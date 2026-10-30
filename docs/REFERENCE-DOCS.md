@@ -336,7 +336,8 @@ branch at the time it was added (`scope.repo.branch`).
 - **Ids and versions**: a page id is `g` + base64url(path) (`h` + sha256 for a path too long for the 64-character
   cache file name); the version is a number from the file's blob sha, so the sync's version compare reads
   exactly the files whose bytes changed. `changedSince` lists the tree (ONE request, cached for a minute) and
-  reports every document — over, never under.
+  reports every page the capped listing holds — over, never under. ⚠ Never a document past the cap: it is
+  never stored, so it would read as a NEW page on every check and rebuild a large folder for nothing.
 - **Converting** (`repoDocToMarkdown`): markdown as is; MDX without its import / export lines; AsciiDoc `=`,
   Org `*` and reStructuredText under/overlined titles become `#` headings; text as is. Images keep their names.
 - Requests: `GET /repos/{o}/{r}`, `GET /repos/{o}/{r}/git/trees/{branch}?recursive=1`,

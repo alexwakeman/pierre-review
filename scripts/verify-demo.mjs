@@ -103,13 +103,14 @@ const VIEWS = [
       act: async (page) => {
         if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
         await page.getByRole('button', { name: 'Add documents' }).first().click();
-        await page.getByText('GitHub repository', { exact: true }).first().click();
-        await page.getByRole('button', { name: 'Next' }).click();
-        await page.getByPlaceholder('owner/name').fill('acme/web');
-        await page.getByRole('button', { name: 'Next' }).click();
-        await page.getByText('docs/adr', { exact: true }).waitFor({ timeout: 10_000 });
-        await page.getByText('docs', { exact: true }).first().click();
-        await page.getByRole('button', { name: 'Next' }).click();
+        const wizard = page.getByTestId('docs-add-wizard');
+        await wizard.getByText('GitHub repository', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByPlaceholder('owner/name').fill('acme/web');
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByText('docs/adr', { exact: true }).waitFor({ timeout: 10_000 });
+        await wizard.getByText('docs', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
       },
       expect: ['This will add 11 documents from acme/web/docs.', 'Start'],
     },
@@ -122,11 +123,12 @@ const VIEWS = [
       act: async (page) => {
         if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
         await page.getByRole('button', { name: 'Add documents' }).first().click();
-        await page.getByText('Confluence', { exact: true }).first().click();
-        await page.getByRole('button', { name: 'Next' }).click();
-        await page.getByRole('button', { name: 'Next' }).click();
-        await page.getByPlaceholder(/atlassian\.net/).fill('https://acme.atlassian.net/wiki/spaces/ENG/overview');
-        await page.getByRole('button', { name: 'Next' }).click();
+        const wizard = page.getByTestId('docs-add-wizard');
+        await wizard.getByText('Confluence', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByPlaceholder(/atlassian\.net/).fill('https://acme.atlassian.net/wiki/spaces/ENG/overview');
+        await wizard.getByRole('button', { name: 'Next' }).click();
       },
       expect: ['This will add 42 pages from the whole Engineering wiki.', 'Read with your Jira connection.'],
     },
@@ -262,20 +264,20 @@ const VIEWS = [
     null,
     { act: openSettingsTab('AI review'), expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
   ],
-  // Settings → AI review → Confluence: the site and email saved, the token never shown; pages on the
+  // Settings → Docs → Confluence: the site and email saved, the token never shown; pages on the
   // demo's Jira site read with the Jira token.
   [
     'settings:confluence',
     '?view=activity',
     null,
-    { act: openSettingsTab('AI review'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
+    { act: openSettingsTab('Docs'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
   ],
-  // Settings → AI review → Notion: a token saved (never shown), the sharing rule behind the ⓘ.
+  // Settings → Docs → Notion: a token saved (never shown), the sharing rule behind the ⓘ.
   [
     'settings:notion',
     '?view=activity',
     null,
-    { act: openSettingsTab('AI review'), expect: ['Notion', 'Add Notion pages to Docs.', 'Integration token'] },
+    { act: openSettingsTab('Docs'), expect: ['Notion', 'Add Notion pages to Docs.', 'Integration token'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],

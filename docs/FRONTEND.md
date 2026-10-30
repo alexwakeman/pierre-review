@@ -4885,8 +4885,8 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   `pierre:docsChatWidth`, `pierre:docsLibraryCollapsed`), never the store or the URL. ⚠ Widths are
   applied inline ONLY while the columns sit side by side (`useMediaQuery`), so a stacked layout is never
   pinned to a dragged width.
-- **Settings → AI review → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Auto review,
-  only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
+- **Settings → Docs → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Confluence and
+  Notion, only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
 
 **Reference links from reviews.** `components/DocReferences.tsx` draws a run's checked `docReferences`
 (the Claude Review tab's "Reference docs" section after SonarCloud; a compact block in Story check — the

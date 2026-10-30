@@ -195,4 +195,35 @@ describe('the adapter', () => {
     expect(second.fetched).toBe(1);
     expect(fake2.calls.filter((c) => c.includes('/git/blobs/'))).toEqual([`/repos/acme/handbook/git/blobs/${sha(99)}`]);
   });
+
+  it('a folder past the page cap does not read as changed on every check', async () => {
+    const many: RepoTreeEntry[] = [dir('big', 1), ...Array.from({ length: 140 }, (_, i) => blob(`big/p${String(i).padStart(3, '0')}.md`, 1000 + i))];
+    const src = githubDocsSource({ get: fakeGh(many).get, now: () => 0 });
+    const root = await src.resolveRoot!(ref('big'), CRED);
+    const state: ReferenceDocWikiState = {
+      provider: 'github',
+      origin: 'https://github.com',
+      rootPageId: root.ref.pageId,
+      rootUrl: 'https://github.com/acme/handbook/tree/main/big',
+      depth: 32,
+      pageCount: null,
+      pagesLeftOut: 0,
+      lastCheckedAt: null,
+      lastListedAt: null,
+      lastChangedAt: null,
+      unreachableSince: null,
+      unreachableReason: null,
+      retryAfter: null,
+      scope: root.scope,
+      rootTitle: root.title,
+    };
+    const first = await syncWikiTree({ source: src, site: root.ref, state, stored: [], credential: CRED.credential, readCached: () => null, full: true, now: new Date(1000) });
+    expect(first.pages).toHaveLength(100);
+    expect(first.pagesLeftOut).toBeGreaterThan(0);
+    const cache = new Map(first.pages.map((p) => [p.pageId, p.markdown]));
+    const after = { ...state, lastCheckedAt: 1000, lastListedAt: 1000, pagesLeftOut: first.pagesLeftOut };
+    const check = await checkWikiTree({ source: src, site: root.ref, state: after, stored: first.pages, credential: CRED.credential, now: new Date(2000) });
+    expect(check.changed).toBe(false);
+    expect(cache.size).toBe(100);
+  });
 });

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isNonCodeFile } from '../../db/code-loc.js';
 import { ghRestGetFor, isRateLimitError } from '../../github/client.js';
-import type { WikiScope } from '@pierre-review/shared';
+import { REFERENCE_DOC_WIKI_ALL_DEPTH, REFERENCE_DOC_WIKI_MAX_PAGES, type WikiScope } from '@pierre-review/shared';
 import { WikiSourceError, type WikiCallOptions, type WikiPage, type WikiPageMeta, type WikiPageRef, type WikiSource } from './source.js';
 
 // A GITHUB REPOSITORY'S DOCUMENTS AS A WIKI (docs/REFERENCE-DOCS.md § GitHub repositories). The third
@@ -19,7 +19,7 @@ import { WikiSourceError, type WikiCallOptions, type WikiPage, type WikiPageMeta
 // THE PAGE ID is the path, base64url (`g…`, filename-safe for the page cache) — or, for a path too long
 // for that, `h` + a sha256 of it, found again through the tree. THE VERSION is a number taken from the
 // file's blob sha, so the sync's version compare sees exactly the files whose bytes changed. The change
-// check lists the tree (ONE request) and reports every document — over, never under; the sync keeps
+// check lists the tree (ONE request) and reports every page within the cap — over, never under; the sync keeps
 // only the moved ones.
 //
 // AUTH: the reader's own `gh` token (auth/account.ts `getAccessToken`, via the credential ladder), on
@@ -353,6 +353,34 @@ export function githubDocsSource(deps: GithubDocsDeps = {}): WikiSource & {
   const webUrl = (scope: RepoScope, path: string, isDir: boolean): string =>
     `https://github.com/${enc(scope.owner)}/${enc(scope.repo)}/${isDir ? 'tree' : 'blob'}/${enc(scope.branch)}${path ? `/${enc(path)}` : ''}`;
 
+  const listDescendants: WikiSource['listDescendants'] = async (site, rootId, depth, cap, opts) => {
+    const { top } = await topOf(site, opts);
+    if (repoPageId(top.path) !== rootId) throw new WikiSourceError('not_found', 404);
+    const pages: WikiPageMeta[] = [];
+    let more = false;
+    // Reading order: a folder's documents, then its sub-folders (each with its own, depth-first).
+    const walk = (f: Folder, d: number): void => {
+      if (d >= depth) return;
+      let position = 0;
+      const add = (id: string, title: string, version: number): boolean => {
+        if (pages.length >= cap) {
+          more = true;
+          return false;
+        }
+        pages.push({ id, title, parentId: repoPageId(f.path), version, editedAt: null, depth: d + 1, position: position++ });
+        return true;
+      };
+      for (const doc of f.docs) if (!add(repoPageId(doc.path), basename(doc.path), shaVersion(doc.sha))) return;
+      for (const c of f.folders) {
+        if (c.count === 0) continue;
+        if (!add(repoPageId(c.path), basename(c.path), c.readme ? shaVersion(c.readme.sha) : 0)) return;
+        walk(c, d + 1);
+      }
+    };
+    walk(top, 0);
+    return { pages, more };
+  };
+
   return {
     provider: 'github',
     // A repository is never pasted into the web-page form: the wizard's own route builds the reference.
@@ -394,46 +422,17 @@ export function githubDocsSource(deps: GithubDocsDeps = {}): WikiSource & {
       if (text.includes('\u0000')) return base; // binary after all
       return { ...base, body: JSON.stringify({ v: 1, path: file.path, text }) };
     },
-    async listDescendants(site, rootId, depth, cap, opts) {
+    listDescendants,
+    async changedSince(site, rootId, _since, opts) {
+      // The tree carries every file's blob sha: report the root and every page a listing would hold,
+      // with its version (over, never under — the sync keeps only those whose version moved, and reads
+      // only those). ⚠ Only the pages within the cap: a document past it is never stored, so reporting
+      // it would read as a NEW page on every check and rebuild a large folder for nothing.
       const { top } = await topOf(site, opts);
       if (repoPageId(top.path) !== rootId) throw new WikiSourceError('not_found', 404);
-      const pages: WikiPageMeta[] = [];
-      let more = false;
-      // Reading order: a folder's documents, then its sub-folders (each with its own, depth-first).
-      const walk = (f: Folder, d: number): void => {
-        if (d >= depth) return;
-        let position = 0;
-        const add = (id: string, title: string, version: number): boolean => {
-          if (pages.length >= cap) {
-            more = true;
-            return false;
-          }
-          pages.push({ id, title, parentId: repoPageId(f.path), version, editedAt: null, depth: d + 1, position: position++ });
-          return true;
-        };
-        for (const doc of f.docs) if (!add(repoPageId(doc.path), basename(doc.path), shaVersion(doc.sha))) return;
-        for (const c of f.folders) {
-          if (c.count === 0) continue;
-          if (!add(repoPageId(c.path), basename(c.path), c.readme ? shaVersion(c.readme.sha) : 0)) return;
-          walk(c, d + 1);
-        }
-      };
-      walk(top, 0);
-      return { pages, more };
-    },
-    async changedSince(site, _rootId, _since, opts) {
-      // The tree carries every file's blob sha: report every page with its version (over, never under —
-      // the sync keeps only those whose version moved, and reads only those).
-      const { top } = await topOf(site, opts);
-      const out: WikiPageMeta[] = [];
-      const stack: Folder[] = [top];
-      while (stack.length > 0) {
-        const f = stack.pop()!;
-        out.push({ id: repoPageId(f.path), title: '', parentId: null, version: f.readme ? shaVersion(f.readme.sha) : 0, editedAt: null, depth: 0, position: null });
-        for (const d of f.docs) out.push({ id: repoPageId(d.path), title: '', parentId: null, version: shaVersion(d.sha), editedAt: null, depth: 0, position: null });
-        stack.push(...f.folders.filter((c) => c.count > 0));
-      }
-      return out;
+      const rootMeta: WikiPageMeta = { id: rootId, title: '', parentId: null, version: top.readme ? shaVersion(top.readme.sha) : 0, editedAt: null, depth: 0, position: null };
+      const { pages } = await listDescendants(site, rootId, REFERENCE_DOC_WIKI_ALL_DEPTH, REFERENCE_DOC_WIKI_MAX_PAGES - 1, opts);
+      return [rootMeta, ...pages];
     },
     async toMarkdown(page) {
       if (page.body === '') return '';

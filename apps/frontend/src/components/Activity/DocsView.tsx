@@ -208,10 +208,15 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
     if (trail.ancestors.some((k) => !expanded.has(k))) setExpanded((prev) => new Set([...prev, ...trail.ancestors]));
     if (open.reveal) setFlash(trail.key);
   }, [trail, open.seq, open.reveal, expanded]);
+  // Scrolled ONCE per open, as soon as the row is rendered (its branches open a render later) — never
+  // again when the reader opens or closes another branch.
+  const scrolledSeq = useRef<number | null>(null);
   useEffect(() => {
-    if (trail == null) return;
+    if (trail == null || scrolledSeq.current === open.seq) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-tree-key="${CSS.escape(trail.key)}"]`);
-    el?.scrollIntoView({ block: 'nearest' });
+    if (!el) return;
+    scrolledSeq.current = open.seq;
+    el.scrollIntoView({ block: 'nearest' });
   }, [trail, open.seq, expanded]);
   useEffect(() => {
     if (flash == null) return;
