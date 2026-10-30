@@ -326,7 +326,7 @@ export function MergeControl({
               href={githubUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="hit inline-flex items-center gap-1 rounded-ui font-medium text-ui-mute underline-offset-2 hover:text-ui-ink hover:underline touch:min-h-10"
+              className="hit inline-flex items-center gap-1 rounded-ui font-medium text-ui-mute underline-offset-2 hover:text-ui-ink hover:underline text-link-phone touch:min-h-10"
             >
               Resolve on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
             </a>

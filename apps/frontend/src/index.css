@@ -2155,3 +2155,25 @@ details[open] > summary::before {
 body[data-pr-popover] .vis-tooltip {
   display: none !important;
 }
+
+/* TEXT LINKS (docs/FRONTEND.md § Text links; the classes are `TEXT_LINK` / `TEXT_LINK_PHONE` in
+   components/ui/cx.ts). ONE look: a 1px underline in the text's own colour at half strength, 2px
+   below the baseline; full strength on hover. `.text-link` is underlined at every width;
+   `.text-link-phone` below md only — a desktop keeps the element's own hover underline. */
+.text-link {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+}
+.text-link:hover {
+  text-decoration-color: currentColor;
+}
+@media (max-width: 767px) {
+  .text-link-phone {
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  }
+}

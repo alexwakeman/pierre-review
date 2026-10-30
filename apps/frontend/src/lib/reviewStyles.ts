@@ -30,6 +30,6 @@ export const REVIEW_ITEM_TITLE = 'font-medium text-ui-ink';
 export const REVIEW_PROSE = 'whitespace-pre-wrap break-words text-body leading-normal';
 export const REVIEW_META = 'text-meta text-ui-mute';
 export const REVIEW_CHIP = 'inline-flex shrink-0 items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium';
-export const REVIEW_ANCHOR = 'break-all text-left font-mono text-meta text-ui-ink hover:underline';
+export const REVIEW_ANCHOR = 'break-all text-left font-mono text-meta text-ui-ink hover:underline text-link-phone';
 export const REVIEW_ANCHOR_MUTED = 'break-all font-mono text-meta text-ui-mute';
 export const REVIEW_SUBHEAD = 'text-meta font-medium text-ui-mute';

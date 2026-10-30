@@ -90,7 +90,7 @@ describe('the wiring', () => {
     expect(panel).toMatch(/<BlastRadiusChip pr=\{pr\} expandable \/>/);
     expect(panel).toMatch(/<DrawerAiReview/);
     expect(panel).toMatch(/openStory\(/);
-    expect(rows).toMatch(/Open pull request/);
+    expect(rows).toMatch(/View PR/);
     expect(rows).toMatch(/what="PR link"/);
     // The AI work chip ("<provider> is working on this PR") survives in the panel and the row.
     expect(rows.match(/is working on this PR/g)?.length).toBeGreaterThanOrEqual(2);
@@ -129,4 +129,27 @@ describe('the wiring', () => {
     expect(feed).not.toMatch(/border-yellow-400/);
     expect(feed).toMatch(/>\s*My Turn\s*</);
   });
+
+  it("the drawer's links read as links: 'View PR', an underlined threads link to the Threads only view", () => {
+    const rows = src('components/Activity/OpenPrsRows.tsx');
+    const panel = rows.slice(rows.indexOf('function PrPanelBody('));
+    expect(rows).toMatch(/>\s*View PR\s*</);
+    expect(rows).toContain('`View PR ${label}`');
+    expect(rows).not.toMatch(/Open pull request \$\{label\}|>\s*Open pull request\s*</);
+    // The threads fact is a link, underlined at every width, to the PR's Threads only view.
+    expect(panel).toMatch(/onClick=\{\(\) => data\.onOpenThreads\(pr\)\}[\s\S]{0,200}TEXT_LINK/);
+    expect(src('components/Activity/OpenPrsCards.tsx')).toMatch(/onOpenThreads=\{\(pr\) => openPrThreadsView\(metaOf\(pr\)\)\}/);
+    expect(src('components/PrDetail.tsx')).toMatch(/threadsViewRequest !== prId\) return;[\s\S]{0,120}seedThreadsView\(\)/);
+    // The AI review section's links are the same primitive.
+    expect(src('components/Activity/OpenPrsAiReview.tsx')).toMatch(/const LINK = cx\([^)]*TEXT_LINK/);
+  });
+
+  it('the text-link primitive: always-underlined, and a phone-only variant scoped below md', () => {
+    const css = src('index.css');
+    expect(css).toMatch(/\.text-link \{[^}]*text-decoration-line: underline/);
+    expect(css).toMatch(/@media \(max-width: 767px\) \{\s*\.text-link-phone \{[^}]*text-decoration-line: underline/);
+    // The phone variant is never declared outside that media query.
+    expect(css.match(/\.text-link-phone \{/g)).toHaveLength(1);
+  });
 });
+

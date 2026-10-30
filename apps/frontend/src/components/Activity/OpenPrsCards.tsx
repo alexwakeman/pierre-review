@@ -463,6 +463,7 @@ export function OpenPrsCards({
     [ticketStatesData],
   );
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
+  const openPrThreadsView = useFilters((s) => s.openPrThreadsView);
   const openAiFix = useFilters((s) => s.openAiFix);
   const metaOf = (pr: TimelinePr): TabMeta => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
@@ -657,6 +658,7 @@ export function OpenPrsCards({
         onOpenPr={onOpenPr}
         onOpenReview={(pr) => openClaudeReview(metaOf(pr), { fromActivity: true })}
         onOpenFix={(pr) => openAiFix(metaOf(pr))}
+        onOpenThreads={(pr) => openPrThreadsView(metaOf(pr))}
         windowKey={fullKey}
         offer={offer}
       />
