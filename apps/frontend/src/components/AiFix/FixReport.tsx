@@ -7,16 +7,15 @@ import {
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { InfoButton } from '../InfoModal.js';
+import { CHANGE_REPORT_CHIP, CHANGE_REPORT_HEADING, ChangeReportSections } from './ChangeReport.js';
 
 // THE FINISHED FIX, EXPLAINED: per changed file, what changed and why and which review items it
 // answers; then the items the agent left alone and why. Everything here is the agent's SELF-REPORT,
 // validated server-side (refs it was not shown are dropped, a file the diff does not contain is
 // dropped) — the diff below it is the authoritative changeset.
 
-const CHIP =
-  'inline-flex max-w-full items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium bg-ui-raise text-ui-ink';
-const HEADING =
-  'mb-1 mt-3 flex items-center gap-1 text-meta font-medium text-ui-mute';
+const CHIP = CHANGE_REPORT_CHIP;
+const HEADING = CHANGE_REPORT_HEADING;
 
 /** Where a chip can jump: a finding of a review shows in the Claude Review tab with a DOM anchor. */
 function findingAnchor(item: AiFixReviewItem): string | null {
@@ -114,75 +113,24 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
   const leftOut = (fix.reviewItems ?? []).filter((i) => !i.included);
   if (!report && leftOut.length === 0) return null;
 
-  const described = new Set(report?.changes.map((c) => c.path) ?? []);
-  const undescribed = fix.filesChanged.filter((f) => !described.has(f));
   const hasRefs = items.size > 0;
 
   return (
     <div className="mt-2 text-meta">
-      {report && (report.changes.length > 0 || undescribed.length > 0) && (
-        <section>
-          <div className={HEADING}>
-            Changes
-            <InfoButton title="Changes">
-              <p>What {by} says it changed in each file, and why.</p>
-              {hasRefs && (
-                <p>
-                  Each tag is a review item the change answers. A finding tag opens it in the AI
-                  Review tab.
-                </p>
-              )}
-              <p>The diff below is what actually changed.</p>
-            </InfoButton>
-          </div>
-          <ul className="space-y-2">
-            {report.changes.map((c) => (
-              <li key={c.path}>
-                <div className="break-all font-mono text-ui-ink">{c.path}</div>
-                {c.summary && <p className="mt-0.5 text-ui-ink">{c.summary}</p>}
-                {c.refs.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {c.refs.map((r) => (
-                      <RefChip key={r} refId={r} item={items.get(r)} onJump={jump} />
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-            {undescribed.map((p) => (
-              <li key={p}>
-                <div className="break-all font-mono text-ui-ink">{p}</div>
-                <p className="mt-0.5 text-ui-mute">No summary reported.</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {report && report.unaddressed.length > 0 && (
-        <section>
-          <div className={HEADING}>Not addressed</div>
-          <ul className="space-y-1.5">
-            {report.unaddressed.map((u) => (
-              <li key={u.ref}>
-                <RefChip refId={u.ref} item={items.get(u.ref)} onJump={jump} />
-                <p className="mt-0.5 text-ui-ink">{u.reason}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {report && report.notReported.length > 0 && (
-        <section>
-          <div className={HEADING}>No report</div>
-          <div className="flex flex-wrap gap-1">
-            {report.notReported.map((r) => (
-              <RefChip key={r} refId={r} item={items.get(r)} onJump={jump} />
-            ))}
-          </div>
-        </section>
-      )}
+      <ChangeReportSections
+        report={report}
+        filesChanged={fix.filesChanged}
+        by={by}
+        refsInfo={
+          hasRefs ? (
+            <p>
+              Each tag is a review item the change answers. A finding tag opens it in the AI
+              Review tab.
+            </p>
+          ) : null
+        }
+        renderRef={(r) => <RefChip key={r} refId={r} item={items.get(r)} onJump={jump} />}
+      />
 
       {leftOut.length > 0 && (
         <section>

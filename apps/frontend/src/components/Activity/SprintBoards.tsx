@@ -3,6 +3,9 @@ import {
   SPRINT_PATH_RISK_LABEL,
   SPRINT_SIGNAL_LABEL,
   SPRINT_VISIT_GAP_MS,
+  STORY_BUILD_MARK_WORDS,
+  storyBuildMark,
+  type StoryBuildMark,
   type SprintGraphNode,
   type SprintGraphResponse,
   type SprintPace,
@@ -43,7 +46,7 @@ import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
 import { AiRunLabel } from '../AiRunLabel.js';
-import { CriticalPathIcon, PullRequestIcon, WaitingIcon, WarningIcon } from '../Icons.js';
+import { BuildIcon, CriticalPathIcon, PullRequestIcon, WaitingIcon, WarningIcon } from '../Icons.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
@@ -135,6 +138,8 @@ export interface SprintCardActions {
   onSelect: OpenTicket;
   /** Open the ticket's story TAB (the card's corner arrow). */
   onOpen: OpenTicket;
+  /** Open the ticket's BUILD tab ("Implement story" — the card's build button). Absent ⇒ AI is off. */
+  onImplement?: OpenTicket;
   /** The ticket whose story the tray shows; null = no tray. */
   selectedIdent: string | null;
   /** The tray's element id, for the open card's `aria-controls`. */
@@ -190,8 +195,15 @@ function SprintLaneBoard({
       new Set<string>([
         ...layout.cards.flatMap((c) => ticketCardMarks({ critical: c.data.critical, waiting: c.data.waiting, ghost: c.data.node.ghost === true })),
         ...(layout.cards.some((c) => c.data.node.ghost !== true && hasLivePr(c.data.node)) ? [PR_KEY] : []),
+        // The build marks a card wears ("Implement story"), only when the board offers builds.
+        ...(actions.onImplement != null
+          ? layout.cards.flatMap((c) => {
+              const m = storyBuildMark(c.data.node.build);
+              return m != null ? [`${BUILD_KEY}${m}`] : [];
+            })
+          : []),
       ]),
-    [layout.cards],
+    [layout.cards, actions.onImplement],
   );
   return (
     <LaneBoard
@@ -215,6 +227,7 @@ function SprintLaneBoard({
           onOpen={actions.onOpen}
           cardRef={ref}
           codeMarker={codeMarker}
+          onImplement={actions.onImplement}
         />
       )}
     />
@@ -336,6 +349,9 @@ function SegmentBar({
 
 /** The key entry for the pull-request mark a card with an open or merged pull request wears (TicketCard). */
 const PR_KEY = 'pr';
+/** The key entries for the build marks ("Implement story", `storyBuildMark`), in a session's order. */
+const BUILD_KEY = 'build:';
+const STORY_BUILD_MARKS: readonly StoryBuildMark[] = ['building', 'plan_ready', 'ready_to_push', 'pushed'];
 
 /** The key to the card marks, under a board: exactly the marks the board draws (the shared
  *  `BorderKey`), each with the card's own icon or ground. */
@@ -346,6 +362,9 @@ function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
   if (present.has('waiting')) items.push({ key: 'waiting', label: TICKET_CARD_MARK_LABEL.waiting, icon: <WaitingIcon size={12} className="text-ui-mute" /> });
   if (present.has('outside')) items.push({ key: 'outside', label: TICKET_CARD_MARK_LABEL.outside, swatch: ticketCardSurface({ ghost: true }) });
   if (present.has(PR_KEY)) items.push({ key: PR_KEY, label: 'Has a pull request', icon: <PullRequestIcon size={11} className="text-ui-mute" /> });
+  for (const m of STORY_BUILD_MARKS) {
+    if (present.has(`${BUILD_KEY}${m}`)) items.push({ key: `${BUILD_KEY}${m}`, label: `Build: ${STORY_BUILD_MARK_WORDS[m]}`, icon: <BuildIcon size={11} className="text-ui-mute" /> });
+  }
   return items;
 }
 

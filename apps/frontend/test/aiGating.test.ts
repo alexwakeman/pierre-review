@@ -206,7 +206,9 @@ describe('the wiring', () => {
   it('the plan panel gates each button on what it runs; Discard runs no model and is never gated', () => {
     const src = read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'));
     const planGate = src.slice(src.indexOf('<AiRunGate kind="plan"'), src.indexOf('</AiRunGate>'));
-    expect(planGate).toMatch(/Update plan/);
+    // The message box + "Update plan" is the shared PlanChat piece (also the story build's plan chat).
+    expect(planGate).toMatch(/<PlanMessageBox\b/);
+    expect(read(join(root, 'components', 'AiFix', 'PlanChat.tsx'))).toMatch(/Update plan/);
     expect(planGate).not.toMatch(/Approve and build|Discard plan/);
     const fixGate = src.slice(src.indexOf('<AiRunGate kind="fix"'));
     expect(fixGate.slice(0, fixGate.indexOf('</AiRunGate>'))).toMatch(/Approve and build/);

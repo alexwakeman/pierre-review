@@ -20,10 +20,12 @@ import {
   MagnifierIcon,
   PersonIcon,
   TicketIcon,
+  BuildIcon,
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
 import { storyTabLabels } from '../lib/ticketTab.js';
+import { storyBuildTabLabels } from '../lib/storyBuildTab.js';
 import { Monogram } from './CommentCard.js';
 
 // Active-label tone per chip flavour (inactive is the shared gray).
@@ -256,6 +258,23 @@ function TabChip({
         <>
           <span aria-hidden="true" className="shrink-0">
             <TicketIcon />
+          </span>
+          <span className={chipLabelClass(active, 'sky')}>{words.chip}</span>
+        </>
+      ),
+    };
+  } else if (tab.kind === 'story-build') {
+    // The BUILD TAB ("Implement story"): "KEY · Build", tooltip "KEY: implementation"
+    // (`storyBuildTabLabels`, lib/storyBuildTab.ts). ⚠ Not cosmetic: without this branch the tab falls
+    // through to the PR ladder below.
+    const words = storyBuildTabLabels(tab.ticketMeta?.key);
+    cfg = {
+      title: words.title,
+      closeAria: words.closeAria,
+      body: (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            <BuildIcon />
           </span>
           <span className={chipLabelClass(active, 'sky')}>{words.chip}</span>
         </>

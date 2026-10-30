@@ -585,6 +585,9 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
   out.tickets = await seedTicketReviews(base, c);
   out.designs = await seedDesigns(base, c);
   out.storyDocs = await seedStoryDocs(base, c);
+
+  // ---- "Implement story": a finished two-repository build and a plan waiting for Accept ----
+  out.storyBuilds = await seedStoryBuilds(c);
   void and;
   void inArray;
   return out;
@@ -1636,4 +1639,403 @@ async function seedStoryDocs(base: any, c: AgenticSeedCtx): Promise<string> {
   } finally {
     mgr._setStoryDocsSeamsForTest(null);
   }
+}
+
+// ── "IMPLEMENT STORY" (docs/STORY-BUILD.md) ─────────────────────────────────────────────────────────
+//
+// Two sessions on NOT-STARTED sprint tickets with no pull request (the only tickets the sprint card
+// offers Implement on, owner decision 4), written through the session's own persist module
+// (coding/story-build/persist.ts — the claim, then the row updates the manager makes):
+//   PLAT-310  finished: a plan across acme/api + acme/infrastructure (+ the web app read only), a
+//             design, a two-turn chat, the docs weighed (2 grounded, 1 superseded, 2 suggestions);
+//             acme/api PUSHED, acme/infrastructure READY with tests (3 passed, 1 failed, and the hook).
+//   PLAT-312  plan_ready: one repository, waiting for the reader's Accept.
+// No model ran: these rows are the answers the passes would have stored. The pushed pull request is
+// a number on the row only (no `pull_requests` row), so no other demo view changes.
+
+const docRef = (ws: number, docSlug: string, docTitle: string, file: string, sectionTitle: string, quote: string) => ({
+  path: `${docSlug}/sections/${file}`,
+  workspaceId: ws,
+  anchor: null,
+  docSlug,
+  docTitle,
+  sectionTitle,
+  quote,
+});
+
+const PATCH_API = [
+  'diff --git a/src/sync/budget.ts b/src/sync/budget.ts',
+  'index 3f1a2b4..9c0d7e1 100644',
+  '--- a/src/sync/budget.ts',
+  '+++ b/src/sync/budget.ts',
+  '@@ -12,9 +12,22 @@ export interface Budget {',
+  '   resetAt: number;',
+  ' }',
+  ' ',
+  '-export function assertBudget(b: Budget): void {',
+  "-  if (b.remaining <= 0) throw new Error('GitHub budget spent');",
+  '+/** How long to wait before the next page: none while the budget lasts, else until it resets. */',
+  '+export function waitFor(b: Budget, now: number, floor = PAGE_COST): number {',
+  '+  if (b.remaining > floor) return 0;',
+  '+  return Math.max(0, b.resetAt - now) + RESET_SLACK_MS;',
+  ' }',
+  '+',
+  '+/** The repository is paused until `resetAt`; nothing is sent while it waits. */',
+  '+export async function waitForBudget(b: Budget, signal: AbortSignal, now = Date.now()): Promise<void> {',
+  '+  const ms = waitFor(b, now);',
+  '+  if (ms === 0) return;',
+  '+  await markPaused(b.repoId, new Date(now + ms));',
+  '+  await sleep(ms, signal);',
+  '+  await clearPaused(b.repoId);',
+  '+}',
+  'diff --git a/src/sync/walk.ts b/src/sync/walk.ts',
+  'index 51e0c2a..a7b44f2 100644',
+  '--- a/src/sync/walk.ts',
+  '+++ b/src/sync/walk.ts',
+  '@@ -40,7 +40,7 @@ export async function walkRepo(repo: Repo, signal: AbortSignal): Promise<void> {',
+  '   for (let page = start; ; page++) {',
+  '-    assertBudget(await readBudget(repo));',
+  '+    await waitForBudget(await readBudget(repo), signal);',
+  '     const res = await fetchPage(repo, page);',
+  '     await writePage(repo, res);',
+  '     if (res.nextCursor == null) break;',
+  '',
+].join('\n');
+
+const PATCH_INFRA = [
+  'diff --git a/terraform/monitoring/sync.tf b/terraform/monitoring/sync.tf',
+  'index 0b7e3d1..6a2f9c4 100644',
+  '--- a/terraform/monitoring/sync.tf',
+  '+++ b/terraform/monitoring/sync.tf',
+  '@@ -31,3 +31,19 @@ resource "aws_cloudwatch_metric_alarm" "dlq_age" {',
+  '   alarm_actions       = [aws_sns_topic.oncall.arn]',
+  '   treat_missing_data  = "notBreaching"',
+  ' }',
+  '+',
+  '+# A repository paused on the GitHub budget for over an hour: the budget is not refilling.',
+  '+resource "aws_cloudwatch_metric_alarm" "sync_paused_age" {',
+  '+  alarm_name          = "sync-paused-over-an-hour"',
+  '+  namespace           = "Acme/Sync"',
+  '+  metric_name         = "OldestPausedSeconds"',
+  '+  statistic           = "Maximum"',
+  '+  period              = 300',
+  '+  evaluation_periods  = 3',
+  '+  threshold           = 3600',
+  '+  comparison_operator = "GreaterThanThreshold"',
+  '+  alarm_actions       = [aws_sns_topic.oncall.arn]',
+  '+  treat_missing_data  = "notBreaching"',
+  '+}',
+  '',
+].join('\n');
+
+async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number>> {
+  const { db, schema, now, platformWs: ws } = c;
+  const persist = await import('../src/coding/story-build/persist.js');
+  const ctx = { db, schema } as never;
+  const at = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * HOUR);
+  const API_REPO = 2;
+  const INFRA_REPO = 3;
+  const WEB_REPO = 1;
+  const SHA_API = 'a3c9e1f0b2d4c6e8a0b1c3d5e7f9a1b3c5d7e9f1';
+  const SHA_INFRA = '7d1e5b9c3a0f2e4d6c8b0a1f3e5d7c9b1a3f5e7d';
+  const SHA_WEB = 'c0ffee15b2d4c6e8a0b1c3d5e7f9a1b3c5d7e9f2';
+  const out: Record<string, number> = {};
+
+  // ---- PLAT-310: the finished build ----
+  {
+    const ident = ticketIdent('PLAT-310');
+    const claim = await persist.insertStoryBuild(ctx, {
+      accountId: 1,
+      workspaceId: ws,
+      ident,
+      ticketKey: 'PLAT-310',
+      ticketTitle: 'Retry GitHub calls within the rate-limit budget',
+      wantDiagram: true,
+      wantDocs: true,
+      provider: 'claude',
+      model: 'claude-opus-5-5',
+    });
+    const id = claim.id;
+    out.finished = id;
+    const runbook = (file: string, title: string, quote: string) => docRef(ws, 'sync-runbook', 'Sync service runbook', file, title, quote);
+    const conventions = (file: string, title: string, quote: string) => docRef(ws, 'api-conventions', 'Platform API conventions', file, title, quote);
+    await persist.updateStoryBuild(ctx, 1, id, {
+      status: 'ready',
+      phase: null,
+      effort: null,
+      criteriaSource: 'ticket',
+      criteriaJson: [
+        { n: 1, text: 'A sync that runs out of budget waits and resumes instead of failing.' },
+        { n: 2, text: 'The repository shows "paused" with the time it will resume.' },
+        { n: 3, text: 'No retry is sent while the budget is empty.' },
+      ] as never,
+      coverageJson: {
+        state: 'none',
+        ticketReviewId: null,
+        checkedAt: null,
+        criteria: [
+          { ref: 'AC1', text: 'A sync that runs out of budget waits and resumes instead of failing.', verdict: 'not_checked', coveredByPrIds: [] },
+          { ref: 'AC2', text: 'The repository shows "paused" with the time it will resume.', verdict: 'not_checked', coveredByPrIds: [] },
+          { ref: 'AC3', text: 'No retry is sent while the budget is empty.', verdict: 'not_checked', coveredByPrIds: [] },
+        ],
+        missing: [{ ref: 'M1', text: 'Use the numbers from the PLAT-275 audit to pick the wait.' }],
+        existingPrs: [],
+        note: null,
+      },
+      candidatesJson: [
+        { ref: 'R1', repoId: API_REPO, fullName: 'acme/api', source: 'picked', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
+        { ref: 'R2', repoId: INFRA_REPO, fullName: 'acme/infrastructure', source: 'picked', baseRef: 'main', baseSha: SHA_INFRA, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
+        { ref: 'R3', repoId: WEB_REPO, fullName: 'acme/web-app', source: 'related', baseRef: 'main', baseSha: SHA_WEB, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
+      ],
+      planJson: {
+        revision: 2,
+        summary:
+          'The sync waits for the GitHub budget to refill instead of failing, and marks the repository paused until then. An alarm tells on-call when a repository stays paused for over an hour.',
+        repos: [
+          {
+            ref: 'R1',
+            repoId: API_REPO,
+            why: 'The sync walk and the budget check live here.',
+            branchSlug: 'wait-for-budget',
+            steps: [
+              { title: 'Wait for the budget instead of failing', files: ['src/sync/budget.ts', 'src/sync/walk.ts'], change: 'Replace the throwing check with a wait until the budget resets, cancellable by the sync signal.', refs: ['AC1', 'AC3'] },
+              { title: 'Mark the repository paused', files: ['src/sync/budget.ts'], change: 'Store the resume time while the walk waits and clear it after; the status endpoint reads it.', refs: ['AC2'] },
+              { title: 'Pick the wait from the audit', files: ['src/sync/budget.ts'], change: 'A page costs about 12 points (PLAT-275), so wait once fewer than that remain.', refs: ['M1'] },
+            ],
+            tests: ['A walk with an empty budget waits and resumes.', 'No request is sent while the budget is empty.'],
+          },
+          {
+            ref: 'R2',
+            repoId: INFRA_REPO,
+            why: 'The sync alarms are defined here.',
+            branchSlug: 'paused-sync-alarm',
+            steps: [{ title: 'Alarm on a long pause', files: ['terraform/monitoring/sync.tf'], change: 'A CloudWatch alarm when the oldest paused repository has waited over an hour.', refs: [] }],
+            tests: [],
+          },
+        ],
+        readOnlyRepos: [{ ref: 'R3', repoId: WEB_REPO, why: 'It already shows a paused repository from the status endpoint.' }],
+        criteria: [
+          { ref: 'AC1', how: 'planned', repo: 'R1', reason: null },
+          { ref: 'AC2', how: 'planned', repo: 'R1', reason: null },
+          { ref: 'AC3', how: 'planned', repo: 'R1', reason: null },
+          { ref: 'M1', how: 'planned', repo: 'R1', reason: null },
+        ],
+        risks: ['A sync that waits holds its worker; a long reset can back up the queue.'],
+      },
+      planRevision: 2,
+      transcriptJson: [
+        { role: 'reader', text: 'Add an alarm when a repository stays paused for a long time.', revision: 1, at: at(5.2).toISOString() },
+        { role: 'claude', text: 'Added acme/infrastructure: one CloudWatch alarm when the oldest paused repository has waited over an hour.', revision: 2, at: at(5.1).toISOString() },
+      ],
+      designJson: {
+        acts: [
+          { id: 'a1', title: 'Read the budget' },
+          { id: 'a2', title: 'Wait' },
+          { id: 'a3', title: 'Resume' },
+        ],
+        layers: ['api', 'domain', 'external'],
+        cells: [
+          { id: 'c1', act: 'a1', layer: 'domain', label: 'Budget check before each page', pattern: 'Guard clause', change: 'changed', pr: 'R1', files: ['src/sync/walk.ts'] },
+          { id: 'c2', act: 'a2', layer: 'domain', label: 'Wait until the budget resets', pattern: null, change: 'new', pr: 'R1', files: ['src/sync/budget.ts'] },
+          { id: 'c3', act: 'a2', layer: 'api', label: 'Paused status with resume time', pattern: null, change: 'changed', pr: 'R1', files: ['src/sync/budget.ts'] },
+          { id: 'c4', act: 'a2', layer: 'external', label: 'Alarm on a long pause', pattern: null, change: 'new', pr: 'R2', files: ['terraform/monitoring/sync.tf'] },
+          { id: 'c5', act: 'a3', layer: 'domain', label: 'Carry on from the same page', pattern: null, change: 'unchanged', pr: null, files: [] },
+        ],
+        arrows: [
+          { from: 'c1', to: 'c2', label: 'budget low' },
+          { from: 'c2', to: 'c3', label: null },
+          { from: 'c2', to: 'c5', label: 'budget reset' },
+        ],
+      },
+      docsStatus: 'ready',
+      docsJson: {
+        summary: 'The runbook already asks the sync to wait rather than fail, and never to retry while the budget is empty. It also suggests alarming on age, which the plan now does.',
+        nothingGrounded: false,
+        planRevision: 1,
+        items: [
+          { id: 'D1', kind: 'grounded', about: 'AC1', note: 'Waiting instead of failing is what the runbook already describes.', suggestion: null, refs: [runbook('04-rate-limits.md', 'Rate limits', 'waits when it is low, rather than failing')] },
+          { id: 'D2', kind: 'grounded', about: 'AC3', note: 'The runbook forbids a retry while the budget is empty.', suggestion: null, refs: [runbook('04-rate-limits.md', 'Rate limits', 'Never retry a request while the budget is empty.')] },
+          { id: 'D3', kind: 'superseded', about: 'AC2', note: 'The runbook shows a waiting repository as paused; the story adds the time it will resume to the status endpoint, which the API conventions spell as an ISO time.', suggestion: null, refs: [conventions('03-pagination-and-time.md', 'Pagination and time', 'Timestamps on the wire are ISO-8601 in UTC.')] },
+          { id: 'D4', kind: 'suggestion', about: 'R1:step 1', note: 'The runbook asks a sync that stops part-way to start again from the last recorded page.', suggestion: 'Resume from the last recorded page after the wait.', refs: [runbook('01-how-a-sync-runs.md', 'How a sync runs', 'starts again from the last recorded page')] },
+          { id: 'D5', kind: 'suggestion', about: 'story', note: 'The runbook alarms on how old something is, not how many there are.', suggestion: 'Alarm on how long a repository has been paused.', refs: [runbook('05-the-sync-queue.md', 'The sync queue', 'Alarm on the age of the oldest dead-letter message, not the count.')] },
+        ],
+      } as never,
+      docsDecisionsJson: { D3: 'ignore', D4: 'include', D5: 'include' },
+      docsCostUsd: 0.31,
+      acceptedRevision: 2,
+      acceptedDocsJson: { D3: 'ignore', D4: 'include', D5: 'include' },
+      planCostUsd: 2.84,
+      inputTokens: 212_000,
+      outputTokens: 9_400,
+      numTurns: 31,
+      createdAt: at(5.6),
+      startedAt: at(5.6),
+      completedAt: at(4.2),
+    } as never);
+    const apiRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: API_REPO, ref: 'R1', buildOrder: 0, include: true, status: 'pushed', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, branch: 'PLAT-310-wait-for-budget' });
+    await persist.updateStoryBuildRepo(ctx, 1, apiRow, {
+      patch: PATCH_API,
+      filesChangedJson: ['src/sync/budget.ts', 'src/sync/walk.ts'],
+      summary: 'The walk waits for the budget to reset and marks the repository paused until then.',
+      commitMessage: 'PLAT-310: wait for the GitHub budget instead of failing',
+      changeReportJson: {
+        changes: [
+          { path: 'src/sync/budget.ts', summary: 'waitForBudget waits until the reset, storing the resume time; the wait starts once fewer than one page of points remain.', refs: ['AC1', 'AC2', 'M1'] },
+          { path: 'src/sync/walk.ts', summary: 'Each page waits for the budget instead of throwing, so nothing is sent while it is empty.', refs: ['AC3'] },
+        ],
+        unaddressed: [],
+        notReported: [],
+      },
+      checksWantedJson: ['lint', 'test'],
+      checksJson: {
+        requested: ['lint', 'test'],
+        ran: true,
+        note: null,
+        sandbox: 'seatbelt',
+        install: [{ name: 'install', kind: 'check', command: 'pnpm install --frozen-lockfile --ignore-scripts', status: 'passed', exitCode: 0, durationMs: 21_400, output: '', truncated: false, note: null }],
+        results: [
+          { name: 'lint', kind: 'lint', command: 'pnpm lint', status: 'passed', exitCode: 0, durationMs: 6_100, output: '', truncated: false, note: null },
+          { name: 'test', kind: 'test', command: 'pnpm test', status: 'passed', exitCode: 0, durationMs: 38_200, output: '✓ src/sync/budget.test.ts (6 tests)\n✓ src/sync/walk.test.ts (11 tests)', truncated: false, note: null },
+        ],
+        hook: null,
+        hookAttempts: 0,
+        agentRuns: 2,
+      } as never,
+      prTitle: 'PLAT-310: Retry GitHub calls within the rate-limit budget',
+      pushedBranch: 'PLAT-310-wait-for-budget',
+      pushedPrNumber: 131,
+      pushedPrUrl: 'https://github.com/acme/api/pull/131',
+      pushedCommitSha: 'e4b1c9d2a7f3e5c1b9d7a3f1c5e9b7d3a1f5c9e7',
+      pushedAt: at(3.9),
+      provider: 'claude',
+      model: 'claude-opus-5-5',
+      costUsd: 3.42,
+      inputTokens: 388_000,
+      outputTokens: 14_200,
+      numTurns: 44,
+      startedAt: at(5.0),
+      completedAt: at(4.6),
+    } as never);
+    const infraRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: INFRA_REPO, ref: 'R2', buildOrder: 1, include: true, status: 'ready', baseRef: 'main', baseSha: SHA_INFRA, stackedOnPrId: null, branch: 'PLAT-310-paused-sync-alarm' });
+    await persist.updateStoryBuildRepo(ctx, 1, infraRow, {
+      patch: PATCH_INFRA,
+      filesChangedJson: ['terraform/monitoring/sync.tf'],
+      summary: 'One alarm when the oldest paused repository has waited over an hour.',
+      commitMessage: 'PLAT-310: alarm when a sync stays paused for over an hour',
+      changeReportJson: {
+        changes: [{ path: 'terraform/monitoring/sync.tf', summary: 'sync_paused_age pages on-call after three five-minute periods over an hour.', refs: [] }],
+        unaddressed: [],
+        notReported: [],
+      },
+      checksWantedJson: ['fmt', 'validate', 'tflint', 'checkov'],
+      checksJson: {
+        requested: ['fmt', 'validate', 'tflint', 'checkov'],
+        ran: true,
+        note: null,
+        sandbox: 'seatbelt',
+        install: [],
+        results: [
+          { name: 'fmt', kind: 'lint', command: 'terraform fmt -check -recursive', status: 'passed', exitCode: 0, durationMs: 900, output: '', truncated: false, note: null },
+          { name: 'validate', kind: 'typecheck', command: 'terraform validate', status: 'passed', exitCode: 0, durationMs: 4_300, output: 'Success! The configuration is valid.', truncated: false, note: null },
+          { name: 'tflint', kind: 'lint', command: 'tflint --recursive', status: 'passed', exitCode: 0, durationMs: 2_700, output: '', truncated: false, note: null },
+          {
+            name: 'checkov',
+            kind: 'lint',
+            command: 'checkov -d terraform --compact',
+            status: 'failed',
+            exitCode: 1,
+            durationMs: 11_800,
+            output: 'Check: CKV_AWS_319: "Ensure that CloudWatch alarm actions are enabled"\n\tFAILED for resource: aws_cloudwatch_metric_alarm.sync_paused_age\n\tFile: /monitoring/sync.tf:36-49',
+            truncated: false,
+            note: null,
+          },
+        ],
+        hook: { name: 'pre-commit hook', kind: 'hook', command: 'git commit (.pre-commit-config.yaml)', status: 'passed', exitCode: 0, durationMs: 3_100, output: 'terraform_fmt....Passed', truncated: false, note: null },
+        hookAttempts: 1,
+        agentRuns: 3,
+      } as never,
+      provider: 'claude',
+      model: 'claude-opus-5-5',
+      costUsd: 1.18,
+      inputTokens: 141_000,
+      outputTokens: 4_900,
+      numTurns: 19,
+      startedAt: at(4.6),
+      completedAt: at(4.2),
+    } as never);
+  }
+
+  // ---- PLAT-312: a plan waiting for Accept ----
+  {
+    const ident = ticketIdent('PLAT-312');
+    const claim = await persist.insertStoryBuild(ctx, {
+      accountId: 1,
+      workspaceId: ws,
+      ident,
+      ticketKey: 'PLAT-312',
+      ticketTitle: 'Report sync health on the health endpoint',
+      wantDiagram: false,
+      wantDocs: false,
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+    });
+    const id = claim.id;
+    out.planReady = id;
+    await persist.updateStoryBuild(ctx, 1, id, {
+      status: 'plan_ready',
+      phase: null,
+      criteriaSource: 'ticket',
+      coverageJson: {
+        state: 'none',
+        ticketReviewId: null,
+        checkedAt: null,
+        criteria: [
+          { ref: 'AC1', text: '/api/health reports the age of the oldest running sync.', verdict: 'not_checked', coveredByPrIds: [] },
+          { ref: 'AC2', text: 'It reports how many repositories are in error.', verdict: 'not_checked', coveredByPrIds: [] },
+          { ref: 'AC3', text: 'It answers in under 50 ms.', verdict: 'not_checked', coveredByPrIds: [] },
+        ],
+        missing: [],
+        existingPrs: [],
+        note: null,
+      },
+      candidatesJson: [
+        { ref: 'R1', repoId: API_REPO, fullName: 'acme/api', source: 'picked', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
+        { ref: 'R2', repoId: INFRA_REPO, fullName: 'acme/infrastructure', source: 'picked', baseRef: 'main', baseSha: SHA_INFRA, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
+      ],
+      planJson: {
+        revision: 1,
+        summary: 'The health endpoint gains two fields read from the sync tables in one indexed query. The infrastructure health check is unchanged.',
+        repos: [
+          {
+            ref: 'R1',
+            repoId: API_REPO,
+            why: 'The health endpoint and the sync tables live here.',
+            branchSlug: 'health-sync-fields',
+            steps: [
+              { title: 'Read the oldest running sync and the error count', files: ['src/db/sync-health.ts'], change: 'One query over sync_state with the existing (status, started_at) index.', refs: ['AC1', 'AC2', 'AC3'] },
+              { title: 'Add the two fields to /api/health', files: ['src/api/routes/health.ts'], change: 'oldestRunningSyncMs and reposInError, both whole numbers.', refs: ['AC1', 'AC2'] },
+            ],
+            tests: ['The health answer carries both fields.', 'An empty sync table reports zero and null.'],
+          },
+        ],
+        readOnlyRepos: [{ ref: 'R2', repoId: INFRA_REPO, why: 'The load balancer reads /api/health; its check only needs a 200.' }],
+        criteria: [
+          { ref: 'AC1', how: 'planned', repo: 'R1', reason: null },
+          { ref: 'AC2', how: 'planned', repo: 'R1', reason: null },
+          { ref: 'AC3', how: 'planned', repo: 'R1', reason: null },
+        ],
+        risks: [],
+      },
+      planRevision: 1,
+      transcriptJson: [],
+      planCostUsd: 0,
+      inputTokens: 96_000,
+      outputTokens: 3_100,
+      numTurns: 14,
+      createdAt: at(1.4),
+      startedAt: at(1.4),
+    } as never);
+    await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: API_REPO, ref: 'R1', buildOrder: 0, include: true, status: 'planned', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, branch: 'PLAT-312-health-sync-fields' });
+  }
+  return out;
 }

@@ -174,6 +174,34 @@ const VIEWS = [
     },
   ],
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
+  // "Implement story" (docs/STORY-BUILD.md): the finished two-repository build (acme/api pushed,
+  // acme/infrastructure ready with a failing check), the plan waiting for Accept, and the start state
+  // of a not-started ticket with no session.
+  [
+    'story-build:PLAT-310',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-310')}`,
+    'story-build',
+    { expect: ['Already done', 'Plan', 'Docs', 'Build', 'acme/infrastructure', 'Ready to push', 'This story changes the docs'] },
+  ],
+  [
+    'story-build:PLAT-310:diff',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-310')}`,
+    null,
+    {
+      act: async (page) => {
+        await page.locator('[data-testid="story-build-repo"][data-repo="acme/infrastructure"]').getByTestId('story-build-diff-toggle').click();
+        await page.getByTestId('story-build-diff').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['sync_paused_age'],
+    },
+  ],
+  [
+    'story-build:PLAT-312',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-312')}`,
+    null,
+    { expect: ['Accept plan and build', 'acme/api'] },
+  ],
+  ['story-build:PLAT-318', `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-318')}`, null, { expect: ['Draw a design', 'Start'] }],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
     ['overview', 'comments', 'changes', 'claude_review', 'ai_fix'].map((t) => [

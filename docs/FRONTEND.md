@@ -3601,6 +3601,64 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
   `components/DocReferences.tsx`): plain click ⇒ `openDocsSection(ref.workspaceId, path, anchor)`, modified
   click ⇒ the `docsDeepLink` href, with the quote as the same italic blockquote beneath. Never a raw href.
 
+## The build tab — "Implement story" (`kind: 'story-build'`, docs/STORY-BUILD.md)
+
+One ticket's build session, full-main overlay `data-testid="story-build-overlay"` (`App.tsx`
+`storyBuildActive`), mounting `components/StoryBuild/StoryBuildTabView.tsx`.
+
+- **The tab.** Key `story-build:<ident>` (shared `STORY_BUILD_TAB_PREFIX`; `storyBuildTabKey` /
+  `parseStoryBuildTabKey` in `store/pinnedTabs.ts`), carrying `TabTicketMeta`. EPHEMERAL but
+  SELF-DESCRIBING exactly like `ticket:` — `applyUrlTab` re-creates it, `useUrlState` emits
+  `view=<key>`. The prefixes never overlap. Chip words: `lib/storyBuildTab.ts storyBuildTabLabels`
+  ("KEY · Build", tooltip "KEY: implementation", "Close build tab"). ⚠ **THE ONE OPENER is
+  `useOpenStoryBuild()`**; nothing calls `openStoryBuildTab` directly. Opening never starts a run.
+- **The ONLY entry point (owner decision 4).** This Sprint's `TicketCard`: a `BuildIcon` corner
+  button beside the arrow (same reveal, ONE card height — it is `absolute`) shown ONLY when the board
+  passes `onImplement` (SprintView: `me.ai.enabled` AND the graph's `aiEnabled`) and shared
+  `storyBuildOffered(node)` holds (sprint ticket, `stage === 'not_started'`, no PR, no open session).
+  HIDDEN, never disabled. With an open session the card wears the MARK beside its key
+  (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — words, in the accessible name
+  and the board's `BorderKey`) and the same button opens the build tab. ⌘K: `SprintCommands` lists
+  "Implement KEY · title" for the SAME tickets while the board is mounted. Not on the story view, Open
+  PRs or Reports. ⚠ A tab rebuilt from a URL may name ANY ticket, so `StartPanel` applies the SAME
+  gate (`storyBuildOffered` on the cached sprint-graph node, `build` ignored) and shows Start only
+  then; the whole tab says "AI is off" and asks nothing while `me.ai.enabled` is false.
+- **Plan choices** (include, branch, tests) live in the tab, reset on a new plan revision or session —
+  EXCEPT the ticked tests: each card reports them from its own effect, which runs BEFORE the tab's
+  reset in the same commit, so wiping them would Accept with no checks while Run tests reads ticked.
+- **Server state** (`hooks/useStoryBuild.ts`): ONE query per ticket, `['story-build-for', ws:<id>,
+  ident]` → `StoryBuildForTicketResponse`, polled at 2 s ONLY while `storyBuildActive`; the SSE stream
+  (`useStoryBuildStream`) opens only then and refetches per step and at its end. Every billed action
+  shares `storyBuildMutationKey(ident)` (read with `useIsMutating`). Docs ticks are DB-only, their own
+  mutation, patched optimistically. The diff (`…/diff`) is fetched only when a card's Diff opens; the
+  checks list (`…/checks`) only once Run tests is ticked. A push sweeps `invalidateAfterPrWrite(qc,
+  null)` + `['ticket-prs']` + the sprint graph/token.
+- **The screen**, top to bottom: header (key, Open story, Open in <tracker> from the sprint read in
+  memory — never a fetch, title + ⓘ, the step line "Assess · Plan · Docs · Build · Push" with the
+  current step underlined and `aria-current`, status sentence, `AiRunLabel`, cost via
+  `useRunCostText`; end slot: Draft, Push all (≥ 2 pushable), Cancel while building, Discard) → start
+  state (no session, or the last one closed: `ModelPicker` on `story_plan` opening deep, Draw a design,
+  Check against docs only when the library has a ready document, Start inside `AiRunGate kind=
+  "story_plan" anyProvider`) → Already done (the gap fold; rows anchored `story-build-ref-<ref>`) →
+  Plan (summary, one One-PR-card-shell card per changed repository in build order: why, base note,
+  branch field, Include, `RunTestsOption`, steps behind Details; read-only repositories; not planned;
+  risks; the planned `DesignGrid` with `refNames`, cells not clickable; the shared `AiFix/PlanChat`
+  gated `story_plan` follow-up) → Docs (suggestions ticked, superseded unticked "the story wins",
+  grounded collapsed; `StoryDocsRefLinks` citations; gated `story_docs`) → action bar ("Accept plan and
+  build" in `AiRunGate kind="story_build" followUp`, Discard; `lib/storyBuild.ts acceptBody` checks
+  the branches) → Build (per repository: status, live step, `ChangeReportSections` with refs that
+  scroll to Already done, `ChecksReport`, lazy diff via `FileDiffView`, `ChecksStatus` BESIDE Push,
+  "Not built or tested here." only when no check ran, Retry, the pushed PR chip — resolved to its PR
+  tab on click, else GitHub).
+- **Shared with AI Fix, no behaviour change there:** `AiFix/PlanChat.tsx` (`PlanTranscript`,
+  `PlanMessageBox`), `AiFix/ChangeReport.tsx`, `RunTests` (`useRunTestsMemory` + `runTestsState`
+  take any checks query; `ChecksReport`/`ChecksStatus` take a `CheckRunReport`).
+- **⌘K inside the tab:** Accept plan, Push all, Cancel — each registered only while its button is on
+  screen, and each PRESSES that button (`data-story-build-action`), so `OverBudgetConfirm` still asks.
+- Tests: `test/storyBuildTab.test.ts`, `test/storyBuild.test.ts` (steps, docs defaults, Accept,
+  push gating, the card), `e2e/story-build.spec.ts`. Demo: `seed-demo-agentic.ts seedStoryBuilds`
+  (PLAT-310 finished, PLAT-312 plan ready), `demo/routes.ts` (writes inert), recorder + verify steps.
+
 ## The merge-conflict resolver (`components/conflicts/`, CORE)
 
 The three-pane overlay behind **Resolve conflicts**. What it is, what the wand does and how it
