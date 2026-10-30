@@ -24,6 +24,7 @@ import {
   MY_TURN_REASON_TEXT,
   PENDING_SLACK_PER_TAB,
   buildPendingBlocks,
+  buildPendingSections,
   pendingCardText,
 } from '../slack/pending-blocks.js';
 
@@ -74,10 +75,10 @@ describe('buildPendingBlocks', () => {
       land: { cards: [pr('l:1', 'merge', 31)] },
     });
     const t = texts(buildPendingBlocks(ctx(), b, mk));
-    expect(t.map((s) => s.split('\n')[0])).toEqual(['*Ready to land* · 1', '*Dependencies* · 1']);
+    expect(t.map((s) => s.split('\n')[0])).toEqual([':rocket: *Ready to land* · 1', ':package: *Dependencies* · 1']);
     expect(t.join('\n')).not.toContain('@alex');
     expect(t.join('\n')).not.toContain('%3A11|');
-    expect(t[0]).toContain(`• <${BASE}/app/?workspace=3&view=pr-detail%3A31|acme/api#31 Title 31> by @alice`);
+    expect(t[0]).toContain(`:white_check_mark: <${BASE}/app/?workspace=3&view=pr-detail%3A31|acme/api#31 Title 31> by @alice`);
     expect(t[1]).toContain('— Dependency bump: Ready to merge');
   });
 
@@ -91,7 +92,7 @@ describe('buildPendingBlocks', () => {
     const t = texts(buildPendingBlocks(ctx(), b, mk));
     const all = t.join('\n');
     expect(all.split('%3A7|').length - 1).toBe(1);
-    expect(t[0]!.split('\n')[0]).toBe('*Needs fixing* · 2');
+    expect(t[0]!.split('\n')[0]).toBe(':rotating_light: *Needs fixing* · 2');
     expect(t[0]).toContain('Merge conflicts');
     // Ready to land had only #7 — the whole section goes.
     expect(t).toHaveLength(1);
@@ -103,7 +104,7 @@ describe('buildPendingBlocks', () => {
     });
     const t = texts(buildPendingBlocks(ctx(), b, mk));
     expect(t).toHaveLength(1);
-    expect(t[0]!.split('\n')[0]).toBe('*Needs fixing* · 1');
+    expect(t[0]!.split('\n')[0]).toBe(':rotating_light: *Needs fixing* · 1');
     expect(t[0]).not.toContain('%3A7|');
     expect(t[0]).not.toContain('more>');
     // A tab holding only the viewer's own red build sends nothing.
@@ -116,8 +117,8 @@ describe('buildPendingBlocks', () => {
     const t = texts(buildPendingBlocks(ctx(), board({ review: { total: 30, cards } }), mk));
     expect(t).toHaveLength(1);
     const lines = t[0]!.split('\n');
-    expect(lines[0]).toBe('*Waiting on review* · 30');
-    const items = lines.filter((l) => l.startsWith('• '));
+    expect(lines[0]).toBe(':eyes: *Waiting on review* · 30');
+    const items = lines.filter((l) => l.startsWith(':hourglass_flowing_sand: '));
     expect(items).toHaveLength(PENDING_SLACK_PER_TAB);
     expect(items.map((l) => /%3A(\d+)\|/.exec(l)![1])).toEqual(['100', '101', '102', '103', '104']);
     expect(items[0]).toContain('— Waiting on review for 3 days');
@@ -135,7 +136,7 @@ describe('buildPendingBlocks', () => {
     const ci2 = { ...ci, failingChecks: ['build', 'lint'], failingCheckTotal: 3, branchName: 'main' } as unknown as InsightCard;
     const t = texts(buildPendingBlocks(ctx(), board({ my_turn: { cards: [trunk] }, fixing: { cards: [ci2] } }), mk));
     expect(t).toEqual([
-      `*Needs fixing* · 1\n• <${BASE}/app/?view=activity&workspace=3&activityRepo=10|acme/api main> — Default branch is red: build, lint and 1 more`,
+      `:rotating_light: *Needs fixing* · 1\n:red_circle: <${BASE}/app/?view=activity&workspace=3&activityRepo=10|acme/api main> — Default branch is red: build, lint and 1 more`,
     ]);
   });
 
@@ -165,6 +166,38 @@ describe('buildPendingBlocks', () => {
     const blocks = buildPendingBlocks(ctx(), board(tabs), mk);
     expect(blocks.length).toBeLessThanOrEqual(12);
     for (const s of texts(blocks)) expect(s.length).toBeLessThanOrEqual(3000);
+  });
+
+  it('colours each team tab by what it asks: fixing red, waiting amber, ready green, deps grey', () => {
+    const b = board({
+      fixing: { cards: [pr('x:1', 'conflicts', 1)] },
+      review: { cards: [pr('s:2', 'stalled_review', 2, { ageHours: 30 })] },
+      threads: { cards: [pr('t:3', 'untouched_thread', 3, { path: 'a.ts' })] },
+      land: { cards: [pr('l:4', 'merge', 4)] },
+      deps: { cards: [pr('d:5', 'dependency_bump', 5)] },
+    });
+    const sections = buildPendingSections(ctx(), b, mk);
+    expect(sections.map((s) => [s.key, s.tone])).toEqual([
+      ['fixing', 'bad'],
+      ['review', 'waiting'],
+      ['threads', 'waiting'],
+      ['land', 'good'],
+      ['deps', 'info'],
+    ]);
+    // ⚠ Colour is never the only signal: the fallback and the heading both say the tab in words.
+    expect(sections.map((s) => s.fallback)).toEqual([
+      'Needs fixing · 1',
+      'Waiting on review · 1',
+      'Unanswered threads · 1',
+      'Ready to land · 1',
+      'Dependencies · 1',
+    ]);
+    for (const s of sections) {
+      const first = (s.blocks[0] as { text: { text: string } }).text.text.split('\n');
+      expect(first[0]).toContain(`*${s.fallback.split(' · ')[0]}*`);
+      // One emoji per line at most.
+      for (const line of first) expect((line.match(/:[a-z_]+:/g) ?? []).length).toBeLessThanOrEqual(1);
+    }
   });
 
   it('has plain wording for every PR kind on the board and every My turn reason', () => {

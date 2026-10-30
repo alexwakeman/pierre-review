@@ -923,8 +923,9 @@ the two cannot list different cards). The seam runs WITHOUT the route's two live
   copy of the SPA's `pendingLabels.ts`, which the backend cannot import. It reads only fields the
   card carries; `test/slack-pending-blocks.test.ts` fails on a kind or reason with no wording.
 - ⚠ **LIVE STATE**: nothing from the board enters any payload hash (the sprint report's included).
-- Block budget: header 1 + 6 tabs × ≤ 2 sections + 2 dividers + sprint 1 + bot 1 + footer 1 = 18,
-  well under Slack's 50; the `SLACK_MAX_BLOCKS` (48) backstop stays and never drops the footer.
+- Block budget, counted across the top level and every attachment: header 1 + 5 team tabs × ≤ 2
+  sections + sprint 1 + bot 1 + footer 1 = 14, well under Slack's 50; the `SLACK_MAX_BLOCKS` (48)
+  backstop stays, trims body blocks from the end and never drops the footer.
   Every mrkdwn object stays `verbatim: true` (PR titles are attacker-authored) and every link goes
   through `links.ts`.
 
@@ -1033,6 +1034,31 @@ Model text and titles are Slack-escaped, and every mrkdwn object is `verbatim: t
 URL the model writes is rewritten: a PR or issue URL becomes its `owner/name#N` token, and anything
 else becomes plain text. Sections split at line boundaries (`fitSections`): up to 3 for the sprint
 and 2 per repo, inside a 48-block budget. A cut never lands inside a link.
+
+### Colour and icons in every Slack message (`slack/tones.ts`)
+
+Slack paints a coloured bar only beside an ATTACHMENT, so every part of a message is one attachment
+(`SlackMessage.attachments`, each `{ color, fallback, blocks }`) and the top-level `blocks` hold
+only what sits above every bar — the digest's `header`. One TONE per part, `SLACK_TONE_COLOUR`:
+merged `#8250df` purple · good `#1f883d` green · bad `#cf222e` red · waiting `#d4a72c` amber · info
+`#8c959f` grey.
+- **Digest**: one part per team Pending tab (`PENDING_TAB_TONE`: Needs fixing red, Waiting on review
+  and Unanswered threads amber, Ready to land green, Dependencies grey), then the sprint summary and
+  the bot block in grey; the footer `context` closes the last part. The dividers are gone — each
+  part has its own bar. `buildPendingSections` returns the tabs with their tone; `buildPendingBlocks`
+  is the same blocks flattened.
+- **Event signals**: a merge is purple; a review by its verdict — Approve green, Request changes
+  red, Comment or none grey. They have NO top-level blocks: `send.ts` `slackBody` leaves the empty
+  key out, so `text` is the line Slack shows above the bar and in the notification.
+- **Icons**: one standard Slack shortcode per heading (`PENDING_TAB_EMOJI`, `SPRINT_EMOJI`,
+  `BOTS_EMOJI`, `MERGED_EMOJI`, `verdictEmoji`) and, in place of the bullet, one per Pending line
+  by card kind (`pendingCardEmoji`: `:x:` red PR, `:red_circle:` red default branch,
+  `:crossed_swords:` conflicts, `:hourglass_flowing_sand:` waiting on review, …). Never more than
+  one per line, never a custom emoji (it renders as `:name:` text in another Slack workspace).
+- ⚠ **COLOUR IS NEVER THE ONLY SIGNAL.** Every part keeps its words (the tab label, "Verdict:
+  Request changes", "Merged") and a plain `fallback`; the bar and the icon only repeat them. Pinned
+  by `test/slack-tones.test.ts` and `test/slack-pending-blocks.test.ts`.
+- There is no message preview in Settings; "Send test" posts the real digest.
 
 ### The Slack EVENT signals (platform migration 0040)
 

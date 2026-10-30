@@ -25,6 +25,8 @@ import type {
 } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import type { LlmClient } from '../llm/seam.js';
+import type { SlackMessage } from '../slack/report.js';
+import { SLACK_TONE_COLOUR } from '../slack/tones.js';
 
 let sprintFixture: SprintReport | null = null;
 let scopeRepoIds: number[] = [10, 11];
@@ -135,6 +137,12 @@ function mrkdwnObjects(blocks: unknown[]): Array<{ type: string; text: string; v
 const sectionTexts = (blocks: unknown[]): string[] =>
   (blocks as Block[]).filter((b) => b.type === 'section').map((b) => b.text?.text ?? '');
 
+// Every block in the message: the top level (the header), then each coloured part in order.
+const allBlocks = (msg: SlackMessage): unknown[] => [
+  ...msg.blocks,
+  ...(msg.attachments ?? []).flatMap((a) => a.blocks),
+];
+
 const count = (s: string, sub: string): number => s.split(sub).length - 1;
 
 describe('buildSlackReport — every link points into Limn', () => {
@@ -179,7 +187,7 @@ describe('buildSlackReport — every link points into Limn', () => {
 
   it('(a) carries no github.com href — every URL is a Limn URL', async () => {
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const json = JSON.stringify(msg!.blocks);
+    const json = JSON.stringify(allBlocks(msg!));
     expect(json).not.toMatch(/github\.com/i);
     const urls = [...json.matchAll(/<(https?:\/\/[^|>]+)\|/g)].map((m) => m[1]!);
     expect(urls.length).toBeGreaterThan(3);
@@ -188,7 +196,7 @@ describe('buildSlackReport — every link points into Limn', () => {
 
   it('(b) sprint references carry title and author; action items under their repo drop the prefix', async () => {
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const sprintText = sectionTexts(msg!.blocks)[0]!;
+    const sprintText = sectionTexts(allBlocks(msg!))[0]!;
     expect(sprintText).toContain(`<${PR}502|acme/web#12 Tidy the footer> by @bob (2 days red)`);
     expect(sprintText).toContain(`<${PR}501|#12 Fix the login redirect> by @alice — Stalled 5 days`);
     expect(sprintText).toContain('*<https://limn.example/app/?view=activity&workspace=3&activityRepo=10|acme/api>*');
@@ -196,8 +204,8 @@ describe('buildSlackReport — every link points into Limn', () => {
 
   it('(c) a PR outside the workspace stays plain text, title and all', async () => {
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const json = JSON.stringify(msg!.blocks);
-    expect(sectionTexts(msg!.blocks)[0]).toContain('• other/x#12 — Also mentioned');
+    const json = JSON.stringify(allBlocks(msg!));
+    expect(sectionTexts(allBlocks(msg!))[0]).toContain('• other/x#12 — Also mentioned');
     expect(json).not.toContain('%3A777');
     expect(json).not.toContain('Secret thing');
     expect(json).not.toContain('mallory');
@@ -205,19 +213,19 @@ describe('buildSlackReport — every link points into Limn', () => {
 
   it('(d) no per-repo AI digest is sent', async () => {
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const texts = sectionTexts(msg!.blocks);
+    const texts = sectionTexts(allBlocks(msg!));
     expect(texts).toHaveLength(1);
-    expect(texts[0]!.startsWith('*Sprint summary* · 2026-09-18 – 2026-10-02\n')).toBe(true);
-    expect(JSON.stringify(msg!.blocks)).not.toContain('Two merges');
+    expect(texts[0]!.startsWith(':spiral_calendar_pad: *Sprint summary* · 2026-09-18 – 2026-10-02\n')).toBe(true);
+    expect(JSON.stringify(allBlocks(msg!))).not.toContain('Two merges');
   });
 
   it('(f) with no base URL every reference is plain text and there is no footer link', async () => {
     const msg = await buildSlackReport(makeCtx(), llm, 1, 3);
-    const texts = sectionTexts(msg!.blocks);
+    const texts = sectionTexts(allBlocks(msg!));
     for (const t of texts) expect(t).not.toContain('<http');
     expect(texts.join('\n')).toContain('#12 Fix the login redirect by @alice');
-    expect((msg!.blocks as Block[]).some((b) => b.type === 'context')).toBe(false);
-    expect(JSON.stringify(msg!.blocks)).not.toMatch(/github\.com/i);
+    expect((allBlocks(msg!) as Block[]).some((b) => b.type === 'context')).toBe(false);
+    expect(JSON.stringify(allBlocks(msg!))).not.toMatch(/github\.com/i);
   });
 
   it('(g) a long sprint report is cut to one section, whole lines, ending in …', async () => {
@@ -225,7 +233,7 @@ describe('buildSlackReport — every link points into Limn', () => {
     for (let i = 0; i < 40; i++) lines.push(`- acme/api#12 — ${'waiting on a decision '.repeat(10)}${i}.`);
     sprintFixture = sprint(lines.join('\n'), [API12]);
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const texts = sectionTexts(msg!.blocks);
+    const texts = sectionTexts(allBlocks(msg!));
     expect(texts.length).toBe(1);
     for (const t of texts) {
       expect(t.length).toBeLessThanOrEqual(2900);
@@ -244,7 +252,7 @@ describe('buildSlackReport — every link points into Limn', () => {
       tabs: [{ key: 'land', total: 1, cardIds: ['m:1'] }],
     } as unknown as PendingBoardSnapshot;
     const msg = await buildSlackReport(makeCtx(BASE, board), llm, 1, 3);
-    const objs = mrkdwnObjects(msg!.blocks);
+    const objs = mrkdwnObjects(allBlocks(msg!));
     expect(objs.length).toBeGreaterThanOrEqual(3);
     expect(objs[0]!.text).toContain('&lt;!channel&gt;');
     for (const o of objs) expect(o.verbatim).toBe(true);
@@ -252,7 +260,7 @@ describe('buildSlackReport — every link points into Limn', () => {
 
   it('(i) the footer escapes the user-typed workspace name', async () => {
     const msg = await buildSlackReport(makeCtx(BASE), llm, 1, 3);
-    const blocks = msg!.blocks as Block[];
+    const blocks = allBlocks(msg!) as Block[];
     const footer = blocks[blocks.length - 1]!;
     expect(footer.type).toBe('context');
     expect(footer.elements?.[0]?.text).toBe(
@@ -288,20 +296,53 @@ describe('buildSlackReport — every link points into Limn', () => {
       users: [{ id: 1, githubLogin: 'alice' }],
     } as unknown as PendingBoardSnapshot;
     const msg = await buildSlackReport(makeCtx(BASE, board), llm, 1, 3);
-    const blocks = msg!.blocks as Block[];
+    const blocks = allBlocks(msg!) as Block[];
     expect(blocks.length).toBeLessThanOrEqual(50);
     expect(blocks[0]!.type).toBe('header');
     expect(blocks[blocks.length - 1]!.type).toBe('context');
     const texts = sectionTexts(blocks);
     // My turn is one person's board — never in a team channel.
-    expect(texts[0]!.startsWith('*Needs fixing* · 90\n')).toBe(true);
+    expect(texts[0]!.startsWith(':rotating_light: *Needs fixing* · 90\n')).toBe(true);
     expect(texts.some((t) => t.includes('My turn') || t.includes('@alex'))).toBe(false);
     // The sprint summary comes after every Pending section, and is one section.
-    const sprintIdx = texts.findIndex((t) => t.startsWith('*Sprint summary*'));
+    const sprintIdx = texts.findIndex((t) => t.includes('*Sprint summary*'));
     expect(sprintIdx).toBe(texts.length - 1);
-    expect(texts.slice(0, sprintIdx).every((t) => !t.startsWith('*Sprint'))).toBe(true);
+    expect(texts.slice(0, sprintIdx).every((t) => !t.includes('*Sprint'))).toBe(true);
     for (const t of texts) expect(t.length).toBeLessThanOrEqual(3000);
     expect(msg!.text).toBe('Team &lt;A&gt;|B · Pending');
+  });
+
+  it('(l) each part is one coloured attachment: Pending by tab, sprint and bots grey; header above, footer last', async () => {
+    const board = {
+      workspaceId: 3,
+      viewerLogin: 'alex',
+      users: [],
+      cards: [
+        { id: 'x:1', kind: 'conflicts', prId: 501, prNumber: 12, prTitle: 'A', repoFullName: 'acme/api', authorId: null },
+        { id: 'm:2', kind: 'merge', prId: 502, prNumber: 12, prTitle: 'B', repoFullName: 'acme/web', authorId: null },
+      ],
+      tabs: [
+        { key: 'fixing', total: 1, cardIds: ['x:1'] },
+        { key: 'land', total: 1, cardIds: ['m:2'] },
+      ],
+    } as unknown as PendingBoardSnapshot;
+    const msg = await buildSlackReport(makeCtx(BASE, board), llm, 1, 3);
+    expect((msg!.blocks as Block[]).map((b) => b.type)).toEqual(['header']);
+    const parts = msg!.attachments!;
+    expect(parts.map((a) => a.color)).toEqual([
+      SLACK_TONE_COLOUR.bad,
+      SLACK_TONE_COLOUR.good,
+      SLACK_TONE_COLOUR.info,
+    ]);
+    expect(parts.map((a) => a.fallback)).toEqual([
+      'Needs fixing · 1',
+      'Ready to land · 1',
+      'Sprint summary · 2026-09-18 – 2026-10-02',
+    ]);
+    // No dividers: each part has its own bar.
+    expect(JSON.stringify(msg)).not.toContain('"divider"');
+    const lastBlocks = parts[parts.length - 1]!.blocks as Block[];
+    expect(lastBlocks[lastBlocks.length - 1]!.type).toBe('context');
   });
 
   it('(k) a host without the board seam still sends the sprint summary', async () => {
