@@ -6,7 +6,8 @@
 // "not in the plan yet" count, the Accept body (branch checks, at least one repository), push gating
 // (ready + a patch; Push all from two), and the card: Implement ONLY on a not-started ticket with no
 // PR and no session (owner decision 4), never without `onImplement`, the mark in words and in the
-// accessible name, and ONE height (the corner button is absolutely placed).
+// accessible name, and ONE height (the corner button is absolutely placed). "Fill gaps": on a STARTED
+// ticket whose CURRENT story check found gaps — named "Fill gaps in KEY" — and the tab's action word.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/storyBuild.test.ts
 import { describe, expect, it } from 'vitest';
@@ -24,6 +25,8 @@ import {
   storyBuildCancellable,
   storyBuildDocsGroups,
   storyBuildErrorText,
+  storyBuildActionLabel,
+  storyBuildActionOf,
   storyBuildSteps,
 } from '../src/lib/storyBuild.js';
 import { TicketCard } from '../src/components/TicketCard.js';
@@ -302,5 +305,42 @@ describe('the Implement button (owner decision 4)', () => {
       expect(offered).toContain(`data-testid="${id}"`);
     }
     expect(offered).toMatch(/data-testid="ticket-implement"[^>]*class="[^"]*absolute/);
+  });
+});
+
+describe('the Fill gaps button (a started ticket whose story check found gaps)', () => {
+  const CHECK = { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-30T00:00:00.000Z', stale: false, reviewId: 9 };
+  const started = (o: Partial<SprintGraphNode> = {}) => node({ stage: 'in_progress', prs: [PR], check: CHECK, ...o });
+
+  it('shows "Fill gaps in KEY" with its own action', () => {
+    const html = card(started());
+    expect(html).toContain('aria-label="Fill gaps in PLAT-310"');
+    expect(html).toContain('data-action="fill_gaps"');
+    expect(html).toContain('title="Fill the gaps the story check found"');
+    expect(card(node())).toContain('data-action="implement"');
+  });
+
+  it('never shows with no check, a stale one, one with no gaps, on a complete ticket, or without onImplement', () => {
+    expect(card(started({ check: null }))).not.toContain('data-testid="ticket-implement"');
+    expect(card(started({ check: { ...CHECK, stale: true } }))).not.toContain('data-testid="ticket-implement"');
+    expect(card(started({ check: { ...CHECK, notMet: 0, met: 2 } }))).not.toContain('data-testid="ticket-implement"');
+    expect(card(started({ stage: 'done' }))).not.toContain('data-testid="ticket-implement"');
+    expect(card(started(), false)).not.toContain('data-testid="ticket-implement"');
+  });
+
+  it('labels each action', () => {
+    expect(storyBuildActionLabel('implement', 'A-1')).toEqual({ label: 'Implement A-1', title: 'Implement this story' });
+    expect(storyBuildActionLabel('fill_gaps', 'A-1').label).toBe('Fill gaps in A-1');
+  });
+
+  it("the tab's action: the session's coverage first, then the card's gate, then the ticket's PRs", () => {
+    const cov = (n: number) => ({ coverage: { existingPrs: Array.from({ length: n }, () => ({})) } }) as unknown as StoryBuild;
+    expect(storyBuildActionOf(cov(1), node())).toBe('fill_gaps');
+    expect(storyBuildActionOf(cov(0), started())).toBe('implement');
+    expect(storyBuildActionOf(null, started())).toBe('fill_gaps');
+    expect(storyBuildActionOf(null, node())).toBe('implement');
+    // A session still assessing (no coverage yet) on a ticket with an open PR fills gaps.
+    expect(storyBuildActionOf({ coverage: null }, started({ check: null }))).toBe('fill_gaps');
+    expect(storyBuildActionOf(null, null)).toBe('implement');
   });
 });

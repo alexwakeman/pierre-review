@@ -6,7 +6,10 @@ import {
   STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_REPO_RUNNING_STATUSES,
   storyBuildDocsDefaultDecision,
+  storyBuildOffered,
+  type SprintGraphNode,
   type StoryBuild,
+  type StoryBuildAction,
   type StoryBuildAcceptBody,
   type StoryBuildDocs,
   type StoryBuildDocsDecisions,
@@ -17,6 +20,28 @@ import {
   type StoryBuildRepoStatus,
 } from '@pierre-review/shared';
 import { BRANCH_NAME_PATTERN } from './branchName.js';
+
+// ── the action: "Implement" or "Fill gaps" ─────────────────────────────────────────────────────────
+
+/** The card button's accessible name and tooltip (and ⌘K's verb) for an action. */
+export function storyBuildActionLabel(action: StoryBuildAction, key: string): { label: string; title: string } {
+  return action === 'fill_gaps'
+    ? { label: `Fill gaps in ${key}`, title: 'Fill the gaps the story check found' }
+    : { label: `Implement ${key}`, title: 'Implement this story' };
+}
+
+/** Which action the build tab is about (its header and start state). A session that has assessed says so
+ *  itself: the ticket had pull requests ⇒ it fills gaps. Before that, the card's own gate (a closed session
+ *  is no session), else a ticket with an open or merged pull request ⇒ Fill gaps (the backend fills only
+ *  the gaps whenever the ticket has PRs). */
+export function storyBuildActionOf(
+  build: Pick<StoryBuild, 'coverage'> | null,
+  node: Pick<SprintGraphNode, 'ghost' | 'stage' | 'prs' | 'check'> | null,
+): StoryBuildAction {
+  if (build?.coverage != null) return build.coverage.existingPrs.length > 0 ? 'fill_gaps' : 'implement';
+  if (node == null) return 'implement';
+  return storyBuildOffered({ ...node, build: null }) ?? (node.prs.some((p) => p.state !== 'closed') ? 'fill_gaps' : 'implement');
+}
 
 // ── the step line: "Assess · Plan · Docs · Build · Push" ───────────────────────────────────────────
 

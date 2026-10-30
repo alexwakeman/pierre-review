@@ -271,7 +271,7 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
 /**
  * THE CHANGE TOKEN (`SprintGraphResponse.changeToken`, `GET /api/sprint-graph/token`): 16 hex of a sha256
  * over what the CARDS show — per node (sorted by ident): its column, bucket, status, assignee, theme,
- * brief state + one-liner + criteria count, ticket check counts / staleness / running, the "needs code"
+ * brief state + one-liner + criteria count, ticket check counts (+ missing items) / staleness / running, the "needs code"
  * judgement's state, and each PR's
  * id, state, draft flag and CI; the build session's id, status and repository counts (when one is open);
  * plus every edge. ⚠ CLOCK-FREE: nothing derived from `Date.now()` (pace,
@@ -293,7 +293,11 @@ export function sprintChangeTokenOf(g: Pick<GraphFoldResult, 'nodes' | 'edges'>)
       n.brief.state,
       n.brief.oneLiner,
       n.brief.criteriaCount,
-      n.check == null ? null : [n.check.met, n.check.partlyMet, n.check.notMet, n.check.total, n.check.stale, n.check.checkedAt],
+      // `missing` is appended only when non-zero, so a check with none keeps the token it had before the
+      // field existed. (`reviewId` moves with `checkedAt`, so it is not hashed.)
+      n.check == null
+        ? null
+        : [n.check.met, n.check.partlyMet, n.check.notMet, n.check.total, n.check.stale, n.check.checkedAt, ...(n.check.missing ? [n.check.missing] : [])],
       n.checkRunning,
       n.codeJudgement?.state ?? null,
       n.prs.map((p) => [p.prId, p.state, p.draft, p.ciState]),

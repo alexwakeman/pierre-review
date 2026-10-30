@@ -933,6 +933,7 @@ const TICKET_SCRIPTS: TicketScript[] = [
     hoursAgo: 1.8,
   },
   {
+    // ⚠ The "Fill gaps" demo card (seedStoryBuilds): keep a criterion unmet here.
     key: 'PLAT-301',
     codex: true,
     alignment: 'partly_aligned',
@@ -1651,6 +1652,9 @@ async function seedStoryDocs(base: any, c: AgenticSeedCtx): Promise<string> {
 //   PLAT-312  PLAN READY: a plan with a design, a two-turn chat, and the docs weighed (2 grounded,
 //             1 superseded, 2 suggestions — the suggestions not in the plan yet).
 //   PLAT-318  no session: its card shows the Implement button.
+//   PLAT-301  no session, IN PROGRESS with a PR: its story check below (TICKET_SCRIPTS — current, one
+//             criterion not met, one partly met) makes its card offer "Fill gaps", and the build tab lists
+//             those gaps (the recorder opens it). Keep that check current and gapped.
 // No model ran: these rows are the answers the passes would have stored. The pushed draft is not linked to
 // the ticket (the tracker seed lists PLAT-310 with no PR), so the sprint card keeps its build mark.
 

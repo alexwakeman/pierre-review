@@ -33,7 +33,9 @@ const NOTION_TICKETS = ['WEB-31', 'WEB-34', 'WEB-28', 'WEB-36', 'WEB-37'];
 // Accept with its design, chat and docs (session 2), and PLAT-318 — not started, no pull request, no
 // session — whose sprint card shows Implement and whose build tab is the start state. The checks preview
 // is answered by the demo itself (routes.ts GET_FALLBACKS), never recorded: it reads GitHub.
-const STORY_BUILD_TICKETS = ['PLAT-310', 'PLAT-312', 'PLAT-318'];
+// PLAT-301: no session, started, its current story check found gaps — the "Fill gaps" start state (the
+// visit records its check, `GET /api/ticket-reviews/:id`, which lists the gaps).
+const STORY_BUILD_TICKETS = ['PLAT-310', 'PLAT-312', 'PLAT-318', 'PLAT-301'];
 const STORY_BUILD_SESSIONS = [1, 2];
 const STORY_BUILD_DIFFS = [
   [1, 2],
@@ -262,7 +264,7 @@ export const STEPS = [
     run: (h) => h.go(`?view=sprint&sprintTab=themes&sprintStory=${enc(ident(k))}`),
   })),
 
-  // ── "Implement story": the sprint card's Implement button (hover), then each build tab with its
+  // ── "Implement story": the sprint card's Implement and Fill gaps buttons (hover), then each build tab with its
   // disclosures open (plan Details, the docs' grounded list, each repository's diff). Nothing is
   // started, accepted or pushed: the sessions are the seeder's rows. ──
   {
@@ -270,6 +272,7 @@ export const STEPS = [
     run: async (h) => {
       await h.go('?view=sprint&sprintTab=themes');
       await h.page.locator(`[data-ticket="PLAT-318"]`).first().hover().catch(() => {});
+      await h.page.locator(`[data-ticket="PLAT-301"]`).first().hover().catch(() => {});
     },
   },
   ...STORY_BUILD_TICKETS.map((k) => ({

@@ -26,6 +26,7 @@ import type {
   ClaudeThreadJudgementsResponse,
   PrTicketReviewsResponse,
   TicketReviewStatesResponse,
+  TicketReview,
   CiReviewStatesResponse,
   PrCiReviewResponse,
   PrDetail,
@@ -259,6 +260,39 @@ const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
 // The ticket review's two boot-time reads (the PR pane's Story check, the Open PRs stack pills).
 // Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
 const TICKET_REVIEW_STATES: TicketReviewStatesResponse = { states: [] };
+/** ACME-2's latest story check (`GET /api/ticket-reviews/501`): one criterion met, one not, one missing item. */
+const ACME_2_CHECK: TicketReview = {
+  id: 501,
+  ident: 'jira:https://acme.atlassian.net#ACME-2',
+  ticketKey: 'ACME-2',
+  ticketTitle: 'Sign in with a magic link',
+  ticket: null,
+  workspaceId: 1,
+  originPrId: null,
+  trigger: 'manual',
+  status: 'succeeded',
+  model: 'claude-opus-5-5',
+  costUsd: 0.4,
+  error: null,
+  refused: null,
+  createdAt: '2026-10-19T09:58:00.000Z',
+  startedAt: '2026-10-19T09:58:00.000Z',
+  completedAt: '2026-10-19T10:00:00.000Z',
+  alignment: 'partly_aligned',
+  summary: 'The link is sent, but it never expires.',
+  assessment: {
+    alignment: 'partly_aligned',
+    summary: 'The link is sent, but it never expires.',
+    criteria: [
+      { ref: 'AC1', index: 0, text: 'A sign-in link is emailed', status: 'met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null },
+      { ref: 'AC2', index: 1, text: 'The link expires after 15 minutes', status: 'not_met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null },
+    ],
+    missing: [{ ref: 'M1', title: 'A rate limit on link requests', explanation: null, expectedIn: null }],
+    notRequested: [],
+  },
+  members: [],
+  items: [],
+};
 const prTicketReviewsFor = (prId: number): PrTicketReviewsResponse => ({ prId, tickets: [] });
 // The CI review's two boot-time reads (the PR pane's CI check, the Open PRs / Pending CI pill).
 // Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
@@ -662,7 +696,9 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       assignee: null,
       epic: null,
       brief: { state: 'current', summary: 'Users sign in from a one-time link sent by email.', oneLiner: 'Sign in from an email link', criteriaCount: 2, criteriaDerived: false },
-      check: { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-19T10:00:00.000Z', stale: false },
+      // Started, with a CURRENT story check that found gaps: the card offers "Fill gaps" (story-build.spec.ts),
+      // and the build tab lists them from the run (`ACME_2_CHECK`).
+      check: { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, missing: 1, reviewId: 501, checkedAt: '2026-10-19T10:00:00.000Z', stale: false },
       checkRunning: false,
       prs: [
         {
@@ -1411,6 +1447,7 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
           progress: null,
         } satisfies ThreadCheckStatusResponse);
       if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
+      if (path.endsWith(`/api/ticket-reviews/${ACME_2_CHECK.id}`)) return json(route, ACME_2_CHECK);
       const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
       if (ticketReviewsMatch) return json(route, prTicketReviewsFor(Number(ticketReviewsMatch[1])));
       if (path.endsWith('/api/ci-reviews/states')) return json(route, CI_REVIEW_STATES);

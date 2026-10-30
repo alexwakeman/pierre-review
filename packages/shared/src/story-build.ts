@@ -5,11 +5,13 @@
 // each one as a new pull request ONLY when the reader presses Push.
 //
 // Every cap is spelled ONCE, here. The backend validates against these; the SPA words its limits from them.
-// The ONLY entry point is the This Sprint card of a NOT-STARTED ticket with no pull request
-// (`storyBuildOffered`); once a session exists the card shows its mark (`storyBuildMark`).
+// The ONLY entry points are This Sprint cards (`storyBuildOffered`): "Implement" on a NOT-STARTED ticket with
+// no pull request, "Fill gaps" on a STARTED ticket whose current story check found gaps. Once a session
+// exists the card shows its mark (`storyBuildMark`).
 
 import type { DesignDiagram } from './sequence-diagrams.js';
 import type { SprintStage } from './sprint-stories.js';
+import type { SprintTicketCheck } from './sprint-graph.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
 import type {
   AiFixChangeReport,
@@ -18,7 +20,9 @@ import type {
   AiFixPlanMessage,
   AiProviderId,
   ClaudeTicketCriterionStatus,
+  TicketAssessment,
 } from './types.js';
+import { criterionTextOnly } from './prose.js';
 
 // ---- caps (each spelled once) ---------------------------------------------------------------------
 
@@ -684,11 +688,64 @@ export const STORY_BUILD_MARK_WORDS: Readonly<Record<StoryBuildMark, string>> = 
   pushed: 'Pushed',
 };
 
+/** Which entry a card offers: 'implement' (build the story) or 'fill_gaps' (build only what the story
+ *  check found missing). */
+export type StoryBuildAction = 'implement' | 'fill_gaps';
+
+/** The words for an action (the card button, ⌘K, the build tab's header and start state). */
+export const STORY_BUILD_ACTION_WORDS: Readonly<Record<StoryBuildAction, string>> = {
+  implement: 'Implement',
+  fill_gaps: 'Fill gaps',
+};
+
+/** The gaps a card's story check found: criteria not met, partly met or unsettled, plus what it found
+ *  missing outside the criteria. 0 when there is no check, or it is STALE (its verdicts are not today's). */
+export function storyBuildCheckGaps(c: SprintTicketCheck | null | undefined): number {
+  if (c == null || c.stale) return 0;
+  return c.notMet + c.partlyMet + c.unsettled + (c.missing ?? 0);
+}
+
 /**
- * THE ONE ENTRY GATE (owner decision 4): "Implement" shows ONLY on a This Sprint card of a sprint ticket
- * (not a ghost) whose status sits in the Not started bucket and that has NO pull request, and only while
- * no session is open (then the card shows the mark instead). The SPA also requires `me.ai.enabled`.
+ * THE ONE ENTRY GATE (owner decision 4, widened 2026-10-31): which build a This Sprint card of a sprint
+ * ticket (never a ghost) offers, and only while no session is open (then the card shows the mark instead).
+ *   'implement'  its status sits in the Not started bucket and it has NO pull request
+ *   'fill_gaps'  it has STARTED (a pull request, or a status past Not started, short of Complete) and its
+ *                latest succeeded story check is CURRENT and found gaps (`storyBuildCheckGaps`). No check,
+ *                or a stale one, offers nothing: the gaps are not known.
+ *   null         neither
+ * The SPA also requires `me.ai.enabled`. The backend's gap fold builds only the gaps whenever the ticket
+ * has PRs, so both actions start the same session.
  */
-export function storyBuildOffered(n: { ghost: boolean; stage: SprintStage | null; prs: ReadonlyArray<unknown>; build?: SprintNodeBuild | null }): boolean {
-  return !n.ghost && n.stage === 'not_started' && n.prs.length === 0 && n.build == null;
+export function storyBuildOffered(n: {
+  ghost: boolean;
+  stage: SprintStage | null;
+  prs: ReadonlyArray<unknown>;
+  build?: SprintNodeBuild | null;
+  check?: SprintTicketCheck | null;
+}): StoryBuildAction | null {
+  if (n.ghost || n.build != null) return null;
+  if (n.stage === 'not_started' && n.prs.length === 0) return 'implement';
+  const started = n.prs.length > 0 || (n.stage != null && n.stage !== 'not_started');
+  if (!started || n.stage === 'done') return null;
+  return storyBuildCheckGaps(n.check) > 0 ? 'fill_gaps' : null;
+}
+
+/** One gap a story check found, as the "Fill gaps" start state lists it. `verdict` is null for an item
+ *  asked for outside the criteria (`M1`…). */
+export interface StoryBuildGap {
+  ref: string;
+  text: string;
+  verdict: ClaudeTicketCriterionStatus | null;
+}
+
+/** The gaps of a story check's assessment, in its order: criteria not met (the same rule as the gap fold,
+ *  `storyBuildIsGap`), then the missing items. Pure. */
+export function storyBuildGapsOf(a: Pick<TicketAssessment, 'criteria' | 'missing'> | null | undefined): StoryBuildGap[] {
+  if (a == null) return [];
+  return [
+    ...a.criteria
+      .filter((c) => storyBuildIsGap({ verdict: c.status }))
+      .map((c) => ({ ref: c.ref, text: criterionTextOnly(c.text, c.ref), verdict: c.status })),
+    ...a.missing.map((m) => ({ ref: m.ref, text: m.title, verdict: null })),
+  ];
 }

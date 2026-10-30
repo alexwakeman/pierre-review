@@ -15,7 +15,8 @@ import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
-import { BuildIcon, FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
+import { BuildIcon, FillGapsIcon, FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
+import { storyBuildActionLabel } from '../../lib/storyBuild.js';
 import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
@@ -381,17 +382,19 @@ function SprintCommands({
         run: () => toggle('needsCode'),
       },
     );
-    // "Implement KEY · title": the SAME tickets the card offers it on (owner decision 4 — a sprint
-    // ticket, Not started, no pull request, no open session), only while this board is open.
+    // "Implement KEY · title" / "Fill gaps in KEY · title": the SAME tickets the card offers it on, with
+    // the same action (shared `storyBuildOffered`), only while this board is open.
     if (canImplement)
       for (const n of nodes) {
-        if (!storyBuildOffered(n)) continue;
+        const action = storyBuildOffered(n);
+        if (action == null) continue;
+        const { label } = storyBuildActionLabel(action, n.key);
         out.push({
-          id: `implement:${n.ident}`,
+          id: `${action === 'fill_gaps' ? 'fill-gaps' : 'implement'}:${n.ident}`,
           group: 'Actions',
-          title: n.title !== '' ? `Implement ${n.key} · ${n.title}` : `Implement ${n.key}`,
-          keywords: ['build', 'story', 'code', 'implement'],
-          icon: <BuildIcon size={14} />,
+          title: n.title !== '' ? `${label} · ${n.title}` : label,
+          keywords: action === 'fill_gaps' ? ['build', 'story', 'code', 'gaps', 'fill'] : ['build', 'story', 'code', 'implement'],
+          icon: action === 'fill_gaps' ? <FillGapsIcon size={14} /> : <BuildIcon size={14} />,
           run: () => live.current.onImplement?.(n),
         });
       }
@@ -456,6 +459,10 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
           <strong>Implement</strong>: a not-started ticket with no pull request has a hammer button in its corner. It opens a build tab
           where {name} plans the change and, once you accept the plan, writes it. Nothing is pushed until you press Push. A ticket with a
           build open says how far it got beside its key.
+        </li>
+        <li>
+          <strong>Fill gaps</strong>: a started ticket whose story check found criteria not met has a Fill gaps button instead. It
+          plans and builds only those gaps, on top of the pull requests already there.
         </li>
         <li>
           <strong>Names</strong>: Critical path and Theme show who each ticket is assigned to; People shows its theme there

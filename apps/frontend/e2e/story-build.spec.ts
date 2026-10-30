@@ -4,7 +4,8 @@ import type { StoryBuild, StoryBuildDocsDecisionsBody } from '@pierre-review/sha
 
 // "Implement story" (docs/STORY-BUILD.md) against the mocked API (mock-api.ts keeps ACME-1's session
 // per page): the Implement button sits ONLY on the not-started card with no pull request (owner
-// decision 4), opens the build tab, Start makes a plan, Accept builds, Push pushes one repository.
+// decision 4), opens the build tab, Start makes a plan, Accept builds, Push pushes one repository. "Fill
+// gaps" sits on ACME-2 (started, its current story check found gaps) and its tab lists them up front.
 
 /** The fixtures keep AI dark; this feature needs it on (`me.ai.enabled`). */
 async function withAi(page: Page, storyBuild?: StoryBuild): Promise<void> {
@@ -28,7 +29,21 @@ test.describe('Implement story', () => {
     const acme1 = page.locator('[data-ticket="ACME-1"]').first();
     const acme2 = page.locator('[data-ticket="ACME-2"]').first();
     await expect(acme1.getByRole('button', { name: 'Implement ACME-1' })).toHaveCount(1);
-    await expect(acme2.getByTestId('ticket-implement')).toHaveCount(0);
+    await expect(acme2.getByRole('button', { name: 'Implement ACME-2' })).toHaveCount(0);
+  });
+
+  test('a started ticket whose story check found gaps offers Fill gaps, and its tab lists them', async ({ page }) => {
+    await gotoSprint(page);
+    const card = page.locator('[data-ticket="ACME-2"]').first();
+    await card.hover();
+    await card.getByRole('button', { name: 'Fill gaps in ACME-2' }).click();
+
+    const view = page.getByTestId('story-build-overlay');
+    await expect(view.getByTestId('story-build-action')).toHaveText('Fill gaps');
+    await expect(view.getByTestId('story-build-start-gap')).toHaveCount(2);
+    await expect(view.getByTestId('story-build-start-gaps')).toContainText('The link expires after 15 minutes');
+    await expect(view.getByTestId('story-build-start-gaps')).toContainText('A rate limit on link requests');
+    await expect(view.getByTestId('story-build-start-button')).toHaveText('Fill gaps');
   });
 
   test('open from the card, start, accept, push', async ({ page }) => {
@@ -111,7 +126,8 @@ test.describe('Implement story', () => {
 
   test('a build tab URL for a ticket the board does not offer cannot start one', async ({ page }) => {
     await withAi(page);
-    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-2')}`);
+    // ACME-9 is a ghost (outside the sprint): neither Implement nor Fill gaps.
+    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-9')}`);
     await expect(page.getByTestId('story-build-not-offered')).toBeVisible();
     await expect(page.getByTestId('story-build-start-button')).toHaveCount(0);
   });

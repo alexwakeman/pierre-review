@@ -5,15 +5,16 @@
 > Status: every work package is merged — the CONTRACT (C0), the SESSION + PLAN (WP1), the build + push
 > (WP2), the docs run (WP3) and the screen (WP4). The full flow is wired end to end (start → assess → plan
 > → chat → docs → accept → build per repository → checks → push); `e2e-flow-db.test.ts` drives it with
-> fake providers.
+> fake providers. Fill gaps (2026-10-31) is a second entry on started tickets (§ Fill gaps).
 
 ## What it is
 
 On the This Sprint board, a ticket that has NOT STARTED (its status sits in the Not started bucket) and has
-NO pull request shows an **Implement** button. One click opens a build tab that:
+NO pull request shows an **Implement** button. A STARTED ticket whose current story check found gaps shows
+**Fill gaps** instead (§ Fill gaps). One click opens a build tab that:
 
-1. **Assesses** the ticket: its story and criteria, and (rarely, since the button needs no PRs) what any
-   existing ticket PRs already deliver — the gap fold.
+1. **Assesses** the ticket: its story and criteria, and what any existing ticket PRs already deliver — the
+   gap fold (always for Fill gaps; rarely for Implement, which needs no PRs).
 2. **Plans** the work across at most 4 repositories with a READ-ONLY agent (`story_plan`). The reader
    steers the plan by chat, optionally with a planned design diagram.
 3. Optionally **weighs the workspace docs** against the plan. **The story wins**: where they disagree the
@@ -40,11 +41,13 @@ These override the design document where they differ.
 3. **≤ 4 repositories change** (`STORY_BUILD_MAX_REPOS`), built **sequentially in plan order** (a later
    repository reads earlier ones' worktrees read-only); **one build at a time per machine**.
 4. **Entry point:** the Implement button appears ONLY on This Sprint ticket cards whose story is NOT
-   STARTED and has no PRs (shared `storyBuildOffered`). Not the story view header, not Open PRs, not
-   Reports. ⌘K offers "Implement KEY" only for the same tickets while the sprint board is open; the build
-   tab registers its own commands (Accept plan, Push all, Cancel). Once a session exists the card shows the
+   STARTED and has no PRs; Fill gaps (2026-10-31) ONLY on STARTED cards whose current story check found
+   gaps. ONE gate decides both: shared `storyBuildOffered` returns `'implement' | 'fill_gaps' | null`.
+   Not the story view header, not Open PRs, not Reports. ⌘K offers "Implement KEY" / "Fill gaps in KEY"
+   only for the same tickets while the sprint board is open; the build tab registers its own commands
+   (Accept plan, Push all, Cancel). Once a session exists the card shows the
    build MARK (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed) and a click opens the tab.
-5. **Gap-filling** against existing ticket PRs stays in the backend (cheap), though (4) makes it rare.
+5. **Gap-filling** against existing ticket PRs stays in the backend (cheap); Fill gaps is its entry.
 6. **Docs defaults:** suggestions ticked, superseded unticked ("the story wins, acknowledged"), grounded
    informational (`storyBuildDocsDefaultDecision`).
 7. **Effort:** Settings → AI → Effort reaches `story_plan` and `story_build`. Default model depth: deep for
@@ -224,6 +227,27 @@ Error codes: shared `StoryBuildErrorCode`.
 graph fold (null when AI is off, for a ghost, or with no open session). It rides `changeToken`, appended
 only when present, so a sprint with no session keeps its old token. The board fetches nothing on mount.
 
+## Fill gaps
+
+The second entry, for a ticket that is already under way. Same session, routes, tab and screen; nothing new
+on the backend's start path (the gap fold already builds only the gaps whenever the ticket has PRs).
+
+- **When** (`storyBuildOffered` → `'fill_gaps'`): a sprint ticket, no open session, STARTED (≥ 1 PR, or a
+  status past Not started) and not Complete, whose `SprintGraphNode.check` — the latest SUCCEEDED story check
+  — is NOT stale and found gaps: `storyBuildCheckGaps` = not met + partly met + unsettled (unclear / not
+  checked) + `missing` (the items outside the criteria, M1…). No check, or a stale one ⇒ nothing is offered
+  (the gaps are not known), and the board says nothing about it. ⚠ `stale` there is the DB-only compare
+  (member PRs pushed / joined / left); an edit to the ticket TEXT is not seen, so the assess phase still runs
+  the ticket check's own currency rule and re-checks first when it must (§ Session and plan, the gap fold).
+- **Data** (DB only, no fetch on mount): `db/sprint-ticket-checks.ts` adds `missing` (the run's
+  `assessment.missing.length`) and `reviewId` (the run's id) to the check it already reads. The change token
+  appends `missing` to the check's tuple ONLY when non-zero (a check with none keeps its old token);
+  `reviewId` moves with `checkedAt`, so it is not hashed.
+- **The tab**: the header leads with the action word ("Fill gaps", `lib/storyBuild.ts storyBuildActionOf`)
+  and its ⓘ explains the gaps; the start state lists the gaps up front — ONE read of that run
+  (`GET /api/ticket-reviews/:id`) when the tab opens, folded by shared `storyBuildGapsOf` (the gap fold's
+  rule: criteria not met, then the missing items) — and its button reads "Fill gaps".
+
 ## Docs consideration _(WP3)_
 
 A `build` mode of the story-docs pipeline — the SAME `story_docs` read (shortlist, inlined sections, the
@@ -379,8 +403,9 @@ PR's head are protected and refused before any process runs), then `createPullRe
 | WP3 docs | `feat/story-build-docs` | the story-docs `build` mode, `docs.ts`, `routes-docs.ts` |
 | WP4 frontend + demo | `feat/story-build-ui` | the tab kind, `useOpenStoryBuild`, `components/StoryBuild/*`, the card button + mark, ⌘K, hooks + client, `mock-api.ts`, demo seed/recorder |
 
-**The demo** (`seed-demo-agentic.ts seedStoryBuilds`, docs/DEMO.md): on not-started PLAT sprint tickets with no
-PR — PLAT-310 a READY build (acme/api pushed as draft #143, its `pull_requests` row seeded and not linked to the
+**The demo** (`seed-demo-agentic.ts seedStoryBuilds`, docs/DEMO.md): PLAT-301 (in progress, its story check from
+`seedTicketReviews` current with one criterion not met and one partly met) is the Fill gaps card and tab (the
+recorder opens it, recording its check); and on not-started PLAT sprint tickets with no PR — PLAT-310 a READY build (acme/api pushed as draft #143, its `pull_requests` row seeded and not linked to the
 ticket; acme/web-app ready, tests 3 passed + 1 failed + the hook), PLAT-312 PLAN READY (a design, a two-turn chat,
 the docs weighed: 2 grounded, 1 superseded, 2 suggestions not in the plan yet), PLAT-318 no session (the
 Implement button). The demo answers every write inert (routes.ts), the checks preview from its own fixture, and

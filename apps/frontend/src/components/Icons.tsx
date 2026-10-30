@@ -821,6 +821,18 @@ export function BuildIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A dashed box with a plus — "Fill gaps": build only what a started story's check found missing (the
+// sprint card's Fill gaps button, the build tab).
+export function FillGapsIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
+      <line x1="12" y1="8.5" x2="12" y2="15.5" />
+      <line x1="8.5" y1="12" x2="15.5" y2="12" />
+    </IconShell>
+  );
+}
+
 // Bars — charts / analytics.
 export function ChartIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (

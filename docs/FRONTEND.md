@@ -3612,17 +3612,29 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   `view=<key>`. The prefixes never overlap. Chip words: `lib/storyBuildTab.ts storyBuildTabLabels`
   ("KEY · Build", tooltip "KEY: implementation", "Close build tab"). ⚠ **THE ONE OPENER is
   `useOpenStoryBuild()`**; nothing calls `openStoryBuildTab` directly. Opening never starts a run.
-- **The ONLY entry point (owner decision 4).** This Sprint's `TicketCard`: a `BuildIcon` corner
-  button beside the arrow (same reveal, ONE card height — it is `absolute`) shown ONLY when the board
-  passes `onImplement` (SprintView: `me.ai.enabled` AND the graph's `aiEnabled`) and shared
-  `storyBuildOffered(node)` holds (sprint ticket, `stage === 'not_started'`, no PR, no open session).
-  HIDDEN, never disabled. With an open session the card wears the MARK beside its key
-  (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — words, in the accessible name
-  and the board's `BorderKey`) and the same button opens the build tab. ⌘K: `SprintCommands` lists
-  "Implement KEY · title" for the SAME tickets while the board is mounted. Not on the story view, Open
-  PRs or Reports. ⚠ A tab rebuilt from a URL may name ANY ticket, so `StartPanel` applies the SAME
-  gate (`storyBuildOffered` on the cached sprint-graph node, `build` ignored) and shows Start only
-  then; the whole tab says "AI is off" and asks nothing while `me.ai.enabled` is false.
+- **The ONLY entry points (owner decision 4, widened 2026-10-31).** This Sprint's `TicketCard`: a
+  corner button beside the arrow (same reveal, ONE card height — it is `absolute`) shown ONLY when the
+  board passes `onImplement` (SprintView: `me.ai.enabled` AND the graph's `aiEnabled`) and shared
+  `storyBuildOffered(node)` returns an ACTION: `'implement'` (sprint ticket, `stage === 'not_started'`,
+  no PR, no open session — `BuildIcon`, "Implement KEY") or `'fill_gaps'` (a STARTED sprint ticket — a
+  PR, or a status past Not started, short of Complete — whose latest succeeded story check is CURRENT
+  and found gaps, `storyBuildCheckGaps(node.check)` over not met + partly met + unsettled + `missing`;
+  `FillGapsIcon`, "Fill gaps in KEY", `data-action`). No check or a STALE one offers nothing. Words:
+  `lib/storyBuild.ts storyBuildActionLabel`. HIDDEN, never disabled. With an open session the card wears
+  the MARK beside its key (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — words, in
+  the accessible name and the board's `BorderKey`) and the same button opens the build tab. ⌘K:
+  `SprintCommands` lists "Implement KEY · title" / "Fill gaps in KEY · title" for the SAME tickets while
+  the board is mounted. Not on the story view, Open PRs or Reports. ⚠ A tab rebuilt from a URL may name
+  ANY ticket, so `StartPanel` applies the SAME gate (`storyBuildOffered` on the cached sprint-graph
+  node, `build` ignored) and shows Start only then; the whole tab says "AI is off" and asks nothing
+  while `me.ai.enabled` is false.
+- **Fill gaps in the tab.** The header leads with the action word (`storyBuildActionOf`: a session's
+  `coverage.existingPrs` decides once it has assessed; before that the card's gate, else a ticket with an
+  open or merged PR) and words its ⓘ for the gaps. The start state lists the gaps UP FRONT from the
+  check the card read (`check.reviewId` → `useTicketReviewById`, ONE read when the tab opens, never on
+  the board; shared `storyBuildGapsOf`, the gap fold's own rule: criteria not met, then the missing
+  items) and its button reads "Fill gaps". Same session, same routes: the backend's gap fold builds only
+  the gaps whenever the ticket has PRs.
 - **Plan choices** (include, branch, tests) live in the tab, reset on a new plan revision or session —
   EXCEPT the ticked tests: each card reports them from its own effect, which runs BEFORE the tab's
   reset in the same commit, so wiping them would Accept with no checks while Run tests reads ticked.
@@ -3656,8 +3668,10 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
 - **⌘K inside the tab:** Accept plan, Push all, Cancel — each registered only while its button is on
   screen, and each PRESSES that button (`data-story-build-action`), so `OverBudgetConfirm` still asks.
 - Tests: `test/storyBuildTab.test.ts`, `test/storyBuild.test.ts` (steps, docs defaults, Accept,
-  push gating, the card), `e2e/story-build.spec.ts`. Demo: `seed-demo-agentic.ts seedStoryBuilds`
-  (PLAT-310 finished, PLAT-312 plan ready), `demo/routes.ts` (writes inert), recorder + verify steps.
+  push gating, the card, Fill gaps), `e2e/story-build.spec.ts` (ACME-2 is the Fill gaps card). Demo:
+  `seed-demo-agentic.ts seedStoryBuilds` (PLAT-310 finished, PLAT-312 plan ready; PLAT-301's story check
+  from `seedTicketReviews` makes it the Fill gaps card), `demo/routes.ts` (writes inert), recorder +
+  verify steps.
 
 ## The merge-conflict resolver (`components/conflicts/`, CORE)
 

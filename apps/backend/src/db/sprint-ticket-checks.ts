@@ -12,6 +12,8 @@ import type { SprintGraphPr, SprintTicketCheck, TicketAssessment } from '@pierre
 //     or this workspace's graph lists an open / merged PR the run did not read. ⚠ An edit to the ticket
 //     TEXT is NOT detected here (that needs the story read per ticket — a query per card); the Story
 //     check's own state on the PR pane says so.
+//   • `missing` counts the run's items outside the criteria and `reviewId` names the run: with the
+//     verdicts they decide "Fill gaps" (shared `storyBuildOffered`), and its start state reads that run.
 //   • `running` = a run of the ticket is queued or running (its DB row; the boot reconcile fails any a
 //     restart orphaned).
 //
@@ -33,8 +35,9 @@ export interface CheckMember {
 }
 
 /** The verdict counts of one assessment (the shared rule: `unclear` and anything unknown are unsettled). */
-function countsOf(a: TicketAssessment): Pick<SprintTicketCheck, 'met' | 'partlyMet' | 'notMet' | 'unsettled' | 'total'> {
-  const c = { met: 0, partlyMet: 0, notMet: 0, unsettled: 0, total: a.criteria.length };
+function countsOf(a: TicketAssessment): Pick<SprintTicketCheck, 'met' | 'partlyMet' | 'notMet' | 'unsettled' | 'total' | 'missing'> {
+  const missing = Array.isArray(a.missing) ? a.missing.length : 0;
+  const c = { met: 0, partlyMet: 0, notMet: 0, unsettled: 0, total: a.criteria.length, missing };
   for (const x of a.criteria) {
     if (x.status === 'met') c.met += 1;
     else if (x.status === 'partly_met') c.partlyMet += 1;
@@ -65,6 +68,7 @@ export function sprintTicketCheckOf(
   if (!stale) stale = graphPrs.some((p) => (p.state === 'open' || p.state === 'merged') && !read.has(p.prId));
   return {
     ...countsOf(run.assessment),
+    reviewId: run.id,
     checkedAt: (run.completedAt ?? new Date(0)).toISOString(),
     stale,
   };

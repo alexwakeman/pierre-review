@@ -218,8 +218,8 @@ export interface SprintGraphNode {
   codeJudgement?: SprintCodeJudgement | null;
   /** "Implement story" (docs/STORY-BUILD.md): the ticket's latest OPEN build session, coarse (status +
    *  repository counts — it rides the change token). null when none is open, for a ghost, and whenever
-   *  AI is off. Absent from an older server. The card's mark is `storyBuildMark(build)`; the Implement
-   *  button's gate is `storyBuildOffered(node)`. */
+   *  AI is off. Absent from an older server. The card's mark is `storyBuildMark(build)`; the Implement /
+   *  Fill gaps button's gate is `storyBuildOffered(node)`. */
   build?: SprintNodeBuild | null;
 }
 
@@ -265,6 +265,12 @@ export interface SprintTicketCheck {
   /** Criteria the check could not settle (unclear or not checked). */
   unsettled: number;
   total: number;
+  /** Things the ticket asks for outside its criteria that no PR does (the check's `missing` items, M1…).
+   *  Absent from an older server (read as 0). */
+  missing?: number;
+  /** The run's id (`GET /api/ticket-reviews/:id`) — the "Fill gaps" start state lists its gaps. Absent
+   *  from an older server. */
+  reviewId?: number;
   /** ISO-8601 of the run's completion. */
   checkedAt: string;
   /** A member PR was added, left, pushed or merged since that run (a DB-only compare of the run's
