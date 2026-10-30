@@ -41,6 +41,7 @@ import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { reconcileCiReview, reconcileWithoutModel } from './reconcile.js';
 import type { SubmitCiReviewPayload } from './schema.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE CI REVIEW QUEUE — one run per PR at a time, beside the PR review's queue
 // (claude-review/manager.ts) and the ticket review's (ticket-review/manager.ts), and SEPARATE from
@@ -324,7 +325,7 @@ async function runPipeline(
   let cleanupWorktree: (() => Promise<void>) | null = null;
   let scratch: string | null = null;
   try {
-    const [diffs, worktrees] = await Promise.all([fetchMemberDiffs([member]), prepareMemberWorktrees([member])]);
+    const [diffs, worktrees] = await Promise.all([fetchMemberDiffs([member]), withWorktreeOwner({ kind: 'ci_review', accountId, prId }, () => prepareMemberWorktrees([member]))]);
     cleanupWorktree = worktrees.cleanup;
     const worktreePath = worktrees.byPr.get(prId)?.path ?? null;
     if (!worktreePath) {

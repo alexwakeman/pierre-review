@@ -24,6 +24,7 @@ import { acceptAiChoices, AI_CHOICE_REFUSAL_TEXT, type AiChoiceInput } from './v
 import { buildAiResolvePrompt } from './prompt.js';
 import { partialSpendOf } from '../partial-spend.js';
 import { providerName } from '../../ai/prompt-tools.js';
+import { withWorktreeOwner } from '../../review/worktree-owner.js';
 
 /**
  * "RESOLVE WITH CLAUDE" — the agentic half of the merge-conflict resolver (CORE, free, LOCAL ONLY:
@@ -254,7 +255,7 @@ async function runJob(
         import('./schema.js'),
       ]);
     const token = await getAccessToken(rec.accountId);
-    const prepared = await prepWorktree(model.owner, model.name, model.number, model.headSha, token);
+    const prepared = await withWorktreeOwner({ kind: 'resolve', accountId: rec.accountId, prId: rec.prId }, () => prepWorktree(model.owner, model.name, model.number, model.headSha, token));
     worktree = { owner: model.owner, name: model.name, ...prepared };
 
     const shape = await submitResolutionShape();

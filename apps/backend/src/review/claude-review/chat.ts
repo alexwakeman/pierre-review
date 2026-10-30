@@ -46,6 +46,7 @@ import {
 import { providerName } from '../../ai/prompt-tools.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -662,7 +663,7 @@ export async function answerReviewChat(
     const timer = setTimeout(() => abortController.abort(), CHAT_TIMEOUT_MS);
     let result;
     try {
-      result = await chat({
+      result = await withWorktreeOwner({ kind: 'chat', accountId, prId: review.prId, runId: reviewId }, () => chat({
         owner: pr.owner,
         name: pr.name,
         prNumber: pr.number,
@@ -677,7 +678,7 @@ export async function answerReviewChat(
         ...(explain ? { explain: true } : {}),
         // Who to bill when the provider writes its own ledger row (Codex).
         usage: { accountId, prId: review.prId },
-      });
+      }));
     } finally {
       clearTimeout(timer);
     }

@@ -22,7 +22,7 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   if (removed > 0) console.log(`cleanup: removed ${removed} redundant review_submitted events`);
 
   // Repair the clone cache before anything can hand a clone out: strip credentials an older
-  // build left in `.git/config`, tighten permissions, and collect orphaned worktrees. AWAITED
+  // build left in `.git/config`, tighten permissions, and prune dead worktree records. AWAITED
   // — bindPlatform can start a fix that reuses a clone — but BOUNDED: a sweep that cannot
   // finish must not be the reason the server never listens.
   await Promise.race([
@@ -32,10 +32,8 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
           `clones: repaired ${r.credentialsRepaired} and deleted ${r.clonesRemoved} of ${r.scanned} — a GitHub token was stored on disk. Run \`gh auth refresh\`: deleting the clone does not reach a backup the token is already in.`,
         );
       }
-      if (r.worktreeDirsRemoved > 0 || r.worktreeRecordsPruned > 0) {
-        console.log(
-          `clones: removed ${r.worktreeDirsRemoved} stale worktrees and ${r.worktreeRecordsPruned} dead records`,
-        );
+      if (r.worktreeRecordsPruned > 0) {
+        console.log(`clones: pruned ${r.worktreeRecordsPruned} dead worktree records`);
       }
     }),
     new Promise<void>((resolve) => setTimeout(resolve, config.cloneSweepMaxMs).unref?.()),
@@ -59,6 +57,11 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   }
 
   const app = await buildApp();
+
+  // The worktree ledger (review/worktree-gc.ts): every per-run checkout made from here on is
+  // recorded with its owner. Before anything below can start a run.
+  const { installWorktreeLedger, kickWorktreeSweep } = await import('./review/worktree-gc.js');
+  installWorktreeLedger();
 
   // Backfill the cross-team search index from already-stored data (PRs that predate the feature),
   // in the BACKGROUND so it never delays serving. Idempotent + batched; a cheap no-op once caught
@@ -103,6 +106,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   installShutdownHandler(app);
 
   await app.listen({ port: config.port, host: config.host });
+  // Remove the per-run checkouts nothing needs any more — in the background, bounded by
+  // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
+  kickWorktreeSweep('boot');
   return { app, port: config.port };
 }
 

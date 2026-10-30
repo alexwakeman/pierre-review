@@ -67,6 +67,7 @@ import {
   type JudgingRun,
 } from './replies-pass.js';
 import { buildRepliesPrompt, repliesSystemPrompt } from './replies-check-prompt.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE REPLIES PASS — the I/O half (docs/CLAUDE-REVIEW.md § The replies pass; the pure half is
 // replies-pass.ts). A cheap run that judges ONLY people's replies on Limn's own posted findings, at
@@ -592,7 +593,7 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
   try {
     let worktreePath: string | null = null;
     try {
-      const wt = await prepareMemberWorktrees([member]);
+      const wt = await withWorktreeOwner({ kind: 'replies_check', accountId, prId }, () => prepareMemberWorktrees([member]));
       cleanupWorktree = wt.cleanup;
       worktreePath = wt.byPr.get(prId)?.path ?? null;
     } catch {

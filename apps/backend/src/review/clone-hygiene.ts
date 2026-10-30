@@ -9,8 +9,8 @@ import { config } from '../config.js';
 // The cache is keyed `owner__name` and SHARED ACROSS ACCOUNTS (in cloud two tenants can
 // watch the same repo), so a token that reaches `.git/config` is readable by every other
 // account on the box and by anything that backs the home directory up. This module is the
-// one place that decides what a clone on disk is allowed to contain: a token-LESS origin,
-// owner-only permissions, and no worktree older than the TTL.
+// one place that decides what a clone on disk is allowed to contain: a token-LESS origin and
+// owner-only permissions. Which per-run worktrees may stay is review/worktree-gc.ts's call.
 //
 // It deliberately imports NOTHING from clone-manager.ts — clone-manager imports this, and
 // the startup sweep needs `liveWorktrees` without the cycle.
@@ -182,6 +182,13 @@ export function tightenClonePerms(dir: string): boolean {
 export const liveWorktrees = new Map<string, number>();
 
 /**
+ * Worktree paths the last worktree sweep (review/worktree-gc.ts) decided to KEEP for a reason no
+ * clock in this module can see: unpushed work the reader may still push, or a tree another live
+ * Limn process made. Replaced whole by each sweep. The LRU below must not evict a repo holding one.
+ */
+export const heldWorktrees = new Set<string>();
+
+/**
  * Does `repoDir` hold a worktree we must not evict? A worktree this process owns always
  * counts; anything else counts only while it is younger than config.worktreeTtlMs.
  * ⚠ This replaced a bare "is `.worktrees/` non-empty" test, under which ONE orphan left by a
@@ -197,7 +204,7 @@ export function hasFreshWorktrees(repoDir: string, now: number): boolean {
   }
   for (const entry of entries) {
     const full = join(root, entry);
-    if (liveWorktrees.has(full)) return true;
+    if (liveWorktrees.has(full) || heldWorktrees.has(full)) return true;
     try {
       if (now - statSync(full).mtimeMs < config.worktreeTtlMs) return true;
     } catch {
@@ -213,7 +220,6 @@ export interface CloneHygieneReport {
   clonesRemoved: number;
   permissionsTightened: number;
   worktreeRecordsPruned: number;
-  worktreeDirsRemoved: number;
 }
 
 /**
@@ -240,30 +246,6 @@ async function pruneWorktreeRecords(dir: string): Promise<number> {
   return `${stdout}\n${stderr}`.split('\n').filter((l) => l.startsWith('Removing')).length;
 }
 
-/** Delete every `.worktrees/<entry>` this process does not own that is past the TTL. */
-function removeStaleWorktreeDirs(dir: string, now: number): number {
-  const root = join(dir, '.worktrees');
-  let entries: string[];
-  try {
-    entries = readdirSync(root);
-  } catch {
-    return 0;
-  }
-  let removed = 0;
-  for (const entry of entries) {
-    const full = join(root, entry);
-    if (liveWorktrees.has(full)) continue;
-    try {
-      if (now - statSync(full).mtimeMs < config.worktreeTtlMs) continue;
-      rmSync(full, { recursive: true, force: true });
-      removed++;
-    } catch {
-      /* leave it and move on */
-    }
-  }
-  return removed;
-}
-
 /**
  * Drop the conflict-resolver's fetch refs. No resolver job survives a restart, so at boot
  * every `refs/pierre/conflict/*` is an orphan by definition and each one pins objects.
@@ -287,7 +269,6 @@ const EMPTY_REPORT: CloneHygieneReport = {
   clonesRemoved: 0,
   permissionsTightened: 0,
   worktreeRecordsPruned: 0,
-  worktreeDirsRemoved: 0,
 };
 
 /**
@@ -298,7 +279,6 @@ async function sweepOneClone(
   dir: string,
   owner: string,
   name: string,
-  now: number,
 ): Promise<CloneHygieneReport> {
   const report: CloneHygieneReport = { ...EMPTY_REPORT, scanned: 1 };
 
@@ -324,23 +304,10 @@ async function sweepOneClone(
   } catch {
     /* best-effort */
   }
-  let removedDirs = 0;
-  try {
-    removedDirs = removeStaleWorktreeDirs(dir, now);
-    report.worktreeDirsRemoved += removedDirs;
-  } catch {
-    /* best-effort */
-  }
-  // The second prune exists to collect the records the deletes above just orphaned. With no
-  // deletes there are no new orphans, so it is provably a no-op — and a no-op git spawn still
-  // costs ~120ms per clone. ⚠ Keep it gated on the COUNT, not on `.worktrees/` existing.
-  if (removedDirs > 0) {
-    try {
-      report.worktreeRecordsPruned += await pruneWorktreeRecords(dir);
-    } catch {
-      /* best-effort */
-    }
-  }
+  // ⚠ STALE WORKTREE DIRECTORIES ARE NOT REMOVED HERE ANY MORE. This sweep runs before the
+  // ledger is read and knows only a directory's age, so it would delete a tree holding a fix the
+  // reader has not pushed. The worktree sweep (review/worktree-gc.ts) owns removal: after listen,
+  // non-blocking, by the ledger's owner and the policy in worktree-gc-policy.ts.
   try {
     await deleteConflictRefs(dir);
   } catch {
@@ -351,11 +318,8 @@ async function sweepOneClone(
 
 /**
  * Walk every clone in the cache once: repair credentials, tighten permissions, prune dead
- * worktree records, delete worktree directories past the TTL, prune again IF that deleted
- * anything (those deletes are the only thing that could have orphaned a fresh record), and
- * drop the resolver's fetch refs.
- *
- * `now` is a parameter so a test can age a worktree without touching the clock.
+ * worktree records, and drop the resolver's fetch refs. Stale worktree DIRECTORIES are the
+ * worktree sweep's (review/worktree-gc.ts), which runs after listen with the ledger in hand.
  *
  * ⚠ THIS RUNS BEFORE `app.listen()` AND IS AWAITED ON PURPOSE — `bindProPlugin` can hand a
  * clone to a fix, and no clone may carry a token in `.git/config` when it does. So the cost
@@ -370,9 +334,7 @@ async function sweepOneClone(
  * against 2,509ms serial — inside the noise, for a shared cursor and a concurrency limit in
  * a file whose value is that it can be read straight through.
  */
-export async function sweepCloneCache(
-  now: number = Date.now(),
-): Promise<CloneHygieneReport> {
+export async function sweepCloneCache(): Promise<CloneHygieneReport> {
   const report: CloneHygieneReport = { ...EMPTY_REPORT };
   tightenCloneRoot();
 
@@ -396,13 +358,12 @@ export async function sweepCloneCache(
     const split = entry.indexOf('__');
     if (split <= 0) continue;
 
-    const one = await sweepOneClone(dir, entry.slice(0, split), entry.slice(split + 2), now);
+    const one = await sweepOneClone(dir, entry.slice(0, split), entry.slice(split + 2));
     report.scanned += one.scanned;
     report.credentialsRepaired += one.credentialsRepaired;
     report.clonesRemoved += one.clonesRemoved;
     report.permissionsTightened += one.permissionsTightened;
     report.worktreeRecordsPruned += one.worktreeRecordsPruned;
-    report.worktreeDirsRemoved += one.worktreeDirsRemoved;
   }
 
   return report;

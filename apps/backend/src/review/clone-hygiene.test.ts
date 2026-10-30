@@ -180,36 +180,16 @@ describe('sweepCloneCache — worktrees', () => {
     expect(git(['worktree', 'list', '--porcelain'], repo)).not.toContain('gone');
   });
 
-  it('removes a backdated worktree and keeps a fresh one', async () => {
+  it('leaves stale worktree DIRECTORIES to the worktree sweep', async () => {
+    // This sweep runs before the ledger is read and knows only a directory's age, so it would
+    // delete a tree holding a fix the reader has not pushed. review/worktree-gc.ts owns removal.
     const repo = makeClone('octocat__hello', PLAIN);
     const stale = addWorktreeDir(repo, 'stale');
-    const fresh = addWorktreeDir(repo, 'fresh');
     backdate(stale, TTL_MS * 2);
 
-    const report = await hygiene.sweepCloneCache();
-    expect(report.worktreeDirsRemoved).toBe(1);
-    expect(existsSync(stale)).toBe(false);
-    expect(existsSync(fresh)).toBe(true);
-    // ⚠ The SECOND prune is what collects the record the delete above just orphaned, and it
-    // is gated on the delete COUNT so a sweep that deletes nothing skips a no-op git spawn.
-    // Delete that call, or widen the gate to something that is not the count, and the stale
-    // record survives here while `worktreeDirsRemoved` still reads 1.
-    const listed = git(['worktree', 'list', '--porcelain'], repo);
-    expect(listed).not.toContain('stale');
-    expect(listed).toContain('fresh');
-  });
-
-  it('keeps a backdated worktree THIS process owns', async () => {
-    // Identity beats the clock — a long agent run writes nothing under its worktree for
-    // hours. Delete the `liveWorktrees.has` branch and this test fails.
-    const repo = makeClone('octocat__hello', PLAIN);
-    const mine = addWorktreeDir(repo, 'mine');
-    backdate(mine, TTL_MS * 2);
-    hygiene.liveWorktrees.set(mine, Date.now());
-
-    const report = await hygiene.sweepCloneCache();
-    expect(report.worktreeDirsRemoved).toBe(0);
-    expect(existsSync(mine)).toBe(true);
+    await hygiene.sweepCloneCache();
+    expect(existsSync(stale)).toBe(true);
+    expect(git(['worktree', 'list', '--porcelain'], repo)).toContain('stale');
   });
 
   it('drops the resolver fetch refs — no job survives a restart', async () => {
@@ -231,6 +211,18 @@ describe('hasFreshWorktrees', () => {
     const stale = addWorktreeDir(repo, 'stale');
     backdate(stale, TTL_MS * 2);
     expect(hygiene.hasFreshWorktrees(repo, Date.now())).toBe(false);
+  });
+
+  it('is true for a stale worktree the worktree sweep is HOLDING (unpushed work)', () => {
+    const repo = makeClone('octocat__hello', PLAIN);
+    const held = addWorktreeDir(repo, 'held');
+    backdate(held, TTL_MS * 2);
+    hygiene.heldWorktrees.add(held);
+    try {
+      expect(hygiene.hasFreshWorktrees(repo, Date.now())).toBe(true);
+    } finally {
+      hygiene.heldWorktrees.delete(held);
+    }
   });
 
   it('is false for a repo with no .worktrees at all', () => {

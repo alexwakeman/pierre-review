@@ -52,6 +52,7 @@ import {
   type DiagramPromptPr,
 } from './prompts.js';
 import { validateDesign, type DesignContext } from './validate.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE SEQUENCE-DIAGRAM QUEUE — a SEPARATE agentic process beside the PR review's queue
 // (claude-review/manager.ts), the ticket review's and the CI review's: its own rows, its own claim,
@@ -320,7 +321,7 @@ async function runPrPipeline(job: DiagramJob, controller: AbortController): Prom
     await markDiagramCancelled(ctx, accountId, diagramId);
     return;
   }
-  const worktrees = await prepareMemberWorktrees([member]);
+  const worktrees = await withWorktreeOwner({ kind: 'diagram', accountId, prId }, () => prepareMemberWorktrees([member]));
   try {
     const path = worktrees.byPr.get(prId)?.path ?? null;
     if (!path) {
@@ -395,10 +396,10 @@ async function runStoryPipeline(job: DiagramJob, controller: AbortController): P
     return;
   }
   const [worktrees, defaults, ticket] = await Promise.all([
-    prepareMemberWorktrees(members.filter((m) => m.state === 'open')),
-    prepDefaultBranchCheckouts(
+    withWorktreeOwner({ kind: 'diagram', accountId, ticket: ident }, () => prepareMemberWorktrees(members.filter((m) => m.state === 'open'))),
+    withWorktreeOwner({ kind: 'diagram', accountId, ticket: ident }, () => prepDefaultBranchCheckouts(
       members.filter((m) => m.state === 'merged').map((m) => ({ owner: m.owner, name: m.name, branch: m.defaultBranch })),
-    ),
+    )),
     jiraStoryFor(accountId, ident).catch(() => null),
   ]);
   try {

@@ -74,6 +74,7 @@ import { reconcileTicketReview, type TicketReport } from './reconcile.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE TICKET REVIEW QUEUE — one run per TICKET (never per PR), beside the PR review's own queue
 // (claude-review/manager.ts) and SEPARATE from it: its own rows, its own claim, its own lane, so a
@@ -452,12 +453,12 @@ async function runPipeline(
     const [{ diffs, results }, worktrees, defaults, legacy, prior] = await Promise.all([
       // Caught like the reads below: a rejection would skip the cleanup assignments and leak.
       diffsThenCards.catch(() => ({ diffs: new Map<number, MemberDiff>(), results: [] as PrepassResult[] })),
-      prepareMemberWorktrees(located.filter((m) => m.state === 'open')),
-      prepDefaultBranchCheckouts(
+      withWorktreeOwner({ kind: 'ticket_review', accountId, ticket: job.ident }, () => prepareMemberWorktrees(located.filter((m) => m.state === 'open'))),
+      withWorktreeOwner({ kind: 'ticket_review', accountId, ticket: job.ident }, () => prepDefaultBranchCheckouts(
         located
           .filter((m) => m.state === 'merged')
           .map((m) => ({ owner: m.owner, name: m.name, branch: m.defaultBranch })),
-      ),
+      )),
       loadLegacyStoryFindings(ctx, accountId, members.map((m) => m.prId), ticket).catch(() => []),
       // Caught, like the legacy read: a rejection here would skip the assignment below and leak the
       // worktrees the parallel branch prepared.
