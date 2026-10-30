@@ -180,3 +180,21 @@ Why spawning dominates: inside a vitest worker on macOS, `git --version` measure
 against ~20 ms from plain node (`/usr/bin/true` stays ~6 ms). A conflict case shells out ~60 times
 (the land path rebuilds the model before it commits). Linux CI pays no Gatekeeper assessment, so
 the slow project should be much quicker there; it has not been timed on CI yet.
+
+### The follow-up (time budget, live project, four more files to `slow`), same day
+
+Three full runs of the `fast` project on the same shared machine, default workers:
+
+| Run | Load average | Wall clock | Files | Tests (skipped) | Sum of test time |
+|---|---|---|---|---|---|
+| Before | ~30 | 135s | 428 | 6,204 (42) | 805s |
+| After pruning + `live` split, before the four moves | ~50 | 338s | 425 | 6,168 (8) | 628s |
+| Same, budget reporter on | 5–15, but every file 3–10× its first-run time | 497s | 425 | 6,168 (8) | 524s |
+
+The wall clocks are NOT comparable: the machine's load changed the result more than the change
+did, so the table is a record, not a speed-up claim. What changed for certain: 3 `live` files no
+longer load ~8 heavy modules to skip 34 cases; 4 spawn-bound files (measured 11s of test time in
+the first run, with 4 of the 30 slowest tests) left `fast`; `fast` is now 421 files. The first run's
+slowest `fast` files (`db/my-turn-settings` 21s, `benchmark-rollup` 10s) are in-process sweeps and
+are on the allowlist, not moved.
+
