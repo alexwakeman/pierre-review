@@ -24,7 +24,7 @@ const sum = (a: number[]): number => a.reduce((s, v) => s + v, 0);
 function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
   return (
     <div>
-      <h3 className="mb-1.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
+      <h3 className="mb-1.5 text-meta font-semibold  text-ui-faint">
         {title}
       </h3>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{children}</div>

@@ -263,7 +263,7 @@ function CardPlacementBody({
   return (
     <div className="space-y-2">
       <section>
-        <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
+        <h3 className="text-meta font-semibold  text-ui-mute">
           Why it is here
         </h3>
         <p className="mt-0.5">{x.why}</p>
@@ -277,7 +277,7 @@ function CardPlacementBody({
         </p>
       </section>
       <section>
-        <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
+        <h3 className="text-meta font-semibold  text-ui-mute">
           Where it sits
         </h3>
         <p className="mt-0.5 font-medium text-ui-ink">{x.place}</p>
@@ -285,7 +285,7 @@ function CardPlacementBody({
       </section>
       {x.score != null && (
         <section>
-          <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
+          <h3 className="text-meta font-semibold  text-ui-mute">
             Do next score: {x.score.total} of 100
           </h3>
           <table className="mt-1 w-full border-collapse text-meta">

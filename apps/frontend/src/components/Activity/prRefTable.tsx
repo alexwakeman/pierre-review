@@ -245,7 +245,7 @@ export function PrTable({
           <col />
         </colgroup>
         <thead>
-          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold  text-gray-400">
             <th className="pb-1 pr-2 font-semibold">Pull request</th>
             <th className="pb-1 pr-2 font-semibold">CI</th>
             <th className="pb-1 pr-2 font-semibold">Age</th>
@@ -351,7 +351,7 @@ function MdTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[480px] border-collapse text-meta">
         <thead>
-          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-ui-faint">
+          <tr className="text-left text-meta font-semibold  text-ui-faint">
             {table.header.map((h, ci) => (
               <th key={ci} className="pb-1 pr-2 font-semibold">
                 {renderInlineMarkdown(h, index, onOpenPr)}
@@ -429,7 +429,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="pt-1 text-meta font-semibold uppercase tracking-wide text-ui-mute"
+              className="pt-1 text-meta font-semibold  text-ui-mute"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>

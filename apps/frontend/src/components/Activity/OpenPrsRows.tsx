@@ -651,10 +651,12 @@ function TicketGroup({
         tabIndex={-1}
         className="scroll-mt-4 rounded-ui outline-none"
       >
-        {/* ONE line at md+: chevron · key + title (→ the story view) … status · type · assignee ·
-            criteria met + Re-check · roll-up · PR count. Below md the facts wrap onto a second line. */}
-        <div role="presentation" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 rounded-ui px-1 py-1.5">
-          <div className="flex min-w-0 flex-1 basis-full items-center gap-1.5 md:basis-[18rem]">
+        {/* ONE line at every width: chevron · key + title (→ the story view) … status · type ·
+            assignee · criteria met + Re-check · roll-up · PR count. Below md only the title, a red
+            dot when something in the group blocks, and the PR count stay on the line — the status,
+            criteria and Re-check are one tap away in the ticket's story view. */}
+        <div role="presentation" className="flex min-w-0 items-center gap-x-3 gap-y-0.5 rounded-ui px-1 py-1.5 md:flex-wrap">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 md:basis-[18rem]">
             <button
               type="button"
               onClick={onFold}
@@ -695,14 +697,27 @@ function TicketGroup({
               )}
             </h3>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 pl-[30px] text-meta text-ui-mute md:ml-auto md:justify-end md:pl-0 touch:pl-[46px] touch:md:pl-0">
-            {t != null && <TicketFacts t={t} />}
-            {review != null && <GroupCoverage ident={review.ident} state={review.state} prId={review.prId} />}
+          <div className="flex shrink-0 items-center gap-x-3 gap-y-0.5 text-meta text-ui-mute md:ml-auto md:min-w-0 md:shrink md:flex-wrap md:justify-end">
+            {t != null && (
+              <span className="contents max-md:hidden">
+                <TicketFacts t={t} />
+              </span>
+            )}
+            {review != null && (
+              <span className="contents max-md:hidden">
+                <GroupCoverage ident={review.ident} state={review.state} prId={review.prId} />
+              </span>
+            )}
             {rollup.map((p) => (
-              <span key={p.text} className={cx('shrink-0', p.tone === 'bad' ? 'text-ui-danger' : 'text-ui-success')}>
+              <span key={p.text} className={cx('shrink-0 max-md:hidden', p.tone === 'bad' ? 'text-ui-danger' : 'text-ui-success')}>
                 {p.text}
               </span>
             ))}
+            {rollup.some((p) => p.tone === 'bad') && (
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger md:hidden" title={rollup.filter((p) => p.tone === 'bad').map((p) => p.text).join(' · ')}>
+                <span className="sr-only">{rollup.filter((p) => p.tone === 'bad').map((p) => p.text).join(', ')}</span>
+              </span>
+            )}
             <span className="shrink-0 tabular-nums text-ui-faint">{prCountLabel(stack.rows.length)}</span>
           </div>
         </div>

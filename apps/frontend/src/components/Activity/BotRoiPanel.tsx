@@ -1,4 +1,5 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
+import { useEdgeFade } from '../ui/index.js';
 import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
@@ -289,10 +290,11 @@ export function TuningSuggestions({
               className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta"
             >
               <span
-                className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium"
-                style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
+                className="inline-flex items-center gap-1 font-medium text-ui-ink"
               >
-                <BotIcon size={11} />
+                <span aria-hidden className="flex" style={vendorInk(meta.color)}>
+                  <BotIcon size={11} />
+                </span>
                 {meta.label}
               </span>
               <span className="text-ui-mute">{s.rationale}</span>
@@ -522,8 +524,7 @@ function MlTotalsStrip({
         >
           <div className="text-meta text-ui-faint">High severity</div>
           <div
-            className="text-title font-semibold tabular-nums"
-            style={{ color: ML_SEVERITY_META.major.color }}
+            className="text-title font-semibold tabular-nums text-ui-ink"
           >
             {Math.round(highShare * 100)}%
           </div>
@@ -537,8 +538,7 @@ function MlTotalsStrip({
         >
           <div className="text-meta text-ui-faint">Nits</div>
           <div
-            className="text-title font-semibold tabular-nums"
-            style={{ color: ML_SEVERITY_META.nit.color }}
+            className="text-title font-semibold tabular-nums text-ui-ink"
           >
             {Math.round(nitShare * 100)}%
           </div>
@@ -996,6 +996,10 @@ function VendorTable({
   // sub-headers shove the ordinary columns out of alignment with their own data. Add a column
   // here and it needs `rowSpan={headSpan}` too.
   const headSpan = showMl ? 2 : 1;
+  // The table scrolls inside its own box; the hidden side fades so the cut-off column reads as
+  // "more this way", not as the edge of the data.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fade = useEdgeFade(scrollRef, 'x');
   // ⚠ A BOT WITH NO COMMENTS IN THE WINDOW IS ABSENT FROM THE VOLUME RESPONSE (it has no trend to
   // keep such a row meaningful, unlike this table's dormant rows) — so a miss means "said nothing
   // on anything merged here" and renders a DASH, never a 0.
@@ -1003,7 +1007,7 @@ function VendorTable({
   const mergedPrs = volume?.totals.prs ?? 0;
   return (
     // Its own scroll box with the Bot column sticky, so the wide table never widens the page.
-    <div className={TABLE_SCROLL} data-testid="bot-roi-table">
+    <div ref={scrollRef} style={fade} className={TABLE_SCROLL} data-testid="bot-roi-table">
       <table
         className={`${TABLE} text-meta ${showMl ? 'min-w-[1560px]' : 'min-w-[1080px]'}`}
       >
@@ -1169,7 +1173,6 @@ function VendorTable({
                 <th
                   key={s}
                   className={`px-1.5 pb-1.5 text-right text-meta font-medium${i === 0 ? ' ' : ''}`}
-                  style={{ color: ML_SEVERITY_META[s].color }}
                   title={`Not-addressed threads whose opening finding scored ${ML_SEVERITY_META[s].label.toLowerCase()}`}
                 >
                   {s === 'critical' ? 'Crit' : ML_SEVERITY_META[s].label}
@@ -1196,10 +1199,12 @@ function VendorTable({
                     type="button"
                     onClick={() => onOpenVendor(v.key)}
                     title="Open the bot drill-down — its comments (default) and the PRs it touched"
-                    className="hit inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium hover:underline"
-                    style={{ ...vendorInk(color), background: `${color}1a` }}
+                    className="hit inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium text-ui-ink hover:underline"
                   >
-                    <BotIcon size={11} />
+                    {/* The vendor colour is the MARK only; the name is ink. */}
+                    <span aria-hidden className="flex" style={vendorInk(color)}>
+                      <BotIcon size={11} />
+                    </span>
                     {v.label}
                   </button>
                   {v.reviewers > 1 && (
@@ -1361,8 +1366,10 @@ function VendorTable({
                       return (
                         <td
                           key={s}
-                          className={`px-1.5 py-1.5 text-right tabular-nums${i === 0 ? ' ' : ''}`}
-                          style={n > 0 ? { color: ML_SEVERITY_META[s].color } : undefined}
+                          // Ink, not the severity hue (a raw hex is never text colour); critical
+                          // findings still waiting are the one cell in danger ink.
+                          className={`px-1.5 py-1.5 text-right tabular-nums${n > 0 && s === 'critical' ? ' text-ui-danger' : ''}`}
+                          data-severity={s}
                           title={
                             n > 0
                               ? `${n} not-addressed thread${n === 1 ? '' : 's'} opened by a ${ML_SEVERITY_META[s].label.toLowerCase()} finding`

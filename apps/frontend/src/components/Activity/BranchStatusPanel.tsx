@@ -478,7 +478,7 @@ export function BranchStatusPanel({
         className={
           quiet
             ? 'shrink-0 text-meta font-medium text-ui-mute'
-            : 'text-meta font-semibold uppercase tracking-wide text-ui-mute'
+            : 'text-meta font-semibold  text-ui-mute'
         }
       >
         Default branches

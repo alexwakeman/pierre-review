@@ -55,6 +55,23 @@ export function ThreadCountChips({
 }): JSX.Element | null {
   const shown = ORDER.filter((s) => counts[s] > 0);
   if (shown.length === 0) return null;
+  // COMPACT (the Changes tree and the sticky bar): ONE grey count of the threads, and a red dot
+  // only when one of them is untouched — the per-state breakdown lives in the tooltip and the
+  // Threads-only view (docs/redesign/DESIGN.md § 3: colour only for what blocks).
+  if (compact) {
+    const total = shown.reduce((n, s) => n + counts[s], 0);
+    const breakdown = shown.map((s) => `${DERIVED_STATE_META[s].label}: ${counts[s]}`).join('\n');
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-meta tabular-nums text-ui-faint"
+        title={breakdown}
+        aria-label={`${total} thread${total === 1 ? '' : 's'}: ${shown.map((s) => `${counts[s]} ${DERIVED_STATE_META[s].label.toLowerCase()}`).join(', ')}`}
+      >
+        {counts.untouched > 0 && <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-ui-danger" />}
+        <span aria-hidden>{total}</span>
+      </span>
+    );
+  }
   return (
     <span className={`inline-flex items-center ${compact ? 'gap-1' : 'gap-1.5'}`}>
       {shown.map((s) => {

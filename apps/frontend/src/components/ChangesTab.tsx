@@ -220,7 +220,7 @@ function Header({
             Threads only
             <span className="tabular-nums text-ui-faint">{threadCount}</span>
           </button>
-          <ThreadCountChips counts={rollupCounts(pr.threads)} />
+          <ThreadCountChips counts={rollupCounts(pr.threads)} compact />
         </>
       )}
       <span className="ml-auto flex items-center gap-3">

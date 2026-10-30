@@ -3,8 +3,10 @@
 // comment block (see index.css).
 export function NewTag(): JSX.Element {
   return (
-    <span className="rounded-ui bg-ui-sel px-1 text-meta font-semibold uppercase text-ui-accent">
-      new
+    // An accent dot and the word, quietly (the redesign: no  tags, the accent marks "new").
+    <span className="inline-flex items-center gap-1 text-meta text-ui-accent">
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ui-accent" />
+      New
     </span>
   );
 }

@@ -62,7 +62,7 @@ function Row({
 }): JSX.Element {
   return (
     // Label above the value on a phone, beside it from sm up. A quiet mute word, never an
-    // uppercase tracked label (docs/redesign/DESIGN.md § Type).
+    //  tracked label (docs/redesign/DESIGN.md § Type).
     <div className="flex flex-col gap-0.5 px-4 py-1.5 text-body sm:flex-row sm:gap-3 md:px-5">
       <span className="shrink-0 text-meta text-ui-faint sm:w-28 sm:pt-0.5">
         {label}

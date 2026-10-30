@@ -212,7 +212,7 @@ export function TicketCard({
         aria-label={`Open ${node.key}'s story tab`}
         title="Open story tab"
         className={cx(
-          'absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:h-9 touch:w-9',
+          'absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:h-10 touch:w-10',
           // On a mouse it shows on hover or focus (the key and its marks get the whole line); on touch it is always there.
           'group-hover:bg-ui-hover [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100',
           FOCUS_RING,

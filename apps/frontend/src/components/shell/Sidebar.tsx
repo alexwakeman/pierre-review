@@ -44,6 +44,7 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 import { Kbd } from '../ui/Kbd.js';
 import { modKeyLabel } from '../ui/keys.js';
 import { useIsDesktop } from '../ui/media.js';
+import { useEdgeFade } from '../ui/edgeFade.js';
 import {
   currentLocation,
   DESTINATIONS,
@@ -601,6 +602,9 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
   // Set when the drawer closes to open another modal (the palette): focus must NOT go back to the
   // menu button behind it — on a phone that kept the keyboard down and typing went nowhere.
   const skipRestoreRef = useRef(false);
+  // The docked middle scrolls (a long repo list): its hidden edge fades, so "more below" shows.
+  const middleRef = useRef<HTMLDivElement>(null);
+  const middleFade = useEdgeFade(middleRef, 'y');
   const drawer = drawerOpen && !desktop;
 
   // Growing past `lg` with the drawer open docks it; the flag must not linger for the next shrink.
@@ -696,7 +700,11 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
         {/* In the drawer the WHOLE aside scrolls, foot included: a pinned foot left the middle so
             short that Insights' items sat below the fold with nothing saying so. The foot stays at
             the same place in the tree either way (SyncStatus must never remount). */}
-        <div className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}>
+        <div
+          ref={middleRef}
+          style={drawer ? undefined : middleFade}
+          className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}
+        >
           <Destinations location={location} />
           <OpenTabs />
           <Repositories location={location} />

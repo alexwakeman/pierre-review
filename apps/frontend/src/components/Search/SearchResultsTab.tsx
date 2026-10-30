@@ -148,7 +148,7 @@ export function SearchResultsTab(): JSX.Element {
 
       {people.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+          <span className="text-meta font-semibold  text-ui-faint">
             People
           </span>
           {people.map((p) => (

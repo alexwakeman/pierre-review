@@ -134,7 +134,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
               )}
               {detail.sections.map((sec) => (
                 <div key={sec.title} className="mt-2.5">
-                  <p className="text-meta font-medium uppercase tracking-wide text-ui-mute">{sec.title}</p>
+                  <p className="text-meta font-medium  text-ui-mute">{sec.title}</p>
                   <dl className="mt-1 space-y-1.5">
                     {sec.rows.map((r) => (
                       <div key={r.label}>

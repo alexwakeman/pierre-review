@@ -206,12 +206,12 @@ export function FirstRunOnboarding(): JSX.Element {
                         {r.fullName}
                       </span>
                       {r.isPrivate && (
-                        <span className="shrink-0 rounded-ui bg-ui-hover px-1 text-meta uppercase tracking-wide text-ui-mute">
+                        <span className="shrink-0 rounded-ui bg-ui-hover px-1 text-meta  text-ui-mute">
                           private
                         </span>
                       )}
                       {r.isOwnedOrMember && (
-                        <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta uppercase tracking-wide text-ui-accent">
+                        <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta  text-ui-accent">
                           yours
                         </span>
                       )}

@@ -49,7 +49,7 @@ function Segmented<T extends string>({
             title={o.title}
             onClick={() => onChange(o.id)}
             className={cx(
-              'inline-flex h-6 items-center gap-1 rounded-ui px-2 text-body tabular-nums touch:h-9 touch:px-3',
+              'inline-flex h-6 items-center gap-1 rounded-ui px-2 text-body tabular-nums touch:h-10 touch:px-3',
               'motion-safe:transition-colors motion-safe:duration-ui-fast',
               on ? 'bg-ui-sel font-medium text-ui-ink shadow-sm shadow-black/20' : 'text-ui-mute hover:text-ui-ink',
               FOCUS_RING,

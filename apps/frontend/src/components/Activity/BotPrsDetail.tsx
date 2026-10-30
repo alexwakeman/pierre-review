@@ -504,7 +504,7 @@ export function BotPrsDetail(): JSX.Element {
               key={wOpt.key}
               type="button"
               onClick={() => setWindow(wOpt.key)}
-              className={`px-2 py-0.5 text-meta font-medium ${
+              className={`h-7 px-2 text-meta font-medium touch:h-10 touch:px-3 ${
                 window === wOpt.key
                   ? 'bg-ai-signal/15 text-ai-signal'
                   : 'text-ui-mute hover:bg-ui-hover'
@@ -624,7 +624,7 @@ export function BotPrsDetail(): JSX.Element {
                       type="button"
                       onClick={() => setCommentSort(s.key)}
                       title={s.title}
-                      className={`px-2 py-0.5 text-meta font-medium ${
+                      className={`h-7 px-2 text-meta font-medium touch:h-10 touch:px-3 ${
                         effectiveSort === s.key
                           ? 'bg-ai-signal/15 text-ai-signal'
                           : 'text-ui-mute hover:bg-ui-hover'

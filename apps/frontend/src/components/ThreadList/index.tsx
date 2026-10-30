@@ -326,7 +326,7 @@ export function ThreadList({
           style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+            <span className="text-meta font-semibold  text-ui-faint">
               State
             </span>
             {DERIVED_STATES.map((st) => {
@@ -389,7 +389,7 @@ export function ThreadList({
               advertise a filter that can only ever return nothing. */}
           {mlIndex != null && mlIndex.size > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+              <span className="text-meta font-semibold  text-ui-faint">
                 Severity
               </span>
               {ML_SEVERITIES.map((sev) => {

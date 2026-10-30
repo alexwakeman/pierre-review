@@ -1320,7 +1320,7 @@ export function FeedView({
                   role="radio"
                   aria-checked={on}
                   onClick={() => setFeedAuthors(id)}
-                  className={`flex h-6 items-center gap-1.5 rounded-ui px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-9 ${
+                  className={`flex h-6 items-center gap-1.5 rounded-ui px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-10 ${
                     on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
                   }`}
                   title={

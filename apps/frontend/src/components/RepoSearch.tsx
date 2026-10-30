@@ -307,7 +307,7 @@ export function RepoSearch({
               >
                 {s.owner}/{s.name}
               </span>
-              <span className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta uppercase tracking-wide text-ui-mute">
+              <span className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta  text-ui-mute">
                 {s.category}
               </span>
             </span>
@@ -379,7 +379,7 @@ export function RepoSearch({
             <div ref={listRef}>
               {botSuggestions.length === 0 && suggestions.length === 0 ? (
                 <div>
-                  <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
+                  <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold  text-ui-faint">
                     Suggested repos
                   </div>
                   <div className="px-3 py-2 text-meta text-ui-mute">
@@ -391,7 +391,7 @@ export function RepoSearch({
                   {botSuggestions.length > 0 && (
                     <div>
                       <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5">
-                        <div className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+                        <div className="text-meta font-semibold  text-ui-faint">
                           Bot monitoring demos
                         </div>
                         <div className="mt-0.5 text-meta leading-snug text-ui-faint">
@@ -405,7 +405,7 @@ export function RepoSearch({
                   )}
                   {suggestions.length > 0 && (
                     <div>
-                      <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
+                      <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold  text-ui-faint">
                         Suggested repos
                       </div>
                       {suggestions.map((s, idx) =>
@@ -478,12 +478,12 @@ export function RepoSearch({
                             {r.fullName}
                           </span>
                           {r.isPrivate && (
-                            <span className="shrink-0 rounded-ui bg-ui-hover px-1 text-meta uppercase tracking-wide text-ui-mute">
+                            <span className="shrink-0 rounded-ui bg-ui-hover px-1 text-meta  text-ui-mute">
                               private
                             </span>
                           )}
                           {r.isOwnedOrMember && (
-                            <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta uppercase tracking-wide text-ui-accent">
+                            <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta  text-ui-accent">
                               yours
                             </span>
                           )}

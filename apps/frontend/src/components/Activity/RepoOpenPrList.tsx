@@ -278,7 +278,7 @@ export function RepoOpenPrList({
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta font-semibold uppercase tracking-wide text-ui-mute hover:bg-ui-hover"
+        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta font-semibold  text-ui-mute hover:bg-ui-hover"
       >
         <ChevronIcon
           dir={collapsed ? 'right' : 'down'}

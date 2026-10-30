@@ -119,7 +119,7 @@ function ChipShell({
         type="button"
         data-tab-close
         onClick={() => closeTab(tabKey)}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint opacity-70 hover:bg-ui-hover hover:text-ui-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover:opacity-100 touch:h-9 touch:w-9 touch:opacity-100"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint opacity-70 hover:bg-ui-hover hover:text-ui-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover:opacity-100 touch:h-10 touch:w-10 touch:opacity-100"
         title="Close this tab"
         aria-label={closeAria}
       >

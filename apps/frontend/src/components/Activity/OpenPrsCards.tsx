@@ -328,7 +328,7 @@ export function OpenPrsViewToggle(): JSX.Element {
       type="button"
       aria-pressed={view === v}
       onClick={() => setView(v)}
-      className={`h-6 rounded-ui px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-9 ${
+      className={`h-6 rounded-ui px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${
         view === v ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
       }`}
     >

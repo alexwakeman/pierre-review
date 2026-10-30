@@ -25,7 +25,7 @@ export function RepoInsightsCard({
   return (
     <div className="rounded-ui border border-ui-line p-3">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+        <span className="text-meta font-semibold  text-ui-faint">
           PR merge rate{data ? ` · ${data.windowDays / 7}-wk` : ''}
         </span>
         <button

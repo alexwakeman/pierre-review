@@ -464,7 +464,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         </span>
                         {w.isDefault && (
                           <span
-                            className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta uppercase tracking-wide text-ui-mute"
+                            className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta  text-ui-mute"
                             title="New repos land here, and a deleted workspace's repos come back here."
                           >
                             default
@@ -522,7 +522,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           {/* RIGHT: the account's repos, each showing the ONE workspace it lives in */}
           <div className="flex min-h-0 flex-col">
             <div className="border-b border-ui-line px-3 py-2">
-              <div className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
+              <div className="text-meta font-semibold  text-ui-faint">
                 Repos
               </div>
               <div className="text-meta text-ui-mute">
@@ -540,7 +540,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                 <>
                   {selected && (
                     <>
-                      <div className="px-1 pb-1 pt-0.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
+                      <div className="px-1 pb-1 pt-0.5 text-meta font-semibold  text-ui-faint">
                         In “{selected.name}” · {inSelected.length}
                       </div>
                       {inSelected.length === 0 ? (
@@ -554,7 +554,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   )}
                   {elsewhere.length > 0 && (
                     <>
-                      <div className="border-t border-ui-line px-1 pb-1 pt-2 text-meta font-semibold uppercase tracking-wide text-ui-faint">
+                      <div className="border-t border-ui-line px-1 pb-1 pt-2 text-meta font-semibold  text-ui-faint">
                         In other workspaces · {elsewhere.length}
                       </div>
                       <ul className="space-y-0.5">{elsewhere.map(RepoRow)}</ul>

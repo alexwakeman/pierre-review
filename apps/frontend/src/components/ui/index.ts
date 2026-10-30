@@ -46,3 +46,4 @@ export {
   MOTION,
 } from './media.js';
 export { isTypingTarget, shortcutBlocked, escapeBelongsToLayer, isPaletteChord, modKeyLabel, modalOpen } from './keys.js';
+export { useEdgeFade } from './edgeFade.js';
