@@ -487,6 +487,67 @@ export async function fetchPrHeadInfo(
   };
 }
 
+// ---- Dependency automation: the PR as GitHub has it NOW (merge/dependency-automation.ts) ----
+
+interface RestPullForAutomation extends RestPullFull {
+  state: string;
+  draft?: boolean;
+  title: string;
+  body: string | null;
+  user: { login: string; type: string } | null;
+  labels: Array<{ name: string }> | null;
+}
+
+export interface PrAutomationSnapshot {
+  state: string;
+  isDraft: boolean;
+  headSha: string;
+  headRef: string;
+  isFork: boolean;
+  title: string;
+  body: string | null;
+  authorLogin: string | null;
+  labels: string[];
+}
+
+/** ONE `GET /pulls/{n}`: what the dependency automation re-checks before it writes (the head it
+ *  pins, fork-ness, the author) and reads the update's size from (title + body). */
+export async function fetchPrForAutomation(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<PrAutomationSnapshot> {
+  const pull = await ghRestGetFor<RestPullForAutomation>(token, `/repos/${owner}/${name}/pulls/${number}`);
+  const baseRepoFullName = pull.base.repo.full_name;
+  const headRepoFullName = pull.head.repo?.full_name ?? baseRepoFullName;
+  return {
+    state: pull.state,
+    isDraft: pull.draft === true,
+    headSha: pull.head.sha,
+    headRef: pull.head.ref,
+    isFork: pull.head.repo == null || headRepoFullName !== baseRepoFullName,
+    title: pull.title,
+    body: pull.body,
+    authorLogin: pull.user?.login ?? null,
+    labels: (pull.labels ?? []).map((l) => l.name),
+  };
+}
+
+/** Replace a PR's description (REST PATCH `{ body }`). Renovate's rebase checkbox is ticked this
+ *  way. Never throws on a non-2xx; the caller records GitHub's words. */
+export async function updatePullRequestBody(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  body: string,
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, { body });
+  if (res.ok) return { ok: true };
+  return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+}
+
 /**
  * The tip of one BRANCH of a repository, or null when it does not exist (404) or cannot be read. A
  * deep review's related-repo rule 3 (review/claude-review/related-repos.ts): "a branch of the same

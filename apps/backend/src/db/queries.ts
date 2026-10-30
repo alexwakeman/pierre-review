@@ -9569,6 +9569,11 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         .delete(schema.autoMergePolicySkips)
         .where(inArray(schema.autoMergePolicySkips.prId, prIds))
         .execute();
+      // Dependency automation's claimed actions (migration 0147). Composite FK cascades; explicit.
+      await tx
+        .delete(schema.dependencyAutomationActions)
+        .where(inArray(schema.dependencyAutomationActions.prId, prIds))
+        .execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear
       // them before the PRs.
       const reviewIdRows = await tx

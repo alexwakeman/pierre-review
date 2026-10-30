@@ -254,6 +254,62 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
       notifyMerges: false,
     });
     await call('PUT', `/api/workspaces/${webWs}/flow-settings`, { timeZone: 'America/New_York', days: [1, 2, 3, 4, 5], startMinute: 9 * 60, endMinute: 17 * 60 });
+    // Settings → Dependencies (written LAST so the older markers keep their ages): approve and resolve
+    // conflicts on, patch and minor updates only, Dependabot trusted. Its bot row is what detection
+    // itself persists for the known vendor login (`vendor_login`, role dependency).
+    const depBot = ((await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.githubLogin, 'dependabot')).execute()) as Array<{ id: number }>)[0];
+    if (depBot) {
+      await db
+        .insert(schema.workspaceReviewers)
+        .values({
+          accountId: 1,
+          workspaceId: platformWs,
+          authorUserId: depBot.id,
+          automated: true,
+          role: 'dependency',
+          confidence: 'high',
+          source: 'vendor_login',
+          reasonsJson: ['login "dependabot" is a known Dependabot account'],
+          kind: 'dependabot',
+          identitySource: 'auto',
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [schema.workspaceReviewers.accountId, schema.workspaceReviewers.workspaceId, schema.workspaceReviewers.authorUserId],
+          set: { automated: true, role: 'dependency', kind: 'dependabot' },
+        })
+        .execute();
+      await call('PUT', `/api/workspaces/${platformWs}/dependency-automation`, {
+        autoApprove: true,
+        autoResolveConflicts: true,
+        maxLevel: 'minor',
+        trustedBotIds: [depBot.id],
+      });
+      // What the automation did (Pending → Dependencies → "What automation did"): an approval, a
+      // rebase request, and the AI run that followed when the branch still conflicted.
+      const depPrs = (await db
+        .select({ id: schema.pullRequests.id, head: schema.pullRequests.headSha })
+        .from(schema.pullRequests)
+        .innerJoin(schema.workspaceRepos, eq(schema.workspaceRepos.repoId, schema.pullRequests.repoId))
+        .where(and(eq(schema.workspaceRepos.workspaceId, platformWs), eq(schema.pullRequests.authorId, depBot.id)))
+        .orderBy(schema.pullRequests.id)
+        .execute()) as Array<{ id: number; head: string | null }>;
+      const at = (h: number) => new Date(nowMs - h * 3_600_000);
+      const [a, b] = [depPrs.at(-1), depPrs.at(-2)];
+      const rows = [
+        ...(a ? [{ prId: a.id, headSha: a.head ?? 'demo-a', action: 'approve', state: 'done', detail: 'a patch dependency update', createdAt: at(3), updatedAt: at(3) }] : []),
+        ...(b
+          ? [
+              { prId: b.id, headSha: 'demo-b0', action: 'rebase_request', state: 'done', detail: 'Asked Dependabot to rebase', createdAt: at(7), updatedAt: at(7) },
+              { prId: b.id, headSha: 'demo-b0', action: 'ai_resolve', state: 'done', detail: 'Resolved with Claude and pushed 4f2a9c1', resultSha: '4f2a9c1e0b7d', createdAt: at(6), updatedAt: at(6) },
+            ]
+          : []),
+      ];
+      if (rows.length > 0) {
+        await db.insert(schema.dependencyAutomationActions).values(rows.map((r) => ({ accountId: 1, ...r }))).execute();
+      }
+      out.dependencyAutomation = rows.length;
+    }
     // The markers, spread back over the last months (oldest first, in the order written above).
     const events = (await db
       .select({ id: schema.workspaceSettingEvents.id, ws: schema.workspaceSettingEvents.workspaceId })

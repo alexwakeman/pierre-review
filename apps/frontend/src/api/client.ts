@@ -32,7 +32,9 @@ import type {
   ActiveReviewsResponse,
   DependencyMergeAllBody,
   DependencyMergeAllResponse,
-  WorkspaceDependencyAutoMergeResponse,
+  WorkspaceDependencyAutomationResponse,
+  DependencyAutomationPatch,
+  DependencyAutomationLogResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
   RequestReviewersBody,
@@ -547,13 +549,16 @@ export const api = {
     ),
   // Auto Claude review for this workspace (CORE, local only — the route is not registered in the
   // cloud or under LIMN_AI_DISABLED). OFF until switched on; a 404 is "not this account's".
-  // "Merge dependency updates automatically" for this workspace (CORE, both modes). OFF by default.
-  workspaceDependencyAutoMerge: (id: number) =>
-    get<WorkspaceDependencyAutoMergeResponse>(`/api/workspaces/${id}/dependency-auto-merge`),
-  setWorkspaceDependencyAutoMerge: (id: number, enabled: boolean) =>
-    fetch(`/api/workspaces/${id}/dependency-auto-merge`, jsonBody('PUT', { enabled })).then((r) =>
-      handle<WorkspaceDependencyAutoMergeResponse>(r),
+  // Settings → Dependencies: the three switches, the policy and the trusted bots (CORE). OFF by default.
+  workspaceDependencyAutomation: (id: number) =>
+    get<WorkspaceDependencyAutomationResponse>(`/api/workspaces/${id}/dependency-automation`),
+  setWorkspaceDependencyAutomation: (id: number, patch: DependencyAutomationPatch) =>
+    fetch(`/api/workspaces/${id}/dependency-automation`, jsonBody('PUT', patch)).then((r) =>
+      handle<WorkspaceDependencyAutomationResponse>(r),
     ),
+  // What the dependency automation did (Pending → Dependencies, fetched on a click). DB only.
+  dependencyAutomationLog: (workspaceId: number) =>
+    get<DependencyAutomationLogResponse>(`/api/dependencies/automation-log?workspace=${workspaceId}`),
   workspaceAutoReview: (id: number) =>
     get<WorkspaceAutoReviewResponse>(`/api/workspaces/${id}/auto-review`),
   setWorkspaceAutoReview: (id: number, body: SetWorkspaceAutoReviewBody) =>

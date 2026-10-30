@@ -1315,6 +1315,17 @@ erased with the account. No FKs. Additive, no backfill: a checkout made before i
 orphan the sweep collects by age. [BACKEND.md](BACKEND.md) § Worktree cleanup. Journal `idx` 146,
 `when` sqlite `1792137650016`.
 
+### `0147_dependency_automation` — Settings → Dependencies: approve, resolve conflicts, one policy
+Additive, nullable, no backfill: `workspaces.dependency_auto_approve`, `.dependency_auto_resolve`,
+`.dependency_security_only` (NULL = off), `.dependency_max_level` (NULL = `major`, every size),
+`.dependency_ecosystems` (JSON; NULL = every ecosystem); `workspace_reviewers.dependency_trusted` (NULL =
+not trusted); and a new table `dependency_automation_actions` (unique `daa_account_pr_head_action` =
+the claim; index `daa_account_created_idx`; composite FK `daa_pr_account_fk` against `pull_requests(id,
+account_id)`, cascade) — in both delete paths, `eraseAccountData` and `accountScopedTables()`. NULL is
+today's behaviour everywhere: the merge switch keeps merging every size. [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md)
+§ Dependency automation. Journal `idx` 147, `when` sqlite `1792137651016` (built as `0146`, renumbered on merge after
+`0146_worktree_ledger`).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

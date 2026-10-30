@@ -253,6 +253,17 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   delete paths, `eraseAccountData` and `accountScopedTables()`. `workspaces.dependency_auto_merge`
   (same migration) is the setting itself — NULL/false = OFF, the one writer
   `setDependencyAutoMerge` (merge/dependency-policy.ts).
+- **`dependencyAutomationActions`** (`dependency_automation_actions`, 0147) — one row per
+  (account, PR, head, action ∈ approve / rebase_request / ai_resolve) the dependency automation
+  TOOK; unique `daa_account_pr_head_action` IS the claim (inserted `running` before the GitHub write,
+  `onConflictDoNothing`; settled `done` / `failed` + `detail`, never retried). `result_sha` = the
+  commit an AI conflict run pushed (that head must be GREEN before it is approved or armed). Boot
+  marks leftover `running` rows failed. Composite FK to `pull_requests(id, account_id)`; both delete
+  paths, `eraseAccountData`, `accountScopedTables()`. Also the "What automation did" log. Siblings:
+  `workspaces.dependency_auto_approve` / `_auto_resolve` / `_max_level` / `_security_only` /
+  `_ecosystems` (NULL = off / `major` / every update / every ecosystem) and
+  `workspace_reviewers.dependency_trusted` — the reader's trust mark on a DEPENDENCY bot, written
+  only by `setDependencyAutomation` (like the price: no derived writer names it).
 - **`branchCommits`** — the recent commits on each repo's DEFAULT branch (`accountId`
   denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=100 per
   repo in the same transaction as the upsert. COUNT bound only — a writer-side age bound was
@@ -716,7 +727,7 @@ pass is NOT a review: every "latest review" / "run at this head" reader filters 
 
 APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One
 row per REAL change — `kind` (`WorkspaceSettingEventKind`: `auto_review` · `auto_fix` · `auto_post` ·
-`flow_settings` · `dependency_auto_merge` · `tracker`), a short plain-English `summary`, `occurred_at`.
+`flow_settings` · `dependency_auto_merge` · `dependency_automation` · `tracker`), a short plain-English `summary`, `occurred_at`.
 Written by each setting's ONE writer after the stored value moved (`setWorkspaceAutoReview`,
 `setWorkspaceFlowSettings`, `setDependencyAutoMerge`, the tracker PUT) — a Save that changes nothing
 writes nothing. ⚠ **Never fatal**: the setting is already stored, so a failed insert is logged and
@@ -1105,6 +1116,7 @@ and check every hit against its table's declared unique.**
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
 | `auto_merge_policy_skips` | `[accountId, prId]` (`amps_account_pr`) — **`onConflictDoNothing`** | `recordPolicySkip` (merge/dependency-policy.ts) |
+| `dependency_automation_actions` | `[accountId, prId, headSha, action]` (`daa_account_pr_head_action`) — **`onConflictDoNothing`** (the claim) | `claimAction` (merge/dependency-automation.ts) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
 | `workspace_trackers` | `[accountId, workspaceId]` (`workspace_trackers_account_workspace`) | `tracker/settings.ts` `writeWorkspaceTracker` (the ONLY writer; seeds every column from the stored row, never deletes) + the boot-time move (`tracker/legacy-import.ts`, raw `ON CONFLICT DO NOTHING`) |

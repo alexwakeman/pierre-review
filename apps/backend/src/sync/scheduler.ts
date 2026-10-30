@@ -6,6 +6,10 @@ import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
 import { runDependencyPolicyTick } from '../merge/dependency-policy.js';
+import {
+  reconcileDependencyActionsOnStartup,
+  runDependencyAutomationTick,
+} from '../merge/dependency-automation.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
 import { isMlScoringPossible } from '../ml/scorer.js';
@@ -68,10 +72,17 @@ export function startScheduler(log: FastifyBaseLogger): void {
   // catches internally, so a bad tenant never crashes the loop. Runs in BOTH modes: local is
   // the common case (the app is open on the developer's machine) and cloud arms per account.
   if (cron.validate(AUTO_MERGE_CRON)) {
+    // A dependency action left `running` by the last process is recorded failed, never retried.
+    void reconcileDependencyActionsOnStartup().catch((err) =>
+      log.warn({ err }, 'dependency automation: startup reconcile failed'),
+    );
     autoMergeTask = cron.schedule(AUTO_MERGE_CRON, () => {
-      // The dependency auto-merge sweep arms first (OFF unless a workspace switched it on), so a
-      // fresh policy intent is evaluated by the same tick. Both never throw.
-      void runDependencyPolicyTick(log).finally(() => runAutoMergeTick(log));
+      // Dependency automation first (approve, resolve conflicts — OFF unless a workspace switched
+      // it on), then the dependency auto-merge sweep arms (an approval may be what lets it land),
+      // so a fresh policy intent is evaluated by the same tick. All three never throw.
+      void runDependencyAutomationTick(log)
+        .finally(() => runDependencyPolicyTick(log))
+        .finally(() => runAutoMergeTick(log));
     });
     log.info(`auto-merge watcher started (cron "${AUTO_MERGE_CRON}")`);
   }

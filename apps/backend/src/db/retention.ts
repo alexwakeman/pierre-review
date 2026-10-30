@@ -96,6 +96,11 @@ async function deletePrSubtree(
     .delete(schema.autoMergePolicySkips)
     .where(inArray(schema.autoMergePolicySkips.prId, prIds))
     .execute();
+  // Dependency automation's claimed actions (migration 0147) — composite FK cascades; explicit anyway.
+  await tx
+    .delete(schema.dependencyAutomationActions)
+    .where(inArray(schema.dependencyAutomationActions.prId, prIds))
+    .execute();
   // Claude review runs + findings FK these PRs — clear findings (via reviewId) then runs.
   const reviewIdRows = await tx
     .select({ id: claudeReviews.id })

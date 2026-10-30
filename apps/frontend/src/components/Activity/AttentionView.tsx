@@ -50,6 +50,7 @@ import {
   type TabItem,
 } from '../ui/index.js';
 import { DependencyMergeAll } from './DependencyMergeAll.js';
+import { DependencyAutomationLog } from './DependencyAutomationLog.js';
 import { MyTurnDismissedList } from './MyTurnDismissedList.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
@@ -770,6 +771,13 @@ export function AttentionView(): JSX.Element {
                 {tabKey === 'deps' && empty?.placement !== 'alone' && (
                   <div className="flex justify-end px-2 pb-1 pt-2">
                     <DependencyMergeAll cards={view.cards} workspaceId={workspaceId} />
+                  </div>
+                )}
+                {/* What Settings → Dependencies did (approvals, rebase requests, AI conflict runs) —
+                    a disclosure that fetches only once opened. */}
+                {tabKey === 'deps' && (
+                  <div className="px-2 pb-1 pt-1">
+                    <DependencyAutomationLog workspaceId={workspaceId} />
                   </div>
                 )}
               </>

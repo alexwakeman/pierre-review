@@ -734,6 +734,10 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/dependencies/merge-all')).toEqual(['github_write']);
     // Its setting is a DB write on the workspace (the sweeper is server-paced).
     expect(tiers('PUT', '/api/workspaces/3/dependency-auto-merge')).toEqual(['read']);
+    // Settings → Dependencies and its log: DB only (the automation itself is server-paced).
+    expect(tiers('PUT', '/api/workspaces/3/dependency-automation')).toEqual(['read']);
+    expect(tiers('GET', '/api/workspaces/3/dependency-automation')).toEqual(['read']);
+    expect(tiers('GET', '/api/dependencies/automation-log')).toEqual(['read']);
     expect(tiers('DELETE', '/api/prs/42/auto-merge')).toEqual(['github_write']);
   });
 

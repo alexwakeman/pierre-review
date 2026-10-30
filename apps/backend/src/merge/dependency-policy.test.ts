@@ -210,6 +210,36 @@ describe('the sweep', () => {
   });
 });
 
+describe('the Dependencies policy gates the sweep', () => {
+  it('an update of unknown or larger size is not armed under a size cap', async () => {
+    const auto = await import('./dependency-automation.js');
+    await policy.setDependencyAutoMerge(A, wsId, true);
+    await auto.setDependencyAutomation(A, wsId, { maxLevel: 'patch' });
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toBeUndefined();
+    await db.update(schema.pullRequests).set({ title: 'Bump x from 1.2.3 to 1.2.4' }).where(eq(schema.pullRequests.id, depPr)).execute();
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toMatchObject({ state: 'armed', armedByPolicy: true });
+    await auto.setDependencyAutomation(A, wsId, { maxLevel: 'major' });
+    await db.update(schema.pullRequests).set({ title: 'PR 1' }).where(eq(schema.pullRequests.id, depPr)).execute();
+  });
+
+  it('⚠ a head Limn’s AI run pushed is armed only once CI is green', async () => {
+    await policy.setDependencyAutoMerge(A, wsId, true);
+    await db
+      .insert(schema.dependencyAutomationActions)
+      .values({ accountId: A, prId: depPr, headSha: 'h0', action: 'ai_resolve', state: 'done', resultSha: 'h1' })
+      .execute();
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toBeUndefined();
+    await db.update(schema.pullRequests).set({ ciStatus: 'success' }).where(eq(schema.pullRequests.id, depPr)).execute();
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toMatchObject({ state: 'armed' });
+    await db.update(schema.pullRequests).set({ ciStatus: null }).where(eq(schema.pullRequests.id, depPr)).execute();
+    await db.delete(schema.dependencyAutomationActions).execute();
+  });
+});
+
 describe('"Merge or arm all" — the dry run', () => {
   it('plans from synced rows, names every skip, and calls no GitHub', async () => {
     await db

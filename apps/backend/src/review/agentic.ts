@@ -24,6 +24,7 @@ import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
 import { runOpen } from '../api/routes/conflicts.js';
+import { bindDependencyAutomationAi } from '../merge/dependency-automation.js';
 import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
 import { registerStoryDocsRoutes } from './story-docs/routes.js';
@@ -99,6 +100,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   // The CI review's sweeper rides the same switch: a check that fails on a PR's head is explained
   // at once (no settle, no CI hold — a failing check is final).
   registerCiReviewSweep(ctx);
+  // DEPENDENCY AUTOMATION's AI fallback (Settings → Dependencies → resolve conflicts): without this
+  // binding the tick asks bots to rebase but never starts an AI run.
+  bindDependencyAutomationAi(ctx);
   try {
     await reconcileReviewsOnStartup(ctx);
   } catch (err) {

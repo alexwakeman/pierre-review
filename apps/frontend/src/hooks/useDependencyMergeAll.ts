@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import type {
+  DependencyAutomationPatch,
   DependencyMergeAllResponse,
   DependencyMergeItem,
-  WorkspaceDependencyAutoMergeResponse,
+  WorkspaceDependencyAutomationResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 
-// ── PENDING → DEPENDENCIES: "MERGE OR ARM ALL" + the per-workspace setting ─────────────────────
+// ── PENDING → DEPENDENCIES: "MERGE OR ARM ALL", and Settings → Dependencies ──────────────────────────
 //
 // The server decides everything (merge/dependency-policy.ts): which listed PRs are dependency
 // updates it can push to, which land now and which wait armed. The dialog reads the server's own
@@ -58,22 +59,34 @@ export function useDependencyMergeAll(workspaceId: number | null) {
   });
 }
 
-const settingKey = (workspaceId: number | null) => ['dependency-auto-merge', `ws:${workspaceId}`];
+// ── SETTINGS → DEPENDENCIES ─────────────────────────────────────────────────────────────────────
 
-export function useDependencyAutoMergeSetting(workspaceId: number | null) {
+const automationKey = (workspaceId: number | null) => ['dependency-automation', `ws:${workspaceId}`];
+
+export function useDependencyAutomation(workspaceId: number | null) {
   return useQuery({
-    queryKey: settingKey(workspaceId),
-    queryFn: () => api.workspaceDependencyAutoMerge(workspaceId!),
+    queryKey: automationKey(workspaceId),
+    queryFn: () => api.workspaceDependencyAutomation(workspaceId!),
     enabled: workspaceId != null,
   });
 }
 
-export function useSetDependencyAutoMerge(workspaceId: number | null) {
+export function useSetDependencyAutomation(workspaceId: number | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (enabled: boolean) => api.setWorkspaceDependencyAutoMerge(workspaceId!, enabled),
-    onSuccess: (resp: WorkspaceDependencyAutoMergeResponse) => {
-      qc.setQueryData(settingKey(workspaceId), resp);
+    mutationFn: (patch: DependencyAutomationPatch) => api.setWorkspaceDependencyAutomation(workspaceId!, patch),
+    onSuccess: (resp: WorkspaceDependencyAutomationResponse) => {
+      qc.setQueryData(automationKey(workspaceId), resp);
     },
+  });
+}
+
+/** What the automation did — fetched only while the list is OPEN (the board fetches nothing on mount). */
+export function useDependencyAutomationLog(workspaceId: number | null, open: boolean) {
+  return useQuery({
+    queryKey: ['dependency-automation-log', `ws:${workspaceId}`],
+    queryFn: () => api.dependencyAutomationLog(workspaceId!),
+    enabled: open && workspaceId != null,
+    staleTime: 30_000,
   });
 }

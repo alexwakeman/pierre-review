@@ -3828,11 +3828,12 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
 |---|---|---|---|
 | Pull requests | `LargePrThresholdSection`, `BlastRadiusSection` | — | none |
 | Pending | `MyTurnSection` (per ACCOUNT) | `PendingMuteSection` | none |
+| Dependencies | — | `DependencyAutomationSection` (merge / approve / resolve conflicts, the policy, trusted bots; its AI sentence only with `me.ai.enabled`) | none |
 | AI | `AiProviderSection`, `ClaudeSpendSection` | — | tab shown only with `me.ai.enabled` |
 | AI review | — | `AutoReviewSection` (auto review, auto-post, auto fix, diagrams), `ReferenceDocsSection`, `RelatedReposSection` | tab shown only with `me.ai.enabled` |
 | Reports and sprint | — | `FlowSettingsSection` (working hours and budgets), `SprintSection` (cadence + comparison window) | none |
 | Integrations | — | `IssueLinksSection` (tracker + Jira API access, shown whenever the SAVED tracker is Jira with a base URL — not behind `me.ai.enabled`), `SonarSection`, `SlackSection` (the "Claude review ran" switch only with `me.ai.enabled`) | none |
-| Bots | `BotScoringSection` (renders nothing under `LIMN_ML_DISABLED`) | `DependencyAutoMergeSection` | none |
+| Bots | `BotScoringSection` (renders nothing under `LIMN_ML_DISABLED`) | — | none |
 
 (`GithubAppInstallSection`, `BenchmarkConsentSection` and `YourDataSection` were removed
 2026-10-22 with the hosted mode; so was every `caps.*` / `proReady` gate — the modal opens with no

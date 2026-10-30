@@ -38,6 +38,7 @@ export type WorkspaceSettingEventKind =
   | 'auto_post'
   | 'flow_settings'
   | 'dependency_auto_merge'
+  | 'dependency_automation'
   | 'tracker';
 
 /** What a weekly series measures. The four budget waits are p75 working hours; the shares are the

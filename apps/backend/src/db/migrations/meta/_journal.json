@@ -1030,6 +1030,13 @@
       "when": 1792137650016,
       "tag": "0146_worktree_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "6",
+      "when": 1792137651016,
+      "tag": "0147_dependency_automation",
+      "breakpoints": true
     }
   ]
 }

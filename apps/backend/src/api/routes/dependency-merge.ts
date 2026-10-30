@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  DEPENDENCY_ECOSYSTEMS,
   DEPENDENCY_MERGE_ALL_MAX,
+  DEPENDENCY_UPDATE_LEVELS,
+  type DependencyAutomationLogResponse,
+  type DependencyAutomationPatch,
   type DependencyMergeAllBody,
   type DependencyMergeAllResponse,
   type WorkspaceDependencyAutoMergeResponse,
@@ -11,6 +15,11 @@ import {
   runDependencyMergeAll,
   setDependencyAutoMerge,
 } from '../../merge/dependency-policy.js';
+import {
+  getDependencyAutomation,
+  listDependencyAutomationLog,
+  setDependencyAutomation,
+} from '../../merge/dependency-automation.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // DEPENDENCY AUTO-MERGE (CORE, free, both modes) — docs/MERGE-CI-TRUNK.md § Dependency auto-merge.
@@ -20,6 +29,10 @@ import { accountIdOf } from '../plugins/auth.js';
 //        open, dependency automation, write access). Sequential; `github_write` tier.
 //   GET / PUT /api/workspaces/:id/dependency-auto-merge  the per-workspace setting, OFF by default.
 //        DB-only; ownership → 404.
+//   GET / PUT /api/workspaces/:id/dependency-automation  Settings → Dependencies: the three switches
+//        (merge, approve, resolve conflicts), the policy and the trusted bots. DB-only; → 404.
+//   GET /api/dependencies/automation-log?workspace=  what the automation did (Pending →
+//        Dependencies, fetched on a click). DB-only.
 
 /** The most the Dependencies tab can list (shared, so the SPA sends at most this too). */
 const MERGE_ALL_MAX = DEPENDENCY_MERGE_ALL_MAX;
@@ -111,6 +124,74 @@ export async function dependencyMergeRoutes(app: FastifyInstance): Promise<void>
         dependencyAutoMerge: { enabled },
       };
       return resp;
+    },
+  );
+
+  app.get('/api/dependencies/automation-log', async (req) => {
+    const accountId = accountIdOf(req);
+    const q = req.query as { workspace?: string };
+    const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    const resp: DependencyAutomationLogResponse = {
+      workspaceId: scope.workspaceId,
+      items: await listDependencyAutomationLog(accountId, scope.repoIds),
+    };
+    return resp;
+  });
+
+  app.get('/api/workspaces/:id/dependency-automation', { schema: idParam }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const resp = await getDependencyAutomation(accountIdOf(req), id);
+    if (!resp) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Workspace ${id} not found` };
+    }
+    return resp;
+  });
+
+  app.put(
+    '/api/workspaces/:id/dependency-automation',
+    {
+      schema: {
+        ...idParam,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            autoMerge: { type: 'boolean' },
+            autoApprove: { type: 'boolean' },
+            autoResolveConflicts: { type: 'boolean' },
+            maxLevel: { type: 'string', enum: [...DEPENDENCY_UPDATE_LEVELS] },
+            securityOnly: { type: 'boolean' },
+            ecosystems: {
+              type: ['array', 'null'],
+              minItems: 1,
+              maxItems: DEPENDENCY_ECOSYSTEMS.length,
+              items: { type: 'string', enum: [...DEPENDENCY_ECOSYSTEMS] },
+            },
+            trustedBotIds: { type: 'array', maxItems: 200, items: { type: 'integer', minimum: 1 } },
+          },
+        },
+      },
+      // Fastify's validator COERCES types, so `"true"` or 1 would read as a switch. Raw check.
+      preValidation: async (req, reply) => {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        for (const k of ['autoMerge', 'autoApprove', 'autoResolveConflicts', 'securityOnly']) {
+          if (k in raw && typeof raw[k] !== 'boolean') {
+            reply.status(400);
+            return reply.send({ error: 'BadRequest', message: `\`${k}\` must be true or false.` });
+          }
+        }
+      },
+    },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id } = req.params as { id: number };
+      const patch = req.body as DependencyAutomationPatch;
+      if (!(await setDependencyAutomation(accountId, id, patch))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return await getDependencyAutomation(accountId, id);
     },
   );
 }

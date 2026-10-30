@@ -1022,6 +1022,47 @@ export const autoMergePolicySkips = sqliteTable(
   }),
 );
 
+// ---- Dependency automation: what it did (migration 0147) ----------------------------------
+// One row per (account, PR, head, action) the dependency automation TOOK — an approval, a request
+// for the bot to rebase, an AI conflict run. CLAIMED (inserted as 'running') BEFORE the GitHub
+// write, so a second tick cannot write twice; a failure is recorded ('failed' + `detail`) and NEVER
+// retried at that head. It is also the log Pending → Dependencies shows ("What automation did").
+// `resultSha` is the commit an AI run pushed: the head that must be GREEN (not merely not red)
+// before the automation approves or arms it. A child of `pull_requests` (composite FK, cascade), in
+// `accountScopedTables()` and both delete paths.
+export const dependencyAutomationActions = sqliteTable(
+  'dependency_automation_actions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FK: the COMPOSITE declaration below (tenancy as a constraint).
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    action: text('action', { enum: ['approve', 'rebase_request', 'ai_resolve'] }).notNull(),
+    state: text('state', { enum: ['running', 'done', 'failed'] }).notNull(),
+    detail: text('detail'),
+    resultSha: text('result_sha'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // THE CLAIM: one action of a kind per head, ever.
+    claimUx: uniqueIndex('daa_account_pr_head_action').on(t.accountId, t.prId, t.headSha, t.action),
+    accountCreatedIdx: index('daa_account_created_idx').on(t.accountId, t.createdAt),
+    prAccountFk: foreignKey({
+      name: 'daa_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- Default-branch commits ("is trunk green?") -----------------------------------------
 // The recent commits on each repo's DEFAULT branch, with the CI state observed for each. Not
 // derivable from `commits`, which is PR-scoped (a commit merged via squash never appears
@@ -2073,6 +2114,19 @@ export const workspaces = sqliteTable(
     // has to name it. The setting IS the consent, so a bot's new head is re-armed; a reader's
     // cancel is recorded in `auto_merge_policy_skips` and never overridden.
     dependencyAutoMerge: integer('dependency_auto_merge', { mode: 'boolean' }),
+    // DEPENDENCY AUTOMATION (migration 0147; docs/MERGE-CI-TRUNK.md § Dependency automation). Every
+    // switch NULL/false = OFF, the default. `dependencyAutoApprove`: approve a TRUSTED dependency
+    // bot's PR (`workspace_reviewers.dependency_trusted`) once its CI is green, under the reader's
+    // account. `dependencyAutoResolve`: on a conflict, ask that bot to rebase, then fall back to an AI
+    // run through the in-app resolver. The POLICY gates all three switches (merge included):
+    // `dependencyMaxLevel` NULL = 'major' (every size) | 'minor' | 'patch'; `dependencySecurityOnly`
+    // NULL/false = every update; `dependencyEcosystems` a JSON array of `DependencyEcosystem`, NULL =
+    // every ecosystem. The ONE writer is `setDependencyAutomation` (merge/dependency-automation.ts).
+    dependencyAutoApprove: integer('dependency_auto_approve', { mode: 'boolean' }),
+    dependencyAutoResolve: integer('dependency_auto_resolve', { mode: 'boolean' }),
+    dependencyMaxLevel: text('dependency_max_level'),
+    dependencySecurityOnly: integer('dependency_security_only', { mode: 'boolean' }),
+    dependencyEcosystems: text('dependency_ecosystems', { mode: 'json' }).$type<string[]>(),
     // REFERENCE DOCS IN REVIEW (migration 0116 / pg 0103; docs/REFERENCE-DOCS.md): may Claude Review
     // read this workspace's reference library? NULL/false = OFF, the default; nullable with no
     // default, so no insert has to name it. The ONE reader/writer is reference-docs/store.ts.
@@ -2430,6 +2484,11 @@ export const workspaceReviewers = sqliteTable(
     costModel: text('cost_model', { enum: ['flat', 'per_seat'] })
       .notNull()
       .default('flat'),
+    // ── TRUST (migration 0147; one writer, `setDependencyAutomation`) ──
+    // The reader marked this DEPENDENCY bot as belonging to the project: Settings → Dependencies may
+    // approve its PRs and resolve their conflicts. NULL/false = not trusted, the default. Like the
+    // price, nothing derived ever writes it (no detection UPDATE names it, no INSERT seeds it).
+    dependencyTrusted: integer('dependency_trusted', { mode: 'boolean' }),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

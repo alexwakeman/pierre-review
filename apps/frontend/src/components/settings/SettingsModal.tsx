@@ -12,7 +12,7 @@ import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpe
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
 import { DiskSpaceSection } from './DiskSpaceSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
-import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
+import { DependencyAutomationSection } from './DependencyAutomationSection.js';
 import { SonarSection } from './SonarSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
 import { ConfluenceSection } from './ConfluenceSection.js';
@@ -97,7 +97,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   SonarSection,
   SlackSection,
   BotScoringSection,
-  DependencyAutoMergeSection,
+  DependencyAutomationSection,
 };
 
 function renderSections(names: readonly string[]): (JSX.Element | null)[] {
