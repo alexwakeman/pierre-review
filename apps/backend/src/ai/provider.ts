@@ -194,6 +194,13 @@ export interface AgentRunSpec {
   readOnlyRoots: string[];
   /** Roots the run may WRITE ([] ⇒ a read-only run). Informational for Claude (its tools decide). */
   writeRoots: string[];
+  /**
+   * THE BUILD'S WRITE DENY-LIST (review/write-deny.ts): true ⇒ no write may touch CI / git / hook /
+   * package-manager config, lockfiles or agent settings inside the write roots. Both providers enforce
+   * it — Claude as a PreToolUse hook after the path guard, Codex in its guard process. Absent ⇒ off
+   * (every run but a story build, exactly as before).
+   */
+  protectWrites?: boolean;
   /** The result tools. Absent ⇒ the run has none (a chat answering in text). */
   tools?: AgentToolServer;
   /** The project's own checks (`run_check`). Absent ⇒ the run cannot run any (every run but a fix with "Run tests"). */
