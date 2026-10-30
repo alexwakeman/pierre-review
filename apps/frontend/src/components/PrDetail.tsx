@@ -53,6 +53,7 @@ import {
 } from './ui/index.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
+import { useOpenStory } from '../lib/ticketTab.js';
 import {
   ChevronIcon,
   DotIcon,
@@ -68,6 +69,7 @@ import {
   LinkIcon,
   OctocatIcon,
   RefreshIcon,
+  TicketIcon,
   TimelineIcon,
   TimerIcon,
   WarningIcon,
@@ -1272,6 +1274,17 @@ export function PrDetail({
   ] as Tab[];
   const cmdTabsKey = cmdTabs.join(',');
   const prNumber = pr?.number ?? null;
+  // The PR's linked stories: its tickets Limn can open as a story (an `ident`; one whose tracker site
+  // cannot be folded only links out, from the Overview chip). Most PRs name one. Opened ONLY through
+  // `useOpenStory` — the one way the story view opens.
+  const openStory = useOpenStory();
+  // (`pr.tickets` keeps its identity across polls — React Query's structural sharing — so this memo
+  // and the ⌘K list below rebuild only when the tickets themselves change.)
+  const prTickets = pr?.tickets;
+  const storyTickets = useMemo(
+    () => (prTickets ?? []).flatMap((t) => (t.ident != null ? [{ ident: t.ident, key: t.key }] : [])),
+    [prTickets],
+  );
   const prCommands = useMemo((): Command[] | null => {
     if (!liveVisible || prNumber == null) return null;
     const where = `#${prNumber}`;
@@ -1294,6 +1307,17 @@ export function PrDetail({
       { id: 'pr:timeline', title: 'Show this pull request on the timeline', group: 'Actions', hint: where, run: () => cmdLive.current.act('timeline') },
       { id: 'pr:focus', title: 'Focus this pull request in its own timeline tab', group: 'Actions', hint: where, run: () => cmdLive.current.act('focus') },
       { id: 'pr:feed', title: 'Show this pull request in the Activity feed', group: 'Actions', hint: where, run: () => cmdLive.current.act('feed') },
+      ...storyTickets.map(
+        (t): Command => ({
+          id: `pr:story:${t.ident}`,
+          title: `Open the ${t.key} story`,
+          group: 'Actions',
+          hint: where,
+          keywords: ['story', 'ticket'],
+          icon: <TicketIcon size={14} />,
+          run: () => openStory({ ident: t.ident, key: t.key, title: null }),
+        }),
+      ),
       { id: 'pr:refresh', title: 'Refresh this pull request from GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('refresh') },
       { id: 'pr:copy', title: 'Copy the GitHub link to this pull request', group: 'Actions', hint: where, run: () => cmdLive.current.act('copy') },
       { id: 'pr:github', title: 'Open this pull request on GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('github') },
@@ -1301,7 +1325,7 @@ export function PrDetail({
       { id: 'pr:threads', title: 'Show the review threads (Changes, threads only)', group: 'Actions', hint: where, keywords: ['comments', 'review'], run: () => cmdLive.current.act('threads-view') },
       { id: 'pr:activity', title: 'Show this pull request’s activity (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('activity') },
     ];
-  }, [liveVisible, prNumber, cmdTabsKey, placement]);
+  }, [liveVisible, prNumber, cmdTabsKey, placement, storyTickets, openStory]);
   useRegisterCommands(`pr-detail:${placement}`, prCommands);
 
   if (isLoading) {
@@ -1429,6 +1453,14 @@ export function PrDetail({
     { id: 'timeline', label: 'Show on the timeline', icon: <TimelineIcon size={14} />, onSelect: () => openPrFocused(pr.id) },
     { id: 'focus', label: 'Focus in its own timeline tab', icon: <MagnifierIcon size={14} />, onSelect: () => openPrFocusTab(pinnedMetaOf(pr, usersById)) },
     { id: 'feed', label: 'Show in the Activity feed', icon: <FeedIcon size={14} />, onSelect: showInFeed },
+    // Only when the PR names a story; its key as the hint (a PR naming two lists both).
+    ...storyTickets.map((t): MenuEntry => ({
+      id: `story:${t.ident}`,
+      label: 'Open story',
+      hint: t.key,
+      icon: <TicketIcon size={14} />,
+      onSelect: () => openStory({ ident: t.ident, key: t.key, title: null }),
+    })),
     { id: 'sep', separator: true },
     {
       id: 'refresh',

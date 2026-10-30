@@ -1334,10 +1334,10 @@ Cross-cutting:
   `threadSeverityFilter`, `threadBotFilter`, `commentFocus`, `selectedCommentId`, `activityFocus`,
   `claudeTabFocus`, `aiFixTabFocus`, `prChangesFocus`, `feedIsolatedPrId`. Local-only:
   `changesThreadsOnly`, `changesFocus`, `threadOpenMemory`, `activityOpenLocal`, `statusFocus`.
-  localStorage: Changes rail width (`RAIL_W_KEY`), diff wrap (`useDiffWrap`), `limn.blastImpactNote.collapsed.v1`.
+  localStorage: Changes rail width (`RAIL_W_KEY`), diff wrap (`useDiffWrap`).
 - [x] Every tab change goes through `goToTab` / `seedTab` / `openInChanges` / `showThread` (the Tabs primitive calls `goToTab`); deep-link
   effects use `markUrlCorrection` (replace, not push).
-- [x] Gates (unchanged): `me.ai.enabled` hides AI Review, AI Fix, Check threads, the impact note and the AI menu
+- [x] Gates (unchanged): `me.ai.enabled` hides AI Review, AI Fix, Check threads and the AI menu
   items. AiRunGate kinds used here: review, fix, plan, resolve, thread_check, review_chat,
   ci_review, ticket_review, story_docs, complete. `me.mlSeverity` controls ML badges and Severity
   pills. `me.conflictResolver` controls the resolver entry. PR permissions: viewerCanPush,
@@ -1434,24 +1434,10 @@ Cross-cutting:
   the author" — pins `text-sm`; conflicts with the 12/13/15/22 scale, update deliberately),
   `test/themeMetrics.test.ts`, `test/textContrast.test.ts`, `test/vendorInk.test.ts`
 
-### [x] Impact note ("What could this break?") → unchanged component, under the meta line
-- Entry: under the header meta line, only when `me.ai.enabled`, a blast chip exists and Settings → showImpactNote is on
-- Files: `Activity/BlastImpactNote.tsx`, `AiSetup.tsx` (AiRunGate complete), `AiStatusLine.tsx`, `hooks/useAnnotations*.ts`
-- Essential info:
-  - [ ] Verdict: "Flagged on a closer read" (warning, amber) or a plain note
-  - [ ] Two-sentence body on what the change could break
-  - [ ] "Written by <model>"
-  - [ ] "Re-reading the change" status line when stale and running
-- Actions:
-  - [ ] "What could this break?" (sparkle, AiRunGate complete)
-  - [ ] Collapse/expand (localStorage)
-  - [ ] Re-run when stale
-- States:
-  - [ ] Hidden without AI, without a blast chip or with the setting off
-  - [ ] Running: AiStatusLine "Reading the change"
-  - [ ] Collapsed stub only when a note exists (collapsing never hides the ask button)
-  - [ ] No request of its own: reads the shared `['pr-annotations', prId]` index
-- Tests: `test/aiStatusAndPrActions.test.ts`, verify-demo `pr:113:overview`
+### [x] Impact note ("What could this break?") → REMOVED 2026-10-30
+- The component, its hook, routes and Settings switch are gone (docs/BLAST-RADIUS.md § The impact note (removed)).
+- The header "…" menu gains **"Open story"** (`TicketIcon`, key as hint) for each linked ticket with an ident,
+  through `useOpenStory`; ⌘K lists "Open the KEY story". Test: `test/prDetailOpenStory.test.ts`.
 
 ### [x] PR tab strip → the `Tabs` primitive (role=tab, ← → Home End; 1–9 while this PR is the one on screen): Comments and Changes carry counts, Overview its failing dot (+ sr-only "N failing"), AI Review its outcome pill, Bot activity its warning; tabs scroll sideways on a phone; ⌘K lists every tab. `prOverviewLayout.test.ts` finds the order in `tabIds` now
 - Entry: below the header; `?prTab=` paired with the PR id
