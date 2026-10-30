@@ -6,9 +6,9 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from '../ui/floating.js';
 import type { ConflictRegion } from '@pierre-review/shared';
 import { highlightLines } from '../../lib/hljsLines.js';
 import { CompareBaseIcon } from '../Icons.js';
@@ -40,7 +40,7 @@ export function BasePopover({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange,
     strategy: 'fixed',

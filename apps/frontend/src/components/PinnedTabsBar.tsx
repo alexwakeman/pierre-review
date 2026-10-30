@@ -463,6 +463,8 @@ function TabContextMenu({
   const closeAllTabs = usePinnedTabs((s) => s.closeAllTabs);
 
   const { refs, floatingStyles, context, isPositioned } = useFloating({
+    // Placed by top/left: the entry animation animates `transform` (ui/floating.ts).
+    transform: false,
     open: true,
     onOpenChange: (o) => {
       if (!o) onClose();

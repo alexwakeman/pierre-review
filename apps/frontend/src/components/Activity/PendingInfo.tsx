@@ -6,9 +6,9 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from '../ui/floating.js';
 import {
   DO_NEXT_RULES,
   MY_TURN_DEFAULT_ORDER,
@@ -89,7 +89,7 @@ function InfoPopover({
   align?: 'start' | 'end';
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: setOpen,
     strategy: 'fixed',

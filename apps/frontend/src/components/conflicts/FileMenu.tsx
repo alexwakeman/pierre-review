@@ -6,9 +6,9 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from '../ui/floating.js';
 import type { ConflictFileEntry } from '@pierre-review/shared';
 import { fileRowState, type FileTally } from '../../lib/mergeResolver.js';
 import { CaretIcon, CheckIcon, ConflictIcon, MinusIcon } from '../Icons.js';
@@ -58,7 +58,7 @@ export function FileMenu({
   onSelect: (index: number) => void;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange,
     strategy: 'fixed',

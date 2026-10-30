@@ -7,10 +7,10 @@ import {
   shift,
   useClick,
   useDismiss,
-  useFloating,
   useInteractions,
   useRole,
 } from '@floating-ui/react';
+import { usePlacedFloating } from './ui/floating.js';
 import { useMe } from '../hooks/useTriage.js';
 import { useMyTurnByWorkspace, type WorkspaceMyTurnLine } from '../hooks/useMyTurnByWorkspace.js';
 import { useFilters } from '../store/filters.js';
@@ -191,7 +191,7 @@ function MoreWorkspaces({
 }): JSX.Element {
   const [isOpen, setOpen] = useState(false);
   const panelId = useId();
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open: isOpen,
     onOpenChange: setOpen,
     placement: 'right-start',

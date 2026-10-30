@@ -6,13 +6,13 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useFocus,
   useHover,
   useInteractions,
   useMergeRefs,
   useRole,
 } from '@floating-ui/react';
+import { usePlacedFloating } from '../ui/floating.js';
 import { claimActivePopover } from '../../lib/activePopover.js';
 
 // A CHART'S FIGURES, ON DEMAND. The chart stays on the page; the numbers behind it open in a small
@@ -48,7 +48,7 @@ export function ChartPopover({ label, content, children, anchorX, testId }: Char
   const [transient, setTransient] = useState(false);
   const open = pinned || transient;
 
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: (next, _event, reason) => {
       // Hover and focus drive the TRANSIENT half only, so leaving a pinned popover's bar does not

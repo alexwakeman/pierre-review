@@ -11,6 +11,7 @@ import {
   useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from './ui/floating.js';
 import { claimActivePopover, closeActivePopover } from '../lib/activePopover.js';
 import { CloseIcon, InfoIcon } from './Icons.js';
 
@@ -154,7 +155,7 @@ export function InfoButton({ title, children, width = 'md', className }: InfoBut
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: setOpen,
     strategy: 'fixed',

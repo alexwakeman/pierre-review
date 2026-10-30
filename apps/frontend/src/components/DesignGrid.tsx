@@ -29,9 +29,9 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from './ui/floating.js';
 import type { DesignCell, DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
 import { claimActivePopover } from '../lib/activePopover.js';
 import { CHANGE_KEY_LABEL, CHANGE_WORD, changesPresent, layoutDesign, memberForRef, prBadgeTexts } from '../lib/designGrid.js';
@@ -185,7 +185,7 @@ function DesignCard({
   const word = CHANGE_WORD[cell.change];
   const clickable = openFile != null && cell.files.length > 0;
   const many = cell.files.length > 1;
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: setOpen,
     strategy: 'fixed',

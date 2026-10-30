@@ -19,7 +19,8 @@
 //            when the pointer leaves. No click, no pin. The numbers are in the tab order. The same
 //            arrows are also an sr-only list.
 import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { autoUpdate, FloatingPortal, useDismiss, useFloating, useFocus, useHover, useInteractions, useRole } from '@floating-ui/react';
+import { autoUpdate, FloatingPortal, useDismiss, useFocus, useHover, useInteractions, useRole } from '@floating-ui/react';
+import { usePlacedFloating } from './ui/floating.js';
 import { avoidRects } from '../lib/avoidRects.js';
 import { HOVER_PANEL_CLASS } from './HoverPopover.js';
 import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
@@ -327,7 +328,7 @@ function ArrowMarker({
   const [transient, setTransient] = useState(false);
   const open = transient || lineHovered;
   const popId = useId();
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: setTransient,
     strategy: 'fixed',

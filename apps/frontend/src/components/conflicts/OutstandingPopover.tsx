@@ -6,9 +6,9 @@ import {
   offset,
   shift,
   useDismiss,
-  useFloating,
   useInteractions,
 } from '@floating-ui/react';
+import { usePlacedFloating } from '../ui/floating.js';
 import type { OutstandingFile } from '../../lib/conflictCommit.js';
 import { CaretIcon } from '../Icons.js';
 import {
@@ -72,7 +72,7 @@ export function OutstandingPopover({
   /** Go to that file's first unanswered region, and close. */
   onJumpToFile: (index: number) => void;
 }): JSX.Element {
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange,
     strategy: 'fixed',

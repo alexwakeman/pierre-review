@@ -114,6 +114,8 @@ export function PrPopover({ pr, repo, author, container, anchorX, phone, onClose
   const tickets = cardTickets(ticketData?.prs.find((p) => p.prId === pr.id));
 
   const { refs, floatingStyles, context, isPositioned } = useFloating({
+    // Placed by top/left: the entry animation animates `transform` (ui/floating.ts).
+    transform: false,
     open: true,
     onOpenChange: (o) => {
       if (!o) onClose();

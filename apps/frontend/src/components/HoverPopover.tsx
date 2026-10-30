@@ -14,12 +14,12 @@ import {
   autoUpdate,
   FloatingPortal,
   useDismiss,
-  useFloating,
   useFocus,
   useHover,
   useInteractions,
   useRole,
 } from '@floating-ui/react';
+import { usePlacedFloating } from './ui/floating.js';
 import { avoidRects } from '../lib/avoidRects.js';
 
 const NO_OBSTACLES = (): DOMRect[] => [];
@@ -48,7 +48,7 @@ export function HoverPopover({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const popId = useId();
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context } = usePlacedFloating({
     open,
     onOpenChange: setOpen,
     strategy: 'fixed',
