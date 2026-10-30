@@ -297,7 +297,7 @@ function BotCommentCardImpl({
           <button
             type="button"
             onClick={() => onOpenThread(c, threadId)}
-            className="hit font-medium text-ui-ink hover:underline"
+            className="hit font-medium text-ui-ink hover:underline text-link-phone"
           >
             Open thread
           </button>
@@ -375,7 +375,7 @@ function UnbodiedMember({
         <button
           type="button"
           onClick={() => onOpenThread(cluster, member.threadId)}
-          className="hit font-medium text-ui-ink hover:underline"
+          className="hit font-medium text-ui-ink hover:underline text-link-phone"
         >
           Open thread
         </button>

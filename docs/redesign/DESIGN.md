@@ -134,6 +134,9 @@ All in `components/ui/`, exported from `components/ui/index.ts`.
 - **`hit`** (index.css) — a small control's tap area grows to 40 × 40 on a coarse pointer through an
   invisible centred `::after`, without moving layout. Every hand-rolled `<button>` / `<a>` with a
   class string carries it; a primitive with real `touch:` sizes does not need it.
+- **`TEXT_LINK` / `TEXT_LINK_PHONE`** (`ui/cx.ts`; `.text-link` / `.text-link-phone` in index.css)
+  — a TEXTUAL link's underline: 1px, 2px below the baseline, the text's own colour at half
+  strength, full on hover. Rules in [FRONTEND.md § Text links](../FRONTEND.md#text-links--text_link--text_link_phone).
 - **`useEdgeFade(ref, 'x' | 'y')`** — a scroll box fades the edge that hides more (wide tables, the
   sidebar's middle). `Tabs` does the same and keeps the selected tab in view.
 - **`StatusIcon`** — icon + words, tone by rule.

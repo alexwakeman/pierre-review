@@ -589,6 +589,9 @@ export interface FilterState {
   // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
   // null = no filter. Transient; cleared when the PR changes / selection clears.
   threadBotFilter: ReviewBotKind | null;
+  // A request to land a PR's detail on its Changes tab's Threads only view, unfiltered (the Open
+  // PRs drawer's "N threads" link). Holds the PR id; PrDetail consumes it once and clears it.
+  threadsViewRequest: number | null;
   // PR-detail Threads only view's derived-STATE filter pills (Untouched/Replied/Likely-addressed/
   // Resolved), matching the feed's state pills. Empty = all shown. Preset to
   // {likely_addressed} when arriving from the resolvable-bot-threads tab. Transient; cleared
@@ -973,6 +976,11 @@ export interface FilterState {
   // resolvable-bot-threads row click → the PR's likely-addressed threads). Does NOT touch the
   // Activity rail / feed isolation — navigation goes to the PR detail, not back to the Bots pane.
   openPrThreadsFiltered: (meta: TabMeta, state: DerivedState) => void;
+  // Open a PR's detail tab on its Changes tab's Threads only view with NO pill preset (every
+  // thread shown) — the Open PRs drawer's threads link. The filters are reset for the PR the same
+  // way openPrThreadsFiltered resets them.
+  openPrThreadsView: (meta: TabMeta) => void;
+  clearThreadsViewRequest: () => void;
   // Open a PR from the strip / my-turn / a timeline event: select it AND ask
   // the timeline to scroll to it (optionally recentering on `focusAt`). Pass `event`
   // to also glow a specific marker once the timeline recenters (e.g. a thread's
@@ -1377,6 +1385,7 @@ function freshDefaults(): FilterData {
     insightsReportKey: null,
     insightsReportGrain: 'sprint',
     threadBotFilter: null,
+    threadsViewRequest: null,
     threadStateFilter: new Set<ThreadStateBucket>(),
     threadSeverityFilter: new Set<MlSeverity>(),
     selectedCommentId: null,
@@ -1941,6 +1950,19 @@ export const useFilters = create<FilterState>((set, get) => ({
       threadSeverityFilter: new Set<MlSeverity>(),
     });
   },
+  openPrThreadsView: (meta) => {
+    usePinnedTabs.getState().openPrDetailTab(meta, { fromActivity: true });
+    set({
+      selectedPrId: meta.id,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      threadBotFilter: null,
+      threadStateFilter: new Set<ThreadStateBucket>(),
+      threadSeverityFilter: new Set<MlSeverity>(),
+      threadsViewRequest: meta.id,
+    });
+  },
+  clearThreadsViewRequest: () => set({ threadsViewRequest: null }),
   requestSyncModal: (repoId: number) =>
     set((s) => ({
       syncModalSignal: s.syncModalSignal + 1,

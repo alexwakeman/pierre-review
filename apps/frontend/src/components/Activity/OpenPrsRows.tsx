@@ -59,6 +59,8 @@ import {
   SidePanel,
   StatusIcon,
   cx,
+  FOCUS_RING,
+  TEXT_LINK,
   useIsDesktop,
   useListKeyboard,
   useRegisterCommands,
@@ -114,6 +116,8 @@ export interface OpenPrsRowsData {
   onOpenPr: (pr: TimelinePr) => void;
   onOpenReview: (pr: TimelinePr) => void;
   onOpenFix: (pr: TimelinePr) => void;
+  /** The PR's Changes tab, on its Threads only view (the drawer's threads link). */
+  onOpenThreads: (pr: TimelinePr) => void;
   /** The list's identity (workspace, repo filter, sort, layout): a change starts at one page. */
   windowKey: string | null;
   /** "Tickets loaded. [Group by ticket]" — shown above the list when offered. */
@@ -326,7 +330,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
     if (selected == null) return null;
     const label = `#${selected.pr.number}`;
     const list: Command[] = [
-      { id: 'open', group: 'Actions', title: `Open pull request ${label}`, hint: selected.pr.title, shortcut: '↵', icon: <PullRequestIcon size={14} />, run: () => openPr(selected) },
+      { id: 'open', group: 'Actions', title: `View PR ${label}`, hint: selected.pr.title, shortcut: '↵', icon: <PullRequestIcon size={14} />, run: () => openPr(selected) },
     ];
     const url = githubOf(selected);
     if (url != null) {
@@ -457,7 +461,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
         selected != null ? (
           <>
             <Button variant="primary" kbd="↵" icon={<PullRequestIcon size={13} />} onClick={() => openPr(selected)}>
-              Open pull request
+              View PR
             </Button>
             {props.claudeOn && (
               <Button kbd="R" icon={<SparkleIcon size={13} />} onClick={() => props.onOpenReview(selected.pr)}>
@@ -888,9 +892,17 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
         </Fact>
         <Fact label="Threads">
           {threads != null ? (
-            <span className={'inline-flex items-center gap-2 text-ui-ink'} title="Review threads: untouched · replied · likely addressed · resolved">
+            <span className="inline-flex items-center gap-2 text-ui-ink">
               <ThreadStateBar counts={pr.threadCounts} compact className="!w-10" />
-              {threads.text}
+              {/* The PR's threads, every one shown (Changes → Threads only). */}
+              <button
+                type="button"
+                onClick={() => data.onOpenThreads(pr)}
+                title="Review threads: untouched · replied · likely addressed · resolved. Show them."
+                className={cx('hit rounded-ui text-left', TEXT_LINK, FOCUS_RING)}
+              >
+                {threads.text}
+              </button>
             </span>
           ) : (
             <span className="text-ui-mute">No review threads</span>
@@ -907,11 +919,13 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
           <ul className="m-0 list-none space-y-0.5 p-0">
             {tickets.map((t) => {
               const href = safeExternalUrl(t.url);
+              // A row that goes somewhere underlines its words (the drawer's links read as links).
+              const linked = t.ident != null || href != null;
               const body = (
                 <>
                   <TicketIcon size={12} className="shrink-0 text-ui-faint" />
-                  <span className="shrink-0 font-mono text-meta text-ui-mute">{t.key}</span>
-                  {t.title != null && <span className="min-w-0 truncate">{t.title}</span>}
+                  <span className={cx('shrink-0 font-mono text-meta text-ui-mute', t.title == null && linked && TEXT_LINK)}>{t.key}</span>
+                  {t.title != null && <span className={cx('min-w-0 truncate', linked && TEXT_LINK)}>{t.title}</span>}
                 </>
               );
               const cls = 'flex min-h-7 w-full min-w-0 items-center gap-2 rounded-ui px-1 text-left text-body hover:bg-ui-hover touch:min-h-10';
@@ -941,7 +955,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
                   type="button"
                   onClick={() => onJump(`ticket:${t.key}`)}
                   title={`Go to ${cardTicketLabel(t)}`}
-                  className="rounded-ui px-1 font-mono text-ui-ink hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
+                  className={cx('rounded-ui px-1 font-mono text-ui-ink hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10', TEXT_LINK)}
                 >
                   {t.key}
                 </button>

@@ -154,7 +154,7 @@ function MoreFilesNote({
         href={`${githubUrl}/files`}
         target="_blank"
         rel="noreferrer noopener"
-        className={`text-ui-ink hover:underline ${compact ? 'block' : ''}`}
+        className={`text-ui-ink hover:underline text-link-phone ${compact ? 'block' : ''}`}
       >
         All on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
       </a>
@@ -231,7 +231,7 @@ function Header({
           href={`${pr.githubUrl}/files`}
           target="_blank"
           rel="noreferrer noopener"
-          className="inline-flex items-center gap-1 text-ui-ink hover:underline touch:min-h-10"
+          className="inline-flex items-center gap-1 text-ui-ink hover:underline text-link-phone touch:min-h-10"
         >
           Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
         </a>
@@ -668,7 +668,7 @@ export function ChangesTab({
             href={`${pr.githubUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-ui-ink hover:underline"
+            className="hit text-ui-ink hover:underline text-link-phone"
           >
             View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -789,7 +789,7 @@ export function ChangesTab({
                 href={`${pr.githubUrl}/files`}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-ui-ink hover:underline"
+                className="hit text-ui-ink hover:underline text-link-phone"
               >
                 View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
               </a>

@@ -157,7 +157,7 @@ function CodeAnchorRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, side)}
-        className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline"
+        className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline text-link-phone"
       >
         {label}
       </button>

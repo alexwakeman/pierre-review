@@ -57,7 +57,7 @@ export function ShowOnTimeline({
       <button
         type="button"
         onClick={onClick}
-        className={`hit shrink-0 text-ui-ink hover:underline ${className}`}
+        className={`hit shrink-0 text-ui-ink hover:underline text-link-phone ${className}`}
         title={title}
       >
         {label}

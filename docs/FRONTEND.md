@@ -4810,6 +4810,43 @@ estimate, and a "~5 sec left" would sit frozen for minutes.
 
 ---
 
+## Text links — `TEXT_LINK` / `TEXT_LINK_PHONE`
+
+ONE primitive for "this text goes somewhere": the classes `text-link` (always underlined) and
+`text-link-phone` (underlined below `md`, 767px and down, only), exported as `TEXT_LINK` /
+`TEXT_LINK_PHONE` from `components/ui`. One look: a 1px underline, `underline-offset` 2px, the
+text's own colour at 50% (`color-mix` on `currentColor`), full strength on hover. Never hand-roll
+`underline decoration-…` on a new link; never declare `.text-link-phone` outside its media query
+(`openPrsRows.test.ts` pins both).
+
+- **The Open PRs drawer underlines at EVERY width** (`TEXT_LINK`): it is a panel of facts, so a
+  link must read as one at a glance. Underlined there: the **Threads** fact ("2 untouched" /
+  "N open threads" / "N resolved" — a link to the PR's Changes → Threads only view, every thread
+  shown), the linked ticket rows' words (story view or tracker), the "Also in" ticket keys, and
+  the AI review section's links (verdict / "Reviewing…" / "Review failed", the "N threads to fix"
+  line → the AI review, the AI Fix state). NOT underlined there: the footer's Buttons (**View PR**,
+  AI review), the GitHub icon link, the copy-link icon, chips (reach, large-PR flag) and the
+  status icons.
+- **The drawer's threads link** goes through the store's `openPrThreadsView(meta)`: it opens the
+  PR tab with the thread pills reset and sets the transient `threadsViewRequest = prId`, which
+  PrDetail consumes ONCE (`seedThreadsView`) — the same landing as the bot-chip and state-pill
+  seeds. A request for another PR is left alone.
+- **Everywhere else, underline on a PHONE only** (`TEXT_LINK_PHONE`; a desktop keeps the element's
+  own `hover:underline`, since a touch screen has no hover to reveal a link). Adopted on:
+  doc citations (`DocLink`), "Open in Jira/Linear/…" (`TrackerLinkOut`), "Show on timeline", PR refs
+  in AI review text and digests (`ReviewPrRefs`, `prRefLinks`), file:line anchors in findings
+  (`REVIEW_ANCHOR`, the follow-up and ticket-review anchors), "See the whole story", "Resolve on
+  GitHub", "View … on GitHub" / "Files changed ↗" / "N more files on GitHub", "Over budget", and
+  the Bots cards' "Open thread".
+- **Deliberately left alone** (an underline would be noise, or the context already says "link"):
+  user names (`UserName` — on every row; the popover is the affordance), ticket keys heading an
+  Open PRs group and Pending card titles (whole-row/heading targets), PR titles in the PR header
+  and search results, chips and pills (thread-state pills, `ClaudeReviewTab`'s "posted" chips),
+  tabs, nav and sidebar items, Buttons, menu items (`AiUsageMenu`), toast actions (accent ink
+  already marks them), disclosure toggles ("Show more", "Reply"), and links ALREADY underlined
+  everywhere: markdown prose (`.md-body a`), `TicketRefLink`, the AI sign-in links in Settings.
+- **Contrast is unchanged** — an underline adds no ink to `textContrast.test.ts`'s measurement.
+
 ## Iconography — `components/Icons.tsx`
 
 The SPA ships **no icon library and no rendered emoji**. Every icon is a hand-written inline SVG

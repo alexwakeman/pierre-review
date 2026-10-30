@@ -1,5 +1,5 @@
 // The redesign's shared primitives (docs/redesign/DESIGN.md). Import from here.
-export { cx, FOCUS_RING, TOUCH_TARGET } from './cx.js';
+export { cx, FOCUS_RING, TOUCH_TARGET, TEXT_LINK, TEXT_LINK_PHONE } from './cx.js';
 export { Kbd, KbdGroup } from './Kbd.js';
 export { Button, IconButton, type ButtonProps, type ButtonVariant, type ButtonSize, type IconButtonProps } from './Button.js';
 export { StatusIcon, STATUS_TONE_CLASS, type StatusTone } from './StatusIcon.js';

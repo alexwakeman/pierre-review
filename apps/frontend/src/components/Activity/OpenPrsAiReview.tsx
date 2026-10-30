@@ -20,7 +20,7 @@ import { dateTime, relativeTime } from '../../lib/ui.js';
 import { AiRunGate } from '../AiSetup.js';
 import { CheckIcon, CommitIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
-import { Button, cx, FOCUS_RING } from '../ui/index.js';
+import { Button, cx, FOCUS_RING, TEXT_LINK } from '../ui/index.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 
 // THE OPEN PRS SIDE PANEL'S "AI REVIEW" SECTION — the drawer's own presentation of the list's ONE
@@ -41,7 +41,8 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-const LINK = cx('hit inline-flex min-w-0 items-center gap-1.5 rounded-ui text-left hover:underline', FOCUS_RING);
+// Underlined at every width: in a panel of facts, a link must read as one at a glance.
+const LINK = cx('hit inline-flex min-w-0 items-center gap-1.5 rounded-ui text-left', TEXT_LINK, FOCUS_RING);
 const SEP = <span aria-hidden className="text-ui-faint"> · </span>;
 const PULSE = <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ai-signal-fill motion-safe:animate-pulse" />;
 // Red means blocks: a request for changes. Approval is the news, so it reads green. A comment is ink.
@@ -236,8 +237,16 @@ export function DrawerAiReview({
               </span>
             )}
             {toFix != null && (
-              <p className="m-0 mt-0.5 text-meta text-ui-mute" title="Other reviewers' threads the review judged right and not yet dealt with">
-                {toFix}
+              // The threads it names are listed in the AI review — the link goes there.
+              <p className="m-0 mt-0.5 text-meta text-ui-mute">
+                <button
+                  type="button"
+                  onClick={onOpenReview}
+                  className={LINK}
+                  title="Other reviewers' threads the review judged right and not yet dealt with"
+                >
+                  {toFix}
+                </button>
               </p>
             )}
           </Fact>

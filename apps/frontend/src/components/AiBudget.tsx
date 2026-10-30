@@ -116,7 +116,7 @@ export function OverBudgetConfirm({
         <button
           type="button"
           onClick={() => openSettings('claude-spend')}
-          className="hit rounded-ui font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+          className="hit rounded-ui font-medium hover:underline text-link-phone focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title="Over your AI spend budget: open Settings"
         >
           Over budget

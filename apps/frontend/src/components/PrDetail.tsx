@@ -687,7 +687,7 @@ function PrCommentsList({
                   href={safeExternalUrl(it.url)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-ui-ink hover:underline touch:min-h-10"
+                  className="inline-flex items-center gap-1 text-ui-ink hover:underline text-link-phone touch:min-h-10"
                 >
                   <ExternalLinkIcon size={11} />
                   {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
@@ -1064,6 +1064,15 @@ export function PrDetail({
   useEffect(() => {
     if (threadBotFilter != null) seedThreadsView();
   }, [threadBotFilter, seedThreadsView]);
+
+  // The Open PRs drawer's threads link: land on the Threads only view, every thread shown. A
+  // request for ANOTHER PR is left for that PR's pane; this one is consumed once.
+  const threadsViewRequest = useFilters((s) => s.threadsViewRequest);
+  useEffect(() => {
+    if (threadsViewRequest !== prId) return;
+    useFilters.getState().clearThreadsViewRequest();
+    seedThreadsView();
+  }, [threadsViewRequest, prId, seedThreadsView]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
   // → force the Threads only view so the relevant threads are visible immediately. The preset belongs
