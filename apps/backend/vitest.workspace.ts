@@ -28,6 +28,8 @@ export const SLOW_TESTS = [
   'src/review/clone-hygiene.test.ts',
   'src/coding/git.test.ts',
   'src/coding/merge.test.ts',
+  'src/review/worktree-gc.test.ts',
+  'src/coding/checks/session.test.ts',
   // The fake Codex CLI: one node process per run (two on a retry), many on real git worktrees.
   'src/coding/codex-fix.test.ts',
   'src/ai/providers/codex.test.ts',

@@ -77,7 +77,9 @@ These sit in `slow` and so run on every PR that can affect them, and on main:
 `verifyHookTrusted` proves the hook runs), `review/codex-review-runs.test.ts` (the review's
 read-only guard roots), `conflict/*` (the resolver: no marker reaches a blob, the wand never picks
 a side, the commit is blocked until every decidable region is decided), `coding/codex-fix.test.ts`
-(AI Fix and Plan first on Codex).
+(AI Fix and Plan first on Codex). Joined on the 2026-10-30 integration merge (measured in `fast`: 44s / 9 cases and
+67s / 9 cases, real `git` per case): `review/worktree-gc.test.ts` (the sweep keeps a tree a live
+job is using) and `coding/checks/session.test.ts` ("Run tests": the sandbox stops a hostile test).
 
 ## Measured, 2026-10-30
 
