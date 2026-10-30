@@ -34,7 +34,7 @@ export function AiBudgetMeter({ provider }: { provider?: AiProviderId | null } =
       data-ai-budget-meter
       onClick={() => openSettings('claude-spend')}
       title={`${perDay != null ? `Limn's share pays for ${perDay}.\n` : ''}AI spend: open Settings`}
-      className="whitespace-nowrap rounded text-[11px] text-gray-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300"
+      className="hit whitespace-nowrap rounded text-[11px] text-gray-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300"
     >
       {text}
     </button>
@@ -116,7 +116,7 @@ export function OverBudgetConfirm({
         <button
           type="button"
           onClick={() => openSettings('claude-spend')}
-          className="rounded font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="hit rounded font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           title="Over your AI spend budget: open Settings"
         >
           Over budget

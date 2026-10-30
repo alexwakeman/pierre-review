@@ -523,7 +523,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
         onClick={() => setExpanded(true)}
         aria-expanded={false}
         title="Show the code hunk"
-        className="mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
+        className="hit mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
       >
         <ChevronIcon dir="right" className="shrink-0 text-gray-400" />
         <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview, previewHtml != null)}`}>
@@ -593,7 +593,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
         type="button"
         onClick={() => setExpanded(false)}
         aria-expanded={true}
-        className="inline-flex items-center gap-1 px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+        className="hit inline-flex items-center gap-1 px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
       >
         <ChevronIcon dir="up" size={11} />
         Hide code
@@ -932,7 +932,7 @@ export function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
+                  className="hit inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
                   {postedChipLabel(post!)}
@@ -949,7 +949,7 @@ export function FindingRow({
                 href={safeExternalUrl(reminderUrl)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
+                className="hit inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
                 title="View the reminder on GitHub"
               >
                 {reminderChipLabel(finding.reminder)}
@@ -1028,7 +1028,7 @@ export function FindingRow({
                       finding.threadId ?? undefined,
                     )
                   }
-                  className="text-left text-blue-600 hover:underline dark:text-blue-400"
+                  className="hit text-left text-blue-600 hover:underline dark:text-blue-400"
                   title={
                     finding.threadId != null
                       ? 'Show this comment in the Changes tab'
@@ -1049,7 +1049,7 @@ export function FindingRow({
                       : `Open ${finding.path} in the PR diff on GitHub`
                   }
                   title="Open this line in the PR diff on GitHub"
-                  className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  className="hit shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                 >
                   <ExternalLinkIcon size={11} />
                 </a>
@@ -1059,7 +1059,7 @@ export function FindingRow({
                 href={primaryHref}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="text-blue-600 hover:underline dark:text-blue-400"
+                className="hit text-blue-600 hover:underline dark:text-blue-400"
                 title={
                   commentUrl != null
                     ? 'Open this posted comment on GitHub'
@@ -1076,7 +1076,7 @@ export function FindingRow({
                 href={secondaryBlobHref}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="font-sans text-[11px] text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
+                className="hit font-sans text-[11px] text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
                 title="Open the file at the reviewed commit"
               >
                 view file
@@ -1621,7 +1621,7 @@ function GenerateFixButton({
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, review.id)}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
       >
         Generate fix from this review
         <ArrowIcon dir="right" size={11} />

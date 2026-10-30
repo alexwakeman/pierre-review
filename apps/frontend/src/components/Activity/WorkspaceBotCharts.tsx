@@ -166,7 +166,7 @@ function BotSubsetLegend({
         <button
           type="button"
           onClick={subset.reset}
-          className="text-meta text-ui-accent hover:underline"
+          className="hit text-meta text-ui-accent hover:underline"
         >
           all
         </button>

@@ -106,8 +106,8 @@ describe('resolveGoChord', () => {
     expect(resolveGoChord(a.armedAt, 'p', 1500)).toEqual({ go: 'attention', armedAt: null, handled: true });
   });
 
-  it('an unknown second key ends the chord and is not swallowed', () => {
-    expect(resolveGoChord(1000, 'x', 1100)).toEqual({ go: null, armedAt: null, handled: false });
+  it('an unknown second key ends the chord and is swallowed (it must not fire a row action)', () => {
+    expect(resolveGoChord(1000, 'x', 1100)).toEqual({ go: null, armedAt: null, handled: true });
   });
 
   it('a late letter is just a letter', () => {

@@ -83,7 +83,7 @@ export function FlowPointersPanel({
               type="button"
               disabled={generating}
               onClick={() => generate.mutate()}
-              className="rounded-ui border border-ai-border px-2.5 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+              className="hit rounded-ui border border-ai-border px-2.5 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
             >
               {generating ? 'Writing…' : result == null ? 'Write pointers' : 'Rewrite'}
             </button>

@@ -679,7 +679,7 @@ function TicketGroup({
               ) : (
                 <>
                   {href != null ? (
-                    <a href={href} target="_blank" rel="noreferrer noopener" title={`Open ${cardTicketLabel(t)}`} className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute hover:underline">
+                    <a href={href} target="_blank" rel="noreferrer noopener" title={`Open ${cardTicketLabel(t)}`} className="hit inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute hover:underline">
                       <TicketIcon size={12} className="shrink-0 self-center" />
                       {t.key}
                       <span className="sr-only">:</span>

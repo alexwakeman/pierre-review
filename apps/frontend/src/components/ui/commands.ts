@@ -53,6 +53,9 @@ interface RegistryState {
    */
   query: string;
   setQuery: (q: string) => void;
+  /** An async source (the server search) is still answering for the query typed — "Searching…". */
+  searching: boolean;
+  setSearching: (b: boolean) => void;
   setSource: (id: string, commands: readonly Command[] | null) => void;
   setProvider: (id: string, provider: CommandProvider | null) => void;
   openPalette: (initialQuery?: string) => void;
@@ -67,6 +70,8 @@ export const useCommandRegistry = create<RegistryState>((set) => ({
   initialQuery: '',
   query: '',
   setQuery: (q) => set({ query: q }),
+  searching: false,
+  setSearching: (b) => set((s) => (s.searching === b ? s : { searching: b })),
   setSource: (id, commands) =>
     set((s) => {
       const sources = { ...s.sources };

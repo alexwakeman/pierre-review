@@ -58,7 +58,7 @@ export function CodeAnchor({
           type="button"
           onClick={() => toggle(threadId)}
           aria-expanded={true}
-          className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          className="hit inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
           <ChevronIcon dir="up" size={11} />
           Hide code context

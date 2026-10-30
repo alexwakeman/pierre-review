@@ -287,7 +287,7 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
       </span>
       <span className="min-w-0 break-words">
         {href != null ? (
-          <a href={href} target="_blank" rel="noreferrer noopener" className="font-mono hover:underline">
+          <a href={href} target="_blank" rel="noreferrer noopener" className="hit font-mono hover:underline">
             {label}
           </a>
         ) : (
@@ -305,7 +305,7 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${label}`}
-        className="mt-px shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+        className="hit mt-px shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
       >
         <CloseIcon size={10} />
       </button>

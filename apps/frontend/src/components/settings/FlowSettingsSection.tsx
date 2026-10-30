@@ -149,7 +149,7 @@ export function FlowSettingsSection(): JSX.Element {
             type="button"
             disabled={setWorkspaceFlowSettings.isPending}
             onClick={() => setWorkspaceFlowSettings.mutate({ id: workspaceId, settings: {} })}
-            className="text-meta text-ui-mute hover:underline disabled:opacity-40"
+            className="hit text-meta text-ui-mute hover:underline disabled:opacity-40"
           >
             Reset to defaults
           </button>

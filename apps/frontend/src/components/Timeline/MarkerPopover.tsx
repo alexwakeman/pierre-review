@@ -71,7 +71,7 @@ function PrContext({
       <button
         type="button"
         onClick={onOpen}
-        className="font-medium text-blue-500 hover:underline"
+        className="hit font-medium text-blue-500 hover:underline"
       >
         #{pr.number}
       </button>
@@ -259,7 +259,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={openInDetail}
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
           >
             Open in detail pane
           </button>
@@ -268,7 +268,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={viewInActivity}
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
             title="Show this commit in the PR's Activity tab"
           >
             View in Activity
@@ -279,7 +279,7 @@ function SingleEvent({
             href={`${prDetail.githubUrl}/commits/${commit.sha}`}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
           >
             Open commit on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -289,7 +289,7 @@ function SingleEvent({
             href={safeExternalUrl(prComment.url) ?? prDetail.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
           >
             Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -509,7 +509,7 @@ export function MarkerPopover({
           </span>
           <button
             type="button"
-            className="tl-modal-close"
+            className="hit tl-modal-close"
             // Stop the pointerdown so it doesn't start a header drag; the click closes.
             onPointerDown={(e) => e.stopPropagation()}
             onClick={onDismiss}

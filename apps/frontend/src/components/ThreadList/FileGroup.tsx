@@ -97,7 +97,7 @@ export function FileGroup({
                   type="button"
                   onClick={() => onToggleResolved(t.id)}
                   aria-expanded={false}
-                  className="flex w-full min-w-0 items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-gray-900"
+                  className="hit flex w-full min-w-0 items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-gray-900"
                 >
                   <ChevronIcon dir="right" className="shrink-0 text-gray-400" />
                   <span className="shrink-0 tabular-nums">{lineLabel}</span>
@@ -125,7 +125,7 @@ export function FileGroup({
                   type="button"
                   onClick={() => onToggleResolved(t.id)}
                   aria-expanded
-                  className="mb-1 flex items-center gap-1 rounded px-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  className="hit mb-1 flex items-center gap-1 rounded px-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
                   <ChevronIcon dir="down" className="shrink-0" />
                   Collapse

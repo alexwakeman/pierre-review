@@ -1173,10 +1173,10 @@ export function conflictResolverEntryVisible(e: ConflictResolverEntry): boolean 
 
 // Tailwind classes per tone, so every compact surface tints a verdict identically.
 export const MERGE_TONE_CLASS: Record<MergeVerdictInfo['tone'], string> = {
-  ok: 'text-green-600 dark:text-green-400',
-  warn: 'text-orange-600 dark:text-orange-400',
-  bad: 'text-red-600 dark:text-red-400',
-  muted: 'text-gray-400 dark:text-gray-500',
+  ok: 'text-ui-success',
+  warn: 'text-ui-warn',
+  bad: 'text-ui-danger',
+  muted: 'text-ui-faint',
 };
 
 // Chip backgrounds for the dense list rows (RepoOpenPrList).

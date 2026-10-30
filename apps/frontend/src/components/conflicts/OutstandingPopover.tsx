@@ -113,7 +113,7 @@ export function OutstandingPopover({
         aria-haspopup="dialog"
         aria-expanded={open}
         title={OUTSTANDING_TITLE}
-        className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+        className="hit flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
       >
         {/* ⚠ WHAT IS LEFT, NOT WHAT IS DONE — the population and the denominator are the footer's,
             the direction is the question this control answers. See `allChangesLeft`. */}

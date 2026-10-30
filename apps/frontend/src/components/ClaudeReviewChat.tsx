@@ -122,7 +122,7 @@ function PinPill({ label, onRemove }: { label: string; onRemove?: () => void }):
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${label} from the chat`}
-          className="-mr-1 shrink-0 rounded-full p-0.5 hover:bg-blue-200/60 dark:hover:bg-blue-800/60"
+          className="hit -mr-1 shrink-0 rounded-full p-0.5 hover:bg-blue-200/60 dark:hover:bg-blue-800/60"
         >
           <CloseIcon size={10} />
         </button>
@@ -411,7 +411,7 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:underline dark:text-gray-200"
+        className="hit inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:underline dark:text-gray-200"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
         Earlier reviews&apos; chats
@@ -492,7 +492,7 @@ export function ReviewChatSection({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className="hit inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             <CommentIcon size={13} />
             {open ? 'Hide' : `Ask ${providerName} about this review`}

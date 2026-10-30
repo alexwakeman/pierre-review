@@ -367,7 +367,7 @@ function Row({
         <button
           type="button"
           onClick={() => onOpen(pr)}
-          className="block max-w-md text-left hover:underline"
+          className="hit block max-w-md text-left hover:underline"
           title={`${pr.repoFullName} #${pr.prNumber} — ${pr.prTitle}`}
         >
           <span className="block truncate font-mono text-meta text-ui-faint">
@@ -561,7 +561,7 @@ export function MetricsDetail(): JSX.Element {
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
+          className="hit ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}

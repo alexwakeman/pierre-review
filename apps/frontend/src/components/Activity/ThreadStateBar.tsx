@@ -82,7 +82,7 @@ export function ThreadStateBar({
                   background: meta.color,
                   opacity: activeState == null || activeState === s ? 1 : 0.35,
                 }}
-                className="block h-full transition-opacity hover:opacity-100"
+                className="hit block h-full transition-opacity hover:opacity-100"
                 aria-pressed={activeState === s}
               />
             );

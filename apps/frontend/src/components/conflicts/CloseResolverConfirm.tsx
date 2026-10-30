@@ -45,14 +45,14 @@ export function CloseResolverConfirm({
           ref={keepRef}
           type="button"
           onClick={onKeep}
-          className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-900 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
+          className="hit rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-900 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
         >
           {KEEP_WORKING}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:border-gray-300 dark:border-gray-800 dark:text-gray-300 dark:hover:border-gray-700"
+          className="hit rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:border-gray-300 dark:border-gray-800 dark:text-gray-300 dark:hover:border-gray-700"
         >
           {CLOSE_ANYWAY}
         </button>

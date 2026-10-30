@@ -108,10 +108,12 @@ export function useKeyboard(): void {
       }
       const chord = resolveGoChord(goArmedAt.current, e.key, Date.now());
       goArmedAt.current = chord.armedAt;
-      if (chord.go == null) return;
+      // The `g` itself passes through (it only arms); the chord's SECOND key is always consumed,
+      // so an unknown letter never also fires the selected row's action (`g e` used to dismiss).
+      if (!chord.handled || chord.armedAt != null) return;
       e.preventDefault();
       e.stopPropagation();
-      goTo(chord.go);
+      if (chord.go != null) goTo(chord.go);
     };
     window.addEventListener('keydown', onChord, true);
     return () => window.removeEventListener('keydown', onChord, true);

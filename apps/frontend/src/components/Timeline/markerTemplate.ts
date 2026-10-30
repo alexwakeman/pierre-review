@@ -10,15 +10,19 @@ export interface MarkerVisual {
   round?: boolean;
 }
 
+// The redesign's colour rule (docs/redesign/DESIGN.md § 3): the SHAPE says what kind of event it
+// is; colour is kept only where it means something — red for "changes requested" (it blocks),
+// green for an approval (the one event that moves a PR toward ready). Everything else is grey,
+// two steps apart so a filled comment still reads against an outlined one.
 const C = {
-  reviewComment: '#f59e0b',
-  prComment: '#9ca3af',
+  reviewComment: '#8b93a1',
+  prComment: '#8b93a1',
   approved: '#22c55e',
-  changes: '#f97316',
-  commented: '#9ca3af',
-  dismissed: '#9ca3af',
+  changes: '#ef4444',
+  commented: '#8b93a1',
+  dismissed: '#8b93a1',
   commit: '#6b7280',
-  lifecycle: '#3b82f6',
+  lifecycle: '#a3aab6',
 };
 
 function svgWrap(inner: string): string {

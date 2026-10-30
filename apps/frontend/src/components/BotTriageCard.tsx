@@ -249,7 +249,7 @@ export function BotTriageCard({
           <button
             type="button"
             onClick={onOpenThreads}
-            className="ml-auto rounded px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+            className="hit ml-auto rounded px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
             title={
               resolvableIds.length > 0
                 ? 'See the threads. The likely-addressed ones can be resolved there.'
@@ -283,7 +283,7 @@ export function BotTriageCard({
             type="button"
             onClick={() => setConfirming(true)}
             disabled={resolveBotThreads.isPending}
-            className="ml-auto rounded border border-green-600 px-2 py-0.5 font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-950/30"
+            className="hit ml-auto rounded border border-green-600 px-2 py-0.5 font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-950/30"
             title="A later commit touched the file each of these threads flags — review the exact list, then resolve them on GitHub in one click."
           >
             Resolve the {resolvableIds.length} addressed
@@ -327,7 +327,7 @@ export function BotTriageCard({
                   { onSettled: () => setConfirming(false) },
                 )
               }
-              className="rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+              className="hit rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
             >
               {resolveBotThreads.isPending ? 'Resolving…' : 'Yes, resolve'}
             </button>
@@ -335,7 +335,7 @@ export function BotTriageCard({
               type="button"
               disabled={resolveBotThreads.isPending}
               onClick={() => setConfirming(false)}
-              className="rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              className="hit rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             >
               Cancel
             </button>

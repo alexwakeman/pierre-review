@@ -37,7 +37,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
           <button
             type="button"
             onClick={undoAllClaudeChoices}
-            className="inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            className="hit inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
           >
             <UndoIcon size={12} />
             Undo all {name}’s choices
@@ -48,7 +48,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
             type="button"
             aria-expanded={notesOpen}
             onClick={() => setNotesOpen((o) => !o)}
-            className="inline-flex items-center gap-1 text-[11px] text-gray-600 underline-offset-2 hover:underline dark:text-gray-300"
+            className="hit inline-flex items-center gap-1 text-[11px] text-gray-600 underline-offset-2 hover:underline dark:text-gray-300"
           >
             <ChevronIcon dir={notesOpen ? 'down' : 'right'} size={11} />
             {name}’s notes

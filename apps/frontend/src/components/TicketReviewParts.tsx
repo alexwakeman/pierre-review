@@ -142,7 +142,7 @@ function EvidenceRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(ev.path, ev.line, 'RIGHT')}
-        className="break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
       >
         {label}
       </button>
@@ -532,7 +532,7 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         {/* Under "What each PR adds" the PR ref IS the label; a bare mount (one PR's own coverage) names the card. */}

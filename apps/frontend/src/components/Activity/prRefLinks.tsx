@@ -69,7 +69,7 @@ export function renderRefTokens(
           key={`${keyPrefix}r${k++}`}
           type="button"
           onClick={() => onOpenPr(ref)}
-          className="font-semibold text-sky-600 hover:underline dark:text-sky-400"
+          className="hit font-semibold text-sky-600 hover:underline dark:text-sky-400"
           title={ref.title ?? label}
         >
           {label}

@@ -245,7 +245,7 @@ export function FirstRunOnboarding(): JSX.Element {
               type="button"
               onClick={addSelected}
               disabled={running || chosen.length === 0}
-              className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="hit rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {running
                 ? progress
@@ -274,7 +274,7 @@ export function FirstRunOnboarding(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => flushBatch(pendingSuccessIds)}
-                  className="mt-2 rounded bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-700"
+                  className="hit mt-2 rounded bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-700"
                 >
                   Continue with the {pendingSuccessIds.length} added repo
                   {pendingSuccessIds.length === 1 ? '' : 's'}

@@ -234,7 +234,7 @@ export function MyTurnSection(): JSX.Element {
                       onClick={() => move(reason, dir)}
                       disabled={dir === -1 ? i === 0 : i === visibleOrder.length - 1}
                       aria-label={`Move “${label}” ${dir === -1 ? 'up' : 'down'}`}
-                      className="rounded-ui p-1.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                      className="hit rounded-ui p-1.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
                     >
                       <ArrowIcon dir={dir === -1 ? 'up' : 'down'} size={12} />
                     </button>

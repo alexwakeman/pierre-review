@@ -357,7 +357,7 @@ export function BotThreadsDetail(): JSX.Element {
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
+          className="hit ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -393,7 +393,7 @@ export function BotThreadsDetail(): JSX.Element {
         <button
           type="button"
           onClick={() => setShowReceipts(true)}
-          className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
+          className="hit w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
         >
           Show the {totalThreads.toLocaleString()} thread{totalThreads === 1 ? '' : 's'} across{' '}
           {prs.length.toLocaleString()} PR{prs.length === 1 ? '' : 's'} this summary was computed
@@ -439,7 +439,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending}
                   onClick={() => setConfirming(false)}
-                  className="rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink"
+                  className="hit rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink"
                 >
                   Cancel
                 </button>
@@ -461,7 +461,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   onClick={selectAll}
                   disabled={allSelected || filtered.length === 0}
-                  className="rounded-ui px-2 py-1 text-meta font-medium text-ui-mute disabled:opacity-50 bg-ui-surface"
+                  className="hit rounded-ui px-2 py-1 text-meta font-medium text-ui-mute disabled:opacity-50 bg-ui-surface"
                   title="Select every PR in the list (across all pages)"
                 >
                   Select all{effectiveRepoFilter === 'all' ? '' : ' (repo)'}
@@ -473,7 +473,7 @@ export function BotThreadsDetail(): JSX.Element {
                   // or high-only filter that hides every selected PR, Clear greys out in step with
                   // the "0 of 0 selected" summary instead of dangling enabled off a hidden ghost.
                   disabled={selectedPrIds.length === 0}
-                  className="rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink disabled:opacity-40"
+                  className="hit rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink disabled:opacity-40"
                 >
                   Clear
                 </button>
@@ -638,7 +638,7 @@ export function BotThreadsDetail(): JSX.Element {
                 type="button"
                 onClick={() => setPage(Math.max(0, safePage - 1))}
                 disabled={safePage === 0}
-                className="inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
+                className="hit inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
               >
                 <ChevronIcon dir="left" size={11} />
                 Prev
@@ -650,7 +650,7 @@ export function BotThreadsDetail(): JSX.Element {
                 type="button"
                 onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
                 disabled={safePage >= pageCount - 1}
-                className="inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
+                className="hit inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
               >
                 Next
                 <ChevronIcon dir="right" size={11} />

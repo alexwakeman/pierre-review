@@ -203,7 +203,7 @@ export function SprintStoryTray({
         <button
           type="button"
           onClick={onClose}
-          className={cx('-ml-1 flex h-10 items-center gap-1 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink md:hidden', FOCUS_RING)}
+          className={cx('hit -ml-1 flex h-10 items-center gap-1 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink md:hidden', FOCUS_RING)}
         >
           <ChevronIcon dir="left" size={12} />
           Back

@@ -271,7 +271,7 @@ export function PrTable({
                     <button
                       type="button"
                       onClick={() => onOpenPr(pr)}
-                      className="block text-left leading-snug hover:underline"
+                      className="hit block text-left leading-snug hover:underline"
                       title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''}`}
                     >
                       <span className="font-semibold text-sky-600 dark:text-sky-400">

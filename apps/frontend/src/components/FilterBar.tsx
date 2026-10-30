@@ -263,7 +263,16 @@ export function FilterBar(): JSX.Element | null {
   }
 
   return (
-    <div data-testid="filter-bar" className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-2 bg-ui-bg px-3 py-2 md:px-4">
+    <>
+    {/* THE PAGE HEADER (docs/redesign/DESIGN.md § 1): every page opens on its title; the board's
+        filters are its header row. Not on a phone (the top bar names the page) and not on a PR
+        Focus tab (its tab chip names it). */}
+    {isTimeline && !phone && (
+      <header className="shrink-0 bg-ui-bg px-7 pt-5" data-testid="timeline-header">
+        <h2 className="text-display text-ui-ink">Timeline</h2>
+      </header>
+    )}
+    <div data-testid="filter-bar" className={cx('flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-2 bg-ui-bg px-3 py-2', isTimeline && !phone ? 'md:px-[18px] md:pb-3' : 'md:px-4')}>
       {phone && (
         <button type="button" onClick={() => setPhoneOpen(false)} aria-expanded className={cx(TOOL, '-ml-1 text-ui-ink')}>
           <FilterIcon size={13} />
@@ -400,5 +409,6 @@ export function FilterBar(): JSX.Element | null {
         </div>
       )}
     </div>
+    </>
   );
 }

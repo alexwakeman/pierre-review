@@ -66,7 +66,7 @@ export function BasePopover({
         onClick={() => onOpenChange(!open)}
         aria-expanded={open}
         title={COMPARE_BASE_HEADER}
-        className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600"
+        className="hit flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600"
       >
         <CompareBaseIcon size={13} />
         {COMPARE_BASE}

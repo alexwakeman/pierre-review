@@ -87,7 +87,7 @@ function Row({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-meta text-ui-mute hover:underline"
+              className="hit font-mono text-meta text-ui-mute hover:underline"
               title="Open on GitHub"
             >
               #{row.prNumber}
@@ -99,7 +99,7 @@ function Row({
             type="button"
             onClick={() => onOpenPr(row)}
             title="Open this PR"
-            className="max-w-[46rem] truncate text-left text-ui-ink hover:underline"
+            className="hit max-w-[46rem] truncate text-left text-ui-ink hover:underline"
           >
             {row.prTitle}
           </button>
@@ -381,7 +381,7 @@ export function BotVolumeDetail(): JSX.Element {
                 type="button"
                 onClick={() => setBots(null)}
                 title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from that bot's cell in the Bots table. Click to widen to every bot, keeping this window and scope.`}
-                className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
+                className="hit flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
               >
                 <BotIcon size={11} />
                 {botNarrowLabel(bots)} only
@@ -420,7 +420,7 @@ export function BotVolumeDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setBots(null)}
-                      className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
+                      className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                     >
                       Show every bot
                     </button>
@@ -442,7 +442,7 @@ export function BotVolumeDetail(): JSX.Element {
             <button
               type="button"
               onClick={() => setShowReceipts(true)}
-              className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
+              className="hit w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
             >
               Show the {filteredTotal.toLocaleString()} merged PR{filteredTotal === 1 ? '' : 's'}{' '}
               this summary was computed from
@@ -514,7 +514,7 @@ export function BotVolumeDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={fetchMore}
-                      className="rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
+                      className="hit rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
                     >
                       Load more
                     </button>

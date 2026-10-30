@@ -159,7 +159,7 @@ export function SlotStrip({
             onActivate();
             setWhyOpen((o) => !o);
           }}
-          className="inline-flex items-center gap-1 rounded bg-ai-signal-fill/10 px-1 py-0.5 text-[11px] font-medium leading-none text-ai-signal"
+          className="hit inline-flex items-center gap-1 rounded bg-ai-signal-fill/10 px-1 py-0.5 text-[11px] font-medium leading-none text-ai-signal"
         >
           <SparkleIcon size={11} />
           {aiName}

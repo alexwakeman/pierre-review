@@ -21,7 +21,7 @@ export function TicketComments({ comments }: { comments: readonly TicketComment[
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
         Comments ({comments.length})

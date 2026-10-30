@@ -227,7 +227,7 @@ export function BarChart({
               <button
                 key={`hit-${i}`}
                 type="button"
-                className="pointer-events-auto absolute cursor-pointer rounded-ui bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                className="hit pointer-events-auto absolute cursor-pointer rounded-ui bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                 style={{ left: PAD_L + i * bandW, top: PAD_T, width: bandW, height: innerH }}
                 onMouseEnter={() => setHover(i)}
                 // ⚠ EACH BAND MUST CLEAR ITS OWN HOVER. The svg's full-size transparent overlay

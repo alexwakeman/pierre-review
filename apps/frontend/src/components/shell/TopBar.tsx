@@ -7,6 +7,8 @@ import { PinnedTabsBar } from '../PinnedTabsBar.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 import { currentLocation, destination } from './nav.js';
 import { tabWords } from './Sidebar.js';
+import { AlertDot } from './AlertDot.js';
+import { useShellSignals } from './shellSignals.js';
 import type { ReactNode } from 'react';
 
 // THE SLIM TOP BAR — the one strip above the content (docs/redesign/DESIGN.md § 1).
@@ -23,6 +25,7 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setDrawerOpen = useShell((s) => s.setDrawerOpen);
   const { data: repos } = useRepos();
+  const signals = useShellSignals();
   const loc = currentLocation(activeTab, tabs, activityRepoId);
   const activeDynamic = loc == null ? tabs.find((t) => t.key === activeTab) : undefined;
   const label =
@@ -38,30 +41,46 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
       <button
         type="button"
         onClick={() => setDrawerOpen(true)}
-        aria-label="Open menu"
-        title="Menu"
+        aria-label={signals.alertWords != null ? `Open menu. ${signals.alertWords}` : 'Open menu'}
+        title={signals.alertWords != null ? `Menu — ${signals.alertWords}` : 'Menu'}
+        data-alert={signals.alert ?? undefined}
+        data-testid="topbar-menu"
         className={cx(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10 lg:hidden',
+          'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10 lg:hidden',
           FOCUS_RING,
         )}
       >
         <MenuIcon />
+        {signals.alert != null && <AlertDot tone={signals.alert} />}
       </button>
       {/* Where you are — for when the sidebar is not on screen (below lg). At lg+ the sidebar's
           highlight says it; on md+ a dynamic tab says it through its highlighted chip. */}
       <p
         className={cx(
-          'min-w-0 shrink truncate text-body font-medium text-ui-ink',
-          loc == null ? 'max-w-[55%] md:hidden' : 'max-w-[40%] md:max-w-[14rem] lg:hidden',
+          // Below md the location takes what the toasts leave (min-w-0 flex-1), never a fixed cap —
+          // a fixed 55% let a toast overrun the bar's clipped edge.
+          'min-w-0 flex-1 truncate text-body font-medium text-ui-ink md:flex-none',
+          loc == null ? 'md:hidden' : 'md:max-w-[14rem] lg:hidden',
         )}
         data-testid="topbar-location"
+        title={signals.workspaceName != null ? `${signals.workspaceName} · ${label}` : label}
       >
+        {/* The workspace you are in — on main its pill was visible at every width. */}
+        {signals.workspaceName != null && (
+          <span className="font-normal text-ui-faint" data-testid="topbar-workspace">
+            {signals.workspaceName}
+            <span aria-hidden> / </span>
+            <span className="sr-only">: </span>
+          </span>
+        )}
         {label}
       </p>
       <div className="hidden min-w-0 flex-1 md:flex">
         <PinnedTabsBar />
       </div>
-      <div className="flex min-w-0 flex-1 md:max-w-[min(34rem,45%)] md:flex-none md:basis-[34rem]">{toasts}</div>
+      <div className="flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-[34rem] md:justify-start">
+        {toasts}
+      </div>
     </header>
   );
 }

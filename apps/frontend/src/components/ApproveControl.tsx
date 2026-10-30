@@ -198,7 +198,7 @@ export function ApproveControl({
             type="button"
             disabled
             title="Your approval stands"
-            className="inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
+            className="hit inline-flex cursor-default items-center gap-1 rounded border border-green-500/40 px-2 py-0.5 text-sm font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
           >
             <CheckIcon /> Approved
           </button>

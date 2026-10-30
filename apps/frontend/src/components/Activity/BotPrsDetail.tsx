@@ -133,7 +133,7 @@ function CommentRow({
         <button
           type="button"
           onClick={() => onOpen(c)}
-          className="block max-w-56 text-left hover:underline"
+          className="hit block max-w-56 text-left hover:underline"
           title={`${c.repoFullName} #${c.prNumber} — ${c.prTitle}`}
         >
           <span className="block truncate font-mono text-meta text-ui-faint">
@@ -236,7 +236,7 @@ function Row({
         <button
           type="button"
           onClick={() => onOpen(pr)}
-          className="block max-w-md text-left hover:underline"
+          className="hit block max-w-md text-left hover:underline"
           title={`${pr.repoFullName} #${pr.prNumber} — ${pr.prTitle}`}
         >
           <span className="block truncate font-mono text-meta text-ui-faint">
@@ -518,7 +518,7 @@ export function BotPrsDetail(): JSX.Element {
           type="button"
           onClick={refresh}
           disabled={isFetching}
-          className="rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
+          className="hit rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -692,7 +692,7 @@ export function BotPrsDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearCommentFilters}
-                  className="rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
+                  className="hit rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -721,7 +721,7 @@ export function BotPrsDetail(): JSX.Element {
                       <button
                         type="button"
                         onClick={clearCommentFilters}
-                        className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
+                        className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                       >
                         Clear filters
                       </button>
@@ -765,7 +765,7 @@ export function BotPrsDetail(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => setVisibleComments((n) => n + COMMENTS_PAGE_STEP)}
-                    className="w-full rounded-ui px-2 py-1 text-meta font-medium text-ui-mute bg-ui-surface"
+                    className="hit w-full rounded-ui px-2 py-1 text-meta font-medium text-ui-mute bg-ui-surface"
                   >
                     Show more ({(commentRows.length - visibleComments).toLocaleString()} remaining)
                   </button>

@@ -290,7 +290,7 @@ function DesignCard({
                         setOpen(false);
                         openFile!(cell, f);
                       }}
-                      className="block w-full break-all rounded px-2 py-1 text-left font-mono text-[12px] text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-100 dark:hover:bg-gray-800"
+                      className="hit block w-full break-all rounded px-2 py-1 text-left font-mono text-[12px] text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-100 dark:hover:bg-gray-800"
                     >
                       {f}
                     </button>

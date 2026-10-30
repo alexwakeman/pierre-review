@@ -97,19 +97,18 @@ export interface HeaderToastProgress {
 /** A toast's source, as a colour. Each reuses the accent its home surface already wears. */
 export type HeaderToastTone = 'neutral' | 'ai' | 'merge' | 'sync' | 'attention' | 'conflicts';
 
-// THE ONE TONE MAPPING: the card's BORDER and its PROGRESS FILL are the same colour, so a bar
-// can never say a different source from the card it sits on. Non-text colours only, so none of
-// these carries words and none needs a text-contrast pairing. `ai-signal-fill` is the AI surface's
-// NON-TEXT accent and flips with the theme by itself; violet is the merge family's own
-// (MergeControl's buttons); sky-500 is the sync/selection accent; amber-500 is the Pending rail
-// entry's stopwatch; `--mr-conflict` is the resolver's conflict type.
-export const HEADER_TOAST_TONE: Record<HeaderToastTone, { border: string; fill: string }> = {
-  neutral: { border: 'border-gray-200 dark:border-gray-700', fill: 'bg-gray-400 dark:bg-gray-500' },
-  ai: { border: 'border-ai-signal-fill', fill: 'bg-ai-signal-fill' },
-  merge: { border: 'border-violet-500 dark:border-violet-600', fill: 'bg-violet-500 dark:bg-violet-600' },
-  sync: { border: 'border-sky-500', fill: 'bg-sky-500' },
-  attention: { border: 'border-amber-500', fill: 'bg-amber-500' },
-  conflicts: { border: 'border-[rgb(var(--mr-conflict))]', fill: 'bg-[rgb(var(--mr-conflict))]' },
+// THE ONE TONE MAPPING (the redesign's colour rule, docs/redesign/DESIGN.md § 3): a card is a
+// toned surface with NO border. Its source shows only on the ICON and the PROGRESS FILL, and only
+// where the colour means something: the AI family for a model's run, danger for conflicts (they
+// block), the accent for the sync / merge machinery the reader set going, grey for the rest.
+// Non-text colours on the fill; the icon colours are the measured `--ui-*` / `--ai-*` inks.
+export const HEADER_TOAST_TONE: Record<HeaderToastTone, { mark: string; fill: string }> = {
+  neutral: { mark: 'text-ui-mute', fill: 'bg-ui-faint' },
+  ai: { mark: 'text-ai-signal', fill: 'bg-ai-signal-fill' },
+  merge: { mark: 'text-ui-accent', fill: 'bg-ui-accent' },
+  sync: { mark: 'text-ui-accent', fill: 'bg-ui-accent' },
+  attention: { mark: 'text-ui-mute', fill: 'bg-ui-faint' },
+  conflicts: { mark: 'text-ui-danger', fill: 'bg-ui-danger' },
 };
 
 interface HeaderToastProps {
@@ -261,14 +260,13 @@ function stop(e: React.SyntheticEvent): void {
 
 // ONE slot size for every card: the words show from `sm` up; below it the icon, the action and the
 // X (the words return on expand).
-const SLOT = 'relative h-7 w-28 shrink-0 sm:w-56 lg:w-64';
-const PANEL_BASE =
-  'rounded-md border border-l-[3px] bg-white text-gray-800 dark:bg-gray-900 dark:text-gray-100';
+const SLOT = 'relative h-7 w-28 shrink-0 sm:w-56 lg:w-64 touch:h-10';
+const PANEL_BASE = 'rounded-ui bg-ui-raise text-ui-ink';
 const PANEL_COLLAPSED = 'absolute inset-0 overflow-hidden';
 // ⚠ `overscroll-contain` is the scroll-bug fix, not polish — see the header comment.
 const PANEL_EXPANDED = 'z-50 overflow-y-auto overscroll-contain shadow-lg';
 // The one inner divider every section of an expanded panel uses.
-const SECTION = 'border-t border-gray-100 dark:border-gray-800';
+const SECTION = 'border-t border-ui-line/60';
 
 /** A toast card. */
 export function HeaderToast({
@@ -298,14 +296,14 @@ export function HeaderToast({
         data-tone={tone}
         data-expanded={expanded ? 'true' : undefined}
         style={panelStyle}
-        className={`${PANEL_BASE} ${colours.border} ${expanded ? PANEL_EXPANDED : PANEL_COLLAPSED}`}
+        className={`${PANEL_BASE} ${expanded ? PANEL_EXPANDED : PANEL_COLLAPSED}`}
       >
         {/* THE LINE — the same in both states. It is the click target (icon, words, empty space);
             the button inside it (icon + words) is the keyboard stop and carries aria-expanded. Its own click
             bubbles here, so Enter / Space and a pointer take the one path. Collapsed, the words
             are one truncated line in exactly 26px; expanded, they wrap so the full text shows. */}
         <div
-          className="relative flex min-h-[26px] cursor-pointer items-center gap-1.5 px-2"
+          className="relative flex min-h-[26px] cursor-pointer items-center gap-1.5 px-2 touch:min-h-10"
           onClick={toggle}
         >
           {/* The icon sits INSIDE the toggle, so below `sm` (words visually hidden) the keyboard
@@ -314,22 +312,22 @@ export function HeaderToast({
             type="button"
             data-toast-toggle
             aria-expanded={expanded}
-            className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 rounded-ui text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           >
-            <span className="flex h-[18px] shrink-0 items-center text-gray-600 dark:text-gray-300">
+            <span className={`flex h-[18px] shrink-0 items-center ${colours.mark}`}>
               {icon}
             </span>
             <span
               data-toast-line
-              className={`block min-w-0 flex-1 text-[12px] leading-[18px] ${
+              className={`block min-w-0 flex-1 text-meta leading-[18px] ${
                 expanded ? 'whitespace-normal break-words py-1' : `truncate${summary == null ? ' max-sm:sr-only' : ''}`
               }`}
             >
               {/* Below `sm` a collapsed card with a summary shows the summary alone ("1 armed"), the
                   label staying in the accessible name; a card without one shows its icon only. */}
-              <span className={`font-semibold${expanded ? '' : ' max-sm:sr-only'}`}>{label}</span>
+              <span className={`font-medium${expanded ? '' : ' max-sm:sr-only'}`}>{label}</span>
               {summary != null && (
-                <span className="text-gray-600 dark:text-gray-300">
+                <span className="text-ui-mute">
                   <span className={expanded ? undefined : 'max-sm:sr-only'}> · </span>
                   {summary}
                 </span>
@@ -350,7 +348,7 @@ export function HeaderToast({
               }}
               aria-label={dismissLabel ?? `Dismiss ${label}`}
               title={dismissLabel ?? `Dismiss ${label}`}
-              className="-mr-1 flex shrink-0 items-center rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              className="hit -mr-1 flex shrink-0 items-center rounded-ui p-0.5 text-ui-faint hover:bg-ui-hover hover:text-ui-ink"
             >
               <CloseIcon size={12} />
             </button>
@@ -362,10 +360,10 @@ export function HeaderToast({
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={pct}
-              className="absolute inset-x-1 bottom-0 h-[3px] overflow-hidden rounded bg-gray-200 dark:bg-gray-800"
+              className="absolute inset-x-1 bottom-0 h-[3px] overflow-hidden rounded-[2px] bg-ui-hover"
             >
               <div
-                className={`h-full rounded ${colours.fill} transition-all duration-500`}
+                className={`h-full rounded-[2px] ${colours.fill} motion-safe:transition-all motion-safe:duration-500`}
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -373,11 +371,11 @@ export function HeaderToast({
         </div>
         {/* THE DETAIL — mounted only while expanded: rows, then the footer. */}
         {expanded && children != null && (
-          <div className={`${SECTION} px-2 py-1 text-[12px]`}>{children}</div>
+          <div className={`${SECTION} px-2 py-1 text-meta`}>{children}</div>
         )}
         {expanded && footer != null && (
           <div
-            className={`${SECTION} flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 py-1.5 text-[11px] text-gray-600 dark:text-gray-300`}
+            className={`${SECTION} flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 py-1.5 text-meta text-ui-mute`}
           >
             {footer}
           </div>
@@ -393,7 +391,7 @@ export function HeaderToast({
  */
 export function ToastList({ id, children }: { id?: string; children: ReactNode }): JSX.Element {
   return (
-    <ul id={id} className="-mx-2 -my-1 divide-y divide-gray-100 dark:divide-gray-800">
+    <ul id={id} className="-mx-2 -my-1 divide-y divide-ui-line/60">
       {children}
     </ul>
   );
@@ -401,7 +399,7 @@ export function ToastList({ id, children }: { id?: string; children: ReactNode }
 
 /** One row of a card: the same padding, type size and line layout on every card. */
 export function ToastRow({ children }: { children: ReactNode }): JSX.Element {
-  return <li className="px-2 py-1.5 text-[12px] leading-snug">{children}</li>;
+  return <li className="px-2 py-1.5 text-meta leading-snug">{children}</li>;
 }
 
 /** The compact control kept on a card's line (Undo, Reopen) — one look for every card. */
@@ -419,7 +417,7 @@ export function ToastLineButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="whitespace-nowrap rounded border border-gray-300 px-1.5 text-[11px] leading-[18px] text-gray-800 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+      className="hit whitespace-nowrap rounded-ui bg-ui-hover px-1.5 text-meta font-medium leading-[18px] text-ui-ink hover:brightness-110 disabled:opacity-50"
     >
       {children}
     </button>
@@ -442,7 +440,7 @@ export function ToastFooterButton({
       type="button"
       onClick={onClick}
       {...rest}
-      className="rounded text-[11px] font-medium text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300"
+      className="hit rounded-ui text-meta font-medium text-ui-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
     >
       {children}
     </button>

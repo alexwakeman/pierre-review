@@ -159,7 +159,7 @@ function GuideLink({ onClick }: { onClick: () => void }): JSX.Element {
     <button
       type="button"
       onClick={onClick}
-      className="mt-2.5 text-[12px] font-medium text-sky-700 hover:underline dark:text-sky-400"
+      className="hit mt-2.5 text-[12px] font-medium text-sky-700 hover:underline dark:text-sky-400"
     >
       How Pending works
     </button>
@@ -476,7 +476,7 @@ export function PendingGuideModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center self-stretch text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+            className="hit flex items-center self-stretch text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
             aria-label="Close (Esc)"
           >
             <CloseIcon size={16} />

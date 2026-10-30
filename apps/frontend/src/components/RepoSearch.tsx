@@ -296,7 +296,7 @@ export function RepoSearch({
           disabled={addRepo.isPending || atRepoLimit}
           onMouseEnter={() => setActive(idx)}
           onClick={() => addRepo.mutate({ owner: s.owner, name: s.name })}
-          className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
+          className="hit flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
         >
           <OwnerAvatar login={s.owner} src={null} />
           <span className="min-w-0 flex-1">
@@ -326,7 +326,7 @@ export function RepoSearch({
           onClick={(e) => e.stopPropagation()}
           title="Open on GitHub"
           aria-label={`Open ${s.owner}/${s.name} on GitHub`}
-          className="flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          className="hit flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
         >
           <ExternalLinkIcon size={12} />
         </a>
@@ -466,7 +466,7 @@ export function RepoSearch({
                       disabled={addRepo.isPending}
                       onMouseEnter={() => setActive(idx)}
                       onClick={() => addRepo.mutate({ owner: r.owner, name: r.name })}
-                      className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
+                      className="hit flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left disabled:opacity-60"
                     >
                       <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />
                       <span className="min-w-0 flex-1">
@@ -522,7 +522,7 @@ export function RepoSearch({
                       onClick={(e) => e.stopPropagation()}
                       title="Open on GitHub"
                       aria-label={`Open ${r.fullName} on GitHub`}
-                      className="flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      className="hit flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                     >
                       <ExternalLinkIcon size={12} />
                     </a>
@@ -538,7 +538,7 @@ export function RepoSearch({
                 type="button"
                 onClick={gotoPrev}
                 disabled={pageIdx === 0}
-                className="flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
               >
                 <ChevronIcon dir="left" size={11} />
                 Prev
@@ -548,7 +548,7 @@ export function RepoSearch({
                 type="button"
                 onClick={gotoNext}
                 disabled={!hasNextPage}
-                className="flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
               >
                 Next
                 <ChevronIcon dir="right" size={11} />

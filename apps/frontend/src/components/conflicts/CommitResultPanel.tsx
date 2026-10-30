@@ -77,7 +77,7 @@ export function CommitResultPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+            className="hit rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
           >
             {CLOSE_RESOLVER}
           </button>
@@ -86,7 +86,7 @@ export function CommitResultPanel({
               href={compareUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="text-xs text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+              className="hit text-xs text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             >
               {OPEN_COMPARE}
               <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />

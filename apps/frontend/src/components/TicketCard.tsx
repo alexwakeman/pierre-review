@@ -126,7 +126,7 @@ export function TicketCard({
         title={code?.tooltip}
         data-card-button
         onClick={() => onSelect(node)}
-        className={cx('flex w-full min-w-0 flex-col rounded-ui px-2.5 py-2 text-left', FOCUS_RING)}
+        className={cx('hit flex w-full min-w-0 flex-col rounded-ui px-2.5 py-2 text-left', FOCUS_RING)}
       >
         <span className="flex h-4 min-w-0 items-center gap-1 pr-5 [@media(hover:hover)]:pr-0">
           {/* Has an open or merged pull request: the pull-request mark, before the key. */}

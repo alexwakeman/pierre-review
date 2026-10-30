@@ -440,7 +440,7 @@ export function LandingStep({
                     strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH,
                   )}
                   aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
-                  className="rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
+                  className="hit rounded bg-gray-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
                 >
                   {strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH}
                 </button>
@@ -543,7 +543,7 @@ function SecondaryButton({
     <button
       type="button"
       onClick={onClick}
-      className="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+      className="hit rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
     >
       {children}
     </button>

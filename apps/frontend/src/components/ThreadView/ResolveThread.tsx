@@ -33,7 +33,7 @@ export function ResolveThread({
             ? 'Reopen this thread on GitHub'
             : 'Mark this thread resolved on GitHub'
         }
-        className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+        className="hit rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
       >
         {isResolved ? 'Unresolve' : 'Resolve'}
       </button>

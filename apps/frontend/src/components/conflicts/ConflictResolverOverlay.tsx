@@ -319,7 +319,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             Open on GitHub
             <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />
@@ -331,7 +331,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
         <button
           type="button"
           onClick={() => close({ reason: closeReason('user') })}
-          className="flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          className="hit flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           title="Close"
           aria-label="Close"
         >
@@ -647,7 +647,7 @@ function Notice({ text, onRetry }: { text: string; onRetry?: () => void }): JSX.
         <button
           type="button"
           onClick={onRetry}
-          className="rounded border border-gray-300 px-1.5 py-0.5 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
+          className="hit rounded border border-gray-300 px-1.5 py-0.5 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
         >
           {/* Every `onRetry` here is `onRestart` — it opens a new session, it does not re-send
               anything — so the button says what it does, in the same words the landing step uses

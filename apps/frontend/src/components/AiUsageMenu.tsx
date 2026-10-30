@@ -163,7 +163,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
                 setOpen(false);
                 openSettings('claude-spend');
               }}
-              className="rounded text-xs text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded text-xs text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
             >
               AI spend settings
             </button>

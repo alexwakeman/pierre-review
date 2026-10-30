@@ -348,7 +348,7 @@ export function FixPicker({
               </span>
               <button
                 type="button"
-                className="ml-auto text-[11px] text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
+                className="hit ml-auto text-[11px] text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
                 disabled={disabled}
                 onClick={() =>
                   set(

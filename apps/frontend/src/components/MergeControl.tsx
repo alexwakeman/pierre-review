@@ -16,7 +16,7 @@ import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateSta
 import { ApiError } from '../api/client.js';
 import { CaretIcon, ExternalLinkIcon, MergeIcon, WarningIcon } from './Icons.js';
 import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
-import { Select } from './ui/index.js';
+import { Button, Select } from './ui/index.js';
 import type { ResolverTarget } from '../store/conflictResolver.js';
 
 // Merge control for the Overview tab (CORE / free tier), rendered next to Approve when the
@@ -195,32 +195,23 @@ export function MergeControl({
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
-      >
-        <MergeIcon />
+      <Button size="sm" onClick={() => setOpen(true)} icon={<MergeIcon />}>
         {label}
         <CaretIcon />
-      </button>
+      </Button>
     );
   }
 
   if (isLoading) {
-    return <div className="text-xs text-gray-400">Checking merge status…</div>;
+    return <div className="text-meta text-ui-faint">Checking merge status…</div>;
   }
   if (isError || options == null) {
     return (
-      <div className="flex items-center gap-2 text-xs text-red-500">
+      <div className="flex items-center gap-2 text-meta text-ui-danger">
         Couldn’t load merge status.
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="rounded border border-gray-300 px-1.5 py-0.5 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300"
-        >
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
           Close
-        </button>
+        </Button>
       </div>
     );
   }
@@ -288,13 +279,13 @@ export function MergeControl({
   return (
     <div className="w-full space-y-2">
       {/* The verdict, always first — "why can't I merge this?" answered in one line. */}
-      <div className={`text-xs font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}>
+      <div className={`text-meta font-medium ${MERGE_TONE_CLASS[verdict.tone]}`}>
         {(verdict.tone === 'bad' || verdict.tone === 'warn') && (
           <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
         )}
         {verdict.label}
         {verdict.detail && (
-          <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
+          <span className="ml-1 font-normal text-ui-mute">
             — {verdict.detail}
           </span>
         )}
@@ -310,8 +301,8 @@ export function MergeControl({
           fetch. Two gates on one screen is fine here: this box exists because the fetch happened,
           and the button exists because the four synced facts say so. */}
       {options.conflicts && (
-        <div className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200">
-          <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
+        <div className="rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-ink">
+          <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em] text-ui-danger" />
           This PR conflicts with <span className="font-mono">{options.baseRef}</span>.
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             {resolverTarget != null && (
@@ -335,7 +326,7 @@ export function MergeControl({
               href={githubUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="font-medium underline"
+              className="hit inline-flex items-center gap-1 rounded-ui font-medium text-ui-mute underline-offset-2 hover:text-ui-ink hover:underline touch:min-h-10"
             >
               Resolve on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
             </a>
@@ -345,8 +336,8 @@ export function MergeControl({
 
       {/* Behind trunk — offer an update (rebase locally / merge). Hidden on conflicts. */}
       {options.canUpdateBranch && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-gray-500 dark:text-gray-400">{behindLabel}.</span>
+        <div className="flex flex-wrap items-center gap-2 text-meta">
+          <span className="text-ui-mute">{behindLabel}.</span>
           {options.canRebaseUpdate && (
             <Select<'rebase' | 'merge'>
               label="How to bring in the base branch"
@@ -360,51 +351,45 @@ export function MergeControl({
               ]}
             />
           )}
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() =>
               update.mutate(
                 options.canRebaseUpdate ? { strategy: updateStrategy } : { strategy: 'merge' },
               )
             }
             disabled={update.isPending}
-            className="rounded border border-sky-500 px-2 py-0.5 font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50 dark:border-sky-600 dark:text-sky-300 dark:hover:bg-sky-900/30"
             title="Bring in the latest base-branch changes before merging"
           >
             {update.isPending ? 'Updating…' : 'Update branch'}
-          </button>
-          {updateError && <span className="text-red-500">{updateError}</span>}
+          </Button>
+          {updateError && <span className="text-ui-danger">{updateError}</span>}
         </div>
       )}
 
       {/* An armed intent — what it will do, and how to call it off. */}
       {isArmed && armed != null && (
-        <div className="rounded border border-violet-300 bg-violet-50/60 px-2 py-1.5 text-xs text-violet-900 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-200">
+        <div className="rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-ink">
           <div className="font-medium">
             {/* On a queue intent the METHOD verb would mislead — the queue's own configured
                 method wins, not the intent's. Say what actually lands it instead. */}
             Auto-merge armed · {armed.viaMergeQueue ? 'via the merge queue' : METHOD_VERB[armed.mergeMethod]} · armed{' '}
             {relativeTime(armed.armedAt)}
           </div>
-          <div className="mt-0.5 text-violet-700/90 dark:text-violet-300/90">
+          <div className="mt-0.5 text-ui-mute">
             {armed.lastReason ?? 'Waiting for the blockers to clear.'}
           </div>
           {/* Honest about the mechanism: this is a watcher in THIS server, not a GitHub setting. */}
-          <div className="mt-0.5 text-[11px] text-violet-700/70 dark:text-violet-300/70">
+          <div className="mt-0.5 text-meta text-ui-faint">
             {armed.viaMergeQueue
               ? 'Limn adds it to the merge queue while the app is running; GitHub lands it from there.'
               : 'Limn merges it while the app is running.'}{' '}
             A new commit on the branch disarms it — you re-arm to merge the new code. Expires{' '}
             {dateTime(armed.expiresAt)}.
           </div>
-          <button
-            type="button"
-            onClick={() => disarm.mutate()}
-            disabled={disarm.isPending}
-            className="mt-1 rounded border border-violet-400 px-1.5 py-0.5 font-medium hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:hover:bg-violet-900/40"
-          >
+          <Button size="sm" variant="secondary" className="mt-1.5" onClick={() => disarm.mutate()} disabled={disarm.isPending}>
             {disarm.isPending ? 'Cancelling…' : 'Cancel auto-merge'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -413,15 +398,15 @@ export function MergeControl({
           control — so the only queue verb left is adding it. */}
       <div className="flex flex-wrap items-center gap-2">
         {queue?.enabled ? (
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="primary"
             onClick={() => enqueue.mutate(effectiveMethod)}
             disabled={busy}
-            className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
             title="This branch uses a merge queue — GitHub merges it in turn"
           >
             {queueing ? 'Queueing…' : 'Add to merge queue'}
-          </button>
+          </Button>
         ) : (
           <>
             {options.allowedMethods.length > 1 && (
@@ -433,19 +418,20 @@ export function MergeControl({
                 options={options.allowedMethods.map((m) => ({ value: m, label: METHOD_LABEL[m] }))}
               />
             )}
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="primary"
               onClick={() => merge.mutate(effectiveMethod)}
               disabled={!canMergeNow || busy}
-              className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
               title={canMergeNow ? 'Merge this PR' : verdict.detail ?? 'This PR can’t be merged right now'}
             >
               {merge.isPending ? 'Merging…' : METHOD_VERB[effectiveMethod]}
-            </button>
+            </Button>
           </>
         )}
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => {
             setOpen(false);
             merge.reset();
@@ -455,13 +441,12 @@ export function MergeControl({
             disarm.reset();
           }}
           disabled={busy}
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           Cancel
-        </button>
-        {mergeError && <span className="text-xs text-red-500">{mergeError}</span>}
-        {queueError && <span className="text-xs text-red-500">{queueError}</span>}
-        {armError && <span className="text-xs text-red-500">{armError}</span>}
+        </Button>
+        {mergeError && <span className="text-meta text-ui-danger">{mergeError}</span>}
+        {queueError && <span className="text-meta text-ui-danger">{queueError}</span>}
+        {armError && <span className="text-meta text-ui-danger">{armError}</span>}
       </div>
     </div>
   );
@@ -495,9 +480,7 @@ function QueuedRow({
     <div className="flex flex-wrap items-center gap-2">
       {showLine && (
       <span
-        className={`text-xs ${
-          status.tone === 'bad' ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-gray-300'
-        }`}
+        className={`text-meta ${status.tone === 'bad' ? 'text-ui-danger' : 'text-ui-mute'}`}
         title={status.title}
       >
         {/* Only the ejection earns a mark — it is the one state that needs the reader. */}
@@ -507,16 +490,10 @@ function QueuedRow({
         {status.line}
       </span>
       )}
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={busy}
-        title={showLine ? undefined : status.title}
-        className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-      >
+      <Button size="sm" onClick={onRemove} disabled={busy} title={showLine ? undefined : status.title}>
         {removing ? 'Removing…' : 'Remove from queue'}
-      </button>
-      {error && <span className="text-xs text-red-500">{error}</span>}
+      </Button>
+      {error && <span className="text-meta text-ui-danger">{error}</span>}
     </div>
   );
 }

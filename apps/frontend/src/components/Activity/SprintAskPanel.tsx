@@ -91,7 +91,7 @@ export function SprintAskPanel({
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (
-          <button type="button" onClick={() => clear(workspaceId)} className="text-meta text-ui-accent hover:underline">
+          <button type="button" onClick={() => clear(workspaceId)} className="hit text-meta text-ui-accent hover:underline">
             Clear
           </button>
         )}
@@ -167,7 +167,7 @@ export function SprintAskPanel({
             <button
               type="submit"
               disabled={asking || question.trim() === ''}
-              className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+              className="hit inline-flex items-center gap-1 rounded border border-ai-border px-2 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
             >
               Ask
             </button>

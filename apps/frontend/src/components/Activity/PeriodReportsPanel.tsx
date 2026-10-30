@@ -946,7 +946,7 @@ function GenerateControls({
             type="button"
             onClick={() => generate.mutate(model != null ? { model } : {})}
             disabled={blocked}
-            className="rounded-ui border border-ai-border px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
+            className="hit rounded-ui border border-ai-border px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
             title={
               hasReport
                 ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
@@ -1418,7 +1418,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               Collapsed by default: this is a shelf, not part of the current reading. */}
           {archived.length > 0 && (
             <details className="print:hidden">
-              <summary className="cursor-pointer text-meta text-ui-faint hover:text-ui-mute">
+              <summary className="hit cursor-pointer text-meta text-ui-faint hover:text-ui-mute">
                 Earlier cadences ({archived.length})
               </summary>
               <div className="mt-1.5 space-y-1 pl-2">

@@ -486,7 +486,7 @@ function MlTotalsStrip({
               onClick={() => onOpen({ kind: 'findings' })}
               // No aria-label — it would displace "Findings 2,147" as the accessible name. See Tile.
               title="Show the findings behind this number"
-              className="block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
               <div className="text-meta text-ui-faint">Findings</div>
               <div className="text-title font-semibold tabular-nums">
@@ -506,7 +506,7 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'summaries' })}
               title="Show the walkthroughs and summaries — a separate population, not counted as findings"
-              className="block w-full text-left text-meta text-ui-faint hover:text-ui-mute focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit block w-full text-left text-meta text-ui-faint hover:text-ui-mute focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </button>
@@ -594,7 +594,7 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'category', category: c.category })}
               title={`Show the findings categorised as ${ML_CATEGORY_LABEL[c.category] ?? c.category}`}
-              className="rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute hover:bg-ui-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute hover:bg-ui-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
               {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
             </button>
@@ -794,7 +794,7 @@ function VolumeCell({
       onClick={() => onOpen({ userId: bot.authorUserId, label: bot.label })}
       // No aria-label — it would displace the number as the accessible name (the `Tile` rule).
       title={`${detail} Click for the PRs behind it.`}
-      className="rounded-ui px-1 underline decoration-dotted underline-offset-2 hover:bg-ui-hover hover:text-ui-ink"
+      className="hit rounded-ui px-1 underline decoration-dotted underline-offset-2 hover:bg-ui-hover hover:text-ui-ink"
     >
       {label}
     </button>
@@ -1196,7 +1196,7 @@ function VendorTable({
                     type="button"
                     onClick={() => onOpenVendor(v.key)}
                     title="Open the bot drill-down — its comments (default) and the PRs it touched"
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium hover:underline"
+                    className="hit inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium hover:underline"
                     style={{ ...vendorInk(color), background: `${color}1a` }}
                   >
                     <BotIcon size={11} />
@@ -1738,7 +1738,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             type="button"
             onClick={() => openBotOnlyDetail(repoId ?? null)}
             title="Show the OPEN PRs only a bot reviewed — no human review or comment since they opened"
-            className="rounded-ui underline decoration-dotted underline-offset-2 hover:text-ui-ink"
+            className="hit rounded-ui underline decoration-dotted underline-offset-2 hover:text-ui-ink"
           >
             <b className="tabular-nums text-ui-ink">{t.botOnlyPrs}</b>{' '}
             bot-only open PR{t.botOnlyPrs === 1 ? '' : 's'}

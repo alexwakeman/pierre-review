@@ -1102,7 +1102,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         data-testid="benchmark-rollup-counters-toggle"
-        className="flex items-center gap-1.5 text-meta font-semibold text-ui-ink hover:text-ui-ink"
+        className="hit flex items-center gap-1.5 text-meta font-semibold text-ui-ink hover:text-ui-ink"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} />
         <ThreadsIcon size={12} className="text-ui-faint" />

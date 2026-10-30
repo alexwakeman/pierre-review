@@ -126,7 +126,7 @@ function Row({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="inline-flex items-center gap-0.5 text-meta text-ui-mute hover:underline"
+          className="hit inline-flex items-center gap-0.5 text-meta text-ui-mute hover:underline"
           title="Open on GitHub"
         >
           GitHub
@@ -319,7 +319,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
+          className="hit rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}

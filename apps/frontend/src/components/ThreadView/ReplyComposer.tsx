@@ -43,7 +43,7 @@ export function ReplyComposer({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-blue-500 hover:underline"
+        className="hit text-blue-500 hover:underline"
       >
         Reply
       </button>
@@ -66,7 +66,7 @@ export function ReplyComposer({
           type="button"
           onClick={send}
           disabled={reply.isPending || body.trim().length === 0}
-          className="whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {reply.isPending ? 'Sending…' : 'Send'}
         </button>
@@ -78,7 +78,7 @@ export function ReplyComposer({
             reply.reset();
           }}
           disabled={reply.isPending}
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           Cancel
         </button>

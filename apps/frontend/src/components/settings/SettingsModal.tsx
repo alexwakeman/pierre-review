@@ -347,7 +347,7 @@ export function SettingsModal({
                   requestAnimationFrame(() => tabRefs.current.get(activeTab)?.focus());
                 }}
                 className={cx(
-                  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+                  'hit inline-flex h-10 shrink-0 items-center gap-1.5 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
                   FOCUS_RING,
                 )}
               >

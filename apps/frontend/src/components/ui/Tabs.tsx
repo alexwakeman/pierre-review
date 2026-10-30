@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { cx, FOCUS_RING } from './cx.js';
 import { shortcutBlocked } from './keys.js';
 
@@ -62,6 +62,52 @@ export function Tabs<T extends string>({
     return () => window.removeEventListener('keydown', onKey);
   }, [numberKeys]);
 
+  // A strip wider than its box scrolls sideways. Keep the selected tab IN VIEW (a deep link to a
+  // later tab otherwise shows a strip with nothing highlighted), and fade the edge that hides more
+  // tabs so the reader can tell there are some. Only the strip's own scrollLeft moves — never the
+  // page (scrollIntoView would also scroll vertical ancestors).
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const measure = (): void => {
+    const el = stripRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
+  };
+  useLayoutEffect(() => {
+    const el = stripRef.current;
+    const tab = refs.current.get(value);
+    if (el && tab && el.scrollWidth > el.clientWidth) {
+      const pad = 24;
+      const box = el.getBoundingClientRect();
+      const t = tab.getBoundingClientRect();
+      const l = t.left - box.left + el.scrollLeft;
+      const r = l + t.width;
+      if (l - pad < el.scrollLeft) el.scrollLeft = Math.max(0, l - pad);
+      else if (r + pad > el.scrollLeft + el.clientWidth) el.scrollLeft = r + pad - el.clientWidth;
+    }
+    measure();
+  }, [value, shown.length]);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const fade: CSSProperties | undefined =
+    edges.left || edges.right
+      ? {
+          maskImage: `linear-gradient(to right, ${edges.left ? 'transparent, black 24px' : 'black'}, ${
+            edges.right ? 'black calc(100% - 24px), transparent' : 'black'
+          })`,
+          WebkitMaskImage: `linear-gradient(to right, ${edges.left ? 'transparent, black 24px' : 'black'}, ${
+            edges.right ? 'black calc(100% - 24px), transparent' : 'black'
+          })`,
+        }
+      : undefined;
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     const i = shown.findIndex((t) => t.id === value);
     let next: number | null = null;
@@ -79,10 +125,14 @@ export function Tabs<T extends string>({
 
   return (
     <div
+      ref={stripRef}
       role="tablist"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className={cx('flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]', className)}
+      onScroll={measure}
+      style={fade}
+      data-overflow={edges.left || edges.right ? 'true' : undefined}
+      className={cx('flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}
     >
       {shown.map((t, i) => {
         const on = t.id === value;

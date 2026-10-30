@@ -122,7 +122,7 @@ export function BlastImpactNote({
             type="button"
             onClick={() => run()}
             disabled={state.running}
-            className="inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
           >
             <SparkleIcon size={11} />
             What could this break?
@@ -137,7 +137,7 @@ export function BlastImpactNote({
         <button
           type="button"
           onClick={toggle}
-          className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           aria-expanded={false}
         >
           <ChevronIcon size={11} dir="right" />
@@ -153,7 +153,7 @@ export function BlastImpactNote({
           <button
             type="button"
             onClick={toggle}
-            className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             aria-expanded
           >
             <ChevronIcon size={11} dir="down" />
@@ -188,7 +188,7 @@ export function BlastImpactNote({
                   type="button"
                   onClick={() => run()}
                   disabled={state.running}
-                  className="underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
+                  className="hit underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
                 >
                   Out of date — read again
                 </button>

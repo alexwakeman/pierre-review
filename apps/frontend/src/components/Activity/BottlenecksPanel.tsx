@@ -128,7 +128,7 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
         type="button"
         onClick={() => openPrDetailTab(meta, { fromActivity: true })}
         title={pr.prTitle}
-        className="inline-flex min-w-0 items-center gap-1 font-medium text-ui-accent hover:underline"
+        className="hit inline-flex min-w-0 items-center gap-1 font-medium text-ui-accent hover:underline"
       >
         <PullRequestIcon size={11} className="shrink-0" />
         <span className="shrink-0">#{pr.prNumber}</span>
@@ -166,7 +166,7 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
           rel="noopener noreferrer"
           title="Open on GitHub"
           aria-label={`Open ${pr.repoFullName} #${pr.prNumber} on GitHub`}
-          className="shrink-0 text-ui-mute hover:text-ui-ink"
+          className="hit shrink-0 text-ui-mute hover:text-ui-ink"
         >
           <ExternalLinkIcon size={10} />
         </a>
@@ -456,7 +456,7 @@ export function BottlenecksPanel(): JSX.Element {
                     type="button"
                     onClick={() => setShowSlowest((v) => !v)}
                     aria-expanded={showSlowest}
-                    className="mt-2 text-meta font-medium text-ui-accent hover:underline"
+                    className="hit mt-2 text-meta font-medium text-ui-accent hover:underline"
                   >
                     {showSlowest ? 'Hide' : 'Show'} as a table, longest first
                   </button>

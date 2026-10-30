@@ -793,7 +793,7 @@ export function ResolverPanes({
                   <button
                     type="button"
                     onClick={() => onRetryFile(activeIndex)}
-                    className="rounded border border-gray-300 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+                    className="hit rounded border border-gray-300 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
                   >
                     Try again
                   </button>

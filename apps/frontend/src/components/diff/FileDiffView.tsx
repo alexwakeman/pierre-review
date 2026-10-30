@@ -289,7 +289,7 @@ function DiffLine({
                 type="button"
                 onClick={onOpen}
                 title="Comment on this line"
-                className="rounded bg-blue-500 px-1 text-[11px] font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                className="hit rounded bg-blue-500 px-1 text-[11px] font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
               >
                 +
               </button>
@@ -843,7 +843,7 @@ function InlineCommentBox({
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -856,7 +856,7 @@ function InlineCommentBox({
             onClose();
           }}
           disabled={busy}
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           {notice?.posted ? 'Close' : 'Cancel'}
         </button>
@@ -872,7 +872,7 @@ function InlineCommentBox({
                 href={safeExternalUrl(notice.url)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="text-blue-500 hover:underline"
+                className="hit text-blue-500 hover:underline"
               >
                 Open on GitHub
                 <ExternalLinkIcon
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>
@@ -930,7 +930,7 @@ function NoPatchNote({
           href={githubUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-blue-500 hover:underline"
+          className="hit text-blue-500 hover:underline"
         >
           View on GitHub
           <ExternalLinkIcon size={10} className="ml-0.5 inline-block align-[-0.1em]" />
@@ -986,7 +986,7 @@ function GapRow({
                   onClick={() => onExpand(c)}
                   aria-label={label}
                   title={label}
-                  className="flex h-5 w-full items-center justify-center text-gray-500 hover:bg-blue-500 hover:text-white focus-visible:bg-blue-500 focus-visible:text-white focus-visible:outline-none dark:text-gray-400 dark:hover:bg-blue-600 dark:focus-visible:bg-blue-600"
+                  className="hit flex h-5 w-full items-center justify-center text-gray-500 hover:bg-blue-500 hover:text-white focus-visible:bg-blue-500 focus-visible:text-white focus-visible:outline-none dark:text-gray-400 dark:hover:bg-blue-600 dark:focus-visible:bg-blue-600"
                 >
                   {c === 'all' ? <UnfoldIcon size={16} /> : <FoldIcon dir={c} size={16} />}
                 </button>
@@ -1383,7 +1383,7 @@ function FileDiffBlock({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="hit flex min-w-0 flex-1 items-center gap-2 text-left"
           title={expanded ? 'Collapse this file' : 'Expand this file'}
         >
           <span className="flex w-3 shrink-0 select-none items-center text-gray-400">
@@ -1419,7 +1419,7 @@ function FileDiffBlock({
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex shrink-0 items-center text-blue-500 hover:underline"
+            className="hit inline-flex shrink-0 items-center text-blue-500 hover:underline"
             title="View this file's diff on GitHub"
           >
             <ExternalLinkIcon size={12} />
@@ -1452,7 +1452,7 @@ function FileDiffBlock({
                     href={githubUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="text-blue-500 hover:underline"
+                    className="hit text-blue-500 hover:underline"
                   >
                     view on GitHub
                     <ExternalLinkIcon

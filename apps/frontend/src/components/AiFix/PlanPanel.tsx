@@ -184,7 +184,7 @@ export function PlanPanel({
           <PlanBullets plan={plan} />
           <button
             type="button"
-            className="mt-2 inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+            className="hit mt-2 inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >

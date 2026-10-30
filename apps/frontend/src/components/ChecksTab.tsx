@@ -175,7 +175,7 @@ export function ChecksSummary({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
         {passed > 0 && (
@@ -302,7 +302,7 @@ function SuggestedReviewersRow({
                   type="button"
                   onClick={() => assign(s)}
                   disabled={pendingKey !== null || done}
-                  className="rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                  className="hit rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
                   title="Request this reviewer on GitHub"
                 >
                   {done ? (
@@ -458,7 +458,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="mt-1 text-xs font-medium text-blue-500 hover:underline"
+            className="hit mt-1 text-xs font-medium text-blue-500 hover:underline"
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
@@ -636,7 +636,7 @@ export function ChecksTab({
           Your GitHub sign-in isn&rsquo;t authorized for {pr.authNotice.org}&rsquo;s SAML
           SSO, so the description, CI jobs and comment bodies couldn&rsquo;t be loaded. Fix:{' '}
           <a
-            className="underline underline-offset-2"
+            className="hit underline underline-offset-2"
             href={`https://github.com/orgs/${pr.authNotice.org}/sso`}
             target="_blank"
             rel="noreferrer"
@@ -645,7 +645,7 @@ export function ChecksTab({
           </a>
           , then revoke the app at{' '}
           <a
-            className="underline underline-offset-2"
+            className="hit underline underline-offset-2"
             href="https://github.com/settings/applications"
             target="_blank"
             rel="noreferrer"
@@ -691,7 +691,7 @@ export function ChecksTab({
                   target="_blank"
                   rel="noreferrer noopener"
                   title="Open this pull request's Checks tab on GitHub"
-                  className="inline-flex items-center gap-1 hover:underline"
+                  className="hit inline-flex items-center gap-1 hover:underline"
                 >
                   {ci.label}
                   <ExternalLinkIcon
@@ -834,7 +834,7 @@ export function ChecksTab({
                 href={pr.githubUrl}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="underline underline-offset-2"
+                className="hit underline underline-offset-2"
                 title="Open this pull request on GitHub"
               >
                 Resolve on GitHub
@@ -908,7 +908,7 @@ export function ChecksTab({
                       <button
                         type="button"
                         onClick={onOpenThreads}
-                        className="font-medium text-gray-700 first-letter:uppercase hover:underline dark:text-gray-200"
+                        className="hit font-medium text-gray-700 first-letter:uppercase hover:underline dark:text-gray-200"
                       >
                         {b.text}
                       </button>
@@ -942,7 +942,7 @@ export function ChecksTab({
                 key={g.kind}
                 type="button"
                 onClick={() => setThreadBotFilter(g.kind)}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
+                className="hit inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
                 style={{ color: g.color, background: `${g.color}1a` }}
                 title={`${g.label} opened ${g.threads} review thread${
                   g.threads === 1 ? '' : 's'
@@ -975,7 +975,7 @@ export function ChecksTab({
           <button
             type="button"
             onClick={onShowBotActivity}
-            className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
+            className="hit inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
             title={slowBots
               .map((b) => `${b.label}: slower than its typical on this PR`)
               .join(' · ')}
@@ -1129,7 +1129,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         <button
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
-          className="inline-flex items-center rounded-l px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit inline-flex items-center rounded-l px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
           title={`Open the ${t.key} story`}
           data-testid="pr-ticket-story"
         >
@@ -1172,7 +1172,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           disabled={remove.isPending}
           onClick={() => remove.mutate(t.key)}
           aria-label={`Remove ${t.key} (added by hand)`}
-          className="rounded-r px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit rounded-r px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
         >
           <CloseIcon size={10} />
         </button>

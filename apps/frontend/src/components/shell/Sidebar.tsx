@@ -9,13 +9,11 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useMe, useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 import { openPrsTabCount } from '../../lib/openPrsTab.js';
 import { storyTabLabels } from '../../lib/ticketTab.js';
-import { DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
+import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { useShell } from '../../store/shell.js';
-import { BranchStatusChip } from '../Activity/BranchStatusChip.js';
-import { ThreadStateBar } from '../Activity/ThreadStateBar.js';
 import { AiUsageMenu } from '../AiUsageMenu.js';
 import {
   BellIcon,
@@ -34,10 +32,8 @@ import {
   SunIcon,
   TicketIcon,
   TimelineIcon,
-  WarningIcon,
 } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { MaintainerShield } from '../MaintainerShield.js';
 import { SyncStatus } from '../SyncStatus.js';
 import { UserMenu } from '../UserMenu.js';
 import { NeedsYou } from '../WelcomeBackBanner.js';
@@ -269,7 +265,7 @@ function OpenTabs(): JSX.Element | null {
         <button
           type="button"
           onClick={closeAllTabs}
-          className="h-10 shrink-0 rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+          className="hit h-10 shrink-0 rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
         >
           Close all
         </button>
@@ -287,7 +283,7 @@ function OpenTabs(): JSX.Element | null {
                   setActiveTab(t.key);
                   useShell.getState().setDrawerOpen(false);
                 }}
-                className={cx('h-11 min-w-0 flex-1 truncate px-2 text-left text-body', on ? 'font-medium text-ui-ink' : 'text-ui-mute', FOCUS_RING)}
+                className={cx('hit h-11 min-w-0 flex-1 truncate px-2 text-left text-body', on ? 'font-medium text-ui-ink' : 'text-ui-mute', FOCUS_RING)}
               >
                 {words}
               </button>
@@ -295,7 +291,7 @@ function OpenTabs(): JSX.Element | null {
                 type="button"
                 onClick={() => closeTab(t.key)}
                 aria-label={`Close tab ${words}`}
-                className={cx('flex h-11 w-11 shrink-0 items-center justify-center rounded-ui text-ui-faint hover:text-ui-ink', FOCUS_RING)}
+                className={cx('hit flex h-11 w-11 shrink-0 items-center justify-center rounded-ui text-ui-faint hover:text-ui-ink', FOCUS_RING)}
               >
                 <CloseIcon size={12} />
               </button>
@@ -326,7 +322,12 @@ interface RepoItem {
   threadTotals: ThreadStateCounts | null;
 }
 
-/** One repo: name · shield · unread dot · attention count · open PRs; then its health line. */
+/**
+ * One repo, ONE LINE: unread dot · name · a red dot only when its default branch is failing · open
+ * PRs. Everything else the old two-line row drew (the attention count, the maintainer shield, the
+ * thread-state bar, the branch name and its last commit) is in the row's tooltip and accessible
+ * name, and in full on the repo's own page — the row is permanent chrome, so it stays quiet.
+ */
 function RepoRow({
   r,
   branch,
@@ -338,83 +339,81 @@ function RepoRow({
 }): JSX.Element {
   const short = r.fullName.split('/')[1] ?? r.fullName;
   const owner = r.fullName.split('/')[0] ?? '';
-  // The second line appears only once there is something to say (the name-only loading fallback
-  // keeps one line).
-  const health = r.threadTotals != null || branch?.branchName != null;
+  const failing = branch?.branchName != null && (branch.ciStatus === 'failure' || branch.ciStatus === 'error');
+  const facts: string[] = [];
+  if (r.openPrs != null) facts.push(`${r.openPrs} open pull request${r.openPrs === 1 ? '' : 's'}`);
+  if (r.attentionCount > 0) facts.push(`${r.attentionCount} needing attention`);
+  if (r.hasUnread) facts.push('new activity');
+  if (r.maintainerCount > 0) facts.push('you have merged here');
+  if (r.threadTotals != null) {
+    const t = r.threadTotals;
+    const parts = (['untouched', 'replied_unresolved', 'likely_addressed', 'resolved'] as const)
+      .filter((k) => (t[k] ?? 0) > 0)
+      .map((k) => `${t[k]} ${DERIVED_STATE_META[k].label.toLowerCase()}`);
+    if (parts.length > 0) facts.push(`threads: ${parts.join(', ')}`);
+  }
+  if (branch?.branchName != null) {
+    facts.push(
+      `${branch.branchName}: ${CI_META[branch.ciStatus]?.label ?? 'no CI reported'}${
+        branch.lastCommitAt != null ? `, last commit ${relativeTime(branch.lastCommitAt)}` : ''
+      }`,
+    );
+  }
   return (
     <button
       type="button"
       onClick={() => goTo(r.repoId)}
       aria-current={current ? 'page' : undefined}
-      title={r.fullName}
-      aria-label={`${r.fullName}${r.attentionCount > 0 ? `, ${r.attentionCount} needing attention` : ''}${
-        r.openPrs != null ? `, ${r.openPrs} open pull requests` : ''
-      }${r.hasUnread ? ', new activity' : ''}`}
+      title={[r.fullName, ...facts].join('\n')}
+      aria-label={[r.fullName, ...facts].join(', ')}
       data-testid="sidebar-repo"
+      data-attention={r.attentionCount > 0 ? r.attentionCount : undefined}
       className={cx(
-        'flex w-full min-w-0 flex-col justify-center gap-0.5 rounded-ui px-2 py-1 text-left touch:min-h-11',
+        'flex h-8 w-full min-w-0 items-center gap-1.5 rounded-ui px-2 text-left touch:h-11',
         current ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
         FOCUS_RING,
       )}
     >
-      <span className="flex h-5 min-w-0 items-center gap-1.5">
-        <span className="flex w-4 shrink-0 justify-center">
-          {r.hasUnread ? (
-            <span aria-hidden title="New activity" className="h-1.5 w-1.5 rounded-full bg-ui-accent" />
-          ) : null}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-body">
-          {short}
-          {owner !== '' && short !== r.fullName && <span className="sr-only"> in {owner}</span>}
-        </span>
-        {r.maintainerCount > 0 && <MaintainerShield />}
-        {r.attentionCount > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 text-meta tabular-nums text-ui-warn" title="PRs needing attention">
-            <WarningIcon size={11} />
-            {r.attentionCount}
-          </span>
-        )}
-        <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-faint" title="Open pull requests">
-          {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
-        </span>
+      <span className="flex w-4 shrink-0 justify-center">
+        {r.hasUnread ? <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ui-accent" /> : null}
       </span>
-      {health && (
-        <span className="flex min-w-0 items-center gap-2 pl-[22px]">
-          {r.threadTotals != null && <ThreadStateBar counts={r.threadTotals} compact className="!w-10 shrink-0" />}
-          <BranchStatusChip status={branch} className="min-w-0 !text-meta" />
-        </span>
-      )}
+      <span className="min-w-0 flex-1 truncate text-body">
+        {short}
+        {owner !== '' && short !== r.fullName && <span className="sr-only"> in {owner}</span>}
+      </span>
+      {failing && <span aria-hidden data-testid="sidebar-repo-failing" className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger" />}
+      <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-faint">
+        {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
+      </span>
     </button>
   );
 }
 
-/** The thread-state colours, behind the ⓘ beside "Repositories" (the rail's legend, kept). */
+/** What a repo row says, behind the ⓘ beside "Repositories" (the rail's legend, kept). */
 function ThreadLegend(): JSX.Element {
   return (
     <InfoButton title="Repositories">
       <p>
-        Each repo shows its open pull requests on the right, and an amber count when some need attention. A blue dot
-        means new activity; the shield means you have merged there.
+        Each repo shows its open pull requests on the right. A blue dot means new activity; a red dot means its
+        default branch is failing CI.
       </p>
-      <p>The bar under a repo shows its review threads:</p>
+      <p>
+        Hover a repo (or open it) for the rest: how many pull requests need attention, whether you have merged there,
+        its review threads and its default branch.
+      </p>
       <ul className="space-y-1">
         {(['untouched', 'replied_unresolved', 'likely_addressed', 'resolved'] as const).map((k) => (
-          <li key={k} className="flex items-start gap-2">
-            <span
-              aria-hidden
-              className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full"
-              style={{ background: DERIVED_STATE_META[k].color }}
-            />
-            <span>
-              <strong className="font-medium">{DERIVED_STATE_META[k].label}</strong>: {DERIVED_STATE_META[k].description}
-            </span>
+          <li key={k}>
+            <strong className="font-medium">{DERIVED_STATE_META[k].label}</strong>: {DERIVED_STATE_META[k].description}
           </li>
         ))}
       </ul>
-      <p>The last line is the default branch: its CI and when it last had a commit.</p>
     </InfoButton>
   );
 }
+
+/** Rows shown before "Show all" — the group must never push the rest of the sidebar out of view. */
+const REPO_ROWS_SHOWN = 6;
 
 function Repositories({ location }: { location: ReturnType<typeof currentLocation> }): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -428,6 +427,7 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
   const { data: allRepos } = useRepos();
   const branchByRepo = useMemo(() => new Map((branchData?.repos ?? []).map((r) => [r.repoId, r])), [branchData]);
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
+  const [showAll, setShowAll] = useState(false);
   // "generated N ago": re-render every 30s so the stamp stays true without refetching.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -494,9 +494,21 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
               <div className="h-full w-1/3 bg-ui-accent motion-safe:animate-pulse" />
             </div>
           )}
-          {items.map((r) => (
+          {(showAll
+            ? items
+            : items.filter((r, i) => i < REPO_ROWS_SHOWN || r.repoId === location)
+          ).map((r) => (
             <RepoRow key={r.repoId} r={r} branch={branchByRepo.get(r.repoId) ?? null} current={location === r.repoId} />
           ))}
+          {items.length > REPO_ROWS_SHOWN && (
+            <button
+              type="button"
+              onClick={() => setShowAll(!showAll)}
+              className={cx('flex h-8 w-full items-center rounded-ui pl-[30px] text-left text-meta text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-11', FOCUS_RING)}
+            >
+              {showAll ? 'Show fewer' : `Show all ${items.length}`}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -586,6 +598,9 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
   const desktop = useIsDesktop();
   const asideRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  // Set when the drawer closes to open another modal (the palette): focus must NOT go back to the
+  // menu button behind it — on a phone that kept the keyboard down and typing went nowhere.
+  const skipRestoreRef = useRef(false);
   const drawer = drawerOpen && !desktop;
 
   // Growing past `lg` with the drawer open docks it; the flag must not linger for the next shrink.
@@ -611,7 +626,8 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
     window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('keydown', onKey, true);
-      openerRef.current?.focus?.();
+      if (skipRestoreRef.current) skipRestoreRef.current = false;
+      else openerRef.current?.focus?.();
     };
   }, [drawer, setDrawerOpen]);
 
@@ -637,7 +653,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
           'lg:static lg:z-auto lg:flex lg:w-sidebar lg:shrink-0',
           // A drawer below lg: hidden (never unmounted) until opened.
           drawer
-            ? 'fixed inset-y-0 left-0 z-[56] flex w-[min(18rem,86vw)] pt-[env(safe-area-inset-top)] shadow-2xl shadow-black/40 motion-safe:animate-ui-drawer-in'
+            ? 'fixed inset-y-0 left-0 z-[56] flex w-[min(18rem,86vw)] overflow-y-auto overscroll-contain pt-[env(safe-area-inset-top)] shadow-2xl shadow-black/40 motion-safe:animate-ui-drawer-in'
             : 'hidden',
         )}
       >
@@ -650,7 +666,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
               type="button"
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
-              className={cx('flex h-10 w-10 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover', FOCUS_RING)}
+              className={cx('hit flex h-10 w-10 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover', FOCUS_RING)}
             >
               <CloseIcon size={14} />
             </button>
@@ -661,6 +677,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
           <button
             type="button"
             onClick={() => {
+              if (drawer) skipRestoreRef.current = true;
               setDrawerOpen(false);
               openCommandPalette();
             }}
@@ -676,7 +693,10 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
             <Kbd>{`${modKeyLabel()}K`}</Kbd>
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 pt-3">
+        {/* In the drawer the WHOLE aside scrolls, foot included: a pinned foot left the middle so
+            short that Insights' items sat below the fold with nothing saying so. The foot stays at
+            the same place in the tree either way (SyncStatus must never remount). */}
+        <div className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}>
           <Destinations location={location} />
           <OpenTabs />
           <Repositories location={location} />

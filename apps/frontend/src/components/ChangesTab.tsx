@@ -80,7 +80,7 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
         href={file.githubUrl}
         target="_blank"
         rel="noreferrer noopener"
-        className="group flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5 text-sm"
+        className="hit group flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5 text-sm"
         title={`${file.path} — view this file's diff on GitHub`}
       >
         <code className="min-w-0 flex-1 truncate font-mono text-xs">
@@ -141,7 +141,7 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>
@@ -665,7 +665,7 @@ export function ChangesTab({
             href={`${pr.githubUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
           >
             View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -786,7 +786,7 @@ export function ChangesTab({
                 href={`${pr.githubUrl}/files`}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="text-blue-500 hover:underline"
+                className="hit text-blue-500 hover:underline"
               >
                 View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
               </a>

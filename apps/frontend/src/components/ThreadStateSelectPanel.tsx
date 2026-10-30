@@ -117,7 +117,7 @@ export function ThreadStateSelectPanel({
               <button
                 type="button"
                 onClick={onClear}
-                className="text-meta text-ui-faint hover:text-ui-ink"
+                className="hit text-meta text-ui-faint hover:text-ui-ink"
               >
                 Clear
               </button>

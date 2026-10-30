@@ -27,7 +27,7 @@ export function highlightTerms(text: string, query: string): ReactNode {
       // be set explicitly: dark mode was rendering black on a dark-amber wash at ~1.9:1.
       <mark
         key={i}
-        className="rounded bg-yellow-200 px-0.5 text-gray-900 dark:bg-yellow-400/30 dark:text-yellow-100"
+        className="rounded-[2px] bg-ui-accent/25 px-0.5 text-ui-ink"
       >
         {part}
       </mark>

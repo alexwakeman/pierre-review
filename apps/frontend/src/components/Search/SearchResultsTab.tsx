@@ -101,7 +101,7 @@ export function SearchResultsTab(): JSX.Element {
             <button
               type="button"
               onClick={() => setKinds([])}
-              className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              className="hit px-2 py-0.5 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             >
               Clear
             </button>
@@ -127,7 +127,7 @@ export function SearchResultsTab(): JSX.Element {
                   type="button"
                   data-testid="search-story"
                   onClick={() => openSearchStory(st)}
-                  className="flex w-full items-start gap-2 rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-left hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-sky-900 dark:bg-sky-950/40 dark:hover:bg-sky-950"
+                  className="hit flex w-full items-start gap-2 rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-left hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-sky-900 dark:bg-sky-950/40 dark:hover:bg-sky-950"
                 >
                   <TicketIcon size={14} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-300" />
                   <span className="min-w-0">
@@ -156,7 +156,7 @@ export function SearchResultsTab(): JSX.Element {
               key={p.id}
               type="button"
               onClick={() => openSearchDetail(p.login)}
-              className="flex items-center gap-1.5 rounded-full border border-gray-200 px-2 py-0.5 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              className="hit flex items-center gap-1.5 rounded-full border border-gray-200 px-2 py-0.5 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
             >
               {p.avatarUrl != null ? (
                 <img src={p.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
@@ -193,7 +193,7 @@ export function SearchResultsTab(): JSX.Element {
             type="button"
             onClick={fetchMore}
             disabled={isFetchingMore}
-            className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="hit rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             {isFetchingMore ? 'Loading…' : `Load more (${total - hits.length} more)`}
           </button>

@@ -304,7 +304,7 @@ function ActivityList({
           <button
             type="button"
             onClick={onClearSince}
-            className="ml-auto text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit ml-auto text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             Show all
           </button>
@@ -338,7 +338,7 @@ function ActivityList({
                   href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="font-mono text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                  className="hit font-mono text-gray-500 hover:text-blue-500 dark:text-gray-400"
                   aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
                 >
                   {r.sha.slice(0, 7)}
@@ -371,7 +371,7 @@ function ActivityList({
                 href={href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="shrink-0 rounded p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                className="hit shrink-0 rounded p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
                 title="Open on GitHub"
                 aria-label="Open on GitHub"
               >
@@ -1443,7 +1443,7 @@ export function PrDetail({
               <button
                 type="button"
                 onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
-                className={cx('min-w-0 truncate rounded-ui text-left text-title text-ui-ink hover:underline', FOCUS_RING)}
+                className={cx('hit min-w-0 truncate rounded-ui text-left text-title text-ui-ink hover:underline', FOCUS_RING)}
                 title="Open full-screen in its own tab"
               >
                 <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
@@ -1615,7 +1615,7 @@ export function PrDetail({
                 <button
                 type="button"
                 onClick={() => goToTab('changes')}
-                className={cx('inline-flex shrink-0 items-center gap-1 rounded-ui px-0.5 tabular-nums hover:text-ui-ink', FOCUS_RING)}
+                className={cx('hit inline-flex shrink-0 items-center gap-1 rounded-ui px-0.5 tabular-nums hover:text-ui-ink', FOCUS_RING)}
                 title="View the files changed by this PR"
               >
                 <span>

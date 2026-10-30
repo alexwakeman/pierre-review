@@ -227,7 +227,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                   authorAvatarUrl: null,
                 })
               }
-              className="block min-w-0 flex-1 text-left"
+              className="hit block min-w-0 flex-1 text-left"
               title="Open this review"
             >
               <span className="flex items-center gap-1.5">
@@ -250,7 +250,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                 type="button"
                 onClick={() => dismissOne(e.reviewId)}
                 aria-label={`Dismiss ${e.repoFullName} #${e.prNumber}`}
-                className="shrink-0 rounded p-0.5 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit shrink-0 rounded p-0.5 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
               >
                 <CloseIcon size={10} />
               </button>

@@ -65,7 +65,7 @@ function Answer({
                 <button
                   type="button"
                   onClick={() => onOpen(c.path, c.anchor, c.quote ?? null)}
-                  className="inline-flex items-start gap-1 text-left text-body text-ui-accent hover:underline"
+                  className="hit inline-flex items-start gap-1 text-left text-body text-ui-accent hover:underline"
                 >
                   <BookIcon size={12} className="mt-0.5 shrink-0" />
                   <span>{citationLabel(c)}</span>
@@ -216,7 +216,7 @@ export function DocsChat({
         </AiRunGate>
         {active != null && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
-            <button type="button" onClick={() => setConversation(workspaceId, null)} className="text-ui-accent hover:underline">
+            <button type="button" onClick={() => setConversation(workspaceId, null)} className="hit text-ui-accent hover:underline">
               New conversation
             </button>
             {confirmDelete ? (
@@ -226,16 +226,16 @@ export function DocsChat({
                   type="button"
                   disabled={remove.isPending}
                   onClick={() => remove.mutate(active)}
-                  className="font-medium text-ui-danger hover:underline disabled:opacity-50"
+                  className="hit font-medium text-ui-danger hover:underline disabled:opacity-50"
                 >
                   Delete
                 </button>
-                <button type="button" onClick={() => setConfirmDelete(false)} className="text-ui-accent hover:underline">
+                <button type="button" onClick={() => setConfirmDelete(false)} className="hit text-ui-accent hover:underline">
                   Keep
                 </button>
               </>
             ) : (
-              <button type="button" onClick={() => setConfirmDelete(true)} className="text-ui-accent hover:underline">
+              <button type="button" onClick={() => setConfirmDelete(true)} className="hit text-ui-accent hover:underline">
                 Delete conversation
               </button>
             )}

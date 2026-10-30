@@ -79,7 +79,7 @@ export function UserActivityDetail(): JSX.Element {
             href={profileUrl(login)}
             target="_blank"
             rel="noreferrer noopener"
-            className="ml-auto inline-flex items-center gap-0.5 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+            className="hit ml-auto inline-flex items-center gap-0.5 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
             title={`@${login} on GitHub`}
           >
             GitHub

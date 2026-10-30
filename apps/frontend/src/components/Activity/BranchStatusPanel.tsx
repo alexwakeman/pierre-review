@@ -79,7 +79,7 @@ function FailingCheck({ check }: { check: BranchCheckRun }): JSX.Element {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="min-w-0 text-red-600 hover:underline dark:text-red-400"
+      className="hit min-w-0 text-red-600 hover:underline dark:text-red-400"
     >
       {inner}
     </a>
@@ -152,7 +152,7 @@ function PrRow({
               })
             }
             title={`Open #${pr.prNumber} in this app`}
-            className="shrink-0 rounded bg-sky-500/10 px-1 font-mono text-[11px] text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+            className="hit shrink-0 rounded bg-sky-500/10 px-1 font-mono text-[11px] text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
           >
             #{pr.prNumber}
           </button>
@@ -165,7 +165,7 @@ function PrRow({
             target="_blank"
             rel="noreferrer noopener"
             title={`#${pr.prNumber} on GitHub — not synced here`}
-            className="shrink-0 rounded bg-gray-500/10 px-1 font-mono text-[11px] text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
+            className="hit shrink-0 rounded bg-gray-500/10 px-1 font-mono text-[11px] text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
           >
             #{pr.prNumber}
           </a>
@@ -337,7 +337,7 @@ function BranchRow({
           aria-expanded={open}
           disabled={!hasHistory}
           // flex-1 replaces the timestamp's old ml-auto: the toggle now absorbs the row's slack.
-          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+          className="hit flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
         >
           <span
             aria-hidden="true"

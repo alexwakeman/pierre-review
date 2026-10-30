@@ -163,7 +163,7 @@ export function ThreadCard({
               e.stopPropagation();
               openInChanges.run();
             }}
-            className="shrink-0 rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
+            className="hit shrink-0 rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
             title={
               openInChanges.line == null
                 ? 'Show this file’s code. This thread’s line is no longer in the diff.'
@@ -238,7 +238,7 @@ export function ThreadCard({
             href={safeExternalUrl(thread.url) ?? `${prUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 hover:underline"
+            className="hit text-blue-500 hover:underline"
           >
             <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
             {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}

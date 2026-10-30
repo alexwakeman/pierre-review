@@ -150,7 +150,7 @@ export function ResolverToolbar({
           disabled={!canStepBack}
           title={FILE_PREV}
           aria-label={FILE_PREV}
-          className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="hit rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ChevronIcon dir="left" size={13} />
         </button>
@@ -160,7 +160,7 @@ export function ResolverToolbar({
           disabled={!canStepForward}
           title={FILE_NEXT}
           aria-label={FILE_NEXT}
-          className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="hit rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ChevronIcon dir="right" size={13} />
         </button>
@@ -183,7 +183,7 @@ export function ResolverToolbar({
           onClick={() => onTakeFile('ours')}
           disabled={takeFileDisabled.ours}
           title={takeFileOursTitle(baseRef)}
-          className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+          className="hit flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
         >
           <AcceptLeftIcon size={13} />
           {TAKE_FILE_OURS}
@@ -193,7 +193,7 @@ export function ResolverToolbar({
           onClick={() => onTakeFile('theirs')}
           disabled={takeFileDisabled.theirs}
           title={takeFileTheirsTitle(baseRef)}
-          className="flex min-w-0 max-w-[16rem] items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+          className="hit flex min-w-0 max-w-[16rem] items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
         >
           <span className="truncate">{takeFileTheirs(baseRef)}</span>
           <AcceptRightIcon size={13} className="shrink-0" />
@@ -205,7 +205,7 @@ export function ResolverToolbar({
         onClick={onWand}
         disabled={wandDisabled}
         title={WAND_BUTTON_TITLE}
-        className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+        className="hit flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
       >
         <WandIcon size={13} />
         {WAND_BUTTON}
@@ -216,7 +216,7 @@ export function ResolverToolbar({
         onClick={onUndo}
         disabled={undoDepth === 0}
         title="Undo the last decision"
-        className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+        className="hit flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
       >
         <UndoIcon size={13} />
         {UNDO_LAST}
@@ -249,7 +249,7 @@ export function ResolverToolbar({
             title={nextOutstandingBlocked ? NEXT_OUTSTANDING_BLOCKED : NEXT_OUTSTANDING_LABEL}
             aria-label={NEXT_OUTSTANDING_LABEL}
             aria-describedby={nextOutstandingBlocked ? NEXT_BLOCKED_ID : undefined}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+            className="hit rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 disabled:opacity-40 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
           >
             {NEXT_OUTSTANDING}
           </button>
@@ -292,7 +292,7 @@ export function ResolverToolbar({
               title={blockedReason ?? COMMIT_ENTRY_TITLE}
               aria-label={COMMIT_ENTRY_NAME}
               aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
-              className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-900 disabled:opacity-40 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
+              className="hit rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-900 disabled:opacity-40 hover:border-gray-400 dark:border-gray-600 dark:text-gray-100 dark:hover:border-gray-500"
             >
               {COMMIT_AND_PUSH}
             </button>

@@ -635,7 +635,7 @@ export function BotFlaggingDetail(): JSX.Element {
                   type="button"
                   onClick={() => setBots(null)}
                   title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from the Behaviour tab’s inflation index. Click to widen back to every bot, keeping this window, scope and direction.`}
-                  className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
+                  className="hit flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
                 >
                   <BotIcon size={11} />
                   {botNarrowLabel(bots)} only
@@ -648,7 +648,7 @@ export function BotFlaggingDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearRefine}
-                  className="rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
+                  className="hit rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -676,7 +676,7 @@ export function BotFlaggingDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={clearRefine}
-                      className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
+                      className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                     >
                       Clear filters
                     </button>
@@ -700,7 +700,7 @@ export function BotFlaggingDetail(): JSX.Element {
             <button
               type="button"
               onClick={() => setShowReceipts(true)}
-              className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
+              className="hit w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
             >
               Show the {filteredTotal.toLocaleString()} {noun} this summary was computed from
             </button>
@@ -772,7 +772,7 @@ export function BotFlaggingDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={fetchMore}
-                      className="rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
+                      className="hit rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
                     >
                       Load more
                     </button>

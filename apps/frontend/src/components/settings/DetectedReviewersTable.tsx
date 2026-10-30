@@ -689,7 +689,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetJudgement(r.userId)}
               title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name and the price are untouched.`}
-              className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+              className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset classification
             </button>
@@ -807,7 +807,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetIdentity(r.userId)}
               title={`Forget the vendor and label you set and let detection name this bot again in this Workspace. The monthly price is kept, and the bot / not-a-bot verdict is unchanged.`}
-              className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+              className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset name
             </button>
@@ -1047,7 +1047,7 @@ function CostEditor({
           if (parsed.ok && outcome?.dirty === true) onApply(parsed.value, mode);
         }}
         title={hint}
-        className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+        className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
       >
         {outcome?.kind === 'clear' ? 'Clear' : 'Save price'}
       </button>

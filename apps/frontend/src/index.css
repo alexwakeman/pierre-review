@@ -824,7 +824,7 @@ body {
 }
 .pr-ci-lead {
   flex-shrink: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 1px rgb(var(--ui-bg) / 0.8);
 }
 /* State colours. These intentionally carry the `.pr-bar` class too (raising them
    to a 3-class selector): vis-timeline ships a bright-yellow `.vis-item.vis-selected`
@@ -833,51 +833,51 @@ body {
    decided by CSS source order — which holds in dev but flips in the Vite production
    bundle, making a clicked bar flash unreadable yellow in the published app. The
    extra `.pr-bar` out-specifies vis so the state colour always wins. */
-.vis-item.pr-bar.pr-open {
-  background-color: #1d4ed8;
-  border-color: #3b82f6;
+/* THE REDESIGN'S COLOUR RULE ON THE BOARD (docs/redesign/DESIGN.md § 3): bars are TONES, not
+   hues. Open = the raised tone with ink text; merged / closed recede to the surface tone with
+   muted text (merged keeps a faint green edge — it landed; closed none). Colour is spent only where
+   it means something: red = changes requested (it blocks), green = approved (ready), and the
+   accent ring = the selected / focused PR. A stalled PR keeps a quiet warn edge on its left.
+   Three-class selectors for the reason in the note above (vis's yellow .vis-selected). */
+.vis-item.vis-range.pr-bar {
+  color: rgb(var(--ui-ink));
+  border-color: transparent;
 }
-/* Merged → green, closed → grey; both keep white text for legibility. */
+.vis-item.pr-bar.pr-open {
+  background-color: rgb(var(--ui-raise));
+  border-color: rgb(var(--ui-line));
+}
 .vis-item.pr-bar.pr-merged {
-  background-color: #15803d;
-  border-color: #22c55e;
+  background-color: rgb(var(--ui-surface));
+  border-color: rgb(var(--ui-success) / 0.45);
+  color: rgb(var(--ui-mute));
 }
 .vis-item.pr-bar.pr-closed {
-  background-color: #4b5563;
-  border-color: #9ca3af;
+  background-color: rgb(var(--ui-surface));
+  border-color: rgb(var(--ui-line));
+  color: rgb(var(--ui-faint));
 }
-/* Stalled open PRs read as "going stale": an orange FILL (replacing the blue open
-   fill) so they're unmistakable at a glance. Placed BEFORE the review-status border
-   rules below so that a PR which is stalled AND has changes requested still gets the
-   red border — red now means changes-requested ONLY. (Previously stalled used a red
-   box-shadow glow, which read identically to the changes-requested red border.) */
 .vis-item.pr-bar.pr-stalled {
-  background-color: #c2410c;
-  border-color: #f97316;
+  background-color: rgb(var(--ui-raise));
+  border-color: rgb(var(--ui-line));
+  box-shadow: inset 3px 0 0 0 rgb(var(--ui-warn));
 }
-/* Review-status outline on OPEN bars (added by prClassName, mutually exclusive):
-   green = approved, red = changes requested, grey = has discussion but no standing
-   verdict. Placed AFTER the state-colour AND stalled rules so it overrides their
-   border (red border == changes requested, even on a stalled/orange bar). A 2px
-   BORDER (not a box-shadow) so it coexists with the selection / my-turn / cross-link
-   rings, which all use box-shadow. */
 .vis-item.pr-bar.pr-changes-requested {
-  border-color: #ef4444;
+  border-color: rgb(var(--ui-danger));
   border-width: 2px;
 }
 .vis-item.pr-bar.pr-approved {
-  border-color: #22c55e;
+  border-color: rgb(var(--ui-success));
   border-width: 2px;
 }
 .vis-item.pr-bar.pr-commented {
-  border-color: #9ca3af;
-  border-width: 2px;
+  border-width: 1px;
 }
 .vis-item.pr-draft {
   background-image: repeating-linear-gradient(
     45deg,
-    rgba(255, 255, 255, 0.12),
-    rgba(255, 255, 255, 0.12) 4px,
+    rgb(var(--ui-faint) / 0.18),
+    rgb(var(--ui-faint) / 0.18) 4px,
     transparent 4px,
     transparent 8px
   );
@@ -894,7 +894,7 @@ body {
 .vis-item.vis-selected.pr-bar {
   overflow: visible; /* let the ring escape the bar bounds */
   z-index: 5;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
+  box-shadow: 0 0 0 2px rgb(var(--ui-accent));
 }
 /* PR-isolation focus: bars sharing the focused PR's packed lane are hidden so only
    the focused PR's bar shows (see isolatePrBars in Timeline/index.tsx). */
@@ -941,7 +941,7 @@ body {
 .vis-item.ev-selected:not(.ev-cross-linked) .ev-cluster-inner {
   position: relative;
   z-index: 5;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.9);
+  box-shadow: 0 0 0 2px rgb(var(--ui-accent));
 }
 .vis-item.ev-selected:not(.ev-cross-linked) .ev-marker-inner {
   border-radius: 9999px; /* circular ring around the tiny marker */
@@ -953,7 +953,7 @@ body {
   padding: 0 2px;
 }
 .pr-num {
-  font-weight: 700;
+  font-weight: 600;
   opacity: 0.85;
 }
 .pr-avatar {
@@ -980,8 +980,8 @@ body {
 }
 .pr-draft-tag {
   font-size: 11px;
-  text-transform: uppercase;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgb(var(--ui-hover));
+  color: rgb(var(--ui-mute));
   border-radius: 3px;
   padding: 0 3px;
 }
@@ -1348,7 +1348,7 @@ body {
    box-shadow is not clipped by its own overflow, so no pseudo-element / overflow
    override is needed. */
 .my-turn-ring {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.9);
+  box-shadow: 0 0 0 2px rgb(var(--ui-accent) / 0.55);
 }
 .vis-item.pr-myturn {
   overflow: visible; /* keep the ring clear of neighbouring bars */
@@ -1953,5 +1953,63 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* TOUCH HIT AREA (docs/redesign/DESIGN.md § 6: ≥ 40px targets on touch). `.hit` grows a small
+   control's TAP area to at least 40 × 40 on a coarse pointer WITHOUT moving a pixel of layout: an
+   invisible ::after centred on the control. `:where()` keeps the `relative` at zero specificity, so
+   an `absolute` / `sticky` / `fixed` on the same element still wins (it is a containing block too). */
+@media (pointer: coarse) {
+  :where(.hit) {
+    position: relative;
+  }
+  .hit::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 40px);
+    height: max(100%, 40px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* vis-timeline's nesting-group triangles (▼ / ▶ as TEXT) → the ChevronIcon drawing, in the label's
+   own ink. A mask over a currentColor box, so it follows the theme. */
+.vis-labelset .vis-label.vis-nesting-group.expanded:before,
+.vis-labelset .vis-label.vis-nesting-group.collapsed:before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  background-color: currentColor;
+  opacity: 0.6;
+  -webkit-mask: var(--tl-chev) center / contain no-repeat;
+  mask: var(--tl-chev) center / contain no-repeat;
+}
+.vis-labelset .vis-label.vis-nesting-group.expanded:before {
+  --tl-chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+.vis-labelset .vis-label.vis-nesting-group.collapsed:before {
+  --tl-chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E");
+}
+
+/* THE BOARD ON A PHONE: vis sizes the names column to its widest label, which took about half of
+   a 390px screen. Below md the column is capped (names truncate; the full name stays in the
+   label's title and the user popover), and the per-row stats line drops out first. */
+@media (max-width: 767px) {
+  .vis-labelset .vis-label .vis-inner,
+  .vis-labelset .vis-label.tl-user-row .vis-inner {
+    max-width: min(30vw, 7.5rem);
+    overflow: hidden;
+  }
+  .vis-labelset .vis-label .tl-user-stats {
+    display: none;
+  }
+  .tl-repo-sticky {
+    max-width: min(30vw, 7.5rem);
   }
 }

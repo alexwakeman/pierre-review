@@ -34,7 +34,7 @@ export function FeedIsolationBanner(): JSX.Element | null {
       <button
         type="button"
         onClick={() => setFeedIsolatedPrId(null)}
-        className="shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
+        className="hit shrink-0 rounded border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
       >
         Clear
       </button>

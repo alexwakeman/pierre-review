@@ -245,7 +245,7 @@ export function SyncProgressPanel({
                 ? 'Close this. Scoring keeps running in the background.'
                 : 'Close'
             }
-            className="rounded border border-gray-300 px-3 py-1 text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="hit rounded border border-gray-300 px-3 py-1 text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             {scoring ? 'Continue in background' : 'Close'}
           </button>
@@ -255,7 +255,7 @@ export function SyncProgressPanel({
             onClick={onCancel}
             disabled={cancelling}
             title="Stop the sync and remove any repos still loading for the first time"
-            className="rounded border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+            className="hit rounded border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
           >
             {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>

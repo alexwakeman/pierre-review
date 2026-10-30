@@ -257,13 +257,13 @@ export function DocsViewer({
               type="button"
               disabled={data.prev == null}
               onClick={() => data.prev != null && onOpen(data.prev, null)}
-              className="inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
+              className="hit inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
             >
               <ArrowIcon dir="left" size={11} />
               Previous
             </button>
             {contentsPath != null && (
-              <button type="button" onClick={() => onOpen(contentsPath, null)} className="text-ui-accent hover:underline">
+              <button type="button" onClick={() => onOpen(contentsPath, null)} className="hit text-ui-accent hover:underline">
                 Contents
               </button>
             )}
@@ -271,7 +271,7 @@ export function DocsViewer({
               type="button"
               disabled={data.next == null}
               onClick={() => data.next != null && onOpen(data.next, null)}
-              className="inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
+              className="hit inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
             >
               Next
               <ArrowIcon dir="right" size={11} />

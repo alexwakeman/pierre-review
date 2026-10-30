@@ -130,7 +130,7 @@ export function MemberSectionList({
                   type="button"
                   onClick={() => onToggleMany(ids, !allChecked)}
                   title="Select / clear every member in this repo (including any collapsed below)"
-                  className="text-meta text-ui-faint hover:text-ui-ink"
+                  className="hit text-meta text-ui-faint hover:text-ui-ink"
                 >
                   {allChecked ? 'none' : 'all'}
                 </button>
@@ -145,7 +145,7 @@ export function MemberSectionList({
                       onClick={() =>
                         setShownOthers((s) => ({ ...s, [sec.key]: (s[sec.key] ?? 0) + 10 }))
                       }
-                      className="font-medium text-ui-accent hover:underline"
+                      className="hit font-medium text-ui-accent hover:underline"
                     >
                       {/* Lead number == what THIS click reveals (always ≤10, since the
                           onClick bumps by 10); "· N hidden" is the total still collapsed. */}
@@ -158,7 +158,7 @@ export function MemberSectionList({
                     <button
                       type="button"
                       onClick={() => setShownOthers((s) => ({ ...s, [sec.key]: 0 }))}
-                      className="text-ui-faint hover:text-ui-ink"
+                      className="hit text-ui-faint hover:text-ui-ink"
                     >
                       Show fewer
                     </button>
@@ -421,7 +421,7 @@ export function UserSelectPanel({
             <button
               type="button"
               onClick={clearAll}
-              className="text-meta text-ui-faint hover:text-ui-ink"
+              className="hit text-meta text-ui-faint hover:text-ui-ink"
             >
               Clear all
             </button>

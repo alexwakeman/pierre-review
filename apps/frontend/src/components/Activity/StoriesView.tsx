@@ -206,7 +206,7 @@ function StoriesBlock({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="inline-flex items-center gap-1 text-meta font-semibold text-ui-ink hover:underline"
+          className="hit inline-flex items-center gap-1 text-meta font-semibold text-ui-ink hover:underline"
         >
           <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           All {data.stories.length} {data.stories.length === 1 ? 'story' : 'stories'}

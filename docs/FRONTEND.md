@@ -4197,8 +4197,8 @@ back:
   ("Dismissing…") until `['my-turn']`, `['attention-cards']`, `['daily-brief']` and `['work-plan']`
   have refetched — the My Turn settings save's list — so the card and every count move in one frame
   and `capFor`'s `shown === count` pairing never sees a half-updated board. Per-target mutation key.
-- **Two ways back**: `MyTurnDismissToast` (a card in the ONE header toast strip, 10s,
-  "Undo"), and the **Dismissed** disclosure under the My turn tab (`MyTurnDismissedList`, shut by
+- **Two ways back**: the ONE `UndoToast` in the header strip (10s, "Undo", `z`; the old
+  per-card `MyTurnDismissToast` is deleted), and the **Dismissed** disclosure under the My turn tab (`MyTurnDismissedList`, shut by
   default, fed by `AttentionCardsResponse.myTurnDismissed`, each row "Bring back"). Its count is its
   own length and appears in no tab badge, chip or lens.
 - ⚠ **A RESTORE MUST NOT RING.** A restored entry comes back with its OLD clock and a new id in the
@@ -4491,7 +4491,7 @@ each other) is GONE: every toast is now a horizontal card in the top header, in
 `<HeaderToastStrip>`, which fills the right of the slim `TopBar` (components/shell/TopBar.tsx; the
 controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
 foot). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`,
-`ClosedResolverToast`, `MyTurnDismissToast`, `DependencyMergeToast`, `AutoMergeBanner`,
+`ClosedResolverToast`, `DependencyMergeToast`, `AutoMergeBanner`,
 `GlobalLoadingBar`, `UndoToast`.
 
 - **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;

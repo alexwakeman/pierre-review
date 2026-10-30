@@ -170,7 +170,7 @@ export function SlotRow({
     <button
       type="button"
       onClick={() => setExpanded((v) => !v)}
-      className="flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11px] text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+      className="hit flex w-full items-center gap-1 px-1 py-0.5 text-left text-[11px] text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
     >
       <ChevronIcon dir={expanded ? 'down' : 'right'} size={11} />
       {expanded ? HIDE_UNCHANGED : showUnchanged(hiddenCount)}
@@ -266,7 +266,7 @@ export function SlotRow({
             // ⚠ DO NOT BACKTICK A BARE UTILITY IN THIS COMMENT. `textContrast.test.ts` scans every
             // quoted run on every line, backticks included, so a prose mention of one half of a
             // theme pairing reads to it as a theme-LESS colour and fails the build on a comment.
-            className="rounded px-1.5 py-0.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:bg-gray-100 focus-visible:text-gray-900 focus-visible:ring-1 focus-visible:ring-sky-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100 dark:focus-visible:bg-gray-800 dark:focus-visible:text-gray-100 dark:focus-visible:ring-sky-400"
+            className="hit rounded px-1.5 py-0.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:bg-gray-100 focus-visible:text-gray-900 focus-visible:ring-1 focus-visible:ring-sky-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100 dark:focus-visible:bg-gray-800 dark:focus-visible:text-gray-100 dark:focus-visible:ring-sky-400"
           >
             {side === 'left' ? <AcceptLeftIcon size={13} /> : <AcceptRightIcon size={13} />}
           </button>

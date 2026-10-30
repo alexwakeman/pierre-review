@@ -120,7 +120,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
               type="button"
               onClick={() => refresh.mutate()}
               disabled={busy || workspaceId == null}
-              className="rounded-ui bg-ai-signal px-3 py-1 text-meta font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              className="hit rounded-ui bg-ai-signal px-3 py-1 text-meta font-semibold text-white hover:opacity-90 disabled:opacity-50"
               title="Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments are not re-read)"
             >
               {busy ? (

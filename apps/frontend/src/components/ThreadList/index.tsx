@@ -377,7 +377,7 @@ export function ThreadList({
               <button
                 type="button"
                 onClick={() => setThreadStateFilter(new Set())}
-                className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                className="hit rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Clear
               </button>
@@ -424,7 +424,7 @@ export function ThreadList({
                 <button
                   type="button"
                   onClick={() => setThreadSeverityFilter(new Set())}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                  className="hit rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -447,7 +447,7 @@ export function ThreadList({
               <button
                 type="button"
                 onClick={() => setThreadBotFilter(null)}
-                className="rounded px-1.5 py-0.5 text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                className="hit rounded px-1.5 py-0.5 text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Show all threads
               </button>
@@ -465,7 +465,7 @@ export function ThreadList({
                     type="button"
                     disabled={resolveBotThreads.isPending}
                     onClick={runBulkResolve}
-                    className="rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                    className="hit rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
                   >
                     {resolveBotThreads.isPending ? 'Resolving…' : 'Yes, resolve'}
                   </button>
@@ -473,7 +473,7 @@ export function ThreadList({
                     type="button"
                     disabled={resolveBotThreads.isPending}
                     onClick={() => setConfirming(false)}
-                    className="rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                    className="hit rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                   >
                     Cancel
                   </button>
@@ -482,7 +482,7 @@ export function ThreadList({
                 <button
                   type="button"
                   onClick={() => setConfirming(true)}
-                  className="rounded border px-2 py-0.5 font-medium hover:opacity-80"
+                  className="hit rounded border px-2 py-0.5 font-medium hover:opacity-80"
                   style={{ borderColor: vendor.color, ...vendorInk(vendor.color) }}
                   title="A later commit touched the file these threads flag — resolve them in one click (you approve each batch)."
                 >
@@ -539,7 +539,7 @@ export function ThreadList({
                         <button
                           type="button"
                           onClick={() => cycleToThread(clusterKey, m.userId, ids)}
-                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium hover:opacity-80"
+                          className="hit inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium hover:opacity-80"
                           style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
                           title={
                             ids.length > 1

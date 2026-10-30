@@ -310,7 +310,7 @@ function RowHeader({
   onOpen: () => void;
 }): JSX.Element {
   return (
-    <button type="button" onClick={onOpen} className="block w-full text-left" title="Open this PR">
+    <button type="button" onClick={onOpen} className="hit block w-full text-left" title="Open this PR">
       <div className="flex items-center gap-1.5">
         <StatusDot tone={tone} />
         <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
@@ -392,7 +392,7 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
           type="button"
           onClick={() => disarm.mutate()}
           disabled={disarm.isPending}
-          className="shrink-0 text-[11px] text-gray-400 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
+          className="hit shrink-0 text-[11px] text-gray-400 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
         >
           {disarm.isPending ? 'Cancelling…' : 'Cancel'}
         </button>
@@ -437,7 +437,7 @@ function OutcomeRow({
           type="button"
           onClick={onDismiss}
           aria-label={`Dismiss the result for ${outcome.repoFullName} #${outcome.prNumber}`}
-          className="shrink-0 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit shrink-0 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           Dismiss
         </button>

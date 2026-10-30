@@ -770,7 +770,7 @@ export function OpenPrsCards({
           <button
             type="button"
             onClick={ticketGate.release}
-            className="rounded border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            className="hit rounded border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
           >
             Group by ticket
           </button>
@@ -943,7 +943,7 @@ function ShowMoreRow({
           focusFrom.current = drawnCards;
           onMore();
         }}
-        className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
       >
         Show more
       </button>
@@ -998,7 +998,7 @@ function StackCoverage({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
@@ -1183,7 +1183,7 @@ function StoryCurrencyLine({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-xs font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-xs font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
@@ -1278,7 +1278,7 @@ function TicketStack({
                     target="_blank"
                     rel="noreferrer noopener"
                     title={`Open ${cardTicketLabel(t)}`}
-                    className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
                   >
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
@@ -1378,7 +1378,7 @@ function MergedPanel({
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => toggle(stackId)}
-        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         Merged ({prs.length})
@@ -1389,7 +1389,7 @@ function MergedPanel({
             <button
               type="button"
               onClick={() => onOpen(m)}
-              className="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
+              className="hit block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
             >
               <span className="flex min-w-0 items-center gap-1.5">
                 <MergeIcon size={13} className="shrink-0 text-gray-500 dark:text-gray-400" aria-hidden />
@@ -1656,7 +1656,7 @@ function OpenPrCard({
                 target="_blank"
                 rel="noreferrer noopener"
                 title={`Open ${label}`}
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
+                className="hit inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
               >
                 {body}
               </a>
@@ -1687,7 +1687,7 @@ function OpenPrCard({
                 onJumpToStack(stackIdFor(t.key));
               }}
               title={`Go to ${cardTicketLabel(t)}`}
-              className="rounded font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
             >
               {t.key}
             </button>

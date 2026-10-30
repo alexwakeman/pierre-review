@@ -1,6 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { cx, FOCUS_RING } from './cx.js';
-import { Kbd } from './Kbd.js';
 
 // THE BUTTON (docs/redesign/DESIGN.md § Controls).
 //
@@ -31,7 +30,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
   /** An icon from Icons.tsx, drawn before the label. */
   icon?: ReactNode;
-  /** The shortcut that does the same thing, shown as a key after the label ("M"). */
+  /**
+   * The shortcut that does the same thing ("M"). NEVER printed on the button (the standing rule:
+   * shortcuts exist, ⌘K and the ? sheet list them) — it is announced through `aria-keyshortcuts`
+   * and added to the tooltip.
+   */
   kbd?: string;
   /** Busy: shows `busyLabel` (or the label) and blocks clicks, keeping the width stable. */
   busy?: boolean;
@@ -39,7 +42,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'secondary', size = 'md', icon, kbd, busy = false, busyLabel, className, children, disabled, type, ...rest },
+  { variant = 'secondary', size = 'md', icon, kbd, busy = false, busyLabel, className, children, disabled, type, title, ...rest },
   ref,
 ) {
   return (
@@ -48,6 +51,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type ?? 'button'}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
+      aria-keyshortcuts={kbd != null ? (kbd === '↵' ? 'Enter' : kbd.toLowerCase()) : undefined}
+      title={kbd != null && title != null ? `${title} (${kbd})` : title}
       className={cx(
         'inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-ui font-medium',
         'motion-safe:transition-colors motion-safe:duration-ui-fast',
@@ -61,11 +66,6 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     >
       {icon != null && <span className="flex shrink-0 items-center">{icon}</span>}
       {busy && busyLabel != null ? busyLabel : children}
-      {kbd != null && !busy && (
-        <Kbd onAccent={variant === 'primary'} className="ml-0.5">
-          {kbd}
-        </Kbd>
-      )}
     </button>
   );
 });

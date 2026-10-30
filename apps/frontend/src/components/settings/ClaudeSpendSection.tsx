@@ -197,7 +197,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
             {/* THE 5-HOUR SHARE: follows the weekly one unless the reader sets their own. Collapsed
                 by default; open when a separate figure is stored. Clearing it = same as weekly. */}
             <details open={settings.fiveHourSharePct != null} data-testid="ai-budget-five-hour">
-              <summary className="cursor-pointer text-meta text-ui-mute">
+              <summary className="hit cursor-pointer text-meta text-ui-mute">
                 Set a separate 5-hour limit
               </summary>
               <div className="mt-1.5 space-y-1.5">

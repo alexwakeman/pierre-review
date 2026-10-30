@@ -35,7 +35,13 @@ export function usePaletteSearch(): void {
     const t = window.setTimeout(() => setDebounced(query.trim()), 300);
     return () => window.clearTimeout(t);
   }, [open, query]);
-  const { data } = useSearchDropdown(open ? debounced : '');
+  const { data, isFetching } = useSearchDropdown(open ? debounced : '');
+  // "Searching…" from the keystroke until the debounced request answers (the old dropdown's line).
+  const typed = query.trim();
+  const searching = open && typed.length >= 2 && (typed !== debounced || isFetching);
+  const setSearching = useCommandRegistry((s) => s.setSearching);
+  useEffect(() => setSearching(searching), [searching, setSearching]);
+  useEffect(() => () => setSearching(false), [setSearching]);
   const { data: openPrs } = useWorkspaceOpenPrs();
 
   const commands = useMemo<Command[]>(() => {

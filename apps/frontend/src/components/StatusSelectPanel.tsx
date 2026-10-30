@@ -152,7 +152,7 @@ export function StatusSelectPanel({
               <button
                 type="button"
                 onClick={reset}
-                className="text-meta text-ui-faint hover:text-ui-ink"
+                className="hit text-meta text-ui-faint hover:text-ui-ink"
               >
                 Reset to default
               </button>

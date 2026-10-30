@@ -565,7 +565,7 @@ function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
               href={safeExternalUrl(fix.pushedPrUrl)}
               target="_blank"
               rel="noreferrer"
-              className="underline"
+              className="hit underline"
             >
               PR #{fix.pushedPrNumber}
             </a>
@@ -618,7 +618,7 @@ function FixHistory({
                     href={safeExternalUrl(h.pushedPrUrl)}
                     target="_blank"
                     rel="noreferrer"
-                    className="underline"
+                    className="hit underline"
                   >
                     PR #{h.pushedPrNumber}
                   </a>

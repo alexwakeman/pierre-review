@@ -96,7 +96,7 @@ export function PrActionControls({
       type="button"
       onClick={toggle}
       aria-expanded={open}
-      className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+      className="hit inline-flex items-center gap-1 whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
     >
       {open ? 'Hide actions' : 'Show actions'}
       <ChevronIcon dir={open ? 'up' : 'down'} size={11} />

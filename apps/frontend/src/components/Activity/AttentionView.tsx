@@ -38,10 +38,7 @@ import { AttentionCards, KIND_LABEL, type PendingFocusRequest } from './Attentio
 import { pendingRowSummary } from './pendingRow.js';
 import {
   Button,
-  Kbd,
-  KbdGroup,
   Tabs,
-  modKeyLabel,
   panelId,
   tabId,
   useCommandProvider,
@@ -780,20 +777,6 @@ export function AttentionView(): JSX.Element {
         )}
       </div>
 
-      {/* The keys, once, quietly — desktop only (a touch screen has none; Kbd hides itself). */}
-      <footer
-        aria-label="Keyboard shortcuts"
-        className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 bg-ui-surface px-7 py-2 text-meta text-ui-faint max-lg:hidden touch:hidden"
-      >
-        <span className="inline-flex items-center gap-1.5"><KbdGroup keys={['J', 'K']} /> move</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>↵</Kbd> open</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>A</Kbd> approve</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>M</Kbd> merge</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>E</Kbd> dismiss</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>Z</Kbd> undo</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>1</Kbd>–<Kbd>7</Kbd> tabs</span>
-        <span className="inline-flex items-center gap-1.5"><Kbd>{modKeyLabel()}K</Kbd> commands</span>
-      </footer>
       {guideOpen && <PendingGuideModal onClose={closeGuide} rules={data?.rules} />}
     </div>
   );

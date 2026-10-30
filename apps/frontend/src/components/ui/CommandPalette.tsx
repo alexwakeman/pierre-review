@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { closeActivePopover } from '../../lib/activePopover.js';
 import { MagnifierIcon } from '../Icons.js';
+import { highlightTerms } from '../Search/highlight.js';
 import { collectCommands, rankCommands, useCommandRegistry, type Command } from './commands.js';
 import { cx } from './cx.js';
 import { isPaletteChord } from './keys.js';
@@ -36,6 +37,7 @@ function PaletteDialog(): JSX.Element {
   const providers = useCommandRegistry((s) => s.providers);
   const close = useCommandRegistry((s) => s.closePalette);
   const publishQuery = useCommandRegistry((s) => s.setQuery);
+  const searching = useCommandRegistry((s) => s.searching);
   const [query, setQuery] = useState(initialQuery);
   // Publish what is typed, for async sources (the server search); see commands.ts `query`.
   useEffect(() => publishQuery(query), [query, publishQuery]);
@@ -72,7 +74,16 @@ function PaletteDialog(): JSX.Element {
       inputRef.current?.focus();
     };
     document.addEventListener('focusin', onFocusIn);
-    return () => document.removeEventListener('focusin', onFocusIn);
+    // A layer closing in the same frame as the palette opens (the phone drawer) may hand focus back
+    // to its opener AFTER the layout effect above: take it back once the frame settles.
+    const raf = window.requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (a == null || !dialogRef.current?.contains(a)) inputRef.current?.focus();
+    });
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      window.cancelAnimationFrame(raf);
+    };
   }, []);
 
   useEffect(() => {
@@ -160,7 +171,7 @@ function PaletteDialog(): JSX.Element {
           aria-label="Results"
           className="m-0 min-h-0 flex-1 list-none overflow-y-auto overscroll-contain bg-ui-surface p-1.5"
         >
-          {results.length === 0 && (
+          {results.length === 0 && !searching && (
             <li role="presentation" className="px-3 py-6 text-body text-ui-mute">
               Nothing matches “{query.trim()}”.
             </li>
@@ -189,7 +200,7 @@ function PaletteDialog(): JSX.Element {
                   )}
                 >
                   {c.icon != null && <span className="flex w-4 shrink-0 items-center text-ui-faint">{c.icon}</span>}
-                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                  <span className="min-w-0 flex-1 truncate">{grouped ? c.title : highlightTerms(c.title, query)}</span>
                   {(c.hint ?? (!grouped ? c.group : null)) != null && (
                     <span className="max-w-[45%] shrink-0 truncate text-meta text-ui-faint">{c.hint ?? c.group}</span>
                   )}
@@ -198,6 +209,12 @@ function PaletteDialog(): JSX.Element {
               </li>
             );
           })}
+          {searching && (
+            // The server search is still answering: say so quietly, under whatever already matched.
+            <li role="status" className="px-3 py-2 text-meta text-ui-faint" data-testid="palette-searching">
+              Searching…
+            </li>
+          )}
         </ul>
       </div>
     </div>

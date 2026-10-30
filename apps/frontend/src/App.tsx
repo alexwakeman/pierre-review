@@ -30,7 +30,6 @@ import { SettingsModal } from './components/settings/SettingsModal.js';
 import { useSettingsModal } from './store/settingsModal.js';
 import { ConflictResolverOverlay } from './components/conflicts/ConflictResolverOverlay.js';
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
-import { MyTurnDismissToast } from './components/Activity/MyTurnDismissToast.js';
 import { DependencyMergeToast } from './components/Activity/DependencyMergeAll.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
 import { useUrlState } from './hooks/useUrlState.js';
@@ -259,7 +258,6 @@ export default function App(): JSX.Element {
           The resolver has no URL and no history entry, so this card is the ONLY route back. */}
       <ClosedResolverToast />
       {/* Undo for the My Turn entry just dismissed from the Pending board. */}
-      <MyTurnDismissToast />
       {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
       <DependencyMergeToast />
       {/* "Merge when ready" — what is armed and what just landed (the old header's merge pill). */}
@@ -313,8 +311,11 @@ export default function App(): JSX.Element {
                   onPointerMove={onResizeMove}
                   onPointerUp={onResizeUp}
                   title="Drag to resize"
-                  className="h-1 shrink-0 cursor-row-resize bg-ui-surface transition-colors hover:bg-ui-accent-fill touch:h-3"
-                />
+                  // A finger needs 40px: on touch the handle is a 40px band with a grabber pill.
+                  className="group flex h-1 shrink-0 cursor-row-resize touch-none items-center justify-center bg-ui-surface transition-colors hover:bg-ui-accent-fill touch:h-10 touch:hover:bg-ui-surface"
+                >
+                  <span aria-hidden className="hidden h-1 w-10 rounded-full bg-ui-faint touch:block" />
+                </div>
                 <section
                   ref={paneRef}
                   style={{ height: paneH }}

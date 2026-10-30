@@ -92,7 +92,7 @@ function TreeRow({
           onClick={() => onToggleDir(node.path)}
           aria-expanded={open}
           style={pad}
-          className="flex w-full items-center gap-1.5 rounded border-l-2 border-transparent py-0.5 pr-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800/50"
+          className="hit flex w-full items-center gap-1.5 rounded border-l-2 border-transparent py-0.5 pr-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800/50"
           title={`${node.path} — ${node.fileCount} file${node.fileCount === 1 ? '' : 's'}`}
         >
           <span className="flex w-3 shrink-0 select-none justify-center text-gray-400">
@@ -294,7 +294,7 @@ export function FileTree({
             onClick={() =>
               setCollapsed(anyExpanded ? new Set(dirPaths) : new Set<string>())
             }
-            className="ml-auto hover:text-gray-600 hover:underline dark:hover:text-gray-300"
+            className="hit ml-auto hover:text-gray-600 hover:underline dark:hover:text-gray-300"
           >
             {anyExpanded ? 'Collapse all' : 'Expand all'}
           </button>

@@ -324,7 +324,7 @@ export function Charts({
         <button
           type="button"
           onClick={() => setShowMore((s) => !s)}
-          className="flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <ChevronIcon dir={showMore ? 'down' : 'right'} size={11} />
           More charts
@@ -383,7 +383,7 @@ export function RepoAnalyticsModal({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="hit shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
             aria-label="Close (Esc)"
             title="Close (Esc)"
           >

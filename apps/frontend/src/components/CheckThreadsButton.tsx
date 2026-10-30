@@ -53,7 +53,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
           type="button"
           onClick={() => cancel.mutate()}
           disabled={cancel.isPending}
-          className="rounded px-1 text-xs text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:text-white"
+          className="hit rounded px-1 text-xs text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:text-white"
         >
           Cancel
         </button>
@@ -81,7 +81,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
           type="button"
           onClick={() => start.mutate()}
           disabled={start.isPending}
-          className="inline-flex items-center gap-1 rounded border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface disabled:opacity-50"
+          className="hit inline-flex items-center gap-1 rounded border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface disabled:opacity-50"
         >
           <PendingClaudeReviewIcon size={12} className="text-ai-signal" />
           {start.isPending ? 'Starting…' : 'Check threads'}

@@ -112,7 +112,7 @@ export function TicketStatusPicker({
                   setOpen(false);
                   change.mutate(t.id);
                 }}
-                className="flex w-full flex-col rounded px-2 py-1 text-left text-xs text-gray-800 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+                className="hit flex w-full flex-col rounded px-2 py-1 text-left text-xs text-gray-800 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
               >
                 <span>{t.to.name}</span>
                 {dupes.has(t.to.name) && t.name !== t.to.name && (

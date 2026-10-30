@@ -282,7 +282,7 @@ export function ClaudeReviewPanel({
         type="button"
         onClick={open}
         title="Open the AI review"
-        className="inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="hit inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
         <SparkleIcon size={12} className="text-ai-signal" />
         AI review

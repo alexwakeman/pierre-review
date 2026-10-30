@@ -221,14 +221,14 @@ function CodexSignIn({
     return (
       <span className="flex flex-wrap items-center gap-2">
         {authUrl != null && (
-          <a href={authUrl} target="_blank" rel="noreferrer" className="text-ui-accent underline">
+          <a href={authUrl} target="_blank" rel="noreferrer" className="hit text-ui-accent underline">
             Open the ChatGPT sign-in
           </a>
         )}
         {verificationUrl != null && (
           <span className={MUTED}>
             Go to{' '}
-            <a href={verificationUrl} target="_blank" rel="noreferrer" className="text-ui-accent underline">
+            <a href={verificationUrl} target="_blank" rel="noreferrer" className="hit text-ui-accent underline">
               the sign-in page
             </a>{' '}
             and enter <span className="font-mono font-semibold text-ui-ink">{state.userCode}</span>

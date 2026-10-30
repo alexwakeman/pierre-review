@@ -39,7 +39,7 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
           href={s.oldestUnreviewed.githubUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="hover:underline"
+          className="hit hover:underline"
           title={s.oldestUnreviewed.title}
         >
           oldest unreviewed #{s.oldestUnreviewed.number} ·{' '}

@@ -400,7 +400,7 @@ export function SlackSection(): JSX.Element {
             type="button"
             onClick={() => removal.mutate()}
             disabled={removal.isPending}
-            className="ml-auto text-meta text-ui-faint underline hover:text-ui-danger disabled:opacity-50"
+            className="hit ml-auto text-meta text-ui-faint underline hover:text-ui-danger disabled:opacity-50"
             title="Delete this workspace's channel and stop the digest. Use cadence 'Off' to pause without losing the webhook."
           >
             {removal.isPending ? 'Stopping…' : 'Stop sending (delete the channel)'}

@@ -138,7 +138,7 @@ function ResolveConflictsMenu({
           <button
             type="button"
             onClick={() => cancelConflictAiRun(target.prId)}
-            className="ml-auto text-[11px] text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+            className="hit ml-auto text-[11px] text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
           >
             Cancel
           </button>

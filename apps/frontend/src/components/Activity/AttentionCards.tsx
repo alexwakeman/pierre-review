@@ -1136,7 +1136,7 @@ function MyTurnReplyBody({
           {(overflows || expanded) && (
             <button
               type="button"
-              className="text-gray-600 hover:underline dark:text-gray-300"
+              className="hit text-gray-600 hover:underline dark:text-gray-300"
               onClick={() => setExpanded((v) => !v)}
             >
               {expanded ? 'Show less' : 'Show more'}
@@ -1145,7 +1145,7 @@ function MyTurnReplyBody({
           {reply.truncated && (expanded || !overflows) && (
             <button
               type="button"
-              className="text-gray-600 hover:underline dark:text-gray-300"
+              className="hit text-gray-600 hover:underline dark:text-gray-300"
               onClick={onOpen}
             >
               {openLabel}
@@ -1218,7 +1218,7 @@ export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        className="hit text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
         <ChevronIcon
           dir={open ? 'down' : 'right'}
@@ -1332,7 +1332,7 @@ function RoutingReviewerRow({
             disabled={state.status === 'pending'}
             aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
             title={`Ask ${who} to review this PR on GitHub`}
-            className="min-w-[4.75rem] rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+            className="hit min-w-[4.75rem] rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           >
             {state.status === 'pending' ? 'Assigning…' : 'Assign'}
           </button>
@@ -1661,7 +1661,7 @@ function PendingMergeActions({
         // describes what will happen later, a live POST describes what is happening now, and the
         // card must not read "Waiting for the first check" while the merge call is in flight.
         // Not a spinner — the row already has no other motion and the sentence is the signal.
-        <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{inFlight}</span>
+        <span className="text-meta font-medium text-ui-mute">{inFlight}</span>
       ) : armed != null ? (
         // ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. The
         // repo is not named because the card's meta line already prints `#number · owner/name`.
@@ -1670,7 +1670,7 @@ function PendingMergeActions({
         // beside the armed chip below, which says exactly that (with "Cancel & dequeue"), under a
         // header queue chip saying it a third time. The chip and its verb carry it.
         armed.phase === 'queued' && armed.enqueuedAt != null ? null : (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {armedPhaseHeadline(armed)}
           </span>
         )
@@ -1681,7 +1681,7 @@ function PendingMergeActions({
         // is still here. Before this the card just lost its armed line and said nothing at all —
         // the reported "disarmed for unknown reasons". It clears itself: the server drops the
         // row after 24h, and a re-arm replaces it with the live headline above.
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
           {TERMINAL_LABEL[stopped.state] ?? 'Auto-merge stopped'}
           {stopped.lastReason != null && <span className="ml-1">— {stopped.lastReason}</span>}
@@ -1694,10 +1694,10 @@ function PendingMergeActions({
         // No button, but never a silent row: the verdict IS the answer to "why can't I merge
         // this?", and it is the same sentence PrDetail leads its merge panel with. (A Dependencies
         // card's state row has already said it — `verdictLine` is false there.)
-        <span className={`text-[11px] font-medium ${MERGE_TONE_CLASS[row.verdict.tone]}`}>
+        <span className={`text-meta font-medium ${MERGE_TONE_CLASS[row.verdict.tone]}`}>
           {row.verdict.label}
           {row.verdict.detail != null && (
-            <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">
+            <span className="ml-1 font-normal text-ui-mute">
               — {row.verdict.detail}
             </span>
           )}
@@ -2004,7 +2004,7 @@ function SecurityDetail({
                   <button
                     type="button"
                     onClick={() => onOpenThread(alert.threadId as number)}
-                    className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                    className="hit text-left underline decoration-dotted underline-offset-2 hover:decoration-solid"
                     title="Open this review thread"
                   >
                     {where}
@@ -2041,7 +2041,7 @@ function ExternalCardLink({ href, title }: { href: string | null; title: string 
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="inline-flex shrink-0 items-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+      className="hit inline-flex shrink-0 items-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
       title={title}
       aria-label={title}
     >
@@ -2289,7 +2289,7 @@ function ActionLine({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="text-ui-ink underline decoration-dotted underline-offset-2 hover:decoration-solid"
+          className="hit text-ui-ink underline decoration-dotted underline-offset-2 hover:decoration-solid"
           title="Open the commit on GitHub"
         >
           {text}
@@ -2306,7 +2306,7 @@ function ActionLine({
         <button
           type="button"
           onClick={pr.open}
-          className="min-w-0 truncate rounded-ui text-left text-ui-ink underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+          className="hit min-w-0 truncate rounded-ui text-left text-ui-ink underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title={`${pr.title} — open the PR`}
         >
           {pr.title}
@@ -2454,7 +2454,7 @@ function LastLandedLine({
       <button
         type="button"
         onClick={() => board.openMeta(meta, card.id)}
-        className="text-left text-gray-900 underline-offset-2 hover:underline dark:text-gray-100"
+        className="hit text-left text-gray-900 underline-offset-2 hover:underline dark:text-gray-100"
         title="Open this PR on its Overview tab"
       >
         {line.pr}

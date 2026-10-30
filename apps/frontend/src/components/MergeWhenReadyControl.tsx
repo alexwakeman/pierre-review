@@ -133,7 +133,7 @@ export function MergeWhenReadyControl({
     return (
       <div className="flex flex-wrap items-center gap-2">
         <span
-          className="inline-flex items-center gap-1 rounded border border-violet-300 bg-violet-50/60 px-2 py-0.5 text-sm font-medium text-violet-700 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-300"
+          className="inline-flex items-center gap-1.5 text-meta font-medium text-ui-ink"
           title={
             inQueue
               ? 'Limn added this PR to the merge queue — GitHub lands it from here. Cancelling also removes it from the queue.'
@@ -150,17 +150,17 @@ export function MergeWhenReadyControl({
               : 'Armed — merging when ready'}
         </span>
         {armed.armedByPolicy && (
-          <span className="text-[12px] text-gray-500 dark:text-gray-400">{ARMED_BY_POLICY_LABEL}</span>
+          <span className="text-meta text-ui-mute">{ARMED_BY_POLICY_LABEL}</span>
         )}
         <button
           type="button"
           onClick={() => disarm.mutate()}
           disabled={disarm.isPending}
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui px-2 h-7 text-meta font-medium text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
         >
           {disarm.isPending ? 'Cancelling…' : inQueue ? 'Cancel & dequeue' : 'Cancel auto-merge'}
         </button>
-        {disarmError && <span className="text-xs text-red-500">{disarmError}</span>}
+        {disarmError && <span className="text-meta text-ui-danger">{disarmError}</span>}
       </div>
     );
   }
@@ -182,7 +182,7 @@ export function MergeWhenReadyControl({
         <button
           type="button"
           onClick={() => dispatchArmDraft(prId, { type: 'ask' })}
-          className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-[11px] font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
+          className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2 h-7 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
           title="Check whether Limn's watcher can land this for you — it asks GitHub for the live merge state"
         >
           <TimerIcon size={11} />
@@ -190,7 +190,7 @@ export function MergeWhenReadyControl({
         </button>
       );
     }
-    return <span className="text-[11px] text-gray-400">Checking merge state…</span>;
+    return <span className="text-meta text-ui-faint">Checking merge state…</span>;
   }
 
   const queue = options.mergeQueue;
@@ -249,7 +249,7 @@ export function MergeWhenReadyControl({
     if (eager || draft === 'idle') return null;
     return (
       <span
-        className="text-[11px] text-gray-400"
+        className="text-meta text-ui-faint"
         title="Arming only helps while something is blocking the merge. There is nothing here for the watcher to wait out — or this repo won’t let this account merge."
       >
         Nothing to arm.
@@ -265,7 +265,7 @@ export function MergeWhenReadyControl({
         {/* The honest contract in one line: what it does AND that it's this server's watcher,
             not a GitHub setting. On a clean-but-behind PR this is a ≤2-min delayed merge, so
             the confirm step is deliberate, not decoration. */}
-        <span className="text-xs text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           {queueEnabled
             ? 'Updates from trunk if needed and adds it to the merge queue when required reviews are in — while Limn is running.'
             : 'Updates from trunk if needed and merges when checks pass — while Limn is running.'}
@@ -287,7 +287,7 @@ export function MergeWhenReadyControl({
             })
           }
           disabled={phase === 'arming'}
-          className="whitespace-nowrap rounded border border-violet-500 px-2 py-0.5 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-600 dark:text-violet-300 dark:hover:bg-violet-900/30"
+          className="hit inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-ui bg-ui-accent-fill px-2 h-7 text-meta font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
         >
           {phase === 'arming' ? 'Arming…' : 'Arm auto-merge'}
         </button>
@@ -298,11 +298,11 @@ export function MergeWhenReadyControl({
             arm.reset();
           }}
           disabled={phase === 'arming'}
-          className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui px-2 h-7 text-meta font-medium text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
         >
           Cancel
         </button>
-        {armError && <span className="text-xs text-red-500">{armError}</span>}
+        {armError && <span className="text-meta text-ui-danger">{armError}</span>}
       </div>
     );
   }
@@ -311,7 +311,7 @@ export function MergeWhenReadyControl({
     <button
       type="button"
       onClick={() => dispatchArmDraft(prId, { type: 'confirm' })}
-      className="inline-flex items-center gap-1 rounded border border-violet-400 px-2 py-0.5 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30"
+      className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2 h-7 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
       title={
         (queueEnabled
           ? "Arm Limn's watcher: it updates from trunk if needed and adds the PR to the merge queue when required reviews are in — while the app is running"

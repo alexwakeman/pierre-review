@@ -123,7 +123,7 @@ export function SynthesisCard({
                 type="button"
                 onClick={() => generate.mutate()}
                 disabled={busy || workspaceId == null}
-                className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+                className="hit rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
                 title="Group this list into recurring clusters (runs the Haiku model; unchanged items are not re-read)"
               >
                 {busy ? (

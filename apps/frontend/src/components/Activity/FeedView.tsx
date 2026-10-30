@@ -1587,7 +1587,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+          className="hit group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
         >
           {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────
               The Resolved pill, the anchor line and the comment tally are what make this row
@@ -1727,7 +1727,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           <button
             type="button"
             onClick={() => setShowSummary((s) => !s)}
-            className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="hit text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
           >
             {showSummary ? 'Hide summary' : 'Show summary'}
           </button>
@@ -1757,7 +1757,7 @@ function AffectedThreadRow({
       <button
         type="button"
         onClick={onOpen}
-        className="group/th block w-full rounded border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+        className="hit group/th block w-full rounded border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
       >
         <span className="flex items-center gap-1.5 text-[11px]">
           <span
@@ -1815,7 +1815,7 @@ function AffectedThreadsList({
               e.stopPropagation();
               setShowResolved((v) => !v);
             }}
-            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="hit text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           >
             {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved{' '}
             {resolved.length === 1 ? 'thread' : 'threads'}
@@ -2062,7 +2062,7 @@ function FeedRowImpl({
             <button
               type="button"
               onClick={() => onOpen(item)}
-              className="min-w-0 truncate text-body text-ui-mute hover:text-ui-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+              className="hit min-w-0 truncate text-body text-ui-mute hover:text-ui-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               {prLabel}
             </button>
@@ -2099,7 +2099,7 @@ function FeedRowImpl({
               <button
                 type="button"
                 onClick={() => onToggleExpanded(item.id)}
-                className="mt-1 text-meta font-medium text-ui-mute hover:text-ui-ink hover:underline"
+                className="hit mt-1 text-meta font-medium text-ui-mute hover:text-ui-ink hover:underline"
               >
                 {expanded ? 'Show less' : 'Show more'}
               </button>

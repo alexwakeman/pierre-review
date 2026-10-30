@@ -125,8 +125,9 @@ export function resolveGoChord(
   const armed = armedAt != null && now - armedAt <= GO_CHORD_MS;
   if (armed) {
     const dest = GO_KEYS[key.toLowerCase()] ?? null;
-    // Any second key ends the chord; only a known letter goes somewhere.
-    return { go: dest, armedAt: null, handled: dest != null };
+    // Any second key ends the chord and is SWALLOWED: only a known letter goes somewhere, but an
+    // unknown one must not fall through to a row action (`g e` used to dismiss the selected row).
+    return { go: dest, armedAt: null, handled: true };
   }
   if (key === 'g') return { go: null, armedAt: now, handled: true };
   return { go: null, armedAt: null, handled: false };

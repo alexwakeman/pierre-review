@@ -252,7 +252,7 @@ export function UserProfilePopover({
                 });
                 onDismiss();
               }}
-              className="rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
+              className="hit rounded px-1.5 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
               title={`Open ${label}'s last ${FEED_WINDOW_DAYS} days of activity in a tab`}
             >
               {`Last ${FEED_WINDOW_DAYS} days of activity →`}
@@ -264,7 +264,7 @@ export function UserProfilePopover({
               target="_blank"
               rel="noreferrer noopener"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="hit inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
               title={`@${login} on GitHub`}
             >
               GitHub

@@ -86,7 +86,9 @@ export function useShellCommands({
     const out: Command[] = [
       { id: 'open-prs', group: 'Go to', title: 'Open pull requests', icon: <PullRequestIcon size={14} />, keywords: ['prs', 'activity'], run: activity('open-prs') },
       { id: 'pending', group: 'Go to', title: 'Pending', icon: <PendingBallIcon size={14} />, keywords: ['my turn', 'inbox', 'attention'], run: activity('attention') },
-      ...PENDING_TABS.map((d, i) => ({
+      // Numbered over the tabs the strip SHOWS (AI reviews is hidden with AI off), so the key printed
+      // here is the key that picks it — see AttentionView's `shownTabs`.
+      ...PENDING_TABS.filter((d) => aiOn || d.key !== 'claude').map((d, i) => ({
         id: `pending:${d.key}`,
         group: 'Go to' as const,
         title: `Pending: ${TAB_LABEL[d.key]}`,
@@ -98,7 +100,7 @@ export function useShellCommands({
           f().setAttentionTab(d.key);
           t().showActivity();
         },
-      })).filter((c) => aiOn || c.id !== 'pending:claude'),
+      })),
       ...(aiOn
         ? [{ id: 'docs', group: 'Go to' as const, title: 'Docs', icon: <BookIcon size={14} />, keywords: ['reference', 'library'], run: activity('docs') }]
         : []),

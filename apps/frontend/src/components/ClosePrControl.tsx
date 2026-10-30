@@ -25,7 +25,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 rounded border border-gray-400 px-2 py-0.5 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="hit inline-flex items-center gap-1 rounded border border-gray-400 px-2 py-0.5 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
           title="Close this PR without merging (reversible on GitHub)"
         >
           <CloseIcon /> Close
@@ -46,7 +46,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           })
         }
         disabled={close.isPending}
-        className="whitespace-nowrap rounded border border-red-400 px-2 py-0.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/30"
+        className="hit whitespace-nowrap rounded border border-red-400 px-2 py-0.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/30"
       >
         {close.isPending ? 'Closing…' : 'Close PR'}
       </button>
@@ -57,7 +57,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           close.reset();
         }}
         disabled={close.isPending}
-        className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
       >
         Cancel
       </button>

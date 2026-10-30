@@ -138,7 +138,7 @@ function CardBody({ body }: { body: string }): JSX.Element {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-meta font-medium text-ui-accent hover:underline"
+          className="hit mt-1 text-meta font-medium text-ui-accent hover:underline"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -255,7 +255,7 @@ function BotCommentCardImpl({
             <button
               type="button"
               onClick={() => onOpenPr(c)}
-              className="shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
+              className="hit shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
               title={`${c.repoFullName} #${c.prNumber} — ${c.prTitle}`}
             >
               {c.repoFullName} #{c.prNumber}
@@ -297,7 +297,7 @@ function BotCommentCardImpl({
           <button
             type="button"
             onClick={() => onOpenThread(c, threadId)}
-            className="font-medium text-ui-accent hover:underline"
+            className="hit font-medium text-ui-accent hover:underline"
           >
             Open thread
           </button>
@@ -307,7 +307,7 @@ function BotCommentCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-0.5 font-medium text-ui-accent hover:underline"
+            className="hit inline-flex items-center gap-0.5 font-medium text-ui-accent hover:underline"
             title={`${c.repoFullName} #${c.prNumber} on GitHub. There is deliberately no per-comment permalink — the comment's REST id isn't stored, so an anchor would 404.`}
           >
             <ExternalLinkIcon size={11} />
@@ -375,7 +375,7 @@ function UnbodiedMember({
         <button
           type="button"
           onClick={() => onOpenThread(cluster, member.threadId)}
-          className="font-medium text-ui-accent hover:underline"
+          className="hit font-medium text-ui-accent hover:underline"
         >
           Open thread
         </button>
@@ -430,7 +430,7 @@ function BotClusterCardImpl({
         <button
           type="button"
           onClick={() => onOpenPr(cluster)}
-          className="shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
+          className="hit shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
           title={`${cluster.repoFullName} #${cluster.prNumber} — ${cluster.prTitle}`}
         >
           {cluster.repoFullName} #{cluster.prNumber}
@@ -455,7 +455,7 @@ function BotClusterCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium text-ui-accent hover:underline"
+            className="hit ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium text-ui-accent hover:underline"
           >
             <ExternalLinkIcon size={11} />
             PR

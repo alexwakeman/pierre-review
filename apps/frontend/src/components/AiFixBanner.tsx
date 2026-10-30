@@ -155,7 +155,7 @@ function AiFixBannerRow({
             authorAvatarUrl: null,
           })
         }
-        className="block w-full text-left"
+        className="hit block w-full text-left"
         title="Open the AI Fix tab for this pull request"
       >
         <div className="flex items-center gap-1.5">
@@ -183,7 +183,7 @@ function AiFixBannerRow({
             type="button"
             onClick={() => dismiss(run.prId)}
             aria-label={`Dismiss the AI fix for ${run.repoFullName} #${run.prNumber}`}
-            className="text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             Dismiss
           </button>

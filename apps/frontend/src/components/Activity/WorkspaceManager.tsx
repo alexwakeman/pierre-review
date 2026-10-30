@@ -263,7 +263,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             onClick={() => confirmDeepResyncRepo(r)}
             title={`Deep re-sync ${r.fullName} — re-fetches its full backfill window`}
             aria-label={`Deep re-sync ${r.fullName}`}
-            className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-blue-500 focus:opacity-100 group-hover:opacity-100"
+            className="hit shrink-0 px-1 text-gray-400 opacity-0 hover:text-blue-500 focus:opacity-100 group-hover:opacity-100"
           >
             <DeepSyncIcon size={12} />
           </button>
@@ -273,7 +273,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             disabled={removeRepo.isPending}
             title={`Remove ${r.fullName}`}
             aria-label={`Remove ${r.fullName}`}
-            className="shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
+            className="hit shrink-0 px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100 disabled:opacity-30"
           >
             <CloseIcon />
           </button>
@@ -310,7 +310,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               onClick={confirmDeepResyncAll}
               disabled={syncRound.syncing}
               title="Force a full backfill for all repos"
-              className="flex items-center gap-1.5 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="hit flex items-center gap-1.5 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <DeepSyncIcon size={12} />
               Deep re-sync all
@@ -319,7 +319,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="hit rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
             >
               <CloseIcon size={14} />
             </button>
@@ -406,7 +406,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   type="button"
                   onClick={submitCreate}
                   disabled={!newName.trim() || createWorkspace.isPending}
-                  className="shrink-0 rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                  className="hit shrink-0 rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
                 >
                   Create
                 </button>
@@ -459,7 +459,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                       <button
                         type="button"
                         onClick={() => setSelectedId(w.id)}
-                        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                        className="hit flex min-w-0 flex-1 items-center gap-1.5 text-left"
                       >
                         <span
                           className={`truncate ${isSelected ? 'font-semibold text-sky-700 dark:text-sky-300' : 'text-gray-700 dark:text-gray-200'}`}
@@ -489,7 +489,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                       }}
                       title="Rename"
                       aria-label={`Rename ${w.name}`}
-                      className="shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-gray-200"
+                      className="hit shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-gray-200"
                     >
                       <PencilIcon />
                     </button>
@@ -502,7 +502,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         disabled
                         title="The default workspace can’t be deleted — new repos land here, and a deleted workspace’s repos and bot settings come back here. You can rename it."
                         aria-label={`${w.name} is the default workspace and can’t be deleted`}
-                        className="shrink-0 cursor-not-allowed rounded px-1 decorative-mark text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
+                        className="hit shrink-0 cursor-not-allowed rounded px-1 decorative-mark text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
                       >
                         <CloseIcon />
                       </button>
@@ -512,7 +512,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         onClick={() => confirmDeleteWorkspace(w)}
                         title="Delete workspace"
                         aria-label={`Delete ${w.name}`}
-                        className="shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
+                        className="hit shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
                       >
                         <CloseIcon />
                       </button>

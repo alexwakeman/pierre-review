@@ -150,7 +150,7 @@ export function CheckRow({
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="text-blue-500 hover:underline"
+      className="hit text-blue-500 hover:underline"
       title={linkTitle}
     >
       Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
@@ -169,7 +169,7 @@ export function CheckRow({
           target="_blank"
           rel="noreferrer noopener"
           title={linkTitle}
-          className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="hit flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           {dot}
           <span className="min-w-0 truncate">{check.name}</span>
@@ -207,7 +207,7 @@ export function CheckRow({
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
           title={linkTitle}
-          className="min-w-0 truncate hover:underline"
+          className="hit min-w-0 truncate hover:underline"
         >
           {check.name}
         </a>
@@ -216,7 +216,7 @@ export function CheckRow({
           onClick={toggle}
           aria-expanded={expanded}
           title={expanded ? 'Hide the job log' : 'Show the job log'}
-          className="flex flex-1 items-center justify-end gap-1.5 text-gray-400"
+          className="hit flex flex-1 items-center justify-end gap-1.5 text-gray-400"
         >
           <span className="text-xs">{m.label}</span>
           <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-500">
@@ -248,7 +248,7 @@ export function CheckRow({
                   {(logs.hasNextPage || logs.isFetchingNextPage) && (
                     <button
                       type="button"
-                      className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                      className="hit rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
                       disabled={!canLoadEarlier}
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"
@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        className="hit whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"
@@ -357,7 +357,7 @@ export function CiRerunControl({
       </button>
       <button
         type="button"
-        className="whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         disabled={rerun.isPending}
         onClick={() => fire('all', allRunIds)}
         title="Re-run the entire workflow run(s) from scratch"

@@ -418,7 +418,7 @@ export function ThemeThreadsDetail(): JSX.Element {
                   key={pr.prId}
                   type="button"
                   onClick={() => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
-                  className="rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
+                  className="hit rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
                   title={`${pr.repoFullName}#${pr.prNumber} — open PR`}
                 >
                   #{pr.prNumber}

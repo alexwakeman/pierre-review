@@ -47,7 +47,7 @@ export function PrLink({ pr }: { pr: FlowPrLink }): JSX.Element {
         type="button"
         onClick={() => open(pr)}
         title={pr.prTitle}
-        className="inline-flex min-w-0 items-baseline gap-1 text-left font-medium text-ui-accent hover:underline"
+        className="hit inline-flex min-w-0 items-baseline gap-1 text-left font-medium text-ui-accent hover:underline"
       >
         <PullRequestIcon size={11} className="shrink-0 self-center" />
         <span className="shrink-0 whitespace-nowrap">
@@ -62,7 +62,7 @@ export function PrLink({ pr }: { pr: FlowPrLink }): JSX.Element {
           rel="noopener noreferrer"
           title="Open on GitHub"
           aria-label={`Open ${pr.repoFullName} #${pr.prNumber} on GitHub`}
-          className="shrink-0 self-center text-ui-mute hover:text-ui-ink"
+          className="hit shrink-0 self-center text-ui-mute hover:text-ui-ink"
         >
           <ExternalLinkIcon size={11} />
         </a>

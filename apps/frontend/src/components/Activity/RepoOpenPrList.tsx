@@ -61,7 +61,7 @@ export function OpenPrRow({
         type="button"
         onClick={onClick}
         title={`Open #${pr.number} — ${pr.title}`}
-        className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
+        className="hit flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
       >
         {/* CI rollup dot (a hollow ring when there are no checks) */}
         <span
@@ -224,7 +224,7 @@ export function OpenPrRows({
         <button
           type="button"
           onClick={onShowAll}
-          className="flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
+          className="hit flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
         >
           Show all {prs.length} open PRs
           <span className="text-gray-400">· sortable</span>
@@ -278,7 +278,7 @@ export function RepoOpenPrList({
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
       >
         <ChevronIcon
           dir={collapsed ? 'right' : 'down'}

@@ -134,7 +134,7 @@ function ThemeCard({
                       onOpenPr(pr);
                     }}
                     title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''} — open PR`}
-                    className="rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
+                    className="hit rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
                   >
                     #{pr.prNumber}
                   </button>

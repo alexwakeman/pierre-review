@@ -157,7 +157,7 @@ function CodeAnchorRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, side)}
-        className="break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
       >
         {label}
       </button>
@@ -783,7 +783,7 @@ export function ClaudeReviewTicketPanel({
               <button
                 type="button"
                 onClick={addStory}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
+                className="hit flex items-center gap-1 px-2 py-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
               >
                 <PlusIcon size={11} />
                 Add story
@@ -1336,7 +1336,7 @@ export function FollowUpRow({
               .getElementById(`claude-finding-${reraised}`)
               ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
           }
-          className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+          className="hit mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
         >
           Raised again below
           <ChevronIcon dir="down" size={11} />
