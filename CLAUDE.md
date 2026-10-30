@@ -415,9 +415,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   run's thread is deleted once its usage is recorded. Models: deep `gpt-6.1-sol`, standard
   `gpt-6.1-terra`, fast `gpt-6-luna`. ⚠ A Codex change leaves Claude's prompts byte-identical
   (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
-- **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
-  [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
-  `build-release.mjs` asserts it.
+- **No AI SDK in the npm manifest**, yet the first boot downloads Claude AND Codex (`ai/auto-install.ts`,
+  after listen, never awaited); signing in is the only step. Value-imported ONLY by `ai/runtime.ts`.
 - **THE SPEND BUDGET** (ON by default at 50% of the week on a subscription — the reader may change or switch it off; never-set on an API key = no cap; per machine, `ai/budget.ts`; read per provider): ⚠
   **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
   `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click
@@ -619,7 +618,7 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   conflict fold, that both sides must agree on to the byte); every emitted specifier is rewritten
   and the build fails on one it missed. Never add it to the manifest; never fork a shared fold.
 - The platform's migrations + benchmark data are copied to `release/dist/platform/`.
-- **AI and ML runtimes install on first use** at pins the build writes into `limnAiRuntime` /
+- **AI runtimes install at boot, ML on first use,** at pins the build writes into `limnAiRuntime` /
   `limnMlRuntime` / `limnMlModels`; only `ai/runtime.ts` / `ml/runtime.ts` may value-import them
   (the build greps `release/dist`); the Codex CLI (`@openai/codex`) is never imported, only run.
   ⚠ zod comes from the SAME install as the SDK, by its ESM entry.

@@ -3788,11 +3788,13 @@ export interface AiClaudeProviderStatus {
    * stands for it while Claude is the active provider).
    */
   runtime?: 'ready' | 'absent' | 'installing' | 'failed';
+  /** While 'installing', the current step; when 'failed' (or stale), why. Optional: an older server omits it. */
+  runtimeMessage?: string | null;
 }
 
 /** `MeResponse.ai.providers.codex` — the Codex install and Limn's own Codex sign-in. */
 export interface AiCodexProviderStatus {
-  /** The Codex program (installed on request: "Set up AI" with Codex, `limn ai install codex`). */
+  /** The Codex program (downloaded with Claude's SDKs on the first boot, or `limn ai install codex`). */
   runtime: 'ready' | 'absent' | 'installing' | 'failed';
   runtimeMessage: string | null;
   /**
@@ -3906,8 +3908,10 @@ export interface MeResponse {
   // The agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto review, the review
   // chat) and AI Fix. Free; they run on the user's own Claude Code session or ANTHROPIC_API_KEY.
   //  - `enabled`: `!LIMN_AI_DISABLED`. False ⇒ no agentic surface renders.
-  //  - `runtime`: the one-time AI runtime download (the SDKs are not in the npm package). 'absent'
-  //    ⇒ the SPA offers "Set up AI"; 'failed' carries `runtimeMessage`.
+  //  - `runtime`: the one-time AI runtime download (the SDKs are not in the npm package). Limn
+  //    starts it by itself on the first boot when `autoInstall` (LIMN_AI_AUTO_INSTALL is not
+  //    'false'); 'installing' carries the current step in `runtimeMessage`, 'failed' the reason (the
+  //    SPA offers Retry). 'absent' with `autoInstall` false ⇒ the SPA offers "Set up AI".
   //  - `auth`: whether a Claude credential was detected (a heuristic — the run itself is the real
   //    check). 'none' ⇒ one line in place of every Run button; `authMessage` is that line.
   //  - `provider`: the ACTIVE provider (LIMN_AI_PROVIDER when set, else Settings → AI; `auto` =
@@ -3920,6 +3924,8 @@ export interface MeResponse {
   //    Optional: an older server omits it and every gate falls back to `auth`.
   ai: {
     enabled: boolean;
+    /** Limn downloads both runtimes by itself on boot. Optional: an older server omits it (false). */
+    autoInstall?: boolean;
     runtime: 'ready' | 'absent' | 'installing' | 'failed';
     runtimeMessage: string | null;
     auth: 'ok' | 'none';

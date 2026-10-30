@@ -12,6 +12,7 @@ import { aiCapabilitiesOf, type AiCapabilities } from '../lib/aiCapabilities.js'
 export {
   AI_AUTH_LINE,
   AI_SETUP_LABEL,
+  AI_SETUP_LABEL_BOTH,
   aiSetupLabel,
   aiAuthFor,
   aiCapabilitiesOf,
@@ -38,6 +39,8 @@ export function useAiProvider(): AiProviderId {
 
 // ---- The one-time runtime install (POST /api/ai/runtime/install, SSE) ----------------------------
 //
+// The SERVER starts the download by itself on the first boot (ai/auto-install.ts, `ai.autoInstall`);
+// this is the Retry after a failure (and the Set up button where the automatic download is off).
 // ONE install per page, shared by every mount: two "Set up AI" buttons (the Claude Review tab and
 // the AI Fix tab, say) must show the same progress and must not start two downloads. A tiny
 // module-level store rather than per-mount state, so a tab switch mid-download keeps the line.
@@ -66,10 +69,11 @@ export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvi
     if (installState.phase === 'running') return;
     setInstallState({ phase: 'running', message: null });
     let failed: string | null = null;
-    // The ACTIVE provider's download (or the one Settings → AI names): with Codex, `me.ai.runtime` is
-    // the Codex program's, so "Set up AI" adds Codex (Claude's SDKs always come with it). Absent body ⇒
-    // Claude only.
-    const provider = forProvider ?? qc.getQueryData<MeResponse>(['me'])?.ai.provider;
+    // Where Limn sets up both providers by itself (`ai.autoInstall`), a Retry fetches both too: body
+    // `codex` (Claude's SDKs always come with it). Otherwise the ACTIVE provider's download (or the one
+    // Settings → AI names): with Codex, `me.ai.runtime` is the Codex program's. Absent body ⇒ Claude only.
+    const meAi = qc.getQueryData<MeResponse>(['me'])?.ai;
+    const provider = forProvider ?? (meAi?.autoInstall ? 'codex' : meAi?.provider);
     const body: AiRuntimeInstallBody | undefined = provider === 'codex' ? { provider: 'codex' } : undefined;
     void sseStream<AiRuntimeInstallEvent>('/api/ai/runtime/install', {
       method: 'POST',
@@ -106,8 +110,8 @@ export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvi
 }
 
 /**
- * Poll `/api/me` while the SERVER says an install is running that this page did not start (another
- * browser tab, or `limn ai install` in a terminal), so the button turns into Run on its own.
+ * Poll `/api/me` while the SERVER says a download is running (the automatic first-boot one, another
+ * tab's, or `limn ai install` in a terminal), so its step shows and the line turns into Run on its own.
  * Shares the `['me']` cache entry — an extra observer with an interval, nothing more.
  */
 export function useAiRuntimePoll(installing: boolean): void {

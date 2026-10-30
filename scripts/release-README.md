@@ -44,10 +44,12 @@ there is nothing to set up. An Anthropic API key is the alternative: set
 `ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it. They can
 run on Codex instead (below).
 
-- **First use downloads the AI runtime, once (about 110 MB).** Press
-  **Set up AI** in the app, or run `limn ai install`. It goes to
-  `~/.limn/ai-runtime`, at the exact versions this release was tested with. The
-  package itself stays small for everyone who never uses AI.
+- **Claude and Codex work out of the box.** The first time Limn starts, it
+  downloads both in the background (Claude about 110 MB, Codex about 360 MB
+  unpacked) into `~/.limn/ai-runtime`, at the exact versions this release was
+  tested with. The package itself stays small. Signing in is the only step.
+  `limn ai install codex` runs the same download by hand;
+  `LIMN_AI_AUTO_INSTALL=false` skips the automatic one.
 - Set `LIMN_CLAUDE_PATH` to the `claude` you already have to use it instead of
   the bundled copy (the download then skips it).
 - The reviewer reads code. It cannot edit files, run commands or reach the web.
@@ -62,12 +64,13 @@ run on Codex instead (below).
 Every AI feature can run on Codex, on your own ChatGPT plan. One provider runs
 everything at a time.
 
+Codex comes with Limn. Sign in from **Settings → AI**, or:
+
 ```bash
-limn ai install codex   # adds the Codex CLI to the AI download
 limn ai login codex     # sign in with ChatGPT (add --device-auth on a headless machine)
 ```
 
-Or press **Set up AI** and sign in from **Settings → AI**. Limn keeps its own
+Limn keeps its own
 Codex sign-in in `~/.limn/codex`; your `~/.codex` is not read or changed. Codex
 with an OpenAI API key is not available yet.
 

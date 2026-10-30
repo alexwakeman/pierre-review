@@ -327,6 +327,11 @@ export const config = {
   // AI surface (`MeResponse.ai.enabled` false), registers no agentic route and refuses every
   // one-shot completion.
   aiEnabled: process.env.LIMN_AI_DISABLED !== 'true',
+  // The FIRST-BOOT DOWNLOAD of both AI runtimes (Claude's SDKs and the Codex program), in the
+  // background after the server listens (ai/auto-install.ts). On by default; LIMN_AI_AUTO_INSTALL=false
+  // leaves it to `limn ai install` or the Set up button (the demo and recording stacks set it). Inert
+  // when AI is off.
+  aiAutoInstall: process.env.LIMN_AI_AUTO_INSTALL !== 'false',
   // ---- Claude Review — infra knobs ----
   // The routing thresholds, concurrency + queue caps keep their historical PRO_REVIEW_* env names.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,

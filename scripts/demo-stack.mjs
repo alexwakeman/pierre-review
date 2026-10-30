@@ -60,6 +60,9 @@ const baseEnv = {
   PATH: SAFE_PATH,
   DATABASE_URL: DB,
   LIMN_DATA_DIR: DATA_DIR,
+  // No first-boot AI download (ai/auto-install.ts): it would hit the network and turn /api/me's
+  // `ai.runtime` into 'installing' mid-shot.
+  LIMN_AI_AUTO_INSTALL: 'false',
   DISABLE_SCHEDULER: 'true',
   ANTHROPIC_API_KEY: 'dummy',
   // The ML severity gate IS the URL (config.severityApiUrl): without it /api/me reports

@@ -11,7 +11,7 @@ import {
   type CodexLoginResponse,
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
-import { useAiRuntimeInstall } from '../../hooks/useAiCapabilities.js';
+import { useAiRuntimeInstall, useAiRuntimePoll } from '../../hooks/useAiCapabilities.js';
 import { useCodexLogin, useCodexLoginActions, useSetAiEffort, useSetAiProvider } from '../../hooks/useAiProvider.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
@@ -47,15 +47,25 @@ const CHOICE_LABEL: Record<AiProviderSetting, string> = {
   codex: 'Codex',
 };
 
+/** The download's own line while it is not ready; null once it is (then the sign-in line). */
+function downloadLine(name: string, runtime: string | undefined, message: string | null | undefined): string | null {
+  if (runtime === 'installing') return `Setting up ${name}…${message ? ` ${message}` : ''}`;
+  if (runtime === 'failed') return message ?? 'The download failed.';
+  if (runtime === 'absent') return message ?? 'Not set up.';
+  return null;
+}
+
 function claudeLine(c: AiClaudeProviderStatus): string {
+  const dl = downloadLine('Claude', c.runtime, c.runtimeMessage);
+  if (dl != null) return dl;
   if (c.route === 'login') return 'Signed in to Claude Code.';
   if (c.route === 'api_key') return 'Using ANTHROPIC_API_KEY.';
   return c.message ?? 'Sign in to Claude Code or set ANTHROPIC_API_KEY.';
 }
 
 function codexLine(c: AiCodexProviderStatus): string {
-  if (c.runtime === 'installing') return 'Setting up Codex…';
-  if (c.runtime !== 'ready') return c.runtimeMessage ?? 'Not set up.';
+  const dl = downloadLine('Codex', c.runtime, c.runtimeMessage);
+  if (dl != null) return dl;
   if (c.auth === 'ok') return c.plan ? `Signed in with ${chatGptPlanLabel(c.plan)}.` : 'Signed in with ChatGPT.';
   return c.message ?? 'Not signed in.';
 }
@@ -66,6 +76,12 @@ export function AiProviderSection(): JSX.Element | null {
   const set = useSetAiProvider();
   const install = useAiRuntimeInstall();
   const codexReady = ai?.providers.codex.runtime === 'ready';
+  const claudeRuntime = ai?.providers.claude.runtime;
+  const codexRuntime = ai?.providers.codex.runtime;
+  // Limn downloads both by itself on the first boot: poll while it runs so each line moves on its own.
+  useAiRuntimePoll(ai?.enabled === true && (claudeRuntime === 'installing' || codexRuntime === 'installing'));
+  // Retry a failed download (both providers, one download), or Set up where the automatic one is off.
+  const retryable = (r: string | undefined): boolean => r === 'failed' || (r === 'absent' && ai?.autoInstall !== true);
   const login = useCodexLogin(ai?.enabled === true && codexReady);
   const actions = useCodexLoginActions();
 
@@ -80,6 +96,9 @@ export function AiProviderSection(): JSX.Element | null {
         this provider.
       </p>
       <p className="mt-2">Auto uses Claude when Claude is signed in, and Codex when only Codex is.</p>
+      <p className="mt-2">
+        Limn downloads Claude and Codex by itself the first time it starts. Signing in is the only step.
+      </p>
       <p className="mt-2">
         A change applies to the next run. A run already going finishes on the provider it started on, and every run
         keeps the name of the provider and model that ran it.
@@ -123,20 +142,34 @@ export function AiProviderSection(): JSX.Element | null {
       <dl className="space-y-1.5 text-body">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <dt className="w-14 shrink-0 font-medium text-ui-ink">Claude</dt>
-          <dd className={MUTED}>{claudeLine(ai.providers.claude)}</dd>
-        </div>
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <dt className="w-14 shrink-0 font-medium text-ui-ink">Codex</dt>
           <dd className="flex flex-wrap items-center gap-2">
-            <span className={MUTED}>{codexLine(ai.providers.codex)}</span>
-            {!codexReady && ai.providers.codex.runtime !== 'installing' && (
+            <span className={ai.providers.claude.runtime === 'failed' ? 'text-ui-danger' : MUTED}>
+              {claudeLine(ai.providers.claude)}
+            </span>
+            {retryable(claudeRuntime) && (
               <button
                 type="button"
                 className={BTN}
                 disabled={install.state.phase === 'running'}
                 onClick={() => install.start('codex')}
               >
-                {install.state.phase === 'running' ? 'Setting up Codex…' : 'Set up Codex'}
+                {claudeRuntime === 'failed' ? 'Retry' : 'Set up'}
+              </button>
+            )}
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <dt className="w-14 shrink-0 font-medium text-ui-ink">Codex</dt>
+          <dd className="flex flex-wrap items-center gap-2">
+            <span className={codexRuntime === 'failed' ? 'text-ui-danger' : MUTED}>{codexLine(ai.providers.codex)}</span>
+            {retryable(codexRuntime) && !retryable(claudeRuntime) && (
+              <button
+                type="button"
+                className={BTN}
+                disabled={install.state.phase === 'running'}
+                onClick={() => install.start('codex')}
+              >
+                {codexRuntime === 'failed' ? 'Retry' : 'Set up Codex'}
               </button>
             )}
             {codexReady && (
@@ -152,7 +185,8 @@ export function AiProviderSection(): JSX.Element | null {
           </dd>
         </div>
       </dl>
-      {install.state.phase === 'failed' && install.state.message && (
+      {/* The lines above carry a download failure the server recorded; this is one it never saw. */}
+      {install.state.phase === 'failed' && install.state.message && claudeRuntime !== 'failed' && codexRuntime !== 'failed' && (
         <p className="text-body text-ui-danger">{install.state.message}</p>
       )}
       <p className={`text-body ${MUTED}`}>Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.</p>

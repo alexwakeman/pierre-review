@@ -8,7 +8,7 @@ import { bindPlatform } from './platform/context.js';
 import { sweepCloneCache } from './review/clone-hygiene.js';
 
 // Boot the server: migrate → cache the local user → build the Fastify app →
-// start the scheduler → listen. Returns the listening Fastify instance and the
+// start the scheduler → listen → (background) the first-boot AI download. Returns the listening Fastify instance and the
 // resolved port so a caller (the CLI) can print the URL / open the browser.
 export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // The one-time ~/.pierre-review → ~/.limn move already ran: config.ts does it on import, before it
@@ -103,6 +103,14 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   installShutdownHandler(app);
 
   await app.listen({ port: config.port, host: config.host });
+
+  // Claude and Codex come with Limn: a boot that finds either runtime missing downloads both in the
+  // BACKGROUND (ai/auto-install.ts). After listen and never awaited, so it cannot slow the boot; a
+  // no-op under LIMN_AI_DISABLED / LIMN_AI_AUTO_INSTALL=false or when both are already there.
+  void import('./ai/auto-install.js')
+    .then(({ startAiAutoInstall }) => startAiAutoInstall(app.log))
+    .catch((err) => app.log.warn({ err }, 'ai: background download not started'));
+
   return { app, port: config.port };
 }
 

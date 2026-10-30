@@ -71,7 +71,8 @@ Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
                    clickable links (see \`limn status --help\`)
   ai install       Download the AI runtime AI Review and AI Fix run on
-                   (one time, about 110 MB). The app offers the same button.
+                   (one time, about 110 MB). Limn does this by itself the
+                   first time it starts, with Codex.
   ai status        Say whether the AI runtime is set up
   ml install       Download the model that scores bot review comments
                    (one time, about 240 MB). The app offers the same button.
@@ -256,7 +257,8 @@ async function runStatusCommand(argv: string[]): Promise<void> {
 }
 
 // ── `limn ai install|status|login|logout` — the AI runtime and Codex's sign-in, from the terminal ──
-// The same download the app's "Set up AI" button runs (ai/runtime.ts): the pinned Agent SDK and
+// The same download Limn starts by itself on the first boot (ai/auto-install.ts) and the app's Retry
+// runs (ai/runtime.ts): the pinned Agent SDK and
 // its three peers into ~/.limn/ai-runtime via `npm install --prefix` — plus, with `codex`, the Codex
 // CLI. `login codex` / `logout codex` sign Limn's OWN Codex home (~/.limn/codex) in and out; the
 // reader's own ~/.codex is never touched.
@@ -277,6 +279,9 @@ Usage:
   limn ai status           Say whether it is set up
   limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
   limn ai logout codex     Sign it out
+
+Limn downloads Claude and Codex by itself the first time it starts
+(LIMN_AI_AUTO_INSTALL=false turns that off). Signing in is the only step.
 
 AI Review and AI Fix are free. One AI runs every feature: Claude, unless only
 Codex is signed in. Set LIMN_AI_PROVIDER=claude or codex to choose.

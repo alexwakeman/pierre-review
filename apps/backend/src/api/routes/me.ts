@@ -160,7 +160,8 @@ const myTurnSettingsSchema = {
 /**
  * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: not LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
  * anything. `runtime` is the ACTIVE provider's one-time download (ai/active-runtime.ts: Claude's SDKs, or
- * the Codex program under Codex). `providerSetting` is the Settings → AI choice and who made it
+ * the Codex program under Codex) — started by itself on the first boot (`autoInstall`, ai/auto-install.ts);
+ * while 'installing', `runtimeMessage` is the current step. `providerSetting` is the Settings → AI choice and who made it
  * (LIMN_AI_PROVIDER wins). `auth` is `detectClaudeAuth`'s
  * disk check (a credentials file or a signed-in `oauthAccount`, never a bare `~/.claude`): it decides only whether a Run button or the one
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
@@ -176,6 +177,7 @@ function agenticAiStatus(): MeResponse['ai'] {
   if (!config.aiEnabled) {
     return {
       enabled: false,
+      autoInstall: false,
       runtime: 'absent',
       runtimeMessage: null,
       auth: 'none',
@@ -185,7 +187,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       providerSetting: aiProviderSettingStatus(),
       effortSetting: aiEffortSettingStatus(),
       providers: {
-        claude: { auth: 'none', route: 'none', message: null, runtime: 'absent' },
+        claude: { auth: 'none', route: 'none', message: null, runtime: 'absent', runtimeMessage: null },
         codex: {
           runtime: 'absent',
           runtimeMessage: null,
@@ -208,8 +210,10 @@ function agenticAiStatus(): MeResponse['ai'] {
   // (a stale cache kicks the background probe; this request never waits on a process).
   const claudeRoute = resolveAiCredential().route;
   const codex = codexDetailCached();
+  const claudeRt = getAiRuntimeStatus();
   return {
     enabled: true,
+    autoInstall: config.aiAutoInstall,
     runtime: rt.runtime,
     runtimeMessage: rt.runtimeMessage,
     auth: auth.status === 'ok' ? 'ok' : 'none',
@@ -228,7 +232,8 @@ function agenticAiStatus(): MeResponse['ai'] {
         message: claudeRoute === 'none' ? NO_CLAUDE_AUTH_MESSAGE : null,
         // Claude's OWN download, whichever provider is active: a model picker offers Claude's
         // models only when it is ready and signed in (the per-run choice, ai/run-choice.ts).
-        runtime: getAiRuntimeStatus().runtime,
+        runtime: claudeRt.runtime,
+        runtimeMessage: claudeRt.runtimeMessage,
       },
       codex: {
         runtime: codex.runtime,

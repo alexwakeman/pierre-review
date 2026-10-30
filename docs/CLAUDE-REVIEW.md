@@ -232,8 +232,8 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
     anchor is a `<button>` into the Changes tab only when the file is in the PR.
 - **Packaging (NO AI SDK in the npm manifest):** the AI SDKs (`@anthropic-ai/claude-agent-sdk`,
   `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod`) are NOT dependencies of the published
-  package; "Set up AI" (`POST /api/ai/runtime/install`, or `limn ai install`) downloads exact
-  pinned versions into `<dataDir>/ai-runtime` on first use, and ONE loader module,
+  package; the first boot downloads exact pinned versions into `<dataDir>/ai-runtime` by itself
+  (`ai/auto-install.ts`; Retry is `POST /api/ai/runtime/install`, or `limn ai install`), and ONE loader module,
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
@@ -781,8 +781,8 @@ stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier 
   probe at most every 5 minutes. Both counts cover the SAME span. Unknown account tokens leave
   Limn's share unknown, which never blocks. The share is coarse (whole percent); the copy says so
   behind the ⓘ.
-- **Install.** The Codex CLI is downloaded on first use into `~/.limn/ai-runtime` ("Set up AI"
-  with Codex, or `limn ai install codex`); `LIMN_CODEX_PATH` points at a codex program of your own.
+- **Install.** The Codex CLI is downloaded on the first boot with Claude's packages into
+  `~/.limn/ai-runtime` (`ai/auto-install.ts`; by hand, `limn ai install codex`); `LIMN_CODEX_PATH` points at a codex program of your own.
   See [PACKAGING.md](PACKAGING.md).
 
 ## Related repos (2026-10-26)
@@ -3536,7 +3536,7 @@ library, sprint briefs/paths and every one-shot completion. Details:
   says "runs on your own Claude Code login or Anthropic API key", never promises subscription
   billing. Per-review budget: `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded
   (`recordAiUsage`), never metered.
-- **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install`)
+- **No AI SDK in the npm manifest** — downloaded on the first boot (`ai/auto-install.ts`) / `limn ai install`
   and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
 - **THE CLAUDE SPEND BUDGET** (optional, per machine, `ai/budget.ts`): ⚠ **every AUTOMATIC model

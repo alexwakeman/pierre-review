@@ -63,6 +63,15 @@ describe('aiCapabilitiesOf', () => {
     expect(ai).toMatchObject({ enabled: false, ready: false });
   });
 
+  it('the first-boot download: `autoInstall` and its step ride through; an older server reads false', () => {
+    const ai = aiCapabilitiesOf(
+      me({ ...READY, autoInstall: true, runtime: 'installing', runtimeMessage: 'Downloading Claude (about 110 MB).' }),
+    );
+    expect(ai).toMatchObject({ autoInstall: true, ready: false, runtimeMessage: 'Downloading Claude (about 110 MB).' });
+    expect(aiCapabilitiesOf(me(READY)).autoInstall).toBe(false);
+    expect(aiCapabilitiesOf(me({ ...READY, enabled: false, autoInstall: true })).autoInstall).toBe(false);
+  });
+
   it('no /api/me yet, or an older server with no `ai` block ⇒ off', () => {
     expect(aiCapabilitiesOf(undefined).enabled).toBe(false);
     expect(aiCapabilitiesOf(me(undefined)).enabled).toBe(false);
