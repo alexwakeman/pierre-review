@@ -158,7 +158,7 @@ export const STEPS = [
   })),
 
   // ── Reports ──
-  ...['overview', 'bottlenecks', 'stories'].map((t) => ({
+  ...['overview', 'bottlenecks', 'stories', 'ai-usage'].map((t) => ({
     name: `reports:${t}`,
     run: async (h) => {
       await h.go(`?view=activity&activityRepo=insights&insightsTab=${t}`);

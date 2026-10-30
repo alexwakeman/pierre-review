@@ -65,6 +65,13 @@ const VIEWS = [
   ['bot-detail:8', '?view=bot-detail:8', null],
   ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
   ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
+  // Reports → AI usage: the ledger (scripts/seed-demo-ai-usage.ts), the 12 weeks and #116's auto re-reviews.
+  [
+    'reports:ai-usage',
+    '?view=activity&activityRepo=insights&insightsTab=ai-usage',
+    'reports-ai-usage',
+    { expect: ['Where it goes', 'Top pull requests', 'Last 12 weeks', 'Ways to use fewer tokens', 'Auto review ran'] },
+  ],
   // Two Confluence page trees beside the files (one current, one Confluence has stopped answering) and a
   // Notion page tree whose diagram Claude described (docs/REFERENCE-DOCS.md § Figures).
   [
