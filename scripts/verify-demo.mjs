@@ -175,7 +175,8 @@ const VIEWS = [
   ],
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
   // "Implement story" (docs/STORY-BUILD.md): the sprint board's entry points (the Implement button on a
-  // not-started ticket with no session, the build marks on the two with one), the ready two-repository
+  // not-started ticket with no session, Fill gaps on a started one whose story check found gaps, the
+  // build marks on the two with one), the ready two-repository
   // build (acme/api pushed as a draft, acme/web-app ready with a failing check), the plan waiting for
   // Accept with its design, chat and docs, and the start state of a ticket with no session.
   [
@@ -186,6 +187,8 @@ const VIEWS = [
       act: async (page) => {
         // The corner build button is revealed on hover; attached is what counts.
         await page.locator('[aria-label="Implement PLAT-318"]').first().waitFor({ state: 'attached', timeout: 10_000 });
+        // "Fill gaps": a started ticket whose current story check found gaps.
+        await page.locator('[aria-label="Fill gaps in PLAT-301"]').first().waitFor({ state: 'attached', timeout: 10_000 });
         await page.locator('[aria-label="Open PLAT-310\'s build: Ready to push"]').first().waitFor({ state: 'attached', timeout: 10_000 });
         await page.locator('[aria-label="Open PLAT-312\'s build: Plan ready"]').first().waitFor({ state: 'attached', timeout: 10_000 });
       },
@@ -227,6 +230,12 @@ const VIEWS = [
     },
   ],
   ['story-build:PLAT-318', `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-318')}`, null, { expect: ['Draw a design', 'Start'] }],
+  [
+    'story-build:PLAT-301',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-301')}`,
+    'story-build-fill-gaps',
+    { expect: ['Fill gaps', 'Gaps from the story check (2)', 'Not met', 'Partly met'] },
+  ],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
     ['overview', 'comments', 'changes', 'claude_review', 'ai_fix'].map((t) => [

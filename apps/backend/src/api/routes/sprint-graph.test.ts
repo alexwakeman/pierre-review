@@ -610,7 +610,7 @@ describe('ticket checks and the change token', () => {
     await db.insert(schema.ticketReviews).values({ accountId: 2, workspaceId: foreignWs, ticketIdent: id('ENG-1'), status: 'running', model: 'claude-opus-5-5' }).execute();
     const g1 = await graphOf();
     const n1 = g1.nodes.find((x: any) => x.key === 'ENG-1');
-    expect(n1.check).toEqual({ met: 1, partlyMet: 1, notMet: 1, unsettled: 0, total: 3, checkedAt: '2026-10-19T10:00:00.000Z', stale: false });
+    expect(n1.check).toEqual({ met: 1, partlyMet: 1, notMet: 1, unsettled: 0, total: 3, missing: 0, reviewId: run!.id, checkedAt: '2026-10-19T10:00:00.000Z', stale: false });
     expect(n1.checkRunning).toBe(false);
     expect(g1.nodes.find((x: any) => x.key === 'ENG-2').check).toBeNull();
     expect(g1.nodes.filter((x: any) => x.ghost).every((x: any) => x.check == null && x.checkRunning === false)).toBe(true);

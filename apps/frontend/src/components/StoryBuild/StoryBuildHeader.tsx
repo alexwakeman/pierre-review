@@ -1,16 +1,16 @@
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { SprintGraphResponse, StoryBuild } from '@pierre-review/shared';
+import { STORY_BUILD_ACTION_WORDS, type SprintGraphResponse, type StoryBuild } from '@pierre-review/shared';
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
-import { storyBuildStatusLine, storyBuildSteps } from '../../lib/storyBuild.js';
+import { storyBuildActionOf, storyBuildStatusLine, storyBuildSteps } from '../../lib/storyBuild.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { InfoButton } from '../InfoModal.js';
 import { TrackerLinkOut } from '../TrackerLinkOut.js';
 import { cx } from '../ui/cx.js';
 
-// THE BUILD TAB'S HEADER: the ticket key, "Open story", "Open in <tracker>", the title, who ran it, what
+// THE BUILD TAB'S HEADER: what the tab does ("Implement" or "Fill gaps", `storyBuildActionOf`), the ticket key, "Open story", "Open in <tracker>", the title, who ran it, what
 // it cost so far (ONE formatter, `useRunCostText` — US$ on an API key, a share of the week on a
 // subscription), the quiet step line ("Assess · Plan · Docs · Build · Push", the current step in words
 // AND weight — never colour alone), the status sentence, and the end slot (Push all, Cancel).
@@ -41,9 +41,14 @@ export function StoryBuildHeader({
   const steps = storyBuildSteps(build, wantDocs);
   const cost = build != null ? costText(build.totalCostUsd, build.provider ?? null) : null;
   const shownTitle = build?.ticketTitle ?? title ?? (node != null && node.title !== '' ? node.title : null);
+  const action = storyBuildActionOf(build, node);
+  const fill = action === 'fill_gaps';
   return (
     <header data-testid="story-build-header" className="pt-5 max-md:pt-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
+        <span data-testid="story-build-action" data-action={action} className="font-semibold text-ui-ink">
+          {STORY_BUILD_ACTION_WORDS[action]}
+        </span>
         <span className="font-mono font-medium text-ui-mute">{ticketKey}</span>
         <button
           type="button"
@@ -57,11 +62,19 @@ export function StoryBuildHeader({
       <div className="mt-1 flex flex-wrap items-start gap-x-3 gap-y-2">
         <h2 className="flex min-w-0 flex-1 items-center gap-2 break-words text-display text-ui-ink">
           <span className="min-w-0">{shownTitle ?? ticketKey}</span>
-          <InfoButton title="Implement this story">
-            <p>
-              The AI reads the story and the code, writes a plan across up to four repositories, and builds each one on its own
-              branch, in plan order. You can change the plan by chat before anything is built.
-            </p>
+          <InfoButton title={fill ? 'Fill the gaps in this story' : 'Implement this story'}>
+            {fill ? (
+              <p>
+                The story check found criteria the pull requests do not meet yet. The AI plans only those gaps, across up to four
+                repositories, and builds each one on its own branch, in plan order. A criterion the check could not judge counts as a
+                gap. You can change the plan by chat before anything is built.
+              </p>
+            ) : (
+              <p>
+                The AI reads the story and the code, writes a plan across up to four repositories, and builds each one on its own
+                branch, in plan order. You can change the plan by chat before anything is built.
+              </p>
+            )}
             <p>Nothing is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.</p>
             <p>
               If you ask it to check the docs, the story wins: where the docs say something else, the point is listed as

@@ -29,13 +29,15 @@
 //            view's own body; `onSelect`). The open card wears the accent ring (the selection colour).
 //            The small arrow in the corner opens the story TAB (`onOpen` — `useOpenStory`).
 //   BUILD    "Implement story" (docs/STORY-BUILD.md, owner decision 4): beside the corner arrow, a second
-//            icon button (`BuildIcon`, the same hover/focus/touch reveal, ONE height) — "Implement KEY" —
-//            ONLY on a card `storyBuildOffered` allows (a sprint ticket, Not started, no pull request, no
-//            open session) and only when the board passes `onImplement` (AI on). Hidden, never disabled.
+//            icon button (the same hover/focus/touch reveal, ONE height) ONLY on a card `storyBuildOffered`
+//            allows, and only when the board passes `onImplement` (AI on). Hidden, never disabled. Its
+//            action names it: "Implement KEY" (`BuildIcon`) on a Not started ticket with no pull request,
+//            "Fill gaps in KEY" (`FillGapsIcon`) on a started one whose current story check found gaps.
 //            Once a session is open the card wears its MARK beside the key (`storyBuildMark`: Building… /
 //            Plan ready / Ready to push / Pushed — words, no border; in the accessible name and the
 //            board's key) and the same corner button opens the build tab (`useOpenStoryBuild`).
 import { STORY_BUILD_MARK_WORDS, storyBuildMark, storyBuildOffered, type SprintGraphNode } from '@pierre-review/shared';
+import { storyBuildActionLabel } from '../lib/storyBuild.js';
 import {
   hasLivePr,
   TICKET_CARD_MARK_LABEL,
@@ -46,7 +48,7 @@ import {
   ticketCodeNote,
 } from '../lib/laneBoard.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, BuildIcon, CriticalPathIcon, FillGapsIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -95,8 +97,9 @@ export function TicketCard({
   const marks = ticketCardMarks({ critical, waiting, ghost: node.ghost }).filter((m) => m !== 'outside');
   // "Implement story": the session's mark, and whether the corner build button shows at all.
   const buildMark = onImplement != null ? storyBuildMark(node.build) : null;
-  const offered = onImplement != null && storyBuildOffered(node);
-  const buildButton = offered || buildMark != null;
+  const offered = onImplement != null ? storyBuildOffered(node) : null;
+  const buildButton = offered != null || buildMark != null;
+  const action = offered != null ? storyBuildActionLabel(offered, node.key) : null;
 
   const name = [
     `${node.key}: ${title}`,
@@ -243,8 +246,9 @@ export function TicketCard({
           type="button"
           data-testid="ticket-implement"
           onClick={() => onImplement(node)}
-          aria-label={buildMark != null ? `Open ${node.key}'s build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : `Implement ${node.key}`}
-          title={buildMark != null ? 'Open the build' : 'Implement this story'}
+          data-action={offered ?? undefined}
+          aria-label={buildMark != null ? `Open ${node.key}'s build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : (action?.label ?? undefined)}
+          title={buildMark != null ? 'Open the build' : (action?.title ?? undefined)}
           className={cx(
             'absolute right-8 top-1 flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:right-12 touch:h-10 touch:w-10',
             // The corner arrow's reveal: on hover or focus with a mouse, always there on touch.
@@ -252,7 +256,7 @@ export function TicketCard({
             FOCUS_RING,
           )}
         >
-          <BuildIcon size={12} />
+          {buildMark == null && offered === 'fill_gaps' ? <FillGapsIcon size={12} /> : <BuildIcon size={12} />}
         </button>
       )}
       <button
