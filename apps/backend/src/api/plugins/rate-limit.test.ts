@@ -105,6 +105,41 @@ describe('tierFor — ticket review', () => {
   });
 });
 
+// IMPLEMENT STORY: agent starts on the AI pair, the two pushes on the GitHub write bucket, the checks picker
+// on `search`, and every DB-only route DECIDED as `read` — a PUT on decisions or a POST cancel must never
+// inherit `ai`, and a push must never sit on the 600/min blanket.
+describe('tierFor — implement story', () => {
+  it('bills every agent start as AI generation', () => {
+    expect(tiers('POST', '/api/story-builds')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/plan/message')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/docs')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/accept')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/repos/3/retry')).toEqual(['ai', 'ai_hourly']);
+  });
+  it('puts both pushes on the GitHub write bucket', () => {
+    expect(tiers('POST', '/api/story-builds/7/repos/3/push')).toEqual(['github_write']);
+    expect(tiers('POST', '/api/story-builds/7/push')).toEqual(['github_write']);
+  });
+  it('reads the checks picker from GitHub on search, and keeps the rest on read', () => {
+    expect(tiers('GET', '/api/story-builds/7/repos/3/checks')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/story-builds')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/7')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/7/stream')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/7/repos/3/diff')).toEqual(['read']);
+    expect(tiers('PUT', '/api/story-builds/7/docs/decisions')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/cancel')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/discard')).toEqual(['read']);
+  });
+  it('spells every shared route path into a decided tier', async () => {
+    const { STORY_BUILD_API, storyBuildPath } = await import('@pierre-review/shared');
+    for (const route of Object.keys(STORY_BUILD_API) as Array<keyof typeof STORY_BUILD_API>) {
+      const path = storyBuildPath(route, { id: 7, repoId: 3 });
+      expect(path, route).not.toMatch(/:/);
+      expect(tiers('GET', path).length, route).toBeGreaterThan(0);
+    }
+  });
+});
+
 // The CI review: only the start spends model money (and reads the head's checks and logs); the
 // batched states read is DB-only and a POST only because it carries a list.
 describe('tierFor — CI review', () => {

@@ -49,6 +49,7 @@ import {
   type SprintPathsInput,
   type SprintTiming,
 } from './sprint-paths.js';
+import { sprintBuildsFor } from './sprint-builds.js';
 import { sprintSignalsFor } from './sprint-signals.js';
 import { currentSprintThemes, sprintThemeInput, type SprintThemeInput } from './sprint-themes.js';
 import {
@@ -333,6 +334,9 @@ async function foldStoredSprint(
   const judged = aiEnabled
     ? await currentSprintCodeJudgements(accountId, workspaceId, [...judgeInputs].map(([ident, input]) => ({ ident, input })))
     : null;
+  // "IMPLEMENT STORY" (db/sprint-builds.ts): the latest open build session per sprint ticket — the card's
+  // mark. Agentic, so AI off reads none (every node's `build` is null).
+  const builds = aiEnabled ? await sprintBuildsFor(accountId, workspaceId, t.sprint.map((x) => x.ident)) : undefined;
   const g = foldSprintGraph({
     provider: site.provider,
     apiRoot: site.apiRoot,
@@ -343,6 +347,7 @@ async function foldStoredSprint(
     ...(themes != null ? { themes: themes.byIdent } : {}),
     ...(checks != null ? { checks } : {}),
     codeJudgementOf: (ident) => (judged == null ? { state: 'off', reason: null } : (judged.get(ident) ?? { state: 'pending', reason: null })),
+    ...(builds != null ? { builds } : {}),
   });
   return { t, statusLayout, themes, g };
 }
