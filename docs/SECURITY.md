@@ -166,13 +166,15 @@ use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `rest
   run's `sbx/` folder (and, for the install step only, the private cache; for Cargo only its lock
   files); the worktree's `.git` FILE is read-only. Reads: everything outside the home folder and
   Limn's data folder; inside them only the worktree, the clone, the caches and the toolchain homes
-  (`~/.nvm`, `~/.rustup`, PATH entries…); `~/.cargo/credentials*`, `~/.m2/settings*.xml`,
-  `~/.gradle/gradle.properties` stay dark. Network: a CHECK gets loopback only (macOS: `localhost`
+  (`~/.nvm`, `~/.rustup`, PATH entries…; ⚠ never a folder DIRECTLY in the home folder through PATH —
+  `~/.docker/bin` opens that bin, not `~/.docker`); `~/.cargo/credentials*`, `~/.m2/settings*.xml`,
+  `~/.gradle/gradle.properties`, `~/.docker/config.json` stay dark. Network: a CHECK gets loopback only (macOS: `localhost`
   in and out, so a test reaches a database the reader started; Linux `--unshare-net`: its OWN
   loopback, so host services are NOT reachable); the INSTALL step gets the network but runs no
   repository code (`--ignore-scripts`, `--ignore-pnpmfile`, yarn `--mode=skip-build`; a Yarn
-  `yarnPath`/plugins or Maven `.mvn/extensions.xml` repo gets NO install; Gradle never — its build
-  scripts are code). Unix sockets only inside the run's folder (never the Docker socket); the macOS
+  `yarnPath`/plugins or Yarn 1 `.yarnrc` `yarn-path`, a `packageManager` that is a LINK (corepack
+  would fetch it), or Maven build extensions (`.mvn/extensions.xml` or `<extensions>` in the POM) gets
+  NO install; Gradle never — its build scripts are code). Unix sockets only inside the run's folder (never the Docker socket); the macOS
   keychain daemon is denied. **No sandbox ⇒ refused** with one plain sentence; only
   `LIMN_CHECKS_ALLOW_UNSANDBOXED=true` runs them bare, and the run says so.
 - **DOCKER FIRST** (`docker.ts`): a check that needs Docker (compose file, testcontainers, a script
@@ -185,9 +187,12 @@ use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `rest
   path-guard hook allows `mcp__workspace__run_check` only when the run's guard roots carry
   `checks: true`. An unknown name is refused; 12 calls per run.
 - **THE COMMIT HOOK** (`hooks.ts`): husky / lefthook / simple-git-hooks run INSIDE the sandbox, in a
-  THROWAWAY git folder (`sbx/hook-git`, objects borrowed from the clone through `alternates`, HEAD at
+  THROWAWAY git folder (`spec/hook-git`, objects borrowed from the clone through `alternates`, HEAD at
   the base commit) — the shared clone's config, refs and objects (which every later run and every
-  push reads) are never writable. The pre-commit framework is refused (it installs over the
+  push reads) are never writable. ⚠ That folder lives in Limn-only `spec/`, never the checks'
+  writable `sbx/`: Limn stages into it with its OWN git, outside the sandbox, and a process a check
+  left behind (a daemon escapes the process-group kill) must not get to plant a `filter.*` command
+  in its config first. Only the hook's own sandboxed run may write it. The pre-commit framework is refused (it installs over the
   network). Push still commits the stored patch with `--no-verify`: the hook already ran.
 - ⚠ **`restoreGit()` BEFORE EVERY GIT COMMAND OF LIMN'S IN THE WORKTREE.** A check (or the agent's
   Write) could point the worktree's `.git` file at a folder whose config sets `core.fsmonitor` — and

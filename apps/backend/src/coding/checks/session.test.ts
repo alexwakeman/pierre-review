@@ -2,18 +2,18 @@
 // commit hook in a throwaway repository, the `.git` restore — and, on macOS, the Seatbelt boundary
 // itself (a hostile test cannot write home, read ~/.ssh, rewrite .git or see a token).
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { openCheckSession, type OpenCheckSessionOptions } from './session.js';
+import { openCheckSession, readableToolchains, type OpenCheckSessionOptions } from './session.js';
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
 }
 
-function fixture(filesIn: Record<string, string>): { root: string; clone: string; worktree: string; sha: string } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'limn-checks-')));
+function fixture(filesIn: Record<string, string>, base = tmpdir()): { root: string; clone: string; worktree: string; sha: string } {
+  const root = realpathSync(mkdtempSync(join(base, 'limn-checks-')));
   const clone = join(root, 'clone');
   mkdirSync(clone);
   git(clone, 'init', '-q');
@@ -147,4 +147,45 @@ describe.skipIf(process.platform !== 'darwin')('the Seatbelt boundary (macOS)', 
     expect(r.session.agentRuns()).toEqual([{ name: 'test', status: 'passed', durationMs: expect.any(Number) }]);
     await r.session.close();
   }, 120_000);
+
+  it('the commit hook runs in the sandbox with its throwaway git folder in Limn-only spec/', async () => {
+    // The hook tries to plant a command in the throwaway repository's config the NEXT run would read
+    // from outside the sandbox, and to rewrite the frozen check list. Neither may stick.
+    const hook = 'git config filter.evil.clean "touch /tmp/limn-filter-probe"\necho planted > "$GIT_DIR/../checks.json" 2>/dev/null\nexit 0\n';
+    // Under /tmp, not the per-user temp folder (macOS keeps that writable for compilers): the run folder
+    // must sit, as in production, in a dark root (Limn's data folder) that no rule makes writable.
+    const f = fixture({ 'package.json': pkg({ test: 'node -e 0' }), 'package-lock.json': lock, '.husky/pre-commit': hook }, '/tmp');
+    const r = await openCheckSession(opts(f, { wanted: ['pre-commit hook'], darkRoots: [join(f.root, 'runs')] }));
+    if (!r.ok) throw new Error(r.note);
+    expect(r.session.sandbox).toBe('seatbelt');
+    const spec = readFileSync(r.session.specFile, 'utf8');
+    writeFileSync(join(f.worktree, 'x.txt'), 'x\n');
+    const first = await r.session.runHook('fix: x', f.sha);
+    expect(first?.status).toBe('passed');
+    expect(readFileSync(r.session.specFile, 'utf8')).toBe(spec);
+    // The next commit starts from a fresh folder: the planted filter is gone before Limn's git runs.
+    writeFileSync(join(f.worktree, 'y.txt'), 'y\n');
+    expect((await r.session.runHook('fix: y', f.sha))?.status).toBe('passed');
+    expect(existsSync('/tmp/limn-filter-probe')).toBe(false);
+    await r.session.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }, 120_000);
+});
+
+describe('readableToolchains', () => {
+  it('opens a toolchain’s own folder, never a folder directly in the home folder', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'limn-home-')));
+    for (const d of ['.docker/bin', '.nvm/versions/node/v24/bin', 'Library/Python/3.12/bin', 'bin']) mkdirSync(join(home, d), { recursive: true });
+    writeFileSync(join(home, '.docker', 'config.json'), '{"auths":{}}');
+    const PATH = ['.docker/bin', '.nvm/versions/node/v24/bin', 'Library/Python/3.12/bin', 'bin'].map((d) => join(home, d)).join(':');
+    const out = readableToolchains(home, { PATH });
+    // `~/.docker/bin` is on PATH: the bin folder is readable, `~/.docker` (its config.json) is not.
+    expect(out).toContain(join(home, '.docker', 'bin'));
+    expect(out).not.toContain(join(home, '.docker'));
+    expect(out).not.toContain(home);
+    // A version's own folder (nvm's lib/ beside bin/) is.
+    expect(out).toContain(join(home, '.nvm', 'versions', 'node', 'v24'));
+    expect(out).toContain(join(home, 'Library', 'Python', '3.12'));
+    expect(out).toContain(join(home, '.nvm'));
+  });
 });

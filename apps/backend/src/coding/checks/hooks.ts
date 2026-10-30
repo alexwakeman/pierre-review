@@ -2,8 +2,9 @@
 // Limn makes the commit with the repository's pre-commit hook (husky, lefthook, simple-git-hooks)
 // ENABLED, inside the same sandbox as a check — and in a THROWAWAY git folder, never the shared clone:
 //
-//   • `<run>/sbx/hook-git` is a fresh repository Limn creates, whose object store BORROWS the clone's
-//     (`objects/info/alternates`, read only to the sandbox) and whose `HEAD` is the fix's base commit;
+//   • `<run>/spec/hook-git` is a fresh repository Limn creates (Limn-only, never the checks' `sbx/`),
+//     whose object store BORROWS the clone's (`objects/info/alternates`, read only to the sandbox)
+//     and whose `HEAD` is the fix's base commit;
 //   • Limn stages the worktree into it (git add -A, outside the sandbox — no repository code runs in a
 //     stage), then runs `git commit` INSIDE the sandbox with GIT_DIR / GIT_WORK_TREE pointing there,
 //     so the hook (and lint-staged, which stashes and re-stages) writes only that throwaway folder and

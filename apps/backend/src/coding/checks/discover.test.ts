@@ -56,6 +56,17 @@ describe('discoverChecks — Node', () => {
   it('refuses to install when Yarn would run a copy of itself from the repository', () => {
     const plan = discoverChecks(files({ 'package.json': pkg({ test: 'x' }), 'yarn.lock': '__metadata:\n', '.yarnrc.yml': 'yarnPath: .yarn/releases/yarn.cjs\n' }));
     expect(plan.prepare[0]!.refused).toMatch(/copy of itself/);
+    // Yarn 1's `.yarnrc` `yarn-path` does the same.
+    const classic = discoverChecks(files({ 'package.json': pkg({ test: 'x' }), 'yarn.lock': '', '.yarnrc': 'yarn-path "./evil.js"\n' }));
+    expect(classic.prepare[0]!.refused).toMatch(/copy of itself/);
+    expect(discoverChecks(files({ 'package.json': pkg({ test: 'x' }), 'yarn.lock': '', '.yarnrc': 'network-timeout 600000\n' })).prepare[0]!.refused).toBeNull();
+  });
+
+  it('refuses to install when corepack would fetch the package manager from a link', () => {
+    const url = discoverChecks(files({ 'package.json': pkg({ test: 'x' }, { packageManager: 'yarn@https://evil.example/yarn.tgz' }), 'yarn.lock': '' }));
+    expect(url.prepare[0]!.refused).toMatch(/link/);
+    const pinned = discoverChecks(files({ 'package.json': pkg({ test: 'x' }, { packageManager: 'pnpm@9.15.9+sha512.abc123' }), 'pnpm-lock.yaml': '' }));
+    expect(pinned.prepare[0]!.refused).toBeNull();
   });
 
   it('defaults test, lint and typecheck on; variants and `check` off', () => {
@@ -113,6 +124,8 @@ describe('discoverChecks — Make, Python, Rust, Go, Gradle, Maven', () => {
     expect(discoverChecks(files({ 'build.gradle.kts': '' })).prepare).toEqual([]); // build scripts are code
     expect(discoverChecks(files({ 'pom.xml': '<project/>' })).checks[0]!.argv).toEqual(['mvn', '-B', '-o', 'test']);
     expect(discoverChecks(files({ 'pom.xml': '<project/>', '.mvn/extensions.xml': '<x/>' })).prepare[0]!.refused).toMatch(/extensions/);
+    expect(discoverChecks(files({ 'pom.xml': '<project><build><extensions><extension/></extensions></build></project>' })).prepare[0]!.refused).toMatch(/extensions/);
+    expect(discoverChecks(files({ 'pom.xml': '<plugin><extensions>true</extensions></plugin>' })).prepare[0]!.refused).toMatch(/extensions/);
   });
 
   it('two ecosystems never collide on a name', () => {

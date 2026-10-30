@@ -23,6 +23,7 @@ export const CHECK_MANIFEST_FILES = [
   'npm-shrinkwrap.json',
   'yarn.lock',
   '.yarnrc.yml',
+  '.yarnrc',
   'bun.lockb',
   'bun.lock',
   'Makefile',
@@ -175,11 +176,26 @@ export function nodeScriptArgv(pm: NodePackageManager, name: string): string[] {
 /** The dependency step for a Node project: the lockfile, no lifecycle scripts, no hooks file. */
 export function nodePrepare(pm: NodePackageManager, files: RepoFiles): PrepareStep {
   const yarnrc = files.read('.yarnrc.yml');
-  if (pm === 'yarn' && yarnrc != null && /^\s*(?:yarnPath|plugins)\s*:/m.test(yarnrc)) {
+  // Yarn 1 reads `yarn-path` from `.yarnrc` (not .yml) and runs THAT file instead of itself.
+  const classicRc = files.read('.yarnrc');
+  if (
+    pm === 'yarn' &&
+    ((yarnrc != null && /^\s*(?:yarnPath|plugins)\s*:/m.test(yarnrc)) || (classicRc != null && /^\s*["']?yarn-path["']?\s/m.test(classicRc)))
+  ) {
     return {
       ecosystem: 'node',
       argv: ['yarn', 'install'],
       refused: 'Yarn here runs a copy of itself (or plugins) from the repository, so Limn does not install with the network on.',
+    };
+  }
+  // Corepack fetches the package manager the `packageManager` field names — and that may be a URL to
+  // any tarball (code that would run with the network on). Only a plain `name@version[+hash]`.
+  const field = parsePackageJson(files.read('package.json'))?.packageManager;
+  if (typeof field === 'string' && !/^(?:pnpm|npm|yarn|bun)@\d[\w.-]*(?:\+[\w.:-]+)?$/.test(field)) {
+    return {
+      ecosystem: 'node',
+      argv: [pm, 'install'],
+      refused: 'package.json names its package manager by a link, not a version, so Limn does not install with the network on.',
     };
   }
   const argv: Record<NodePackageManager, string[]> = {
@@ -438,7 +454,9 @@ export function discoverChecks(files: RepoFiles): CheckPlan {
       text: pom,
     });
     prepare.push(
-      files.read('.mvn/extensions.xml') != null
+      // Build extensions (`.mvn/extensions.xml`, or `<extensions>` in the POM) are code Maven loads
+      // before any goal — they would run with the network on.
+      files.read('.mvn/extensions.xml') != null || /<extensions\s*>/i.test(pom)
         ? { ecosystem: 'maven', argv: ['mvn', '-B', 'dependency:go-offline'], refused: 'Maven here loads build extensions from the repository, so Limn does not fetch with the network on.' }
         : { ecosystem: 'maven', argv: ['mvn', '-B', 'dependency:go-offline'], refused: null },
     );

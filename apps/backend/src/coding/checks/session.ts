@@ -94,6 +94,7 @@ const HIDDEN_IN_HOME = [
   '.gradle/gradle.properties',
   '.local/share/keyrings',
   '.pyenv/.pyenv-credentials',
+  '.docker/config.json',
 ];
 
 export interface OpenCheckSessionOptions {
@@ -149,13 +150,17 @@ function real(p: string): string {
 }
 
 /** Read folders inside the home folder that exist (real paths), plus the PATH entries under it. */
-function readableToolchains(home: string, env: NodeJS.ProcessEnv): string[] {
+export function readableToolchains(home: string, env: NodeJS.ProcessEnv): string[] {
   const out = new Set<string>();
   for (const d of TOOLCHAIN_DIRS) {
     const p = join(home, d);
     if (existsSync(p)) out.add(real(p));
   }
   const realHome = real(home);
+  // ⚠ Never a folder DIRECTLY in the home folder: `~/.docker/bin` on PATH must not open `~/.docker`
+  // (its config.json may hold registry logins), nor Node at `~/.local/bin/node` all of `~/.local`.
+  // A known toolchain home (TOOLCHAIN_DIRS) is already listed above.
+  const deepInHome = (p: string): boolean => p.startsWith(`${realHome}/`) && relative(realHome, p).split('/').length >= 2;
   for (const dir of (env.PATH ?? '').split(':')) {
     if (!dir || !isAbsolute(dir)) continue;
     const r = real(dir);
@@ -163,11 +168,11 @@ function readableToolchains(home: string, env: NodeJS.ProcessEnv): string[] {
     out.add(r);
     // A version manager's bin/ links into its lib/ (nvm's node_modules): read the version's folder.
     const parent = dirname(r);
-    if (r.endsWith('/bin') && parent !== realHome && !parent.endsWith('/.local')) out.add(parent);
+    if (r.endsWith('/bin') && deepInHome(parent)) out.add(parent);
   }
   // The Node running Limn (for a check that runs `node` through a manager shim).
   const nodeHome = dirname(dirname(real(process.execPath)));
-  if (nodeHome.startsWith(`${realHome}/`)) out.add(nodeHome);
+  if (deepInHome(nodeHome)) out.add(nodeHome);
   return [...out];
 }
 
@@ -199,7 +204,7 @@ export class CheckSession {
     private readonly sbxTmp: string,
     private readonly gitFile: { content: string } | null,
     private readonly checkEnv: Record<string, string>,
-    private readonly policy: (network: 'localhost' | 'open', extraWritable?: string[]) => SandboxPolicy,
+    private readonly policy: (network: 'localhost' | 'open', extraWritable?: string[], extraReadable?: string[]) => SandboxPolicy,
   ) {
     this.specFile = join(specDir, 'checks.json');
     this.logFile = join(specDir, 'agent-runs.jsonl');
@@ -271,7 +276,10 @@ export class CheckSession {
     const display = `git commit (${this.hook.source})`;
     this.restoreGit();
     const hooksDir = writeHooksDir(this.specDir, this.hook);
-    const gitDir = join(this.sbxTmp, 'hook-git');
+    // ⚠ In Limn's own `spec/`, NOT `sbx/`: Limn's git stages into it OUTSIDE the sandbox, and a
+    // process a check left behind (a daemon outlives its process group) could otherwise plant a
+    // `filter.*.clean` or similar in its config first. It is writable only to the hook's own run.
+    const gitDir = join(this.specDir, 'hook-git');
     rmSync(gitDir, { recursive: true, force: true });
     let staged: boolean;
     try {
@@ -289,7 +297,7 @@ export class CheckSession {
     }
     if (!staged) return { name, kind: 'hook', command: display, status: 'skipped', exitCode: null, durationMs: 0, output: '', truncated: false, note: 'No changes to commit.' };
     this.o.onStatus?.('Running the pre-commit hook');
-    const wrapped = wrapCommand(this.sandbox, this.policy('localhost', [gitDir]), this.o.worktree, commitArgv(message));
+    const wrapped = wrapCommand(this.sandbox, this.policy('localhost', [gitDir], [this.excludesFile]), this.o.worktree, commitArgv(message));
     const binPath = join(this.o.worktree, 'node_modules', '.bin');
     const env = { ...this.checkEnv, GIT_DIR: gitDir, GIT_WORK_TREE: this.o.worktree, PATH: `${binPath}:${this.checkEnv.PATH ?? ''}` };
     const r = await runProcess({
@@ -450,9 +458,9 @@ export async function openCheckSession(o: OpenCheckSessionOptions): Promise<Open
     }
   }
 
-  // The run's folders: Limn-only `spec/` (the frozen list, the hook, the excludes file) and the
-  // sandbox's own `sbx/` (HOME, TMPDIR, the throwaway hook repository). Under Limn's data folder,
-  // which a check can neither read nor write outside `sbx/`.
+  // The run's folders: Limn-only `spec/` (the frozen list, the hook, the excludes file, the throwaway
+  // hook repository) and the sandbox's own `sbx/` (HOME, TMPDIR). Under Limn's data folder, which a
+  // check can neither read nor write outside `sbx/`.
   mkdirSync(o.runRoot, { recursive: true, mode: 0o700 });
   mkdirSync(o.cacheDir, { recursive: true, mode: 0o700 });
   const runDir = real(await mkdtemp(join(o.runRoot, 'run-')));
@@ -485,12 +493,13 @@ export async function openCheckSession(o: OpenCheckSessionOptions): Promise<Open
       checkWritable.push(p);
     }
   }
-  const policy = (network: 'localhost' | 'open', extraWritable: string[] = []): SandboxPolicy => ({
+  const policy = (network: 'localhost' | 'open', extraWritable: string[] = [], extraReadable: string[] = []): SandboxPolicy => ({
     // The dependency step may fill Limn's cache; a check only reads it (no poisoning a later run).
     writable: [worktree, sbxTmp, ...checkWritable, ...extraWritable],
     protectedPaths: [gitPath],
     darkRoots: [...new Set([home, ...o.darkRoots.map(real)])],
-    readable,
+    // A step's extra writable folders are readable to it too (the hook's throwaway git folder).
+    readable: [...new Set([...readable, ...extraWritable, ...extraReadable])],
     hiddenPaths: hidden,
     network,
     darwinUserTemp: darwin.temp,
