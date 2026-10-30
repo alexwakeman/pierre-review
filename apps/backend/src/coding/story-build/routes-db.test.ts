@@ -490,3 +490,41 @@ describe('the repository shortlist (DB)', () => {
     expect(res.costUsd).toBeGreaterThan(0);
   });
 });
+
+describe('the coverage wait lends the review slot back', () => {
+  it('holds no review slot while it waits on the ticket check, and plans after', async () => {
+    const ident = 'jira:https://acme.atlassian.net#ACME-299';
+    const held: number[] = [];
+    M._setStoryBuildSeamsForTest({
+      ...SEAMS,
+      inputs: {
+        ...SEAMS.inputs!,
+        ticketPrIds: async () => [1],
+        ticketPrs: async () => [{ prId: 1, repoId: repoIds[1]![0]!, number: 7, title: 'Earlier', headSha: 'abc', state: 'merged', headRefName: 'x', byReader: false }],
+      },
+      coverage: {
+        checkState: async () => {
+          held.push(M._storyPlanSlotsHeldForTest());
+          return { latest: null, runningRunId: null };
+        },
+        liveTicketHash: async () => null,
+        isCurrent: async () => false,
+        startCheck: async () => ({ outcome: 'busy' }),
+        runStatus: async () => null,
+        sleep: async () => {},
+      },
+    });
+    try {
+      const r = await start(ident);
+      expect(r.statusCode).toBe(202);
+      await M._storyBuildIdleForTest();
+      expect(held).toEqual([0]);
+      const b = (await get(`/api/story-builds/${r.json().buildId}`)).json();
+      expect(b.status).toBe('plan_ready');
+      expect(b.coverage.state).toBe('failed');
+      expect(M._storyPlanSlotsHeldForTest()).toBe(0);
+    } finally {
+      M._setStoryBuildSeamsForTest(SEAMS);
+    }
+  });
+});

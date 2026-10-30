@@ -226,7 +226,31 @@ interface PlanJob {
 
 const planLane: PlanJob[] = [];
 const planRunning = new Set<number>();
-registerReviewSlotPeer({ inFlight: () => planRunning.size, pump: () => pumpPlan() });
+/**
+ * Running passes that have LENT their slot back while they wait on another review-slot run (the ticket
+ * check the coverage phase starts). Without this, a pass holding a slot while it waits on a run that
+ * needs one deadlocks the pool (PRO_REVIEW_CONCURRENCY=1, or every slot held by waiting assesses) until
+ * the coverage wait times out.
+ */
+const planLent = new Set<number>();
+registerReviewSlotPeer({ inFlight: () => planRunning.size - planLent.size, pump: () => pumpPlan() });
+
+const SLOT_RETAKE_POLL_MS = 500;
+
+/** Run `fn` with this pass's review slot lent back; take a slot again (waiting for one) before returning. */
+async function withSlotLent<T>(buildId: number, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  planLent.add(buildId);
+  pumpReviewLane();
+  try {
+    return await fn();
+  } finally {
+    // Retake: wait until a slot is free, then hold it again in the same tick (no await in between).
+    while (!signal.aborted && !reviewSlotFree()) {
+      await new Promise((r) => setTimeout(r, SLOT_RETAKE_POLL_MS));
+    }
+    planLent.delete(buildId);
+  }
+}
 
 function pumpPlan(): void {
   while (planLane.length > 0 && reviewSlotFree() && !reviewLaneWaiting().manual) launchPlan(planLane.shift()!);
@@ -250,6 +274,7 @@ function launchPlan(job: PlanJob): void {
     })
     .finally(() => {
       planRunning.delete(job.buildId);
+      planLent.delete(job.buildId);
       endPass(job.buildId);
       pumpPlan();
       pumpReviewLane();
@@ -341,7 +366,9 @@ async function runAssess(ctx: AgentContext, a: StartStoryBuildArgs, buildId: num
     await setPhase(ctx, accountId, buildId, 'checking_coverage');
     let coverage;
     try {
-      coverage = await assessCoverage(
+      // The coverage phase may start a ticket check and WAIT for it; that check needs a review slot, so
+      // this pass lends its own back while it waits (withSlotLent).
+      coverage = await withSlotLent(buildId, controller.signal, () => assessCoverage(
         ctx,
         {
           accountId,
@@ -354,7 +381,7 @@ async function runAssess(ctx: AgentContext, a: StartStoryBuildArgs, buildId: num
           signal: controller.signal,
         },
         seams.coverage ?? defaultCoverageSeams,
-      );
+      ));
     } catch (err) {
       if (cancelled()) return stop();
       throw err;
@@ -1084,6 +1111,11 @@ export async function reconcileStoryBuildsOnStartup(ctx: AgentContext): Promise<
   }
   if (moved > 0) ctx.log.info(`reconciled ${moved} story build session(s) cut off by a restart`);
   return moved;
+}
+
+/** Test seam: the review slots the plan lane holds right now (running passes minus lent ones). */
+export function _storyPlanSlotsHeldForTest(): number {
+  return planRunning.size - planLent.size;
 }
 
 /** Test seam: wait until nothing is queued or running. */

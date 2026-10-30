@@ -117,6 +117,9 @@ Discard (any non-running state) ⇒ discarded
   start's manual pick, follow-ups on the session's provider (`followUpProvider`, `requestModelOf`).
 - **Lanes:** the read-only passes (assess + plan, re-plans, the docs run) are a `registerReviewSlotPeer`
   peer — a PR-review click goes first; one pass per session. The build lane is its own, ONE at a time.
+  ⚠ While the coverage phase WAITS on the ticket check it started (which needs a slot of its own), the
+  pass LENDS its slot back (`withSlotLent`) and retakes one after — else a full pool deadlocks until
+  the 15-minute wait times out (certain at `PRO_REVIEW_CONCURRENCY=1`).
 - **The SSE** (`GET …/stream`): frames are bare `StoryBuildProgress`; the stream ENDS with the pass
   (or at once when nothing runs). Phases are also written to `story_builds.phase` (and the repository's
   status follows the build's phases), so a poll reads the same step.
