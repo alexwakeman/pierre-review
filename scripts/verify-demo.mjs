@@ -79,6 +79,22 @@ const VIEWS = [
   ...['roi', 'themes', 'benchmark', 'classification'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : t === 'classification' ? 'bot-classification' : null]),
   ['bot-detail:8', '?view=bot-detail:8', null],
   ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
+  // Chronology → Over time: a marker on "Working hours saved" opens what happened that week
+  // (docs/BOTTLENECKS.md § Over time), floated over the page and never clipped by the chart above.
+  [
+    'reports:chronology-event',
+    '?view=activity&activityRepo=insights&insightsTab=bottlenecks',
+    'chronology-event',
+    {
+      act: async (page) => {
+        const marker = page.getByTestId('chronology-trend').locator('button[aria-haspopup="dialog"][data-marker]').last();
+        await marker.scrollIntoViewIfNeeded();
+        await marker.click();
+        await page.getByTestId('chronology-event-popover').waitFor({ timeout: 10_000 });
+      },
+      expect: ['Repository joined', 'acme/api joined the workspace', 'That week on this chart', 'Not counted until the week ends'],
+    },
+  ],
   ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
   // Reports → AI usage: the ledger (scripts/seed-demo-ai-usage.ts), the 12 weeks and #116's auto re-reviews.
   [

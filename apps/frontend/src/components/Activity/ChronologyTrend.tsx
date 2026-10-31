@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import {
   HOURLY_COST_MAX_USD,
   FLOW_BUDGET_LABEL,
@@ -15,7 +15,8 @@ import { useFlowTrend } from '../../hooks/useFlowTrend.js';
 import { useUpdateWorkspaceProSettings, useWorkspaceProSettings } from '../../hooks/useWorkspaceProSettings.js';
 import { BOT_VENDOR_META } from '../../lib/ui.js';
 import { EventMarkerLines, EventMarkerRail, type ChartEventMarker } from '../charts/EventMarkers.js';
-import { FloatingTip, niceMax, useChartWidth } from '../charts/common.js';
+import { AnchoredTip } from '../charts/AnchoredTip.js';
+import { niceMax, useChartWidth } from '../charts/common.js';
 import { InfoButton } from '../InfoModal.js';
 import { BotIcon, ChartIcon, CloseIcon, GearIcon, PersonIcon, WarningIcon, WorkspaceIcon } from '../Icons.js';
 import { COURT_LABEL, COURT_ORDER } from './bottlenecksModel.js';
@@ -26,6 +27,7 @@ import {
   EVENT_KIND_LABEL,
   EVENT_KIND_ORDER,
   eventCounts,
+  eventPopoverModel,
   hoursCostUsd,
   hoursShort,
   lensChange,
@@ -37,6 +39,7 @@ import {
   usd,
   weekLabel,
   type EventCluster,
+  type RunningGain,
 } from './chronologyTrendModel.js';
 
 // CHRONOLOGY OVER TIME — four charts on ONE fetch (`GET /api/flow-trend`), docs/BOTTLENECKS.md
@@ -44,10 +47,16 @@ import {
 //   (a) where the working hours went, week by week (the split as a stacked area);
 //   (b) each wait against TODAY's budgets, one coloured cell per week;
 //   (c) before and after any marked week, in a panel opened from a marker;
-//   (d) working hours saved against a baseline the reader can move.
+//   (d) working hours saved against a fixed baseline (the first eight usable weeks).
 //
 // ⚠ EVERY CHART SHARES ONE X-AXIS (`geometry`), so an event's line falls on the same week in all
-// three. Only the top chart's marker rail is interactive; the others are decorative copies.
+// three. Two marker rails are interactive, each for its own action: the top chart's opens the
+// before/after lens, the hours-saved chart's opens a popover saying what happened that week and why
+// it can move the line. The budget chart's rail is a decorative copy.
+//
+// ⚠ NOTHING FLOATS INSIDE THE SCROLLER. Every hover box is an `AnchoredTip` and every popover is
+// portalled (charts/EventMarkers.tsx): an `absolute` box inside `ChartScroller` was cut off by the
+// scroller and hidden under the chart above it.
 //
 // ⚠ "LAST 26 WEEKS" IS ON SCREEN. This view is the one labelled exception to Chronology's 90-day
 // cap, and coverage is shown, never implied: faint weeks, contributing-repo counts on hover, and a
@@ -133,6 +142,8 @@ function markersFor(
   weeks: FlowTrendWeek[],
   selected: number | null,
   onSelect: (week: number) => void,
+  /** What a click does, closing the accessible name. */
+  action = 'Compare before and after.',
 ): ChartEventMarker[] {
   return clusters.map((c) => {
     const w = weeks[c.week];
@@ -149,7 +160,7 @@ function markersFor(
       selected: selected === c.week,
       icon: KIND_ICON[c.lead](11),
       count: c.events.length,
-      label: `${when}: ${all.length === 1 ? all[0] : `${all.length} events`}. Compare before and after.`,
+      label: `${when}: ${all.length === 1 ? all[0] : `${all.length} events`}. ${action}`,
       lines: [when, ...lines],
       onSelect: () => onSelect(c.week),
     };
@@ -240,16 +251,24 @@ function ChartScroller({ width, children }: { width: number; children: ReactNode
       ro?.disconnect();
     };
   }, []);
-  const overflows = box != null && box.vw < width;
+  // ⚠ ONLY A CHART WIDER THAN ITS BOX SCROLLS. `overflow-x: auto` also turns the other axis to
+  // `auto`, so a box that never needed to scroll still drew scroll bars (and clipped the marker
+  // badges). Until measured it is assumed to scroll, so a phone never widens the page for a frame.
+  const overflows = box == null || box.vw < width - 0.5;
   const g = `linear-gradient(to right, black calc(100% - ${CHART_FADE}px), transparent)`;
   const fade: CSSProperties | undefined =
-    overflows && !box.atEnd ? { maskImage: g, WebkitMaskImage: g } : undefined;
+    box != null && overflows && !box.atEnd ? { maskImage: g, WebkitMaskImage: g } : undefined;
   const inner = {
     width,
-    '--chart-vw': overflows ? `${box.vw - CHART_FADE}px` : `${width}px`,
+    '--chart-vw': box != null && overflows ? `${box.vw - CHART_FADE}px` : `${width}px`,
   } as CSSProperties;
   return (
-    <div ref={ref} className="overflow-x-auto overscroll-x-contain" style={fade}>
+    <div
+      ref={ref}
+      data-scrolls={overflows ? '' : undefined}
+      className={overflows ? 'overflow-x-auto overflow-y-hidden overscroll-x-contain' : undefined}
+      style={fade}
+    >
       <div style={inner}>{children}</div>
     </div>
   );
@@ -264,7 +283,7 @@ function BallRiver({
   geo: Geometry;
   markers: ChartEventMarker[];
 }): JSX.Element {
-  const [hover, setHover] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ week: number; el: Element } | null>(null);
   const weeks = data.weeks;
   const H = 150;
   const top = 6;
@@ -294,10 +313,10 @@ function BallRiver({
     return `M ${topPts.join(' L ')} L ${botPts.join(' L ')} Z`;
   };
 
-  const hw = hover == null ? null : weeks[hover];
+  const hw = hover == null ? null : weeks[hover.week];
   return (
     <div className="relative">
-      <svg width={geo.width} height={H} role="img" aria-label="Share of working hours in each wait, week by week">
+      <svg width={geo.width} height={H} className="block" role="img" aria-label="Share of working hours in each wait, week by week">
         <g aria-hidden="true">
           {[0, 0.5, 1].map((v) => (
             <g key={v}>
@@ -322,13 +341,13 @@ function BallRiver({
             width={geo.band}
             height={bottom - top}
             fill="transparent"
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+            onMouseEnter={(e) => setHover({ week: i, el: e.currentTarget })}
+            onMouseLeave={() => setHover((h) => (h?.week === i ? null : h))}
           />
         ))}
       </svg>
       {hw != null && hover != null && (
-        <FloatingTip x={geo.cx(hover)} y={top + 10} width={geo.width}>
+        <AnchoredTip anchor={hover.el}>
           <div className="font-medium">{weekHead(hw)}</div>
           <div>{prsLine(hw)}</div>
           {hw.measuredPrs > 0 &&
@@ -338,7 +357,7 @@ function BallRiver({
               </div>
             ))}
           <div>{coverageLine(hw)}</div>
-        </FloatingTip>
+        </AnchoredTip>
       )}
       <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${PINNED}`}>
         {COURT_ORDER.map((c) => (
@@ -363,7 +382,7 @@ function BudgetWeather({
   geo: Geometry;
   markers: ChartEventMarker[];
 }): JSX.Element {
-  const [hover, setHover] = useState<{ week: number; row: number } | null>(null);
+  const [hover, setHover] = useState<{ week: number; row: number; el: Element } | null>(null);
   const weeks = data.weeks;
   const ROW = 18;
   const GAP = 4;
@@ -374,7 +393,7 @@ function BudgetWeather({
   const hw = hover == null ? null : weeks[hover.week];
   return (
     <div className="relative">
-      <svg width={geo.width} height={H} role="img" aria-label="Each wait against today's budgets, week by week. The table below lists the same figures.">
+      <svg width={geo.width} height={H} className="block" role="img" aria-label="Each wait against today's budgets, week by week. The table below lists the same figures.">
         {FLOW_BUDGET_MEASURES.map((m, r) => {
           const yy = top + r * (ROW + GAP);
           return (
@@ -403,8 +422,9 @@ function BudgetWeather({
                     rx={2}
                     className={cls}
                     opacity={faint && b != null && b.prs > 0 ? 0.35 : 1}
-                    onMouseEnter={() => setHover({ week: i, row: r })}
-                    onMouseLeave={() => setHover(null)}
+                    data-testid={`budget-cell-${m}-${i}`}
+                    onMouseEnter={(e) => setHover({ week: i, row: r, el: e.currentTarget })}
+                    onMouseLeave={() => setHover((h) => (h != null && h.week === i && h.row === r ? null : h))}
                   />
                 );
               })}
@@ -415,7 +435,7 @@ function BudgetWeather({
         <XLabels geo={geo} weeks={weeks} y={H - 4} />
       </svg>
       {hover != null && hw != null && cell != null && (
-        <FloatingTip x={geo.cx(hover.week)} y={top + hover.row * (ROW + GAP)} width={geo.width}>
+        <AnchoredTip anchor={hover.el} testId="budget-weather-tip">
           <div className="font-medium">
             {weekHead(hw)} · {FLOW_BUDGET_LABEL[cell.measure]}
           </div>
@@ -433,7 +453,7 @@ function BudgetWeather({
             </>
           )}
           {hw.thin && hw.measuredPrs > 0 && <div>Too few pull requests to compare this week</div>}
-        </FloatingTip>
+        </AnchoredTip>
       )}
       <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${PINNED}`}>
         {(['good', 'ok', 'slow'] as const).map((v) => (
@@ -581,34 +601,26 @@ function GainLine({
   data,
   geo,
   markers,
-  from,
-  onPickBaseline,
+  gain,
   workspaceId,
 }: {
   data: FlowTrendResponse;
   geo: Geometry;
   markers: ChartEventMarker[];
-  from: number | null;
-  onPickBaseline: (week: number | null) => void;
+  /** `runningGain(data.weeks)`, worked out once by the section (the marker popovers read it too). */
+  gain: RunningGain | null;
   workspaceId: number | null;
 }): JSX.Element {
-  const [hover, setHover] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ week: number; el: Element } | null>(null);
   const weeks = data.weeks;
-  const gain = useMemo(() => runningGain(weeks, from), [weeks, from]);
   const H = 150;
   const top = 8;
   const bottom = H - 20;
   if (gain == null) {
     return (
       <p className={NOTE}>
-        {from == null
-          ? `Not enough weeks yet to set a baseline: it needs ${FLOW_TREND.baselineWeeks} weeks with at least ${FLOW_TREND.thinWeekPrs} pull requests each.`
-          : 'Too few usable weeks before that week to set a baseline there.'}
-        {from != null && (
-          <button type="button" className="hit ml-2 font-medium text-ui-ink hover:underline" onClick={() => onPickBaseline(null)}>
-            Use the default baseline
-          </button>
-        )}
+        Not enough weeks yet to set a baseline: it needs {FLOW_TREND.baselineWeeks} weeks with at least{' '}
+        {FLOW_TREND.thinWeekPrs} pull requests each.
       </p>
     );
   }
@@ -625,7 +637,7 @@ function GainLine({
   const startWeek = weeks[gain.start];
   const bFirst = gain.baselineWeeks[0] as number;
   const bLast = gain.baselineWeeks[gain.baselineWeeks.length - 1] as number;
-  const hw = hover == null ? null : weeks[hover];
+  const hw = hover == null ? null : weeks[hover.week];
   return (
     <div className="relative">
       <div className={`mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 ${PINNED}`}>
@@ -640,13 +652,8 @@ function GainLine({
         <span className={NOTE}>
           Baseline: half merged within {hoursShort(gain.baseline)} ({gain.baselineWeeks.length} weeks)
         </span>
-        {from != null && (
-          <button type="button" className="hit text-meta font-medium text-ui-ink hover:underline" onClick={() => onPickBaseline(null)}>
-            Use the default baseline
-          </button>
-        )}
       </div>
-      <svg width={geo.width} height={H} role="img" aria-label={`Working hours saved against the baseline: ${signedHours(last)} so far`}>
+      <svg width={geo.width} height={H} className="block" role="img" aria-label={`Working hours saved against the baseline: ${signedHours(last)} so far`}>
         <g aria-hidden="true">
           <rect
             x={geo.left(bFirst)}
@@ -706,36 +713,35 @@ function GainLine({
             width={geo.band}
             height={bottom - top}
             fill="transparent"
-            className="cursor-pointer"
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover((h) => (h === i ? null : h))}
-            onClick={() => onPickBaseline(i)}
+            onMouseEnter={(e) => setHover({ week: i, el: e.currentTarget })}
+            onMouseLeave={() => setHover((h) => (h?.week === i ? null : h))}
           />
         ))}
       </svg>
       {hw != null && hover != null && (
-        <FloatingTip x={geo.cx(hover)} y={top + 10} width={geo.width}>
+        <AnchoredTip anchor={hover.el}>
           <div className="font-medium">{weekHead(hw)}</div>
-          {gain.weekly[hover] != null ? (
+          {gain.weekly[hover.week] != null ? (
             <>
               <div>
                 Half merged within {hoursShort(hw.medianLeadWorkHours ?? 0)}, against {hoursShort(gain.baseline)}
               </div>
               <div>
-                {signedHours(gain.weekly[hover] as number)} over {hw.measuredPrs} pull requests
+                {signedHours(gain.weekly[hover.week] as number)} over {hw.measuredPrs} pull requests
               </div>
             </>
           ) : (
-            <div>{hover < gain.start ? 'Before the baseline' : 'Not counted: too few pull requests'}</div>
+            <div>{hover.week < gain.start ? 'Before the baseline' : 'Not counted: too few pull requests'}</div>
           )}
-          {gain.cumulative[hover] != null && <div>Running total {signedHours(gain.cumulative[hover] as number)}</div>}
-          <div>Click to measure from this week</div>
-        </FloatingTip>
+          {gain.cumulative[hover.week] != null && (
+            <div>Running total {signedHours(gain.cumulative[hover.week] as number)}</div>
+          )}
+        </AnchoredTip>
       )}
       <p className={`mt-1 ${NOTE} ${PINNED}`}>
         Each week adds (baseline − that week’s half-merged-within time) × the pull requests merged
         that week, in working hours. A rising line means pull requests are merging faster than at
-        the baseline. Click any week to measure from there.
+        the baseline. Select a marker to see what happened that week.
       </p>
     </div>
   );
@@ -747,12 +753,12 @@ function BeforeAfterLens({
   data,
   week,
   onClose,
-  onUseAsBaseline,
+  sectionRef,
 }: {
   data: FlowTrendResponse;
   week: number;
   onClose: () => void;
-  onUseAsBaseline: () => void;
+  sectionRef?: Ref<HTMLElement>;
 }): JSX.Element | null {
   const lens = data.lenses.find((l) => l.week === week);
   const w = data.weeks[week];
@@ -760,6 +766,7 @@ function BeforeAfterLens({
   const events = data.events.filter((e) => e.week === week);
   return (
     <section
+      ref={sectionRef}
       aria-label={`Before and after the week of ${weekLabel(w.weekStart)}`}
       className="rounded-ui bg-ui-surface p-3"
       data-testid="chronology-trend-lens"
@@ -853,14 +860,84 @@ function BeforeAfterLens({
           );
         })}
       </ul>
-      <button
-        type="button"
-        onClick={onUseAsBaseline}
-        className="hit mt-2 text-meta font-medium text-ui-ink hover:underline"
-      >
-        Measure hours saved from this week
-      </button>
     </section>
+  );
+}
+
+// ── What happened in a marked week (the hours-saved chart's markers) ────────────────────────
+
+function EventPopover({
+  cluster,
+  data,
+  gain,
+  onCompare,
+  close,
+}: {
+  cluster: EventCluster;
+  data: FlowTrendResponse;
+  gain: RunningGain | null;
+  onCompare: (week: number) => void;
+  close: () => void;
+}): JSX.Element {
+  const model = eventPopoverModel(cluster.events, cluster.week, data.weeks, gain, eventLine);
+  const hasLens = data.lenses.some((l) => l.week === cluster.week);
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-semibold text-ui-ink">{model.title}</div>
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close"
+          className="hit -mr-1 -mt-0.5 rounded-ui p-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+        >
+          <CloseIcon size={12} />
+        </button>
+      </div>
+      <div className="mt-1.5 space-y-2.5">
+        {model.groups.map((g) => (
+          <div key={g.kind} data-testid={`event-group-${g.kind}`}>
+            <div className="flex items-center gap-1.5 font-medium text-ui-ink">
+              <span className="text-ui-mute">{KIND_ICON[g.kind](12)}</span>
+              {g.heading}
+              {g.date != null && <span className="ml-auto font-normal tabular-nums text-ui-mute">{g.date}</span>}
+            </div>
+            <ul className="mt-0.5 space-y-0.5">
+              {g.items.map((it) => (
+                <li key={it.id} className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 break-words">{it.text}</span>
+                  {it.date != null && <span className="shrink-0 tabular-nums text-ui-mute">{it.date}</span>}
+                </li>
+              ))}
+              {g.more > 0 && <li className="text-ui-mute">and {g.more} more</li>}
+            </ul>
+            <p className="mt-0.5 text-ui-mute">{g.why}</p>
+          </div>
+        ))}
+      </div>
+      {model.facts.length > 0 && (
+        <div className="mt-2.5 border-t border-ui-line pt-2">
+          <div className="font-medium text-ui-ink">That week on this chart</div>
+          <ul className="mt-0.5 space-y-0.5 tabular-nums">
+            {model.facts.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasLens && (
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            onCompare(cluster.week);
+          }}
+          className="hit mt-2 font-medium text-ui-ink hover:underline"
+        >
+          Compare before and after
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -885,7 +962,10 @@ function TrendInfo({ data }: { data: FlowTrendResponse }): JSX.Element {
         and a shift the numbers show on their own (dashed). A marker only says something first
         happened that week. Someone active since before our records began is not marked as new.
       </p>
-      <p>Click a marker to compare the weeks before and after it.</p>
+      <p>
+        Click a marker above the first chart to compare the weeks before and after it. Click one above
+        the hours-saved chart to see what happened that week and why it can move the line.
+      </p>
     </div>
   );
 }
@@ -906,7 +986,6 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
   // refetch shifts every index by one, and an index would silently move the pick to its neighbour.
   // A week that has scrolled out of the span resolves to nothing.
   const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
-  const [baselineWeek, setBaselineWeek] = useState<string | null>(null);
   const indexOf = (ws: string | null): number | null => {
     if (ws == null || data == null) return null;
     const i = data.weeks.findIndex((w) => w.weekStart === ws);
@@ -914,16 +993,28 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
   };
   const weekAt = (i: number | null): string | null => (i == null ? null : (data?.weeks[i]?.weekStart ?? null));
   const selected = indexOf(selectedWeek);
-  const baselineFrom = indexOf(baselineWeek);
   const setSelected = (next: number | null | ((s: number | null) => number | null)): void =>
     setSelectedWeek(weekAt(typeof next === 'function' ? next(selected) : next));
-  const setBaselineFrom = (i: number | null): void => setBaselineWeek(weekAt(i));
+  // "Compare before and after" from a marker's popover opens the lens ABOVE the chart the reader is
+  // looking at, so it is scrolled into view once it mounts.
+  const lensRef = useRef<HTMLElement>(null);
+  const [revealLens, setRevealLens] = useState(false);
+  useEffect(() => {
+    if (!revealLens || selected == null) return;
+    lensRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    setRevealLens(false);
+  }, [revealLens, selected]);
   // 26 weekly columns need room: below ~640px the charts keep that width and scroll inside their
   // own box (the notes above them still wrap to the screen).
   const chartWidth = width === 0 ? 0 : Math.max(width, 640);
   const geo = geometryFor(chartWidth, data?.weeks.length ?? FLOW_TREND.weeks);
   const clusters = useMemo(() => clusterEvents(data?.events ?? [], shown), [data?.events, shown]);
   const markers = data == null ? [] : markersFor(clusters, geo, data.weeks, selected, (w) => setSelected((s) => (s === w ? null : w)));
+  const gain = useMemo(() => (data == null ? null : runningGain(data.weeks)), [data]);
+  // The hours-saved chart's markers explain their week instead of opening the lens.
+  const gainMarkers =
+    data == null ? [] : markersFor(clusters, geo, data.weeks, selected, () => undefined, 'Show what happened.');
+  const clusterByKey = new Map(clusters.map((c) => [`w${c.week}`, c]));
   const counts = eventCounts(data?.events ?? []);
   const usable = data?.weeks.filter(usableWeek).length ?? 0;
 
@@ -1009,12 +1100,7 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
             </div>
 
             {selected != null && (
-              <BeforeAfterLens
-                data={data}
-                week={selected}
-                onClose={() => setSelected(null)}
-                onUseAsBaseline={() => setBaselineFrom(selected)}
-              />
+              <BeforeAfterLens data={data} week={selected} onClose={() => setSelected(null)} sectionRef={lensRef} />
             )}
 
             <div>
@@ -1030,15 +1116,27 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
                 Working hours saved, opened to merged
               </h5>
               <ChartScroller width={chartWidth}>
-                  <EventMarkerRail markers={markers} width={chartWidth} interactive={false} />
-                  <GainLine
-                    data={data}
-                    geo={geo}
-                    markers={markers}
-                    from={baselineFrom}
-                    onPickBaseline={setBaselineFrom}
-                    workspaceId={workspaceId}
+                  <EventMarkerRail
+                    markers={gainMarkers}
+                    width={chartWidth}
+                    popoverTestId="chronology-event-popover"
+                    renderPopover={(m, close) => {
+                      const cluster = clusterByKey.get(m.key);
+                      return cluster == null ? null : (
+                        <EventPopover
+                          cluster={cluster}
+                          data={data}
+                          gain={gain}
+                          close={close}
+                          onCompare={(w) => {
+                            setSelected(w);
+                            setRevealLens(true);
+                          }}
+                        />
+                      );
+                    }}
                   />
+                  <GainLine data={data} geo={geo} markers={markers} gain={gain} workspaceId={workspaceId} />
               </ChartScroller>
             </div>
           </div>

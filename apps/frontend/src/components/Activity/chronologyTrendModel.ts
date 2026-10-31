@@ -48,30 +48,17 @@ export interface RunningGain {
  * requests spent less (or more) than they would have at the baseline pace. A rising line is
  * improvement.
  *
- * `from` is the week accumulation starts: the baseline is the median of up to
- * `FLOW_TREND.baselineWeeks` usable weeks BEFORE it. With no `from`, the default: accumulation starts
- * right after the first `baselineWeeks` usable weeks, so the default needs ALL `baselineWeeks` (its
- * empty-state copy quotes that constant). A picked `from` needs only `MIN_BASELINE_WEEKS` usable weeks
- * before it; fewer is null — too few to call a baseline.
+ * Accumulation starts right after the first `FLOW_TREND.baselineWeeks` usable weeks, and the baseline
+ * is the median of exactly those weeks (its empty-state copy quotes that constant). Fewer usable
+ * weeks is null: too few to call a baseline.
  */
-export function runningGain(weeks: FlowTrendWeek[], from: number | null = null): RunningGain | null {
-  let start = from;
-  if (start == null) {
-    let seen = 0;
-    for (let i = 0; i < weeks.length; i += 1) {
-      if (usableWeek(weeks[i] as FlowTrendWeek)) seen += 1;
-      if (seen === FLOW_TREND.baselineWeeks) {
-        start = i + 1;
-        break;
-      }
-    }
-    if (start == null) return null;
-  }
+export function runningGain(weeks: FlowTrendWeek[]): RunningGain | null {
   const baselineWeeks: number[] = [];
-  for (let i = start - 1; i >= 0 && baselineWeeks.length < FLOW_TREND.baselineWeeks; i -= 1) {
-    if (usableWeek(weeks[i] as FlowTrendWeek)) baselineWeeks.unshift(i);
+  for (let i = 0; i < weeks.length && baselineWeeks.length < FLOW_TREND.baselineWeeks; i += 1) {
+    if (usableWeek(weeks[i] as FlowTrendWeek)) baselineWeeks.push(i);
   }
-  if (baselineWeeks.length < MIN_BASELINE_WEEKS) return null;
+  if (baselineWeeks.length < FLOW_TREND.baselineWeeks) return null;
+  const start = (baselineWeeks[baselineWeeks.length - 1] as number) + 1;
   const baseline = medianOf(baselineWeeks.map((i) => (weeks[i] as FlowTrendWeek).medianLeadWorkHours as number));
   if (baseline == null) return null;
   const cumulative: (number | null)[] = weeks.map(() => null);
@@ -88,9 +75,6 @@ export function runningGain(weeks: FlowTrendWeek[], from: number | null = null):
   }
   return { start, baselineWeeks, baseline, cumulative, weekly };
 }
-
-/** The change-point test's per-side floor, mirrored: fewer usable weeks is no baseline. */
-export const MIN_BASELINE_WEEKS = 4;
 
 // ── Event markers ────────────────────────────────────────────────────────────────────────────
 
@@ -140,6 +124,117 @@ export function clusterEvents(events: FlowTrendEvent[], shown: ReadonlySet<FlowT
 export function eventCounts(events: FlowTrendEvent[]): Record<FlowTrendEventKind, number> {
   const out: Record<FlowTrendEventKind, number> = { repo: 0, bot: 0, contributor: 0, setting: 0, shift: 0 };
   for (const e of events) out[e.kind] += 1;
+  return out;
+}
+
+// ── A marker's popover: what happened, when, and why it can move the line ────────────────────
+
+/**
+ * Why each kind of event can move a weekly figure — fixed copy, one line per kind present. It says
+ * what the event CAN do to the figures, never that it did: a change can line up with an event
+ * without being caused by it (the lens is where a change is tested).
+ */
+export const EVENT_KIND_WHY: Record<FlowTrendEventKind, string> = {
+  repo: 'Its pull requests count in every weekly figure from this week on, so the line can move without anything changing in how people work.',
+  bot: 'A bot never counts as someone reviewing, but its comments can give authors more to answer before a merge.',
+  contributor: 'Someone new often needs more review rounds at first, so their pull requests can take longer to merge.',
+  setting: 'It can change how pull requests are reviewed or merged from this week on.',
+  shift: 'Nobody recorded this: the figures themselves moved this week, by more than their usual week-to-week spread.',
+};
+
+/** A working-hours or budget change alters how every wait is counted, not how anyone works. */
+const FLOW_SETTINGS_WHY =
+  'Working hours or budgets changed, which changes how every wait is counted and judged from this week on.';
+
+/** Lines listed per kind before "and N more". */
+export const EVENT_POPOVER_LINES = 6;
+
+export interface EventPopoverGroup {
+  kind: FlowTrendEventKind;
+  /** The kind's name, e.g. "Repository joined". */
+  heading: string;
+  /** The day every event in the group happened, when they share one (printed once, by the
+   *  heading); null when they differ (each item carries its own) or for a shift. */
+  date: string | null;
+  /** One per event: its line and, when the group has no shared day, the day it happened. */
+  items: { id: string; text: string; date: string | null }[];
+  /** Events past `EVENT_POPOVER_LINES`. */
+  more: number;
+  why: string;
+}
+
+export interface EventPopoverModel {
+  /** "Week of 13 Jul". */
+  title: string;
+  groups: EventPopoverGroup[];
+  /** That week on the hours-saved chart, as plain facts from the figures. */
+  facts: string[];
+}
+
+/** "14 Jul" — the day an event happened, in the reader's locale like `weekLabel`. */
+export function eventDay(at: string): string | null {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/**
+ * The popover a marker on "Working hours saved" opens: the events of one week grouped by kind (in
+ * `EVENT_KIND_ORDER`), why each kind can move the line, and where that week sits on the chart.
+ * Pure — `lineOf` names an event (the SPA names a bot by its product), and `gain` is the chart's own
+ * `runningGain` (null when there is too little history for a baseline).
+ */
+export function eventPopoverModel(
+  events: FlowTrendEvent[],
+  week: number,
+  weeks: FlowTrendWeek[],
+  gain: RunningGain | null,
+  lineOf: (e: FlowTrendEvent) => string = (e) => e.label,
+): EventPopoverModel {
+  const w = weeks[week];
+  const title = w ? `Week of ${weekLabel(w.weekStart)}` : 'This week';
+  const groups: EventPopoverGroup[] = [];
+  for (const kind of EVENT_KIND_ORDER) {
+    const of = events.filter((e) => e.kind === kind && e.week === week);
+    if (of.length === 0) continue;
+    const why =
+      kind === 'setting' && of.every((e) => e.settingKind === 'flow_settings') ? FLOW_SETTINGS_WHY : EVENT_KIND_WHY[kind];
+    // A shift is dated by its week, which the title already says.
+    const days = kind === 'shift' ? [] : of.map((e) => eventDay(e.at));
+    const shared = days.length > 0 && days.every((d) => d === days[0]) ? (days[0] ?? null) : null;
+    groups.push({
+      kind,
+      heading: EVENT_KIND_LABEL[kind],
+      date: shared,
+      items: of.slice(0, EVENT_POPOVER_LINES).map((e, i) => ({
+        id: e.id,
+        text: lineOf(e),
+        date: shared != null || kind === 'shift' ? null : (days[i] ?? null),
+      })),
+      more: Math.max(0, of.length - EVENT_POPOVER_LINES),
+      why,
+    });
+  }
+  return { title, groups, facts: w == null ? [] : weekFacts(w, week, gain) };
+}
+
+function prCount(n: number): string {
+  return `${n.toLocaleString()} pull ${n === 1 ? 'request' : 'requests'}`;
+}
+
+function weekFacts(w: FlowTrendWeek, week: number, gain: RunningGain | null): string[] {
+  const merged = `${prCount(w.measuredPrs)} merged${w.partial ? ' so far' : ''}`;
+  if (w.measuredPrs === 0) return ['Nothing merged that week'];
+  if (w.partial) return [merged, 'Not counted until the week ends'];
+  if (!usableWeek(w)) return [merged, `Not counted: fewer than ${FLOW_TREND.thinWeekPrs} pull requests`];
+  const half = `Half merged within ${hoursShort(w.medianLeadWorkHours as number)} (working hours)`;
+  if (gain == null) return [merged, half];
+  if (gain.baselineWeeks.includes(week)) return [merged, half, 'One of the weeks the baseline is taken from'];
+  if (week < gain.start) return [merged, half, 'Before hours saved are counted'];
+  const saved = gain.weekly[week];
+  const total = gain.cumulative[week];
+  const out = [merged, `${half}, against ${hoursShort(gain.baseline)} at the baseline`];
+  if (saved != null) out.push(`That week ${signedHours(saved)}; running total ${signedHours(total ?? 0)}`);
   return out;
 }
 
