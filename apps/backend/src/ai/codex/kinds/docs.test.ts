@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withWritingRules } from '../../writing-rules.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -232,7 +233,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     expect(cfg(call.argv).get('model_reasoning_effort')).toBe('"medium"');
     expect(cfg(call.argv).get('sandbox_mode')).toBe('"read-only"');
     const dev = JSON.parse(cfg(call.argv).get('developer_instructions')!);
-    expect(dev).toBe(DiagPrompts.prDiagramSystemPrompt('codex'));
+    expect(dev).toBe(withWritingRules(DiagPrompts.prDiagramSystemPrompt('codex')));
     expect(dev).toMatch(/You may use read_file, list_files and search\./);
     expect(dev).not.toMatch(/submit_design/);
     expect(call.stdin).toMatch(/Answer with the one JSON diagram\.$/);
@@ -338,7 +339,7 @@ describe('sprint critical paths on Codex (kind: sprint_paths)', () => {
     const [call] = calls();
     expect(call.schema).toEqual((await resultJsonSchemas('submit_paths')).strict);
     const dev = JSON.parse(cfg(call.argv).get('developer_instructions')!);
-    expect(dev).toBe(PathsPrompt.sprintPathsSystem('codex'));
+    expect(dev).toBe(withWritingRules(PathsPrompt.sprintPathsSystem('codex')));
     expect(dev).not.toMatch(/submit_paths/);
     expect(dev).toMatch(/NO digits/);
     // The Claude run's only root: a throwaway cwd (removed after), read-only, nothing else.
@@ -460,7 +461,7 @@ describe('the docs build on Codex (kind: docs_build)', () => {
     // Both halves of the old two-call protocol, side by side.
     expect(Object.keys(call.schema.properties).sort()).toEqual(['sections', 'summary', 'title', 'topics']);
     const dev = JSON.parse(cfg(call.argv).get('developer_instructions')!);
-    expect(dev).toBe(DocsPrompts.buildSectionsSystemPrompt('codex'));
+    expect(dev).toBe(withWritingRules(DocsPrompts.buildSectionsSystemPrompt('codex')));
     expect(dev).not.toMatch(/record_sections|finish_document|progress and/);
     expect(dev).toMatch(/You may use read_file, list_files and search\. You have NO write tools\./);
     expect(guardRoots()).toEqual({ read: [resolve(s.staging)], write: [] });
@@ -541,7 +542,7 @@ describe('the docs chat on Codex (kind: docs_chat)', () => {
     expect(call.schema).toBeNull();
     expect(call.argv).not.toContain('--output-schema');
     const dev = JSON.parse(cfg(call.argv).get('developer_instructions')!);
-    expect(dev).toBe(DocsPrompts.chatSystemPrompt('codex'));
+    expect(dev).toBe(withWritingRules(DocsPrompts.chatSystemPrompt('codex')));
     expect(dev).toMatch(/read them with read_file, list_files and search\./);
     expect(dev).toMatch(/Search across the library/);
     expect(guardRoots()).toEqual({ read: [resolve(lib)], write: [] });

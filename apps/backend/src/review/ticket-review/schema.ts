@@ -87,7 +87,7 @@ function buildBaseTicketReviewShape(z: ZodNs) {
 
   return {
     alignment: z.enum(['aligned', 'partly_aligned', 'not_aligned', 'unclear']),
-    summary: z.string().describe('Two plain sentences: how far the pull requests, together, deliver the ticket, then the most important thing still left (or that nothing is). No bullets, no headings.'),
+    summary: z.string().describe('At most three short sentences, each at most 20 words: how far the pull requests, together, deliver the ticket, then the most important thing still left (or that nothing is). No bullets, no headings.'),
     criteria: z
       .array(
         z.object({

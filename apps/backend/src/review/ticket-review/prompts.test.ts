@@ -93,9 +93,10 @@ describe('ticketToolPolicy', () => {
 });
 
 describe('the summary instruction', () => {
-  it('asks for TWO plain sentences: how far, then the most important thing left — no bullets, no criteria', () => {
-    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain("'summary' is TWO plain sentences");
-    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('the second names the most important thing still left, or says nothing is');
+  it('asks for at most three short sentences of 20 words: how far, then the most important thing left — no bullets, no criteria', () => {
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain("'summary' is at most THREE short sentences, each at most 20 words");
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('then the most important thing still left, or that nothing is');
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('do not join clauses with semicolons or colons');
     expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('No bullets, no list of criteria, no headings, no tables');
     expect(TICKET_REVIEW_SYSTEM_PROMPT).not.toContain('a short bullet list');
   });

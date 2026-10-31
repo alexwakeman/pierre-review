@@ -16,6 +16,7 @@
 //
 //   pnpm --filter @pierre-review/backend test ai/provider
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { REVIEW_WRITING_RULES, withWritingRules } from './writing-rules.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -305,7 +306,9 @@ describe('the Claude provider builds the same query() options the runners did', 
     expect(captured!.prompt).toBe('PROMPT');
     expect(o).toMatchObject({
       model: 'claude-sonnet-5',
-      systemPrompt: 'SYS',
+      // The caller's system prompt, then the writing rules (ai/writing-rules.ts) — a CI review gets the
+      // review set.
+      systemPrompt: withWritingRules('SYS', 'review'),
       cwd: '/tmp',
       additionalDirectories: ['/tmp', '/var'],
       permissionMode: 'bypassPermissions',
@@ -353,10 +356,11 @@ describe('the Claude provider builds the same query() options the runners did', 
     });
   });
 
-  it('a run with no tools, no roots, no system prompt sends none of them', async () => {
+  it('a run with no tools, no roots, no system prompt sends none of them — only the writing rules', async () => {
     await claudeProvider.runAgent({ ...baseSpec({ system: undefined }) });
     const o = captured!.options;
-    for (const k of ['mcpServers', 'additionalDirectories', 'systemPrompt', 'tools', 'agents']) expect(o).not.toHaveProperty(k);
+    for (const k of ['mcpServers', 'additionalDirectories', 'tools', 'agents']) expect(o).not.toHaveProperty(k);
+    expect(o.systemPrompt).toBe(REVIEW_WRITING_RULES);
     expect(o.hooks.PreToolUse).toHaveLength(2);
     const [own] = o.hooks.PreToolUse[1].hooks;
     // No server registered ⇒ every MCP tool is foreign.

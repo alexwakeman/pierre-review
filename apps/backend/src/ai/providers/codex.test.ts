@@ -118,6 +118,7 @@ vi.mock('../codex/threads.js', () => ({
 const C = await import('./codex.js');
 const P = await import('../provider.js');
 const { loadZod } = await import('../runtime.js');
+const { withWritingRules } = await import('../writing-rules.js');
 
 // ---- the fake binary ------------------------------------------------------------------------------
 //
@@ -245,7 +246,7 @@ describe('complete()', () => {
     expect(call.argv[call.argv.indexOf('-m') + 1]).toBe('gpt-6-luna');
     expect(c.get('model_reasoning_effort')).toBe('"low"');
     expect(c.get('sandbox_mode')).toBe('"read-only"');
-    expect(c.get('developer_instructions')).toBe('"SYS"');
+    expect(c.get('developer_instructions')).toBe(JSON.stringify(withWritingRules('SYS')));
     expect(c.get('features.shell_tool')).toBe('false');
     expect([...c.keys()].some((k) => k.startsWith('mcp_servers'))).toBe(false);
     // ⚠ The SAME trusted guard as an agent run, with EMPTY roots (everything but update_plan denied):

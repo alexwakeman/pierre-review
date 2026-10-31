@@ -91,8 +91,7 @@ The load-bearing concept is **derived thread state** (below).
   comes from `.env` (repo root) then `apps/backend/.env`.
 
 **Removed 2026-10-22 — do not reintroduce:** cloud mode, Postgres, the Pro entitlement layer,
-credits, Stripe billing and the cloud benchmark collection (the full list:
-[docs/BACKEND.md](docs/BACKEND.md)). Their tables stay dormant, never dropped.
+credits, Stripe billing, the cloud benchmark collection ([docs/BACKEND.md](docs/BACKEND.md)). Their tables stay dormant, never dropped.
 
 ---
 
@@ -329,7 +328,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
 - **Sync-round state has ONE driver, `SyncStatus`; there is ONE header toast strip,
   `HeaderToasts`** (never a second strip or a `fixed` toast). Both: docs/FRONTEND.md.
-- **Reactions are fetched ON DEMAND (one batched lookup), NEVER STORED.**
+- **Reactions are fetched ON DEMAND (batched), NEVER STORED.**
 
 ---
 
@@ -386,6 +385,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`**: runners call a provider's `runAgent`,
   `cheapComplete` calls `.complete`. ONLY `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls
   `query`/loads an SDK, adding the path guard, own-tools hook and isolation (`provider-seam.test.ts`).
+  Every system prompt gets the WRITING RULES (`ai/writing-rules.ts`, ASD-STE100).
   The DEFAULT provider is `activeProviderId` (`LIMN_AI_PROVIDER` = `claude`|`codex`|`auto`, else
   Settings → AI; `auto` = Claude when both are signed in): it runs every AUTOMATIC run and every
   surface without a model menu. A MANUAL picker run (AI Review, AI Fix) names `{provider, model}`
@@ -416,7 +416,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **No AI SDK in the npm manifest** (`build-release.mjs` asserts it), yet the first boot downloads
   Claude AND Codex (`ai/auto-install.ts`, after listen, never awaited); signing in is the only step.
   Value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`).
-- **THE SPEND BUDGET** (ON by default at 50% of the week on a subscription — the reader may change or switch it off; never-set on an API key = no cap; per machine, `ai/budget.ts`; read per provider): ⚠
+- **THE SPEND BUDGET** (ON by default at 50% of the week on a subscription, changeable; never-set on an API key = no cap; per machine, `ai/budget.ts`; read per provider): ⚠
   **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
   `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click
   is never refused (the SPA asks). On a subscription it is a share of the week and of the 5-hour
@@ -587,7 +587,7 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
   new event types get a deterministic `dedupeKey`.
 - **`req.raw.on('close')` fires when a POST body is read** — watch `reply.raw` for a disconnect.
   The GET `…/stream` endpoints are fine.
-- **A feature can be built and UNREACHABLE — grep for the mount** (`grep '<Component'`).
+- **A feature can be built and UNREACHABLE — grep for the mount.**
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 
 ## Verifying changes

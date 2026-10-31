@@ -374,6 +374,20 @@ size, cache reads). It never runs a model and never starts the usage probe.
 
 ### The provider seam
 
+- **THE WRITING RULES** (`ai/writing-rules.ts`, 2026-10-31): every word a model writes for a person
+  follows ASD-STE100 Simplified Technical English and is brief — one idea per sentence, 20 words
+  maximum (25 for a description), a summary in 2 sentences, a finding or point in 3, active voice,
+  no filler, hedges or praise. Both providers append the block to the system prompt of EVERY
+  `runAgent`, `complete` and `describeImage` (the exported provider objects, so Codex's direct
+  specialist calls get it too). Prose only: code, quotes, identifiers and the output format are
+  untouched, and a caller's tighter limit wins. Appended at the door, it leaves every runner's prompt —
+  and the prompt goldens — byte-identical. `writing-rules.test.ts` pins it.
+  ⚠ **REVIEWS GET THE REVIEW SET** (`writingStyleFor(spec.kind)`: `review` — specialists included —
+  `ci_review`, `thread_check`, `review_chat`): the same technical-writing rules with NO length caps,
+  and an explicit "never cut a finding, cause, evidence or fix to save words". Their findings feed AI
+  Fix and the CI fix, and a first trial of the brief set on a review dropped both findings. The story
+  check (`ticket_review`) and every other run or completion keep the brief set.
+
 - **`ai/provider.ts`** is the ONE door for every model call. The agent runners call a provider's
   `runAgent(spec)` — the RUN's provider (`review/run-provider.ts` `runProvider(args.provider)`: the
   reader's per-run pick, else the default; a runner with no menu gets the default,

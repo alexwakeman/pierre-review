@@ -45,6 +45,7 @@ import type {
 import { AI_MODEL_FOR_ROLE } from '@pierre-review/shared';
 import { foldRateLimitEvent, parseUsageProbe } from './claude-usage.js';
 import { assistantText, describeFixBlocks, describeReviewBlocks } from './claude-activity.js';
+import { withWritingRules, writingStyleFor } from '../writing-rules.js';
 
 /**
  * Claude's model per role — the shared table's (packages/shared `AI_MODEL_FOR_ROLE`, which the SPA's
@@ -492,9 +493,10 @@ async function sdkUsageProbe(): Promise<unknown> {
 export const claudeProvider: AgentProvider = {
   id: 'claude',
   resolveModel,
-  runAgent,
-  complete,
-  describeImage,
+  // THE WRITING RULES ride every system prompt (ai/writing-rules.ts) — added here, at the one door.
+  runAgent: (spec) => runAgent({ ...spec, system: withWritingRules(spec.system, writingStyleFor(spec.kind)) }),
+  complete: (req) => complete({ ...req, system: withWritingRules(req.system) }),
+  describeImage: (req) => describeImage({ ...req, system: withWritingRules(req.system) }),
   detect,
   credentialRoute: () => resolveAiCredential().route,
   usage: {

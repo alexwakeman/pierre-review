@@ -111,6 +111,7 @@ import {
   type JsonSchema,
 } from '../result-schemas.js';
 import { AiRuntimeMissingError, loadZod } from '../runtime.js';
+import { withWritingRules, writingStyleFor } from '../writing-rules.js';
 
 const execFileP = promisify(execFile);
 
@@ -789,8 +790,9 @@ async function detect(): Promise<ProviderStatus> {
 export const codexProvider: AgentProvider = {
   id: 'codex',
   resolveModel: resolveCodexModel,
-  runAgent,
-  complete,
+  // THE WRITING RULES ride every system prompt (ai/writing-rules.ts) — added here, at the one door.
+  runAgent: (spec) => runAgent({ ...spec, system: withWritingRules(spec.system, writingStyleFor(spec.kind)) }),
+  complete: (req) => complete({ ...req, system: withWritingRules(req.system) }),
   detect,
   credentialRoute: () => codexCredentialRoute(),
   // `exec --json` carries no rate-limit data (spike § 6): the windows come from the app-server.
