@@ -272,6 +272,30 @@ describe('the write overlay', () => {
     expect((await json(srv, 'GET', '/api/open-prs?workspace=1')).prs.map((p: { id: number }) => p.id)).toEqual([6]);
   });
 
+  it("opening a PR, or Mark all seen on its repo, clears the repo's blue (new since you last opened it)", async () => {
+    const n = { comments: 2, reviews: 0, commits: 1 };
+    const activity = {
+      repos: [
+        {
+          repoId: 1,
+          hasUnread: true,
+          unreadPrs: [{ prId: 5, lastViewedAt: null }, { prId: 6, lastViewedAt: null }],
+          prs: [{ id: 5, state: 'open', newSinceLastViewed: n }, { id: 6, state: 'open', newSinceLastViewed: n }],
+        },
+      ],
+    };
+    const srv = new DemoServer(recording([{ method: 'GET', path: '/api/activity?workspace=1', status: 200, body: activity }]), {
+      now: () => CAPTURED_MS,
+    });
+    const repo = async (): Promise<any> => (await json(srv, 'GET', '/api/activity?workspace=1')).repos[0];
+    await json(srv, 'POST', '/api/prs/5/mark-viewed');
+    expect((await repo()).unreadPrs.map((u: { prId: number }) => u.prId)).toEqual([6]);
+    expect((await repo()).prs[0].newSinceLastViewed).toBeNull();
+    await json(srv, 'POST', '/api/prs/mark-all-viewed', { repoIds: [1] });
+    expect(await repo()).toMatchObject({ hasUnread: false, unreadPrs: [] });
+    expect((await repo()).prs[1].newSinceLastViewed).toBeNull();
+  });
+
   it('a resolve shows the thread resolved, and a reply appends to it', async () => {
     const srv = base();
     expect(await json(srv, 'POST', '/api/threads/50/reply', { body: 'Done.' })).toMatchObject({ body: 'Done.' });

@@ -88,6 +88,8 @@ export const STEPS = [
       await explore(h, { max: 12 });
     },
   },
+  // acme/api: its status panel (red + blue, seed-demo.ts pr_views) reads only /api/activity and
+  // /api/branch-status, which the boot already records.
   { name: 'repo-console', run: (h) => h.go('?view=activity&activityRepo=2') },
 
   // ── Pending: every tab, both lenses, a few kind chips ──

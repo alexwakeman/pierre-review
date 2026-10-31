@@ -1030,6 +1030,7 @@ const ACTIVITY: ActivityResponse = {
       maintainerIds: [],
       attentionCount: 1,
       hasUnread: false,
+      unreadPrs: [],
       prs: PRS,
     },
   ],

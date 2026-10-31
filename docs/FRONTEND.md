@@ -178,8 +178,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   location reads "<workspace> / <page>". The words stay in the drawer (foot, Needs you).
 - **The drawer scrolls as ONE column** (foot included) so Insights is never below a pinned foot;
   the docked sidebar's middle fades at the hidden edge (`ui/edgeFade.ts`). The Repositories group
-  is ONE line per repo (unread dot · name · a red dot only when the default branch fails · open
-  PRs; everything else in the tooltip / accessible name) and shows 6 rows before "Show all".
+  is ONE line per repo (the two status dots in one fixed slot · name · open PRs; everything else in
+  the tooltip / accessible name) and shows 6 rows before "Show all". What the dots mean, and the
+  panel that spells them out: § The repo status panel.
 - **"Search or jump" from the drawer** skips the drawer's focus restore (`skipRestoreRef`) and the
   palette re-takes focus one frame after opening — otherwise on a phone the keyboard never came up.
 - **Keys** (`hooks/useKeyboard.ts`): `/` opens the palette (or focuses `#add-repo-input` while the
@@ -4823,6 +4824,40 @@ the countdown: the post-walk tails (ML-label purge, CI-history backfill) leave n
 estimate, and a "~5 sec left" would sit frozen for minutes.
 
 ---
+
+## The repo status panel — the sidebar's two dots, spelled out (`RepoStatusPanel`, shared `repo-status.ts`)
+
+A sidebar repo row carries up to TWO dots in ONE fixed-width slot at its left (red always in the
+first place, blue in the second; an absent dot leaves its place empty, so dots and names line up
+down the list). The top of that repo's view (`Activity/index.tsx` `RepoConsole`, above the
+Activity | Bots tabs, so on both) is a **Status** panel listing the reasons, each line led by the
+SAME dot (`components/RepoStatusDot.tsx`). Both read ONE pure fold, shared `repoStatusSummary(repo,
+branch)` — the dot and the panel cannot disagree.
+
+- **RED — needs attention**, in this order: open PRs waiting for YOUR review
+  (`reviewRequestedFromMe`) · the default branch failing CI (`failure` | `error`) · open PRs failing
+  CI · open PRs with merge conflicts (`mergeable === 'conflicting'` or `dirty`). Drafts are not
+  counted for any of the PR lines. The default branch line is a READOUT (the dot always showed it);
+  it still feeds no count, sort, badge or My Turn (docs/MERGE-CI-TRUNK.md).
+- **BLUE — new to you**: comments, reviews and commits BY SOMEONE ELSE on open PRs you have opened
+  before, since you last opened each (`newSinceLastViewed` from `pr_views`; per PR with when you
+  last opened it, `ActivityRepo.unreadPrs`). ⚠ `newSinceLastViewed` is a non-null ALL-ZERO object
+  for every open PR you have ever opened — test `hasNewSinceLastViewed()`, never `!= null` (that
+  lit the dot on every repo you had visited). ⚠ The reader's OWN events are excluded at the source
+  (`computeTriage`, `getPrDetail`), so a comment you post never turns your own repo blue.
+- **When blue clears**: per PR, when you open that PR (PrDetail's `markViewed`); for the whole repo,
+  the panel's **Mark all seen** (`POST /api/prs/mark-all-viewed` with `[repoId]` — ⚠ never an empty
+  list, which means every repo). Opening the repo view does NOT clear it: that would erase the list
+  you came to read. Both writes refresh the same keys, `invalidateSeenState`
+  (`hooks/useMarkRepoSeen.ts`), which includes `['activity']` — without it the dot outlived the visit.
+- **Each line links to where you act**: PR refs open the PR tab (three shown, then "N more"); the
+  default branch line scrolls to the header's `BranchStatusPanel` (switching to the Activity tab).
+  Nothing in it fetches: it reads the `/api/activity` entry and the whole-workspace
+  `/api/branch-status` key the sidebar already holds. Nothing to report → ONE calm line.
+- The explanation lives behind the ⓘ ("What the dots mean"); the sidebar's Repositories ⓘ says the
+  same in two lines. Demo: `seed-demo.ts` seeds `pr_views` so acme/api reads both colours
+  (`verify-demo.mjs` view `repo:api`). Tests: `db/repo-status-fold.test.ts` (the fold),
+  `db/activity-unread.test.ts` (the blue on a real DB).
 
 ## Text links — `TEXT_LINK` / `TEXT_LINK_PHONE`
 
