@@ -2041,7 +2041,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   reason is the title). Re-check (a click) is never held by any of it. When an account has no
   auto-enabled workspace left, the sweeper drops its watches AND their wait reasons (nothing will
   re-check them automatically, so nothing says "daily limit reached").
-- **The summary is TWO plain sentences** (2026-10-28): how far the PRs together deliver the ticket,
+- **The summary is at most THREE short sentences of 20 words** (2026-10-28; tightened 2026-10-31, one
+  fact per sentence, no clauses joined by semicolons): how far the PRs together deliver the ticket,
   then the most important thing still left (or that nothing is) — no bullets, no criteria list, no
   headings; the criteria and missing items below carry the detail. Enforced in `reconcile.ts` by the
   shared `storySummaryProse` (only the prose before the first list / heading line, cut at a sentence
