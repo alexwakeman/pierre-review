@@ -24,27 +24,83 @@ export interface LazyMounter {
   disconnect: () => void;
 }
 
+// ⚠ THE PANE CAN CHANGE UNDER US. The observer's root is the scroll pane of the first block it sees,
+// but that pane can be replaced while the diff lives on (a resize across a layout breakpoint, the PR
+// moving between the drawer and its tab, a hot reload). An observer rooted on a detached pane never
+// fires again and the code stays blank. So each observe re-checks the pane and rebuilds the observer
+// when it moved, and a WATCHDOG (scroll anywhere, resize, and a slow interval) mounts any pending block
+// that is on or near the screen by its own measured position, whatever the observer thinks.
+
+/** How far beyond the window the watchdog mounts, in window heights (matches NEAR_MARGIN). */
+const WATCHDOG_REACH = 1.5;
+const WATCHDOG_INTERVAL_MS = 1000;
+
 export function createLazyMounter(): LazyMounter {
   const callbacks = new Map<Element, () => void>();
   let io: IntersectionObserver | null = null;
-  const ensure = (el: Element): IntersectionObserver | null => {
-    if (io != null) return io;
+  let root: HTMLElement | null = null;
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const fire = (el: Element): void => {
+    const cb = callbacks.get(el);
+    callbacks.delete(el);
+    io?.unobserve(el);
+    cb?.();
+    if (callbacks.size === 0) stopWatchdog();
+  };
+  const build = (paneRoot: HTMLElement | null): IntersectionObserver | null => {
+    io?.disconnect();
+    io = null;
+    root = paneRoot;
     if (typeof IntersectionObserver !== 'function') return null;
     io = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          const cb = callbacks.get(e.target);
-          callbacks.delete(e.target);
-          io?.unobserve(e.target);
-          cb?.();
-        }
+        for (const e of entries) if (e.isIntersecting) fire(e.target);
       },
-      // Every block shares the one pane, so the first element observed names it.
-      { root: scrollParentOf(el), rootMargin: NEAR_MARGIN },
+      { root: paneRoot, rootMargin: NEAR_MARGIN },
     );
+    for (const el of callbacks.keys()) io.observe(el);
     return io;
   };
+  const ensure = (el: Element): IntersectionObserver | null => {
+    const pane = scrollParentOf(el);
+    const stale = root != null && (!root.isConnected || (pane != null && pane !== root));
+    if (io == null || stale) return build(pane);
+    return io;
+  };
+  // Mount every pending block that is on or near the screen, measured directly.
+  const sweep = (): void => {
+    frame = 0;
+    if (typeof window === 'undefined') return;
+    const reach = window.innerHeight * WATCHDOG_REACH;
+    for (const el of [...callbacks.keys()]) {
+      if (!el.isConnected) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue; // display:none (Threads only): not now
+      if (r.bottom >= -reach && r.top <= window.innerHeight + reach) fire(el);
+    }
+  };
+  const schedule = (): void => {
+    if (frame === 0 && typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(sweep);
+  };
+  const startWatchdog = (): void => {
+    if (timer != null || typeof window === 'undefined') return;
+    // Scroll events do not bubble, so listen in the capture phase to hear every pane.
+    document.addEventListener('scroll', schedule, { capture: true, passive: true });
+    window.addEventListener('resize', schedule, { passive: true });
+    timer = setInterval(schedule, WATCHDOG_INTERVAL_MS);
+  };
+  function stopWatchdog(): void {
+    if (timer == null) return;
+    document.removeEventListener('scroll', schedule, { capture: true });
+    window.removeEventListener('resize', schedule);
+    clearInterval(timer);
+    timer = null;
+    if (frame !== 0 && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+    frame = 0;
+  }
+
   return {
     observe(el, onNear) {
       const obs = ensure(el);
@@ -55,15 +111,20 @@ export function createLazyMounter(): LazyMounter {
       }
       callbacks.set(el, onNear);
       obs.observe(el);
+      startWatchdog();
+      schedule();
       return () => {
         callbacks.delete(el);
-        obs.unobserve(el);
+        io?.unobserve(el);
+        if (callbacks.size === 0) stopWatchdog();
       };
     },
     disconnect() {
       io?.disconnect();
       io = null;
+      root = null;
       callbacks.clear();
+      stopWatchdog();
     },
   };
 }
