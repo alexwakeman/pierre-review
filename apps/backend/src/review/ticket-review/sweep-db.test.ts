@@ -386,7 +386,12 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
   const BUSY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1083';
   const STORY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1086';
   // Ticks on today's UTC day, clear of midnight (rows are stamped with the real clock).
-  const B = NOW - (NOW % 86_400_000) + 6 * 3_600_000;
+  // ⚠ Count the cap from the SAME instant the sweeper does — the UTC day start of the tick —
+  // never from B: a row stamped by the real clock before 06:00 UTC is in the sweeper's day but
+  // not in "since B", so the test's budget disagreed with the sweeper's whenever it ran between
+  // midnight and 06:00 UTC (failed at 02:40, passed every afternoon).
+  const DAY = NOW - (NOW % 86_400_000);
+  const B = DAY + 6 * 3_600_000;
   const at = (min: number): number => B + min * 60_000;
 
   it('push-only re-checks stop at the per-ticket limit; PRs joining the story still re-check it', async () => {
@@ -409,7 +414,7 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     await sweep.runTicketReviewSweep(ctx, at(0), deps());
     await sweep.runTicketReviewSweep(ctx, at(7), deps());
     await endQueuedRuns();
-    const base = await persist.countAutoTicketReviewsSince(ctx, 1, ws, B);
+    const base = await persist.countAutoTicketReviewsSince(ctx, 1, ws, DAY);
     // Room for 8 more automatic checks: the old rule let the busy ticket take all 8.
     dailyCap = Math.max(base + 8, 20);
     expect(repeatRunLimit(dailyCap) - base).toBeGreaterThanOrEqual(3);
@@ -418,9 +423,13 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     let t = 8;
     for (let i = 1; i <= 10; i += 1) {
       await push('busy', `h_busy_${i}`);
-      await sweep.runTicketReviewSweep(ctx, at(t), deps());
+      // ⚠ Count BOTH ticks. Whether a push queues on receipt or after the 5-minute settle depends
+      // on how long ago the last run row was stamped — by the REAL clock, against injected ticks:
+      // before 06:00 UTC the rows read hours old (queued on receipt), after it they read as just
+      // now (settles). Counting only the settled tick saw 0 runs before 06:00 UTC.
+      const received = await sweep.runTicketReviewSweep(ctx, at(t), deps());
       const settled = await sweep.runTicketReviewSweep(ctx, at(t + 6), deps());
-      busyRuns += settled.queued.filter((q) => q.ident === BUSY).length;
+      busyRuns += [...received.queued, ...settled.queued].filter((q) => q.ident === BUSY).length;
       await endQueuedRuns();
       t += 7;
     }
@@ -448,15 +457,15 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     await seedCurrentRun(QUIET);
     await sweep.runTicketReviewSweep(ctx, at(195), deps());
     await endQueuedRuns();
-    const used = await persist.countAutoTicketReviewsSince(ctx, 1, ws, B);
+    const used = await persist.countAutoTicketReviewsSince(ctx, 1, ws, DAY);
     // One slot left: a push-only re-check may not take it (the reserve kept for first checks and
     // PRs joining or leaving).
     dailyCap = used + 1;
     expect(repeatRunLimit(dailyCap)).toBeLessThanOrEqual(used);
     await push('c1', 'h_c1_push');
-    await sweep.runTicketReviewSweep(ctx, at(200), deps());
+    const received = await sweep.runTicketReviewSweep(ctx, at(200), deps());
     const capped = await sweep.runTicketReviewSweep(ctx, at(207), deps());
-    expect(capped.queued).toEqual([]);
+    expect([...received.queued, ...capped.queued]).toEqual([]);
     expect(waits.ticketSweepWait(1, QUIET)).toBe('daily_limit');
     dailyCap = 20;
   });
