@@ -1390,6 +1390,40 @@ body {
   background-color: rgb(100 116 139); /* slate-500 on hover */
 }
 
+/* ---- A sideways scroll box whose scrollbar must SHOW (the data-flow diagram's lane strip) ----
+   macOS hides overlay scrollbars until a scroll starts, so a figure wider than its pane gave no sign
+   it scrolls. Styling the WebKit pseudo-elements makes the bar a classic, always-drawn one. */
+.scroll-x-visible {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--ui-mute) / 0.55) transparent;
+}
+.scroll-x-visible::-webkit-scrollbar {
+  height: 8px;
+}
+.scroll-x-visible::-webkit-scrollbar-track {
+  background: rgb(var(--ui-raise));
+  border-radius: 9999px;
+}
+.scroll-x-visible::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--ui-mute) / 0.55);
+  border-radius: 9999px;
+}
+.scroll-x-visible:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--ui-mute) / 0.85);
+}
+/* Its twin box (the diagram's steps) scrolls with it, by touch, trackpad or keys, without a second bar. */
+.scroll-x-hidden {
+  scrollbar-width: none;
+}
+.scroll-x-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---- The story view's reading measure: prose never runs wider than ~75 characters ---- */
+.story-measure p {
+  max-width: 75ch;
+}
+
 /* ── Printing the Reports pane (plan P4.1 — the board-pack path) ────────────────────────────
    Print-to-PDF is the vehicle; there is no server rendering. The printable subtree is the
    period report marked `data-print-report` (PeriodReportsPanel): title, coverage sentence,

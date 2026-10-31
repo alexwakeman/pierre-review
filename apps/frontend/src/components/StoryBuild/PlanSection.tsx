@@ -22,6 +22,7 @@ import { RunTestsOption, runTestsState, useRunTestsMemory } from '../AiFix/RunTe
 import { AiRunGate } from '../AiSetup.js';
 import { DesignGrid } from '../DesignGrid.js';
 import { FlowDiagram } from '../FlowDiagram.js';
+import { PaneWide } from '../Ticket/StoryLayout.js';
 import { ChevronIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
@@ -153,11 +154,14 @@ export function PlanSection({
                   <p>Each box and step names the repository that does it. Nothing is built yet, so the steps open nothing.</p>
                 </InfoButton>
               </h4>
-              {build.flow != null ? (
-                <FlowDiagram flow={build.flow} label={`Planned data flow for ${build.ticketKey}`} refNames={refNames} />
-              ) : (
-                build.design != null && <DesignGrid design={build.design} label={`Planned design for ${build.ticketKey}`} refNames={refNames} />
-              )}
+              {/* Wide content: past the page's reading column, to the pane's edge. */}
+              <PaneWide>
+                {build.flow != null ? (
+                  <FlowDiagram flow={build.flow} label={`Planned data flow for ${build.ticketKey}`} refNames={refNames} stickyClassName="bg-ui-bg" />
+                ) : (
+                  build.design != null && <DesignGrid design={build.design} label={`Planned design for ${build.ticketKey}`} refNames={refNames} />
+                )}
+              </PaneWide>
             </div>
           )}
           {build.wantDiagram && build.flow == null && build.design == null && build.status === 'plan_ready' && (

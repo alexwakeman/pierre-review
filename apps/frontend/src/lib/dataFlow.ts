@@ -121,4 +121,7 @@ export function laneChangesPresent(layout: Pick<FlowLayout, 'lanes'>): DesignCha
 }
 
 /** The narrowest a lane is drawn, in rem — below this the figure scrolls sideways inside itself. */
-export const FLOW_LANE_MIN_REM = 7;
+export const FLOW_LANE_MIN_REM = 12;
+/** …and in a phone-sized box (narrower than FLOW_PHONE_BOX_PX), where a 12rem lane is most of the screen. */
+export const FLOW_LANE_MIN_REM_PHONE = 9;
+export const FLOW_PHONE_BOX_PX = 480;

@@ -32,6 +32,7 @@ import {
 import { useFilters } from '../store/filters.js';
 import { REVIEW_ITEM_TITLE, REVIEW_META, REVIEW_PROSE } from '../lib/reviewStyles.js';
 import { DesignGrid } from './DesignGrid.js';
+import { PaneWide } from './Ticket/StoryLayout.js';
 import { FlowDiagram, type OpenFlowFile } from './FlowDiagram.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
@@ -75,12 +76,15 @@ export function DiagramSlotView({
   redrawing,
   label,
   openFile,
+  stickyClassName,
 }: {
   slot: SequenceDiagramSlot;
   redrawing: boolean;
   // What the design shows, for assistive tech ("Design of this pull request").
   label: string;
   openFile?: OpenFlowFile;
+  // The ground the flow's sticky lane cards are painted on (the tone the figure sits on).
+  stickyClassName?: string;
 }): JSX.Element {
   const d = slot.diagram;
   const line = slotStatusLine(slot, redrawing);
@@ -95,7 +99,13 @@ export function DiagramSlotView({
           {!d.current && <p className={REVIEW_META}>Drawn for an earlier commit.</p>}
           {d.model && <p className={REVIEW_META}>{aiRunLabel(d.provider, d.model)}</p>}
           {d.flow != null ? (
-            <FlowDiagram flow={d.flow} members={d.kind === 'story' ? d.members : []} label={name} openFile={openFile} />
+            <FlowDiagram
+              flow={d.flow}
+              members={d.kind === 'story' ? d.members : []}
+              label={name}
+              openFile={openFile}
+              {...(stickyClassName != null ? { stickyClassName } : {})}
+            />
           ) : (
             d.design != null && (
               <>
@@ -171,7 +181,10 @@ export function ClaudeReviewDiagramsSection({
         </button>
       }
     >
-      <DiagramSlotView slot={data.pr} redrawing={redrawing} label="Design of this pull request" openFile={openOwn} />
+      {/* Wide content: past the tab's reading column, to the pane's edge (PaneWide). */}
+      <PaneWide>
+        <DiagramSlotView slot={data.pr} redrawing={redrawing} label="Design of this pull request" openFile={openOwn} stickyClassName="bg-ui-bg" />
+      </PaneWide>
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
       {data.stories.map((s) => (
@@ -214,7 +227,9 @@ function StorySlotBlock({
           </button>
         )}
       </div>
-      <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole story" openFile={openFile} />
+      <PaneWide>
+        <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole story" openFile={openFile} stickyClassName="bg-ui-bg" />
+      </PaneWide>
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
     </div>

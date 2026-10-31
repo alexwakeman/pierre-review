@@ -88,6 +88,7 @@ import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
 import { PageHeader } from '../ui/PageHeader.js';
+import { InRail, useInRail } from '../Ticket/StoryLayout.js';
 import { FloatingLayer } from '../ui/FloatingLayer.js';
 import {
   CARD_CHIP,
@@ -1024,7 +1025,7 @@ function StackCoverage({
 }
 
 /** The ticket's status (the story view's Jira status picker), type and assignee — a header's left facts. */
-function TicketPeopleAndStatus({
+function TicketStatusChip({
   t,
   cat,
   single,
@@ -1033,21 +1034,36 @@ function TicketPeopleAndStatus({
   cat: 'new' | 'indeterminate' | 'done' | null;
   single: boolean;
 }): JSX.Element {
+  return single && t.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
+    // The story view's Jira ticket: the chip is the status picker (the one tracker write).
+    <TicketStatusPicker
+      ident={t.ident}
+      status={t.status ?? STATUS_WORD[cat ?? 'new']}
+      chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
+    />
+  ) : (
+    <>
+      {cat != null && <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>}
+      {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
+    </>
+  );
+}
+
+function TicketPeopleAndStatus({
+  t,
+  cat,
+  single,
+  status = true,
+}: {
+  t: NonNullable<OpenPrsStack['ticket']>;
+  cat: 'new' | 'indeterminate' | 'done' | null;
+  single: boolean;
+  /** false: the status is drawn elsewhere (the wide story layout's rail). */
+  status?: boolean;
+}): JSX.Element {
   return (
     <>
-      {single && t.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
-        // The story view's Jira ticket: the chip is the status picker (the one tracker write).
-        <TicketStatusPicker
-          ident={t.ident}
-          status={t.status ?? STATUS_WORD[cat ?? 'new']}
-          chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
-        />
-      ) : (
-        <>
-          {cat != null && <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>}
-          {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
-        </>
-      )}
+      {status && <TicketStatusChip t={t} cat={cat} single={single} />}
       {t.issueType != null && <span className="text-meta text-ui-mute">{t.issueType}</span>}
       {t.assignee != null && (
         <span className="inline-flex items-center gap-1.5">
@@ -1112,13 +1128,15 @@ function StoryViewHeader({
       <TrackerLinkOut url={t.url} provider={t.provider} />
     </div>
   );
+  // The wide story layout moves the status, the criteria reading and Re-check to the rail.
+  const rail = useInRail();
   const facts = (
       <div className={`flex flex-wrap items-center gap-x-4 gap-y-2${page ? ' mt-1.5' : ''}`}>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
-          <TicketPeopleAndStatus t={t} cat={cat} single />
+          <TicketPeopleAndStatus t={t} cat={cat} single status={!rail} />
         </div>
         <ul aria-label="Facts" className="flex flex-wrap items-center gap-1.5">
-          {cov != null && (
+          {cov != null && !rail && (
             <li className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
               {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ui-accent-fill" />}
               {cov.label}
@@ -1131,7 +1149,12 @@ function StoryViewHeader({
           ))}
           {prCount > 0 && <li className={NEUTRAL_CHIP}>{prCountLabel(prCount)}</li>}
         </ul>
-        {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} labelOf={labelOf} />}
+        {checked && !rail && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} labelOf={labelOf} />}
+        <InRail slot="check">
+          <StoryRailCheck t={t} cat={cat} cov={cov} counts={checked ? (review.state?.counts ?? null) : null}>
+            {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} labelOf={labelOf} />}
+          </StoryRailCheck>
+        </InRail>
       </div>
   );
   if (page) {
@@ -1162,6 +1185,67 @@ function StoryViewHeader({
       </h3>
       {facts}
     </header>
+  );
+}
+
+/** The criteria counts the rail lists under the coverage pill, in verdict order; zeros are left out. */
+const RAIL_COUNT_WORDS: ReadonlyArray<{ key: 'met' | 'partlyMet' | 'notMet' | 'unclear' | 'notChecked'; label: string }> = [
+  { key: 'met', label: 'Met' },
+  { key: 'partlyMet', label: 'Partly met' },
+  { key: 'notMet', label: 'Not met' },
+  { key: 'unclear', label: 'Can’t tell' },
+  { key: 'notChecked', label: 'Not checked' },
+];
+
+/**
+ * THE WIDE STORY LAYOUT'S FACTS (the rail's first block, `InRail slot="check"`): the ticket's status
+ * (the Jira picker), the ticket review's "N of M met" with its met / partly / not met / can't tell
+ * counts, and the currency line with Re-check. Narrow, these stay in the page header.
+ */
+function StoryRailCheck({
+  t,
+  cat,
+  cov,
+  counts,
+  children,
+}: {
+  t: NonNullable<OpenPrsStack['ticket']>;
+  cat: 'new' | 'indeterminate' | 'done' | null;
+  cov: ReturnType<typeof ticketCoverage>;
+  counts: TicketReviewState['counts'];
+  children: ReactNode;
+}): JSX.Element {
+  const rows = counts != null ? RAIL_COUNT_WORDS.filter((w) => counts[w.key] > 0) : [];
+  const hasStatus = cat != null || t.status != null;
+  return (
+    <div className="space-y-3" data-testid="story-rail-check">
+      {hasStatus && (
+        <div>
+          <p className="mb-1 text-meta text-ui-mute">Status</p>
+          <TicketStatusChip t={t} cat={cat} single />
+        </div>
+      )}
+      {cov != null && (
+        <div>
+          <p className="mb-1 text-meta text-ui-mute">Acceptance criteria</p>
+          <span className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
+            {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ui-accent-fill" />}
+            {cov.label}
+          </span>
+          {rows.length > 0 && (
+            <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-body" data-testid="story-rail-counts">
+              {rows.map((w) => (
+                <div key={w.key} className="contents">
+                  <dt className="text-ui-mute">{w.label}</dt>
+                  <dd className="text-right tabular-nums text-ui-ink">{counts![w.key]}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
+      {children}
+    </div>
   );
 }
 
@@ -1392,7 +1476,12 @@ function TicketStack({
       >
         {children}
       </ul>
-      {merged.length > 0 && <MergedPanel stackId={stack.id} prs={merged} onOpen={onOpenMerged} />}
+      {merged.length > 0 && (
+        // The story view's wide layout lists the merged PRs in its rail.
+        <InRail slot="merged" inline>
+          <MergedPanel stackId={stack.id} prs={merged} onOpen={onOpenMerged} />
+        </InRail>
+      )}
     </section>
   );
 }
@@ -1416,8 +1505,10 @@ function MergedPanel({
   const open = useMergedPanelOpen((s) => s.open.has(stackId));
   const toggle = useMergedPanelOpen((s) => s.toggle);
   const listId = useId();
+  // In the story view's rail (wide layout) the rail is the margin.
+  const inRail = useInRail();
   return (
-    <div className="px-3 pb-3">
+    <div className={inRail ? '' : 'px-3 pb-3'}>
       <button
         type="button"
         aria-expanded={open}

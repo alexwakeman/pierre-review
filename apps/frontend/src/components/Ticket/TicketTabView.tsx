@@ -14,8 +14,9 @@ export function TicketTabView(): JSX.Element | null {
   if (ident == null) return null;
   return (
     // The page gutter (the ONE every destination's title sits on); the story's header is the PAGE
-    // header (`page`), with no card around the story.
-    <div data-testid="ticket-tab-view" className={`max-w-5xl pb-6 ${PAGE_GUTTER}`}>
+    // header (`page`), with no card around the story. No max width here: the body measures this
+    // width and picks one column (capped) or two (StoryLayout.tsx).
+    <div data-testid="ticket-tab-view" className={`pb-6 ${PAGE_GUTTER}`}>
       <StoryViewBody ident={ident} meta={meta} page />
     </div>
   );

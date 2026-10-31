@@ -18,6 +18,7 @@ import {
 import { memberForRef } from '../../lib/designGrid.js';
 import { DesignLegend, DiagramSlotView, redrawRefusalText, useOpenMemberFile } from '../ClaudeReviewDiagrams.js';
 import { InfoButton } from '../InfoModal.js';
+import { StoryWide } from '../Ticket/StoryLayout.js';
 
 const MUTED = 'text-ui-mute';
 const BTN =
@@ -64,7 +65,9 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
   if (data.memberCount < 2 && data.diagram == null) return null;
   const refusal = redrawRefusalText(redraw.data);
   return (
-    <section aria-label="Story design" className="space-y-2" data-testid="story-design">
+    // Wide content: in the two-column layout it spans the rail too (StoryWide).
+    <StoryWide>
+    <section aria-label="Story design" className="scroll-mt-4 space-y-2 focus:outline-none" data-testid="story-design" data-story-section="design">
       <div className="flex items-center gap-1.5">
         <h4 className="text-meta font-semibold text-ui-ink">Story design</h4>
         <InfoButton title="Story design">
@@ -84,5 +87,6 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
       {refusal != null && <p className={`text-meta ${MUTED}`}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
     </section>
+    </StoryWide>
   );
 }

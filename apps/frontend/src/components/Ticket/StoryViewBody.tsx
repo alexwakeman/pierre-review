@@ -8,6 +8,7 @@ import { ticketKeyOfIdent, usePinnedTabs } from '../../store/pinnedTabs.js';
 import { dateTime, indexUsers, relativeTime } from '../../lib/ui.js';
 import { OpenPrsCards } from '../Activity/OpenPrsCards.js';
 import { ChevronIcon } from '../Icons.js';
+import { StoryLayout } from './StoryLayout.js';
 
 // THE STORY VIEW'S BODY (docs/FRONTEND.md § The story view) — one ticket, Open PRs style: the SAME
 // ticket stack the Open PRs board draws (`OpenPrsCards` with `story`), so a ticket reads the same in
@@ -109,6 +110,7 @@ export function StoryViewBody({
   const found = data?.found === true || storyQ.data?.found === true;
 
   return (
+    <StoryLayout>
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
         <p className="text-body text-ui-danger">Couldn’t load this story.</p>
@@ -132,6 +134,7 @@ export function StoryViewBody({
         </>
       )}
     </div>
+    </StoryLayout>
   );
 }
 

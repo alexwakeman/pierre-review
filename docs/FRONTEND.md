@@ -3510,6 +3510,33 @@ board.
   `openTicketTab`). Never call the store action from a component. The sprint drawer and its reference cards are GONE.
   On This Sprint a ticket LINK opens the page's tray instead (`StoryOpenOverride` / `useStoryLinkOpener`);
   the override never opens a tab, and the tray's "Open story tab" calls `useOpenStory`.
+- **WIDE LAYOUT — TWO COLUMNS FROM THE CONTAINER'S WIDTH** (2026-10-31; `Ticket/StoryLayout.tsx`, pure
+  half `lib/storyLayout.ts`, test/storyLayout.test.ts). `StoryViewBody` wraps everything in
+  `StoryLayout`, which measures ITS OWN width (ResizeObserver — ⚠ never the window: the tray is narrow
+  on a wide screen). Below `STORY_TWO_COLUMN_MIN_PX` (1080 — a 1280px window with the sidebar stays one
+  column; 1440 goes to two) it is one column capped at `max-w-5xl`, exactly as before (the tab view no
+  longer caps the width itself; the body does). At or above it: a reading column
+  (`minmax(0,60rem)`) and a RIGHT RAIL (`minmax(18rem,22rem)`, `aside` "Story facts and actions").
+  - **Prose keeps a reading measure everywhere**: the Story card is `.story-measure` (`p` max 75ch).
+  - **The rail's pieces are PORTALS** (`<InRail slot=…>` into fixed, ordered slot divs, so React context
+    — the PR-ref provider, the start mutations — still reaches them): `check` (`StoryRailCheck` in
+    OpenPrsCards.tsx: the status picker, "N of M met" with its Met / Partly met / Not met / Can’t tell /
+    Not checked counts, zeros left out, and `StoryCurrencyLine` with Re-check), `actions` (the Story
+    heading's Check against docs / Redraw design — their AiRunGate as before), `nav` (`StorySectionNav`,
+    "On this page"), `prs` ("What each PR adds"), `merged` (the Merged panel), `docs`
+    (`StoryDocsRailSummary`: verdict / Checking… / Not checked yet, Out of date). Narrow, `inline`
+    pieces render in place and rail-only ones (`check`, `nav`, `docs`) render nothing — the header
+    keeps the status, coverage chip and currency line then; wide, the header drops those three.
+  - **Section nav**: every section it reaches carries `data-story-section` (`story`, `design`,
+    `missing`, `not-asked`, `docs` — STORY_SECTIONS); the nav lists those present (re-read on every
+    measure + a MutationObserver), scrolls to one and moves focus to it.
+  - **The design breaks out** (`StoryWide`): wide, it spans the rail to the container's right edge. The
+    rail is then TWO sticky segments measured around it (`railSegments`): status … nav from the Story
+    section's top down to the design, the PR lists and docs summary from below it to the end. ⚠ Only
+    when the room above the design fits the top segment's content (`MIN_TOP_SEGMENT_PX` and its
+    measured height) — otherwise one segment and the design stays in the reading column (a short
+    brief, the demo's INFRA-260). Each segment is `sticky top-4`, scrolling inside itself only past
+    the viewport's height.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,
@@ -4955,10 +4982,24 @@ test/dataFlow.test.ts).
   numbered badge, the step WORD and what data passes, centred over the lanes it joins, and under it
   the arrow from the `from` lane's line to the `to` lane's (percentages of the figure's width). A step
   that stays on its lane (a check or a transform) is a small loop beside the line.
-- ⚠ **A WIDE FLOW SCROLLS SIDEWAYS INSIDE THE FIGURE, never the page**: lanes are never narrower than
-  `FLOW_LANE_MIN_REM` (7rem), so at 390px or in the drawer a 4+-lane flow scrolls in its own
-  `overflow-x-auto` box, and a one-line "Scroll sideways to see every lane." shows only while it
-  actually overflows (a ResizeObserver).
+- ⚠ **A WIDE FLOW SCROLLS SIDEWAYS INSIDE THE FIGURE, never the page** (2026-10-31 rework — the lanes
+  were ~125px and labels wrapped 3 lines): lanes are never narrower than `FLOW_LANE_MIN_REM` (12rem;
+  `FLOW_LANE_MIN_REM_PHONE` 9rem when the figure's box is under `FLOW_PHONE_BOX_PX` 480px), a step
+  label wraps at most ~2 lines (`max-w-[26rem]`), and a lane card's name and PR chip wrap, never clip.
+  The figure is TWO boxes sharing one sideways position (each `onScroll` copies `scrollLeft` to the
+  other): the LANE CARDS (`data-testid="flow-lanes"`), `sticky top-0` in the scroll pane while the
+  steps go by, carrying the ONE visible scrollbar (`.scroll-x-visible` in index.css — macOS hides
+  overlay bars), and the STEPS (`flow-scroll`, `.scroll-x-hidden`), which, overflowing, is a
+  `role="region"` with `tabIndex=0` and the label "<figure label>: scrolls sideways" (arrow keys
+  scroll it). Both inner boxes take the same `minWidth`, so the arrows stay under their lanes. The
+  sticky strip is painted with `stickyClassName` (default `bg-ui-surface`, the story card; the PR tab
+  and the story build pass `bg-ui-bg`). "Scroll sideways to see every lane." shows only while it
+  actually overflows (a ResizeObserver). ⚠ Playwright's headless Chromium hides scrollbars by default
+  (`--hide-scrollbars`): screenshot with `ignoreDefaultArgs: ['--hide-scrollbars']` to see the bar.
+- **Wide content**: the PR tab's Design (both slots) and the story build's planned design sit in
+  `PaneWide` (Ticket/StoryLayout.tsx): past their capped reading column, to the scroll pane's right
+  edge less 20px — only ever wider, never narrower. The story view's design uses `StoryWide` instead
+  (§ The story view → Wide layout).
 - **Kind is never colour alone**: every step prints its word (Read, Check, Transform, Write, Call,
   Emit, Return); a Check is a dotted line with ShieldIcon; a Write a heavy accent line with
   DatabaseIcon; a Return a dashed line. TWO visible keys under the figure (the shared `BorderKey`):

@@ -195,7 +195,7 @@ export function StoryDocsAlignmentBlock({
   // button is now "Check again anyway" (run buttons live in the Story heading, never in a block).
   const reused = reusedAnswer(data, start, starting);
   return (
-    <section aria-label="Docs check" className="space-y-2" data-testid="story-docs">
+    <section aria-label="Docs check" className="scroll-mt-4 space-y-2 focus:outline-none" data-testid="story-docs" data-story-section="docs">
       <div className="flex flex-wrap items-center gap-1.5">
         <h4 className="text-body font-medium text-ui-ink">Docs check</h4>
         <StoryDocsInfo />
@@ -219,6 +219,54 @@ export function StoryDocsAlignmentBlock({
       {start.isError && !clickStale && <p className="text-meta text-ui-danger">{start.error.message}</p>}
       {shown != null && <StoryDocsResultView run={shown} attached={attached} />}
     </section>
+  );
+}
+
+/**
+ * The wide story layout's rail: the docs check in one line — its verdict (or "Checking…", "Not checked
+ * yet") and "Out of date" — the whole block stays in the reading column ("Docs" in the section nav).
+ * Rendered only in the rail (`InRail slot="docs"`, rail-only), under the same condition as the block.
+ */
+export function StoryDocsRailSummary({
+  q,
+  starting,
+}: {
+  q: UseQueryResult<StoryDocsAlignmentResponse>;
+  starting: boolean;
+}): JSX.Element | null {
+  const ai = useAiCapabilities();
+  const data = q.data;
+  if (!ai.enabled || data == null) return null;
+  const shown = shownRun(data);
+  if (!data.available && data.run == null && shown == null) return null;
+  const checking = docsChecking(data, starting);
+  const overall = shown?.result?.overall ?? null;
+  const outcome = shown?.result?.outcome ?? null;
+  const tone = overall != null ? OVERALL_TONE[overall.verdict] : null;
+  return (
+    <div data-testid="story-docs-rail">
+      <p className="mb-1 text-meta text-ui-mute">Docs check</p>
+      <div className="flex flex-wrap items-center gap-1.5 text-body text-ui-ink">
+        {checking ? (
+          <span>{docsProgressText(data.run?.status, starting)}</span>
+        ) : shown == null ? (
+          <span className="text-ui-mute">Not checked yet</span>
+        ) : overall != null && tone != null ? (
+          <span className={`${REVIEW_CHIP} ${TONE_CLASS[tone]}`}>
+            <ToneIcon tone={tone} />
+            {STORY_DOCS_OVERALL_VERDICT_LABEL[overall.verdict]}
+          </span>
+        ) : (
+          <span className="text-ui-mute">{outcome === 'no_relevant_docs' ? 'No docs bear on this story' : 'Nothing to report'}</span>
+        )}
+        {shown != null && !shown.current && !checking && (
+          <span className={`${REVIEW_CHIP} ${OUTDATED_CLASS}`}>
+            <WarningIcon size={11} aria-hidden />
+            Out of date
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

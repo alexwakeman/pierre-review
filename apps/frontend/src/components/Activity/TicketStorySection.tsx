@@ -50,7 +50,8 @@ import { ReviewPrRefsProvider } from '../ReviewPrRefs.js';
 import { MemberCards, TicketResults } from '../TicketReviewParts.js';
 import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
-import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
+import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail, StoryDocsRailSummary } from './StoryDocsAlignment.js';
+import { InRail, StorySectionNav, useInRail } from '../Ticket/StoryLayout.js';
 import { aiModelWords } from '@pierre-review/shared';
 import { InlineMarkdown } from '../InlineMarkdown.js';
 
@@ -85,20 +86,39 @@ export function TicketStorySection({
   const design = useStoryDesign(ticket.ident, storyDesignOffered(ai.enabled, prCount));
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="px-3 pb-2" data-testid="story-section">
+    <section aria-labelledby={headingId} className="scroll-mt-4 px-3 pb-2 focus:outline-none" data-testid="story-section" data-story-section="story">
       <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 px-1 py-0.5">
         <h4 id={headingId} className="text-title text-ui-ink">
           Story
         </h4>
-        <span className="ml-auto flex flex-wrap items-center gap-1.5" data-testid="story-actions">
-          {docs != null && <StoryDocsButton q={docs.q} start={docs.start} starting={docs.starting} />}
-          <StoryDesignButton design={design} />
-        </span>
+        {/* The story's actions: here, right-aligned; in the wide layout, the rail's actions block. */}
+        <InRail slot="actions" inline>
+          <StoryActions docs={docs} design={design} />
+        </InRail>
       </div>
-      <div className="mt-1.5 space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
+      <div className="story-measure mt-1.5 space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
         <StoryBody ticket={ticket} state={state} storyPrId={storyPrId} docs={docs} design={design} />
       </div>
+      <InRail slot="nav">
+        <StorySectionNav />
+      </InRail>
+      {docs != null && (
+        <InRail slot="docs">
+          <StoryDocsRailSummary q={docs.q} starting={docs.starting} />
+        </InRail>
+      )}
     </section>
+  );
+}
+
+/** "Check against docs" and "Redraw design" — in the Story heading row, or the rail's actions block. */
+function StoryActions({ docs, design }: { docs: DocsCheck | null; design: StoryDesign }): JSX.Element {
+  const rail = useInRail();
+  return (
+    <span className={rail ? 'flex flex-wrap items-center gap-1.5' : 'ml-auto flex flex-wrap items-center gap-1.5'} data-testid="story-actions">
+      {docs != null && <StoryDocsButton q={docs.q} start={docs.start} starting={docs.starting} />}
+      <StoryDesignButton design={design} />
+    </span>
   );
 }
 
@@ -332,7 +352,10 @@ function ReviewSummary({
             {design}
           </>
         )}
-        <MemberCards members={members} />
+        {/* "What each PR adds": in the wide layout, the rail's. */}
+        <InRail slot="prs" inline>
+          <MemberCards members={members} />
+        </InRail>
         {docsNotes.block}
         <StoryDisclosure
           prId={storyPrId ?? review.originPrId}

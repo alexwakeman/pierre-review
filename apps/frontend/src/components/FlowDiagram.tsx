@@ -4,10 +4,14 @@
 // section, the story view's Story design and the story build's planned design all draw it. (Rows drawn
 // before it hold the older grid, which `DesignGrid` still draws.)
 //
-//   LAYOUT   lanes are equal columns, never narrower than FLOW_LANE_MIN_REM: a wide flow scrolls
-//            SIDEWAYS INSIDE THE FIGURE (a phone at 390px, the ~620px drawer), never the page. Each
-//            lane has a dashed line down the page; each step is a row with its arrow between the two
-//            lanes' lines (lib/dataFlow.ts computes every position as a percentage).
+//   LAYOUT   lanes are equal columns, never narrower than FLOW_LANE_MIN_REM (12rem, so a lane card's
+//            name and PR chip are never clipped and a step label wraps at most ~2 lines, capped at
+//            26rem): a wide flow scrolls SIDEWAYS INSIDE THE FIGURE, never the page. The lane cards are
+//            their own box, STICKY to the top of the scroll pane while the steps go by, and carry the
+//            visible scrollbar; the steps' box (a focusable region with a name when it overflows) and
+//            the cards share one sideways position, so the arrows stay under their lanes. Each lane has
+//            a dashed line down the page; each step is a row with its arrow between the two lanes'
+//            lines (lib/dataFlow.ts computes every position as a percentage).
 //   STEPS    a numbered badge, the step's WORD (Read, Check, Transform, Write, Call, Emit, Return) and
 //            what data passes. Kind is never colour alone: a Check is a dotted line with a shield and
 //            the word; a Write a heavy line with a cylinder and the word; a Return a dashed line. A
@@ -35,7 +39,7 @@ import type { DesignChange, FlowDiagram, FlowStepKind, SequenceDiagramMember } f
 import { usePlacedFloating } from './ui/floating.js';
 import { claimActivePopover } from '../lib/activePopover.js';
 import { CHANGE_KEY_LABEL, CHANGE_WORD, prBadgeTexts } from '../lib/designGrid.js';
-import { FLOW_LANE_MIN_REM, laneChangesPresent, layoutFlow, type FlowRow } from '../lib/dataFlow.js';
+import { FLOW_LANE_MIN_REM, FLOW_LANE_MIN_REM_PHONE, FLOW_PHONE_BOX_PX, laneChangesPresent, layoutFlow, type FlowRow } from '../lib/dataFlow.js';
 import { BorderKey } from './LaneBoard.js';
 import { DatabaseIcon, PencilIcon, PlusIcon, ShieldIcon } from './Icons.js';
 
@@ -89,8 +93,11 @@ export function FlowDiagram({
   label,
   openFile,
   refNames,
+  stickyClassName = 'bg-ui-surface',
 }: {
   flow: FlowDiagram;
+  // The sticky lane cards' ground: the tone the figure sits on, so steps scrolling under it are hidden.
+  stickyClassName?: string;
   // Story designs: the members, in ref order (PR1 = members[0]). Empty for a PR design.
   members?: readonly SequenceDiagramMember[];
   // The accessible name of the whole figure.
@@ -102,21 +109,35 @@ export function FlowDiagram({
   refNames?: ReadonlyMap<string, string>;
 }): JSX.Element {
   const layout = useMemo(() => layoutFlow(flow, members), [flow, members]);
-  // Does the figure overflow its pane (a phone, the drawer)? Then say it scrolls.
+  // Does the figure overflow its pane (a phone, the drawer, a story with many lanes)? Then say it
+  // scrolls, and make the steps a keyboard-scrollable region.
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const headRef = useRef<HTMLDivElement | null>(null);
   const [overflows, setOverflows] = useState(false);
+  // A phone-sized box draws narrower lanes (a 12rem lane is most of a 390px screen).
+  const [phone, setPhone] = useState(false);
   useEffect(() => {
     const el = scrollRef.current;
     if (el == null || typeof ResizeObserver === 'undefined') return;
-    const measure = (): void => setOverflows(el.scrollWidth > el.clientWidth + 1);
+    const measure = (): void => {
+      setOverflows(el.scrollWidth > el.clientWidth + 1);
+      setPhone(el.clientWidth > 0 && el.clientWidth < FLOW_PHONE_BOX_PX);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [layout]);
+  // The lane cards and the steps are two boxes (the cards stick to the top of the pane while the
+  // steps scroll by): they share ONE sideways position, whichever of them is scrolled.
+  const sync = (from: HTMLDivElement | null, to: HTMLDivElement | null): void => {
+    if (from == null || to == null || to.scrollLeft === from.scrollLeft) return;
+    to.scrollLeft = from.scrollLeft;
+  };
   const badges = useMemo(() => prBadgeTexts(members), [members]);
   const n = Math.max(1, layout.lanes.length);
   const cols = { gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` };
+  const inner = { minWidth: `${n * (phone ? FLOW_LANE_MIN_REM_PHONE : FLOW_LANE_MIN_REM)}rem` };
   const chip = (member: SequenceDiagramMember | null, ref: string | null): string | null =>
     member != null ? (badges.get(member.prId) ?? `#${member.number}`) : ref != null ? (refNames?.get(ref) ?? null) : null;
   const kindsDrawn = new Set(layout.rows.map((r) => r.step.kind));
@@ -132,16 +153,22 @@ export function FlowDiagram({
     <div role="group" aria-label={label} className="w-full" data-testid="flow-diagram">
       {/* The figure scrolls sideways INSIDE itself when its lanes do not fit (a phone, the drawer). */}
       {overflows && <p className="mb-1 text-meta text-ui-mute">Scroll sideways to see every lane.</p>}
-      <div ref={scrollRef} className="overflow-x-auto overscroll-x-contain pb-1" data-testid="flow-scroll">
-        <div className="relative" style={{ minWidth: `${n * FLOW_LANE_MIN_REM}rem` }}>
-          <ul aria-label="Who touches the data, left to right" className="grid gap-x-2" style={cols}>
+      {/* The lane cards STICK to the top of the scroll pane while the steps go by, and carry the
+          figure's visible scrollbar (the steps' own box can be far taller than the screen). */}
+      <div className={`sticky top-0 z-20 ${stickyClassName}`} data-testid="flow-lanes">
+        <div
+          ref={headRef}
+          onScroll={() => sync(headRef.current, scrollRef.current)}
+          className={`overscroll-x-contain ${overflows ? 'scroll-x-visible overflow-x-auto pb-1' : 'overflow-x-hidden'}`}
+        >
+          <ul aria-label="Who touches the data, left to right" className="grid gap-x-2 py-1" style={{ ...cols, ...inner }}>
             {layout.lanes.map((l) => {
               const word = CHANGE_WORD[l.participant.change];
               const c = chip(l.member, l.participant.pr);
               return (
                 <li
                   key={l.participant.id}
-                  className={`relative z-10 min-w-0 rounded-ui px-1.5 py-1 text-center ${CARD_CHANGE[l.participant.change]}`}
+                  className={`relative z-10 min-w-0 rounded-ui px-2 py-1 text-center ${CARD_CHANGE[l.participant.change]}`}
                 >
                   <span className="block text-meta text-ui-mute">{l.kindLabel}</span>
                   <span className="block break-words text-body font-medium leading-snug text-ui-ink">{l.participant.label}</span>
@@ -158,7 +185,7 @@ export function FlowDiagram({
                         </span>
                       )}
                       {c != null && (
-                        <span className="whitespace-nowrap rounded-ui border border-ui-line px-1 text-meta text-ui-ink">{c}</span>
+                        <span className="max-w-full break-words rounded-ui border border-ui-line px-1 text-meta text-ui-ink">{c}</span>
                       )}
                     </span>
                   )}
@@ -166,8 +193,18 @@ export function FlowDiagram({
               );
             })}
           </ul>
-
-          <ol aria-label="Steps, in the order they happen" className="relative mt-1 pb-2">
+        </div>
+      </div>
+      <div
+        ref={scrollRef}
+        onScroll={() => sync(scrollRef.current, headRef.current)}
+        // Overflowing, the steps are a named region a keyboard can focus and scroll with the arrow keys.
+        {...(overflows ? { role: 'region', tabIndex: 0, 'aria-label': `${label}: scrolls sideways` } : {})}
+        className="scroll-x-hidden overflow-x-auto overscroll-x-contain rounded-ui pb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+        data-testid="flow-scroll"
+      >
+        <div className="relative" style={inner}>
+          <ol aria-label="Steps, in the order they happen" className="relative pb-2">
             {/* Each lane's line down the page. */}
             {layout.lanes.map((l) => (
               <span
@@ -238,13 +275,16 @@ function StepRow({
         <span aria-hidden>
           <StepMark row={row} />
         </span>
-        {clickable ? (
-          <StepFiles row={row} openFile={openFile!}>
-            {words}
-          </StepFiles>
-        ) : (
-          <span aria-hidden>{words}</span>
-        )}
+        {/* A label wraps at a reading width, never wider: two lines at most for a normal step. */}
+        <div className="max-w-[26rem]">
+          {clickable ? (
+            <StepFiles row={row} openFile={openFile!}>
+              {words}
+            </StepFiles>
+          ) : (
+            <span aria-hidden>{words}</span>
+          )}
+        </div>
       </div>
       <Arrow row={row} />
     </li>

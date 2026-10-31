@@ -397,7 +397,8 @@ export function MissingRow({
 export function MissingList({ items, ...ctx }: RowContext & { items: readonly TicketReviewItem[] }): JSX.Element | null {
   if (items.length === 0) return null;
   return (
-    <div className="space-y-1.5">
+    // `data-story-section`: the story view's section nav reaches it (Ticket/StoryLayout.tsx).
+    <div className="scroll-mt-4 space-y-1.5 focus:outline-none" data-story-section="missing">
       <div className="flex items-center gap-1">
         <h5 className={REVIEW_SUBHEAD}>{`${STORY_MISSING_HEADING} (${items.length})`}</h5>
         <InfoButton title={STORY_MISSING_HEADING}>
@@ -422,7 +423,7 @@ export function NotRequestedList({
 }: RowContext & { items: readonly TicketNotRequestedItem[] }): JSX.Element | null {
   if (items.length === 0) return null;
   return (
-    <div className="space-y-1">
+    <div className="scroll-mt-4 space-y-1 focus:outline-none" data-story-section="not-asked">
       <h5 className={REVIEW_SUBHEAD}>{`Not asked for (${items.length})`}</h5>
       <ul className="space-y-1.5">
         {items.map((g, i) => (
