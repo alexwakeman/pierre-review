@@ -3714,3 +3714,13 @@ library, sprint briefs/paths and every one-shot completion. Details:
   snapshot per (PR, head) kept only when SonarCloud analysed THIS head; the docs library is
   server-written files, crawls same-host only with LINEAR scanners over untrusted text, and every
   doc link goes through `resolveDocLink`.
+
+## Measuring reviews (`scripts/review-eval.mjs`, 2026-10-31)
+
+Reviews vary run to run (sampling with no temperature control, model-chosen exploration and
+specialists, the confirm-or-drop threshold). To compare setups, `scripts/review-eval.mjs` runs N
+FRESH reviews per PR through the local API and scores each against a hand-written list of KNOWN
+issues: per-issue hit rate, recall per run, unmatched findings, words and cost. The cases file lives
+OUTSIDE the repo (`~/.limn/review-eval/cases.json`: it describes a team's private code); results go to
+`~/.limn/review-eval/results/`. `--score <results.json>` re-scores saved runs after a pattern is
+refined. A manual run never posts, but each becomes that PR's latest review in the app.
