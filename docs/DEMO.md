@@ -91,7 +91,10 @@ The chosen steps are re-recorded and MERGED into the existing recording: their f
 the old ones, answers only they had recorded and no longer see are dropped, everything else is kept.
 ⚠ **It runs as of the old recording's `capturedAt`**: the seeder, the backend and the browser have
 their clocks moved back (`scripts/lib/demo-clock.mjs`), so the new answers carry the same sprint keys,
-ages and windows as the answers around them. (A column whose default is SQLite's `unixepoch()` still
+ages and windows as the answers around them. ⚠ The clock starts a MINUTE BEFORE `capturedAt`
+(`INCREMENTAL_SEED_LEAD_MS`): a full record stamps `capturedAt` after seeding, so seeded rows must be
+older than it — a row newer than the demo's "now" (a docs check created after the click) read as
+stale and broke `ticket:PLAT-301:docs-reuse`. (A column whose default is SQLite's `unixepoch()` still
 reads the real clock.) `--only` needs `recording-steps.json` from the same record; without it, run a
 full record first.
 

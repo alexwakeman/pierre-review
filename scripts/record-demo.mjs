@@ -83,6 +83,8 @@ const OUT = str('out') ?? join(FRONTEND, 'src', 'demo', 'data', 'recording.json'
 const STEPS_OUT = `${OUT.replace(/\.json$/, '')}-steps.json`;
 // Overridable so two worktrees can record side by side without sharing a database.
 const DB = process.env.RECORD_DB ?? '/tmp/limn-record.sqlite';
+/** How far before the old `capturedAt` an incremental record's clock starts (see `offsetMs`). */
+const INCREMENTAL_SEED_LEAD_MS = 60_000;
 process.env.RECORD_DB = DB; // the steps read it (timelinePrIds)
 const SCRATCH = process.env.RECORD_SCRATCH ?? '/tmp/limn-record-home';
 const DATA_DIR = join(SCRATCH, 'data');
@@ -907,13 +909,18 @@ async function main() {
     }
   }
   const incremental = Boolean(old);
-  const offsetMs = incremental ? Date.now() - Date.parse(old.recording.capturedAt) : 0;
+  // ⚠ The shifted clock starts a minute BEFORE `capturedAt`, not at it. A full record stamps
+  // `capturedAt` AFTER seeding, so every seeded row is older than it; started at `capturedAt`, the
+  // seeder (which runs seconds later) wrote rows NEWER than the recording's "now" — and a check the
+  // demo then answers `reused` read as stale (lib/storyDocsAlignment.ts `clickMessageStale`: the run
+  // created after the click), so "Check again anyway" never showed.
+  const offsetMs = incremental ? Date.now() - Date.parse(old.recording.capturedAt) + INCREMENTAL_SEED_LEAD_MS : 0;
   const childEnv = { ...baseEnv };
   if (offsetMs) {
     childEnv.LIMN_CLOCK_OFFSET_MS = String(offsetMs);
     childEnv.NODE_OPTIONS = `${baseEnv.NODE_OPTIONS ?? ''} --import ${pathToFileURL(CLOCK_MODULE).href}`.trim();
     process.env.LIMN_CLOCK_OFFSET_MS = String(offsetMs);
-    console.log(`▸ incremental: clocks moved back ${(offsetMs / 3_600_000).toFixed(1)}h, to ${old.recording.capturedAt}`);
+    console.log(`▸ incremental: clocks moved back ${(offsetMs / 3_600_000).toFixed(1)}h, to ${INCREMENTAL_SEED_LEAD_MS / 1000}s before ${old.recording.capturedAt}`);
   }
   const t0 = Date.now();
   const viteEnv = (lane) => ({ ...baseEnv, BACKEND_PORT: String(lane.api), FRONTEND_PORT: String(lane.web) });
