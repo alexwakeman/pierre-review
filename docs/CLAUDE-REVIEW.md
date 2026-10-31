@@ -129,7 +129,7 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   - **THE SUMMARY IS MARKDOWN, LED BY BULLETS** (`'summary'` in the system prompt, pinned by
     `prompts.test.ts`): ONE short plain-English sentence, then a "- " bullet per main issue, most
     serious first — and no list when there are no issues; no headings or tables. The ticket review's
-    `summary` does NOT: it is two plain sentences, no list (§ Ticket review).
+    `summary` does NOT: at most three short sentences of 20 words, no list (§ Ticket review).
     Older plain-prose summaries render unchanged.
   - **PR references in every piece of model text link to that PR in Limn** — one batched, DB-only
     `POST /api/prs/resolve` (`read` tier, account-scoped, ≤ `PR_REF_RESOLVE_MAX` refs, 400 over)
