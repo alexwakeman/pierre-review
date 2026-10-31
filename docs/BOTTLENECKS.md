@@ -142,7 +142,7 @@ figure belongs to the period the work COMPLETED in, matching `db/period-metrics.
 Last 26 weeks", with four charts on one fetch: where the working hours went (a stacked area of the
 working-hour split per week), each wait against its budget (one cell per week, coloured within /
 acceptable / past limit against TODAY's budgets, which the page says), working hours saved against a
-baseline, and a before/after lens opened from any marker.
+baseline, and a before/after lens opened from any marker on the top chart.
 
 - ⚠ **THE 26 WEEKS ARE THE ONE LABELLED EXCEPTION TO THE 90-DAY CAP.** The cap stays for the panel.
   This view keeps the coverage bias VISIBLE instead: the page says "Last 26 weeks"; every week carries
@@ -180,10 +180,25 @@ baseline, and a before/after lens opened from any marker.
   Every explanation (the window, "three in four within", the z rule) lives in the ⓘ popover only.
 - **Working hours saved** (client-side, `chronologyTrendModel.ts` `runningGain`): each counted week
   adds `(baseline − that week's median whole-PR time) × pull requests measured that week`; the line is
-  the running total, so rising = merging faster than the baseline. The default baseline is the median
-  of the first 8 usable weeks and counting starts the week after; clicking a week (or "Measure hours
-  saved from this week" in the lens) moves the start there, against the 8 usable weeks before it.
-  Fewer than 4 usable weeks before the start refuses.
+  the running total, so rising = merging faster than the baseline. The baseline is the median of the
+  first 8 usable weeks and counting starts the week after; fewer than 8 usable weeks refuses. ⚠ The
+  baseline is FIXED: "click a week to measure from it" (and the lens's "Measure hours saved from this
+  week") was removed on 2026-10-31 — a reader-moved start let any week be made to look like a gain.
+- **The hours-saved chart's markers explain their week** (`eventPopoverModel`): a click (or Enter)
+  opens a popover listing that week's events by kind, dated (once per group when they share a day),
+  one fixed line per kind on why it CAN move the line (`EVENT_KIND_WHY` — never that it did; a working-
+  hours change has its own line), and where that week sits on the chart, from the figures ("37 pull
+  requests merged", "Half merged within 2.9 h … against 4.5 h at the baseline", "That week +58 h;
+  running total +143 h", or why it is not counted). "Compare before and after" opens the lens. The top
+  chart's markers still open the lens directly; the budget chart's rail is a decorative copy.
+- ⚠ **NOTHING FLOATS INSIDE THE SCROLLER.** The charts sit in `ChartScroller`, which scrolls sideways
+  ONLY when the chart is wider than its box (a phone; `data-scrolls`) — `overflow-x: auto` also sets
+  the other axis to `auto`, and the always-on scroller drew stray scroll bars on a desktop and cut the
+  marker badges. Every hover box is a `charts/AnchoredTip` and every marker box/popover is portalled
+  and placed `fixed` (`usePlacedFloating`, flip + shift + size), so the chart above can never cover
+  one. Marker LINES are `pointer-events: none` so they never steal a cell's hover.
+  `e2e/chronology-trend.spec.ts` pins all of it at 1280/1440/1920 and 390px over a fixture at a real
+  workspace's density (`e2e/chronology-fixtures.ts`).
 - **Hours saved in US$**: when the Workspace has an hourly cost set
   (`WorkspaceProSettings.hourlyCostUsd`, platform migration 0041, set/cleared from the chart itself),
   the figure reads "≈ $X of engineering time at $Y an hour" (|rounded hours| × rate). Blank until
