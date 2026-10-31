@@ -140,6 +140,7 @@ export function DocReferencesSection({
   return (
     <ReviewSection
       title="Reference docs"
+      section="refs"
       pills={counts !== '' ? <SectionCount>{counts}</SectionCount> : undefined}
       info={<DocReferencesInfo by={by} />}
     >

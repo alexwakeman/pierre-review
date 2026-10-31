@@ -1440,6 +1440,7 @@ export function ClaudeReviewFollowUpSection({
   return (
     <ReviewSection
       title="Previous review"
+      section="previous"
       pills={
         <>
           {followUp != null && (

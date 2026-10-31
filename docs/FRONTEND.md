@@ -58,7 +58,8 @@ Three layers, deliberately separated:
      URL dialect); the narrowings a reader navigates TO are keys of their own (`attn=<InsightKind>`
      for the attention board, `feedPr=<id>` for the Feed, `botsTab` for the Bots sub-tab strip (a
      legacy `feedTab` is parsed, never emitted), `prTab` for PrDetail's inner tab, which is a `{prId, tab}` PAIR in the store
-     so one PR's tab can't be read on another's screen).
+     so one PR's tab can't be read on another's screen; on the wire the AI Review tab is `ai_review`,
+     the old `claude_review` an alias — § PR detail → The tab on the wire).
    - ⚠ **NAVIGATIONS PUSH, REFINEMENTS REPLACE — decided by DIFFING `NAV_KEYS`**, never by a
      `push:true` argument threaded through call sites (the 15th caller forgets) and never per
      store write (Safari throws past ~100 pushes/30s). `pr`/`thread` are deliberately NOT nav
@@ -742,6 +743,54 @@ back; a local flag mirrors it so pressing Overview afterwards does not snap it s
 section while seated on `'activity'` moves the tab to `'overview'`. **Comments** (`?prTab=comments`,
 badge = issue comments + review bodies, `prConversationCount`) holds `PrCommentsList` + the composer;
 a PR-comment deep link (`commentFocus`) seats it.
+
+**THE TAB ON THE WIRE** (2026-10-31; `hooks/useUrlState.ts` `prTabToUrl` / `prTabFromUrl`,
+`test/prTabWire.test.ts`, e2e `pr-tabs.spec.ts`): the AI Review tab is **`?prTab=ai_review`** —
+agent-agnostic. Internally it stays `PrDetailTab` `'claude_review'` (store, effects, ⌘K ids); ONLY the
+URL spells it `ai_review`. ⚠ The old `?prTab=claude_review` is still READ as an alias (old links,
+bookmarks) and the load's reconcile write (`markUrlCorrection` + `writeToUrl`) REPLACES it with
+`ai_review` at once; `?prTab=threads` likewise reads as `changes`. Never emit the raw tab id: the
+serializer goes through `prTabToUrl`. Nothing persists the inner tab (pinned tabs, localStorage), so
+there is nothing to migrate. No backend link names a PR tab (Slack's `prLink` opens the PR's tab only).
+
+**THE STORY TAB** (`?prTab=story`, `components/pr/PrStoryTab.tsx`, 2026-10-31): the story view of the
+PR's linked ticket, INSIDE the PR — the ONE `StoryViewBody` (§ The story view), never a copy, so its
+reads are the story view's own two DB reads (`ticket-prs`, `ticket-story`), made when the tab is
+OPENED, never on mount of the PR. Listed only while the PR names a ticket Limn can open as a story
+(`TicketRef.ident` — the SAME `storyTickets` the header's "Open story" menu item and ⌘K's "Open the KEY
+story" read; no ident, no tab, no fetch), and LAST in the strip so the 1–9 keys of the tabs before it
+never move. A stale `?prTab=story` on a PR naming none renders Overview, DERIVED (`effectiveTab`). Several
+stories: a switcher of keys on top (`aria-pressed`, the first picked, local state). "Open story tab"
+(and the "…" menu's "Open story", kept) opens the full story tab through `useOpenStory`. The body's
+layout measures THIS pane: two columns full-screen on a wide screen, one in the PR drawer (`oneColumn`,
+below) or on a phone. ⌘K lists it with the other PR tabs ("Story (this pull request)").
+
+**THE AI REVIEW TAB'S WIDE LAYOUT** (2026-10-31; `ClaudeReviewTab.tsx` `REVIEW_RAIL`, the shared
+`components/RailLayout.tsx` — the story view's mechanism, generalised; `test/prTabWire.test.ts`). The tab
+wraps its content in `<RailLayout config={REVIEW_RAIL}>`, which measures ITS OWN width (never the
+window). Below `STORY_TWO_COLUMN_MIN_PX` (1080: a 1280px window with the sidebar stays one column; 1440
+goes to two), and ALWAYS in the PR drawer (`placement === 'pane'` passes `oneColumn` — a short strip
+under the timeline gives a sticky rail no height), it is today's single column, capped at 64rem, in
+today's order. Wide: the reading column holds the CONTENT — the summary (paragraphs at a reading measure,
+`.reading-measure`), Previous review, Review threads, Findings, Story check, CI check, SonarCloud,
+Reference docs, the Design and the chat — and a sticky RIGHT RAIL ("Review facts and actions") holds the
+META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` stays exactly where it was:
+  - `status` (rail only, `ReviewRailStatus`): who reviewed, the verdict, the commit it read
+    (`CurrencyPill`), when, auto / fresh / replies / depth, and the ONE run label (`aiRunLabel`) + cost
+    (`useRunCostText`, the one formatter) — the review header drops its pills and meta line then;
+  - `run` (in place when narrow): the whole "Run a review" section — model picker, Run / Re-review in
+    its `AiRunGate`, the same-commit confirm, auto-review holds, team claims, live progress + Stop,
+    failures, the replies pass, the history select;
+  - `counts` (rail only, `ReviewRailCounts`): findings by severity (zeros left out), "Under Story check",
+    "Threads to fix" (`validUnaddressed`) — each row scrolls to its section;
+  - `nav` (rail only): "On this page" over the sections present (`data-review-section`, set through
+    `ReviewSection`'s `section` prop: review, previous, threads, findings, stories, ci, sonar, refs,
+    design, chat); `nav-end` repeats it beside what follows the design when the design spans the rail;
+  - `actions` (in place when narrow): Reviews and actions + "Generate fix from this review";
+  - `post` (in place when narrow): Post to GitHub (summary, verdict, Preview, Post + confirm, results).
+  The Design section sits in `<RailWide>`: wide, it spans the rail to the container's edge and the rail
+  becomes two sticky segments around it (the story view's `railSegments` rule); `PaneWide` inside it
+  stands down while a wide layout is around it, so the two never overlap.
 
 Header carries **Show** + **Focus** links (drive the timeline) and, on OPEN PRs only, a **CI
 readout**: a 12px `CiDot` plus its word (`prHeaderCi(state, ciStatus)` in `lib/ui.ts`, pinned by
@@ -3510,8 +3559,11 @@ board.
   `openTicketTab`). Never call the store action from a component. The sprint drawer and its reference cards are GONE.
   On This Sprint a ticket LINK opens the page's tray instead (`StoryOpenOverride` / `useStoryLinkOpener`);
   the override never opens a tab, and the tray's "Open story tab" calls `useOpenStory`.
-- **WIDE LAYOUT — TWO COLUMNS FROM THE CONTAINER'S WIDTH** (2026-10-31; `Ticket/StoryLayout.tsx`, pure
-  half `lib/storyLayout.ts`, test/storyLayout.test.ts). `StoryViewBody` wraps everything in
+- **WIDE LAYOUT — TWO COLUMNS FROM THE CONTAINER'S WIDTH** (2026-10-31; `Ticket/StoryLayout.tsx` over the
+  shared `components/RailLayout.tsx` — the AI Review tab uses the same mechanism with its own config,
+  § PR detail; a story piece inside another layout renders as if narrow; pure
+  half `lib/storyLayout.ts`, test/storyLayout.test.ts). Three hosts now: the story tab, This Sprint's
+  tray and the PR view's Story tab (`oneColumn` in the PR drawer). `StoryViewBody` wraps everything in
   `StoryLayout`, which measures ITS OWN width (ResizeObserver — ⚠ never the window: the tray is narrow
   on a wide screen). Below `STORY_TWO_COLUMN_MIN_PX` (1080 — a 1280px window with the sidebar stays one
   column; 1440 goes to two) it is one column capped at `max-w-5xl`, exactly as before (the tab view no
@@ -5014,8 +5066,10 @@ test/dataFlow.test.ts).
   actually overflows (a ResizeObserver). ⚠ Playwright's headless Chromium hides scrollbars by default
   (`--hide-scrollbars`): screenshot with `ignoreDefaultArgs: ['--hide-scrollbars']` to see the bar.
 - **Wide content**: the PR tab's Design (both slots) and the story build's planned design sit in
-  `PaneWide` (Ticket/StoryLayout.tsx): past their capped reading column, to the scroll pane's right
-  edge less 20px — only ever wider, never narrower. The story view's design uses `StoryWide` instead
+  `PaneWide` (components/RailLayout.tsx): past their capped reading column, to the scroll pane's right
+  edge less 20px — only ever wider, never narrower. Inside the AI Review tab's WIDE layout PaneWide stands
+  down and the whole Design section is `RailWide` (spans the rail; § PR detail → The AI Review tab's wide
+  layout). The story view's design uses `StoryWide` instead
   (§ The story view → Wide layout).
 - **Kind is never colour alone**: every step prints its word (Read, Check, Transform, Write, Call,
   Emit, Return); a Check is a dotted line with ShieldIcon; a Write a heavy accent line with

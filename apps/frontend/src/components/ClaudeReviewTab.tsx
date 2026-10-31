@@ -105,6 +105,7 @@ import { TeamClaimLine } from './TeamClaimLine.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
+import { RailLayout, RailPiece, RailSectionNav, RailWide, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
@@ -1354,6 +1355,8 @@ export function ClaudesReview({
   const chatProvider = useChatPreferredProvider(storedReview);
   const currency = currencyOf(review, prHeadSha);
   const storyIds = placement.ids;
+  // THE WIDE LAYOUT (REVIEW_RAIL): the run's facts move from the section header to the rail.
+  const inRail = useRailWide('review');
 
   // THE ONE FINDING CARD, for the Findings list and the Story check's older stories alike. `storyLabel`
   // is the chip naming the story item (null for an ordinary finding).
@@ -1389,10 +1392,21 @@ export function ClaudesReview({
 
   return (
     <>
+      <RailPiece slot="status">
+        <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} meta={metaLine(review, costText)} />
+      </RailPiece>
+      <RailPiece slot="counts">
+        <ReviewRailCounts
+          findings={findings}
+          storyFindings={placement.placed.size}
+          threads={(currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts) ?? null}
+        />
+      </RailPiece>
       <ReviewSection
         title={storedReview.pair != null ? `${by} review` : `${by}'s review`}
+        section="review"
         pills={
-          <>
+          inRail ? null : <>
             {/* The outcome leads; everything after it is about the run. */}
             {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {currency != null && <CurrencyPill currency={currency} />}
@@ -1438,7 +1452,7 @@ export function ClaudesReview({
           </InfoButton>
         }
       >
-        <div className="text-meta text-ui-mute">{metaLine(review, costText)}</div>
+        {!inRail && <div className="text-meta text-ui-mute">{metaLine(review, costText)}</div>}
         {/* WHY IT WAS NOT APPROVED (auto verdict on): one line under the verdict, always. */}
         {notApprovedLine(storedReview) != null && (
           <div className="text-meta text-ui-ink" data-not-approved>
@@ -1457,7 +1471,12 @@ export function ClaudesReview({
           </div>
         )}
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
-        {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
+        {/* Wide: prose at a reading measure (`.reading-measure`: paragraphs ≤ 75ch). */}
+        {review.summary != null && review.summary !== '' && (
+          <div className={inRail ? 'reading-measure' : undefined}>
+            <Markdown prRefs>{review.summary}</Markdown>
+          </div>
+        )}
       </ReviewSection>
       {(review.followUp != null || settledEarlier.length > 0) && (
         <ClaudeReviewFollowUpSection
@@ -1482,6 +1501,7 @@ export function ClaudesReview({
       />
       <ReviewSection
         title="Findings"
+        section="findings"
         pills={
           <>
             <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
@@ -1528,11 +1548,14 @@ export function ClaudesReview({
       <DocReferencesSection references={review.docReferences} by={by} />
       {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
           after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
-      <ClaudeReviewDiagramsSection
-        prId={review.prId}
-        reviewFinishedAt={review.finishedAt ?? null}
-        onOpenInChanges={onOpenInChanges}
-      />
+      {/* Wide content: in the two-column layout it spans the rail too (RailWide). */}
+      <RailWide>
+        <ClaudeReviewDiagramsSection
+          prId={review.prId}
+          reviewFinishedAt={review.finishedAt ?? null}
+          onOpenInChanges={onOpenInChanges}
+        />
+      </RailWide>
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
       {chatReviewId != null && (
@@ -1543,6 +1566,130 @@ export function ClaudesReview({
         />
       )}
     </>
+  );
+}
+
+// THE AI REVIEW TAB'S WIDE LAYOUT (docs/FRONTEND.md § The AI Review tab → Wide layout): the shared rail
+// layout (RailLayout.tsx, the story view's mechanism) with the review's slots. CONTENT — the summary,
+// previous review, threads, findings, Story check, CI check, SonarCloud, reference docs, the design (it
+// spans the rail) and the chat — stays in the reading column; FACTS AND ACTIONS go to the rail: the
+// run's status (`status`), the run controls (`run`), the counts (`counts`), "On this page" (`nav`),
+// Reviews and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). Narrow (the PR
+// drawer, a laptop, a phone) every piece renders in place, in today's order; rail-only extras vanish.
+export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'nav', 'actions', 'post', 'nav-end'] as const;
+export const REVIEW_SECTIONS = [
+  { id: 'review', label: 'Summary' },
+  { id: 'previous', label: 'Previous review' },
+  { id: 'threads', label: 'Review threads' },
+  { id: 'findings', label: 'Findings' },
+  { id: 'stories', label: 'Story check' },
+  { id: 'ci', label: 'CI check' },
+  { id: 'sonar', label: 'SonarCloud' },
+  { id: 'refs', label: 'Reference docs' },
+  { id: 'design', label: 'Design' },
+  { id: 'chat', label: 'Review chat' },
+] as const;
+const REVIEW_RAIL: RailLayoutConfig = {
+  name: 'review',
+  slots: REVIEW_RAIL_SLOTS,
+  // Everything but the second "On this page" (beside what follows the design) rides above the design.
+  topSlots: REVIEW_RAIL_SLOTS.filter((s) => s !== 'nav-end'),
+  sections: REVIEW_SECTIONS,
+  sectionAttr: 'data-review-section',
+  startSection: null,
+  railLabel: 'Review facts and actions',
+  // The single column as it always was: max-w-5xl around the tab's own padding (px-5 = 2.5rem).
+  narrowClassName: 'max-w-[61.5rem]',
+  wideClassName: 'relative z-10 bg-ui-bg',
+};
+
+/** The rail's first block: who reviewed, the verdict, the commit it read, when, and the run label + cost. */
+function ReviewRailStatus({
+  review,
+  title,
+  currency,
+  meta,
+}: {
+  review: ClaudeReview;
+  title: string;
+  currency: ReviewCurrency | null;
+  meta: string;
+}): JSX.Element {
+  return (
+    <div className="space-y-1.5" data-testid="review-rail-status">
+      <p className="text-meta text-ui-mute">{title}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
+        {currency != null && <CurrencyPill currency={currency} />}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">
+        <ReviewedAgo at={review.finishedAt} />
+        {review.trigger === 'auto' && <span>{AUTO_REVIEW_LABEL}</span>}
+        {review.fresh === true && <span>{FRESH_REVIEW_LABEL}</span>}
+        {review.kind === 'replies' && <span>{REPLIES_CHECK_LABEL}</span>}
+        {review.reviewMode != null && <span>{REVIEW_MODE_LABEL[review.reviewMode]} review</span>}
+      </div>
+      <p className="break-words text-meta text-ui-mute">{meta}</p>
+    </div>
+  );
+}
+
+const SEVERITY_PLURAL: Record<ClaudeFindingSeverity, [string, string]> = {
+  blocker: ['blocker', 'blockers'],
+  warning: ['warning', 'warnings'],
+  nit: ['nit', 'nits'],
+  question: ['question', 'questions'],
+  praise: ['praise', 'praise'],
+};
+
+/** The rail's counts: findings by severity (zeros left out) and the threads still to fix. Each row
+ *  scrolls to its section. */
+function ReviewRailCounts({
+  findings,
+  storyFindings,
+  threads,
+}: {
+  findings: readonly ClaudeFinding[];
+  storyFindings: number;
+  threads: ClaudeThreadAssessmentCounts | null;
+}): JSX.Element {
+  const go = useScrollToRailSection();
+  const bySeverity = SEVERITY_ORDER.map((sev) => ({ sev, n: findings.filter((f) => f.severity === sev).length })).filter((r) => r.n > 0);
+  const toFix = threads?.validUnaddressed ?? 0;
+  const row = (key: string, section: string, label: ReactNode, n: number): JSX.Element => (
+    <li key={key}>
+      <button
+        type="button"
+        onClick={() => go?.(section)}
+        className={cx('hit -mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-ui px-1.5 py-0.5 text-left text-body text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
+      >
+        <span className="min-w-0 flex-1">{label}</span>
+        <span className="tabular-nums text-ui-mute">{n}</span>
+      </button>
+    </li>
+  );
+  return (
+    <div data-testid="review-rail-counts">
+      <p className="mb-1 text-meta text-ui-mute">In this review</p>
+      <ul className="space-y-0.5">
+        {bySeverity.length === 0 && storyFindings === 0 ? (
+          <li className="text-body text-ui-mute">No line-level findings</li>
+        ) : (
+          bySeverity.map(({ sev, n }) =>
+            row(
+              sev,
+              'findings',
+              <span className={`inline-flex rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[sev]}`}>
+                {SEVERITY_PLURAL[sev][n === 1 ? 0 : 1]}
+              </span>,
+              n,
+            ),
+          )
+        )}
+        {storyFindings > 0 && row('story', 'stories', 'Under Story check', storyFindings)}
+        {threads != null && threads.total > 0 && row('threads', 'threads', 'Threads to fix', toFix)}
+      </ul>
+    </div>
   );
 }
 
@@ -1703,9 +1850,12 @@ export function ClaudeReviewTab({
   usersById,
   onOpenInChanges,
   onOpenThread,
+  oneColumn = false,
 }: {
   pr: PrDetail;
   usersById: Map<number, User>;
+  /** The PR drawer (a short strip under the timeline): always one column, whatever its width. */
+  oneColumn?: boolean;
   // Provided by PrDetail (which owns the tab state). Absent ⇒ every code anchor keeps its
   // pre-existing GitHub link.
   onOpenInChanges?: OpenInChanges;
@@ -1929,9 +2079,24 @@ export function ClaudeReviewTab({
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
     <QuietReviewSections>
-    <div className="max-w-5xl space-y-7 px-5 py-2 max-md:px-3">
+    {/* Two columns from THIS box's width (REVIEW_RAIL): the content, and a rail of facts and actions.
+        Narrow, one column exactly as before. */}
+    <div className="px-5 py-2 max-md:px-3">
+    <RailLayout config={REVIEW_RAIL} oneColumn={oneColumn}>
+    <div className="space-y-7">
       {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
-      <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
+      <RailPiece slot="actions" inline>
+        <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
+      </RailPiece>
+      {/* "On this page" — the rail's section nav (rail only); its second copy sits beside what follows
+          the design when the design spans the rail. */}
+      <RailPiece slot="nav">
+        <RailSectionNav />
+      </RailPiece>
+      <RailPiece slot="nav-end">
+        <RailSectionNav whenSplit />
+      </RailPiece>
+      <RailPiece slot="run" inline>
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
           ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
@@ -2155,6 +2320,7 @@ export function ClaudeReviewTab({
         />
       )}
       </ReviewSection>
+      </RailPiece>
 
       {/* Section A — Claude's read-only review for the shown run. */}
       {shownReview != null && shownReview.status === 'succeeded' && (
@@ -2218,8 +2384,9 @@ export function ClaudeReviewTab({
         </>
       )}
 
-      {/* Section B — the authored review that gets posted (latest run only). */}
+      {/* Section B — the authored review that gets posted (latest run only). In the rail when wide. */}
       {canEdit && review != null && review.status === 'succeeded' && review.reviewMode !== 'skip' && (
+        <RailPiece slot="post" inline>
         <ReviewSection
           title="Post to GitHub"
           pills={
@@ -2374,8 +2541,11 @@ export function ClaudeReviewTab({
             </div>
           )}
         </ReviewSection>
+        </RailPiece>
       )}
 
+    </div>
+    </RailLayout>
     </div>
     </QuietReviewSections>
     </ReviewTabPrRefs>

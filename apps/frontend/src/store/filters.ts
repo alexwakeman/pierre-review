@@ -118,8 +118,10 @@ export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'bench
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and its other tabs like every other view. Which member is
-// VISIBLE is still derived per PR (bot_activity / claude_review / ai_fix are capability- or
+// VISIBLE is still derived per PR (bot_activity / claude_review / ai_fix / story are capability- or
 // data-gated) — the store holds the CHOICE, never a computed effective tab.
+// ⚠ ON THE WIRE `claude_review` IS `ai_review` (useUrlState.ts `prTabToUrl` / `prTabFromUrl`; the old
+// spelling is still read). `story` is the PR's linked story (PrStoryTab.tsx).
 // There is NO 'threads' member any more: review threads live in the Changes tab (inline in the
 // diff, or its "Threads only" view). The URL layer reads a legacy `?prTab=threads` as 'changes'.
 //
@@ -134,7 +136,8 @@ export type PrDetailTab =
   | 'changes'
   | 'bot_activity'
   | 'claude_review'
-  | 'ai_fix';
+  | 'ai_fix'
+  | 'story';
 export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'overview',
   'comments',
@@ -143,6 +146,7 @@ export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'bot_activity',
   'claude_review',
   'ai_fix',
+  'story',
 ];
 // Activity → Open PRs' repo dropdown (see openPrsRepoFilter). Stamped with the workspace it
 // was chosen in, so a switch makes it inert by DERIVATION rather than by a reset effect.

@@ -484,6 +484,7 @@ export function ReviewChatSection({
     <div ref={ref}>
       <ReviewSection
         title="Review chat"
+        section="chat"
         actions={
           <button
             type="button"

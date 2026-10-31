@@ -29,6 +29,7 @@ export function ReviewSection({
   info,
   actions,
   children,
+  section,
 }: {
   title: string;
   // Count pills / short status chips, right after the title.
@@ -39,12 +40,18 @@ export function ReviewSection({
   actions?: ReactNode;
   // Absent ⇒ a header-only section (no body, no rule under the header).
   children?: ReactNode;
+  // The AI Review tab's section nav reaches this section (`data-review-section`, RailLayout.tsx).
+  section?: string;
 }): JSX.Element {
   const hasBody = children != null && children !== false;
   const quiet = useContext(QuietContext);
   if (quiet) {
     return (
-      <section aria-label={title} className="min-w-0">
+      <section
+        aria-label={title}
+        className={section != null ? 'min-w-0 scroll-mt-4 focus:outline-none' : 'min-w-0'}
+        data-review-section={section}
+      >
         <header className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 pb-2">
           <h3 className="text-title text-ui-ink">{title}</h3>
           {pills}
@@ -58,7 +65,8 @@ export function ReviewSection({
   return (
     <section
       aria-label={title}
-      className="rounded-ui bg-ui-surface"
+      className={section != null ? 'scroll-mt-4 rounded-ui bg-ui-surface focus:outline-none' : 'rounded-ui bg-ui-surface'}
+      data-review-section={section}
     >
       <header
         className={`flex flex-wrap items-center gap-x-2 gap-y-1 bg-ui-surface px-3 py-2 ${

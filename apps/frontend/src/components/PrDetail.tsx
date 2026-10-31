@@ -1,3 +1,4 @@
+import { PrStoryTab } from './pr/PrStoryTab.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invalidateSeenState } from '../hooks/useMarkRepoSeen.js';
@@ -146,6 +147,8 @@ const TAB_LABELS: Record<Tab, string> = {
   bot_activity: 'Bot activity',
   claude_review: 'AI Review',
   ai_fix: 'AI Fix',
+  // The PR's linked story (the story view, inside the PR) — listed only while it names one.
+  story: 'Story',
 };
 
 // The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
@@ -1209,6 +1212,18 @@ export function PrDetail({
    * stands, and the store keeps the reader's raw choice either way — the same rule
    * `botsInnerTab` / `insightsInnerTab` follow.
    */
+  // The PR's linked stories: its tickets Limn can open as a story (an `ident`; one whose tracker site
+  // cannot be folded only links out, from the Overview chip). Most PRs name one. The Story tab shows
+  // them in place; the full story view opens ONLY through `useOpenStory`.
+  const openStory = useOpenStory();
+  // (`pr.tickets` keeps its identity across polls — React Query's structural sharing — so this memo
+  // and the ⌘K list below rebuild only when the tickets themselves change.)
+  const prTickets = pr?.tickets;
+  const storyTickets = useMemo(
+    () => (prTickets ?? []).flatMap((t) => (t.ident != null ? [{ ident: t.ident, key: t.key }] : [])),
+    [prTickets],
+  );
+  const storyTabVisible = storyTickets.length > 0;
   const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
   // `'activity'` is not a screen of its own any more: it renders Overview (section open, above).
   const effectiveTab: Tab =
@@ -1216,7 +1231,10 @@ export function PrDetail({
       ? 'overview'
       : tab === 'bot_activity' && botTabResolved && !botTabVisible
         ? 'overview'
-        : tab;
+        : // A PR naming no story (a stale `?prTab=story`): Overview, derived — never written back.
+          tab === 'story' && pr != null && !storyTabVisible
+          ? 'overview'
+          : tab;
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -1266,20 +1284,10 @@ export function PrDetail({
     ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
     ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
     ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
+    ...(storyTabVisible ? (['story'] as Tab[]) : []),
   ] as Tab[];
   const cmdTabsKey = cmdTabs.join(',');
   const prNumber = pr?.number ?? null;
-  // The PR's linked stories: its tickets Limn can open as a story (an `ident`; one whose tracker site
-  // cannot be folded only links out, from the Overview chip). Most PRs name one. Opened ONLY through
-  // `useOpenStory` — the one way the story view opens.
-  const openStory = useOpenStory();
-  // (`pr.tickets` keeps its identity across polls — React Query's structural sharing — so this memo
-  // and the ⌘K list below rebuild only when the tickets themselves change.)
-  const prTickets = pr?.tickets;
-  const storyTickets = useMemo(
-    () => (prTickets ?? []).flatMap((t) => (t.ident != null ? [{ ident: t.ident, key: t.key }] : [])),
-    [prTickets],
-  );
   const prCommands = useMemo((): Command[] | null => {
     if (!liveVisible || prNumber == null) return null;
     const where = `#${prNumber}`;
@@ -1402,6 +1410,8 @@ export function PrDetail({
     ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
     ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
     ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
+    // Last, so the 1–9 keys of the tabs before it never move.
+    ...(storyTabVisible ? (['story'] as Tab[]) : []),
   ];
   const tabItems: TabItem<Tab>[] = tabIds.map((t) => ({
     id: t,
@@ -1821,12 +1831,15 @@ export function PrDetail({
           <PrBotBehaviourTab pr={pr} />
         ) : effectiveTab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
+        ) : effectiveTab === 'story' ? (
+          <PrStoryTab tickets={storyTickets} oneColumn={placement === 'pane'} />
         ) : (
           <ClaudeReviewTab
             pr={pr}
             usersById={usersById}
             onOpenInChanges={openInChanges}
             onOpenThread={showThread}
+            oneColumn={placement === 'pane'}
           />
         )}
         </Suspense>

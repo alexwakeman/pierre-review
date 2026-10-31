@@ -27,7 +27,8 @@ describe('two columns', () => {
     expect(storyTwoColumn(800)).toBe(false);
   });
   it('measures the container, not the window', () => {
-    const layout = src('components/Ticket/StoryLayout.tsx');
+    // The measuring lives in the shared rail layout (the story view and the AI Review tab).
+    const layout = src('components/RailLayout.tsx') + src('components/Ticket/StoryLayout.tsx');
     expect(layout).not.toMatch(/window\.innerWidth|useIsDesktop|matchMedia\('\(min-width/);
     expect(layout).toMatch(/ResizeObserver/);
   });
@@ -61,7 +62,7 @@ describe('rail segments: the top content must fit', () => {
 
 describe('wiring', () => {
   it('the body mounts the layout and the tab does not cap the width', () => {
-    expect(src('components/Ticket/StoryViewBody.tsx')).toMatch(/<StoryLayout>/);
+    expect(src('components/Ticket/StoryViewBody.tsx')).toMatch(/<StoryLayout oneColumn=\{oneColumn\}>/);
     expect(src('components/Ticket/TicketTabView.tsx')).not.toMatch(/max-w-5xl/);
   });
   it('every section the nav lists is marked where it renders', () => {

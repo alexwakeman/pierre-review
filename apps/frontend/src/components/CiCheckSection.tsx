@@ -140,6 +140,7 @@ export function CiCheckSection({
   return (
     <ReviewSection
       title="CI check"
+      section="ci"
       pills={
         <>
           {currency != null && <CurrencyPill currency={currency} />}

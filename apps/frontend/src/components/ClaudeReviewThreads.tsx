@@ -263,6 +263,7 @@ export function ClaudeReviewThreadsSection({
   return (
     <ReviewSection
       title="Review threads"
+      section="threads"
       actions={actions}
       pills={pills.map((p) => (
         <span key={p.key} className={`${CHIP} ${p.cls}`}>

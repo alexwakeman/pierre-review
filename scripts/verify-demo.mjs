@@ -281,14 +281,14 @@ const VIEWS = [
   ],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
-    ['overview', 'comments', 'changes', 'claude_review', 'ai_fix'].map((t) => [
+    ['overview', 'comments', 'changes', 'ai_review', 'ai_fix'].map((t) => [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
-      id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
+      id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'ai_review') ? `pr-114-${t}` : id === 105 && t === 'ai_review' ? 'pr-105-ai_review' : null,
       // #105 holds a Claude Opus review and a Codex GPT-6.1 Sol review of the same head, each labelled,
       // both options of the history select ("Showing"). The model menu lists BOTH providers (both
       // signed in): picking Codex's model leaves every run listed.
-      id === 105 && t === 'claude_review'
+      id === 105 && t === 'ai_review'
         ? {
             act: async (page) => {
               // "Model" and "Showing" are the redesign's custom Select (role="combobox"): open it
@@ -313,7 +313,7 @@ const VIEWS = [
           }
         : // #113's latest run read acme/infrastructure's branch of the same name (a related repo), and its
           // Design is a data-flow sequence (numbered steps, the line key under it).
-          id === 113 && t === 'claude_review'
+          id === 113 && t === 'ai_review'
           ? {
               expect: [
                 'Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries',
@@ -323,11 +323,20 @@ const VIEWS = [
               ],
             }
           : // #114's change moves no data: the model declined, and the pane says why in one line.
-            id === 114 && t === 'claude_review'
+            id === 114 && t === 'ai_review'
             ? { expect: ['No diagram: this change only resizes the node-group limits.'] }
             : undefined,
     ]),
   ),
+  // The PR view's Story tab: #113 names PLAT-292, so the story view renders inside the PR, and the
+  // old `?prTab=claude_review` link still opens AI Review.
+  [
+    'pr:113:story',
+    '?view=pr-detail:113&prTab=story',
+    'pr-113-story',
+    { expect: ['Open story tab', 'PLAT-292', 'Write each pull request in one transaction during sync'] },
+  ],
+  ['pr:113:claude_review-alias', '?view=pr-detail:113&prTab=claude_review', null, { expect: ['Run a review'] }],
   // AI Fix "Run tests": #114's fix ran the project's checks in the sandbox (results + the commit
   // hook), and "New fix" → "Run tests" lists what the head declares, one refused by the deny scan.
   [

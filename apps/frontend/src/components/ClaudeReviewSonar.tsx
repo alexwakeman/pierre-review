@@ -217,6 +217,7 @@ export function ClaudeReviewSonarSection({
   return (
     <ReviewSection
       title="SonarCloud"
+      section="sonar"
       pills={
         snap?.state === 'ok' ? (
           <>

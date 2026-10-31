@@ -58,6 +58,27 @@ const PRESETS: RangePreset[] = ['7d', '14d', '30d', '90d', 'custom'];
 // un-isolated board and a browser Back cannot return to the narrowed one. EXPORTED purely so
 // `test/ciFailingCard.test.ts` can compare it against `KIND_LABEL` — whose exhaustiveness the
 // compiler DOES enforce — turning that silent omission into a failing test.
+
+/**
+ * PrDetail's inner tab ON THE WIRE. The store keeps its internal ids; the URL says `ai_review` for
+ * the AI Review tab (`claude_review` internally — the URL is agent-agnostic, docs/FRONTEND.md §
+ * PrDetail). Every other tab is its id.
+ */
+export function prTabToUrl(tab: PrDetailTab): string {
+  return tab === 'claude_review' ? 'ai_review' : tab;
+}
+
+/**
+ * The URL's `prTab` → the store's tab id, or null. Aliases: the retired Threads tab lands on
+ * Changes (where the threads live now), and the old `claude_review` spelling still opens AI Review
+ * (old links and bookmarks); the reconcile write then rewrites it to `ai_review`.
+ */
+export function prTabFromUrl(raw: string | null): PrDetailTab | null {
+  if (raw == null || raw === '') return null;
+  const id = raw === 'threads' ? 'changes' : raw === 'ai_review' ? 'claude_review' : raw;
+  return (PR_DETAIL_TABS as readonly string[]).includes(id) ? (id as PrDetailTab) : null;
+}
+
 export const INSIGHT_KINDS: readonly InsightKind[] = [
   'my_turn',
   'ci_failing',
@@ -485,8 +506,9 @@ export function readFromUrl(): Partial<FilterState> {
   // nothing rather than arming a pair for a PR nobody is looking at.
   // The retired Threads tab lands on Changes, where the threads live now. A `?thread=` beside it
   // still names the thread: PrDetail's selected-thread effect scrolls to it there.
-  const rawPrTab = p.get('prTab');
-  const prTab = rawPrTab === 'threads' ? 'changes' : rawPrTab;
+  // The AI Review tab is `ai_review` on the wire (agent-agnostic); the old `claude_review` is read
+  // as an alias and the load's reconcile write REPLACES it with `ai_review` (`prTabFromUrl`).
+  const prTab = prTabFromUrl(p.get('prTab'));
   if (prTab && (PR_DETAIL_TABS as readonly string[]).includes(prTab)) {
     const viewed = parseTabKey(p.get('view') ?? '');
     if (viewed?.kind === 'pr-detail') {
@@ -744,7 +766,7 @@ export function writeToUrl(s: FilterState): void {
       s.prDetailTab.prId === viewedPr.prId &&
       s.prDetailTab.tab !== 'overview'
     ) {
-      p.set('prTab', s.prDetailTab.tab);
+      p.set('prTab', prTabToUrl(s.prDetailTab.tab));
     }
   }
   // Every remaining `activeTab` is a SEED-BACKED drill-down — the ML-strip flagging list, a

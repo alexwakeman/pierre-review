@@ -487,6 +487,7 @@ export function TicketCoverageSection({
   return (
     <ReviewSection
       title="Story check"
+      section="stories"
       pills={n > 0 ? <SectionCount>{`${n} ${n === 1 ? 'ticket' : 'tickets'}`}</SectionCount> : null}
       info={
         <InfoButton title="Story check">

@@ -1420,7 +1420,8 @@ body {
 }
 
 /* ---- The story view's reading measure: prose never runs wider than ~75 characters ---- */
-.story-measure p {
+.story-measure p,
+.reading-measure p {
   max-width: 75ch;
 }
 

@@ -217,6 +217,7 @@ export function ClaudeReviewDiagramsSection({
   return (
     <ReviewSection
       title="Design"
+      section="design"
       info={
         <InfoButton title="Design">
           <DesignLegend story={data.stories.length > 0} />

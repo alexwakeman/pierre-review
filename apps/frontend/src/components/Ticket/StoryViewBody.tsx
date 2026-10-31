@@ -32,7 +32,10 @@ export function StoryViewBody({
   ident,
   meta,
   page = false,
+  oneColumn = false,
 }: {
+  /** Always one column (the PR drawer's Story tab — StoryLayout). */
+  oneColumn?: boolean;
   /** The story TAB (TicketTabView): the ticket's header is the page header and there is no card.
    *  This Sprint's tray leaves it off. */
   page?: boolean;
@@ -110,7 +113,7 @@ export function StoryViewBody({
   const found = data?.found === true || storyQ.data?.found === true;
 
   return (
-    <StoryLayout>
+    <StoryLayout oneColumn={oneColumn}>
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
         <p className="text-body text-ui-danger">Couldn’t load this story.</p>

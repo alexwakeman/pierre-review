@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  ActiveReviewsResponse,
   AiBudgetResponse,
   CloneStorageResponse,
   ThreadCheckStatusResponse,
@@ -1437,6 +1438,8 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
+      // The review banner's poll (AI on): nothing running.
+      if (path.endsWith('/api/claude-reviews/active')) return json(route, { reviews: [] } satisfies ActiveReviewsResponse);
       // The thread cards' Claude marker (one batched POST per screen): no judged run here.
       if (path.endsWith('/api/claude-review/thread-judgements'))
         return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);

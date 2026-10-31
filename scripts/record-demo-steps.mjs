@@ -15,7 +15,9 @@
 import { createRequire } from 'node:module';
 const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'];
 // Activity is a collapsed section of Overview now (opened below); Comments is its own tab.
-const PR_TABS = ['overview', 'comments', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
+// `ai_review` is the AI Review tab on the wire (`claude_review` is only an old-link alias); `story` is
+// the PR's linked story, the story view inside the PR (a PR naming none shows Overview).
+const PR_TABS = ['overview', 'comments', 'changes', 'bot_activity', 'ai_review', 'ai_fix', 'story'];
 const ROOT = 'https://acme.atlassian.net';
 const ident = (key) => `jira:${ROOT}#${key}`;
 const enc = encodeURIComponent;
@@ -341,7 +343,7 @@ export const STEPS = [
           await h.clickAll(h.page.getByRole('button', { name: /View log|Show log/ }), { max: 2 });
           await h.clickAll(h.page.getByRole('button', { name: /^(Merge|Merge when ready)$/ }), { max: 1, after: () => h.escape() });
         }
-        await explore(h, { max: t === 'claude_review' || t === 'ai_fix' ? 20 : 10, scope: 'main' });
+        await explore(h, { max: t === 'ai_review' || t === 'ai_fix' ? 20 : 10, scope: 'main' });
       },
     })),
   ),
@@ -356,7 +358,7 @@ export const STEPS = [
     },
   })),
   ...MORE_PRS.flatMap((id) =>
-    ['overview', 'changes', 'claude_review'].map((t) => ({
+    ['overview', 'changes', 'ai_review'].map((t) => ({
       name: `pr:${id}:${t}`,
       run: (h) => h.go(`?view=pr-detail:${id}&prTab=${t}`),
     })),
@@ -387,7 +389,7 @@ export const STEPS = [
   {
     name: 'pr:105:review-history',
     run: async (h) => {
-      await h.go('?view=pr-detail:105&prTab=claude_review');
+      await h.go('?view=pr-detail:105&prTab=ai_review');
       // Every run in the history select ("Showing", the custom Select: its options exist only
       // while it is open), so showing any of them answers. Open it, count, then pick each by index.
       const history = h.page.locator('main').getByLabel('Showing').first();
@@ -479,7 +481,7 @@ export const STEPS = [
   { name: 'ws2:sprint', run: (h) => h.go('?view=sprint&workspace=2') },
   { name: 'ws2:chronology', run: (h) => h.go('?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks') },
   ...WEB_PRS.flatMap((id) =>
-    ['overview', 'changes', 'claude_review'].map((t) => ({
+    ['overview', 'changes', 'ai_review'].map((t) => ({
       name: `pr:${id}:${t}`,
       run: (h) => h.go(`?view=pr-detail:${id}&prTab=${t}&workspace=2`),
     })),
