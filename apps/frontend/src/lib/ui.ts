@@ -399,7 +399,7 @@ export const BOT_VENDOR_META: Record<
 
 /** THE PAGE GROUNDS. `bg-white` in light, `dark:bg-gray-950` in dark. */
 const INK_LIGHT_BG = '#ffffff';
-const INK_DARK_BG = '#030712';
+const INK_DARK_BG = '#191919';
 /** WCAG AA for body text. Vendor chips render at 10-11px, so the large-text 3:1 relaxation
  *  does not apply to them. */
 const INK_TARGET = 4.5;

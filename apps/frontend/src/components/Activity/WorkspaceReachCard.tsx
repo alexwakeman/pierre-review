@@ -42,7 +42,7 @@ import { InfoButton } from '../InfoModal.js';
 
 /** Low → high, and the STACK ORDER IS FIXED, so position encodes the level as well as hue does.
  *
- *  ⚠ MEASURED AS FILLS AGAINST BOTH PAGE GROUNDS (#ffffff light, #030712 dark), not eyeballed —
+ *  ⚠ MEASURED AS FILLS AGAINST BOTH PAGE GROUNDS (#ffffff light, #191919 dark), not eyeballed —
  *  every one clears the 3:1 non-text floor on BOTH, which is a narrow band: it admits only
  *  luminance 0.107–0.300, so a light-to-dark ramp of one hue is arithmetically impossible here.
  *

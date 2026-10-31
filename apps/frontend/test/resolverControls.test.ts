@@ -201,7 +201,7 @@ describe('the gutter arrow is a real control', () => {
     // gray-500 on white, gray-400 on gray-950. WCAG 1.4.11 asks 3:1 of a non-text control; against
     // the BARE PAGE both clear AA's 4.5 as well.
     expect(ratio('#6b7280', '#ffffff')).toBeGreaterThanOrEqual(4.5);
-    expect(ratio('#9ca3af', '#030712')).toBeGreaterThanOrEqual(4.5);
+    expect(ratio('#9ca3af', '#191919')).toBeGreaterThanOrEqual(4.5);
     // ⚠ AND THE PAGE IS NOT THE ONLY GROUND IT SITS ON. Once a side is taken, `RegionRibbons`
     // paints `.mr-fill-applied` across the whole 1.75rem gutter track — which IS this button's
     // cell — so late in a resolve the majority of arrows are on a green tint, not on white. 4.5
@@ -211,7 +211,7 @@ describe('the gutter arrow is a real control', () => {
     // floors the ribbon's alpha and never caps it, which is exactly the gap.
     for (const [name, fg, bg] of [
       ['light', '#6b7280', '#ffffff'],
-      ['dark', '#9ca3af', '#030712'],
+      ['dark', '#9ca3af', '#191919'],
     ] as const) {
       const tinted = over(appliedInk(name), ribbonAlpha(), hexToRgb(bg));
       expect(ratio(fg, rgbToHex(tinted)), `${name} arrow over the ribbon`).toBeGreaterThanOrEqual(3);
@@ -236,7 +236,7 @@ describe('the gutter arrow is a real control', () => {
     expect(cls).toMatch(/focus-visible:ring-sky-600/);
     expect(cls).toMatch(/dark:focus-visible:ring-sky-400/);
     expect(ratio('#0284c7', '#ffffff'), 'light ring on the page').toBeGreaterThanOrEqual(3);
-    expect(ratio('#38bdf8', '#030712'), 'dark ring on the page').toBeGreaterThanOrEqual(3);
+    expect(ratio('#38bdf8', '#191919'), 'dark ring on the page').toBeGreaterThanOrEqual(3);
   });
 
   it('never points at a pane the wash left invisible', () => {

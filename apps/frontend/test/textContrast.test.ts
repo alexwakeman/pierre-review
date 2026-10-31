@@ -35,7 +35,7 @@ import { join } from 'node:path';
 const TW: Record<string, string> = {
   'gray-100': '#f3f4f6', 'gray-200': '#e5e7eb', 'gray-300': '#d1d5db', 'gray-400': '#9ca3af',
   'gray-500': '#6b7280', 'gray-600': '#4b5563', 'gray-700': '#374151', 'gray-800': '#1f2937',
-  'gray-900': '#111827', 'gray-950': '#030712',
+  'gray-900': '#111827', 'gray-950': '#191919',
   'slate-300': '#cbd5e1', 'slate-400': '#94a3b8', 'slate-500': '#64748b', 'slate-600': '#475569',
   'zinc-400': '#a1a1aa', 'zinc-500': '#71717a', 'zinc-600': '#52525b',
   'neutral-400': '#a3a3a3', 'neutral-500': '#737373',
@@ -43,7 +43,7 @@ const TW: Record<string, string> = {
 
 /** The page grounds. `bg-white` in light, `dark:bg-gray-950` in dark — see index.css / App.tsx. */
 const LIGHT_BG = '#ffffff';
-const DARK_BG = '#030712';
+const DARK_BG = '#191919';
 
 function rgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');

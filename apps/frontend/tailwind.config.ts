@@ -48,6 +48,9 @@ export default {
         'ui-fade': 'ui-fade 140ms linear',
       },
       colors: {
+        // The dark PAGE GROUND (`dark:bg-gray-950` and the veils that mimic it) is Claude Code
+        // desktop's #191919, the same as --ui-bg in .dark. Extending merges with Tailwind's grays.
+        gray: { 950: '#191919' },
         ui: {
           bg: 'rgb(var(--ui-bg) / <alpha-value>)',
           surface: 'rgb(var(--ui-surface) / <alpha-value>)',

@@ -37,7 +37,7 @@ describe('LimnSeverityChip', () => {
     for (const [sev, color] of Object.entries(LIMN_SEVERITY_COLOR)) {
       const ink = vendorInk(color);
       const light = contrastRatio(ink['--ink-light']!, '#ffffff');
-      const dark = contrastRatio(ink['--ink-dark']!, '#030712');
+      const dark = contrastRatio(ink['--ink-dark']!, '#191919');
       if (light < 4.5) failures.push(`${sev} light ${light.toFixed(2)}`);
       if (dark < 4.5) failures.push(`${sev} dark ${dark.toFixed(2)}`);
     }

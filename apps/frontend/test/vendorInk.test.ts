@@ -12,7 +12,7 @@ import { BOT_VENDOR_META, contrastRatio, readableInk, vendorInk } from '../src/l
 // here so nobody "simplifies" this back to one stored colour per vendor.
 
 const LIGHT_BG = '#ffffff';
-const DARK_BG = '#030712';
+const DARK_BG = '#191919';
 const AA = 4.5;
 
 describe('brand ink', () => {

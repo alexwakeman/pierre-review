@@ -59,21 +59,21 @@
 /* ── THE REDESIGN'S COLOUR ROLES (docs/redesign/DESIGN.md § Colour) ───────────────────────────
    Space-separated RGB channels (the --ai-* pattern) so Tailwind can apply alpha. Surfaces are
    separated by TONE, not borders: bg → surface → raise → hover → sel, each one step lighter in dark
-   and one step darker in light. Text has three inks (ink / mute / faint), every one AA (4.5:1) on
+   and one step darker in light. The neutrals are Claude Code desktop's (untinted greys). Text has three inks (ink / mute / faint), every one AA (4.5:1) on
    every surface, measured by test/designTokens.test.ts — change a value here and that test says
    whether it still holds. Colour is reserved: danger = what blocks, success = what is ready to
    land, accent = the selection and the one primary action. Everything else is ink on surface.
    warn is for the few legacy "attention" marks the redesign keeps (stale, near a limit). */
 :root {
   --ui-bg: 255 255 255;           /* #FFFFFF page                         */
-  --ui-surface: 247 247 248;      /* #F7F7F8 sidebar, side panel          */
-  --ui-raise: 240 241 243;        /* #F0F1F3 inputs, secondary buttons    */
-  --ui-hover: 234 235 238;        /* #EAEBEE row hover                    */
-  --ui-sel: 227 230 236;          /* #E3E6EC selected row, active tab     */
-  --ui-line: 220 222 227;         /* #DCDEE3 the rare divider / input edge */
-  --ui-ink: 22 23 26;             /* #16171A primary text                 */
-  --ui-mute: 80 85 94;            /* #50555E secondary text               */
-  --ui-faint: 98 102 111;         /* #62666F tertiary text, meta          */
+  --ui-surface: 250 250 250;      /* #FAFAFA sidebar, side panel          */
+  --ui-raise: 244 244 244;        /* #F4F4F4 inputs, secondary buttons    */
+  --ui-hover: 238 238 238;        /* #EEEEEE row hover                    */
+  --ui-sel: 225 225 225;          /* #E1E1E1 selected row, active tab     */
+  --ui-line: 222 222 222;         /* #DEDEDE the rare divider / input edge */
+  --ui-ink: 25 25 25;             /* #191919 primary text                 */
+  --ui-mute: 83 83 83;            /* #535353 secondary text               */
+  --ui-faint: 97 97 97;           /* #616161 tertiary text, meta          */
   --ui-accent: 29 91 214;         /* #1D5BD6 accent as TEXT / focus ring  */
   --ui-accent-fill: 37 99 235;    /* #2563EB primary button ground        */
   --ui-on-accent: 255 255 255;    /* text on accent-fill                  */
@@ -84,15 +84,15 @@
 }
 
 .dark {
-  --ui-bg: 14 15 17;              /* #0E0F11 */
-  --ui-surface: 19 20 23;         /* #131417 */
-  --ui-raise: 24 25 29;           /* #18191D */
-  --ui-hover: 28 30 34;           /* #1C1E22 */
-  --ui-sel: 34 37 43;             /* #22252B */
-  --ui-line: 40 43 50;            /* #282B32 */
-  --ui-ink: 232 233 236;          /* #E8E9EC */
-  --ui-mute: 161 165 174;         /* #A1A5AE */
-  --ui-faint: 139 144 154;        /* #8B909A */
+  --ui-bg: 25 25 25;              /* #191919 */
+  --ui-surface: 31 31 31;         /* #1F1F1F */
+  --ui-raise: 38 38 38;           /* #262626 */
+  --ui-hover: 44 44 44;           /* #2C2C2C */
+  --ui-sel: 51 51 51;             /* #333333 — the lightest ground the kept accent/alert inks clear AA on */
+  --ui-line: 58 58 58;            /* #3A3A3A */
+  --ui-ink: 239 239 239;          /* #EFEFEF */
+  --ui-mute: 180 180 180;         /* #B4B4B4 */
+  --ui-faint: 158 158 158;        /* #9E9E9E */
   --ui-accent: 107 157 247;       /* #6B9DF7 */
   --ui-accent-fill: 52 102 212;   /* #3466D4 */
   --ui-on-accent: 255 255 255;
@@ -440,26 +440,26 @@ body {
 
 /* ---- vis-timeline: dark-mode + custom item styling ---- */
 .dark .vis-timeline {
-  border-color: #1f2937;
+  border-color: #262626;
 }
 .dark .vis-panel .vis-content,
 .dark .vis-panel .vis-background,
 .dark .vis-labelset .vis-label,
 .dark .vis-foreground .vis-group {
-  border-color: #1f2937;
-  color: #e5e7eb;
+  border-color: #262626;
+  color: #e5e5e5;
 }
 .dark .vis-time-axis .vis-text {
-  color: #9ca3af;
+  color: #9e9e9e;
 }
 .dark .vis-time-axis .vis-grid.vis-minor {
-  border-color: #1f2937;
+  border-color: #262626;
 }
 .dark .vis-time-axis .vis-grid.vis-major {
-  border-color: #374151;
+  border-color: #333333;
 }
 .dark .vis-labelset .vis-label {
-  color: #d1d5db;
+  color: #d4d4d4;
 }
 .vis-current-time,
 .dark .vis-current-time {
@@ -722,9 +722,9 @@ body {
   text-overflow: ellipsis;
 }
 .dark .tl-repo-sticky {
-  color: #f3f4f6; /* gray-100 */
-  background-color: #030712; /* gray-950 opaque base */
-  border-bottom-color: #1f2937; /* gray-800 */
+  color: #f0f0f0;
+  background-color: #191919; /* the dark page ground (gray-950, remapped in tailwind.config) */
+  border-bottom-color: #262626;
 }
 /* Faint zebra wash echoing the current repo's tint. Drawn as a background-IMAGE so it
    composes OVER the opaque background-color (which stays fully opaque) — same trick as
@@ -1585,7 +1585,7 @@ body {
    utilities with a numeric shade (`text-gray-400`); a custom property is invisible to it. The
    guard is `test/codeTokens.test.ts`, which parses these declarations back out of this file,
    composites each wash at its declared alpha and asserts AA both directions in both themes.
-   Measured with `textContrast.test.ts`'s own formula against #ffffff and #030712 — ink on its own
+   Measured with `textContrast.test.ts`'s own formula against #ffffff and #191919 — ink on its own
    wash, then ink on the bare page:
 
      role      light wash   ink/wash   ink/page      dark wash   ink/wash   ink/page
