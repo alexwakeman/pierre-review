@@ -12,6 +12,7 @@
 //   node scripts/verify-demo.mjs --only=pr:113   some views (comma list; substring, or a `*` glob)
 //   --concurrency=<n>   views at once, each in its own fresh browser context (default 4)
 //   --port=<p>          the site server's port (default 4391, or VERIFY_PORT)
+//   --shots=<dir>       where screenshots go (default /tmp/limn-demo-shots; `-390` appended on --phone)
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -28,7 +29,8 @@ const argValue = (name) => {
 const PORT = Number(argValue('port') ?? process.env.VERIFY_PORT ?? 4391);
 const CONCURRENCY = Math.max(1, Number(argValue('concurrency') ?? 4));
 const BASE = `http://127.0.0.1:${PORT}/demo/`;
-const SHOTS = '/tmp/limn-demo-shots';
+// `--shots=<dir>` (or VERIFY_SHOTS_DIR): so two runs at once do not overwrite each other's screenshots.
+const SHOTS = argValue('shots') ?? process.env.VERIFY_SHOTS_DIR ?? '/tmp/limn-demo-shots';
 const LATER_DAYS = Number(argValue('later') ?? 0);
 const ONLY = argValue('only')
   ?.split(',')
@@ -455,11 +457,17 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200));
   }
 
+  const views = VIEWS.filter(([name]) => selected(name));
+  if (!views.length) {
+    // A typo in --only must not read as a clean run.
+    console.error(`no view matches --only=${argValue('only')}`);
+    stopSite();
+    process.exit(1);
+  }
   const browser = await chromium.launch({ headless: true });
   const contextOptions = PHONE
     ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark', reducedMotion: 'reduce' }
     : { viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' };
-  const views = VIEWS.filter(([name]) => selected(name));
   const results = new Map(); // name → problems[]
   const shots = [];
 

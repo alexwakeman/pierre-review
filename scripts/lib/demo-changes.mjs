@@ -14,7 +14,9 @@
 //     (a longer list whose new rows the SPA then fetches): run a full record for that. A file the demo SEEDER imports → full (it changes the
 //     data). A file no route reaches (the scheduler, sync) → nothing: the recorder's backend runs
 //     no scheduler and no sync.
-//   • A FRONTEND source file → the COVERAGE row that names it → its steps; no row → full.
+//   • A FRONTEND source file → the COVERAGE row that names it, plus the rows of every view that
+//     renders it (its importers, walked up to the first file a row names) → their steps. No row for
+//     the file, or an importer chain that reaches the app shell through files no row names → full.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
@@ -58,13 +60,13 @@ export function changedFiles(root, base) {
 }
 
 // ── The backend's import graph ──────────────────────────────────────────────────────────────────
-function walkTs(dir, out) {
+function walkTs(dir, out, ext = /\.(ts|mjs)$/) {
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir)) {
     if (name === 'node_modules' || name.startsWith('.')) continue;
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walkTs(p, out);
-    else if (/\.(ts|mjs)$/.test(name) && !/\.test\.ts$/.test(name)) out.push(p);
+    if (statSync(p).isDirectory()) walkTs(p, out, ext);
+    else if (ext.test(name) && !/\.test\.tsx?$/.test(name)) out.push(p);
   }
   return out;
 }
@@ -92,6 +94,61 @@ function buildBackendGraph(root) {
     }
   }
   return { importers, routes };
+}
+
+/** The SPA's import graph: file → the files importing it (relative to root; `.js` specifiers → .ts/.tsx). */
+function buildFrontendImporters(root) {
+  const importers = new Map();
+  for (const f of walkTs(join(root, 'apps/frontend/src'), [], /\.(ts|tsx)$/)) {
+    const src = readFileSync(f, 'utf8');
+    for (const m of src.matchAll(IMPORT_RE)) {
+      const raw = resolve(dirname(f), m[1]);
+      const stem = raw.replace(/\.(js|jsx|ts|tsx)$/, '');
+      const target = [`${stem}.tsx`, `${stem}.ts`, join(stem, 'index.tsx'), join(stem, 'index.ts')].find((t) => existsSync(t));
+      if (!target) continue;
+      const rel = relative(root, target);
+      if (!importers.has(rel)) importers.set(rel, new Set());
+      importers.get(rel).add(relative(root, f));
+    }
+  }
+  return importers;
+}
+
+/** The files that MOUNT views (by URL): a view a row names, mounted here, is covered by that row. */
+const VIEW_HOSTS = ['apps/frontend/src/App.tsx', 'apps/frontend/src/main.tsx', 'apps/frontend/src/components/Activity/index.tsx'];
+
+/**
+ * A frontend file's steps: its own COVERAGE rows, plus — walking UP its importers — the rows of every
+ * view that renders it (a shared component such as CommentCard renders in the Feed, Pending, Bots and
+ * PR detail alike). It walks every importer up to the files that mount views (VIEW_HOSTS), adding
+ * each file's rows on the way. A file a row names may be mounted there (it is that view); a file NO
+ * row names that is mounted there (the shell: top bar, sidebar), or that nothing imports, is in every
+ * view or in none we know → null (a full record).
+ */
+function frontendRows(f, map, importers) {
+  const rowsOf = (file) => map.COVERAGE.filter((r) => matchesAny(file, r.files));
+  const rows = new Set(rowsOf(f));
+  const seen = new Set([f]);
+  const queue = [f];
+  while (queue.length) {
+    const cur = queue.shift();
+    const own = rowsOf(cur);
+    for (const r of own) rows.add(r);
+    const ups = [...(importers.get(cur) ?? [])].filter((u) => !matchesAny(u, map.NO_RECORD_PATHS));
+    const named = own.length > 0;
+    if (!ups.length && !named) return { rows: null, via: cur };
+    for (const u of ups) {
+      if (VIEW_HOSTS.includes(u)) {
+        if (!named) return { rows: null, via: cur };
+        continue;
+      }
+      if (!seen.has(u)) {
+        seen.add(u);
+        queue.push(u);
+      }
+    }
+  }
+  return { rows: [...rows], via: null };
 }
 
 /** A registered route pattern (`/api/prs/:id/files`) as a pathname matcher. */
@@ -122,6 +179,7 @@ export function stepsForChanges(root, files, map, index, stepNames) {
     return hit.length;
   };
   let graph = null;
+  let feImporters = null;
   for (const f of files) {
     if (matchesAny(f, map.FULL_RECORD_PATHS)) return { full: `${f} changes what every view reads`, steps, why };
     if (matchesAny(f, map.NO_RECORD_PATHS)) {
@@ -129,8 +187,10 @@ export function stepsForChanges(root, files, map, index, stepNames) {
       continue;
     }
     if (f.startsWith('apps/frontend/src/')) {
-      const rows = map.COVERAGE.filter((r) => matchesAny(f, r.files));
-      if (!rows.length) return { full: `${f} is not in COVERAGE (record-demo-steps.mjs)`, steps, why };
+      if (!map.COVERAGE.some((r) => matchesAny(f, r.files))) return { full: `${f} is not in COVERAGE (record-demo-steps.mjs)`, steps, why };
+      feImporters ??= buildFrontendImporters(root);
+      const { rows, via } = frontendRows(f, map, feImporters);
+      if (!rows) return { full: `${f} renders through ${via}, which no COVERAGE row names`, steps, why };
       const n = rows.reduce((acc, r) => acc + r.steps.reduce((a, g) => a + stepGlob(g), 0), 0);
       why.push(`${f} → ${rows.flatMap((r) => r.steps).join(', ')} (${n} steps)`);
       continue;

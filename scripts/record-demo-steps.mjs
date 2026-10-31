@@ -595,6 +595,7 @@ export const COVERAGE = [
     steps: ['ticket:*', 'sprint:tray:*', 'ws2:sprint:tray:*'],
   },
   { files: ['apps/frontend/src/components/Timeline/**', 'apps/frontend/src/components/ShowOnTimeline.tsx'], steps: ['timeline', 'timeline:*'] },
+  { files: ['apps/frontend/src/components/Search/**'], steps: ['search'] },
   { files: ['apps/frontend/src/components/Activity/UserActivityDetail.tsx', 'apps/frontend/src/components/User*.tsx'], steps: ['user-activity:*', 'popovers'] },
   { files: ['apps/frontend/src/components/settings/**', 'apps/frontend/src/components/Activity/{WorkspaceManager,SprintStatusSettings}.tsx'], steps: ['settings', 'ws2:settings'] },
   {

@@ -223,8 +223,10 @@ async function buildSpa(env, vite) {
       else hash.update(p).update(readFileSync(p));
     }
   };
-  for (const d of [join(FRONTEND, 'src'), join(ROOT, 'packages', 'shared', 'src')]) walk(d);
-  for (const f of [join(FRONTEND, 'index.html'), join(FRONTEND, 'vite.config.ts'), join(FRONTEND, 'package.json'), join(ROOT, 'pnpm-lock.yaml')]) {
+  for (const d of [join(FRONTEND, 'src'), join(FRONTEND, 'public'), join(ROOT, 'packages', 'shared', 'src')]) if (existsSync(d)) walk(d);
+  const configs = ['index.html', 'vite.config.ts', 'tailwind.config.ts', 'postcss.config.js', 'tsconfig.json', 'package.json'].map((f) => join(FRONTEND, f));
+  for (const name of readdirSync(FRONTEND).sort()) if (name.startsWith('.env')) configs.push(join(FRONTEND, name));
+  for (const f of [...configs, join(ROOT, 'pnpm-lock.yaml')]) {
     if (existsSync(f)) hash.update(f).update(readFileSync(f));
   }
   const key = hash.digest('hex').slice(0, 16);

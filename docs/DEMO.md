@@ -103,7 +103,7 @@ full record first.
 | the seed, the schema, migrations, `packages/shared`, the SPA's data layer (`api/`, `hooks/`, `store/`, `lib/`, `App.tsx`), the recorder | EVERYTHING (a full record) |
 | a backend file the demo seeder imports | everything |
 | any other backend file | for each answer on a route that imports it (walking imports up to the route file), the FIRST step that recorded it |
-| a frontend component | the steps its `COVERAGE` row names; a component in no row → everything |
+| a frontend component | the steps of its `COVERAGE` row AND of every row naming a file that imports it, walked up to the files that mount views (a shared component re-records every view it renders in); a component in no row, or one the shell (top bar, sidebar) renders through files no row names → everything |
 | tests, docs, the website, the demo replayer | nothing |
 
 ⚠ A backend change that makes a view ASK for something new (a longer list whose new rows the SPA
@@ -162,8 +162,9 @@ a re-record **in the same commit**:
 Then: `pnpm demo:record` (or `--changed` / `--only=…`, above) → `pnpm --filter @pierre-review/frontend build:demo`
 → `pnpm demo:verify` and `node scripts/verify-demo.mjs --later=40` → commit
 `apps/frontend/src/demo/data/recording.json` and `recording-steps.json`. `verify-demo` opens its views
-on four pages at once, each in a fresh browser context (`--concurrency=<n>`, `--port=<p>`), and takes
-`--only=<names>` (comma list; substrings or `*` globs).
+on four pages at once, each in a fresh browser context (`--concurrency=<n>`, `--port=<p>`,
+`--shots=<dir>` so two runs do not share screenshots), and takes `--only=<names>` (comma list;
+substrings or `*` globs; matching no view is a failure).
 `pnpm demo:verify:phone` (`--phone`) runs the same views and actions at 390 × 844 on a touch screen
 (screenshots in `/tmp/limn-demo-shots-390`); an `act` that differs on a phone branches on `PHONE`
 (Settings is reached through the drawer; a phone's Settings tab carries its summary line; Docs
