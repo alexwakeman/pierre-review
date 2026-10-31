@@ -1746,6 +1746,13 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   (≤ 8, between existing cells, labels ≤ 3 words / 24 chars). Plus a title (≤ 80) and a caption
   (≤ 2 sentences, ≤ 220). ⚠ **The layer vocabulary is PROVISIONAL** — the user is trialling it; a
   change to it bumps `DESIGN_DIAGRAM_VERSION`.
+- **PROGRESS** (2026-10-31): the queue keeps each queued or running run's phase IN MEMORY (`manager.ts`
+  `progress`, set on queue → `waiting`, on launch → `preparing` (diffs, pre-check, checkouts), from the
+  agent's `onProgress` → `reading` with its tool-step count, or `checking` while its LATEST step sent a
+  design (Claude's `submit_design`; Codex's final JSON answer — the same `onProgress`, so both providers
+  report alike; a refused design goes back to `reading`), after the agent → `saving`; deleted when the
+  run ends). The GET routes add it to an in-flight view as `progress` (`diagramProgress`). No column, no
+  migration: a restart fails the run anyway (`reconcileOrphanedDiagrams`).
 - **Two kinds.** `'pr'` — ONE design of how this PR's change is built, at its head.
   `'story'` — when the PR is on a TRACKER ticket (core tracker, STORED rows only via
   `tracker/ticket-source.ts`; a pasted `manual:` story never counts) with **more than one** open or

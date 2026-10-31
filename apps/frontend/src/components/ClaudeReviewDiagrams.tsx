@@ -20,7 +20,14 @@ import {
   type StorySequenceDiagramSlot,
 } from '@pierre-review/shared';
 import { useAiCapabilities, useAiProvider } from '../hooks/useAiCapabilities.js';
-import { redrawRefusalText, slotDrawing, slotStatusLine } from '../lib/sequenceDiagrams.js';
+import {
+  diagramProgressPct,
+  diagramProgressText,
+  redrawRefusalText,
+  slotDrawing,
+  slotRunInFlight,
+  slotStatusLine,
+} from '../lib/sequenceDiagrams.js';
 import { memberForRef } from '../lib/designGrid.js';
 import {
   useRedrawStoryDiagram,
@@ -37,6 +44,8 @@ import { FlowDiagram, type OpenFlowFile } from './FlowDiagram.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
 import { aiRunLabel } from '@pierre-review/shared';
+import { RegenProgressBar } from './Activity/RegenProgressBar.js';
+import { AiStatusLine } from './AiStatusLine.js';
 
 export { redrawRefusalText };
 
@@ -70,6 +79,40 @@ export function DesignLegend({ story }: { story: boolean }): JSX.Element {
   );
 }
 
+/**
+ * THE DRAWING'S PROGRESS: the shared AI bar (determinate from the server's phase, else easing) and the
+ * one status line with the time since the run was queued — both from the stored run, so a reload
+ * shows them again. Gone (the bar fills and fades) once the run is done; the slot's line then says
+ * how it ended.
+ */
+function DiagramProgress({
+  slot,
+  drawing,
+  redrawing,
+}: {
+  slot: SequenceDiagramSlot;
+  drawing: boolean;
+  redrawing: boolean;
+}): JSX.Element {
+  const run = slotRunInFlight(slot);
+  // A fragment: nothing is left in the slot's spacing once the bar has faded.
+  return (
+    <>
+      <RegenProgressBar
+        active={drawing}
+        label="Drawing the design"
+        value={drawing ? diagramProgressPct(run?.progress) : null}
+        timeConstantSec={40}
+      />
+      {drawing && (
+        <p data-testid="diagram-progress" className="m-0">
+          <AiStatusLine stage={diagramProgressText(run, redrawing)} since={run?.createdAt ?? null} />
+        </p>
+      )}
+    </>
+  );
+}
+
 /** One subject's design: its title, caption, the grid itself and the status line. */
 export function DiagramSlotView({
   slot,
@@ -87,11 +130,15 @@ export function DiagramSlotView({
   stickyClassName?: string;
 }): JSX.Element {
   const d = slot.diagram;
-  const line = slotStatusLine(slot, redrawing);
+  const drawing = redrawing || slotDrawing(slot);
+  // While it draws, the bar and its words take the status line's place.
+  const line = drawing ? null : slotStatusLine(slot, redrawing);
   const drawn = d != null && (d.flow != null || d.design != null);
   const name = d?.title != null ? `${label}: ${d.title}` : label;
   return (
     <div className="space-y-1.5">
+      {/* Above the design, so a long one never hides that it is being redrawn. */}
+      <DiagramProgress slot={slot} drawing={drawing} redrawing={redrawing} />
       {d != null && drawn && (
         <>
           {d.title != null && <p className={REVIEW_ITEM_TITLE}>{d.title}</p>}

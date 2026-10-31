@@ -26,7 +26,10 @@ export function RegenProgressBar({
   sub?: string;
 }): JSX.Element | null {
   // null = hidden. A number 0–100 = shown at that fill.
-  const [pct, setPct] = useState<number | null>(null);
+  // Mounted while already active (a reload mid-run), it draws at once rather than a frame later.
+  const [pct, setPct] = useState<number | null>(() =>
+    active ? (value != null ? Math.max(0, Math.min(100, value)) : 8) : null,
+  );
   const determinate = value != null;
 
   useEffect(() => {

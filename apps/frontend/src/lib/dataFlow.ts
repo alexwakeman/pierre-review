@@ -6,10 +6,13 @@
 //            first reaches them). A duplicate id keeps its first.
 //   ROWS     one per step, in step order, top to bottom. A step naming a lane that is not drawn is
 //            dropped (the validator refuses it; an old or hand-made row must not crash the pane).
-//   GEOMETRY percentages of the figure's width, so the drawing scales with the lanes: an arrow runs from
-//            the centre of its `from` lane to the centre of its `to` lane; a step that stays on one lane
-//            (a check or a transform) is a small loop beside that lane's line; a label spans the lanes
-//            its arrow joins (two lanes for a loop) so it never has less room than one lane.
+//   GEOMETRY percentages of the figure's width, so the drawing scales with the lanes. Each step's SPAN
+//            runs from the centre of its `from` lane to the centre of its `to` lane: the step's box sits
+//            centred in it and its arrow runs from one lane's line to the box's edge, and from the
+//            box's other edge to the other lane's line. A step that stays on one lane (a check or a
+//            transform) spans from its lane's line up to LOOP_LANES towards its open side — the right, or the
+//            left on the last lane (a lone lane: to the figure's edge) — with its box beside the line
+//            and a loop out to the box and back.
 import {
   DESIGN_CHANGES,
   FLOW_LANES,
@@ -47,9 +50,8 @@ export interface FlowRow {
   member: SequenceDiagramMember | null;
   // How the step reads as text: "Step 3, Write: from Orders route to orders table — order row."
   text: string;
-  // Percentages of the figure's width.
-  arrow: { left: number; width: number };
-  label: { left: number; width: number };
+  // Percentages of the figure's width: lane line to lane line (a loop: lane line to one lane over).
+  span: { left: number; width: number };
 }
 
 export interface FlowLayout {
@@ -57,7 +59,8 @@ export interface FlowLayout {
   rows: FlowRow[];
 }
 
-const LOOP = 0.42; // a loop's width, in lanes
+/** How far a loop's span reaches from its lane's line, in lanes (less where the figure ends). */
+export const LOOP_LANES = 1.75;
 
 export function layoutFlow(flow: FlowDiagram, members: readonly SequenceDiagramMember[] = []): FlowLayout {
   const lanes: FlowLane[] = [];
@@ -84,14 +87,14 @@ export function layoutFlow(flow: FlowDiagram, members: readonly SequenceDiagramM
     const hi = Math.max(fromCol, toCol);
     // A loop opens to the right of its lane, or to the left on the last lane.
     const opensRight = fromCol < n - 1 || n === 1;
-    const arrow = self
-      ? { left: pct(opensRight ? fromCol + 0.5 : fromCol + 0.5 - LOOP), width: pct(LOOP) }
+    // A loop's box may run past the next lane's line (it is opaque, as a long step's box is), so its
+    // words get about as much room as a step between lanes — never past the figure's edge.
+    const loopW = Math.min(LOOP_LANES, opensRight ? n - fromCol - 0.5 : fromCol + 0.5);
+    const span = self
+      ? opensRight
+        ? { left: pct(fromCol + 0.5), width: pct(loopW) }
+        : { left: pct(fromCol + 0.5 - loopW), width: pct(loopW) }
       : { left: pct(lo + 0.5), width: pct(hi - lo) };
-    const label = self
-      ? n === 1
-        ? { left: 0, width: 100 }
-        : { left: pct(opensRight ? fromCol : fromCol - 1), width: pct(2) }
-      : { left: pct(lo), width: pct(hi - lo + 1) };
     const word = FLOW_STEP_WORD[step.kind] ?? step.kind;
     const fromLabel = lanes[fromCol]!.participant.label;
     const toLabel = lanes[toCol]!.participant.label;
@@ -107,8 +110,7 @@ export function layoutFlow(flow: FlowDiagram, members: readonly SequenceDiagramM
       word,
       member,
       text: `Step ${step.n}, ${word}: ${where} — ${step.label}.${member != null ? ` Pull request ${member.repo} #${member.number}.` : ''}`,
-      arrow,
-      label,
+      span,
     });
   }
   return { lanes, rows };

@@ -6,7 +6,10 @@ import {
   type AiProviderName,
   type PrSequenceDiagramsResponse,
   type RedrawSequenceDiagramResponse,
+  type SequenceDiagramPhase,
+  type SequenceDiagramProgress,
   type SequenceDiagramSlot,
+  type SequenceDiagramView,
 } from '@pierre-review/shared';
 
 export const DIAGRAM_POLL_MS = 5000;
@@ -73,4 +76,46 @@ export function autoSkippedLine(slot: Pick<SequenceDiagramSlot, 'autoSkipped' | 
     default:
       return null;
   }
+}
+
+// ---- the drawing's progress bar (components/ClaudeReviewDiagrams.tsx `DiagramProgress`) ----
+
+export const DIAGRAM_PHASE_LABEL: Record<SequenceDiagramPhase, string> = {
+  waiting: 'Waiting to start',
+  preparing: 'Reading the changes',
+  reading: 'Reading the code',
+  checking: 'Checking the design',
+  saving: 'Saving',
+};
+
+/** The run in flight in this slot (queued or running), or null. */
+export function slotRunInFlight(slot: SequenceDiagramSlot | null | undefined): SequenceDiagramView | null {
+  for (const v of [slot?.latest, slot?.diagram]) if (v != null && (v.status === 'queued' || v.status === 'running')) return v;
+  return null;
+}
+
+/** A 0–100 reading for the bar; null = no phase known (an older server): the bar eases on its own. */
+export function diagramProgressPct(p: SequenceDiagramProgress | null | undefined): number | null {
+  if (p == null) return null;
+  switch (p.phase) {
+    case 'waiting':
+      return 5;
+    case 'preparing':
+      return 15;
+    case 'reading':
+      // Each file read or search moves it on; never past the checking step.
+      return Math.min(80, 25 + p.steps * 3);
+    case 'checking':
+      return 88;
+    case 'saving':
+      return 96;
+  }
+}
+
+/** The words beside the bar. */
+export function diagramProgressText(run: Pick<SequenceDiagramView, 'status' | 'progress'> | null, redrawing: boolean): string {
+  if (run?.progress != null) return DIAGRAM_PHASE_LABEL[run.progress.phase];
+  if (run?.status === 'queued') return DIAGRAM_PHASE_LABEL.waiting;
+  if (run?.status === 'running') return 'Drawing the design';
+  return redrawing ? 'Starting' : 'Drawing the design';
 }

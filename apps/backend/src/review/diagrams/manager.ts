@@ -7,6 +7,8 @@ import {
   type ClaudeReviewModel,
   type SequenceDiagramKind,
   type SequenceDiagramMember,
+  type SequenceDiagramPhase,
+  type SequenceDiagramProgress,
   type SequenceDiagramTrigger,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -107,6 +109,22 @@ const claimed = new Map<string, number>(); // claim key → diagram id (-1 while
 const lane: DiagramJob[] = [];
 const running = new Map<number, DiagramJob>();
 const controllers = new Map<number, AbortController>();
+// WHERE EACH QUEUED OR RUNNING DRAWING IS (diagram id → progress), read by the GET routes
+// (`diagramProgress`) so the SPA's bar survives a reload. In memory only: a restart fails the run
+// (`reconcileOrphanedDiagrams`), so nothing stale outlives it. Set on queue, moved by the pipeline,
+// deleted when the run ends. Both providers report steps through the same `onProgress`.
+const progress = new Map<number, SequenceDiagramProgress>();
+
+function setPhase(diagramId: number, phase: SequenceDiagramPhase, steps?: number): void {
+  if (!running.has(diagramId) && !lane.some((j) => j.diagramId === diagramId)) return;
+  const prev = progress.get(diagramId);
+  progress.set(diagramId, { phase, steps: steps ?? prev?.steps ?? 0 });
+}
+
+/** A queued or running drawing's progress in this process, or null. */
+export function diagramProgress(diagramId: number): SequenceDiagramProgress | null {
+  return progress.get(diagramId) ?? null;
+}
 
 const keyOf = (accountId: number, kind: SequenceDiagramKind, subject: string): string =>
   `${accountId}:${kind}:${subject}`;
@@ -165,6 +183,7 @@ export async function startDiagram(ctx: AgentContext, a: StartDiagramArgs): Prom
   const firstReview = lane.findIndex((j) => !isManual(j));
   if (manual && firstReview >= 0) lane.splice(firstReview, 0, job);
   else lane.push(job);
+  progress.set(diagramId, { phase: 'waiting', steps: 0 });
   pump();
   return { outcome: 'queued', diagramId };
 }
@@ -192,6 +211,7 @@ function pump(): void {
 function launch(job: DiagramJob): void {
   const { ctx, diagramId } = job;
   running.set(diagramId, job);
+  setPhase(diagramId, 'preparing');
   const controller = new AbortController();
   controllers.set(diagramId, controller);
   void runPipeline(job, controller)
@@ -204,6 +224,7 @@ function launch(job: DiagramJob): void {
     .finally(() => {
       running.delete(diagramId);
       controllers.delete(diagramId);
+      progress.delete(diagramId);
       claimed.delete(keyOf(job.accountId, job.kind, job.subject));
       pump();
       pumpReviewLane();
@@ -229,9 +250,12 @@ async function finishWithAgent(
       design: args.design,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
+      // The bar's phase: reading while the agent works, checking once it has sent a design.
+      onProgress: (p) => setPhase(diagramId, p.submitted ? 'checking' : 'reading', p.steps),
       // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
       usageRecord: { accountId, seam: 'agent', feature: 'sequence_diagram', prId: args.prId },
     });
+    setPhase(diagramId, 'saving');
     // What ran (provider + model id), whatever the outcome.
     await markDiagramRanOn(ctx, accountId, diagramId, { provider: res.provider, model: res.model });
     const telemetry: Telemetry = {

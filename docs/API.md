@@ -277,8 +277,12 @@ run; exactly one of the two is set on a succeeded row), `refusal` (`SequenceDiag
 server-written: the pre-check's `no_code` / `tests_only` / `copy_only` / `too_small`, the model's
 `no_flow`, …), `refusalDetail` (a `no_flow` refusal's own reason, finishing "No diagram: …"; null
 otherwise — a refused view's `title` / `caption` are null) and `members` (story, in ref order: a
-step's or participant's `pr: 'PR2'` is `members[1]`). The Mermaid `source` and `diagramType` left the
-wire. Only design-era rows are read: a stored Mermaid diagram answers as no diagram.
+step's or participant's `pr: 'PR2'` is `members[1]`). A QUEUED or RUNNING view also carries
+`progress` (`SequenceDiagramProgress {phase, steps} | null`; phase `waiting` · `preparing` · `reading` ·
+`checking` · `saving`, `steps` = the agent's tool steps so far): the queue's IN-MEMORY state in this
+process (`manager.ts` `diagramProgress`), null for a run this process does not hold; absent on a
+finished view. It drives the SPA's bar and survives a page reload (a server restart fails the run). The
+Mermaid `source` and `diagramType` left the wire. Only design-era rows are read: a stored Mermaid diagram answers as no diagram.
 
 | Route | Contract |
 |---|---|

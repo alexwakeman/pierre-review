@@ -10,12 +10,16 @@
 //            their own box, STICKY to the top of the scroll pane while the steps go by, and carry the
 //            visible scrollbar; the steps' box (a focusable region with a name when it overflows) and
 //            the cards share one sideways position, so the arrows stay under their lanes. Each lane has
-//            a dashed line down the page; each step is a row with its arrow between the two lanes'
-//            lines (lib/dataFlow.ts computes every position as a percentage).
-//   STEPS    a numbered badge, the step's WORD (Read, Check, Transform, Write, Call, Emit, Return) and
-//            what data passes. Kind is never colour alone: a Check is a dotted line with a shield and
-//            the word; a Write a heavy line with a cylinder and the word; a Return a dashed line. A
-//            visible key names the line styles drawn. A step that stays on one lane is a loop.
+//            a dashed line down the page; each step is a row whose BOX sits centred between the two
+//            lanes' lines (lib/dataFlow.ts computes every span as a percentage).
+//   STEPS    a BOX each (a thin grey border, the lane cards' corners): a numbered badge, the step's WORD
+//            (Read, Check, Transform, Write, Call, Emit, Return), its PR chip, and what data passes. The
+//            arrow runs from the source lane's line to the box's edge and from the box's other edge to
+//            the target lane's line, its head on that line. A step that stays on one lane is a box
+//            beside it with a loop out to the box and back. Kind is never colour alone: a Check is a
+//            dotted line with a shield and the word; a Write a heavy line with a cylinder and the
+//            word; a Return a dashed line. A visible key names the line styles drawn. Lines and heads
+//            are SVG in boxes of one height, so every head sits on its line at any zoom (`ArrowLine`).
 //   LANES    a card per participant: what kind of thing it is, its name, New / Changed (the border, as
 //            on the design grid, keyed by the shared `BorderKey`), and on a story its pull request.
 //   CLICK    a step with files is a button: one file opens it in the Changes tab; several open a small
@@ -54,22 +58,38 @@ const CARD_CHANGE: Record<DesignChange, string> = {
   unchanged: 'border border-solid border-ai-border bg-ai-surface-2',
 };
 
-// The line under each step, by kind. Colour is never the only mark: the style differs and the word is
-// printed beside the number.
-const LINE: Record<FlowStepKind, string> = {
-  read: 'border-t-[1.5px] border-solid border-ui-mute',
-  validate: 'border-t-2 border-dotted border-ui-ink',
-  transform: 'border-t-[1.5px] border-solid border-ui-mute',
-  write: 'border-t-[3px] border-solid border-ai-signal-fill',
-  call: 'border-t-[1.5px] border-solid border-ui-mute',
-  emit: 'border-t-[1.5px] border-solid border-ui-mute',
-  return: 'border-t-[1.5px] border-dashed border-ui-mute',
+// THE ARROWS. A line and its head are drawn in SVG, in boxes of ONE height (SEG_PX) whose centre is the
+// line's centre, so the head's tip sits exactly on the line at any zoom: CSS borders snap to device
+// pixels and SVG does not, which is what set the old heads a pixel or two off their lines. The line
+// stops under the head's base (HEAD_OVERLAP_PX in), never at the tip, so a heavy line cannot poke out
+// beside it. Kind is never colour alone: the stroke differs too, and the word is printed in the box.
+const SEG_PX = 12;
+const HEAD_OVERLAP_PX = 1;
+interface Stroke {
+  width: number;
+  dash?: string;
+  cap?: 'round' | 'butt';
+}
+const STROKE: Record<FlowStepKind, Stroke> = {
+  read: { width: 1.5 },
+  validate: { width: 2, dash: '0 4', cap: 'round' }, // dotted
+  transform: { width: 1.5 },
+  write: { width: 3 }, // heavy
+  call: { width: 1.5 },
+  emit: { width: 1.5 },
+  return: { width: 1.5, dash: '5 4' }, // dashed
 };
-// The loop drawn for a step that stays on its lane (only checks and transforms do).
-const LOOP: Record<'validate' | 'transform', string> = {
-  validate: 'border-2 border-dotted border-ui-ink',
-  transform: 'border-[1.5px] border-solid border-ui-mute',
+// Head length × height, px: a heavy line gets a larger head so it still covers the line's end.
+const HEAD_PX: Record<FlowStepKind, { w: number; h: number }> = {
+  read: { w: 8, h: 10 },
+  validate: { w: 8, h: 10 },
+  transform: { w: 8, h: 10 },
+  write: { w: 10, h: 12 },
+  call: { w: 8, h: 10 },
+  emit: { w: 8, h: 10 },
+  return: { w: 8, h: 10 },
 };
+// Line and head colour (the SVG's currentColor).
 const HEAD: Record<FlowStepKind, string> = {
   read: 'text-ui-mute',
   validate: 'text-ui-ink',
@@ -146,7 +166,11 @@ export function FlowDiagram({
     .map((k) => ({
       key: k,
       label: LINE_KEY[k]!,
-      icon: <span className={`inline-block w-6 ${LINE[k]}`} />,
+      icon: (
+        <span className="relative inline-block w-6" style={{ height: SEG_PX }}>
+          <LineSvg kind={k} style={{ left: 0, right: 0 }} />
+        </span>
+      ),
     }));
 
   return (
@@ -215,7 +239,7 @@ export function FlowDiagram({
               />
             ))}
             {layout.rows.map((r) => (
-              <StepRow key={r.step.n} row={r} chip={chip(r.member, r.step.pr)} openFile={openFile} />
+              <StepRow key={r.step.n} row={r} chip={chip(r.member, r.step.pr)} openFile={openFile} phone={phone} />
             ))}
           </ol>
         </div>
@@ -246,87 +270,169 @@ function StepMark({ row }: { row: FlowRow }): JSX.Element {
   );
 }
 
+// THE STEP ROW: the step's BOX (number, word, PR chip, what passes) centred in its span, the arrow in
+// two parts — from one lane's line to the box's edge, and from the box's other edge to the other lane's
+// line, its head on that line. The box sits on the arrow's line (vertically centred), so the arrow
+// visibly starts and ends on it. A step in place: the box beside its lane, a loop out of the lane's
+// line into the box (above) and back out of it to the line (below, the head on the line).
 function StepRow({
   row,
   chip,
   openFile,
+  phone,
 }: {
   row: FlowRow;
   chip: string | null;
   openFile?: OpenFlowFile;
+  phone: boolean;
 }): JSX.Element {
   const files = row.step.files;
+  const k = row.step.kind;
   const clickable = openFile != null && files.length > 0;
-  const words: ReactNode = (
-    <>
-      <span className="rounded-ui bg-ui-surface px-0.5 break-words text-body leading-snug text-ui-ink">{row.step.label}</span>
-      {chip != null && (
-        <span className="ml-1 whitespace-nowrap rounded-ui border border-ui-line px-1 align-middle text-meta text-ui-ink">{chip}</span>
-      )}
-    </>
+  const words: ReactNode = <span className="break-words text-body leading-snug text-ui-ink">{row.step.label}</span>;
+  const box = (
+    <div
+      className={`relative z-10 min-w-0 max-w-[26rem] shrink rounded-ui border border-ui-line bg-ui-surface text-center ${
+        phone ? 'px-1 py-1' : 'px-2 py-1'
+      }`}
+      style={{ flex: '0 1 auto' }}
+      data-testid="flow-step-box"
+    >
+      <span aria-hidden className="flex flex-wrap items-center justify-center gap-1">
+        <StepMark row={row} />
+        {chip != null && (
+          <span className="max-w-full break-words rounded-ui border border-ui-line px-1 text-meta text-ui-ink">{chip}</span>
+        )}
+      </span>
+      {/* A label wraps at a reading width (the box's max), never wider. */}
+      <div className="mt-0.5">
+        {clickable ? (
+          <StepFiles row={row} openFile={openFile!}>
+            {words}
+          </StepFiles>
+        ) : (
+          <span aria-hidden>{words}</span>
+        )}
+      </div>
+    </div>
   );
+  let drawing: ReactNode;
+  if (row.dir === 'self') {
+    const stubs = <LoopStubs kind={k} laneOnLeft={row.loopRight} />;
+    drawing = row.loopRight ? (
+      <>
+        {stubs}
+        {box}
+      </>
+    ) : (
+      <>
+        {box}
+        {stubs}
+      </>
+    );
+  } else {
+    drawing = (
+      <>
+        <Segment kind={k} head={row.dir === 'left' ? 'start' : null} phone={phone} />
+        {box}
+        <Segment kind={k} head={row.dir === 'right' ? 'end' : null} phone={phone} />
+      </>
+    );
+  }
   return (
-    <li className="relative pt-1.5" data-step={row.step.n} data-kind={row.step.kind}>
+    <li className="relative pt-2" data-step={row.step.n} data-kind={k} data-dir={row.dir}>
       {!clickable && <span className="sr-only">{row.text}</span>}
       <div
-        className="relative z-10 flex flex-col items-center px-1 text-center"
-        style={{ marginLeft: `${row.label.left}%`, width: `${row.label.width}%` }}
+        className={`flex items-stretch ${row.dir === 'self' ? (row.loopRight ? 'justify-start pr-3' : 'justify-end pl-3') : ''}`}
+        style={{ marginLeft: `${row.span.left}%`, width: `${row.span.width}%` }}
       >
-        <span aria-hidden>
-          <StepMark row={row} />
-        </span>
-        {/* A label wraps at a reading width, never wider: two lines at most for a normal step. */}
-        <div className="max-w-[26rem]">
-          {clickable ? (
-            <StepFiles row={row} openFile={openFile!}>
-              {words}
-            </StepFiles>
-          ) : (
-            <span aria-hidden>{words}</span>
-          )}
-        </div>
+        {drawing}
       </div>
-      <Arrow row={row} />
     </li>
   );
 }
 
-/** The line, its head, or a loop for a step that stays on its lane. Decorative. */
-function Arrow({ row }: { row: FlowRow }): JSX.Element {
-  const k = row.step.kind;
-  if (row.dir === 'self') {
-    const right = row.loopRight;
-    const loop = LOOP[k === 'validate' ? 'validate' : 'transform'];
-    return (
-      <div aria-hidden className="relative h-5">
-        <span
-          className={`absolute top-0.5 h-3.5 ${loop} ${right ? 'rounded-r-md border-l-0' : 'rounded-l-md border-r-0'}`}
-          style={{ left: `${row.arrow.left}%`, width: `${row.arrow.width}%` }}
-        />
-        <Head kind={k} dir={right ? 'left' : 'right'} style={{ left: `${right ? row.arrow.left : row.arrow.left + row.arrow.width}%`, top: '0.8rem' }} />
-      </div>
-    );
-  }
-  const end = row.dir === 'right' ? row.arrow.left + row.arrow.width : row.arrow.left;
+/**
+ * One part of a step's arrow: a line across its flex share, at the row's middle, with the head at
+ * `head` ('start' = pointing left at its left end, 'end' = pointing right at its right end). The
+ * part's outer ends ARE the lane line and the box edge, so nothing needs measuring.
+ */
+function Segment({ kind, head, phone }: { kind: FlowStepKind; head: 'start' | 'end' | null; phone: boolean }): JSX.Element {
+  // Never shorter than a head and a visible stub of line (a phone's narrower lanes: a shorter stub).
   return (
-    <div aria-hidden className="relative h-3">
-      <span className={`absolute top-1 ${LINE[k]}`} style={{ left: `${row.arrow.left}%`, width: `${row.arrow.width}%` }} />
-      <Head kind={k} dir={row.dir} style={{ left: `${end}%`, top: '0.05rem' }} />
-    </div>
+    <span aria-hidden className={`relative block flex-1 self-center ${phone ? 'min-w-[0.875rem]' : 'min-w-[1.25rem]'}`} style={{ height: SEG_PX }} data-testid="flow-seg">
+      <ArrowLine kind={kind} head={head} />
+    </span>
   );
 }
 
-function Head({ kind, dir, style }: { kind: FlowStepKind; dir: 'left' | 'right'; style: CSSProperties }): JSX.Element {
-  // The tip sits ON the lane's line: shifted back by its own width when it points right.
+/** A loop for a step in place: out of the lane's line into the box, and back to the line with the head. */
+function LoopStubs({ kind, laneOnLeft }: { kind: FlowStepKind; laneOnLeft: boolean }): JSX.Element {
+  // The head points back at the lane: at the stub's left end when the lane is on the left.
+  return (
+    <span aria-hidden className="relative block w-6 shrink-0 self-stretch" data-testid="flow-loop">
+      <span className="absolute inset-x-0" style={{ top: `calc(0.55rem - ${SEG_PX / 2}px)`, height: SEG_PX }}>
+        <ArrowLine kind={kind} head={null} />
+      </span>
+      <span className="absolute inset-x-0" style={{ bottom: `calc(0.55rem - ${SEG_PX / 2}px)`, height: SEG_PX }}>
+        <ArrowLine kind={kind} head={laneOnLeft ? 'start' : 'end'} />
+      </span>
+    </span>
+  );
+}
+
+/** The line and its head inside a SEG_PX-high box (the caller sizes and places the box). */
+function ArrowLine({ kind, head }: { kind: FlowStepKind; head: 'start' | 'end' | null }): JSX.Element {
+  const hp = HEAD_PX[kind];
+  const inset = head != null ? hp.w - HEAD_OVERLAP_PX : 0;
+  return (
+    <>
+      <LineSvg kind={kind} style={{ left: head === 'start' ? inset : 0, right: head === 'end' ? inset : 0 }} />
+      {head != null && <HeadSvg kind={kind} dir={head === 'end' ? 'right' : 'left'} />}
+    </>
+  );
+}
+
+/** A horizontal line through the middle of a SEG_PX-high box, in the kind's stroke. */
+function LineSvg({ kind, style }: { kind: FlowStepKind; style: CSSProperties }): JSX.Element {
+  const st = STROKE[kind];
+  const y = SEG_PX / 2;
+  return (
+    // An svg ignores left + right (it is a replaced element), so a span takes them and the svg fills it.
+    <span aria-hidden className={`absolute top-0 block ${HEAD[kind]}`} style={{ ...style, height: SEG_PX }}>
+      <svg focusable="false" className="block h-full w-full overflow-visible">
+        <line
+          x1={st.cap === 'round' ? st.width / 2 : 0}
+          y1={y}
+          x2="100%"
+          y2={y}
+          stroke="currentColor"
+          strokeWidth={st.width}
+          strokeLinecap={st.cap ?? 'butt'}
+          {...(st.dash != null ? { strokeDasharray: st.dash } : {})}
+        />
+      </svg>
+    </span>
+  );
+}
+
+/** The head: its tip exactly at the box's end and on the line's centre (both are y = SEG_PX / 2). */
+function HeadSvg({ kind, dir }: { kind: FlowStepKind; dir: 'left' | 'right' }): JSX.Element {
+  const { w, h } = HEAD_PX[kind];
+  const top = (SEG_PX - h) / 2;
+  const d = dir === 'right' ? `M0 ${top} L${w} ${SEG_PX / 2} L0 ${top + h} Z` : `M${w} ${top} L0 ${SEG_PX / 2} L${w} ${top + h} Z`;
   return (
     <svg
-      width="9"
-      height="10"
-      viewBox="0 0 9 10"
-      className={`absolute ${HEAD[kind]}`}
-      style={{ ...style, transform: dir === 'right' ? 'translateX(-100%)' : undefined }}
+      aria-hidden
+      focusable="false"
+      width={w}
+      height={SEG_PX}
+      viewBox={`0 0 ${w} ${SEG_PX}`}
+      className={`absolute top-0 ${HEAD[kind]}`}
+      style={dir === 'right' ? { right: 0 } : { left: 0 }}
+      data-testid="flow-head"
     >
-      <path d={dir === 'right' ? 'M0 0 L9 5 L0 10 Z' : 'M9 0 L0 5 L9 10 Z'} fill="currentColor" />
+      <path d={d} fill="currentColor" />
     </svg>
   );
 }

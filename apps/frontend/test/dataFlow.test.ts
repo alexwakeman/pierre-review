@@ -1,5 +1,5 @@
 // THE DATA-FLOW DIAGRAM'S RENDERING MODEL (lib/dataFlow.ts): lanes in stored order, one row per step in
-// order, arrows between lane centres, loops for in-place steps, and every step as one sentence.
+// order, spans between lane centres, loops for in-place steps, and every step as one sentence.
 import { describe, expect, it } from 'vitest';
 import { sequenceDiagramRefusalText, type FlowDiagram, type SequenceDiagramMember } from '@pierre-review/shared';
 import { laneChangesPresent, layoutFlow } from '../src/lib/dataFlow.js';
@@ -40,21 +40,33 @@ describe('layoutFlow', () => {
     expect(l.rows.map((r) => r.step.n)).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('arrows join lane centres; labels span the lanes they join', () => {
+  it('a step spans lane line to lane line; a loop up to 1.75 lanes towards its open side', () => {
     const [call, check, read, transform, ret] = l.rows;
     expect(call).toMatchObject({ dir: 'right', self: false, word: 'Call' });
-    expect(call!.arrow.left).toBeCloseTo(100 / 6);
-    expect(call!.arrow.width).toBeCloseTo(100 / 3);
-    expect(call!.label).toEqual({ left: 0, width: expect.closeTo(200 / 3) });
+    expect(call!.span.left).toBeCloseTo(100 / 6);
+    expect(call!.span.width).toBeCloseTo(100 / 3);
     expect(ret).toMatchObject({ dir: 'left', word: 'Return' });
+    // A leftward step spans the same lane lines as a rightward one between the same lanes.
+    expect(ret!.span.left).toBeCloseTo(100 / 6);
+    expect(ret!.span.width).toBeCloseTo(100 / 3);
     expect(read).toMatchObject({ dir: 'right', word: 'Read' });
-    // A check in place: a loop opening right of its lane …
+    // A check in place: its box opens right of its lane, 1.75 lanes or to the figure's edge …
     expect(check).toMatchObject({ dir: 'self', self: true, loopRight: true, word: 'Check' });
-    expect(check!.arrow.left).toBeCloseTo(50);
-    // … except on the last lane, where it opens to the left and its label takes the lane before.
+    expect(check!.span.left).toBeCloseTo(50);
+    expect(check!.span.width).toBeCloseTo((1.5 / 3) * 100);
+    // … except on the last lane, where it opens to the left, ending on its own lane's line.
     expect(transform).toMatchObject({ dir: 'self', loopRight: false, word: 'Transform' });
-    expect(transform!.arrow.left + transform!.arrow.width).toBeCloseTo((2.5 / 3) * 100);
-    expect(transform!.label.left).toBeCloseTo(100 / 3);
+    expect(transform!.span.left + transform!.span.width).toBeCloseTo((2.5 / 3) * 100);
+    expect(transform!.span.left).toBeCloseTo((0.75 / 3) * 100);
+  });
+
+  it('a lone lane: a loop runs from its line to the figure edge, never past it', () => {
+    const one = layoutFlow({
+      participants: [FLOW.participants[1]!],
+      steps: [{ n: 1, from: 'api', to: 'api', kind: 'validate', label: 'x', pr: null, files: [] }],
+    });
+    expect(one.rows[0]!.span).toEqual({ left: 50, width: 50 });
+    expect(one.rows[0]!.loopRight).toBe(true);
   });
 
   it('every step reads as one sentence', () => {

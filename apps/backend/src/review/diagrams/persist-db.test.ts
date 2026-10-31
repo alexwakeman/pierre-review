@@ -144,6 +144,9 @@ describe('storage', () => {
     const drawing = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
     expect(drawing.diagram).toMatchObject({ id, status: 'succeeded', current: true, flow: DESIGN, design: null });
     expect(drawing.latest).toMatchObject({ id: again, status: 'queued', trigger: 'manual', current: true });
+    // In flight but not in this process's queue: no phase to report (the SPA eases its bar).
+    expect(drawing.latest?.progress).toBeNull();
+    expect(drawing.diagram).not.toHaveProperty('progress');
     await persist.markDiagramFailed(ctx, 1, again, 'boom', { costUsd: 0.05 }, 'invalid_diagram');
     const failed = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
     expect(failed.diagram).toMatchObject({ id, flow: DESIGN });

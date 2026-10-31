@@ -198,6 +198,21 @@ export type SequenceDiagramStatus = 'queued' | 'running' | 'succeeded' | 'failed
 // 'manual' = a Redraw click (never counts).
 export type SequenceDiagramTrigger = 'review' | 'manual';
 
+// Where a queued or running drawing is (held IN MEMORY by the server's queue, review/diagrams/manager.ts;
+// a restart fails the run anyway). The SPA's bar and words: lib/sequenceDiagrams.ts `diagramProgressPct`.
+//   waiting    queued behind other runs
+//   preparing  reading the diffs and checking out the code
+//   reading    the agent is reading the code (`steps` counts its tool steps)
+//   checking   the agent sent a design; the server is checking it
+//   saving     the answer is being stored
+export type SequenceDiagramPhase = 'waiting' | 'preparing' | 'reading' | 'checking' | 'saving';
+
+export interface SequenceDiagramProgress {
+  phase: SequenceDiagramPhase;
+  // The agent's steps so far (files read, searches): 0 before it starts.
+  steps: number;
+}
+
 // Automatic draws of ONE subject (a PR, a story) per UTC day that count against the cap: its draw and
 // one redraw. A story whose pull requests changed (one joined, left) is drawn past it — that is a new
 // picture, not a redraw. (2026-10-28: one story was drawn 11 times and one PR 9 times in a day, and
@@ -298,6 +313,9 @@ export interface SequenceDiagramView {
   // server or row omits them — read through `aiRunLabel(provider, model)`.
   model?: string | null;
   provider?: AiProviderId;
+  // A queued or running run in this server process: where it is. Absent / null otherwise (and on an
+  // older server — the SPA then shows an easing bar).
+  progress?: SequenceDiagramProgress | null;
 }
 
 /**

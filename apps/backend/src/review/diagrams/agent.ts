@@ -55,7 +55,9 @@ export interface RunDiagramAgentArgs {
   design: DesignContext;
   applyAuthEnv: boolean;
   abortController: AbortController;
-  onProgress?(p: { recentActivity: string[] }): void;
+  // `steps` counts every tool step so far; `submitted` while the model's latest step sent a design
+  // (on Codex, its final answer).
+  onProgress?(p: { recentActivity: string[]; steps: number; submitted: boolean }): void;
   /** Who to bill. A provider that records its own usage (Codex) writes the ledger row from it. */
   usageRecord?: AgentUsageRecord;
 }
@@ -167,6 +169,8 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
     };
     const policy = diagramToolPolicy();
     const activity: string[] = [];
+    let steps = 0;
+    let submitted = false;
     ({ outcome } = await getActiveProvider().runAgent({
       kind: 'diagram',
       model: claudeModelChoice(model),
@@ -195,8 +199,11 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
               const submitting = line.startsWith(DIAGRAM_TOOL_NAME) || (provider.id === 'codex' && line.startsWith('{'));
               activity.push(submitting ? 'Submitting the design…' : line);
               if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+              // The LAST line decides: a refused design sends the model back to reading.
+              submitted = submitting;
+              if (!submitting) steps += 1;
             }
-            args.onProgress?.({ recentActivity: [...activity] });
+            args.onProgress?.({ recentActivity: [...activity], steps, submitted });
           } catch {
             /* never let a progress listener break the run */
           }

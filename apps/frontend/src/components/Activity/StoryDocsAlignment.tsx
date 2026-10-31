@@ -35,7 +35,8 @@ import type { StartStoryDocsVars } from '../../hooks/useStoryDocsAlignment.js';
 import { TICKET_CRITERION_STATUS_CLASS, OUTDATED_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { citationLabel } from '../../lib/referenceDocs.js';
 import { REVIEW_CHIP, REVIEW_PROSE } from '../../lib/reviewStyles.js';
-import { clickMessageStale, docsButtonLabel, docsChecking, docsProgressText, shownRun } from '../../lib/storyDocsAlignment.js';
+import { clickMessageStale, docsButtonLabel, docsChecking, docsProgressPct, docsProgressText, shownRun } from '../../lib/storyDocsAlignment.js';
+import { RegenProgressBar } from './RegenProgressBar.js';
 import { AiRunGate } from '../AiSetup.js';
 import { DocLink } from '../DocReferences.js';
 import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
@@ -207,6 +208,14 @@ export function StoryDocsAlignmentBlock({
           </span>
         )}
       </div>
+      {/* The bar: each stored step has its share, eased by the time since the run began, so a reload
+          draws it again where it was. It fills and fades when the check ends. */}
+      <RegenProgressBar
+        active={checking}
+        label="Checking the story against the docs"
+        value={checking && !starting && data.run != null ? docsProgressPct(data.run.status, Date.now() - Date.parse(data.run.createdAt)) : null}
+        timeConstantSec={30}
+      />
       {progress != null && (
         <AiStatusLine
           stage={progress}

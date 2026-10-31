@@ -52,6 +52,26 @@ export function docsProgressText(status: StoryDocsAlignmentStatus | null | undef
 }
 
 /**
+ * A 0–100 reading for the docs check's bar, from its stored status and the time since it started: each
+ * step has its share of the bar and eases across it (a step is one model answer, no counts), so the
+ * bar never stalls or claims done early. Null = no run yet (the click is in flight): the bar eases.
+ */
+export function docsProgressPct(status: StoryDocsAlignmentStatus | null | undefined, elapsedMs: number): number | null {
+  const share = status != null ? DOCS_SHARE[status] : undefined;
+  if (share == null) return null;
+  const [from, to, tauSec] = share;
+  const t = Math.max(0, elapsedMs) / 1000;
+  return from + (to - from) * (1 - Math.exp(-t / tauSec));
+}
+
+// [start, end, time constant in seconds] of each step's share.
+const DOCS_SHARE: Partial<Record<StoryDocsAlignmentStatus, [number, number, number]>> = {
+  queued: [3, 10, 10],
+  shortlisting: [10, 40, 15],
+  reading: [40, 92, 40],
+};
+
+/**
  * A click's refusal or error sentence is stale once a run exists that was created AFTER that click
  * (another mount, or a later click, started one) — it must not sit under a check that is going.
  */

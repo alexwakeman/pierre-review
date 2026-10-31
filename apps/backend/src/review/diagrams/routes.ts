@@ -14,7 +14,7 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { prDiagramFingerprint, storedCodeAnswer, storyDiagramFingerprint } from './fingerprint.js';
-import { liveStoryMembers, startDiagram } from './manager.js';
+import { diagramProgress, liveStoryMembers, startDiagram } from './manager.js';
 import {
   getDiagramPrContext,
   latestDiagram,
@@ -75,7 +75,11 @@ export async function slotFor(
   const autoSkipped = skipped != null ? { autoSkipped: skipped } : {};
   if (latest == null) return { diagram: null, latest: null, ...autoSkipped };
   const good = latest.status === 'succeeded' ? latest : await latestSucceededDiagram(ctx, accountId, kind, subject);
-  const view = (r: typeof latest) => toDiagramView(r, liveFp != null && r.fingerprint === liveFp);
+  const view = (r: typeof latest) => {
+    const v = toDiagramView(r, liveFp != null && r.fingerprint === liveFp);
+    // A run in flight: where it is (the queue's in-memory phase), so the bar survives a reload.
+    return v.status === 'queued' || v.status === 'running' ? { ...v, progress: diagramProgress(v.id) } : v;
+  };
   return {
     diagram: good != null ? view(good) : null,
     latest: good != null && good.id === latest.id ? null : view(latest),

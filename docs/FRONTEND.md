@@ -3606,7 +3606,10 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
   "Out of date" means). Its button sits in the Story heading row
   (`StoryDocsButton`), inside `AiRunGate`, shown only when `available` ("Check against docs" /
   "Checking…" / "Check docs again", `docsButtonLabel`). Progress words
-  are status-derived (`docsProgressText`: "Choosing sections…", "Reading the docs…"), a failed run's
+  are status-derived (`docsProgressText`: "Choosing sections…", "Reading the docs…"), with the shared AI
+  bar above them (`RegenProgressBar`, "Checking the story against the docs"): `docsProgressPct` gives
+  each stored step a share (queued 3-10, shortlisting 10-40, reading 40-92) eased by the time since the
+  run's `createdAt`, so it never goes backwards, never reads done while running, and a reload redraws it, a failed run's
   `error` is a red line, a refusal prints `STORY_DOCS_REFUSAL_TEXT`. A click the server answered `reused`
   (nothing changed since the shown run) prints "Nothing has changed since this check." with "Check again
   anyway" (`start.mutate({force: true})`, inside `AiRunGate`) and hides an older failed run's red line. The drawn run is `shownRun`: the newest
@@ -4978,10 +4981,24 @@ test/dataFlow.test.ts).
 - **Layout**: the participants are equal lanes across the top (a card each: the kind word — Screen,
   API route, Service, Queue / job, Database, File / cache, Outside API —, the name, New / Changed with
   the design grid's own `CARD_CHANGE` borders, and on a story its PR badge via `prBadgeTexts`); a
-  dashed line runs down from each lane; each STEP is a row of an `<ol>`, top to bottom in order: a
-  numbered badge, the step WORD and what data passes, centred over the lanes it joins, and under it
-  the arrow from the `from` lane's line to the `to` lane's (percentages of the figure's width). A step
-  that stays on its lane (a check or a transform) is a small loop beside the line.
+  dashed line runs down from each lane; each STEP is a row of an `<ol>`, top to bottom in order.
+- **EACH STEP IS A BOX** (2026-10-31; `data-testid="flow-step-box"`): a thin `border-ui-line` border,
+  `rounded-ui` like the lane cards, `bg-ui-surface`, light padding; inside, the numbered badge, the step
+  WORD, the PR chip, then what data passes (≤ `max-w-[26rem]`, wrapping). The row's SPAN (`layoutFlow`
+  `span`, percentages) runs from the `from` lane's line to the `to` lane's; the row is a flex line
+  `[segment][box][segment]`: the box sits CENTRED in the span (its own width, shrinking to fit) and the
+  two segments (`flex-1`, never under 1.25rem — 0.875rem on a phone) carry the arrow from the source
+  lane's line to the box's edge and from the box's other edge to the target lane's line, the HEAD on
+  that line. A box is opaque, so a long step hides the lane lines it crosses. A STEP IN PLACE (a check or
+  a transform) spans from its lane's line up to `LOOP_LANES` (1.75) towards its open side (the right;
+  the left on the last lane; never past the figure's edge): a stub column beside the line holds the
+  loop — out of the lane into the box (top) and back from the box to the line (bottom, with the head).
+- ⚠ **HEADS SIT ON THEIR LINES**: lines and heads are SVG inside boxes of ONE height (`SEG_PX` 12), both
+  centred on `SEG_PX / 2` — CSS borders snap to device pixels and SVG does not, which set the old heads
+  1-2px off. The line stops `HEAD_PX.w - 1` short of the tip (under the head's base), so a heavy line
+  never pokes out beside the tip; the heavy Write gets a larger head (10×12). Strokes (`STROKE`):
+  1.5px solid, Check 2px round dots (`0 4`), Write 3px, Return 1.5px dashed (`5 4`). The "Arrow lines"
+  key draws the same SVG (`LineSvg`).
 - ⚠ **A WIDE FLOW SCROLLS SIDEWAYS INSIDE THE FIGURE, never the page** (2026-10-31 rework — the lanes
   were ~125px and labels wrapped 3 lines): lanes are never narrower than `FLOW_LANE_MIN_REM` (12rem;
   `FLOW_LANE_MIN_REM_PHONE` 9rem when the figure's box is under `FLOW_PHONE_BOX_PX` 480px), a step
@@ -5007,6 +5024,16 @@ test/dataFlow.test.ts).
 - **Click-through** as the grid's cards: a step with files is a button (dotted underline) — one file
   opens it, several open the one floating list; the caller's `openFile(owner, path)` (`OpenFlowFile`,
   `owner.pr` naming a story's member) decides which PR's Changes tab.
+- **PROGRESS WHILE IT DRAWS** (`DiagramProgress` in `ClaudeReviewDiagrams.tsx`, above the design so a
+  long one never hides a redraw): the shared AI bar (`Activity/RegenProgressBar`) and the ONE status
+  line (`AiStatusLine`) with the clock from the run's `createdAt` — both from the STORED run
+  (`slotRunInFlight`), so a reload draws them again. The bar is determinate from the view's `progress`
+  (`diagramProgressPct`: waiting 5, preparing 15, reading 25 + 3 per step ≤ 80, checking 88, saving 96)
+  and eases on its own without one (an older server, another process). Words: `DIAGRAM_PHASE_LABEL`
+  ("Reading the changes", "Reading the code", "Checking the design" …). While it draws, the slot's
+  "Drawing…" line is not shown; when the run ends the bar fills and fades and the slot's line says how
+  it ended. `RegenProgressBar` now draws at once when mounted mid-run (its state starts from the props).
+  Pinned by test/aiRunProgress.test.ts.
 - **Accessible text**: each `<li>` reads as one sentence ("Step 3, Write: from Pull request upsert to
   pull_requests, threads — PR, threads and events in one transaction."); the lines, loops and
   arrowheads are `aria-hidden`.
