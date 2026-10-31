@@ -145,6 +145,8 @@ export interface StoryStackInput {
   /** The story TAB (not This Sprint's tray): the stack's header is the PAGE header and the stack is
    *  the page itself, with no card around it. */
   page?: boolean;
+  /** The PR view's Story tab: the story inside the PR pane (no card while the rail is drawn). */
+  embedded?: boolean;
 }
 
 /** The story view's stack id — apart from the board's `ticket:<KEY>`, so open state never crosses. */

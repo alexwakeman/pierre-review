@@ -74,7 +74,7 @@ describe('the AI Review tab wide layout', () => {
   const tab = read('components/ClaudeReviewTab.tsx');
   it('mounts the shared rail layout', () => {
     expect(tab).toMatch(/<RailLayout config=\{REVIEW_RAIL\} oneColumn=\{oneColumn\}>/);
-    expect(read('components/Ticket/StoryLayout.tsx')).toMatch(/<RailLayout config=\{STORY_RAIL\} oneColumn=\{oneColumn\}>/);
+    expect(read('components/Ticket/StoryLayout.tsx')).toMatch(/<RailLayout config=\{embedded \? STORY_RAIL_EMBEDDED : STORY_RAIL\} oneColumn=\{oneColumn\}>/);
   });
   it('actions and post render in place when narrow; status, counts and nav are rail-only', () => {
     expect(tab).toMatch(/<RailPiece slot="actions" inline>/);

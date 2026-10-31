@@ -32,8 +32,12 @@ export function StoryViewBody({
   ident,
   meta,
   page = false,
+  embedded = false,
   oneColumn = false,
 }: {
+  /** The PR view's Story tab (PrStoryTab): the rail starts at the story's top, beside the header, and
+   *  the story has no card while the rail is drawn — the AI Review tab's shape. */
+  embedded?: boolean;
   /** Always one column (the PR drawer's Story tab — StoryLayout). */
   oneColumn?: boolean;
   /** The story TAB (TicketTabView): the ticket's header is the page header and there is no card.
@@ -86,7 +90,7 @@ export function StoryViewBody({
       }),
     [data?.merged, usersById, repoNameById],
   );
-  const story = useMemo(() => (ticket != null ? { ticket, merged: mergedRows, page } : null), [ticket, mergedRows, page]);
+  const story = useMemo(() => (ticket != null ? { ticket, merged: mergedRows, page, embedded } : null), [ticket, mergedRows, page, embedded]);
 
   if (workspaceId == null || ident == null || story == null) return null;
 
@@ -113,7 +117,7 @@ export function StoryViewBody({
   const found = data?.found === true || storyQ.data?.found === true;
 
   return (
-    <StoryLayout oneColumn={oneColumn}>
+    <StoryLayout oneColumn={oneColumn} embedded={embedded}>
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
         <p className="text-body text-ui-danger">Couldn’t load this story.</p>

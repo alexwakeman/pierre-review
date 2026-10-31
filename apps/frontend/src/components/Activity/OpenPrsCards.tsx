@@ -745,6 +745,7 @@ export function OpenPrsCards({
             showRollup={!merged}
             single={story != null}
             page={story?.page === true}
+            embedded={story?.embedded === true}
             review={
               // Who starts the check: any PR on the ticket (the story view's merged ones count too).
               (ticketReviewOn || merged) && stack.ticket?.ident != null && (stack.rows[0]?.pr.id ?? story?.merged[0]?.prId) != null
@@ -1098,6 +1099,7 @@ function StoryViewHeader({
   review,
   prs,
   page = false,
+  bare = false,
 }: {
   headingId: string;
   t: NonNullable<OpenPrsStack['ticket']>;
@@ -1109,6 +1111,9 @@ function StoryViewHeader({
   prs: ReadonlyArray<{ prId: number; repoId: number | null; repoFullName: string | null; number: number }>;
   /** The story TAB: drawn as THE page header (the shared one), the same facts in the same order. */
   page?: boolean;
+  /** No card around it (the PR view's Story tab beside its rail): no top inset, so the key line sits
+   *  level with the rail's first line. */
+  bare?: boolean;
 }): JSX.Element {
   const { data: repos } = useRepos();
   const labelOf = useMemo(() => {
@@ -1177,7 +1182,7 @@ function StoryViewHeader({
     );
   }
   return (
-    <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
+    <header className={`space-y-2 px-4 pb-3 ${bare ? 'pt-0' : 'pt-3.5'}`} data-testid="story-header">
       {keyLine}
       <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-ui-ink">
         <span className="sr-only">{t.key}: </span>
@@ -1327,6 +1332,7 @@ function TicketStack({
   showRollup = true,
   single = false,
   page = false,
+  embedded = false,
   children,
 }: {
   stack: OpenPrsStack;
@@ -1336,6 +1342,9 @@ function TicketStack({
   single?: boolean;
   /** The story TAB: the header is the page header (components/ui/PageHeader.tsx), no card tone. */
   page?: boolean;
+  /** The PR view's Story tab: no card tone while the story rail is drawn (the rail sits beside the
+   *  whole story, as the AI Review tab's does); the card stays in one column. */
+  embedded?: boolean;
   /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
@@ -1347,6 +1356,7 @@ function TicketStack({
   children: ReactNode;
 }): JSX.Element {
   const headingId = useId();
+  const railWide = useInRail();
   const t = stack.ticket;
   const cat = t?.statusCategory ?? null;
   const href = t != null ? safeExternalUrl(t.url) : null;
@@ -1369,11 +1379,11 @@ function TicketStack({
       // A tone, not a border (a "no ticket" stack keeps its dashed edge: it says "not a ticket").
       // The story view (`single`) is the page itself, so below sm it drops even the tone.
       className={`scroll-mt-4 rounded-ui focus:outline-none ${
-        t == null ? 'border border-dashed border-ui-line bg-ui-surface' : single && page ? '' : single ? 'bg-ui-surface max-sm:-mx-3 max-sm:bg-transparent' : 'bg-ui-surface'
+        t == null ? 'border border-dashed border-ui-line bg-ui-surface' : single && (page || (embedded && railWide)) ? '' : single ? 'bg-ui-surface max-sm:-mx-3 max-sm:bg-transparent' : 'bg-ui-surface'
       }`}
     >
       {single && t != null ? (
-        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} prs={knownPrs} page={page} />
+        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} prs={knownPrs} page={page} bare={embedded && railWide} />
       ) : (
       <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
         <div className="min-w-0 flex-1 basis-[16rem]">

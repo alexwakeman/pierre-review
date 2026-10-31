@@ -62,7 +62,11 @@ describe('rail segments: the top content must fit', () => {
 
 describe('wiring', () => {
   it('the body mounts the layout and the tab does not cap the width', () => {
-    expect(src('components/Ticket/StoryViewBody.tsx')).toMatch(/<StoryLayout oneColumn=\{oneColumn\}>/);
+    expect(src('components/Ticket/StoryViewBody.tsx')).toMatch(/<StoryLayout oneColumn=\{oneColumn\} embedded=\{embedded\}>/);
+    // The PR view's Story tab: the rail starts at the story's top (beside the header), no card while wide.
+    expect(src('components/pr/PrStoryTab.tsx')).toMatch(/<StoryViewBody [^>]*\bembedded\b/);
+    expect(src('components/Ticket/StoryLayout.tsx')).toMatch(/STORY_RAIL_EMBEDDED: RailLayoutConfig = \{ \.\.\.STORY_RAIL, startSection: null \}/);
+    expect(src('components/Activity/OpenPrsCards.tsx')).toMatch(/single && \(page \|\| \(embedded && railWide\)\) \? ''/);
     expect(src('components/Ticket/TicketTabView.tsx')).not.toMatch(/max-w-5xl/);
   });
   it('every section the nav lists is marked where it renders', () => {

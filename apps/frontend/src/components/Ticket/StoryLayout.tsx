@@ -53,9 +53,22 @@ export function useStoryLayout(): ReturnType<typeof useRailLayout> {
   return layout?.config.name === 'story' ? layout : null;
 }
 
-export function StoryLayout({ oneColumn = false, children }: { oneColumn?: boolean; children: ReactNode }): JSX.Element {
+/** The PR view's Story tab: no card around the story (as the story tab), so the rail starts at the
+ *  story's top — beside the ticket's header, as the AI Review tab's rail does. */
+export const STORY_RAIL_EMBEDDED: RailLayoutConfig = { ...STORY_RAIL, startSection: null };
+
+export function StoryLayout({
+  oneColumn = false,
+  embedded = false,
+  children,
+}: {
+  oneColumn?: boolean;
+  /** The PR view's Story tab (`STORY_RAIL_EMBEDDED`). */
+  embedded?: boolean;
+  children: ReactNode;
+}): JSX.Element {
   return (
-    <RailLayout config={STORY_RAIL} oneColumn={oneColumn}>
+    <RailLayout config={embedded ? STORY_RAIL_EMBEDDED : STORY_RAIL} oneColumn={oneColumn}>
       {children}
     </RailLayout>
   );

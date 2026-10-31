@@ -65,7 +65,7 @@ export function PrStoryTab({
         </Button>
       </div>
       {/* Keyed on the ticket, so switching stories starts the body afresh. */}
-      <StoryViewBody key={current.ident} ident={current.ident} meta={{ key: current.key, title: null }} oneColumn={oneColumn} />
+      <StoryViewBody key={current.ident} ident={current.ident} meta={{ key: current.key, title: null }} embedded oneColumn={oneColumn} />
     </div>
   );
 }

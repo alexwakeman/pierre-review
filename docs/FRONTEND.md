@@ -763,7 +763,12 @@ never move. A stale `?prTab=story` on a PR naming none renders Overview, DERIVED
 stories: a switcher of keys on top (`aria-pressed`, the first picked, local state). "Open story tab"
 (and the "…" menu's "Open story", kept) opens the full story tab through `useOpenStory`. The body's
 layout measures THIS pane: two columns full-screen on a wide screen, one in the PR drawer (`oneColumn`,
-below) or on a phone. ⌘K lists it with the other PR tabs ("Story (this pull request)").
+below) or on a phone. ⌘K lists it with the other PR tabs ("Story (this pull request)"). It mounts the
+body `embedded`: `StoryLayout` takes `STORY_RAIL_EMBEDDED` (`startSection: null`, so the rail starts
+level with the ticket's header, as the AI Review tab's does — the story tab's rail starts at its Story
+section, below the page header), and while the rail is drawn the story has NO card tone and the header
+no top inset (a surface card under a rail that starts beside it, with the design breaking out across
+the rail, read as an L-shaped slab). One column (the drawer, a laptop) keeps the card.
 
 **THE AI REVIEW TAB'S WIDE LAYOUT** (2026-10-31; `ClaudeReviewTab.tsx` `REVIEW_RAIL`, the shared
 `components/RailLayout.tsx` — the story view's mechanism, generalised; `test/prTabWire.test.ts`). The tab
