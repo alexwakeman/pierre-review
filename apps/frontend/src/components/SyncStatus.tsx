@@ -515,7 +515,7 @@ export function SyncStatus({ variant = 'header' }: { variant?: 'header' | 'sideb
         aria-label={variant === 'sidebar' ? `Sync all repos now. ${statusWords}` : undefined}
         className={
           variant === 'sidebar'
-            ? 'relative flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta text-ui-mute outline-none hover:bg-ui-hover hover:text-ui-ink focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11'
+            ? 'relative flex h-8 w-full min-w-0 items-center gap-2.5 rounded-ui px-2 text-left text-meta text-ui-ink outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11'
             : 'relative flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover'
         }
       >

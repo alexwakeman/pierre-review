@@ -124,13 +124,13 @@ export default function App(): JSX.Element {
   // board slot with its own isolated Timeline instance (keyed remount).
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
-  // THE TOAST SEAT: at ≥ lg with no pinned tabs the top bar would hold nothing but the toast strip,
-  // so it collapses and the ONE strip moves (a portal, never a copy) to the end of the page header's
-  // title row (components/ui/PageHeader.tsx). Below lg it stays in the top bar, which a SidePanel
+  // THE TOAST SEAT: at ≥ lg (open tabs are in the sidebar) the top bar would hold nothing but the
+  // toast strip, so it collapses and the ONE strip moves (a portal, never a copy) to the end of the
+  // page header's title row (components/ui/PageHeader.tsx). Below lg it stays in the top bar, which a SidePanel
   // sheet starts under, so an Undo raised from the sheet stays reachable.
   const isDesktop = useIsDesktop();
   const pageToastSlot = usePageToastSlot();
-  const toastsInPage = isDesktop && tabs.length === 0 && pageToastSlot != null;
+  const toastsInPage = isDesktop && pageToastSlot != null;
   const activeTabObj = !isFixedView(activeTab)
     ? (tabs.find((t) => t.key === activeTab) ?? null) // stale/closed key → full board
     : null;

@@ -65,6 +65,15 @@ interface IconProps {
   title?: string;
 }
 
+/** ICON SCALE (2026-10-31): every icon is drawn 25% larger than the size its call site names, to
+ *  match Claude Code desktop's icon weight (a 14 renders at 18px). Tiny marks under 10px (dots,
+ *  inline glyphs) keep their exact size. Call sites keep their old numbers on purpose: the scale is
+ *  ONE number here, not a sweep. */
+export const ICON_SCALE = 1.25;
+export function renderedIconSize(size: number | undefined): number | undefined {
+  return size == null || size < 10 ? size : Math.round(size * ICON_SCALE);
+}
+
 /**
  * The one `<svg>` shell every icon draws into, so the a11y contract and the stroke defaults
  * live in exactly one place.
@@ -85,11 +94,12 @@ function IconShell({
   variant?: 'stroke' | 'solid';
 }): JSX.Element {
   const solid = variant === 'solid';
+  const px = renderedIconSize(size);
   return (
     <svg
       viewBox="0 0 24 24"
-      width={size}
-      height={size}
+      width={px}
+      height={px}
       fill={solid ? 'currentColor' : 'none'}
       stroke={solid ? 'none' : 'currentColor'}
       strokeWidth={solid ? undefined : strokeWidth}
@@ -1499,8 +1509,8 @@ export function BellIcon({ size = 14, filled = false, ...rest }: IconProps & { f
   return (
     <svg
       viewBox="0 0 24 24"
-      width={size}
-      height={size}
+      width={renderedIconSize(size)}
+      height={renderedIconSize(size)}
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
       strokeWidth={2}

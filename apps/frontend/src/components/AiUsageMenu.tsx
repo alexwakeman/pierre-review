@@ -30,7 +30,7 @@ const TONE: Record<'normal' | 'near' | 'over', string> = {
 };
 
 const SIDEBAR_TONE: Record<'normal' | 'near' | 'over', string> = {
-  normal: 'text-ui-mute',
+  normal: 'text-ui-ink',
   near: 'text-ui-warn',
   over: 'text-ui-danger',
 };
@@ -94,7 +94,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
         title={head.title}
         className={
           variant === 'sidebar'
-            ? `flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${SIDEBAR_TONE[head.tone]}`
+            ? `flex h-8 w-full min-w-0 items-center gap-2.5 rounded-ui px-2 text-left text-meta outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${SIDEBAR_TONE[head.tone]}`
             : `inline-flex items-center gap-1 whitespace-nowrap rounded-ui border px-2 py-0.5 text-meta tabular-nums hover:border-ui-line ${TONE[head.tone]}`
         }
       >

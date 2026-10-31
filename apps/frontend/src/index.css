@@ -72,8 +72,8 @@
   --ui-sel: 225 225 225;          /* #E1E1E1 selected row, active tab     */
   --ui-line: 222 222 222;         /* #DEDEDE the rare divider / input edge */
   --ui-ink: 25 25 25;             /* #191919 primary text                 */
-  --ui-mute: 83 83 83;            /* #535353 secondary text               */
-  --ui-faint: 97 97 97;           /* #616161 tertiary text, meta          */
+  --ui-mute: 64 64 64;            /* #404040 secondary text               */
+  --ui-faint: 87 87 87;           /* #575757 tertiary text, meta          */
   --ui-accent: 29 91 214;         /* #1D5BD6 accent as TEXT / focus ring  */
   --ui-accent-fill: 37 99 235;    /* #2563EB primary button ground        */
   --ui-on-accent: 255 255 255;    /* text on accent-fill                  */
@@ -91,8 +91,8 @@
   --ui-sel: 51 51 51;             /* #333333 — the lightest ground the kept accent/alert inks clear AA on */
   --ui-line: 58 58 58;            /* #3A3A3A */
   --ui-ink: 239 239 239;          /* #EFEFEF */
-  --ui-mute: 180 180 180;         /* #B4B4B4 */
-  --ui-faint: 158 158 158;        /* #9E9E9E */
+  --ui-mute: 200 200 200;         /* #C8C8C8 */
+  --ui-faint: 166 166 166;        /* #A6A6A6 */
   --ui-accent: 107 157 247;       /* #6B9DF7 */
   --ui-accent-fill: 52 102 212;   /* #3466D4 */
   --ui-on-accent: 255 255 255;
@@ -1416,6 +1416,14 @@ body {
   scrollbar-width: none;
 }
 .scroll-x-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* A pane that scrolls with no visible bar (the sidebar's middle; an edge fade marks the overflow). */
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+.scrollbar-hidden::-webkit-scrollbar {
   display: none;
 }
 

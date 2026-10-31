@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   flip,
   FloatingPortal,
@@ -132,24 +132,19 @@ function ChipShell({
   );
 }
 
-// One closable tab chip. Clicking the body activates the tab (App.tsx renders the matching
-// content). PR tabs (pr-detail / pr-focus) are fixed-width with the PR title + author; the
-// drill-down kinds render a compact icon + label. Each branch below only assembles the
-// per-kind config — the chrome, drag and context-menu behaviour live in ChipShell.
-function TabChip({
-  tab,
-  isDragged,
-  drag,
-  onActivate,
-  onOpenMenu,
-}: {
-  tab: Tab;
-  isDragged: boolean;
-  drag: ChipDragHandlers;
-  onActivate: (key: string) => void;
-  onOpenMenu: (e: React.MouseEvent, tabKey: string | null) => void;
-}): JSX.Element {
-  const active = usePinnedTabs((s) => s.activeTab === tab.key);
+/** What one tab says — its icon, words, tooltip and close label — for EVERY place a tab is listed
+ *  (the strip's chips below md–lg, the sidebar's "Open tabs" list). One ladder, so the two can
+ *  never name a tab two ways. `label` is the words alone; the caller sets their tone. */
+export interface TabChipCfg {
+  width?: string;
+  buttonClass?: string;
+  title: string;
+  closeAria: string;
+  icon: JSX.Element;
+  label: ReactNode;
+}
+
+export function useTabChip(tab: Tab): TabChipCfg {
   // Repo-scoped drill-down chips (bot-only-prs / bot-threads) show the repo name so a
   // per-repo tab is easy to track. These hooks run UNCONDITIONALLY (before the kind branches) to
   // satisfy the Rules of Hooks — TabChip renders for every tab; only the branches below use them.
@@ -163,26 +158,21 @@ function TabChip({
   const repoName = (id: number | null): string | null =>
     id != null ? ((repos ?? []).find((r) => r.id === id)?.fullName ?? `repo ${id}`) : null;
 
-  interface ChipCfg {
-    width?: string;
-    buttonClass?: string;
-    title: string;
-    closeAria: string;
-    body: JSX.Element;
-  }
-  let cfg: ChipCfg;
+  let cfg: TabChipCfg;
 
   if (tab.kind === 'metrics-detail') {
     cfg = {
       title: 'Flow metrics — drill-down',
       closeAria: 'Close flow-metrics tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0 text-ui-mute">
             <BarsIcon />
           </span>
-          <span className={chipLabelClass(active, 'violet')}>Flow metrics</span>
         </>
+      ),
+      label: (
+        <>Flow metrics</>
       ),
     };
   } else if (tab.kind === 'bot-prs') {
@@ -191,13 +181,15 @@ function TabChip({
     cfg = {
       title: 'Bot Drill-Down — what a review bot said, and the PRs it touched',
       closeAria: 'Close bot drill-down tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <BotIcon />
           </span>
-          <span className={chipLabelClass(active, 'ai')}>Bot Drill-Down</span>
         </>
+      ),
+      label: (
+        <>Bot Drill-Down</>
       ),
     };
   } else if (tab.kind === 'bot-only-prs') {
@@ -205,15 +197,17 @@ function TabChip({
     cfg = {
       title: `Bot-only PRs — only a bot reviewed these${scopeName ? ` · ${scopeName}` : ''}`,
       closeAria: 'Close bot-only-PRs tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <BotIcon />
           </span>
-          <span className={chipLabelClass(active, 'amber')}>
-            Bot-only PRs{scopeName ? ` · ${scopeName}` : ''}
-          </span>
         </>
+      ),
+      label: (
+        <>
+            Bot-only PRs{scopeName ? ` · ${scopeName}` : ''}
+          </>
       ),
     };
   } else if (tab.kind === 'user-activity') {
@@ -223,7 +217,7 @@ function TabChip({
     cfg = {
       title: `${who} — recent activity`,
       closeAria: 'Close contributor activity tab',
-      body: (
+      icon: (
         <>
           {tab.userMeta?.avatarUrl ? (
             <img
@@ -241,8 +235,10 @@ function TabChip({
               <PersonIcon />
             </span>
           )}
-          <span className={chipLabelClass(active, 'sky')}>{who}</span>
         </>
+      ),
+      label: (
+        <>{who}</>
       ),
     };
   } else if (tab.kind === 'ticket') {
@@ -254,13 +250,15 @@ function TabChip({
     cfg = {
       title: words.title,
       closeAria: words.closeAria,
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <TicketIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{words.chip}</span>
         </>
+      ),
+      label: (
+        <>{words.chip}</>
       ),
     };
   } else if (tab.kind === 'story-build') {
@@ -271,13 +269,15 @@ function TabChip({
     cfg = {
       title: words.title,
       closeAria: words.closeAria,
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <BuildIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{words.chip}</span>
         </>
+      ),
+      label: (
+        <>{words.chip}</>
       ),
     };
   } else if (tab.kind === 'bot-detail') {
@@ -289,13 +289,15 @@ function TabChip({
     cfg = {
       title: `${who} — bot depth`,
       closeAria: 'Close bot depth tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <BotIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{who} · depth</span>
         </>
+      ),
+      label: (
+        <>{who} · depth</>
       ),
     };
   } else if (tab.kind === 'bot-threads') {
@@ -303,15 +305,17 @@ function TabChip({
     cfg = {
       title: `Bot threads — review & resolve the likely-addressed backlog${scopeName ? ` · ${scopeName}` : ''}`,
       closeAria: 'Close bot-threads tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <ResolveIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>
-            Bot threads{scopeName ? ` · ${scopeName}` : ''}
-          </span>
         </>
+      ),
+      label: (
+        <>
+            Bot threads{scopeName ? ` · ${scopeName}` : ''}
+          </>
       ),
     };
   } else if (tab.kind === 'theme-threads') {
@@ -320,13 +324,15 @@ function TabChip({
     cfg = {
       title: `Theme threads — ${themeTitle}`,
       closeAria: 'Close theme-threads tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <ThreadsIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{themeTitle}</span>
         </>
+      ),
+      label: (
+        <>{themeTitle}</>
       ),
     };
   } else if (tab.kind === 'bot-flagging') {
@@ -350,15 +356,17 @@ function TabChip({
         scopeName ? ` · ${scopeName}` : ''
       }`,
       closeAria: 'Close bot-flagging tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <MagnifierIcon size={13} />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>
-            Flagged{seedTitle ? ` · ${seedTitle}` : ''}
-          </span>
         </>
+      ),
+      label: (
+        <>
+            Flagged{seedTitle ? ` · ${seedTitle}` : ''}
+          </>
       ),
     };
   } else if (tab.kind === 'bot-volume') {
@@ -375,15 +383,17 @@ function TabChip({
         scopeName ? ` · ${scopeName}` : ''
       }`,
       closeAria: 'Close bot-volume tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
             <CommentIcon />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>
-            Comments/PR{botLabel ? ` · ${botLabel}` : ''}
-          </span>
         </>
+      ),
+      label: (
+        <>
+            Comments/PR{botLabel ? ` · ${botLabel}` : ''}
+          </>
       ),
     };
   } else if (tab.kind === 'search') {
@@ -392,13 +402,15 @@ function TabChip({
     cfg = {
       title: q ? `Search — “${q}”` : 'Search',
       closeAria: 'Close search tab',
-      body: (
+      icon: (
         <>
           <span aria-hidden="true" className="shrink-0 text-ui-mute">
             <MagnifierIcon size={13} />
           </span>
-          <span className={chipLabelClass(active, 'sky')}>{q ? `“${q}”` : 'Search'}</span>
         </>
+      ),
+      label: (
+        <>{q ? `“${q}”` : 'Search'}</>
       ),
     };
   } else {
@@ -415,7 +427,7 @@ function TabChip({
         isFocus ? ' (PR focus)' : ` · by ${author}`
       }`,
       closeAria: `Close ${isFocus ? 'focus' : 'detail'} tab for PR #${meta?.number ?? ''}`,
-      body: (
+      icon: (
         <>
           {isFocus ? (
             <span aria-hidden="true" className="shrink-0 text-ui-mute">
@@ -434,15 +446,37 @@ function TabChip({
           ) : (
             <Monogram label={author} size={16} />
           )}
-          <span className={chipLabelClass(active, 'sky')}>
-            <span className="tabular-nums text-ui-faint">#{meta?.number}</span> {meta?.title}
-            <span className="sr-only">{isFocus ? ' · PR focus' : ` · ${author}`}</span>
-          </span>
+        </>
+      ),
+      label: (
+        <>
+          <span className="tabular-nums text-ui-faint">#{meta?.number}</span> {meta?.title}
+          <span className="sr-only">{isFocus ? ' · PR focus' : ` · ${author}`}</span>
         </>
       ),
     };
   }
+  return cfg;
+}
 
+// One closable tab chip. Clicking the body activates the tab (App.tsx renders the matching
+// content). The per-kind words and icon are `useTabChip`'s; the chrome, drag and context-menu
+// behaviour live in ChipShell.
+function TabChip({
+  tab,
+  isDragged,
+  drag,
+  onActivate,
+  onOpenMenu,
+}: {
+  tab: Tab;
+  isDragged: boolean;
+  drag: ChipDragHandlers;
+  onActivate: (key: string) => void;
+  onOpenMenu: (e: React.MouseEvent, tabKey: string | null) => void;
+}): JSX.Element {
+  const active = usePinnedTabs((s) => s.activeTab === tab.key);
+  const cfg = useTabChip(tab);
   return (
     <ChipShell
       tabKey={tab.key}
@@ -452,7 +486,12 @@ function TabChip({
       buttonClass={cfg.buttonClass}
       title={cfg.title}
       closeAria={cfg.closeAria}
-      body={cfg.body}
+      body={
+        <>
+          {cfg.icon}
+          <span className={chipLabelClass(active, 'sky')}>{cfg.label}</span>
+        </>
+      }
       onActivate={onActivate}
       drag={drag}
       onOpenMenu={onOpenMenu}
@@ -464,7 +503,7 @@ function TabChip({
 // a FloatingPortal — the strip is overflow-x-auto, so a non-portaled absolute menu would
 // clip to the 42px bar. Anchored to a virtual zero-size rect at the click point (the
 // MarkerPopover trick). `tabKey` null = a fixed Activity/Timeline chip: only "Close all".
-function TabContextMenu({
+export function TabContextMenu({
   x,
   y,
   tabKey,

@@ -151,8 +151,10 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
   (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests · This Sprint · Timeline;
   Library: Docs (AI only) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
-  Welcome-back strip), **Open tabs** (phones only), **Repositories** (collapsible, remembered in
-  `localStorage`; each repo opens its console; the thread-state legend is behind the ⓘ), and the
+  Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
+  rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
+  ⓘ), **Open tabs** (EVERY open tab at every width — `useTabChip`'s icon + words, a ✕, the strip's
+  right-click menu, "Close all"; the active row scrolls into view; `data-testid="sidebar-tabs"`), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
   the bell, Help, the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
   ⚠ **RENDERED ONCE, NEVER UNMOUNTED**: below `lg` the closed drawer is `display: none`, because
@@ -335,8 +337,12 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
   also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
-  one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
-  aria-labels) are load-bearing and survived.
+  one-place change. ⚠ **2026-10-31: the strip shows only from md to lg** (where the sidebar is a
+  drawer); at lg+ the open tabs are the SIDEBAR's list, which reuses `useTabChip` (one per-kind
+  ladder for icon/words/close label) and `TabContextMenu`. The e2e selectors are
+  `data-testid="sidebar-tabs"`, `role="tab"` names and the ✕ aria-labels. The docked sidebar is
+  resizable from its right edge (`useShell` `sidebarWidth`, default 268px, 232–420px, `localStorage`; double-click resets); its middle
+  scrolls vertically only, with the scrollbar hidden (`.scrollbar-hidden`, the edge fade shows it).
   **REDESIGN (2026-10-29, `redesign/open-prs`): Open PRs draws ONE-LINE ROWS + a SIDE PANEL**
   (`Activity/OpenPrsRows.tsx`, mounted by `<OpenPrsCards layout="rows">` from `OpenPrsDetail`).
   `OpenPrsCards` still owns EVERY read (the ticket gate, the ONE batched Claude / CI / ticket-review /
@@ -5433,8 +5439,14 @@ shorter form of each rule; this is the full wording.
 - **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
   icon emoji/library. What stayed a character is listed in that file's header (regexes over vendor
   bodies must not change). `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.
+  ⚠ **ONE ICON SCALE** (`ICON_SCALE` = 1.25, `renderedIconSize`, 2026-10-31): every icon renders 25%
+  larger than its call site's `size` (a 14 is 18px, Claude Code desktop's weight); sizes under 10
+  are exact. File-type marks use it too. Change the number there, never sweep the call sites.
 
 ## Pending is an inbox: one line per item, the card in a side panel (the redesign)
+
+Nothing is selected on arrival or on a tab switch (`sel.index` null): a click, `j`/`k` or an arrow
+picks the first row, and Enter/a/m/e act only on a selection.
 
 `AttentionView.tsx` is one page header (title + ⓘ, the work plan's quiet sentences, Re-plan inside
 `AiRunGate`), the shared `Tabs` (`1`–`7`), the controls row, then `AttentionCards` — now a

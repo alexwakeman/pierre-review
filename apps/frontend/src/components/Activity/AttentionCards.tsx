@@ -3265,10 +3265,13 @@ export function AttentionCards({
   const { peopleRows, ranked, doNextRows, restRows, flat } = groups;
 
   // ── selection: by id, falling back to the same slot when the selected row leaves ──
-  const [sel, setSel] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
+  // NOTHING is selected on arrival (index null): the board opens unhighlighted; a click, j/k or an
+  // arrow picks the first row.
+  const [sel, setSel] = useState<{ id: string | null; index: number | null }>({ id: null, index: null });
   const [panelOpen, setPanelOpen] = useState(false);
   const found = sel.id != null ? flat.findIndex((c) => c.id === sel.id) : -1;
-  const selIndex = flat.length === 0 ? null : found >= 0 ? found : Math.min(sel.index, flat.length - 1);
+  const selIndex =
+    flat.length === 0 ? null : found >= 0 ? found : sel.index == null ? null : Math.min(sel.index, flat.length - 1);
   const selected = selIndex != null ? (flat[selIndex] ?? null) : null;
   const select = useCallback(
     (i: number): void => {
@@ -3306,13 +3309,13 @@ export function AttentionCards({
     return () => cancelAnimationFrame(raf);
   }, [flashTarget, clearFlash]);
 
-  // A new tab starts at its first row (a kept index would land on an arbitrary row of the new list).
+  // A new tab starts with nothing selected (a kept index would land on an arbitrary row of the new list).
   const tabOnScreen = explain?.tab ?? null;
   const tabRef = useRef(tabOnScreen);
   useEffect(() => {
     if (tabRef.current === tabOnScreen) return;
     tabRef.current = tabOnScreen;
-    setSel({ id: null, index: 0 });
+    setSel({ id: null, index: null });
   }, [tabOnScreen]);
 
   // The command palette asked for one card: select it and open its panel.

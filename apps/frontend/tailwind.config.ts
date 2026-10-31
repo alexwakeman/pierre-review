@@ -23,7 +23,7 @@ export default {
       spacing: {
         row: '36px',
         'row-touch': '44px',
-        sidebar: '232px',
+        sidebar: '268px',
         panel: '400px',
       },
       transitionDuration: {

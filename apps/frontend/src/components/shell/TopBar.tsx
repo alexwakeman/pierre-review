@@ -13,16 +13,16 @@ import type { ReactNode } from 'react';
 
 // THE SLIM TOP BAR — the one strip above the content (docs/redesign/DESIGN.md § 1).
 //
-//   [≡ below lg] [where you are] [open tabs, md+] [the ONE header toast strip]
+//   [≡ below lg] [where you are] [open tabs, md–lg] [the ONE header toast strip]
 //
 // ⚠ A FIXED HEIGHT (`h-11`): the toast strip and its cards fit inside it, so a card appearing or
 // disappearing never moves the page by a pixel (docs/FRONTEND.md § There is ONE header toast strip).
 // The right-hand controls the old header carried — Sync, the bell, Help, the theme, AI usage, the
 // account — moved to the sidebar's foot; the wordmark heads the sidebar.
 //
-// ⚠ COLLAPSED (`collapsed`, App.tsx) at ≥ lg when no tabs are open: the band would hold only the toast
-// strip, so the strip sits at the end of the page header's title row instead (components/ui/
-// PageHeader.tsx) and the bar is `lg:hidden`. Below lg it always stays (menu button + location).
+// ⚠ COLLAPSED (`collapsed`, App.tsx) at ≥ lg whenever the page header offers a toast seat: the open
+// tabs are in the sidebar there, so the band would hold only the toast strip — it sits at the end of
+// the page header's title row instead (components/ui/PageHeader.tsx) and the bar is `lg:hidden`. Below lg it always stays (menu button + location).
 export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; collapsed?: boolean }): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
@@ -101,7 +101,8 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
         )}
         {label}
       </p>
-      <div className="hidden min-w-0 flex-1 md:flex">
+      {/* md to lg only: at lg+ the open tabs are listed in the sidebar. */}
+      <div className="hidden min-w-0 flex-1 md:flex lg:hidden">
         <PinnedTabsBar />
       </div>
       <div className="flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-auto md:justify-start">

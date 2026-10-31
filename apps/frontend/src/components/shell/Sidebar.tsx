@@ -19,8 +19,9 @@ import { storyBuildTabLabels } from '../../lib/storyBuildTab.js';
 import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
+import { TabContextMenu, useTabChip } from '../PinnedTabsBar.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
-import { useShell } from '../../store/shell.js';
+import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useShell } from '../../store/shell.js';
 import { AiUsageMenu } from '../AiUsageMenu.js';
 import { RepoStatusDot } from '../RepoStatusDot.js';
 import {
@@ -72,9 +73,13 @@ import {
 //   Pending · Open pull requests · This Sprint · Timeline          (primary; the phone's bottom bar)
 //   Needs you                                                      (other workspaces' My Turn)
 //   Library: Docs · Feed      Insights: Reports · Bots Monitoring
-//   Open tabs                                                      (phone only; the top bar has them wider)
-//   Repositories (collapsible): one row per repo in the workspace
+//   Repositories (collapsible): the top four repos, "Show all" for the rest
+//   Open tabs: every open tab (a PR, a story, a drill-down) — the top bar's strip only shows them
+//              from md to lg, where this sidebar is a drawer
 //   foot: sync · AI usage · bell · help · keys · theme · account
+//
+// At lg and wider its right edge drags it wider (SIDEBAR_WIDTH_MIN–MAX, remembered); the middle
+// scrolls vertically only, with no visible scrollbar (the edge fade says "more below").
 //
 // ⚠ IT IS RENDERED ONCE AND NEVER UNMOUNTED. `SyncStatus` (the sync round's ONE driver) lives in
 // the foot, so below `lg` the closed drawer is `display: none`, not an unmounted tree. Anything it
@@ -84,6 +89,9 @@ import {
 // `useActivity(workspace, null, null)` / `useBranchStatus()` keys the Activity console reads — and
 // only while the Repositories group is open — and the counts read the keys the palette and the
 // workspace picker already hold.
+
+/** The sidebar's icon size, as named (Icons.tsx scales it to 18px — Claude Code desktop's). */
+const SIDEBAR_ICON = 14;
 
 const NAV_ICON: Record<DestinationId, (p: { size?: number; className?: string }) => JSX.Element> = {
   attention: PendingBallIcon,
@@ -129,17 +137,18 @@ function NavItem({
       className={cx(
         'group flex h-8 w-full min-w-0 items-center gap-2.5 rounded-ui px-2 text-left text-body touch:h-11',
         'motion-safe:transition-colors motion-safe:duration-ui-fast',
-        current ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+        // Claude Code desktop's sidebar: every row in full ink, the selection is the ground alone.
+        current ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
         FOCUS_RING,
         'focus-visible:ring-offset-ui-surface',
       )}
     >
-      <span className={cx('flex w-4 shrink-0 justify-center', current ? 'text-ui-ink' : 'text-ui-faint group-hover:text-ui-mute')}>
+      <span className="flex w-[18px] shrink-0 justify-center text-ui-ink">
         {icon}
       </span>
       <span className="nav-label min-w-0 flex-1 truncate">{label}</span>
       {count != null && (
-        <span title={countTitle} className={cx('shrink-0 text-meta tabular-nums', current ? 'text-ui-ink' : 'text-ui-faint')}>
+        <span title={countTitle} className={cx('shrink-0 text-meta tabular-nums', current ? 'text-ui-ink' : 'text-ui-mute')}>
           {count}
         </span>
       )}
@@ -204,7 +213,7 @@ function Destinations({ location }: { location: ReturnType<typeof currentLocatio
                 return (
                   <NavItem
                     key={d.id}
-                    icon={<Icon size={14} />}
+                    icon={<Icon size={SIDEBAR_ICON} />}
                     label={d.label}
                     title={`${d.title} (G then ${d.goKey.toUpperCase()})`}
                     kbd={`g ${d.goKey}`}
@@ -261,56 +270,176 @@ export function tabWords(tab: Tab): string {
   }
 }
 
-/** Phone only: the open tabs (the top bar's strip is md and wider). Activate, close, close all. */
+/** One open tab in the sidebar: the strip's icon and words (`useTabChip`), a ✕, a right-click menu. */
+function SidebarTabRow({
+  tab,
+  active,
+  onOpenMenu,
+}: {
+  tab: Tab;
+  active: boolean;
+  onOpenMenu: (e: React.MouseEvent, key: string) => void;
+}): JSX.Element {
+  const cfg = useTabChip(tab);
+  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
+  const closeTab = usePinnedTabs((s) => s.closeTab);
+  // The list sits below the destinations and repos, so a tab just opened can land under the fold
+  // of a scroller with no visible bar: bring the active one into view. The repo list often lands
+  // AFTER the tab (a reload, a link) and pushes it down, so it is kept in view while the content
+  // above settles — for a moment only, so a later "Show all" never yanks the scroll.
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!active || row == null) return;
+    const reveal = (): void => row.scrollIntoView?.({ block: 'nearest' });
+    reveal();
+    const content = row.closest('[data-sidebar-middle]')?.firstElementChild ?? null;
+    if (content == null || typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(reveal);
+    ro.observe(content);
+    const stop = window.setTimeout(() => ro.disconnect(), 2000);
+    return () => {
+      window.clearTimeout(stop);
+      ro.disconnect();
+    };
+  }, [active]);
+  return (
+    <li
+      ref={rowRef}
+      onContextMenu={(e) => onOpenMenu(e, tab.key)}
+      className={cx('group flex h-8 items-center rounded-ui touch:h-11', active ? 'bg-ui-sel' : 'hover:bg-ui-hover')}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        title={cfg.title}
+        onClick={() => {
+          setActiveTab(tab.key);
+          useShell.getState().setDrawerOpen(false);
+        }}
+        className={cx(
+          'flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-ui pl-2 text-left text-body',
+          active && 'font-medium',
+          'text-ui-ink',
+          FOCUS_RING,
+        )}
+      >
+        <span className="flex w-[18px] shrink-0 justify-center text-ui-ink">{cfg.icon}</span>
+        <span className="min-w-0 flex-1 truncate">{cfg.label}</span>
+      </button>
+      <button
+        type="button"
+        data-tab-close
+        onClick={() => closeTab(tab.key)}
+        aria-label={cfg.closeAria}
+        title="Close this tab"
+        className={cx(
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11 touch:w-11',
+          // Shown on the open tab and on hover/focus; always on touch (no hover there).
+          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100',
+          'mr-1',
+          FOCUS_RING,
+        )}
+      >
+        <CloseIcon size={12} />
+      </button>
+    </li>
+  );
+}
+
+/** Every open tab, under Repositories, at every width. Activate, ✕ to close, right-click for
+ *  Close this / Close other tabs / Close all tabs (the strip's own menu), "Close all" for touch. */
 function OpenTabs(): JSX.Element | null {
   const tabs = usePinnedTabs((s) => s.tabs);
   const activeTab = usePinnedTabs((s) => s.activeTab);
-  const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
-  const closeTab = usePinnedTabs((s) => s.closeTab);
   const closeAllTabs = usePinnedTabs((s) => s.closeAllTabs);
+  const [menu, setMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null);
   if (tabs.length === 0) return null;
   return (
-    <div className="md:hidden" data-testid="sidebar-open-tabs">
+    <div data-testid="sidebar-open-tabs">
       <div className="mb-1 mt-4 flex items-center pl-2 pr-1">
-        <p className="min-w-0 flex-1 text-meta text-ui-faint">Open tabs</p>
+        <p className="min-w-0 flex-1 text-meta text-ui-faint">
+          Open tabs <span className="tabular-nums">{tabs.length}</span>
+        </p>
         <button
           type="button"
           onClick={closeAllTabs}
-          className="hit h-10 shrink-0 rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+          className={cx('h-7 shrink-0 rounded-ui px-2 text-meta text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-10', FOCUS_RING)}
         >
           Close all
         </button>
       </div>
-      <ul className="m-0 flex list-none flex-col gap-px p-0">
-        {tabs.map((t) => {
-          const words = tabWords(t);
-          const on = activeTab === t.key;
-          return (
-            <li key={t.key} className={cx('flex items-center rounded-ui', on ? 'bg-ui-sel' : 'hover:bg-ui-hover')}>
-              <button
-                type="button"
-                aria-current={on ? 'page' : undefined}
-                onClick={() => {
-                  setActiveTab(t.key);
-                  useShell.getState().setDrawerOpen(false);
-                }}
-                className={cx('hit h-11 min-w-0 flex-1 truncate px-2 text-left text-body', on ? 'font-medium text-ui-ink' : 'text-ui-mute', FOCUS_RING)}
-              >
-                {words}
-              </button>
-              <button
-                type="button"
-                onClick={() => closeTab(t.key)}
-                aria-label={`Close tab ${words}`}
-                className={cx('hit flex h-11 w-11 shrink-0 items-center justify-center rounded-ui text-ui-faint hover:text-ui-ink', FOCUS_RING)}
-              >
-                <CloseIcon size={12} />
-              </button>
-            </li>
-          );
-        })}
+      <ul role="tablist" aria-orientation="vertical" aria-label="Open tabs" data-testid="sidebar-tabs" className="m-0 flex list-none flex-col gap-px p-0">
+        {tabs.map((t) => (
+          <SidebarTabRow
+            key={t.key}
+            tab={t}
+            active={activeTab === t.key}
+            onOpenMenu={(e, key) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, tabKey: key });
+            }}
+          />
+        ))}
       </ul>
+      {menu != null && (
+        <TabContextMenu x={menu.x} y={menu.y} tabKey={menu.tabKey} tabCount={tabs.length} onClose={() => setMenu(null)} />
+      )}
     </div>
+  );
+}
+
+/** The docked sidebar's right edge: drag (or arrow keys) to resize, double-click to reset. */
+function ResizeHandle(): JSX.Element {
+  const width = useShell((s) => s.sidebarWidth);
+  const setWidth = useShell((s) => s.setSidebarWidth);
+  const [dragging, setDragging] = useState(false);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuemin={SIDEBAR_WIDTH_MIN}
+      aria-valuemax={SIDEBAR_WIDTH_MAX}
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      data-testid="sidebar-resize"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = width;
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        setDragging(true);
+        const move = (ev: PointerEvent): void => setWidth(startW + ev.clientX - startX, false);
+        const up = (ev: PointerEvent): void => {
+          el.removeEventListener('pointermove', move);
+          el.removeEventListener('pointerup', up);
+          el.removeEventListener('pointercancel', up);
+          setDragging(false);
+          setWidth(clampSidebarWidth(startW + ev.clientX - startX));
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+      }}
+      onDoubleClick={() => setWidth(SIDEBAR_WIDTH_DEFAULT)}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          setWidth(width + (e.key === 'ArrowRight' ? 16 : -16));
+        }
+      }}
+      className={cx(
+        'absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none select-none lg:block',
+        'after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-ui-accent after:opacity-0 after:motion-safe:transition-opacity',
+        'hover:after:opacity-60 focus-visible:outline-none focus-visible:after:opacity-100',
+        dragging && 'after:opacity-100',
+      )}
+    />
   );
 }
 
@@ -378,13 +507,13 @@ function RepoRow({ r, current }: { r: RepoItem; current: boolean }): JSX.Element
       data-new={st?.hasNew ? 'true' : undefined}
       className={cx(
         'flex h-8 w-full min-w-0 items-center gap-2.5 rounded-ui px-2 text-left touch:h-11',
-        current ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+        current ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
         FOCUS_RING,
       )}
     >
       {/* THE DOT SLOT: fixed width, two fixed places (red, then blue). An absent dot leaves its
           place empty, so every row's dots — and every row's name — start on the same line. */}
-      <span className="grid w-4 shrink-0 grid-cols-2 place-items-center" data-testid="sidebar-repo-dots">
+      <span className="grid w-[18px] shrink-0 grid-cols-2 place-items-center" data-testid="sidebar-repo-dots">
         <span className="flex h-2 w-2 items-center justify-center">
           {st?.attention && (
             <RepoStatusDot tone="attention" title={st.attentionWords ?? undefined} testId="sidebar-repo-attention" />
@@ -398,7 +527,7 @@ function RepoRow({ r, current }: { r: RepoItem; current: boolean }): JSX.Element
         {short}
         {owner !== '' && short !== r.fullName && <span className="sr-only"> in {owner}</span>}
       </span>
-      <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-faint">
+      <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-mute">
         {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
       </span>
     </button>
@@ -445,7 +574,7 @@ function branchFactsOf(b: RepoBranchStatus | undefined): RepoItem['branchFacts']
 }
 
 /** Rows shown before "Show all" — the group must never push the rest of the sidebar out of view. */
-const REPO_ROWS_SHOWN = 6;
+const REPO_ROWS_SHOWN = 4;
 
 function Repositories({ location }: { location: ReturnType<typeof currentLocation> }): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -562,7 +691,7 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
   const setShortcutsOpen = useShell((s) => s.setShortcutsOpen);
   const notif = useNotificationToggle();
   const small = cx(
-    'flex h-8 w-8 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11 touch:w-11',
+    'flex h-8 w-8 shrink-0 items-center justify-center rounded-ui text-ui-ink hover:bg-ui-hover touch:h-11 touch:w-11',
     FOCUS_RING,
     'focus-visible:ring-offset-ui-surface',
   );
@@ -584,7 +713,7 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
             }
             className={cx(small, notif.enabled && 'bg-ui-sel text-ui-ink')}
           >
-            <BellIcon size={14} filled={notif.enabled} />
+            <BellIcon size={SIDEBAR_ICON} filled={notif.enabled} />
           </button>
         )}
         <button
@@ -594,7 +723,7 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
           title="Help — what is Limn and how to use it"
           className={small}
         >
-          <QuestionIcon size={14} />
+          <QuestionIcon size={SIDEBAR_ICON} />
         </button>
         <button
           type="button"
@@ -604,7 +733,7 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
           aria-keyshortcuts="?"
           className={cx(small, 'touch:hidden')}
         >
-          <KeyboardIcon size={15} />
+          <KeyboardIcon size={SIDEBAR_ICON} />
         </button>
         <button
           type="button"
@@ -613,7 +742,7 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
           title="Toggle dark mode"
           className={small}
         >
-          {dark ? <SunIcon /> : <MoonIcon />}
+          {dark ? <SunIcon size={SIDEBAR_ICON} /> : <MoonIcon size={SIDEBAR_ICON} />}
         </button>
       </div>
       {/* The GitHub user (hidden when `me.user` is null, e.g. offline). */}
@@ -643,6 +772,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
   const middleRef = useRef<HTMLDivElement>(null);
   const middleFade = useEdgeFade(middleRef, 'y');
   const drawer = drawerOpen && !desktop;
+  const sidebarWidth = useShell((s) => s.sidebarWidth);
 
   // Growing past `lg` with the drawer open docks it; the flag must not linger for the next shrink.
   useEffect(() => {
@@ -688,13 +818,15 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
         // A dialog only while it is a drawer; a plain landmark when docked.
         role={drawer ? 'dialog' : undefined}
         aria-modal={drawer ? true : undefined}
+        // Docked: the reader's width (dragged by the right edge).
+        style={desktop ? { width: sidebarWidth } : undefined}
         className={cx(
           'flex-col bg-ui-surface',
-          // Docked at lg+.
-          'lg:static lg:z-auto lg:flex lg:w-sidebar lg:shrink-0',
+          // Docked at lg+ (relative: the resize handle sits on its right edge).
+          'lg:relative lg:z-auto lg:flex lg:shrink-0',
           // A drawer below lg: hidden (never unmounted) until opened.
           drawer
-            ? 'fixed inset-y-0 left-0 z-[56] flex w-[min(18rem,86vw)] overflow-y-auto overscroll-contain pt-[env(safe-area-inset-top)] shadow-2xl shadow-black/40 motion-safe:animate-ui-drawer-in'
+            ? 'fixed inset-y-0 left-0 z-[56] flex w-[min(18rem,86vw)] overflow-y-auto overflow-x-hidden overscroll-contain pt-[env(safe-area-inset-top)] shadow-2xl shadow-black/40 motion-safe:animate-ui-drawer-in'
             : 'hidden',
         )}
       >
@@ -724,12 +856,14 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
             }}
             aria-keyshortcuts="Meta+K Control+K /"
             className={cx(
-              'mt-1.5 flex h-8 w-full items-center gap-2 rounded-ui bg-ui-raise px-2 text-left text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11',
+              'mt-1.5 flex h-8 w-full items-center gap-2.5 rounded-ui bg-ui-raise px-2 text-left text-body text-ui-ink hover:bg-ui-hover touch:h-11',
               FOCUS_RING,
               'focus-visible:ring-offset-ui-surface',
             )}
           >
-            <MagnifierIcon size={14} className="shrink-0" />
+            <span className="flex w-[18px] shrink-0 justify-center">
+              <MagnifierIcon size={SIDEBAR_ICON} />
+            </span>
             <span className="min-w-0 flex-1 truncate">Search or jump</span>
             <Kbd>{`${modKeyLabel()}K`}</Kbd>
           </button>
@@ -739,14 +873,19 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
             the same place in the tree either way (SyncStatus must never remount). */}
         <div
           ref={middleRef}
+          data-sidebar-middle
           style={drawer ? undefined : middleFade}
-          className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}
+          // Vertical only, and no visible scrollbar: the edge fade says there is more.
+          className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain')}
         >
-          <Destinations location={location} />
-          <OpenTabs />
-          <Repositories location={location} />
+          <div>
+            <Destinations location={location} />
+            <Repositories location={location} />
+            <OpenTabs />
+          </div>
         </div>
         <Foot dark={dark} toggleDark={toggleDark} />
+        {!drawer && <ResizeHandle />}
       </aside>
     </>
   );

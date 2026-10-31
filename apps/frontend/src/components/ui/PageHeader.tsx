@@ -10,11 +10,11 @@ import { cx } from './cx.js';
 // body is padded by the same token (the Activity pane, the story tab) passes `inset={false}` and the
 // title still lands on the gutter; nothing else may pad a page header horizontally.
 //
-// ⚠ THE TOAST SEAT. At ≥ lg with no pinned tabs the top bar collapses and the ONE header toast strip
-// (HeaderToasts.tsx, mounted once in App.tsx) is PORTALLED into the end of the title row of the page
-// header on screen (`usePageToastSlot`). It is the same strip moved, never a second one. Below lg (or
-// with tabs open) the slot stays empty and the strip lives in the top bar, where a SidePanel sheet
-// measures it (`[data-shell-topbar]`).
+// ⚠ THE TOAST SEAT. At ≥ lg (open tabs live in the sidebar) the top bar collapses and the ONE header
+// toast strip (HeaderToasts.tsx, mounted once in App.tsx) is PORTALLED into the end of the title row
+// of the page header on screen (`usePageToastSlot`). It is the same strip moved, never a second one.
+// Below lg the slot stays empty and the strip lives in the top bar, where a SidePanel sheet measures
+// it (`[data-shell-topbar]`).
 
 /** The one horizontal padding of a page: a phone's 16px, 28px from md. */
 export const PAGE_GUTTER = 'px-4 md:px-7';

@@ -315,7 +315,7 @@ export function WorkspaceSelector(): JSX.Element {
         aria-label={`Workspace: ${activeLabel}`}
         className="flex h-9 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-title text-ui-ink outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11"
       >
-        <WorkspaceIcon size={15} className="shrink-0 text-ui-mute" />
+        <WorkspaceIcon size={14} className="shrink-0 text-ui-ink" />
         <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
         {elsewhereCount > 0 && (
           // Work waiting in OTHER workspaces: a quiet dot (the sentence is in the title, and the

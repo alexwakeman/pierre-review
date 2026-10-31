@@ -140,10 +140,20 @@ test.describe('Pending: one line per item, the event-first card in the panel', (
     await expect(row(page)).toHaveAttribute('aria-selected', 'true');
   });
 
+  test('nothing is selected on arrival; j picks the first row', async ({ page }) => {
+    await openMyTurn(page);
+    await expect(row(page)).toBeVisible();
+    await expect(row(page)).not.toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('j');
+    await expect(row(page)).toHaveAttribute('aria-selected', 'true');
+  });
+
   test('Enter opens the selected row, and e dismisses it with an Undo in the header strip', async ({ page }) => {
     await openMyTurn(page);
     await expect(row(page)).toBeVisible();
     await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('j');
     await page.keyboard.press('Enter');
     await expect(panel(page)).toBeVisible();
     const dismissed = page.waitForRequest((r) => r.method() === 'PUT' && /my-turn\/dismissals/.test(new URL(r.url()).pathname));
@@ -164,10 +174,13 @@ test.describe('Pending: one line per item, the event-first card in the panel', (
     await openMyTurn(page);
     await expect(row(page)).toBeVisible();
     await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('j');
     await page.keyboard.press('Shift+Enter');
     await expect(page).toHaveURL(/view=pr-detail(:|%3A)101/);
     await page.goBack();
     await expect(page.getByTestId('attention-view')).toBeVisible();
+    // Back returns to the board; the row is selected again (the flash) or picked here.
+    if ((await row(page).getAttribute('aria-selected')) !== 'true') await row(page).click();
     await page.getByRole('listbox', { name: 'Pending items' }).focus();
     await page.keyboard.press('Enter');
     await expect(panel(page)).toBeVisible();

@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
 import { fileTypeIcon, type FileTypeIconId } from '../lib/fileTypeIcon.js';
+import { renderedIconSize } from './Icons.js';
 
 // File-type marks for the Changes tab: the file tree and each file's heading.
 //
@@ -684,8 +685,8 @@ function MarkSvg({
   return (
     <svg
       viewBox={mark.viewBox}
-      width={size}
-      height={size}
+      width={renderedIconSize(size)}
+      height={renderedIconSize(size)}
       className={className}
       aria-hidden
       focusable="false"
@@ -701,8 +702,8 @@ function KotlinMark({ size, className }: { size: number; className?: string }): 
   return (
     <svg
       viewBox="0 0 24 24"
-      width={size}
-      height={size}
+      width={renderedIconSize(size)}
+      height={renderedIconSize(size)}
       className={className}
       aria-hidden
       focusable="false"

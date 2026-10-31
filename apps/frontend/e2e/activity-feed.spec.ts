@@ -18,11 +18,11 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
 //   • THE REDESIGN'S SHELL: one sidebar replaced the tab row and the Activity rail. Pending, Open
 //     pull requests, This Sprint and Timeline lead it; Docs, Feed, Reports and Bots Monitoring
-//     follow. `aria-current="page"` marks where you are. The tab strip (`pinned-tabs`) now holds
-//     only the dynamic tabs (a PR, a drill-down) and renders nothing when none is open.
+//     follow. `aria-current="page"` marks where you are. The open tabs (a PR, a drill-down) are listed
+//     in the sidebar (`sidebar-tabs`) at desktop width, which renders nothing when none is open.
 
 const overlay = (p: Page) => p.getByTestId('activity-overlay');
-const tabs = (p: Page) => p.getByTestId('pinned-tabs');
+const tabs = (p: Page) => p.getByTestId('sidebar-tabs');
 
 async function gotoActivity(page: Page, query = ''): Promise<void> {
   await installMockApi(page);
