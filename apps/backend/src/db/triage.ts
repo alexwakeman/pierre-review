@@ -318,6 +318,9 @@ export async function computeTriage(
   }
 
   // ---- events per PR (for new-since counts) ----
+  // ⚠ THE READER'S OWN ACTIONS ARE NOT "NEW". A comment you post (or a commit you push) after
+  // opening a PR is later than your `pr_views` stamp, and counting it lit the sidebar's blue
+  // "new activity" dot — and the `your_pr` My Turn section — for something you did yourself.
   const newByPr = new Map<number, NewSinceLastViewed>();
   if (prIds.length > 0 && viewedAtByPr.size > 0) {
     const rows = await db
@@ -325,12 +328,14 @@ export async function computeTriage(
         prId: events.prId,
         type: events.type,
         occurredAt: events.occurredAt,
+        actorId: events.actorId,
       })
       .from(events)
       .where(inArray(events.prId, prIds))
       .execute();
     for (const r of rows) {
       if (r.prId == null) continue;
+      if (localUserId != null && r.actorId === localUserId) continue;
       const threshold = viewedAtByPr.get(r.prId);
       if (threshold == null) continue;
       if (r.occurredAt.getTime() <= threshold) continue;

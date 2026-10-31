@@ -569,7 +569,7 @@ optional facts that `db/my-turn-card-facts.ts` adds to the cards:
 | `threadPath`, `threadLine` | `thread`, `thread_reply`, `own_thread` | the thread row the section already carries |
 | `committerId` | `thread` with a `likely_addressed` ball | the author of the FIRST commit after your comment whose `commit_files` list holds the path (the `derive-thread-state.ts` predicate), passing over bots (`globalAutomationUserIds`), you and unattributed commits — the ball rule's exclusions |
 | `firstComment` | `own_thread`, `untouched_thread` (+ `line`) | the thread's oldest stored review comment (one body read per thread; a blank one moves on to the next) |
-| `newActorIds`, `newActorTotal` | `your_pr` | the events `newSinceLastViewed` counts, actors other than you, newest first, capped at `YOUR_PR_NEW_ACTORS_SHOWN` (3) with an uncapped total |
+| `newActorIds`, `newActorTotal` | `your_pr` | the events `newSinceLastViewed` counts (which never include your own — `computeTriage` skips them), actors other than you, newest first, capped at `YOUR_PR_NEW_ACTORS_SHOWN` (3) with an uncapped total |
 | `requesterId` | `review_request` | `review_request_events.requester_user_id` of the NEWEST stored event naming you, when it is a `requested` one (`reviewRequesters`). Absent when that newest event is a withdrawal, the requester is NULL (pre-`0081` row, ghost) or is you, or the PR's history is at the selection's 25-event cap (the real newest request may be past it). The card qualifies only on a personal request (`review_requests.user_id`), so team requests are not read. The SPA heads the card "<name> asked you to review" and drops the action line's "by <author>" when the author asked |
 
 Quotes are `CardExcerpt`s: plain text (markdown and HTML stripped), at most

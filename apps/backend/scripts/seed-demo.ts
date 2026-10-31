@@ -809,6 +809,20 @@ ev(API, 1, 105, 'pr_comment', day(1), 'pr_comments', 2);
 ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
 await db.insert(schema.events).values(events).execute();
 
+// ---- what Morgan has opened before (pr_views) — the sidebar's BLUE dot -----
+// acme/api's status panel then reads both colours: red (#111 waits for Morgan's review, #105 has
+// merge conflicts) and blue (new since Morgan last opened #113 — Tom's comment and the review
+// thread replies — and #111 — Sam's follow-up commit). #105 was opened after everything on it, and
+// Morgan's own comment there would not count anyway, so it adds nothing.
+await db
+  .insert(schema.prViews)
+  .values([
+    { prId: 113, lastViewedSha: null, lastViewedAt: day(2.5) },
+    { prId: 111, lastViewedSha: null, lastViewedAt: day(4.5) },
+    { prId: 105, lastViewedSha: null, lastViewedAt: day(0.5) },
+  ])
+  .execute();
+
 // ---- Claude Review run + findings on #113 ----------------------------------
 await db
   .insert(schema.claudeReviews)

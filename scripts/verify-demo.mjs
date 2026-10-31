@@ -59,6 +59,14 @@ const openSettingsTab = (tab) => async (page) => {
  */
 const VIEWS = [
   ['open-prs', '?view=activity', 'open-prs'],
+  // A repo's own view: the status panel spells out its sidebar dots — red (a review waiting for you,
+  // merge conflicts) and blue (new since you last opened #111 and #113; seed-demo.ts pr_views).
+  [
+    'repo:api',
+    '?view=activity&activityRepo=2',
+    'repo-status',
+    { expect: ['Status', '1 pull request is waiting for your review', '1 pull request has merge conflicts', 'on 2 pull requests since you last opened them', 'Mark all seen'] },
+  ],
   ...['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'].map((t) => [`pending:${t}`, `?view=activity&activityRepo=attention&attnTab=${t}`, t === 'my_turn' ? 'pending' : t === 'deps' ? 'pending-deps' : null]),
   ['feed', '?view=activity&activityRepo=feed', 'feed'],
   ...['roi', 'themes', 'benchmark', 'classification'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : t === 'classification' ? 'bot-classification' : null]),

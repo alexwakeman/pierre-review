@@ -9,6 +9,7 @@ import { openWorkspaceManager } from '../WorkspaceSelector.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
 import { RepoOpenPrList } from './RepoOpenPrList.js';
+import { RepoStatusPanel } from './RepoStatusPanel.js';
 import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { InsightsView } from './InsightsView.js';
@@ -39,6 +40,9 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   const isolated = useFilters((s) => s.feedIsolatedPrId != null);
   return (
     <div className="space-y-3" data-testid="repo-console">
+      {/* What the sidebar row's red and blue dots mean for THIS repo, line by line — on top, on
+          both sub-tabs, so opening a repo explains its dots at once. */}
+      <RepoStatusPanel repo={repo} />
       <Tabs
         label="Repository views"
         value={tab}

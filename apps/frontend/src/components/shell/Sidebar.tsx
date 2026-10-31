@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-review/shared';
+import {
+  repoStatusSummary,
+  type ActivityRepo,
+  type RepoBranchStatus,
+  type RepoStatusSummary,
+  type ThreadStateCounts,
+} from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
@@ -16,6 +22,7 @@ import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { useShell } from '../../store/shell.js';
 import { AiUsageMenu } from '../AiUsageMenu.js';
+import { RepoStatusDot } from '../RepoStatusDot.js';
 import {
   BellIcon,
   BookIcon,
@@ -320,34 +327,30 @@ interface RepoItem {
   repoId: number;
   fullName: string;
   maintainerCount: number;
-  hasUnread: boolean;
   attentionCount: number;
   openPrs: number | null;
   threadTotals: ThreadStateCounts | null;
+  /** The red and blue dots (shared `repoStatusSummary`), null before the aggregate lands. */
+  status: RepoStatusSummary | null;
+  branchFacts: { name: string; ci: string; lastCommitAt: string | null } | null;
 }
 
 /**
- * One repo, ONE LINE: unread dot · name · a red dot only when its default branch is failing · open
- * PRs. Everything else the old two-line row drew (the attention count, the maintainer shield, the
- * thread-state bar, the branch name and its last commit) is in the row's tooltip and accessible
- * name, and in full on the repo's own page — the row is permanent chrome, so it stays quiet.
+ * One repo, ONE LINE: the two status dots · name · open PRs. The dots sit in ONE fixed-width slot
+ * at the left, red always in the first place and blue in the second, so they line up down the list
+ * whatever a row carries. What each means is the shared `repoStatusSummary` — the SAME fold the
+ * status panel at the top of the repo view lists line by line, so opening the repo explains its
+ * dots. Everything else (thread states, maintainers, the default branch) is in the row's tooltip
+ * and accessible name, and in full on the repo's own page — the row is permanent chrome.
  */
-function RepoRow({
-  r,
-  branch,
-  current,
-}: {
-  r: RepoItem;
-  branch: RepoBranchStatus | null;
-  current: boolean;
-}): JSX.Element {
+function RepoRow({ r, current }: { r: RepoItem; current: boolean }): JSX.Element {
   const short = r.fullName.split('/')[1] ?? r.fullName;
   const owner = r.fullName.split('/')[0] ?? '';
-  const failing = branch?.branchName != null && (branch.ciStatus === 'failure' || branch.ciStatus === 'error');
+  const st = r.status;
   const facts: string[] = [];
+  if (st?.attentionWords != null) facts.push(st.attentionWords);
+  if (st?.newWords != null) facts.push(st.newWords);
   if (r.openPrs != null) facts.push(`${r.openPrs} open pull request${r.openPrs === 1 ? '' : 's'}`);
-  if (r.attentionCount > 0) facts.push(`${r.attentionCount} needing attention`);
-  if (r.hasUnread) facts.push('new activity');
   if (r.maintainerCount > 0) facts.push('you have merged here');
   if (r.threadTotals != null) {
     const t = r.threadTotals;
@@ -356,10 +359,10 @@ function RepoRow({
       .map((k) => `${t[k]} ${DERIVED_STATE_META[k].label.toLowerCase()}`);
     if (parts.length > 0) facts.push(`threads: ${parts.join(', ')}`);
   }
-  if (branch?.branchName != null) {
+  if (r.branchFacts != null) {
     facts.push(
-      `${branch.branchName}: ${CI_META[branch.ciStatus]?.label ?? 'no CI reported'}${
-        branch.lastCommitAt != null ? `, last commit ${relativeTime(branch.lastCommitAt)}` : ''
+      `${r.branchFacts.name}: ${r.branchFacts.ci}${
+        r.branchFacts.lastCommitAt != null ? `, last commit ${relativeTime(r.branchFacts.lastCommitAt)}` : ''
       }`,
     );
   }
@@ -371,21 +374,30 @@ function RepoRow({
       title={[r.fullName, ...facts].join('\n')}
       aria-label={[r.fullName, ...facts].join(', ')}
       data-testid="sidebar-repo"
-      data-attention={r.attentionCount > 0 ? r.attentionCount : undefined}
+      data-attention={st?.attention ? 'true' : undefined}
+      data-new={st?.hasNew ? 'true' : undefined}
       className={cx(
-        'flex h-8 w-full min-w-0 items-center gap-1.5 rounded-ui px-2 text-left touch:h-11',
+        'flex h-8 w-full min-w-0 items-center gap-2.5 rounded-ui px-2 text-left touch:h-11',
         current ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
         FOCUS_RING,
       )}
     >
-      <span className="flex w-4 shrink-0 justify-center">
-        {r.hasUnread ? <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ui-accent" /> : null}
+      {/* THE DOT SLOT: fixed width, two fixed places (red, then blue). An absent dot leaves its
+          place empty, so every row's dots — and every row's name — start on the same line. */}
+      <span className="grid w-4 shrink-0 grid-cols-2 place-items-center" data-testid="sidebar-repo-dots">
+        <span className="flex h-2 w-2 items-center justify-center">
+          {st?.attention && (
+            <RepoStatusDot tone="attention" title={st.attentionWords ?? undefined} testId="sidebar-repo-attention" />
+          )}
+        </span>
+        <span className="flex h-2 w-2 items-center justify-center">
+          {st?.hasNew && <RepoStatusDot tone="new" title={st.newWords ?? undefined} testId="sidebar-repo-new" />}
+        </span>
       </span>
       <span className="min-w-0 flex-1 truncate text-body">
         {short}
         {owner !== '' && short !== r.fullName && <span className="sr-only"> in {owner}</span>}
       </span>
-      {failing && <span aria-hidden data-testid="sidebar-repo-failing" className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger" />}
       <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-faint">
         {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
       </span>
@@ -397,14 +409,24 @@ function RepoRow({
 function ThreadLegend(): JSX.Element {
   return (
     <InfoButton title="Repositories">
-      <p>
-        Each repo shows its open pull requests on the right. A blue dot means new activity; a red dot means its
-        default branch is failing CI.
-      </p>
-      <p>
-        Hover a repo (or open it) for the rest: how many pull requests need attention, whether you have merged there,
-        its review threads and its default branch.
-      </p>
+      <p>Each repo shows its open pull requests on the right, and up to two dots on the left.</p>
+      <ul className="space-y-1">
+        <li className="flex items-baseline gap-2">
+          <RepoStatusDot tone="attention" className="relative -top-px" />
+          <span>
+            <strong className="font-medium">Red: needs attention.</strong> A pull request is waiting for your review,
+            the default branch is failing CI, or a ready pull request is failing CI or has merge conflicts.
+          </span>
+        </li>
+        <li className="flex items-baseline gap-2">
+          <RepoStatusDot tone="new" className="relative -top-px" />
+          <span>
+            <strong className="font-medium">Blue: new to you.</strong> Someone else commented, reviewed or pushed on a
+            pull request you have opened before, since you last opened it. Opening that pull request clears it.
+          </span>
+        </li>
+      </ul>
+      <p>Open a repo to see each of these listed at the top, with links to the pull requests.</p>
       <ul className="space-y-1">
         {(['untouched', 'replied_unresolved', 'likely_addressed', 'resolved'] as const).map((k) => (
           <li key={k}>
@@ -414,6 +436,12 @@ function ThreadLegend(): JSX.Element {
       </ul>
     </InfoButton>
   );
+}
+
+/** The default branch's line in a repo row's tooltip, or null before it has been branch-synced. */
+function branchFactsOf(b: RepoBranchStatus | undefined): RepoItem['branchFacts'] {
+  if (b?.branchName == null) return null;
+  return { name: b.branchName, ci: CI_META[b.ciStatus]?.label ?? 'no CI reported', lastCommitAt: b.lastCommitAt };
 }
 
 /** Rows shown before "Show all" — the group must never push the rest of the sidebar out of view. */
@@ -431,6 +459,10 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
   const { data: allRepos } = useRepos();
   const branchByRepo = useMemo(() => new Map((branchData?.repos ?? []).map((r) => [r.repoId, r])), [branchData]);
   const sorted = useMemo(() => sortRepos(data?.repos ?? []), [data?.repos]);
+  const statusByRepo = useMemo(
+    () => new Map(sorted.map((r) => [r.repoId, repoStatusSummary(r, branchByRepo.get(r.repoId) ?? null)])),
+    [sorted, branchByRepo],
+  );
   const [showAll, setShowAll] = useState(false);
   // "generated N ago": re-render every 30s so the stamp stays true without refetching.
   const [, setTick] = useState(0);
@@ -447,10 +479,11 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
           repoId: r.repoId,
           fullName: r.repoFullName,
           maintainerCount: r.maintainerIds.length,
-          hasUnread: r.hasUnread,
           attentionCount: r.attentionCount,
           openPrs: r.stats.openPrs,
           threadTotals: r.threadTotals,
+          status: statusByRepo.get(r.repoId) ?? null,
+          branchFacts: branchFactsOf(branchByRepo.get(r.repoId)),
         }))
       : (allRepos ?? [])
           .filter((r) => r.workspaceId === workspaceId)
@@ -458,10 +491,11 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
             repoId: r.id,
             fullName: r.fullName,
             maintainerCount: 0,
-            hasUnread: false,
             attentionCount: 0,
             openPrs: null,
             threadTotals: null,
+            status: null,
+            branchFacts: branchFactsOf(branchByRepo.get(r.id)),
           }));
   if (items.length === 0 && data != null) return null;
   const generatedAt = data?.generatedAt ?? null;
@@ -502,7 +536,7 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
             ? items
             : items.filter((r, i) => i < REPO_ROWS_SHOWN || r.repoId === location)
           ).map((r) => (
-            <RepoRow key={r.repoId} r={r} branch={branchByRepo.get(r.repoId) ?? null} current={location === r.repoId} />
+            <RepoRow key={r.repoId} r={r} current={location === r.repoId} />
           ))}
           {items.length > REPO_ROWS_SHOWN && (
             <button

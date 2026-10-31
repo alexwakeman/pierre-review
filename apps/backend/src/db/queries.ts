@@ -189,6 +189,7 @@ import {
   PENDING_SEVERITY,
   REPORTING_DEFAULT_DAYS,
   FEED_WINDOW_DAYS as SHARED_FEED_WINDOW_DAYS,
+  hasNewSinceLastViewed,
   USER_STATS_WINDOW_DAYS,
 } from '@pierre-review/shared';
 
@@ -2807,6 +2808,18 @@ export async function getActivity(
     await automatedReviewerUserIds(accountId, scope.workspaceId, 'review'),
   );
 
+  // When you last opened each open PR with something new on it (the blue dot's "since").
+  const unreadIds = openPrs.filter((pr) => hasNewSinceLastViewed(pr.newSinceLastViewed)).map((pr) => pr.id);
+  const lastViewedByPr = new Map<number, Date>();
+  if (unreadIds.length > 0) {
+    const rows = await db
+      .select({ prId: prViews.prId, lastViewedAt: prViews.lastViewedAt })
+      .from(prViews)
+      .where(inArray(prViews.prId, unreadIds))
+      .execute();
+    for (const r of rows) lastViewedByPr.set(r.prId, r.lastViewedAt);
+  }
+
   // Preserve listRepos order (stable, not jumpy across loads).
   const activityRepos: ActivityRepo[] = reposScoped.map((repo) => {
     const repoPrs = prsByRepo.get(repo.id) ?? [];
@@ -2860,7 +2873,16 @@ export async function getActivity(
         pr.threadCounts.untouched > 0 ||
         ACTIVITY_ATTENTION_REASONS.has(pr.reasonTag),
     ).length;
-    const hasUnread = repoPrs.some((pr) => pr.newSinceLastViewed != null);
+    // THE BLUE DOT: an open PR you have opened before has comments, reviews or pushes by someone
+    // else since you last opened it. ⚠ `newSinceLastViewed` is NON-NULL (all zeros) for every
+    // open PR you have EVER opened, so `!= null` alone lit the dot on any repo you had visited.
+    const unreadPrs = repoPrs
+      .filter((pr) => hasNewSinceLastViewed(pr.newSinceLastViewed))
+      .map((pr) => {
+        const at = lastViewedByPr.get(pr.id);
+        return { prId: pr.id, lastViewedAt: at != null ? at.toISOString() : null };
+      });
+    const hasUnread = unreadPrs.length > 0;
 
     return {
       repoId: repo.id,
@@ -2870,6 +2892,7 @@ export async function getActivity(
       maintainerIds: mergersByRepo.get(repo.id) ?? [],
       attentionCount,
       hasUnread,
+      unreadPrs,
       prs: repoPrs,
     };
   });
@@ -9200,12 +9223,15 @@ export async function getPrDetail(
   let newSinceLastViewed: NewSinceLastViewed | null = null;
   if (pr.state === 'open' && lastViewedAt) {
     const since = await db
-      .select({ type: events.type, occurredAt: events.occurredAt })
+      .select({ type: events.type, occurredAt: events.occurredAt, actorId: events.actorId })
       .from(events)
       .where(and(eq(events.prId, id), gt(events.occurredAt, lastViewedAt)))
       .execute();
+    // The reader's own actions are not "new" to them (the same rule as computeTriage).
+    const readerId = await getAccountUserId(accountId);
     const n: NewSinceLastViewed = { commits: 0, comments: 0, reviews: 0 };
     for (const e of since) {
+      if (readerId != null && e.actorId === readerId) continue;
       if (e.type === 'commit_pushed') n.commits += 1;
       else if (e.type === 'pr_comment' || e.type === 'review_comment') n.comments += 1;
       else if (e.type === 'review_submitted') n.reviews += 1;

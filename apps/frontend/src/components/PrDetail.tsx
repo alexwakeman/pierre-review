@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { invalidateSeenState } from '../hooks/useMarkRepoSeen.js';
 import type {
   EventType,
   PrDetail as PrDetailT,
@@ -1153,24 +1154,9 @@ export function PrDetail({
   // We deliberately do NOT invalidate this PR's own query.
   const markViewed = useMutation({
     mutationFn: (id: number) => api.markPrViewed(id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['open-prs'] });
-      void qc.invalidateQueries({ queryKey: ['timeline'] });
-      void qc.invalidateQueries({ queryKey: ['my-turn'] });
-      void qc.invalidateQueries({ queryKey: ['me'] });
-      // ⚠ VIEWING A PR IS A MY-TURN MUTATION. `your_pr` rows leave getMyTurn's `yourPrs` section
-      // the instant this stamps `pr_views` (the section filters on newSinceLastViewed) — so the
-      // `my_turn` CARD built from that row, and the daily-brief count OF those cards, are both
-      // wrong the moment this succeeds. Without these two the card sat on the **Pending**
-      // board until its 60s staleTime or the 5-min interval: the user opens the PR the card
-      // pointed at, comes back, and the card is still there telling them to look at it.
-      // Invalidated at the PREFIX (both keys are `[name, 'ws:<id>']` — see useAttentionCards /
-      // useDailyBrief) so every cached workspace refreshes.
-      void qc.invalidateQueries({ queryKey: ['attention-cards'] });
-      void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      // …and the THIRD read of that fold: the three move together (prCacheSync.ts).
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
-    },
+    // Every read of the seen stamp — the Pending board's `your_pr` cards and their counts, and the
+    // sidebar's blue dot — moves together (hooks/useMarkRepoSeen.ts).
+    onSuccess: () => invalidateSeenState(qc),
   });
   const markedRef = useRef<number | null>(null);
   useEffect(() => {

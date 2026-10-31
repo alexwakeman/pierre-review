@@ -9413,8 +9413,19 @@ export interface ActivityRepo {
   threadTotals: ThreadStateCounts;
   maintainerIds: number[]; // from getMergers
   attentionCount: number; // PRs needing attention (my-turn reason | stalled | untouched>0)
-  hasUnread: boolean; // any PR newSinceLastViewed != null
+  // THE BLUE DOT: an open PR you have opened before has comments, reviews or pushes by someone else
+  // since you last opened it (`hasNewSinceLastViewed`). Clears per PR when you open it, or for the
+  // whole repo with "Mark all seen" (POST /api/prs/mark-all-viewed).
+  hasUnread: boolean;
+  // Those PRs, each with when you last opened it (null when the stamp went missing). ABSENT on an
+  // answer cached before this field existed — read it through `repoStatusSummary`, which copes.
+  unreadPrs?: ActivityUnreadPr[];
   prs: TimelinePr[]; // caller groups by authorId
+}
+
+export interface ActivityUnreadPr {
+  prId: number;
+  lastViewedAt: string | null; // ISO-8601
 }
 
 export interface ActivityResponse {
