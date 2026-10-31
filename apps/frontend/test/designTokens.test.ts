@@ -90,10 +90,16 @@ describe('the type floor', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the design scale is exactly four sizes: 12 / 13 / 15 / 22', () => {
+  it('the design scale is exactly four sizes: 14 / 15 / 17 / 25 in the page, 12 / 13 / 15 / 22 in the sidebar', () => {
     const cfg = readFileSync(join(__dirname, '../tailwind.config.ts'), 'utf8');
     const scale = cfg.match(/fontSize:\s*\{([\s\S]*?)\n\s{6}\},/)?.[1] ?? '';
-    const sizes = [...scale.matchAll(/\[\s*'(\d+)px'/g)].map((m) => Number(m[1]));
-    expect(sizes).toEqual([12, 13, 15, 22]);
+    const vars = [...scale.matchAll(/\[\s*'var\(--fs-([a-z]+)\)'/g)].map((m) => m[1]);
+    expect(vars).toEqual(['meta', 'body', 'title', 'display']);
+    const sizesIn = (selector: string): number[] => {
+      const body = CSS.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([^}]*--fs-meta[^}]*)\\}`))?.[1] ?? '';
+      return vars.map((v) => Number(body.match(new RegExp(`--fs-${v}:\\s*(\\d+)px`))?.[1]));
+    };
+    expect(sizesIn(':root')).toEqual([14, 15, 17, 25]);
+    expect(sizesIn('.type-compact')).toEqual([12, 13, 15, 22]);
   });
 });

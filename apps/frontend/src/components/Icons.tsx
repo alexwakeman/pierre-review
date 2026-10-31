@@ -392,10 +392,12 @@ export function WorkspaceIcon({ size = 13, ...rest }: IconProps): JSX.Element {
 
 // Cog — Settings.
 export function GearIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  // Six square teeth on a round body, one hub: drawn to read at 16–18px, where the old
+  // many-curved outline blurred into a ring.
   return (
-    <IconShell size={size} strokeWidth={1.8} {...rest}>
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M19.1 14.4a1.5 1.5 0 0 0 .3 1.66l.05.05a1.9 1.9 0 1 1-2.68 2.68l-.05-.05a1.5 1.5 0 0 0-2.56 1.06v.15a1.9 1.9 0 1 1-3.8 0v-.08a1.5 1.5 0 0 0-2.6-1.02l-.05.05a1.9 1.9 0 1 1-2.68-2.68l.05-.05A1.5 1.5 0 0 0 4 12.05h-.15a1.9 1.9 0 1 1 0-3.8h.08A1.5 1.5 0 0 0 4.95 5.7l-.05-.05A1.9 1.9 0 1 1 7.58 2.97l.05.05a1.5 1.5 0 0 0 1.66.3h.07A1.5 1.5 0 0 0 10.28 1.9v-.15a1.9 1.9 0 1 1 3.8 0v.08a1.5 1.5 0 0 0 2.56 1.06l.05-.05a1.9 1.9 0 1 1 2.68 2.68l-.05.05a1.5 1.5 0 0 0-.3 1.66v.07a1.5 1.5 0 0 0 1.38.92h.15a1.9 1.9 0 1 1 0 3.8h-.08a1.5 1.5 0 0 0-1.37.92z" />
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M10.26 5.22L10.67 2.29L13.33 2.29L13.74 5.22L17.00 7.10L19.74 5.99L21.07 8.30L18.74 10.12L18.74 13.88L21.07 15.70L19.74 18.01L17.00 16.90L13.74 18.78L13.33 21.71L10.67 21.71L10.26 18.78L7.00 16.90L4.26 18.01L2.93 15.70L5.26 13.88L5.26 10.12L2.93 8.30L4.26 5.99L7.00 7.10Z" />
+      <circle cx="12" cy="12" r="3" />
     </IconShell>
   );
 }
@@ -1399,12 +1401,12 @@ export function PendingActivityIcon({ size = 13, ...rest }: IconProps): JSX.Elem
   );
 }
 
-// A speech bubble with clock hands — a review thread nobody has answered.
+// A speech bubble waiting on its reply (three dots) — a review thread nobody has answered.
 export function PendingUnansweredIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>
-      <path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20l1.4-4.9A8 8 0 1 1 20.5 11.5Z" />
-      <path d="M12.5 7.5v4l2.5 1.5" />
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 3.5V17A1.5 1.5 0 0 1 4 15.5Z" />
+      <path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" strokeWidth={2.6} />
     </IconShell>
   );
 }
@@ -1434,13 +1436,14 @@ export function PendingNewPrIcon({ size = 13, ...rest }: IconProps): JSX.Element
   );
 }
 
-// An hourglass — a review that has been waiting too long.
+// An hourglass, sand run through — a review that has been waiting too long.
 export function PendingStalledIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>
       <path d="M6 3h12M6 21h12" />
-      <path d="M7.5 3c0 5 9 5 9 9s-9 4-9 9" />
-      <path d="M16.5 3c0 5-9 5-9 9s9 4 9 9" />
+      <path d="M7.5 3v2.6a4 4 0 0 0 1.6 3.2L12 11l2.9-2.2a4 4 0 0 0 1.6-3.2V3" />
+      <path d="M7.5 21v-2.6a4 4 0 0 1 1.6-3.2L12 13l2.9 2.2a4 4 0 0 1 1.6 3.2V21" />
+      <path d="M10 19h4" />
     </IconShell>
   );
 }

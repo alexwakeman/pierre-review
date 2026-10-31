@@ -821,7 +821,8 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
         // Docked: the reader's width (dragged by the right edge).
         style={desktop ? { width: sidebarWidth } : undefined}
         className={cx(
-          'flex-col bg-ui-surface',
+          // type-compact: the sidebar keeps the original type scale (index.css).
+          'type-compact flex-col bg-ui-surface',
           // Docked at lg+ (relative: the resize handle sits on its right edge).
           'lg:relative lg:z-auto lg:flex lg:shrink-0',
           // A drawer below lg: hidden (never unmounted) until opened.

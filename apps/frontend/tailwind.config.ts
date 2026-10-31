@@ -11,11 +11,13 @@ export default {
       // so every colour takes Tailwind's alpha modifier. Contrast is measured in
       // test/designTokens.test.ts. New UI uses ONLY these steps: four type sizes, one radius,
       // two motion durations, two row heights.
+      // The four sizes are CSS variables (index.css `--fs-*` / `--lh-*`): the page content reads the
+      // larger set, the sidebar (`.type-compact`) the original one.
       fontSize: {
-        meta: ['12px', { lineHeight: '16px' }],
-        body: ['13px', { lineHeight: '20px' }],
-        title: ['15px', { lineHeight: '22px', fontWeight: '600' }],
-        display: ['22px', { lineHeight: '28px', fontWeight: '600', letterSpacing: '-0.01em' }],
+        meta: ['var(--fs-meta)', { lineHeight: 'var(--lh-meta)' }],
+        body: ['var(--fs-body)', { lineHeight: 'var(--lh-body)' }],
+        title: ['var(--fs-title)', { lineHeight: 'var(--lh-title)', fontWeight: '600' }],
+        display: ['var(--fs-display)', { lineHeight: 'var(--lh-display)', fontWeight: '600', letterSpacing: '-0.01em' }],
       },
       borderRadius: {
         ui: '6px',

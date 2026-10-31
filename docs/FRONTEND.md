@@ -765,11 +765,13 @@ reads are the story view's own two DB reads (`ticket-prs`, `ticket-story`), made
 OPENED, never on mount of the PR. Listed only while the PR names a ticket Limn can open as a story
 (`TicketRef.ident` — the SAME `storyTickets` the header's "Open story" menu item and ⌘K's "Open the KEY
 story" read; no ident, no tab, no fetch), and LAST in the strip so the 1–9 keys of the tabs before it
-never move. A stale `?prTab=story` on a PR naming none renders Overview, DERIVED (`effectiveTab`). Several
-stories: a switcher of keys on top (`aria-pressed`, the first picked, local state). "Open story tab"
+never move. A stale `?prTab=story` on a PR naming none renders Overview, DERIVED (`effectiveTab`). Each tab
+names its ticket ("Story BMD-1182"), and a PR naming SEVERAL stories gets ONE TAB EACH (strip ids
+`story:<index>`, 2026-10-31); the store and URL keep the one id `story`, which story is local state (the
+first after a reload or from a link). "Open story tab"
 (and the "…" menu's "Open story", kept) opens the full story tab through `useOpenStory`. The body's
 layout measures THIS pane: two columns full-screen on a wide screen, one in the PR drawer (`oneColumn`,
-below) or on a phone. ⌘K lists it with the other PR tabs ("Story (this pull request)"). It mounts the
+below) or on a phone. ⌘K lists each with the other PR tabs ("Story BMD-1182 (this pull request)"). It mounts the
 body `embedded`: `StoryLayout` takes `STORY_RAIL_EMBEDDED` (`startSection: null`, so the rail starts
 level with the ticket's header, as the AI Review tab's does — the story tab's rail starts at its Story
 section, below the page header), and while the rail is drawn the story has NO card tone and the header
@@ -5442,6 +5444,10 @@ shorter form of each rule; this is the full wording.
   ⚠ **ONE ICON SCALE** (`ICON_SCALE` = 1.25, `renderedIconSize`, 2026-10-31): every icon renders 25%
   larger than its call site's `size` (a 14 is 18px, Claude Code desktop's weight); sizes under 10
   are exact. File-type marks use it too. Change the number there, never sweep the call sites.
+- ⚠ **THE TYPE SCALE IS FOUR CSS VARIABLES** (`--fs-*`/`--lh-*` in index.css, read by the
+  `text-meta/body/title/display` tokens): page content 14/15/17/25px, the sidebar (`.type-compact`)
+  the original 12/13/15/22. `.md-body` follows `--fs-body`. The timeline's own `tl-*` labels stay at
+  their fixed px (they fit fixed bar heights). `designTokens.test.ts` pins both sets.
 
 ## Pending is an inbox: one line per item, the card in a side panel (the redesign)
 

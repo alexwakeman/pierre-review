@@ -1224,6 +1224,11 @@ export function PrDetail({
     [prTickets],
   );
   const storyTabVisible = storyTickets.length > 0;
+  // EVERY STORY IS ITS OWN TAB ("Story BMD-1182", "Story BMD-1190"), all at the end of the strip. The
+  // store and the URL hold one tab id, `story`; which story it shows is local (the first by default),
+  // so a reload or a shared link opens the first.
+  const [storyIndex, setStoryIndex] = useState(0);
+  const currentStory = storyTickets[storyIndex] ?? storyTickets[0] ?? null;
   const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
   // `'activity'` is not a screen of its own any more: it renders Overview (section open, above).
   const effectiveTab: Tab =
@@ -1276,7 +1281,7 @@ export function PrDetail({
   // ⌘K: this PR's tabs and toolbar, registered only while THIS copy is the one on screen (the pane
   // can stay mounted under another PR's overlay). The handlers are read through a ref so the list
   // is rebuilt only when what it SAYS changes, never on every render.
-  const cmdLive = useRef<{ tab: (t: Tab) => void; act: (id: string) => void }>({ tab: () => {}, act: () => {} });
+  const cmdLive = useRef<{ tab: (t: Tab, story?: number) => void; act: (id: string) => void }>({ tab: () => {}, act: () => {} });
   const cmdTabs = [
     'overview',
     'comments',
@@ -1293,17 +1298,21 @@ export function PrDetail({
     const where = `#${prNumber}`;
     const tabs = cmdTabsKey.split(',') as Tab[];
     return [
-      ...tabs.map(
-        (t, i): Command => ({
-          id: `pr-tab:${t}`,
-          title: `${TAB_LABELS[t]} (this pull request)`,
-          group: 'Go to',
-          hint: where,
-          shortcut: i < 9 ? String(i + 1) : undefined,
-          keywords: ['tab', 'pr', 'pull request'],
-          run: () => cmdLive.current.tab(t),
-        }),
-      ),
+      ...tabs
+        .flatMap((t): { t: Tab; story: number | null }[] =>
+          t === 'story' ? storyTickets.map((_, k) => ({ t, story: k })) : [{ t, story: null }],
+        )
+        .map(
+          ({ t, story }, i): Command => ({
+            id: story != null ? `pr-tab:story:${story}` : `pr-tab:${t}`,
+            title: `${story != null ? `Story ${storyTickets[story]?.key ?? ''}` : TAB_LABELS[t]} (this pull request)`,
+            group: 'Go to',
+            hint: where,
+            shortcut: i < 9 ? String(i + 1) : undefined,
+            keywords: ['tab', 'pr', 'pull request'],
+            run: () => cmdLive.current.tab(t, story ?? undefined),
+          }),
+        ),
       ...(placement === 'pane'
         ? [{ id: 'pr:full', title: 'Open this pull request full-screen', group: 'Actions' as const, hint: where, run: () => cmdLive.current.act('full') }]
         : []),
@@ -1378,7 +1387,10 @@ export function PrDetail({
   };
   const newSince = newSummary(pr.newSinceLastViewed);
   cmdLive.current = {
-    tab: goToTab,
+    tab: (t, story) => {
+      if (story != null) setStoryIndex(story);
+      goToTab(t);
+    },
     act: (id) => {
       if (id === 'full') openPrDetailTab(pinnedMetaOf(pr, usersById));
       else if (id === 'timeline') openPrFocused(pr.id);
@@ -1413,7 +1425,21 @@ export function PrDetail({
     // Last, so the 1–9 keys of the tabs before it never move.
     ...(storyTabVisible ? (['story'] as Tab[]) : []),
   ];
-  const tabItems: TabItem<Tab>[] = tabIds.map((t) => ({
+  // One strip entry per story (`story:<index>`); every other tab is its own id.
+  type StripId = Exclude<Tab, 'story'> | `story:${number}`;
+  const stripValue: StripId = effectiveTab === 'story' ? `story:${currentStory != null ? storyTickets.indexOf(currentStory) : 0}` : effectiveTab;
+  const onStripChange = (id: StripId): void => {
+    if (id.startsWith('story:')) {
+      setStoryIndex(Number(id.slice('story:'.length)));
+      goToTab('story');
+    } else goToTab(id as Tab);
+  };
+  const storyItems: TabItem<StripId>[] = storyTickets.map((st, k) => ({
+    id: `story:${k}`,
+    label: `Story ${st.key}`,
+    title: `${st.key}: the story and its pull requests`,
+  }));
+  const tabItems: TabItem<StripId>[] = tabIds.flatMap((t): TabItem<StripId>[] => t === 'story' ? storyItems : [{
     id: t,
     label: (
       <>
@@ -1448,7 +1474,7 @@ export function PrDetail({
         : t === 'changes' && pr.changedFilesCount > 0
           ? `${pr.changedFilesCount} files changed`
           : undefined,
-  }));
+  }]);
   // Everything the toolbar does, in words — the overflow menu (every width) and, below md, the
   // only way to the actions the icon row hides. Nothing here is unique to the menu.
   const menuItems: MenuEntry[] = [
@@ -1708,8 +1734,8 @@ export function PrDetail({
       >
         <Tabs
           tabs={tabItems}
-          value={effectiveTab}
-          onChange={goToTab}
+          value={stripValue}
+          onChange={onStripChange}
           label={`Pull request #${pr.number} tabs`}
           numberKeys={liveVisible}
           idPrefix={`pr-${pr.id}`}
@@ -1722,7 +1748,7 @@ export function PrDetail({
         className="min-h-0 flex-1 overflow-auto max-md:flex-none max-md:overflow-visible"
         role="tabpanel"
         id={panelId(`pr-${pr.id}`, effectiveTab)}
-        aria-labelledby={tabId(`pr-${pr.id}`, effectiveTab)}
+        aria-labelledby={tabId(`pr-${pr.id}`, stripValue)}
       >
         <Suspense
           fallback={<div className="px-5 py-6 text-body text-ui-faint">Loading…</div>}
@@ -1832,7 +1858,7 @@ export function PrDetail({
         ) : effectiveTab === 'ai_fix' ? (
           <AiFixTab pr={pr} />
         ) : effectiveTab === 'story' ? (
-          <PrStoryTab tickets={storyTickets} oneColumn={placement === 'pane'} />
+          currentStory != null && <PrStoryTab ticket={currentStory} oneColumn={placement === 'pane'} />
         ) : (
           <ClaudeReviewTab
             pr={pr}

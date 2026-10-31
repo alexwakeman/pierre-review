@@ -63,7 +63,7 @@ describe('the Story tab', () => {
   });
   it('mounts the one story body', () => {
     const tab = read('components/pr/PrStoryTab.tsx');
-    expect(tab).toMatch(/<StoryViewBody key=\{current\.ident\}/);
+    expect(tab).toMatch(/<StoryViewBody key=\{ticket\.ident\}/);
     expect(tab).toMatch(/useOpenStory\(\)/);
     // The "Open story" menu item stays.
     expect(pd).toMatch(/label: 'Open story'/);

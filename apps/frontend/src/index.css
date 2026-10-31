@@ -102,6 +102,30 @@
   --ui-scrim: 0 0 0;
 }
 
+/* ── THE TYPE SCALE (tailwind.config.ts `text-meta/body/title/display`) ─────────────────────────────
+   Page content is ~15% larger than the original scale (2026-10-31, with the wider sidebar); the
+   sidebar keeps the original sizes (`.type-compact` on the aside), which match Claude Code desktop's. */
+:root {
+  --fs-meta: 14px;
+  --lh-meta: 18px;
+  --fs-body: 15px;
+  --lh-body: 22px;
+  --fs-title: 17px;
+  --lh-title: 24px;
+  --fs-display: 25px;
+  --lh-display: 32px;
+}
+.type-compact {
+  --fs-meta: 12px;
+  --lh-meta: 16px;
+  --fs-body: 13px;
+  --lh-body: 20px;
+  --fs-title: 15px;
+  --lh-title: 22px;
+  --fs-display: 22px;
+  --lh-display: 28px;
+}
+
 html,
 body,
 #root {
@@ -253,7 +277,7 @@ body {
 
 /* ---- markdown comment bodies ---- */
 .md-body {
-  font-size: 13px;
+  font-size: var(--fs-body); /* the body size of wherever it sits (page or sidebar) */
   line-height: 1.5;
   word-break: break-word;
 }
