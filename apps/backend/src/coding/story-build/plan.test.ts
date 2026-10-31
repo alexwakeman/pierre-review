@@ -3,7 +3,7 @@
 //      planned gap with no step citing it, a step citing a non-gap, a 1-sentence or 4-sentence summary;
 //   2. a good plan is accepted and normalised: build order kept, repo ids from the candidates, criteria in
 //      GAP order, strings clipped, read-only repos never also changed;
-//   3. the design is judged as kind 'planned' (cells name repo refs); a bad design is refused until the
+//   3. the design is judged as kind 'planned' (steps name repo refs); a bad design is refused until the
 //      LAST attempt, which keeps the plan without it;
 //   4. branch names: the proposal, and what git accepts at Accept.
 import { describe, expect, it } from 'vitest';
@@ -122,34 +122,40 @@ describe('checkStoryPlanSubmission', () => {
 
 const DESIGN = {
   title: 'Refunds',
-  caption: 'A refund flows from the page to the API.',
-  acts: [{ id: 'ask', title: 'Ask' }],
-  layers: ['ui', 'api'],
-  cells: [
-    { id: 'btn', act: 'ask', layer: 'ui', label: 'Refund button', pattern: 'Command', change: 'new', pr: 'R1', files: ['web/Order.tsx', 'other.ts'] },
-    { id: 'ep', act: 'ask', layer: 'api', label: 'Refund endpoint', pattern: null, change: 'new', pr: 'R2', files: ['src/refunds.ts'] },
+  caption: 'A refund goes from the order page to the API.',
+  participants: [
+    { id: 'btn', kind: 'ui', label: 'Refund button', change: 'new', pr: 'R1' },
+    { id: 'ep', kind: 'api', label: 'Refund endpoint', change: 'new', pr: 'R2' },
   ],
-  arrows: [{ from: 'btn', to: 'ep', label: 'POST' }],
+  steps: [
+    { n: 1, from: 'btn', to: 'ep', kind: 'call', label: 'order id and amount', files: ['web/Order.tsx', 'web/Nope.tsx'] },
+    { n: 2, from: 'ep', to: 'ep', kind: 'validate', label: 'amount within the order total', pr: 'R2', files: ['src/refunds.ts'] },
+  ],
 };
 
 describe('the planned design', () => {
   const withDesign: StoryPlanContext = { ...CTX, wantDiagram: true };
 
-  it('is judged as kind planned: cells name repo refs, files filtered to the planned steps', () => {
+  it('is judged as kind planned: steps name repo refs, files filtered to the planned steps', () => {
     const p = { ...good(), design: DESIGN };
     expect(checkStoryPlanSubmission(p, withDesign).designProblems).toBeNull();
     const d = acceptedDesignOf(p, withDesign)!;
-    expect(d.cells.map((c) => [c.pr, c.files])).toEqual([
+    expect(d.steps.map((c) => [c.pr, c.files])).toEqual([
       ['R1', ['web/Order.tsx']],
       ['R2', ['src/refunds.ts']],
     ]);
   });
 
+  it('a planned design may not decline', () => {
+    const p = { ...good(), design: { participants: [], steps: [], noDiagram: 'nothing moves' } };
+    expect(checkStoryPlanSubmission(p, withDesign).designProblems).toMatch(/noDiagram is not allowed here/);
+  });
+
   it('a bad design is refused until the last attempt, which keeps the plan without it', () => {
-    const p = { ...good(), design: { ...DESIGN, cells: [{ ...DESIGN.cells[0], pr: 'R3' }] } };
+    const p = { ...good(), design: { ...DESIGN, participants: [{ ...DESIGN.participants[0], pr: 'R3' }, DESIGN.participants[1]] } };
     const t = promptTools('claude');
     const first = judgeStoryPlan(p, 1, withDesign, t);
-    expect('reply' in first && first.reply).toMatch(/Design:\n- cell "btn" names pr "R3"/);
+    expect('reply' in first && first.reply).toMatch(/Design:\n- participant "btn" names pr "R3"/);
     const last = judgeStoryPlan(p, 3, withDesign, t);
     expect(last).toMatchObject({ designDropped: true });
     expect(acceptedDesignOf(p, withDesign)).toBeNull();
@@ -162,7 +168,7 @@ describe('the planned design', () => {
   });
 
   it('Codex: its second answer is the last (no third)', () => {
-    const p = { ...good(), design: { ...DESIGN, cells: [] } };
+    const p = { ...good(), design: { ...DESIGN, steps: [] } };
     expect(judgeStoryPlan(p, 2, withDesign, promptTools('codex'), 2)).toMatchObject({ designDropped: true });
     const r = judgeStoryPlan({ ...p, repos: [] }, 1, withDesign, promptTools('codex'), 2);
     expect('reply' in r && r.reply).toMatch(/Fix every point and answer again with the whole plan/);

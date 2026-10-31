@@ -28,7 +28,8 @@ import {
   memberRepos,
   prepareMemberWorktrees,
 } from '../ticket-review/prepare.js';
-import { diffHasCode, storyDiagramFingerprint } from './fingerprint.js';
+import { storyDiagramFingerprint } from './fingerprint.js';
+import { diagramPrecheck } from './precheck.js';
 import { toDiagramMembers } from './trigger.js';
 import {
   getDiagramPrContext,
@@ -51,7 +52,7 @@ import {
   diagramUntrustedTexts,
   type DiagramPromptPr,
 } from './prompts.js';
-import { validateDesign, type DesignContext } from './validate.js';
+import { acceptedAsPayload, validateDesign, type DesignContext } from './validate.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE SEQUENCE-DIAGRAM QUEUE — a SEPARATE agentic process beside the PR review's queue
@@ -69,14 +70,17 @@ import { withWorktreeOwner } from '../worktree-owner.js';
 //            PR-review auto lane is empty too. Each side pumps the others when a run ends.
 //
 // THE PIPELINE (`runPipeline`), per kind:
-//   pr     the synced head (moved since queued ⇒ refused head_moved) → the diff (no code file ⇒
-//          refused no_code) → a read-only worktree at the head → the prompt → the agent.
+//   pr     the synced head (moved since queued ⇒ refused head_moved) → the diff → THE PRE-CHECK
+//          (precheck.ts, free: no code ⇒ no_code; tests only, copy only or too small ⇒ tests_only /
+//          copy_only / too_small, skipped on a reader's own Draw) → a read-only worktree at the head →
+//          the prompt → the agent.
 //   story  the ticket's live open + merged members (< 2 ⇒ too_few_prs; > the cap ⇒ too_many_prs;
-//          a changed member set ⇒ head_moved) → every member's diff (none with code ⇒ no_code) → a
+//          a changed member set ⇒ head_moved) → every member's diff (the pre-check over them all) → a
 //          worktree per OPEN member + ONE default-branch checkout per repository for the MERGED ones
 //          (the ticket review's approach) → the prompt (+ the stored ticket text) → the agent.
-// Every answer is a DESIGN GRID validated (validate.ts `validateDesign`, against the run's PR refs and
-// changed files) inside the tool and again before it is stored. The `finally` removes every checkout
+// Every answer is a DATA-FLOW SEQUENCE validated (validate.ts `validateDesign`, against the run's PR
+// refs and changed files) inside the tool and again before it is stored — or the model's DECLINE (no
+// data moves through the change), stored as refused `no_flow` with its reason. The `finally` removes every checkout
 // and the scratch directory, then runs a deferred clone-cache eviction.
 //
 // ⚠ NEVER BLOCKS OR FAILS A REVIEW: the review's manager reaches this module only through a
@@ -243,10 +247,7 @@ async function finishWithAgent(
       return;
     }
     // ⚠ Validated AGAIN here: the tool's acceptance is not the storage gate.
-    const v =
-      res.diagram != null
-        ? validateDesign({ ...res.diagram.design, title: res.diagram.title, caption: res.diagram.caption }, args.design)
-        : null;
+    const v = res.diagram != null ? validateDesign(acceptedAsPayload(res.diagram), args.design) : null;
     if (res.diagram == null || v == null || !v.ok) {
       await markDiagramFailed(
         ctx,
@@ -258,11 +259,16 @@ async function finishWithAgent(
       );
       return;
     }
+    // The model said no data moves through the change: a refusal with its reason (billed — it ran).
+    if (v.value.flow == null) {
+      await markDiagramRefused(ctx, accountId, diagramId, 'no_flow', telemetry, v.value.declined);
+      return;
+    }
     await saveDiagramSuccess(
       ctx,
       accountId,
       diagramId,
-      { title: v.value.title, caption: v.value.caption, design: v.value.design },
+      { title: v.value.title, caption: v.value.caption, design: v.value.flow },
       telemetry,
     );
   } finally {
@@ -313,8 +319,10 @@ async function runPrPipeline(job: DiagramJob, controller: AbortController): Prom
     await markDiagramRefused(ctx, accountId, diagramId, 'unreadable');
     return;
   }
-  if (!diffHasCode(diff.changedFiles)) {
-    await markDiagramRefused(ctx, accountId, diagramId, 'no_code');
+  // THE PRE-CHECK: no model and no checkout when the change has no data path to draw.
+  const pre = diagramPrecheck(diff, { manual: job.trigger === 'manual' });
+  if (pre != null) {
+    await markDiagramRefused(ctx, accountId, diagramId, pre);
     return;
   }
   if (controller.signal.aborted) {
@@ -387,8 +395,18 @@ async function runStoryPipeline(job: DiagramJob, controller: AbortController): P
   await markDiagramRunning(ctx, accountId, diagramId, { members: toDiagramMembers(members) });
 
   const diffs = await fetchMemberDiffs(members);
-  if (![...diffs.values()].some((d) => d.diff != null && diffHasCode(d.changedFiles))) {
-    await markDiagramRefused(ctx, accountId, diagramId, [...diffs.values()].some((d) => d.diff != null) ? 'no_code' : 'unreadable');
+  const readable = [...diffs.values()].filter((d) => d.diff != null);
+  if (readable.length === 0) {
+    await markDiagramRefused(ctx, accountId, diagramId, 'unreadable');
+    return;
+  }
+  // THE PRE-CHECK over every member at once: the story has a data path if any member does.
+  const pre = diagramPrecheck(
+    { changedFiles: readable.flatMap((d) => d.changedFiles), diff: readable.map((d) => d.diff).join('\n') },
+    { manual: job.trigger === 'manual' },
+  );
+  if (pre != null) {
+    await markDiagramRefused(ctx, accountId, diagramId, pre);
     return;
   }
   if (controller.signal.aborted) {

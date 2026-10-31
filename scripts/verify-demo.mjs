@@ -188,7 +188,8 @@ const VIEWS = [
       expect: ['Nothing has changed since this check.', 'Check again anyway'],
     },
   ],
-  ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
+  // The story view's Story design: one data flow across both pull requests.
+  ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null, { expect: ['Terraform state moves to S3, guarded by a lock', 'a new state version'] }],
   // "Implement story" (docs/STORY-BUILD.md): the sprint board's entry points (the Implement button on a
   // not-started ticket with no session, Fill gaps on a started one whose story check found gaps, the
   // build marks on the two with one), the ready two-repository
@@ -241,6 +242,9 @@ const VIEWS = [
         'This story changes the docs (1)',
         'Grounded in the docs (2)',
         'aren’t in the plan yet',
+        // The planned design is a data flow.
+        'Sync health query',
+        'oldest running sync and error count, one query',
       ],
     },
   ],
@@ -283,10 +287,21 @@ const VIEWS = [
             },
             expect: ['Showing'],
           }
-        : // #113's latest run read acme/infrastructure's branch of the same name (a related repo).
+        : // #113's latest run read acme/infrastructure's branch of the same name (a related repo), and its
+          // Design is a data-flow sequence (numbered steps, the line key under it).
           id === 113 && t === 'claude_review'
-          ? { expect: ['Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries'] }
-          : undefined,
+          ? {
+              expect: [
+                'Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries',
+                'Sync writes one pull request per transaction',
+                'PR, threads and events in one transaction',
+                'Write: heavy line, where data is kept',
+              ],
+            }
+          : // #114's change moves no data: the model declined, and the pane says why in one line.
+            id === 114 && t === 'claude_review'
+            ? { expect: ['No diagram: this change only resizes the node-group limits.'] }
+            : undefined,
     ]),
   ),
   // AI Fix "Run tests": #114's fix ran the project's checks in the sandbox (results + the commit

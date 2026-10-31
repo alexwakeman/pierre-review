@@ -1693,7 +1693,7 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   the tab's Start fix (`AiRunGate kind="fix"`). Not a revival of the removed `ci_analysis` seed (the
   OLD code review's free-text diagnosis): the items are the CI review's, nonce-fenced as data.
 
-## Design diagrams (how a change is built — its own process)
+## Design diagrams (how data flows through a change — its own process)
 
 A SEPARATE agentic process (`src/review/diagrams/`), never inside the PR review, the ticket review or
 the CI review: own table, own claim, own lane, own cap, own budget. Routes in `registerAgenticRoutes`; the SPA
@@ -1703,8 +1703,41 @@ sequence diagrams (2026-10-17): those were stack-trace detailed (12 participants
 design is the stages, layers and patterns used to deliver the change, readable without zooming. The
 table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep "sequence diagram".
 
-- **What a run produces — a `DesignDiagram`** (`packages/shared/src/sequence-diagrams.ts`, where
-  every cap is spelled ONCE for the validator, the prompt and the renderer): `acts` (1–4 columns, the
+- ⚠ **SINCE 2026-10-31 A RUN DRAWS A DATA-FLOW SEQUENCE, NOT A GRID** (`DESIGN_DIAGRAM_VERSION` 2).
+  The grid was read as "areas of interest"; the reader needs the ORDER data is read, checked,
+  transformed and written. **What a run produces — a `FlowDiagram`** (`packages/shared/src/
+  sequence-diagrams.ts`, every cap spelled ONCE): `participants` (2–7 lanes, left to right in the order
+  the data first reaches them; `kind` from `FLOW_LANES` — `ui` Screen · `api` API route · `service`
+  Service · `queue` Queue / job · `db` Database · `store` File / cache · `external` Outside API;
+  `label` ≤ 28; `change` new / changed / unchanged; story `pr`) and `steps` (2–16, numbered `n` = 1..n
+  in process order; `from` → `to` participant ids; `kind` read · validate · transform · write · call ·
+  emit · return; `label` ≤ 56 = WHAT data passes; story `pr`; `files` ≤ 4). Plus a title and a caption
+  as before. **Validation** (`validate.ts`, inside the tool and again before storing): every cap; ids;
+  steps numbered 1..n IN ORDER; every step names existing participants; a step to ITSELF only for a
+  validate or a transform; a `write` must END at a queue / db / store / external participant; ⚠ **THE
+  CHAIN RULE** — every step after the first starts at a participant an earlier step already reached,
+  so the flow is ONE connected sequence (no orphan boxes); every participant is in a step; ⚠ every
+  changed CODE file (`flowRelevantFile`: `isNonCodeFile` and `isTestFile` side by side, never folded)
+  sits on a step when there are ≤ `FLOW_FILES_MUST_MAP` (8), else at least 8 do; story `pr` refs only
+  the prompt's; plain text only; `files` FILTERED as before.
+- ⚠ **NO DIAGRAM WHEN NO DATA MOVES — said plainly, never retried by the trigger.** (1) THE PRE-CHECK
+  (`precheck.ts` `diagramPrecheck`, pure, on the diff the pipeline reads anyway, BEFORE any checkout or
+  model, so FREE — a server refusal outside the cap): `no_code` (always), then the SOFT three a
+  reader's own Draw skips — `tests_only`, `copy_only` (every changed code line differs only in string
+  literals / JSX text / prose lines, `codeSkeleton`; a string holding SQL or a route stays code, and a
+  words-only line is NOT prose when it carries an operator (`price * qty`) or is a query line (`FROM orders o`)) and
+  `too_small` (< `FLOW_MIN_CODE_LINES` = 4 changed code lines, comments and blanks aside). (2) THE
+  MODEL may decline: `submit_design`'s `noDiagram` (a reason finishing "No diagram: …", ≤ 120 chars,
+  with empty participants and steps) is stored as refused `no_flow`, the reason in `caption` and served
+  as the view's `refusalDetail` — a billed run, so it COUNTS against the cap. The pane says "No diagram:
+  this change only edits copy." / "No diagram: <reason>." and keeps Draw. A refused row is a row at the
+  fingerprint, so the next review at that head never redraws it. The PLANNED design (story build)
+  takes `buildFlowShape` — no `noDiagram`; a decline there is refused.
+- ⚠ **OLD ROWS**: rows queued now are stamped `diagram_type = 'flow'`; the older grid's `'design'` rows
+  are STILL READ and served as `design` (never `flow`), drawn by `DesignGrid` with "Drawn in the
+  earlier layout. Redraw it to see how data flows." The version bump made their fingerprints stale, so
+  each current head draws once more as a flow after its next review.
+- **THE PREVIOUS SHAPE — a `DesignDiagram` grid** (kept for those rows): `acts` (1–4 columns, the
   stages as a reader tells them, titles ≤ 24), `layers` (1–5 rows from the FIXED vocabulary
   `DESIGN_LAYERS`: `ui` UI · `api` API / route · `domain` Domain / service · `data` Data / store ·
   `external` External / integration · `tests` Tests / CI; canonical order), `cells` (≤ 14, at most
@@ -1733,8 +1766,9 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   unknown ⇒ the pipeline decides from the diff with the same classifier), a row already at this
   fingerprint (any status — a click redraws a failure), one in flight, or the daily cap
   (`SEQUENCE_DIAGRAM_DAILY_CAP`, default 30, review-started rows per ACCOUNT per UTC day that ran or
-  will run the model — every row EXCEPT the server-decided free refusals `no_code`, `head_moved`,
-  `unreadable`, `too_few_prs`, `too_many_prs`; ⚠ `invalid_diagram` COUNTS, it was billed; a Redraw
+  will run the model — every row EXCEPT the server-decided free refusals `no_code`, `tests_only`,
+  `copy_only`, `too_small`, `head_moved`, `unreadable`, `too_few_prs`, `too_many_prs`; ⚠
+  `invalid_diagram` and the model's `no_flow` COUNT, they were billed; a Redraw
   never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
   so the pane can say why and the same head is never judged twice.
 - ⚠ **A REDRAW IS LIMITED** (2026-10-28: one story drawn 11 times and one PR 9 times spent the cap of
@@ -1773,28 +1807,32 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   auto lane is empty too. Claim `${account}:${kind}:${subject}`, taken synchronously. Spend is recorded
   (`recordAiUsage`, feature `sequence_diagram`); budget `SEQUENCE_DIAGRAM_BUDGET_USD` ($1.50), turns
   `SEQUENCE_DIAGRAM_MAX_TURNS` (30). A restart fails what it orphaned.
-- **The pipeline.** PR: the synced head (moved since queued ⇒ `head_moved`) → the diff (no code ⇒
-  `no_code`; unreadable ⇒ `unreadable`) → a read-only worktree at the head. Story: the live members
-  (changed since queued ⇒ `head_moved`) → every member's diff → a worktree per OPEN member + ONE
+- **The pipeline.** PR: the synced head (moved since queued ⇒ `head_moved`) → the diff (unreadable ⇒
+  `unreadable`) → THE PRE-CHECK (`no_code` / `tests_only` / `copy_only` / `too_small`; a manual run
+  skips the last three) → a read-only worktree at the head. Story: the live members
+  (changed since queued ⇒ `head_moved`) → every member's diff (the pre-check over them ALL) → a worktree per OPEN member + ONE
   default-branch checkout per repository for MERGED ones (the ticket review's approach) + the stored
   ticket text. Then the agent: Read/Glob/Grep + `submit_design` only, `Bash` and every write tool
   denied, the PreToolUse PATH GUARD over the checkouts, `ownToolsOnlyHook`. Every untrusted string
   (titles, file names, diffs, ticket text) is nonce-fenced.
-- **The prompt** (`prompts.ts`) asks for the DESIGN — the stages, which layer does the work, the
-  pattern, what is new vs changed; one cell = one responsibility, never a stack frame or a function
-  list; fewer cells preferred, empty cells good. Story: how the PRs/repos fit together, every cell
-  tagged with its PR, `files` from THAT PR's changed files.
+- **The prompt** (`prompts.ts`) asks for the FLOW OF DATA as a numbered sequence — where it is read
+  (which table, file, API), checked, transformed, written and what is sent on or returned, in order;
+  "NOT a map of areas of interest"; ONE CHAIN; every changed code file on the step its code performs;
+  and the decline paragraph. Story: one flow across the PRs, every new or changed participant and every
+  step tagged with its PR, a step's `files` from THAT PR's changed files. ⚠ Claude's text is pinned by
+  hash in `ai/codex/kinds/docs.test.ts` (re-taken deliberately for this change); Codex's wording goes
+  through `ai/prompt-tools.ts`, its strict schema derived from the same zod shape.
 - **Validation** (`validate.ts` `validateDesign`, run INSIDE the tool — a refusal lists EVERY problem
-  with its fix, e.g. "5 acts; merge stages so there are at most 4", at most 3 attempts — and AGAIN
-  before storing): every cap above; unique, well-formed ids; every cell's act and layer listed; layers
-  only from the vocabulary; ONE cell per slot; every listed act and layer has a cell; ≥ 1 cell names a
-  pattern; arrows between existing cells, no self-loops, no duplicates; story `pr` refs only the
-  prompt's. Plain text only: control characters stripped, anything tag-like (`<x`) or a URL / scheme
-  REFUSED. ⚠ `files` is FILTERED server-side, never refused — kept only when the path is in the PR's
-  changed files (story: the member the cell's `pr` names, else any member, and a story cell with no
-  `pr` then takes the member owning its first kept file, so a click knows which PR to open).
-- **The SPA** (docs/FRONTEND.md § Design diagrams) draws it as a CSS grid (`components/DesignGrid.tsx`),
-  every string as React text; a card with files opens its PR's Changes tab at that file.
+  with its fix, e.g. 'step 4 starts at "mail", which no earlier step reached; start each step where the
+  data already is', at most 3 attempts — and AGAIN before storing, `acceptedAsPayload` round-trips it):
+  the rules above. Plain text only: control characters stripped, anything tag-like (`<x`) or a URL /
+  scheme REFUSED. ⚠ `files` is FILTERED server-side, never refused — kept only when the path is in the
+  PR's changed files (story: the member the step's `pr` names, else any member, and a story step with
+  no `pr` then takes the member owning its first kept file, so a click knows which PR to open).
+- **The SPA** (docs/FRONTEND.md § Design diagrams) draws a flow with `components/FlowDiagram.tsx` (lanes
+  across, numbered steps down, scrolling sideways inside the figure on a phone; an ordered list a screen
+  reader reads step by step), an old row's grid with `components/DesignGrid.tsx`; every string as React
+  text; a step with files opens its PR's Changes tab at that file.
 
 ## Starting from the Open PRs tab
 

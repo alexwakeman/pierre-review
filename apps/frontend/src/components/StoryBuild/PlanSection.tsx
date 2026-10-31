@@ -21,6 +21,7 @@ import { PlanMessageBox, PlanTranscript } from '../AiFix/PlanChat.js';
 import { RunTestsOption, runTestsState, useRunTestsMemory } from '../AiFix/RunTests.js';
 import { AiRunGate } from '../AiSetup.js';
 import { DesignGrid } from '../DesignGrid.js';
+import { FlowDiagram } from '../FlowDiagram.js';
 import { ChevronIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
@@ -31,7 +32,8 @@ import { storyBuildRefAnchor } from './CoverageSection.js';
 // THE PLAN: the 2–3 sentence summary, one card per repository the plan CHANGES (the One PR card shell
 // look; build order = card order) with its why, the base, an editable branch, Include, Run tests and the
 // steps behind Details; the repositories it only reads, one line; the risks; the planned design (the
-// shared DesignGrid, cells not clickable — no pull request exists yet); and the steering chat (the AI
+// shared FlowDiagram — an older plan's grid through DesignGrid —, steps not clickable: no pull request
+// exists yet); and the steering chat (the AI
 // Fix plan chat, `AiFix/PlanChat.tsx`) gated on `story_plan` on the session's own provider.
 
 const REF_CHIP = 'inline-flex items-center rounded-ui bg-ui-raise px-1.5 py-px font-mono text-meta text-ui-ink hover:bg-ui-hover';
@@ -142,19 +144,23 @@ export function PlanSection({
               </ul>
             </div>
           )}
-          {build.design != null && (
+          {(build.flow != null || build.design != null) && (
             <div data-testid="story-build-design" className="mt-4">
               <h4 className="mb-2 flex items-center gap-1 text-meta font-medium text-ui-mute">
                 Design
                 <InfoButton title="The planned design">
-                  <p>How the plan builds the story: stages across, layers down, one card per responsibility.</p>
-                  <p>Each card names the repository that does it. Nothing is built yet, so the cards open nothing.</p>
+                  <p>How data will flow through the story once it is built: what touches the data across the top, each step down the page in order.</p>
+                  <p>Each box and step names the repository that does it. Nothing is built yet, so the steps open nothing.</p>
                 </InfoButton>
               </h4>
-              <DesignGrid design={build.design} label={`Planned design for ${build.ticketKey}`} refNames={refNames} />
+              {build.flow != null ? (
+                <FlowDiagram flow={build.flow} label={`Planned data flow for ${build.ticketKey}`} refNames={refNames} />
+              ) : (
+                build.design != null && <DesignGrid design={build.design} label={`Planned design for ${build.ticketKey}`} refNames={refNames} />
+              )}
             </div>
           )}
-          {build.wantDiagram && build.design == null && build.status === 'plan_ready' && (
+          {build.wantDiagram && build.flow == null && build.design == null && build.status === 'plan_ready' && (
             <p className="mt-3 text-meta text-ui-mute">Couldn&rsquo;t draw the design.</p>
           )}
         </>

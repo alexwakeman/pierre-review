@@ -8,7 +8,7 @@ import {
   STORY_BUILD_SUMMARY_MIN_SENTENCES,
 } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
-import { buildSubmitDesignShape } from '../../review/diagrams/schema.js';
+import { buildFlowShape } from '../../review/diagrams/schema.js';
 
 // The `submit_story_plan` tool's contract (the read-only `story_plan` pass, docs/STORY-BUILD.md), built
 // from a zod handed in (the AI runtime's own install — review/schema.ts explains why a second zod
@@ -67,10 +67,10 @@ export function buildSubmitStoryPlanShape(z: ZodNs) {
       .optional()
       .describe('When the person sent a steering message: one or two sentences on what you changed because of it.'),
     design: z
-      .object(buildSubmitDesignShape(z))
+      .object(buildFlowShape(z))
       .nullable()
       .optional()
-      .describe('Only when asked for a design: the planned design, cells naming repository refs (R1…) in `pr`. Otherwise null.'),
+      .describe('Only when asked for a design: the planned data flow, participants and steps naming repository refs (R1…) in `pr`. Otherwise null.'),
   };
 }
 

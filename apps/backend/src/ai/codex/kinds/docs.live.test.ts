@@ -91,7 +91,7 @@ describe.skipIf(!LIVE)('stream (d) on Codex, live (LIMN_CODEX_LIVE=1)', () => {
       applyAuthEnv: false,
       abortController: new AbortController(),
     });
-    console.log('[codex docs live 1]', JSON.stringify({ ms: Date.now() - started, provider: res.provider, failure: res.failureReason ?? null, refusal: res.lastRefusal, tokens: [res.inputTokens, res.outputTokens], title: res.diagram?.title ?? null, cells: res.diagram?.design.cells.length ?? null }));
+    console.log('[codex docs live 1]', JSON.stringify({ ms: Date.now() - started, provider: res.provider, failure: res.failureReason ?? null, refusal: res.lastRefusal, tokens: [res.inputTokens, res.outputTokens], title: res.diagram?.title ?? null, steps: res.diagram?.flow?.steps.length ?? null }));
     expect(res.provider).toBe('codex');
     expect(res.diagram).not.toBeNull();
     expect(res.costUsd).toBe(0);

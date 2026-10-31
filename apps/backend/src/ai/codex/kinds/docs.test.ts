@@ -222,8 +222,8 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     const res = await run(checkout, new AbortController(), (p) => activity.push(p.recentActivity));
     expect(res.failureReason).toBeUndefined();
     expect(res.diagram?.title).toBe('Rate import');
-    // The null `files` on an unchanged cell (strict form) reached the handler as absent.
-    expect(res.diagram?.design.cells.find((c) => c.id === 'c3')?.files).toEqual([]);
+    // The null `files` on a step (strict form) reached the handler as absent.
+    expect(res.diagram?.flow?.steps.find((s) => s.n === 2)?.files).toEqual([]);
     expect(res).toMatchObject({ provider: 'codex', aborted: false, costUsd: 0, inputTokens: 11000, outputTokens: 900 });
 
     const [call] = calls();
@@ -235,7 +235,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     expect(dev).toBe(DiagPrompts.prDiagramSystemPrompt('codex'));
     expect(dev).toMatch(/You may use read_file, list_files and search\./);
     expect(dev).not.toMatch(/submit_design/);
-    expect(call.stdin).toMatch(/Answer with the one JSON design\.$/);
+    expect(call.stdin).toMatch(/Answer with the one JSON diagram\.$/);
     // Exactly the Claude path guard's roots (the scratch cwd, then the checkout), read-only.
     expect(guardRoots()).toEqual({ read: [resolve(work), resolve(checkout)], write: [] });
     // ONE ledger row, written by the provider AS CODEX.
@@ -255,7 +255,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     expect(retry.argv).toContain('resume');
     expect(retry.argv).toContain('th-docs');
     expect(retry.stdin).toMatch(/Limn could not accept your final answer/);
-    expect(retry.stdin).toMatch(/acts/);
+    expect(retry.stdin).toMatch(/steps/);
     expect(T.recorded).toHaveLength(1);
     expect(T.recorded[0]).toMatchObject({ provider: 'codex', inputTokens: 62000, outputTokens: 1100 });
   });
@@ -265,7 +265,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     const res = await run(mkdtempSync(join(T.root, 'checkout-')));
     expect(res.diagram?.title).toBe('Rate import');
     const retry = calls()[1];
-    expect(retry.stdin).toMatch(/acts; merge stages so there are at most 4/);
+    expect(retry.stdin).toMatch(/step 2 starts at "mail", which no earlier step reached/);
     expect(retry.stdin).toMatch(/Fix every point and answer again with the whole design\./);
     expect(retry.stdin).not.toMatch(/submit_design/);
   });
@@ -274,7 +274,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     plays('diagram-refused.jsonl', 'diagram-refused.jsonl');
     const res = await run(mkdtempSync(join(T.root, 'checkout-')));
     expect(res.diagram).toBeNull();
-    expect(res.lastRefusal).toMatch(/acts/);
+    expect(res.lastRefusal).toMatch(/no earlier step reached/);
     expect(res.aborted).toBe(false);
     expect(T.recorded).toHaveLength(1);
     expect(T.recorded[0]).toMatchObject({ provider: 'codex' });
@@ -562,11 +562,14 @@ describe('the docs chat on Codex (kind: docs_chat)', () => {
 
 describe('Claude’s prompts are BYTE-IDENTICAL to before the port', () => {
   // sha256 of each prompt as built by the code BEFORE this port (taken at ae7c8d78), over fixed inputs.
+  // The four DIAGRAM hashes were re-taken DELIBERATELY on 2026-10-31, when the design grid became a
+  // data-flow sequence (DESIGN_DIAGRAM_VERSION 2): Claude's new text, Codex's built through the same
+  // prompt-tools seam.
   const BEFORE: Record<string, string> = {
-    PR_DIAGRAM_SYSTEM_PROMPT: 'c2cb43c804b49cf6ed2827803442fde7e38cdeb98c0f7b7e41cddd2a18aef4f6',
-    STORY_DIAGRAM_SYSTEM_PROMPT: '8c24e1f5f0dec733a0f8a240ed78c009bcdda5e182d4efa95547c3ab63f22fd7',
-    buildPrDiagramPrompt: '6661f36479868affbe49e0627efd3638c1729af6fa624ad7a19c80c9ea641231',
-    buildStoryDiagramPrompt: '4186fd734636e2268b85c506a275e62ff696c5dcaa20194d77240538fea0c0de',
+    PR_DIAGRAM_SYSTEM_PROMPT: '46b2b4f64b17d1adc515fba3845ba38f6e46776f4baf73fcc9111d3139130f1e',
+    STORY_DIAGRAM_SYSTEM_PROMPT: 'ee66f10f9c303cebcc7516130691bfb83d79e2f0ad3ef6107b0f2539ecb278ab',
+    buildPrDiagramPrompt: 'ce36274b96152a9765fcd0d4c4adaf1d9a59c3bcc3400dfaa1473ca2b7bd78ee',
+    buildStoryDiagramPrompt: '75ab850f4f650bdc9955896e20957e882a1d377784473bb66a0714f108e5d1b9',
     SPRINT_PATHS_SYSTEM: 'c4ef79f37f75c5d9fad9e1c71376b810456d4fbc6a4d886038c6c0e8f68036b9',
     sprintPathsPrompt: '2bec786f635ffb21a0e0276967b7f75361b9c52e6ce8bbdc48f36960450a6f93',
     BUILD_SECTIONS_SYSTEM_PROMPT: '83a03d4446782dfd2b5afd7606d5780ebebab8b23840840f4240bf6ef9aa2fb7',

@@ -270,11 +270,15 @@ Automatic runs (`trigger` `auto` / `cascade`) count against the starting workspa
 live inputs on a limit; in memory):
 `diagram` = the newest SUCCEEDED `SequenceDiagramView` (what to draw), `latest` = the newest run of any
 status when it is a different one (drawing, refused, failed) — a failed redraw never hides the last
-good design. Each view carries `current` (its fingerprint is the live one), `design` (the validated
-`DesignDiagram {acts, layers, cells, arrows}`, succeeded rows only — the Mermaid `source` and
-`diagramType` left the wire), `refusal` (`SequenceDiagramRefusal`, server-written) and `members`
-(story, in ref order: a cell's `pr: 'PR2'` is `members[1]`). Only design-era rows are read: a stored
-Mermaid diagram answers as no diagram.
+good design. Each view carries `current` (its fingerprint is the live one), `flow` (the validated
+data-flow `FlowDiagram {participants, steps}`, succeeded rows only), `design` (a succeeded row drawn
+BEFORE the data flows — the older `DesignDiagram {acts, layers, cells, arrows}` grid; null on every new
+run; exactly one of the two is set on a succeeded row), `refusal` (`SequenceDiagramRefusal`,
+server-written: the pre-check's `no_code` / `tests_only` / `copy_only` / `too_small`, the model's
+`no_flow`, …), `refusalDetail` (a `no_flow` refusal's own reason, finishing "No diagram: …"; null
+otherwise — a refused view's `title` / `caption` are null) and `members` (story, in ref order: a
+step's or participant's `pr: 'PR2'` is `members[1]`). The Mermaid `source` and `diagramType` left the
+wire. Only design-era rows are read: a stored Mermaid diagram answers as no diagram.
 
 | Route | Contract |
 |---|---|

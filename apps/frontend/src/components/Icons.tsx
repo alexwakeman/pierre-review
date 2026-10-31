@@ -720,6 +720,17 @@ export function ShieldIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A cylinder — where data is KEPT (the data-flow diagram's Write steps, components/FlowDiagram.tsx).
+export function DatabaseIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <ellipse cx="12" cy="5.5" rx="7" ry="2.6" />
+      <path d="M5 5.5v13c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-13" />
+      <path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" />
+    </IconShell>
+  );
+}
+
 // Head and shoulders — one person.
 export function PersonIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (

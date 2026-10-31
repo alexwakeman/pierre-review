@@ -857,6 +857,7 @@ export const STORY_BUILD_PLAN_READY: StoryBuild = {
   },
   planRevision: 1,
   transcript: [],
+  flow: null,
   design: null,
   docsStatus: 'none',
   docsError: null,
@@ -1503,21 +1504,21 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
               trigger: 'review',
               title: 'Rate import',
               caption: 'Rows are checked, then each rate is stored once.',
-              design: {
-                acts: [
-                  { id: 'imp', title: 'Import' },
-                  { id: 'save', title: 'Save' },
+              flow: {
+                participants: [
+                  { id: 'imp', kind: 'service', label: 'Rate importer', change: 'new', pr: null },
+                  { id: 'db', kind: 'db', label: 'rates table', change: 'unchanged', pr: null },
                 ],
-                layers: ['domain', 'data'],
-                cells: [
-                  { id: 'c1', act: 'imp', layer: 'domain', label: 'Reject rows with no account', pattern: 'Guard clause', change: 'new', pr: null, files: ['src/import.ts'] },
-                  { id: 'c2', act: 'save', layer: 'data', label: 'Store each rate once', pattern: 'Repository', change: 'changed', pr: null, files: [] },
+                steps: [
+                  { n: 1, from: 'imp', to: 'imp', kind: 'validate', label: 'rows with no account are dropped', pr: null, files: ['src/import.ts'] },
+                  { n: 2, from: 'imp', to: 'db', kind: 'write', label: 'one rate per currency', pr: null, files: [] },
                 ],
-                arrows: [{ from: 'c1', to: 'c2', label: 'valid rows' }],
               },
+              design: null,
               headSha: 'a'.repeat(40),
               members: [],
               refusal: null,
+              refusalDetail: null,
               error: null,
               current: true,
               createdAt: '2026-10-17T00:00:00.000Z',

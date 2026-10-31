@@ -22,10 +22,18 @@ const view = (over: Partial<SequenceDiagramView> = {}): SequenceDiagramView => (
   trigger: 'review',
   title: 'Flow',
   caption: null,
+  flow: {
+    participants: [
+      { id: 'a', kind: 'service', label: 'Importer', change: 'new', pr: null },
+      { id: 'b', kind: 'db', label: 'rates', change: 'unchanged', pr: null },
+    ],
+    steps: [{ n: 1, from: 'a', to: 'b', kind: 'write', label: 'rows', pr: null, files: [] }],
+  },
   design: { acts: [{ id: 'a', title: 'Import' }], layers: ['domain'], cells: [{ id: 'c', act: 'a', layer: 'domain', label: 'Parse rows', pattern: 'Pipeline', change: 'new', pr: null, files: [] }], arrows: [] },
   headSha: 'a'.repeat(40),
   members: [],
   refusal: null,
+  refusalDetail: null,
   error: null,
   current: true,
   createdAt: '2026-10-16T00:00:00.000Z',
@@ -75,7 +83,14 @@ describe('the status line', () => {
     expect(slotStatusLine({ diagram: null, latest: null }, false)).toBe('No design yet.');
     expect(slotStatusLine({ diagram: view(), latest: null }, true)).toBe('Drawing…');
     expect(slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'no_code', design: null }) }, false)).toBe(
-      'No code changed, so there is no design to draw.',
+      'No diagram: this change edits no code.',
+    );
+    // The model's decline says its own reason; the pre-check's say theirs.
+    expect(
+      slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'no_flow', refusalDetail: 'this change only renames helpers', design: null }) }, false),
+    ).toBe('No diagram: this change only renames helpers.');
+    expect(slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'copy_only', design: null }) }, false)).toBe(
+      'No diagram: this change only edits copy.',
     );
     expect(slotStatusLine({ diagram: view(), latest: view({ status: 'failed', design: null }) }, false)).toBe('Drawing failed.');
     expect(redrawRefusalText({ outcome: 'refused', diagramId: null, refusal: 'too_few_prs' })).toBe(

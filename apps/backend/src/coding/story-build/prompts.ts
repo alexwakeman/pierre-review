@@ -182,7 +182,7 @@ export function buildStoryPlanUserPrompt(input: StoryPlanPromptInput): string {
   }
   parts.push(
     input.wantDiagram
-      ? '\nThe person asked for a design: fill `design` with the planned design — acts left to right, the layers each change sits in, one cell per (act, layer), each cell\'s `pr` the repository ref (R1, R2, …) that builds it, `change` "new" or "changed" (or "unchanged" for context), and `files` from that repository\'s steps.'
+      ? '\nThe person asked for a design: fill `design` with the planned DATA FLOW — `participants` left to right in the order the data reaches them (each with `kind` ui, api, service, queue, db, store or external, a `label` naming the real thing, `change` "new", "changed" or "unchanged", and `pr` the repository ref R1, R2, … that builds it), and `steps` numbered 1, 2, 3, … in the order they happen (each `from` and `to` a participant id, `kind` read, validate, transform, write, call, emit or return — a write ends at a queue, db, store or external participant —, `label` saying WHAT data passes, `pr` the repository ref, and `files` from that repository\'s steps). Every step after the first starts at a participant an earlier step reached, so the steps form one chain, and every changed code file sits on a step.'
       : '\n`design` is null: no design was asked for.',
   );
   parts.push(

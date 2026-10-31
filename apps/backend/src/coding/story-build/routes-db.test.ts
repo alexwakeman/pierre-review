@@ -67,13 +67,14 @@ const goodPlan = (repoA: string, repoB: string, extra: Record<string, unknown> =
   design: {
     title: 'Refunds',
     caption: 'A refund flows from the page to the API.',
-    acts: [{ id: 'ask', title: 'Ask' }],
-    layers: ['ui', 'api'],
-    cells: [
-      { id: 'btn', act: 'ask', layer: 'ui', label: 'Refund button', pattern: 'Command', change: 'new', pr: repoA, files: ['web/Order.tsx'] },
-      { id: 'ep', act: 'ask', layer: 'api', label: 'Refund endpoint', pattern: null, change: 'new', pr: repoB, files: ['src/refunds.ts'] },
+    participants: [
+      { id: 'btn', kind: 'ui', label: 'Refund button', change: 'new', pr: repoA },
+      { id: 'ep', kind: 'api', label: 'Refund endpoint', change: 'new', pr: repoB },
     ],
-    arrows: [{ from: 'btn', to: 'ep', label: 'POST' }],
+    steps: [
+      { n: 1, from: 'btn', to: 'ep', kind: 'call', label: 'order id', pr: repoA, files: ['web/Order.tsx'] },
+      { n: 2, from: 'ep', to: 'ep', kind: 'validate', label: 'refundable amount', pr: repoB, files: ['src/refunds.ts'] },
+    ],
   },
   ...extra,
 });
@@ -239,7 +240,8 @@ describe('start → plan_ready', () => {
       ['R2', 'planned', 0, 'limn/acme-214-refund-endpoint'],
       ['R1', 'planned', 1, 'limn/acme-214-refund-button'],
     ]);
-    expect(b.design.cells.map((c: any) => c.pr)).toEqual(['R1', 'R2']);
+    expect(b.flow.steps.map((c: any) => c.pr)).toEqual(['R1', 'R2']);
+    expect(b.design).toBeNull();
     expect(b.planCostUsd).toBe(0.5);
     expect(b.provider).toBe('claude');
     expect(JSON.stringify(b)).not.toContain('Customers can refund'); // the seed never reaches the wire

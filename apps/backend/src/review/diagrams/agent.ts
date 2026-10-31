@@ -28,9 +28,10 @@ import { validateDesign, type AcceptedDesign, type DesignContext } from './valid
 // PATH GUARD (path-guard.ts) denies any path outside them and the working directory.
 //
 // `submit_design` VALIDATES before it accepts (validate.ts `validateDesign`, against the run's
-// `DesignContext` — its PR refs and changed files): a refused design is answered with EVERY problem
-// and what to do about it, and the model may call again, at most MAX_SUBMIT_ATTEMPTS times. Only a
-// design that passed is returned — the manager validates it once more before storing.
+// `DesignContext` — its PR refs and changed files): a refused flow is answered with EVERY problem
+// and what to do about it, and the model may call again, at most MAX_SUBMIT_ATTEMPTS times. Only an
+// answer that passed is returned — a data-flow diagram, or a DECLINE (`noDiagram`: no data moves
+// through the change, with its reason) — and the manager validates it once more before storing.
 //
 // ON CODEX (docs/CODEX-PLAN.md Phase 3, kind 'diagram'): the same run through the active provider's
 // `runAgent`. Codex has no `submit_design` tool: its final message IS the design, checked against the
@@ -144,7 +145,8 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       tools: [
         {
           name: 'submit_design',
-          description: 'Submit the one design grid. It is checked at once: a refusal lists what to fix.',
+          description:
+            'Submit the one data-flow diagram, or noDiagram with the reason when no data moves through the change. It is checked at once: a refusal lists what to fix.',
           shape,
           handle: async (a) => {
             if (accepted != null) return { text: 'Design already recorded.' };
@@ -155,7 +157,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
             const j = judgeSubmission(a as unknown as Partial<SubmitDesignPayload>, attempts, args.design, provider.id);
             if ('accepted' in j) {
               accepted = j.accepted;
-              return { text: 'Design recorded.' };
+              return { text: j.accepted.declined != null ? 'Recorded: no diagram.' : 'Design recorded.' };
             }
             lastRefusal = j.refusal;
             return { text: j.reply, isError: true };

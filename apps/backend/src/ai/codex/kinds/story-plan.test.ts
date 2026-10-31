@@ -160,14 +160,15 @@ const PLAN = {
 };
 const DESIGN = {
   title: 'Refunds',
-  caption: 'A refund flows from the page to the API.',
-  acts: [{ id: 'ask', title: 'Ask' }],
-  layers: ['ui', 'api'],
-  cells: [
-    { id: 'btn', act: 'ask', layer: 'ui', label: 'Refund button', pattern: 'Command', change: 'new', pr: 'R1', files: ['web/Order.tsx'] },
-    { id: 'ep', act: 'ask', layer: 'api', label: 'Refund endpoint', change: 'new', pr: 'R2', files: ['src/refunds.ts'] },
+  caption: 'A refund goes from the page to the API.',
+  participants: [
+    { id: 'btn', kind: 'ui', label: 'Refund button', change: 'new', pr: 'R1' },
+    { id: 'ep', kind: 'api', label: 'Refund endpoint', change: 'new', pr: 'R2' },
   ],
-  arrows: [{ from: 'btn', to: 'ep', label: 'POST' }],
+  steps: [
+    { n: 1, from: 'btn', to: 'ep', kind: 'call', label: 'order id and amount', pr: 'R1', files: ['web/Order.tsx'] },
+    { n: 2, from: 'ep', to: 'ep', kind: 'validate', label: 'amount within the order total', pr: 'R2', files: ['src/refunds.ts'] },
+  ],
 };
 const CTX = {
   candidates: [
@@ -283,7 +284,7 @@ describe('story_plan on Codex', () => {
   });
 
   it("Codex's second answer is its last: a design still wrong is dropped, the plan kept", async () => {
-    const badDesign = answer({ ...PLAN, design: { ...DESIGN, cells: [{ ...DESIGN.cells[0], pr: 'R9' }] } });
+    const badDesign = answer({ ...PLAN, design: { ...DESIGN, participants: [{ ...DESIGN.participants[0], pr: 'R9' }, DESIGN.participants[1]] } });
     scenario({ first: badDesign, resume: badDesign });
     const { res } = await run({ context: { ...CTX, wantDiagram: true } });
     expect(res.plan).not.toBeNull();

@@ -37,6 +37,7 @@ import type {
   SonarPostRecord,
   SequenceDiagramMember,
   DesignDiagram,
+  FlowDiagram,
   ReferenceDocCrawl,
   ReferenceDocWikiState,
   ReferenceDocSummaryCache,
@@ -3826,7 +3827,8 @@ export const sequenceDiagrams = sqliteTable(
     // The retired Mermaid source — kept, never written.
     source: text('source'),
     // The validated design grid (succeeded design-era rows; migration 0119).
-    design: text('design', { mode: 'json' }).$type<DesignDiagram>(),
+    // 'flow' rows: the FlowDiagram; 'design' rows: the older DesignDiagram grid (read, never written).
+    design: text('design', { mode: 'json' }).$type<FlowDiagram | DesignDiagram>(),
     // SequenceDiagramRefusal — server-written.
     refusal: text('refusal'),
     error: text('error'),
@@ -4147,7 +4149,8 @@ export const storyBuilds = sqliteTable(
     planJson: text('plan_json', { mode: 'json' }).$type<StoryBuildPlan>(),
     planRevision: integer('plan_revision').notNull().default(0),
     transcriptJson: text('transcript_json', { mode: 'json' }).$type<StoryBuildMessage[]>(),
-    designJson: text('design_json', { mode: 'json' }).$type<DesignDiagram>(),
+    // The planned FlowDiagram; older rows hold the DesignDiagram grid (served apart by its shape).
+    designJson: text('design_json', { mode: 'json' }).$type<FlowDiagram | DesignDiagram>(),
     // StoryBuildDocsStatus.
     docsStatus: text('docs_status').notNull().default('none'),
     docsJson: text('docs_json', { mode: 'json' }).$type<StoryBuildDocs>(),

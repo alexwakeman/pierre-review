@@ -48,7 +48,7 @@ export function slotStatusLine(slot: SequenceDiagramSlot, redrawing: boolean): s
   if (l == null) return slot.diagram == null ? 'No design yet.' : null;
   // A refusal names the provider that RAN this drawing (its row's), never the active one.
   const by = aiRunProviderName(l);
-  if (l.status === 'refused' && l.refusal != null) return sequenceDiagramRefusalText(l.refusal, by);
+  if (l.status === 'refused' && l.refusal != null) return sequenceDiagramRefusalText(l.refusal, by, l.refusalDetail);
   if (l.status === 'failed') {
     return l.refusal != null ? sequenceDiagramRefusalText(l.refusal, by) : 'Drawing failed.';
   }

@@ -1,10 +1,13 @@
-// DESIGN DIAGRAMS in the Claude Review tab (docs/FRONTEND.md § Design diagrams): the PR's own design
-// and, when the PR is on a ticket with more than one pull request, the whole story's. Drawn by a
-// separate Sonnet run after each finished review; Redraw queues one now. `DiagramSlotView` is also what
-// This Sprint's ticket drawer shows for a story.
+// DESIGN DIAGRAMS in the Claude Review tab (docs/FRONTEND.md § Design diagrams): how data flows through
+// the PR's change and, when the PR is on a ticket with more than one pull request, through the whole
+// story. Drawn by a separate Sonnet run after each finished review; Redraw queues one now. A change with
+// no data path gets none, said plainly ("No diagram: this change only edits copy."). `DiagramSlotView`
+// is also what the story view shows for a story.
 //
 // Rules:
-//  - Every string from the server renders as PLAIN TEXT; the design renders through <DesignGrid>.
+//  - Every string from the server renders as PLAIN TEXT; the flow renders through <FlowDiagram>. A row
+//    drawn before the data-flow diagrams still holds the older grid: <DesignGrid> draws it, marked as
+//    the earlier layout (Redraw draws the flow).
 //  - A newer run that refused or failed NEVER hides the last good design: the slot carries both.
 //  - Only the reads poll, and only while a run is queued or running (or just after a review).
 //  - A card's click-through: THIS PR's file → `onOpenInChanges` (same pane); another PR's (a story
@@ -12,7 +15,6 @@
 import {
   aiModelWords,
   aiProviderName,
-  type DesignCell,
   type SequenceDiagramMember,
   type SequenceDiagramSlot,
   type StorySequenceDiagramSlot,
@@ -29,7 +31,8 @@ import {
 } from '../hooks/useSequenceDiagrams.js';
 import { useFilters } from '../store/filters.js';
 import { REVIEW_ITEM_TITLE, REVIEW_META, REVIEW_PROSE } from '../lib/reviewStyles.js';
-import { DesignGrid, type OpenDesignFile } from './DesignGrid.js';
+import { DesignGrid } from './DesignGrid.js';
+import { FlowDiagram, type OpenFlowFile } from './FlowDiagram.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
 import { aiRunLabel } from '@pierre-review/shared';
@@ -41,26 +44,27 @@ const BTN =
 
 type OpenInChanges = (path: string, line: number | null, side: 'LEFT' | 'RIGHT') => void;
 
-/** How the grid reads — the ONE legend, behind the ⓘ of every Design heading. */
+/** How the diagram reads — the ONE legend, behind the ⓘ of every Design heading. */
 export function DesignLegend({ story }: { story: boolean }): JSX.Element {
   const provider = useAiProvider();
   return (
     <div className="space-y-2">
       <p>
-        {aiModelWords(provider, 'Sonnet')} reads the change and the code around it, then lays out how it is built: the stages across, the
-        layers down, one card per job, with the pattern it uses.
+        {aiModelWords(provider, 'Sonnet')} reads the change and the code around it, then draws how data moves through it: what
+        touches the data across the top, and each step down the page in the order it happens.
       </p>
       <p>
-        The key under the grid names each card border. Grey arrows are the hand-offs that matter; a numbered one is
-        named in the key too.
+        Each arrow names the data that passes. A dotted line is a check, a heavy line a write to where data is kept, and
+        a dashed line a result going back. The keys under the diagram name the lines and box borders.
       </p>
-      {story && <p>Each card names the pull request that does it.</p>}
-      <p>Click a card to open its file in the Changes tab. Empty cells are expected.</p>
+      {story && <p>Each box and step names the pull request that does it.</p>}
+      <p>Click a step to open its file in the Changes tab.</p>
       <p>
-        It is drawn again after a review of a new commit, unless that is turned off in Settings. Pull requests that
-        change no code get none.
+        It is drawn again after a review of a new commit, unless that is turned off in Settings. A change with no data
+        path gets none: one that edits only copy or tests, changes a few lines, or that {aiProviderName(provider)} finds
+        moves no data. Draw asks for one anyway.
       </p>
-      <p>{aiProviderName(provider)} works the design out from the code, so check it before relying on it.</p>
+      <p>{aiProviderName(provider)} works the flow out from the code, so check it before relying on it.</p>
     </div>
   );
 }
@@ -76,24 +80,32 @@ export function DiagramSlotView({
   redrawing: boolean;
   // What the design shows, for assistive tech ("Design of this pull request").
   label: string;
-  openFile?: OpenDesignFile;
+  openFile?: OpenFlowFile;
 }): JSX.Element {
   const d = slot.diagram;
   const line = slotStatusLine(slot, redrawing);
+  const drawn = d != null && (d.flow != null || d.design != null);
+  const name = d?.title != null ? `${label}: ${d.title}` : label;
   return (
     <div className="space-y-1.5">
-      {d != null && d.design != null && (
+      {d != null && drawn && (
         <>
           {d.title != null && <p className={REVIEW_ITEM_TITLE}>{d.title}</p>}
           {d.caption != null && <p className={REVIEW_PROSE}>{d.caption}</p>}
           {!d.current && <p className={REVIEW_META}>Drawn for an earlier commit.</p>}
           {d.model && <p className={REVIEW_META}>{aiRunLabel(d.provider, d.model)}</p>}
-          <DesignGrid
-            design={d.design}
-            members={d.kind === 'story' ? d.members : []}
-            label={d.title != null ? `${label}: ${d.title}` : label}
-            openFile={openFile}
-          />
+          {d.flow != null ? (
+            <FlowDiagram flow={d.flow} members={d.kind === 'story' ? d.members : []} label={name} openFile={openFile} />
+          ) : (
+            d.design != null && (
+              <>
+                <p className={REVIEW_META} data-testid="design-old-layout">
+                  Drawn in the earlier layout. Redraw it to see how data flows.
+                </p>
+                <DesignGrid design={d.design} members={d.kind === 'story' ? d.members : []} label={name} openFile={openFile} />
+              </>
+            )
+          )}
         </>
       )}
       {line != null && <p className={REVIEW_META}>{line}</p>}
@@ -142,7 +154,7 @@ export function ClaudeReviewDiagramsSection({
   const data = q.data;
   const drawing = redrawing || slotDrawing(data.pr);
   const refusal = redrawRefusalText(redraw.data);
-  const openOwn: OpenDesignFile | undefined =
+  const openOwn: OpenFlowFile | undefined =
     onOpenInChanges != null ? (_cell, path) => onOpenInChanges(path, null, 'RIGHT') : undefined;
 
   return (
@@ -184,7 +196,7 @@ function StorySlotBlock({
   openFile,
 }: {
   slot: StorySequenceDiagramSlot;
-  openFile: (cell: DesignCell, path: string) => void;
+  openFile: OpenFlowFile;
 }): JSX.Element {
   const redraw = useRedrawStoryDiagram(slot.ident);
   const redrawing = useRedrawingStory(slot.ident);
