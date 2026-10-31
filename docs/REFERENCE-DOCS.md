@@ -17,6 +17,9 @@ table-of-contents tree whose nodes carry summaries, and retrieves by letting an 
 agent reads with its ordinary file tools. This library is both: the tree IS the files, and the walk is
 the agent's own Read/Glob/Grep, guided by one prompt block (`docsNavigationPrompt`).
 
+Planned (not built): hybrid retrieval (FTS5 + local embeddings) to pick what the model reads first,
+measured on the 2018 Intel MacBook Pro: [DOCS-RAG.md](DOCS-RAG.md).
+
 ## The three levels
 
 ```
