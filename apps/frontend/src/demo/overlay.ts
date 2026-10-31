@@ -26,6 +26,8 @@ export class DemoOverlay {
   readonly chats = new Map<string, unknown[]>();
   /** Ticket statuses the reader set from the story view's picker, by ticket ident. */
   readonly ticketStatuses = new Map<string, { name: string; category: string | null }>();
+  /** Repos the reader pressed "Mark all seen" on (the repo status panel). */
+  readonly seenRepoIds = new Set<number>();
 
   patchPr(prId: number, fields: Record<string, unknown>): void {
     this.prFields.set(prId, { ...(this.prFields.get(prId) ?? {}), ...fields });

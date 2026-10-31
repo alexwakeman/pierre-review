@@ -876,7 +876,16 @@ export const ROUTES: DemoRoute[] = [
       return OK({ status: 'ok' });
     },
   },
-  { method: 'POST', re: /^\/api\/prs\/mark-all-viewed$/, run: () => OK({ status: 'ok', count: 0 }) },
+  {
+    method: 'POST',
+    re: /^\/api\/prs\/mark-all-viewed$/,
+    // The repo status panel's "Mark all seen" names its one repo: the /api/activity patch below
+    // then clears that repo's blue line and sidebar dot. (An unscoped call is a no-op here.)
+    run: (req, _m, srv) => {
+      for (const id of numberList(bodyRecord(req).repoIds)) srv.overlay.seenRepoIds.add(id);
+      return OK({ status: 'ok', count: 0 });
+    },
+  },
   { method: 'POST', re: /^\/api\/prs\/\d+\/dismiss$/, run: () => OK({ status: 'ok' }) },
   { method: 'POST', re: /^\/api\/activity\/feed\/mark-seen$/, run: (_r, _m, srv) => OK({ feedLastSeenAt: srv.nowIso() }) },
   {
@@ -1420,6 +1429,8 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
     return { ...body, prs };
   }
 
+  if (p === '/api/activity' && isRecord(body) && Array.isArray(body.repos)) return patchActivity(srv, body);
+
   if (p === '/api/story-builds' && isRecord(body) && isRecord(body.build)) return { ...body, build: patchStoryBuild(srv, body.build) };
   if (/^\/api\/story-builds\/\d+$/.test(p) && isRecord(body)) return patchStoryBuild(srv, body);
   if (p === '/api/attention' && isRecord(body)) return patchAttention(srv, body).body;
@@ -1462,6 +1473,28 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
 }
 
 /** Only the fields a list row shares with the detail (state and clocks), never the detail's arrays. */
+// /api/activity: a PR opened here (mark-viewed) or a repo marked seen loses its "new since you last
+// opened it", so the repo status panel's blue line and the sidebar's blue dot clear as they do live.
+function patchActivity(srv: DemoServer, body: Record<string, unknown>): Record<string, unknown> {
+  const o = srv.overlay;
+  if (o.prFields.size === 0 && o.seenRepoIds.size === 0) return body;
+  const repos = (body.repos as unknown[]).map((r) => {
+    if (!isRecord(r) || !Array.isArray(r.prs)) return r;
+    const seen = typeof r.repoId === 'number' && o.seenRepoIds.has(r.repoId);
+    const prs = r.prs.map((x) => {
+      if (!isRecord(x) || typeof x.id !== 'number') return x;
+      const row = o.prFields.has(x.id) ? patchListPr(x, o.prFields.get(x.id) ?? {}) : x;
+      return seen ? { ...row, newSinceLastViewed: null } : row;
+    });
+    const stillNew = new Set(
+      prs.filter((x) => isRecord(x) && x.newSinceLastViewed != null && typeof x.id === 'number').map((x) => (x as { id: number }).id),
+    );
+    const unreadPrs = Array.isArray(r.unreadPrs) ? r.unreadPrs.filter((u) => isRecord(u) && stillNew.has(u.prId as number)) : r.unreadPrs;
+    return { ...r, prs, unreadPrs, hasUnread: Array.isArray(unreadPrs) ? unreadPrs.length > 0 : r.hasUnread };
+  });
+  return { ...body, repos };
+}
+
 function patchListPr(row: Record<string, unknown>, fields: Record<string, unknown>): Record<string, unknown> {
   const out = { ...row };
   for (const [k, v] of Object.entries(fields)) if (k in row && !Array.isArray(v)) out[k] = v;

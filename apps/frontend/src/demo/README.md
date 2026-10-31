@@ -129,6 +129,8 @@ a merge marks the PR merged and drops it from Open PRs (a second merge answers 4
 `NotMergeable`), a resolved thread reads resolved, a reply or comment appears, approve / request
 changes / withdraw change the reader's standing, auto-merge arm and disarm show in the armed list,
 workspace edits and every settings PUT are read back, and a pushed AI Fix reads pushed.
+Opening a PR, or a repo status panel's "Mark all seen", clears that PR's (or repo's) "new since
+you last opened it" in `/api/activity`, so the panel's blue line and the sidebar's blue dot clear.
 The Pending reads (`/api/attention`, `/api/my-turn`, `/api/daily-brief`, `/api/pro/work-plan`)
 drop every card of a PR merged or closed here and every My Turn entry dismissed here (listed
 under "Dismissed" until it is brought back), take the removed cards off each tab's, kind's and
