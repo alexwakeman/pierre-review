@@ -1724,7 +1724,8 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   (`precheck.ts` `diagramPrecheck`, pure, on the diff the pipeline reads anyway, BEFORE any checkout or
   model, so FREE — a server refusal outside the cap): `no_code` (always), then the SOFT three a
   reader's own Draw skips — `tests_only`, `copy_only` (every changed code line differs only in string
-  literals / JSX text / prose lines, `codeSkeleton`; a string holding SQL or a route stays code) and
+  literals / JSX text / prose lines, `codeSkeleton`; a string holding SQL or a route stays code, and a
+  words-only line is NOT prose when it carries an operator (`price * qty`) or is a query line (`FROM orders o`)) and
   `too_small` (< `FLOW_MIN_CODE_LINES` = 4 changed code lines, comments and blanks aside). (2) THE
   MODEL may decline: `submit_design`'s `noDiagram` (a reason finishing "No diagram: …", ≤ 120 chars,
   with empty participants and steps) is stored as refused `no_flow`, the reason in `caption` and served

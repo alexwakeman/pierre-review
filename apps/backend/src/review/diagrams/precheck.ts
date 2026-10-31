@@ -46,6 +46,11 @@ function isCommentOrBlank(t: string): boolean {
 // SQL, a route or a URL path inside a string literal.
 const DATA_STRING = /\bselect\s.+\sfrom\s|\binsert\s+into\s|\bupdate\s+\w+\s+set\s|\bdelete\s+from\s|^["']\/|\/api\//i;
 
+// An operator between operands: an expression continuation line, not prose.
+const OPERATOR = /\s(?:[-+*/%^]|&&|\|\||\?\?|\?|\||&)\s|=>|\.\w+\b(?!\s)/;
+// A line of SQL (a multi-line query inside a template literal): an upper-case keyword, or `from orders o`.
+const SQL_LINE = /^(?:SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AND|OR|GROUP|ORDER|HAVING|LIMIT|OFFSET|INSERT|UPDATE|DELETE|SET|VALUES|RETURNING|UNION|WITH)\b|^(?:from|join)\s+[a-z_][a-z0-9_.]*\s*(?:[a-z_]\w*)?,?$/;
+
 /** The line with its WORDS taken out: string contents, JSX text. Prose-only lines read as ''. */
 export function codeSkeleton(line: string): string {
   let s = line.trim();
@@ -57,9 +62,11 @@ export function codeSkeleton(line: string): string {
   // JSX / HTML text between tags.
   s = s.replace(/>[^<>{}]*</g, '><');
   s = s.replace(/\s+/g, ' ').trim();
-  // A line of plain words (JSX text on its own line, a markdown-ish string continuation).
+  // A line of plain words (JSX text on its own line, a markdown-ish string continuation). Never one that
+  // is an expression continuation (`price * qty`, `a && b`) or a line of a multi-line query (`FROM orders`):
+  // those move data, so a change to them is code.
   const first = s.split(/[\s(]/)[0] ?? '';
-  if (!/[(){}[\]=;<>]/.test(s) && /\s/.test(s) && !KEYWORDS.has(first)) return '';
+  if (!/[(){}[\]=;<>]/.test(s) && /\s/.test(s) && !KEYWORDS.has(first) && !OPERATOR.test(s) && !SQL_LINE.test(s)) return '';
   return s;
 }
 

@@ -43,6 +43,18 @@ describe('diagramPrecheck', () => {
     ).toBeNull();
   });
 
+  it('an expression continuation or a multi-line query line is code, not prose', () => {
+    expect(codeSkeleton('  price * qty')).toBe('price * qty');
+    expect(codeSkeleton('  isOpen && hasRows')).toBe('isOpen && hasRows');
+    expect(codeSkeleton('  FROM orders o')).toBe('FROM orders o');
+    expect(codeSkeleton('  from refunds r')).toBe('from refunds r');
+    // Still prose: JSX text on its own line.
+    expect(codeSkeleton('  Open the pull request to see its steps.')).toBe('');
+    const lines = ['  a();', '  b();', '  c();'];
+    expect(run([['src/q.ts', ['    FROM orders o', ...lines], ['    FROM refunds o', ...lines]]])).toBeNull();
+    expect(run([['src/q.ts', ['    price * qty', ...lines], ['    price * qty * rate', ...lines]]])).toBeNull();
+  });
+
   it('too small: fewer than four changed code lines (comments and blanks aside)', () => {
     expect(run([['src/a.ts', ['  return a + 1;'], ['  return a + 2;', '  // why', '']]])).toBe('too_small');
     expect(run([['src/a.ts', ['// old comment'], ['// new comment']]])).toBe('too_small');
