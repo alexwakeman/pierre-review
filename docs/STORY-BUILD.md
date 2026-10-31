@@ -9,9 +9,10 @@
 
 ## What it is
 
-On the This Sprint board, a ticket that has NOT STARTED (its status sits in the Not started bucket) and has
-NO pull request shows an **Implement** button. A STARTED ticket whose current story check found gaps shows
-**Fill gaps** instead (§ Fill gaps). One click opens a build tab that:
+In the STORY VIEW (This Sprint's tray, the story tab, the PR view's Story tab — § Entry points), a ticket
+that has NOT STARTED (its status sits in the Not started bucket) and has NO pull request offers
+**Implement**. A STARTED ticket whose current story check found gaps offers **Fill gaps** instead (§ Fill
+gaps). One click opens a build tab that:
 
 1. **Assesses** the ticket: its story and criteria, and what any existing ticket PRs already deliver — the
    gap fold (always for Fill gaps; rarely for Implement, which needs no PRs).
@@ -40,13 +41,14 @@ These override the design document where they differ.
 2. **Draft by default** (`STORY_BUILD_PUSH_DRAFT_DEFAULT`), with a toggle to open ready for review.
 3. **≤ 4 repositories change** (`STORY_BUILD_MAX_REPOS`), built **sequentially in plan order** (a later
    repository reads earlier ones' worktrees read-only); **one build at a time per machine**.
-4. **Entry point:** the Implement button appears ONLY on This Sprint ticket cards whose story is NOT
-   STARTED and has no PRs; Fill gaps (2026-10-31) ONLY on STARTED cards whose current story check found
-   gaps. ONE gate decides both: shared `storyBuildOffered` returns `'implement' | 'fill_gaps' | null`.
-   Not the story view header, not Open PRs, not Reports. ⌘K offers "Implement KEY" / "Fill gaps in KEY"
-   only for the same tickets while the sprint board is open; the build tab registers its own commands
-   (Accept plan, Push all, Cancel). Once a session exists the card shows the
-   build MARK (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed) and a click opens the tab.
+4. **Entry point:** the STORY VIEW's action group (moved off the sprint cards 2026-10-31, § Entry points):
+   Implement ONLY on a story that is NOT STARTED and has no PRs; Fill gaps (2026-10-31) ONLY on a STARTED
+   one whose current story check found gaps. ONE gate decides both: shared `storyBuildOffered` returns
+   `'implement' | 'fill_gaps' | null`. Not Open PRs, not Reports. ⌘K offers "Implement KEY" / "Fill gaps in
+   KEY" (or "Open KEY's build") only while that ticket's story view is open; the build tab registers its
+   own commands (Accept plan, Push all, Cancel). Once a session exists the story view offers "Open build ·
+   <mark>" and the sprint card shows the build MARK (`storyBuildMark`: Building… / Plan ready / Ready to
+   push / Pushed) — a status, never a button; a card click opens the tray.
 5. **Gap-filling** against existing ticket PRs stays in the backend (cheap); Fill gaps is its entry.
 6. **Docs defaults:** suggestions ticked, superseded unticked ("the story wins, acknowledged"), grounded
    informational (`storyBuildDocsDefaultDecision`).
@@ -223,21 +225,44 @@ read scopes the account (wrong owner ⇒ 404). Registered only from `review/agen
 
 Error codes: shared `StoryBuildErrorCode`.
 
+## Entry points
+
+ONE component, `apps/frontend/src/components/StoryBuild/StoryBuildEntry.tsx`, the primary button of the
+story view's action group (beside Check against docs / Redraw design: the right rail in the two-column
+layout, the Story heading row in one column and in This Sprint's tray). The story view is mounted by the
+tray, the story tab (`?view=ticket:…`) and the PR view's Story tab (`?prTab=story`), so all three offer it.
+Gated on `me.ai.enabled` (hidden, never disabled); opens the build tab through `useOpenStoryBuild` only.
+
+- **Inputs.** The tray hands in the board's node: the gate reads it exactly as the board would, and no
+  request is made. Elsewhere the view derives the node's fields (`lib/storyBuild.ts`): the stage from the
+  sprint graph already in memory, else the tracker status category (`storyStageOfCategory`: To Do ⇒ Not
+  started, Done ⇒ Complete, anything else ⇒ started; unknown ⇒ Implement is never offered); the PR count
+  from the view's ticket-PR read; the check from the view's ticket-check state and the latest run the
+  Story section already reads (`storyViewCheck` — stale for any reason the state names, so an edited
+  ticket offers nothing); and the session from ONE DB read, `GET /api/story-builds?workspace=&ident=`
+  (`sprintNodeBuildOf`). The button waits for that read.
+- **A ticket outside the sprint.** The tab's `StartPanel` gates on the sprint node; with none, on what the
+  story view offered (`TabTicketMeta.buildOffer`: the action and the check's run id, for the gap list).
+  A tab rebuilt from a URL carries no offer, so it still refuses.
+- **The sprint card** carries no build button: only the mark (§ The sprint card).
+
 ## The sprint card
 
 `SprintGraphNode.build: SprintNodeBuild | null` — the ticket's latest OPEN session, coarse (`id`, `status`,
 `readyRepos`, `pushedRepos`), read in ONE batched query by `db/sprint-builds.ts sprintBuildsFor` inside the
 graph fold (null when AI is off, for a ghost, or with no open session). It rides `changeToken`, appended
 only when present, so a sprint with no session keeps its old token. The board fetches nothing on mount.
+The card shows it as the build MARK only; the action lives in the story view (§ Entry points), which the
+tray reads from this same node.
 
 ## Fill gaps
 
 The second entry, for a ticket that is already under way. Same session, routes, tab and screen; nothing new
 on the backend's start path (the gap fold already builds only the gaps whenever the ticket has PRs).
 
-- **When** (`storyBuildOffered` → `'fill_gaps'`): a sprint ticket, no open session, STARTED (≥ 1 PR, or a
-  status past Not started) and not Complete, whose `SprintGraphNode.check` — the latest SUCCEEDED story check
-  — is NOT stale and found gaps: `storyBuildCheckGaps` = not met + partly met + unsettled (unclear / not
+- **When** (`storyBuildOffered` → `'fill_gaps'`): a ticket (outside the tray, its fields derived — § Entry
+  points), no open session, STARTED (≥ 1 PR, or a status past Not started) and not Complete, whose
+  `SprintGraphNode.check` — the latest SUCCEEDED story check — is NOT stale and found gaps: `storyBuildCheckGaps` = not met + partly met + unsettled (unclear / not
   checked) + `missing` (the items outside the criteria, M1…). No check, or a stale one ⇒ nothing is offered
   (the gaps are not known), and the board says nothing about it. ⚠ `stale` there is the DB-only compare
   (member PRs pushed / joined / left); an edit to the ticket TEXT is not seen, so the assess phase still runs
@@ -404,14 +429,14 @@ PR's head are protected and refused before any process runs), then `createPullRe
 | WP1 session + plan | `feat/story-build-plan` | `inputs`, `coverage`, `candidates`, `checkouts`, `plan`, `plan-agent`, `prompts` (plan), `manager`, `routes.ts`, SSE; Codex `story_plan`; gc facts for `story_plan` |
 | WP2 build + push | `feat/story-build-build` | `coding/agent.ts buildInWorktree` refactor, `prepBranchWorktree`, the write-deny hook, `build.ts`, `push.ts`, `routes-build.ts`; Codex `story_build`; gc facts for `story_build` |
 | WP3 docs | `feat/story-build-docs` | the story-docs `build` mode, `docs.ts`, `routes-docs.ts` |
-| WP4 frontend + demo | `feat/story-build-ui` | the tab kind, `useOpenStoryBuild`, `components/StoryBuild/*`, the card button + mark, ⌘K, hooks + client, `mock-api.ts`, demo seed/recorder |
+| WP4 frontend + demo | `feat/story-build-ui` | the tab kind, `useOpenStoryBuild`, `components/StoryBuild/*`, the card mark (the button moved to the story view 2026-10-31), ⌘K, hooks + client, `mock-api.ts`, demo seed/recorder |
 
 **The demo** (`seed-demo-agentic.ts seedStoryBuilds`, docs/DEMO.md): PLAT-301 (in progress, its story check from
-`seedTicketReviews` current with one criterion not met and one partly met) is the Fill gaps card and tab (the
+`seedTicketReviews` current with one criterion not met and one partly met) is the Fill gaps ticket and tab (the
 recorder opens it, recording its check); and on not-started PLAT sprint tickets with no PR — PLAT-310 a READY build (acme/api pushed as draft #143, its `pull_requests` row seeded and not linked to the
 ticket; acme/web-app ready, tests 3 passed + 1 failed + the hook), PLAT-312 PLAN READY (a design, a two-turn chat,
-the docs weighed: 2 grounded, 1 superseded, 2 suggestions not in the plan yet), PLAT-318 no session (the
-Implement button). The demo answers every write inert (routes.ts), the checks preview from its own fixture, and
+the docs weighed: 2 grounded, 1 superseded, 2 suggestions not in the plan yet), PLAT-318 no session (its story view
+offers Implement). The demo answers every write inert (routes.ts), the checks preview from its own fixture, and
 the stream as an unrecorded (ended) stream.
 
 Each WP owns its files; the manager reaches WP2/WP3 only through `seams.ts` (`storyBuildDeps()`; tests use

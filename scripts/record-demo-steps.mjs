@@ -276,15 +276,14 @@ export const STEPS = [
     run: (h) => h.go(`?view=sprint&sprintTab=themes&sprintStory=${enc(ident(k))}`),
   })),
 
-  // ── "Implement story": the sprint card's Implement and Fill gaps buttons (hover), then each build tab with its
+  // ── "Implement story": the story view's Implement / Fill gaps / Open build (in This Sprint's tray —
+  // the cards carry only the build marks — and in the story tab), then each build tab with its
   // disclosures open (plan Details, the docs' grounded list, each repository's diff). Nothing is
   // started, accepted or pushed: the sessions are the seeder's rows. ──
   {
     name: 'sprint:implement',
     run: async (h) => {
-      await h.go('?view=sprint&sprintTab=themes');
-      await h.page.locator(`[data-ticket="PLAT-318"]`).first().hover().catch(() => {});
-      await h.page.locator(`[data-ticket="PLAT-301"]`).first().hover().catch(() => {});
+      for (const k of STORY_BUILD_TICKETS) await h.go(`?view=sprint&sprintTab=themes&sprintStory=${enc(ident(k))}`);
     },
   },
   ...STORY_BUILD_TICKETS.map((k) => ({

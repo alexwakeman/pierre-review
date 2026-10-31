@@ -17,6 +17,7 @@ import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import { TICKET_CRITERION_STATUS_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { useSprintGraph } from '../../hooks/useSprintStories.js';
+import type { TabTicketMeta } from '../../store/pinnedTabs.js';
 import { storyBuildErrorText, storyBuildStatusLine } from '../../lib/storyBuild.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
@@ -38,6 +39,7 @@ export function StartPanel({
   workspaceId,
   ident,
   last,
+  offer = null,
   wantDiagram,
   setWantDiagram,
   wantDocs,
@@ -47,6 +49,9 @@ export function StartPanel({
   ident: string;
   /** The latest session when it is closed (failed / cancelled / discarded); null otherwise. */
   last: StoryBuild | null;
+  /** What the story view offered when it opened this tab (`TabTicketMeta.buildOffer`); used only while
+   *  the ticket is not a sprint board node (a story outside the sprint). */
+  offer?: TabTicketMeta['buildOffer'];
   wantDiagram: boolean;
   setWantDiagram: (v: boolean) => void;
   wantDocs: boolean;
@@ -64,12 +69,14 @@ export function StartPanel({
   });
   const hasDocs = (docs.data?.docs ?? []).some((d) => d.status === 'ready');
   // THE ENTRY GATE holds here too (owner decision 4, shared `storyBuildOffered`): a tab rebuilt from a
-  // URL may name any ticket, but a NEW session starts only for a sprint ticket that is Not started and
-  // has no pull request. A closed session is no open session, so `build` is ignored. (The sprint graph
-  // is the board's own DB-only query, usually cached.)
+  // URL may name any ticket, but a NEW session starts only for a ticket the gate offers it on. A sprint
+  // ticket is judged from its board node (the sprint graph is the board's own DB-only query, usually
+  // cached); a story outside the sprint by what its story view offered when it opened this tab
+  // (`offer`, the same gate over the view's own facts). A closed session is no open session, so `build`
+  // is ignored.
   const graph = useSprintGraph(workspaceId);
   const node = graph.data?.nodes.find((n) => n.ident === ident);
-  const offered = node != null ? storyBuildOffered({ ...node, build: null }) : null;
+  const offered = node != null ? storyBuildOffered({ ...node, build: null }) : (offer?.action ?? null);
   const fill = offered === 'fill_gaps';
   const go = (): void => {
     start.mutate({
@@ -93,7 +100,7 @@ export function StartPanel({
             The AI reads the story, its pull requests and the code, then plans only what the story check found missing. Nothing is
             built until you accept the plan, and nothing is pushed until you press Push.
           </p>
-          <StartGaps reviewId={node?.check?.reviewId ?? null} />
+          <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
@@ -135,8 +142,8 @@ export function StartPanel({
           <p className="text-meta text-ui-mute">Loading…</p>
         ) : (
           <p data-testid="story-build-not-offered" className="text-meta text-ui-mute">
-            A build starts only from a This Sprint ticket that is not started and has no pull request, or a started one whose
-            story check found gaps.
+            A build starts only for a story that is not started and has no pull request, or a started one whose story check
+            found gaps.
           </p>
         )}
       </div>

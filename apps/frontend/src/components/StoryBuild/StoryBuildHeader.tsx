@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { STORY_BUILD_ACTION_WORDS, type SprintGraphResponse, type StoryBuild } from '@pierre-review/shared';
+import { STORY_BUILD_ACTION_WORDS, type SprintGraphResponse, type StoryBuild, type StoryBuildAction } from '@pierre-review/shared';
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
@@ -22,6 +22,7 @@ export function StoryBuildHeader({
   title,
   build,
   wantDocs,
+  offered = null,
   actions,
 }: {
   workspaceId: number | null;
@@ -31,6 +32,8 @@ export function StoryBuildHeader({
   build: StoryBuild | null;
   /** Before a start: whether the reader ticked "Check against docs" (the step line shows Docs). */
   wantDocs: boolean;
+  /** What the story view offered when it opened the tab (used only with no sprint node in memory). */
+  offered?: StoryBuildAction | null;
   actions?: ReactNode;
 }): JSX.Element {
   const openStory = useOpenStory();
@@ -41,7 +44,7 @@ export function StoryBuildHeader({
   const steps = storyBuildSteps(build, wantDocs);
   const cost = build != null ? costText(build.totalCostUsd, build.provider ?? null) : null;
   const shownTitle = build?.ticketTitle ?? title ?? (node != null && node.title !== '' ? node.title : null);
-  const action = storyBuildActionOf(build, node);
+  const action = storyBuildActionOf(build, node, offered);
   const fill = action === 'fill_gaps';
   return (
     <header data-testid="story-build-header" className="pt-5 max-md:pt-3">

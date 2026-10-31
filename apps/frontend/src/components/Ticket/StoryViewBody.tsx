@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from 'react';
-import type { TicketMergedPr, TimelinePr } from '@pierre-review/shared';
+import type { SprintGraphNode, TicketMergedPr, TimelinePr } from '@pierre-review/shared';
 import { useTicketPrs, useTicketStory } from '../../hooks/useTicketPrs.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { storyViewTicket } from '../../lib/ticketStory.js';
@@ -9,6 +9,7 @@ import { dateTime, indexUsers, relativeTime } from '../../lib/ui.js';
 import { OpenPrsCards } from '../Activity/OpenPrsCards.js';
 import { ChevronIcon } from '../Icons.js';
 import { StoryLayout } from './StoryLayout.js';
+import { StoryBuildEntryProvider, type StoryBuildEntryFacts } from '../StoryBuild/StoryBuildEntry.js';
 
 // THE STORY VIEW'S BODY (docs/FRONTEND.md § The story view) — one ticket, Open PRs style: the SAME
 // ticket stack the Open PRs board draws (`OpenPrsCards` with `story`), so a ticket reads the same in
@@ -17,9 +18,11 @@ import { StoryLayout } from './StoryLayout.js';
 // design), its open PRs as the Open PRs cards and "Merged (n)" — and, under it, the PRs closed without
 // merging. A ticket with no pull request still gets its stack and its story.
 //
-// TWO HOSTS, ONE BODY: the story TAB (TicketTabView.tsx, its ident from the active tab) and This
-// Sprint's story TRAY (Sprint/SprintStoryTray.tsx, its ident from `?sprintStory=`). Both mount THIS
-// component, never a copy, so the two cannot drift. It reads nothing about where it is mounted.
+// THREE HOSTS, ONE BODY: the story TAB (TicketTabView.tsx, its ident from the active tab), This
+// Sprint's story TRAY (Sprint/SprintStoryTray.tsx, its ident from `?sprintStory=`) and the PR view's
+// Story tab (pr/PrStoryTab.tsx). All mount THIS component, never a copy, so they cannot drift. The tray
+// also hands in the board's node (`sprintNode`) for the story's build action ("Implement" / "Fill gaps"
+// / "Open build", StoryBuild/StoryBuildEntry.tsx); elsewhere that action reads the view's own facts.
 //
 // TWO stored reads, both DB-only and free: GET /api/ticket-prs (the PRs + the freshest tracker row) and
 // GET /api/ticket-story (the sprint read's row + the CURRENT brief). Only this workspace's repos are
@@ -34,7 +37,11 @@ export function StoryViewBody({
   page = false,
   embedded = false,
   oneColumn = false,
+  sprintNode = null,
 }: {
+  /** This Sprint's tray: the board's node for this ticket, so the story's build action reads it and
+   *  fetches nothing (StoryBuild/StoryBuildEntry.tsx). */
+  sprintNode?: SprintGraphNode | null;
   /** The PR view's Story tab (PrStoryTab): the rail starts at the story's top, beside the header, and
    *  the story has no card while the rail is drawn — the AI Review tab's shape. */
   embedded?: boolean;
@@ -91,6 +98,8 @@ export function StoryViewBody({
     [data?.merged, usersById, repoNameById],
   );
   const story = useMemo(() => (ticket != null ? { ticket, merged: mergedRows, page, embedded } : null), [ticket, mergedRows, page, embedded]);
+  const prTotal = (data?.open.length ?? 0) + (data?.merged.length ?? 0) + (data?.closed.length ?? 0);
+  const buildFacts = useMemo<StoryBuildEntryFacts>(() => ({ sprintNode, prTotal }), [sprintNode, prTotal]);
 
   if (workspaceId == null || ident == null || story == null) return null;
 
@@ -117,6 +126,7 @@ export function StoryViewBody({
   const found = data?.found === true || storyQ.data?.found === true;
 
   return (
+    <StoryBuildEntryProvider facts={buildFacts}>
     <StoryLayout oneColumn={oneColumn} embedded={embedded}>
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
@@ -142,6 +152,7 @@ export function StoryViewBody({
       )}
     </div>
     </StoryLayout>
+    </StoryBuildEntryProvider>
   );
 }
 

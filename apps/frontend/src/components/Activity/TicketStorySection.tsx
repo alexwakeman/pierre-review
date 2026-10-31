@@ -3,7 +3,8 @@
 // board does NOT render it: a reader opens the ticket (its key and title are one button) to see the
 // story. Here it is ALWAYS OPEN — a plain "Story" heading, no disclosure.
 //
-// THE HEADING ROW carries the STORY'S ACTIONS, right-aligned: the docs check ("Check against docs" /
+// THE HEADING ROW carries the STORY'S ACTIONS, right-aligned: first "Implement" / "Fill gaps" / "Open
+// build" (StoryBuild/StoryBuildEntry.tsx, AI on only), then the docs check ("Check against docs" /
 // "Check docs again", StoryDocsAlignment.tsx `StoryDocsButton`) and the story design ("Draw design" / "Redraw design",
 // StoryDesignSection.tsx `StoryDesignButton`). The section owns ONE start mutation for each, handed to
 // both the button and its block, so a refusal or error from a heading click shows in that block.
@@ -52,6 +53,7 @@ import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail, StoryDocsRailSummary } from './StoryDocsAlignment.js';
 import { InRail, StorySectionNav, useInRail } from '../Ticket/StoryLayout.js';
+import { StoryBuildEntry } from '../StoryBuild/StoryBuildEntry.js';
 import { aiModelWords } from '@pierre-review/shared';
 import { InlineMarkdown } from '../InlineMarkdown.js';
 
@@ -93,7 +95,7 @@ export function TicketStorySection({
         </h4>
         {/* The story's actions: here, right-aligned; in the wide layout, the rail's actions block. */}
         <InRail slot="actions" inline>
-          <StoryActions docs={docs} design={design} />
+          <StoryActions ticket={ticket} state={state} docs={docs} design={design} />
         </InRail>
       </div>
       <div className="story-measure mt-1.5 space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
@@ -111,11 +113,24 @@ export function TicketStorySection({
   );
 }
 
-/** "Check against docs" and "Redraw design" — in the Story heading row, or the rail's actions block. */
-function StoryActions({ docs, design }: { docs: DocsCheck | null; design: StoryDesign }): JSX.Element {
+/** The story's actions — "Implement" / "Fill gaps" / "Open build" first (the group's primary action,
+ *  StoryBuild/StoryBuildEntry.tsx), then "Check against docs" and "Redraw design" — in the Story heading
+ *  row, or the rail's actions block. */
+function StoryActions({
+  ticket,
+  state,
+  docs,
+  design,
+}: {
+  ticket: CardTicket & { ident: string };
+  state: TicketReviewState | undefined;
+  docs: DocsCheck | null;
+  design: StoryDesign;
+}): JSX.Element {
   const rail = useInRail();
   return (
     <span className={rail ? 'flex flex-wrap items-center gap-1.5' : 'ml-auto flex flex-wrap items-center gap-1.5'} data-testid="story-actions">
+      <StoryBuildEntry ticket={ticket} state={state} />
       {docs != null && <StoryDocsButton q={docs.q} start={docs.start} starting={docs.starting} />}
       <StoryDesignButton design={design} />
     </span>

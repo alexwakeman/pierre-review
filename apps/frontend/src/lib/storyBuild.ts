@@ -5,9 +5,18 @@ import {
   isStoryBuildRunning,
   STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_REPO_RUNNING_STATUSES,
+  isStoryBuildOpen,
   storyBuildDocsDefaultDecision,
+  storyBuildMark,
   storyBuildOffered,
+  type JiraStatusCategory,
   type SprintGraphNode,
+  type SprintNodeBuild,
+  type SprintStage,
+  type SprintTicketCheck,
+  type StoryBuildMark,
+  type TicketReview,
+  type TicketReviewState,
   type StoryBuild,
   type StoryBuildAction,
   type StoryBuildAcceptBody,
@@ -31,16 +40,89 @@ export function storyBuildActionLabel(action: StoryBuildAction, key: string): { 
 }
 
 /** Which action the build tab is about (its header and start state). A session that has assessed says so
- *  itself: the ticket had pull requests ⇒ it fills gaps. Before that, the card's own gate (a closed session
+ *  itself: the ticket had pull requests ⇒ it fills gaps. Before that, the board's own gate (a closed session
  *  is no session), else a ticket with an open or merged pull request ⇒ Fill gaps (the backend fills only
- *  the gaps whenever the ticket has PRs). */
+ *  the gaps whenever the ticket has PRs). With no sprint node in memory, what the story view offered when
+ *  it opened the tab (`offered`, the tab's `buildOffer`), else Implement. */
 export function storyBuildActionOf(
   build: Pick<StoryBuild, 'coverage'> | null,
   node: Pick<SprintGraphNode, 'ghost' | 'stage' | 'prs' | 'check'> | null,
+  offered: StoryBuildAction | null = null,
 ): StoryBuildAction {
   if (build?.coverage != null) return build.coverage.existingPrs.length > 0 ? 'fill_gaps' : 'implement';
-  if (node == null) return 'implement';
+  if (node == null) return offered ?? 'implement';
   return storyBuildOffered({ ...node, build: null }) ?? (node.prs.some((p) => p.state !== 'closed') ? 'fill_gaps' : 'implement');
+}
+
+// ── the story view's entry: "Implement" / "Fill gaps" / "Open build" ────────────────────────────
+
+/** The stage a ticket's tracker status CATEGORY implies, where the sprint board's bucket is not known
+ *  (a story outside the sprint, or the board not read yet): To Do ⇒ Not started, Done ⇒ Complete, anything
+ *  in between ⇒ started. Unknown ⇒ null (Implement is then never offered). */
+export function storyStageOfCategory(category: JiraStatusCategory | null | undefined): SprintStage | null {
+  if (category === 'new') return 'not_started';
+  if (category === 'done') return 'done';
+  if (category === 'indeterminate') return 'in_progress';
+  return null;
+}
+
+/** The sprint card's check, from the story view's own ticket-check state and the latest succeeded run (the
+ *  same counts `db/sprint-ticket-checks.ts` folds). null until that run is read, or with none. Stale when
+ *  the state says so for any reason (a member PR moved, or the ticket text changed). */
+export function storyViewCheck(state: TicketReviewState | null | undefined, run: TicketReview | null | undefined): SprintTicketCheck | null {
+  if (state == null || state.latestRunId == null || run == null || run.id !== state.latestRunId || run.assessment == null) return null;
+  const a = run.assessment;
+  const c: SprintTicketCheck = {
+    met: 0,
+    partlyMet: 0,
+    notMet: 0,
+    unsettled: 0,
+    total: a.criteria.length,
+    missing: Array.isArray(a.missing) ? a.missing.length : 0,
+    reviewId: run.id,
+    checkedAt: state.checkedAt ?? run.completedAt ?? run.createdAt,
+    stale: state.status === 'stale' || state.staleBecause.length > 0,
+  };
+  for (const x of a.criteria) {
+    if (x.status === 'met') c.met += 1;
+    else if (x.status === 'partly_met') c.partlyMet += 1;
+    else if (x.status === 'not_met') c.notMet += 1;
+    else c.unsettled += 1;
+  }
+  return c;
+}
+
+/** A full session as the board's coarse build (`db/sprint-builds.ts foldSprintBuilds`): null unless OPEN;
+ *  only included repositories count. */
+export function sprintNodeBuildOf(b: Pick<StoryBuild, 'id' | 'status' | 'repos'> | null | undefined): SprintNodeBuild | null {
+  if (b == null || !isStoryBuildOpen(b.status)) return null;
+  const inc = b.repos.filter((r) => r.include);
+  return {
+    id: b.id,
+    status: b.status,
+    readyRepos: inc.filter((r) => r.status === 'ready').length,
+    pushedRepos: inc.filter((r) => r.status === 'pushed').length,
+  };
+}
+
+/** What the story view's action group offers for its ticket: open the session it has, start one
+ *  (shared `storyBuildOffered`, the ONE gate), or nothing. */
+export type StoryViewBuildEntry =
+  | { kind: 'open'; mark: StoryBuildMark }
+  | { kind: 'offer'; action: StoryBuildAction; reviewId: number | null }
+  | null;
+
+export function storyViewBuildEntry(n: {
+  ghost: boolean;
+  stage: SprintStage | null;
+  prs: ReadonlyArray<unknown>;
+  build: SprintNodeBuild | null;
+  check: SprintTicketCheck | null;
+}): StoryViewBuildEntry {
+  const mark = storyBuildMark(n.build);
+  if (mark != null) return { kind: 'open', mark };
+  const action = storyBuildOffered(n);
+  return action != null ? { kind: 'offer', action, reviewId: action === 'fill_gaps' ? (n.check?.reviewId ?? null) : null } : null;
 }
 
 // ── the step line: "Assess · Plan · Docs · Build · Push" ───────────────────────────────────────────

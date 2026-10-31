@@ -1,19 +1,20 @@
-// THE BUILD TAB'S PURE HALF (lib/storyBuild.ts) and the sprint card's Implement button / build mark
-// (components/TicketCard.tsx) — "Implement story", docs/STORY-BUILD.md.
+// THE BUILD TAB'S PURE HALF (lib/storyBuild.ts), the story view's entry (Implement / Fill gaps / Open
+// build — `storyViewBuildEntry` and its inputs) and the sprint card's build mark (components/TicketCard.tsx)
+// — "Implement story", docs/STORY-BUILD.md.
 //
 // Pins: the step line ("Assess · Plan · Docs · Build · Push", the current step), the docs groups and
 // their defaults (suggestions ticked, superseded unticked, grounded no box — owner decision 6), the
 // "not in the plan yet" count, the Accept body (branch checks, at least one repository), push gating
-// (ready + a patch; Push all from two), and the card: Implement ONLY on a not-started ticket with no
-// PR and no session (owner decision 4), never without `onImplement`, the mark in words and in the
-// accessible name, and ONE height (the corner button is absolutely placed). "Fill gaps": on a STARTED
-// ticket whose CURRENT story check found gaps — named "Fill gaps in KEY" — and the tab's action word.
+// (ready + a patch; Push all from two), the story view's entry: Implement ONLY on a not-started story
+// with no PR and no session (owner decision 4), Fill gaps on a STARTED one whose CURRENT story check found
+// gaps, Open build once a session is open; and the card: NO build button, only the mark in words and in
+// the accessible name.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/storyBuild.test.ts
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { SprintGraphNode, StoryBuild, StoryBuildDocs, StoryBuildRepo } from '@pierre-review/shared';
+import type { SprintGraphNode, StoryBuild, StoryBuildDocs, StoryBuildRepo, TicketReview, TicketReviewState } from '@pierre-review/shared';
 import {
   acceptBody,
   branchNameProblem,
@@ -28,6 +29,10 @@ import {
   storyBuildActionLabel,
   storyBuildActionOf,
   storyBuildSteps,
+  sprintNodeBuildOf,
+  storyStageOfCategory,
+  storyViewBuildEntry,
+  storyViewCheck,
 } from '../src/lib/storyBuild.js';
 import { TicketCard } from '../src/components/TicketCard.js';
 
@@ -256,7 +261,7 @@ const node = (o: Partial<SprintGraphNode> = {}): SprintGraphNode => ({
   ...o,
 });
 
-const card = (n: SprintGraphNode, implement = true): string =>
+const card = (n: SprintGraphNode): string =>
   renderToStaticMarkup(
     createElement(TicketCard, {
       node: n,
@@ -267,67 +272,117 @@ const card = (n: SprintGraphNode, implement = true): string =>
       selected: false,
       onSelect: () => {},
       onOpen: () => {},
-      ...(implement ? { onImplement: () => {} } : {}),
     }),
   );
 
 const PR = { id: 1, repoId: 1, repo: 'acme/api', number: 5, title: 't', state: 'open', draft: false, ciState: null, url: 'https://github.com/acme/api/pull/5', author: null } as unknown as SprintGraphNode['prs'][number];
+const CHECK = { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-30T00:00:00.000Z', stale: false, reviewId: 9 };
+const started = (o: Partial<SprintGraphNode> = {}) => node({ stage: 'in_progress', prs: [PR], check: CHECK, ...o });
+const entryOf = (n: SprintGraphNode) => storyViewBuildEntry({ ...n, build: n.build ?? null, check: n.check ?? null });
 
-describe('the Implement button (owner decision 4)', () => {
-  it('shows on a not-started ticket with no pull request', () => {
-    expect(card(node())).toContain('aria-label="Implement PLAT-310"');
+describe('the sprint card: a build MARK, never a build button', () => {
+  it('has no Implement / Fill gaps / build button, whatever the ticket', () => {
+    for (const n of [node(), started(), node({ build: { id: 3, status: 'ready', readyRepos: 1, pushedRepos: 0 } })]) {
+      const html = card(n);
+      expect(html).not.toContain('ticket-implement');
+      expect(html).not.toContain('aria-label="Implement');
+      expect(html).not.toContain('aria-label="Fill gaps');
+      expect(html).not.toContain('build: Open');
+    }
+    // "No PR" stays a tag (it was hidden behind the Implement button).
+    expect(card(node())).toContain('No PR');
   });
 
-  it('never shows without onImplement (AI off), on a started ticket, with a PR, or on a ghost', () => {
-    expect(card(node(), false)).not.toContain('data-testid="ticket-implement"');
-    expect(card(node({ stage: 'in_progress' }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(node({ prs: [PR] }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(node({ ghost: true }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(node({ stage: null }))).not.toContain('data-testid="ticket-implement"');
-  });
-
-  it('turns into the build mark once a session is open, in words and in the accessible name', () => {
+  it('wears the open session\'s mark, in words and in the accessible name', () => {
     const html = card(node({ build: { id: 3, status: 'ready', readyRepos: 1, pushedRepos: 1 }, prs: [PR] }));
     expect(html).toContain('data-build="ready_to_push"');
     expect(html).toContain('Ready to push');
     expect(html).toContain('build: Ready to push');
-    expect(html).toContain('aria-label="Open PLAT-310&#x27;s build: Ready to push"');
     expect(card(node({ build: { id: 3, status: 'building', readyRepos: 0, pushedRepos: 0 } }))).toContain('Building…');
     expect(card(node({ build: { id: 3, status: 'plan_ready', readyRepos: 0, pushedRepos: 0 } }))).toContain('Plan ready');
-  });
-
-  it('keeps ONE height: the button is absolutely placed, the mark sits in the key line', () => {
-    const plain = card(node(), false);
-    const offered = card(node());
-    // The same rows (title, one-liner, criteria, tags) in both; the extra button is `absolute`.
-    for (const id of ['ticket-one-liner', 'ticket-criteria', 'ticket-person-line']) {
-      expect(plain).toContain(`data-testid="${id}"`);
-      expect(offered).toContain(`data-testid="${id}"`);
-    }
-    expect(offered).toMatch(/data-testid="ticket-implement"[^>]*class="[^"]*absolute/);
+    expect(card(node())).not.toContain('data-build=');
   });
 });
 
-describe('the Fill gaps button (a started ticket whose story check found gaps)', () => {
-  const CHECK = { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-30T00:00:00.000Z', stale: false, reviewId: 9 };
-  const started = (o: Partial<SprintGraphNode> = {}) => node({ stage: 'in_progress', prs: [PR], check: CHECK, ...o });
-
-  it('shows "Fill gaps in KEY" with its own action', () => {
-    const html = card(started());
-    expect(html).toContain('aria-label="Fill gaps in PLAT-310"');
-    expect(html).toContain('data-action="fill_gaps"');
-    expect(html).toContain('title="Fill the gaps the story check found"');
-    expect(card(node())).toContain('data-action="implement"');
+describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)', () => {
+  it('offers Implement on a not-started story with no pull request', () => {
+    expect(entryOf(node())).toEqual({ kind: 'offer', action: 'implement', reviewId: null });
   });
 
-  it('never shows with no check, a stale one, one with no gaps, on a complete ticket, or without onImplement', () => {
-    expect(card(started({ check: null }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(started({ check: { ...CHECK, stale: true } }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(started({ check: { ...CHECK, notMet: 0, met: 2 } }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(started({ stage: 'done' }))).not.toContain('data-testid="ticket-implement"');
-    expect(card(started(), false)).not.toContain('data-testid="ticket-implement"');
+  it('offers nothing on a started ticket with no gaps known, with a PR and no check, on a ghost, or with no stage', () => {
+    expect(entryOf(node({ stage: 'in_progress' }))).toBeNull();
+    expect(entryOf(node({ prs: [PR] }))).toBeNull();
+    expect(entryOf(node({ ghost: true }))).toBeNull();
+    expect(entryOf(node({ stage: null }))).toBeNull();
   });
 
+  it('offers Fill gaps (with the check behind it) on a started story whose current check found gaps', () => {
+    expect(entryOf(started())).toEqual({ kind: 'offer', action: 'fill_gaps', reviewId: 9 });
+    expect(entryOf(started({ check: null }))).toBeNull();
+    expect(entryOf(started({ check: { ...CHECK, stale: true } }))).toBeNull();
+    expect(entryOf(started({ check: { ...CHECK, notMet: 0, met: 2 } }))).toBeNull();
+    expect(entryOf(started({ stage: 'done' }))).toBeNull();
+  });
+
+  it('opens the session instead once one is open, with its mark', () => {
+    expect(entryOf(node({ build: { id: 3, status: 'ready', readyRepos: 1, pushedRepos: 0 } }))).toEqual({ kind: 'open', mark: 'ready_to_push' });
+    expect(entryOf(started({ build: { id: 3, status: 'planning', readyRepos: 0, pushedRepos: 0 } }))).toEqual({ kind: 'open', mark: 'building' });
+  });
+
+  it('reads the stage from the tracker status category where the board is not known', () => {
+    expect(storyStageOfCategory('new')).toBe('not_started');
+    expect(storyStageOfCategory('indeterminate')).toBe('in_progress');
+    expect(storyStageOfCategory('done')).toBe('done');
+    expect(storyStageOfCategory(null)).toBeNull();
+    expect(storyStageOfCategory(undefined)).toBeNull();
+  });
+
+  it('folds the view\'s check state and latest run into the card\'s check', () => {
+    const state = {
+      ident: 'x',
+      status: 'current',
+      staleBecause: [],
+      changedPrIds: [],
+      latestRunId: 9,
+      runningRunId: null,
+      alignment: null,
+      counts: null,
+      memberCount: 1,
+      checkedAt: '2026-10-30T00:00:00.000Z',
+    } as TicketReviewState;
+    const run = {
+      id: 9,
+      createdAt: '2026-10-29T00:00:00.000Z',
+      completedAt: '2026-10-30T00:00:00.000Z',
+      assessment: {
+        criteria: [{ status: 'met' }, { status: 'not_met' }, { status: 'partly_met' }, { status: 'unclear' }, { status: 'not_checked' }],
+        missing: [{}],
+      },
+    } as unknown as TicketReview;
+    expect(storyViewCheck(state, run)).toMatchObject({ met: 1, notMet: 1, partlyMet: 1, unsettled: 2, total: 5, missing: 1, reviewId: 9, stale: false });
+    expect(storyViewCheck({ ...state, status: 'stale' }, run)?.stale).toBe(true);
+    expect(storyViewCheck({ ...state, staleBecause: ['ticket_edited'] as TicketReviewState['staleBecause'] }, run)?.stale).toBe(true);
+    // A run that is not the latest, none, or none read yet: no check.
+    expect(storyViewCheck({ ...state, latestRunId: 10 }, run)).toBeNull();
+    expect(storyViewCheck(state, undefined)).toBeNull();
+    expect(storyViewCheck(undefined, run)).toBeNull();
+  });
+
+  it('folds a full session into the board\'s coarse build: open only, included repositories only', () => {
+    const b = (status: StoryBuild['status'], repos: StoryBuildRepo[]) => ({ id: 4, status, repos });
+    expect(sprintNodeBuildOf(b('ready', [repo(1, { status: 'ready' }), repo(2, { status: 'pushed' }), repo(3, { status: 'ready', include: false })]))).toEqual({
+      id: 4,
+      status: 'ready',
+      readyRepos: 1,
+      pushedRepos: 1,
+    });
+    expect(sprintNodeBuildOf(b('failed', []))).toBeNull();
+    expect(sprintNodeBuildOf(b('discarded', []))).toBeNull();
+    expect(sprintNodeBuildOf(null)).toBeNull();
+  });
+});
+
+describe('the action words and the build tab\'s action', () => {
   it('labels each action', () => {
     expect(storyBuildActionLabel('implement', 'A-1')).toEqual({ label: 'Implement A-1', title: 'Implement this story' });
     expect(storyBuildActionLabel('fill_gaps', 'A-1').label).toBe('Fill gaps in A-1');
@@ -342,5 +397,8 @@ describe('the Fill gaps button (a started ticket whose story check found gaps)',
     // A session still assessing (no coverage yet) on a ticket with an open PR fills gaps.
     expect(storyBuildActionOf({ coverage: null }, started({ check: null }))).toBe('fill_gaps');
     expect(storyBuildActionOf(null, null)).toBe('implement');
+    // No node in memory: what the story view offered when it opened the tab.
+    expect(storyBuildActionOf(null, null, 'fill_gaps')).toBe('fill_gaps');
+    expect(storyBuildActionOf(null, node(), 'fill_gaps')).toBe('implement');
   });
 });

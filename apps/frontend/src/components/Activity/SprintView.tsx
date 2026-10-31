@@ -4,19 +4,16 @@ import {
   SPRINT_GHOST_MAX,
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
-  storyBuildOffered,
   type SprintGraphNode,
   type SprintGraphResponse,
   type SprintRefreshTicketChecks,
 } from '@pierre-review/shared';
 import { useSprintAiOn, useSprintChangeToken, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
 import { StoryOpenOverride, useOpenStory, type OpenStoryArgs } from '../../lib/ticketTab.js';
-import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
-import { BuildIcon, FillGapsIcon, FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
-import { storyBuildActionLabel } from '../../lib/storyBuild.js';
+import { FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
@@ -29,7 +26,7 @@ import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsMode
 import { SprintStatusSettings } from './SprintStatusSettings.js';
 import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
 import { SprintStoryTray } from '../Sprint/SprintStoryTray.js';
-import { useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 // This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
 // the toolbar (title + ⓘ, dates, Ask Claude, the status buckets behind the gear, Refresh), the page's
@@ -136,18 +133,12 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const trayId = useId();
   const showInTray = useCallback((t: OpenStoryArgs): void => setTray(t.ident), [setTray]);
   const select = useCallback((n: SprintGraphNode): void => setTray(n.ident), [setTray]);
-  // "Implement story" (docs/STORY-BUILD.md): the card's build button and mark open the build tab — ONLY
-  // with AI on (owner decision 4; which cards offer it is shared `storyBuildOffered`).
-  const openBuild = useOpenStoryBuild();
-  const aiOn = useAiCapabilities().enabled;
-  const buildsOn = aiOn && data?.aiEnabled === true;
-  const implement = useCallback(
-    (n: SprintGraphNode): void => openBuild({ ident: n.ident, key: n.key, title: n.title !== '' ? n.title : null }),
-    [openBuild],
-  );
+  // "Implement story" (docs/STORY-BUILD.md § Entry points) is the STORY VIEW's action: a card shows only
+  // its build MARK, and a click shows the story in the tray, whose action group offers Implement / Fill
+  // gaps / Open build (StoryBuild/StoryBuildEntry.tsx, reading the node handed to the tray).
   const actions = useMemo<SprintCardActions>(
-    () => ({ onSelect: select, onOpen: open, onImplement: buildsOn ? implement : undefined, selectedIdent: trayIdent, trayId }),
-    [select, open, buildsOn, implement, trayIdent, trayId],
+    () => ({ onSelect: select, onOpen: open, selectedIdent: trayIdent, trayId }),
+    [select, open, trayIdent, trayId],
   );
   const trayNode = trayIdent != null ? data?.nodes.find((n) => n.ident === trayIdent) : undefined;
 
@@ -188,7 +179,6 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       onStatuses={() => setSettingsOpen((o) => !o)}
       onRefresh={refreshDisabled ? null : startRefresh}
       onShowStory={select}
-      onImplement={buildsOn ? implement : null}
     />
     <div className="flex items-start gap-4">
     <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-4">
@@ -289,6 +279,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
         ident={trayIdent}
         ticketKey={trayNode?.key ?? ticketKeyOfIdent(trayIdent)}
         title={trayNode != null && trayNode.title !== '' ? trayNode.title : null}
+        node={trayNode ?? null}
         onClose={() => setTray(null)}
       />
     )}
@@ -313,7 +304,6 @@ function SprintCommands({
   onStatuses,
   onRefresh,
   onShowStory,
-  onImplement,
 }: {
   nodes: readonly SprintGraphNode[];
   aiName: string;
@@ -325,16 +315,13 @@ function SprintCommands({
   /** null while a read is already running. */
   onRefresh: (() => void) | null;
   onShowStory: (n: SprintGraphNode) => void;
-  /** Open a ticket's build tab; null while AI is off. */
-  onImplement: ((n: SprintGraphNode) => void) | null;
 }): null {
   const filter = useSprintBoardFilter((s) => s.filter);
   const toggle = useSprintBoardFilter((s) => s.toggle);
   // The parent's handlers are fresh closures every render; the commands call the latest through a ref
   // so the list re-registers only when what it SAYS changes.
-  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory, onImplement });
-  live.current = { onAsk, onStatuses, onRefresh, onShowStory, onImplement };
-  const canImplement = onImplement != null;
+  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory });
+  live.current = { onAsk, onStatuses, onRefresh, onShowStory };
   const canRefresh = onRefresh != null;
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
@@ -382,22 +369,6 @@ function SprintCommands({
         run: () => toggle('needsCode'),
       },
     );
-    // "Implement KEY · title" / "Fill gaps in KEY · title": the SAME tickets the card offers it on, with
-    // the same action (shared `storyBuildOffered`), only while this board is open.
-    if (canImplement)
-      for (const n of nodes) {
-        const action = storyBuildOffered(n);
-        if (action == null) continue;
-        const { label } = storyBuildActionLabel(action, n.key);
-        out.push({
-          id: `${action === 'fill_gaps' ? 'fill-gaps' : 'implement'}:${n.ident}`,
-          group: 'Actions',
-          title: n.title !== '' ? `${label} · ${n.title}` : label,
-          keywords: action === 'fill_gaps' ? ['build', 'story', 'code', 'gaps', 'fill'] : ['build', 'story', 'code', 'implement'],
-          icon: action === 'fill_gaps' ? <FillGapsIcon size={14} /> : <BuildIcon size={14} />,
-          run: () => live.current.onImplement?.(n),
-        });
-      }
     for (const n of nodes) {
       out.push({
         id: `ticket:${n.ident}`,
@@ -410,7 +381,7 @@ function SprintCommands({
       });
     }
     return out;
-  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, canImplement, filter, toggle]);
+  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, filter, toggle]);
   useRegisterCommands('sprint-board', commands);
   return null;
 }

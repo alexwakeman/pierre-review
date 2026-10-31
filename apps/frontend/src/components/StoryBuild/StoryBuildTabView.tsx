@@ -22,7 +22,7 @@ import {
   storyBuildErrorText,
   type RepoChoice,
 } from '../../lib/storyBuild.js';
-import { parseStoryBuildTabKey, ticketKeyOfIdent, usePinnedTabs } from '../../store/pinnedTabs.js';
+import { parseStoryBuildTabKey, ticketKeyOfIdent, usePinnedTabs, type TabTicketMeta } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
@@ -65,13 +65,32 @@ export function StoryBuildTabView(): JSX.Element | null {
       ) : !aiOn ? (
         <p className="pt-5 text-meta text-ui-mute">AI is off on this machine.</p>
       ) : (
-        <StoryBuildBody workspaceId={workspaceId} ident={ident} ticketKey={meta?.key ?? ticketKeyOfIdent(ident)} title={meta?.title ?? null} />
+        <StoryBuildBody
+          workspaceId={workspaceId}
+          ident={ident}
+          ticketKey={meta?.key ?? ticketKeyOfIdent(ident)}
+          title={meta?.title ?? null}
+          offer={meta?.buildOffer ?? null}
+        />
       )}
     </div>
   );
 }
 
-function StoryBuildBody({ workspaceId, ident, ticketKey, title }: { workspaceId: number; ident: string; ticketKey: string; title: string | null }): JSX.Element {
+function StoryBuildBody({
+  workspaceId,
+  ident,
+  ticketKey,
+  title,
+  offer,
+}: {
+  workspaceId: number;
+  ident: string;
+  ticketKey: string;
+  title: string | null;
+  /** What the story view offered when it opened this tab (`TabTicketMeta.buildOffer`). */
+  offer: TabTicketMeta['buildOffer'];
+}): JSX.Element {
   const q = useStoryBuildFor(workspaceId, ident);
   const build = q.data?.build ?? null;
   const active = storyBuildActive(build);
@@ -118,6 +137,7 @@ function StoryBuildBody({ workspaceId, ident, ticketKey, title }: { workspaceId:
         title={title}
         build={closed ? null : build}
         wantDocs={wantDocs}
+        offered={offer?.action ?? null}
         actions={headerActions}
       />
       {q.isLoading && <p className="mt-5 text-meta text-ui-mute">Loading…</p>}
@@ -127,6 +147,7 @@ function StoryBuildBody({ workspaceId, ident, ticketKey, title }: { workspaceId:
           workspaceId={workspaceId}
           ident={ident}
           last={closed ? build : null}
+          offer={offer ?? null}
           wantDiagram={wantDiagram}
           setWantDiagram={setWantDiagram}
           wantDocs={wantDocs}

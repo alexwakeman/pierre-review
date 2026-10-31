@@ -80,6 +80,10 @@ export interface TabTicketMeta {
   ident: string; // shared `trackerTicketIdent` — the same string the tab key carries
   key: string; // the tracker key shown on the chip ("BMD-568")
   title: string | null;
+  /** A build tab opened from a STORY VIEW (`useOpenStoryBuild`): what it offered there — its action and,
+   *  for Fill gaps, the story check whose gaps it lists. The start state uses it only when the sprint
+   *  board's node is not in memory (a story outside the sprint). Absent on a tab rebuilt from a URL. */
+  buildOffer?: { action: 'implement' | 'fill_gaps'; reviewId: number | null } | null;
 }
 
 export interface Tab {

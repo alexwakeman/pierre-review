@@ -28,16 +28,12 @@
 //   CLICK    the card opens the STORY TRAY beside the board (Sprint/SprintStoryTray.tsx — the story
 //            view's own body; `onSelect`). The open card wears the accent ring (the selection colour).
 //            The small arrow in the corner opens the story TAB (`onOpen` — `useOpenStory`).
-//   BUILD    "Implement story" (docs/STORY-BUILD.md, owner decision 4): beside the corner arrow, a second
-//            labelled button, ALWAYS VISIBLE (an icon revealed on hover went unnoticed), ONE height, ONLY on a card `storyBuildOffered`
-//            allows, and only when the board passes `onImplement` (AI on). Hidden, never disabled. Its
-//            action names it: "Implement KEY" (`BuildIcon`) on a Not started ticket with no pull request,
-//            "Fill gaps in KEY" (`FillGapsIcon`) on a started one whose current story check found gaps.
-//            Once a session is open the card wears its MARK beside the key (`storyBuildMark`: Building… /
-//            Plan ready / Ready to push / Pushed — words, no border; in the accessible name and the
-//            board's key) and the same corner button opens the build tab (`useOpenStoryBuild`).
-import { STORY_BUILD_MARK_WORDS, storyBuildMark, storyBuildOffered, type SprintGraphNode } from '@pierre-review/shared';
-import { storyBuildActionLabel } from '../lib/storyBuild.js';
+//   BUILD    "Implement story" (docs/STORY-BUILD.md § Entry points): the card carries NO build button —
+//            Implement / Fill gaps / Open build is the STORY VIEW's action (the tray a click opens,
+//            StoryBuild/StoryBuildEntry.tsx). Once a session is open the card wears its MARK beside the
+//            key (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — a status in words,
+//            no border; in the accessible name and the board's key). The server sends no session with AI off.
+import { STORY_BUILD_MARK_WORDS, storyBuildMark, type SprintGraphNode } from '@pierre-review/shared';
 import {
   hasLivePr,
   TICKET_CARD_MARK_LABEL,
@@ -48,7 +44,7 @@ import {
   ticketCodeNote,
 } from '../lib/laneBoard.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { ArrowIcon, BuildIcon, CriticalPathIcon, FillGapsIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -62,7 +58,6 @@ export function TicketCard({
   onOpen,
   cardRef,
   codeMarker = false,
-  onImplement,
 }: {
   node: SprintGraphNode;
   critical: boolean;
@@ -82,8 +77,6 @@ export function TicketCard({
   cardRef?: (el: HTMLElement | null) => void;
   /** The board's Needs code filter is on: a ticket not judged yet says so beside its key. */
   codeMarker?: boolean;
-  /** Open the ticket's build tab ("Implement story"). Absent ⇒ no build button (AI off). */
-  onImplement?: (node: SprintGraphNode) => void;
 }): JSX.Element {
   // "No owner" and "Unassigned" would say one thing twice on the person line's views.
   const tags = ticketCardTags(node).filter((t) => !(show === 'person' && t === 'No owner'));
@@ -95,14 +88,8 @@ export function TicketCard({
   const marker = codeMarker ? (code?.marker ?? null) : null;
   // 'outside' is the recessed ground (and the column it sits in), not an icon.
   const marks = ticketCardMarks({ critical, waiting, ghost: node.ghost }).filter((m) => m !== 'outside');
-  // "Implement story": the session's mark, and whether the corner build button shows at all.
-  const buildMark = onImplement != null ? storyBuildMark(node.build) : null;
-  const offered = onImplement != null ? storyBuildOffered(node) : null;
-  const buildButton = offered != null || buildMark != null;
-  const action = offered != null ? storyBuildActionLabel(offered, node.key) : null;
-  // An offered Implement / Fill gaps is a LABELLED button that is always visible (an icon revealed on
-  // hover went unnoticed). It sits at the start of the bottom row, where the board leaves it room.
-  const showAction = offered != null && buildMark == null;
+  // "Implement story": the open session's mark (a status, not a button).
+  const buildMark = storyBuildMark(node.build);
 
   const name = [
     `${node.key}: ${title}`,
@@ -133,8 +120,7 @@ export function TicketCard({
       data-marks={marks.length > 0 ? marks.join(' ') : undefined}
       data-build={buildMark ?? undefined}
       className={cx(
-        // A size container: a narrow card (a crowded board) shows the Implement / Fill gaps button as its icon alone.
-        'group relative flex w-full min-w-0 flex-col rounded-ui [container-type:inline-size]',
+        'group relative flex w-full min-w-0 flex-col rounded-ui',
         'motion-safe:transition-colors motion-safe:duration-ui-fast',
         ticketCardSurface({ ghost: node.ghost }),
         !node.ghost && 'hover:bg-ui-hover',
@@ -151,7 +137,7 @@ export function TicketCard({
         onClick={() => onSelect(node)}
         className={cx('hit flex w-full min-w-0 flex-col rounded-ui px-2.5 py-2 text-left', FOCUS_RING)}
       >
-        <span className={cx('flex h-4 min-w-0 items-center gap-1 [@media(hover:hover)]:pr-0', buildButton && !showAction ? 'pr-12' : 'pr-5')}>
+        <span className="flex h-4 min-w-0 items-center gap-1 pr-5 [@media(hover:hover)]:pr-0">
           {/* Has an open or merged pull request: the pull-request mark, before the key. */}
           {withPr && (
             <span aria-hidden data-testid="ticket-pr-dot" title="Has a pull request" className="flex shrink-0 text-ui-mute">
@@ -212,9 +198,8 @@ export function TicketCard({
         {/* One line, never wrapping: only the PR-count tag shrinks and truncates, so "CI failing" and
             "No owner" can never fall off the face. */}
         <span aria-hidden className="mt-1.5 flex h-5 w-full items-center gap-x-1.5 text-meta">
-          {showAction && <span data-testid="ticket-implement-room" className={cx('w-7 shrink-0', offered === 'fill_gaps' ? '[@container_(min-width:10.5rem)]:w-[5.25rem]' : '[@container_(min-width:10.5rem)]:w-[5.75rem]')} />}
           <span className="flex h-5 min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-            {(showAction && offered === 'implement' ? tags.filter((t) => t !== 'No PR') : tags).map((t) => (
+            {tags.map((t) => (
               <span
                 key={t}
                 className={cx(
@@ -231,7 +216,7 @@ export function TicketCard({
           </span>
           {/* Bottom right: the person pill (or the theme on People), as long as the name, capped so
               the tags keep room; a longer name truncates with an ellipsis. */}
-          <span data-testid="ticket-person-line" className={cx('flex h-5 min-w-0 items-center', showAction ? 'shrink' : 'max-w-[60%] shrink-0')}>
+          <span data-testid="ticket-person-line" className="flex h-5 min-w-0 max-w-[60%] shrink-0 items-center">
             {show === 'theme' ? (
               node.theme != null && <span className="truncate rounded-ui bg-ui-raise px-1.5 text-ui-mute">{node.theme}</span>
             ) : person != null ? (
@@ -246,31 +231,6 @@ export function TicketCard({
           </span>
         </span>
       </button>
-      {buildButton && onImplement != null && (
-        <button
-          type="button"
-          data-testid="ticket-implement"
-          onClick={() => onImplement(node)}
-          data-action={offered ?? undefined}
-          aria-label={buildMark != null ? `Open ${node.key}'s build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : (action?.label ?? undefined)}
-          title={buildMark != null ? 'Open the build' : (action?.title ?? undefined)}
-          className={cx(
-            'absolute flex items-center justify-center rounded-ui',
-            FOCUS_RING,
-            showAction
-              ? // OFFERED: bottom-left, over the room the bottom row leaves (`ticket-implement-room`).
-                'hit bottom-2 left-2.5 h-5 gap-1 border border-ui-line bg-ui-surface px-1.5 text-meta font-medium text-ui-ink hover:bg-ui-raise'
-              : // A build already exists: its mark is on the card, so this stays the corner reveal.
-                cx(
-                  'right-8 top-1 h-6 w-6 text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:right-12 touch:h-10 touch:w-10',
-                  'group-hover:bg-ui-hover [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100',
-                ),
-          )}
-        >
-          {buildMark == null && offered === 'fill_gaps' ? <FillGapsIcon size={12} /> : <BuildIcon size={12} />}
-          {showAction && <span aria-hidden className="hidden [@container_(min-width:10.5rem)]:inline">{offered === 'fill_gaps' ? 'Fill gaps' : 'Implement'}</span>}
-        </button>
-      )}
       <button
         type="button"
         onClick={() => onOpen(node)}

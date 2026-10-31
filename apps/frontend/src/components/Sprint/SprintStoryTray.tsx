@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import type { SprintGraphNode } from '@pierre-review/shared';
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
 import { hasActivePopover } from '../../lib/activePopover.js';
@@ -11,7 +12,9 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 // THIS SPRINT'S STORY TRAY (docs/FRONTEND.md § This Sprint, § The story view): a ticket clicked on the
 // board (a card, a call-out key, a ticket key in an Ask Claude answer) shows its story HERE, on the
 // right of the board, so the reader never leaves the sprint. The body is the story TAB's own
-// (`StoryViewBody`), never a copy; "Open story tab" opens the tab itself (`useOpenStory`).
+// (`StoryViewBody`), never a copy; "Open story tab" opens the tab itself (`useOpenStory`). The story's
+// build action (Implement / Fill gaps / Open build — the board's cards carry only the build MARK) sits
+// in the body's action group and reads the board's node handed in here.
 //
 //   STATE    `sprintStoryIdent` in the filter store, mirrored to `?sprintStory=` (a navigation key:
 //            Back closes the tray). The caller mounts the tray only while it is set, so nothing here
@@ -56,8 +59,12 @@ export function SprintStoryTray({
   ident,
   ticketKey,
   title,
+  node = null,
   onClose,
 }: {
+  /** The board's node for this ticket (absent for a ticket the board does not show): the story's build
+   *  action reads it, so the tray fetches nothing for it. */
+  node?: SprintGraphNode | null;
   /** The tray's element id (the open card's `aria-controls`). */
   id: string;
   ident: string;
@@ -216,7 +223,7 @@ export function SprintStoryTray({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1 md:px-4">
         {/* Keyed on the ticket, so switching tickets starts the body afresh. */}
-        <StoryViewBody key={ident} ident={ident} meta={{ key: ticketKey, title }} />
+        <StoryViewBody key={ident} ident={ident} meta={{ key: ticketKey, title }} sprintNode={node} />
       </div>
     </aside>
   );

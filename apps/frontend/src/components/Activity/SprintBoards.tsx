@@ -138,8 +138,6 @@ export interface SprintCardActions {
   onSelect: OpenTicket;
   /** Open the ticket's story TAB (the card's corner arrow). */
   onOpen: OpenTicket;
-  /** Open the ticket's BUILD tab ("Implement story" — the card's build button). Absent ⇒ AI is off. */
-  onImplement?: OpenTicket;
   /** The ticket whose story the tray shows; null = no tray. */
   selectedIdent: string | null;
   /** The tray's element id, for the open card's `aria-controls`. */
@@ -195,15 +193,13 @@ function SprintLaneBoard({
       new Set<string>([
         ...layout.cards.flatMap((c) => ticketCardMarks({ critical: c.data.critical, waiting: c.data.waiting, ghost: c.data.node.ghost === true })),
         ...(layout.cards.some((c) => c.data.node.ghost !== true && hasLivePr(c.data.node)) ? [PR_KEY] : []),
-        // The build marks a card wears ("Implement story"), only when the board offers builds.
-        ...(actions.onImplement != null
-          ? layout.cards.flatMap((c) => {
-              const m = storyBuildMark(c.data.node.build);
-              return m != null ? [`${BUILD_KEY}${m}`] : [];
-            })
-          : []),
+        // The build marks a card wears ("Implement story"; the server sends no session with AI off).
+        ...layout.cards.flatMap((c) => {
+          const m = storyBuildMark(c.data.node.build);
+          return m != null ? [`${BUILD_KEY}${m}`] : [];
+        }),
       ]),
-    [layout.cards, actions.onImplement],
+    [layout.cards],
   );
   return (
     <LaneBoard
@@ -227,7 +223,6 @@ function SprintLaneBoard({
           onOpen={actions.onOpen}
           cardRef={ref}
           codeMarker={codeMarker}
-          onImplement={actions.onImplement}
         />
       )}
     />
