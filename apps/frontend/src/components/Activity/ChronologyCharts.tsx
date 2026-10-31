@@ -314,15 +314,15 @@ export function BudgetChart({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-ui-mute">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-emerald-500/25 dark:bg-emerald-400/25" />
+          <svg aria-hidden width={16} height={10} className="shrink-0"><rect width={16} height={10} rx={2} className="fill-emerald-500/25 dark:fill-emerald-400/25" /></svg>
           within budget
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-amber-400/30 dark:bg-amber-400/25" />
+          <svg aria-hidden width={16} height={10} className="shrink-0"><rect width={16} height={10} rx={2} className="fill-amber-400/30 dark:fill-amber-400/25" /></svg>
           acceptable
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-rose-500/20 dark:bg-rose-400/20" />
+          <svg aria-hidden width={16} height={10} className="shrink-0"><rect width={16} height={10} rx={2} className="fill-rose-500/20 dark:fill-rose-400/20" /></svg>
           past limit
         </span>
         <span className="inline-flex items-center gap-1.5">
