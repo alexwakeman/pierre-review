@@ -9,7 +9,9 @@
 //
 //   node scripts/verify-demo.mjs                 every view, as if opened now
 //   node scripts/verify-demo.mjs --later=40      …as if opened 40 days after the recording
-//   node scripts/verify-demo.mjs --only=pr:113   one view (substring match)
+//   node scripts/verify-demo.mjs --only=pr:113   some views (comma list; substring, or a `*` glob)
+//   --concurrency=<n>   views at once, each in its own fresh browser context (default 4)
+//   --port=<p>          the site server's port (default 4391, or VERIFY_PORT)
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -17,12 +19,23 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PORT = Number(process.env.VERIFY_PORT ?? 4391);
+const args = process.argv.slice(2);
+const argValue = (name) => {
+  const i = args.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+  if (i < 0) return undefined;
+  return args[i].includes('=') ? args[i].slice(args[i].indexOf('=') + 1) : args[i + 1];
+};
+const PORT = Number(argValue('port') ?? process.env.VERIFY_PORT ?? 4391);
+const CONCURRENCY = Math.max(1, Number(argValue('concurrency') ?? 4));
 const BASE = `http://127.0.0.1:${PORT}/demo/`;
 const SHOTS = '/tmp/limn-demo-shots';
-const args = process.argv.slice(2);
-const LATER_DAYS = Number(args.find((a) => a.startsWith('--later='))?.slice(8) ?? 0);
-const ONLY = args.find((a) => a.startsWith('--only='))?.slice(7);
+const LATER_DAYS = Number(argValue('later') ?? 0);
+const ONLY = argValue('only')
+  ?.split(',')
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => (p.includes('*') ? new RegExp(`^${p.replace(/[.+?^$()|[\]\\{}]/g, '\\$&').replace(/\*/g, '.*')}$`) : p));
+const selected = (name) => !ONLY || ONLY.some((p) => (typeof p === 'string' ? name.includes(p) : p.test(name)));
 // `--phone`: the same views at 390 × 844 on a touch screen (mobile is a first-class target,
 // docs/redesign/DESIGN.md § 6). Screenshots go to their own folder.
 const PHONE = args.includes('--phone');
@@ -443,67 +456,79 @@ async function main() {
   }
 
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext(
-    PHONE
-      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark', reducedMotion: 'reduce' }
-      : { viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' },
-  );
-  await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
-  const page = await context.newPage();
-  if (LATER_DAYS > 0) await page.clock.install({ time: new Date(Date.now() + LATER_DAYS * 86_400_000) });
-  const failures = [];
+  const contextOptions = PHONE
+    ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark', reducedMotion: 'reduce' }
+    : { viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' };
+  const views = VIEWS.filter(([name]) => selected(name));
+  const results = new Map(); // name → problems[]
   const shots = [];
-  let pageErrors = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
 
-  for (const [name, query, shot, opts] of VIEWS) {
-    if (ONLY && !name.includes(ONLY)) continue;
-    pageErrors = [];
-    await page.goto(`${BASE}${query}`, { waitUntil: 'load' });
-    // The app mounts once the recording is loaded; then let the in-browser API answer and the view
-    // settle (recorded streams replay over a few seconds).
-    await page.waitForFunction(() => document.body.innerText.trim().length > 300, null, { timeout: 20_000 }).catch(() => {});
-    await page.waitForTimeout(1800);
-    // A lazy tab (AI Review, AI Fix, Bot activity) shows a bare "Loading…" until its chunk arrives;
-    // the first such view of a run could be read before it did (a flaky "text not shown").
-    await page.getByText('Loading…', { exact: true }).first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
+  /** One view, in a fresh context: no state from another view (the demo's overlay, a picked setting). */
+  async function check([name, query, shot, opts]) {
+    const context = await browser.newContext(contextOptions);
+    await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
+    const page = await context.newPage();
+    if (LATER_DAYS > 0) await page.clock.install({ time: new Date(Date.now() + LATER_DAYS * 86_400_000) });
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
     const problems = [];
-    if (opts?.act) {
-      try {
-        await opts.act(page);
-        await page.waitForTimeout(800);
-      } catch (e) {
-        problems.push(`action failed: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`);
+    try {
+      await page.goto(`${BASE}${query}`, { waitUntil: 'load' });
+      // The app mounts once the recording is loaded; then let the in-browser API answer and the view
+      // settle (recorded streams replay over a few seconds).
+      await page.waitForFunction(() => document.body.innerText.trim().length > 300, null, { timeout: 20_000 }).catch(() => {});
+      await page.waitForTimeout(1800);
+      // A lazy tab (AI Review, AI Fix, Bot activity) shows a bare "Loading…" until its chunk arrives;
+      // the first such view of a run could be read before it did (a flaky "text not shown").
+      await page.getByText('Loading…', { exact: true }).first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
+      if (opts?.act) {
+        try {
+          await opts.act(page);
+          await page.waitForTimeout(800);
+        } catch (e) {
+          problems.push(`action failed: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`);
+        }
       }
+      const text = await page.evaluate(() => document.body.innerText.trim().length);
+      const missing = await page.evaluate(() => {
+        const d = window.__limnDemo;
+        return d ? d.log.filter((e) => e.stage === 'missing').map((e) => `${e.method} ${e.url}`) : ['(no demo server)'];
+      });
+      if (opts?.expect) {
+        const body = await page.evaluate(() => document.body.innerText);
+        const absent = opts.expect.filter((t) => !body.includes(t));
+        if (absent.length) problems.push(`text not shown: ${absent.map((t) => JSON.stringify(t)).join(', ')}`);
+      }
+      if (pageErrors.length) problems.push(`page errors: ${[...new Set(pageErrors)].join(' | ').slice(0, 300)}`);
+      if (text < 200) problems.push(`nearly blank (${text} chars)`);
+      if (missing.length) problems.push(`missing: ${[...new Set(missing)].join(', ').slice(0, 600)}`);
+      if (shot) {
+        const file = join(SHOTS_DIR, `${shot}.png`);
+        await page.screenshot({ path: file });
+        shots.push(file);
+      }
+    } catch (e) {
+      problems.push(`failed: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`);
+    } finally {
+      await context.close();
     }
-    const text = await page.evaluate(() => document.body.innerText.trim().length);
-    const missing = await page.evaluate(() => {
-      const d = window.__limnDemo;
-      return d ? d.log.filter((e) => e.stage === 'missing').map((e) => `${e.method} ${e.url}`) : ['(no demo server)'];
-    });
-    if (opts?.expect) {
-      const body = await page.evaluate(() => document.body.innerText);
-      const absent = opts.expect.filter((t) => !body.includes(t));
-      if (absent.length) problems.push(`text not shown: ${absent.map((t) => JSON.stringify(t)).join(', ')}`);
-    }
-    if (pageErrors.length) problems.push(`page errors: ${[...new Set(pageErrors)].join(' | ').slice(0, 300)}`);
-    if (text < 200) problems.push(`nearly blank (${text} chars)`);
-    if (missing.length) problems.push(`missing: ${[...new Set(missing)].join(', ').slice(0, 600)}`);
-    if (shot) {
-      const file = join(SHOTS_DIR, `${shot}.png`);
-      await page.screenshot({ path: file });
-      shots.push(file);
-    }
+    results.set(name, problems);
     console.log(`${problems.length ? '✗' : '✓'} ${name}${problems.length ? `\n    ${problems.join('\n    ')}` : ''}`);
-    if (problems.length) failures.push(name);
-    // A fresh log per view.
-    await page.evaluate(() => {
-      if (window.__limnDemo) window.__limnDemo.log.length = 0;
-    });
   }
+
+  const queue = [...views];
+  const t0 = Date.now();
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      for (let v = queue.shift(); v; v = queue.shift()) await check(v);
+    }),
+  );
+  // In declared order, whatever order they finished in.
+  const failures = views.map(([name]) => name).filter((name) => results.get(name)?.length);
   await browser.close();
   stopSite();
-  console.log(`\n${failures.length === 0 ? '✅' : '⚠'} ${VIEWS.length - failures.length} of ${VIEWS.length} views clean${LATER_DAYS ? ` (as if ${LATER_DAYS} days later)` : ''}${PHONE ? ' at 390px' : ''}`);
+  if (failures.length) console.log(`\nfailed: ${failures.join(', ')}`);
+  console.log(`\n${failures.length === 0 ? '✅' : '⚠'} ${views.length - failures.length} of ${views.length} views clean in ${Math.round((Date.now() - t0) / 1000)}s on ${Math.min(CONCURRENCY, views.length)} page${Math.min(CONCURRENCY, views.length) === 1 ? "" : "s"}${LATER_DAYS ? ` (as if ${LATER_DAYS} days later)` : ''}${PHONE ? ' at 390px' : ''}`);
   console.log(`screenshots (${shots.length}): ${SHOTS_DIR}`);
   process.exit(failures.length === 0 ? 0 : 1);
 }

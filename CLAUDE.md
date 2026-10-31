@@ -138,7 +138,7 @@ All from the repo root unless noted.
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
 | `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` reuses the DB |
 | `pnpm shots` · `pnpm demo:video` | landing screenshots · the walkthrough clip (`--publish` writes `apps/landing/public/media/`) |
-| `pnpm demo:record` · `demo:verify` | re-seed and record `apps/frontend/src/demo/data/recording.json` · check every demo view ([docs/DEMO.md](docs/DEMO.md)) |
+| `pnpm demo:record` · `demo:verify` | record the demo (`--changed`/`--only=`: just those steps) · check every demo view ([docs/DEMO.md](docs/DEMO.md)) |
 | `pnpm --filter @pierre-review/frontend build:demo` · `dev:demo` | the static demo → `apps/frontend/dist-demo/` (base `/demo/`) · same on Vite |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
@@ -635,7 +635,7 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
 - ⚠ **EVERY USER-VISIBLE CHANGE MUST REACH THE DEMO, IN THE SAME COMMIT.** UI ships there by
   itself; DATA does not. A new route/view/tab/field, a changed shape or an unseeded feature: seed it
   (`seed-demo*.ts`, fictional Acme), visit it in `scripts/record-demo-steps.mjs` + `verify-demo.mjs`
-  `VIEWS`, `pnpm demo:record`, `build:demo` + `pnpm demo:verify`, commit `recording.json`
+  `VIEWS`, `pnpm demo:record`, `build:demo` + `pnpm demo:verify`, commit `recording*.json`
   ([docs/DEMO.md](docs/DEMO.md) § Keeping it current). PR CI and `deploy-site.yml` run
   verify-demo (a failure blocks the deploy), but it sees only MISSING answers, never a stale shape.
 

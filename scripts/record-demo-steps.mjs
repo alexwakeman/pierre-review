@@ -3,6 +3,11 @@
 //
 // ⚠ THE DEFAULT WORKSPACE (Platform, id 1) GOES FIRST: the demo answers a request whose exact query
 // was never recorded with the FIRST entry recorded for its path.
+// ⚠ STEPS RUN IN PARALLEL, EACH FROM A CLEAN BROWSER (record-demo.mjs): no step may rely on a cookie,
+// localStorage key or cached query an earlier step left behind, and every step must capture ALL the
+// answers its views need by itself (an incremental `--only` re-record replaces exactly the answers its
+// steps capture). A step that WRITES server state sets `mutates: true`: it runs alone, after every
+// step declared before it and before every step declared after it.
 // ⚠ NOTHING HERE WRITES. `h.explore()` clicks tabs and disclosures only, never a button whose label
 // is a verb that changes something (merge, post, run, save …); every finished agentic run in the
 // recording is a row the seeder wrote.
@@ -56,7 +61,9 @@ function timelinePrIds() {
   const Database = require('better-sqlite3');
   const db = new Database(process.env.RECORD_DB ?? '/tmp/limn-record.sqlite', { readonly: true });
   try {
-    const since = Math.floor(Date.now() / 1000) - 30 * 86400;
+    // The recorder's clock (record-demo.mjs pins it back to the old recording's capture time on an
+    // incremental run), so the window matches the one the Timeline asks for.
+    const since = Math.floor((Date.now() - Number(process.env.LIMN_CLOCK_OFFSET_MS ?? 0)) / 1000) - 30 * 86400;
     return db
       .prepare(
         `SELECT DISTINCT p.id AS id, wr.workspace_id AS workspaceId
@@ -127,10 +134,11 @@ export const STEPS = [
   {
     name: 'feed',
     run: async (h) => {
+      // One screen at a time (the Feed is virtualised): the same rows, and their threads, every run.
       await h.go('?view=activity&activityRepo=feed');
-      await h.scroll();
+      await h.scrollThrough();
       await h.clickRole('button', /^Bots$/);
-      await h.scroll();
+      await h.scrollThrough();
       await h.clickRole('button', /^People$/);
     },
   },
@@ -354,13 +362,14 @@ export const STEPS = [
   // THE TIMELINE'S "Open details". Every PR bar on a workspace's 30-day Timeline opens a popover
   // whose primary action is the PR's tab, so every one of them needs at least its Overview
   // recorded — or the demo answers "Not available in the demo." on most bars.
+  // ONE STEP PER PR (`expand` runs once the database is seeded), so the pages share them out.
   {
     name: 'timeline:open-details',
-    run: async (h) => {
-      for (const { id, workspaceId } of timelinePrIds()) {
-        await h.go(`?view=pr-detail:${id}&prTab=overview${workspaceId === 1 ? '' : `&workspace=${workspaceId}`}`);
-      }
-    },
+    expand: () =>
+      timelinePrIds().map(({ id, workspaceId }) => ({
+        name: `timeline:open-details:${id}`,
+        run: (h) => h.go(`?view=pr-detail:${id}&prTab=overview${workspaceId === 1 ? '' : `&workspace=${workspaceId}`}`),
+      })),
   },
 
   // ── People ──
@@ -481,5 +490,120 @@ export const STEPS = [
       await h.scrollModal();
       await h.escape();
     },
+  },
+];
+
+// ── What a change touches: `pnpm demo:record --changed` (scripts/lib/demo-changes.mjs) ───────────
+// A changed file maps to the steps above that would record something different. BACKEND files are
+// mapped AUTOMATICALLY (a file → the route files that import it → their /api paths → the steps that
+// recorded an answer on those paths, read from recording-steps.json). FRONTEND files are mapped by
+// the table below: a view's components → the steps that visit it. A frontend file no row names
+// forces a FULL record, and so does every path in FULL_RECORD_PATHS: the seed, the schema and the
+// migrations change what every view reads, and the shared wire types change every answer's shape.
+// Globs: `*` within one path segment, `**` across segments; paths are relative to the repo root.
+
+/** A change here re-records EVERYTHING. */
+export const FULL_RECORD_PATHS = [
+  'apps/backend/scripts/seed-demo*',
+  'apps/backend/scripts/lib/**',
+  'apps/backend/src/db/schema.sqlite.ts',
+  'apps/backend/src/db/migrations/**',
+  'apps/backend/src/platform/migrations/**',
+  'apps/backend/src/platform/**/schema.sqlite.ts',
+  'apps/backend/src/platform/migrate.ts',
+  'apps/backend/src/index.ts',
+  'apps/backend/src/app.ts',
+  'apps/backend/src/config.ts',
+  'apps/backend/src/auth/account.ts',
+  'apps/backend/src/api/plugins/**',
+  'apps/backend/package.json',
+  'packages/shared/**',
+  'apps/frontend/src/App.tsx',
+  'apps/frontend/src/main.tsx',
+  'apps/frontend/src/api/**',
+  'apps/frontend/src/hooks/**',
+  'apps/frontend/src/store/**',
+  'apps/frontend/src/lib/**',
+  'apps/frontend/vite.config.ts',
+  'apps/frontend/package.json',
+  'scripts/record-demo*.mjs',
+  'scripts/lib/demo-*.mjs',
+  'pnpm-lock.yaml',
+];
+
+/** Never changes a recorded answer: tests, docs, the website, the demo's own replayer. */
+export const NO_RECORD_PATHS = [
+  '**/*.test.ts',
+  '**/*.test.tsx',
+  '**/__fixtures__/**',
+  '**/__tests__/**',
+  'apps/frontend/test/**',
+  'apps/frontend/e2e/**',
+  'apps/frontend/src/demo/**',
+  'apps/frontend/src/**/*.css',
+  'apps/frontend/src/fonts/**',
+  'apps/frontend/src/components/Icons.tsx',
+  'apps/frontend/src/components/FileTypeIcons.tsx',
+  'apps/landing/**',
+  'apps/site/**',
+  'packages/ml/**',
+  'docs/**',
+  '**/*.md',
+  '.github/**',
+  'scripts/**',
+  'apps/backend/scripts/**',
+  'apps/backend/test/**',
+  '.claude/**',
+  'LICENSE',
+];
+
+/** Frontend file → the steps that visit it. `steps` are step-name globs. */
+export const COVERAGE = [
+  {
+    files: ['apps/frontend/src/components/Activity/{OpenPrs*,RepoOpenPrList,RepoFeedHeader,RepoStats,ClaudeReviewCell,BranchStatus*,DefaultBranchesSlot,PrCardShell,LargePrFlag,BlastRadiusChip}.tsx'],
+    steps: ['open-prs', 'repo-console', 'ws2:open-prs', 'popovers'],
+  },
+  {
+    files: ['apps/frontend/src/components/Activity/{Attention*,Pending*,pending*,MyTurnDismissedList,DependencyMergeAll,DependencyAutomationLog}.{ts,tsx}'],
+    steps: ['pending:*', 'ws2:attention'],
+  },
+  { files: ['apps/frontend/src/components/Activity/{FeedView,FeedIsolationBanner,BotCommentCard}.tsx'], steps: ['feed', 'feed:*', 'ws2:feed'] },
+  {
+    files: ['apps/frontend/src/components/Activity/{Bot*,bot*,benchmark*,Benchmark*,SeverityAgreementMatrix,InflationHistoryChart,ThemeThreadsDetail,WorkspaceBotCharts,SynthesisCard}.{ts,tsx}'],
+    steps: ['bots:*', 'bot-detail:*', 'ws2:bots'],
+  },
+  {
+    files: [
+      'apps/frontend/src/components/Activity/{InsightsView,Period*,period*,Chronology*,chronology*,Bottlenecks*,bottlenecks*,FlowPointersPanel,MetricsDetail,MetricRepoFilter,MergedPrsView,ThemesReportView,Workspace*,RepoInsights*,reachModel,reportChrome,reportingWindowText,sortableTable,AiUsageView,aiUsageModel,StoriesView,storiesModel,RegenProgressBar,DigestMarkdown}.{ts,tsx}',
+      'apps/frontend/src/components/charts/**',
+      'apps/frontend/src/components/RepoAnalyticsModal.tsx',
+    ],
+    steps: ['reports:*', 'ws2:insights', 'ws2:chronology'],
+  },
+  { files: ['apps/frontend/src/components/Activity/{Docs*,docs*}.tsx', 'apps/frontend/src/components/DocReferences.tsx'], steps: ['docs', 'ws2:docs'] },
+  {
+    files: [
+      'apps/frontend/src/components/Activity/{Sprint*,sprint*,TicketStorySection,StoryDesignSection,StoryDocsAlignment}.{ts,tsx}',
+      'apps/frontend/src/components/Sprint/**',
+      'apps/frontend/src/components/LaneBoard.tsx',
+    ],
+    steps: ['sprint:*', 'ws2:sprint', 'ws2:sprint:*'],
+  },
+  { files: ['apps/frontend/src/components/StoryBuild/**'], steps: ['story-build:*', 'sprint:implement'] },
+  {
+    files: ['apps/frontend/src/components/Ticket/**', 'apps/frontend/src/components/{Ticket*,TrackerLinkOut}.tsx'],
+    steps: ['ticket:*', 'sprint:tray:*', 'ws2:sprint:tray:*'],
+  },
+  { files: ['apps/frontend/src/components/Timeline/**', 'apps/frontend/src/components/ShowOnTimeline.tsx'], steps: ['timeline', 'timeline:*'] },
+  { files: ['apps/frontend/src/components/Activity/UserActivityDetail.tsx', 'apps/frontend/src/components/User*.tsx'], steps: ['user-activity:*', 'popovers'] },
+  { files: ['apps/frontend/src/components/settings/**', 'apps/frontend/src/components/Activity/{WorkspaceManager,SprintStatusSettings}.tsx'], steps: ['settings', 'ws2:settings'] },
+  {
+    // PR detail and everything it hosts: every pr:* step, the Timeline's per-PR overviews and #113's popovers.
+    files: [
+      'apps/frontend/src/components/{PrDetail,DetailPane,ChangesTab,ChecksTab,CheckList,CiCheckSection,PrBotBehaviourTab,PrCommentComposer,CommentCard,ReviewSection,ReviewsRow,ReactionBar,MergeControl,MergeWhenReadyControl,ApproveControl,ClosePrControl,ReopenPrControl,AutoMergeBanner,TeamClaimLine,StateBadge,MlSeverityBadge,LimnSeverityChip,ConfidenceBadge,DiffHunk,ReviewedAgo,ReviewHistoryList,ReviewPrRefs,RepliesCheckLine,CheckThreadsButton,EventSelectPanel}.tsx',
+      'apps/frontend/src/components/{ClaudeReview*,AiFix*,AiRunLabel,ModelPicker,DesignGrid}.tsx',
+      'apps/frontend/src/components/{pr,diff,conflicts,AiFix,ThreadList,ThreadView}/**',
+    ],
+    steps: ['pr:*', 'timeline:open-details:*', 'timeline:focus', 'feed:isolated', 'popovers'],
   },
 ];

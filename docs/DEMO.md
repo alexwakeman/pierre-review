@@ -46,18 +46,71 @@ stack and must write EXACTLY the format the README specifies:
 - Record the DEFAULT workspace first: the pathname-only fallback serves the first entry recorded
   for a path.
 
-⚠ **No recorder is checked in yet.** Until `data/recording.json` exists, the build uses
-`data/sample-recording.json`, generated from the typed e2e fixtures plus one hand-written finished
-Claude review:
+The recorder is `pnpm demo:record` (`scripts/record-demo.mjs`, the walk in
+`scripts/record-demo-steps.mjs`); its isolation rules and how it answers the live GitHub reads are in
+the runtime README § The real recording. It writes TWO files: `data/recording.json` (one entry per
+line, so a re-record's diff names the answers that changed) and `data/recording-steps.json`, the
+STEPS INDEX — which steps recorded each answer, and how long each step took. Commit both together;
+the index is never shipped (the demo build reads only `recording.json`).
+
+#### Fast: several pages, a production build
+
+A full record runs every step on six browser pages at once (`--concurrency=<n>`; `1` is the old
+serial walk) against three backend processes reading the same scratch database (`--backends=<n>`),
+and serves a PRODUCTION build of the SPA (`vite build` + `vite preview`, cached by a hash of its
+sources; `--dev` uses the Vite dev server). Quiet windows are halved (`--settle-scale=0.5`), which is
+safe because `settle()` waits for two things: no request to the SPA's own origin in flight (lazy
+chunks included) for the window, AND the page's main thread idle without asking for more — on a busy
+machine, rendering a big answer outlasts any fixed window. A virtualised list is walked one screen at a
+time (`h.scrollThrough()`, the Feed), so the same rows, and their threads, are fetched on every run.
+
+- ⚠ **The output does not depend on the concurrency.** Each step records into its own bucket; an
+  answer belongs to the FIRST step in declared order that recorded it, and entries are sorted by
+  (that step, method + normalised path). The default workspace's steps come first, so its answers
+  still win the demo's query-less fallback.
+- ⚠ **Every step starts from a clean browser** (storage and IndexedDB cleared): a step must not
+  depend on what an earlier step left behind, and it records every answer its view needs by itself.
+- ⚠ **Nothing a step does may change what another step reads.** The writes the SPA makes on its own
+  (`mark-viewed` when a PR opens, the Feed's `mark-seen`) are answered in the browser
+  (`STUBBED_WRITES`), the way the demo answers them; the backend never sees them, so every view reads
+  the SEEDED "viewed" state. A step that must write sets `mutates: true` and runs alone, in its
+  declared place. The recorder lists any other write a step sent.
+- `timeline:open-details` is one step per PR (`expand`), so the pages share the ~200 PR overviews.
+
+Ports: `--api-port` / `--web-port` (default 4310 / 5383); lane *i* uses `+i` on both.
+
+#### Incremental: re-record only what a change touches
 
 ```sh
-./apps/backend/node_modules/.bin/tsx apps/frontend/src/demo/tools/make-sample.ts
+pnpm demo:record --only=pr:113,docs        # these steps (a plain name takes its `name:…` children; `*` globs)
+pnpm demo:record --changed                 # the steps the working tree's changes touch
+pnpm demo:record --changed=main            # …the branch's changes since main, too
 ```
 
-It boots to Activity → Open PRs (five PRs in `acme/web`), opens any of them, and replays a Claude
-review. `window.__limnDemo.log` in the browser console lists every request the demo answered and
-which stage answered it (`runs`, `route`, `recording:exact`, `recording:path`, `fallback`,
-`missing`) — the quickest way to see what a recording lacks.
+The chosen steps are re-recorded and MERGED into the existing recording: their fresh answers replace
+the old ones, answers only they had recorded and no longer see are dropped, everything else is kept.
+⚠ **It runs as of the old recording's `capturedAt`**: the seeder, the backend and the browser have
+their clocks moved back (`scripts/lib/demo-clock.mjs`), so the new answers carry the same sprint keys,
+ages and windows as the answers around them. (A column whose default is SQLite's `unixepoch()` still
+reads the real clock.) `--only` needs `recording-steps.json` from the same record; without it, run a
+full record first.
+
+`--changed` maps each changed file (`scripts/lib/demo-changes.mjs`, the tables at the end of
+`record-demo-steps.mjs`):
+
+| Changed | Re-records |
+|---|---|
+| the seed, the schema, migrations, `packages/shared`, the SPA's data layer (`api/`, `hooks/`, `store/`, `lib/`, `App.tsx`), the recorder | EVERYTHING (a full record) |
+| a backend file the demo seeder imports | everything |
+| any other backend file | for each answer on a route that imports it (walking imports up to the route file), the FIRST step that recorded it |
+| a frontend component | the steps its `COVERAGE` row names; a component in no row → everything |
+| tests, docs, the website, the demo replayer | nothing |
+
+⚠ A backend change that makes a view ASK for something new (a longer list whose new rows the SPA
+then fetches) is not found by the import walk — run a full record for that.
+
+`node scripts/lib/compare-recordings.mjs a.json b.json [--order]` compares two recordings modulo
+time (answer set, statuses, bodies; `--order` the entry order too).
 
 ### 3. Rebase — recorded time moves to now
 
@@ -106,8 +159,11 @@ a re-record **in the same commit**:
 | New route, new field, or a changed response shape | re-record so the stored answers have the new shape |
 | New write (a button that changes something) | simulate it in `apps/frontend/src/demo/routes.ts` (or `runs.ts` for an agentic run) so it does not answer "Not available in the demo" |
 
-Then: `pnpm demo:record` → `pnpm --filter @pierre-review/frontend build:demo` → `pnpm demo:verify` and
-`node scripts/verify-demo.mjs --later=40` → commit `apps/frontend/src/demo/data/recording.json`.
+Then: `pnpm demo:record` (or `--changed` / `--only=…`, above) → `pnpm --filter @pierre-review/frontend build:demo`
+→ `pnpm demo:verify` and `node scripts/verify-demo.mjs --later=40` → commit
+`apps/frontend/src/demo/data/recording.json` and `recording-steps.json`. `verify-demo` opens its views
+on four pages at once, each in a fresh browser context (`--concurrency=<n>`, `--port=<p>`), and takes
+`--only=<names>` (comma list; substrings or `*` globs).
 `pnpm demo:verify:phone` (`--phone`) runs the same views and actions at 390 × 844 on a touch screen
 (screenshots in `/tmp/limn-demo-shots-390`); an `act` that differs on a phone branches on `PHONE`
 (Settings is reached through the drawer; a phone's Settings tab carries its summary line; Docs

@@ -170,6 +170,7 @@ and `GET /api/docs/story-alignment?ident=…` with a succeeded run. Without one,
 
 ```sh
 pnpm demo:record          # seed a scratch DB, boot an isolated stack, walk the SPA, write the file
+pnpm demo:record --changed   # …or re-record only the steps a change touches, merged in (docs/DEMO.md § 2)
 pnpm --filter @pierre-review/frontend build:demo
 pnpm demo:verify          # serve dist-demo at /demo/ and open every view (--later=40: 40 days on)
 ```
@@ -187,9 +188,12 @@ pnpm demo:verify          # serve dist-demo at /demo/ and open every view (--lat
   the product (the Changes tab's files, a job log, the merge control's options, reactions) are
   answered in the browser by `scripts/lib/demo-github.mjs` from the same fictional code
   (`scripts/lib/demo-diffs.mjs`).
-- Every GET is kept once per normalised path (the default workspace first); the batched read POSTs
-  are merged into one entry per path; finished runs' `…/stream` endpoints are read from the backend
-  as frame lists.
+- Every GET is kept once per normalised path, owned by the FIRST step (in declared order) that
+  recorded it, and entries are sorted by (owner step, path) — so the default workspace's answers come
+  first and the file does not depend on how many pages recorded it. The batched read POSTs are merged
+  into one entry per path; finished runs' `…/stream` endpoints are read from the backend as frame
+  lists. `data/recording-steps.json` (never shipped) lists which steps recorded each answer, for
+  incremental re-records.
 
 ## The sample recording
 

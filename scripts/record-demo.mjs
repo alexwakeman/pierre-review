@@ -1,15 +1,39 @@
 // THE DEMO RECORDER — `pnpm demo:record`.
 //
-// Seeds the fictional acme/* data into a scratch database, boots an ISOLATED backend + Vite on
-// spare ports, drives the real SPA with Playwright through every view, and writes every /api
-// answer it saw to apps/frontend/src/demo/data/recording.json — the file the static demo at
-// /demo/ replays (format: apps/frontend/src/demo/README.md).
+// Seeds the fictional acme/* data into a scratch database, boots an ISOLATED backend + the SPA on
+// spare ports, drives the real SPA with Playwright through every step of record-demo-steps.mjs —
+// several browser pages at once — and writes every /api answer it saw to
+// apps/frontend/src/demo/data/recording.json, the file the static demo at /demo/ replays (format:
+// apps/frontend/src/demo/README.md), plus recording-steps.json beside it: which steps recorded which
+// answer, and how long each step took (docs/DEMO.md § 2).
 //
-//   pnpm demo:record                 seed → boot → record → write → teardown
-//   pnpm demo:record --no-seed       reuse the scratch DB from the last run
-//   pnpm demo:record --keep          leave the servers running afterwards (Ctrl-C stops)
-//   pnpm demo:record --probe         record, but write /tmp/limn-record-probe.json instead
-//                                    (every request, plus the GETs that answered empty or 4xx)
+//   pnpm demo:record                     seed → boot → record every step → write → teardown
+//   pnpm demo:record --only=<names>      re-record only these steps and MERGE them into the existing
+//                                        recording (comma list; `*` globs; a plain name also takes
+//                                        its `name:…` children, so `pr:113` is every pr:113:* step)
+//   pnpm demo:record --changed[=<base>]  re-record the steps the changed files touch (git diff
+//                                        against <base>, plus the working tree); a full record when
+//                                        a change cannot be placed (seed, schema, wire types, …)
+//   --concurrency=<n>   pages at once (default 6; 1 = one page, the old serial walk)
+//   --backends=<n>      backend processes the pages share (default 3, at most the concurrency)
+//   --dev               serve the SPA from the Vite dev server instead of a production build
+//   --api-port=<p> --web-port=<p>   ports (default 4310 / 5383; or RECORD_BACKEND_PORT / RECORD_FRONTEND_PORT)
+//   --settle-scale=<x>  multiply every quiet window (default 0.5; 1 = the old timings)
+//   --out=<file>        write the recording somewhere else (its steps file goes beside it)
+//   --no-seed           reuse the scratch DB from the last run
+//   --keep              leave the servers running afterwards (Ctrl-C stops)
+//   --probe             also write /tmp/limn-record-probe.json (every response, by step)
+//   RECORD_VERBOSE=1 prints the servers' logs; RECORD_DEBUG_SETTLE=1 names what a slow settle waited for.
+//
+// ⚠ THE OUTPUT DOES NOT DEPEND ON THE CONCURRENCY. Each step records into its own bucket; an answer
+// belongs to the FIRST step (in declared order) that recorded it, and entries are written sorted by
+// (that step, method + normalised path). The demo's query-less fallback serves the first entry for a
+// path, so the declared order still decides it — the default workspace's steps come first.
+// ⚠ EVERY STEP STARTS FROM A CLEAN BROWSER (storage and IndexedDB cleared), so a step records the
+// same answers whichever page runs it, and after whichever step.
+// ⚠ AN INCREMENTAL RECORD RUNS AS OF THE OLD RECORDING'S `capturedAt`: the seeder, the backend and
+// the browser have their clocks moved back (scripts/lib/demo-clock.mjs), so fresh answers carry the
+// same sprint keys, ages and windows as the answers they sit beside.
 //
 // ⚠ NO MODEL IS EVER CALLED. The backend runs with HOME and LIMN_DATA_DIR in a scratch
 // directory (no Claude Code sign-in is found there), no ANTHROPIC_API_KEY, a placeholder
@@ -26,32 +50,66 @@
 // sits FIRST on the PATH, and recording.json is refused unless /api/me answers as the fictional
 // viewer (`user.login` === VIEWER_LOGIN) — a recording carrying your identity is never written.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
-import { STEPS } from './record-demo-steps.mjs';
+import * as STEP_MODULE from './record-demo-steps.mjs';
 import { installGithubStandIn } from './lib/demo-github.mjs';
+import { browserClockScript } from './lib/demo-clock.mjs';
+import { changedFiles, globToRegExp, stepsForChanges } from './lib/demo-changes.mjs';
 
+const { STEPS } = STEP_MODULE;
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BACKEND = join(ROOT, 'apps', 'backend');
 const FRONTEND = join(ROOT, 'apps', 'frontend');
-const OUT = join(FRONTEND, 'src', 'demo', 'data', 'recording.json');
-// Overridable so two worktrees can record side by side without sharing a database.
-const DB = process.env.RECORD_DB ?? '/tmp/limn-record.sqlite';
-const SCRATCH = process.env.RECORD_SCRATCH ?? '/tmp/limn-record-home';
-const DATA_DIR = join(SCRATCH, 'data');
-const BACKEND_PORT = Number(process.env.RECORD_BACKEND_PORT ?? 4310);
-const FRONTEND_PORT = Number(process.env.RECORD_FRONTEND_PORT ?? 5383);
-const BASE = `http://localhost:${FRONTEND_PORT}/app/`;
+const CLOCK_MODULE = join(ROOT, 'scripts', 'lib', 'demo-clock.mjs');
 
 const args = process.argv.slice(2);
+/** `--name=value` or `--name value`; `true` for a bare flag; undefined when absent. */
+function arg(name) {
+  const i = args.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+  if (i < 0) return undefined;
+  const a = args[i];
+  if (a.includes('=')) return a.slice(a.indexOf('=') + 1);
+  const next = args[i + 1];
+  return next != null && !next.startsWith('--') ? next : true;
+}
+const str = (name) => (typeof arg(name) === 'string' ? arg(name) : undefined);
+
+const OUT = str('out') ?? join(FRONTEND, 'src', 'demo', 'data', 'recording.json');
+const STEPS_OUT = `${OUT.replace(/\.json$/, '')}-steps.json`;
+// Overridable so two worktrees can record side by side without sharing a database.
+const DB = process.env.RECORD_DB ?? '/tmp/limn-record.sqlite';
+process.env.RECORD_DB = DB; // the steps read it (timelinePrIds)
+const SCRATCH = process.env.RECORD_SCRATCH ?? '/tmp/limn-record-home';
+const DATA_DIR = join(SCRATCH, 'data');
+const BACKEND_PORT = Number(str('api-port') ?? process.env.RECORD_BACKEND_PORT ?? 4310);
+const FRONTEND_PORT = Number(str('web-port') ?? process.env.RECORD_FRONTEND_PORT ?? 5383);
+
 const RESEED = !args.includes('--no-seed');
 const KEEP = args.includes('--keep');
 const PROBE = args.includes('--probe');
 const HEADED = args.includes('--headed');
-const ONLY = args.find((a) => a.startsWith('--only='))?.slice('--only='.length);
+const DEV = args.includes('--dev');
+const CONCURRENCY = Math.max(1, Number(str('concurrency') ?? process.env.RECORD_CONCURRENCY ?? 6));
+// Backend processes (each with its own SPA server on the next port up): one Node process answering
+// six pages is the bottleneck, and every read is DB-only, so several read the same SQLite file.
+const BACKENDS = Math.max(1, Math.min(CONCURRENCY, Number(str('backends') ?? 3)));
+/** Lane i: backend `api-port + i`, its SPA on `web-port + i`. Lane 0 is the one named on the command line. */
+const LANES = Array.from({ length: BACKENDS }, (_, i) => ({
+  api: BACKEND_PORT + i,
+  web: FRONTEND_PORT + i,
+  origin: `http://localhost:${FRONTEND_PORT + i}`,
+  base: `http://localhost:${FRONTEND_PORT + i}/app/`,
+  backend: `http://localhost:${BACKEND_PORT + i}`,
+}));
+const SETTLE_SCALE = Number(str('settle-scale') ?? 0.5);
+const ONLY = str('only')?.split(',').map((s) => s.trim()).filter(Boolean) ?? null;
+const CHANGED = arg('changed');
+const CHANGED_BASE = typeof CHANGED === 'string' ? CHANGED : (str('base') ?? null);
 // The seeded viewer (apps/backend/scripts/seed-demo.ts). The recording must answer as them.
 const VIEWER_LOGIN = 'morgan-diaz';
 
@@ -110,8 +168,10 @@ function stop(child) {
     child.kill('SIGTERM');
   }
 }
+const cleanups = [];
 function teardown() {
   for (const c of children) stop(c);
+  for (const f of cleanups.splice(0)) f();
 }
 process.on('SIGINT', () => {
   teardown();
@@ -133,20 +193,80 @@ async function waitFor(url, label, timeoutMs = 120_000) {
     } catch {
       /* not up yet */
     }
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 300));
   }
   throw new Error(`${label} did not become ready at ${url} within ${timeoutMs / 1000}s`);
 }
 
-function seed() {
+function seed(env) {
   console.log(`▸ seeding → ${DB}`);
   rmSync(join(DATA_DIR, 'docs'), { recursive: true, force: true });
   const r = spawnSync(join(BACKEND, 'node_modules', '.bin', 'tsx'), ['scripts/seed-demo.ts'], {
     cwd: BACKEND,
-    stdio: 'inherit',
-    env: baseEnv,
+    stdio: process.env.RECORD_VERBOSE ? 'inherit' : ['ignore', 'ignore', 'inherit'],
+    env,
   });
   if (r.status !== 0) throw new Error('seed-demo.ts failed');
+}
+
+/**
+ * The production SPA, built once per distinct source: a hash of everything `vite build` reads names
+ * the output directory, so an incremental record after a backend-only change skips the build.
+ */
+async function buildSpa(env, vite) {
+  const hash = createHash('sha256');
+  const walk = (dir) => {
+    for (const name of readdirSync(dir).sort()) {
+      if (name === 'node_modules' || name === 'dist' || name.startsWith('dist-')) continue;
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else hash.update(p).update(readFileSync(p));
+    }
+  };
+  for (const d of [join(FRONTEND, 'src'), join(ROOT, 'packages', 'shared', 'src')]) walk(d);
+  for (const f of [join(FRONTEND, 'index.html'), join(FRONTEND, 'vite.config.ts'), join(FRONTEND, 'package.json'), join(ROOT, 'pnpm-lock.yaml')]) {
+    if (existsSync(f)) hash.update(f).update(readFileSync(f));
+  }
+  const key = hash.digest('hex').slice(0, 16);
+  const prefix = 'limn-record-web-';
+  const dir = join(tmpdir(), `${prefix}${key}`);
+  if (existsSync(join(dir, 'index.html'))) {
+    console.log(`▸ the SPA is unchanged since the last record: reusing ${dir}`);
+    return dir;
+  }
+  for (const name of readdirSync(tmpdir())) if (name.startsWith(prefix)) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  const building = `${dir}.building`;
+  console.log(`▸ building the SPA → ${dir}`);
+  const status = await new Promise((res) => {
+    const b = spawn(vite, ['build', '--outDir', building, '--emptyOutDir', '--logLevel', 'error'], { cwd: FRONTEND, env, stdio: ['ignore', 'ignore', 'inherit'] });
+    b.on('exit', res);
+  });
+  if (status !== 0) throw new Error('vite build failed');
+  renameSync(building, dir);
+  return dir;
+}
+
+/**
+ * Writes the SPA makes by itself when a view opens, answered IN THE BROWSER the way the demo answers
+ * them (apps/frontend/src/demo/routes.ts), so the backend never sees them. Opening a PR marks it viewed
+ * — and "new since you last looked" is part of what other views read, so a write that reached the
+ * backend would make a step's answers depend on which steps ran before it.
+ */
+const STUBBED_WRITES = [
+  { method: 'POST', re: /^\/api\/prs\/\d+\/mark-viewed$/, body: () => ({ status: 'ok' }) },
+  { method: 'POST', re: /^\/api\/prs\/mark-all-viewed$/, body: () => ({ status: 'ok', count: 0 }) },
+  { method: 'POST', re: /^\/api\/activity\/feed\/mark-seen$/, body: () => ({ feedLastSeenAt: new Date().toISOString() }) },
+];
+async function stubWrites(context) {
+  await context.route(
+    (url) => STUBBED_WRITES.some((w) => w.re.test(url.pathname)),
+    (route) => {
+      const req = route.request();
+      const w = STUBBED_WRITES.find((x) => x.method === req.method() && x.re.test(new URL(req.url()).pathname));
+      if (!w) return route.continue();
+      return route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify(w.body()) });
+    },
+  );
 }
 
 // --- path normalisation: the SAME rule as apps/frontend/src/demo/recording.ts ----------------
@@ -172,6 +292,8 @@ function sortedPath(input) {
   const qs = pairs.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v).replace(/%2C/gi, ',')}`).join('&');
   return qs ? `${u.pathname}?${qs}` : u.pathname;
 }
+const entryKey = (method, path) => `${method} ${normalisePath(path)}`;
+const pathnameOf = (path) => new URL(path, 'http://demo.invalid').pathname;
 
 // Batched read POSTs: one recorded answer per path, its rows merged across every call
 // (apps/frontend/src/demo/README.md § Batched read POSTs). The key de-duplicates rows.
@@ -184,24 +306,36 @@ const BATCHED = {
   '/api/reactions/lookup': { field: 'results', key: (r) => `${r.kind}:${r.id}` },
   '/api/prs/resolve': { field: 'refs', key: (r) => `${r.repo}#${r.number}` },
 };
+// Writes the SPA makes on its own while a view is open. They change nothing the recording reads (no
+// GitHub, no tracker, no model is reachable, so a refresh finds nothing new). Any OTHER write during
+// a step not marked `mutates` is reported at the end.
+const QUIET_WRITES = [
+  /^\/api\/prs\/\d+\/refresh$/,
+  /^\/api\/prs\/\d+\/(sonar|tracker-ticket)\/refresh$/,
+  /^\/api\/attention\/liveness$/,
+  /^\/api\/sprint-stories\/refresh$/,
+];
 
-// --- the recording ---------------------------------------------------------------------------
-const gets = new Map(); // normalised "METHOD path" → entry
-const order = [];
-const batched = new Map(); // path → Map(key → row)
-const streams = new Set();
-const seen = []; // probe log
-let currentStep = '';
-
-function addEntry(method, url, status, body) {
-  const key = `${method} ${normalisePath(url)}`;
-  if (gets.has(key)) return;
-  const entry = { method, path: sortedPath(url), status, body };
-  gets.set(key, entry);
-  order.push(key);
+// --- one step's bucket -------------------------------------------------------------------------
+function newCapture(step) {
+  return {
+    name: step.name,
+    idx: step.idx,
+    gets: new Map(), // key → entry (the first answer this step saw)
+    batched: new Map(), // path → { extra, rows: Map(rowKey → row) }
+    streams: new Set(),
+    seen: [],
+    writes: [],
+    pending: new Set(),
+  };
 }
 
-function onResponse(resp) {
+function addGet(capture, url, status, body) {
+  const key = entryKey('GET', url);
+  if (!capture.gets.has(key)) capture.gets.set(key, { method: 'GET', path: sortedPath(url), status, body });
+}
+
+function onResponse(capture, resp) {
   const req = resp.request();
   const u = new URL(req.url());
   if (!u.pathname.startsWith('/api/')) return;
@@ -209,12 +343,15 @@ function onResponse(resp) {
   const ct = resp.headers()['content-type'] ?? '';
   const pathQ = u.pathname + u.search;
   if (ct.includes('text/event-stream') || u.pathname.endsWith('/stream')) {
-    if (method === 'GET') streams.add(pathQ);
-    seen.push({ step: currentStep, method, path: pathQ, status: resp.status(), stream: true });
+    if (method === 'GET') capture.streams.add(pathQ);
+    capture.seen.push({ method, path: pathQ, status: resp.status(), stream: true });
     return;
   }
   const status = resp.status();
-  resp
+  if (method !== 'GET' && !BATCHED[u.pathname] && ![...QUIET_WRITES, ...STUBBED_WRITES.map((w) => w.re)].some((re) => re.test(u.pathname))) {
+    capture.writes.push(`${method} ${u.pathname}`);
+  }
+  const p = resp
     .text()
     .then((text) => {
       let body;
@@ -223,27 +360,29 @@ function onResponse(resp) {
       } catch {
         return;
       }
-      seen.push({ step: currentStep, method, path: pathQ, status, empty: isEmptyish(body) });
+      capture.seen.push({ method, path: pathQ, status, empty: isEmptyish(body) });
       if (method === 'GET') {
         // A transient 5xx or a 404 the SPA tolerates is still the truth of what the screen got;
         // keep 4xx (the demo replays them as is) and drop 5xx.
         if (status >= 500 || status === 429) return;
-        addEntry('GET', pathQ, status, body);
+        addGet(capture, pathQ, status, body);
         return;
       }
       const spec = BATCHED[u.pathname];
       if (method === 'POST' && spec && status < 400 && body && Array.isArray(body[spec.field])) {
-        let rows = batched.get(u.pathname);
-        if (!rows) batched.set(u.pathname, (rows = { extra: body, rows: new Map() }));
+        let rows = capture.batched.get(u.pathname);
+        if (!rows) capture.batched.set(u.pathname, (rows = { extra: body, rows: new Map() }));
         for (const r of body[spec.field]) {
-          const k = spec.key(r);
+          const k = String(spec.key(r));
           if (!rows.rows.has(k)) rows.rows.set(k, r);
         }
       }
     })
     .catch(() => {
       /* the page navigated away before the body arrived — the step re-requests it */
-    });
+    })
+    .finally(() => capture.pending.delete(p));
+  capture.pending.add(p);
 }
 
 function isEmptyish(body) {
@@ -260,7 +399,7 @@ async function captureStream(pathQ) {
   const timer = setTimeout(() => ctl.abort(), 4000);
   const frames = [];
   try {
-    const res = await fetch(`http://localhost:${BACKEND_PORT}${pathQ}`, { signal: ctl.signal });
+    const res = await fetch(`${LANES[0].backend}${pathQ}`, { signal: ctl.signal });
     if (!res.ok || !res.body) return null;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -301,44 +440,71 @@ async function captureStream(pathQ) {
 }
 
 // --- the browser pass ------------------------------------------------------------------------
+const isStreamRequest = (r) => r.url().endsWith('/stream') || (r.headers().accept ?? '').includes('text/event-stream');
+/** Requests settle() waits for: the SPA's own origin (its /api and its lazy chunks), never a stream. */
+const counts = (r) => /^http:\/\/localhost:\d+\//.test(r.url()) && !isStreamRequest(r);
+
+/**
+ * Wait until the page has had NO request in flight (an /api answer, a lazy chunk, an image — server-
+ * sent event streams excepted, they never finish) for `quietMs` × the settle scale, AND its main
+ * thread has gone idle without asking for anything more. The idle check is what makes the shorter
+ * quiet window safe on a loaded machine: rendering a big answer can outlast the window.
+ */
 async function settle(page, { quietMs = 900, maxMs = 15_000 } = {}) {
-  // Wait until no /api request has been in flight for `quietMs`.
+  const quiet = Math.max(150, Math.round(quietMs * SETTLE_SCALE));
   const start = Date.now();
   let lastActivity = Date.now();
-  let inflight = 0;
+  const inflight = new Set();
   const onReq = (r) => {
-    if (r.url().includes('/api/')) {
-      inflight++;
-      lastActivity = Date.now();
-    }
+    if (!counts(r)) return;
+    inflight.add(r);
+    lastActivity = Date.now();
   };
   const onDone = (r) => {
-    if (r.url().includes('/api/')) {
-      inflight = Math.max(0, inflight - 1);
-      lastActivity = Date.now();
-    }
+    if (inflight.delete(r)) lastActivity = Date.now();
   };
   page.on('request', onReq);
   page.on('requestfinished', onDone);
   page.on('requestfailed', onDone);
   try {
     while (Date.now() - start < maxMs) {
-      await page.waitForTimeout(150);
-      if (inflight <= 0 && Date.now() - lastActivity >= quietMs) break;
+      await page.waitForTimeout(100);
+      if (inflight.size === 0 && Date.now() - lastActivity >= quiet) {
+        // The network is quiet — but a busy page may still be rendering what the last answer brought
+        // (a lazy chunk evaluating, a large PR laying out) before it asks for the next thing. Wait for
+        // the main thread to go idle, then look again.
+        const mark = lastActivity;
+        await page
+          .evaluate(
+            () =>
+              new Promise((resolve) => {
+                const after = () => requestAnimationFrame(() => setTimeout(resolve, 0));
+                if (typeof requestIdleCallback === 'function') requestIdleCallback(after, { timeout: 3000 });
+                else setTimeout(after, 50);
+              }),
+          )
+          .catch(() => {});
+        await page.waitForTimeout(60);
+        if (inflight.size === 0 && lastActivity === mark) break;
+      }
     }
   } finally {
+    if (process.env.RECORD_DEBUG_SETTLE && Date.now() - start > 2000) {
+      console.log(`    settle ${Date.now() - start}ms; in flight: ${[...inflight].map((r) => r.url().replace(/^http:\/\/localhost:\d+/, '')).join(' ') || '-'}`);
+    }
     page.off('request', onReq);
     page.off('requestfinished', onDone);
     page.off('requestfailed', onDone);
   }
 }
 
-function stepHelpers(page) {
+function stepHelpers(worker) {
+  const { page, lane } = worker;
   const h = {
     page,
-    base: BASE,
+    base: lane.base,
     async go(query) {
-      await page.goto(`${BASE}${query}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${lane.base}${query}`, { waitUntil: 'domcontentloaded' });
       await settle(page);
     },
     settle: (o) => settle(page, o),
@@ -400,6 +566,30 @@ function stepHelpers(page) {
           }
         });
         await settle(page, { quietMs: 500 });
+      }
+    },
+    /**
+     * Scroll every scrollable panel down ONE SCREEN AT A TIME, settling after each, up to `screens`
+     * screens — so a virtualised list (the Feed) renders, and fetches for, every row on the way down,
+     * the same rows on every run. (`scroll()` jumps to the end: rows it skips past depend on timing.)
+     */
+    async scrollThrough({ screens = 40 } = {}) {
+      for (let i = 0; i < screens; i++) {
+        const moved = await page.evaluate(() => {
+          let any = false;
+          for (const el of [document.scrollingElement, ...document.querySelectorAll('*')]) {
+            if (!el) continue;
+            const s = el === document.scrollingElement ? null : getComputedStyle(el);
+            if (s && !(s.overflowY === 'auto' || s.overflowY === 'scroll')) continue;
+            if (el.scrollHeight <= el.clientHeight + 20) continue;
+            const before = el.scrollTop;
+            el.scrollTop = before + Math.max(200, Math.floor(el.clientHeight * 0.9));
+            if (el.scrollTop > before) any = true;
+          }
+          return any;
+        });
+        await settle(page, { quietMs: 500 });
+        if (!moved) break;
       }
     },
     /** Pick every option of every <select> in turn (window pickers and the like), then the first again. */
@@ -474,12 +664,13 @@ function stepHelpers(page) {
     },
     /** A GET the SPA would make from a surface the recorder cannot reach by clicking. */
     async fetchGet(path) {
+      const capture = worker.capture;
       try {
-        const res = await fetch(`http://localhost:${BACKEND_PORT}${path}`);
+        const res = await fetch(`${lane.backend}${path}`);
         const text = await res.text();
         const body = text ? JSON.parse(text) : undefined;
-        seen.push({ step: currentStep, method: 'GET', path, status: res.status, empty: isEmptyish(body), direct: true });
-        if (res.status < 500) addEntry('GET', path, res.status, body);
+        capture.seen.push({ method: 'GET', path, status: res.status, empty: isEmptyish(body), direct: true });
+        if (res.status < 500) addGet(capture, path, res.status, body);
         return body;
       } catch {
         return undefined;
@@ -489,88 +680,362 @@ function stepHelpers(page) {
   return h;
 }
 
-async function main() {
-  for (const p of [BACKEND_PORT, FRONTEND_PORT]) {
-    if (portBusy(p)) throw new Error(`port ${p} is in use — set RECORD_BACKEND_PORT / RECORD_FRONTEND_PORT`);
+// --- steps: expansion, selection, scheduling ----------------------------------------------------
+/** Every step in declared order, `expand` steps replaced by their children (the DB must exist). */
+async function expandSteps() {
+  const out = [];
+  for (const s of STEPS) {
+    if (s.expand) for (const c of await s.expand()) out.push({ ...c, mutates: c.mutates ?? s.mutates });
+    else out.push({ ...s });
   }
-  if (RESEED) seed();
+  const names = new Set();
+  for (const [idx, s] of out.entries()) {
+    if (names.has(s.name)) throw new Error(`two recorder steps are named ${s.name}`);
+    names.add(s.name);
+    s.idx = idx;
+  }
+  return out;
+}
 
-  console.log(`▸ backend :${BACKEND_PORT}`);
-  run(join(BACKEND, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
-    cwd: BACKEND,
-    tag: 'backend',
-    env: { ...baseEnv, PORT: String(BACKEND_PORT), FRONTEND_PORT: String(FRONTEND_PORT) },
-  });
-  await waitFor(`http://localhost:${BACKEND_PORT}/api/health`, 'backend');
-  console.log(`▸ frontend :${FRONTEND_PORT}`);
-  run(join(FRONTEND, 'node_modules', '.bin', 'vite'), ['--port', String(FRONTEND_PORT), '--strictPort'], {
-    cwd: FRONTEND,
-    tag: 'vite',
-    env: { ...baseEnv, BACKEND_PORT: String(BACKEND_PORT), FRONTEND_PORT: String(FRONTEND_PORT) },
-  });
-  await waitFor(BASE, 'frontend');
+/** `pr:113` matches `pr:113` and every `pr:113:…`; a pattern with `*` is a glob over the whole name. */
+function stepMatcher(patterns) {
+  const tests = patterns.map((p) => (/[*?{]/.test(p) ? (n) => globToRegExp(p).test(n) : (n) => n === p || n.startsWith(`${p}:`)));
+  return (name) => tests.some((t) => t(name));
+}
 
-  const capturedAt = new Date().toISOString();
+/**
+ * Run `steps` on the workers. A step marked `mutates` is a barrier: everything declared before it
+ * finishes first, it runs alone, then the rest continue. Within a stretch of read-only steps the
+ * longest (by the last record's timings) start first.
+ */
+async function runAll(workers, steps, durations, onDone) {
+  const stretches = [];
+  let cur = [];
+  for (const s of steps) {
+    if (s.mutates) {
+      if (cur.length) stretches.push(cur);
+      stretches.push([s]);
+      cur = [];
+    } else cur.push(s);
+  }
+  if (cur.length) stretches.push(cur);
+  for (const stretch of stretches) {
+    const queue = [...stretch].sort((a, b) => (durations[b.name] ?? 4000) - (durations[a.name] ?? 4000) || a.idx - b.idx);
+    const n = stretch.length === 1 ? 1 : workers.length;
+    await Promise.all(
+      workers.slice(0, n).map(async (w) => {
+        for (let s = queue.shift(); s; s = queue.shift()) await runStep(w, s, onDone);
+      }),
+    );
+  }
+}
+
+async function resetBrowser(worker) {
+  // A same-origin page that is not the SPA, so its storage can be cleared before the step boots it.
+  await worker.page.goto(`${worker.lane.origin}/__limn_record_blank__`, { waitUntil: 'commit' }).catch(() => {});
+  await worker.page
+    .evaluate(async () => {
+      localStorage.clear();
+      sessionStorage.clear();
+      localStorage.setItem('pierre:onboarded', '1');
+      const dbs = (await indexedDB.databases?.()) ?? [];
+      await Promise.all(
+        dbs.map(
+          (d) =>
+            new Promise((res) => {
+              const r = indexedDB.deleteDatabase(d.name);
+              r.onsuccess = r.onerror = r.onblocked = () => res();
+            }),
+        ),
+      );
+    })
+    .catch(() => {});
+}
+
+async function runStep(worker, step, onDone) {
+  const capture = newCapture(step);
+  const t0 = Date.now();
+  let error = null;
+  try {
+    await resetBrowser(worker);
+    worker.capture = capture;
+    await step.run(worker.h);
+    // Answers whose bodies are still arriving belong to this step.
+    await Promise.race([Promise.allSettled([...capture.pending]), new Promise((r) => setTimeout(r, 5000))]);
+  } catch (err) {
+    error = String(err?.message ?? err).split('\n')[0];
+  }
+  capture.ms = Date.now() - t0;
+  worker.capture = worker.idle;
+  onDone(capture, error);
+}
+
+// --- merging buckets into the recording ----------------------------------------------------------
+/**
+ * The recording + its steps index from per-step buckets, optionally on top of an OLD recording
+ * (incremental). An answer belongs to its lowest-index captor; its body is the freshest one (a
+ * re-recorded step's, else the old file's).
+ */
+function buildRecording({ steps, captures, streamFrames, old, rerecorded, capturedAt }) {
+  const idxOf = new Map(steps.map((s) => [s.name, s.idx]));
+  const END = steps.length;
+  const owner = (captors) => (captors.length ? Math.min(...captors.map((n) => idxOf.get(n) ?? END)) : END);
+  const byIdx = (a, b) => (idxOf.get(a) ?? END) - (idxOf.get(b) ?? END) || (a < b ? -1 : 1);
+  /** key → { entry, captors:Set, fresh } */
+  const byKey = new Map();
+  /** path → { extra, extraOwner, rows: Map(rowKey → { row, captors:Set, fresh }) } */
+  const batched = new Map();
+  /** Captors still standing after the re-recorded (and removed) steps are taken out; null = drop. */
+  const keep = (all) => {
+    const left = (all ?? []).filter((n) => idxOf.has(n) && !rerecorded.has(n));
+    return all && all.length && !left.length ? null : left;
+  };
+
+  if (old) {
+    for (const e of old.recording.entries) {
+      const path = pathnameOf(e.path);
+      const spec = e.method === 'POST' ? BATCHED[path] : undefined;
+      if (spec) {
+        const rowIdx = old.index.rows?.[path] ?? {};
+        const b = { extra: e.body, extraOwner: END, rows: new Map() };
+        for (const r of e.body?.[spec.field] ?? []) {
+          const k = String(spec.key(r));
+          const captors = keep(rowIdx[k]);
+          if (captors) b.rows.set(k, { row: r, captors: new Set(captors), fresh: false });
+        }
+        batched.set(path, b);
+        continue;
+      }
+      const key = entryKey(e.method, e.path);
+      const captors = keep(old.index.keys[key]);
+      if (captors) byKey.set(key, { entry: e, captors: new Set(captors), fresh: false });
+    }
+  }
+
+  const add = (map, key, value, name) => {
+    const cur = map.get(key);
+    if (!cur) map.set(key, { ...value, captors: new Set([name]), fresh: true });
+    else {
+      cur.captors.add(name);
+      if (!cur.fresh) Object.assign(cur, value, { fresh: true });
+    }
+  };
+  for (const c of [...captures].sort((a, b) => a.idx - b.idx)) {
+    for (const [key, entry] of c.gets) add(byKey, key, { entry }, c.name);
+    for (const [path, { extra, rows }] of c.batched) {
+      let b = batched.get(path);
+      if (!b) batched.set(path, (b = { extra, extraOwner: c.idx, rows: new Map() }));
+      else if (c.idx < b.extraOwner) Object.assign(b, { extra, extraOwner: c.idx });
+      for (const [k, row] of rows) add(b.rows, k, { row }, c.name);
+    }
+  }
+  // Streams: a path the SPA opened as a stream and nobody answered as JSON.
+  for (const [pathQ, { frames, captors }] of streamFrames) {
+    const key = entryKey('GET', pathQ);
+    const cur = byKey.get(key);
+    if (cur && !cur.entry.stream && cur.fresh) {
+      for (const n of captors) cur.captors.add(n);
+      continue;
+    }
+    for (const n of captors) add(byKey, key, { entry: { method: 'GET', path: sortedPath(pathQ), status: 200, stream: frames } }, n);
+  }
+
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const keyed = [...byKey.entries()].map(([key, v]) => ({ key, ...v, owner: owner([...v.captors]) }));
+  keyed.sort((a, b) => a.owner - b.owner || cmp(a.key, b.key));
+  const entries = keyed.map((k) => k.entry);
+  const index = { version: 1, capturedAt, steps: steps.map((s) => s.name), ms: {}, keys: {}, rows: {} };
+  for (const k of keyed) index.keys[k.key] = [...k.captors].sort(byIdx);
+  for (const path of [...batched.keys()].sort()) {
+    const { extra, rows } = batched.get(path);
+    const spec = BATCHED[path];
+    const list = [...rows.entries()].map(([k, v]) => ({ k, ...v, owner: owner([...v.captors]) }));
+    list.sort((a, b) => a.owner - b.owner || cmp(a.k, b.k));
+    entries.push({ method: 'POST', path, status: 200, body: { ...extra, [spec.field]: list.map((r) => r.row) } });
+    index.keys[`POST ${path}`] = [...new Set(list.flatMap((r) => [...r.captors]))].sort(byIdx);
+    index.rows[path] = Object.fromEntries(list.map((r) => [r.k, [...r.captors].sort(byIdx)]));
+  }
+  return { entries, index };
+}
+
+/** One entry per line: a re-record's diff names the answers that changed. Still one JSON value. */
+function serialise(recording) {
+  const head = JSON.stringify({ version: recording.version, capturedAt: recording.capturedAt });
+  return `${head.slice(0, -1)},"entries":[\n${recording.entries.map((e) => JSON.stringify(e)).join(',\n')}\n]}\n`;
+}
+function serialiseIndex(index) {
+  const lines = (obj) => Object.entries(obj).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n');
+  return `{\n"version": 1,\n"capturedAt": ${JSON.stringify(index.capturedAt)},\n"steps": ${JSON.stringify(index.steps)},\n"ms": ${JSON.stringify(index.ms)},\n"keys": {\n${lines(index.keys)}\n},\n"rows": {\n${lines(index.rows)}\n}\n}\n`;
+}
+
+function loadOld() {
+  if (!existsSync(OUT) || !existsSync(STEPS_OUT)) return null;
+  const recording = JSON.parse(readFileSync(OUT, 'utf8'));
+  const index = JSON.parse(readFileSync(STEPS_OUT, 'utf8'));
+  if (index.version !== 1 || index.capturedAt !== recording.capturedAt) return null;
+  return { recording, index };
+}
+
+async function main() {
+  for (const p of LANES.flatMap((l) => [l.api, l.web])) {
+    if (portBusy(p)) throw new Error(`port ${p} is in use — pass --api-port / --web-port (lanes use the next ${BACKENDS - 1} ports up)`);
+  }
+
+  // ── What to record: everything, or (incremental) some steps merged into the old file ──
+  let old = ONLY || CHANGED ? loadOld() : null;
+  const indexName = STEPS_OUT.split('/').pop();
+  // --only with nothing to merge into: refused for the committed file (it would replace the whole
+  // recording with a few steps); allowed with --out, as a scratch recording of just those steps.
+  if (ONLY && !old && !str('out')) {
+    throw new Error(`--only needs ${indexName} beside the recording, from the same record: run a full \`pnpm demo:record\` first`);
+  }
+  if (CHANGED && !old) console.log(`▸ no ${indexName} from the same record: recording everything`);
+  let changedVerdict = null;
+  if (CHANGED && old && !ONLY) {
+    const files = changedFiles(ROOT, CHANGED_BASE);
+    const names = [...new Set([...old.index.steps, ...STEPS.filter((s) => !s.expand).map((s) => s.name)])];
+    changedVerdict = stepsForChanges(ROOT, files, STEP_MODULE, old.index, names);
+    for (const w of changedVerdict.why) console.log(`  · ${w}`);
+    if (changedVerdict.full) {
+      console.log(`▸ full record: ${changedVerdict.full}`);
+      old = null;
+    } else if (!changedVerdict.steps.size) {
+      console.log(`▸ ${files.length} changed file(s); none changes a recorded answer: nothing to record`);
+      process.exit(0);
+    }
+  }
+  const incremental = Boolean(old);
+  const offsetMs = incremental ? Date.now() - Date.parse(old.recording.capturedAt) : 0;
+  const childEnv = { ...baseEnv };
+  if (offsetMs) {
+    childEnv.LIMN_CLOCK_OFFSET_MS = String(offsetMs);
+    childEnv.NODE_OPTIONS = `${baseEnv.NODE_OPTIONS ?? ''} --import ${pathToFileURL(CLOCK_MODULE).href}`.trim();
+    process.env.LIMN_CLOCK_OFFSET_MS = String(offsetMs);
+    console.log(`▸ incremental: clocks moved back ${(offsetMs / 3_600_000).toFixed(1)}h, to ${old.recording.capturedAt}`);
+  }
+  const t0 = Date.now();
+  const viteEnv = (lane) => ({ ...baseEnv, BACKEND_PORT: String(lane.api), FRONTEND_PORT: String(lane.web) });
+  const vite = join(FRONTEND, 'node_modules', '.bin', 'vite');
+  // A production build (a few large chunks, not hundreds of dev modules) loads several times faster per
+  // page, and it is what the demo itself runs. Built while the seeder runs; reused while the SPA's
+  // sources are unchanged.
+  const built = DEV ? Promise.resolve(null) : buildSpa(viteEnv(LANES[0]), vite);
+  built.catch(() => {});
+  if (RESEED) seed(childEnv);
+  else if (incremental) console.log('⚠ --no-seed on an incremental record: the DB must have been seeded as of the same capturedAt');
+
+  const steps = await expandSteps();
+  let selected = steps;
+  if (incremental) {
+    const pick = ONLY ? stepMatcher(ONLY) : (n) => changedVerdict.steps.has(n);
+    selected = steps.filter((s) => pick(s.name));
+    if (!selected.length) throw new Error(`no recorder step matches ${ONLY ? ONLY.join(',') : 'the changed files'}`);
+    console.log(`▸ re-recording ${selected.length} of ${steps.length} steps`);
+  } else if (ONLY) {
+    selected = steps.filter((s) => stepMatcher(ONLY)(s.name));
+    console.log(`▸ a scratch recording of ${selected.length} steps → ${OUT}`);
+  }
+
+  const bootBackend = (lane) =>
+    run(join(BACKEND, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
+      cwd: BACKEND,
+      tag: `backend:${lane.api}`,
+      env: { ...childEnv, PORT: String(lane.api), FRONTEND_PORT: String(lane.web) },
+    });
+  // The first backend migrates the database; the others start once it has.
+  console.log(`▸ backend${BACKENDS > 1 ? 's' : ''} :${LANES.map((l) => l.api).join(', :')}`);
+  bootBackend(LANES[0]);
+  const webDir = await built;
+  await waitFor(`${LANES[0].backend}/api/health`, 'backend');
+  for (const lane of LANES.slice(1)) bootBackend(lane);
+  for (const lane of LANES) {
+    if (DEV) run(vite, ['--port', String(lane.web), '--strictPort'], { cwd: FRONTEND, tag: `vite:${lane.web}`, env: viteEnv(lane) });
+    else run(vite, ['preview', '--port', String(lane.web), '--strictPort', '--outDir', webDir], { cwd: FRONTEND, tag: `vite:${lane.web}`, env: viteEnv(lane) });
+  }
+  console.log(`▸ ${DEV ? 'vite dev' : 'vite preview'} :${LANES.map((l) => l.web).join(', :')}`);
+  await Promise.all(LANES.flatMap((l) => [waitFor(`${l.backend}/api/health`, 'backend'), waitFor(l.base, 'frontend')]));
+
+  const capturedAt = incremental ? old.recording.capturedAt : new Date().toISOString();
   const browser = await chromium.launch({
     headless: !HEADED,
     args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
   });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 950 }, reducedMotion: 'reduce', colorScheme: 'dark' });
-  await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
-  context.on('response', onResponse);
-  await installGithubStandIn(context, { backend: `http://localhost:${BACKEND_PORT}` });
-  const page = await context.newPage();
   const errors = [];
-  page.on('pageerror', (e) => errors.push(`${currentStep}: ${e.message}`));
-  const h = stepHelpers(page);
-
-  // Warm Vite (first load compiles every module).
-  await page.goto(BASE, { waitUntil: 'load', timeout: 120_000 });
-  await settle(page, { quietMs: 2500, maxMs: 60_000 });
-
-  for (const step of STEPS) {
-    if (ONLY && !step.name.includes(ONLY)) continue;
-    currentStep = step.name;
-    const t0 = Date.now();
-    try {
-      await step.run(h);
-    } catch (err) {
-      console.log(`  ✗ ${step.name}: ${err.message.split('\n')[0]}`);
-      continue;
-    }
-    console.log(`  ✓ ${step.name} (${Date.now() - t0}ms)`);
+  const n = Math.min(CONCURRENCY, selected.length);
+  const workers = [];
+  for (let i = 0; i < n; i++) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 950 }, reducedMotion: 'reduce', colorScheme: 'dark' });
+    const lane = LANES[i % LANES.length];
+    if (offsetMs) await context.addInitScript(browserClockScript(offsetMs));
+    await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
+    await installGithubStandIn(context, { backend: lane.backend });
+    await stubWrites(context);
+    const page = await context.newPage();
+    const idle = newCapture({ name: '(between steps)', idx: -1 });
+    const worker = { context, page, lane, capture: idle, idle };
+    // Each response belongs to the step that was running when its REQUEST went out.
+    const owners = new WeakMap();
+    page.on('request', (r) => owners.set(r, worker.capture));
+    page.on('response', (resp) => {
+      const c = owners.get(resp.request()) ?? worker.capture;
+      if (c !== idle) onResponse(c, resp);
+    });
+    page.on('pageerror', (e) => errors.push(`${worker.capture.name}: ${e.message}`));
+    worker.h = stepHelpers(worker);
+    workers.push(worker);
   }
-  await settle(page, { quietMs: 1500 });
+  // Warm every page (and, on --dev, Vite's module graph) — nothing is recorded yet.
+  await Promise.all(
+    workers.map(async (w) => {
+      await w.page.goto(w.lane.base, { waitUntil: 'load', timeout: 120_000 });
+      await settle(w.page, { quietMs: DEV ? 2500 : 1000, maxMs: 60_000 });
+    }),
+  );
+  console.log(`▸ ${selected.length} steps on ${n} page${n === 1 ? '' : 's'}`);
+
+  const captures = [];
+  const writes = [];
+  let done = 0;
+  const tRec = Date.now();
+  await runAll(workers, selected, old?.index.ms ?? (existsSync(STEPS_OUT) ? JSON.parse(readFileSync(STEPS_OUT, 'utf8')).ms ?? {} : {}), (capture, error) => {
+    done++;
+    captures.push(capture);
+    if (capture.writes.length && !steps[capture.idx].mutates) writes.push(`${capture.name}: ${[...new Set(capture.writes)].join(', ')}`);
+    console.log(`  ${error ? '✗' : '✓'} [${done}/${selected.length}] ${capture.name} (${capture.ms}ms)${error ? `: ${error}` : ''}`);
+  });
+  const recordMs = Date.now() - tRec;
   await browser.close();
 
-  // Streams: read each finished run's stream straight from the backend.
-  for (const s of streams) {
+  // Streams: read each finished run's stream straight from the backend, once per path.
+  const streamCaptors = new Map();
+  for (const c of captures) for (const s of c.streams) (streamCaptors.get(s) ?? streamCaptors.set(s, []).get(s)).push(c.name);
+  const streamFrames = new Map();
+  for (const s of [...streamCaptors.keys()].sort()) {
     const frames = await captureStream(s);
-    if (frames && frames.length) {
-      const key = `GET ${normalisePath(s)}`;
-      if (!gets.has(key)) {
-        gets.set(key, { method: 'GET', path: sortedPath(s), status: 200, stream: frames });
-        order.push(key);
-      }
-    }
+    if (frames && frames.length) streamFrames.set(s, { frames, captors: streamCaptors.get(s) });
   }
 
-  const entries = order.map((k) => gets.get(k));
-  for (const [path, { extra, rows }] of batched) {
-    const spec = BATCHED[path];
-    entries.push({ method: 'POST', path, status: 200, body: { ...extra, [spec.field]: [...rows.values()] } });
-  }
+  const rerecorded = new Set(selected.map((s) => s.name));
+  const { entries, index } = buildRecording({ steps, captures, streamFrames, old: incremental ? old : null, rerecorded, capturedAt });
+  index.ms = Object.fromEntries(
+    steps.map((s) => [s.name, captures.find((c) => c.name === s.name)?.ms ?? old?.index.ms?.[s.name]]).filter(([, ms]) => ms != null),
+  );
 
   if (PROBE) {
+    const seen = [...captures].sort((a, b) => a.idx - b.idx).flatMap((c) => c.seen.map((x) => ({ step: c.name, ...x })));
     writeFileSync('/tmp/limn-record-probe.json', JSON.stringify({ errors, seen }, null, 1));
     console.log(`probe → /tmp/limn-record-probe.json (${seen.length} responses, ${errors.length} page errors)`);
   }
   // ⚠ Refuse to write a recording that answers as anyone but the fictional viewer — the live
   // backend AND every recorded /api/me must agree, or your real GitHub identity would ship in it.
-  const liveMe = await fetch(`http://localhost:${BACKEND_PORT}/api/me`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
-  const logins = [liveMe, ...entries.filter((e) => e.path === '/api/me').map((e) => e.body)].map(
+  const liveMes = await Promise.all(
+    LANES.map((l) =>
+      fetch(`${l.backend}/api/me`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ),
+  );
+  const logins = [...liveMes, ...entries.filter((e) => e.path === '/api/me').map((e) => e.body)].map(
     (b) => b?.user?.login ?? null,
   );
   if (logins.some((l) => l !== VIEWER_LOGIN)) {
@@ -580,14 +1045,17 @@ async function main() {
     );
   }
   const recording = { version: 1, capturedAt, entries };
-  const outPath = PROBE ? '/tmp/limn-record-probe-recording.json' : OUT;
-  writeFileSync(outPath, JSON.stringify(recording));
-  const kb = Math.round(statSync(outPath).size / 1024);
-  console.log(`\n✅ ${entries.length} entries → ${outPath} (${kb} KB)`);
+  mkdirSync(dirname(OUT), { recursive: true });
+  writeFileSync(OUT, serialise(recording));
+  writeFileSync(STEPS_OUT, serialiseIndex(index));
+  const kb = Math.round(statSync(OUT).size / 1024);
+  console.log(`\n✅ ${entries.length} entries → ${OUT} (${kb} KB)${incremental ? `; ${selected.length} of ${steps.length} steps re-recorded` : ''}`);
+  console.log(`   walk ${Math.round(recordMs / 1000)}s on ${n} page(s); total ${Math.round((Date.now() - t0) / 1000)}s`);
+  if (writes.length) console.log(`⚠ steps not marked \`mutates\` sent writes:\n  ${writes.join('\n  ')}`);
   if (errors.length) console.log(`⚠ ${errors.length} page errors:\n  ${[...new Set(errors)].slice(0, 20).join('\n  ')}`);
 
   if (KEEP) {
-    console.log(`servers still up: ${BASE} (backend :${BACKEND_PORT}). Ctrl-C stops.`);
+    console.log(`servers still up: ${LANES.map((l) => `${l.base} (backend :${l.api})`).join(', ')}. Ctrl-C stops.`);
     await new Promise(() => {});
   }
   teardown();
