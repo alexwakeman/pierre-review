@@ -1084,110 +1084,121 @@ async function seedDesigns(base: any, c: AgenticSeedCtx): Promise<number> {
   const { db, schema, now } = c;
   const { eq } = await import('drizzle-orm');
   const ctx = agentCtx(base, {});
-  const { insertQueuedDiagram, markDiagramRunning, saveDiagramSuccess, markDiagramRanOn } = await import('../src/review/diagrams/persist.js');
+  const { insertQueuedDiagram, markDiagramRunning, markDiagramRefused, saveDiagramSuccess, markDiagramRanOn } = await import('../src/review/diagrams/persist.js');
   const { validateDesign } = await import('../src/review/diagrams/validate.js');
   const { prDiagramFingerprint, storyDiagramFingerprint } = await import('../src/review/diagrams/fingerprint.js');
   const { liveStoryMembers, designContextFor } = await import('../src/review/diagrams/manager.js');
   let n = 0;
+  const backdate = async (id: number, hoursAgo: number) =>
+    db.update(schema.sequenceDiagrams).set({ createdAt: new Date(now.getTime() - hoursAgo * HOUR), completedAt: new Date(now.getTime() - (hoursAgo - 0.05) * HOUR) }).where(eq(schema.sequenceDiagrams.id, id)).execute();
+  const prRow = async (prId: number) => ((await db.select().from(schema.pullRequests).where(eq(schema.pullRequests.id, prId)).execute()) as Array<Record<string, unknown>>)[0]!;
 
-  // #105's design was drawn after its Codex review, on Codex.
-  const prDesign = async (prId: number, title: string, caption: string, design: Record<string, unknown>, hoursAgo: number) => {
+  // #105's flow was drawn after its Codex review, on Codex. Every flow passes the real validator (the
+  // chain rule, every changed code file on a step) before it is stored.
+  const prFlow = async (prId: number, title: string, caption: string, flow: Record<string, unknown>, hoursAgo: number) => {
     const codex = prId === 105;
-    const pr = ((await db.select().from(schema.pullRequests).where(eq(schema.pullRequests.id, prId)).execute()) as Array<Record<string, unknown>>)[0]!;
+    const pr = await prRow(prId);
     const files = (DIFFS[prId] ?? []).map((f) => f.path);
-    const v = validateDesign({ ...design, title, caption } as never, designContextFor('pr', [{ ref: 'PR1', changedFiles: files } as never]));
-    if (!v.ok) throw new Error(`design #${prId}: ${JSON.stringify(v)}`);
+    const v = validateDesign({ ...flow, title, caption } as never, designContextFor('pr', [{ ref: 'PR1', changedFiles: files } as never]));
+    if (!v.ok || v.value.flow == null) throw new Error(`flow #${prId}: ${JSON.stringify(v)}`);
     const id = await insertQueuedDiagram(ctx, { accountId: 1, kind: 'pr', subject: String(prId), prId, ticketKey: null, fingerprint: prDiagramFingerprint(prId, pr.headSha as string), trigger: 'review', headSha: pr.headSha, model: 'claude-sonnet-5' } as never);
     await markDiagramRunning(ctx, 1, id, { headSha: pr.headSha as string });
     if (codex) await markDiagramRanOn(ctx, 1, id, CODEX_STANDARD);
-    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.design }, { costUsd: codex ? 0 : 0.14, inputTokens: 18_000, outputTokens: 1_300, numTurns: 4 });
-    await db.update(schema.sequenceDiagrams).set({ createdAt: new Date(now.getTime() - hoursAgo * HOUR), completedAt: new Date(now.getTime() - (hoursAgo - 0.05) * HOUR) }).where(eq(schema.sequenceDiagrams.id, id)).execute();
+    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.flow }, { costUsd: codex ? 0 : 0.14, inputTokens: 18_000, outputTokens: 1_300, numTurns: 4 });
+    await backdate(id, hoursAgo);
     n++;
   };
 
-  await prDesign(
+  await prFlow(
     113,
     'Sync writes one pull request per transaction',
-    'The upsert now owns the transaction and writes threads and events inside it. Derived state and the search index run after it commits.',
+    'Each pull request is written with its threads and events in one transaction. Thread states are worked out after it commits.',
     {
-      acts: [
-        { id: 'fetch', title: 'Fetch' },
-        { id: 'write', title: 'Write' },
-        { id: 'derive', title: 'Derive' },
+      participants: [
+        { id: 'sched', kind: 'service', label: 'Sync scheduler', change: 'changed' },
+        { id: 'gh', kind: 'external', label: 'GitHub GraphQL', change: 'unchanged' },
+        { id: 'upsert', kind: 'service', label: 'Pull request upsert', change: 'changed' },
+        { id: 'db', kind: 'db', label: 'pull_requests, threads', change: 'changed' },
+        { id: 'derive', kind: 'service', label: 'Thread-state classifier', change: 'changed' },
+        { id: 'route', kind: 'api', label: 'Timeline route', change: 'changed' },
       ],
-      layers: ['domain', 'data', 'tests'],
-      cells: [
-        { id: 'walk', act: 'fetch', layer: 'domain', label: 'Walk changed pull requests', pattern: 'Iterator', change: 'unchanged', pr: null, files: [] },
-        { id: 'upsert', act: 'write', layer: 'domain', label: 'Upsert PR with its threads', pattern: 'Unit of work', change: 'changed', pr: null, files: ['src/sync/upsert.ts'] },
-        { id: 'tx', act: 'write', layer: 'data', label: 'One transaction per PR', pattern: 'Transaction', change: 'new', pr: null, files: ['src/sync/upsert.ts', 'src/db/schema.sqlite.ts'] },
-        { id: 'state', act: 'derive', layer: 'domain', label: 'Classify thread state', pattern: 'Pure function', change: 'changed', pr: null, files: ['src/sync/derive-thread-state.ts'] },
-        { id: 'counts', act: 'derive', layer: 'data', label: 'Count threads for the list', pattern: 'Batch query', change: 'changed', pr: null, files: ['src/db/queries.ts'] },
-        { id: 'fixtures', act: 'derive', layer: 'tests', label: 'Thread-state fixtures', pattern: null, change: 'unchanged', pr: null, files: [] },
-      ],
-      arrows: [
-        { from: 'walk', to: 'upsert', label: 'each PR' },
-        { from: 'upsert', to: 'tx', label: 'inside' },
-        { from: 'tx', to: 'state', label: 'after commit' },
-        { from: 'state', to: 'counts', label: null },
+      steps: [
+        { n: 1, from: 'sched', to: 'gh', kind: 'read', label: 'pull requests changed since the cursor', files: ['src/sync/scheduler.ts'] },
+        { n: 2, from: 'gh', to: 'sched', kind: 'return', label: 'each PR with its threads and events', files: [] },
+        { n: 3, from: 'sched', to: 'upsert', kind: 'call', label: 'one pull request at a time', files: ['src/sync/scheduler.ts'] },
+        { n: 4, from: 'upsert', to: 'upsert', kind: 'validate', label: 'skip a PR whose head and updatedAt did not move', files: ['src/sync/upsert.ts'] },
+        { n: 5, from: 'upsert', to: 'db', kind: 'write', label: 'PR, threads and events in one transaction', files: ['src/sync/upsert.ts', 'src/db/schema.sqlite.ts'] },
+        { n: 6, from: 'upsert', to: 'derive', kind: 'call', label: 'thread ids, after the commit', files: ['src/sync/upsert.ts'] },
+        { n: 7, from: 'derive', to: 'db', kind: 'read', label: 'last comment and later commits per thread', files: ['src/sync/derive-thread-state.ts'] },
+        { n: 8, from: 'derive', to: 'db', kind: 'write', label: 'derived state per thread', files: ['src/sync/derive-thread-state.ts'] },
+        { n: 9, from: 'db', to: 'route', kind: 'read', label: 'thread counts per PR, one batch query', files: ['src/db/queries.ts', 'src/api/routes/timeline.ts'] },
       ],
     },
     1.9,
   );
 
-  await prDesign(
+  await prFlow(
     105,
     'Review-request webhooks update reviewers',
-    'GitHub posts a delivery; the route checks it, finds the repository and writes the pull request through the shared upsert.',
+    'GitHub posts a delivery; the route checks it and writes the requested reviewers through the shared upsert.',
     {
-      acts: [
-        { id: 'receive', title: 'Receive' },
-        { id: 'check', title: 'Check' },
-        { id: 'save', title: 'Save' },
+      participants: [
+        { id: 'gh', kind: 'external', label: 'GitHub', change: 'unchanged' },
+        { id: 'route', kind: 'api', label: 'Webhook route', change: 'new' },
+        { id: 'upsert', kind: 'service', label: 'Pull request upsert', change: 'changed' },
+        { id: 'db', kind: 'db', label: 'pull_requests', change: 'unchanged' },
       ],
-      layers: ['api', 'domain', 'external'],
-      cells: [
-        { id: 'gh', act: 'receive', layer: 'external', label: 'GitHub webhook delivery', pattern: null, change: 'unchanged', pr: null, files: [] },
-        { id: 'route', act: 'receive', layer: 'api', label: 'Webhook route', pattern: 'Front controller', change: 'new', pr: null, files: ['src/api/routes/webhooks.ts'] },
-        { id: 'sig', act: 'check', layer: 'api', label: 'Verify signature and dedupe', pattern: 'Guard clause', change: 'new', pr: null, files: ['src/api/routes/webhooks.ts'] },
-        { id: 'upsert', act: 'save', layer: 'domain', label: 'Write through the PR upsert', pattern: 'Adapter', change: 'unchanged', pr: null, files: ['src/sync/sync-repo.ts'] },
-      ],
-      arrows: [
-        { from: 'gh', to: 'route', label: 'POST' },
-        { from: 'route', to: 'sig', label: null },
-        { from: 'sig', to: 'upsert', label: 'accepted' },
+      steps: [
+        { n: 1, from: 'gh', to: 'route', kind: 'call', label: 'review_requested delivery', files: ['src/api/routes/webhooks.ts'] },
+        { n: 2, from: 'route', to: 'route', kind: 'validate', label: 'signature and delivery id, once each', files: ['src/api/routes/webhooks.ts'] },
+        { n: 3, from: 'route', to: 'upsert', kind: 'call', label: 'repository and pull request number', files: ['src/sync/sync-repo.ts'] },
+        { n: 4, from: 'upsert', to: 'gh', kind: 'read', label: 'the pull request’s current reviewers', files: ['src/sync/sync-repo.ts'] },
+        { n: 5, from: 'upsert', to: 'db', kind: 'write', label: 'requested reviewers', files: ['src/sync/sync-repo.ts'] },
+        { n: 6, from: 'route', to: 'gh', kind: 'return', label: '202 Accepted', files: [] },
       ],
     },
     19,
   );
 
-  // A STORY design: INFRA-260 has two pull requests (one merged, one open).
+  // #114 only resizes autoscaling limits: the model DECLINED (refused `no_flow`, with its reason), the
+  // one refused case the demo shows.
+  {
+    const pr = await prRow(114);
+    const id = await insertQueuedDiagram(ctx, { accountId: 1, kind: 'pr', subject: '114', prId: 114, ticketKey: null, fingerprint: prDiagramFingerprint(114, pr.headSha as string), trigger: 'review', headSha: pr.headSha, model: 'claude-sonnet-5' } as never);
+    await markDiagramRunning(ctx, 1, id, { headSha: pr.headSha as string });
+    await markDiagramRefused(ctx, 1, id, 'no_flow', { costUsd: 0.03, inputTokens: 6_000, outputTokens: 120, numTurns: 2 }, 'this change only resizes the node-group limits');
+    await backdate(id, 20);
+    n++;
+  }
+
+  // A STORY flow: INFRA-260 has two pull requests (one merged, one open).
   const ident = ticketIdent('INFRA-260');
   const members = await liveStoryMembers(ctx, 1, ident);
   if (members.length >= 2) {
     const fp = storyDiagramFingerprint(ident, members);
     const refs = members.map((m, i) => ({ ref: `PR${i + 1}`, changedFiles: [] as string[] }));
-    const design = {
-      acts: [
-        { id: 'lock', title: 'Lock' },
-        { id: 'move', title: 'Move state' },
+    const second = refs[1] ? 'PR2' : 'PR1';
+    const flow = {
+      participants: [
+        { id: 'tf', kind: 'service', label: 'Terraform run', change: 'unchanged', pr: null },
+        { id: 'lock', kind: 'db', label: 'DynamoDB lock table', change: 'new', pr: 'PR1' },
+        { id: 'state', kind: 'store', label: 'Versioned state bucket', change: 'new', pr: second },
       ],
-      layers: ['data', 'external'],
-      cells: [
-        { id: 'ddb', act: 'lock', layer: 'external', label: 'DynamoDB lock table', pattern: 'Mutex', change: 'new', pr: 'PR1', files: [] },
-        { id: 'backend', act: 'move', layer: 'data', label: 'S3 backend per stack', pattern: 'Remote state', change: 'new', pr: refs[1] ? 'PR2' : 'PR1', files: [] },
-        { id: 'archive', act: 'move', layer: 'external', label: 'Versioned state bucket', pattern: null, change: 'new', pr: refs[1] ? 'PR2' : 'PR1', files: [] },
-      ],
-      arrows: [
-        { from: 'ddb', to: 'backend', label: 'guards' },
-        { from: 'backend', to: 'archive', label: 'writes' },
+      steps: [
+        { n: 1, from: 'tf', to: 'lock', kind: 'write', label: 'a lock for the stack', pr: 'PR1' },
+        { n: 2, from: 'lock', to: 'tf', kind: 'return', label: 'lock granted, or the holder', pr: 'PR1' },
+        { n: 3, from: 'tf', to: 'state', kind: 'read', label: 'the stack’s current state', pr: second },
+        { n: 4, from: 'tf', to: 'tf', kind: 'transform', label: 'plan against that state', pr: null },
+        { n: 5, from: 'tf', to: 'state', kind: 'write', label: 'a new state version', pr: second },
+        { n: 6, from: 'tf', to: 'lock', kind: 'write', label: 'the lock released', pr: 'PR1' },
       ],
     };
-    const v = validateDesign({ ...design, title: 'Terraform state moves to S3, guarded by a lock', caption: 'The first pull request adds the lock table; the second points each stack at the versioned bucket.' } as never, designContextFor('story', refs as never));
-    if (!v.ok) throw new Error(`story design: ${JSON.stringify(v)}`);
+    const v = validateDesign({ ...flow, title: 'Terraform state moves to S3, guarded by a lock', caption: 'Every run takes a lock first. State is read from and written to the versioned bucket.' } as never, designContextFor('story', refs as never));
+    if (!v.ok || v.value.flow == null) throw new Error(`story flow: ${JSON.stringify(v)}`);
     const { toDiagramMembers } = await import('../src/review/diagrams/trigger.js');
     const id = await insertQueuedDiagram(ctx, { accountId: 1, kind: 'story', subject: ident, prId: null, ticketKey: 'INFRA-260', fingerprint: fp, trigger: 'review', headSha: null, model: 'claude-sonnet-5' } as never);
     await markDiagramRunning(ctx, 1, id, { members: toDiagramMembers(members) });
-    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.design }, { costUsd: 0.21, inputTokens: 24_000, outputTokens: 1_600, numTurns: 5 });
+    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.flow }, { costUsd: 0.21, inputTokens: 24_000, outputTokens: 1_600, numTurns: 5 });
     n++;
   }
   return n;
@@ -2056,21 +2067,20 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         { role: 'reader', text: 'Leave the load balancer check alone. Does it need anything new from the endpoint?', revision: 1, at: at(1.2).toISOString() },
         { role: 'claude', text: 'No. The check reads only the status code, so acme/infrastructure stays read-only and the two fields are additive.', revision: 2, at: at(1.1).toISOString() },
       ],
+      // The planned data flow (participants and steps name repo refs, never PRs).
       designJson: {
-        acts: [
-          { id: 'a1', title: 'Request' },
-          { id: 'a2', title: 'Read the sync state' },
-          { id: 'a3', title: 'Answer' },
+        participants: [
+          { id: 'lb', kind: 'external', label: 'Load balancer check', change: 'unchanged', pr: null },
+          { id: 'route', kind: 'api', label: 'GET /api/health', change: 'changed', pr: 'R1' },
+          { id: 'q', kind: 'service', label: 'Sync health query', change: 'new', pr: 'R1' },
+          { id: 'db', kind: 'db', label: 'sync_state table', change: 'unchanged', pr: null },
         ],
-        layers: ['api', 'domain', 'data'],
-        cells: [
-          { id: 'c1', act: 'a1', layer: 'api', label: 'GET /api/health', pattern: null, change: 'unchanged', pr: null, files: [] },
-          { id: 'c2', act: 'a2', layer: 'data', label: 'Oldest running sync and error count, one query', pattern: 'Covering index', change: 'new', pr: 'R1', files: ['src/db/sync-health.ts'] },
-          { id: 'c3', act: 'a3', layer: 'api', label: 'Two new fields on the answer', pattern: null, change: 'changed', pr: 'R1', files: ['src/api/routes/health.ts'] },
-        ],
-        arrows: [
-          { from: 'c1', to: 'c2', label: null },
-          { from: 'c2', to: 'c3', label: 'age and count' },
+        steps: [
+          { n: 1, from: 'lb', to: 'route', kind: 'call', label: 'health request', pr: null, files: [] },
+          { n: 2, from: 'route', to: 'q', kind: 'call', label: 'ask for the sync figures', pr: 'R1', files: ['src/api/routes/health.ts'] },
+          { n: 3, from: 'q', to: 'db', kind: 'read', label: 'oldest running sync and error count, one query', pr: 'R1', files: ['src/db/sync-health.ts'] },
+          { n: 4, from: 'q', to: 'route', kind: 'return', label: 'age in ms and repositories in error', pr: 'R1', files: ['src/db/sync-health.ts'] },
+          { n: 5, from: 'route', to: 'lb', kind: 'return', label: 'two new fields on the answer', pr: 'R1', files: ['src/api/routes/health.ts'] },
         ],
       },
       docsStatus: 'ready',

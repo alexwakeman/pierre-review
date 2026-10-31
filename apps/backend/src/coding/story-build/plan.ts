@@ -7,7 +7,7 @@ import {
   STORY_BUILD_SUMMARY_MAX_SENTENCES,
   STORY_BUILD_SUMMARY_MIN_SENTENCES,
   storySummaryProse,
-  type DesignDiagram,
+  type FlowDiagram,
   type StoryBuildCriterionHow,
   type StoryBuildPlan,
   type StoryBuildPlanCriterion,
@@ -26,7 +26,7 @@ import { validateDesign, type DesignContext } from '../../review/diagrams/valida
 //   • criteria refs only from the gap fold, and EVERY gap appears exactly once; a `planned` gap names a
 //     changed repository with a step that cites it; `how` is existing | planned | not_planned;
 //   • the summary is STORY_BUILD_SUMMARY_MIN..MAX sentences of prose (`storySummaryProse`); ≤ MAX_RISKS risks;
-//   • the design (only when asked for) passes `validateDesign` as kind 'planned' (cells name repo refs).
+//   • the design (only when asked for) passes `validateDesign` as kind 'planned' (participants and steps name repo refs).
 //     A design that is still wrong on the LAST attempt does not cost the plan: it is kept with
 //     `design: null` and the line "Couldn't draw the design".
 // The model's text is untrusted: every string is clipped and whitespace-folded before it is stored.
@@ -228,10 +228,10 @@ export function designContextOf(raw: RawStoryPlan, ctx: StoryPlanContext): Desig
 }
 
 /** The design to keep: the validated one, or null (not asked for, missing, or still wrong). */
-export function acceptedDesignOf(raw: RawStoryPlan, ctx: StoryPlanContext): DesignDiagram | null {
+export function acceptedDesignOf(raw: RawStoryPlan, ctx: StoryPlanContext): FlowDiagram | null {
   if (!ctx.wantDiagram || raw.design == null) return null;
   const v = validateDesign(raw.design, designContextOf(raw, ctx));
-  return v.ok ? v.value.design : null;
+  return v.ok ? v.value.flow : null;
 }
 
 /** A branch-name slug: lower-case words joined by hyphens, never empty. */

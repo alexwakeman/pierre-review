@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm';
 import type {
   DesignDiagram,
+  FlowDiagram,
   SequenceDiagramKind,
   SequenceDiagramMember,
   SequenceDiagramRefusal,
@@ -9,7 +10,7 @@ import type {
   SequenceDiagramView,
   StoredPrFile,
 } from '@pierre-review/shared';
-import { aiRunProvider } from '@pierre-review/shared';
+import { aiRunProvider, isFlowDiagram, isLegacyDesignDiagram } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 
@@ -18,11 +19,13 @@ import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 // nothing. Portable terminals only (`.execute()`, `.returning().execute()`).
 //
 // ⚠ ONLY DESIGN-ERA ROWS ARE READ. The table also holds the retired Mermaid diagrams (`source`, a
-// Mermaid `diagram_type`). Every run queued now is stamped `diagram_type = DESIGN_DIAGRAM_TYPE` at
-// INSERT, and a succeeded one carries `design`; the slot reads (`latestDiagram`,
-// `latestSucceededDiagram`) take only stamped rows, and a succeeded row only with a design — so an
-// old Mermaid row is "no diagram yet" and the next review (its fingerprint version moved) or a Redraw
-// draws a design. `source` is kept (no column drops) and never written.
+// Mermaid `diagram_type`). Every run queued now is stamped `diagram_type = FLOW_DIAGRAM_TYPE` at
+// INSERT, and a succeeded one carries its flow in `design`; the slot reads (`latestDiagram`,
+// `latestSucceededDiagram`) take only stamped rows ('flow', or the older grid's 'design'), and a
+// succeeded row only with a design — so an old Mermaid row is "no diagram yet" and the next review
+// (its fingerprint version moved) or a Redraw draws one. `source` is kept (no column drops) and never
+// written. A 'design' row (the older GRID shape) is served as `design`, never as `flow`
+// (`toDiagramView` reads the JSON's shape), and the SPA marks it as the old layout.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const t = (ctx: Pick<AgentContext, 'schema'>): any => (ctx.schema as any).sequenceDiagrams;
@@ -50,7 +53,8 @@ export interface DiagramRow {
   caption: string | null;
   diagramType: string | null;
   source: string | null;
-  design: DesignDiagram | null;
+  // A 'flow' row: the FlowDiagram. A 'design' row: the older DesignDiagram grid.
+  design: FlowDiagram | DesignDiagram | null;
   refusal: string | null;
   error: string | null;
   costUsd: number | null;
@@ -69,8 +73,11 @@ export interface Telemetry {
   numTurns?: number | null;
 }
 
-/** The `diagram_type` every design-era row carries from the moment it is queued. */
+/** The `diagram_type` of the older GRID rows (DESIGN_DIAGRAM_VERSION 1) — still read, never written. */
 export const DESIGN_DIAGRAM_TYPE = 'design';
+/** The `diagram_type` every row queued now carries from the moment it is queued (the data flow). */
+export const FLOW_DIAGRAM_TYPE = 'flow';
+const READ_TYPES = [FLOW_DIAGRAM_TYPE, DESIGN_DIAGRAM_TYPE];
 
 // ---- the PR the pipeline reads ----
 
@@ -186,7 +193,7 @@ export async function insertQueuedDiagram(ctx: Ctx, a: QueueDiagramArgs): Promis
       headSha: a.headSha,
       members: a.members,
       trigger: a.trigger,
-      diagramType: DESIGN_DIAGRAM_TYPE,
+      diagramType: FLOW_DIAGRAM_TYPE,
       status: 'queued',
       // Labelled by the provider it is expected to run on; the run stamps its own (`markDiagramRanOn`).
       ...expectedRanOn(claudeModelChoice(a.model)),
@@ -238,8 +245,16 @@ export async function markDiagramRefused(
   id: number,
   refusal: SequenceDiagramRefusal,
   t0: Telemetry = {},
+  // A `no_flow` refusal: the model's reason (validated plain text), kept in `caption`.
+  detail: string | null = null,
 ): Promise<void> {
-  await update(ctx, accountId, id, { status: 'refused', refusal, completedAt: new Date(), ...tel(t0) });
+  await update(ctx, accountId, id, {
+    status: 'refused',
+    refusal,
+    ...(detail != null ? { caption: detail } : {}),
+    completedAt: new Date(),
+    ...tel(t0),
+  });
 }
 
 export async function markDiagramFailed(
@@ -267,14 +282,14 @@ export async function saveDiagramSuccess(
   ctx: Ctx,
   accountId: number,
   id: number,
-  d: { title: string | null; caption: string | null; design: DesignDiagram },
+  d: { title: string | null; caption: string | null; design: FlowDiagram },
   t0: Telemetry,
 ): Promise<void> {
   await update(ctx, accountId, id, {
     status: 'succeeded',
     title: d.title,
     caption: d.caption,
-    diagramType: DESIGN_DIAGRAM_TYPE,
+    diagramType: FLOW_DIAGRAM_TYPE,
     design: d.design,
     completedAt: new Date(),
     ...tel(t0),
@@ -362,7 +377,7 @@ export async function diagramExistsAt(
 /** A design-era row: stamped at queue time, and a succeeded one carries its design. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const designEra = (d: any) =>
-  and(eq(d.diagramType, DESIGN_DIAGRAM_TYPE), or(ne(d.status, 'succeeded'), isNotNull(d.design)));
+  and(inArray(d.diagramType, READ_TYPES), or(ne(d.status, 'succeeded'), isNotNull(d.design)));
 
 /** The newest design-era row of one subject (any status), or null. */
 export async function latestDiagram(
@@ -408,7 +423,17 @@ export async function latestSucceededDiagram(
 // The refusals the SERVER decides before any model runs: free, so they do not use up the cap. Every
 // other row counts — queued and running ones (they will spend), failures, and 'invalid_diagram', which
 // is a billed run whose answer failed validation.
-const FREE_REFUSALS: readonly SequenceDiagramRefusal[] = ['no_code', 'head_moved', 'unreadable', 'too_few_prs', 'too_many_prs'];
+// The pre-check's three (precheck.ts) are free too; the MODEL's `no_flow` is not (it ran).
+const FREE_REFUSALS: readonly SequenceDiagramRefusal[] = [
+  'no_code',
+  'tests_only',
+  'copy_only',
+  'too_small',
+  'head_moved',
+  'unreadable',
+  'too_few_prs',
+  'too_many_prs',
+];
 
 /** Diagrams a finished review queued since `dayStartMs` that ran (or will run) the model. */
 export async function countReviewDiagramsSince(ctx: Ctx, accountId: number, dayStartMs: number): Promise<number> {
@@ -484,12 +509,14 @@ export function toDiagramView(row: DiagramRow, current: boolean): SequenceDiagra
     ticketKey: row.ticketKey,
     status: row.status,
     trigger: row.trigger,
-    title: row.title,
-    caption: row.caption,
-    design: row.status === 'succeeded' ? (row.design ?? null) : null,
+    title: row.status === 'refused' ? null : row.title,
+    caption: row.status === 'refused' ? null : row.caption,
+    flow: row.status === 'succeeded' && isFlowDiagram(row.design) ? row.design : null,
+    design: row.status === 'succeeded' && isLegacyDesignDiagram(row.design) ? row.design : null,
     headSha: row.headSha,
     members: row.members ?? [],
     refusal: (row.refusal as SequenceDiagramRefusal | null) ?? null,
+    refusalDetail: row.status === 'refused' && row.refusal === 'no_flow' ? (row.caption ?? null) : null,
     error: row.error,
     current,
     createdAt: iso(row.createdAt)!,

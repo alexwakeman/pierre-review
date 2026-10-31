@@ -9,7 +9,7 @@
 // no pull request, "Fill gaps" on a STARTED ticket whose current story check found gaps. Once a session
 // exists the card shows its mark (`storyBuildMark`).
 
-import type { DesignDiagram } from './sequence-diagrams.js';
+import type { DesignDiagram, FlowDiagram } from './sequence-diagrams.js';
 import type { SprintStage } from './sprint-stories.js';
 import type { SprintTicketCheck } from './sprint-graph.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
@@ -427,7 +427,9 @@ export interface StoryBuild {
   plan: StoryBuildPlan | null;
   planRevision: number;
   transcript: StoryBuildMessage[];
-  /** The planned design (`want_diagram`); cells name repo refs, never PRs. */
+  /** The planned data flow (`want_diagram`); participants and steps name repo refs (R1…), never PRs. */
+  flow: FlowDiagram | null;
+  /** A plan drawn before the data-flow diagrams: the older grid, rendered as it was. Null otherwise. */
   design: DesignDiagram | null;
   docsStatus: StoryBuildDocsStatus;
   /** Why the latest docs run failed or was refused (one sentence); null otherwise. */

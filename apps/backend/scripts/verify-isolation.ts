@@ -4266,10 +4266,14 @@ check(
         title: `T${acct}`,
         caption: null,
         design: {
-          acts: [{ id: 'a1', title: 'Import' }],
-          layers: ['domain'],
-          cells: [{ id: 'c1', act: 'a1', layer: 'domain', label: 'Parse rows', pattern: 'Pipeline', change: 'new', pr: null, files: [] }],
-          arrows: [],
+          participants: [
+            { id: 'imp', kind: 'service', label: 'Importer', change: 'new', pr: null },
+            { id: 'db', kind: 'db', label: 'rates table', change: 'unchanged', pr: null },
+          ],
+          steps: [
+            { n: 1, from: 'imp', to: 'db', kind: 'write', label: 'rates', pr: null, files: [] },
+            { n: 2, from: 'db', to: 'imp', kind: 'return', label: 'row ids', pr: null, files: [] },
+          ],
         },
       }, {});
     }

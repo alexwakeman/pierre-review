@@ -1,6 +1,8 @@
 import { and, desc, eq, inArray, asc, notInArray } from 'drizzle-orm';
 import {
   aiRunProvider,
+  isFlowDiagram,
+  isLegacyDesignDiagram,
   isStoryBuildOpen,
   isStoryBuildRunning,
   storyBuildDocsEffectiveDecisions,
@@ -385,7 +387,8 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     plan: row.planJson ?? null,
     planRevision: row.planRevision,
     transcript: row.transcriptJson ?? [],
-    design: row.designJson ?? null,
+    flow: isFlowDiagram(row.designJson) ? row.designJson : null,
+    design: isLegacyDesignDiagram(row.designJson) ? row.designJson : null,
     docsStatus: row.docsStatus,
     docsError: row.docsError ?? null,
     docs: row.docsJson ?? null,

@@ -123,8 +123,11 @@ Discard (any non-running state) ⇒ discarded
   (`STORY_PLAN_TOOLS` / `STORY_PLAN_DISALLOWED_TOOLS`, `no-shell.test.ts`); roots = the scratch cwd
   (`REPOS.md`) + every readable checkout + the library when usable, NO write root. `submit_story_plan`
   is judged in the tool (≤ 3 calls on Claude, 2 on Codex); a design still wrong on the last call is
-  dropped ("Couldn't draw the design.") and the plan kept. The design is `validateDesign` kind
-  `'planned'` (cells name repo refs). Claude's prompts are golden (`__fixtures__/story-plan-prompts.json`);
+  dropped ("Couldn't draw the design.") and the plan kept. The design is a DATA FLOW
+  (`FlowDiagram`, the schema's `buildFlowShape` — no `noDiagram`: the reader asked for one), judged by
+  `validateDesign` kind `'planned'` (participants and steps name repo refs; every code file the plan's
+  steps name must sit on a flow step); `design_json` keeps a pre-flow plan's grid, served as `design`
+  beside `flow` by its shape. Claude's prompts are golden (`__fixtures__/story-plan-prompts.json`);
   Codex's wording goes through `ai/prompt-tools.ts`. Effort: `agenticRunEffort` per pass; model: the
   start's manual pick, follow-ups on the session's provider (`followUpProvider`, `requestModelOf`).
 - **Lanes:** the read-only passes (assess + plan, re-plans, the docs run) are a `registerReviewSlotPeer`

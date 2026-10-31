@@ -31,6 +31,17 @@ let prB = 0;
 const HEAD = 'a'.repeat(40);
 const HEAD2 = 'b'.repeat(40);
 const DESIGN = {
+  participants: [
+    { id: 'imp', kind: 'service' as const, label: 'Importer', change: 'new' as const, pr: null },
+    { id: 'db', kind: 'db' as const, label: 'rates table', change: 'unchanged' as const, pr: null },
+  ],
+  steps: [
+    { n: 1, from: 'imp', to: 'imp', kind: 'validate' as const, label: 'rows with an account', pr: null, files: ['src/a.ts'] },
+    { n: 2, from: 'imp', to: 'db', kind: 'write' as const, label: 'one rate per currency', pr: null, files: [] },
+  ],
+};
+// The older GRID shape (DESIGN_DIAGRAM_VERSION 1), as a 'design' row holds it.
+const GRID = {
   acts: [{ id: 'a1', title: 'Import' }],
   layers: ['domain' as const],
   cells: [
@@ -129,13 +140,13 @@ describe('storage', () => {
     await persist.saveDiagramSuccess(ctx, 1, id, { title: 'T', caption: 'C', design: DESIGN }, { costUsd: 0.1 });
     const again = await queue(1, prA, 'fp1', 'manual');
     expect(again).not.toBe(id);
-    expect(await persist.getDiagramRow(ctx, 1, id)).toMatchObject({ status: 'succeeded', design: DESIGN, source: null, diagramType: 'design' });
+    expect(await persist.getDiagramRow(ctx, 1, id)).toMatchObject({ status: 'succeeded', design: DESIGN, source: null, diagramType: 'flow' });
     const drawing = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
-    expect(drawing.diagram).toMatchObject({ id, status: 'succeeded', current: true, design: DESIGN });
+    expect(drawing.diagram).toMatchObject({ id, status: 'succeeded', current: true, flow: DESIGN, design: null });
     expect(drawing.latest).toMatchObject({ id: again, status: 'queued', trigger: 'manual', current: true });
     await persist.markDiagramFailed(ctx, 1, again, 'boom', { costUsd: 0.05 }, 'invalid_diagram');
     const failed = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
-    expect(failed.diagram).toMatchObject({ id, design: DESIGN });
+    expect(failed.diagram).toMatchObject({ id, flow: DESIGN });
     expect(failed.latest).toMatchObject({ id: again, status: 'failed', refusal: 'invalid_diagram' });
     expect(await persist.diagramExistsAt(ctx, 1, 'pr', String(prA), 'fp1')).toBe(true);
     expect(await persist.diagramExistsAt(ctx, 2, 'pr', String(prA), 'fp1')).toBe(false);
@@ -149,8 +160,8 @@ describe('storage', () => {
     const latest = await persist.latestDiagram(ctx, 1, 'pr', String(prA));
     await persist.markDiagramRefused(ctx, 1, latest!.id, 'head_moved');
     const slot = await slotFor(ctx, 1, 'pr', String(prA), 'fp2');
-    expect(slot.diagram).toMatchObject({ status: 'succeeded', current: false, design: DESIGN });
-    expect(slot.latest).toMatchObject({ status: 'refused', refusal: 'head_moved', current: true, design: null });
+    expect(slot.diagram).toMatchObject({ status: 'succeeded', current: false, flow: DESIGN });
+    expect(slot.latest).toMatchObject({ status: 'refused', refusal: 'head_moved', current: true, flow: null, refusalDetail: null });
     const cur = await slotFor(ctx, 1, 'pr', String(prA), 'fp1');
     expect(cur.diagram?.current).toBe(true);
     expect((await slotFor(ctx, 2, 'pr', String(prA), 'fp1')).diagram).toBeNull();
@@ -217,10 +228,28 @@ describe('storage', () => {
     });
     const queued = await slotFor(ctx, 1, 'pr', '9999', 'new');
     expect(queued.diagram).toBeNull();
-    expect(queued.latest).toMatchObject({ id, status: 'queued', design: null });
+    expect(queued.latest).toMatchObject({ id, status: 'queued', flow: null, design: null });
     await persist.saveDiagramSuccess(ctx, 1, id, { title: 'T', caption: null, design: DESIGN }, {});
-    expect((await slotFor(ctx, 1, 'pr', '9999', 'new')).diagram).toMatchObject({ id, design: DESIGN, current: true });
+    expect((await slotFor(ctx, 1, 'pr', '9999', 'new')).diagram).toMatchObject({ id, flow: DESIGN, current: true });
     await db.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.subject, '9999')).execute();
+  });
+
+  it('an older GRID row still reads, as `design` (never as a flow); a model decline carries its reason', async () => {
+    const { slotFor } = await import('./routes.js');
+    await db
+      .insert(schema.sequenceDiagrams)
+      .values({ accountId: 1, kind: 'pr', subject: '9998', prId: 9998, fingerprint: 'g', trigger: 'review', status: 'succeeded', model: 'm', diagramType: 'design', design: GRID, createdAt: new Date(Date.now() - 2000) })
+      .execute();
+    const old = await slotFor(ctx, 1, 'pr', '9998', 'g');
+    expect(old.diagram).toMatchObject({ status: 'succeeded', flow: null, design: GRID });
+    const id = await persist.insertQueuedDiagram(ctx, {
+      accountId: 1, kind: 'pr', subject: '9998', prId: 9998, ticketKey: null, fingerprint: 'g2', headSha: HEAD, members: null, trigger: 'manual', model: 'claude-sonnet-5',
+    });
+    await persist.markDiagramRefused(ctx, 1, id, 'no_flow', { costUsd: 0.02 }, 'this change only renames helpers');
+    const after = await slotFor(ctx, 1, 'pr', '9998', 'g2');
+    expect(after.diagram).toMatchObject({ design: GRID });
+    expect(after.latest).toMatchObject({ status: 'refused', refusal: 'no_flow', refusalDetail: 'this change only renames helpers', caption: null });
+    await db.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.subject, '9998')).execute();
   });
 
   it('a restart fails what it orphaned', async () => {
@@ -240,7 +269,7 @@ describe('routes', () => {
     const ok = await app.inject({ method: 'GET', url: `/api/prs/${prA}/sequence-diagrams` });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toMatchObject({ prId: prA, stories: [] });
-    expect(ok.json().pr.diagram.design).toEqual(DESIGN);
+    expect(ok.json().pr.diagram.flow).toEqual(DESIGN);
     expect(ok.json().pr.diagram).not.toHaveProperty('source');
     expect((await app.inject({ method: 'GET', url: `/api/prs/${prB}/sequence-diagrams` })).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: `/api/prs/${prB}/sequence-diagrams/redraw` })).statusCode).toBe(404);

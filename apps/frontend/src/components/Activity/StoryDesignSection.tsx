@@ -1,8 +1,8 @@
 // THE WHOLE STORY'S DESIGN — the last part of the Story section (TicketStorySection.tsx), in the story
-// view only (docs/FRONTEND.md § Design diagrams): one design grid across every open and merged pull
-// request on the ticket, in every repository involved. Only where agentic AI runs and the ticket has a
+// view only (docs/FRONTEND.md § Design diagrams): one data-flow sequence across every open and merged
+// pull request on the ticket, in every repository involved. Only where agentic AI runs and the ticket has a
 // PR. Drawn after a review of any of its pull requests. The read is the STORED row (no model, no tracker
-// call) and polls only while a run is queued or running. A card opens its pull request's Changes tab at
+// call) and polls only while a run is queued or running. A step opens its pull request's Changes tab at
 // the file.
 //
 // The Draw / Redraw button is one of the STORY'S ACTIONS, in the Story section's heading row

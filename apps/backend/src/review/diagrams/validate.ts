@@ -1,56 +1,67 @@
 import {
-  DESIGN_ACT_TITLE_MAX,
-  DESIGN_ARROW_LABEL_MAX,
-  DESIGN_ARROW_LABEL_WORDS,
   DESIGN_CAPTION_MAX,
   DESIGN_CAPTION_SENTENCES,
-  DESIGN_CELL_FILES_MAX,
-  DESIGN_CELL_LABEL_MAX,
   DESIGN_CHANGES,
-  DESIGN_ID_MAX,
-  DESIGN_LAYERS,
-  DESIGN_LAYER_ORDER,
-  DESIGN_MAX_ACTS,
-  DESIGN_MAX_ARROWS,
-  DESIGN_MAX_CELLS,
-  DESIGN_MAX_LAYERS,
-  DESIGN_PATTERN_MAX,
   DESIGN_TITLE_MAX,
-  type DesignAct,
-  type DesignArrow,
-  type DesignCell,
+  FLOW_DECLINE_MAX,
+  FLOW_FILES_MUST_MAP,
+  FLOW_ID_MAX,
+  FLOW_LANE_KINDS,
+  FLOW_LANES,
+  FLOW_MAX_PARTICIPANTS,
+  FLOW_MAX_STEPS,
+  FLOW_MIN_PARTICIPANTS,
+  FLOW_MIN_STEPS,
+  FLOW_PARTICIPANT_LABEL_MAX,
+  FLOW_SELF_STEP_KINDS,
+  FLOW_STEP_FILES_MAX,
+  FLOW_STEP_KINDS,
+  FLOW_STEP_LABEL_MAX,
+  FLOW_STORE_LANES,
   type DesignChange,
-  type DesignDiagram,
-  type DesignLayer,
+  type FlowDiagram,
+  type FlowLaneKind,
+  type FlowParticipant,
+  type FlowStep,
+  type FlowStepKind,
 } from '@pierre-review/shared';
+import { isTestFile } from '../../db/blast-radius.js';
+import { isNonCodeFile } from '../../db/code-loc.js';
 
-// THE DESIGN VALIDATOR — every answer passes through here TWICE: inside the agent's `submit_design`
-// tool (a refusal lists EVERY problem with what to do about it, so the model resubmits smaller in one
-// go) and again before the row is stored. PURE, no I/O. Every cap is the ONE spelling in
+// THE DATA-FLOW VALIDATOR — every answer passes through here TWICE: inside the agent's `submit_design`
+// tool (a refusal lists EVERY problem with what to do about it, so the model resubmits in one go) and
+// again before the row is stored. PURE, no I/O. Every cap is the ONE spelling in
 // packages/shared/src/sequence-diagrams.ts, which the prompt and the renderer read too.
 //
 // The model read attacker-authored code and PR text, so its answer is untrusted too. The SPA renders
 // every string as React text (never HTML), and this is the first line, not the only one:
 //
-//   REFUSED      a cap broken (acts, layers, cells, arrows, every string length, files per cell);
-//                a duplicate or malformed id; a cell naming an act or layer that is not listed, or a
-//                layer outside the FIXED vocabulary; two cells in one (act, layer) slot; a listed act
-//                or layer with no cell; no cell carrying a pattern; an arrow to a missing cell or to
-//                itself; a story `pr` ref the prompt did not give; anything tag-like (`<x`, `</x`,
-//                `<!`) or a URL / scheme (`http:`, `javascript:`, `www.`) in any text.
-//   CLEANED      control characters stripped and whitespace collapsed in every string; layers put in
-//                canonical order; an empty pattern / arrow label becomes null; a PR design's `pr`
-//                becomes null.
+//   REFUSED      a cap broken (participants, steps, every string length, files per step); a duplicate
+//                or malformed id; a participant kind outside FLOW_LANES; a participant no step uses;
+//                steps not numbered 1..n in order; a step naming a missing participant; a step to
+//                ITSELF that is not a check or a transform; a `write` that does not end where data is
+//                kept (FLOW_STORE_LANES); a step after the first that starts where the data has NOT
+//                been yet (no earlier step reached its `from`) — THE CHAIN RULE: the flow is one
+//                connected sequence, never a list of areas; a changed CODE file (tests aside) on no
+//                step, when there are at most FLOW_FILES_MUST_MAP of them (else fewer than that many
+//                mapped); a story `pr` ref the prompt did not give; anything tag-like (`<x`, `</x`,
+//                `<!`) or a URL / scheme in any text.
+//   DECLINED     `noDiagram` set (PR and story designs only — `ctx.decline`): the model says no data
+//                moves through the change. Accepted as a refusal with that reason, which must be plain
+//                text within FLOW_DECLINE_MAX; the participants and steps must then be empty.
+//   CLEANED      control characters stripped and whitespace collapsed in every string; an empty
+//                caption / title becomes null; a PR design's `pr` becomes null.
 //   FILTERED     `files` — kept only when the path is one the change touches (story: the member PR
-//                the cell's `pr` names, else any member — and a story cell with no `pr` takes the
-//                member owning its first kept file, so a click knows which PR to open). Unknown paths
-//                are DROPPED, never refused: a wrong path is a missing link, not a wrong design.
+//                the step's `pr` names, else any member — and a story step with no `pr` takes the
+//                member owning its first kept file). Unknown paths are DROPPED, never refused: a
+//                wrong path is a missing link, not a wrong flow. The coverage rule above counts only
+//                the KEPT paths.
 
 /** What the run knows that the answer is checked against. */
 export interface DesignContext {
-  // 'planned' ("Implement story", coding/story-build/plan.ts): a story's design BEFORE any PR exists —
+  // 'planned' ("Implement story", coding/story-build/plan.ts): a story's flow BEFORE any PR exists —
   // the refs are the plan's REPOSITORY refs (R1…) and `changedFiles` the files its steps name. It is
-  // judged exactly like a story design.
+  // judged exactly like a story design, except that it may not decline.
   kind: 'pr' | 'story' | 'planned';
   // In ref order: PR1 first (a planned design: R1 first). A PR design has exactly one.
   prs: ReadonlyArray<{ ref: string; changedFiles: readonly string[] }>;
@@ -59,7 +70,10 @@ export interface DesignContext {
 export interface AcceptedDesign {
   title: string | null;
   caption: string | null;
-  design: DesignDiagram;
+  // The flow — null exactly when the model declined (`declined` set).
+  flow: FlowDiagram | null;
+  // The model's reason no diagram is drawn, finishing "No diagram: …". Null on a drawn flow.
+  declined: string | null;
 }
 
 export type DesignValidation = { ok: true; value: AcceptedDesign } | { ok: false; problems: string[]; message: string };
@@ -68,7 +82,7 @@ export type DesignValidation = { ok: true; value: AcceptedDesign } | { ok: false
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 const TAG_LIKE = /<\s*[a-z/!?]/i;
 const URL_LIKE = /\b(?:https?|ftp|file|javascript|vbscript|data|mailto):|\bwww\.|:\/\//i;
-const ID = new RegExp(`^[A-Za-z0-9_-]{1,${DESIGN_ID_MAX}}$`);
+const ID = new RegExp(`^[A-Za-z0-9_-]{1,${FLOW_ID_MAX}}$`);
 const MAX_PROBLEMS = 8;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
@@ -83,7 +97,7 @@ function normPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
 }
 
-/** Every listed path of the changed file set that `raw` names (exact, else a unique suffix match). */
+/** The listed path of the changed file set that `raw` names (exact, else a unique suffix match). */
 function matchPath(raw: string, changed: ReadonlySet<string>): string | null {
   const p = normPath(raw);
   if (p === '') return null;
@@ -91,6 +105,11 @@ function matchPath(raw: string, changed: ReadonlySet<string>): string | null {
   // The model sometimes prefixes a checkout or repository directory.
   const hits = [...changed].filter((c) => p.endsWith(`/${c}`));
   return hits.length === 1 ? hits[0]! : null;
+}
+
+/** A changed file the flow should show: code, and not a test (the existing classifiers, unfolded). */
+export function flowRelevantFile(path: string): boolean {
+  return !isNonCodeFile(path) && !isTestFile(path);
 }
 
 /** Validate, clean and filter one design answer. */
@@ -110,8 +129,35 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
     if (URL_LIKE.test(s)) add(`${where} contains a link or URL; use plain words only.`);
     return s;
   };
+  const fail = (): DesignValidation => {
+    const shown = problems.slice(0, MAX_PROBLEMS);
+    const more = problems.length - shown.length;
+    return {
+      ok: false,
+      problems,
+      message: `${shown.map((x) => `- ${x}`).join('\n')}${more > 0 ? `\n- and ${more} more problem(s).` : ''}`,
+    };
+  };
 
   const p = isObj(raw) ? raw : {};
+  const rawParts = Array.isArray(p.participants) ? p.participants : [];
+  const rawSteps = Array.isArray(p.steps) ? p.steps : [];
+
+  // ---- a declined answer ----
+  const declineRaw = plain(p.noDiagram);
+  if (declineRaw !== '') {
+    if (ctx.kind === 'planned') {
+      add('noDiagram is not allowed here: the person asked for this design; draw it.');
+      return fail();
+    }
+    const reason = text('noDiagram', declineRaw, FLOW_DECLINE_MAX, true).replace(/^no diagram:\s*/i, '');
+    if (rawParts.length > 0 || rawSteps.length > 0) {
+      add('noDiagram is set but participants or steps are not empty; either draw the flow (noDiagram null) or leave them empty.');
+    }
+    if (problems.length > 0) return fail();
+    return { ok: true, value: { title: null, caption: null, flow: null, declined: reason } };
+  }
+
   const title = text('title', p.title, DESIGN_TITLE_MAX, false);
   const caption = text('caption', p.caption, DESIGN_CAPTION_MAX, false);
   if (caption !== '') {
@@ -121,161 +167,156 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
     }
   }
 
-  // ---- acts ----
-  const rawActs = Array.isArray(p.acts) ? p.acts : [];
-  if (rawActs.length === 0) add('acts is empty; give 1 to 4 stages.');
-  if (rawActs.length > DESIGN_MAX_ACTS) {
-    add(`${rawActs.length} acts; merge stages so there are at most ${DESIGN_MAX_ACTS}.`);
+  const refs = new Map(ctx.prs.map((x) => [x.ref.toUpperCase(), x]));
+  const refList = [...refs.keys()].join(', ');
+  const story = ctx.kind !== 'pr';
+  /** A story / planned ref the prompt gave, or null (a PR design's is always null). */
+  const refOf = (where: string, v: unknown): string | null => {
+    const r = plain(v).toUpperCase();
+    if (!story || r === '') return null;
+    if (!refs.has(r)) {
+      add(`${where} names pr "${r.slice(0, 20)}"; use one of: ${refList}, or null.`);
+      return null;
+    }
+    return r;
+  };
+
+  // ---- participants ----
+  if (rawParts.length < FLOW_MIN_PARTICIPANTS) {
+    add(
+      `${rawParts.length} participant(s); a flow needs at least ${FLOW_MIN_PARTICIPANTS} (where the data comes from and where it goes). If no data moves through this change, set noDiagram instead.`,
+    );
   }
-  const acts: DesignAct[] = [];
-  const actIds = new Set<string>();
-  rawActs.forEach((a, i) => {
-    const o = isObj(a) ? a : {};
+  if (rawParts.length > FLOW_MAX_PARTICIPANTS) {
+    add(`${rawParts.length} participants; merge the minor ones so there are at most ${FLOW_MAX_PARTICIPANTS}.`);
+  }
+  const kinds = new Set<string>(FLOW_LANE_KINDS);
+  const participants: FlowParticipant[] = [];
+  const partIds = new Map<string, FlowParticipant>();
+  rawParts.forEach((x, i) => {
+    const o = isObj(x) ? x : {};
     const id = plain(o.id);
-    if (!ID.test(id)) add(`act ${i + 1} id "${id.slice(0, 30)}" must be 1-${DESIGN_ID_MAX} letters, digits, - or _.`);
-    else if (actIds.has(id)) add(`act id "${id}" is used twice; make act ids unique.`);
-    actIds.add(id);
-    acts.push({ id, title: text(`act "${id}" title`, o.title, DESIGN_ACT_TITLE_MAX, true) });
+    if (!ID.test(id)) add(`participant ${i + 1} id "${id.slice(0, 30)}" must be 1-${FLOW_ID_MAX} letters, digits, - or _.`);
+    else if (partIds.has(id)) add(`participant id "${id}" is used twice; make participant ids unique.`);
+    const where = `participant "${id}"`;
+    const kind = plain(o.kind).toLowerCase();
+    if (!kinds.has(kind)) add(`${where} kind "${kind.slice(0, 20)}" must be one of: ${FLOW_LANE_KINDS.join(', ')}.`);
+    const change = plain(o.change).toLowerCase();
+    if (!DESIGN_CHANGES.includes(change as DesignChange)) {
+      add(`${where} change "${change.slice(0, 20)}" must be one of: ${DESIGN_CHANGES.join(', ')}.`);
+    }
+    const part: FlowParticipant = {
+      id,
+      kind: kind as FlowLaneKind,
+      label: text(`${where} label`, o.label, FLOW_PARTICIPANT_LABEL_MAX, true),
+      change: change as DesignChange,
+      pr: refOf(where, o.pr),
+    };
+    participants.push(part);
+    if (!partIds.has(id)) partIds.set(id, part);
   });
 
-  // ---- layers ----
-  const rawLayers = Array.isArray(p.layers) ? p.layers.map(plain) : [];
-  const known = new Set<string>(DESIGN_LAYER_ORDER);
-  const vocab = DESIGN_LAYER_ORDER.join(', ');
-  const listed = new Set<DesignLayer>();
-  for (const l of rawLayers) {
-    if (!known.has(l)) add(`unknown layer "${l.slice(0, 30)}"; use only: ${vocab}.`);
-    else if (listed.has(l as DesignLayer)) add(`layer "${l}" is listed twice.`);
-    else listed.add(l as DesignLayer);
+  // ---- steps ----
+  if (rawSteps.length < FLOW_MIN_STEPS) {
+    add(`${rawSteps.length} step(s); a flow needs at least ${FLOW_MIN_STEPS}. If no data moves through this change, set noDiagram instead.`);
   }
-  if (rawLayers.length === 0) add(`layers is empty; list the 1 to ${DESIGN_MAX_LAYERS} layers the cells use.`);
-  if (listed.size > DESIGN_MAX_LAYERS) {
-    add(`${listed.size} layers; use at most ${DESIGN_MAX_LAYERS} (drop or fold the least important).`);
+  if (rawSteps.length > FLOW_MAX_STEPS) {
+    add(`${rawSteps.length} steps; merge steps so there are at most ${FLOW_MAX_STEPS} (fewer is better).`);
   }
-  const layers = DESIGN_LAYER_ORDER.filter((l) => listed.has(l));
-
-  // ---- cells ----
-  const rawCells = Array.isArray(p.cells) ? p.cells : [];
-  if (rawCells.length === 0) add('cells is empty; give at least one.');
-  if (rawCells.length > DESIGN_MAX_CELLS) {
-    add(`${rawCells.length} cells; merge or drop cells so there are at most ${DESIGN_MAX_CELLS} (fewer is better).`);
-  }
-  const refs = new Map(ctx.prs.map((x) => [x.ref.toUpperCase(), x]));
+  const stepKinds = new Set<string>(FLOW_STEP_KINDS);
   const anyChanged = new Set(ctx.prs.flatMap((x) => x.changedFiles.map(normPath)));
-  const cells: DesignCell[] = [];
-  const cellIds = new Set<string>();
-  const slots = new Map<string, string>();
-  rawCells.forEach((c, i) => {
-    const o = isObj(c) ? c : {};
-    const id = plain(o.id);
-    if (!ID.test(id)) add(`cell ${i + 1} id "${id.slice(0, 30)}" must be 1-${DESIGN_ID_MAX} letters, digits, - or _.`);
-    else if (cellIds.has(id)) add(`cell id "${id}" is used twice; make cell ids unique.`);
-    cellIds.add(id);
-    const where = `cell "${id}"`;
-    const act = plain(o.act);
-    if (!actIds.has(act)) add(`${where} names act "${act.slice(0, 30)}", which is not in acts.`);
-    const layer = plain(o.layer);
-    if (!known.has(layer)) add(`${where} has unknown layer "${layer.slice(0, 30)}"; use only: ${vocab}.`);
-    else if (!listed.has(layer as DesignLayer)) add(`${where} uses layer "${layer}"; add it to layers.`);
-    const slot = `${act}\u0000${layer}`;
-    const other = slots.get(slot);
-    if (other != null) {
-      add(`cells "${other}" and "${id}" are both in act "${act}", layer "${layer}"; merge them into one cell.`);
-    } else slots.set(slot, id);
-    const label = text(`${where} label`, o.label, DESIGN_CELL_LABEL_MAX, true);
-    const patternRaw = text(`${where} pattern`, o.pattern, DESIGN_PATTERN_MAX, false);
-    const changeRaw = plain(o.change).toLowerCase();
-    if (!DESIGN_CHANGES.includes(changeRaw as DesignChange)) {
-      add(`${where} change "${changeRaw.slice(0, 20)}" must be one of: ${DESIGN_CHANGES.join(', ')}.`);
+  const reached = new Set<string>();
+  const used = new Set<string>();
+  const steps: FlowStep[] = [];
+  rawSteps.forEach((x, i) => {
+    const o = isObj(x) ? x : {};
+    const expected = i + 1;
+    const n = typeof o.n === 'number' ? o.n : Number(plain(o.n));
+    if (n !== expected) add(`step ${expected} is numbered "${String(o.n).slice(0, 8)}"; number the steps 1, 2, 3, … in the order they happen.`);
+    const where = `step ${expected}`;
+    const from = plain(o.from);
+    const to = plain(o.to);
+    const kind = plain(o.kind).toLowerCase();
+    const fromP = partIds.get(from);
+    const toP = partIds.get(to);
+    if (fromP == null) add(`${where} starts at "${from.slice(0, 24)}", which is not a participant id.`);
+    if (toP == null) add(`${where} goes to "${to.slice(0, 24)}", which is not a participant id.`);
+    if (!stepKinds.has(kind)) add(`${where} kind "${kind.slice(0, 20)}" must be one of: ${FLOW_STEP_KINDS.join(', ')}.`);
+    else {
+      if (from === to && !FLOW_SELF_STEP_KINDS.includes(kind as FlowStepKind)) {
+        add(`${where} goes from "${from}" to itself as a ${kind}; only a validate or a transform stays on one participant.`);
+      }
+      if (kind === 'write' && toP != null && !FLOW_STORE_LANES.includes(toP.kind)) {
+        add(
+          `${where} is a write to "${to}" (${FLOW_LANES[toP.kind] ?? toP.kind}); a write ends where data is kept (${FLOW_STORE_LANES.join(', ')}). Use call, emit or return, or point it at the store.`,
+        );
+      }
     }
-    // pr refs: a story's must be one the prompt gave; a PR design's is always null.
-    let pr: string | null = null;
-    const prRaw = plain(o.pr).toUpperCase();
-    if (ctx.kind !== 'pr' && prRaw !== '') {
-      if (!refs.has(prRaw)) add(`${where} names pr "${prRaw.slice(0, 20)}"; use one of: ${[...refs.keys()].join(', ')}, or null.`);
-      else pr = prRaw;
+    // THE CHAIN RULE: the data is somewhere already before it moves on.
+    if (i > 0 && fromP != null && !reached.has(from)) {
+      add(`${where} starts at "${from}", which no earlier step reached; start each step where the data already is, so the steps form one chain.`);
     }
+    reached.add(from);
+    reached.add(to);
+    used.add(from);
+    used.add(to);
+    const label = text(`${where} label`, o.label, FLOW_STEP_LABEL_MAX, true);
+    let pr = refOf(where, o.pr);
     const rawFiles = Array.isArray(o.files) ? o.files.filter((f): f is string => typeof f === 'string') : [];
-    if (rawFiles.length > DESIGN_CELL_FILES_MAX) {
-      add(`${where} lists ${rawFiles.length} files; keep the ${DESIGN_CELL_FILES_MAX} most important.`);
+    if (rawFiles.length > FLOW_STEP_FILES_MAX) {
+      add(`${where} lists ${rawFiles.length} files; keep the ${FLOW_STEP_FILES_MAX} that do this step.`);
     }
-    // FILTERED to the change. Story + no pr: any member, then the cell takes the owner of its first file.
+    // FILTERED to the change. Story + no pr: any member, then the step takes the owner of its first file.
     const scope = pr != null ? new Set(refs.get(pr)!.changedFiles.map(normPath)) : anyChanged;
     const files: string[] = [];
-    for (const f of rawFiles.slice(0, DESIGN_CELL_FILES_MAX)) {
+    for (const f of rawFiles.slice(0, FLOW_STEP_FILES_MAX)) {
       const m = matchPath(plain(f), scope);
       if (m != null && !files.includes(m)) files.push(m);
     }
-    if (ctx.kind !== 'pr' && pr == null && files.length > 0) {
-      const owner = ctx.prs.find((x) => x.changedFiles.some((cf) => normPath(cf) === files[0]));
+    if (story && pr == null && files.length > 0) {
+      const owner = ctx.prs.find((m) => m.changedFiles.some((cf) => normPath(cf) === files[0]));
       if (owner != null) {
         pr = owner.ref.toUpperCase();
         const own = new Set(owner.changedFiles.map(normPath));
         files.splice(0, files.length, ...files.filter((f) => own.has(f)));
       }
     }
-    cells.push({
-      id,
-      act,
-      layer: layer as DesignLayer,
-      label,
-      pattern: patternRaw === '' ? null : patternRaw,
-      change: changeRaw as DesignChange,
-      pr,
-      files,
-    });
+    steps.push({ n: expected, from, to, kind: kind as FlowStepKind, label, pr, files });
   });
-  for (const a of acts) {
-    if (actIds.has(a.id) && !cells.some((c) => c.act === a.id)) add(`act "${a.id}" has no cell; drop it or give it one.`);
-  }
-  for (const l of layers) {
-    if (!cells.some((c) => c.layer === l)) add(`layer "${l}" has no cell; drop it from layers.`);
-  }
-  if (cells.length > 0 && !cells.some((c) => c.pattern != null)) {
-    add('no cell names a pattern; give the pattern (e.g. "Adapter", "Guard clause") on the cells that use one.');
-  }
-
-  // ---- arrows ----
-  const rawArrows = Array.isArray(p.arrows) ? p.arrows : [];
-  if (rawArrows.length > DESIGN_MAX_ARROWS) {
-    add(`${rawArrows.length} arrows; keep only the ${DESIGN_MAX_ARROWS} that carry the design.`);
-  }
-  const arrows: DesignArrow[] = [];
-  const pairs = new Set<string>();
-  rawArrows.forEach((a, i) => {
-    const o = isObj(a) ? a : {};
-    const from = plain(o.from);
-    const to = plain(o.to);
-    const where = `arrow ${i + 1} (${from.slice(0, 24)} → ${to.slice(0, 24)})`;
-    if (!cellIds.has(from) || !cellIds.has(to)) add(`${where} must join two existing cell ids.`);
-    if (from === to) add(`${where} points at itself; remove it.`);
-    if (pairs.has(`${from}\u0000${to}`)) add(`${where} is drawn twice; keep one.`);
-    pairs.add(`${from}\u0000${to}`);
-    const label = text(`${where} label`, o.label, DESIGN_ARROW_LABEL_MAX, false);
-    if (label !== '' && label.split(' ').length > DESIGN_ARROW_LABEL_WORDS) {
-      add(`${where} label has more than ${DESIGN_ARROW_LABEL_WORDS} words; shorten it.`);
+  for (const part of participants) {
+    if (partIds.get(part.id) === part && !used.has(part.id)) {
+      add(`participant "${part.id}" is in no step; drop it or show the step that reaches it.`);
     }
-    arrows.push({ from, to, label: label === '' ? null : label });
-  });
-
-  if (problems.length > 0) {
-    const shown = problems.slice(0, MAX_PROBLEMS);
-    const more = problems.length - shown.length;
-    return {
-      ok: false,
-      problems,
-      message: `${shown.map((x) => `- ${x}`).join('\n')}${more > 0 ? `\n- and ${more} more problem(s).` : ''}`,
-    };
   }
+
+  // ---- every changed code file on a step (tests aside) ----
+  const relevant = [...new Set([...anyChanged].filter(flowRelevantFile))];
+  const mapped = new Set(steps.flatMap((s) => s.files));
+  const missing = relevant.filter((f) => !mapped.has(f));
+  const need = Math.min(relevant.length, FLOW_FILES_MUST_MAP);
+  if (relevant.length - missing.length < need) {
+    const list = missing.slice(0, 5).join(', ');
+    add(
+      relevant.length <= FLOW_FILES_MUST_MAP
+        ? `these changed files are on no step: ${list}${missing.length > 5 ? ` and ${missing.length - 5} more` : ''}; put each in the files of the step its code performs.`
+        : `only ${relevant.length - missing.length} changed files are on a step; put at least ${need} in the files of the steps their code performs (not yet placed: ${list}).`,
+    );
+  }
+
+  if (problems.length > 0) return fail();
   return {
     ok: true,
     value: {
       title: title === '' ? null : title,
       caption: caption === '' ? null : caption,
-      design: { acts, layers, cells, arrows },
+      flow: { participants, steps },
+      declined: null,
     },
   };
 }
 
-/** The display label of a layer (prompt + tests). */
-export const layerLabel = (l: DesignLayer): string => DESIGN_LAYERS[l];
+/** An accepted design back in the tool's shape (the manager validates it once more before storing). */
+export function acceptedAsPayload(a: AcceptedDesign): Record<string, unknown> {
+  if (a.flow == null) return { title: null, caption: null, participants: [], steps: [], noDiagram: a.declined };
+  return { title: a.title, caption: a.caption, participants: a.flow.participants, steps: a.flow.steps, noDiagram: null };
+}

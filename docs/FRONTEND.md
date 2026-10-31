@@ -3654,7 +3654,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   "story_plan" anyProvider`) → Already done (the gap fold; rows anchored `story-build-ref-<ref>`) →
   Plan (summary, one One-PR-card-shell card per changed repository in build order: why, base note,
   branch field, Include, `RunTestsOption`, steps behind Details; read-only repositories; not planned;
-  risks; the planned `DesignGrid` with `refNames`, cells not clickable; the shared `AiFix/PlanChat`
+  risks; the planned `FlowDiagram` (an older plan's `DesignGrid`) with `refNames`, steps not clickable; the shared `AiFix/PlanChat`
   gated `story_plan` follow-up) → Docs (suggestions ticked, superseded unticked "the story wins",
   grounded collapsed; `StoryDocsRefLinks` citations; gated `story_docs`) → action bar ("Accept plan and
   build" in `AiRunGate kind="story_build" followUp`, Discard; `lib/storyBuild.ts acceptBody` checks
@@ -4909,7 +4909,40 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
 
 ## Design diagrams (review tab section, the Story section)
 
-`components/DesignGrid.tsx` is the ONE renderer of a stored `DesignDiagram` (Mermaid is GONE — no
+**A design diagram is a DATA-FLOW SEQUENCE now** (2026-10-31): `components/FlowDiagram.tsx` is the ONE
+renderer of a stored `FlowDiagram` — the review tab's Design, the story view's Story design and the
+story build's planned design. The pure fold is `lib/dataFlow.ts` (`layoutFlow`, `laneChangesPresent`;
+test/dataFlow.test.ts).
+- **Layout**: the participants are equal lanes across the top (a card each: the kind word — Screen,
+  API route, Service, Queue / job, Database, File / cache, Outside API —, the name, New / Changed with
+  the design grid's own `CARD_CHANGE` borders, and on a story its PR badge via `prBadgeTexts`); a
+  dashed line runs down from each lane; each STEP is a row of an `<ol>`, top to bottom in order: a
+  numbered badge, the step WORD and what data passes, centred over the lanes it joins, and under it
+  the arrow from the `from` lane's line to the `to` lane's (percentages of the figure's width). A step
+  that stays on its lane (a check or a transform) is a small loop beside the line.
+- ⚠ **A WIDE FLOW SCROLLS SIDEWAYS INSIDE THE FIGURE, never the page**: lanes are never narrower than
+  `FLOW_LANE_MIN_REM` (7rem), so at 390px or in the drawer a 4+-lane flow scrolls in its own
+  `overflow-x-auto` box, and a one-line "Scroll sideways to see every lane." shows only while it
+  actually overflows (a ResizeObserver).
+- **Kind is never colour alone**: every step prints its word (Read, Check, Transform, Write, Call,
+  Emit, Return); a Check is a dotted line with ShieldIcon; a Write a heavy accent line with
+  DatabaseIcon; a Return a dashed line. TWO visible keys under the figure (the shared `BorderKey`):
+  "Box borders" (only the changes drawn) and "Arrow lines" (only the line styles drawn).
+- **Click-through** as the grid's cards: a step with files is a button (dotted underline) — one file
+  opens it, several open the one floating list; the caller's `openFile(owner, path)` (`OpenFlowFile`,
+  `owner.pr` naming a story's member) decides which PR's Changes tab.
+- **Accessible text**: each `<li>` reads as one sentence ("Step 3, Write: from Pull request upsert to
+  pull_requests, threads — PR, threads and events in one transaction."); the lines, loops and
+  arrowheads are `aria-hidden`.
+- **Old rows**: a succeeded row drawn before the data flows serves `design` (the grid) instead of
+  `flow`; `DiagramSlotView` draws it with `DesignGrid` under "Drawn in the earlier layout. Redraw it to
+  see how data flows." (the slot's Redraw is right there). A plan stored with a grid does the same in
+  `StoryBuild/PlanSection.tsx`.
+- **No diagram**: a refused run's line comes from shared `sequenceDiagramRefusalText(refusal, by,
+  refusalDetail)` — "No diagram: this change only edits copy." (pre-check) or "No diagram: <the
+  model's reason>." (`no_flow`). Draw / Redraw stays, and a manual draw skips the soft pre-checks.
+
+THE OLDER GRID (still drawn for old rows, and the source of the shared pieces): `components/DesignGrid.tsx` is the renderer of a stored `DesignDiagram` (Mermaid is GONE — no
 `mermaid` or `uuid` dependency, no lazy chunk). A CSS grid: a narrow layer-label column plus one
 `minmax(0, 1fr)` column per act, so it shrinks to the pane (Claude Review tab; the Story section of an
 Open PRs stack or the story view) with NO horizontal scroll, labels wrapping and nothing under 11px.

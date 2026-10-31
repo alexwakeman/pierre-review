@@ -15,10 +15,12 @@ import { codeLocFor, isNonCodeFile } from '../../db/code-loc.js';
 // inputs changes (the prompt's rules, the validator) — every stored diagram then reads stale once.
 // DESIGN_DIAGRAM_VERSION is the design grid's own number (folded in beside it): its arrival made
 // every Mermaid-era fingerprint stale, so every current head is drawn once more, as a design. Bump it
-// when the design prompt, the validator or the layer vocabulary changes what a run produces.
+// when the design prompt, the validator or the vocabulary changes what a run produces.
+// 2 (2026-10-31): the grid of stages and layers became a DATA-FLOW SEQUENCE (participants + numbered
+// steps) with a pre-check and a model decline — every current head draws once more, as a flow.
 
 export const SEQUENCE_DIAGRAM_VERSION = 1;
-export const DESIGN_DIAGRAM_VERSION = 1;
+export const DESIGN_DIAGRAM_VERSION = 2;
 const VERSION = `v${SEQUENCE_DIAGRAM_VERSION}.d${DESIGN_DIAGRAM_VERSION}`;
 
 const sha256 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex');
