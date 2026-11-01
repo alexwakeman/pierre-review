@@ -43,7 +43,7 @@ export function UserMenu({
       id: 'profile',
       label: 'Open Profile on GitHub',
       icon: <ExternalLinkIcon size={13} />,
-      onSelect: () => window.open(profileUrl(user.login), '_blank', 'noopener,noreferrer'),
+      onSelect: () => window.open(profileUrl(user.login) ?? 'https://github.com', '_blank', 'noopener,noreferrer'),
     },
   ];
 

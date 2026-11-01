@@ -406,10 +406,7 @@ describe('getBotVendorComments (the Comments drill-down)', () => {
     expect(resp.truncated).toBe(false);
   });
 
-  it('answers EMPTY for the pierre sentinel and for an unclassified user id', async () => {
-    const pierre = await ml.getBotVendorComments(1, { kind: 'pierre' }, 'rolling_14', scope);
-    expect(pierre.key).toBe('pierre');
-    expect(pierre.comments).toEqual([]);
+  it('answers EMPTY for an unclassified user id', async () => {
     const unknown = await ml.getBotVendorComments(1, { userId: 999_999 }, 'rolling_14', scope);
     expect(unknown.comments).toEqual([]);
   });

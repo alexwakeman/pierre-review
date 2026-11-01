@@ -49,7 +49,7 @@ const STORY_BUILD_DIFFS = [
   [1, 1],
 ];
 const PEOPLE = [1, 2, 5, 6, 3];
-const BOTS = [8, 9, 10, 20];
+const BOTS = [8, 9, 10, 20, 40, 41];
 
 /** Expand everything a reader would expand on this view (tabs, disclosures), never a write. */
 const explore = (h, opts) => h.explore(opts);

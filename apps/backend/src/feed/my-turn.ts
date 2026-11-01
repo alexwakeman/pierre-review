@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type { ConsolidatedFeedItem, MyTurnReason, ReasonTag } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getAccountUserId } from '../auth/account.js';
@@ -91,7 +91,8 @@ async function resolveParticipation(
   for (const row of await db
     .select({ prId: prComments.prId })
     .from(prComments)
-    .where(and(eq(prComments.authorId, localUserId), inArray(prComments.prId, prIds)))
+    // The TRUE poster: a Limn finding the reader posted sits under their `limn:` bot.
+    .where(and(or(eq(prComments.authorId, localUserId), eq(prComments.limnPostedByUserId, localUserId)), inArray(prComments.prId, prIds)))
     .execute()) {
     commented.add(row.prId);
     all.add(row.prId);
@@ -99,7 +100,8 @@ async function resolveParticipation(
   for (const row of await db
     .select({ prId: reviewComments.prId })
     .from(reviewComments)
-    .where(and(eq(reviewComments.authorId, localUserId), inArray(reviewComments.prId, prIds)))
+    // The TRUE poster: a Limn finding the reader posted sits under their `limn:` bot.
+    .where(and(or(eq(reviewComments.authorId, localUserId), eq(reviewComments.limnPostedByUserId, localUserId)), inArray(reviewComments.prId, prIds)))
     .execute()) {
     commented.add(row.prId);
     all.add(row.prId);

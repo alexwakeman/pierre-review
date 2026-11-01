@@ -782,9 +782,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
 
     // (Provenance stamping is no longer read from settings. The hidden
     // `<!-- pierre:claude-review v=1 -->` marker is now appended UNCONDITIONALLY by core's
-    // `review/post-seam.ts` — it is the only producer of the 'pierre' AutomatedReviewerKind, so a
-    // toggle that switched it off silently deleted the Bot-ROI "Limn · Claude" row and the
-    // verbatim-vs-curated provenance. The visible footer, which matched no detector at all, is
+    // `review/post-seam.ts` — it is how Limn's posts are recognised and what makes a finding a
+    // per-poster "Limn · <login>" bot, so a toggle that switched it off silently deleted those
+    // bots and the verbatim-vs-curated provenance. The visible footer, which matched no detector at all, is
     // gone entirely.)
 
     try {

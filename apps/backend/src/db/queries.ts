@@ -270,6 +270,7 @@ import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
 import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
+import { limnBotUserIdForUser, limnBotUserIds } from './limn-bots.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -7720,6 +7721,11 @@ export async function getMyTurn(
   // THE AUTOMATION SET — ONE read, handed to every rule below. GLOBAL (users.isBot ∪ GitHub-typed
   // Bots ∪ vendor logins), never `hiddenBotUserIds`, which needs a workspace this fold may not have.
   const bots = await globalAutomationUserIds();
+  // The reader's own Limn bot (`limn:<login>`, db/limn-bots.ts), or null. A thread rooted on one of
+  // YOUR Limn findings is still your thread: the finding never moves the ball, a person's reply in
+  // it does (docs/BACKEND.md § My Turn).
+  const myLimnBotId = await limnBotUserIdForUser(localUserId);
+  const myThreadOpeners = myLimnBotId != null ? [localUserId, myLimnBotId] : [localUserId];
 
   // Open PRs, enriched with triage, are the basis for every PR-grained section.
   const openRows = await db
@@ -7981,10 +7987,11 @@ export async function getMyTurn(
             reviewThreads.createdAt,
             new Date(now - PENDING_LIMITS.untouchedThreadMinHours * 3_600_000),
           ),
-          // A thread you started on your own PR is a note to yourself — it stays on its home tab.
+          // A thread you started on your own PR (yourself, or your Limn finding) is a note to
+          // yourself — it stays on its home tab.
           or(
             isNull(reviewThreads.originalCommenterId),
-            ne(reviewThreads.originalCommenterId, localUserId),
+            notInArray(reviewThreads.originalCommenterId, myThreadOpeners),
           ),
         ),
       )
@@ -8300,6 +8307,7 @@ export async function getMyTurn(
     show.thread || show.thread_reply
       ? await getThreadTurns({
           localUserId,
+          myThreadOpeners,
           accountId,
           repoNameById,
           repoIds: scopedRepoIds,
@@ -8569,6 +8577,8 @@ async function countOtherReviewers(
 // (`approvedSince`, below). S3(b) is NOT discharged: an approval does not say you checked the fix.
 async function getThreadTurns(opts: {
   localUserId: number;
+  /** You, plus your own Limn bot when you have one: the threads that are "yours". */
+  myThreadOpeners: number[];
   accountId: number;
   repoNameById: Map<number, string>;
   // The workspace's repo narrowing, or null for the account-wide (unscoped) read. An EMPTY array
@@ -8605,7 +8615,7 @@ async function getThreadTurns(opts: {
         .select(threadCols)
         .from(reviewThreads)
         .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-        .where(and(scoped, eq(reviewThreads.originalCommenterId, localUserId)))
+        .where(and(scoped, inArray(reviewThreads.originalCommenterId, opts.myThreadOpeners)))
         .execute()
     : [];
   // Somebody else's threads you have commented in — a JOIN on your comments, deduped here (never a
@@ -8622,7 +8632,7 @@ async function getThreadTurns(opts: {
             eq(reviewComments.authorId, localUserId),
             or(
               isNull(reviewThreads.originalCommenterId),
-              ne(reviewThreads.originalCommenterId, localUserId),
+              notInArray(reviewThreads.originalCommenterId, opts.myThreadOpeners),
             ),
           ),
         )
@@ -10395,6 +10405,15 @@ export interface ThreadWriteContext {
 // Resolve a review thread to its GitHub node id + parent-PR coordinates, for a
 // reply (addPullRequestReviewThreadReply) or resolve/unresolve mutation. The
 // thread's GitHub node id is the GraphQL `pullRequestReviewThreadId` / `threadId`.
+// ⚠ LIMN'S OWN FINDING THREADS ARE NEVER IN THE BOT BACKLOG. Their `limn:` bots are review bots
+// (db/limn-bots.ts), but Limn's auto resolve owns those threads (review/claude-review/auto-resolve.ts),
+// on its own evidence; "a later commit touched the file" must not resolve them.
+function withoutLimnBots(botIds: number[], limnIds: number[]): number[] {
+  if (limnIds.length === 0) return botIds;
+  const limn = new Set(limnIds);
+  return botIds.filter((id) => !limn.has(id));
+}
+
 // The review-BOT threads on a PR that a later commit has LIKELY ADDRESSED — the set the
 // "clear the bot backlog" bulk action may safely resolve. Ownership-scoped (join to the PR's
 // account), restricted to review-bot-originated threads currently in `likely_addressed` that
@@ -10415,7 +10434,10 @@ export async function getResolvableBotThreads(
   // automated for it).
   const prScope = await botScopeForPr(accountId, prId);
   if (!prScope) return [];
-  const botIds = await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review');
+  const botIds = withoutLimnBots(
+    await automatedReviewerUserIds(accountId, prScope.workspaceId, 'review'),
+    await limnBotUserIds(),
+  );
   if (botIds.length === 0) return [];
   const preds = [
     eq(reviewThreads.prId, prId),
@@ -10509,7 +10531,10 @@ export async function getResolvableBotThreadsForScope(
   // body carried `repoIds` but no team, so the re-derive ran at the account default and found a
   // per-team-only bot ineligible, resolving 0 for threads the listing had just offered. One
   // workspace id on both sides cannot disagree with itself.
-  const botIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
+  const botIds = withoutLimnBots(
+    await automatedReviewerUserIds(accountId, scope.workspaceId, 'review'),
+    await limnBotUserIds(),
+  );
   if (botIds.length === 0) return empty;
 
   const preds = [
@@ -10655,7 +10680,10 @@ export async function getResolvableBotThreadPrs(
   // Same workspace as getResolvableBotThreadsForScope, and it MUST stay the same: the LISTING
   // offers thread ids that the resolve route re-derives through that function, so a judgement
   // scope that differs here would offer threads the server then refuses to resolve.
-  const botIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
+  const botIds = withoutLimnBots(
+    await automatedReviewerUserIds(accountId, scope.workspaceId, 'review'),
+    await limnBotUserIds(),
+  );
   if (botIds.length === 0) return { prs: [], totalThreads: 0 };
 
   const preds = [
@@ -12047,6 +12075,9 @@ export async function getReviewerProvenanceForPr(
   return map;
 }
 
+// Any comment or review body Limn posted (a finding, a reply, a review body, a pushback).
+const LIMN_STAMP_RE = /<!--\s*pierre:claude-review/i;
+
 // Gather the deterministic evidence the classifier needs for a not-yet-cached reviewer:
 // the fingerprint (over their most-recent review body + a sample of inline comments)
 // and their behavioral signals. Account-scoped.
@@ -12066,7 +12097,8 @@ async function reviewerEvidence(
       ),
     )
     .orderBy(desc(reviews.submittedAt))
-    .limit(1)
+    // The latest body that is not Limn's (below), so a few to choose from.
+    .limit(10)
     .execute();
   const commentBodies = await db
     .select({ body: reviewComments.body })
@@ -12081,10 +12113,14 @@ async function reviewerEvidence(
     )
     .limit(20)
     .execute();
-  const reviewBody = revBodies[0]?.body ?? null;
-  const comments = commentBodies
-    .map((c) => c.body)
-    .filter((b): b is string => typeof b === 'string' && b.length > 0);
+  // ⚠ LIMN-STAMPED TEXT IS LEFT OUT. Limn posts as the reader, so a person's review body and
+  // comments can carry its `pierre:claude-review` stamp and its `**Warning**` leads; fingerprinting
+  // them would class that person as Limn (or as an in-house bot from the uniform severity words).
+  // Only the per-poster `limn:` bots are Limn (db/limn-bots.ts).
+  const notLimn = (b: string | null): b is string =>
+    typeof b === 'string' && b.length > 0 && !LIMN_STAMP_RE.test(b);
+  const reviewBody = revBodies.map((r) => r.body).find(notLimn) ?? null;
+  const comments = commentBodies.map((c) => c.body).filter(notLimn);
   return {
     fingerprint: fingerprintReview(reviewBody, comments),
     behavioral: await computeBehavioralSignals(accountId, userId),
@@ -15701,19 +15737,16 @@ export async function getBotOnlyPrs(
 
 // Item 6 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/vendor/:key/prs).
 // Keyed by the analytics ROW (per-REVIEWER, not per-kind), so two in-house bots don't collapse into
-// one merged list. `target` is either `{ userId }` (a single reviewer) or the `{ kind: 'pierre' }`
-// sentinel. Lists the PRs that reviewer touched in the window (its review threads + comments), with
+// one merged list. `target` is `{ userId }`, a single reviewer (the old `{ kind: 'pierre' }`
+// sentinel is gone: Limn's findings are per-poster bot users now, db/limn-bots.ts). Lists the PRs that reviewer touched in the window (its review threads + comments), with
 // per-PR volume, the merged "acted-on" count (resolved | likely_addressed | a human followed up
 // after the bot), the untouched backlog, last-activity, and the broadened bot-only flag. Ordered
 // most-recent-bot-activity first (nulls last). Deterministic, NO AI, account-scoped (the vendor's
 // threads/comments bind pullRequests.accountId via the PR join — a foreign/unknown userId surfaces
-// nothing). For the 'pierre' sentinel the PRs are those with a Pierre-verbatim posted review
-// in-window — per-review provenance means Pierre has no attributable threads/comments (the human who
-// posted is never reclassified), so its rows carry the review timestamp as lastBotActivityAt and 0
-// thread/comment counts.
+// nothing).
 export async function getBotVendorPrs(
   accountId: number,
-  target: { userId: number } | { kind: 'pierre' },
+  target: { userId: number },
   window: BotWindowKind,
   // The SAME `BotScope` the ROI row was computed at — this list must reproduce ONE of that
   // panel's rows, so the header label and the per-PR `botOnly` badge both take the identical
@@ -15729,19 +15762,12 @@ export async function getBotVendorPrs(
   const generatedAt = new Date(nowMs).toISOString();
 
   // Resolve the drill-down's identity — the analytics ROW this list belongs to.
-  const isPierre = 'kind' in target;
   let key: string;
   let kindTyped: AutomatedReviewerKind;
   let label: string;
   let login: string | null;
   let vendorIds: number[];
-  if (isPierre) {
-    key = 'pierre';
-    kindTyped = 'pierre';
-    label = labelForKind('pierre');
-    login = null;
-    vendorIds = [];
-  } else {
+  {
     const userId = target.userId;
     key = `u${userId}`;
     // NOT role-filtered: the quality-check SECTION of the ROI panel offers the same drill-down,
@@ -15808,32 +15834,7 @@ export async function getBotVendorPrs(
     if (a.lastAtMs == null || atMs > a.lastAtMs) a.lastAtMs = atMs;
   };
 
-  if (isPierre) {
-    // Pierre PRs via Pierre-verbatim posted reviews in-window (postedReviewId == reviews.databaseId).
-    const crRows = await db
-      .select({
-        prId: reviews.prId,
-        submittedAt: reviews.submittedAt,
-        userBody: claudeReviews.userBody,
-        summary: claudeReviews.summary,
-      })
-      .from(claudeReviews)
-      .innerJoin(reviews, eq(reviews.databaseId, claudeReviews.postedReviewId))
-      .where(
-        and(
-          eq(claudeReviews.accountId, accountId),
-          isNotNull(claudeReviews.postedReviewId),
-          gte(reviews.submittedAt, from),
-          lte(reviews.submittedAt, to),
-        ),
-      )
-      .execute();
-    for (const r of crRows) {
-      const ub = normalizeBody(r.userBody);
-      if (ub.length === 0 || ub !== normalizeBody(r.summary)) continue; // verbatim only
-      bump(accForPr(r.prId), r.submittedAt.getTime());
-    }
-  } else {
+  {
     if (vendorIds.length === 0) return empty;
     // Vendor review threads in-window (account-scoped via the PR join).
     const threadRows = await db

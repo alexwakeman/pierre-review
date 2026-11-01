@@ -10,7 +10,7 @@ import {
   useInteractions,
 } from '@floating-ui/react';
 import type { User } from '@pierre-review/shared';
-import { FEED_WINDOW_DAYS, USER_STATS_WINDOW_DAYS } from '@pierre-review/shared';
+import { FEED_WINDOW_DAYS, USER_STATS_WINDOW_DAYS, limnPosterOf } from '@pierre-review/shared';
 import { profileUrl, userLabel } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
@@ -150,6 +150,10 @@ export function UserProfilePopover({
 
   const label = userLabel(user, userId);
   const login = user?.githubLogin ?? null;
+  // A Limn bot (`limn:alice`) is not a GitHub account: no profile link, and its sub-line names
+  // the person whose findings it posted.
+  const githubUrl = login ? profileUrl(login) : null;
+  const limnPoster = limnPosterOf(login);
   const rows: { label: string; value: number; dot?: string }[] = stats
     ? [
         { label: 'PRs merged', value: stats.prsMerged, dot: '#8957e5' },
@@ -193,11 +197,15 @@ export function UserProfilePopover({
             >
               {label}
             </div>
-            {login && (
+            {limnPoster != null ? (
+              <div className="truncate text-meta text-ui-mute" title={`Limn findings posted by @${limnPoster}`}>
+                Findings posted by @{limnPoster}
+              </div>
+            ) : login ? (
               <div className="truncate text-meta text-ui-mute" title={`@${login}`}>
                 @{login}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -258,9 +266,9 @@ export function UserProfilePopover({
               {`Last ${FEED_WINDOW_DAYS} days of activity →`}
             </button>
           </div>
-          {login && (
+          {githubUrl && (
             <a
-              href={profileUrl(login)}
+              href={githubUrl}
               target="_blank"
               rel="noreferrer noopener"
               onClick={(e) => e.stopPropagation()}

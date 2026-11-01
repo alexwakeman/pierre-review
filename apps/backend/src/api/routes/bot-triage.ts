@@ -321,8 +321,8 @@ const analyticsSchema = {
 };
 
 // GET /api/bot-analytics/vendor/:key/prs?window= — per-REVIEWER PR drill-down. `key` is the
-// analytics-row identity: `u<userId>` (a single reviewer) or the 'pierre' sentinel; the handler
-// parses it (anything else → 400). The window/workspace/repoIds resolution is identical to
+// analytics-row identity: `u<userId>`, a single reviewer; the handler parses it (anything else →
+// 400). The window/workspace/repoIds resolution is identical to
 // /api/bot-analytics, because this list must reproduce ONE of that panel's rows.
 const vendorPrsSchema = {
   params: {
@@ -795,8 +795,8 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
 
   // The per-REVIEWER PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer
   // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
-  // `key` is the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel;
-  // anything else is a client bug → 400.
+  // `key` is the analytics row identity — `u<userId>`, one reviewer (a Limn bot included); anything
+  // else, the retired 'pierre' sentinel among them, is a client bug → 400.
   app.get('/api/bot-analytics/vendor/:key/prs', { schema: vendorPrsSchema }, async (req, reply) => {
     const { key } = req.params as { key: string };
     const { window, workspace, repoIds } = req.query as {
@@ -805,11 +805,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
       repoIds?: string;
     };
     const m = /^u(\d+)$/.exec(key);
-    const target = m
-      ? { userId: Number(m[1]) }
-      : key === 'pierre'
-        ? ({ kind: 'pierre' } as const)
-        : null;
+    const target = m ? { userId: Number(m[1]) } : null;
     if (!target) {
       reply.status(400);
       return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
@@ -826,9 +822,8 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // The per-REVIEWER COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer
   // said in the window (inline review comments, PR comments, review bodies), each row with its
   // stored ML label INLINE — one response, never the per-PR label index per row. Same key parse
-  // and the same scope resolution as the /prs sibling, so the list reproduces the same ROI row;
-  // the 'pierre' sentinel answers empty (verbatim reviews are human-posted — no per-comment
-  // rows to attribute). ⚠ Rate tier `search`, pinned in rate-limit.test.ts — this ships up to
+  // and the same scope resolution as the /prs sibling, so the list reproduces the same ROI row.
+  // ⚠ Rate tier `search`, pinned in rate-limit.test.ts — this ships up to
   // 3000 comment BODIES per source plus a three-way label join per request.
   app.get(
     '/api/bot-analytics/vendor/:key/comments',
@@ -843,11 +838,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
         toMs?: string;
       };
       const m = /^u(\d+)$/.exec(key);
-      const target = m
-        ? { userId: Number(m[1]) }
-        : key === 'pierre'
-          ? ({ kind: 'pierre' } as const)
-          : null;
+      const target = m ? { userId: Number(m[1]) } : null;
       if (!target) {
         reply.status(400);
         return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };

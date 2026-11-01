@@ -39,6 +39,7 @@
 import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { globalAutomationUserIds } from './automation-ids.js';
+import { trueAuthorId } from './limn-bots.js';
 
 const LIMN_MARKER = /<!--\s*pierre:claude-review/i;
 
@@ -159,7 +160,8 @@ export async function newestReviewCommentTimes(
     .from(rc)
     .innerJoin(rt, eq(rt.id, rc.threadId))
     .innerJoin(prs, eq(prs.id, rc.prId))
-    .leftJoin(users, eq(users.id, rc.authorId))
+    // The TRUE poster: a Limn finding is stored under its `limn:` bot (db/limn-bots.ts).
+    .leftJoin(users, eq(users.id, trueAuthorId(rc)))
     .where(
       and(
         eq(prs.accountId, accountId),
@@ -196,7 +198,8 @@ export async function newestReviewCommentTimes(
         })
         .from(rc)
         .innerJoin(prs, eq(prs.id, rc.prId))
-        .leftJoin(users, eq(users.id, rc.authorId))
+        // The TRUE poster: a Limn finding is stored under its `limn:` bot (db/limn-bots.ts).
+        .leftJoin(users, eq(users.id, trueAuthorId(rc)))
         .where(and(eq(prs.accountId, accountId), inArray(rc.threadId, threadIds)))
         .execute();
       const roots = new Map<number, (typeof all)[number]>();
@@ -308,7 +311,8 @@ export async function loadReviewThreadsForReview(
     })
     .from(rt)
     .innerJoin(rc, eq(rc.threadId, rt.id))
-    .leftJoin(users, eq(users.id, rc.authorId))
+    // The TRUE poster: a Limn finding is stored under its `limn:` bot (db/limn-bots.ts).
+    .leftJoin(users, eq(users.id, trueAuthorId(rc)))
     .where(eq(rt.prId, prId))
     .execute();
   if (rows.length === 0) return { threads: [], newestCommentAt: null, newestOwnThreadCommentAt: null };

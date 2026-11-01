@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { isLimnBotLogin } from '@pierre-review/shared';
 import type {
   AutomatedReviewerKind,
   BotInflationWeekPoint,
@@ -56,6 +57,8 @@ const UNDER_COLOR = PALETTE.violet;
 export interface InflationHistoryRow {
   key: string;
   label: string;
+  /** A `limn:` login is a Limn bot: its severity is its own review's, so it is never "unbadged". */
+  login?: string | null;
   mlInflation?: BotVendorInflation;
 }
 
@@ -87,6 +90,8 @@ export interface InflationHistory {
    * over, and carries the long-form argument.)
    */
   unbadged: string[];
+  /** Limn bots, named apart: their severity is their own review's, not a missing badge. */
+  limn: string[];
   /**
    * Bots that DID badge findings and disagreed with us in none of the 12 weeks — the server drops
    * the whole `weekly` key when every bucket is zero, so there is no array to draw. Named rather
@@ -112,9 +117,14 @@ export function inflationHistory(rows: InflationHistoryRow[]): InflationHistory 
 
   const panels: InflationHistoryPanel[] = [];
   const unbadged: string[] = [];
+  const limn: string[] = [];
   const quiet: string[] = [];
   for (const r of rows) {
     const inf = r.mlInflation;
+    if (inf != null && isLimnBotLogin(r.login)) {
+      limn.push(r.label);
+      continue;
+    }
     // No `mlInflation` at all means the bot had no in-window labels — it is absent from this
     // block's story rather than silent within it, so it is not named either (the same line
     // `inflationSummary` draws with its `findings > 0` guard).
@@ -146,7 +156,7 @@ export function inflationHistory(rows: InflationHistoryRow[]): InflationHistory 
     (a, b) =>
       b.overTotal + b.underTotal - (a.overTotal + a.underTotal) || a.label.localeCompare(b.label),
   );
-  return { labels, panels, unbadged, quiet };
+  return { labels, panels, unbadged, limn, quiet };
 }
 
 // The key. Hand-rolled rather than the toolkit `Legend` because it has to match the CELL, not the
@@ -237,14 +247,15 @@ export function InflationHistoryChart({
    *  the caption so the two grains on this panel are named apart rather than left to be inferred. */
   windowLabel: string;
 }): JSX.Element | null {
-  const { labels, panels, unbadged, quiet } = useMemo(() => inflationHistory(vendors), [vendors]);
+  const { labels, panels, unbadged, limn, quiet } = useMemo(() => inflationHistory(vendors), [vendors]);
   const colorOf = useMemo(() => {
     const byKey = new Map(vendors.map((v) => [v.key, botColor({ login: v.login, kind: v.kind })]));
     return (key: string): string => byKey.get(key) ?? PALETTE.slate;
   }, [vendors, botColor]);
 
   // Nothing measured, nothing withheld — no card at all rather than empty chrome.
-  if (panels.length === 0 && unbadged.length === 0 && quiet.length === 0) return null;
+  if (panels.length === 0 && unbadged.length === 0 && limn.length === 0 && quiet.length === 0)
+    return null;
 
   return (
     // ⚠ THE TWO GRAINS ON THIS PANEL. The weekly series is anchored at `min(window start, now −
@@ -289,12 +300,18 @@ export function InflationHistoryChart({
           ))}
         </div>
       )}
-      {(unbadged.length > 0 || quiet.length > 0) && (
+      {(unbadged.length > 0 || limn.length > 0 || quiet.length > 0) && (
         <div className="mt-2 space-y-0.5 text-meta leading-snug text-ui-mute">
           {unbadged.length > 0 && (
             <div>
               Not charted: {unbadged.join(', ')} — {unbadged.length === 1 ? 'it badges' : 'they badge'}{' '}
               nothing.
+            </div>
+          )}
+          {limn.length > 0 && (
+            <div>
+              Not charted: {limn.join(', ')} — {limn.length === 1 ? 'its' : 'their'} severity is
+              the review’s own.
             </div>
           )}
           {quiet.length > 0 && (

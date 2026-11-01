@@ -1,3 +1,4 @@
+import { isLimnBotLogin } from '@pierre-review/shared';
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { ChevronIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -103,7 +104,10 @@ export function FileGroup({
                   <span className="shrink-0 tabular-nums">{lineLabel}</span>
                   {author && (
                     <span className="shrink-0 font-medium text-ui-mute">
-                      @{author.githubLogin}
+                      {/* A Limn bot has no GitHub login to show: "Limn · alice". */}
+                      {isLimnBotLogin(author.githubLogin)
+                        ? author.displayName || author.githubLogin
+                        : `@${author.githubLogin}`}
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate">{snippet(t)}</span>

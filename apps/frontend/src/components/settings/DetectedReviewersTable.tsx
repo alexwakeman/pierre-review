@@ -9,6 +9,7 @@ import type {
 } from '@pierre-review/shared';
 import {
   REVIEWER_ROLES,
+  limnPosterOf,
   REVIEWER_ROLE_LABEL,
   roleForVendorKind,
   vendorKindsForRole,
@@ -561,7 +562,8 @@ function ReviewerCard({
             {title}
           </div>
           <div className="truncate text-meta text-ui-mute">
-            @{r.login}
+            {/* A Limn bot's login (`limn:alice`) is not a GitHub account: name the poster. */}
+            {limnPosterOf(r.login) != null ? `Findings posted by @${limnPosterOf(r.login)}` : `@${r.login}`}
             {r.displayName != null && r.displayName !== r.login && r.displayName !== title && (
               <span className="ml-1">· {r.displayName}</span>
             )}

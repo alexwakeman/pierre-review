@@ -1,6 +1,7 @@
 // WS1c — the layered reviewer classifier (CORE). Resolution order (first HARD hit wins; soft
 // signals only accumulate into the MEDIUM band):
 //
+//   0. A Limn bot login (`limn:<poster>`)               → 'pierre', role review. HIGH
 //   1. Known vendor login (reviewBotKind)               → vendor kind.        HIGH
 //   2. githubType==='Bot' OR opt-in app attribution     → fingerprint tool ?? in_house. HIGH
 //   3. Branded/marked fingerprint                       → fingerprint tool ?? in_house. HIGH
@@ -48,7 +49,12 @@
 // and rewrites the specifier to a relative path (CLAUDE.md § Packaging). The big login→kind
 // tables in sync/bot-detection.ts are still hand-copied, for the drift-test reason stated there.
 import { and, eq, inArray } from 'drizzle-orm';
-import { GENERIC_REVIEWER_LABELS } from '@pierre-review/shared';
+import {
+  GENERIC_REVIEWER_LABELS,
+  isLimnBotLogin,
+  limnBotLabel,
+  limnPosterOf,
+} from '@pierre-review/shared';
 import type {
   AutomatedReviewerKind,
   ClassificationConfidence,
@@ -59,6 +65,7 @@ import type {
   ReviewerRole,
 } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
+import { LIMN_BOT_REASON } from '../db/limn-bots.js';
 import {
   automationVendorFor,
   matchesAutomatedLoginPattern,
@@ -502,7 +509,31 @@ export async function classifyReviewer(
   opts: ClassifyOpts = {},
 ): Promise<ReviewerClassification> {
   const login = user.githubLogin;
-  const fp = evidence.fingerprint;
+
+  // 0. A Limn bot (`limn:<poster>`, db/limn-bots.ts): always a review bot, kind 'pierre', named
+  // after its poster. The same verdict `ensureLimnReviewerRow` writes, so re-deriving is a no-op.
+  if (isLimnBotLogin(login)) {
+    return persist(
+      accountId,
+      workspaceIds,
+      {
+        userId: user.id,
+        login,
+        automated: true,
+        kind: 'pierre',
+        label: limnBotLabel(limnPosterOf(login) ?? login),
+        confidence: 'high',
+        source: 'fingerprint',
+        reasons: [LIMN_BOT_REASON],
+      },
+      opts,
+    );
+  }
+
+  // ⚠ LIMN'S MARKER NEVER MAKES A PERSON A BOT. Limn posts as the reader, so a person's own
+  // reviews and comments can carry its `pierre:` stamp; only the `limn:` bots above are Limn.
+  // (The evidence query also leaves Limn-stamped text out — db/queries.ts `reviewerEvidence`.)
+  const fp = evidence.fingerprint?.tool === 'pierre' ? undefined : evidence.fingerprint;
 
   // 1. Known vendor login — an AI REVIEWER.
   const vendor = reviewBotKind(login);

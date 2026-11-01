@@ -842,7 +842,7 @@ export interface ReviewerClassification {
   login: string;
   automated: boolean;
   kind: AutomatedReviewerKind | null;   // null when human
-  label: string;                        // "CodeRabbit" | "In-house / custom" | "acme-ci" | "Limn · Claude"
+  label: string;                        // "CodeRabbit" | "In-house / custom" | "acme-ci" | "Limn · alice"
   // What this automation is FOR (see ReviewerRole). Always 'review' for a human — the field is
   // meaningless when `automated` is false, and callers must gate on `automated` first rather
   // than reading a human's role. Persisted NOT NULL DEFAULT 'review', so it is never absent.
@@ -1331,6 +1331,10 @@ export interface BotAnalyticsResponse {
 // every rate are FINDINGS-only; summaries and praise are labelled work, not findings).
 export interface BotAnalyticsMlTotals {
   labelled: number;   // every label in window: findings + summaries + praise
+  // Of `labelled`, the labels written from a Limn finding's OWN severity line (never scored;
+  // docs/ML-SEVERITY.md § Limn findings). The "N of M scored" coverage leaves them out of both
+  // sides. Absent on old payloads ⇒ 0.
+  limnLabelled?: number;
   findings: number;
   summaries: number;
   praise: number;
@@ -1741,13 +1745,13 @@ export interface BotVendorPr {
 
 export interface BotVendorPrsResponse {
   enabled: boolean;
-  // The analytics-row identity this list belongs to: `u<userId>` for a per-reviewer row, or the
-  // 'pierre' sentinel (per-review provenance, no userId). Mirrors BotVendorAnalytics.key.
+  // The analytics-row identity this list belongs to: `u<userId>`, one reviewer (each Limn poster's
+  // bot included). Mirrors BotVendorAnalytics.key.
   key: string;
   kind: AutomatedReviewerKind;
   label: string;
-  // The reviewer's github login (per-reviewer rows); null for the 'pierre' sentinel or an
-  // unresolved login.
+  // The reviewer's github login; null when unresolved. A Limn bot's is internal (`limn:alice`)
+  // and never a GitHub profile.
   login: string | null;
   window: { kind: BotWindowKind; from: string; to: string };
   prs: BotVendorPr[]; // most-recent-bot-activity first
@@ -1782,9 +1786,7 @@ export interface BotVendorComment {
 
 export interface BotVendorCommentsResponse {
   enabled: boolean;
-  // `u<userId>` | 'pierre' — mirrors BotVendorAnalytics.key. The 'pierre' sentinel always
-  // answers empty: its verbatim reviews are posted with the human's token, so there are no
-  // attributable per-comment rows (same reasoning as its getBotVendorPrs special case).
+  // `u<userId>` — mirrors BotVendorAnalytics.key.
   key: string;
   kind: AutomatedReviewerKind;
   label: string;
@@ -1808,7 +1810,7 @@ export interface BotOnlyPrItem {
   title: string;
   repoId: number;      // for the cross-repo drill-down's repo filter
   repoFullName: string;
-  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Limn · Claude" | …)
+  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Limn · alice" | …)
   state: PrState;      // 'open' (mergeable) | 'merged' (in window)
   githubUrl: string;
   openedAt: string;    // ISO-8601 — the PR age (sortable)
@@ -4083,9 +4085,9 @@ export interface ProSettings {
   // `autoTagHighConfidence` / `loginAllowlist` / `deepDetect` / `aiTiebreak` had no production
   // consumer — CORE's `classifyReviewer` never received them (core cannot read the plugin's
   // `pro_settings` table at all), so they were switches wired to nothing. `tagPierreReviews` /
-  // `pierreFooter` went too: the hidden marker is now stamped unconditionally, because it is the
-  // ONLY producer of the 'pierre' AutomatedReviewerKind and a user turning it off silently deleted
-  // the Bot-ROI "Limn · Claude" row. Their `pro_settings` COLUMNS stay dormant (like
+  // `pierreFooter` went too: the hidden marker is now stamped unconditionally, because it is how
+  // Limn's posts are recognised, and a finding's marker + lead is what makes it a per-poster
+  // "Limn · <login>" bot (docs/CLAUDE-REVIEW.md § Limn findings are bots). Their `pro_settings` COLUMNS stay dormant (like
   // `bot_auto_resolve*` below) — no migration, no data loss, nothing reads them.
   bots: {
     /** @deprecated ALWAYS false. The "Review bots" Slack block is a property of the DELIVERY as of
@@ -11866,7 +11868,8 @@ export interface SeverityAgreementMatrix {
   agree: number; // vendorSeverity === severity
   overCall: number; // the BOT called it worse than we did
   underCall: number; // the bot called it milder
-  /** Every row in the selector population, declared or not. agree+over+under === declared. */
+  /** Every model-scored row in the selector population, declared or not (a Limn finding is in
+   *  neither axis: its severity is its own review's). agree+over+under === declared. */
   total: number;
 }
 

@@ -649,13 +649,13 @@ async function reconcilePostedState(
     : ((await ctx.db
         .select({ threadId: rc.threadId, databaseId: rc.databaseId, body: rc.body, authorLogin: users.githubLogin, createdAt: rc.createdAt })
         .from(rc)
-        .leftJoin(users, eq(users.id, rc.authorId))
+        .leftJoin(users, eq(users.id, sql`coalesce(${rc.limnPostedByUserId}, ${rc.authorId})`)) // the TRUE poster (db/limn-bots.ts)
         .where(eq(rc.prId, row.prId))
         .execute()) as Array<Omit<ThreadComment, 'createdAt'> & { createdAt: unknown }>);
   const prCommentRows = (await ctx.db
     .select({ databaseId: pc.databaseId, body: pc.body, authorLogin: users.githubLogin, createdAt: pc.createdAt })
     .from(pc)
-    .leftJoin(users, eq(users.id, pc.authorId))
+    .leftJoin(users, eq(users.id, sql`coalesce(${pc.limnPostedByUserId}, ${pc.authorId})`)) // the TRUE poster (db/limn-bots.ts)
     .where(eq(pc.prId, row.prId))
     .execute()) as Array<{ databaseId: string | null; body: string | null; authorLogin: string | null; createdAt: unknown }>;
   const login = (
@@ -802,7 +802,7 @@ async function postedFindingThreadIds(
       createdAt: rc.createdAt,
     })
     .from(rc)
-    .leftJoin(users, eq(users.id, rc.authorId))
+    .leftJoin(users, eq(users.id, sql`coalesce(${rc.limnPostedByUserId}, ${rc.authorId})`)) // the TRUE poster (db/limn-bots.ts)
     .where(inArray(rc.threadId, threads.map((t) => t.id)))
     .execute()) as Array<Omit<ThreadComment, 'createdAt'> & { createdAt: Date | null }>;
   const comments: ThreadComment[] = commentRows.map((c) => ({ ...c, createdAt: c.createdAt?.getTime?.() ?? 0 }));

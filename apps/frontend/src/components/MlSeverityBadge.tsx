@@ -1,3 +1,4 @@
+import { LIMN_LABEL_BACKEND } from '@pierre-review/shared';
 import type { MlCategory, MlLabel, MlSeverity, MlSeverityCounts } from '@pierre-review/shared';
 import { ML_CATEGORY_LABEL, ML_SEVERITY_META, vendorInk } from '../lib/ui.js';
 import { disagreeDirection } from '../lib/severityAgreement.js';
@@ -70,7 +71,10 @@ export function MlSeverityBadge({
   // The `backend` string is the only signal that a deployment fell back to the marker heuristic;
   // saying so in the tooltip is cheaper than a user wondering why the labels look odd.
   const fromModel = label.backend.includes('modernbert-onnx');
-  const modelNote = fromModel
+  // A Limn finding's label is its OWN severity line, never scored (docs/ML-SEVERITY.md § Limn
+  // findings): no confidence, no heuristic note, never dimmed.
+  const fromLimn = label.backend === LIMN_LABEL_BACKEND;
+  const modelNote = fromModel || fromLimn
     ? ''
     : '\nHeuristic fallback — the ML model was not loaded on the server.';
 
@@ -78,7 +82,7 @@ export function MlSeverityBadge({
   // about a label the MODEL produced — on a marker-fallback deployment `severityProb` is not a
   // softmax at all and the floor identity does not hold.
   const overridden = fromModel && label.severityProb < ARGMAX_FLOOR;
-  const dim = label.severityProb < LOW_CONFIDENCE;
+  const dim = !fromLimn && label.severityProb < LOW_CONFIDENCE;
 
   // ── The bot's OWN badge — shown only when it CONTRADICTS ours ────────────────────────────
   // Agreement stays silent (two pills saying the same thing is noise) UNLESS `vendorClaim` asks
@@ -97,7 +101,7 @@ export function MlSeverityBadge({
   const dir = vendorMeta ? disagreeDirection(label) : null;
   // The other two states, said out loud only in `vendorClaim` mode (see the prop's note).
   const quietVendorState =
-    vendorClaim && !compact && !vendorMeta
+    vendorClaim && !compact && !vendorMeta && !fromLimn
       ? label.vendorSeverity == null
         ? {
             text: 'bot declared nothing',
@@ -117,8 +121,9 @@ export function MlSeverityBadge({
       ? ` (a ${label.vendorSeverityConfidence}-confidence read of its own markup)`
       : '';
 
-  const title =
-    `${meta.label}: ${meta.description}\n` +
+  const title = fromLimn
+    ? `${meta.label}: ${meta.description}\nFrom Limn's review.`
+    : `${meta.label}: ${meta.description}\n` +
     `Confidence ${confidence}%. Category: ${
       label.categories.map((c) => ML_CATEGORY_LABEL[c] ?? c).join(', ') || 'none'
     }.` +

@@ -403,8 +403,10 @@ function MlTotalsStrip({
   const findingsTileClass = onOpen
     ? `${TILE_CLASS} transition`
     : TILE_CLASS;
-  const coverage =
-    ml.labelled + ml.pending > 0 ? ml.labelled / (ml.labelled + ml.pending) : 0;
+  // Coverage is about the MODEL: a Limn finding's label comes from its own severity line, so it
+  // is left out of both sides of "N of M scored".
+  const scored = ml.labelled - (ml.limnLabelled ?? 0);
+  const coverage = scored + ml.pending > 0 ? scored / (scored + ml.pending) : 0;
   const highFindings = ml.bySeverity.major + ml.bySeverity.critical;
   const highShare = ml.findings > 0 ? highFindings / ml.findings : 0;
   const nitShare = ml.findings > 0 ? ml.bySeverity.nit / ml.findings : 0;
@@ -420,8 +422,8 @@ function MlTotalsStrip({
         <h3 className="text-body font-semibold">What the bots are flagging</h3>
         <InfoButton title="What the bots are flagging">
           <p>
-            Each bot comment is given a severity (nit, minor, major, critical) and up to eight
-            categories by a small model that runs on our side. It is not an LLM, and it never reads
+            Each bot comment, except Limn’s own findings, is given a severity (nit, minor, major,
+            critical) and up to eight categories by a small model that runs on our side. It is not an LLM, and it never reads
             the bot’s own severity badge.
           </p>
           <p>
@@ -431,16 +433,21 @@ function MlTotalsStrip({
           <p>
             Severity shares count findings only. Walkthrough summaries and praise are left out.
           </p>
+          <p>
+            Limn’s own findings are not scored. Their severity is the one the review gave them.
+          </p>
           <p>Every figure covers the window picked above.</p>
           <p>
             Some older comments can never be scored: their text was not stored when they synced and
             GitHub no longer has it. They are left out of every figure here.
           </p>
         </InfoButton>
-        <span className="text-meta text-ui-mute">model-scored</span>
+        <span className="text-meta text-ui-mute">
+          {(ml.limnLabelled ?? 0) > 0 ? 'model-scored; Limn’s from its review' : 'model-scored'}
+        </span>
         {ml.pending > 0 && (
           <span className="ml-auto text-meta text-ui-faint tabular-nums">
-            {ml.labelled.toLocaleString()} of {(ml.labelled + ml.pending).toLocaleString()} bot
+            {scored.toLocaleString()} of {(scored + ml.pending).toLocaleString()} bot
             comments in this window scored ({Math.round(coverage * 100)}%), the rest still
             in progress
           </span>
@@ -802,10 +809,10 @@ function VolumeCell({
 }
 
 // The ONE place a vendor row's `u<userId>` key is parsed back to its users.id (the "Depth →"
-// pill's target). `BotVendorAnalytics` carries no userId field; its `key` is `u<id>` for real
-// reviewer rows and 'pierre' for Limn's own attribution row — the latter (or any future
-// non-user key) yields null, and the pill simply doesn't render for it. Kept as a single
-// exported-nowhere helper so a second spelling of the format cannot creep in.
+// pill's target). `BotVendorAnalytics` carries no userId field; its `key` is `u<id>` for every
+// reviewer row, a per-poster Limn bot ("Limn · alice") included. A key of any other shape yields
+// null and the pill doesn't render. Kept as a single exported-nowhere helper so a second
+// spelling of the format cannot creep in.
 function vendorKeyUserId(key: string): number | null {
   const m = /^u(\d+)$/.exec(key);
   return m ? Number(m[1]) : null;
@@ -1449,8 +1456,8 @@ function VendorTable({
                 {onOpenDepth != null && (
                   <td className="px-2 py-1.5 text-center">
                     {(() => {
-                      // The 'pierre' attribution row (and any future non-user key) has no
-                      // users.id to key a depth tab on — a dash, never a dead pill.
+                      // A key that is not `u<id>` has no users.id to key a depth tab on — a
+                      // dash, never a dead pill.
                       const depthUserId = vendorKeyUserId(v.key);
                       return depthUserId == null ? (
                         dash

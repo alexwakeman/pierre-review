@@ -209,6 +209,36 @@ exactly the user-defined bots the feature is meant to cover.
 
 ---
 
+## Limn findings: labelled from their own lead, never scored
+
+A Limn finding posted to GitHub is a bot comment (the poster's `limn:<login>` bot,
+[CLAUDE-REVIEW.md § Limn findings are bots](CLAUDE-REVIEW.md)). Its severity is the AI Review's
+own, read from the lead line — never the model's.
+
+- **Writer**: `db/limn-finding-labels.ts` `syncLimnFindingLabels` writes an `ml_comment_labels`
+  row per Limn finding with a severity: `LIMN_ML_SEVERITY` (blocker→critical, warning→major,
+  nit→nit, question→minor), probability 1, `backend = 'limn-review'`, `model_version =
+  'limn-finding-v1'`, no vendor claim, categories `nitpick` for a nit else `correctness_bug`. A
+  reminder without a severity gets no row. It runs in `persistPr`'s transaction (per PR) and at the
+  end of the boot reconcile; it is idempotent and deletes a Limn row whose comment stopped being a
+  finding.
+- ⚠ **Excluded in lockstep**: `listMlCandidates` and `countBotText` both skip
+  `limn_posted_by_user_id IS NOT NULL`, so a Limn finding is never a candidate, never pending,
+  never unscorable.
+- ⚠ **Never overwritten, never purged**: `upsertMlLabels` guards its update with `setWhere backend
+  <> 'limn-review'`; `deleteMlLabelsForRepo` (deep re-sync) and `ml:enrich --reset` skip the backend.
+- **Not a scorer**: the rollups' `backends` (the fallback banner's input) never list `limn-review`.
+- **Inflation**: no vendor badge, so a Limn bot is never "badged" — it shows the dash, never a zero.
+  The Inflation card names Limn bots apart ("its severity is the review's own"), never under
+  "badges nothing".
+- **Agreement matrices** (the flagging drill-down and the overlap clusters): a Limn row is on
+  neither axis — left out of the matrix and of any cell refine, kept in the list (its total still
+  equals the tile). The strip's caption says "Limn's from its review" when the window has any.
+- **Coverage**: `BotAnalyticsMlTotals.limnLabelled` counts the window's Limn labels; the Bots
+  strip's "N of M bot comments scored" leaves them out of both sides.
+- **The badge**: `MlSeverityBadge` reads `backend === LIMN_LABEL_BACKEND` and says "From Limn's
+  review." — no confidence, no fallback note, never dimmed, no vendor state.
+
 ## Data model
 
 One new core table, **`ml_comment_labels`** (schema.sqlite.ts;

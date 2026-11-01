@@ -94,6 +94,10 @@ export function limnSeverityTargets(input: {
   return { byThreadId, byPrCommentId };
 }
 
+// Who posted a comment: the poster of a Limn finding, else its author.
+const posterOf = (c: { authorId: number | null; limnPostedByUserId?: number | null }): number | null =>
+  c.limnPostedByUserId ?? c.authorId;
+
 /**
  * Load this PR's posted findings and fold them over the thread / comment rows getPrDetail already
  * read. One indexed query when nothing of Limn's is posted; the account login and the comment
@@ -109,6 +113,8 @@ export async function loadLimnSeverityTargets(
       databaseId: string | null;
       body: string | null;
       authorId: number | null;
+      // The person who posted a Limn finding (its `authorId` is the `limn:` bot, db/limn-bots.ts).
+      limnPostedByUserId?: number | null;
       createdAt: Date;
     }>;
     prComments: ReadonlyArray<{ id: number; databaseId: string | null }>;
@@ -138,7 +144,7 @@ export async function loadLimnSeverityTargets(
   const loginById = new Map<number, string>();
   if (needsMatcher) {
     accountLogin = await accountGithubLogin(accountId);
-    const authorIds = [...new Set(rows.threadComments.map((c) => c.authorId).filter((x): x is number => x != null))];
+    const authorIds = [...new Set(rows.threadComments.map(posterOf).filter((x): x is number => x != null))];
     if (authorIds.length > 0) {
       const us = await db
         .select({ id: schema.users.id, login: schema.users.githubLogin })
@@ -155,7 +161,7 @@ export async function loadLimnSeverityTargets(
       threadId: c.threadId,
       databaseId: c.databaseId,
       body: c.body,
-      authorLogin: c.authorId != null ? (loginById.get(c.authorId) ?? null) : null,
+      authorLogin: posterOf(c) != null ? (loginById.get(posterOf(c)!) ?? null) : null,
       createdAt: c.createdAt.getTime(),
     })),
     prComments: rows.prComments,

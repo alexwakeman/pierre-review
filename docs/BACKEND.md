@@ -14,7 +14,10 @@ account, builds the app, installs the worktree ledger, starts the agentic backgr
 the platform (`bindPlatform`, `platform/context.ts` → `registerPlatform`), starts the tracker worker
 and the scheduler, listens, then starts the worktree sweep in the background (§ Worktree cleanup). There is one synthesized account (id 1): `ensureLocalAccount()`
 shells out to `gh api user` at startup, caches the identity on the `accounts` row (refreshed
-~daily; non-fatal offline — you lose "my turn" triage). API calls use `gh auth token`
+~daily; non-fatal offline — you lose "my turn" triage). Right after it, the boot awaits
+`reconcileLimnFindingAuthors` (`db/limn-bots.ts`, DB only, never fails the boot): it moves stored
+Limn finding comments to their poster's `limn:` bot (or back to the person), and writes their
+severity labels ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are bots). API calls use `gh auth token`
 (`getAccessToken`); SQLite opens `journal_mode=WAL` + `foreign_keys=ON`. There is no sign-in,
 no session and no hosted mode.
 
@@ -320,6 +323,15 @@ no "done" state and no tombstone. A card appears when the state says so and vani
 says so. What IS stored is the reader's choice of which TYPES exist (§ Settings: gates and
 promotions) and — since migration `0069` — a per-SUBJECT dismissal whose only power is to
 hide what happened BEFORE it (§ Dismissals and one card per PR).
+
+### Limn findings never move the ball
+
+A Limn finding comment is stored under the poster's `limn:` bot (CLAUDE-REVIEW.md § Limn findings
+are bots), so like every bot action it never counts as the reader acting. One exception keeps
+"replied to you" alive: the reader's thread set is **the reader plus their own Limn bot**
+(`limnBotUserIdForUser`), so a PERSON's reply in a thread rooted on the reader's Limn finding still
+summons them, and the reader's own Limn finding on their own PR is never an unanswered thread.
+Participation ("did I take part") reads the TRUE poster (`limn_posted_by_user_id`).
 
 ### Claude reviews have their own Pending tab
 

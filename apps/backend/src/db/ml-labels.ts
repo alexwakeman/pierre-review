@@ -19,7 +19,7 @@
 // candidate only once it has been classified. That is fine BECAUSE this is a pull-based
 // worker: it re-derives the bot set every tick, so a newly-classified or newly-marked bot's
 // whole backlog is picked up on the next pass with no backfill trigger of its own.
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
@@ -43,6 +43,7 @@ import type {
   SeverityAgreementMatrix,
   VendorSeverityAxis,
 } from '@pierre-review/shared';
+import { LIMN_LABEL_BACKEND, limnBotLabel, limnPosterOf } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { botWindowMs } from './bot-window.js';
 import { labelFor as labelForKind } from '../sync/reviewer-classify.js';
@@ -124,10 +125,19 @@ function coerceVendorConfidence(raw: unknown): MlVendorConfidence | null {
  * a deep sync is the user's explicit "re-fetch and re-derive everything" gesture, so stale
  * versions are purged rather than left to mix with fresh ones in the same charts.
  */
+//
+// ⚠ A LIMN FINDING'S LABEL IS KEPT (`backend = LIMN_LABEL_BACKEND`): it is the review's own
+// severity, not a model output, and the scorer would never re-create it (db/limn-finding-labels.ts).
 export async function deleteMlLabelsForRepo(accountId: number, repoId: number): Promise<void> {
   await db
     .delete(mlCommentLabels)
-    .where(and(eq(mlCommentLabels.accountId, accountId), eq(mlCommentLabels.repoId, repoId)))
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        eq(mlCommentLabels.repoId, repoId),
+        ne(mlCommentLabels.backend, LIMN_LABEL_BACKEND),
+      ),
+    )
     .execute();
 }
 
@@ -204,6 +214,9 @@ export async function listMlCandidates(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviewComments.authorId),
           inArray(reviewComments.authorId, automatedIds),
+          // ⚠ LOCKSTEP with `countBotText`: a Limn finding is never scored (its label is the
+          // review's own, db/limn-finding-labels.ts), so it is neither a candidate nor pending.
+          isNull(reviewComments.limnPostedByUserId),
           isNotNull(reviewComments.body),
           hasText(reviewComments.body),
           isNull(mlCommentLabels.id),
@@ -230,6 +243,7 @@ export async function listMlCandidates(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(prComments.authorId),
           inArray(prComments.authorId, automatedIds),
+          isNull(prComments.limnPostedByUserId), // ⚠ LOCKSTEP with `countBotText`
           isNotNull(prComments.body),
           hasText(prComments.body),
           isNull(mlCommentLabels.id),
@@ -395,6 +409,9 @@ export async function upsertMlLabels(rows: MlLabelWrite[]): Promise<number> {
           targetCreatedAt: values.targetCreatedAt,
           updatedAt: values.updatedAt,
         },
+        // ⚠ The scorer never overwrites a Limn finding's label — that severity is the review's own
+        // (db/limn-finding-labels.ts). A guarded conflict writes nothing and returns no row.
+        setWhere: ne(mlCommentLabels.backend, LIMN_LABEL_BACKEND),
       })
       .returning({ id: mlCommentLabels.id })
       .execute();
@@ -560,7 +577,9 @@ export async function getBotSeverityRollup(
   for (const row of labelRows) {
     const severity = coerceSeverity(row.severity);
     if (!severity) continue;
-    if (row.backend) backends.add(row.backend);
+    // `backends` answers "which SCORER answered" (the fallback banner reads it). A Limn finding's
+    // label is no scorer's, so it is never listed.
+    if (row.backend && row.backend !== LIMN_LABEL_BACKEND) backends.add(row.backend);
     const acc: Acc = byBot.get(row.authorUserId) ?? {
       labelled: 0,
       bySeverity: emptySeverityCounts(),
@@ -655,6 +674,9 @@ export async function getBotSeverityRollup(
 // BOT_VENDOR_META (colours + display names), and duplicating that whole map server-side would
 // give two answers to "what is this bot called".
 function vendorBrand(kind: AutomatedReviewerKind, login: string): string {
+  // A Limn bot reads "Limn · alice", never its internal `limn:alice` login.
+  const poster = limnPosterOf(login);
+  if (poster != null) return limnBotLabel(poster);
   if (kind === 'in_house' || kind === 'vendor' || kind === 'pierre') return login;
   return kind
     .split('_')
@@ -767,6 +789,7 @@ export async function getMlWindowAggregates(
 ): Promise<MlWindowAggregates> {
   const emptyTotals: BotAnalyticsMlTotals = {
     labelled: 0,
+    limnLabelled: 0,
     findings: 0,
     summaries: 0,
     praise: 0,
@@ -852,6 +875,8 @@ export async function getMlWindowAggregates(
   // The totals' `labelled` twin under a widened scan: rows whose targetCreatedAt is in-window,
   // fold success or not — exactly what `labelRows.length` counted when the scan was window-only.
   let windowLabelled = 0;
+  // Of those, the labels taken from a Limn finding's own lead (no scorer ran).
+  let windowLimnLabelled = 0;
   // Whether the cap bit INSIDE the window. Rows arrive newest-first, so if the scan hit the cap
   // but its oldest row already predates `from`, every in-window row was captured and the WINDOW
   // totals are complete — only the (Pro, advisory) weekly history is a newest-first sample.
@@ -865,12 +890,13 @@ export async function getMlWindowAggregates(
     const rowMs = row.targetCreatedAt.getTime();
     const inWindow = rowMs >= fromMs;
     if (inWindow) windowLabelled += 1;
+    if (inWindow && row.backend === LIMN_LABEL_BACKEND) windowLimnLabelled += 1;
     // ⚠ Through `foldMlLabelRow`, NEVER a local re-spelling of the three branches: the flagging
     // drill-down slices this same scan with this same fold, and a second copy of the order here
     // is exactly how the tile and the list it opens would drift apart.
     const folded = foldMlLabelRow(row);
     if (!folded) continue;
-    if (inWindow && row.backend) backends.add(row.backend);
+    if (inWindow && row.backend && row.backend !== LIMN_LABEL_BACKEND) backends.add(row.backend); // never Limn's
     let acc = byBot.get(row.authorUserId);
     if (!acc) {
       acc = {
@@ -936,6 +962,7 @@ export async function getMlWindowAggregates(
     byBot,
     totals: {
       labelled: windowLabelled,
+      limnLabelled: windowLimnLabelled,
       findings,
       summaries,
       praise,
@@ -1038,9 +1065,8 @@ export async function listMlLabelsForBehaviour(
 // drill-down must also serve quality_check-roled rows —
 // mirroring getBotVendorPrs, whose quality-check section offers the same drill-down.
 //
-// The 'pierre' sentinel answers EMPTY: its verbatim reviews are posted with the human's token
-// (per-review provenance), so there are no attributable per-comment rows to list — the same
-// reasoning as its getBotVendorPrs special case, minus the review-join it uses for PR rows.
+// Limn's findings are listed like any bot's: each poster's findings belong to their own
+// `limn:<login>` bot user (db/limn-bots.ts). The old 'pierre' sentinel key is gone.
 const BOT_VENDOR_COMMENT_CAP = 3000; // most-recent rows per source (the themes-funnel precedent)
 
 interface JoinedLabelCols {
@@ -1084,7 +1110,7 @@ function inlineLabel(
 
 export async function getBotVendorComments(
   accountId: number,
-  target: { userId: number } | { kind: 'pierre' },
+  target: { userId: number },
   // Either a KIND (resolved here against the one shared duration mapping) or a kind carried
   // ALONGSIDE explicit bounds — the getBotAnalytics window form, widened here for the same
   // reason: the People report's bot sections must list a completed period's comments, and an
@@ -1111,20 +1137,6 @@ export async function getBotVendorComments(
   // enum-form scans over the same rows.
   const toBound = typeof window === 'string' ? null : to;
   const generatedAt = new Date(nowMs).toISOString();
-
-  if ('kind' in target) {
-    return {
-      enabled: true,
-      key: 'pierre',
-      kind: 'pierre',
-      label: labelForKind('pierre'),
-      login: null,
-      window: win,
-      comments: [],
-      truncated: false,
-      generatedAt,
-    };
-  }
 
   const userId = target.userId;
   const key = `u${userId}`;
@@ -1440,6 +1452,9 @@ async function countBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviewComments.authorId),
           inArray(reviewComments.authorId, automatedIds),
+          // ⚠ LOCKSTEP with `listMlCandidates`: a Limn finding is never scored, so it is neither
+          // pending nor unscorable (db/limn-finding-labels.ts).
+          isNull(reviewComments.limnPostedByUserId),
           bodyPredicate(reviewComments.body),
           isNull(mlCommentLabels.id),
           ...windowed(reviewComments.createdAt),
@@ -1464,6 +1479,7 @@ async function countBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(prComments.authorId),
           inArray(prComments.authorId, automatedIds),
+          isNull(prComments.limnPostedByUserId), // ⚠ LOCKSTEP with `listMlCandidates`
           bodyPredicate(prComments.body),
           isNull(mlCommentLabels.id),
           ...windowed(prComments.createdAt),
@@ -1810,11 +1826,15 @@ function matchesFlaggingRefine(
   vendor: MlSeverity | null,
   ours: MlSeverity,
   authorUserId: number,
+  // A Limn finding's severity is its own review's, not a model score, so it has no place in the
+  // ours-vs-vendor matrix (see getBotFlaggingComments): no matrix cell may select it.
+  limn = false,
 ): boolean {
   // `includes` over an array of at most one entry per automated reviewer in the workspace — a
   // per-call Set would allocate once per scanned row for a membership test of ~10 numbers.
   if (refine.authorUserIds != null && !refine.authorUserIds.includes(authorUserId)) return false;
   if (refine.cell) {
+    if (limn) return false;
     if ((vendor ?? 'none') !== refine.cell.vendor) return false;
     if (ours !== refine.cell.ours) return false;
   }
@@ -2225,6 +2245,7 @@ export async function foldBotFlaggingPopulation(
       coerceSeverity(row.vendorSeverity),
       fold.severity,
       row.authorUserId,
+      row.backend === LIMN_LABEL_BACKEND,
     ),
   );
 
@@ -2258,11 +2279,15 @@ export async function getBotFlaggingComments(
   // ── Phase 3: the matrix, over the SELECTOR population and PRE-refine ─────────────────────
   // Computed before the refinement so clicking a cell cannot zero out the cell that was clicked
   // — the commentFacetCounts / ConsolidatedFeedResponse.counts rule.
+  // ⚠ Limn's findings stay in `selected` (the list total must equal the tile) but are left OUT
+  // of the matrix: their severity is their own review's, never "we scored", and they did not
+  // "declare nothing" (docs/ML-SEVERITY.md § Limn findings).
+  const matrixRows = selected.filter(({ row }) => row.backend !== LIMN_LABEL_BACKEND);
   const matrix =
-    selected.length === 0
+    matrixRows.length === 0
       ? emptyAgreementMatrix()
       : buildAgreementMatrix(
-          selected.map(({ row, fold }) => ({
+          matrixRows.map(({ row, fold }) => ({
             vendor: coerceSeverity(row.vendorSeverity),
             ours: fold.severity,
           })),

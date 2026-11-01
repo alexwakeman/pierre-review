@@ -2893,9 +2893,9 @@ Every comment Limn posts for a finding LEADS with the finding's severity as a bo
   `FINDING_COMMENT_MARKER` stay last and unchanged, so `isLimnPostedComment` still holds.
 - **One owner each** (`packages/shared/src/limn-severity.ts`): `limnSeverityLabel` (the word),
   `limnSeverityLead(severity, {tag?, ref?})` (the line; `tag` is an extra part such as a provider
-  name on a paired post: `**Warning** · Codex`), and **`severityForPostedFinding(finding)` — THE
-  GRADER SEAM**. Today it returns the review's own severity; a later bot-comment grader replaces
-  that function's body and nothing else. The builders (`post-review.ts` `findingCommentBody` /
+  name on a paired post: `**Warning** · Codex`), and **`severityForPostedFinding(finding)`**: the
+  review's own severity, and nothing else. ⚠ It is never ML-graded (§ Limn findings are bots).
+  The builders (`post-review.ts` `findingCommentBody` /
   `prLevelFindingBody`) take `severity` on the finding (`PostReviewFinding.severity`, optional) and
   call the seam. Replies (accept, pushback, resolve, manual reply) get no label.
 - ⚠ **Matching comments posted before and after the label.** `finding-thread.ts` compares a thread
@@ -2909,6 +2909,49 @@ Every comment Limn posts for a finding LEADS with the finding's severity as a bo
   GET `/api/prs/:id` (`db/limn-finding-severity.ts`: the finding's stored comment id = the thread's
   ROOT comment or the PR comment, its latest reminder's comment, else `findFindingThread`; severity
   through the same seam). No request of its own, no migration.
+
+## Limn findings are bots (2026-11-01)
+
+Limn posts findings under the reader's own GitHub account. Those comments are counted as a BOT,
+one per poster ("Limn · alice"), beside CodeRabbit and Copilot, and never as the person's own
+activity.
+
+- **What counts** (shared `limnFindingPost(body)`, `packages/shared/src/limn-severity.ts`): the
+  finding marker (`<!-- pierre:claude-review-finding`) PLUS a severity lead (`**Warning**` …) or a
+  reminder lead (`**Reminder:**`), on an inline or PR-level comment, by ANY author, manual or
+  automatic. NOT the bot: replies on a finding thread (marker, no lead), pushback, review bodies and
+  auto verdicts, CI, Sonar, dependency and ticket "story check" posts, and findings posted before
+  leads existed (2026-10-27). Those stay the person's.
+- **Identity**: a synthetic `users` row per poster, login `limn:<login>` (`:` is impossible in a
+  GitHub login, so it never collides and is NEVER sent to GitHub), `is_bot` pinned, no node id,
+  display name "Limn · <login>" (`db/limn-bots.ts` `ensureLimnBotUser`). Its `workspace_reviewers`
+  row is kind `'pierre'` (vendor label "Limn"), role `'review'`, automated, written once with `DO NOTHING`
+  (`ensureLimnReviewerRow`); `classifyReviewer` step 0 gives a `limn:` login the same verdict.
+  ⚠ `REVIEW_BOT_KINDS` never gains `'pierre'` (the benchmark never ships Limn).
+- **The true poster**: sync stores the comment under the bot (`author_id`) and keeps the person in
+  `limn_posted_by_user_id` (migration `0151`). The event actor, search author and thread root
+  (`original_commenter_id`) follow the bot. A body edited to drop the marker goes back to its person
+  on the next walk (both columns are in the conflict `set`). The boot reconcile
+  (`reconcileLimnFindingAuthors`, after `ensureLocalAccount`) applies the same rule to stored rows.
+- ⚠ **Every "own post" check reads the TRUE author** (`trueAuthorId(t)` = `coalesce(limn_posted_by,
+  author_id)`): `isLimnPostedComment`, finding replies, posted state, `findFindingThread`, the
+  severity chip, auto-post's "did I take part", My Turn participation. So auto-resolve, pushback and
+  reminders keep working, and the reader's OWN Limn posts still never trigger their auto review. A
+  teammate's Limn findings are a review bot's comments, so they DO count for a re-review.
+- **A bot everywhere**: never moves the ball (My Turn, Chronology), the Bots side of the Feed,
+  hidden on the Timeline, a `u<id>` row in Bots Monitoring with its own `bot-detail:<id>` tab. My
+  Turn keeps one exception: a PERSON's reply in a thread rooted on your own Limn finding still
+  summons you (your thread set is you plus your Limn bot).
+- **Severity** is the lead's, never the scorer's: ML-SEVERITY.md § Limn findings.
+- **Bulk bot-thread resolve** (`getResolvableBotThreads*`) leaves Limn threads out; auto-resolve owns
+  them.
+- ⚠ **A person is never classed a bot by Limn's marker**: `reviewerEvidence` drops Limn-marked text
+  before fingerprinting, and a `'pierre'` fingerprint is ignored for any non-`limn:` login. The boot
+  reconcile deletes untouched `'pierre'` rows on real people.
+- **In the SPA**: a `limn:` login is never a profile link (`profileUrl` returns null); its name reads
+  "Limn · alice" and its card names the poster. The severity badge on a Limn label says "From
+  Limn's review." with no confidence. The old single `'pierre'` row in Bots Monitoring is gone (the
+  vendor drill-down routes answer 400 for it).
 
 ## Chat about a review
 

@@ -477,6 +477,25 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 
 
+## Limn finding bots — `limn:` users and `limn_posted_by_user_id` (CORE; migration `0151`)
+
+A Limn finding comment is a bot comment ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are
+bots). Two storage facts carry it:
+
+- **`users` rows with login `limn:<login>`**, one per poster: `is_bot = 1`, `is_bot_overridden = 1`,
+  `github_node_id` NULL, display name "Limn · <login>". Global like every user. ⚠ The login is never
+  sent to GitHub, and the node-id branch of the user resolver never matches it.
+- **`review_comments.limn_posted_by_user_id` / `pr_comments.limn_posted_by_user_id`** (nullable FK
+  to `users`, indexed): set ONLY on a Limn finding, to the person who posted it; `author_id` is then
+  the bot. NULL everywhere else. ⚠ A check about "did this person post it" reads
+  `coalesce(limn_posted_by_user_id, author_id)` (`db/limn-bots.ts` `trueAuthorId`), never
+  `author_id` alone.
+- The bot's `workspace_reviewers` row: kind `'pierre'`, role `'review'`, `source 'fingerprint'`,
+  `identity_source 'auto'`, per workspace where it appears.
+
+No new account-scoped table, so `accountScopedTables()` is unchanged (the columns ride
+`review_comments` / `pr_comments`, erased with their PRs).
+
 ## `review_request_events` (CORE — who was asked to review, and when)
 
 Every `ReviewRequestedEvent` / `ReviewRequestRemovedEvent` on a PR's timeline (first 25 per PR):

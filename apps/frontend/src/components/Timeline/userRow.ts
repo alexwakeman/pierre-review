@@ -51,11 +51,14 @@ export function renderUserLabel(
   // in a new tab, and so a plain click degrades to the old behaviour if the script is gone;
   // the listener preventDefaults an unmodified click. vis's sanitizer is disabled (see
   // VIS_OPTIONS) so the <a> survives; the login + name are still escaped for safety.
+  // A Limn bot (`limn:alice`) has no GitHub profile, so its name opens the popover only.
+  const href = user?.githubLogin ? profileUrl(user.githubLogin) : null;
+  const hrefAttr = href ? ` href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener"` : ' href="#"';
   const nameHtml =
     user?.githubLogin && gid
-      ? `<a class="tl-user-name tl-user-name-link" data-user-gid="${escapeHtml(gid)}" href="${escapeHtml(profileUrl(user.githubLogin))}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(`@${user.githubLogin} — activity & stats`)}">${escapeHtml(name)}</a>`
-      : user?.githubLogin
-        ? `<a class="tl-user-name tl-user-name-link" href="${escapeHtml(profileUrl(user.githubLogin))}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(`@${user.githubLogin} on GitHub`)}">${escapeHtml(name)}</a>`
+      ? `<a class="tl-user-name tl-user-name-link" data-user-gid="${escapeHtml(gid)}"${hrefAttr} title="${escapeHtml(href ? `@${user.githubLogin} — activity & stats` : name)}">${escapeHtml(name)}</a>`
+      : user?.githubLogin && href
+        ? `<a class="tl-user-name tl-user-name-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener" title="${escapeHtml(`@${user.githubLogin} on GitHub`)}">${escapeHtml(name)}</a>`
         : `<span class="tl-user-name">${escapeHtml(name)}</span>`;
 
   const mergerBadge = isMerger

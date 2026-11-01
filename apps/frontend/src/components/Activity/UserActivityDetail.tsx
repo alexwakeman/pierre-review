@@ -32,6 +32,8 @@ export function UserActivityDetail(): JSX.Element {
   // Prefer the live roster; fall back to the label metadata captured when the tab was opened
   // (the roster query may not have loaded yet, or the actor may have aged out of it).
   const login = user?.githubLogin ?? tab?.userMeta?.login ?? null;
+  // Null for a Limn bot (`limn:alice`): it has no GitHub profile.
+  const githubUrl = login ? profileUrl(login) : null;
   const avatarUrl = user?.avatarUrl ?? tab?.userMeta?.avatarUrl ?? null;
   const label = user
     ? userLabel(user, userId ?? 0)
@@ -74,9 +76,9 @@ export function UserActivityDetail(): JSX.Element {
         <span className="text-meta text-ui-faint">
           last {FEED_WINDOW_DAYS} days · across this Workspace · merge/close rows are PRs they authored
         </span>
-        {login && (
+        {githubUrl && (
           <a
-            href={profileUrl(login)}
+            href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
             className="hit bg-ui-raise ml-auto inline-flex items-center gap-0.5 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"

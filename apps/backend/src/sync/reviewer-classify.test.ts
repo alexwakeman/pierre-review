@@ -87,6 +87,7 @@ beforeAll(async () => {
   await addUser('claude-bot-type', { isBot: true, githubType: 'Bot' });
   await addUser('branded-bot-type', { isBot: true, githubType: 'Bot' });
   await addUser('pierre-poster', { githubType: 'User' });
+  await addUser('limn:alice', { isBot: true }); // a per-poster Limn bot (db/limn-bots.ts)
   await addUser('acme-ci'); // matches the -ci service-account pattern
   await addUser('jordan-lee'); // a fast, thorough human
   await addUser('sam-rivers'); // no evidence at all
@@ -164,12 +165,10 @@ describe('classifyReviewer resolution order', () => {
     expect(c.source).toBe('github_type');
   });
 
-  // The marker in the review body stays `pierre:claude-review` after the rename to
-  // Limn, and so does the `kind` — both are permanent identifiers. The marker is
-  // written into GitHub review bodies we do not control, so the detector must keep
-  // matching it forever; the kind is a persisted DB value and a live API path
-  // segment. Only the human-readable LABEL moved. This test asserts that split.
-  it('4. branded fingerprint on a plain User → pierre, high, fingerprint', async () => {
+  // ⚠ LIMN'S MARKER NEVER MAKES A PERSON A BOT. Limn posts as the reader, so a person's own
+  // review can carry the `pierre:claude-review` stamp. Only the per-poster `limn:` bot is Limn
+  // (step 0, below); the 'pierre' kind and the marker spelling stay permanent identifiers.
+  it('4. Limn\'s marker on a plain User → still a person', async () => {
     const fp = fingerprintReview('LGTM\n\n<!-- pierre:claude-review v=1 -->', []);
     const c = await classifyReviewer(
       1,
@@ -177,10 +176,17 @@ describe('classifyReviewer resolution order', () => {
       { fingerprint: fp },
       SCOPE,
     );
+    expect(c.automated).toBe(false);
+    expect(c.kind).toBeNull();
+  });
+
+  it('0. a limn: bot login → automated review bot, kind pierre, named after its poster', async () => {
+    const c = await classifyReviewer(1, userArg('limn:alice', { isBot: true }), {}, SCOPE);
     expect(c.automated).toBe(true);
     expect(c.kind).toBe('pierre');
+    expect(c.role).toBe('review');
     expect(c.source).toBe('fingerprint');
-    expect(c.label).toBe('Limn · Claude');
+    expect(c.label).toBe('Limn · alice');
   });
 
   it('5. behavioral band → MEDIUM in_house, source behavioral (never auto-badges to high)', async () => {

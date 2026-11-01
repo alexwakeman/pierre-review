@@ -8,7 +8,12 @@
 // what the pane shows can never disagree.
 //
 // Praise is never posted, so it has no label.
-import type { ClaudeFindingSeverity } from './types.js';
+//
+// THE SAME LEAD MAKES A POSTED FINDING A BOT COMMENT (`limnFindingPost`, docs/CLAUDE-REVIEW.md
+// § Limn findings are bots): sync re-attributes such a comment to a per-poster bot user
+// ("Limn · alice", login `limn:alice`) and keeps the true poster beside it.
+import { PRODUCT_NAME } from './product.js';
+import type { ClaudeFindingSeverity, MlSeverity } from './types.js';
 
 /** A severity Limn posts with a label: every finding severity but praise. */
 export type LimnSeverity = Exclude<ClaudeFindingSeverity, 'praise'>;
@@ -30,10 +35,11 @@ export function limnSeverityLabel(severity: ClaudeFindingSeverity | null | undef
 }
 
 /**
- * THE GRADER SEAM. The severity a POSTED finding carries — on its GitHub comment and on the pane's
- * chip. Today it is the review's own severity. A later bot-comment grader (the ML severity model
- * that already rates other bots' comments) replaces THIS function's body, and nothing else: every
- * comment builder and the chip's wire mapping read the severity only through here.
+ * The severity a POSTED finding carries — on its GitHub comment and on the pane's chip. It is the
+ * review's own severity, and nothing else: every comment builder and the chip's wire mapping read
+ * it only through here. ⚠ It is NEVER ML-graded. The ML scorer never sees a Limn finding
+ * (`limnFindingPost` takes it out of the scorer's candidates); its severity badge is written from
+ * this lead (`LIMN_ML_SEVERITY`).
  */
 export function severityForPostedFinding(f: { severity?: ClaudeFindingSeverity | null }): LimnSeverity | null {
   return isLimnSeverity(f.severity) ? f.severity : null;
@@ -61,7 +67,7 @@ export function limnSeverityLead(
 }
 
 // A lead line as `limnSeverityLead` writes it, at the very start of a body.
-const LEAD_RE = /^\*\*(?:Blocker|Warning|Nit|Question)\*\*(?: · [^\n]*)?(?:\n+|$)/;
+export const LEAD_RE = /^\*\*(?:Blocker|Warning|Nit|Question)\*\*(?: · [^\n]*)?(?:\n+|$)/;
 
 /**
  * The body without its leading severity line, if it has one. For matchers that compare a posted
@@ -71,3 +77,82 @@ const LEAD_RE = /^\*\*(?:Blocker|Warning|Nit|Question)\*\*(?: · [^\n]*)?(?:\n+|
 export function stripLimnSeverityLead(body: string): string {
   return body.replace(LEAD_RE, '');
 }
+
+// ── LIMN FINDINGS ARE BOTS ──────────────────────────────────────────────────────────────────────
+// Limn posts as the reader, so a finding comment carries the reader's login. These are the ONE
+// predicate and parser that tell a finding apart from the person's own words, for any author.
+
+/** The hidden stamp on every finding comment Limn posts (backend `FINDING_COMMENT_MARKER`). A reply
+ *  to a finding thread carries it too, without a lead line. */
+export const LIMN_FINDING_MARKER_RE = /<!--\s*pierre:claude-review-finding/i;
+/** Limn's pushback reply on a finding thread. Never a finding. */
+const LIMN_PUSHBACK_MARKER_RE = /<!--\s*pierre:claude-review-pushback/i;
+/** A reminder's lead (backend posted-state.ts `reminderLead`). */
+export const LIMN_REMINDER_LEAD_RE = /^\*\*Reminder:\*\*/;
+
+export interface LimnFindingPost {
+  /** The lead's severity; null on a reminder with no severity. */
+  severity: LimnSeverity | null;
+  reminder: boolean;
+}
+
+const WORD_TO_SEVERITY: Record<string, LimnSeverity> = {
+  Blocker: 'blocker',
+  Warning: 'warning',
+  Nit: 'nit',
+  Question: 'question',
+};
+
+/**
+ * A comment body that is a Limn FINDING (or a reminder of one): the finding marker plus a severity
+ * lead or a reminder lead at the start. Null for everything else — a reply on a finding thread
+ * (marker, no lead), a pushback, a review body, a ticket post, a finding posted before leads
+ * existed, and any comment without the marker.
+ */
+export function limnFindingPost(body: string | null | undefined): LimnFindingPost | null {
+  if (typeof body !== 'string' || body === '') return null;
+  if (!LIMN_FINDING_MARKER_RE.test(body)) return null;
+  if (LIMN_PUSHBACK_MARKER_RE.test(body)) return null;
+  const text = body.replace(/\r\n?/g, '\n').replace(/^[\s]+/, '');
+  const lead = /^\*\*(Blocker|Warning|Nit|Question)\*\*/.exec(text);
+  if (lead != null && LEAD_RE.test(text)) {
+    const rest = stripLimnSeverityLead(text).replace(/^[\s]+/, '');
+    return { severity: WORD_TO_SEVERITY[lead[1]!] ?? null, reminder: LIMN_REMINDER_LEAD_RE.test(rest) };
+  }
+  if (LIMN_REMINDER_LEAD_RE.test(text)) return { severity: null, reminder: true };
+  return null;
+}
+
+/** A finding's severity as the ML severity scale reads it, for its badge. */
+export const LIMN_ML_SEVERITY: Record<LimnSeverity, MlSeverity> = {
+  blocker: 'critical',
+  warning: 'major',
+  nit: 'nit',
+  question: 'minor',
+};
+
+/** The login prefix of the per-poster Limn bot users. ':' cannot occur in a GitHub login, so a
+ *  `limn:` login never collides with a real account and must NEVER be sent to GitHub. */
+export const LIMN_BOT_LOGIN_PREFIX = 'limn:';
+
+export function limnBotLogin(posterLogin: string): string {
+  return `${LIMN_BOT_LOGIN_PREFIX}${posterLogin}`;
+}
+
+export function isLimnBotLogin(login: string | null | undefined): boolean {
+  return typeof login === 'string' && login.startsWith(LIMN_BOT_LOGIN_PREFIX);
+}
+
+/** The poster's GitHub login behind a `limn:` bot login; null for any other login. */
+export function limnPosterOf(botLogin: string | null | undefined): string | null {
+  return isLimnBotLogin(botLogin) ? botLogin!.slice(LIMN_BOT_LOGIN_PREFIX.length) : null;
+}
+
+/** The bot's display name: "Limn · alice". */
+export function limnBotLabel(posterLogin: string): string {
+  return `${PRODUCT_NAME} · ${posterLogin}`;
+}
+
+/** `ml_comment_labels.backend` / `model_version` of a label written from a finding's own lead. */
+export const LIMN_LABEL_BACKEND = 'limn-review';
+export const LIMN_LABEL_MODEL_VERSION = 'limn-finding-v1';

@@ -86,6 +86,10 @@ const VIEWS = [
   ['feed', '?view=activity&activityRepo=feed', 'feed'],
   ...['roi', 'themes', 'benchmark', 'classification'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : t === 'classification' ? 'bot-classification' : null]),
   ['bot-detail:8', '?view=bot-detail:8', null],
+  // A Limn finding is a bot comment, one bot per poster (docs/CLAUDE-REVIEW.md § Limn findings are bots).
+  ['bots:roi:limn', '?view=activity&activityRepo=bots&botsTab=roi', null, { expect: ['Limn · morgan-diaz', 'Limn · priya-nair'] }],
+  ['bot-detail:40', '?view=bot-detail:40', null],
+  ['bot-detail:41', '?view=bot-detail:41', null],
   ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
   // Chronology → Over time: a marker on "Working hours saved" opens what happened that week
   // (docs/BOTTLENECKS.md § Over time), floated over the page and never clipped by the chart above.

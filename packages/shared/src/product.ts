@@ -54,5 +54,6 @@ export const PRODUCT_NAME = 'Limn';
 export const GENERIC_REVIEWER_LABELS: Readonly<Record<GenericReviewerKind, string>> = {
   in_house: 'In-house / custom',
   vendor: 'Vendor',
-  pierre: `${PRODUCT_NAME} · Claude`,
+  // The vendor of every per-poster Limn bot ("Limn · alice" is the bot's own label).
+  pierre: PRODUCT_NAME,
 };

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { limnPosterOf } from '@pierre-review/shared';
 import type { User } from '@pierre-review/shared';
 import { profileUrl, userLabel } from '../lib/ui.js';
 import { useMaintainersByRepo } from '../hooks/useMaintainers.js';
@@ -48,6 +49,9 @@ export function UserName({
   // so it stays plain text (as before).
   const userId = user?.id ?? null;
   const login = user?.githubLogin ?? null;
+  // A Limn bot (`limn:alice`) has no GitHub profile: no link, and its title names the poster.
+  const href = login ? profileUrl(login) : null;
+  const limnPoster = limnPosterOf(login);
   // Still an <a href> to the profile, exactly as before: a MODIFIED click (⌘/ctrl/shift/alt)
   // or a non-primary button keeps opening GitHub in a new tab, and the element stays inline
   // so no call site's layout shifts. A plain left click is intercepted for the popover
@@ -58,9 +62,9 @@ export function UserName({
     ) : (
       <a
         ref={setAnchorEl}
-        href={login ? profileUrl(login) : undefined}
-        target={login ? '_blank' : undefined}
-        rel={login ? 'noreferrer noopener' : undefined}
+        href={href ?? undefined}
+        target={href ? '_blank' : undefined}
+        rel={href ? 'noreferrer noopener' : undefined}
         data-user-handle={userId}
         onClick={(e) => {
           e.stopPropagation();
@@ -68,7 +72,13 @@ export function UserName({
           e.preventDefault();
           setOpen((v) => !v);
         }}
-        title={login ? `@${login} — activity & stats` : 'Activity & stats'}
+        title={
+          limnPoster != null
+            ? `Limn findings posted by @${limnPoster}`
+            : login
+              ? `@${login} — activity & stats`
+              : 'Activity & stats'
+        }
         className={[className, 'cursor-pointer hover:underline'].filter(Boolean).join(' ')}
       >
         {label}

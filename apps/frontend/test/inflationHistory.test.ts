@@ -105,6 +105,17 @@ describe('inflationHistory — the enlarged Inflation sparkline', () => {
     expect(h.unbadged).toEqual(['SonarQube']);
   });
 
+  // A Limn bot's severity is its own review's: named apart, never "badges nothing".
+  it('names a Limn bot apart from the bots that badge nothing', () => {
+    const h = inflationHistory([
+      { ...row('u40', 'Limn · alice', { badged: 0, overCall: 0, underCall: 0 }), login: 'limn:alice' },
+      row('u13', 'SonarQube', { badged: 0, overCall: 0, underCall: 0 }),
+    ]);
+    expect(h.limn).toEqual(['Limn · alice']);
+    expect(h.unbadged).toEqual(['SonarQube']);
+    expect(h.panels).toEqual([]);
+  });
+
   // No `mlInflation` at all means the bot had no in-window labels — it is absent from this block's
   // story rather than silent within it, so naming it would invent an exclusion that was never made.
   it('says nothing at all about a bot with no ML claim', () => {

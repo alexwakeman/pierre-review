@@ -237,10 +237,10 @@ it needs a CORE home. Classifications live in the CORE account-scoped
 who posted (their token) is NEVER reclassified**. The hidden marker `<!-- pierre:claude-review v=1 -->`
 is stamped **UNCONDITIONALLY** in `review/post-seam.ts` and dogfooded through the same fingerprint
 detector. ⚠ **It used to be a setting (`pro_settings bots.tagPierreReviews`) and must never be one
-again**: that marker is the ONLY producer of the `'pierre'` `AutomatedReviewerKind`, so switching it
-off silently deleted the Bot-ROI "Limn · Claude" row, the verbatim-vs-curated provenance,
-`BotPrsDetail`'s `'pierre'` tab and the `bot_only_review` risk flag — a config toggle for turning an
-analytics lane dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Limn +
+again**: the marker is how Limn's own posts are recognised (`isLimnPostedComment`) and, with a severity
+lead, what makes a finding a per-poster "Limn · <login>" bot (docs/CLAUDE-REVIEW.md § Limn findings
+are bots) — switching it off would turn those bots, the verbatim-vs-curated provenance and the
+`bot_only_review` risk flag dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Limn +
 Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
 DECLARED on the contract but nothing passes them. **Bot-ROI** (`getBotAnalytics(accountId,
 window, scope)`, a core fold) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`

@@ -40,7 +40,7 @@ const OLD_BRAND = /\bPierre\b(?![-:/])/;
 describe('the product name is Limn', () => {
   it('is one constant, and the labels that compose it read from it', () => {
     expect(PRODUCT_NAME).toBe('Limn');
-    expect(GENERIC_REVIEWER_LABELS.pierre).toBe(`${PRODUCT_NAME} · Claude`);
+    expect(GENERIC_REVIEWER_LABELS.pierre).toBe(PRODUCT_NAME);
     for (const label of Object.values(GENERIC_REVIEWER_LABELS)) {
       expect(label).not.toMatch(/pierre/i);
     }

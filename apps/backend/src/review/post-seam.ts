@@ -92,11 +92,11 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   }
 
   // Bot-Triage WS2c — the Limn provenance stamp. UNCONDITIONAL, and that is the point: this hidden,
-  // invisible, idempotent HTML marker is the ONLY producer of the 'pierre' AutomatedReviewerKind
-  // (`sync/review-fingerprint.ts` matches exactly this string). Everything downstream of that
-  // sentinel — the Bot-ROI "Limn · Claude" row, the ai_verbatim-vs-human_curated provenance,
-  // BotPrsDetail's 'pierre' tab, the bot_only_review risk flag — goes dark without it, so the
-  // account setting that used to gate it was a switch for silently deleting an analytics lane.
+  // invisible, idempotent HTML marker is how Limn's own posts are recognised, and a finding's
+  // marker + severity lead is what makes it a per-poster "Limn · <login>" bot (docs/CLAUDE-REVIEW.md
+  // § Limn findings are bots). Those bots, the ai_verbatim-vs-human_curated provenance and the
+  // bot_only_review risk flag go dark without it, so the account setting that used to gate it was a
+  // switch for silently deleting an analytics lane.
   // DO NOT re-gate this. `PostReviewArgs.pierreMarker?`/`pierreFooter?` remain DECLARED on the
   // contract (both sides, back-compat) but nothing passes them any more; the visible
   // "🤖 Reviewed with Limn + Claude" footer appeared in no detector and is gone.

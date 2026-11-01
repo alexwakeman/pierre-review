@@ -654,7 +654,7 @@ export interface FilterState {
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
   metricsFocus: WorkspaceMetricKey | null;
 
-  // transient: a clicked Bot-ROI vendor row → which analytics-row KEY (`u<userId>` | 'pierre')
+  // transient: a clicked Bot-ROI vendor row → which analytics-row KEY (`u<userId>`)
   // the bot-PR drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab
   // itself is a singleton). null = none.
   botPrsFocusKey: string | null;
@@ -1078,7 +1078,7 @@ export interface FilterState {
   openMetricsDetail: (metric: WorkspaceMetricKey) => void;
   consumeMetricsFocus: () => void;
   // Open (or re-focus) the bot-vendor PR drill-down tab on a specific analytics-row key
-  // (`u<userId>` | 'pierre'). Sets the botPrsFocusKey signal + opens the singleton bot-PRs tab;
+  // (`u<userId>`). Sets the botPrsFocusKey signal + opens the singleton bot-PRs tab;
   // BotPrsDetail consumes it.
   openBotPrsDetail: (key: string, repoId?: number | null) => void;
   consumeBotPrsFocus: () => void;

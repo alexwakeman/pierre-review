@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import { Tabs } from '../ui/index.js';
-import { PRODUCT_NAME } from '@pierre-review/shared';
 import type {
   BotVendorAnalytics,
   BotVendorComment,
@@ -336,7 +335,8 @@ export function BotPrsDetail(): JSX.Element {
   const analytics = useBotAnalytics(workspaceId, window, true, repoScope);
   const vendors = analytics.data?.vendors ?? NO_VENDORS;
 
-  // The active reviewer sub-tab, identified by its analytics-row KEY (`u<userId>` | 'pierre').
+  // The active reviewer sub-tab, identified by its analytics-row KEY (`u<userId>`; a Limn bot is
+  // one `u<id>` row per poster, like any other reviewer).
   // Seeded from the focus signal (the clicked ROI row); defaults to the first (most-threads)
   // reviewer once analytics load / when the current pick drops out of the window.
   const [active, setActive] = useState<string | null>(botPrsFocusKey);
@@ -359,12 +359,7 @@ export function BotPrsDetail(): JSX.Element {
   // Comments | PRs sub-view — state LOCAL to the tab (window/scope stay shared with the panel).
   // COMMENTS IS THE DEFAULT: what a review bot actually said is the question this drill-down is
   // opened to answer; the per-PR shape is the secondary cut.
-  // The visible view is DERIVED for the 'pierre' sentinel and never written back: its verbatim
-  // reviews are posted with the human's token, so there are no per-comment rows to list — the
-  // scalar keeps the user's choice for the sub-tabs that do render it (a corrective set would
-  // permanently forget it).
   const [view, setView] = useState<'prs' | 'comments'>('comments');
-  const effectiveView: 'prs' | 'comments' = active === 'pierre' ? 'prs' : view;
   const mlEnabled = useMlSeverityEnabled();
   const [commentSort, setCommentSort] = useState<CommentSort>('newest');
   // Severity/praise pills (empty = no narrowing) and the vendor-disagreement toggle. They AND.
@@ -385,13 +380,13 @@ export function BotPrsDetail(): JSX.Element {
   // BOTH lists are lazy, each gated on its own view being the visible one. Comments now opens by
   // default, so making the PR list lazy too is what keeps opening this tab at one list request
   // rather than two — and the PR list is the heavier read of the pair.
-  const prs = useBotVendorPrs(workspaceId, active, window, effectiveView === 'prs', repoScope);
+  const prs = useBotVendorPrs(workspaceId, active, window, view === 'prs', repoScope);
   const rows = prs.data?.prs ?? [];
   const comments = useBotVendorComments(
     workspaceId,
     active,
     window,
-    effectiveView === 'comments',
+    view === 'comments',
     repoScope,
   );
   const fetchedComments = useMemo(() => comments.data?.comments ?? [], [comments.data]);
@@ -474,7 +469,7 @@ export function BotPrsDetail(): JSX.Element {
     void analytics.refetch();
     // Only the OPEN view's list — `refetch` ignores `enabled`, so refetching both would spend a
     // search-tier request on a list nothing renders (and undo half of making them lazy).
-    if (effectiveView === 'comments') void comments.refetch();
+    if (view === 'comments') void comments.refetch();
     else void prs.refetch();
   };
 
@@ -485,7 +480,7 @@ export function BotPrsDetail(): JSX.Element {
           Bot Drill-Down
         </h2>
         <span className="text-meta text-ui-faint">
-          {effectiveView === 'comments'
+          {view === 'comments'
             ? `What ${activeLabel ?? 'an automated reviewer'} said in the window`
             : `PRs ${activeLabel ?? 'an automated reviewer'} touched · most-recent activity first`}
           {botOnlyPrs > 0 && (
@@ -565,9 +560,7 @@ export function BotPrsDetail(): JSX.Element {
             }))}
           />
 
-          {/* Comments | PRs sub-view toggle — Comments first, and the view this tab opens on.
-              Comments is DISABLED for the 'pierre' sentinel (verbatim reviews are posted with the
-              human's token — no per-comment rows), which is the one case that lands on PRs. */}
+          {/* Comments | PRs sub-view toggle — Comments first, and the view this tab opens on. */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex overflow-hidden rounded-ui">
               {(
@@ -576,22 +569,18 @@ export function BotPrsDetail(): JSX.Element {
                   { key: 'prs', label: 'PRs' },
                 ] as const
               ).map((t) => {
-                const disabled = t.key === 'comments' && active === 'pierre';
                 return (
                   <button
                     key={t.key}
                     type="button"
                     onClick={() => setView(t.key)}
-                    disabled={disabled}
                     title={
-                      disabled
-                        ? `${PRODUCT_NAME}’s verbatim reviews are posted with the human’s token — there are no per-comment rows to list.`
-                        : t.key === 'comments'
-                          ? 'Everything this bot said in the window — inline comments, PR comments and review summaries'
-                          : 'The PRs this bot touched in the window'
+                      t.key === 'comments'
+                        ? 'Everything this bot said in the window — inline comments, PR comments and review summaries'
+                        : 'The PRs this bot touched in the window'
                     }
-                    className={`px-2 py-0.5 text-meta font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-                      effectiveView === t.key
+                    className={`px-2 py-0.5 text-meta font-medium ${
+                      view === t.key
                         ? 'bg-ai-signal/15 text-ai-signal'
                         : 'text-ui-mute hover:bg-ui-hover'
                     }`}
@@ -603,7 +592,7 @@ export function BotPrsDetail(): JSX.Element {
             </div>
             {/* Sort. Both DATE orders are always offered; Severity only where severities exist
                 to sort by (no scoring service ⇒ the option would sort by nothing). */}
-            {effectiveView === 'comments' && (
+            {view === 'comments' && (
               <div className="ml-auto inline-flex overflow-hidden rounded-ui">
                 {(
                   [
@@ -641,7 +630,7 @@ export function BotPrsDetail(): JSX.Element {
               badges count the FULL fetched list so pressing one never zeroes the others. Hidden
               entirely when nothing in the list is labelled — a row of dead pills on an
               un-enriched (or OSS) install advertises a filter that can only return nothing. */}
-          {effectiveView === 'comments' && showCommentFilters && (
+          {view === 'comments' && showCommentFilters && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-meta font-semibold text-ui-faint">
                 Severity
@@ -700,7 +689,7 @@ export function BotPrsDetail(): JSX.Element {
             </div>
           )}
 
-          {effectiveView === 'comments' ? (
+          {view === 'comments' ? (
             comments.isLoading ? (
               <div className="space-y-2">
                 {[0, 1, 2, 3].map((i) => (

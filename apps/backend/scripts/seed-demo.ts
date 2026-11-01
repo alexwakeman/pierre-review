@@ -138,6 +138,12 @@ await db
     // a manual classification override — so the demo shows in-house / allowlist detection,
     // not just vendor-login matching.
     { id: 10, githubLogin: 'acme-ci', githubNodeId: 'U_acmeci', displayName: 'Acme CI', isBot: false, githubType: 'User' },
+    // The per-poster LIMN BOTS (docs/CLAUDE-REVIEW.md § Limn findings are bots). Sync creates these
+    // on first sight of a poster's finding (`ensureLimnBotUser`, the same values); they are named
+    // here only so their ids stay fixed for the demo's `bot-detail:<id>` tabs. Their comments are
+    // re-attributed by the product's own `reconcileLimnFindingAuthors` below, never by hand.
+    { id: 40, githubLogin: 'limn:morgan-diaz', githubNodeId: null, displayName: 'Limn · morgan-diaz', isBot: true, isBotOverridden: true },
+    { id: 41, githubLogin: 'limn:priya-nair', githubNodeId: null, displayName: 'Limn · priya-nair', isBot: true, isBotOverridden: true },
   ])
   .execute();
 
@@ -807,7 +813,68 @@ for (const rc of botCommentRows) {
 ev(API, 4, 113, 'pr_comment', day(1), 'pr_comments', 1);
 ev(API, 1, 105, 'pr_comment', day(1), 'pr_comments', 2);
 ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
+
+// ---- Limn findings posted by two people (threads 60+, comments 460+, pr_comment 60) ----------
+// Limn posts AI Review findings under the reader's own account. A finding comment (the finding
+// marker + a severity or reminder lead) is a BOT comment: one bot per poster, "Limn · morgan-diaz"
+// and "Limn · priya-nair", beside CodeRabbit and Copilot in Bots Monitoring. Stored here exactly as
+// sync first sees them — under the PERSON — and moved to the bot by the product's own reconcile
+// (end of this block), which also writes their severity badges from the lead line.
+{
+  const { findingCommentBody, prLevelFindingBody, FINDING_COMMENT_MARKER } = await import('../src/review/post-review.js');
+  const LIMN_THREADS: Array<{
+    id: number; prId: number; path: string; line: number; poster: number; daysAgo: number; body: string;
+  }> = [
+    { id: 60, prId: 105, path: 'src/api/routes/webhooks.ts', line: 41, poster: ME, daysAgo: 1.6,
+      body: findingCommentBody({ severity: 'warning', body: 'The signature check compares strings with `===`, so its timing leaks how many bytes matched. Use `crypto.timingSafeEqual` on the two buffers.', editedBody: null, suggestion: null }) },
+    { id: 61, prId: 105, path: 'src/api/routes/webhooks.ts', line: 77, poster: ME, daysAgo: 1.6,
+      body: findingCommentBody({ severity: 'nit', body: '`evt` reads better as `event` here; the handler below already uses the long name.', editedBody: null, suggestion: null }) },
+    { id: 62, prId: 111, path: 'src/api/routes/sync-activity.ts', line: 23, poster: 2, daysAgo: 2.4,
+      body: findingCommentBody({ severity: 'question', body: 'Does the stream close when the client disconnects? Nothing here listens for `close` on the reply socket.', editedBody: null, suggestion: null }) },
+    { id: 63, prId: 111, path: 'src/api/routes/sync-activity.ts', line: 58, poster: 2, daysAgo: 0.8,
+      body: [
+        `**Reminder:** first raised on ${day(2.4).getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][day(2.4).getUTCMonth()]} ${day(2.4).getUTCFullYear()}.`,
+        'Each progress frame is written without a back-pressure check, so a slow client buffers the whole sync in memory.',
+        FINDING_COMMENT_MARKER,
+      ].join('\n\n') },
+  ];
+  await db
+    .insert(schema.reviewThreads)
+    .values(
+      LIMN_THREADS.map((t) => ({
+        id: t.id, githubNodeId: `RT_${t.id}`, prId: t.prId, path: t.path, line: t.line,
+        isResolved: false, isOutdated: false, derivedState: 'untouched' as const,
+        originalCommenterId: t.poster, createdAt: day(t.daysAgo),
+      })),
+    )
+    .execute();
+  const limnCommentRows = LIMN_THREADS.map((t, i) => ({
+    id: 460 + i, githubNodeId: `RC_limn_${t.id}`, threadId: t.id, prId: t.prId, authorId: t.poster,
+    body: t.body, excerpt: t.body.length > 160 ? `${t.body.slice(0, 159)}…` : t.body,
+    diffHunk: `@@ -${t.line},3 +${t.line},4 @@`, databaseId: `${1_350_000 + t.id}`, createdAt: day(t.daysAgo),
+  }));
+  await db.insert(schema.reviewComments).values(limnCommentRows).execute();
+  // A PR-level finding: its file is outside #111's diff, so Priya's review posted it as a comment.
+  const prLevelBody = prLevelFindingBody(
+    { severity: 'blocker', path: 'src/sync/scheduler.ts', line: 12, body: 'The scheduler starts a second tick while the first still runs, so two walks can write the same PR at once.', editedBody: null, suggestion: null },
+    { outsideDiffNote: true },
+  );
+  await db
+    .insert(schema.prComments)
+    .values({ id: 60, githubNodeId: 'PC_limn_60', prId: 111, authorId: 2, body: prLevelBody, databaseId: '3000060', createdAt: day(2.4) })
+    .execute();
+  // Events keyed as sync keys them (`<type>:<node id>`), so the reconcile moves their actor too.
+  for (const rc of limnCommentRows) {
+    events.push({ id: evId++, accountId: 1, repoId: API, actorId: rc.authorId, prId: rc.prId, type: 'review_comment', occurredAt: rc.createdAt, refTable: 'review_threads', refId: rc.threadId, dedupeKey: `review_comment:${rc.githubNodeId}` });
+  }
+  events.push({ id: evId++, accountId: 1, repoId: API, actorId: 2, prId: 111, type: 'pr_comment', occurredAt: day(2.4), refTable: 'pr_comments', refId: 60, dedupeKey: 'pr_comment:PC_limn_60' });
+}
 await db.insert(schema.events).values(events).execute();
+{
+  const { reconcileLimnFindingAuthors } = await import('../src/db/limn-bots.js');
+  const r = await reconcileLimnFindingAuthors(1);
+  console.log(`  limn findings: ${JSON.stringify(r)}`);
+}
 
 // ---- what Morgan has opened before (pr_views) — the sidebar's BLUE dot -----
 // acme/api's status panel then reads both colours: red (#111 waits for Morgan's review, #105 has

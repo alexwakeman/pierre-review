@@ -17,7 +17,7 @@ describe('BOT_VENDOR_META and the product name', () => {
     expect(BOT_VENDOR_META.pierre.label).toBe(GENERIC_REVIEWER_LABELS.pierre);
     expect(BOT_VENDOR_META.in_house.label).toBe(GENERIC_REVIEWER_LABELS.in_house);
     expect(BOT_VENDOR_META.vendor.label).toBe(GENERIC_REVIEWER_LABELS.vendor);
-    expect(BOT_VENDOR_META.pierre.label).toBe(`${PRODUCT_NAME} · Claude`);
+    expect(BOT_VENDOR_META.pierre.label).toBe(PRODUCT_NAME);
   });
 
   it('names no vendor after the old brand', () => {

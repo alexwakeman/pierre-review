@@ -14,6 +14,8 @@
 import { config } from '../src/config.js';
 import { runMigrations } from '../src/db/run-migrations.js';
 import { closeDb, db, schema } from '../src/db/client.js';
+import { ne } from 'drizzle-orm';
+import { LIMN_LABEL_BACKEND } from '@pierre-review/shared';
 import { runMlEnrichmentTick } from '../src/sync/ml-enrichment.js';
 import { isSeverityApiConfigured, severityHealth } from '../src/ml/severity-client.js';
 
@@ -55,8 +57,11 @@ async function main(): Promise<void> {
   }
 
   if (args.has('--reset')) {
+    // ⚠ A Limn finding's label is the review's own severity, not a model output: kept (the scorer
+    // would never re-create it — db/limn-finding-labels.ts).
     const removed = await db
       .delete(schema.mlCommentLabels)
+      .where(ne(schema.mlCommentLabels.backend, LIMN_LABEL_BACKEND))
       .returning({ id: schema.mlCommentLabels.id })
       .execute();
     console.log(`Cleared ${removed.length} stored label(s).`);

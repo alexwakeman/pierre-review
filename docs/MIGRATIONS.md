@@ -1345,6 +1345,16 @@ has no FK). Both on `accountScopedTables()`, erased, exported (the seed withheld
 `deleteRepo` deletes a repository's rows explicitly. Additive, no backfill. [STORY-BUILD.md](STORY-BUILD.md)
 § Data model. Journal `idx` 149, `when` sqlite `1792137653016`.
 
+### `0151_limn_finding_bots` — Limn findings are bots
+`ALTER TABLE review_comments ADD limn_posted_by_user_id` and the same on `pr_comments` (nullable,
+`REFERENCES users(id)`), with indexes `rc_limn_poster_idx` / `prc_limn_poster_idx`. A comment that is a
+Limn finding (shared `limnFindingPost`) keeps its true poster here while `author_id` holds the per-poster
+bot user `limn:<login>`. No SQL backfill: the predicate is code, so the boot reconcile
+(`db/limn-bots.ts` `reconcileLimnFindingAuthors`) re-attributes stored rows, idempotently, and sync
+applies the same rule on every walk. No new table, so `accountScopedTables()` is unchanged.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are bots. Journal `idx` 151, `when` sqlite
+`1792224054016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

@@ -15,7 +15,7 @@
 // Each reply is CLIPPED (REPLY_CHARS) and only the last REPLIES_MAX are kept. Everything here was
 // written by people on an attacker-influenced pull request: prompts.ts fences it with the run's
 // nonce as data, never instructions.
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { PUSHBACK_REPLY_MARKER, type FindingAutoResolveRecord, type FindingPushbackRecord } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { automationVendorFor, isLikelyBot } from '../../sync/bot-detection.js';
@@ -241,7 +241,9 @@ export async function loadPrThreads(
       id: t.reviewComments.id,
     })
     .from(t.reviewComments)
-    .leftJoin(t.users, eq(t.users.id, t.reviewComments.authorId))
+    // The TRUE poster: a Limn finding is stored under its `limn:` bot (db/limn-bots.ts), and
+    // every test here (`isLimnMarked`, the root, the pushback) asks who POSTED it.
+    .leftJoin(t.users, eq(t.users.id, sql`coalesce(${t.reviewComments.limnPostedByUserId}, ${t.reviewComments.authorId})`))
     .where(eq(t.reviewComments.prId, prId))
     .orderBy(asc(t.reviewComments.createdAt), asc(t.reviewComments.id))
     .execute()) as Array<{

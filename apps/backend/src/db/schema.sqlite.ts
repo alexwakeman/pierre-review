@@ -612,11 +612,18 @@ export const reviewComments = sqliteTable(
     // GitHub numeric id (fullDatabaseId) for the #discussion_r<id> deep link.
     databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    // LIMN FINDINGS ARE BOTS (migration 0151; docs/CLAUDE-REVIEW.md § Limn findings are bots). A
+    // comment that is a Limn finding (shared `limnFindingPost`) is stored under the per-poster bot
+    // user `limn:<login>` in `authorId`, and the person who posted it is kept HERE. NULL on every
+    // other comment. Every "is this my own post" check reads `coalesce(this, author_id)`
+    // (db/limn-bots.ts `trueAuthorId`).
+    limnPostedByUserId: integer('limn_posted_by_user_id').references(() => users.id),
   },
   (t) => ({
     threadIdx: index('rc_thread_idx').on(t.threadId),
     authorIdx: index('rc_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('rc_pr_node').on(t.prId, t.githubNodeId),
+    limnPosterIdx: index('rc_limn_poster_idx').on(t.limnPostedByUserId),
   }),
 );
 
@@ -635,11 +642,15 @@ export const prComments = sqliteTable(
     // GitHub numeric id (fullDatabaseId) for the #issuecomment-<id> deep link.
     databaseId: text('database_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    // The person who posted a Limn finding; `authorId` holds the `limn:<login>` bot. See
+    // reviewComments.limnPostedByUserId.
+    limnPostedByUserId: integer('limn_posted_by_user_id').references(() => users.id),
   },
   (t) => ({
     prIdx: index('prc_pr_idx').on(t.prId),
     authorIdx: index('prc_author_idx').on(t.authorId),
     nodeUx: uniqueIndex('prc_pr_node').on(t.prId, t.githubNodeId),
+    limnPosterIdx: index('prc_limn_poster_idx').on(t.limnPostedByUserId),
   }),
 );
 

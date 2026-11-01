@@ -11,7 +11,7 @@ import { workspaceKey } from './useActivity.js';
 // one automated reviewer touched in the window (threads/comments/acted-on/untouched/bot-only),
 // most-recent-bot-activity first. A heavier read than the always-loaded Bot-ROI panel, so it's
 // fetched lazily — `enabled` is gated on the drill-down tab being open AND a row being selected.
-// `key` is the analytics row identity (`u<userId>` | 'pierre').
+// `key` is the analytics row identity (`u<userId>`; a Limn bot is one such row per poster).
 //
 // ⚠ IT MUST BE OPENED AT THE SAME SCOPE AS THE ROW IT CAME FROM. This list reproduces one row of
 // the ROI panel, so the header label and the per-PR `botOnly` badge take the identical

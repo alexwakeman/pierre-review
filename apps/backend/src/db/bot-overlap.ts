@@ -37,6 +37,7 @@ import type {
   SeverityAgreementMatrix,
   VendorSeverityAxis,
 } from '@pierre-review/shared';
+import { LIMN_LABEL_BACKEND } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { botWindowMs } from './bot-window.js';
 import { clusterThreadsByLine } from './line-overlap.js';
@@ -496,10 +497,16 @@ export async function getBotOverlapClusters(
   // (the commentFacetCounts rule). ⚠ Its `total` is the count of LABELLED origin comments, NOT
   // the cluster `total` above: a cluster is not an ML row, and only a labelled comment can be
   // placed on either axis. `declared`/`undeclared` state the sparsity honestly.
+  // ⚠ A Limn finding's label is its own review's severity, never a model score, so it sits on
+  // neither axis: left out of the matrix AND of any cell/disagreement refine.
+  const matrixLabelForThread = (threadId: number): MlLabel | undefined => {
+    const l = labelForThread(threadId);
+    return l && l.backend !== LIMN_LABEL_BACKEND ? l : undefined;
+  };
   const matrix = buildMatrix(
     capped.flatMap((c) =>
       c.items
-        .map((t) => labelForThread(t.threadId))
+        .map((t) => matrixLabelForThread(t.threadId))
         .filter((l): l is MlLabel => l !== undefined),
     ),
   );
@@ -521,7 +528,7 @@ export async function getBotOverlapClusters(
   const memberMatches = (t: OverlapThread): boolean => {
     if (refine.authorUserIds != null && !refine.authorUserIds.includes(t.userId)) return false;
     if (!refine.cell && !refine.disagree) return true;
-    return labelMatchesRefine(labelForThread(t.threadId), refine);
+    return labelMatchesRefine(matrixLabelForThread(t.threadId), refine);
   };
   const narrowed =
     refine.cell || refine.disagree || refine.authorUserIds != null

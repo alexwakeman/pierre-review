@@ -64,7 +64,7 @@
 // "Couldn't post automatically: …" and keeps the Post button), never swallowed and never retried.
 // ⚠ Manual runs are never auto-posted: a review you start yourself keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
-import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
   type AutoApproveImpact,
@@ -644,15 +644,22 @@ export async function readAutoPostPrFacts(
   }
   let participatedByMe = false;
   if (me != null && !authorIsMe && !requestedOfMe) {
+    // A Limn finding the reader posted is stored under their `limn:` bot with the reader in
+    // `limn_posted_by_user_id` (db/limn-bots.ts); it still counts as the reader taking part.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const by = (tbl: any) =>
+    const by = (tbl: any, limnPoster: boolean) =>
       ctx.db
         .select({ id: tbl.id })
         .from(tbl)
-        .where(and(eq(tbl.prId, prId), eq(tbl.authorId, me)))
+        .where(
+          and(
+            eq(tbl.prId, prId),
+            limnPoster ? or(eq(tbl.authorId, me), eq(tbl.limnPostedByUserId, me)) : eq(tbl.authorId, me),
+          ),
+        )
         .limit(1)
         .execute() as Promise<unknown[]>;
-    const hits = await Promise.all([by(t.reviews), by(t.reviewComments), by(t.prComments)]);
+    const hits = await Promise.all([by(t.reviews, false), by(t.reviewComments, true), by(t.prComments, true)]);
     participatedByMe = hits.some((h) => h.length > 0);
   }
   return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, openRequestOfMe, participatedByMe };

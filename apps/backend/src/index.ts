@@ -54,6 +54,20 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     const { loadStoredAiEffort, loadStoredAiProvider } = await import('./ai/provider-store.js');
     await loadStoredAiProvider(me?.id);
     await loadStoredAiEffort(me?.id);
+    // LIMN FINDINGS ARE BOTS (db/limn-bots.ts): stored finding comments go to their poster's
+    // `limn:` bot (and edited-away ones back to their person) before anything reads them. DB only,
+    // idempotent; a no-op pass is one indexed scan. Never fails the boot.
+    if (me?.id != null) {
+      try {
+        const { reconcileLimnFindingAuthors } = await import('./db/limn-bots.js');
+        const r = await reconcileLimnFindingAuthors(me.id);
+        if (r.comments > 0 || r.repairedReviewerRows > 0) {
+          console.log(`limn: re-attributed ${r.comments} finding comment(s), repaired ${r.repairedReviewerRows} reviewer row(s)`);
+        }
+      } catch (err) {
+        console.warn('limn: finding re-attribution failed', err);
+      }
+    }
   }
 
   const app = await buildApp();

@@ -2061,7 +2061,7 @@ export const api = {
     ),
   // The per-PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer touched in
   // the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first. `key` is
-  // the analytics row identity — `u<userId>` (a single reviewer) or the 'pierre' sentinel.
+  // the analytics row identity — `u<userId>` (one reviewer; a Limn bot is one per poster).
   //
   // ⚠ It is opened FROM a scoped ROI row, so it MUST be given the SAME workspace and repo set that
   // row was computed at: the header label and the per-PR `botOnly` badge both key on them, and one

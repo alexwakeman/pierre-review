@@ -26,7 +26,15 @@ import type {
   GqlPullRequest,
   GqlReviewRequestEvent,
 } from '../github/queries.js';
-import { isLimnStatusContext, mergeStateWithoutLimn, rollupStateWithoutLimn, type CheckRun } from '@pierre-review/shared';
+import {
+  isLimnStatusContext,
+  limnFindingPost,
+  mergeStateWithoutLimn,
+  rollupStateWithoutLimn,
+  type CheckRun,
+} from '@pierre-review/shared';
+import { ensureLimnBotUser, ensureLimnReviewerRow } from '../db/limn-bots.js';
+import { syncLimnFindingLabels } from '../db/limn-finding-labels.js';
 import { checkContextState } from '../github/check-context-state.js';
 
 const {
@@ -1173,9 +1181,47 @@ export async function persistPr(
       priorThreads.set(row.nodeId, { isResolved: row.isResolved, resolvedAt: row.resolvedAt });
     const observedAt = new Date();
 
+    // LIMN FINDINGS ARE BOTS (db/limn-bots.ts): a comment that is a Limn finding (shared
+    // `limnFindingPost`) is stored under the poster's `limn:<login>` bot, with the poster kept in
+    // `limn_posted_by_user_id`; every other comment under its author. Both columns are in each
+    // conflict `set`, so a body edited to drop the marker goes back to its person on this walk.
+    const limnWorkspaceId = (
+      await tx
+        .select({ workspaceId: workspaceRepos.workspaceId })
+        .from(workspaceRepos)
+        .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)))
+        .limit(1)
+        .execute()
+    )[0]?.workspaceId;
+    const limnBots = new Map<string, number>();
+    // `finding` false = this comment can never be a finding: Limn posts a finding or a reminder
+    // as a new thread ROOT, so a reply (even one opening with a bold "**Nit**") stays its author's.
+    const attribute = async (
+      c: {
+        author?: GqlActor | null;
+        body?: string | null;
+      },
+      finding = true,
+    ): Promise<{ authorId: number | null; limnPostedByUserId: number | null }> => {
+      const posterId = await resolver.resolve(tx, c.author);
+      const login = c.author?.login;
+      if (!finding || posterId == null || !login || limnFindingPost(c.body) == null) {
+        return { authorId: posterId, limnPostedByUserId: null };
+      }
+      let botId = limnBots.get(login);
+      if (botId === undefined) {
+        botId = await ensureLimnBotUser(tx, login);
+        limnBots.set(login, botId);
+        if (limnWorkspaceId != null) await ensureLimnReviewerRow(tx, accountId, limnWorkspaceId, botId, login);
+      }
+      return { authorId: botId, limnPostedByUserId: posterId };
+    };
+
     for (const t of pr.reviewThreads.nodes) {
       const commentNodes = t.comments.nodes;
-      const originalCommenterId = await resolver.resolve(tx, commentNodes[0]?.author);
+      const originalCommenterId = commentNodes[0]
+        ? (await attribute(commentNodes[0])).authorId
+        : null;
 
       const resolvedByLogin = t.resolvedBy?.login ?? null;
       // Preserve a prior stamp; set it fresh only when we observe unresolved→resolved this sync.
@@ -1228,14 +1274,17 @@ export async function persistPr(
             resolvedByLogin,
             resolvedAt,
             line: t.line,
+            // Follows the root comment's attribution (a Limn finding root is its bot). Never
+            // cleared by a walk that saw no comments.
+            originalCommenterId: sql`coalesce(excluded.original_commenter_id, ${reviewThreads.originalCommenterId})`,
           },
         })
         .returning({ id: reviewThreads.id })
         .execute()
       )[0]!;
 
-      for (const c of commentNodes) {
-        const commenterId = await resolver.resolve(tx, c.author);
+      for (const [ci, c] of commentNodes.entries()) {
+        const { authorId: commenterId, limnPostedByUserId } = await attribute(c, ci === 0);
         const createdAt = new Date(c.createdAt);
         const rcRow = (
           await tx
@@ -1252,6 +1301,7 @@ export async function persistPr(
             diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
             databaseId: c.fullDatabaseId ?? null,
             createdAt,
+            limnPostedByUserId,
           })
           .onConflictDoUpdate({
             target: [reviewComments.prId, reviewComments.githubNodeId],
@@ -1260,6 +1310,8 @@ export async function persistPr(
               excerpt: excerptOf(c.body),
               diffHunk: config.persistBodies ? (c.diffHunk ?? null) : null,
               databaseId: c.fullDatabaseId ?? null,
+              authorId: commenterId,
+              limnPostedByUserId,
             },
           })
           .returning({ id: reviewComments.id })
@@ -1293,7 +1345,7 @@ export async function persistPr(
 
     // ---- general PR comments ----
     for (const c of pr.comments.nodes) {
-      const commenterId = await resolver.resolve(tx, c.author);
+      const { authorId: commenterId, limnPostedByUserId } = await attribute(c);
       const createdAt = new Date(c.createdAt);
       const commentRow = (
         await tx
@@ -1306,12 +1358,15 @@ export async function persistPr(
           body: c.body ?? null,
           databaseId: c.fullDatabaseId ?? null,
           createdAt,
+          limnPostedByUserId,
         })
         .onConflictDoUpdate({
           target: [prComments.prId, prComments.githubNodeId],
           set: {
             body: c.body ?? null,
             databaseId: c.fullDatabaseId ?? null,
+            authorId: commenterId,
+            limnPostedByUserId,
           },
         })
         .returning({ id: prComments.id })
@@ -1339,6 +1394,9 @@ export async function persistPr(
         dedupeKey: `pr_comment:${c.id}`,
       });
     }
+
+    // The severity badge of each Limn finding on this PR, from its own lead (never the ML scorer).
+    await syncLimnFindingLabels(tx, accountId, { prIds: [prId] });
 
     // ---- commits ----
     for (const node of pr.commits.nodes) {

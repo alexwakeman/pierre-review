@@ -9,8 +9,7 @@ hosted backend, no sign-in, no stored GitHub credentials (it shells out to your 
 **Every feature is free** under the Limn License 1.0 (`LICENSE`: free for individuals and for
 organisations where ≤ 3 people use it; a commercial licence above that, via the contact form; no
 competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
-or Settings → AI). The website (landing, a static demo at `/demo/`, the contact form) is a separate
-tiny service, `apps/site`.
+or Settings → AI). The website is a separate service, `apps/site`.
 
 > **How to use this file.** This is the lean operating guide: the mental model, the commands,
 > and the invariants and landmines you must know BEFORE editing. Per-area depth lives in the
@@ -438,6 +437,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
   failure is recorded and NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
+- ⚠ **A Limn FINDING comment is a BOT** (`limn:<login>`); the poster is `limn_posted_by_user_id`,
+  and own-post checks read `trueAuthorId`.
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
   never Limn's own. A FAILED auto run at the head is retried by that same rule only when TRANSIENT
@@ -515,7 +516,6 @@ Monitoring, the work-plan wording, Slack.
   Jira status transition the reader picks** in the story view (`tracker/status-change.ts`); nothing
   else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
-- Gone: the story report, story-health charts, Ask about this period, People, 1:1 prep.
 
 ## ML severity/category on bot comments (no LLM)
 

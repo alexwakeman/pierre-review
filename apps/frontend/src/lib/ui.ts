@@ -50,7 +50,7 @@ import type {
   TimelinePr,
   User,
 } from '@pierre-review/shared';
-import { reviewBotKind } from '@pierre-review/shared';
+import { isLimnBotLogin, limnPosterOf, reviewBotKind } from '@pierre-review/shared';
 
 // AI runs spend the reader's OWN Claude Code session or Anthropic API key and Limn bills nothing
 // for them, so their cost shows as plain money, as the provider would charge it.
@@ -284,7 +284,7 @@ export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: s
 // AutomatedReviewerKind = ReviewBotKind ∪ 'in_house' ∪ 'pierre' (vendor classification lives
 // in @pierre-review/shared reviewBotKind; presentation lives here). Drives the PrDetail
 // "Bots" chip, the feed vendor tag, the bot-signal / bot-ROI cards, so a review-comment card
-// reads "CodeRabbit flagged…" (or "In-house / custom" / "Limn · Claude") not a bare bot login.
+// reads "CodeRabbit flagged…" (or "In-house / custom" / "Limn · alice") not a bare bot login.
 //
 // ⚠ THIS MAP HAS TWO SIBLINGS AND THEY HAVE DRIFTED BEFORE: the backend's `labelFor`
 // (sync/reviewer-classify.ts, which also PERSISTS the label) and the plugin's Slack
@@ -1406,8 +1406,12 @@ export function userLabel(user: User | undefined, fallbackId: number | null): st
   return fallbackId == null ? 'unknown' : `user ${fallbackId}`;
 }
 
-/** GitHub profile URL for a login (e.g. `octocat` → https://github.com/octocat). */
-export function profileUrl(login: string): string {
+/**
+ * GitHub profile URL for a login (e.g. `octocat` → https://github.com/octocat). Null for a Limn
+ * bot (`limn:alice`): that login is not a GitHub account and must never become a link to one.
+ */
+export function profileUrl(login: string): string | null {
+  if (isLimnBotLogin(login)) return null;
   return `https://github.com/${encodeURIComponent(login)}`;
 }
 
@@ -1473,7 +1477,9 @@ export function advisoryUrl(id: string): string | null {
 // blockquote and @mentions its author. The user edits from there. Empty bodies
 // (e.g. lean mode before hydration) just yield the bare mention.
 export function buildQuotedReply(body: string | null, authorLogin: string | null): string {
-  const mention = authorLogin ? `@${authorLogin} ` : '';
+  // A Limn bot's `limn:<login>` must never reach GitHub: mention the person who posted it.
+  const login = limnPosterOf(authorLogin) ?? authorLogin;
+  const mention = login ? `@${login} ` : '';
   const trimmed = (body ?? '').trim();
   if (trimmed === '') return mention;
   const quoted = trimmed
