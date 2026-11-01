@@ -48,9 +48,11 @@ export function storySummaryProse(text: string | null | undefined, max: number =
   return clipAtSentence(prose, max);
 }
 
-// A leading criterion ref the model wrote ("AC3: ", "AC1/AC8 - "): group 1 the first number, group 2
-// any further refs joined to it.
-const LEADING_CRITERION_REFS = /^\s*AC\s?(\d+)((?:\s*[/,&]\s*AC\s?\d+)*)\s*[:.)\-–—]\s*/i;
+// A leading criterion ref the model wrote ("AC3: ", "AC1/AC8 - ", or "AC1 Retained …" with only a space
+// before a capital or a quote): group 1 the first number, group 2 any further refs joined to it.
+// ⚠ A bare space counts only before a capital or an opening quote, so "AC1 and AC2 both …" (prose that
+// starts with a ref) is left alone.
+const LEADING_CRITERION_REFS = /^\s*[Aa][Cc]\s?(\d+)((?:\s*[/,&]\s*[Aa][Cc]\s?\d+)*)(?:\s*[:.)\-–—]\s*|\s+(?=[A-Z"'“‘`(]))/;
 
 /**
  * A criterion's text without a leading copy of ITS OWN ref ("AC3: The export …" on row AC3 → "The

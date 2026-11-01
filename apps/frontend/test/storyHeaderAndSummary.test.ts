@@ -51,6 +51,11 @@ describe('the summary', () => {
     expect(criterionTextOnly('npmTest runs', 'AC4')).toBe('npmTest runs');
     expect(criterionTextOnly('AC2:', 'AC2')).toBe('AC2:');
     expect(criterionTextOnly('AC2: x', null)).toBe('AC2: x');
+    // A bare space before a capital or a quote (the model left out the colon): dropped too.
+    expect(criterionTextOnly('AC1 Retained area page shows the input', 'AC1')).toBe('Retained area page shows the input');
+    expect(criterionTextOnly('AC2 "View" links work', 'AC2')).toBe('"View" links work');
+    // …but prose that only STARTS with the ref stays.
+    expect(criterionTextOnly('AC1 and AC2 both hold', 'AC1')).toBe('AC1 and AC2 both hold');
   });
 });
 
