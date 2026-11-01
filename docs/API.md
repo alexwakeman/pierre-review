@@ -335,11 +335,6 @@ nothing), `ClaudeFinding.docCitations` (`ReferenceDocCitation[]`, absent when no
 against code", 2026-10-18). Every `path` is
 the same library-relative path `GET /api/docs/section` takes.
 
-**The review plan on a review** (2026-11-01, docs/CLAUDE-REVIEW.md § The review plan): every
-`ClaudeReview` payload carries `coverage: ClaudeCoverageItem[] | null` — `{ref, path, reasons[], status:
-'issues' | 'no_issues' | 'not_reviewed', note}` in the code's ranked order. null/absent = the run had no
-plan (an older run, a skip, not succeeded). Additive; no route changed.
-
 ### Check a story against the docs
 
 `review/story-docs/routes.ts`, registered by `registerAgenticRoutes` (absent under `LIMN_AI_DISABLED` → `404`). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the docs. Wire

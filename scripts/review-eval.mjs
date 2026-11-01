@@ -70,8 +70,6 @@ async function runOnce(c) {
         outputTokens: rev.outputTokens ?? null,
         seconds: Math.round((Date.now() - started) / 1000),
         summary: rev.summary ?? '',
-        // The review plan (docs/CLAUDE-REVIEW.md § The review plan): what the run said of each ranked file.
-        coverage: (rev.coverage ?? []).map((c) => ({ ref: c.ref, path: c.path, status: c.status })),
         findings: (rev.findings ?? []).map((f) => ({
           severity: f.severity,
           path: f.path,
@@ -114,8 +112,6 @@ function score(results) {
         summaryWords: words(r.summary),
         costUsd: r.costUsd,
         seconds: r.seconds,
-        planned: (r.coverage ?? []).length,
-        notReviewed: (r.coverage ?? []).filter((c) => c.status === 'not_reviewed').length,
       };
     });
     out.push({ case: c, runs: runs.length, failed: results.filter((r) => r.caseId === c.id && r.status !== 'succeeded').length, perIssue, perRun });
@@ -137,7 +133,7 @@ function report(scored, meta) {
     lines.push(`## ${s.case.name}  — recall ${pct(mean(rec))} (runs: ${rec.map(pct).join(', ') || 'none'})${s.failed ? `, ${s.failed} failed` : ''}`);
     for (const i of s.perIssue) lines.push(`- ${i.hits}/${s.runs}  ${i.severity.padEnd(7)} ${i.id} — ${i.title}`);
     for (const r of s.perRun) {
-      lines.push(`  run #${r.reviewId}: ${r.found.length}/${s.case.issues.length} known, ${r.findings} findings, ${r.findingWords} words, $${(r.costUsd ?? 0).toFixed(2)}, ${r.seconds}s${r.planned ? `, plan ${r.planned - r.notReviewed}/${r.planned} checked` : ''}`);
+      lines.push(`  run #${r.reviewId}: ${r.found.length}/${s.case.issues.length} known, ${r.findings} findings, ${r.findingWords} words, $${(r.costUsd ?? 0).toFixed(2)}, ${r.seconds}s`);
       for (const u of r.unmatched) lines.push(`    unmatched: ${u}`);
     }
     lines.push('');

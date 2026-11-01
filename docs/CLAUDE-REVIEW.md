@@ -3720,31 +3720,6 @@ library, sprint briefs/paths and every one-shot completion. Details:
   server-written files, crawls same-host only with LINEAR scanners over untrusted text, and every
   doc link goes through `resolveDocLink`.
 
-## The review plan (`claude-review/worklist.ts`, 2026-11-01)
-
-Before every PR review (both providers, both modes, both halves of a pair), CODE ranks the changed files
-by risk and shows the reviewer the list in that order — a "Review plan" section in the user prompt,
-before the diff, items `W1`… — and the reviewer must report on EVERY item in `coverage` (`issues` /
-`no_issues` / `not_reviewed`, with a one-line note). No model, no network: the same diff and stored data
-give the same plan every time.
-
-- **Signals, all language-agnostic** (each a heuristic; the reviewer sees the REASONS, never a score, and
-  may disagree): a contract surface (the blast-radius classifier `surfacesForPath`), a co-change hub
-  (`db/file-coupling.ts`), a changed line that writes stored data (SQL, ORM and repository verbs — never
-  in a page template), input handling (a route/controller/handler path, a request read or a validation
-  schema), new branches (added lines with `if/else/case/catch/&&/||/?`), size, removed logic, no test
-  changed (a code file with no changed test sharing its name; never said of a contract file), and past
-  findings on the same path in this repo (other PRs, last 180 days, `worklist-inputs.ts`). Test files
-  are planned after the code; non-code files only when they are a contract. At most `WORKLIST_MAX` (15)
-  items; the rest are named as "Also changed, lower risk".
-- **The contract is reconciled by the server** (`reconcileCoverage`): one entry per planned item, in plan
-  order; a ref the model did not report on is `not_reviewed` (never invented as checked); a file the run
-  raised a finding on is `issues` whatever the model said. Stored on `claude_reviews.coverage`
-  (migration 0150), served as `ClaudeReview.coverage`, shown as ONE line on the AI Review tab ("Review
-  plan: 12 files, 11 checked") that opens to the list (`components/ReviewPlan.tsx`).
-- **The submit shape gains `coverage` only when a plan was shown** (`submitReviewShape({ plan })`), so a run
-  without one — and every prompt golden — is unchanged. The plan's stored inputs never fail a review.
-
 ## Measuring reviews (`scripts/review-eval.mjs`, 2026-10-31)
 
 Reviews vary run to run (sampling with no temperature control, model-chosen exploration and
@@ -3761,3 +3736,7 @@ recall ($14.77 / 15 runs; 5 issues found every run, 8 never); Codex alone 54% (9
 model reliably finds its own kinds of issue and reliably misses the other's. Specialists chosen in
 code for Claude (impact + tests always, then accessibility or security; tried and REVERTED) moved
 WHICH issues were found (52%) at twice the cost and with more test-gap noise.
+A REVIEW PLAN (code ranked up to 15 changed files by risk; the reviewer had to report on each, tried
+and REVERTED) made it worse: 37% recall, 1 issue found every run, and the reviewer marked 14–15 of 15
+files "checked" even where it missed the issue. `claude_reviews.coverage` (migration 0150) stays as a
+DORMANT column: nothing writes or reads it.

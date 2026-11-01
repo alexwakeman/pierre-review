@@ -7009,24 +7009,6 @@ export type ClaudeReviewFollowUp = Omit<ClaudeReviewFollowUpRecord, 'items'> & {
   items: ClaudeFollowUpItem[];
 };
 
-// THE REVIEW PLAN (docs/CLAUDE-REVIEW.md § The review plan, 2026-11-01). Before a review runs, CODE
-// ranks the changed files by risk (review/claude-review/worklist.ts: contract surfaces, co-change hubs,
-// stored-data writes, input handling, new branches, size, untested code, past findings), shows the
-// reviewer the list in that order (W1…), and asks it to report on EVERY item. One item as STORED
-// (`claude_reviews.coverage`) and served on `ClaudeReview.coverage`.
-// 'not_reviewed' is also what the SERVER writes for an item the reviewer did not report on.
-export type ClaudeCoverageStatus = 'issues' | 'no_issues' | 'not_reviewed';
-export interface ClaudeCoverageItem {
-  /** 'W1'…, in ranked order. */
-  ref: string;
-  path: string;
-  /** The code's reasons for the rank, in words ("writes stored data", "3 new branches"). */
-  reasons: string[];
-  status: ClaudeCoverageStatus;
-  /** The reviewer's one line on it (what it checked, or why it did not). null when it gave none. */
-  note: string | null;
-}
-
 // ---- Claude Review: every OTHER open review thread on the PR ----
 // A review assesses each unresolved review thread that is not one of Limn's own posted findings
 // (those stay in the follow-up above): comments from people and from other review bots. Two
@@ -7255,9 +7237,6 @@ export interface ClaudeReview {
   // server-checked. null/absent = the run did not read the library (switch off, empty library, or a
   // run from before the feature).
   docReferences?: ReviewDocReference[] | null;
-  // THE REVIEW PLAN and what the run reported on each item (`ClaudeCoverageItem`). null/absent = the
-  // run had no plan (an older run, a skip, or not succeeded).
-  coverage?: ClaudeCoverageItem[] | null;
   // The other code this run read, read-only: ticket peers and related repos' companion changes
   // (docs/CLAUDE-REVIEW.md § Related repos). Only what was checked out. null/absent = none.
   alsoRead?: ReviewPeerRead[] | null;

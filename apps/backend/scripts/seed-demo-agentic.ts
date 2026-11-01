@@ -216,18 +216,6 @@ const THREAD_JUDGEMENTS: Judgement[] = [
   { match: '🧹 Nitpick — align the alarm-threshold', validity: 'valid', addressed: 'unclear', explanation: 'Cosmetic; the values are correct either way.', reason: 'Cosmetic only.' },
 ];
 
-// THE REVIEW PLAN's coverage, as a model would report it (docs/CLAUDE-REVIEW.md § The review plan): the
-// plan comes from the REAL manager (worklist.ts, over the seeded diff); each W item is 'issues' when
-// the canned review raises a finding on that file, else 'no_issues' with a one-line note.
-function coverageFromPrompt(prompt: string, findingPaths: readonly string[]): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = [];
-  for (const m of prompt.matchAll(/^(W\d+) `([^`]+)` — /gm)) {
-    const issues = findingPaths.includes(m[2]!);
-    out.push({ ref: m[1], status: issues ? 'issues' : 'no_issues', note: issues ? null : 'Read the change and its callers; nothing to raise.' });
-  }
-  return out;
-}
-
 function judgeThreadsFromPrompt(prompt: string): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   const re = /---BEGIN REVIEW THREAD (R\d+) \S+---\n([\s\S]*?)\n---END REVIEW THREAD \1 /g;
@@ -292,7 +280,6 @@ async function runClaudeReview(
             findings: s.findings,
             ...(s.followUp ? { followUp: s.followUp } : {}),
             threads: judgeThreadsFromPrompt(args.prompt),
-            coverage: coverageFromPrompt(args.prompt, s.findings.map((f) => String((f as { path: unknown }).path))),
             ...(s.docReferences ? { docReferences: s.docReferences } : {}),
           } as never,
           args.strippedDiff,

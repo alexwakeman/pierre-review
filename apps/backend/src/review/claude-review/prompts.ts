@@ -533,9 +533,6 @@ export function buildUserPrompt(input: {
   // The SECOND run of a Claude + Codex pair: the first run's findings, not to be repeated. Absent /
   // no findings ⇒ no section (and the prompt is byte-identical to a run without it).
   pair?: PromptPairInput | null;
-  // THE REVIEW PLAN (claude-review/worklist.ts `worklistPromptSection`): the changed files ranked by
-  // code, which the run must report on in `coverage`. Absent/empty ⇒ no section (byte-identical).
-  plan?: string | null;
   // The per-run fence tag. REQUIRED when `followUp`, `threads`, `peers` or `settled` is
   // present (throws otherwise).
   nonce?: string;
@@ -558,7 +555,6 @@ export function buildUserPrompt(input: {
     settled = null,
     sonar = null,
     pair = null,
-    plan = null,
     nonce,
   } = input;
   const hasFollowUp = followUp != null && followUp.plan.sent.length > 0;
@@ -602,11 +598,6 @@ export function buildUserPrompt(input: {
       `The following lockfile/generated files were stripped from the diff below and are NOT shown — do not review them:`,
     );
     for (const file of excludedFiles) lines.push(`- ${file}`);
-    lines.push('');
-  }
-
-  if (plan != null && plan !== '') {
-    lines.push(plan);
     lines.push('');
   }
 
