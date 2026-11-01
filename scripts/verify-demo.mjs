@@ -416,7 +416,7 @@ const VIEWS = [
     '?view=activity',
     'settings-ai',
     // Disk space: the clone cache's one line (hand-written in the demo, demo/routes.ts).
-    { act: openSettingsTab('AI'), expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:', 'Repositories 1.3 GB · 1 checkout (184 MB) · 2.4 GB freed in 30 days'] },
+    { act: openSettingsTab('AI'), expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for reviews and AI Fix:', 'Repositories 1.3 GB · 1 checkout (184 MB) · 2.4 GB freed in 30 days'] },
   ],
   // Settings → AI → Effort: a level is picked (simulated, provider.ts) and the control keeps it.
   [
@@ -432,7 +432,7 @@ const VIEWS = [
         await page.getByRole('option', { name: 'High', exact: true }).click();
         await page.waitForFunction(() => document.querySelector('input[name="ai-effort"]')?.value === 'high', null, { timeout: 10_000 });
       },
-      expect: ['Effort for AI Review and AI Fix:'],
+      expect: ['Effort for reviews and AI Fix:'],
     },
   ],
   [

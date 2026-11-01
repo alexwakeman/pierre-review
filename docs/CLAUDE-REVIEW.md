@@ -680,6 +680,11 @@ asked to "make effort a setting". Settings → AI → **Effort** (`AiProviderSec
 `PUT /api/ai/effort`, `accounts.ai_effort`, sqlite `0130`) holds ONE level for both providers:
 Default, Low, Medium, High, Extra high, Max.
 
+- **It reaches EVERY review** (2026-11-01): the PR review (lead, specialists, follow-ups), the CI review,
+  the story check (`ticket_review`) and Check threads, plus AI Fix, Plan first and Implement story, on
+  both providers (`agenticRunEffort` passed as `claude.effort` and `codex.effort`). At Default each run
+  sends exactly the level it sent before. Diagrams, chats and Resolve with Claude keep their fixed depth.
+
 - **The map is the identity** (`packages/shared/src/ai-effort.ts`). Claude's Agent SDK `effort` and
   Codex's `model_reasoning_effort` both take `low | medium | high | xhigh | max`: Opus 5.5 and Sonnet 5
   accept all five with adaptive thinking; the Codex CLI 0.164.0 enum is `none | minimal | low | medium

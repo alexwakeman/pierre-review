@@ -400,7 +400,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   caller picks its own credential, and nothing is stored.** Copy never promises subscription
   billing. `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded (`recordAiUsage`), never metered.
 - **EFFORT IS ONE SETTING** (Settings → AI → Effort; `ai/effort.ts` `agenticRunEffort`, read once per
-  run): the review (+ specialists, follow-ups), AI Fix and Plan first, the SAME word on both providers.
+  run): EVERY review (PR, CI, story check, Check threads), AI Fix + Plan first; SAME word on both providers.
   Default (NULL) = today: Claude medium, Codex by depth. `REVIEW_EFFORT` wins. ⚠ Opus 5.5 is NOT pinned;
   only adaptive thinking is. The run stores what it sent (`aiRunLabel(provider, model, effort)`).
 - **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —

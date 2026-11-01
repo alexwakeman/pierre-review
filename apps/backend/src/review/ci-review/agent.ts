@@ -13,6 +13,7 @@ import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
+import { agenticRunEffort } from '../../ai/effort.js';
 
 // THE CI REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) reads the checks and logs,
 // prepares the scratch working directory and the PR's read-only worktree, builds the prompts, and
@@ -122,6 +123,8 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
     };
     const policy = ciToolPolicy();
     const activity: string[] = [];
+    // THE EFFORT SETTING (ai/effort.ts) reaches every review, the CI review included, on both providers.
+    const level = agenticRunEffort(provider.id, choice, 'worktree');
     ({ outcome } = await provider.runAgent({
       kind: 'ci_review',
       model: choice,
@@ -137,7 +140,8 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
       tools,
       budget: { usd: config.ciReviewBudgetUsd, turns: config.ciReviewMaxTurns },
       abortController,
-      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: level },
+      codex: { effort: level },
       ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {

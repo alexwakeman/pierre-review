@@ -13,6 +13,7 @@ import {
   type AgentUsageRecord,
 } from '../../ai/provider.js';
 import { fallbackCostUsd, ledgerByProvider, liveCostUsd, runProvider } from '../run-provider.js';
+import { agenticRunEffort } from '../../ai/effort.js';
 
 // THE TICKET REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) prepares the scratch
 // working directory (MEMBERS.md) and every member's read-only worktree, builds the prompts, and
@@ -130,6 +131,8 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
     // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
     const policy = ticketToolPolicy();
     const activity: string[] = [];
+    // THE EFFORT SETTING (ai/effort.ts) reaches every review, the story check included, on both providers.
+    const level = agenticRunEffort(provider.id, choice, 'worktree');
     ({ outcome } = await provider.runAgent({
       kind: 'ticket_review',
       model: choice,
@@ -146,7 +149,8 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
       tools,
       budget: { usd: config.ticketReviewBudgetUsd, turns: config.ticketReviewMaxTurns },
       abortController,
-      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: level },
+      codex: { effort: level },
       ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {

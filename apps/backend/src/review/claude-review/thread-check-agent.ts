@@ -17,7 +17,8 @@ import { estimateCostUsd } from '../pricing.js';
 import { buildSubmitThreadsShape } from './thread-check-schema.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { DISPATCH_TOOL_NAMES } from './specialists.js';
-import { codexReviewEffort, codexReviewModelOverride } from '../codex-review.js';
+import { codexReviewModelOverride } from '../codex-review.js';
+import { agenticRunEffort } from '../../ai/effort.js';
 import { codexThreadCheckText } from '../codex-wording.js';
 import { runProvider } from '../run-provider.js';
 
@@ -165,8 +166,9 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
             },
           }
         : {}),
-      codex: { resultTool: 'submit_threads', effort: override?.effort ?? codexReviewEffort(modelChoice.role, effort) },
-      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      // THE EFFORT SETTING (ai/effort.ts) reaches every review, Check threads included, on both providers.
+      codex: { resultTool: 'submit_threads', effort: override?.effort ?? agenticRunEffort(provider.id, modelChoice, effort) },
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: agenticRunEffort(provider.id, modelChoice, effort) },
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
