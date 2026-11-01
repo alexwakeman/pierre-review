@@ -82,9 +82,8 @@ describe('the provider seam', () => {
       const once = /const provider = getActiveProvider\(\);/.test(src) && /\bprovider\.(runAgent|complete)\(/.test(src);
       // The fixer's run core may be handed the provider its prompt was worded for (Phase 3: one provider
       // per job, picked by the AI Fix manager / the resolver) — still the registry's, the active one
-      // when none is named: `const provider = opts.provider ? getProvider(…) : getActiveProvider()`. The
-      // one-shot seam names one the same way (a finding check runs on the checked run's provider).
-      const viaNamed = /getProvider\(opts\.provider\) : getActiveProvider\(\)/.test(src) && /\bprovider\.(runAgent|complete)\(/.test(src);
+      // when none is named: `const provider = opts.provider ? getProvider(…) : getActiveProvider()`.
+      const viaNamed = /getProvider\(opts\.provider\) : getActiveProvider\(\)/.test(src) && /\bprovider\.runAgent\(/.test(src);
       // Or the one its manager resolved once (review/run-provider.ts `runProvider` — the same registry,
       // so its prompt words and its runner agree).
       const viaRunProvider = /runProvider\(/.test(src) && /\bprovider\.runAgent\(/.test(src);

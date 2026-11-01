@@ -403,7 +403,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   Default (NULL) = today: Claude medium, Codex by depth. `REVIEW_EFFORT` wins. ⚠ Opus 5.5 is NOT pinned;
   only adaptive thinking is. The run stores what it sent (`aiRunLabel(provider, model, effort)`).
 - **CLAUDE + CODEX IS THE DEFAULT REVIEW** (both signed in): halves run AT ONCE, blind, merged at
-  the end. ⚠ The FINDING CHECK may only DOWNGRADE a finding to a question, never drop it.
+  the end. ⚠ One half failing never hides the other's findings (it IS the review).
 - **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —
   in Limn's OWN Codex home `~/.limn/codex` (`limn ai login codex` or Settings; a ChatGPT sign-in only
   — an OpenAI API key is REFUSED until it can be priced). ⚠ The reader's `~/.codex` is NEVER read or

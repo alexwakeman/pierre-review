@@ -24,7 +24,7 @@
 // routes — is the ACTIVE PROVIDER's `complete` (Claude's lives in ai/providers/claude.ts, moved there
 // unchanged). This module keeps the one switch every caller passes through and the default model.
 
-import { getActiveProvider, getProvider } from '../ai/provider.js';
+import { getActiveProvider } from '../ai/provider.js';
 import { config } from '../config.js';
 
 // The request shape and the route pick moved with the Claude completion; re-exported under the names
@@ -32,11 +32,6 @@ import { config } from '../config.js';
 export { cheapRequestShape, cheapRoute } from '../ai/providers/claude.js';
 
 export interface CheapCompleteOpts {
-  // Which provider answers. Absent ⇒ the DEFAULT provider (Settings → AI). A caller that judges one
-  // run's output names that run's provider (claude-review/finding-check.ts).
-  provider?: 'claude' | 'codex';
-  // The reasoning effort (ai/provider.ts `CompleteRequest.effort`). Absent ⇒ the provider's default.
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   model?: string;
   // The model ROLE on the active provider (ai/provider.ts `ModelRole`). Absent ⇒ 'fast'. A caller
   // that names a Claude `model` passes its role too, so Codex resolves the same depth.
@@ -63,8 +58,5 @@ export async function cheapComplete(
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  // The named provider (a check of one run's findings), else the default.
-  const provider = opts.provider ? getProvider(opts.provider) : getActiveProvider();
-  const { provider: _named, ...req } = opts;
-  return provider.complete({ ...req, model: req.model ?? DEFAULT_MODEL, role: req.role ?? 'fast' });
+  return getActiveProvider().complete({ ...opts, model: opts.model ?? DEFAULT_MODEL, role: opts.role ?? 'fast' });
 }

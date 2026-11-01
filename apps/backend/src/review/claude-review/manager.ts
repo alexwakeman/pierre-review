@@ -37,7 +37,6 @@ import {
 import { pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
 import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
 import { markPairBusy } from './pair-view.js';
-import { checkFindings } from './finding-check.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import {
   linkReraisedFindings,
@@ -1272,24 +1271,7 @@ async function runPipeline(
     const { kept: notSettled, dropped: droppedSettled } = dropSettledReraises(notAccepted, settled);
     // A pair's repeats are grouped at the pair's END (pair-consolidate.ts `pairRepeatGroups`), never
     // dropped here: the halves run at the same time.
-    // THE FINDING CHECK (finding-check.ts): each blocker and warning checked again in a fresh context,
-    // on this run's provider and model. It can only ask one as a question, never remove it.
-    emit({ phase: 'checking' });
-    const { findings } = await checkFindings(
-      ctx,
-      {
-        accountId: item.accountId,
-        prId: item.prId,
-        owner: prCtx.owner,
-        name: prCtx.name,
-        headSha: item.headSha,
-        diff: prep.strippedDiff,
-        provider: item.provider,
-        model: res.ranOn?.model ?? model,
-        signal: controller.signal,
-      },
-      notSettled,
-    );
+    const findings = notSettled;
     const dropped = [...droppedAccepted, ...droppedSettled];
     if (dropped.length > 0) {
       ctx.log.info(

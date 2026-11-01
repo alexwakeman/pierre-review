@@ -66,9 +66,6 @@ let clock = 0;
 let claudeGate: Promise<void> | null = null;
 let claudeFails = false;
 const mergeCalls: Array<{ prompt: string; autoPostsSoFar: number }> = [];
-const checkCalls: Array<{ provider: string | null; effort: string | null; prompt: string }> = [];
-// The check's answer for a finding (by its prompt): 'stands' unless a case says otherwise.
-let checkAnswer: (prompt: string) => { verdict: string; reason: string } = () => ({ verdict: 'stands', reason: 'ok' });
 
 const finding = (title: string, line: number) => ({
   path: 'src/a.ts', line, side: 'RIGHT', severity: 'warning', title, body: `${title}.`, suggestion: null, diffHunk: null,
@@ -91,12 +88,7 @@ beforeAll(async () => {
     recordAiUsage: async () => {},
     llm: {
       // The merge pass's one-shot (a fake: no model runs). Records when it ran, for the ordering check.
-      complete: async (o: { prompt: string; system?: string; provider?: string; effort?: string }) => {
-        // THE FINDING CHECK (finding-check.ts): one call per blocker/warning, on the run's provider.
-        if (o.system?.startsWith('You check ONE finding')) {
-          checkCalls.push({ provider: o.provider ?? null, effort: o.effort ?? null, prompt: o.prompt });
-          return { text: JSON.stringify(checkAnswer(o.prompt)) };
-        }
+      complete: async (o: { prompt: string }) => {
         mergeCalls.push({ prompt: o.prompt, autoPostsSoFar: autoPostCalls.length });
         return { text: JSON.stringify({ duplicateGroups: [], summary: 'Merged summary.' }) };
       },
@@ -174,8 +166,6 @@ beforeEach(() => {
   claudeGate = null;
   claudeFails = false;
   mergeCalls.length = 0;
-  checkCalls.length = 0;
-  checkAnswer = () => ({ verdict: 'stands', reason: 'ok' });
   signedIn.claude = true;
   signedIn.codex = true;
 });
@@ -227,9 +217,6 @@ describe('a manual pair', () => {
     expect(status.pair).toMatchObject({ role: 'first', provider: 'claude' });
     open();
     const [first, second] = await settled(prId, 2);
-    // THE FINDING CHECK ran per warning, each on its own run's provider, at medium effort.
-    expect(checkCalls.map((c) => c.provider).sort()).toEqual(['claude', 'codex', 'codex']);
-    expect(checkCalls.every((c) => c.effort === 'medium')).toBe(true);
     // Neither prompt carries the other's findings.
     for (const c of calls) expect(c.prompt).not.toContain('Already raised');
     // Two ordinary rows, each its own provider, linked.
@@ -254,6 +241,36 @@ describe('a manual pair', () => {
       ['Off-by-one in the page count', 'codex'],
     ]);
     expect((await manager.getReviewStatus(ctx, 1, prId)).status).toBe('succeeded');
+  });
+
+  it('Codex failing WHILE Claude still runs: Claude\u2019s findings are the review, Codex named', async () => {
+    const prId = await newPr();
+    let open!: () => void;
+    claudeGate = new Promise((r) => (open = r));
+    const orig = ctx.review.runReview;
+    (ctx.review as any).runReview = async (args: RunReviewArgs) => {
+      if (args.provider === 'codex') {
+        return { submitted: false, failureReason: "You've hit your usage limit", ranOn: { provider: 'codex', model: 'gpt-6.1-sol' }, costUsd: null, inputTokens: null, outputTokens: null, numTurns: 1, aborted: false } as any;
+      }
+      return orig(args);
+    };
+    try {
+      await manager.startReview(ctx, 1, prId, 'claude-opus-5-5', 'claude', { pair: true });
+      for (let i = 0; i < 300 && (await persist.listClaudeReviewHistory(ctx, prId, 1)).filter((h) => h.status === 'failed').length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      // Codex already failed; the pair still runs (Claude).
+      expect((await manager.getReviewStatus(ctx, 1, prId)).status).toBe('running');
+      open();
+      const [first, second] = await settled(prId, 2);
+      expect(first).toMatchObject({ provider: 'claude', status: 'succeeded' });
+      expect(second).toMatchObject({ provider: 'codex', status: 'failed' });
+      const latest = await persist.getLatestClaudeReview(ctx, prId, 1);
+      expect(latest).toMatchObject({ status: 'succeeded', summary: 'claude summary', pair: { how: 'single', failedHalf: { provider: 'codex' } } });
+      expect(latest!.findings.map((f) => f.title)).toEqual(['Null check missing on the user lookup']);
+    } finally {
+      (ctx.review as any).runReview = orig;
+    }
   });
 
   it('stopping a pair stops both halves', async () => {

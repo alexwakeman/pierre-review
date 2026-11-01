@@ -73,7 +73,6 @@ const PHASE_LABEL: Record<string, string> = {
   fetching_diff: 'Fetching diff',
   deciding: 'Deciding scope',
   reviewing: 'Reviewing',
-  checking: 'Checking findings',
   persisting: 'Saving findings',
   merging: 'Merging the two reviews',
 };

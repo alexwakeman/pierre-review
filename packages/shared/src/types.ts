@@ -7582,8 +7582,6 @@ export type ClaudeReviewPhase =
   | 'fetching_diff'
   | 'deciding'
   | 'reviewing'
-  // Each blocker and warning checked again in a fresh context (claude-review/finding-check.ts).
-  | 'checking'
   | 'persisting'
   // A Claude + Codex pair's end: the two reviews are being merged into one.
   | 'merging';

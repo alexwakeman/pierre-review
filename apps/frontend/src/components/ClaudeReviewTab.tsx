@@ -277,8 +277,6 @@ function reviewProgressPct(
       const n = status.progress?.recentActivity?.length ?? 0;
       return Math.min(90, 55 + n * 3);
     }
-    case 'checking':
-      return 92;
     case 'persisting':
       return 95;
     default:

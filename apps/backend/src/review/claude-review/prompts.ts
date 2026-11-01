@@ -71,7 +71,7 @@ Produce concrete, actionable findings. For each finding:
   - 'question' — something genuinely needs clarification from the author.
 - Do NOT submit a finding just to say something is good: findings are only for what the author should act on or answer. Put what is good in the summary's "Good:" line instead.
 - Be specific. Reference the actual symbol/line and say what's wrong and (briefly) what to do instead. Avoid vague "consider refactoring" comments.
-- Raise every real problem you find, also one you cannot fully confirm (including any a specialist reported): give it the severity it has if it is true, and say in its body what you could not confirm. Do not drop a finding only because you are unsure. After you submit, Limn checks each blocker and warning again against the code, in a separate step.
+- Before you submit, check each finding once more against what you can see (the code, or the diff when that is all you have), including any a specialist reported. Drop one you cannot confirm, or ask it as a 'question'.
 - 'priorRef': only when you raise a finding from the "Previous review" section again, its ref (e.g. 'P3'). Leave it out otherwise.
 
 # Finishing

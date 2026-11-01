@@ -61,7 +61,7 @@ export function aiUsageFeatureGroup(feature: string): AiUsageFeatureGroup {
   const f = feature.trim();
   // Codex records each specialist as `claude_review:<name>`; the pair merge, the replies pass and
   // Check threads are code review too.
-  if (f === 'claude_review' || f.startsWith('claude_review:') || f === 'claude_review_merge' || f === 'claude_review_check') return 'code';
+  if (f === 'claude_review' || f.startsWith('claude_review:') || f === 'claude_review_merge') return 'code';
   if (f === 'replies_check' || f === 'thread_check') return 'code';
   if (f === 'ticket_review' || f === 'story_labels') return 'story';
   if (f === 'ci_review' || f === 'ci_analysis') return 'ci';

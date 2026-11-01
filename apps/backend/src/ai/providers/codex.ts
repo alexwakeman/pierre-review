@@ -349,7 +349,7 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     }
     const args = buildExecArgs(
       { cwd, writeRoots: [], ...(req.system ? { system: req.system } : {}) },
-      { home, mcp: null, hook, schemaPath, model, effort: req.effort ?? CODEX_EFFORT_FOR_ROLE[role] },
+      { home, mcp: null, hook, schemaPath, model, effort: CODEX_EFFORT_FOR_ROLE[role] },
     );
     armCodexThreadSweeps(home);
     const res = await runCodexExec(args, {

@@ -277,9 +277,6 @@ export interface CompleteRequest {
   outputSchema?: Record<string, unknown>;
   /** Who to bill. Given ⇒ a provider that records its own usage (Codex) writes the ledger row. */
   usageRecord?: AgentUsageRecord;
-  /** The reasoning effort, the SAME word on both providers. Absent ⇒ each provider's default for the
-   *  model (Claude: low on the fast model, the model's own default otherwise; Codex: by role). */
-  effort?: AiEffort;
 }
 
 export interface CompleteResult {

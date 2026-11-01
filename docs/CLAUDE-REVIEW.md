@@ -686,33 +686,13 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   (`getUnactionedClaudeReviews`: both halves' findings, posted when either was, the pair's verdict) and
   the history's finding counts all leave merged-away duplicates out.
 
-### The finding check (decided 2026-11-01)
+### The finding check (tried 2026-11-01, REMOVED)
 
-The user asked, after the review eval, for a fresh-session check of each finding that is cheap in time
-and tokens. Code: `review/claude-review/finding-check.ts`, called in `manager.ts` `runPipeline` after
-the run submits and before its findings are stored (phase `checking`, "Checking findings").
-
-- **Why.** The reviewer used to "check each finding once more … drop one you cannot confirm" in its
-  own session; the published evidence says a same-session second look lowers recall, and a separate
-  checker is what lets a reviewer raise more. So the review prompt now says: raise every real problem,
-  also one you cannot fully confirm, with the severity it has if true, and say in its body what you
-  could not confirm; Limn checks blockers and warnings after you submit.
-- **What it does.** Each BLOCKER and WARNING (the most severe first, ≤ `FINDING_CHECK_MAX` 12, 4 at a
-  time) gets ONE text-only completion, no tools: the finding, its file's diff and the file at the PR's
-  head (read from the clone cache with `git show`; whole up to 40k characters, else a numbered
-  200-line window; "not available" on a diff-only run with no clone), each in a nonce fence as
-  untrusted data. It answers `{verdict: stands | unsure | wrong, reason}`.
-- ⚠ **IT CAN ONLY DOWNGRADE, NEVER DELETE.** `wrong` (with a reason) ⇒ the finding becomes a
-  `question`, its body gaining one line: "A second check of the code doubts this, so it is asked as a
-  question: <reason>". `unsure`, `stands`, an invalid answer, a timeout (90 s), a thrown call, no
-  credential or no completion seam ⇒ unchanged. A wrong check costs one extra question, never a
-  missed issue.
-- **On the run's own provider and model, at MEDIUM effort** (`CheapCompleteOpts.provider` / `.effort`,
-  carried to `CompleteRequest.effort` on both providers): a Codex half is checked by Codex. Part of the
-  run the budget gate already allowed. Usage is recorded as feature `claude_review_check` (Reports'
-  "code" bucket).
-- **Cost** (estimated, not yet measured): roughly 10–30k tokens per checked finding; with 3–5
-  findings, about +15–35% on a review, and 20–60 s of wall time.
+A fresh-context check of each blocker and warning after the run (one text-only completion each, on
+the run's provider at medium effort, allowed only to downgrade a finding to a question), with the
+reviewer told to raise what it could not confirm. In the eval it ran 49 times and changed nothing, and
+the relaxed prompt did not lift Claude alone (43% vs 46%). The user removed it the same day: the
+reviewer prompt is as before, and the pair is what improves recall.
 
 ### The effort setting (decided 2026-10-26)
 
@@ -3786,5 +3766,4 @@ DORMANT column: nothing writes or reads it.
 found 87% of the known issues on average (the earlier sequential pair ≈ 79%), about 4–7 minutes per
 run. The ChatGPT Plus 5-hour limit cut Codex after 9 halves; the 6 runs left were Claude alone with
 the new prompt and check: 43% (46% before), so the relaxed prompt does not lift Claude alone. The
-check ran 49 times and asked nothing as a question: no harm and no measured gain yet, at under 1% of a
-run's tokens. Codex's specialists (impact, security, tests) used about 73% of its input tokens.
+check ran 49 times and asked nothing as a question; both were removed (§ The finding check). Codex's specialists (impact, security, tests) used about 73% of its input tokens.
