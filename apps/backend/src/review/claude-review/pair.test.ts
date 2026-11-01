@@ -17,6 +17,7 @@ import {
   pairReviewBody,
   pairVerdict,
   resolveAutoReviewProviders,
+  storedAutoReviewProviders,
 } from './pair.js';
 import { buildUserPrompt, PAIR_SHOWN_MAX, untrustedTexts } from './prompts.js';
 
@@ -31,9 +32,11 @@ describe('who runs a pair', () => {
     expect(pairProvidersReady((p) => (p === 'claude' ? ok : none))).toEqual(['claude']);
     expect(pairProvidersReady(() => none)).toEqual([]);
   });
-  it("the workspace setting reads 'both' only from a stored 'both'", () => {
-    expect(resolveAutoReviewProviders('both')).toBe('both');
-    for (const v of [null, undefined, '', 'default', 'BOTH', 1]) expect(resolveAutoReviewProviders(v)).toBe('default');
+  it("Claude + Codex is the default: only a stored 'default' runs one provider", () => {
+    expect(resolveAutoReviewProviders('default')).toBe('default');
+    for (const v of [null, undefined, '', 'both', 'BOTH', 1]) expect(resolveAutoReviewProviders(v)).toBe('both');
+    expect(storedAutoReviewProviders('both')).toBeNull();
+    expect(storedAutoReviewProviders('default')).toBe('default');
   });
 });
 

@@ -59,8 +59,8 @@ export function resolveModelPick(
 
 /**
  * THE AI REVIEW MENU: `resolveModelPick`, plus "Claude + Codex" (last) while BOTH providers can
- * review. Picked, it runs Claude's default review model first, then Codex's of the same depth; it
- * falls back to the opening choice when one of them stops being ready.
+ * review — and then the default pick. It runs Claude's default review model and Codex's of the same
+ * depth at the same time; it falls back to the opening choice when one of them stops being ready.
  */
 export function resolveReviewModelPick(
   me: MeResponse | undefined,
@@ -78,7 +78,9 @@ export function resolveReviewModelPick(
     value: PAIR_PICK_VALUE,
   };
   const picks = [...base.picks, pairPick];
-  return picked === PAIR_PICK_VALUE
+  // Claude + Codex is the DEFAULT pick while both can review (2026-11-01): one of each, merged, found
+  // the most in the review eval (docs/CLAUDE-REVIEW.md § Measuring reviews).
+  return picked === PAIR_PICK_VALUE || picked == null
     ? { picks, chosen: pairPick, mixed: true, pairOffered: true, pair: true }
     : { ...base, picks, pairOffered: true, pair: false };
 }
@@ -95,12 +97,19 @@ export function followUpProviderOf(
 
 /**
  * The progress line of a running review: "Running Claude review" — and for a Claude + Codex pair, the
- * step it is on: "Claude reviewing…", then "Codex reviewing…", then "Merging the two reviews…" (the
- * second half's `merging` phase, docs/CLAUDE-REVIEW.md § Claude + Codex → One review).
+ * step it is on: "Claude and Codex reviewing…" while both halves run (they run at the same time),
+ * then "<the one still running> reviewing…", then "Merging the two reviews…" (the `merging` phase,
+ * docs/CLAUDE-REVIEW.md § Claude + Codex → One review).
  */
-export function pairRunningLabel(running: string, role: 'first' | 'second' | null, phase?: string | null): string {
+export function pairRunningLabel(
+  running: string,
+  role: 'first' | 'second' | null,
+  phase?: string | null,
+  both?: boolean,
+): string {
   if (role == null) return `Running ${running} review`;
   if (phase === 'merging') return 'Merging the two reviews…';
+  if (both) return 'Claude and Codex reviewing…';
   return `${running} reviewing…`;
 }
 

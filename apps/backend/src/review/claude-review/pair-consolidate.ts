@@ -42,6 +42,7 @@ import { getClaudeReviewById, savePairConsolidation } from './persist.js';
 import { codeConsolidation, pairCodeVerdict, shortFailReason, sourceOfRun } from './pair-view.js';
 import { DEFAULT_VERDICT_RULES, type VerdictRules } from './auto-verdict.js';
 import { readVerdictRulesForPr } from './auto-settings.js';
+import { isPairRepeat } from './pair.js';
 
 // ---- the pass's limits ----
 
@@ -240,6 +241,44 @@ export function applyDuplicateGroups(
   return { sourceOf, mergedFrom };
 }
 
+/**
+ * THE CODE DEDUPE, at the pair's end (the halves run AT THE SAME TIME, so neither saw the other's
+ * findings): each second-half finding that repeats a first-half one (pair.ts `isPairRepeat`: same
+ * file, same place, a similar title) is grouped with it, the first's kept. Praise is never grouped.
+ */
+export function pairRepeatGroups(first: ClaudeReview, second: ClaudeReview): DuplicateGroup[] {
+  const groups: DuplicateGroup[] = [];
+  const firsts = first.findings.filter((f) => f.severity !== 'praise');
+  for (const f of second.findings) {
+    if (f.severity === 'praise') continue;
+    const a = firsts.find((x) => isPairRepeat(x, f));
+    if (a) groups.push({ ids: [a.id, f.id], keep: a.id });
+  }
+  return groups;
+}
+
+/**
+ * Two sets of groups as one: groups sharing a finding are joined (the earlier group's `keep` stands;
+ * `applyDuplicateGroups` still keeps the most severe). Order-stable.
+ */
+export function joinDuplicateGroups(groups: readonly DuplicateGroup[]): DuplicateGroup[] {
+  const out: Array<{ ids: Set<number>; keep: number }> = [];
+  for (const g of groups) {
+    const hits = out.filter((o) => g.ids.some((id) => o.ids.has(id)));
+    if (hits.length === 0) {
+      out.push({ ids: new Set(g.ids), keep: g.keep });
+      continue;
+    }
+    const into = hits[0]!;
+    for (const id of g.ids) into.ids.add(id);
+    for (const other of hits.slice(1)) {
+      for (const id of other.ids) into.ids.add(id);
+      out.splice(out.indexOf(other), 1);
+    }
+  }
+  return out.map((o) => ({ ids: [...o.ids], keep: o.keep }));
+}
+
 /** The consolidated findings' verdict: the code rule over what is kept (pair-view.ts). */
 export function consolidatedVerdict(
   a: ClaudeReview,
@@ -367,10 +406,19 @@ export async function consolidatePair(
       record = codeConsolidation(halves, failedHalf, at, rules);
     } else {
       const [x, y] = ok as [ClaudeReview, ClaudeReview];
+      // The code's repeats always count; the pass may find more (the same point in other words).
+      const repeats = pairRepeatGroups(x, y);
       const pass = await runMergePass(ctx, a.accountId, a.prId, x, y, deps);
-      if (pass == null) record = codeConsolidation(halves, null, at, rules);
-      else {
-        const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), pass.groups);
+      if (pass == null) {
+        const base = codeConsolidation(halves, null, at, rules);
+        if (repeats.length === 0) record = base;
+        else {
+          const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), repeats);
+          record = { ...base, sourceOf, mergedFrom, verdict: consolidatedVerdict(x, y, mergedFrom, rules) };
+        }
+      } else {
+        const groups = joinDuplicateGroups([...repeats, ...pass.groups]);
+        const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), groups);
         record = {
           how: 'pass',
           summary: pass.summary,
@@ -391,12 +439,14 @@ export async function consolidatePair(
 }
 
 /** Why a second half never started, in a few plain words (for the failed-half line). */
-export function notStartedHalf(provider: AiProviderId, why: 'budget' | 'claimed' | 'error'): ClaudeReviewPairFailedHalf {
+export function notStartedHalf(provider: AiProviderId, why: 'budget' | 'claimed' | 'stopped' | 'error'): ClaudeReviewPairFailedHalf {
   const reason =
     why === 'budget'
       ? 'the spend budget is used up'
       : why === 'claimed'
         ? `a teammate's Limn is reviewing with ${aiProviderName(provider)}`
-        : "it didn't start";
+        : why === 'stopped'
+          ? 'it was stopped'
+          : "it didn't start";
   return { provider, reason };
 }

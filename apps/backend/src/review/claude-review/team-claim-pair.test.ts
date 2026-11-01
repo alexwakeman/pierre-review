@@ -2,7 +2,7 @@
 //   • each half of an AUTO pair claims its OWN provider's context, when that half starts;
 //   • a first half a teammate holds is a half that never started: Codex runs ALONE (no pair row);
 //   • a second half a teammate holds never starts (no row): the pair ends on its first half;
-//   • the first half's line is held until the PAIR ends, then finished with the rest.
+//   • the halves start TOGETHER; each line is held until the PAIR ends, then finished with the rest.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 
@@ -120,19 +120,20 @@ beforeEach(async () => {
 });
 
 describe('team claims on a Claude + Codex pair', () => {
-  it('each half claims its own context when it starts; the first line waits for the pair to end', async () => {
+  it('each half claims its own context as the pair starts; each line waits for the pair to end', async () => {
     m.enqueueAutoReview(ctx, 1, 60);
     await flush();
-    expect(claimCalls).toEqual(['60:claude']);
-    expect(inserted).toEqual([{ prId: 60, provider: 'claude', pair: { role: 'first' } }]);
-    runs.shift()!.release(); // Claude's half ends (fails)
-    await flush();
-    // The second half claimed Codex's context and started; Claude's line is still held.
+    // The halves start together: both claimed, both rows written.
     expect(claimCalls).toEqual(['60:claude', '60:codex']);
-    expect(inserted[1]).toEqual({ prId: 60, provider: 'codex', pair: { role: 'second', pairId: 1 } });
+    expect(inserted).toEqual([
+      { prId: 60, provider: 'claude', pair: { role: 'first' } },
+      { prId: 60, provider: 'codex', pair: { role: 'second', pairId: 1 } },
+    ]);
     expect(saved).toEqual([1, 2]);
+    runs.shift()!.release(); // Claude's half ends (fails); Codex is still running
+    await flush();
     expect(finished).toEqual([]);
-    runs.shift()!.release(); // Codex's half ends
+    runs.shift()!.release(); // Codex's half ends: the pair ends
     await flush();
     expect(finished.map((f) => f.context).sort()).toEqual(['limn/review-claude', 'limn/review-codex']);
     expect(finished.every((f) => f.kind === 'unfinished')).toBe(true);

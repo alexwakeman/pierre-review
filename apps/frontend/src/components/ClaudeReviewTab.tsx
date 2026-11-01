@@ -277,6 +277,8 @@ function reviewProgressPct(
       const n = status.progress?.recentActivity?.length ?? 0;
       return Math.min(90, 55 + n * 3);
     }
+    case 'checking':
+      return 92;
     case 'persisting':
       return 95;
     default:
@@ -2183,7 +2185,7 @@ export function ClaudeReviewTab({
       <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
-          label={pairRunningLabel(aiProviderName(liveProvider), status?.pair?.role ?? null, phase)}
+          label={pairRunningLabel(aiProviderName(liveProvider), status?.pair?.role ?? null, phase, status?.pair?.both === true)}
           value={reviewProgressPct(status)}
           timeConstantSec={30}
         />

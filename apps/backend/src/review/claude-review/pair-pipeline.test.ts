@@ -1,9 +1,9 @@
 // CLAUDE + CODEX, end to end through the review manager over the REAL core client and migrations,
 // with a fake prepare and a fake model (no model runs, nothing reaches GitHub). What is pinned:
-//   1. SEQUENCING: Claude runs first; Codex starts only once Claude's run has ENDED — and still runs
-//      when Claude's failed (without pair input);
-//   2. the pair input (Claude's findings) is in the SECOND run's prompt only;
-//   3. the code dedupe drops Codex's repeat of a Claude finding and counts it on Codex's row;
+//   1. THE HALVES RUN AT THE SAME TIME (2026-11-01): Codex starts as Claude launches, may end first,
+//      and the pair ends when the LAST half ends; stopping the pair stops both;
+//   2. neither prompt carries the other's findings;
+//   3. the code dedupe, at the pair's END, merges Codex's repeat of a Claude finding into it;
 //   4. two ordinary rows, each labelled by its own provider, linked as a pair (wire + history);
 //   5. one provider signed in ⇒ just that one runs, no pair;
 //   6. an AUTO pair (workspace "Claude + Codex"): ONE auto-post call for both halves, and ONE Slack
@@ -66,6 +66,9 @@ let clock = 0;
 let claudeGate: Promise<void> | null = null;
 let claudeFails = false;
 const mergeCalls: Array<{ prompt: string; autoPostsSoFar: number }> = [];
+const checkCalls: Array<{ provider: string | null; effort: string | null; prompt: string }> = [];
+// The check's answer for a finding (by its prompt): 'stands' unless a case says otherwise.
+let checkAnswer: (prompt: string) => { verdict: string; reason: string } = () => ({ verdict: 'stands', reason: 'ok' });
 
 const finding = (title: string, line: number) => ({
   path: 'src/a.ts', line, side: 'RIGHT', severity: 'warning', title, body: `${title}.`, suggestion: null, diffHunk: null,
@@ -88,7 +91,12 @@ beforeAll(async () => {
     recordAiUsage: async () => {},
     llm: {
       // The merge pass's one-shot (a fake: no model runs). Records when it ran, for the ordering check.
-      complete: async (o: { prompt: string }) => {
+      complete: async (o: { prompt: string; system?: string; provider?: string; effort?: string }) => {
+        // THE FINDING CHECK (finding-check.ts): one call per blocker/warning, on the run's provider.
+        if (o.system?.startsWith('You check ONE finding')) {
+          checkCalls.push({ provider: o.provider ?? null, effort: o.effort ?? null, prompt: o.prompt });
+          return { text: JSON.stringify(checkAnswer(o.prompt)) };
+        }
         mergeCalls.push({ prompt: o.prompt, autoPostsSoFar: autoPostCalls.length });
         return { text: JSON.stringify({ duplicateGroups: [], summary: 'Merged summary.' }) };
       },
@@ -166,6 +174,8 @@ beforeEach(() => {
   claudeGate = null;
   claudeFails = false;
   mergeCalls.length = 0;
+  checkCalls.length = 0;
+  checkAnswer = () => ({ verdict: 'stands', reason: 'ok' });
   signedIn.claude = true;
   signedIn.codex = true;
 });
@@ -201,53 +211,80 @@ async function settled(prId: number, rows: number): Promise<ClaudeReview[]> {
 }
 
 describe('a manual pair', () => {
-  it('runs Claude, then Codex only after Claude ended; Codex is shown Claude’s findings; the repeat is dropped', async () => {
+  it('runs Claude and Codex AT THE SAME TIME, neither shown the other; the repeat is merged at the end', async () => {
     const prId = await newPr();
     let open!: () => void;
     claudeGate = new Promise((r) => (open = r));
     const started = await manager.startReview(ctx, 1, prId, 'claude-opus-5-5', 'codex', { pair: true });
     expect(started.ok).toBe(true);
-    for (let i = 0; i < 300 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    await new Promise((r) => setTimeout(r, 50));
-    // Claude is running; Codex has not started.
-    expect(calls.map((c) => c.provider)).toEqual(['claude']);
+    for (let i = 0; i < 300 && calls.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    // Both started; Codex ENDED while Claude is still held open.
+    expect(calls.map((c) => c.provider).sort()).toEqual(['claude', 'codex']);
+    for (let i = 0; i < 300 && ended.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(ended.map((e) => e.provider)).toEqual(['codex']);
     const status = await manager.getReviewStatus(ctx, 1, prId);
-    expect(status.pair).toEqual({ role: 'first', provider: 'claude' });
+    expect(status.status).toBe('running');
+    expect(status.pair).toMatchObject({ role: 'first', provider: 'claude' });
     open();
     const [first, second] = await settled(prId, 2);
-    expect(calls.map((c) => c.provider)).toEqual(['claude', 'codex']);
-    // Codex started after Claude ENDED.
-    expect(calls[1]!.startedAt).toBeGreaterThan(ended[0]!.endedAt);
-    // The pair input is on the second run only.
-    expect(calls[0]!.prompt).not.toContain('Already raised');
-    expect(calls[1]!.prompt).toContain('## Already raised by Claude in this review');
-    expect(calls[1]!.prompt).toContain('Null check missing on the user lookup');
+    // THE FINDING CHECK ran per warning, each on its own run's provider, at medium effort.
+    expect(checkCalls.map((c) => c.provider).sort()).toEqual(['claude', 'codex', 'codex']);
+    expect(checkCalls.every((c) => c.effort === 'medium')).toBe(true);
+    // Neither prompt carries the other's findings.
+    for (const c of calls) expect(c.prompt).not.toContain('Already raised');
     // Two ordinary rows, each its own provider, linked.
     expect(first).toMatchObject({ provider: 'claude', status: 'succeeded', pair: { role: 'first', pairId: first!.id, otherReviewId: second!.id } });
     expect(second).toMatchObject({
       provider: 'codex',
       model: 'gpt-6.1-sol',
       status: 'succeeded',
-      pair: { role: 'second', pairId: first!.id, otherReviewId: first!.id, dropped: 1 },
+      pair: { role: 'second', pairId: first!.id, otherReviewId: first!.id },
     });
-    // The code dedupe: Codex's repeat is gone, its new point stays.
-    expect(second!.findings.map((f) => f.title)).toEqual(['Off-by-one in the page count']);
     const history = await persist.listClaudeReviewHistory(ctx, prId, 1);
     expect(history.map((h) => h.pair?.role)).toEqual(['second', 'first']);
     // A manual pair reaches no auto hook.
     expect(autoPostCalls).toEqual([]);
-    // THE CONSOLIDATION: one merge pass at the pair's end; the latest review reads as ONE.
+    // THE CONSOLIDATION: one merge pass at the pair's end; the code dedupe merged Codex's repeat into
+    // Claude's finding (the fake pass grouped nothing), so the latest review reads as ONE.
     expect(mergeCalls).toHaveLength(1);
     const latest = await persist.getLatestClaudeReview(ctx, prId, 1);
     expect(latest).toMatchObject({ id: second!.id, status: 'succeeded', summary: 'Merged summary.', pair: { how: 'pass' } });
     expect(latest!.findings.map((f) => [f.title, f.source])).toEqual([
-      ['Null check missing on the user lookup', 'claude'],
+      ['Null check missing on the user lookup', 'both'],
       ['Off-by-one in the page count', 'codex'],
     ]);
     expect((await manager.getReviewStatus(ctx, 1, prId)).status).toBe('succeeded');
   });
 
-  it('a failed first half: the second still runs, without pair input', async () => {
+  it('stopping a pair stops both halves', async () => {
+    const prId = await newPr();
+    let open!: () => void;
+    claudeGate = new Promise((r) => (open = r));
+    const orig = ctx.review.runReview;
+    let codexAborted = false;
+    (ctx.review as any).runReview = async (args: RunReviewArgs) => {
+      if (args.provider === 'codex') {
+        const signal = args.abortController.signal;
+        await new Promise<void>((r) => (signal.aborted ? r() : signal.addEventListener('abort', () => r())));
+        codexAborted = signal.aborted;
+        return { submitted: false, failureReason: 'stopped', ranOn: { provider: 'codex', model: 'gpt-6.1-sol' }, costUsd: null, inputTokens: null, outputTokens: null, numTurns: 1, aborted: true } as any;
+      }
+      return orig(args);
+    };
+    try {
+      await manager.startReview(ctx, 1, prId, 'claude-opus-5-5', 'claude', { pair: true });
+      for (let i = 0; i < 300 && calls.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+      for (let i = 0; i < 100 && (await persist.listClaudeReviewHistory(ctx, prId, 1)).length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(manager.requestReviewCancel(prId, 1)).toBe(true);
+      open();
+      await settled(prId, 2);
+      expect(codexAborted).toBe(true);
+    } finally {
+      (ctx.review as any).runReview = orig;
+    }
+  });
+
+  it('a failed first half: the second still succeeds alone', async () => {
     const prId = await newPr();
     claudeFails = true;
     await manager.startReview(ctx, 1, prId, 'claude-opus-5-5', 'claude', { pair: true });

@@ -42,7 +42,7 @@ import type {
   ModelRole,
   ProviderStatus,
 } from '../provider.js';
-import { AI_MODEL_FOR_ROLE } from '@pierre-review/shared';
+import { AI_MODEL_FOR_ROLE, type AiEffort } from '@pierre-review/shared';
 import { foldRateLimitEvent, parseUsageProbe } from './claude-usage.js';
 import { assistantText, describeFixBlocks, describeReviewBlocks } from './claude-activity.js';
 import { withWritingRules, writingStyleFor } from '../writing-rules.js';
@@ -219,7 +219,10 @@ const THINKING_HEADROOM = 1024;
 export function cheapRequestShape(
   model: string,
   maxTokens: number,
-): { maxTokens: number; effort?: 'low' } {
+  // A caller's chosen effort (CompleteRequest.effort): sent as asked, with the thinking headroom.
+  effort?: AiEffort,
+): { maxTokens: number; effort?: AiEffort } {
+  if (effort) return { maxTokens: maxTokens + THINKING_HEADROOM, effort };
   return ADAPTIVE_CHEAP_MODELS.has(model)
     ? { maxTokens: maxTokens + THINKING_HEADROOM, effort: 'low' }
     : { maxTokens };
@@ -250,7 +253,7 @@ async function rawComplete(
 ): Promise<CompleteResult> {
   const { default: Anthropic } = await loadAnthropicSdk();
   const client = new Anthropic({ apiKey });
-  const shape = cheapRequestShape(model, opts.maxTokens ?? 700);
+  const shape = cheapRequestShape(model, opts.maxTokens ?? 700, opts.effort);
   const resp = await client.messages.create({
     model,
     max_tokens: shape.maxTokens,
@@ -291,7 +294,7 @@ async function agentComplete(
     ? `${opts.system}\n\n---\n\n${opts.prompt}`
     : opts.prompt;
 
-  const shape = cheapRequestShape(model, opts.maxTokens ?? 700);
+  const shape = cheapRequestShape(model, opts.maxTokens ?? 700, opts.effort);
   const q = query({
     prompt,
     options: {

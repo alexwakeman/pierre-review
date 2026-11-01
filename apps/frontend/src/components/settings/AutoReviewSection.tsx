@@ -163,7 +163,7 @@ export function AutoReviewSection(): JSX.Element {
   const storedClaims = stored?.teamClaimsEnabled === true;
   const [claimsOn, setClaimsOn] = useState(storedClaims);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
-  const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'both' ? 'both' : 'default';
+  const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
   // Both Claude and Codex signed in: the pair choice, and "When Claude and Codex disagree".
   const pairReady = pairReviewReady(useMe().data);
@@ -337,18 +337,18 @@ export function AutoReviewSection(): JSX.Element {
               value={providers}
               onChange={(v) => setProviders(v === 'both' ? 'both' : 'default')}
               options={[
-                { value: 'default' as const, label: `${ai.providerName} (the default)` },
-                { value: 'both' as const, label: PAIR_PICK_LABEL, disabled: !pairReady && providers !== 'both' },
+                { value: 'both' as const, label: `${PAIR_PICK_LABEL} (the default)` },
+                { value: 'default' as const, label: `${ai.providerName} only` },
               ]}
             />
-            {!pairReady && (
-              <span className="text-meta text-ui-mute">Claude + Codex needs both signed in.</span>
+            {!pairReady && providers === 'both' && (
+              <span className="text-meta text-ui-mute">Only one is signed in, so it reviews alone.</span>
             )}
           </div>
           <InfoButton title="Claude + Codex">
             <p>
-              Claude reviews first. Codex then reviews the same commit, is told what Claude found, and
-              looks for what Claude missed. Anything Codex repeats is dropped.
+              Claude and Codex review the same commit at the same time, each on its own. Limn then
+              merges the two into one review: a point both raised is shown once.
             </p>
             <p>
               Both runs count towards each provider’s usage. If only one is signed in when a review

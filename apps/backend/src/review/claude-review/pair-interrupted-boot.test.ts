@@ -165,7 +165,7 @@ beforeEach(async () => {
   await db.update(schema.claudeReviews).set({ status: 'failed' }).where(eq(schema.claudeReviews.status, 'running')).execute();
 });
 
-describe('a pair whose second half a restart interrupted', () => {
+describe('a pair a restart interrupted', () => {
   it('is consolidated and auto-posted ONCE, on the first half; a second boot does nothing more', async () => {
     const prId = await makePr();
     const first = await half(prId, 'claude', { role: 'first' }, 'succeeded');
@@ -200,6 +200,24 @@ describe('a pair whose second half a restart interrupted', () => {
     expect(await persist.readPairConsolidation(ctx, first, prId)).toBeNull();
     expect(rec.autoPost).toEqual([]);
     expect(postReview).not.toHaveBeenCalled();
+  });
+
+  it('a FIRST half interrupted beside a SUCCEEDED second (the halves run together): ended on the second', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', { role: 'first' }, 'running');
+    const second = await half(prId, 'codex', { role: 'second', pairId: first }, 'succeeded');
+    expect(await boot()).toEqual([first]);
+    expect(await persist.readPairConsolidation(ctx, first, prId)).toMatchObject({ how: 'single', failedHalf: { provider: 'claude' } });
+    expect(rec.autoPost).toEqual([{ accountId: 1, prId, reviewId: second }]);
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('BOTH halves interrupted: nothing to end', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', { role: 'first' }, 'running');
+    await half(prId, 'codex', { role: 'second', pairId: first }, 'running');
+    expect(await boot()).toEqual([]);
+    expect(rec.autoPost).toEqual([]);
   });
 
   it('a FIRST half interrupted (the second never started): nothing to end', async () => {

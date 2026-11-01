@@ -142,8 +142,7 @@ All from the repo root unless noted.
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
 
-**`pnpm dev` scores bot comments in-process (model from `packages/ml/serving_assets`);
-`PIERRE_ML_HTTP=1` runs the Python severity-api instead** ([docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md);
+**`PIERRE_ML_HTTP=1` runs the Python severity-api instead** ([docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md);
 ⚠ it exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL`).
 
 ---
@@ -403,6 +402,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   run): EVERY review (PR, CI, story check, Check threads), AI Fix + Plan first; SAME word on both providers.
   Default (NULL) = today: Claude medium, Codex by depth. `REVIEW_EFFORT` wins. ⚠ Opus 5.5 is NOT pinned;
   only adaptive thinking is. The run stores what it sent (`aiRunLabel(provider, model, effort)`).
+- **CLAUDE + CODEX IS THE DEFAULT REVIEW** (both signed in): halves run AT ONCE, blind, merged at
+  the end. ⚠ The FINDING CHECK may only DOWNGRADE a finding to a question, never drop it.
 - **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —
   in Limn's OWN Codex home `~/.limn/codex` (`limn ai login codex` or Settings; a ChatGPT sign-in only
   — an OpenAI API key is REFUSED until it can be priced). ⚠ The reader's `~/.codex` is NEVER read or
@@ -449,8 +450,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **Thread judgements**: "what Claude says now" is ONE fold, `currentThreadAssessmentsForPrs`
   (latest review + later Check threads, newer wins); words only from `lib/claudeThreadMarker.ts`.
 - **Separate processes, never inside a PR review**: the CI review (`review/ci-review/`; the signed
-  log URL never leaves the server), the TICKET review (`review/ticket-review/`; ONE story per
-  ticket via `ticketStory`), design diagrams (`review/diagrams/`). ⚠ `tracker/runtime.ts` opens the
+  log URL never leaves the server), the TICKET review (ONE story per ticket, `ticketStory`), diagrams. ⚠ `tracker/runtime.ts` opens the
   DB at import — keep review-side tracker imports LAZY.
 - **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`, still
   read as history). Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
@@ -515,8 +515,7 @@ Monitoring, the work-plan wording, Slack.
   Jira status transition the reader picks** in the story view (`tracker/status-change.ts`); nothing
   else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
-- Still gone: the story report, story-health charts, "Ask about this period", the People report,
-  1:1 prep (tables dormant, still erased).
+- Gone: the story report, story-health charts, Ask about this period, People, 1:1 prep.
 
 ## ML severity/category on bot comments (no LLM)
 

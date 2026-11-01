@@ -27,7 +27,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { dropAutoReviews } from './manager.js';
-import { resolveAutoReviewProviders } from './pair.js';
+import { resolveAutoReviewProviders, storedAutoReviewProviders } from './pair.js';
 import {
   DEFAULT_VERDICT_RULES,
   resolveApproveLeftovers,
@@ -459,11 +459,11 @@ export async function setWorkspaceAutoReview(
     if (typeof v === 'boolean') fixAfter.include[k] = v;
   }
   const fixOverrides = autoFixOverrides(fixAfter);
-  // Who runs auto reviews: stored 'both' or NULL (the default) — overrides only.
+  // Who runs auto reviews: NULL is the default (Claude + Codex); 'default' = the default provider alone.
   const providersWas = resolveAutoReviewProviders(existing.providers);
   const providers = autoReviewProviders ?? providersWas;
   const next: AutoRow = {
-    providers: providers === 'both' ? 'both' : null,
+    providers: storedAutoReviewProviders(providers),
     pairStrictness: strictness === 'relaxed' ? 'relaxed' : null,
     approveLeftovers: leftoversStored,
     enabled: review.enabled,
@@ -494,7 +494,7 @@ export async function setWorkspaceAutoReview(
     set.autoReviewDailyCap = capOverride;
   }
   if (autoReviewProviders !== undefined && providers !== providersWas) {
-    set.autoReviewProviders = providers === 'both' ? 'both' : null;
+    set.autoReviewProviders = storedAutoReviewProviders(providers);
   }
   if (pairStrictness !== undefined && strictness !== strictnessWas) {
     set.pairVerdictStrictness = strictness === 'relaxed' ? 'relaxed' : null;

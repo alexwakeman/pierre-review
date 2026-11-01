@@ -506,42 +506,52 @@ must not duplicate. They can run sequentially with … Claude running first so o
 to dedupe results." Then (2026-10-28): "a consolidated view in Limn so we don't have to switch between
 views to see both … the outcome should be always merged as a final step … avoiding duplicates is
 paramount … we should still get a review outcome if at least one agent ran ok." Code:
-`review/claude-review/pair.ts` (the pure half), `manager.ts` (the sequence), `pair-consolidate.ts`
+`review/claude-review/pair.ts` (the pure half), `manager.ts` (the two runs), `pair-consolidate.ts`
 (the merge), `pair-view.ts` (the one view), `auto-post.ts` (the one post); migrations `0135`, `0137`.
 
+**Changed 2026-11-01** (after the review eval, § Measuring reviews): the user asked to make the pair
+the default and run the halves at the same time. One Claude and one Codex review, merged, found the
+most (≈ 79% of known issues against 46% / 54% alone), and the published evidence says two INDEPENDENT
+reviews find more than one told to skip what the other raised. So the halves now run TOGETHER, see
+nothing of each other, and the pair is the DEFAULT wherever both providers can review.
+
 - **Where it is offered.** MANUAL: the AI Review menu lists "Claude + Codex" last, only while BOTH
-  providers can review (`lib/modelPick.ts` `resolveReviewModelPick`); the request is
+  providers can review, and then it is the DEFAULT pick (`lib/modelPick.ts` `resolveReviewModelPick`:
+  nothing picked yet ⇒ the pair; a model picked from the menu runs alone); the request is
   `GenerateReviewBody.pair: true` (`model` / `provider` ignored; `400 PairUnavailable` unless both can
-  review). AUTO: Settings → Workspace → Auto review → **Auto reviews use: <default> / Claude + Codex**
-  (`workspaces.auto_review_providers`, `WorkspaceAutoReviewSettings.autoReviewProviders`, the one
-  writer `setWorkspaceAutoReview`); the option is disabled with "Claude + Codex needs both signed in."
-  while one is not. With `'both'` and only one provider able to review when a run STARTS, that one runs
-  alone (an ordinary run, no pair).
+  review). AUTO: Settings → Workspace → Auto review → **Auto reviews use: Claude + Codex (the default) /
+  <default provider> only** (`workspaces.auto_review_providers`,
+  `WorkspaceAutoReviewSettings.autoReviewProviders`, the one writer `setWorkspaceAutoReview`). ⚠ NULL
+  is the DEFAULT, now `'both'`; only a stored `'default'` runs one provider (`resolveAutoReviewProviders`
+  / `storedAutoReviewProviders`). A stored NULL from before 2026-11-01 therefore reads as the pair.
+  With `'both'` and only one provider able to review when a run STARTS, that one runs alone (an
+  ordinary run, no pair; the setting shows "Only one is signed in, so it reviews alone.").
 - **TWO ORDINARY RUNS, LINKED.** Each half is its own `claude_reviews` row with its own label
   (`aiRunLabel`), its own provider's follow-up chain and thread carry, its own ledger row and its own
   budget reading — nothing about a run changes because it is half of a pair. They are linked by
   `pair_id` (the first half's id, on both) and `pair_role`; the wire carries `pair: {pairId, role,
   otherReviewId, dropped?}`. The providers are resolved ONCE, when the pair starts (`pairProvidersReady`):
   Claude first (`DEFAULT_CLAUDE_REVIEW_MODEL`), Codex second (the same depth: Sol).
-- **SEQUENTIAL.** The second half starts only after the first ENDS — succeeded, failed or stopped
-  (`startPairSecond`, from the first's `finally`). Between the halves the PR's claim and the slot are
-  held (`startingPair`), so nothing slips in, and the status stays `running`. A first half that failed
-  or was stopped still hands over (the second runs without pair input); a second half that fails leaves
-  the first's results standing. To stop the whole pair, stop each half (a queued pair is cancelled
-  whole). An AUTO pair asks the spend budget again before its second half (`automaticRunAllowed`; a
-  reader's press is not asked) and ends on the first half when over.
-- **THE SECOND HALF IS SHOWN THE FIRST'S FINDINGS** — title, `path:line`, severity, a short body
-  (`PAIR_SHOWN_MAX` 40, `PAIR_BODY_CHARS` 400), each in a nonce fence as untrusted data, under "Already
-  raised by Claude in this review": do not repeat them; confirm or dispute one only with evidence Claude
-  missed; spend the effort on what Claude did not cover (`prompts.ts` `pushPairSection`, added through
-  the prompt seam — with no pair input the prompt is byte-identical, so `prompt-golden.json` is
-  unchanged; the block names no tool, so Codex needs no wording swap).
-- ⚠ **DEDUPED IN CODE TOO.** After the second half, any finding that repeats a first-half finding —
-  same file, lines within `PAIR_LINE_SLACK` (5) or either one file-level, and `similarTitles` (the
-  settled-by-reply identity) — is dropped (`dropPairRepeats`); the count is stored on the second half
-  (`pair_dropped`).
+- **AT THE SAME TIME** (2026-11-01). The second half starts as the first LAUNCHES (`launch` →
+  `startPairSecond`), and the pair ENDS when the LAST half ends (`endPair`; each half sets `done` and
+  reads its partner's in one synchronous step, so exactly one of them ends the pair). The first half
+  keeps the PR's per-PR seat (`runningItems`: status, cancel, the stream); the second runs beside it
+  (`pairPartners`) and takes the seat when the first ends first. While the second half's row is being
+  written its slot is held (`startingPair`). A pair takes TWO review slots (it may overshoot
+  `PRO_REVIEW_CONCURRENCY` by one). A half that fails or is stopped leaves the other's results standing.
+  ⚠ **Stopping the pair stops BOTH halves** (and a second half not launched yet never starts:
+  `pair.stopped`, named "it was stopped"). An AUTO pair asks the spend budget for its second half too
+  (`automaticRunAllowed`; a reader's press is not asked) and runs the first alone when over.
+- **NEITHER HALF SEES THE OTHER.** The pair block (`prompts.ts` `pushPairSection`) is no longer sent;
+  the prompt seam keeps it. Older second halves (before 2026-11-01) were shown the first's findings.
+- ⚠ **DEDUPED IN CODE, AT THE END.** When the pair is consolidated, every second-half finding that
+  repeats a first-half one — same file, lines within `PAIR_LINE_SLACK` (5) or either one file-level,
+  and `similarTitles` (the settled-by-reply identity), or the same earlier finding — is grouped with
+  it, the first's kept (`pair-consolidate.ts` `pairRepeatGroups`), on BOTH paths: joined with the
+  pass's groups (`joinDuplicateGroups`), or applied alone when the pass did not answer. Grouped means
+  merged-away (`merged_into`), never deleted. `pair_dropped` is no longer written (older rows keep it).
 - **ONE REVIEW: THE CONSOLIDATION STEP** (decided 2026-10-28; `pair-consolidate.ts`). When the pair
-  ends — its second half succeeded, failed or was stopped, or never started — and BEFORE any hook
+  ends — its LAST half succeeded, failed or was stopped, or the second never started — and BEFORE any hook
   (auto-post, Slack, auto fix, diagrams), the two halves become ONE review, stored ONCE on the pair's
   FIRST row (`claude_reviews.pair_consolidation`, migration 0137: `{how, summary, verdict, sourceOf,
   mergedFrom, failedHalf, at}`). The second half's run is still in its slot meanwhile (phase
@@ -563,7 +573,7 @@ paramount … we should still get a review outcome if at least one agent ran ok.
     budget gate already allowed: not asked again.
   - **THE FALLBACK** (the pass threw, timed out, had no credential or no completion seam, was over
     its cap, or answered something invalid) ⇒ in code (`pair-view.ts codeConsolidation`): every
-    finding kept (`dropPairRepeats` already ran), the summaries joined (`**Claude:** … / **Codex:**
+    finding kept except the code's repeat groups (above), the summaries joined (`**Claude:** … / **Codex:**
     …`). A consolidation failure never fails the pair.
   - **One half succeeded ⇒ that half IS the review** (`how: 'single'`): its findings, summary and
     verdict, and `failedHalf {provider, reason}` — the other's stored error's first sentence, "it was
@@ -650,11 +660,14 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   colour per provider); a half that did not finish is one line under the header ("Codex didn't
   finish: usage limit reached", `pairHalfFailedLine`). How it was merged sits behind the header's ⓘ
   only. The history select lists the pair as ONE option (§ The review tab's history). The progress
-  line names the step: "Claude reviewing…", "Codex reviewing…", "Merging the two reviews…"
-  (`pairRunningLabel`, the second half's `merging` phase).
+  line names the step: "Claude and Codex reviewing…" while both run (`ClaudeReviewStatusResponse.pair.both`),
+  then the one still running ("Codex reviewing…"), then "Merging the two reviews…" (`pairRunningLabel`,
+  the last half's `merging` phase).
+- **A restart** fails every run it cut off; `finishInterruptedPairs` then ends each pair with a half
+  among them whose OTHER half succeeded (either half, since they run together): consolidated in code
+  and the run-end hooks on the half that succeeded. Both halves cut off ⇒ nothing to end.
 - **Auto review's rules hold, per head.** A pair is one unit: any succeeded half settles the head
-  ("re-reviews once per new HEAD"), the lane holds the PR from the first half's start to the second's
-  end. Retries keep the existing rules unchanged and per row: the latest row at the head is the second
+  ("re-reviews once per new HEAD"), the lane holds the PR from the pair's start to its end. Retries keep the existing rules unchanged and per row: the latest row at the head is the second
   half, so only when BOTH halves failed is the pair retried (as a pair again, by the workspace setting);
   each half's row counts towards `AUTO_RETRY_MAX_ATTEMPTS` (3), so a failed pair leaves one retry; the
   "default provider changed" and usage-reset tests read the second half's provider and error.
@@ -672,6 +685,34 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   status and verdict, both halves' counts and "Earlier: …" items), My Turn's "Claude review ready" card
   (`getUnactionedClaudeReviews`: both halves' findings, posted when either was, the pair's verdict) and
   the history's finding counts all leave merged-away duplicates out.
+
+### The finding check (decided 2026-11-01)
+
+The user asked, after the review eval, for a fresh-session check of each finding that is cheap in time
+and tokens. Code: `review/claude-review/finding-check.ts`, called in `manager.ts` `runPipeline` after
+the run submits and before its findings are stored (phase `checking`, "Checking findings").
+
+- **Why.** The reviewer used to "check each finding once more … drop one you cannot confirm" in its
+  own session; the published evidence says a same-session second look lowers recall, and a separate
+  checker is what lets a reviewer raise more. So the review prompt now says: raise every real problem,
+  also one you cannot fully confirm, with the severity it has if true, and say in its body what you
+  could not confirm; Limn checks blockers and warnings after you submit.
+- **What it does.** Each BLOCKER and WARNING (the most severe first, ≤ `FINDING_CHECK_MAX` 12, 4 at a
+  time) gets ONE text-only completion, no tools: the finding, its file's diff and the file at the PR's
+  head (read from the clone cache with `git show`; whole up to 40k characters, else a numbered
+  200-line window; "not available" on a diff-only run with no clone), each in a nonce fence as
+  untrusted data. It answers `{verdict: stands | unsure | wrong, reason}`.
+- ⚠ **IT CAN ONLY DOWNGRADE, NEVER DELETE.** `wrong` (with a reason) ⇒ the finding becomes a
+  `question`, its body gaining one line: "A second check of the code doubts this, so it is asked as a
+  question: <reason>". `unsure`, `stands`, an invalid answer, a timeout (90 s), a thrown call, no
+  credential or no completion seam ⇒ unchanged. A wrong check costs one extra question, never a
+  missed issue.
+- **On the run's own provider and model, at MEDIUM effort** (`CheapCompleteOpts.provider` / `.effort`,
+  carried to `CompleteRequest.effort` on both providers): a Codex half is checked by Codex. Part of the
+  run the budget gate already allowed. Usage is recorded as feature `claude_review_check` (Reports'
+  "code" bucket).
+- **Cost** (estimated, not yet measured): roughly 10–30k tokens per checked finding; with 3–5
+  findings, about +15–35% on a review, and 20–60 s of wall time.
 
 ### The effort setting (decided 2026-10-26)
 

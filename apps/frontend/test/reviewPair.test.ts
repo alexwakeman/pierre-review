@@ -60,7 +60,11 @@ describe('the AI Review menu', () => {
     const both = resolveReviewModelPick(me({ claude: true, codex: true }), 'claude-opus-5-5', null);
     expect(both.pairOffered).toBe(true);
     expect(both.picks.at(-1)).toMatchObject({ value: PAIR_PICK_VALUE, label: PAIR_PICK_LABEL });
-    expect(both.pair).toBe(false);
+    // Nothing picked yet: Claude + Codex is the default while both can review.
+    expect(both.pair).toBe(true);
+    expect(both.chosen.value).toBe(PAIR_PICK_VALUE);
+    // A model picked from the menu runs alone.
+    expect(resolveReviewModelPick(me({ claude: true, codex: true }), 'claude-opus-5-5', 'claude:claude-opus-5-5').pair).toBe(false);
     for (const one of [me({ claude: true }), me({ codex: true }), me({})]) {
       const s = resolveReviewModelPick(one, 'claude-opus-5-5', null);
       expect(s.pairOffered).toBe(false);
@@ -146,6 +150,8 @@ describe('the progress line', () => {
     expect(pairRunningLabel('Claude', 'first', 'reviewing')).toBe('Claude reviewing…');
     expect(pairRunningLabel('Codex', 'second', 'reviewing')).toBe('Codex reviewing…');
     expect(pairRunningLabel('Codex', 'second', 'merging')).toBe('Merging the two reviews…');
+    expect(pairRunningLabel('Claude', 'first', 'reviewing', true)).toBe('Claude and Codex reviewing…');
+    expect(pairRunningLabel('Claude', 'first', 'merging', true)).toBe('Merging the two reviews…');
   });
 });
 

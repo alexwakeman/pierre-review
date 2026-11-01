@@ -101,9 +101,18 @@ export function pairReviewBody(parts: readonly PairBodyPart[], footer: string | 
   return lines.join('\n\n');
 }
 
-/** The stored `workspaces.auto_review_providers` → the setting in force. Anything but 'both' is the default. */
+/**
+ * The stored `workspaces.auto_review_providers` → the setting in force. Since 2026-11-01 Claude + Codex
+ * is the DEFAULT (NULL, or the old explicit 'both'): only a stored 'default' (the reader picked the
+ * default provider alone) runs one provider. With one provider signed in a pair runs just that one.
+ */
 export function resolveAutoReviewProviders(stored: unknown): AutoReviewProviders {
-  return stored === 'both' ? 'both' : 'default';
+  return stored === 'default' ? 'default' : 'both';
+}
+
+/** What `workspaces.auto_review_providers` stores for a setting: NULL for the default (a pair). */
+export function storedAutoReviewProviders(p: AutoReviewProviders): string | null {
+  return p === 'default' ? 'default' : null;
 }
 
 /**

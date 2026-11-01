@@ -7582,6 +7582,8 @@ export type ClaudeReviewPhase =
   | 'fetching_diff'
   | 'deciding'
   | 'reviewing'
+  // Each blocker and warning checked again in a fresh context (claude-review/finding-check.ts).
+  | 'checking'
   | 'persisting'
   // A Claude + Codex pair's end: the two reviews are being merged into one.
   | 'merging';
@@ -7615,8 +7617,9 @@ export interface ClaudeReviewStatusResponse {
   progress: ClaudeReviewProgress | null;
   // Who started the in-flight run (running / queued only). Absent on older servers.
   trigger?: ClaudeReviewTrigger;
-  // The in-flight run is one half of a Claude + Codex pair: which one, and who runs it.
-  pair?: { role: 'first' | 'second'; provider: AiProviderId } | null;
+  // The in-flight run is one half of a Claude + Codex pair: which one, and who runs it. `both`: the
+  // other half is running at the same time (the halves run together since 2026-11-01).
+  pair?: { role: 'first' | 'second'; provider: AiProviderId; both?: boolean } | null;
 }
 
 // Server-Sent-Events payload streamed by GET /api/prs/:id/claude-review/stream.

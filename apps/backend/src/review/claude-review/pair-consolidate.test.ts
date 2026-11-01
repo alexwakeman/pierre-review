@@ -186,6 +186,25 @@ describe('what code keeps', () => {
   });
 });
 
+describe('the code dedupe at the pair\u2019s end', () => {
+  const rev = (id: number, provider: 'claude' | 'codex', fs: Array<[number, number | null, string, ClaudeFindingSeverity?]>) =>
+    ({
+      id, provider, findings: fs.map(([fid, line, title, severity]) => ({ id: fid, path: 'src/a.ts', line, title, severity: severity ?? 'warning' })),
+    }) as any;
+  it('groups a second-half repeat with the first half\u2019s finding (the first kept); praise is never grouped', () => {
+    const a = rev(1, 'claude', [[10, 10, 'Null check missing on the user lookup'], [11, 40, 'Nice tests', 'praise']]);
+    const b = rev(2, 'codex', [[20, 12, 'Missing null check on user lookup'], [21, 90, 'Off-by-one in the page count'], [22, 40, 'Nice tests', 'praise']]);
+    expect(pc.pairRepeatGroups(a, b)).toEqual([{ ids: [10, 20], keep: 10 }]);
+  });
+  it('joins groups that share a finding', () => {
+    expect(pc.joinDuplicateGroups([{ ids: [1, 2], keep: 1 }, { ids: [2, 3], keep: 3 }, { ids: [4, 5], keep: 5 }])).toEqual([
+      { ids: [1, 2, 3], keep: 1 },
+      { ids: [4, 5], keep: 5 },
+    ]);
+    expect(pc.joinDuplicateGroups([{ ids: [1, 2], keep: 1 }, { ids: [3, 4], keep: 3 }, { ids: [2, 3], keep: 2 }])).toEqual([{ ids: [1, 2, 3, 4], keep: 1 }]);
+  });
+});
+
 describe('consolidating a pair (DB)', () => {
   it('both succeeded ⇒ the pass: duplicates merged, the summary stored, the verdict in code, usage recorded', async () => {
     const p = await pairOf(

@@ -92,7 +92,8 @@ describe('the switch and its floor', () => {
       // Automatic design diagrams are ON by default (0126).
       autoDiagramsEnabled: true,
       teamClaimsEnabled: false,
-      autoReviewProviders: 'default',
+      // Claude + Codex is the default (2026-11-01); with one signed in, that one runs alone.
+      autoReviewProviders: 'both',
       pairStrictness: 'strict',
       autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
