@@ -2919,9 +2919,10 @@ activity.
 - **What counts** (shared `limnFindingPost(body)`, `packages/shared/src/limn-severity.ts`): the
   finding marker (`<!-- pierre:claude-review-finding`) PLUS a severity lead (`**Warning**` …) or a
   reminder lead (`**Reminder:**`), on an inline or PR-level comment, by ANY author, manual or
-  automatic. NOT the bot: replies on a finding thread (marker, no lead), pushback, review bodies and
-  auto verdicts, CI, Sonar, dependency and ticket "story check" posts, and findings posted before
-  leads existed (2026-10-27). Those stay the person's.
+  automatic. ALSO an inline thread ROOT with the marker and no lead (`{ threadRoot: true }`): a
+  finding posted before leads existed (2026-10-27) — the bot's, with NO severity. NOT the bot:
+  replies on a finding thread (never a root), pushback, review bodies and auto verdicts, CI, Sonar,
+  dependency and ticket "story check" posts, and a lead-less PR-level comment. Those stay the person's.
 - **Identity**: a synthetic `users` row per poster, login `limn:<login>` (`:` is impossible in a
   GitHub login, so it never collides and is NEVER sent to GitHub), `is_bot` pinned, no node id,
   display name "Limn · <login>" (`db/limn-bots.ts` `ensureLimnBotUser`). Its `workspace_reviewers`

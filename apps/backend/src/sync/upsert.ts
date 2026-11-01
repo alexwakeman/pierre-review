@@ -1202,10 +1202,11 @@ export async function persistPr(
         body?: string | null;
       },
       finding = true,
+      threadRoot = false,
     ): Promise<{ authorId: number | null; limnPostedByUserId: number | null }> => {
       const posterId = await resolver.resolve(tx, c.author);
       const login = c.author?.login;
-      if (!finding || posterId == null || !login || limnFindingPost(c.body) == null) {
+      if (!finding || posterId == null || !login || limnFindingPost(c.body, { threadRoot }) == null) {
         return { authorId: posterId, limnPostedByUserId: null };
       }
       let botId = limnBots.get(login);
@@ -1220,7 +1221,7 @@ export async function persistPr(
     for (const t of pr.reviewThreads.nodes) {
       const commentNodes = t.comments.nodes;
       const originalCommenterId = commentNodes[0]
-        ? (await attribute(commentNodes[0])).authorId
+        ? (await attribute(commentNodes[0], true, true)).authorId
         : null;
 
       const resolvedByLogin = t.resolvedBy?.login ?? null;
@@ -1284,7 +1285,7 @@ export async function persistPr(
       )[0]!;
 
       for (const [ci, c] of commentNodes.entries()) {
-        const { authorId: commenterId, limnPostedByUserId } = await attribute(c, ci === 0);
+        const { authorId: commenterId, limnPostedByUserId } = await attribute(c, ci === 0, ci === 0);
         const createdAt = new Date(c.createdAt);
         const rcRow = (
           await tx

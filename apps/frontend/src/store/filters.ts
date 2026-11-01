@@ -1859,10 +1859,13 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().showActivity();
     get().setActivityRepo('open-prs');
   },
+  // A Pending "main is red" item lands on THAT repo's page (Activity tab), its default-branch row
+  // opened once (the one-shot `trunkFocusRepoId`) — never the workspace's Open PRs list.
   openTrunkStatus: (repoId) => {
     set({ trunkFocusRepoId: repoId });
     usePinnedTabs.getState().showActivity();
-    get().setActivityRepo('open-prs');
+    get().setRepoConsoleTab(repoId, 'activity');
+    get().setActivityRepo(repoId);
   },
   consumeTrunkFocus: () => set({ trunkFocusRepoId: null }),
   setOpenPrsRepoFilter: (repoIds) =>

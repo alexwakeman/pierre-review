@@ -438,9 +438,10 @@ export function BranchStatusPanel({
   // which made the chevron a dead control on a red trunk — never derive `expanded` from data.)
   // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference.
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-  // ONE-SHOT: a Pending "main is red" item (`openTrunkStatus`) asked for one repo. The strip opens
-  // on it once the rows are in, then the seed is consumed — the next arrival is collapsed again.
-  const trunkFocus = useFilters((s) => (compact ? null : s.trunkFocusRepoId));
+  // ONE-SHOT: a Pending "main is red" item (`openTrunkStatus`) asked for one repo — it lands on that
+  // repo's page, where this panel is the compact one. It opens on the repo once the rows are in, then
+  // the seed is consumed — the next arrival is collapsed again.
+  const trunkFocus = useFilters((s) => s.trunkFocusRepoId);
   const consumeTrunkFocus = useFilters((s) => s.consumeTrunkFocus);
   const [focusedRepoId, setFocusedRepoId] = useState<number | null>(null);
   const focusRows = data?.repos;

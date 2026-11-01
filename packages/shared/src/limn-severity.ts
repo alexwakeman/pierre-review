@@ -108,8 +108,15 @@ const WORD_TO_SEVERITY: Record<string, LimnSeverity> = {
  * lead or a reminder lead at the start. Null for everything else — a reply on a finding thread
  * (marker, no lead), a pushback, a review body, a ticket post, a finding posted before leads
  * existed, and any comment without the marker.
+ *
+ * `threadRoot`: the comment OPENS an inline review thread. Limn posts every finding as a new thread
+ * root, so a root with the finding marker and no lead is a finding posted before leads existed: a
+ * finding with no severity. (Replies never open a thread; a ticket story-check post is not a finding.)
  */
-export function limnFindingPost(body: string | null | undefined): LimnFindingPost | null {
+export function limnFindingPost(
+  body: string | null | undefined,
+  opts: { threadRoot?: boolean } = {},
+): LimnFindingPost | null {
   if (typeof body !== 'string' || body === '') return null;
   if (!LIMN_FINDING_MARKER_RE.test(body)) return null;
   if (LIMN_PUSHBACK_MARKER_RE.test(body)) return null;
@@ -120,6 +127,7 @@ export function limnFindingPost(body: string | null | undefined): LimnFindingPos
     return { severity: WORD_TO_SEVERITY[lead[1]!] ?? null, reminder: LIMN_REMINDER_LEAD_RE.test(rest) };
   }
   if (LIMN_REMINDER_LEAD_RE.test(text)) return { severity: null, reminder: true };
+  if (opts.threadRoot === true && !/^\*\*[^*\n]* story check\*\*/.test(text)) return { severity: null, reminder: false };
   return null;
 }
 

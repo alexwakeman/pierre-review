@@ -44,6 +44,14 @@ describe('limnFindingPost', () => {
     expect(limnFindingPost('')).toBeNull();
   });
 
+  it('reads a thread-opening finding posted before leads existed as a finding with no severity', () => {
+    expect(limnFindingPost(findingCommentBody(base), { threadRoot: true })).toEqual({ severity: null, reminder: false });
+    // Still never a ticket post or a pushback, even when it opens a thread.
+    expect(limnFindingPost(`**BMD-1 story check** on abc1234: 1 gap.\n\n${MARK}`, { threadRoot: true })).toBeNull();
+    expect(limnFindingPost(`No.\n\n<!-- pierre:claude-review-pushback v=1 -->\n${MARK}`, { threadRoot: true })).toBeNull();
+    expect(limnFindingPost('A person opened this thread.', { threadRoot: true })).toBeNull();
+  });
+
   it('reads CRLF bodies and leading whitespace', () => {
     expect(limnFindingPost(`\r\n**Warning**\r\n\r\nThis can throw.\r\n\r\n${MARK}`)).toEqual({ severity: 'warning', reminder: false });
   });

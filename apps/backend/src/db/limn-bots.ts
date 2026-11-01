@@ -247,9 +247,9 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
       body: string | null;
       posterId: number | null;
       repoId: number;
-    }): Promise<{ authorId: number | null; limnPostedBy: number | null }> => {
+    }, threadRoot = false): Promise<{ authorId: number | null; limnPostedBy: number | null }> => {
       const login = r.posterId != null ? posterLogin.get(r.posterId) : undefined;
-      if (r.posterId == null || login == null || isLimnBotLogin(login) || limnFindingPost(r.body) == null) {
+      if (r.posterId == null || login == null || isLimnBotLogin(login) || limnFindingPost(r.body, { threadRoot }) == null) {
         return { authorId: r.posterId, limnPostedBy: null };
       }
       const botId = await botFor(login);
@@ -261,7 +261,7 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
     let comments = 0;
     const touchedThreads = new Set<number>();
     for (const r of rcRows) {
-      const d = await desired(r.isRoot ? r : { ...r, body: null });
+      const d = await desired(r.isRoot ? r : { ...r, body: null }, Boolean(r.isRoot));
       if (d.authorId === r.authorId && d.limnPostedBy === r.limnPostedBy) continue;
       comments++;
       touchedThreads.add(r.threadId);
