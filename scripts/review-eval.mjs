@@ -7,6 +7,7 @@
 //
 //   node scripts/review-eval.mjs --cases ~/.limn/review-eval/cases.json --runs 3 \
 //        --provider claude --model claude-opus-5-5 --label baseline
+//   node scripts/review-eval.mjs --cases … --runs 3 --pair --label pair      # Claude + Codex, merged
 //   node scripts/review-eval.mjs --cases … --score ~/.limn/review-eval/results/<file>.json   # re-score only
 //
 // THE CASES FILE lives OUTSIDE the repo (it describes a team's private code):
@@ -51,7 +52,9 @@ async function api(path, init) {
 }
 
 async function runOnce(c) {
-  const body = { fresh: true, ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) };
+  const body = args.pair
+    ? { fresh: true, pair: true }
+    : { fresh: true, ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) };
   const { reviewId } = await api(`/api/prs/${c.prId}/claude-review`, { method: 'POST', body: JSON.stringify(body) });
   const started = Date.now();
   for (;;) {
@@ -70,6 +73,9 @@ async function runOnce(c) {
         outputTokens: rev.outputTokens ?? null,
         seconds: Math.round((Date.now() - started) / 1000),
         summary: rev.summary ?? '',
+        // A pair: how it was merged, and a half that did not finish (the result is then one provider's).
+        pairHow: rev.pair?.how ?? null,
+        failedHalf: rev.pair?.failedHalf ?? null,
         findings: (rev.findings ?? []).map((f) => ({
           severity: f.severity,
           path: f.path,
@@ -88,6 +94,8 @@ function matches(issue, f) {
   const text = `${f.title}\n${f.body}`;
   return issue.all.every((re) => new RegExp(re, 'i').test(text));
 }
+
+const isDowngraded = (f) => /A second check of the code doubts this/.test(f.body ?? '');
 
 function score(results) {
   const out = [];
@@ -108,6 +116,10 @@ function score(results) {
         recall: c.issues.length ? found.length / c.issues.length : 0,
         findings: r.findings.length,
         unmatched: unmatched.map((f) => `${f.severity} ${f.path}:${f.line ?? ''} ${f.title}`),
+        // THE FINDING CHECK: findings it asked as a question, and how many of those were KNOWN issues.
+        downgraded: r.findings.filter(isDowngraded).length,
+        downgradedKnown: r.findings.filter((f) => isDowngraded(f) && c.issues.some((iss) => matches(iss, f))).length,
+        failedHalf: r.failedHalf ? `${r.failedHalf.provider}: ${r.failedHalf.reason}` : null,
         findingWords: r.findings.reduce((n, f) => n + words(f.body), 0),
         summaryWords: words(r.summary),
         costUsd: r.costUsd,
@@ -133,7 +145,11 @@ function report(scored, meta) {
     lines.push(`## ${s.case.name}  — recall ${pct(mean(rec))} (runs: ${rec.map(pct).join(', ') || 'none'})${s.failed ? `, ${s.failed} failed` : ''}`);
     for (const i of s.perIssue) lines.push(`- ${i.hits}/${s.runs}  ${i.severity.padEnd(7)} ${i.id} — ${i.title}`);
     for (const r of s.perRun) {
-      lines.push(`  run #${r.reviewId}: ${r.found.length}/${s.case.issues.length} known, ${r.findings} findings, ${r.findingWords} words, $${(r.costUsd ?? 0).toFixed(2)}, ${r.seconds}s`);
+      lines.push(
+        `  run #${r.reviewId}: ${r.found.length}/${s.case.issues.length} known, ${r.findings} findings, ${r.findingWords} words, $${(r.costUsd ?? 0).toFixed(2)}, ${r.seconds}s` +
+          (r.downgraded ? `, ${r.downgraded} asked as a question (${r.downgradedKnown ?? 0} of them known issues)` : '') +
+          (r.failedHalf ? ` — ONE HALF ONLY (${r.failedHalf})` : ''),
+      );
       for (const u of r.unmatched) lines.push(`    unmatched: ${u}`);
     }
     lines.push('');
@@ -141,7 +157,12 @@ function report(scored, meta) {
   const stable = scored.flatMap((s) => s.perIssue);
   const everyRun = scored.reduce((n, s) => n + s.perIssue.filter((i) => s.runs > 0 && i.hits === s.runs).length, 0);
   const never = scored.reduce((n, s) => n + s.perIssue.filter((i) => s.runs > 0 && i.hits === 0).length, 0);
-  lines.push(`OVERALL: mean recall ${pct(mean(allRecall))}; issues found in EVERY run ${everyRun}/${stable.length}, in NO run ${never}/${stable.length}; cost $${cost.toFixed(2)}`);
+  const all = scored.flatMap((s) => s.perRun);
+  const down = all.reduce((n, r) => n + (r.downgraded ?? 0), 0);
+  const downKnown = all.reduce((n, r) => n + (r.downgradedKnown ?? 0), 0);
+  const oneHalf = all.filter((r) => r.failedHalf).length;
+  lines.push(`OVERALL: mean recall ${pct(mean(allRecall))}; issues found in EVERY run ${everyRun}/${stable.length}, in NO run ${never}/${stable.length}; cost $${cost.toFixed(2)}; mean ${Math.round(mean(all.map((r) => r.seconds ?? 0)))}s per run`);
+  lines.push(`FINDING CHECK: ${down} finding(s) asked as a question, ${downKnown} of them known issues${oneHalf ? `; ${oneHalf} run(s) had ONE HALF ONLY` : ''}`);
   return lines.join('\n');
 }
 
@@ -153,7 +174,7 @@ if (args.score) {
   console.log(report(score(saved.results), saved.meta));
 } else {
   const runs = Number(args.runs ?? 1);
-  const meta = { label: args.label ?? 'run', provider: args.provider ?? null, model: args.model ?? null, runs, startedAt: new Date().toISOString(), cases: casesPath };
+  const meta = { label: args.label ?? 'run', provider: args.pair ? 'claude+codex' : (args.provider ?? null), model: args.model ?? null, runs, startedAt: new Date().toISOString(), cases: casesPath };
   const file = join(outDir, `${meta.label}-${meta.startedAt.replace(/[:.]/g, '-')}.json`);
   const results = [];
   for (let i = 0; i < runs; i++) {

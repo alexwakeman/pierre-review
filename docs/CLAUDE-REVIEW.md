@@ -3781,3 +3781,10 @@ A REVIEW PLAN (code ranked up to 15 changed files by risk; the reviewer had to r
 and REVERTED) made it worse: 37% recall, 1 issue found every run, and the reviewer marked 14–15 of 15
 files "checked" even where it missed the issue. `claude_reviews.coverage` (migration 0150) stays as a
 DORMANT column: nothing writes or reads it.
+
+**Claude + Codex at the same time, with the finding check (2026-11-01, `--pair`):** 9 full pair runs
+found 87% of the known issues on average (the earlier sequential pair ≈ 79%), about 4–7 minutes per
+run. The ChatGPT Plus 5-hour limit cut Codex after 9 halves; the 6 runs left were Claude alone with
+the new prompt and check: 43% (46% before), so the relaxed prompt does not lift Claude alone. The
+check ran 49 times and asked nothing as a question: no harm and no measured gain yet, at under 1% of a
+run's tokens. Codex's specialists (impact, security, tests) used about 73% of its input tokens.
