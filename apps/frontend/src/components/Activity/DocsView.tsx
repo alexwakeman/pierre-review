@@ -722,24 +722,26 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
           <section
             aria-label="Library"
             style={{ width: DOCS_LIBRARY_STRIP_W }}
-            className="flex shrink-0 flex-col items-center gap-2 rounded-ui bg-ui-surface py-2"
+            className="flex shrink-0 rounded-ui bg-ui-surface"
           >
+            {/* The whole strip is the expand control, not just the chevron. */}
             <button
               type="button"
               onClick={() => setCollapsed(false)}
               aria-expanded={false}
               aria-label={`Show the document list (${docs.length} document${docs.length === 1 ? '' : 's'})`}
               title="Show the document list"
-              className={COLLAPSE_BUTTON}
+              data-testid="docs-library-strip"
+              className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-ui py-2 text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
-              <ChevronIcon dir="right" size={12} />
+              <span className="flex h-6 w-6 items-center justify-center">
+                <ChevronIcon dir="right" size={12} />
+              </span>
+              <span className="text-ui-faint">
+                <BookIcon size={14} />
+              </span>
+              <span className="text-meta tabular-nums">{docs.length}</span>
             </button>
-            <span className="text-ui-faint" aria-hidden="true">
-              <BookIcon size={14} />
-            </span>
-            <span className="text-meta tabular-nums text-ui-mute" aria-hidden="true">
-              {docs.length}
-            </span>
           </section>
         ) : (
           <section

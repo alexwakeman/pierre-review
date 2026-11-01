@@ -1542,7 +1542,7 @@ export function PrDetail({
                 <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
               </button>
           ) : (
-            <h2 className="min-w-0 text-title text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
+            <h2 className="min-w-0 text-display text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
               <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
             </h2>
           )}
