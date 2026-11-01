@@ -6,6 +6,7 @@ import { hasActivePopover } from '../../lib/activePopover.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { StoryViewBody } from '../Ticket/StoryViewBody.js';
 import { ArrowIcon, ChevronIcon, CloseIcon } from '../Icons.js';
+import { HEADER_ACTION_CLASS } from '../ui/SidePanel.js';
 import { Button, IconButton } from '../ui/Button.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 
@@ -26,15 +27,20 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 //            redesign; docs/redesign/DESIGN.md § 6).
 //   WIDTH    the left edge is a drag handle (also arrow keys); the width is remembered in localStorage
 //            (TRAY_WIDTH_KEY) for every later opening; Home or a double-click goes back to the default,
-//            TRAY_WIDTH_DEFAULT_CSS, wide enough for the design diagrams; capped so MIN_BOARD_PX of the board still shows.
+//            TRAY_WIDTH_DEFAULT_CSS (~560px, so most of the board stays in view); capped so MIN_BOARD_PX of
+//            the board still shows. The width it lies at is reported (`onWidth`): the board adds that much
+//            scroll room after its last column and scrolls the open card out from under the tray.
+//   STEPPING Previous / Next in the header and j / k (not while typing) step through the board's cards
+//            in board order (`onStep`; components/Sprint/trayBoard.ts). The keys are in ⌘K and the
+//            buttons' titles, never printed on a button.
 //   ESCAPE   closes the tray (capture phase, so the global "Escape leaves the tab" does not also run),
 //            and focus returns to the card that opened it — unless an open popover, a modal or a
 //            control that owns Escape is the one being dismissed, or the reader is typing.
 
 const TRAY_WIDTH_KEY = 'limn:sprintTrayWidth';
-// The default until the reader drags: 52rem, or 55% of the row on a narrower screen, so the board keeps
-// room for its cards. A drag stores pixels.
-const TRAY_WIDTH_DEFAULT_CSS = 'min(52rem, 55%)';
+// The default until the reader drags: 35rem (560px), or 55% of the row on a narrower screen, so the board
+// keeps room for its cards. A drag stores pixels (a stored width still wins).
+const TRAY_WIDTH_DEFAULT_CSS = 'min(35rem, 55%)';
 const TRAY_WIDTH_MIN = 360;
 const MIN_BOARD_PX = 320;
 const KEY_STEP = 32;
@@ -60,6 +66,9 @@ export function SprintStoryTray({
   title,
   node = null,
   onClose,
+  onWidth,
+  onStep,
+  position = null,
 }: {
   /** The board's node for this ticket (absent for a ticket the board does not show): the story's build
    *  action reads it, so the tray fetches nothing for it. */
@@ -70,6 +79,12 @@ export function SprintStoryTray({
   ticketKey: string;
   title: string | null;
   onClose: () => void;
+  /** The width the tray lies at ON TOP of the board (px; wide screens), 0 as a sheet, null once closed. */
+  onWidth?: (px: number | null) => void;
+  /** Show the previous (-1) or next (1) card's story, in board order. */
+  onStep?: (dir: 1 | -1) => void;
+  /** The open card's place in board order; null when the board does not show it. */
+  position?: { index: number; total: number } | null;
 }): JSX.Element {
   const openStory = useOpenStory();
   // The latest close, for the one listener below.
@@ -92,6 +107,31 @@ export function SprintStoryTray({
   }, [ident]);
 
   const asideRef = useRef<HTMLElement>(null);
+  // Report the width the tray lies at over the board (0 when it is a sheet), and null when it closes.
+  const widthRef = useRef(onWidth);
+  widthRef.current = onWidth;
+  useLayoutEffect(() => {
+    const aside = asideRef.current;
+    if (aside == null) return;
+    const wide = window.matchMedia('(min-width: 1024px)');
+    let last: number | null = null;
+    const report = (): void => {
+      const px = wide.matches ? Math.round(aside.offsetWidth) : 0;
+      if (px !== last) {
+        last = px;
+        widthRef.current?.(px);
+      }
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(aside);
+    wide.addEventListener('change', report);
+    return () => {
+      ro.disconnect();
+      wide.removeEventListener('change', report);
+      widthRef.current?.(null);
+    };
+  }, []);
   // The remembered width (px); a drag previews in `dragWidth` and commits on release.
   const [savedWidth, setSavedWidth] = useLocalStorage<number | null>(TRAY_WIDTH_KEY, null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -179,7 +219,7 @@ export function SprintStoryTray({
     <aside
       ref={asideRef}
       id={id}
-      aria-label={`${ticketKey} story`}
+      aria-label={`${ticketKey} ticket`}
       data-testid="sprint-story-tray"
       data-noactivate
       style={style}
@@ -197,7 +237,7 @@ export function SprintStoryTray({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize the story"
+        aria-label="Resize the ticket panel"
         aria-valuenow={width != null ? Math.round(width) : undefined}
         aria-valuemin={TRAY_WIDTH_MIN}
         tabIndex={0}
@@ -219,10 +259,37 @@ export function SprintStoryTray({
           Back
         </button>
         <span className="min-w-0 flex-1 truncate font-mono text-body font-medium text-ui-ink">{ticketKey}</span>
-        <Button variant="ghost" size="sm" icon={<ArrowIcon size={11} />} onClick={() => openStory({ ident, key: ticketKey, title })}>
-          Open story tab
-        </Button>
-        <IconButton label="Close the story" icon={<CloseIcon size={12} />} size="sm" onClick={onClose} className="hidden md:inline-flex" />
+        {/* The header's buttons are ONE row, centred on each other, at the close button's size. */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button variant="ghost" size="sm" icon={<ArrowIcon size={11} />} onClick={() => openStory({ ident, key: ticketKey, title })}>
+            Open ticket tab
+          </Button>
+          {onStep != null && position != null && position.total > 1 && (
+            <>
+              <IconButton
+                label="Previous ticket"
+                title="Previous ticket (k)"
+                data-testid="sprint-story-tray-prev"
+                icon={<ChevronIcon dir="up" size={12} />}
+                size="sm"
+                className={HEADER_ACTION_CLASS}
+                disabled={position.index <= 1}
+                onClick={() => onStep(-1)}
+              />
+              <IconButton
+                label="Next ticket"
+                title="Next ticket (j)"
+                data-testid="sprint-story-tray-next"
+                icon={<ChevronIcon dir="down" size={12} />}
+                size="sm"
+                className={HEADER_ACTION_CLASS}
+                disabled={position.index >= position.total}
+                onClick={() => onStep(1)}
+              />
+            </>
+          )}
+          <IconButton label="Close the ticket" icon={<CloseIcon size={12} />} size="sm" onClick={onClose} className="hidden md:inline-flex" />
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1 md:px-4">
         {/* Keyed on the ticket, so switching tickets starts the body afresh. */}

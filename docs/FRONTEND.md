@@ -2336,6 +2336,8 @@ the next refetch.
 
 ### This Sprint (a fixed tab — formerly "Activity → This Sprint")
 
+**Story tray over the board (2026-11-01).** Wide screens: default width `min(35rem, 55%)` (a dragged width in `limn:sprintTrayWidth` still wins). The tray reports its width (`onWidth`); the board adds exactly that much scroll room after its last column (LaneBoard `endRoom` — padding outside an unchanged content box, so no column narrows), removed on close. The open card is scrolled to just left of the tray (`Sprint/trayBoard.ts` `revealCard`) once per card opened, only when hidden or covered. It wears the accent ring + a left accent bar + `aria-current`; cards in its row under the tray show as "+N under the panel" (`TrayRowMarker`; a click opens the nearest). Previous/Next in the tray header and j/k (not while typing or under a popover/modal; also in ⌘K) step through cards in rendered order, per view, skipping collapsed cells. A click on the board outside a card and its controls closes the tray (native listener on `sprint-view`; portalled popovers never count); Escape closes and refocuses the card. The tray draws NO ticket design (`TicketStack withDesign={page || embedded}`).
+
 **REDESIGN (2026-10, docs/redesign/DESIGN.md).** One page header (`text-display` "This Sprint", then the
 shared `Tabs` — `1`–`4` switch them); a compact toolbar (sprint name + ⓘ, dates · tickets; Ask / Statuses as
 ghost buttons, Refresh secondary); quiet cards (surface tone, no border; MARKS not borders — below);
@@ -3538,6 +3540,8 @@ phrase it two ways.
   simply not drawn beneath its own restatement.
 
 ## The story view (the ticket tab, `kind: 'ticket'`, CORE)
+
+**User-facing word is "Ticket"** (2026-11-01): the section heading (now INSIDE the content box, at its top), the PR tab "Ticket KEY", "Open ticket tab", the nav entry, "Ticket design". Internal names stay story (`prTab=story`, `view=ticket:…`, test ids); Jira's own "Story" type chip and the "Story check" feature keep their names. "What each PR adds" groups PRs by repo in full-width rows; an open card spans the panel and its Expand lays it LEFTWARDS over the main column (`RailWideLeft`, max 768px, z-30, Escape collapses) — the mirror of `RailWide`. The AI Review tab's design section gives EACH diagram (the PR's, each ticket's) its own `RailWide` + Expand, as the ticket view does.
 
 ONE ticket, Open PRs style: `Ticket/StoryViewBody.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a

@@ -130,9 +130,9 @@ export function StoryViewBody({
     <StoryLayout oneColumn={oneColumn} embedded={embedded}>
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
-        <p className="text-body text-ui-danger">Couldn’t load this story.</p>
+        <p className="text-body text-ui-danger">Couldn’t load this ticket.</p>
       ) : prsQ.isLoading || data == null ? (
-        <div aria-busy="true" aria-label="Loading the story" className="h-32 rounded-ui bg-ui-surface motion-safe:animate-pulse" />
+        <div aria-busy="true" aria-label="Loading the ticket" className="h-32 rounded-ui bg-ui-surface motion-safe:animate-pulse" />
       ) : !found ? (
         <p className={`text-body ${MUTED}`}>This ticket isn’t on this workspace’s tracker.</p>
       ) : (

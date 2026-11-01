@@ -136,7 +136,7 @@ export function SearchResultsTab(): JSX.Element {
                       {st.title != null && <span className="font-medium text-ui-ink">{highlightTerms(st.title, debounced)}</span>}
                     </span>
                     <span className="mt-0.5 block text-meta text-ui-mute">
-                      {[st.status, storyPrWords(st)].filter(Boolean).join(' · ')} · Open the story
+                      {[st.status, storyPrWords(st)].filter(Boolean).join(' · ')} · Open the ticket
                     </span>
                   </span>
                 </button>

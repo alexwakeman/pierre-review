@@ -484,6 +484,10 @@ interface LaneBoardProps<L, C> {
   onToggleCell?: (laneId: string, columnId: string) => void;
   /** A key drawn under the board, before the arrows' key (e.g. the card marks). */
   legend?: ReactNode;
+  /** Extra scroll room (px) after the last column, so a card under a panel drawn ON TOP of the board's
+   *  right side (This Sprint's story tray) can be scrolled out from under it. The columns keep the
+   *  widths they had without it. 0 / absent = none. */
+  endRoom?: number;
 }
 
 /** The quiet link-like toggle a column header and a collapsed cell use ("Show", "2 tickets"). */
@@ -498,7 +502,7 @@ export function LaneBoard<L, C>(props: LaneBoardProps<L, C>): JSX.Element {
   return !desktop ? <StackedLaneBoard {...props} /> : <GridLaneBoard {...props} />;
 }
 
-function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard, onToggleColumn, onToggleCell, legend }: LaneBoardProps<L, C>): JSX.Element {
+function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard, onToggleColumn, onToggleCell, legend, endRoom = 0 }: LaneBoardProps<L, C>): JSX.Element {
   const cells = layout.cards;
   const arrows = layout.arrows;
   // A collapsed column's "n tickets" (or an opened cell's "Hide") sits in its lane's first row: an arrow
@@ -532,7 +536,18 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
     <ObstaclesContext.Provider value={cardRects}>
     <div role="group" aria-label={label} className="w-full">
       <div className={cx('w-full overflow-x-auto', narrow && 'snap-x snap-proximity')}>
-        <div ref={gridRef} className={cx('relative grid gap-y-1 pb-1 pr-1', narrow ? 'gap-x-8' : 'gap-x-12')} style={{ gridTemplateColumns: template }}>
+        <div
+          ref={gridRef}
+          className={cx('relative grid gap-y-1 pb-1 pr-1', narrow ? 'gap-x-8' : 'gap-x-12')}
+          // The end room is PADDING outside a content box as wide as before (the box less `pr-1`), and
+          // never narrower than its tracks' minimums, so no column gets narrower and the room always
+          // follows the last column.
+          style={
+            endRoom > 0
+              ? { gridTemplateColumns: template, boxSizing: 'content-box', width: 'calc(100% - 0.25rem)', minWidth: 'min-content', paddingRight: `calc(0.25rem + ${endRoom}px)` }
+              : { gridTemplateColumns: template }
+          }
+        >
           {/* Lane rules, under everything: a hairline above each lane (no zebra ground — the cards
               are the raised tone, the lanes are the page). */}
           {layout.lanes.map((l) => (

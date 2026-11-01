@@ -166,7 +166,7 @@ function TicketShare({
           onClick={() => openStory({ ident, key: ticketKey, title: ticketTitle })}
           className="hit text-ui-ink hover:underline text-link-phone"
         >
-          See the whole story
+          See the whole ticket
         </button>
       </p>
     </div>
@@ -227,7 +227,7 @@ function TicketBlock({
   });
 
   return (
-    <div aria-label={`Story ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
+    <div aria-label={`Ticket ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h4 className="flex min-w-0 flex-wrap items-baseline gap-x-2">
           {entry.ticketKey != null &&

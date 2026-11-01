@@ -212,7 +212,7 @@ const VIEWS = [
       expect: ['Nothing has changed since this check.', 'Check again anyway'],
     },
   ],
-  // The story view's Story design: one data flow across both pull requests.
+  // The story view's Ticket design: one data flow across both pull requests.
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null, { expect: ['Terraform state moves to S3, guarded by a lock', 'a new state version'] }],
   // "Implement story" (docs/STORY-BUILD.md § Entry points): the STORY VIEW's action — Implement on a
   // not-started ticket with no session, Fill gaps on a started one whose story check found gaps, Open
@@ -377,7 +377,7 @@ const VIEWS = [
     'pr:113:story',
     '?view=pr-detail:113&prTab=story',
     'pr-113-story',
-    { expect: ['Open story tab', 'PLAT-292', 'Write each pull request in one transaction during sync'] },
+    { expect: ['Open ticket tab', 'PLAT-292', 'Write each pull request in one transaction during sync'] },
   ],
   ['pr:113:claude_review-alias', '?view=pr-detail:113&prTab=claude_review', null, { expect: ['Run a review'] }],
   // AI Fix "Run tests": #114's fix ran the project's checks in the sandbox (results + the commit

@@ -4,7 +4,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { BotIcon, GearIcon } from '../Icons.js';
 import { Tabs } from '../ui/Tabs.js';
-import { PAGE_GUTTER } from '../ui/PageHeader.js';
+import { PAGE_GUTTER, PageToastSlot } from '../ui/PageHeader.js';
 import { openWorkspaceManager } from '../WorkspaceSelector.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
@@ -40,15 +40,20 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   const isolated = useFilters((s) => s.feedIsolatedPrId != null);
   return (
     <div className="space-y-3" data-testid="repo-console">
-      <Tabs
-        label="Repository views"
-        value={tab}
-        onChange={(t) => setRepoConsoleTab(repo.repoId, t)}
-        tabs={[
-          { id: 'activity', label: 'Activity' },
-          { id: 'bots', label: 'Bots', icon: <BotIcon size={13} /> },
-        ]}
-      />
+      {/* The tabs row is this page's header: it takes a PageHeader's top padding and holds the
+          toast seat, so the empty top bar collapses at ≥ lg as on every other page. */}
+      <div className="flex items-start gap-3 pt-5 max-md:pt-3">
+        <Tabs
+          label="Repository views"
+          value={tab}
+          onChange={(t) => setRepoConsoleTab(repo.repoId, t)}
+          tabs={[
+            { id: 'activity', label: 'Activity' },
+            { id: 'bots', label: 'Bots', icon: <BotIcon size={13} /> },
+          ]}
+        />
+        <PageToastSlot className="ml-auto" />
+      </div>
       {tab === 'activity' ? (
         <>
           {/* What the sidebar row's red and blue dots mean for THIS repo, as plain facts (no
@@ -132,7 +137,8 @@ export function ActivityView(): JSX.Element {
   // The destinations that open on a PageHeader (components/ui/PageHeader.tsx): it carries the top
   // padding; the pane carries the ONE page gutter, so every title starts at the same x.
   const pageHeaded =
-    !noReposAtAll && (showingOpenPrs || showingBots || showingInsights || showingDocs || (showingFeed && !noRepos));
+    !noReposAtAll &&
+    (showingOpenPrs || showingBots || showingInsights || showingDocs || (showingFeed && !noRepos) || selectedRepo != null);
 
   return (
     // ⚠ `relative` IS LOAD-BEARING: it makes this pane the containing block for its own `absolute`

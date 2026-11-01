@@ -68,6 +68,7 @@ import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
 import { FloatingLayer } from './ui/FloatingLayer.js';
+import { RailWideLeft, RailWideToggle } from './RailLayout.js';
 import { useStorySectionLook } from './Ticket/StoryLayout.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { SendToChatButton } from './ClaudeReviewChat.js';
@@ -601,10 +602,95 @@ const CARD_CHANGE_CLASS: Record<TicketPrCard['interfaces'][number]['change'], st
   removed: 'bg-ui-danger/10 text-ui-danger',
 };
 
-/** One member's contribution card, collapsed by default: summary, interfaces, loose ends. */
-export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: ReactNode }): JSX.Element {
+/** One member's contribution card, collapsed by default: summary, interfaces, loose ends. With
+ *  `row` (under "What each PR adds") the toggle is a full-width row — the PR's number and title — and
+ *  the open card spans the whole width under it; in the story rail its Expand lays it over the main
+ *  column (RailLayout.tsx `RailWideLeft`). Bare (one PR's own coverage) a small "What this PR adds". */
+export function PrCardDisclosure({
+  card,
+  label,
+  row,
+}: {
+  card: TicketPrCard;
+  label?: ReactNode;
+  row?: { number: number; title: string | null; repo: string };
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
+  const body = (
+    <div className="space-y-3 text-meta">
+      <p className="whitespace-pre-wrap break-words text-body text-ui-ink">
+        <PrRefText text={card.summary} />
+      </p>
+      {card.interfaces.length > 0 && (
+        <div className="space-y-1.5">
+          <h6 className={REVIEW_SUBHEAD}>{`Interfaces (${card.interfaces.length})`}</h6>
+          <ul className="space-y-2">
+            {card.interfaces.map((i, k) => (
+              <li key={k} className="space-y-0.5">
+                <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span className={`${CHIP} ${CARD_CHANGE_CLASS[i.change]}`}>{TICKET_PR_CARD_CHANGE_LABEL[i.change]}</span>
+                  <span className={MUTED}>{TICKET_PR_CARD_KIND_LABEL[i.kind]}</span>
+                </div>
+                <div className="font-mono text-ui-ink [overflow-wrap:anywhere]">{i.name}</div>
+                {i.note != null && i.note !== '' && (
+                  <div className={`break-words ${MUTED}`}>
+                    <PrRefText text={i.note} />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {card.looseEnds.length > 0 && (
+        <div className="space-y-1.5">
+          <h6 className={REVIEW_SUBHEAD}>{`Loose ends (${card.looseEnds.length})`}</h6>
+          <ul className="list-disc space-y-1 pl-4 text-ui-ink">
+            {card.looseEnds.map((l, k) => (
+              <li key={k} className="break-words">
+                <PrRefText text={l} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+  if (row != null) {
+    // Every PR here is on the same ticket: a title that opens with a ticket key ("BMD-1182 Send…")
+    // drops it in the row (the full title stays in the tooltip).
+    const shortTitle = row.title != null ? row.title.replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?[\s:–—-]*/, '') || row.title : null;
+    return (
+      <div>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen((v) => !v)}
+          title={row.title ?? undefined}
+          className="hit flex w-full min-w-0 items-center gap-2 rounded-ui px-1.5 py-1 text-left text-body hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
+        >
+          <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0 text-ui-mute" />
+          <span className="shrink-0 font-mono text-meta text-ui-mute">
+            <span className="sr-only">{row.repo}</span>#{row.number}
+          </span>
+          <span className={`min-w-0 flex-1 truncate ${shortTitle != null ? 'text-ui-ink' : MUTED}`}>{shortTitle ?? label}</span>
+        </button>
+        {open && (
+          <RailWideLeft className="mb-2 mt-1 rounded-ui bg-ui-surface p-3">
+            <div id={bodyId}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-meta text-ui-mute">{label}</span>
+                <RailWideToggle className="-my-0.5 ml-auto" expandTitle="Show over the main column" />
+              </div>
+              {body}
+            </div>
+          </RailWideLeft>
+        )}
+      </div>
+    );
+  }
   return (
     <div>
       <button
@@ -615,65 +701,57 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
         className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-meta font-medium text-ui-mute hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
-        {/* Under "What each PR adds" the PR ref IS the label; a bare mount (one PR's own coverage) names the card. */}
         {label != null ? <span className="font-mono">{label}</span> : 'What this PR adds'}
       </button>
       {open && (
-        <div id={bodyId} className="ml-5 mt-1 space-y-2 text-meta">
-          <p className="whitespace-pre-wrap break-words text-ui-ink">
-            <PrRefText text={card.summary} />
-          </p>
-          {card.interfaces.length > 0 && (
-            <div className="space-y-1">
-              <h6 className={REVIEW_SUBHEAD}>{`Interfaces (${card.interfaces.length})`}</h6>
-              <ul className="space-y-1">
-                {card.interfaces.map((i, k) => (
-                  <li key={k} className="flex flex-wrap items-baseline gap-x-1.5">
-                    <span className={`${CHIP} ${CARD_CHANGE_CLASS[i.change]}`}>{TICKET_PR_CARD_CHANGE_LABEL[i.change]}</span>
-                    <span className={MUTED}>{TICKET_PR_CARD_KIND_LABEL[i.kind]}</span>
-                    <span className="break-all font-mono text-ui-ink">{i.name}</span>
-                    {i.note != null && i.note !== '' && (
-                      <span className={`min-w-0 break-words ${MUTED}`}>
-                        <PrRefText text={i.note} />
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {card.looseEnds.length > 0 && (
-            <div className="space-y-1">
-              <h6 className={REVIEW_SUBHEAD}>{`Loose ends (${card.looseEnds.length})`}</h6>
-              <ul className="list-disc space-y-0.5 pl-4 text-ui-ink">
-                {card.looseEnds.map((l, k) => (
-                  <li key={k} className="break-words">
-                    <PrRefText text={l} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+        <div id={bodyId} className="ml-5 mt-1">
+          {body}
         </div>
       )}
     </div>
   );
 }
 
-/** "What this PR adds" for every member that has a card (the Open PRs stack). Nothing when none do. */
+/** "What this PR adds" for every member that has a card (the Open PRs stack), grouped by repository
+ *  (a repository's name once, its PRs under it). Nothing when none do. */
 export function MemberCards({ members }: { members: readonly TicketReviewMember[] }): JSX.Element | null {
   const withCards = useMemo(() => membersWithCards(members), [members]);
+  const groups = useMemo(() => {
+    const byRepo = new Map<string, typeof withCards>();
+    for (const w of withCards) {
+      const list = byRepo.get(w.member.repo);
+      if (list != null) list.push(w);
+      else byRepo.set(w.member.repo, [w]);
+    }
+    return [...byRepo.entries()];
+  }, [withCards]);
   if (withCards.length === 0) return null;
+  const oneRepo = groups.length === 1;
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5" data-testid="story-member-cards">
       <h5 className={REVIEW_SUBHEAD}>What each PR adds</h5>
-      <ul className="space-y-0.5">
-        {withCards.map(({ member, card }) => (
-          <li key={member.prId}>
-            <PrCardDisclosure card={card} label={memberLabel(member)} />
-          </li>
+      <div className="space-y-2.5">
+        {groups.map(([repo, list]) => (
+          <div key={repo}>
+            {!oneRepo && (
+              <h6 className="truncate px-1.5 pb-0.5 font-mono text-meta text-ui-mute" title={repo}>
+                {repo.includes('/') ? repo.slice(repo.indexOf('/') + 1) : repo}
+              </h6>
+            )}
+            <ul>
+              {list.map(({ member, card }) => (
+                <li key={member.prId}>
+                  <PrCardDisclosure
+                    card={card}
+                    label={memberLabel(member)}
+                    row={{ number: member.number, title: member.title, repo: member.repo }}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

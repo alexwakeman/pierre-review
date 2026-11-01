@@ -384,7 +384,7 @@ describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)
 
 describe('the action words and the build tab\'s action', () => {
   it('labels each action', () => {
-    expect(storyBuildActionLabel('implement', 'A-1')).toEqual({ label: 'Implement A-1', title: 'Implement this story' });
+    expect(storyBuildActionLabel('implement', 'A-1')).toEqual({ label: 'Implement A-1', title: 'Implement this ticket' });
     expect(storyBuildActionLabel('fill_gaps', 'A-1').label).toBe('Fill gaps in A-1');
   });
 

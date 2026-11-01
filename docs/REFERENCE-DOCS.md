@@ -593,6 +593,8 @@ The switch is per workspace, `workspaces.docs_in_review` (NULL/false = OFF), via
 
 ## The SPA
 
+**Tree, chat strip (2026-11-01).** Clicking a contents-tree row that has rows under it opens its section AND its branch; only the chevron closes a branch. At xl the chat collapses to a 40px strip (one full-height button: chevron + sparkle) exactly as the library does; below xl it is the Ask tab and never collapses. Default (`lib/docsChatDefault.ts`): collapsed unless a conversation's `updatedAt` is under 24 hours old — then open, on that conversation when nothing is picked yet. A click is stored as `pierre:docsChatCollapsed = {collapsed, at}`; a conversation newer than a collapse opens it again. The list is read once per mount, clock fixed at mount.
+
 A rail line under Activity, **Docs** (`?activityRepo=docs`), shown only on `me.ai.enabled`. Three
 columns: the library (every document with its status, each expandable into its contents tree; "All
 documents" opens INDEX.md — the tree is COLLAPSED: only its top-level chapters show at first, each row

@@ -58,14 +58,14 @@ export function StoryBuildHeader({
           className="hit text-meta font-medium text-ui-ink hover:underline"
           onClick={() => openStory({ ident, key: ticketKey, title: shownTitle })}
         >
-          Open story
+          Open ticket
         </button>
         {node != null && <TrackerLinkOut url={node.url} provider={node.provider} />}
       </div>
       <div className="mt-1 flex flex-wrap items-start gap-x-3 gap-y-2">
         <h2 className="flex min-w-0 flex-1 items-center gap-2 break-words text-display text-ui-ink">
           <span className="min-w-0">{shownTitle ?? ticketKey}</span>
-          <InfoButton title={fill ? 'Fill the gaps in this story' : 'Implement this story'}>
+          <InfoButton title={fill ? 'Fill the gaps in this ticket' : 'Implement this ticket'}>
             {fill ? (
               <p>
                 The story check found criteria the pull requests do not meet yet. The AI plans only those gaps, across up to four

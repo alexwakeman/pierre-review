@@ -142,6 +142,9 @@ export interface SprintCardActions {
   selectedIdent: string | null;
   /** The tray's element id, for the open card's `aria-controls`. */
   trayId: string;
+  /** The tray's width (px) while it lies ON TOP of the board (wide screens), else 0: the board adds that
+   *  much scroll room after its last column, so a card under the tray can be scrolled out from under it. */
+  trayRoom: number;
 }
 
 /** The Complete columns the reader opened (each view keeps its own). */
@@ -208,6 +211,7 @@ function SprintLaneBoard({
       laneWidth={laneWidth}
       onToggleColumn={toggle}
       onToggleCell={toggleCell}
+      endRoom={actions.trayRoom}
       legend={<BorderKey items={sprintBorderKeyItems(borders)} label="Card marks" testId="card-border-key" />}
       renderLane={(l) => <LaneHeader lane={l} />}
       renderCard={(c, ref) => (
@@ -520,7 +524,7 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
                     key={n.ident}
                     type="button"
                     onClick={() => onOpen(n)}
-                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows its story over the board`}
+                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows the ticket over the board`}
                     className={`inline-flex h-6 items-center rounded-ui bg-ui-raise px-1.5 font-mono text-meta text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-2.5 ${FOCUS_RING}`}
                   >
                     {n.key}

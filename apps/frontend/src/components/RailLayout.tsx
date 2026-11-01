@@ -253,8 +253,75 @@ export function RailWide({ children, className = '' }: { children: ReactNode; cl
   );
 }
 
+/** The widest a <RailWideLeft> grows: a comfortable reading measure, not the whole page. */
+const RAIL_LEFT_MAX_PX = 768;
+
+/**
+ * Rail content that can WIDEN LEFTWARDS over the reading column (an open "What each PR adds" card,
+ * decided 2026-11-01): the mirror of <RailWide>. It stays in the rail's column; its <RailWideToggle>
+ * lays it over the reading column — keeping its right edge, up to RAIL_LEFT_MAX_PX wide — until
+ * "Collapse" or Escape. Outside the rail (narrow, inline, outside a layout) a plain block.
+ */
+export function RailWideLeft({ children, className = '' }: { children: ReactNode; className?: string }): JSX.Element {
+  const layout = useRailLayout();
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [box, setBox] = useState<{ width: number; shift: number } | null>(null);
+  const root = layout?.root ?? null;
+  const can = layout?.wide === true && el != null && el.closest('[data-rail-slot]') != null;
+  const on = can && expanded;
+  useIsoLayoutEffect(() => {
+    const host = el?.parentElement ?? null;
+    if (!on || host == null || root == null) {
+      setBox(null);
+      return;
+    }
+    const read = (): void => {
+      const own = host.getBoundingClientRect();
+      const width = Math.floor(Math.min(RAIL_LEFT_MAX_PX, own.right - root.getBoundingClientRect().left));
+      const next = { width, shift: Math.max(0, width - Math.floor(own.width)) };
+      setBox((prev) => (prev?.width === next.width && prev.shift === next.shift ? prev : next));
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [on, el, root]);
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [on]);
+  const ctx = useMemo(() => (can ? { expanded: on, toggle: () => setExpanded((v) => !v) } : null), [can, on]);
+  const over = on && box != null;
+  return (
+    <WideCtx.Provider value={ctx}>
+      <div
+        ref={setEl}
+        data-rail-wide-left={over ? 'true' : 'false'}
+        // z-30: above the reading column's sticky diagram lanes (FlowDiagram, z-20).
+        className={`${className}${over ? ' relative z-30 shadow-lg ring-1 ring-ui-line' : ''}`}
+        style={over ? { width: box.width, marginLeft: -box.shift } : undefined}
+      >
+        {children}
+      </div>
+    </WideCtx.Provider>
+  );
+}
+
 /** The enclosing <RailWide>'s Expand / Collapse button, for its header. Nothing when it cannot expand. */
-export function RailWideToggle({ className = '' }: { className?: string }): JSX.Element | null {
+export function RailWideToggle({
+  className = '',
+  expandTitle = 'Show over the side panel',
+}: {
+  className?: string;
+  /** The Expand button's tooltip (a <RailWideLeft> widens over the main column instead). */
+  expandTitle?: string;
+}): JSX.Element | null {
   const wide = useContext(WideCtx);
   if (wide == null) return null;
   return (
@@ -262,7 +329,7 @@ export function RailWideToggle({ className = '' }: { className?: string }): JSX.
       type="button"
       onClick={wide.toggle}
       aria-pressed={wide.expanded}
-      title={wide.expanded ? 'Back to the column (Esc)' : 'Show over the side panel'}
+      title={wide.expanded ? 'Back to the column (Esc)' : expandTitle}
       className={`hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${className}`}
     >
       {wide.expanded ? <CollapseWideIcon size={14} /> : <ExpandWideIcon size={14} />}

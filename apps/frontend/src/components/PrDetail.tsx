@@ -149,7 +149,7 @@ const TAB_LABELS: Record<Tab, string> = {
   claude_review: 'AI Review',
   ai_fix: 'AI Fix',
   // The PR's linked story (the story view, inside the PR) — listed only while it names one.
-  story: 'Story',
+  story: 'Ticket',
 };
 
 // The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
@@ -1306,7 +1306,7 @@ export function PrDetail({
         .map(
           ({ t, story }, i): Command => ({
             id: story != null ? `pr-tab:story:${story}` : `pr-tab:${t}`,
-            title: `${story != null ? `Story ${storyTickets[story]?.key ?? ''}` : TAB_LABELS[t]} (this pull request)`,
+            title: `${story != null ? `Ticket ${storyTickets[story]?.key ?? ''}` : TAB_LABELS[t]} (this pull request)`,
             group: 'Go to',
             hint: where,
             shortcut: i < 9 ? String(i + 1) : undefined,
@@ -1323,7 +1323,7 @@ export function PrDetail({
       ...storyTickets.map(
         (t): Command => ({
           id: `pr:story:${t.ident}`,
-          title: `Open the ${t.key} story`,
+          title: `Open the ${t.key} ticket`,
           group: 'Actions',
           hint: where,
           keywords: ['story', 'ticket'],
@@ -1437,8 +1437,8 @@ export function PrDetail({
   };
   const storyItems: TabItem<StripId>[] = storyTickets.map((st, k) => ({
     id: `story:${k}`,
-    label: `Story ${st.key}`,
-    title: `${st.key}: the story and its pull requests`,
+    label: `Ticket ${st.key}`,
+    title: `${st.key}: the ticket and its pull requests`,
   }));
   const tabItems: TabItem<StripId>[] = tabIds.flatMap((t): TabItem<StripId>[] => t === 'story' ? storyItems : [{
     id: t,
@@ -1488,7 +1488,7 @@ export function PrDetail({
     // Only when the PR names a story; its key as the hint (a PR naming two lists both).
     ...storyTickets.map((t): MenuEntry => ({
       id: `story:${t.ident}`,
-      label: 'Open story',
+      label: 'Open ticket',
       hint: t.key,
       icon: <TicketIcon size={14} />,
       onSelect: () => openStory({ ident: t.ident, key: t.key, title: null }),

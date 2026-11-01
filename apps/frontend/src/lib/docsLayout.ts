@@ -8,7 +8,7 @@ export const DOCS_CHAT_W = { min: 280, max: 720, default: 384 } as const; // 384
 export const DOCS_VIEWER_MIN_W = 360;
 /** One separator's footprint: a 6px handle plus 4px each side (`w-1.5 mx-1`). */
 export const DOCS_SEPARATOR_W = 14;
-/** The collapsed library: a slim strip, no separator after it (it is not resizable). */
+/** The collapsed library (or chat): a slim strip, no separator beside it (it is not resizable). */
 export const DOCS_LIBRARY_STRIP_W = 40;
 export const DOCS_STRIP_GAP_W = 12; // `gap-3` between the strip and the viewer
 
@@ -19,6 +19,8 @@ export interface DocsPaneBoundsInput {
   libraryWidth: number | null;
   /** The chat's current width, or null when it is not beside the viewer (narrow layout). */
   chatWidth: number | null;
+  /** The chat is beside the viewer but collapsed to its strip (`chatWidth` is then ignored). */
+  chatCollapsed?: boolean;
 }
 
 /**
@@ -26,14 +28,18 @@ export interface DocsPaneBoundsInput {
  * DOCS_VIEWER_MIN_W. Each bound reads the OTHER column's current width; a ceiling below its
  * column's floor is passed through as-is — `clampPaneWidth` lets the floor win there.
  */
-export function docsPaneBounds({ rowWidth, libraryWidth, chatWidth }: DocsPaneBoundsInput): {
+export function docsPaneBounds({ rowWidth, libraryWidth, chatWidth, chatCollapsed = false }: DocsPaneBoundsInput): {
   libraryMax: number;
   chatMax: number;
 } {
   if (rowWidth == null || !Number.isFinite(rowWidth) || rowWidth <= 0) {
     return { libraryMax: DOCS_LIBRARY_W.max, chatMax: DOCS_CHAT_W.max };
   }
-  const chatTaken = chatWidth == null ? 0 : chatWidth + DOCS_SEPARATOR_W;
+  const chatTaken = chatCollapsed
+    ? DOCS_LIBRARY_STRIP_W + DOCS_STRIP_GAP_W
+    : chatWidth == null
+      ? 0
+      : chatWidth + DOCS_SEPARATOR_W;
   const libraryTaken = libraryWidth == null ? DOCS_LIBRARY_STRIP_W + DOCS_STRIP_GAP_W : libraryWidth + DOCS_SEPARATOR_W;
   return {
     libraryMax: Math.round(Math.min(DOCS_LIBRARY_W.max, rowWidth - DOCS_VIEWER_MIN_W - DOCS_SEPARATOR_W - chatTaken)),

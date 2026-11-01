@@ -334,7 +334,7 @@ function StoryLink({ story }: { story: AiUsageStoryRow }): JSX.Element {
     <button
       type="button"
       onClick={() => openStory({ ident: story.ident, key: story.key, title: story.title })}
-      title={`Open the ${story.key} story`}
+      title={`Open the ${story.key} ticket`}
       className="hit inline-flex min-w-0 items-center gap-1 text-left hover:underline"
     >
       <TicketIcon size={11} className="shrink-0 text-ui-mute" />

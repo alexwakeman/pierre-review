@@ -36,7 +36,7 @@ import { BRANCH_NAME_PATTERN } from './branchName.js';
 export function storyBuildActionLabel(action: StoryBuildAction, key: string): { label: string; title: string } {
   return action === 'fill_gaps'
     ? { label: `Fill gaps in ${key}`, title: 'Fill the gaps the story check found' }
-    : { label: `Implement ${key}`, title: 'Implement this story' };
+    : { label: `Implement ${key}`, title: 'Implement this ticket' };
 }
 
 /** Which action the build tab is about (its header and start state). A session that has assessed says so

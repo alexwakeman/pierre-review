@@ -5,6 +5,7 @@ import {
   wikiScopeWords,
   wikiUnreachableWords,
   type ReferenceDoc,
+  type ReferenceDocsConversationSummary,
   type WikiProviderId,
 } from '@pierre-review/shared';
 import { formatDate, relativeTime } from '../../lib/ui.js';
@@ -14,6 +15,7 @@ import {
   useDeleteReferenceDoc,
   useRebuildReferenceDoc,
   useRefreshReferenceDoc,
+  useDocsConversations,
   useReferenceDocTree,
   useReferenceDocs,
 } from '../../hooks/useReferenceDocs.js';
@@ -22,6 +24,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery.js';
 import { useResizablePane } from '../../hooks/useResizablePane.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { DOCS_CHAT_W, DOCS_LIBRARY_STRIP_W, DOCS_LIBRARY_W, docsPaneBounds } from '../../lib/docsLayout.js';
+import { docsChatDefault, parseDocsChatChoice } from '../../lib/docsChatDefault.js';
 import {
   LIBRARY_INDEX_PATH,
   docStageLabel,
@@ -73,6 +76,9 @@ import { aiCredentialWords, aiModelWords, aiRunLabel } from '@pierre-review/shar
 // library | viewer | chat widths are DRAGGED on two separators (useResizablePane; ceilings from
 // lib/docsLayout.ts so the viewer keeps its minimum). Both are per-browser localStorage prefs,
 // never the store or the URL. Narrow: the columns stack and the Read / Ask tabs stay as they were.
+// The chat collapses the same way while it sits beside the viewer (xl): its default is
+// lib/docsChatDefault.ts — collapsed unless a conversation is under 24 hours old (then open on it);
+// the reader's own click is stored WITH ITS TIME, and a conversation newer than a collapse opens it.
 //
 // Build progress is live: an SSE stream per document being built — never a queued one, at most
 // MAX_DOC_STREAMS (useReferenceDocs) — the list polled as the fallback.
@@ -82,6 +88,8 @@ const DEFAULT_OPEN: DocsOpen = { path: LIBRARY_INDEX_PATH, anchor: null, quote: 
 const LIBRARY_W_KEY = 'pierre:docsLibraryWidth';
 const CHAT_W_KEY = 'pierre:docsChatWidth';
 const LIBRARY_COLLAPSED_KEY = 'pierre:docsLibraryCollapsed';
+/** `{collapsed, at}` — the reader's last chevron / strip click on the chat (lib/docsChatDefault.ts). */
+const CHAT_COLLAPSED_KEY = 'pierre:docsChatCollapsed';
 const SEPARATOR =
   'mx-1 w-1 shrink-0 cursor-col-resize touch-none rounded-full bg-transparent transition-colors hover:bg-ui-accent focus-visible:bg-ui-accent focus-visible:outline-none';
 const COLLAPSE_BUTTON =
@@ -239,6 +247,8 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
       else next.add(key);
       return next;
     });
+  // Opening a row that has rows under it also opens its disclosure (never closes it: the chevron does that).
+  const expand = (key: string): void => setExpanded((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
   const allOpen = branchKeys.every((k) => expanded.has(k));
   return (
     <div className="py-1">
@@ -268,7 +278,7 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
       )}
       <ul ref={listRef} className="space-y-px" aria-label={`Contents of ${doc.title}`} data-testid="doc-tree">
         {nodes.map((n) => (
-          <DocTreeItem key={n.row.key} node={n} level={0} expanded={expanded} onToggle={toggle} open={open} onOpen={onOpen} flash={flash} />
+          <DocTreeItem key={n.row.key} node={n} level={0} expanded={expanded} onToggle={toggle} onExpand={expand} open={open} onOpen={onOpen} flash={flash} />
         ))}
       </ul>
     </div>
@@ -280,6 +290,7 @@ function DocTreeItem({
   level,
   expanded,
   onToggle,
+  onExpand,
   open,
   onOpen,
   flash,
@@ -288,6 +299,8 @@ function DocTreeItem({
   level: number;
   expanded: ReadonlySet<string>;
   onToggle: (key: string) => void;
+  /** Opens a branch (a no-op when it is open) — a click on a row's title opens its section AND this. */
+  onExpand: (key: string) => void;
   open: DocsOpen;
   onOpen: (path: string, anchor: string | null) => void;
   /** The row a citation just revealed: marked for a moment. */
@@ -334,7 +347,10 @@ function DocTreeItem({
         ) : (
           <button
             type="button"
-            onClick={() => onOpen(r.path, anchor)}
+            onClick={() => {
+              onOpen(r.path, anchor);
+              if (hasChildren) onExpand(r.key);
+            }}
             aria-current={on ? 'true' : undefined}
             title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
             className={cx('block min-w-0 flex-1 rounded-ui px-1.5 py-1 text-left touch:min-h-10', r.kind === 'heading' ? 'text-meta' : 'text-body', on ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
@@ -346,7 +362,7 @@ function DocTreeItem({
       {isOpen && (
         <ul className="space-y-px">
           {node.children.map((c) => (
-            <DocTreeItem key={c.row.key} node={c} level={level + 1} expanded={expanded} onToggle={onToggle} open={open} onOpen={onOpen} flash={flash} />
+            <DocTreeItem key={c.row.key} node={c} level={level + 1} expanded={expanded} onToggle={onToggle} onExpand={onExpand} open={open} onOpen={onOpen} flash={flash} />
           ))}
         </ul>
       )}
@@ -574,6 +590,35 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const chatBeside = useMediaQuery('(min-width: 1280px)');
   const [storedCollapsed, setCollapsed] = useLocalStorage<boolean>(LIBRARY_COLLAPSED_KEY, false);
   const collapsed = wide && storedCollapsed === true; // stacked, the list always shows in full
+
+  // THE CHAT'S COLUMN (lib/docsChatDefault.ts). The conversation list is read ONCE per mount and
+  // workspace, with the clock frozen at mount, so the column never collapses under the reader (a
+  // conversation ageing past 24 hours, or deleted) — only their own click moves it.
+  const conversations = useDocsConversations(workspaceId);
+  const [mountedAt] = useState(() => Date.now());
+  const [seenConversations, setSeenConversations] = useState<{ workspaceId: number; list: ReferenceDocsConversationSummary[] } | null>(null);
+  useEffect(() => {
+    if (seenConversations?.workspaceId === workspaceId) return;
+    if (conversations.data != null) setSeenConversations({ workspaceId, list: conversations.data.conversations });
+    else if (conversations.isError) setSeenConversations({ workspaceId, list: [] });
+  }, [conversations.data, conversations.isError, seenConversations, workspaceId]);
+  const [storedChatChoice, setStoredChatChoice] = useLocalStorage<unknown>(CHAT_COLLAPSED_KEY, null);
+  const chatDefault = docsChatDefault({
+    choice: parseDocsChatChoice(storedChatChoice),
+    conversations: seenConversations?.workspaceId === workspaceId ? seenConversations.list : undefined,
+    now: mountedAt,
+  });
+  const setChatCollapsed = useCallback((on: boolean) => setStoredChatChoice({ collapsed: on, at: Date.now() }), [setStoredChatChoice]);
+  const chatCollapsed = chatBeside && chatDefault.collapsed; // below xl the chat is a tab, never a strip
+  // Open on the newest recent conversation when nothing is picked yet this visit (undefined in the
+  // store; "New conversation" stores null and is left alone).
+  const activeConversation = useDocsView((s) => s.conversation[workspaceId]);
+  const setConversation = useDocsView((s) => s.setConversation);
+  useEffect(() => {
+    if (!chatCollapsed && chatDefault.conversationId != null && activeConversation === undefined) {
+      setConversation(workspaceId, chatDefault.conversationId);
+    }
+  }, [chatCollapsed, chatDefault.conversationId, activeConversation, setConversation, workspaceId]);
   const rowRef = useRef<HTMLDivElement>(null);
   const [rowW, setRowW] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -590,6 +635,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
     rowWidth: wide ? rowW : null,
     libraryWidth: collapsed ? null : widths.lib,
     chatWidth: chatBeside ? widths.chat : null,
+    chatCollapsed,
   });
   const lib = useResizablePane({
     storageKey: LIBRARY_W_KEY,
@@ -635,6 +681,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
         keywords: ['docs', 'chat', 'question'],
         run: () => {
           setNarrowPane('chat');
+          setChatCollapsed(false);
           requestAnimationFrame(() => document.getElementById('docs-chat-question')?.focus());
         },
       },
@@ -665,7 +712,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
         })),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [library.data, onOpen, setNarrowPane],
+    [library.data, onOpen, setNarrowPane, setChatCollapsed],
   );
   useRegisterCommands('docs', commands);
 
@@ -825,14 +872,47 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
           <div className={cx('min-h-0 min-w-0 flex-1', pane === 'viewer' ? 'flex' : 'hidden xl:flex')}>
             <DocsViewer workspaceId={workspaceId} open={open} hasDocs={builtCount > 0} onOpen={onOpen} />
           </div>
-          {chatBeside && <div {...chat.separatorProps} className={SEPARATOR} />}
-          <div
-            ref={chat.paneRef}
-            style={chatBeside ? { width: chat.width } : undefined}
-            className={cx('min-h-0 min-w-0 flex-1 xl:flex-none', pane === 'chat' ? 'flex' : 'hidden xl:flex')}
-          >
-            <DocsChat workspaceId={workspaceId} canAsk={builtCount > 0} onOpen={onOpen} />
-          </div>
+          {chatCollapsed ? (
+            // RIGHT, collapsed: a slim strip — the whole strip is the expand control, not just the chevron.
+            <section
+              aria-label="Ask about these docs"
+              style={{ width: DOCS_LIBRARY_STRIP_W }}
+              className="flex shrink-0 rounded-ui bg-ui-surface"
+            >
+              <button
+                type="button"
+                onClick={() => setChatCollapsed(false)}
+                aria-expanded={false}
+                aria-label="Show the chat"
+                title="Show the chat"
+                data-testid="docs-chat-strip"
+                className="flex flex-1 cursor-pointer flex-col items-center gap-2 rounded-ui py-2 text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+              >
+                <span className="flex h-6 w-6 items-center justify-center">
+                  <ChevronIcon dir="left" size={12} />
+                </span>
+                <span className="text-ai-signal">
+                  <SparkleIcon size={14} />
+                </span>
+              </button>
+            </section>
+          ) : (
+            <>
+              {chatBeside && <div {...chat.separatorProps} className={SEPARATOR} />}
+              <div
+                ref={chat.paneRef}
+                style={chatBeside ? { width: chat.width } : undefined}
+                className={cx('min-h-0 min-w-0 flex-1 xl:flex-none', pane === 'chat' ? 'flex' : 'hidden xl:flex')}
+              >
+                <DocsChat
+                  workspaceId={workspaceId}
+                  canAsk={builtCount > 0}
+                  onOpen={onOpen}
+                  onCollapse={chatBeside ? () => setChatCollapsed(true) : undefined}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

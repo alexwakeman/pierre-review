@@ -138,7 +138,7 @@ describe('currency', () => {
         ?.label,
     ).toBe('2 PRs changed since');
     expect(ticketCurrency(state({ status: 'stale', staleBecause: ['story_edited', 'pr_pushed'], changedPrIds: [1] }))?.label).toBe(
-      'Story edited since',
+      'Ticket edited since',
     );
   });
 

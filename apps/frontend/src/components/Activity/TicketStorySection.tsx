@@ -67,6 +67,7 @@ export function TicketStorySection({
   state,
   storyPrId,
   prCount,
+  withDesign = true,
 }: {
   /** The ticket; only one with an `ident` has a story section. */
   ticket: CardTicket & { ident: string };
@@ -76,6 +77,9 @@ export function TicketStorySection({
   storyPrId: number | null;
   /** Open + merged PRs on the ticket (the design needs one). */
   prCount: number;
+  /** false in This Sprint's drawer: the story design (block, its read and its Draw button) is the
+   *  fuller story displays' alone — the story tab and the PR's Story tab. */
+  withDesign?: boolean;
 }): JSX.Element {
   const ai = useAiCapabilities();
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -85,20 +89,21 @@ export function TicketStorySection({
   const docsStart = useStartStoryDocsAlignment(workspaceId, ticket.ident);
   const docsStarting = useStoryDocsStarting(workspaceId, ticket.ident);
   const docs: DocsCheck | null = ai.enabled ? { q: docsQ, start: docsStart, starting: docsStarting } : null;
-  const design = useStoryDesign(ticket.ident, storyDesignOffered(ai.enabled, prCount));
+  const design = useStoryDesign(ticket.ident, withDesign && storyDesignOffered(ai.enabled, prCount));
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="scroll-mt-4 px-3 pb-2 focus:outline-none" data-testid="story-section" data-story-section="story">
-      <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 px-1 py-0.5">
-        <h4 id={headingId} className="text-title text-ui-ink">
-          Story
-        </h4>
-        {/* The story's actions: here, right-aligned; in the wide layout, the rail's actions block. */}
-        <InRail slot="actions" inline>
-          <StoryActions ticket={ticket} state={state} docs={docs} design={design} />
-        </InRail>
-      </div>
-      <div className="story-measure mt-1.5 space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
+      <div className="story-measure space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
+        {/* The heading sits INSIDE the box, at its top (2026-11-01). */}
+        <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1">
+          <h4 id={headingId} className="text-title text-ui-ink">
+            Ticket
+          </h4>
+          {/* The ticket's actions: here, right-aligned; in the wide layout, the rail's actions block. */}
+          <InRail slot="actions" inline>
+            <StoryActions ticket={ticket} state={state} docs={docs} design={design} />
+          </InRail>
+        </div>
         <StoryBody ticket={ticket} state={state} storyPrId={storyPrId} docs={docs} design={design} />
       </div>
       <InRail slot="nav">
@@ -341,7 +346,7 @@ function ReviewSummary({
     // The docs check does not need the review: with no criteria it draws the run's own numbered list.
     return (
       <div className="space-y-2">
-        <p className="text-meta text-ui-danger">Could not load the story.</p>
+        <p className="text-meta text-ui-danger">Could not load the ticket.</p>
         {design}
         {docsNotes.block}
       </div>

@@ -13,7 +13,7 @@ import { StoryOpenOverride, useOpenStory, type OpenStoryArgs } from '../../lib/t
 import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
-import { FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
+import { ChevronIcon, FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
@@ -26,6 +26,9 @@ import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsMode
 import { SprintStatusSettings } from './SprintStatusSettings.js';
 import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
 import { SprintStoryTray } from '../Sprint/SprintStoryTray.js';
+import { TrayRowMarker } from '../Sprint/TrayRowMarker.js';
+import { cardPosition, findCard, revealCard, stepIdent } from '../Sprint/trayBoard.js';
+import { shortcutBlocked } from '../ui/keys.js';
 import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 // This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
@@ -45,6 +48,10 @@ import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 //            SPRINT_REFRESH_TICKET_CHECKS ticket checks; the count started is said briefly after.
 
 const MUTED = 'text-ui-mute';
+
+/** A click on one of these on the board does its own thing; a click anywhere else on the board (not a
+ *  card) closes the story tray. */
+const BOARD_CONTROL = 'a,button,input,select,textarea,label,summary,[role="button"],[role="menuitem"],[role="tab"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -136,11 +143,88 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   // "Implement story" (docs/STORY-BUILD.md § Entry points) is the STORY VIEW's action: a card shows only
   // its build MARK, and a click shows the story in the tray, whose action group offers Implement / Fill
   // gaps / Open build (StoryBuild/StoryBuildEntry.tsx, reading the node handed to the tray).
+  // THE BOARD UNDER THE TRAY (components/Sprint/trayBoard.ts): on a wide screen the tray lies on top of
+  // the board's right side. The board adds the tray's width as scroll room after its last column (the
+  // columns keep their widths), and the open card is scrolled out from under the tray.
+  const [trayPx, setTrayPx] = useState<number | null>(null);
+  const [board, setBoard] = useState<HTMLDivElement | null>(null);
+  const trayRoom = trayIdent != null ? (trayPx ?? 0) : 0;
   const actions = useMemo<SprintCardActions>(
-    () => ({ onSelect: select, onOpen: open, selectedIdent: trayIdent, trayId }),
-    [select, open, trayIdent, trayId],
+    () => ({ onSelect: select, onOpen: open, selectedIdent: trayIdent, trayId, trayRoom }),
+    [select, open, trayIdent, trayId, trayRoom],
   );
   const trayNode = trayIdent != null ? data?.nodes.find((n) => n.ident === trayIdent) : undefined;
+  // Keep the open card in view: once per card opened (and per view), when the tray's width is known —
+  // never on a width drag. Only a hidden or covered card moves the board.
+  const trayMeasured = trayIdent != null && trayPx != null && trayPx > 0;
+  const trayPxRef = useRef(0);
+  trayPxRef.current = trayPx ?? 0;
+  useEffect(() => {
+    if (!trayMeasured || board == null || trayIdent == null) return;
+    const frame = requestAnimationFrame(() => {
+      const card = findCard(board, trayIdent);
+      if (card != null) revealCard(board, card, trayPxRef.current);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [trayIdent, trayMeasured, board, view]);
+  // Previous / next in board order (the tray's header buttons, j / k, ⌘K).
+  const step = useCallback(
+    (dir: 1 | -1): void => {
+      if (board == null) return;
+      const next = stepIdent(board, useFilters.getState().sprintStoryIdent, dir);
+      if (next == null) return;
+      setTray(next);
+      // Focus on a card follows the step, so the focus ring and the open card stay one card.
+      if (document.activeElement instanceof HTMLElement && document.activeElement.closest('[data-ident]') != null && board.contains(document.activeElement))
+        findCard(board, next)?.querySelector<HTMLElement>('[data-card-button]')?.focus({ preventScroll: true });
+    },
+    [board, setTray],
+  );
+  // Where the open card sits in board order — re-read whenever the board's cards change.
+  const [trayPosition, setTrayPosition] = useState<{ index: number; total: number } | null>(null);
+  useEffect(() => {
+    if (board == null || trayIdent == null) {
+      setTrayPosition(null);
+      return;
+    }
+    const read = (): void => {
+      const next = cardPosition(board, trayIdent);
+      setTrayPosition((prev) => (prev?.index === next?.index && prev?.total === next?.total ? prev : next));
+    };
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(board, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [board, trayIdent]);
+  // j / k step while the tray is open (not while typing, nor under a popover or modal).
+  useEffect(() => {
+    if (trayIdent == null) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'j' && e.key !== 'k') return;
+      if (e.shiftKey || shortcutBlocked(e)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      step(e.key === 'j' ? 1 : -1);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [trayIdent, step]);
+  // A click on the board outside a card and outside its controls closes the tray (a card click shows
+  // that card's story instead). A native listener on the board's own element, so a popover or menu
+  // portalled out of it never counts; a drag that selected text does not close it.
+  useEffect(() => {
+    if (trayIdent == null || board == null) return;
+    const onClick = (e: MouseEvent): void => {
+      if (e.button !== 0 || e.defaultPrevented) return;
+      const t = e.target;
+      if (!(t instanceof Element) || t.closest('[data-ident]') != null || t.closest(BOARD_CONTROL) != null) return;
+      const sel = window.getSelection();
+      if (sel != null && !sel.isCollapsed && sel.toString().trim() !== '') return;
+      setTray(null);
+    };
+    board.addEventListener('click', onClick);
+    return () => board.removeEventListener('click', onClick);
+  }, [trayIdent, board, setTray]);
 
   if (isError) return <p className="text-body text-ui-danger">Could not load this sprint.</p>;
   if (isLoading || data == null || workspaceId == null) return <p className={`text-meta ${MUTED}`}>Loading…</p>;
@@ -179,9 +263,10 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       onStatuses={() => setSettingsOpen((o) => !o)}
       onRefresh={refreshDisabled ? null : startRefresh}
       onShowStory={select}
+      onStep={trayIdent != null && trayPosition != null && trayPosition.total > 1 ? step : null}
     />
     <div className="flex items-start gap-4">
-    <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-4">
+    <div ref={setBoard} data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-4">
       {/* THE TOOLBAR: the sprint's name and facts on the left, its three actions on the right (they
           wrap under the name on a phone). Quiet buttons — nothing here is the page's primary action. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -281,8 +366,12 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
         title={trayNode != null && trayNode.title !== '' ? trayNode.title : null}
         node={trayNode ?? null}
         onClose={() => setTray(null)}
+        onWidth={setTrayPx}
+        onStep={step}
+        position={trayPosition}
       />
     )}
+    {trayIdent != null && trayRoom > 0 && <TrayRowMarker board={board} ident={trayIdent} trayPx={trayRoom} onPick={setTray} />}
     </div>
     </StoryOpenOverride.Provider>
   );
@@ -304,6 +393,7 @@ function SprintCommands({
   onStatuses,
   onRefresh,
   onShowStory,
+  onStep,
 }: {
   nodes: readonly SprintGraphNode[];
   aiName: string;
@@ -315,14 +405,17 @@ function SprintCommands({
   /** null while a read is already running. */
   onRefresh: (() => void) | null;
   onShowStory: (n: SprintGraphNode) => void;
+  /** Step the story tray through the board (null while it is closed). */
+  onStep: ((dir: 1 | -1) => void) | null;
 }): null {
   const filter = useSprintBoardFilter((s) => s.filter);
   const toggle = useSprintBoardFilter((s) => s.toggle);
   // The parent's handlers are fresh closures every render; the commands call the latest through a ref
   // so the list re-registers only when what it SAYS changes.
-  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory });
-  live.current = { onAsk, onStatuses, onRefresh, onShowStory };
+  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory, onStep });
+  live.current = { onAsk, onStatuses, onRefresh, onShowStory, onStep };
   const canRefresh = onRefresh != null;
+  const canStep = onStep != null;
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
     if (canRefresh)
@@ -343,6 +436,27 @@ function SprintCommands({
         icon: <SparkleIcon size={14} />,
         run: () => live.current.onAsk(),
       });
+    if (canStep)
+      out.push(
+        {
+          id: 'tray:next',
+          group: 'Actions',
+          title: 'Next ticket on the board',
+          keywords: ['story', 'step', 'down'],
+          shortcut: 'J',
+          icon: <ChevronIcon dir="down" size={14} />,
+          run: () => live.current.onStep?.(1),
+        },
+        {
+          id: 'tray:prev',
+          group: 'Actions',
+          title: 'Previous ticket on the board',
+          keywords: ['story', 'step', 'up'],
+          shortcut: 'K',
+          icon: <ChevronIcon dir="up" size={14} />,
+          run: () => live.current.onStep?.(-1),
+        },
+      );
     out.push({
       id: 'statuses',
       group: 'Actions',
@@ -381,7 +495,7 @@ function SprintCommands({
       });
     }
     return out;
-  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, filter, toggle]);
+  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, canStep, filter, toggle]);
   useRegisterCommands('sprint-board', commands);
   return null;
 }
@@ -390,8 +504,8 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
   return (
     <>
       <p>
-        Three ways to read the same sprint. Click a ticket to see its story over the board; its corner arrow opens the
-        story in its own tab.
+        Three ways to read the same sprint. Click a ticket to see it over the board; its corner arrow opens it in its own
+        tab.
       </p>
       <ul className="list-disc space-y-1 pl-5">
         <li>

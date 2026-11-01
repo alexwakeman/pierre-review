@@ -143,7 +143,7 @@ export function StoryDisclosure({
   jiraRef,
   stored,
   url,
-  label = 'Story',
+  label = 'Ticket',
 }: {
   /** Any PR on the ticket (the stored tracker row is read through it); null = none, so only `stored`. */
   prId: number | null;

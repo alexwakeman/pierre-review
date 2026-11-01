@@ -105,7 +105,7 @@ import { TeamClaimLine } from './TeamClaimLine.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
-import { RailLayout, RailPiece, RailSectionNav, RailWide, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
+import { RailLayout, RailPiece, RailSectionNav, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
@@ -1548,14 +1548,12 @@ export function ClaudesReview({
       <DocReferencesSection references={review.docReferences} by={by} />
       {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
           after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
-      {/* Wide content: in the two-column layout its Expand lays it over the rail (RailWide). */}
-      <RailWide>
-        <ClaudeReviewDiagramsSection
-          prId={review.prId}
-          reviewFinishedAt={review.finishedAt ?? null}
-          onOpenInChanges={onOpenInChanges}
-        />
-      </RailWide>
+      {/* Each diagram inside is its own wide block with its own Expand (RailWide). */}
+      <ClaudeReviewDiagramsSection
+        prId={review.prId}
+        reviewFinishedAt={review.finishedAt ?? null}
+        onOpenInChanges={onOpenInChanges}
+      />
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
       {chatReviewId != null && (

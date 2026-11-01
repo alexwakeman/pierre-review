@@ -821,7 +821,7 @@ export function TicketKeyButton({
   return (
     <button
       type="button"
-      title={`Open the ${ticket.key} story`}
+      title={`Open the ${ticket.key} ticket`}
       onClick={(e) => {
         e.stopPropagation();
         openStory({ ident: ticket.ident, key: ticket.key, title: ticket.title ?? null });
@@ -1478,6 +1478,9 @@ function TicketStack({
           state={storyState}
           storyPrId={storyPrId}
           prCount={stack.rows.length + merged.length}
+          // The story design is for the fuller story displays (the story tab, the PR's Story tab);
+          // This Sprint's drawer (neither) leaves it out.
+          withDesign={page || embedded}
         />
       )}
       <ul

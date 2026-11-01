@@ -66,7 +66,7 @@ describe('the Story tab', () => {
     expect(tab).toMatch(/<StoryViewBody key=\{ticket\.ident\}/);
     expect(tab).toMatch(/useOpenStory\(\)/);
     // The "Open story" menu item stays.
-    expect(pd).toMatch(/label: 'Open story'/);
+    expect(pd).toMatch(/label: 'Open ticket'/);
   });
 });
 
@@ -85,7 +85,10 @@ describe('the AI Review tab wide layout', () => {
     expect(tab).toMatch(/<RailPiece slot="nav">/);
   });
   it('the design spans the rail, and the run button keeps its AiRunGate', () => {
-    expect(tab).toMatch(/<RailWide>\s*<ClaudeReviewDiagramsSection/);
+    // Each diagram is its own RailWide with its own Expand (the PR's, and each ticket's).
+    const diagrams = read('components/ClaudeReviewDiagrams.tsx');
+    expect(diagrams.match(/<RailWide className=/g)?.length).toBe(2);
+    expect(diagrams.match(/<RailWideToggle className="ml-auto" \/>/g)?.length).toBe(2);
     expect(tab).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/);
   });
   it('every section the nav lists is marked where it renders', () => {

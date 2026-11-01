@@ -53,6 +53,13 @@ describe('docsPaneBounds', () => {
     expect(collapsed).toBe(Math.min(DOCS_CHAT_W.max, 1300 - DOCS_VIEWER_MIN_W - DOCS_SEPARATOR_W - DOCS_LIBRARY_STRIP_W - DOCS_STRIP_GAP_W));
   });
 
+  it('gives the library the chat’s room when the chat is collapsed to its strip', () => {
+    const open = docsPaneBounds({ rowWidth: 1300, libraryWidth: 288, chatWidth: 500 }).libraryMax;
+    const collapsed = docsPaneBounds({ rowWidth: 1300, libraryWidth: 288, chatWidth: 500, chatCollapsed: true }).libraryMax;
+    expect(collapsed).toBeGreaterThan(open);
+    expect(collapsed).toBe(Math.min(DOCS_LIBRARY_W.max, 1300 - DOCS_VIEWER_MIN_W - DOCS_SEPARATOR_W - DOCS_LIBRARY_STRIP_W - DOCS_STRIP_GAP_W));
+  });
+
   it('lets the floor win in a row too narrow for all three', () => {
     const { libraryMax, chatMax } = docsPaneBounds({ rowWidth: 1000, libraryWidth: 400, chatWidth: 500 });
     expect(libraryMax).toBeLessThan(DOCS_LIBRARY_W.min);

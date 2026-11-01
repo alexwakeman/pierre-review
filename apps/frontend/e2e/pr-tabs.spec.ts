@@ -85,21 +85,21 @@ test.describe('the Story tab', () => {
   test('is listed when the PR names a story, last, and renders the story view', async ({ page }) => {
     await setup(page, { story: true });
     await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=story`);
-    const story = tabs(page).getByRole('tab', { name: 'Story' });
+    const story = tabs(page).getByRole('tab', { name: 'Ticket' });
     await expect(story).toHaveAttribute('aria-selected', 'true');
-    await expect(tabs(page).getByRole('tab').last()).toHaveText('Story ACME-7');
+    await expect(tabs(page).getByRole('tab').last()).toHaveText('Ticket ACME-7');
     const pane = page.getByTestId('pr-story-tab');
     await expect(pane.getByTestId('story-view-body')).toBeVisible();
-    await expect(pane.getByRole('button', { name: 'Open story tab' })).toBeVisible();
-    // One story: one Story tab.
-    await expect(tabs(page).getByRole('tab', { name: /^Story/ })).toHaveCount(1);
+    await expect(pane.getByRole('button', { name: 'Open ticket tab' })).toBeVisible();
+    // One story: one Ticket tab.
+    await expect(tabs(page).getByRole('tab', { name: /^Ticket/ })).toHaveCount(1);
   });
 
   test('several stories: one tab each, the first picked', async ({ page }) => {
     await setup(page, { story: true, two: true });
     await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=story`);
-    const first = tabs(page).getByRole('tab', { name: 'Story ACME-7' });
-    const second = tabs(page).getByRole('tab', { name: 'Story ACME-8' });
+    const first = tabs(page).getByRole('tab', { name: 'Ticket ACME-7' });
+    const second = tabs(page).getByRole('tab', { name: 'Ticket ACME-8' });
     await expect(first).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('pr-story-tab')).toHaveAttribute('data-story', 'ACME-7');
     await second.click();
@@ -112,7 +112,7 @@ test.describe('the Story tab', () => {
   test('picking it writes ?prTab=story', async ({ page }) => {
     await setup(page, { story: true });
     await page.goto(`/app/?view=pr-detail:${PR_ID}`);
-    await tabs(page).getByRole('tab', { name: 'Story' }).click();
+    await tabs(page).getByRole('tab', { name: 'Ticket' }).click();
     await expect(page).toHaveURL(/prTab=story/);
     await expect(page.getByTestId('pr-story-tab')).toBeVisible();
   });
@@ -121,7 +121,7 @@ test.describe('the Story tab', () => {
     await setup(page, { story: false });
     await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=story`);
     await expect(tabs(page).getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-    await expect(tabs(page).getByRole('tab', { name: 'Story' })).toHaveCount(0);
+    await expect(tabs(page).getByRole('tab', { name: 'Ticket' })).toHaveCount(0);
     await expect(page.getByTestId('pr-story-tab')).toHaveCount(0);
   });
 });

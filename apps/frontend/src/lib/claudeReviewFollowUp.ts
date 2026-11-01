@@ -50,9 +50,9 @@ export const SEVERITY_RANK: Record<ClaudeFindingSeverity, number> = {
 };
 
 export const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
-  // Only a blocker is coloured (it blocks); the rest are counts in grey (docs/redesign/DESIGN.md § 3).
+  // A blocker is red (it blocks), a warning amber (look at it); the rest are counts in grey (docs/redesign/DESIGN.md § 3).
   blocker: 'bg-ui-danger/10 text-ui-danger',
-  warning: 'bg-ui-raise text-ui-mute',
+  warning: 'bg-ui-warn/10 text-ui-warn',
   nit: 'bg-ui-raise text-ui-mute',
   question: 'bg-ui-raise text-ui-mute',
   praise: 'bg-ui-raise text-ui-mute',

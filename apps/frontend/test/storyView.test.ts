@@ -8,7 +8,7 @@
 //      otherwise, gaps filled from the other, then the tab's own meta.
 //   4. THE ONE STACK (`storyStack`): every PR handed in is a row, the stack exists with none, `alsoIn`
 //      is each row's OTHER tickets, header gaps filled from the PRs' links.
-//   5. The tab's words: "KEY · Story", "KEY: story and pull requests", "Close story tab".
+//   5. The tab's words: "KEY · Ticket", "KEY: ticket and pull requests", "Close ticket tab".
 //   6. NOTHING imports what was removed: the sprint drawer, "Check against code", the old Story check
 //      panel and the PR-sections fold.
 //
@@ -154,8 +154,8 @@ describe('the story view’s one stack', () => {
 
 describe('the story tab’s words', () => {
   it('names the story, not only its pull requests', () => {
-    expect(storyTabLabels('BMD-7')).toEqual({ chip: 'BMD-7 · Story', title: 'BMD-7: story and pull requests', closeAria: 'Close story tab' });
-    expect(storyTabLabels(null)).toEqual({ chip: 'Story', title: 'Story and pull requests', closeAria: 'Close story tab' });
+    expect(storyTabLabels('BMD-7')).toEqual({ chip: 'BMD-7 · Ticket', title: 'BMD-7: ticket and pull requests', closeAria: 'Close ticket tab' });
+    expect(storyTabLabels(null)).toEqual({ chip: 'Ticket', title: 'Ticket and pull requests', closeAria: 'Close ticket tab' });
   });
 });
 

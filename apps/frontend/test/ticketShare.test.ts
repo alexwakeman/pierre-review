@@ -165,7 +165,7 @@ describe('the wiring', () => {
     const panel = src('components/Activity/TicketStorySection.tsx');
     // No disclosure: a plain heading, no open/onToggle props.
     expect(panel).not.toMatch(/onToggle|ChevronIcon|open: boolean/);
-    expect(panel).toMatch(/>\s*Story\s*<\/h4>/);
+    expect(panel).toMatch(/>\s*Ticket\s*<\/h4>/);
     expect(panel).toMatch(/<ReviewSummary\s+runId=\{summary\.runId\}/);
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
     // The docs check's notes ride along (empty unless written against this same list).
@@ -226,8 +226,8 @@ describe('the wiring', () => {
     expect(cov).toMatch(/slimStoryCheck\(\{/);
     expect(cov).toMatch(/prTicketShare\(a, review\.items, \{ id: pr\.id, repoId: pr\.repoId \}\)/);
     expect(cov).toMatch(/onClick=\{\(\) => openStory\(\{ ident, key: ticketKey, title: ticketTitle \}\)\}/);
-    expect(cov).toContain('See the whole story');
-    expect(cov).not.toContain('See the whole story in Open PRs');
+    expect(cov).toContain('See the whole ticket');
+    expect(cov).not.toContain('See the whole ticket in Open PRs');
   });
 
   it('"What this PR adds" rides the loaded review: the stack lists every card, the pane this PR’s', () => {

@@ -107,12 +107,12 @@ function StoryDocsInfo(): JSX.Element {
   return (
     <InfoButton title="Check against the docs">
       <p>
-        {name} reads this story — its description and acceptance criteria — against the workspace's reference docs
+        {name} reads this ticket — its description and acceptance criteria — against the workspace's reference docs
         (Activity → Docs).
       </p>
       <p>
         When the docs are short, {aiModelWords(provider, 'Sonnet')} reads all of them. Otherwise {aiModelWords(provider, 'Haiku')} first
-        picks up to 8 sections that could matter, and {aiModelWords(provider, 'Sonnet')} reads those. It says where the story matches
+        picks up to 8 sections that could matter, and {aiModelWords(provider, 'Sonnet')} reads those. It says where the ticket matches
         the docs and where it does not.
       </p>
       <p>
@@ -125,7 +125,7 @@ function StoryDocsInfo(): JSX.Element {
       </p>
       <p>
         It runs only when you press the button, on your own {name}. If nothing has changed since the last check, you get that
-        check back. Out of date means the story, its criteria or the docs changed since.
+        check back. Out of date means the ticket, its criteria or the docs changed since.
       </p>
     </InfoButton>
   );
@@ -219,7 +219,7 @@ export function StoryDocsAlignmentBlock({
           draws it again where it was. It fills and fades when the check ends. */}
       <RegenProgressBar
         active={checking}
-        label="Checking the story against the docs"
+        label="Checking the ticket against the docs"
         value={checking && !starting && data.run != null ? docsProgressPct(data.run.status, Date.now() - Date.parse(data.run.createdAt)) : null}
         timeConstantSec={30}
       />
@@ -273,7 +273,7 @@ export function StoryDocsRailSummary({
             {STORY_DOCS_OVERALL_VERDICT_LABEL[overall.verdict]}
           </span>
         ) : (
-          <span className="text-ui-mute">{outcome === 'no_relevant_docs' ? 'No docs bear on this story' : 'Nothing to report'}</span>
+          <span className="text-ui-mute">{outcome === 'no_relevant_docs' ? 'No docs bear on this ticket' : 'Nothing to report'}</span>
         )}
         {shown != null && !shown.current && !checking && (
           <span className={`${REVIEW_CHIP} ${OUTDATED_CLASS}`}>
@@ -292,7 +292,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
   const result = run.result;
   if (result == null) return null;
   if (result.outcome === 'no_relevant_docs') {
-    return <p className={`text-meta ${MUTED}`}>Nothing in the reference docs bears on this story.</p>;
+    return <p className={`text-meta ${MUTED}`}>Nothing in the reference docs bears on this ticket.</p>;
   }
   if (result.outcome === 'nothing_grounded' || result.overall == null) {
     return <p className={`text-meta ${MUTED}`}>{name} found nothing it could back with a quote from the docs.</p>;
@@ -328,7 +328,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
       )}
       {result.storyParts.length > 0 && (
         <div className="space-y-1">
-          <h5 className="text-meta font-medium text-ui-mute">Other parts of the story</h5>
+          <h5 className="text-meta font-medium text-ui-mute">Other parts of the ticket</h5>
           <ul className="space-y-1.5">
             {result.storyParts.map((p, i) => {
               const t = ITEM_TONE[p.verdict];

@@ -106,7 +106,7 @@ export function TicketCard({
     waiting ? 'waiting on another ticket' : null,
     code?.tooltip ?? null,
     buildMark != null ? `build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : null,
-    'shows its story over the board',
+    'shows the ticket over the board',
   ]
     .filter(Boolean)
     .join('; ');
@@ -127,10 +127,16 @@ export function TicketCard({
         selected && 'ring-2 ring-ui-accent',
       )}
     >
+      {/* The open card (its story is in the tray): the accent ring AND a bar down its left edge — a
+          shape, not only a colour (the accent measures ≥ 5:1 on both grounds). */}
+      {selected && (
+        <span aria-hidden data-testid="ticket-open-bar" className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-ui-accent" />
+      )}
       <button
         type="button"
         aria-label={name}
         aria-pressed={selected}
+        aria-current={selected ? 'true' : undefined}
         aria-controls={selected ? trayId : undefined}
         title={code?.tooltip}
         data-card-button
@@ -234,8 +240,8 @@ export function TicketCard({
       <button
         type="button"
         onClick={() => onOpen(node)}
-        aria-label={`Open ${node.key}'s story tab`}
-        title="Open story tab"
+        aria-label={`Open ${node.key}'s ticket tab`}
+        title="Open ticket tab"
         className={cx(
           'absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:h-10 touch:w-10',
           // On a mouse it shows on hover or focus (the key and its marks get the whole line); on touch it is always there.

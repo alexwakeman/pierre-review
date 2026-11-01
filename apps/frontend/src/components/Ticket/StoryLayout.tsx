@@ -27,7 +27,7 @@ export const STORY_RAIL_SLOTS = ['check', 'actions', 'nav', 'prs', 'merged', 'do
 export type StoryRailSlot = (typeof STORY_RAIL_SLOTS)[number];
 /** The sections the nav can reach, in page order, and their words. */
 export const STORY_SECTIONS = [
-  { id: 'story', label: 'Story' },
+  { id: 'story', label: 'Ticket' },
   { id: 'design', label: 'Design' },
   { id: 'missing', label: 'Outside the criteria' },
   { id: 'not-asked', label: 'Not asked for' },
@@ -41,7 +41,7 @@ export const STORY_RAIL: RailLayoutConfig = {
   sections: STORY_SECTIONS,
   sectionAttr: 'data-story-section',
   startSection: 'story',
-  railLabel: 'Story facts and actions',
+  railLabel: 'Ticket facts and actions',
   narrowClassName: 'max-w-5xl',
   wideClassName: 'relative z-10 rounded-ui bg-ui-surface pr-4',
 };

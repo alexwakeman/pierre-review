@@ -12,7 +12,7 @@ import { LIBRARY_INDEX_PATH, citationLabel } from '../../lib/referenceDocs.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useDocsView } from '../../store/docsView.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, SparkleIcon } from '../Icons.js';
+import { BookIcon, ChevronIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Markdown } from '../Markdown.js';
 import { useDocLinkRenderer } from './DocsViewer.js';
@@ -28,6 +28,9 @@ import { Select } from '../ui/index.js';
 // opens that section in the viewer, and so does any library link inside the answer's text.
 
 const MUTED = 'text-ui-mute';
+/** The header's "Hide the chat" chevron — the same control as the library's (DocsView.tsx). */
+const COLLAPSE_BUTTON =
+  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10';
 
 function Answer({
   message,
@@ -84,11 +87,14 @@ export function DocsChat({
   workspaceId,
   canAsk,
   onOpen,
+  onCollapse,
 }: {
   workspaceId: number;
   /** False while the library has no built document (the server would refuse). */
   canAsk: boolean;
   onOpen: (path: string, anchor: string | null, quote?: string | null) => void;
+  /** Collapses the column to its strip; absent when the chat is not beside the viewer (no chevron). */
+  onCollapse?: () => void;
 }): JSX.Element {
   const active = useDocsView((s) => s.conversation[workspaceId] ?? null);
   const setConversation = useDocsView((s) => s.setConversation);
@@ -125,28 +131,43 @@ export function DocsChat({
       className="flex min-h-0 min-w-0 flex-1 flex-col rounded-ui bg-ui-surface"
       data-testid="docs-chat"
     >
-      <div className="flex min-h-11 flex-wrap items-center gap-1.5 px-4 py-2">
-        <SparkleIcon size={12} className="text-ai-signal" />
-        <h3 className="text-body font-semibold text-ui-ink">Ask about these docs</h3>
-        <InfoButton title="Ask about these docs">
-          <p>
-            {aiModelWords(aiProvider, 'Sonnet')} answers from this workspace&rsquo;s documents only. It starts at the library&rsquo;s contents, opens the
-            documents that matter, and reads only the sections it needs.
-          </p>
-          <p>Each point links to the section it came from. When two documents disagree, it cites both.</p>
-          <p>It remembers the earlier questions in a conversation, up to a limit. It changes nothing.</p>
-          <p>Each answer runs on {aiCredentialWords(aiProvider)}; what it used is shown under it.</p>
-        </InfoButton>
-        <span className="ml-auto" />
-        {list.length > 0 && (
-          <Select
-            label="Conversation"
-            size="sm"
-            className="max-w-[14rem]"
-            value={active ?? ''}
-            onChange={(v) => setConversation(workspaceId, v === '' ? null : v)}
-            options={[{ value: '', label: 'New conversation' }, ...list.map((c) => ({ value: c.conversationId, label: c.title }))]}
-          />
+      {/* The title and the conversation picker wrap inside; the "Hide the chat" chevron stays top right. */}
+      <div className="flex min-h-11 items-start gap-1.5 px-4 py-2">
+        <div className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <SparkleIcon size={12} className="text-ai-signal" />
+          <h3 className="text-body font-semibold text-ui-ink">Ask about these docs</h3>
+          <InfoButton title="Ask about these docs">
+            <p>
+              {aiModelWords(aiProvider, 'Sonnet')} answers from this workspace&rsquo;s documents only. It starts at the library&rsquo;s contents, opens the
+              documents that matter, and reads only the sections it needs.
+            </p>
+            <p>Each point links to the section it came from. When two documents disagree, it cites both.</p>
+            <p>It remembers the earlier questions in a conversation, up to a limit. It changes nothing.</p>
+            <p>Each answer runs on {aiCredentialWords(aiProvider)}; what it used is shown under it.</p>
+          </InfoButton>
+          <span className="ml-auto" />
+          {list.length > 0 && (
+            <Select
+              label="Conversation"
+              size="sm"
+              className="max-w-[14rem]"
+              value={active ?? ''}
+              onChange={(v) => setConversation(workspaceId, v === '' ? null : v)}
+              options={[{ value: '', label: 'New conversation' }, ...list.map((c) => ({ value: c.conversationId, label: c.title }))]}
+            />
+          )}
+        </div>
+        {onCollapse != null && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-expanded={true}
+            aria-label="Hide the chat"
+            title="Hide the chat"
+            className={COLLAPSE_BUTTON}
+          >
+            <ChevronIcon dir="right" size={12} />
+          </button>
         )}
       </div>
 

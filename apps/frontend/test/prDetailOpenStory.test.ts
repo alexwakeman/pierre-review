@@ -22,7 +22,7 @@ describe('PrDetail "Open story"', () => {
 
   it('is a menu item with the ticket icon, and a ⌘K command', () => {
     const menu = detail.slice(detail.indexOf('const menuItems: MenuEntry[]'));
-    expect(menu).toMatch(/label: 'Open story',\s+hint: t\.key,\s+icon: <TicketIcon size=\{14\} \/>/);
+    expect(menu).toMatch(/label: 'Open ticket',\s+hint: t\.key,\s+icon: <TicketIcon size=\{14\} \/>/);
     expect(detail).toContain('id: `pr:story:${t.ident}`');
   });
 });

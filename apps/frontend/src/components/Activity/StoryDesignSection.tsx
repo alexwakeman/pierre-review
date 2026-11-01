@@ -70,14 +70,14 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
     // Wide content: in the two-column layout its Expand lays it over the rail (StoryWide).
     <StoryWide>
     <section
-      aria-label="Story design"
+      aria-label="Ticket design"
       className={`scroll-mt-4 space-y-2 focus:outline-none ${look?.section ?? ''}`}
       data-testid="story-design"
       data-story-section="design"
     >
       <div className="flex items-center gap-1.5">
-        <h4 className={look?.heading ?? 'text-meta font-semibold text-ui-ink'}>Story design</h4>
-        <InfoButton title="Story design">
+        <h4 className={look?.heading ?? 'text-meta font-semibold text-ui-ink'}>Ticket design</h4>
+        <InfoButton title="Ticket design">
           <DesignLegend story />
         </InfoButton>
         <span className={`text-meta ${MUTED}`}>{data.memberCount} pull requests</span>
@@ -86,7 +86,7 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
       <DiagramSlotView
         slot={data}
         redrawing={redrawing}
-        label="Design of the whole story"
+        label="Design of the whole ticket"
         openFile={(cell, path) => {
           const m = memberForRef(cell.pr, data.diagram?.members ?? []);
           if (m != null) openMember(m, path, true);

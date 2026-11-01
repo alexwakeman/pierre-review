@@ -1010,7 +1010,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
               return (
                 <li key={t.key}>
                   {t.ident != null ? (
-                    <button type="button" className={cls} title={`Open the ${t.key} story`} onClick={() => openStory({ ident: t.ident as string, key: t.key, title: t.title ?? null })}>
+                    <button type="button" className={cls} title={`Open the ${t.key} ticket`} onClick={() => openStory({ ident: t.ident as string, key: t.key, title: t.title ?? null })}>
                       {body}
                     </button>
                   ) : href != null ? (

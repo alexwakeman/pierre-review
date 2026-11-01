@@ -9,7 +9,7 @@ import { Button } from '../ui/Button.js';
 // wide screen, one in the drawer or on a phone) and its reads are the story view's own two DB reads,
 // made when the tab is opened and not before. Listed only while the PR names a ticket Limn can open as
 // a story (a `TicketRef.ident` — the "Open story" menu item's condition). A PR naming several stories
-// gets one tab each ("Story BMD-1182", "Story BMD-1190", PrDetail). "Open story tab" opens the full
+// gets one tab each ("Story BMD-1182", "Story BMD-1190", PrDetail). "Open ticket tab" opens the full
 // story tab (`useOpenStory`, the one way in).
 
 export interface PrStoryTicket {
@@ -35,7 +35,7 @@ export function PrStoryTab({
           icon={<ArrowIcon size={11} />}
           onClick={() => openStory({ ident: ticket.ident, key: ticket.key, title: null })}
         >
-          Open story tab
+          Open ticket tab
         </Button>
       </div>
       {/* Keyed on the ticket, so switching stories starts the body afresh. */}

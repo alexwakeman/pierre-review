@@ -1124,7 +1124,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
           className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
-          title={`Open the ${t.key} story`}
+          title={`Open the ${t.key} ticket`}
           data-testid="pr-ticket-story"
         >
           {t.key}

@@ -131,7 +131,7 @@ const CHANGE_VERB: Record<Exclude<TicketReviewStaleReason, 'story_edited'>, stri
 };
 
 const REASON_SENTENCE: Record<TicketReviewStaleReason, string> = {
-  story_edited: 'The story was edited.',
+  story_edited: 'The ticket was edited.',
   pr_added: 'A PR now names this ticket.',
   pr_left: 'A PR no longer names this ticket.',
   pr_pushed: 'A PR was pushed.',
@@ -165,7 +165,7 @@ export function ticketCurrency(
       const title = `Changed since the last check. ${reasons.map((r) => REASON_SENTENCE[r]).join(' ')}`.trim();
       const first = reasons[0];
       if (first == null) return { tone: 'stale', label: 'Changed since', title };
-      if (first === 'story_edited') return { tone: 'stale', label: 'Story edited since', title };
+      if (first === 'story_edited') return { tone: 'stale', label: 'Ticket edited since', title };
       const ids = state.changedPrIds;
       if (ids.length > 1) return { tone: 'stale', label: `${ids.length} PRs changed since`, title };
       const one = ids.length === 1 ? labelOf(ids[0]!) : null;
@@ -307,7 +307,7 @@ export function refusalSentence(r: { reason: TicketReviewRefusal; prCount: numbe
     case 'no_members':
       return 'No open or merged PR names this ticket.';
     case 'no_ticket':
-      return 'The story could not be read.';
+      return 'The ticket could not be read.';
     case 'peer_unreadable':
       return 'None of the PRs could be checked out.';
   }

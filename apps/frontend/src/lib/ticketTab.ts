@@ -48,8 +48,8 @@ export function useStoryLinkOpener(): (t: OpenStoryArgs) => void {
 export function storyTabLabels(key: string | null | undefined): { chip: string; title: string; closeAria: string } {
   const k = key != null && key.trim() !== '' ? key.trim() : null;
   return {
-    chip: k != null ? `${k} · Story` : 'Story',
-    title: k != null ? `${k}: story and pull requests` : 'Story and pull requests',
-    closeAria: 'Close story tab',
+    chip: k != null ? `${k} · Ticket` : 'Ticket',
+    title: k != null ? `${k}: ticket and pull requests` : 'Ticket and pull requests',
+    closeAria: 'Close ticket tab',
   };
 }

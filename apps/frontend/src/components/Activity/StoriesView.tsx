@@ -62,7 +62,7 @@ function TimeChartInfo(): JSX.Element {
         workspace&rsquo;s working hours. Pull requests counts every pull request on the ticket, open,
         merged or closed. Each column has its own scale.
       </p>
-      <p>Select a ticket to open its story and pull requests in a tab.</p>
+      <p>Select a ticket to open it and its pull requests in a tab.</p>
     </>
   );
 }
@@ -81,7 +81,7 @@ function StoryLink({
     <button
       type="button"
       onClick={() => openStory({ ident: story.ident, key: story.key, title: story.title })}
-      title={`Open the ${story.key} story`}
+      title={`Open the ${story.key} ticket`}
       className={`break-words text-left hover:underline ${className}`}
     >
       <span className="font-medium text-ui-mute">{story.key}</span>

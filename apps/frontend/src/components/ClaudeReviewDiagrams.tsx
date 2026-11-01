@@ -40,7 +40,7 @@ import { useFilters } from '../store/filters.js';
 import { REVIEW_ITEM_TITLE, REVIEW_META, REVIEW_PROSE } from '../lib/reviewStyles.js';
 import { DesignGrid } from './DesignGrid.js';
 import { PaneWide } from './Ticket/StoryLayout.js';
-import { RailWideToggle } from './RailLayout.js';
+import { RailWide, RailWideToggle } from './RailLayout.js';
 import { FlowDiagram, type OpenFlowFile } from './FlowDiagram.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
@@ -225,18 +225,22 @@ export function ClaudeReviewDiagramsSection({
         </InfoButton>
       }
       actions={
-        <>
-          <RailWideToggle />
-          <button type="button" className={BTN} disabled={drawing} onClick={() => redraw.mutate()}>
-            {drawing ? 'Drawing…' : data.pr.diagram != null ? 'Redraw' : 'Draw'}
-          </button>
-        </>
+        <button type="button" className={BTN} disabled={drawing} onClick={() => redraw.mutate()}>
+          {drawing ? 'Drawing…' : data.pr.diagram != null ? 'Redraw' : 'Draw'}
+        </button>
       }
     >
-      {/* Wide content: past the tab's reading column, to the pane's edge (PaneWide). */}
-      <PaneWide>
-        <DiagramSlotView slot={data.pr} redrawing={redrawing} label="Design of this pull request" openFile={openOwn} stickyClassName="bg-ui-bg" />
-      </PaneWide>
+      {/* Each diagram is its own wide block, as in the story view: in the two-column layout its
+          Expand lays it over the rail (RailWide); elsewhere it reaches the pane's edge (PaneWide). */}
+      <RailWide className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="text-meta font-semibold text-ui-ink">This pull request</h4>
+          {data.pr.diagram != null && <RailWideToggle className="ml-auto" />}
+        </div>
+        <PaneWide>
+          <DiagramSlotView slot={data.pr} redrawing={redrawing} label="Design of this pull request" openFile={openOwn} stickyClassName="bg-ui-bg" />
+        </PaneWide>
+      </RailWide>
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
       {data.stories.map((s) => (
@@ -268,22 +272,23 @@ function StorySlotBlock({
   const drawing = redrawing || slotDrawing(slot);
   const refusal = redrawRefusalText(redraw.data);
   return (
-    <div className="space-y-1.5 border-t border-ui-line pt-3">
+    <RailWide className="space-y-1.5 border-t border-ui-line pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-meta font-semibold text-ui-ink">
-          Story design{slot.ticketKey != null ? ` · ${slot.ticketKey}` : ''} · {slot.memberCount} pull requests
+          Ticket design{slot.ticketKey != null ? ` · ${slot.ticketKey}` : ''} · {slot.memberCount} pull requests
         </h4>
+        {slot.diagram != null && <RailWideToggle className="ml-auto" />}
         {slot.memberCount >= 2 && (
-          <button type="button" className={`ml-auto ${BTN}`} disabled={drawing} onClick={() => redraw.mutate()}>
+          <button type="button" className={`${slot.diagram == null ? 'ml-auto ' : ''}${BTN}`} disabled={drawing} onClick={() => redraw.mutate()}>
             {drawing ? 'Drawing…' : slot.diagram != null ? 'Redraw' : 'Draw'}
           </button>
         )}
       </div>
       <PaneWide>
-        <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole story" openFile={openFile} stickyClassName="bg-ui-bg" />
+        <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole ticket" openFile={openFile} stickyClassName="bg-ui-bg" />
       </PaneWide>
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
-    </div>
+    </RailWide>
   );
 }

@@ -105,6 +105,24 @@ test.describe('Implement story', () => {
     await expect(tray.getByRole('button', { name: 'Implement ACME-2' })).toHaveCount(0);
   });
 
+  test('the tray steps through the board in order, and a click on the board closes it', async ({ page }) => {
+    await gotoSprint(page);
+    const order = await page.locator('[data-testid="sprint-view"] [data-ident]:has([data-card-button])').evaluateAll((els) => els.map((e) => e.getAttribute('data-ticket')));
+    expect(order.length).toBeGreaterThan(1);
+    const tray = await openTray(page, order[0]!);
+    const open = page.locator('[data-testid="sprint-view"] [data-card-button][aria-current="true"]');
+    await expect(open).toHaveCount(1);
+    await expect(tray.getByTestId('sprint-story-tray-prev')).toBeDisabled();
+    // j steps to the next card in board order; the Previous button back again.
+    await page.keyboard.press('j');
+    await expect(page.locator(`[data-ticket="${order[1]}"][data-selected="true"]`)).toHaveCount(1);
+    await tray.getByTestId('sprint-story-tray-prev').click();
+    await expect(page.locator(`[data-ticket="${order[0]}"][data-selected="true"]`)).toHaveCount(1);
+    // A click on the board outside a card closes the tray.
+    await page.getByTestId('sprint-view').locator('h3').first().click();
+    await expect(tray).toHaveCount(0);
+  });
+
   test('a started ticket whose story check found gaps offers Fill gaps, and its tab lists them', async ({ page }) => {
     await gotoSprint(page);
     const tray = await openTray(page, 'ACME-2');
