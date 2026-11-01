@@ -441,6 +441,9 @@ export interface RunReviewArgs {
   // a finding's `docRefs`. Absent/null ⇒ the run is exactly as before. Core-only (Claude Review left
   // the plugin), so no apiVersion question.
   docsDir?: string | null;
+  // The prompt carries a "Review plan" section (claude-review/worklist.ts): the submit shape gains
+  // `coverage`. Absent/false ⇒ the shape is unchanged.
+  plan?: boolean;
   // WHO TO BILL, for a provider that writes its own ledger row (Codex: a ChatGPT run is US$ 0, so the
   // manager's cost-gated row would never be written; ai/provider.ts `usageRecord`). Claude ignores it
   // and the manager records Claude's run exactly as before. Core-only.
@@ -491,6 +494,9 @@ export interface RunReviewResult {
   // A docs run only (RunReviewArgs.docsDir): the model's `docReferences`, RAW — the manager checks each
   // against the library before anything is stored.
   docReferences?: unknown;
+  // A run shown a review plan (RunReviewArgs.plan): the model's `coverage`, RAW — the manager reconciles
+  // it against the plan (claude-review/worklist.ts `reconcileCoverage`).
+  coverage?: Array<{ ref: string; status: 'issues' | 'no_issues' | 'not_reviewed'; note?: string | null }>;
   // The refs of the peers that WERE checked out (a deep run handed peers); absent otherwise. The
   // manager stores what was read (`claude_reviews.peers_read`).
   peersCheckedOut?: string[];

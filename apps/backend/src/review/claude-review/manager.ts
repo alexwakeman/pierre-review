@@ -23,6 +23,8 @@ import { agenticRunReady } from './ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
+import { buildWorklist, reconcileCoverage, worklistPromptSection } from './worklist.js';
+import { worklistInputsFor } from './worklist-inputs.js';
 import {
   buildUserPrompt,
   peerRef,
@@ -1128,6 +1130,10 @@ async function runPipeline(
   // A deep review offers the lead its specialist sub-agents (specialists.ts); a diff-only one none.
   const specialists = mode === 'worktree' ? offeredSpecialists(prep.changedFiles) : [];
   const systemPrompt = systemPromptForMode(mode, specialists, docs?.dir ?? null);
+  // THE REVIEW PLAN (worklist.ts): the changed files ranked by code, which the run reports on in
+  // `coverage`. The same plan for either provider. Its stored inputs never fail a review.
+  const stored = await worklistInputsFor(item.accountId, item.prId, prep.changedFiles);
+  const worklist = buildWorklist({ diff: prep.strippedDiff, hubs: stored.hubs, pastFindings: stored.pastFindings });
   const prompt = buildUserPrompt({
     repoFullName: prCtx.repoFullName,
     prNumber: prCtx.number,
@@ -1146,6 +1152,7 @@ async function runPipeline(
     settled,
     sonar,
     ...(pairInput != null ? { pair: pairInput } : {}),
+    plan: worklistPromptSection(worklist),
     nonce,
   });
 
@@ -1164,6 +1171,7 @@ async function runPipeline(
     specialists,
     peers: peers.map(runPeerOf),
     ...(docs != null ? { docsDir: docs.dir } : {}),
+    plan: worklist.items.length > 0,
     // Who to bill when the provider writes its own ledger row (Codex), and — for an AUTOMATIC review
     // on Codex, where Limn runs each specialist as its own run — the spend budget asked before each.
     usage: { accountId: item.accountId, prId: item.prId },
@@ -1238,6 +1246,9 @@ async function runPipeline(
       );
     }
     const threadAssessments = threadPlan ? reconcileThreads(threadPlan, res.threads) : null;
+    // One entry per planned file, in plan order; a file with a finding is 'issues' (worklist.ts).
+    const coverage =
+      worklist.items.length > 0 ? reconcileCoverage(worklist, res.coverage, findings.map((f) => f.path)) : null;
     // The library passages + each finding's citations, CHECKED against the library (a bad link or a
     // quote not in its section is dropped). A docs run with nothing usable stores [] — "looked, found
     // nothing" — and a run without the library stores NULL.
@@ -1263,6 +1274,7 @@ async function runPipeline(
             }
           : null,
       threadAssessments,
+      coverage,
       ...(pairFirst ? { pairDropped: droppedPair.length } : {}),
     });
     return true;

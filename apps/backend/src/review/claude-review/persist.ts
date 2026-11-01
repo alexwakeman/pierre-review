@@ -31,6 +31,7 @@ import type {
   ClaudeTeamClaimRecord,
   ClaudeAutoPostWire,
   ClaudeThreadAssessment,
+  ClaudeCoverageItem,
   ClaudeTicketAssessment,
   ReviewMode,
   ReviewPeerRead,
@@ -189,6 +190,8 @@ interface ReviewRow {
   // The reference-library passages the run used, server-checked (migration 0117 / pg 0104). NULL =
   // the run did not read the library.
   docReferences?: unknown;
+  // THE REVIEW PLAN and what the run reported on each item (migration 0150). NULL = no plan.
+  coverage?: unknown;
   // What it read beside the PR (migration 0131). NULL = nothing.
   peersRead?: unknown;
   // What the team claim did (migration 0134). NULL = no claim attempted.
@@ -413,6 +416,7 @@ function mapReview(
     ...ciWireOf(r.ciFailures),
     autoPost: autoPostWireOf(r.autoPost),
     docReferences: reviewDocReferencesFromStored(r.docReferences),
+    coverage: coverageFromStored(r.coverage),
     alsoRead: peersReadFromStored(r.peersRead),
     ...(r.pairId != null ? { pair: pairInfoOf(r, pairOther) } : {}),
     teamClaim: teamClaimRecordOf(r.teamClaim),
@@ -2139,6 +2143,8 @@ export interface ReviewSuccessData {
   // story_* columns stay NULL on every new run. Old rows keep theirs as read-only history.)
   // Other reviewers' open threads, judged. null/absent ⇒ none assessed (stored NULL).
   threadAssessments?: ClaudeThreadAssessment[] | null;
+  // THE REVIEW PLAN and what the run reported on each item (worklist.ts). null/absent ⇒ no plan.
+  coverage?: ClaudeCoverageItem[] | null;
   // The SECOND half of a pair: how many of its findings repeated the first's and were dropped.
   pairDropped?: number | null;
   // The head's CI and each failing check, diagnosed. null/absent ⇒ CI not looked at (stored NULL).
@@ -2170,6 +2176,7 @@ export async function saveReviewSuccess(
         excludedFiles: data.excludedFiles,
         followUp: data.followUp ?? null,
         threadAssessments: data.threadAssessments ?? null,
+        coverage: data.coverage ?? null,
         ciFailures: data.ciFailures ?? null,
         docReferences: data.docReferences ?? null,
         ...(data.pairDropped != null ? { pairDropped: data.pairDropped } : {}),
@@ -2683,4 +2690,19 @@ export async function loadPriorRunForCarry(
     provider: r.provider ?? null,
     model: r.model ?? null,
   };
+}
+
+/** A stored review plan, served as stored; anything malformed reads as no plan (null), never []. */
+export function coverageFromStored(v: unknown): ClaudeCoverageItem[] | null {
+  if (!Array.isArray(v)) return null;
+  const ok = v.filter(
+    (i): i is ClaudeCoverageItem =>
+      i != null &&
+      typeof i === 'object' &&
+      typeof (i as ClaudeCoverageItem).ref === 'string' &&
+      typeof (i as ClaudeCoverageItem).path === 'string' &&
+      ['issues', 'no_issues', 'not_reviewed'].includes((i as ClaudeCoverageItem).status) &&
+      Array.isArray((i as ClaudeCoverageItem).reasons),
+  );
+  return ok.length > 0 ? ok.map((i) => ({ ...i, note: typeof i.note === 'string' ? i.note : null })) : null;
 }

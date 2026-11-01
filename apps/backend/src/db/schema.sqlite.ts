@@ -60,6 +60,7 @@ import type {
   TicketAutoPostRecord,
   ClaudeReviewCiState,
   ClaudeThreadAssessment,
+  ClaudeCoverageItem,
   ClaudeReviewTicket,
   ClaudeTicketAssessment,
   FlowSettings,
@@ -1338,6 +1339,10 @@ export const claudeReviews = sqliteTable(
     // NULL = the run did not read the library (switch off, empty library, older row). Migration 0117
     // (pg 0104).
     docReferences: text('doc_references', { mode: 'json' }).$type<ReviewDocReference[]>(),
+    // THE REVIEW PLAN (review/claude-review/worklist.ts): the changed files ranked by code and what the
+    // run reported on each (issues / no_issues / not_reviewed). NULL = no plan (an older row, a skip).
+    // Migration 0150.
+    coverage: text('coverage', { mode: 'json' }).$type<ClaudeCoverageItem[]>(),
     // The other code the run READ, read-only (docs/CLAUDE-REVIEW.md § Related repos): ticket peers and
     // related repos' companion changes, only those that were checked out. NULL = none (or an older
     // row). Migration 0131.

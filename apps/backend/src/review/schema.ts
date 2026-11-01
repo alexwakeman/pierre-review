@@ -29,14 +29,32 @@ type ZodNs = typeof Zod;
 // THE REFERENCE LIBRARY (`opts.docs`, docs/REFERENCE-DOCS.md § Use in reviews): only when the
 // workspace's library is in use does the shape gain `docReferences` and a finding's `docRefs`. Without
 // it the shape is EXACTLY the one below — the tool schema a run without the library sees is unchanged.
-export function buildSubmitReviewShape(z: ZodNs, opts: { docs?: boolean } = {}) {
+// THE REVIEW PLAN (`opts.plan`, claude-review/worklist.ts): only a run shown a "Review plan" section
+// gains `coverage`; without one the shape is unchanged.
+export function buildSubmitReviewShape(z: ZodNs, opts: { docs?: boolean; plan?: boolean } = {}) {
   const base = buildBaseReviewShape(z);
-  if (!opts.docs) return base;
+  const withPlan = opts.plan ? { coverage: buildCoverageField(z) } : {};
+  if (!opts.docs) return { ...base, ...withPlan };
   return {
     ...base,
     findings: z.array(base.findings.element.extend({ docRefs: buildDocCitationsField(z) })),
     docReferences: buildDocReferencesField(z),
+    ...withPlan,
   };
+}
+
+/** `coverage`: one entry per "Review plan" item. Optional: the server writes 'not_reviewed' for a gap. */
+function buildCoverageField(z: ZodNs) {
+  return z
+    .array(
+      z.object({
+        ref: z.string().describe("The plan item's ref, e.g. 'W1'."),
+        status: z.enum(['issues', 'no_issues', 'not_reviewed']),
+        note: z.string().nullable().optional().describe('One short line: what you checked, or why you did not.'),
+      }),
+    )
+    .optional()
+    .describe("Only when the user message has a 'Review plan' section: one entry per W item, each ref once.");
 }
 
 function buildBaseReviewShape(z: ZodNs) {
@@ -155,10 +173,11 @@ type BaseSubmitReviewPayload = Zod.infer<Zod.ZodObject<SubmitReviewShape>>;
 export type SubmitReviewPayload = Omit<BaseSubmitReviewPayload, 'findings'> & {
   findings: Array<BaseSubmitReviewPayload['findings'][number] & { docRefs?: unknown }>;
   docReferences?: unknown;
+  coverage?: Array<{ ref: string; status: 'issues' | 'no_issues' | 'not_reviewed'; note?: string | null }>;
 };
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */
-export async function submitReviewShape(opts: { docs?: boolean } = {}): Promise<ReturnType<typeof buildSubmitReviewShape>> {
+export async function submitReviewShape(opts: { docs?: boolean; plan?: boolean } = {}): Promise<ReturnType<typeof buildSubmitReviewShape>> {
   return buildSubmitReviewShape(await loadZod(), opts);
 }
 

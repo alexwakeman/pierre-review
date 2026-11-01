@@ -89,6 +89,7 @@ import {
   WarningIcon,
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
+import { ReviewPlan } from './ReviewPlan.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { AUTO_REVIEW_LABEL, FRESH_REVIEW_LABEL } from './Activity/pendingLabels.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
@@ -1470,6 +1471,8 @@ export function ClaudesReview({
             Also read: {review.alsoRead.map(reviewPeerReadLabel).join(', ')}
           </div>
         )}
+        {/* THE REVIEW PLAN: the files Limn ranked before the run and what the reviewer said of each. */}
+        {review.coverage != null && review.coverage.length > 0 && <ReviewPlan items={review.coverage} />}
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {/* Wide: prose at a reading measure (`.reading-measure`: paragraphs ≤ 75ch). */}
         {review.summary != null && review.summary !== '' && (

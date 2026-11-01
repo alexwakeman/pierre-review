@@ -19,6 +19,8 @@ export interface MappedReview {
   threads?: ReviewThreadReport[];
   // A docs run's `docReferences`, raw.
   docReferences?: unknown;
+  // A planned run's `coverage`, raw (reconciled by the manager).
+  coverage?: SubmitReviewPayload['coverage'];
 }
 
 /**
@@ -62,5 +64,6 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
     ...(payload.docReferences !== undefined ? { docReferences: payload.docReferences } : {}),
+    ...(payload.coverage !== undefined ? { coverage: payload.coverage } : {}),
   };
 }
