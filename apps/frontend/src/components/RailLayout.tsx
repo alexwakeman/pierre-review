@@ -1,4 +1,4 @@
-// THE TWO-COLUMN RAIL LAYOUT — one mechanism for every view that reads as CONTENT beside a sticky rail
+// THE TWO-COLUMN RAIL LAYOUT — one mechanism for every view that reads as CONTENT beside a rail
 // of FACTS AND ACTIONS (docs/FRONTEND.md § The story view → Wide layout, § The AI Review tab → Wide
 // layout). Two hosts today: the story view (Ticket/StoryLayout.tsx, `STORY_RAIL`) and the PR pane's AI
 // Review tab (`REVIEW_RAIL`, ClaudeReviewTab.tsx). Each passes its own config (slots, sections, words);
@@ -9,7 +9,8 @@
 //
 //   NARROW   (container < TWO_COLUMN_MIN_PX) one column, capped at the config's `narrowClassName` — the
 //            view as it always was. Everything a rail would hold renders in place.
-//   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem). The rail's pieces render
+//   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem) that flows with the page
+//            (part of it, never sticky; decided 2026-11-01). The rail's pieces render
 //            through <RailPiece slot=…> (a portal, so React context still reaches them). Narrow, the
 //            same piece renders its children in place (`inline`) or nothing (a rail-only extra).
 //
@@ -17,7 +18,7 @@
 //            wider (decided 2026-11-01: a block spanning the rail split it into two sticky segments and
 //            left a tall empty gap beside the block). Its "Expand" button (<RailWideToggle>, in the
 //            block's own header) lays it over the rail, to the container's right edge, until
-//            "Collapse" or Escape. The rail is ALWAYS one sticky segment.
+//            "Collapse" or Escape. The rail is ONE column.
 //
 //   SECTION NAV  every section the nav can reach carries `<sectionAttr>="<id>"`; the nav lists the ones
 //            present (re-read on every measure) and scrolls to them.
@@ -150,8 +151,6 @@ export function RailLayout({
     [config, wide, slots, sections, root],
   );
 
-  const segClass =
-    'sticky top-4 max-h-[calc(100dvh-6rem)] -mx-2 flex flex-col gap-5 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pb-2';
   const n = config.name;
   return (
     <Ctx.Provider value={value}>
@@ -161,13 +160,13 @@ export function RailLayout({
             {children}
           </div>
           {wide && (
-            <aside aria-label={config.railLabel} className="relative" data-testid={`${n}-rail`}>
-              <div className="absolute inset-x-0 bottom-0" style={{ top: railTop }}>
-                <div className={segClass} data-testid={`${n}-rail-top`}>
-                  {slotNames.map((s) => (
-                    <div key={s} ref={refs[s]} data-rail-slot={s} className="empty:hidden" />
-                  ))}
-                </div>
+            // The rail is PART OF THE PAGE (2026-11-01): it flows and scrolls with the content, never
+            // sticky in its own scroll box.
+            <aside aria-label={config.railLabel} className="min-w-0" data-testid={`${n}-rail`} style={{ paddingTop: railTop }}>
+              <div className="flex flex-col gap-5" data-testid={`${n}-rail-top`}>
+                {slotNames.map((s) => (
+                  <div key={s} ref={refs[s]} data-rail-slot={s} className="empty:hidden" />
+                ))}
               </div>
             </aside>
           )}

@@ -73,6 +73,7 @@ import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { filesLabel } from './PrCardShell.js';
 import { TicketKeyButton, threadChipLabel } from './OpenPrsCards.js';
+import { useFillToPaneBottom } from '../ui/stickyFill.js';
 
 // THE OPEN PRs ROWS — Activity → Open PRs in the redesign (docs/redesign/DESIGN.md): one LINE per
 // pull request, the detail in a SidePanel. OpenPrsCards still owns every read (one batched request
@@ -248,6 +249,10 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const [limit, setLimit] = useState(memo?.limit ?? OPEN_PRS_ROWS_PAGE);
   const [selectedKey, setSelectedKey] = useState<string | null>(memo?.selectedKey ?? null);
   const [panelOpen, setPanelOpen] = useState(memo?.panelOpen ?? false);
+  const [panelEl, setPanelEl] = useState<HTMLElement | null>(null);
+  const panelHeight = useFillToPaneBottom(panelEl, docked && panelOpen);
+  // The docked panel takes the width the size and author columns had (it shows both).
+  const compactRows = docked && panelOpen;
   const [foldTick, bumpFold] = useState(0);
   useEffect(() => {
     if (rowsMemo?.key !== windowKey) {
@@ -397,6 +402,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
       selected={sel === i}
       data={props}
       showTicket={stacks == null}
+      compact={compactRows}
       onSelect={(idx) => {
         select(idx);
         setPanelOpen(true);
@@ -451,7 +457,10 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
       title={selected?.pr.title ?? ''}
       subtitle={selected != null ? `${props.repoNameById.get(selected.pr.repoId) ?? `repo ${selected.pr.repoId}`}#${selected.pr.number}` : undefined}
       testId="open-prs-panel-detail"
-      className={docked ? 'sticky top-0 !h-[calc(100dvh-7rem)] self-start rounded-ui' : undefined}
+      className={docked ? 'sticky top-0 self-start rounded-ui' : undefined}
+      // Docked, it fills from where it sits to the pane's bottom (its footer must stay on screen).
+      panelRef={setPanelEl}
+      style={docked && panelHeight != null ? { height: panelHeight } : undefined}
       headerActions={
         selected != null && githubOf(selected) != null ? (
           <CopyButton text={githubOf(selected) as string} what="PR link" title="Copy the GitHub link to this PR" icon={<LinkIcon />} />
@@ -528,6 +537,7 @@ function PrRow({
   selected,
   data,
   showTicket,
+  compact,
   onSelect,
   onDoubleOpen,
 }: {
@@ -537,6 +547,9 @@ function PrRow({
   selected: boolean;
   data: OpenPrsRowsData;
   showTicket: boolean;
+  /** The docked panel is open beside the list: the size and author columns (both in the panel) go,
+   *  so the title keeps its room. */
+  compact: boolean;
   onSelect: (i: number) => void;
   onDoubleOpen: () => void;
 }): JSX.Element {
@@ -562,7 +575,8 @@ function PrRow({
           <span className={cx('min-w-0 truncate', pr.isDraft ? 'text-ui-mute' : 'text-ui-ink')} title={pr.title}>
             {pr.title}
           </span>
-          <span className="shrink-0 truncate text-meta text-ui-faint max-sm:hidden" title={`${repo}#${pr.number}`}>
+          {/* The repo label gives way before the title does (it shrinks first, to a floor). */}
+          <span className="min-w-[4rem] shrink-[4] truncate text-meta text-ui-faint max-sm:hidden" title={`${repo}#${pr.number}`}>
             {pr.isDraft && 'Draft · '}
             {repoShort(repo)}#{pr.number}
           </span>
@@ -607,13 +621,17 @@ function PrRow({
             />
           </span>
         )}
-        <RowMeta hideBelow="lg" width={76} className="text-right font-mono">
-          <span title={`${filesLabel(pr.changedFiles)} · ${pr.additions} added, ${pr.deletions} removed`}>{sizeText(pr)}</span>
-        </RowMeta>
-        <RowMeta hideBelow="md" width={112} className="flex items-center gap-1.5 text-ui-mute">
-          <Avatar user={author} size={14} />
-          <span className="truncate">{userLabel(author, pr.authorId)}</span>
-        </RowMeta>
+        {!compact && (
+          <RowMeta hideBelow="lg" width={76} className="text-right font-mono">
+            <span title={`${filesLabel(pr.changedFiles)} · ${pr.additions} added, ${pr.deletions} removed`}>{sizeText(pr)}</span>
+          </RowMeta>
+        )}
+        {!compact && (
+          <RowMeta hideBelow="md" width={112} className="flex items-center gap-1.5 text-ui-mute">
+            <Avatar user={author} size={14} />
+            <span className="truncate">{userLabel(author, pr.authorId)}</span>
+          </RowMeta>
+        )}
         <RowMeta width={32} className="text-right">
           <span title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>{shortAge(activity)}</span>
         </RowMeta>

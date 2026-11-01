@@ -30,6 +30,8 @@ export function SidePanel({
   children,
   closeLabel = 'Close',
   className,
+  style,
+  panelRef: outerRef,
   testId,
 }: {
   open: boolean;
@@ -43,6 +45,10 @@ export function SidePanel({
   children: ReactNode;
   closeLabel?: string;
   className?: string;
+  /** Docked only: e.g. a measured height (ui/stickyFill.ts). */
+  style?: React.CSSProperties;
+  /** Docked only: the <aside> element, for a caller that measures it. */
+  panelRef?: (el: HTMLElement | null) => void;
   testId?: string;
 }): JSX.Element | null {
   const docked = useIsDesktop();
@@ -148,9 +154,13 @@ export function SidePanel({
   if (docked) {
     return (
       <aside
-        ref={panelRef as React.RefObject<HTMLElement>}
+        ref={(el) => {
+          (panelRef as React.MutableRefObject<HTMLElement | null>).current = el;
+          outerRef?.(el);
+        }}
         aria-labelledby={titleId}
         data-testid={testId}
+        style={style}
         className={cx(
           'flex h-full min-h-0 w-panel shrink-0 flex-col bg-ui-surface motion-safe:animate-ui-slide-in',
           className,

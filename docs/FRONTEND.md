@@ -786,7 +786,7 @@ goes to two), and ALWAYS in the PR drawer (`placement === 'pane'` passes `oneCol
 under the timeline gives a sticky rail no height), it is today's single column, capped at 64rem, in
 today's order. Wide: the reading column holds the CONTENT — the summary (paragraphs at a reading measure,
 `.reading-measure`), Previous review, Review threads, Findings, Story check, CI check, SonarCloud,
-Reference docs, the Design and the chat — and a sticky RIGHT RAIL ("Review facts and actions") holds the
+Reference docs, the Design and the chat — and a RIGHT RAIL ("Review facts and actions", part of the page: it scrolls with it) holds the
 META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` stays exactly where it was:
   - `status` (rail only, `ReviewRailStatus`): who reviewed, the verdict, the commit it read
     (`CurrencyPill`), when, auto / fresh / replies / depth, and the ONE run label (`aiRunLabel`) + cost
@@ -3601,9 +3601,9 @@ board.
     design spanning the rail split it into two sticky segments and left a tall empty gap in the rail).
     A wider figure scrolls sideways (FlowDiagram's visible scrollbar). Wide, its header's **Expand**
     (`RailWideToggle`) lays it over the rail to the container's right edge (`wideClassName`, a left
-    shadow) until **Collapse** or Escape. The rail is ALWAYS one sticky segment (`sticky top-4`,
-    scrolling inside itself only past the viewport's height). Reading column `minmax(0,70rem)`, rail
-    18–24rem.
+    shadow) until **Collapse** or Escape. The rail is ONE column that is PART OF THE PAGE: it flows and
+    scrolls with the content, never sticky in a scroll box of its own (decided 2026-11-01). Reading
+    column `minmax(0,70rem)`, rail 18–24rem.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,
