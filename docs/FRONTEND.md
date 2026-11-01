@@ -798,12 +798,12 @@ META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` 
     "Threads to fix" (`validUnaddressed`) — each row scrolls to its section;
   - `nav` (rail only): "On this page" over the sections present (`data-review-section`, set through
     `ReviewSection`'s `section` prop: review, previous, threads, findings, stories, ci, sonar, refs,
-    design, chat); `nav-end` repeats it beside what follows the design when the design spans the rail;
+    design, chat);
   - `actions` (in place when narrow): Reviews and actions + "Generate fix from this review";
   - `post` (in place when narrow): Post to GitHub (summary, verdict, Preview, Post + confirm, results).
-  The Design section sits in `<RailWide>`: wide, it spans the rail to the container's edge and the rail
-  becomes two sticky segments around it (the story view's `railSegments` rule); `PaneWide` inside it
-  stands down while a wide layout is around it, so the two never overlap.
+  The Design section sits in `<RailWide>` (the story view's rule, below): in the reading column,
+  scrolling sideways; its header's "Expand" lays it over the rail. `PaneWide` inside it stands down
+  while a wide layout is around it, so the two never overlap.
 
 Header carries **Show** + **Focus** links (drive the timeline) and, on OPEN PRs only, a **CI
 readout**: a 12px `CiDot` plus its word (`prHeaderCi(state, ciStatus)` in `lib/ui.ts`, pinned by
@@ -1543,7 +1543,9 @@ reappears.
   pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
   § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,
   title, "N of M met", the server's currency pill ("2 PRs changed since"), Check / Re-check behind
-  `AiRunGate`, criteria with "Done in web#412" / "Belongs in api#88", and ONE Post button per unmet
+  `AiRunGate`, criteria (each ref — "AC1" — opens a popover: "Done in" web#412 … / "Belongs in api#88";
+  the PRs are not listed under the criteria any more, 2026-11-01; a met row keeps its tick beside the
+  ref on the first line), and ONE Post button per unmet
   item (target named on the button; once posted, never offered again; `visible:false` = "It will
   show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
   is a line above it; each block's header says how long ago the shown run finished (`ReviewedAgo` on
@@ -3595,13 +3597,13 @@ board.
   - **Section nav**: every section it reaches carries `data-story-section` (`story`, `design`,
     `missing`, `not-asked`, `docs` — STORY_SECTIONS); the nav lists those present (re-read on every
     measure + a MutationObserver), scrolls to one and moves focus to it.
-  - **The design breaks out** (`StoryWide`): wide, it spans the rail to the container's right edge. The
-    rail is then TWO sticky segments measured around it (`railSegments`): status … nav from the Story
-    section's top down to the design, the PR lists and docs summary from below it to the end. ⚠ Only
-    when the room above the design fits the top segment's content (`MIN_TOP_SEGMENT_PX` and its
-    measured height) — otherwise one segment and the design stays in the reading column (a short
-    brief, the demo's INFRA-260). Each segment is `sticky top-4`, scrolling inside itself only past
-    the viewport's height.
+  - **The design stays in the reading column** (`StoryWide` = `RailWide`; decided 2026-11-01, when the
+    design spanning the rail split it into two sticky segments and left a tall empty gap in the rail).
+    A wider figure scrolls sideways (FlowDiagram's visible scrollbar). Wide, its header's **Expand**
+    (`RailWideToggle`) lays it over the rail to the container's right edge (`wideClassName`, a left
+    shadow) until **Collapse** or Escape. The rail is ALWAYS one sticky segment (`sticky top-4`,
+    scrolling inside itself only past the viewport's height). Reading column `minmax(0,70rem)`, rail
+    18–24rem.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,

@@ -349,6 +349,33 @@ export function CollapseAllIcon({ size = 14, ...rest }: IconProps): JSX.Element 
   );
 }
 
+/** Expand wide — arrows pointing apart sideways, from a bar: lay a design figure over the side panel
+ *  (RailLayout.tsx `RailWideToggle`). The companion of {@link CollapseWideIcon}. */
+export function ExpandWideIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <polyline points="6 9 3 12 6 15" />
+      <line x1="3" y1="12" x2="9" y2="12" />
+      <polyline points="18 9 21 12 18 15" />
+      <line x1="15" y1="12" x2="21" y2="12" />
+    </IconShell>
+  );
+}
+
+/** Collapse wide — arrows pointing together sideways, at a bar: put the figure back in its column. */
+export function CollapseWideIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <polyline points="6 9 9 12 6 15" />
+      <line x1="2" y1="12" x2="9" y2="12" />
+      <polyline points="18 9 15 12 18 15" />
+      <line x1="15" y1="12" x2="22" y2="12" />
+    </IconShell>
+  );
+}
+
 // Add — a "+" beside an "Add …" label (Claude Review's "Add story" tab).
 export function PlusIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (

@@ -19,7 +19,7 @@
 // contract: once GitHub answered with a comment id, the button never comes back (a retry
 // double-posts).
 import { DocReferencesBlock } from './DocReferences.js';
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   STORY_MISSING_EXPLAINER,
   STORY_MISSING_HEADING,
@@ -47,7 +47,6 @@ import {
   anchorLabel,
 } from '../lib/claudeReviewFollowUp.js';
 import {
-  deliveredByLabel,
   expectedInLabel,
   itemsByRef,
   memberLabel,
@@ -68,6 +67,8 @@ import { InfoButton } from './InfoModal.js';
 import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
+import { FloatingLayer } from './ui/FloatingLayer.js';
+import { useClickOutside } from '../hooks/useClickOutside.js';
 import { SendToChatButton } from './ClaudeReviewChat.js';
 import {
   REVIEW_CHIP,
@@ -281,32 +282,30 @@ export function CriterionRow({
     /** The story docs check's note on this criterion (Story section only); absent ⇒ nothing drawn. */
     docs?: StoryDocsCriterionItem;
   }): JSX.Element {
-  const done = deliveredByLabel(c, review.members);
+  const doneIn = deliveredByMembers(c, review.members);
   const belongs = expectedInLabel(c.expectedIn, review.members);
   const refProps = { viewedPrId, members: review.members, changedPaths, onOpenInChanges };
+  // The criterion's ref ("AC1") opens the PRs that deliver it, or where it belongs (2026-11-01: listed
+  // under every criterion they were clutter).
+  const ref = <CriterionRef label={c.ref} doneIn={doneIn} belongs={belongs} />;
   // MET is one compact line: tick, ref, criterion, who delivered it.
   if (c.status === 'met') {
     const line = (
       <>
-        <span className="shrink-0 self-center text-ui-success" aria-label="Met">
-          <CheckIcon size={12} />
+        {/* The tick and the ref are ONE unit on the first line, however far the criterion wraps. */}
+        <span className="inline-flex shrink-0 items-center gap-1.5 leading-5">
+          <span className="text-ui-success" aria-label="Met">
+            <CheckIcon size={12} />
+          </span>
+          {ref}
         </span>
-        <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 break-words">
-          {criterionTextOnly(c.text, c.ref)}
-          {done != null && (
-            <span className={`text-meta ${MUTED}`}>
-              {' · '}
-              <PrRefText text={done} />
-            </span>
-          )}
-        </span>
+        <span className="min-w-0 break-words leading-5">{criterionTextOnly(c.text, c.ref)}</span>
       </>
     );
-    if (docs == null) return <li className="flex items-baseline gap-2 px-1 text-body">{line}</li>;
+    if (docs == null) return <li className="flex items-start gap-2 px-1 text-body">{line}</li>;
     return (
       <li className="flex flex-col px-1 text-body">
-        <div className="flex items-baseline gap-2">{line}</div>
+        <div className="flex items-start gap-2">{line}</div>
         <div className="pl-5">
           <StoryDocsCriterionDetail item={docs} />
         </div>
@@ -323,15 +322,10 @@ export function CriterionRow({
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
         <span className="flex min-w-0 basis-full items-start gap-2 sm:basis-auto sm:flex-1">
-          <span className={`shrink-0 font-mono text-meta leading-5 ${MUTED}`}>{c.ref}</span>
+          <span className="leading-5">{ref}</span>
           <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
         </span>
       </div>
-      {(done != null || belongs != null) && (
-        <div className={`mt-0.5 text-meta ${MUTED}`}>
-          <PrRefText text={[done, belongs].filter(Boolean).join(' · ')} />
-        </div>
-      )}
       {c.evidence.length > 0 && (
         <div className="mt-0.5 flex flex-wrap gap-x-3">
           {c.evidence.map((ev, i) => (
@@ -347,6 +341,84 @@ export function CriterionRow({
       {actions && item != null && <ItemAction item={item} review={review} viewedPrId={viewedPrId} />}
       {docs != null && <StoryDocsCriterionDetail item={docs} />}
     </li>
+  );
+}
+
+/** The member PRs that deliver a criterion (the ones the run knows), in its order. */
+function deliveredByMembers(c: Pick<TicketCriterion, 'deliveredBy'>, members: readonly TicketReviewMember[]): TicketReviewMember[] {
+  const byId = new Map(members.map((m) => [m.prId, m]));
+  return c.deliveredBy.map((id) => byId.get(id)).filter((m): m is TicketReviewMember => m != null);
+}
+
+/**
+ * A criterion's ref. With PRs to name, a button that opens them in a small popover: "Done in" (one per
+ * line, each opening the PR) and "Belongs in …". Without, plain text.
+ */
+function CriterionRef({
+  label,
+  doneIn,
+  belongs,
+}: {
+  label: string;
+  doneIn: readonly TicketReviewMember[];
+  belongs: string | null;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const panelId = useId();
+  useClickOutside(rootRef, () => setOpen(false), open);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+  if (doneIn.length === 0 && belongs == null) return <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{label}</span>;
+  return (
+    <span ref={rootRef} className="shrink-0" data-criterion-ref>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        title={doneIn.length > 0 ? 'The pull requests that do this' : 'Where this belongs'}
+        className={`hit rounded-ui font-mono text-meta ${MUTED} underline decoration-dotted underline-offset-2 hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent`}
+      >
+        {label}
+      </button>
+      {open && (
+        <FloatingLayer
+          anchorRef={rootRef}
+          id={panelId}
+          role="dialog"
+          aria-label={`${label}: pull requests`}
+          className="z-[60] w-64 rounded-ui bg-ui-raise p-2 text-meta shadow-lg ring-1 ring-ui-line motion-safe:animate-ui-pop"
+        >
+          {doneIn.length > 0 && (
+            <>
+              <p className={`mb-1 ${MUTED}`}>Done in</p>
+              <ul className="space-y-0.5">
+                {doneIn.map((m) => (
+                  <li key={m.prId}>
+                    <MemberPrLink member={{ repo: m.repo, number: m.number, label: memberLabel(m) }} />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {belongs != null && (
+            <p className={doneIn.length > 0 ? 'mt-1.5' : ''}>
+              <PrRefText text={belongs} />
+            </p>
+          )}
+        </FloatingLayer>
+      )}
+    </span>
   );
 }
 

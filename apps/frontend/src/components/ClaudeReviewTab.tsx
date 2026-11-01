@@ -1548,7 +1548,7 @@ export function ClaudesReview({
       <DocReferencesSection references={review.docReferences} by={by} />
       {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
           after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
-      {/* Wide content: in the two-column layout it spans the rail too (RailWide). */}
+      {/* Wide content: in the two-column layout its Expand lays it over the rail (RailWide). */}
       <RailWide>
         <ClaudeReviewDiagramsSection
           prId={review.prId}
@@ -1576,7 +1576,7 @@ export function ClaudesReview({
 // run's status (`status`), the run controls (`run`), the counts (`counts`), "On this page" (`nav`),
 // Reviews and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). Narrow (the PR
 // drawer, a laptop, a phone) every piece renders in place, in today's order; rail-only extras vanish.
-export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'nav', 'actions', 'post', 'nav-end'] as const;
+export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'nav', 'actions', 'post'] as const;
 export const REVIEW_SECTIONS = [
   { id: 'review', label: 'Summary' },
   { id: 'previous', label: 'Previous review' },
@@ -1592,8 +1592,6 @@ export const REVIEW_SECTIONS = [
 const REVIEW_RAIL: RailLayoutConfig = {
   name: 'review',
   slots: REVIEW_RAIL_SLOTS,
-  // Everything but the second "On this page" (beside what follows the design) rides above the design.
-  topSlots: REVIEW_RAIL_SLOTS.filter((s) => s !== 'nav-end'),
   sections: REVIEW_SECTIONS,
   sectionAttr: 'data-review-section',
   startSection: null,
@@ -2088,13 +2086,9 @@ export function ClaudeReviewTab({
       <RailPiece slot="actions" inline>
         <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       </RailPiece>
-      {/* "On this page" — the rail's section nav (rail only); its second copy sits beside what follows
-          the design when the design spans the rail. */}
+      {/* "On this page" — the rail's section nav (rail only). */}
       <RailPiece slot="nav">
         <RailSectionNav />
-      </RailPiece>
-      <RailPiece slot="nav-end">
-        <RailSectionNav whenSplit />
       </RailPiece>
       <RailPiece slot="run" inline>
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces

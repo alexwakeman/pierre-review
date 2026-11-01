@@ -58,10 +58,11 @@ function Dotted({ parts }: { parts: ReadonlyArray<ReactNode | null | false> }): 
   return (
     <span>
       {shown.map((p, i) => (
-        // Each part keeps its words together; the line breaks at a separator.
+        // Each part keeps its words together and the line breaks at a separator; a part wider than the
+        // drawer on its own (a Claude + Codex run label) wraps inside itself, never sideways.
         <Fragment key={i}>
           {i > 0 && SEP}
-          <span className="whitespace-nowrap">{p}</span>
+          <span className="inline-block max-w-full align-top">{p}</span>
         </Fragment>
       ))}
     </span>

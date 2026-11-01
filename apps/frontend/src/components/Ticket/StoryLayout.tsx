@@ -7,7 +7,7 @@
 //   NARROW   (container < STORY_TWO_COLUMN_MIN_PX) one column, capped at max-w-5xl.
 //   WIDE     a reading column and a RIGHT RAIL: status + criteria (`check`), the Story actions, the
 //            section nav, "What each PR adds", the Merged panel, the docs summary.
-//   <StoryWide> (the story design) spans the rail; the rail is then two sticky segments around it.
+//   <StoryWide> (the story design) stays in the reading column; its Expand lays it over the rail.
 import type { ReactNode } from 'react';
 import {
   PaneWide,
@@ -22,7 +22,7 @@ import {
 
 export { PaneWide };
 
-/** The rail's slots, top to bottom. The first three form the top segment when a wide block splits it. */
+/** The rail's slots, top to bottom. */
 export const STORY_RAIL_SLOTS = ['check', 'actions', 'nav', 'prs', 'merged', 'docs'] as const;
 export type StoryRailSlot = (typeof STORY_RAIL_SLOTS)[number];
 /** The sections the nav can reach, in page order, and their words. */
@@ -38,7 +38,6 @@ export type StorySectionId = (typeof STORY_SECTIONS)[number]['id'];
 export const STORY_RAIL: RailLayoutConfig = {
   name: 'story',
   slots: STORY_RAIL_SLOTS,
-  topSlots: ['check', 'actions', 'nav'],
   sections: STORY_SECTIONS,
   sectionAttr: 'data-story-section',
   startSection: 'story',
@@ -94,7 +93,7 @@ export function useInRail(): boolean {
   return useRailWide('story');
 }
 
-/** Wide content (the story design): spans the rail in the two-column layout; a plain block elsewhere. */
+/** Wide content (the story design): expandable over the rail in the two-column layout; a plain block elsewhere. */
 export function StoryWide({ children, className = '' }: { children: ReactNode; className?: string }): JSX.Element {
   return <RailWide className={className}>{children}</RailWide>;
 }

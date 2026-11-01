@@ -3,8 +3,8 @@
 //
 // Pins:
 //   1. Two columns from the CONTAINER's width (never the window's): the tray stays one column.
-//   2. The rail splits around the wide block (the story design) only when there is room above it;
-//      otherwise one segment and the block stays in the reading column.
+//   2. The rail is ONE sticky segment; the wide block (a design) stays in the reading column until the
+//      reader presses Expand, which lays it over the rail (2026-11-01).
 //   3. The wiring: the body mounts StoryLayout; the tab no longer caps the width itself; each section
 //      the nav reaches carries its `data-story-section`; the rail's pieces go through InRail.
 //   4. The data-flow figure: lanes never narrower than 12rem (9rem in a phone-sized box), the lane cards
@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MIN_TOP_SEGMENT_PX, SEGMENT_GAP_PX, STORY_TWO_COLUMN_MIN_PX, railSegments, storyTwoColumn } from '../src/lib/storyLayout.js';
+import { STORY_TWO_COLUMN_MIN_PX, storyTwoColumn } from '../src/lib/storyLayout.js';
 import { FLOW_LANE_MIN_REM, FLOW_LANE_MIN_REM_PHONE } from '../src/lib/dataFlow.js';
 
 const src = (rel: string): string => readFileSync(join(__dirname, '..', 'src', rel), 'utf8');
@@ -34,29 +34,16 @@ describe('two columns', () => {
   });
 });
 
-describe('rail segments', () => {
-  it('is one segment with no wide block', () => {
-    expect(railSegments(40, null)).toEqual({ segments: { top: { start: 40, end: null }, bottom: null }, breakout: false });
-  });
-  it('splits around the block when there is room above it', () => {
-    const r = railSegments(40, { top: 2000, bottom: 3000 });
-    expect(r.breakout).toBe(true);
-    expect(r.segments).toEqual({ top: { start: 40, end: 2000 - SEGMENT_GAP_PX }, bottom: { start: 3000 + SEGMENT_GAP_PX } });
-  });
-  it('keeps the block in the column when the top segment would be too short', () => {
-    const top = 40 + SEGMENT_GAP_PX + MIN_TOP_SEGMENT_PX - 1;
-    expect(railSegments(40, { top, bottom: top + 900 })).toEqual({
-      segments: { top: { start: 40, end: null }, bottom: null },
-      breakout: false,
-    });
-  });
-});
-
-describe('rail segments: the top content must fit', () => {
-  it('no split when the facts, actions and nav are taller than the room above the block', () => {
-    const block = { top: 40 + SEGMENT_GAP_PX + 400, bottom: 2000 };
-    expect(railSegments(40, block, 380).breakout).toBe(true);
-    expect(railSegments(40, block, 460).breakout).toBe(false);
+describe('the wide block (the design)', () => {
+  it('never splits the rail: one sticky segment, the block in the column until Expand', () => {
+    const layout = src('components/RailLayout.tsx');
+    expect(layout).not.toMatch(/rail-bottom|railSegments|topSlots/);
+    // Expand lays it over the rail; Escape or Collapse puts it back.
+    expect(layout).toMatch(/export function RailWideToggle/);
+    expect(layout).toMatch(/e\.key === 'Escape'/);
+    // Both design headers carry the button.
+    expect(src('components/Activity/StoryDesignSection.tsx')).toMatch(/<RailWideToggle/);
+    expect(src('components/ClaudeReviewDiagrams.tsx')).toMatch(/<RailWideToggle/);
   });
 });
 

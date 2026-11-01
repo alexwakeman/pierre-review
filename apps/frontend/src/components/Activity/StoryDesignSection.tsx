@@ -19,6 +19,7 @@ import { memberForRef } from '../../lib/designGrid.js';
 import { DesignLegend, DiagramSlotView, redrawRefusalText, useOpenMemberFile } from '../ClaudeReviewDiagrams.js';
 import { InfoButton } from '../InfoModal.js';
 import { StoryWide } from '../Ticket/StoryLayout.js';
+import { RailWideToggle } from '../RailLayout.js';
 
 const MUTED = 'text-ui-mute';
 const BTN =
@@ -65,7 +66,7 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
   if (data.memberCount < 2 && data.diagram == null) return null;
   const refusal = redrawRefusalText(redraw.data);
   return (
-    // Wide content: in the two-column layout it spans the rail too (StoryWide).
+    // Wide content: in the two-column layout its Expand lays it over the rail (StoryWide).
     <StoryWide>
     <section aria-label="Story design" className="scroll-mt-4 space-y-2 focus:outline-none" data-testid="story-design" data-story-section="design">
       <div className="flex items-center gap-1.5">
@@ -74,6 +75,7 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
           <DesignLegend story />
         </InfoButton>
         <span className={`text-meta ${MUTED}`}>{data.memberCount} pull requests</span>
+        <RailWideToggle className="ml-auto" />
       </div>
       <DiagramSlotView
         slot={data}

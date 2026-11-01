@@ -9,15 +9,15 @@
 //
 //   NARROW   (container < TWO_COLUMN_MIN_PX) one column, capped at the config's `narrowClassName` — the
 //            view as it always was. Everything a rail would hold renders in place.
-//   WIDE     a reading column (minmax(0, 60rem)) and a RIGHT RAIL (18–22rem). The rail's pieces render
+//   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem). The rail's pieces render
 //            through <RailPiece slot=…> (a portal, so React context still reaches them). Narrow, the
 //            same piece renders its children in place (`inline`) or nothing (a rail-only extra).
 //
-//   WIDE BLOCKS  <RailWide> (a design diagram) breaks out of the reading column to the container's right
-//            edge, spanning the rail. The rail is then TWO sticky segments measured around it: the
-//            config's `topSlots` from the start section's top down to the block, the rest from below
-//            the block to the end. With no wide block (or too little room above it for the top
-//            segment) the rail is one segment and the block stays in the reading column.
+//   WIDE BLOCKS  <RailWide> (a design diagram) stays IN the reading column, scrolling sideways when it is
+//            wider (decided 2026-11-01: a block spanning the rail split it into two sticky segments and
+//            left a tall empty gap beside the block). Its "Expand" button (<RailWideToggle>, in the
+//            block's own header) lays it over the rail, to the container's right edge, until
+//            "Collapse" or Escape. The rail is ALWAYS one sticky segment.
 //
 //   SECTION NAV  every section the nav can reach carries `<sectionAttr>="<id>"`; the nav lists the ones
 //            present (re-read on every measure) and scrolls to them.
@@ -33,19 +33,17 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { railSegments, storyTwoColumn, type RailSegments } from '../lib/storyLayout.js';
+import { storyTwoColumn } from '../lib/storyLayout.js';
+import { CollapseWideIcon, ExpandWideIcon } from './Icons.js';
 
 export interface RailLayoutConfig {
   /** The test-id prefix and the layout's identity (`story` → `story-layout`, `story-rail`, …). */
   name: string;
   /** The rail's slots, top to bottom. */
   slots: readonly string[];
-  /** The slots of the top segment when a wide block splits the rail. */
-  topSlots: readonly string[];
   /** The sections the nav can reach, in page order, and their words. */
   sections: readonly { id: string; label: string }[];
   /** The attribute each reachable section carries (`data-story-section`). */
@@ -56,24 +54,16 @@ export interface RailLayoutConfig {
   railLabel: string;
   /** The single column's cap below the breakpoint. */
   narrowClassName: string;
-  /** The wide block's paint while it spans the rail (it sits over the rail's column). */
+  /** The wide block's paint while it is expanded over the rail (it sits over the rail's column). */
   wideClassName: string;
 }
-
-/** The gap between rail blocks (`gap-5`). */
-const RAIL_GAP_PX = 20;
 
 interface RailLayoutValue {
   config: RailLayoutConfig;
   wide: boolean;
-  /** The wide block may break out (there is room above it for the rail's top segment). */
-  breakout: boolean;
-  /** The rail is two segments (a wide block broke out). */
-  split: boolean;
   slots: Partial<Record<string, HTMLElement>>;
   sections: readonly string[];
   root: HTMLElement | null;
-  setWideBlock: (el: HTMLElement | null) => void;
 }
 
 const Ctx = createContext<RailLayoutValue | null>(null);
@@ -99,15 +89,12 @@ export function RailLayout({
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const mainRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [wideBlock, setWideBlock] = useState<HTMLElement | null>(null);
-  const [segments, setSegments] = useState<RailSegments>({ top: { start: 0, end: null }, bottom: null });
-  const [breakout, setBreakout] = useState(false);
+  // The rail's top: the start section's top, from the reading column's top.
+  const [railTop, setRailTop] = useState(0);
   const [sections, setSections] = useState<readonly string[]>([]);
   const [slots, setSlots] = useState<Partial<Record<string, HTMLElement>>>({});
-  const slotsRef = useRef(slots);
-  slotsRef.current = slots;
   const wide = !oneColumn && storyTwoColumn(width);
-  const { slots: slotNames, topSlots, sections: sectionDefs, sectionAttr, startSection } = config;
+  const { slots: slotNames, sections: sectionDefs, sectionAttr, startSection } = config;
 
   // The container's width (the tab's pane, the tray, the PR drawer).
   useIsoLayoutEffect(() => {
@@ -119,32 +106,18 @@ export function RailLayout({
     return () => ro.disconnect();
   }, [root]);
 
-  // Where the rail's segments sit, and which sections the nav can reach: re-read whenever the
-  // reading column or the wide block changes size.
+  // Where the rail starts, and which sections the nav can reach: re-read whenever the reading column
+  // changes size.
   const measure = useCallback(() => {
     const main = mainRef.current;
     if (main == null) return;
     const present = sectionDefs.filter((s) => main.querySelector(`[${sectionAttr}="${s.id}"]`) != null).map((s) => s.id);
     setSections((prev) => (prev.length === present.length && prev.every((p, i) => p === present[i]) ? prev : present));
     if (!wide) return;
-    const base = main.getBoundingClientRect().top;
     const startEl = startSection != null ? main.querySelector(`[${sectionAttr}="${startSection}"]`) : null;
-    const start = startEl != null ? Math.max(0, startEl.getBoundingClientRect().top - base) : 0;
-    let block: { top: number; bottom: number } | null = null;
-    if (wideBlock != null && main.contains(wideBlock)) {
-      const r = wideBlock.getBoundingClientRect();
-      // An empty block (its section rendered nothing) splits nothing.
-      if (r.height > 0) block = { top: r.top - base, bottom: r.bottom - base };
-    }
-    // The top segment's content must fit in the room above the block, unscrolled.
-    const tops = topSlots.map((n) => slotsRef.current[n]).filter((el): el is HTMLElement => el != null && el.offsetHeight > 0);
-    const topContent = tops.reduce((sum, el) => sum + el.offsetHeight, 0) + Math.max(0, tops.length - 1) * RAIL_GAP_PX;
-    const { segments: next, breakout: canBreak } = railSegments(start, block, topContent);
-    setBreakout(canBreak);
-    setSegments((prev) =>
-      prev.top.start === next.top.start && prev.top.end === next.top.end && prev.bottom?.start === next.bottom?.start ? prev : next,
-    );
-  }, [wide, wideBlock, sectionDefs, sectionAttr, startSection, topSlots]);
+    const start = startEl != null ? Math.max(0, startEl.getBoundingClientRect().top - main.getBoundingClientRect().top) : 0;
+    setRailTop((prev) => (prev === start ? prev : start));
+  }, [wide, sectionDefs, sectionAttr, startSection]);
 
   useIsoLayoutEffect(() => {
     const main = mainRef.current;
@@ -152,11 +125,6 @@ export function RailLayout({
     if (main == null || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => measure());
     ro.observe(main);
-    if (wideBlock != null) ro.observe(wideBlock);
-    for (const n of topSlots) {
-      const el = slots[n];
-      if (el != null) ro.observe(el);
-    }
     // A section appearing without a size change (rare) is caught on the next DOM change.
     const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => measure());
     mo?.observe(main, { childList: true, subtree: true });
@@ -164,9 +132,8 @@ export function RailLayout({
       ro.disconnect();
       mo?.disconnect();
     };
-  }, [measure, wideBlock, slots, topSlots]);
+  }, [measure]);
 
-  const split = wide && breakout && segments.bottom != null;
   const slotRef = useCallback(
     (name: string) => (el: HTMLDivElement | null) => {
       setSlots((prev) => (prev[name] === (el ?? undefined) ? prev : { ...prev, [name]: el ?? undefined }));
@@ -178,39 +145,30 @@ export function RailLayout({
     () => Object.fromEntries(slotNames.map((s) => [s, slotRef(s)])) as Record<string, (el: HTMLDivElement | null) => void>,
     [slotRef, slotNames],
   );
-  const slotDivs = (names: readonly string[]): ReactNode =>
-    names.map((s) => <div key={`${s}:${split ? 's' : 'o'}`} ref={refs[s]} data-rail-slot={s} className="empty:hidden" />);
-
   const value = useMemo<RailLayoutValue>(
-    () => ({ config, wide, breakout: wide && breakout, split, slots: wide ? slots : {}, sections, root, setWideBlock }),
-    [config, wide, breakout, split, slots, sections, root],
+    () => ({ config, wide, slots: wide ? slots : {}, sections, root }),
+    [config, wide, slots, sections, root],
   );
 
-  const segStyle = (start: number, end: number | null): CSSProperties => ({ top: start, ...(end != null ? { height: Math.max(0, end - start) } : { bottom: 0 }) });
   const segClass =
     'sticky top-4 max-h-[calc(100dvh-6rem)] -mx-2 flex flex-col gap-5 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pb-2';
   const n = config.name;
   return (
     <Ctx.Provider value={value}>
       <div ref={setRoot} data-testid={`${n}-layout`} data-wide={wide ? 'true' : 'false'}>
-        <div className={wide ? 'grid grid-cols-[minmax(0,60rem)_minmax(18rem,22rem)] gap-x-10' : ''}>
+        <div className={wide ? 'grid grid-cols-[minmax(0,70rem)_minmax(18rem,24rem)] gap-x-10' : ''}>
           <div ref={mainRef} className={wide ? 'min-w-0' : config.narrowClassName}>
             {children}
           </div>
           {wide && (
             <aside aria-label={config.railLabel} className="relative" data-testid={`${n}-rail`}>
-              <div className="absolute inset-x-0" style={segStyle(segments.top.start, split ? segments.top.end : null)}>
+              <div className="absolute inset-x-0 bottom-0" style={{ top: railTop }}>
                 <div className={segClass} data-testid={`${n}-rail-top`}>
-                  {slotDivs(split ? topSlots : slotNames)}
+                  {slotNames.map((s) => (
+                    <div key={s} ref={refs[s]} data-rail-slot={s} className="empty:hidden" />
+                  ))}
                 </div>
               </div>
-              {split && segments.bottom != null && (
-                <div className="absolute inset-x-0 bottom-0" style={{ top: segments.bottom.start }}>
-                  <div className={segClass} data-testid={`${n}-rail-bottom`}>
-                    {slotDivs(slotNames.filter((s) => !topSlots.includes(s)))}
-                  </div>
-                </div>
-              )}
             </aside>
           )}
         </div>
@@ -238,22 +196,22 @@ export function RailPiece({ slot, inline = false, children }: { slot: string; in
   return inline ? <>{children}</> : null;
 }
 
+// The expand control of the enclosing <RailWide> (null outside one, or while it cannot expand).
+const WideCtx = createContext<{ expanded: boolean; toggle: () => void } | null>(null);
+
 /**
- * Wide content (a design diagram): in the two-column layout it breaks out of the reading column to the
- * container's right edge, across the rail. Elsewhere (narrow, the tray, outside a layout) a plain block.
+ * Wide content (a design diagram). It stays in the reading column (a wider figure scrolls sideways).
+ * In the two-column layout its header's <RailWideToggle> lays it over the rail, to the container's
+ * right edge, until "Collapse" or Escape. Elsewhere (narrow, the tray, outside a layout) a plain block.
  */
 export function RailWide({ children, className = '' }: { children: ReactNode; className?: string }): JSX.Element {
   const layout = useRailLayout();
   const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [width, setWidth] = useState<number | null>(null);
-  const register = layout?.setWideBlock;
-  useEffect(() => {
-    if (register == null || el == null) return;
-    register(el);
-    return () => register(null);
-  }, [register, el]);
   const root = layout?.root ?? null;
-  const on = layout?.breakout === true;
+  const can = layout?.wide === true;
+  const on = can && expanded;
   useIsoLayoutEffect(() => {
     if (!on || el == null || root == null) {
       setWidth(null);
@@ -270,28 +228,54 @@ export function RailWide({ children, className = '' }: { children: ReactNode; cl
     ro.observe(root);
     return () => ro.disconnect();
   }, [on, el, root]);
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [on]);
+  const ctx = useMemo(() => (can ? { expanded: on, toggle: () => setExpanded((v) => !v) } : null), [can, on]);
   const name = layout?.config.name ?? 'rail';
+  const over = on && width != null && layout != null;
   return (
-    <div
-      ref={setEl}
-      data-rail-wide={width != null ? 'true' : 'false'}
-      {...{ [`data-${name}-wide`]: width != null ? 'true' : 'false' }}
-      className={`${className}${width != null && layout != null ? ` ${layout.config.wideClassName}` : ''}`}
-      style={width != null ? { width } : undefined}
-    >
-      {children}
-    </div>
+    <WideCtx.Provider value={ctx}>
+      <div
+        ref={setEl}
+        data-rail-wide={over ? 'true' : 'false'}
+        {...{ [`data-${name}-wide`]: over ? 'true' : 'false' }}
+        className={`${className}${over ? ` ${layout.config.wideClassName} shadow-[-12px_0_16px_-12px_rgb(0_0_0/0.25)]` : ''}`}
+        style={over ? { width } : undefined}
+      >
+        {children}
+      </div>
+    </WideCtx.Provider>
   );
 }
 
-/**
- * The rail's "On this page": the sections present, each a link that scrolls to it. `whenSplit` draws it
- * only while the rail is two segments (the bottom segment's copy, beside what follows a wide block).
- */
-export function RailSectionNav({ whenSplit = false }: { whenSplit?: boolean }): JSX.Element | null {
+/** The enclosing <RailWide>'s Expand / Collapse button, for its header. Nothing when it cannot expand. */
+export function RailWideToggle({ className = '' }: { className?: string }): JSX.Element | null {
+  const wide = useContext(WideCtx);
+  if (wide == null) return null;
+  return (
+    <button
+      type="button"
+      onClick={wide.toggle}
+      aria-pressed={wide.expanded}
+      title={wide.expanded ? 'Back to the column (Esc)' : 'Show over the side panel'}
+      className={`hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${className}`}
+    >
+      {wide.expanded ? <CollapseWideIcon size={14} /> : <ExpandWideIcon size={14} />}
+      {wide.expanded ? 'Collapse' : 'Expand'}
+    </button>
+  );
+}
+
+/** The rail's "On this page": the sections present, each a link that scrolls to it. */
+export function RailSectionNav(): JSX.Element | null {
   const layout = useRailLayout();
   if (layout == null || !layout.wide || layout.sections.length < 2) return null;
-  if (whenSplit && !layout.split) return null;
   const { name } = layout.config;
   const go = (id: string): void => scrollToSection(layout, id);
   return (
@@ -345,7 +329,7 @@ const PANE_EDGE_PX = 20;
  * design): it breaks out of its capped reading column to the right edge of the scroll pane it sits in,
  * so a many-lane data flow gets the screen's width before it has to scroll sideways. A block narrower
  * than its column (a phone) is left alone. Inside a WIDE rail layout it stays put — the layout's
- * <RailWide> around the section does the breaking out there, and must not be overlapped.
+ * <RailWide> around the section expands it there, on the reader's press.
  */
 export function PaneWide({ children }: { children: ReactNode }): JSX.Element {
   const [el, setEl] = useState<HTMLDivElement | null>(null);

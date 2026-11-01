@@ -40,6 +40,7 @@ import { useFilters } from '../store/filters.js';
 import { REVIEW_ITEM_TITLE, REVIEW_META, REVIEW_PROSE } from '../lib/reviewStyles.js';
 import { DesignGrid } from './DesignGrid.js';
 import { PaneWide } from './Ticket/StoryLayout.js';
+import { RailWideToggle } from './RailLayout.js';
 import { FlowDiagram, type OpenFlowFile } from './FlowDiagram.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
@@ -224,9 +225,12 @@ export function ClaudeReviewDiagramsSection({
         </InfoButton>
       }
       actions={
-        <button type="button" className={BTN} disabled={drawing} onClick={() => redraw.mutate()}>
-          {drawing ? 'Drawing…' : data.pr.diagram != null ? 'Redraw' : 'Draw'}
-        </button>
+        <>
+          <RailWideToggle />
+          <button type="button" className={BTN} disabled={drawing} onClick={() => redraw.mutate()}>
+            {drawing ? 'Drawing…' : data.pr.diagram != null ? 'Redraw' : 'Draw'}
+          </button>
+        </>
       }
     >
       {/* Wide content: past the tab's reading column, to the pane's edge (PaneWide). */}
