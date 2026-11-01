@@ -56,6 +56,7 @@ import {
   Row,
   RowLead,
   RowMeta,
+  HEADER_ACTION_CLASS,
   SidePanel,
   StatusIcon,
   cx,
@@ -463,7 +464,13 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
       style={docked && panelHeight != null ? { height: panelHeight } : undefined}
       headerActions={
         selected != null && githubOf(selected) != null ? (
-          <CopyButton text={githubOf(selected) as string} what="PR link" title="Copy the GitHub link to this PR" icon={<LinkIcon />} />
+          <CopyButton
+            text={githubOf(selected) as string}
+            what="PR link"
+            title="Copy the GitHub link to this PR"
+            icon={<LinkIcon size={14} />}
+            className={HEADER_ACTION_CLASS}
+          />
         ) : null
       }
       footer={

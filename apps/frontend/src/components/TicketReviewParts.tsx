@@ -68,6 +68,7 @@ import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
 import { FloatingLayer } from './ui/FloatingLayer.js';
+import { useStorySectionLook } from './Ticket/StoryLayout.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { SendToChatButton } from './ClaudeReviewChat.js';
 import {
@@ -467,12 +468,13 @@ export function MissingRow({
 }
 
 export function MissingList({ items, ...ctx }: RowContext & { items: readonly TicketReviewItem[] }): JSX.Element | null {
+  const look = useStorySectionLook();
   if (items.length === 0) return null;
   return (
     // `data-story-section`: the story view's section nav reaches it (Ticket/StoryLayout.tsx).
-    <div className="scroll-mt-4 space-y-1.5 focus:outline-none" data-story-section="missing">
+    <div className={`scroll-mt-4 space-y-1.5 focus:outline-none ${look?.section ?? ''}`} data-story-section="missing">
       <div className="flex items-center gap-1">
-        <h5 className={REVIEW_SUBHEAD}>{`${STORY_MISSING_HEADING} (${items.length})`}</h5>
+        <h5 className={look?.heading ?? REVIEW_SUBHEAD}>{`${STORY_MISSING_HEADING} (${items.length})`}</h5>
         <InfoButton title={STORY_MISSING_HEADING}>
           <p>{STORY_MISSING_EXPLAINER}</p>
         </InfoButton>
@@ -493,10 +495,11 @@ export function NotRequestedList({
   changedPaths,
   onOpenInChanges,
 }: RowContext & { items: readonly TicketNotRequestedItem[] }): JSX.Element | null {
+  const look = useStorySectionLook();
   if (items.length === 0) return null;
   return (
-    <div className="scroll-mt-4 space-y-1 focus:outline-none" data-story-section="not-asked">
-      <h5 className={REVIEW_SUBHEAD}>{`Not asked for (${items.length})`}</h5>
+    <div className={`scroll-mt-4 space-y-1 focus:outline-none ${look?.section ?? ''}`} data-story-section="not-asked">
+      <h5 className={look?.heading ?? REVIEW_SUBHEAD}>{`Not asked for (${items.length})`}</h5>
       <ul className="space-y-1.5">
         {items.map((g, i) => (
           <li key={i} className={REVIEW_ITEM_CARD}>

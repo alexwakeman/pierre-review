@@ -52,6 +52,16 @@ export function useStoryLayout(): ReturnType<typeof useRailLayout> {
   return layout?.config.name === 'story' ? layout : null;
 }
 
+/**
+ * THE STORY VIEW'S SECTION LOOK (decided 2026-11-01: "separate the sections more, larger headings"):
+ * each section after the summary (Design, Outside the criteria, Not asked for, Docs) opens with a rule
+ * and room above it, under a title-sized heading. Inside the story view only — the same blocks in the
+ * PR pane's Story check keep their compact look (null there).
+ */
+export function useStorySectionLook(): { section: string; heading: string } | null {
+  return useStoryLayout() != null ? { section: 'mt-8 border-t border-ui-line pt-6', heading: 'text-title text-ui-ink' } : null;
+}
+
 /** The PR view's Story tab: no card around the story (as the story tab), so the rail starts at the
  *  story's top — beside the ticket's header, as the AI Review tab's rail does. */
 export const STORY_RAIL_EMBEDDED: RailLayoutConfig = { ...STORY_RAIL, startSection: null };

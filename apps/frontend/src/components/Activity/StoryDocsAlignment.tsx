@@ -45,6 +45,7 @@ import { AiStatusLine } from '../AiStatusLine.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { aiModelWords, aiRunProviderName } from '@pierre-review/shared';
 import { InlineMarkdown } from '../InlineMarkdown.js';
+import { useStorySectionLook } from '../Ticket/StoryLayout.js';
 
 const MUTED = 'text-ui-mute';
 const BTN =
@@ -180,6 +181,7 @@ export function StoryDocsAlignmentBlock({
   attached: boolean;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
+  const look = useStorySectionLook();
   const data = q.data;
   if (!ai.enabled || data == null) return null;
   const shown = shownRun(data);
@@ -196,9 +198,14 @@ export function StoryDocsAlignmentBlock({
   // button is now "Check again anyway" (run buttons live in the Story heading, never in a block).
   const reused = reusedAnswer(data, start, starting);
   return (
-    <section aria-label="Docs check" className="scroll-mt-4 space-y-2 focus:outline-none" data-testid="story-docs" data-story-section="docs">
+    <section
+      aria-label="Docs check"
+      className={`scroll-mt-4 space-y-2 focus:outline-none ${look?.section ?? ''}`}
+      data-testid="story-docs"
+      data-story-section="docs"
+    >
       <div className="flex flex-wrap items-center gap-1.5">
-        <h4 className="text-body font-medium text-ui-ink">Docs check</h4>
+        <h4 className={look?.heading ?? 'text-body font-medium text-ui-ink'}>Docs check</h4>
         <StoryDocsInfo />
         {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         {shown != null && !shown.current && !checking && (

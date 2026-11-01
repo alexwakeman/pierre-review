@@ -3604,6 +3604,10 @@ board.
     shadow) until **Collapse** or Escape. The rail is ONE column that is PART OF THE PAGE: it flows and
     scrolls with the content, never sticky in a scroll box of its own (decided 2026-11-01). Reading
     column `minmax(0,70rem)`, rail 18–24rem.
+  - **Sections read apart** (`useStorySectionLook`, Ticket/StoryLayout.tsx): in the story view, Design,
+    Outside the criteria, Not asked for and Docs each open with a rule and room above (`mt-8 border-t
+    pt-6`) under a `text-title` heading. The same blocks in the PR pane's Story check keep their compact
+    sub-headings.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,

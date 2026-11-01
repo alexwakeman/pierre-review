@@ -20,6 +20,10 @@ import { useIsDesktop, useIsPhone } from './media.js';
 // it: the ONE header toast strip lives there, and an action taken in the sheet (Dismiss, Approve,
 // Merge) raises its Undo card in that strip. A sheet over the strip hid the only way back.
 
+/** A header action sized like the close button (an IconButton size="sm"): pass to a CopyButton or a
+ *  link so the row lines up. */
+export const HEADER_ACTION_CLASS = 'h-7 w-7 justify-center touch:h-10 touch:w-10';
+
 export function SidePanel({
   open,
   onClose,
@@ -130,10 +134,14 @@ export function SidePanel({
         </h2>
         {subtitle != null && <p className="mt-0.5 truncate text-meta text-ui-faint">{subtitle}</p>}
       </div>
-      {headerActions != null && <div className="flex shrink-0 items-center gap-0.5">{headerActions}</div>}
-      {!(phone && !docked) && (
-        <IconButton label={closeLabel} icon={<CloseIcon size={14} />} onClick={onClose} size="sm" />
-      )}
+      {/* The header's buttons and the close button are ONE row, centred on each other. Pass an action
+          at the close button's size (`HEADER_ACTION_CLASS`). */}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {headerActions}
+        {!(phone && !docked) && (
+          <IconButton label={closeLabel} icon={<CloseIcon size={14} />} onClick={onClose} size="sm" />
+        )}
+      </div>
     </header>
   );
 

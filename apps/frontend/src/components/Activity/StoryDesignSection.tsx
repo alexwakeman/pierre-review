@@ -18,7 +18,7 @@ import {
 import { memberForRef } from '../../lib/designGrid.js';
 import { DesignLegend, DiagramSlotView, redrawRefusalText, useOpenMemberFile } from '../ClaudeReviewDiagrams.js';
 import { InfoButton } from '../InfoModal.js';
-import { StoryWide } from '../Ticket/StoryLayout.js';
+import { StoryWide, useStorySectionLook } from '../Ticket/StoryLayout.js';
 import { RailWideToggle } from '../RailLayout.js';
 
 const MUTED = 'text-ui-mute';
@@ -59,6 +59,7 @@ export function StoryDesignButton({ design }: { design: StoryDesign }): JSX.Elem
 export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Element | null {
   const ai = useAiCapabilities();
   const openMember = useOpenMemberFile();
+  const look = useStorySectionLook();
   const { q, redraw, redrawing } = design;
   const data = q.data;
   if (!design.enabled || !ai.enabled || data == null) return null;
@@ -68,9 +69,14 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
   return (
     // Wide content: in the two-column layout its Expand lays it over the rail (StoryWide).
     <StoryWide>
-    <section aria-label="Story design" className="scroll-mt-4 space-y-2 focus:outline-none" data-testid="story-design" data-story-section="design">
+    <section
+      aria-label="Story design"
+      className={`scroll-mt-4 space-y-2 focus:outline-none ${look?.section ?? ''}`}
+      data-testid="story-design"
+      data-story-section="design"
+    >
       <div className="flex items-center gap-1.5">
-        <h4 className="text-meta font-semibold text-ui-ink">Story design</h4>
+        <h4 className={look?.heading ?? 'text-meta font-semibold text-ui-ink'}>Story design</h4>
         <InfoButton title="Story design">
           <DesignLegend story />
         </InfoButton>
