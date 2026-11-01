@@ -3724,3 +3724,10 @@ issues: per-issue hit rate, recall per run, unmatched findings, words and cost. 
 OUTSIDE the repo (`~/.limn/review-eval/cases.json`: it describes a team's private code); results go to
 `~/.limn/review-eval/results/`. `--score <results.json>` re-scores saved runs after a pattern is
 refined. A manual run never posts, but each becomes that PR's latest review in the app.
+
+**First results (2026-11-01, 18 known issues on 5 PRs, fresh runs):** Claude Opus alone 46% mean
+recall ($14.77 / 15 runs; 5 issues found every run, 8 never); Codex alone 54% (9 runs; the ChatGPT
+5-hour limit cut the rest); Claude + Codex combined ≈ 79%. The variance is mostly SYSTEMATIC: each
+model reliably finds its own kinds of issue and reliably misses the other's. Specialists chosen in
+code for Claude (impact + tests always, then accessibility or security; tried and REVERTED) moved
+WHICH issues were found (52%) at twice the cost and with more test-gap noise.
