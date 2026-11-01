@@ -85,10 +85,11 @@ describe('the AI Review tab wide layout', () => {
     expect(tab).toMatch(/<RailPiece slot="nav">/);
   });
   it('the design spans the rail, and the run button keeps its AiRunGate', () => {
-    // Each diagram is its own RailWide with its own Expand (the PR's, and each ticket's).
+    // The PR's diagram is its own RailWide with its own Expand; the ticket's design is not on this tab.
     const diagrams = read('components/ClaudeReviewDiagrams.tsx');
-    expect(diagrams.match(/<RailWide className=/g)?.length).toBe(2);
-    expect(diagrams.match(/<RailWideToggle className="ml-auto" \/>/g)?.length).toBe(2);
+    expect(diagrams.match(/<RailWide className=/g)?.length).toBe(1);
+    expect(diagrams).toMatch(/<RailWideToggle className="ml-auto" \/>/);
+    expect(diagrams).not.toMatch(/data\.stories\.map/);
     expect(tab).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/);
   });
   it('every section the nav lists is marked where it renders', () => {

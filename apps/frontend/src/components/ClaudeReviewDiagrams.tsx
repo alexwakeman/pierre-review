@@ -1,6 +1,5 @@
 // DESIGN DIAGRAMS in the Claude Review tab (docs/FRONTEND.md § Design diagrams): how data flows through
-// the PR's change and, when the PR is on a ticket with more than one pull request, through the whole
-// story. Drawn by a separate Sonnet run after each finished review; Redraw queues one now. A change with
+// the PR's change. The whole ticket's design is NOT here — it belongs to the ticket view alone. Drawn by a separate Sonnet run after each finished review; Redraw queues one now. A change with
 // no data path gets none, said plainly ("No diagram: this change only edits copy."). `DiagramSlotView`
 // is also what the story view shows for a story.
 //
@@ -17,7 +16,6 @@ import {
   aiProviderName,
   type SequenceDiagramMember,
   type SequenceDiagramSlot,
-  type StorySequenceDiagramSlot,
 } from '@pierre-review/shared';
 import { useAiCapabilities, useAiProvider } from '../hooks/useAiCapabilities.js';
 import {
@@ -28,10 +26,7 @@ import {
   slotRunInFlight,
   slotStatusLine,
 } from '../lib/sequenceDiagrams.js';
-import { memberForRef } from '../lib/designGrid.js';
 import {
-  useRedrawStoryDiagram,
-  useRedrawingStory,
   usePrSequenceDiagrams,
   useRedrawPrDiagram,
   useRedrawingPr,
@@ -207,7 +202,6 @@ export function ClaudeReviewDiagramsSection({
   const q = usePrSequenceDiagrams(prId, ai.enabled, Number.isFinite(finishedMs) ? finishedMs : null);
   const redraw = useRedrawPrDiagram(prId);
   const redrawing = useRedrawingPr(prId);
-  const openMember = useOpenMemberFile();
   if (!ai.enabled || q.data == null) return null;
   const data = q.data;
   const drawing = redrawing || slotDrawing(data.pr);
@@ -221,7 +215,7 @@ export function ClaudeReviewDiagramsSection({
       section="design"
       info={
         <InfoButton title="Design">
-          <DesignLegend story={data.stories.length > 0} />
+          <DesignLegend story={false} />
         </InfoButton>
       }
       actions={
@@ -243,52 +237,6 @@ export function ClaudeReviewDiagramsSection({
       </RailWide>
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
       {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
-      {data.stories.map((s) => (
-        <StorySlotBlock
-          key={s.ident}
-          slot={s}
-          openFile={(cell, path) => {
-            const m = memberForRef(cell.pr, s.diagram?.members ?? []);
-            if (m == null) return;
-            if (m.prId === prId && onOpenInChanges != null) onOpenInChanges(path, null, 'RIGHT');
-            else openMember(m, path);
-          }}
-        />
-      ))}
     </ReviewSection>
-  );
-}
-
-/** One ticket's whole-story design inside the review section, with its own Redraw. */
-function StorySlotBlock({
-  slot,
-  openFile,
-}: {
-  slot: StorySequenceDiagramSlot;
-  openFile: OpenFlowFile;
-}): JSX.Element {
-  const redraw = useRedrawStoryDiagram(slot.ident);
-  const redrawing = useRedrawingStory(slot.ident);
-  const drawing = redrawing || slotDrawing(slot);
-  const refusal = redrawRefusalText(redraw.data);
-  return (
-    <RailWide className="space-y-1.5 border-t border-ui-line pt-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-meta font-semibold text-ui-ink">
-          Ticket design{slot.ticketKey != null ? ` · ${slot.ticketKey}` : ''} · {slot.memberCount} pull requests
-        </h4>
-        {slot.diagram != null && <RailWideToggle className="ml-auto" />}
-        {slot.memberCount >= 2 && (
-          <button type="button" className={`${slot.diagram == null ? 'ml-auto ' : ''}${BTN}`} disabled={drawing} onClick={() => redraw.mutate()}>
-            {drawing ? 'Drawing…' : slot.diagram != null ? 'Redraw' : 'Draw'}
-          </button>
-        )}
-      </div>
-      <PaneWide>
-        <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole ticket" openFile={openFile} stickyClassName="bg-ui-bg" />
-      </PaneWide>
-      {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
-      {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
-    </RailWide>
   );
 }

@@ -3541,7 +3541,7 @@ phrase it two ways.
 
 ## The story view (the ticket tab, `kind: 'ticket'`, CORE)
 
-**User-facing word is "Ticket"** (2026-11-01): the section heading (now INSIDE the content box, at its top), the PR tab "Ticket KEY", "Open ticket tab", the nav entry, "Ticket design". Internal names stay story (`prTab=story`, `view=ticket:…`, test ids); Jira's own "Story" type chip and the "Story check" feature keep their names. "What each PR adds" groups PRs by repo in full-width rows; an open card spans the panel and its Expand lays it LEFTWARDS over the main column (`RailWideLeft`, max 768px, z-30, Escape collapses) — the mirror of `RailWide`. The AI Review tab's design section gives EACH diagram (the PR's, each ticket's) its own `RailWide` + Expand, as the ticket view does.
+**User-facing word is "Ticket"** (2026-11-01): the section heading (now INSIDE the content box, at its top), the PR tab "Ticket KEY", "Open ticket tab", the nav entry, "Ticket design". Internal names stay story (`prTab=story`, `view=ticket:…`, test ids); Jira's own "Story" type chip and the "Story check" feature keep their names. "What each PR adds" groups PRs by repo in full-width rows; an open card spans the panel and its Expand lays it LEFTWARDS over the main column (`RailWideLeft`, max 768px, z-30, Escape collapses) — the mirror of `RailWide`. The AI Review tab's design (the PR's only) has its own `RailWide` + Expand, as the ticket view's does.
 
 ONE ticket, Open PRs style: `Ticket/StoryViewBody.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
@@ -5075,6 +5075,8 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   collapsing any into the failure mark would report a red nobody observed.
 
 ## Design diagrams (review tab section, the Story section)
+
+**The ticket's whole design is shown ONLY in the ticket view** (2026-11-01): the AI Review tab draws this PR's design alone (one `RailWide` + Expand); `data.stories` from the PR diagrams read is no longer rendered there.
 
 **A design diagram is a DATA-FLOW SEQUENCE now** (2026-10-31): `components/FlowDiagram.tsx` is the ONE
 renderer of a stored `FlowDiagram` — the review tab's Design, the story view's Story design and the
