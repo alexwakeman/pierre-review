@@ -434,9 +434,11 @@ function ResizeHandle(): JSX.Element {
         }
       }}
       className={cx(
-        'absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none select-none lg:block',
-        'after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-ui-accent after:opacity-0 after:motion-safe:transition-opacity',
-        'hover:after:opacity-60 focus-visible:outline-none focus-visible:after:opacity-100',
+        // A 10px hit area centred on the edge (easy to grab); the line it shows stays 2px. z-30: the
+        // page's board layer is `absolute z-20` and would otherwise swallow the half over the page.
+        'absolute inset-y-0 -right-[5px] z-30 hidden w-2.5 cursor-col-resize touch-none select-none lg:block',
+        'after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-ui-accent after:opacity-0 after:motion-safe:transition-opacity',
+        'hover:after:opacity-70 focus-visible:outline-none focus-visible:after:opacity-100',
         dragging && 'after:opacity-100',
       )}
     />

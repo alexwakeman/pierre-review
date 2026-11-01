@@ -546,7 +546,7 @@ export interface FilterState {
   // Which inner sub-tab the This Sprint tab shows (see SprintInnerTab). Transient,
   // URL-serialized (`?sprintTab=paths`) only alongside `view=sprint`.
   sprintInnerTab: SprintInnerTab;
-  // The ticket whose story the This Sprint TRAY shows beside the board (Sprint/SprintStoryTray.tsx),
+  // The ticket whose story the This Sprint TRAY shows over the board (Sprint/SprintStoryTray.tsx),
   // as shared `trackerTicketIdent`; null = no tray. Transient (freshDefaults only, never in
   // FilterDefaults — "Clear filters" must not close it, persistence must not reopen it), and a
   // NAVIGATION key: `?sprintStory=<ident>`, emitted ONLY alongside `view=sprint` on a board sub-tab, so

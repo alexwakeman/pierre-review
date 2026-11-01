@@ -16,7 +16,7 @@
 //            their slot, so a grid row's cards line up.
 //   MARKS    (lib/laneBoard.ts `ticketCardMarks`, the redesign) an ICON beside the key, never a border
 //            colour: the route (`CriticalPathIcon`, in the arrows' vermilion — the paths are the
-//            model's) = on a critical path; the hourglass (`WaitingIcon`) = waiting on another
+//            model's) = on a critical path; the hourglass (`PendingStalledIcon`, the Pending board's) = waiting on another
 //            unfinished ticket. A ticket outside the sprint sits RECESSED (`ticketCardSurface`: the
 //            page's ground with a faint ring; it sits in the "Outside the sprint" column too). A card
 //            with an open or merged pull request wears the pull-request icon before its key and sits
@@ -25,7 +25,7 @@
 //   CODE     "needs code" (lib/laneBoard.ts `ticketCodeNote`): the judgement and its reason are the card
 //            button's tooltip and in its accessible name; under the board's Needs code filter a ticket
 //            not judged yet wears a muted "Not judged yet" beside its key (`codeMarker`).
-//   CLICK    the card opens the STORY TRAY beside the board (Sprint/SprintStoryTray.tsx — the story
+//   CLICK    the card opens the STORY TRAY over the board (Sprint/SprintStoryTray.tsx — the story
 //            view's own body; `onSelect`). The open card wears the accent ring (the selection colour).
 //            The small arrow in the corner opens the story TAB (`onOpen` — `useOpenStory`).
 //   BUILD    "Implement story" (docs/STORY-BUILD.md § Entry points): the card carries NO build button —
@@ -44,7 +44,7 @@ import {
   ticketCodeNote,
 } from '../lib/laneBoard.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, PendingStalledIcon, RefreshIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -70,7 +70,7 @@ export function TicketCard({
   selected: boolean;
   /** The tray's element id (`aria-controls` while this card's story is in it). */
   trayId?: string;
-  /** Show the ticket's story in the tray beside the board. */
+  /** Show the ticket's story in the tray over the board. */
   onSelect: (node: SprintGraphNode) => void;
   /** Open the ticket's story tab. */
   onOpen: (node: SprintGraphNode) => void;
@@ -106,7 +106,7 @@ export function TicketCard({
     waiting ? 'waiting on another ticket' : null,
     code?.tooltip ?? null,
     buildMark != null ? `build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : null,
-    'shows its story beside the board',
+    'shows its story over the board',
   ]
     .filter(Boolean)
     .join('; ');
@@ -153,7 +153,7 @@ export function TicketCard({
               title={TICKET_CARD_MARK_LABEL[m]}
               className={cx('flex shrink-0', m === 'critical' ? 'text-ai-signal' : 'text-ui-mute')}
             >
-              {m === 'critical' ? <CriticalPathIcon size={12} /> : <WaitingIcon size={12} />}
+              {m === 'critical' ? <CriticalPathIcon size={12} /> : <PendingStalledIcon size={13} />}
             </span>
           ))}
           {buildMark != null && (

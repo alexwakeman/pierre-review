@@ -47,7 +47,9 @@ function setHidden(el: HTMLElement, hide: boolean): void {
   });
 }
 
-function PageToastSlot(): JSX.Element {
+/** The toast seat on its own, for a full-main view with its own header (the PR detail tab):
+ *  mounting it collapses the top bar at ≥ lg exactly as a `PageHeader` does. */
+export function PageToastSlot({ className }: { className?: string } = {}): JSX.Element {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (el == null) return;
@@ -69,7 +71,7 @@ function PageToastSlot(): JSX.Element {
     };
   }, [el]);
   // Desktop only: below lg the strip stays in the top bar. Empty, it takes no room.
-  return <div ref={setEl} data-page-toasts className="hidden min-w-0 max-w-[min(34rem,45%)] shrink justify-end self-start lg:flex" />;
+  return <div ref={setEl} data-page-toasts className={cx('hidden min-w-0 max-w-[min(34rem,45%)] shrink justify-end self-start lg:flex', className)} />;
 }
 
 export function PageHeader({

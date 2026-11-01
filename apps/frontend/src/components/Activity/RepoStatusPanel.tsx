@@ -1,21 +1,19 @@
-import { useMemo, useState } from 'react';
-import { repoStatusSummary, type ActivityRepo, type RepoStatusLine, type RepoStatusPr } from '@pierre-review/shared';
+import { useMemo } from 'react';
+import { repoStatusSummary, type ActivityRepo, type RepoStatusLine } from '@pierre-review/shared';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useMarkRepoSeen } from '../../hooks/useMarkRepoSeen.js';
-import { relativeTime } from '../../lib/ui.js';
-import { useFilters } from '../../store/filters.js';
-import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { InfoButton } from '../InfoModal.js';
 import { RepoStatusDot } from '../RepoStatusDot.js';
 import { Button } from '../ui/Button.js';
-import { cx, FOCUS_RING, TEXT_LINK_PHONE } from '../ui/cx.js';
 
-// THE REPO STATUS PANEL — the top of a repo's view (docs/FRONTEND.md § The repo status panel).
+// THE REPO STATUS PANEL — the top of a repo's Activity tab, under the sub-tab strip
+// (docs/FRONTEND.md § The repo status panel).
 //
 // It spells out the sidebar row's two dots, one line per fact, each led by the SAME dot
 // (`RepoStatusDot`) and built by the SAME fold (shared `repoStatusSummary`), so opening a repo
 // explains its dots. Red lines say what needs someone to act; the blue line says what is new on
-// pull requests you have opened before, since you last opened them. Each line links to where you act.
+// pull requests you have opened before, since you last opened them. The lines are PLAIN FACTS — no
+// PR links, no "show the branch": everything a line names is further down the same page.
 //
 // ⚠ NOTHING HERE FETCHES. It reads the `/api/activity` repo entry its caller already holds and the
 // whole-workspace `/api/branch-status` key the sidebar keeps live. "Mark all seen" is a click.
@@ -23,9 +21,6 @@ import { cx, FOCUS_RING, TEXT_LINK_PHONE } from '../ui/cx.js';
 // ⚠ OPENING THE REPO VIEW DOES NOT CLEAR THE BLUE. The seen stamp is per PR (`pr_views`): opening
 // a PR clears that PR's share; "Mark all seen" clears the repo's. Clearing on view would wipe the
 // very list the reader came here to read.
-
-/** PR links shown on a line before "N more". */
-const PRS_SHOWN = 3;
 
 export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
   const { data: branchData } = useBranchStatus();
@@ -35,33 +30,6 @@ export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
   );
   const summary = useMemo(() => repoStatusSummary(repo, branch), [repo, branch]);
   const markSeen = useMarkRepoSeen(repo.repoId);
-  const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const setRepoConsoleTab = useFilters((s) => s.setRepoConsoleTab);
-
-  const openPr = (p: RepoStatusPr): void => {
-    openPrDetailTab(
-      {
-        id: p.prId,
-        number: p.number,
-        title: p.title,
-        repoFullName: repo.repoFullName,
-        authorLogin: null,
-        authorDisplayName: null,
-        authorAvatarUrl: null,
-      },
-      { fromActivity: true },
-    );
-  };
-  // The default branch's CI and what landed on it live in the header below (BranchStatusPanel) —
-  // on the Activity tab, so come back to it first.
-  const showBranch = (): void => {
-    setRepoConsoleTab(repo.repoId, 'activity');
-    window.requestAnimationFrame(() => {
-      document
-        .querySelector('[data-testid="repo-console"] [data-testid="branch-status-panel"]')
-        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
-  };
 
   return (
     <section
@@ -119,12 +87,7 @@ export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
       ) : (
         <ul className="mt-1.5 space-y-1.5">
           {summary.lines.map((line) => (
-            <StatusLine
-              key={line.kind}
-              line={line}
-              onOpenPr={openPr}
-              onShowBranch={line.kind === 'trunk_failing' ? showBranch : undefined}
-            />
+            <StatusLine key={line.kind} line={line} />
           ))}
         </ul>
       )}
@@ -137,77 +100,14 @@ export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
   );
 }
 
-function StatusLine({
-  line,
-  onOpenPr,
-  onShowBranch,
-}: {
-  line: RepoStatusLine;
-  onOpenPr: (p: RepoStatusPr) => void;
-  onShowBranch?: () => void;
-}): JSX.Element {
-  const [all, setAll] = useState(false);
-  const shown = all ? line.prs : line.prs.slice(0, PRS_SHOWN);
-  const hidden = line.prs.length - shown.length;
-  // PR refs and "Show the branch" are links (underlined on a phone, docs/FRONTEND.md § Text links);
-  // "N more" is a disclosure toggle, so it is not.
-  const linkClass = cx('rounded-ui text-left text-ui-accent hover:underline', TEXT_LINK_PHONE, FOCUS_RING);
-  const toggleClass = cx('rounded-ui text-left text-ui-accent hover:underline', FOCUS_RING);
+function StatusLine({ line }: { line: RepoStatusLine }): JSX.Element {
   return (
     <li className="flex items-start gap-2" data-testid="repo-status-line" data-kind={line.kind} data-tone={line.tone}>
       {/* The dot sits on the first line's centre (text-body is 13px on a 20px line). */}
       <span className="flex h-5 w-2 shrink-0 items-center justify-center">
         <RepoStatusDot tone={line.tone} />
       </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-body text-ui-ink">
-          {line.text}
-          {onShowBranch != null && (
-            <>
-              {' '}
-              <button type="button" onClick={onShowBranch} className={linkClass}>
-                Show the branch
-              </button>
-            </>
-          )}
-        </p>
-        {line.prs.length > 0 &&
-          (line.tone === 'new' ? (
-            // One PR per row: what is new on it, and when you last opened it.
-            <ul className="mt-0.5 space-y-0.5">
-              {shown.map((p) => (
-                <li key={p.prId} className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-meta text-ui-mute">
-                  <button type="button" onClick={() => onOpenPr(p)} className={cx(linkClass, 'min-w-0 max-w-full truncate')} title={`Open #${p.number} ${p.title}`}>
-                    #{p.number} {p.title}
-                  </button>
-                  <span className="min-w-0">
-                    {p.detail}
-                    {p.since != null && ` · you last opened it ${relativeTime(p.since)}`}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-meta">
-              {shown.map((p) => (
-                <button
-                  key={p.prId}
-                  type="button"
-                  onClick={() => onOpenPr(p)}
-                  className={cx(linkClass, 'min-w-0 max-w-full truncate sm:max-w-[18rem]')}
-                  title={`Open #${p.number} ${p.title}`}
-                >
-                  #{p.number} {p.title}
-                </button>
-              ))}
-            </p>
-          ))}
-        {hidden > 0 && (
-          <button type="button" onClick={() => setAll(true)} className={cx(toggleClass, 'mt-0.5 text-meta')}>
-            {hidden} more
-          </button>
-        )}
-      </div>
+      <p className="min-w-0 flex-1 text-body text-ui-ink">{line.text}</p>
     </li>
   );
 }

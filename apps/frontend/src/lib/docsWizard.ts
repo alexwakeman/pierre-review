@@ -9,12 +9,17 @@ import {
 // source type walks, and the review step's one sentence. `components/Activity/DocsAddWizard.tsx`
 // renders it; `test/docsWizard.test.ts` pins it.
 
-export type DocsSourceType = 'web' | 'confluence' | 'notion' | 'github';
+export type DocsSourceType = 'upload' | 'web' | 'confluence' | 'notion' | 'github';
 
-export type DocsWizardStep = 'type' | 'address' | 'connection' | 'page' | 'repo' | 'folder' | 'review';
+export type DocsWizardStep = 'type' | 'files' | 'address' | 'connection' | 'page' | 'repo' | 'folder' | 'review';
 
-/** Every step a source type walks, in order. The first is always the type, the last the review. */
+/**
+ * Every step a source type walks, in order (the type list shows them in this order). The first is
+ * always the type. The last is the review — except an upload, whose files step IS the action: a
+ * chosen or dropped file is sent at once, as the old "Choose files" box did.
+ */
 export const DOCS_WIZARD_STEPS: Record<DocsSourceType, readonly DocsWizardStep[]> = {
+  upload: ['type', 'files'],
   web: ['type', 'address', 'review'],
   confluence: ['type', 'connection', 'page', 'review'],
   notion: ['type', 'connection', 'page', 'review'],
@@ -22,6 +27,7 @@ export const DOCS_WIZARD_STEPS: Record<DocsSourceType, readonly DocsWizardStep[]
 };
 
 export const DOCS_SOURCE_LABEL: Record<DocsSourceType, string> = {
+  upload: 'Upload a document',
   web: 'Web page or site',
   confluence: 'Confluence',
   notion: 'Notion',

@@ -42,8 +42,11 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
       <RepoStatsLine stats={repo.stats} />
 
       {/* Display-only thread-state bar (no click-to-filter — the PRs-by-author list it
-          used to filter isn't in this view). */}
-      <ThreadStateBar counts={repo.threadTotals} />
+          used to filter isn't in this view), labelled so the colours read as review threads. */}
+      <div className="flex items-start gap-2" data-testid="repo-thread-bar">
+        <span className="flex h-2.5 shrink-0 items-center text-meta text-ui-mute">Threads</span>
+        <ThreadStateBar counts={repo.threadTotals} className="min-w-0 flex-1" />
+      </div>
 
       {/* This repo's default branch: CI state + (expandable) what recently landed on trunk.
           Pinned to THIS repo rather than following the Workspace/FilterBar scope, and `compact` so it

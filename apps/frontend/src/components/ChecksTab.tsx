@@ -94,38 +94,23 @@ export function PrBranchLine({
   );
 }
 
-/** The Overview's Ticket row body: the ticket chips, then — on the SAME line — the branch. When
- *  the PR has no tracker (`tickets == null`) the row is labelled "Branch" and this is the branch
- *  alone; the inline "Branch" caption appears only when a ticket sits before it. */
-export function PrTicketBranchLine({
+/** The Overview's Ticket row body: one chip per ticket, or a muted "No ticket found". Nothing
+ *  when the PR has no tracker (`tickets == null`). The branch has its own row below. */
+export function PrTicketLine({
   pr,
 }: {
-  pr: Pick<PrDetailT, 'id' | 'tickets' | 'headRefName' | 'baseRefName'>;
-}): JSX.Element {
+  pr: Pick<PrDetailT, 'id' | 'tickets'>;
+}): JSX.Element | null {
   const tickets = pr.tickets;
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-ticket-branch">
-      {tickets != null &&
-        (tickets.length === 0 ? (
-          <span className="text-meta text-ui-mute">No ticket found</span>
-        ) : (
-          <span className="flex flex-wrap gap-1.5">
-            {tickets.map((t) => (
-              <PrTicketChip key={t.key} prId={pr.id} ticket={t} />
-            ))}
-          </span>
-        ))}
-      {pr.headRefName != null && (
-        <span className="flex min-w-0 items-center gap-1.5">
-          {tickets != null && (
-            <span className="shrink-0 text-meta text-ui-faint">
-              Branch
-            </span>
-          )}
-          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
-        </span>
-      )}
-    </div>
+  if (tickets == null) return null;
+  return tickets.length === 0 ? (
+    <span className="text-meta text-ui-mute" data-testid="pr-ticket">No ticket found</span>
+  ) : (
+    <span className="flex flex-wrap gap-1.5" data-testid="pr-ticket">
+      {tickets.map((t) => (
+        <PrTicketChip key={t.key} prId={pr.id} ticket={t} />
+      ))}
+    </span>
   );
 }
 
@@ -1038,13 +1023,18 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* Ticket and branch on ONE row (the ticket key is usually read off the branch name).
-          Tickets (core tracker, compute-on-read) are tri-state: null → no tracker, omitted;
-          [] → a muted "No ticket found"; non-empty → one chip per ticket. The head branch (what you
-          would `git checkout`) and its base: a null head is not synced yet and is omitted. */}
-      {(pr.tickets != null || pr.headRefName != null) && (
-        <Row label={pr.tickets != null ? 'Ticket' : 'Branch'}>
-          <PrTicketBranchLine pr={pr} />
+      {/* Ticket, then Branch, each on its OWN row. Tickets (core tracker, compute-on-read) are
+          tri-state: null → no tracker, row omitted; [] → a muted "No ticket found"; non-empty →
+          one chip per ticket. The head branch (what you would `git checkout`) and its base: a
+          null head is not synced yet and the row is omitted. */}
+      {pr.tickets != null && (
+        <Row label="Ticket">
+          <PrTicketLine pr={pr} />
+        </Row>
+      )}
+      {pr.headRefName != null && (
+        <Row label="Branch">
+          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
         </Row>
       )}
 

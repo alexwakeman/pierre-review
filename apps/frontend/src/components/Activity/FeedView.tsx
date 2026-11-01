@@ -1410,7 +1410,7 @@ export function FeedView({
       )}
         {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
         <div ref={fadeRow3} style={fade3} className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
-          <span className="mr-1 shrink-0 text-meta text-ui-faint">State</span>
+          <span className="mr-1 shrink-0 text-meta text-ui-faint">Thread state</span>
           {BOT_STATE_ORDER.map((st) => {
             const meta = DERIVED_STATE_META[st];
             const on = botStateFilter.has(st);

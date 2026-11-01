@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { FloatingFocusManager, FloatingPortal, useFloating } from '@floating-ui/react';
 import {
   REFERENCE_DOC_CRAWL_MAX_DEPTH,
@@ -16,10 +16,13 @@ import {
   useAddReferenceDocWikiTree,
   usePreflightGithubDocs,
   usePreflightWikiDocs,
+  useUploadReferenceDoc,
   useWikiCredentials,
 } from '../../hooks/useReferenceDocs.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { useMe } from '../../hooks/useTriage.js';
 import { closeActivePopover } from '../../lib/activePopover.js';
+import { DOC_UPLOAD_ACCEPT, uploadRefusal } from '../../lib/referenceDocs.js';
 import {
   DOCS_SOURCE_LABEL,
   DOCS_WIZARD_STEPS,
@@ -32,7 +35,7 @@ import {
   type DocsSourceType,
   type DocsWizardStep,
 } from '../../lib/docsWizard.js';
-import { CheckCircleIcon, CloseIcon, ConfluenceIcon, GlobeIcon, NotionIcon, OctocatIcon } from '../Icons.js';
+import { CheckCircleIcon, CloseIcon, ConfluenceIcon, GlobeIcon, NotionIcon, OctocatIcon, UploadIcon } from '../Icons.js';
 import { ConfluenceForm } from '../settings/ConfluenceSection.js';
 import { NotionForm } from '../settings/NotionSection.js';
 import { inputCls } from '../settings/ui.js';
@@ -41,8 +44,9 @@ import { Button, RadioBox, Select, cx } from '../ui/index.js';
 
 // THE ADD-DOCUMENTS WIZARD (docs/REFERENCE-DOCS.md § The SPA → Adding), opened by the Library's "+".
 //
-//   1. the source type: a web page or site, Confluence, Notion, a GitHub repository;
-//   2. per type — the address and "links to follow" (web); the connection, then the page (a wiki);
+//   1. the source type: an upload, a web page or site, Confluence, Notion, a GitHub repository;
+//   2. per type — the files (an upload: chosen or dropped, each SENT AT ONCE, as the Library's old
+//      "Choose files" box did; no review step), the address and "links to follow" (web); the connection, then the page (a wiki);
 //      the repository, then the folder (GitHub);
 //   3. the REVIEW: what will be added, COUNTED by the server first ("This will add 12 pages from
 //      Payments handbook"), then Start.
@@ -55,6 +59,7 @@ import { Button, RadioBox, Select, cx } from '../ui/index.js';
 // ⚠ A REAL DIALOG (InfoModal's pattern): focus trapped, Escape captured, focus handed back on close.
 
 const TYPE_ICON: Record<DocsSourceType, (p: { size: number }) => JSX.Element> = {
+  upload: (p) => <UploadIcon {...p} aria-hidden />,
   web: (p) => <GlobeIcon {...p} aria-hidden />,
   confluence: (p) => <ConfluenceIcon {...p} aria-hidden />,
   notion: (p) => <NotionIcon {...p} aria-hidden />,
@@ -62,6 +67,7 @@ const TYPE_ICON: Record<DocsSourceType, (p: { size: number }) => JSX.Element> = 
 };
 
 const TYPE_HINT: Record<DocsSourceType, string> = {
+  upload: 'PDF, Word, text or markdown files from this computer.',
   web: 'One page, or a page and the links it leads to on the same site.',
   confluence: 'A whole space, or one page and every page below it.',
   notion: 'A whole wiki, or one page and every page below it.',
@@ -70,6 +76,7 @@ const TYPE_HINT: Record<DocsSourceType, string> = {
 
 const STEP_TITLE: Record<DocsWizardStep, string> = {
   type: 'What would you like to add?',
+  files: 'Which files?',
   address: 'Which page?',
   connection: 'Connection',
   page: 'Which part of the wiki?',
@@ -85,12 +92,14 @@ function wikiReady(type: 'confluence' | 'notion', c: WikiCredentialsSettings | u
   return (c.confluence.hasToken && c.confluence.siteUrl != null) || c.confluence.jiraSite != null;
 }
 
-export function DocsAddWizard({ workspaceId, onClose }: { workspaceId: number; onClose: () => void }): JSX.Element {
+export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId: number; maxBytes: number; onClose: () => void }): JSX.Element {
   const titleId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const { refs, context } = useFloating({ open: true, onOpenChange: (o) => !o && onClose() });
-  const [type, setType] = useState<DocsSourceType>('web');
+  const [type, setType] = useState<DocsSourceType>('upload');
   const [step, setStep] = useState<DocsWizardStep>('type');
+  // Upload: the file being sent, while one is.
+  const [sending, setSending] = useState<string | null>(null);
   // Web
   const [url, setUrl] = useState('');
   const [crawlDepth, setCrawlDepth] = useState(0);
@@ -134,6 +143,8 @@ export function DocsAddWizard({ workspaceId, onClose }: { workspaceId: number; o
     switch (step) {
       case 'type':
         return true;
+      case 'files':
+        return false;
       case 'address':
         return url.trim() !== '' && webWiki == null;
       case 'connection':
@@ -200,9 +211,11 @@ export function DocsAddWizard({ workspaceId, onClose }: { workspaceId: number; o
               </span>
             </label>
           ))}
-          <p className="px-3 pt-1 text-meta text-ui-mute">To add files, drop them on the library or press Choose files.</p>
         </div>
       );
+      break;
+    case 'files':
+      body = <UploadStep workspaceId={workspaceId} maxBytes={maxBytes} sending={sending} setSending={setSending} onDone={onClose} />;
       break;
     case 'address':
       body = (
@@ -381,11 +394,11 @@ export function DocsAddWizard({ workspaceId, onClose }: { workspaceId: number; o
               {adding.isError && step === 'review' && <p className="min-w-0 flex-1 text-meta text-ui-danger">{adding.error.message}</p>}
               <span className="flex-1" />
               {stepIndex > 0 && (
-                <Button variant="ghost" onClick={goBack} disabled={adding.isPending}>
+                <Button variant="ghost" onClick={goBack} disabled={adding.isPending || sending != null}>
                   Back
                 </Button>
               )}
-              {step === 'review' ? (
+              {step === 'files' ? null : step === 'review' ? (
                 // The run button: behind the ONE gate (setup / sign-in line, the over-budget confirm).
                 <AiRunGate kind="docs_build" meter={false}>
                   <Button variant="primary" data-ai-run onClick={goNext} disabled={!canNext} busy={adding.isPending}>
@@ -402,6 +415,116 @@ export function DocsAddWizard({ workspaceId, onClose }: { workspaceId: number; o
         </FloatingFocusManager>
       </div>
     </FloatingPortal>
+  );
+}
+
+/**
+ * The upload step: a drop zone and "Choose files". Each file is checked (`uploadRefusal`), then sent
+ * at once, one after another, through the same upload call the Library's old box used. All sent
+ * closes the wizard; any refusal or failure stays, listed by file name.
+ */
+function UploadStep({
+  workspaceId,
+  maxBytes,
+  sending,
+  setSending,
+  onDone,
+}: {
+  workspaceId: number;
+  maxBytes: number;
+  sending: string | null;
+  setSending: (name: string | null) => void;
+  onDone: () => void;
+}): JSX.Element {
+  // Codex cannot read PDF pages (the build refuses one on Codex): say so BEFORE the upload.
+  const onCodex = useMe().data?.ai.provider === 'codex';
+  const upload = useUploadReferenceDoc(workspaceId);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [problems, setProblems] = useState<Array<{ name: string; message: string }>>([]);
+
+  const send = async (files: File[]): Promise<void> => {
+    const found: Array<{ name: string; message: string }> = [];
+    setProblems([]);
+    for (const f of files) {
+      const refusal = uploadRefusal(f.name, f.size, maxBytes);
+      if (refusal != null) {
+        found.push({ name: f.name, message: refusal });
+        continue;
+      }
+      setSending(f.name);
+      try {
+        await upload.mutateAsync(f);
+      } catch (err) {
+        found.push({ name: f.name, message: err instanceof Error ? err.message : 'The upload failed.' });
+      }
+    }
+    setSending(null);
+    setProblems(found);
+    if (found.length === 0) onDone();
+  };
+
+  const onDrop = (e: DragEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0 && sending == null) void send(files);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!dragging) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        data-testid="docs-drop-zone"
+        className={cx(
+          'flex min-h-28 flex-col items-center justify-center gap-2 rounded-ui border border-dashed px-4 py-5 text-center',
+          dragging ? 'border-ui-accent bg-ui-sel' : 'border-ui-line',
+        )}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={DOC_UPLOAD_ACCEPT}
+          className="hidden"
+          aria-label="Choose files to add"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            if (files.length > 0) void send(files);
+          }}
+        />
+        {sending != null ? (
+          <p className="text-body text-ui-ink">Uploading {sending}…</p>
+        ) : (
+          <>
+            <AiRunGate kind="docs_build" meter={false}>
+              <Button variant="primary" data-ai-run icon={<UploadIcon size={13} aria-hidden />} onClick={() => inputRef.current?.click()}>
+                Choose files
+              </Button>
+            </AiRunGate>
+            <p className="text-meta text-ui-mute">
+              {onCodex ? 'or drop Word, text or markdown files here. Codex cannot read PDFs.' : 'or drop PDF, Word, text or markdown files here'}
+            </p>
+          </>
+        )}
+      </div>
+      {problems.length > 0 && (
+        <ul className="space-y-0.5 text-meta text-ui-danger" data-testid="docs-upload-problems">
+          {problems.map((p, i) => (
+            <li key={`${p.name}-${i}`}>
+              {p.name}: {p.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-meta text-ui-mute">Building starts as soon as a file is sent, and runs on your machine.</p>
+    </div>
   );
 }
 

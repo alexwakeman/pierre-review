@@ -318,10 +318,10 @@ export function UnfoldIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} {...rest}>
       <line x1="3" y1="12" x2="21" y2="12" strokeDasharray="3 3" />
-      <line x1="12" y1="8" x2="12" y2="2" />
-      <polyline points="8 5 12 1.5 16 5" />
-      <line x1="12" y1="16" x2="12" y2="22" />
-      <polyline points="8 19 12 22.5 16 19" />
+      <line x1="12" y1="8.5" x2="12" y2="3" />
+      <polyline points="8.5 6.5 12 3 15.5 6.5" />
+      <line x1="12" y1="15.5" x2="12" y2="21" />
+      <polyline points="8.5 17.5 12 21 15.5 17.5" />
     </IconShell>
   );
 }
@@ -531,17 +531,6 @@ export function CriticalPathIcon({ size = 12, ...rest }: IconProps): JSX.Element
   );
 }
 
-// An hourglass — a sprint ticket WAITING on another unfinished ticket (the card's mark and the board
-// key). Not `TimerIcon`, which is elapsed time; this is "blocked behind something else".
-export function WaitingIcon({ size = 12, ...rest }: IconProps): JSX.Element {
-  return (
-    <IconShell size={size} strokeWidth={2} {...rest}>
-      <path d="M6 3h12M6 21h12" />
-      <path d="M7 3c0 5 5 5.5 5 9s-5 4-5 9M17 3c0 5-5 5.5-5 9s5 4 5 9" />
-    </IconShell>
-  );
-}
-
 // A hollow ring — the anomaly marker on the bot charts (a point that sits outside its own
 // baseline). Deliberately just an outline: it annotates a datum, it is not a status.
 export function RingIcon({ size = 10, ...rest }: IconProps): JSX.Element {
@@ -675,8 +664,8 @@ export function PullRequestIcon({ size = 13, ...rest }: IconProps): JSX.Element 
       <circle cx="6.5" cy="18" r="2.4" />
       <line x1="6.5" y1="8.4" x2="6.5" y2="15.6" />
       <circle cx="17.5" cy="18" r="2.4" />
-      <path d="M17.5 15.6V8a2 2 0 0 0-2-2h-2.6" />
-      <polyline points="15.2 3.6 12.7 6 15.2 8.4" />
+      <path d="M17.5 15.6V8.5A2.5 2.5 0 0 0 15 6h-3.5" />
+      <polyline points="14 3.5 11.5 6 14 8.5" />
     </IconShell>
   );
 }
@@ -705,26 +694,27 @@ export function CommitIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
-// Two chasing arrows (Feather refresh-cw) — "re-read this from GitHub now", and every
+// Two chasing arrows (Lucide refresh-cw) — "re-read this from GitHub now", and every
 // "Regenerate" affordance. Spun via className while a refresh is in flight.
 export function RefreshIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} {...rest}>
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
     </IconShell>
   );
 }
 
-// A counter-clockwise arrow (Feather rotate-ccw) — "put this back": the PR-detail Reopen
+// A counter-clockwise arrow (Lucide rotate-ccw) — "put this back": the PR-detail Reopen
 // control. NOT RefreshIcon, whose two chasing arrows mean "re-read this from GitHub" and which
 // sits a few pixels away in the same pane header.
 export function ReopenIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} {...rest}>
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
     </IconShell>
   );
 }
@@ -1086,8 +1076,8 @@ export function AcceptLeftIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={2} {...rest}>
       <line x1="3.4" y1="4.4" x2="3.4" y2="19.6" />
-      <line x1="6.6" y1="12" x2="19.4" y2="12" />
-      <path d="m14.6 7.2 5.2 4.8-5.2 4.8" />
+      <line x1="6.6" y1="12" x2="19.6" y2="12" />
+      <path d="m14.8 7.2 4.8 4.8-4.8 4.8" />
     </IconShell>
   );
 }
@@ -1097,8 +1087,8 @@ export function AcceptRightIcon({ size = 14, ...rest }: IconProps): JSX.Element 
   return (
     <IconShell size={size} strokeWidth={2} {...rest}>
       <line x1="20.6" y1="4.4" x2="20.6" y2="19.6" />
-      <line x1="17.4" y1="12" x2="4.6" y2="12" />
-      <path d="m9.4 7.2-5.2 4.8 5.2 4.8" />
+      <line x1="17.4" y1="12" x2="4.4" y2="12" />
+      <path d="m9.2 7.2-4.8 4.8 4.8 4.8" />
     </IconShell>
   );
 }
@@ -1107,21 +1097,21 @@ export function AcceptRightIcon({ size = 14, ...rest }: IconProps): JSX.Element 
 export function AcceptBothIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={2} {...rest}>
-      <line x1="3.6" y1="7.4" x2="14.4" y2="7.4" />
-      <path d="m10.6 4.2 4 3.2-4 3.2" />
-      <line x1="20.4" y1="16.6" x2="9.6" y2="16.6" />
-      <path d="m13.4 13.4-4 3.2 4 3.2" />
+      <line x1="3.6" y1="7.4" x2="14.6" y2="7.4" />
+      <path d="m11.2 4 3.4 3.4-3.4 3.4" />
+      <line x1="20.4" y1="16.6" x2="9.4" y2="16.6" />
+      <path d="m12.8 13.2-3.4 3.4 3.4 3.4" />
     </IconShell>
   );
 }
 
-// Two arcs trading places — the ordering control beside "take both".
+// Two arrows trading places, one up and one down — the ordering control beside "take both". Upright
+// on purpose: `AcceptBothIcon` beside it is two SIDEWAYS arrows, and the two must not read alike.
 export function SwapOrderIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>
-      <path d="M4.4 8.4h11.4a3.2 3.2 0 0 1 0 6.4H14" />
-      <path d="m7.6 5.2-3.2 3.2 3.2 3.2" />
-      <path d="m16.4 11.6 3.2 3.2-3.2 3.2" />
+      <path d="M7.5 20V4.5M3.75 8.25 7.5 4.5l3.75 3.75" />
+      <path d="M16.5 4v15.5M12.75 15.75l3.75 3.75 3.75-3.75" />
     </IconShell>
   );
 }
@@ -1143,7 +1133,7 @@ export function UndoIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>
       <path d="M4.4 10.4h10.2a4.8 4.8 0 1 1 0 9.6H8.6" />
-      <path d="m8.2 5.6-3.8 4.8 3.8 4.8" />
+      <path d="m8.4 6.4-4 4 4 4" />
     </IconShell>
   );
 }
@@ -1168,9 +1158,8 @@ export function RebaseIcon({ size = 14, ...rest }: IconProps): JSX.Element {
     <IconShell size={size} strokeWidth={1.9} {...rest}>
       <line x1="5.4" y1="3.6" x2="5.4" y2="20.4" />
       <circle cx="5.4" cy="16.4" r="2.2" />
-      <circle cx="18.4" cy="8" r="2.2" />
-      <path d="M8 14.4c2.6-3.4 5-5.2 8-6.2" />
-      <path d="m13.4 5.6-.6 2.6 2.6.4" />
+      <circle cx="18.4" cy="5.6" r="2.2" />
+      <path d="M7.8 14 14.6 7.2M11.2 7.2h3.4v3.4" />
     </IconShell>
   );
 }
@@ -1463,7 +1452,9 @@ export function PendingNewPrIcon({ size = 13, ...rest }: IconProps): JSX.Element
   );
 }
 
-// An hourglass, sand run through — a review that has been waiting too long.
+// An hourglass, sand run through — waiting too long or waiting on something: a review that has been
+// waiting (Pending), and a sprint ticket waiting on another unfinished ticket (the This Sprint card
+// mark and the board key). ONE hourglass in the app; the sprint card's older outline one is gone.
 export function PendingStalledIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>

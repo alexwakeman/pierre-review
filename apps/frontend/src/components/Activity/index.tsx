@@ -40,9 +40,6 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   const isolated = useFilters((s) => s.feedIsolatedPrId != null);
   return (
     <div className="space-y-3" data-testid="repo-console">
-      {/* What the sidebar row's red and blue dots mean for THIS repo, line by line — on top, on
-          both sub-tabs, so opening a repo explains its dots at once. */}
-      <RepoStatusPanel repo={repo} />
       <Tabs
         label="Repository views"
         value={tab}
@@ -54,6 +51,9 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
       />
       {tab === 'activity' ? (
         <>
+          {/* What the sidebar row's red and blue dots mean for THIS repo, as plain facts (no
+              links — everything it names is further down this page). Activity tab only. */}
+          <RepoStatusPanel repo={repo} />
           <RepoFeedHeader repo={repo} />
           {/* "Showing only #N" sits directly UNDER the repo summary header (not floating).
               Self-hides when nothing is isolated. */}

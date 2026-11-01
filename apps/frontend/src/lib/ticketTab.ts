@@ -29,7 +29,7 @@ export function useOpenStory(): (t: OpenStoryArgs) => void {
 
 /**
  * A PAGE'S OWN WAY TO SHOW A STORY, for the ticket links drawn inside it. This Sprint provides one (its
- * story TRAY beside the board), so a ticket key in a call-out or an Ask Claude answer opens the tray
+ * story TRAY over the board), so a ticket key in a call-out or an Ask Claude answer opens the tray
  * there; everywhere else nothing is provided and a link opens the story TAB. ⚠ `useOpenStory` stays the
  * ONLY way to open the TAB — this override never opens a tab, and a page that wants the tab (the tray's
  * own "Open story tab", the card's corner arrow) calls `useOpenStory` directly.

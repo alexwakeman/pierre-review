@@ -251,6 +251,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const [selectedKey, setSelectedKey] = useState<string | null>(memo?.selectedKey ?? null);
   const [panelOpen, setPanelOpen] = useState(memo?.panelOpen ?? false);
   const [panelEl, setPanelEl] = useState<HTMLElement | null>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
   const panelHeight = useFillToPaneBottom(panelEl, docked && panelOpen);
   // The docked panel takes the width the size and author columns had (it shows both).
   const compactRows = docked && panelOpen;
@@ -284,6 +285,35 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const selectedIndex = selectedKey == null ? null : drawn.findIndex((e) => e.key === selectedKey);
   const sel = selectedIndex != null && selectedIndex >= 0 ? selectedIndex : null;
   const selected = sel != null ? drawn[sel] : undefined;
+
+  // A press outside the docked drawer and outside every PR row closes it. The row stays selected (the
+  // "last viewed" highlight) and the list takes keyboard focus, so j/k and Enter carry on from there.
+  const closeAndKeepRow = useCallback((): void => {
+    setPanelOpen(false);
+    listRef.current?.focus({ preventScroll: true });
+  }, []);
+  const outsideOpen = docked && panelOpen && selected != null;
+  useEffect(() => {
+    if (!outsideOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      if (e.button !== 0 || !pressClosesDrawer(e, panelEl, listRef.current, moreRef.current)) return;
+      setPanelOpen(false);
+      // Focus moves on the press itself (a mousedown on a plain area blurs to <body>), so give the list
+      // focus once the press is over — unless the press focused a control of its own (a filter input).
+      const done = (): void => {
+        window.removeEventListener('pointerup', done, true);
+        window.removeEventListener('pointercancel', done, true);
+        requestAnimationFrame(() => {
+          const a = document.activeElement;
+          if (a == null || a === document.body || a === document.documentElement) closeAndKeepRow();
+        });
+      };
+      window.addEventListener('pointerup', done, true);
+      window.addEventListener('pointercancel', done, true);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [outsideOpen, panelEl, closeAndKeepRow]);
 
   const select = useCallback(
     (i: number): void => {
@@ -352,7 +382,6 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   useRegisterCommands('open-prs-row', commands);
 
   // The scroll trigger: within 600px of the bottom of what scrolls, draw the next page.
-  const moreRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = moreRef.current;
     if (el == null || typeof IntersectionObserver === 'undefined') return;
@@ -451,10 +480,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const panel = (
     <SidePanel
       open={panelOpen && selected != null}
-      onClose={() => {
-        setPanelOpen(false);
-        listRef.current?.focus();
-      }}
+      onClose={closeAndKeepRow}
       title={selected?.pr.title ?? ''}
       subtitle={selected != null ? `${props.repoNameById.get(selected.pr.repoId) ?? `repo ${selected.pr.repoId}`}#${selected.pr.number}` : undefined}
       testId="open-prs-panel-detail"
@@ -531,6 +557,33 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
       {panel}
     </div>
   );
+}
+
+/**
+ * Does this press, while the drawer is docked open, close it? Not when it lands in the drawer, on a PR
+ * row, on a control inside the list (a group's fold, a ticket link), on "Show more", in a popover or
+ * menu portalled out of the drawer (`data-floating-layer`), in a modal, in the top bar (its toast
+ * strip holds Undo), or on a scrollbar.
+ */
+export function pressClosesDrawer(
+  e: Pick<PointerEvent, 'target' | 'clientX' | 'clientY'>,
+  panel: HTMLElement | null,
+  list: HTMLElement | null,
+  more: HTMLElement | null,
+): boolean {
+  const t = e.target;
+  if (!(t instanceof Element)) return false;
+  if (!t.isConnected) return false;
+  if (panel?.contains(t) || more?.contains(t)) return false;
+  if (t.closest('[data-floating-layer],[aria-modal="true"],[role="dialog"],[data-shell-topbar]') != null) return false;
+  if (list?.contains(t) && t.closest('[role="option"],a,button,input,select,textarea,label,summary') != null) return false;
+  // A press on a scroll container's scrollbar targets the container itself.
+  if (t instanceof HTMLElement) {
+    const r = t.getBoundingClientRect();
+    if (t.clientWidth > 0 && e.clientX >= r.left + t.clientLeft + t.clientWidth && e.clientX <= r.right) return false;
+    if (t.clientHeight > 0 && e.clientY >= r.top + t.clientTop + t.clientHeight && e.clientY <= r.bottom) return false;
+  }
+  return true;
 }
 
 export const groupDomId = (stackId: string): string => `open-prs-group-${stackId.replace(/[^A-Za-z0-9_-]/g, '-')}`;

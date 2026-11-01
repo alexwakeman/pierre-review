@@ -149,7 +149,7 @@ const NAV_KEYS = [
   // The This Sprint tab's Theme | Critical path | People | Merged so far strip — same reason as its
   // siblings.
   'sprintTab',
-  // The This Sprint story TRAY (`sprintStoryIdent`): opening a ticket beside the board is a
+  // The This Sprint story TRAY (`sprintStoryIdent`): opening a ticket over the board is a
   // navigation, so Back closes it.
   'sprintStory',
   'prTab',
@@ -496,7 +496,7 @@ export function readFromUrl(): Partial<FilterState> {
   // The retired `graph` (the force graph) lands on the Theme view, the landing view (`sprintTabFromUrl`).
   const sprintTab = sprintTabFromUrl(p.get('sprintTab'));
   if (sprintTab != null) out.sprintInnerTab = sprintTab;
-  // The story tray beside the board. Any non-blank ident is seated (the tray reads it like the story
+  // The story tray over the board. Any non-blank ident is seated (the tray reads it like the story
   // tab reads its own; an unknown one says so there); the serializer emits it on a board only.
   const sprintStory = sprintStoryFromUrl(p.get('sprintStory'));
   if (sprintStory != null) out.sprintStoryIdent = sprintStory;

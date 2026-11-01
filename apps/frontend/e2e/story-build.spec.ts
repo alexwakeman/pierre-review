@@ -76,7 +76,7 @@ async function gotoSprint(page: Page): Promise<void> {
   await expect(page.getByTestId('sprint-view')).toBeVisible();
 }
 
-/** Click a card: its story opens in the tray beside the board. */
+/** Click a card: its story opens in the tray over the board. */
 async function openTray(page: Page, key: string) {
   await page.locator(`[data-ticket="${key}"]`).first().locator('[data-card-button]').click();
   const tray = page.getByTestId('sprint-story-tray');
@@ -98,6 +98,9 @@ test.describe('Implement story', () => {
     let tray = await openTray(page, 'ACME-1');
     await expect(tray.getByRole('button', { name: 'Implement ACME-1' })).toHaveCount(1);
     await expect(tray.getByTestId('story-build-entry')).toHaveText('Implement');
+    // The tray sits ON TOP of the board and may cover the next card: close it first.
+    await page.keyboard.press('Escape');
+    await expect(tray).toHaveCount(0);
     tray = await openTray(page, 'ACME-2');
     await expect(tray.getByRole('button', { name: 'Implement ACME-2' })).toHaveCount(0);
   });

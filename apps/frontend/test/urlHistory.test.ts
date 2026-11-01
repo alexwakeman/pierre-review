@@ -963,7 +963,7 @@ describe('the Activity sub-tab strips', () => {
     expect(location.search).not.toContain('sprintTab');
   });
 
-  // The story TRAY beside the board: `?sprintStory=<ident>`, a navigation (Back closes it), emitted
+  // The story TRAY over the board: `?sprintStory=<ident>`, a navigation (Back closes it), emitted
   // only on This Sprint's boards.
   it('opening the story tray is a navigation: its link reloads onto it, and Back closes it', () => {
     gesture(() => usePinnedTabs.getState().showSprint());

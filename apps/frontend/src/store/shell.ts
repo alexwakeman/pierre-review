@@ -29,11 +29,13 @@ function readSidebarWidth(): number {
   }
 }
 
+// Collapsed by default: only a reader's explicit expand ('1', written on toggle) opens it. The key
+// is written only when the reader toggles, so a reader who never touched it starts collapsed.
 function readReposOpen(): boolean {
   try {
-    return (globalThis.localStorage?.getItem(REPOS_OPEN_KEY) ?? '1') !== '0';
+    return globalThis.localStorage?.getItem(REPOS_OPEN_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -47,7 +49,7 @@ interface ShellState {
   /** The keyboard-shortcut sheet (`?`). */
   shortcutsOpen: boolean;
   setShortcutsOpen: (open: boolean) => void;
-  /** The sidebar's Repositories group. Remembered across reloads. */
+  /** The sidebar's Repositories group. Collapsed by default; the reader's choice is remembered. */
   reposOpen: boolean;
   setReposOpen: (open: boolean) => void;
   /** The docked sidebar's width (lg+), dragged by its edge. Remembered across reloads. */

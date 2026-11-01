@@ -45,6 +45,7 @@ import {
   IconButton,
   Menu,
   panelId,
+  PageToastSlot,
   StatusIcon,
   tabId,
   Tabs,
@@ -1521,6 +1522,9 @@ export function PrDetail({
       <header
         className={cx(
           'shrink-0 px-4 pt-3 md:px-5',
+          // Full-screen: the same top as a PageHeader (the story tab), so the first line sits at
+          // one height across tabs — the top bar collapses at ≥ lg via the toast seat below.
+          placement === 'fullscreen' && 'md:pt-5',
           placement === 'pane' && 'pr-12 md:pr-12',
         )}
       >
@@ -1544,7 +1548,11 @@ export function PrDetail({
           )}
           {/* THE ONE ACTION CONTROL — the "…" menu says every PR action in words (and ⌘K lists
               the same set, registered above). No icon row: the menu is the toolbar. */}
-          <div className="ml-auto flex shrink-0 items-center gap-1" role="toolbar" aria-label="This pull request">
+          {/* THE TOAST SEAT (full-screen only): the header toast strip sits here at ≥ lg and the
+              empty top bar collapses, as on every PageHeader page. Never in the pane: a seat
+              there would pull the strip into a small box at the bottom of the board. */}
+          {placement === 'fullscreen' && <PageToastSlot className="ml-auto" />}
+          <div className={cx('flex shrink-0 items-center gap-1', placement !== 'fullscreen' ? 'ml-auto' : 'max-lg:ml-auto')} role="toolbar" aria-label="This pull request">
             {/* The two states the old icon row showed, in words: a failed re-read of GitHub (a
                 stale note, never an error — the shown data is valid; click retries) and the
                 copy confirmation. Nothing renders in the normal case. */}

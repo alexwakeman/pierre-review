@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   REFERENCE_DOC_MAX_BYTES,
   WIKI_PROVIDER_NAMES,
@@ -16,7 +16,6 @@ import {
   useRefreshReferenceDoc,
   useReferenceDocTree,
   useReferenceDocs,
-  useUploadReferenceDoc,
 } from '../../hooks/useReferenceDocs.js';
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { useMediaQuery } from '../../hooks/useMediaQuery.js';
@@ -24,7 +23,6 @@ import { useResizablePane } from '../../hooks/useResizablePane.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { DOCS_CHAT_W, DOCS_LIBRARY_STRIP_W, DOCS_LIBRARY_W, docsPaneBounds } from '../../lib/docsLayout.js';
 import {
-  DOC_UPLOAD_ACCEPT,
   LIBRARY_INDEX_PATH,
   docStageLabel,
   docTreeBranchKeys,
@@ -34,7 +32,6 @@ import {
   isDocBuilding,
   slugOfLibraryPath,
   type DocTreeNode,
-  uploadRefusal,
 } from '../../lib/referenceDocs.js';
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
@@ -53,7 +50,6 @@ import {
   RefreshIcon,
   SparkleIcon,
   TrashIcon,
-  UploadIcon,
   WarningIcon,
 } from '../Icons.js';
 import { Button, IconButton, Menu, PageHeader, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command, type MenuEntry } from '../ui/index.js';
@@ -111,6 +107,16 @@ const sourceLabel = (doc: ReferenceDoc): string => (doc.wiki ? WIKI_PROVIDER_NAM
 function WikiMark({ provider, size, className }: { provider: WikiProviderId; size: number; className?: string }): JSX.Element {
   if (provider === 'github') return <OctocatIcon size={size} className={className} aria-hidden />;
   return provider === 'notion' ? <NotionIcon size={size} className={className} aria-hidden /> : <ConfluenceIcon size={size} className={className} aria-hidden />;
+}
+
+/** A document's line under its title: the source, its counts and the model that built it. */
+function DocMetaLine({ doc, meta }: { doc: ReferenceDoc; meta: string }): JSX.Element {
+  return (
+    <span className="flex min-w-0 items-center gap-1 text-meta text-ui-mute" title={`${meta}\n${doc.sourceName}`}>
+      {doc.wiki && <WikiMark provider={doc.wiki.provider} size={11} className="shrink-0" />}
+      <span className="truncate">{meta}</span>
+    </span>
+  );
 }
 
 /**
@@ -405,7 +411,7 @@ function DocRow({
 
   return (
     <li>
-      <div className={cx('rounded-ui', current ? 'bg-ui-sel' : 'hover:bg-ui-hover')}>
+      <div className={cx('rounded-ui', current ? 'bg-ui-sel' : doc.available && 'hover:bg-ui-hover')}>
         <div className="flex items-start gap-0.5 pl-1 pr-2">
           {doc.available ? (
             <button
@@ -423,29 +429,29 @@ function DocRow({
               {doc.wiki ? <WikiMark provider={doc.wiki.provider} size={12} /> : <BookIcon size={12} />}
             </span>
           )}
-          <div className="min-w-0 flex-1 py-1.5">
-            {doc.available ? (
-              <button
-                type="button"
-                // Opening a document expands its contents and closes any other (an accordion).
-                onClick={() => {
-                  onOpen(contentsPath, null);
-                  setExpanded(workspaceId, doc.id, true);
-                }}
-                aria-current={onContents ? 'true' : undefined}
-                aria-expanded={expanded}
-                className={cx('block w-full min-w-0 truncate rounded-ui text-left text-body font-medium text-ui-ink touch:min-h-10', FOCUS_RING)}
-              >
-                {doc.title}
-              </button>
-            ) : (
+          {doc.available ? (
+            // The WHOLE row body (title and its line) is the button, so the hand shows wherever the
+            // row highlights. Opening a document expands its contents and closes any other (an accordion).
+            <button
+              type="button"
+              onClick={() => {
+                onOpen(contentsPath, null);
+                setExpanded(workspaceId, doc.id, true);
+              }}
+              aria-current={onContents ? 'true' : undefined}
+              aria-expanded={expanded}
+              data-testid="doc-row-open"
+              className={cx('block min-w-0 flex-1 cursor-pointer rounded-ui py-1.5 text-left touch:min-h-10', FOCUS_RING)}
+            >
               <span className="block truncate text-body font-medium text-ui-ink">{doc.title}</span>
-            )}
-            <p className="flex min-w-0 items-center gap-1 text-meta text-ui-mute" title={`${meta}\n${doc.sourceName}`}>
-              {doc.wiki && <WikiMark provider={doc.wiki.provider} size={11} className="shrink-0" />}
-              <span className="truncate">{meta}</span>
-            </p>
-          </div>
+              <DocMetaLine doc={doc} meta={meta} />
+            </button>
+          ) : (
+            <div className="min-w-0 flex-1 py-1.5">
+              <span className="block truncate text-body font-medium text-ui-ink">{doc.title}</span>
+              <DocMetaLine doc={doc} meta={meta} />
+            </div>
+          )}
           {(unreachable || failed) && !building && (
             <span className="mt-2 shrink-0 text-ui-danger" title={failed ? 'The build failed' : 'Can’t reach this page'}>
               <WarningIcon size={13} aria-hidden />
@@ -506,105 +512,6 @@ function DocRow({
         </div>
       )}
     </li>
-  );
-}
-
-// The drop zone and file picker. Web pages, wikis and repositories come in through the "+" (the
-// add-documents wizard, DocsAddWizard.tsx).
-function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: number }): JSX.Element {
-  // Codex cannot read PDF pages (the build refuses one on Codex): say so BEFORE the upload.
-  const onCodex = useMe().data?.ai.provider === 'codex';
-  const upload = useUploadReferenceDoc(workspaceId);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [sending, setSending] = useState<string | null>(null);
-  const [problems, setProblems] = useState<Array<{ name: string; message: string }>>([]);
-
-  const send = async (files: File[]): Promise<void> => {
-    const found: Array<{ name: string; message: string }> = [];
-    for (const f of files) {
-      const refusal = uploadRefusal(f.name, f.size, maxBytes);
-      if (refusal != null) {
-        found.push({ name: f.name, message: refusal });
-        continue;
-      }
-      setSending(f.name);
-      try {
-        await upload.mutateAsync(f);
-      } catch (err) {
-        found.push({ name: f.name, message: err instanceof Error ? err.message : 'The upload failed.' });
-      }
-    }
-    setSending(null);
-    setProblems(found);
-  };
-
-  const onDrop = (e: DragEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    setDragging(false);
-    const files = Array.from(e.dataTransfer.files ?? []);
-    if (files.length > 0 && sending == null) void send(files);
-  };
-
-  return (
-    <div className="space-y-2">
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (!dragging) setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        data-testid="docs-drop-zone"
-        className={cx(
-          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-ui border border-dashed px-2.5 py-2 text-body',
-          dragging ? 'border-ui-accent bg-ui-sel' : 'border-ui-line',
-        )}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={DOC_UPLOAD_ACCEPT}
-          className="hidden"
-          aria-label="Choose files to add"
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            e.target.value = '';
-            if (files.length > 0) void send(files);
-          }}
-        />
-        {sending != null ? (
-          <p className="text-ui-ink">Uploading {sending}…</p>
-        ) : (
-          <>
-            <button
-              type="button"
-              data-ai-run
-              onClick={() => inputRef.current?.click()}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
-            >
-              <UploadIcon size={12} />
-              Choose files
-            </button>
-            <p className={`min-w-0 flex-1 text-meta ${MUTED}`}>
-              {onCodex
-                ? 'or drop Word, text or markdown files here. Codex cannot read PDFs.'
-                : 'or drop PDF, Word, text or markdown files here'}
-            </p>
-          </>
-        )}
-      </div>
-      {problems.length > 0 && (
-        <ul className="space-y-0.5 text-meta text-ui-danger">
-          {problems.map((p, i) => (
-            <li key={`${p.name}-${i}`}>
-              {p.name}: {p.message}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -766,7 +673,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
     <InfoButton title="Docs">
       <p>
         Reference material for this workspace: PDF, Word, text and markdown files, web pages, Confluence and Notion
-        wikis, and the documents in a GitHub repository. Press + to add a source.
+        wikis, and the documents in a GitHub repository. Press + to upload a file or add a source.
       </p>
       <p>
         {aiModelWords(aiProvider, 'Sonnet')} turns each one into markdown sections with a contents list, and the library keeps one contents
@@ -783,7 +690,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col" data-testid="docs-view">
-      {adding && <DocsAddWizard workspaceId={workspaceId} onClose={() => setAdding(false)} />}
+      {adding && <DocsAddWizard workspaceId={workspaceId} maxBytes={maxBytes} onClose={() => setAdding(false)} />}
       {/* THE PAGE HEADER: the title, its ⓘ, the count — and, while the panes share a column, their tabs. */}
       <PageHeader
         inset={false}
@@ -869,10 +776,10 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
                 </button>
               )}
             </div>
-            <div className="px-1.5">
-              <AiRunGate kind="docs_build">
-                <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
-              </AiRunGate>
+            {/* Adding goes through the "+" (the wizard, uploads included). Without the AI runtime or a
+                sign-in the "+" hides and this gate's one setup / sign-in line stands in its place. */}
+            <div className="px-1.5 empty:hidden">
+              <AiRunGate kind="docs_build">{null}</AiRunGate>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {library.isPending ? (

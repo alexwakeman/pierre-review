@@ -182,8 +182,11 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 - **The drawer scrolls as ONE column** (foot included) so Insights is never below a pinned foot;
   the docked sidebar's middle fades at the hidden edge (`ui/edgeFade.ts`). The Repositories group
   is ONE line per repo (the two status dots in one fixed slot · name · open PRs; everything else in
-  the tooltip / accessible name) and shows 6 rows before "Show all". What the dots mean, and the
-  panel that spells them out: § The repo status panel.
+  the tooltip / accessible name) and shows 6 rows before "Show all". It is COLLAPSED by
+  default: only a stored `limn:sidebarReposOpen = '1'` (written on the reader's toggle) opens it. What
+  the dots mean, and the panel that spells them out: § The repo status panel.
+- **The resize handle** (lg+) is a 10px hit area centred on the sidebar's edge showing a 2px line, at
+  `z-30` — ⚠ it must stay above the page's `absolute z-20` board layer, which swallowed half of it.
 - **"Search or jump" from the drawer** skips the drawer's focus restore (`skipRestoreRef`) and the
   palette re-takes focus one frame after opening — otherwise on a phone the keyboard never came up.
 - **Keys** (`hooks/useKeyboard.ts`): `/` opens the palette (or focuses `#add-repo-input` while the
@@ -732,12 +735,12 @@ their colours because they mean something. Pinned in `test/prDetailPlacement.tes
 gray-600 / dark gray-300; the delta's +/− are green-700 / red-600 so they clear AA). It was 12px
 and author-first.
 
-**Overview → Ticket + branch, ONE row** (`PrTicketBranchLine` in ChecksTab): the ticket chips, then on
-the same line a small "Branch" caption and `PrBranchLine` — the head branch in monospace, a muted
-`→ base`, and a `CopyButton` for the HEAD name only (bare, no fork owner — sync does not know the
-owner). The row is labelled "Ticket" when the PR has a tracker (`tickets != null`; `[]` reads "No
-ticket found") and "Branch" (no caption) when it has none; a null head omits the branch. Long names
-`break-all`. Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
+**Overview → Ticket, then Branch, TWO rows** (ChecksTab): "Ticket" (`PrTicketLine`, the ticket chips;
+`[]` reads "No ticket found") only when the PR has a tracker (`tickets != null`); "Branch"
+(`PrBranchLine` — the head branch in monospace, a muted `→ base`, and a `CopyButton` for the HEAD name
+only, bare, no fork owner) on its own row under it, only when the head has synced. Long names
+`break-all`. The full-screen PR detail's top spacing matches the story tab's (§ ONE header toast strip:
+it hosts the strip through `PageToastSlot`). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
 
 **Tabs: Overview · Comments · Threads · Changes** (+ the gated ones below). ⚠ **Activity is NOT a tab
 any more** — it is the collapsed **Activity** section at the foot of Overview (`ActivitySection`, a
@@ -2437,7 +2440,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     (`ticketCardTags`: "CI failing" on an open PR's red checks, "No PR" or "n PRs · m open" — closed
     unmerged ones ignored —, "No owner"). ⚠ **NO BORDER CARRIES MEANING** (the redesign, 2026-10): state is a MARK beside the key
     (`ticketCardMarks`) — the route (`CriticalPathIcon`, vermilion like the critical arrows) = on a stored
-    critical path; the hourglass (`WaitingIcon`) = waiting on another unfinished ticket (`waitingIdents`);
+    critical path; the hourglass (`PendingStalledIcon`, the same icon as the Pending board) = waiting on another unfinished ticket (`waitingIdents`);
     outside the sprint = RECESSED (`ticketCardSurface`: the page ground with a faint ring), whatever else
     it is. Cards are the surface tone, no border; the open-story arrow shows on hover/focus (always on touch). ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
     tag's population; never a ghost) wears the PULL-REQUEST MARK before its key, top left (`data-testid="ticket-pr-dot"`, kept for
@@ -2446,8 +2449,10 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     link ordering works WITHIN a group and never lifts a card without a PR above one with a PR — on
     Critical path too, where a cell's PR cards come first and path order follows. `BorderKey` names
     the mark "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click
-    opens the STORY TRAY beside the board** (`Sprint/SprintStoryTray.tsx`; the StoryPeek popover is
-    DELETED): an `<aside>` on the RIGHT rendering EXACTLY the story tab's content — the ONE
+    opens the STORY TRAY over the board** (`Sprint/SprintStoryTray.tsx`; the StoryPeek popover is
+    DELETED): an `<aside>` on the RIGHT — on wide screens a panel ON TOP of the board, fixed to the right
+    of the board's scroll box with a shadow; ⚠ it never takes room from the board, so opening it moves no
+    card and re-routes no arrow (at least `MIN_BOARD_PX` = 320px of board still shows) — rendering EXACTLY the story tab's content — the ONE
     `Ticket/StoryViewBody.tsx` the tab mounts too (§ The story view), never a copy — under a header with
     the key, **"Open story tab"** (`useOpenStory`) and a close X. The open card wears a sky RING
     (`aria-pressed`, `aria-controls` = the tray; never the border, which carries meaning). ⚠ **STATE IS
@@ -4791,6 +4796,9 @@ now; last, a merge pill pushed it past the bar's clipped edge at 768px), the Cla
 `AiFixBanner`, `AiBudgetToast`, `ClosedResolverToast`, `DependencyMergeToast`, `AutoMergeBanner`,
 `GlobalLoadingBar`. ⚠ A `SidePanel` SHEET starts BELOW the top bar (`[data-shell-topbar]`), never over
 it, so the Undo for an action taken in the sheet stays on screen; an expanded card is `z-[60]`.
+On lg+ a page with its own header seats the strip there and the empty top bar hides: `PageHeader`
+(the story tab) and the full-screen PR detail tab, both through `PageToastSlot`. The bottom PR pane on
+the Timeline never hosts it.
 
 - **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;
   below `sm` the words are `max-sm:sr-only`, leaving the icon, the action and the X), one line
@@ -4944,8 +4952,8 @@ estimate, and a "~5 sec left" would sit frozen for minutes.
 
 A sidebar repo row carries up to TWO dots in ONE fixed-width slot at its left (red always in the
 first place, blue in the second; an absent dot leaves its place empty, so dots and names line up
-down the list). The top of that repo's view (`Activity/index.tsx` `RepoConsole`, above the
-Activity | Bots tabs, so on both) is a **Status** panel listing the reasons, each line led by the
+down the list). The top of that repo's ACTIVITY tab (`Activity/index.tsx` `RepoConsole`, under the
+Activity | Bots tabs; not on Bots) is a **Status** panel listing the reasons, each line led by the
 SAME dot (`components/RepoStatusDot.tsx`). Both read ONE pure fold, shared `repoStatusSummary(repo,
 branch)` — the dot and the panel cannot disagree.
 
@@ -4965,9 +4973,10 @@ branch)` — the dot and the panel cannot disagree.
   list, which means every repo). Opening the repo view does NOT clear it: that would erase the list
   you came to read. Both writes refresh the same keys, `invalidateSeenState`
   (`hooks/useMarkRepoSeen.ts`), which includes `['activity']` — without it the dot outlived the visit.
-- **Each line links to where you act**: PR refs open the PR tab (three shown, then "N more"); the
-  default branch line scrolls to the header's `BranchStatusPanel` (switching to the Activity tab).
-  Nothing in it fetches: it reads the `/api/activity` entry and the whole-workspace
+- **The lines are PLAIN FACTS, no links** (no PR refs, "N more" or "Show the branch"): everything a
+  line names is further down the same page. The repo header's thread-state bar is labelled "Threads",
+  and the feed's state filter row (main Feed and repo feed, one row in `FeedView`) reads "Thread
+  state". Nothing in it fetches: it reads the `/api/activity` entry and the whole-workspace
   `/api/branch-status` key the sidebar already holds. Nothing to report → ONE calm line.
 - The explanation lives behind the ⓘ ("What the dots mean"); the sidebar's Repositories ⓘ says the
   same in two lines. Demo: `seed-demo.ts` seeds `pr_views` so acme/api reads both colours
@@ -4983,6 +4992,10 @@ text's own colour at 50% (`color-mix` on `currentColor`), full strength on hover
 `underline decoration-…` on a new link; never declare `.text-link-phone` outside its media query
 (`openPrsRows.test.ts` pins both).
 
+- **Docked, a press outside the Open PRs drawer and outside every PR row closes it**
+  (`pressClosesDrawer` in `OpenPrsRows.tsx`); the row stays selected as the last-viewed highlight and
+  the list takes focus (j/k, Enter carry on). Presses in floating layers, modals, the top bar, the
+  list's own controls, "Show more" and scrollbars do not close it.
 - **The Open PRs drawer underlines at EVERY width** (`TEXT_LINK`): it is a panel of facts, so a
   link must read as one at a glance. Underlined there: the **Threads** fact ("2 untouched" /
   "N open threads" / "N resolved" — a link to the PR's Changes → Threads only view, every thread

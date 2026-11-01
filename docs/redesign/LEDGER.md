@@ -2288,7 +2288,7 @@ Cross-cutting:
 - States: filtered empty
 - Tests: `test/laneBoard.test.ts`, `test/peopleRosterScope.test.ts`, verify-demo sprint:people
 
-### [x] Ticket card (shared by all three sprint views) → quiet surface card, no border; critical path / waiting are MARKS beside the key (`CriticalPathIcon` vermilion, `WaitingIcon`; also in the accessible name and `title`), outside the sprint = recessed ground; PR dot → pull-request mark (same testid); CI failing the one red (icon + words); accent ring when open in the tray; the corner arrow shows on hover/focus (always on touch); every line, tag, pill, marker and the accessible name kept
+### [x] Ticket card (shared by all three sprint views) → quiet surface card, no border; critical path / waiting are MARKS beside the key (`CriticalPathIcon` vermilion, `PendingStalledIcon`; also in the accessible name and `title`), outside the sprint = recessed ground; PR dot → pull-request mark (same testid); CI failing the one red (icon + words); accent ring when open in the tray; the corner arrow shows on hover/focus (always on touch); every line, tag, pill, marker and the accessible name kept
 - Files: `TicketCard.tsx`, `lib/laneBoard.ts`, `LaneBoard.tsx`
 - Essential info:
   - [ ] Ticket key mono, violet dot when it has an open or merged PR (those sit first)

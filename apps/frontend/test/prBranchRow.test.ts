@@ -30,14 +30,14 @@ describe('PrBranchLine', () => {
     expect(textOf(html)).not.toContain('→');
   });
 
-  it('shares one row with the ticket, the branch after the ticket chips', () => {
+  it('sits on its own Branch row, after the Ticket row', () => {
     const src = readFileSync(
       fileURLToPath(new URL('../src/components/ChecksTab.tsx', import.meta.url)),
       'utf8',
     );
-    const fn = src.slice(src.indexOf('export function PrTicketBranchLine'));
-    expect(fn.indexOf('<PrTicketChip')).toBeGreaterThan(0);
-    expect(fn.indexOf('<PrTicketChip')).toBeLessThan(fn.indexOf('<PrBranchLine'));
-    expect(fn).toContain('pr.headRefName != null &&');
+    const row = src.slice(src.indexOf('<Row label="Branch">'));
+    expect(src.indexOf('<Row label="Ticket">')).toBeLessThan(src.indexOf('<Row label="Branch">'));
+    expect(row.indexOf('<PrBranchLine')).toBeGreaterThan(0);
+    expect(row.indexOf('<PrBranchLine')).toBeLessThan(row.indexOf('</Row>'));
   });
 });

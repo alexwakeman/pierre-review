@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ChecksSummary, checksSummaryCounts, PrTicketBranchLine } from '../src/components/ChecksTab.js';
+import { ChecksSummary, checksSummaryCounts, PrTicketLine } from '../src/components/ChecksTab.js';
 import { ActivitySection } from '../src/components/PrDetail.js';
 import { PR_DETAIL_TABS } from '../src/store/filters.js';
 
@@ -134,32 +134,23 @@ describe('Checks summary', () => {
   });
 });
 
-describe('Ticket and branch on one row', () => {
-  it('no tracker: the branch alone, with no inline caption', () => {
-    const html = renderToStaticMarkup(
-      createElement(PrTicketBranchLine, {
-        pr: { id: 1, tickets: null, headRefName: 'feat/x', baseRefName: 'main' },
-      }),
-    );
-    expect(textOf(html)).toContain('feat/x → main');
-    expect(textOf(html)).not.toContain('Branch');
+describe('Ticket and branch on separate rows', () => {
+  it('no tracker: no ticket line', () => {
+    const html = renderToStaticMarkup(createElement(PrTicketLine, { pr: { id: 1, tickets: null } }));
+    expect(html).toBe('');
   });
 
-  it('a tracker with no ticket: "No ticket found" then the branch on the same line', () => {
-    const html = renderToStaticMarkup(
-      createElement(PrTicketBranchLine, {
-        pr: { id: 1, tickets: [], headRefName: 'feat/x', baseRefName: 'main' },
-      }),
-    );
+  it('a tracker with no ticket: "No ticket found", no branch', () => {
+    const html = renderToStaticMarkup(createElement(PrTicketLine, { pr: { id: 1, tickets: [] } }));
     const t = textOf(html);
-    expect(t.indexOf('No ticket found')).toBeLessThan(t.indexOf('Branch'));
-    expect(t.indexOf('Branch')).toBeLessThan(t.indexOf('feat/x'));
+    expect(t).toContain('No ticket found');
+    expect(t).not.toContain('Branch');
   });
 
-  it('ChecksTab renders one shared row, not separate Branch and Ticket rows', () => {
+  it('ChecksTab renders a Ticket row, then its own Branch row', () => {
     const s = src('components/ChecksTab.tsx');
-    expect(s).not.toContain('<Row label="Branch">');
-    expect(s).not.toContain('<Row label="Ticket">');
-    expect(s).toContain('<PrTicketBranchLine pr={pr} />');
+    expect(s.indexOf('<Row label="Ticket">')).toBeGreaterThan(0);
+    expect(s.indexOf('<Row label="Ticket">')).toBeLessThan(s.indexOf('<Row label="Branch">'));
+    expect(s).toContain('pr.headRefName != null && (');
   });
 });

@@ -390,7 +390,7 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
   return (
     <>
       <p>
-        Three ways to read the same sprint. Click a ticket to see its story beside the board; its corner arrow opens the
+        Three ways to read the same sprint. Click a ticket to see its story over the board; its corner arrow opens the
         story in its own tab.
       </p>
       <ul className="list-disc space-y-1 pl-5">

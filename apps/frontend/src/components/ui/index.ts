@@ -48,4 +48,4 @@ export {
 } from './media.js';
 export { isTypingTarget, shortcutBlocked, escapeBelongsToLayer, isPaletteChord, modKeyLabel, modalOpen } from './keys.js';
 export { useEdgeFade } from './edgeFade.js';
-export { PageHeader, PAGE_GUTTER, usePageToastSlot } from './PageHeader.js';
+export { PageHeader, PageToastSlot, PAGE_GUTTER, usePageToastSlot } from './PageHeader.js';

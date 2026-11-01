@@ -46,7 +46,7 @@ import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
 import { AiRunLabel } from '../AiRunLabel.js';
-import { BuildIcon, CriticalPathIcon, PullRequestIcon, WaitingIcon, WarningIcon } from '../Icons.js';
+import { BuildIcon, CriticalPathIcon, PendingStalledIcon, PullRequestIcon, WarningIcon } from '../Icons.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
@@ -60,7 +60,7 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 //   • PEOPLE — one lane per assignee, Unassigned last; each header carries CODE's line.
 // Theme and People lanes draw a colour bar of their tickets by column; hovering (or focusing) it shows
 // the key. Under each board, a key to the card borders (the shared `BorderKey`). Every card is a
-// TicketCard: a click shows its story in the TRAY beside the board (`actions.onSelect`, as does a
+// TicketCard: a click shows its story in the TRAY over the board (`actions.onSelect`, as does a
 // call-out's ticket key); its corner arrow opens the ticket's story tab (`actions.onOpen`). A Complete column's
 // "n tickets" opens that lane's cell only.
 //
@@ -134,7 +134,7 @@ type OpenTicket = (node: SprintGraphNode) => void;
 
 /** What a card click and its corner arrow do, and which card's story the tray shows. */
 export interface SprintCardActions {
-  /** Show the ticket's story in the tray beside the board (a card click, a call-out key). */
+  /** Show the ticket's story in the tray over the board (a card click, a call-out key). */
   onSelect: OpenTicket;
   /** Open the ticket's story TAB (the card's corner arrow). */
   onOpen: OpenTicket;
@@ -354,7 +354,7 @@ function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
   const items: BorderKeyItem[] = [];
   if (present.has('critical'))
     items.push({ key: 'critical', label: TICKET_CARD_MARK_LABEL.critical, icon: <CriticalPathIcon size={12} className="text-ai-signal" /> });
-  if (present.has('waiting')) items.push({ key: 'waiting', label: TICKET_CARD_MARK_LABEL.waiting, icon: <WaitingIcon size={12} className="text-ui-mute" /> });
+  if (present.has('waiting')) items.push({ key: 'waiting', label: TICKET_CARD_MARK_LABEL.waiting, icon: <PendingStalledIcon size={13} className="text-ui-mute" /> });
   if (present.has('outside')) items.push({ key: 'outside', label: TICKET_CARD_MARK_LABEL.outside, swatch: ticketCardSurface({ ghost: true }) });
   if (present.has(PR_KEY)) items.push({ key: PR_KEY, label: 'Has a pull request', icon: <PullRequestIcon size={11} className="text-ui-mute" /> });
   for (const m of STORY_BUILD_MARKS) {
@@ -520,7 +520,7 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
                     key={n.ident}
                     type="button"
                     onClick={() => onOpen(n)}
-                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows its story beside the board`}
+                    aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows its story over the board`}
                     className={`inline-flex h-6 items-center rounded-ui bg-ui-raise px-1.5 font-mono text-meta text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-2.5 ${FOCUS_RING}`}
                   >
                     {n.key}

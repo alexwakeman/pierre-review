@@ -600,9 +600,13 @@ with rows under it has its own disclosure button with `aria-expanded`, and two i
 "Expand all" / "Collapse all" (`ExpandAllIcon` / `CollapseAllIcon`), open or fold every branch;
 the nesting is `docTreeNodes(docTreeRows(…))` in `lib/referenceDocs.ts`, the open set local to the
 mount), a viewer that shows one library file at a time with every link followed
-in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
-drop or a file picker (PDF, .docx, .txt, .md, HTML), or the Library's **"+"** — the ADD-DOCUMENTS WIZARD
-(`DocsAddWizard.tsx`): the source type (web page or site, Confluence, Notion, GitHub repository), then the
+in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: ALL of it
+goes through the Library's **"+"** — the ADD-DOCUMENTS WIZARD (`DocsAddWizard.tsx`; the Library has no drop
+zone or file picker of its own). Its first choice, **"Upload a document"** (steps `type → files`, no review
+step), sends each chosen or dropped file (PDF, .docx, .txt, .md, HTML) at once through the upload `POST`,
+checked by `uploadRefusal`; the wizard closes when every file went in and stays open listing any refused.
+A built document's whole row opens it. The other source types (web page or site, Confluence, Notion,
+GitHub repository) go on to the
 address and "Links to follow" (web), the connection and the page (a wiki; § Scopes), or the repository and
 the folder (GitHub), then a review that states the server's count ("This will add 12 pages from Payments
 handbook") and Start. The list is an ACCORDION (opening a document closes the other); Refresh now, Rebuild

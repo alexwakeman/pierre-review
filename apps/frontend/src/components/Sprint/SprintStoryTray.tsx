@@ -19,15 +19,14 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 //   STATE    `sprintStoryIdent` in the filter store, mirrored to `?sprintStory=` (a navigation key:
 //            Back closes the tray). The caller mounts the tray only while it is set, so nothing here
 //            fetches until a ticket was clicked (NOTHING ON THE BOARD FETCHES ON MOUNT).
-//   LAYOUT   wide screens: a column beside the board, sticky in the overlay's scroll box, scrolling on
-//            its own; the board narrows and scrolls sideways in its own box (LaneBoard re-routes its
-//            arrows on resize). md–lg: a sheet over the right of the page; a PHONE: a full-screen
-//            sheet with Back top left (the redesign; docs/redesign/DESIGN.md § 6).
-//            ⚠ Its height is the SCROLL BOX's visible height (measured), never `100vh - Npx`: a tray
-//            taller than the box it sticks in stretched the row and left blank space under the board.
+//   LAYOUT   wide screens: a panel ON TOP of the board, fixed to the right of the board's scroll box
+//            (its visible rect, measured) with a shadow, scrolling on its own. ⚠ It never takes room
+//            from the board: opening it must not reflow a card or re-route an arrow. md–lg: a sheet
+//            over the right of the page; a PHONE: a full-screen sheet with Back top left (the
+//            redesign; docs/redesign/DESIGN.md § 6).
 //   WIDTH    the left edge is a drag handle (also arrow keys); the width is remembered in localStorage
 //            (TRAY_WIDTH_KEY) for every later opening; Home or a double-click goes back to the default,
-//            TRAY_WIDTH_DEFAULT_CSS, wide enough for the design diagrams; capped so the board keeps MIN_BOARD_PX beside it.
+//            TRAY_WIDTH_DEFAULT_CSS, wide enough for the design diagrams; capped so MIN_BOARD_PX of the board still shows.
 //   ESCAPE   closes the tray (capture phase, so the global "Escape leaves the tab" does not also run),
 //            and focus returns to the card that opened it — unless an open popover, a modal or a
 //            control that owns Escape is the one being dismissed, or the reader is typing.
@@ -98,41 +97,37 @@ export function SprintStoryTray({
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const chosen = dragWidth ?? (typeof savedWidth === 'number' && Number.isFinite(savedWidth) ? savedWidth : null);
   const width = chosen != null ? Math.max(TRAY_WIDTH_MIN, chosen) : null;
-  // The tray's height, measured against the scroll box it sticks in and the board beside it.
-  const [boxHeight, setBoxHeight] = useState<number | null>(null);
+  // The tray's dock: the visible rect of the scroll box the board sits in (measured), so the tray
+  // covers the board's right side and never the app's header or sidebar.
+  const [dock, setDock] = useState<{ top: number; bottom: number; right: number; width: number } | null>(null);
 
   useLayoutEffect(() => {
     const aside = asideRef.current;
     const box = scrollParent(aside);
-    const row = aside?.parentElement ?? null;
-    if (aside == null || box == null || row == null) return;
-    // ⚠ Never let the tray make the page taller than the board. `fullH` is the box's visible height;
-    // `fitH` is what fits below the row's own top without scrolling. A short board gets `fitH` (no
-    // scroll, no blank space); a tall board lets the tray grow to `fullH`, but never past the board,
-    // so it can stick at the top while the reader scrolls.
+    if (aside == null || box == null) return;
     const measure = (): void => {
-      const cs = getComputedStyle(box);
-      const padTop = parseFloat(cs.paddingTop);
-      const padBottom = parseFloat(cs.paddingBottom);
-      const fullH = box.clientHeight - padTop - padBottom;
-      const rowTop = row.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-      const fitH = box.clientHeight - rowTop - padBottom;
-      const board = Array.from(row.children).find((c) => c !== aside) as HTMLElement | undefined;
-      const boardH = board?.getBoundingClientRect().height ?? 0;
-      setBoxHeight(Math.round(Math.max(Math.min(fitH, fullH), Math.min(boardH, fullH), 240)));
+      const r = box.getBoundingClientRect();
+      setDock({
+        top: Math.max(0, Math.round(r.top)),
+        bottom: Math.max(0, Math.round(window.innerHeight - r.bottom)),
+        right: Math.max(0, Math.round(window.innerWidth - r.right)),
+        width: Math.round(r.width),
+      });
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(box);
-    for (const c of Array.from(row.children)) if (c !== aside) ro.observe(c);
-    return () => ro.disconnect();
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
-  /** The widest the tray may be: its row's width less room for the board (the viewport on a sheet). */
+  /** The widest the tray may be: the board's box less a strip of board left showing (the viewport on a sheet). */
   const maxWidth = (): number => {
-    const row = asideRef.current?.parentElement;
-    const rowWidth = row != null && getComputedStyle(asideRef.current!).position === 'sticky' ? row.clientWidth : window.innerWidth;
-    return Math.max(TRAY_WIDTH_MIN, rowWidth - MIN_BOARD_PX);
+    const room = dock != null && window.matchMedia('(min-width: 1024px)').matches ? dock.width : window.innerWidth;
+    return Math.max(TRAY_WIDTH_MIN, room - MIN_BOARD_PX);
   };
   const clampWidth = (w: number): number => Math.round(Math.min(maxWidth(), Math.max(TRAY_WIDTH_MIN, w)));
 
@@ -170,7 +165,14 @@ export function SprintStoryTray({
 
   const style = {
     '--tray-w': width != null ? `${width}px` : TRAY_WIDTH_DEFAULT_CSS,
-    ...(boxHeight != null ? { '--tray-h': `${boxHeight}px` } : {}),
+    ...(dock != null
+      ? {
+          '--tray-top': `${dock.top}px`,
+          '--tray-bottom': `${dock.bottom}px`,
+          '--tray-right': `${dock.right}px`,
+          '--tray-room': `${Math.max(TRAY_WIDTH_MIN, dock.width - MIN_BOARD_PX)}px`,
+        }
+      : {}),
   } as CSSProperties;
 
   return (
@@ -182,11 +184,12 @@ export function SprintStoryTray({
       data-noactivate
       style={style}
       // Phone: a FULL-SCREEN sheet (Back closes it). md–lg: a sheet over the right of the page. lg+: a
-      // sticky column beside the board, the surface tone against the page (no border).
+      // panel ON TOP of the board, docked to the right of the board's box with a shadow; the board's
+      // layout never changes when it opens.
       className={cx(
         'fixed inset-0 z-50 flex flex-col bg-ui-surface pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] motion-safe:animate-ui-sheet-up',
         'md:inset-y-0 md:left-auto md:right-0 md:w-[min(var(--tray-w),92vw)] md:pt-0 md:shadow-2xl md:shadow-black/30 md:motion-safe:animate-ui-slide-in',
-        'lg:sticky lg:inset-y-auto lg:right-auto lg:top-0 lg:z-auto lg:max-h-[var(--tray-h,calc(100vh-7rem))] lg:w-[min(var(--tray-w),calc(100%-20rem))] lg:shrink-0 lg:self-start lg:rounded-ui lg:pb-0 lg:shadow-none',
+        'lg:bottom-[var(--tray-bottom,0px)] lg:right-[var(--tray-right,0px)] lg:top-[var(--tray-top,0px)] lg:z-30 lg:w-[min(var(--tray-w),var(--tray-room,92vw))] lg:border-l lg:border-ui-line lg:pb-0',
       )}
     >
       {/* The width handle: the tray's left edge. Drag, or focus it and use the arrow keys (Home resets).
