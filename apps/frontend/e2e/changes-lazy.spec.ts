@@ -13,8 +13,9 @@ import type { PrFileContentResponse } from '@pierre-review/shared';
 
 const PR_ID = 101;
 
-async function openBigPr(page: Page, query = ''): Promise<BigDiff> {
+async function openBigPr(page: Page, query = '', edit?: (big: BigDiff) => void): Promise<BigDiff> {
   const big = bigDiff(PR_ID);
+  edit?.(big);
   await installMockApi(page);
   // Registered AFTER the catch-all, so these win.
   await page.route(
@@ -153,6 +154,63 @@ test.describe('Changes tab on a large PR', () => {
     // Opened, and ringed (the reveal's flash).
     await expect(page.locator(`[data-thread-id="${big.targetThreadId}"]`)).toHaveClass(/ring-2/);
     await expect(page.locator(`[data-thread-id="${big.targetThreadId}"] > button`)).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  // GUARD for the "jumping" bug (lazyMount.ts `useHoldAboveReader`): code mounting ABOVE the reader
+  // must leave what they see exactly still, and only the pane may scroll, never the page. ⚠ This
+  // fixture does NOT reproduce the original fault (Chrome's own anchoring coped with its rows; it
+  // passed before the fix too). The fault was MEASURED on a real PR: the thread dropped 365px for a
+  // frame and was snapped back, and a 300px wheel step moved the code 364px. This pins the behaviour
+  // so a later change cannot break it on simple code either.
+  test('a thread deep link holds still while the code around it mounts, and scrolling up is exact', async ({ page }) => {
+    // Long open threads just above the target, in code not yet mounted: each mounts far taller than
+    // its estimate.
+    const long = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}: the reviewer explains the change at length.`).join('\n\n');
+    const big = await openBigPr(page, `&prTab=changes&pr=${PR_ID}&thread=${bigDiff(PR_ID).targetThreadId}`, (b) => {
+      const target = b.detail.threads.find((t) => t.id === b.targetThreadId)!;
+      for (const [k, line] of [315, 325, 335, 345, 355].entries()) {
+        const id = 99_100 + k;
+        b.detail.threads.push({ ...target, id, line, comments: [{ ...target.comments[0]!, id: id * 10, body: long }] });
+      }
+    });
+    const sel = `[data-thread-id="${big.targetThreadId}"]`;
+    // Every frame from the moment the pill exists: once the landing scroll has stopped (three equal
+    // frames), the pill never moves again — no frame where it drops and is snapped back.
+    const tops = await page.evaluate(
+      (s) =>
+        new Promise<number[]>((done) => {
+          const out: number[] = [];
+          let t0 = 0;
+          const tick = (): void => {
+            const el = document.querySelector(s);
+            if (el != null) {
+              if (t0 === 0) t0 = performance.now();
+              out.push(Math.round(el.getBoundingClientRect().top));
+            }
+            if (t0 === 0 || performance.now() - t0 < 2500) requestAnimationFrame(tick);
+            else done(out);
+          };
+          requestAnimationFrame(tick);
+        }),
+      sel,
+    );
+    const still = tops.findIndex((t, i) => i >= 2 && t === tops[i - 1] && t === tops[i - 2]);
+    expect(still).toBeGreaterThanOrEqual(0);
+    const after = tops.slice(still);
+    expect(Math.max(...after) - Math.min(...after), `pill tops after landing: ${[...new Set(after)].join(',')}`).toBeLessThanOrEqual(1);
+    await expect.poll(() => inPane(page, `${sel} > button`)).toBe(true);
+    // Scrolling up mounts the code above; each wheel step moves the content by exactly that step.
+    const box = (await page.locator(sel).boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y);
+    const at = (): Promise<number> => page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().top, sel);
+    for (let i = 0; i < 12; i++) {
+      const before = await at();
+      await page.mouse.wheel(0, -300);
+      await expect.poll(async () => Math.round((await at()) - before)).toBeGreaterThanOrEqual(299);
+      expect(Math.round((await at()) - before)).toBeLessThanOrEqual(301);
+    }
+    // Only the pane scrolled: the page itself never did.
+    expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0);
   });
 
   test('the first paint mounts only what is near the screen', async ({ page }) => {

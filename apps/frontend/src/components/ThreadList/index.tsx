@@ -40,6 +40,7 @@ import {
   type ThreadStateBucket,
 } from '../../lib/claudeThreadMarker.js';
 import { threadSeverities } from './ThreadCountChips.js';
+import { revealIntoView } from '../../lib/settleScroll.js';
 
 // Stable empty Set so an absent stateFilter prop doesn't churn the memo deps every render.
 const EMPTY_STATE_SET: Set<ThreadStateBucket> = new Set();
@@ -183,7 +184,8 @@ export function ThreadList({
 
   // Jump to a clustered thread's row (rowRefs is populated by FileGroup, keyed by thread id).
   const scrollToThread = (threadId: number): void => {
-    rowRefs.current.get(threadId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = rowRefs.current.get(threadId);
+    if (el) revealIntoView(el, 'center');
   };
 
   // A ×N pill cycles through its bot's threads on successive clicks. The cursor lives in a ref
@@ -296,7 +298,9 @@ export function ThreadList({
     const el = rowRefs.current.get(selectedThreadId);
     // 'center', not 'nearest': the Changes tab's sticky bar and this list's sticky filter header
     // both sit over the top edge, and a 'nearest' scroll from below parks the card under them.
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Through `revealIntoView`: the pane only, and HELD while the cards above it finish loading and
+    // grow — a bare smooth `scrollIntoView` aimed at a stale spot and fought other scrolls.
+    if (el) return revealIntoView(el, 'center');
   }, [selectedThreadId]);
 
   // A resolve empties the eligible set — leave "confirm" mode once nothing's left.

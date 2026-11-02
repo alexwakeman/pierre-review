@@ -70,7 +70,7 @@ import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.j
 import { SELECTED_BORDER, SELECTED_FILL, STATUS_META, UNSELECTED_BORDER } from './status.js';
 import { FileTypeIcon } from '../FileTypeIcons.js';
 import type { ThreadResolveBus } from '../../hooks/useResolveEvents.js';
-import { LazyMountContext, createLazyMounter, useMountWhenNear } from './lazyMount.js';
+import { LazyMountContext, createLazyMounter, useHoldAboveReader, useMountWhenNear } from './lazyMount.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -1228,6 +1228,9 @@ function DiffChunk({
     () => (live ? highlightDiffRows(rows, language, MAX_FILE_DIFF_HIGHLIGHT_LINES, { from, to }) : null),
     [live, rows, language, from, to],
   );
+  // Changing height above the reader ⇒ keep what they see still (`useHoldAboveReader`).
+  const liveRef = useRef<HTMLTableSectionElement>(null);
+  useHoldAboveReader(liveRef, live, estimatePx);
   if (!live) {
     return (
       <tbody ref={ref} data-diff-placeholder="" aria-hidden>
@@ -1237,7 +1240,7 @@ function DiffChunk({
       </tbody>
     );
   }
-  return <tbody>{renderRows(from, to, html)}</tbody>;
+  return <tbody ref={liveRef}>{renderRows(from, to, html)}</tbody>;
 }
 
 function FileDiffBlock({
@@ -1790,9 +1793,11 @@ export const FileDiffView = memo(function FileDiffView({
   // to match. A file-tree click's `scrollIntoView` then scrolled the document as well as the pane —
   // the whole app shell jumped ~265px up and left a gap at the bottom. MEASURED: html scrollHeight
   // 29,462 against a 1,000px window before; equal to the window after.
+  // ⚠ `overflow-anchor: none`: lazy mounts compensate their own height change (`useHoldAboveReader`);
+  // the browser anchoring as well would correct twice.
   return (
     <LazyMountContext.Provider value={mounter}>
-    <div className="relative">
+    <div className="relative [overflow-anchor:none]">
       {files.map((f) => (
         <FileDiffBlock
           key={f.path}

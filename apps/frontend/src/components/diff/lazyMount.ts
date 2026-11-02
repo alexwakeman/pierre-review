@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { scrollParentOf } from '../../lib/settleScroll.js';
 
 // LAZY MOUNTING for the diff (FileDiffView): a stretch of code mounts the first time it comes within
@@ -130,6 +130,64 @@ export function createLazyMounter(): LazyMounter {
 }
 
 export const LazyMountContext = createContext<LazyMounter | null>(null);
+
+// ⚠ A MOUNT ABOVE THE READER MUST NOT MOVE WHAT THEY SEE. A placeholder's height is an estimate, so a
+// stretch that mounts above the visible area grows or shrinks by the error and pushes everything
+// below it. Chrome's scroll anchoring does NOT absorb it here (MEASURED: a Feed → thread link, the
+// thread dropped 365px for a frame and the reveal settle snapped it back, over and over — the
+// "jumping"), so the diff turns anchoring off (`overflow-anchor: none` on FileDiffView's list) and
+// compensates itself (`useHoldAboveReader`). One owner: with both, a 300px wheel step jumped 719px
+// (MEASURED).
+
+/** The pane scroll that keeps the content below a mounted stretch still; 0 when none is owed. */
+export function mountCompensation(stretchTop: number, paneTop: number, grewBy: number): number {
+  return stretchTop < paneTop && Math.abs(grewBy) >= 1 ? grewBy : 0;
+}
+
+/**
+ * The pane scroll owed when an already-mounted stretch resizes (a pill opening, reactions or an
+ * image arriving): only while it lies ENTIRELY above the pane's top, where the reader cannot be
+ * interacting with it. A stretch in view is the reader's own doing and draws in place.
+ */
+export function resizeCompensation(oldBottom: number, paneTop: number, grewBy: number): number {
+  return oldBottom <= paneTop && Math.abs(grewBy) >= 1 ? grewBy : 0;
+}
+
+/**
+ * Keep what the reader sees still while a lazily-mounted stretch changes height above them: once
+ * when it mounts in place of its `estimatePx` placeholder (`mountCompensation`, before paint), then
+ * on every later resize while it is wholly above the pane (`resizeCompensation`).
+ */
+export function useHoldAboveReader(ref: RefObject<Element>, live: boolean, estimatePx: number): void {
+  const wasLive = useRef(live);
+  useLayoutEffect(() => {
+    if (!live) return;
+    const el = ref.current;
+    if (el == null || typeof window === 'undefined') return;
+    const pane = scrollParentOf(el);
+    if (pane == null) return;
+    const shown = (r: DOMRect): boolean => r.width !== 0 || r.height !== 0; // display:none: Threads only
+    if (!wasLive.current) {
+      wasLive.current = true;
+      const r = el.getBoundingClientRect();
+      const dy = shown(r) ? mountCompensation(r.top, pane.getBoundingClientRect().top, r.height - estimatePx) : 0;
+      if (dy !== 0) pane.scrollTop += dy;
+    }
+    if (typeof ResizeObserver !== 'function') return;
+    let last = el.getBoundingClientRect();
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      if (shown(r) && shown(last)) {
+        const dy = resizeCompensation(r.top + last.height, pane.getBoundingClientRect().top, r.height - last.height);
+        if (dy !== 0) pane.scrollTop += dy;
+      }
+      last = el.getBoundingClientRect();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the estimate it replaced, read once
+  }, [live]);
+}
 
 /**
  * Whether a lazily-mounted stretch is LIVE, and the ref for its placeholder. `force` mounts it now,

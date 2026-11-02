@@ -6,7 +6,7 @@
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLazyMounter } from '../src/components/diff/lazyMount.js';
+import { createLazyMounter, mountCompensation, resizeCompensation } from '../src/components/diff/lazyMount.js';
 
 type Rect = { top: number; bottom: number; width: number; height: number };
 
@@ -117,5 +117,22 @@ describe('createLazyMounter', () => {
     expect(onNear).toHaveBeenCalledTimes(1);
     expect(FakeIO.all[0]!.observed.has(el)).toBe(false);
     m.disconnect();
+  });
+});
+
+describe('mountCompensation', () => {
+  it('scrolls by the height change only for a stretch that starts above the pane top', () => {
+    expect(mountCompensation(-500, 100, 852)).toBe(852); // above: keep what is seen still
+    expect(mountCompensation(-500, 100, -40)).toBe(-40); // a short estimate the other way
+    expect(mountCompensation(300, 100, 852)).toBe(0); // on or below the top: the browser draws it in place
+    expect(mountCompensation(-500, 100, 0.4)).toBe(0); // no real change
+  });
+});
+
+describe('resizeCompensation', () => {
+  it('only for a stretch wholly above the pane top; one in view is the reader\'s own doing', () => {
+    expect(resizeCompensation(80, 100, 64)).toBe(64);
+    expect(resizeCompensation(100, 100, -32)).toBe(-32);
+    expect(resizeCompensation(140, 100, 64)).toBe(0); // straddles the top: in view
   });
 });

@@ -5,11 +5,15 @@
 // last file therefore scrolls through, and lands beside, placeholders that turn into real rows of a
 // slightly different height as they mount — the target moves AFTER `scrollIntoView` has picked its
 // offset. A single call lands a few hundred pixels off. So a reveal scrolls, waits for the scroll to
-// stop, and re-issues the SAME `scrollIntoView` (instant) whenever the target moves under a pane
+// stop, and re-issues the SAME scroll (instant) whenever the target moves under a pane
 // that did not — until it holds still.
 //
-// ⚠ Still ordinary `scrollIntoView` calls: the gated programmatic-scroll rules are the vis
-// TIMELINE's, and nothing here writes `scrollTop`.
+// ⚠ ONLY THE PANE SCROLLS. `scrollIntoView` scrolls EVERY scrollable ancestor — the document and
+// the app shell's `overflow: hidden` boxes too — so any stray overflow outside the pane (the
+// sr-only spans once, FileDiffView § `relative`) moved the whole app: a second scroll bar and a
+// shell that jumped. A reveal now sets the pane's own `scrollTop` (`paneScrollTarget`, honouring
+// the target's `scroll-margin`), and falls back to `scrollIntoView` only with no pane. The gated
+// programmatic-scroll rules are the vis TIMELINE's, not this.
 // ⚠ The READER WINS. Any wheel, touch, pointer or key input stops the settle at once, and so does a
 // frame where the pane scrolled by exactly the distance the target moved (a scrollbar drag, which
 // sends none of those events). A newer reveal cancels an older one (one settle at a time).
@@ -38,6 +42,33 @@ export function revealBehavior(distancePx: number, paneHeightPx: number): Scroll
   return Math.abs(distancePx) <= paneHeightPx * 1.5 ? 'smooth' : 'auto';
 }
 
+/**
+ * The pane `scrollTop` that puts a target where `scrollIntoView({block})` would, inside that pane
+ * only. `top` is the target's offset from the pane's top edge NOW, `height` its height, `margin` its
+ * `scroll-margin-top`. 'nearest' leaves the pane alone when the target is already in full view.
+ */
+export function paneScrollTarget(
+  block: ScrollLogicalPosition,
+  scrollTop: number,
+  paneHeight: number,
+  top: number,
+  height: number,
+  margin: number,
+): number {
+  const at = scrollTop + top;
+  switch (block) {
+    case 'start':
+      return at - margin;
+    case 'end':
+      return at + height - paneHeight;
+    case 'nearest':
+      if (top >= margin && top + height <= paneHeight) return scrollTop;
+      return top < margin ? at - margin : at + height - paneHeight;
+    default:
+      return at - (paneHeight - height) / 2;
+  }
+}
+
 /** The nearest scrolling ancestor, or null for the document. */
 export function scrollParentOf(el: Element): HTMLElement | null {
   let p: HTMLElement | null = el.parentElement;
@@ -61,8 +92,8 @@ const SETTLE_CAP_MS = 4000;
 let current: (() => void) | null = null;
 
 /**
- * `el.scrollIntoView({block})`, then keep it there while the layout around it settles. Returns a
- * cancel function (safe to call twice). A newer call cancels this one.
+ * Scroll `el`'s pane so `el` sits at `block` (as `scrollIntoView` would, pane only), then keep it
+ * there while the layout around it settles. Returns a cancel function (safe to call twice). A newer call cancels this one.
  */
 export function revealIntoView(el: Element, block: ScrollLogicalPosition): () => void {
   current?.();
@@ -73,7 +104,22 @@ export function revealIntoView(el: Element, block: ScrollLogicalPosition): () =>
     pane != null ? pane.scrollTop : (document.scrollingElement?.scrollTop ?? 0);
   const top = (): number => el.getBoundingClientRect().top - paneTop();
 
-  el.scrollIntoView({ block, behavior: revealBehavior(top() - paneH / 2, paneH) });
+  // A HIDDEN target (the code under the Threads only view is `display: none`) measures 0×0 at the
+  // pane's corner: never scroll for it — that sent the pane to the top and fought the thread list.
+  const hidden = (): boolean => {
+    const r = el.getBoundingClientRect();
+    return r.width === 0 && r.height === 0;
+  };
+  const scrollTo = (behavior: ScrollBehavior): void => {
+    if (hidden()) return;
+    if (pane == null) return el.scrollIntoView({ block, behavior });
+    const r = el.getBoundingClientRect();
+    const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+    const target = paneScrollTarget(block, pane.scrollTop, pane.clientHeight, r.top - paneTop(), r.height, margin);
+    pane.scrollTo({ top: Math.max(0, target), behavior });
+  };
+
+  scrollTo(revealBehavior(top() - paneH / 2, paneH));
   if (typeof requestAnimationFrame !== 'function') return () => undefined;
 
   const start = performance.now();
@@ -95,7 +141,7 @@ export function revealIntoView(el: Element, block: ScrollLogicalPosition): () =>
     if (current === stop) current = null;
   };
   const correct = (): void => {
-    el.scrollIntoView({ block, behavior: 'auto' });
+    scrollTo('auto');
     lastCorrection = performance.now();
     prevScroll = scrollTop();
     prevTop = top();
@@ -103,7 +149,7 @@ export function revealIntoView(el: Element, block: ScrollLogicalPosition): () =>
   const frame = (): void => {
     if (done) return;
     const now = performance.now();
-    if (!el.isConnected || now - start > SETTLE_CAP_MS) return stop();
+    if (!el.isConnected || hidden() || now - start > SETTLE_CAP_MS) return stop();
     const s = scrollTop();
     const t = top();
     if (!settled) {

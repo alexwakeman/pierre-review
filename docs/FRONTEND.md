@@ -1284,14 +1284,22 @@ header.)
   open. A new reveal grain must add its row here, or its pill/row will not exist to scroll to.
 - ⚠ **EVERY REVEAL SCROLL GOES THROUGH `revealIntoView`.** It scrolls (smooth for ≤ 1.5 panes,
   instant past that — a long smooth scroll mounts placeholders mid-flight), waits for the scroll to
-  stop, then re-issues the same `scrollIntoView` whenever the target moves while the pane did not
-  (a placeholder above it mounted at a different height), until it holds still for 700ms (cap 4s).
-  The reader wins: wheel / touch / pointer / key input, or a frame where the pane scrolled by what
-  the target moved (a scrollbar drag), stops it; a newer reveal cancels an older one. Browser scroll
-  anchoring absorbs most shifts on its own (Chrome, Firefox); the settle covers the rest (Safari has
-  no `overflow-anchor`, so scrolling UP into placeholders there can nudge the view by the estimate's
-  error). ⚠ A pill's reveal is NOT stopped by its effect cleanup: the `consumedFocus` guard makes a
+  stop, then re-issues the same scroll whenever the target moves while the pane did not, until it
+  holds still for 700ms (cap 4s). ⚠ It sets the PANE's `scrollTop` (`paneScrollTarget`, honouring
+  `scroll-margin`), never `scrollIntoView`, which also scrolls the document and the shell's
+  `overflow: hidden` boxes. ⚠ A HIDDEN target (the code under Threads only, `display: none`) is
+  ignored and its settle stops — measured 0×0, it sent the pane to the top and fought the thread
+  list, which reveals its selected card through `revealIntoView` too. The reader wins: wheel /
+  touch / pointer / key input, or a frame where the pane scrolled by what the target moved (a
+  scrollbar drag), stops it; a newer reveal cancels an older one. ⚠ A pill's reveal is NOT stopped by its effect cleanup: the `consumedFocus` guard makes a
   re-run a no-op, so StrictMode's mount-cleanup-mount would kill the settle for good.
+- ⚠ **THE DIFF KEEPS THE READER'S PLACE ITSELF; browser scroll anchoring is OFF in it**
+  (`[overflow-anchor:none]` on FileDiffView's list). Chrome's anchoring did NOT absorb a chunk
+  mounting above the reader (MEASURED on a real PR: the thread dropped 365px for a frame and the
+  settle snapped it back, repeatedly; a 300px wheel step moved the code 364px). `useHoldAboveReader`
+  scrolls the pane, before paint, by a chunk's height change when it mounts starting above the
+  pane's top, and on any later resize while it lies wholly above. ONE owner: with anchoring on as
+  well, a 300px wheel step jumped 719px. This also holds in Safari, which has no anchoring.
 - **The Threads only view is unaffected**: it renders from `pr.threads`, never from the diff, so it
   lists every thread whether or not its code has mounted. The hidden code under it intersects nothing
   and mounts nothing while hidden.
