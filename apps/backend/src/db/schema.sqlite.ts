@@ -4442,6 +4442,33 @@ export const teamClaimLines = sqliteTable(
   }),
 );
 
+// 0159. A TEAMMATE'S LINE THIS LIMN STOOD DOWN FOR (docs/CLAUDE-REVIEW.md § Team claims → The
+// teammate's line on the tab): one row per (account, PR, head, provider) — the last `limn/review-<p>`
+// line by someone else that made this machine skip its auto review there. The AI Review tab says
+// "Robin Dunn reviewed this commit with Claude · no comments" from it, after a reload or a restart
+// (the skip memory itself is in process). `kind` 'reviewing' (their pending line) | 'reviewed'
+// (their success line); `description` = their line as GitHub shows it. Written by team-claim.ts on a
+// skip and by the reconciler when it re-reads the head. No FK on pr_id: BOTH delete paths delete its
+// rows (db/team-claim-lines-delete.ts), the erasure deletes everything.
+export const teamClaimSeen = sqliteTable(
+  'team_claim_seen',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    provider: text('provider').notNull(),
+    kind: text('kind', { enum: ['reviewing', 'reviewed'] }).notNull(),
+    login: text('login').notNull(),
+    description: text('description'),
+    lineAt: integer('line_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    prHeadProviderUx: uniqueIndex('team_claim_seen_account_pr_head_provider').on(t.accountId, t.prId, t.headSha, t.provider),
+  }),
+);
+
 // 0139. THIS DATABASE'S OWN FACTS (key → value) — never an account's, so not account-scoped and not
 // erased with one. `instance_id`: a random id written once (db/instance-id.ts) that names this
 // database file wherever it is moved; the reference-docs janitor's ownership marker.

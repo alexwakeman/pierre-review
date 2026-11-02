@@ -106,6 +106,23 @@ describe('cardClickActivates', () => {
     expect(cardClickActivates(at(true) as unknown as EventTarget)).toBe(false);
     expect(cardClickActivates(at(false) as unknown as EventTarget)).toBe(true);
   });
+  it('a [data-noactivate] AROUND the card (the Sprint story tray) never swallows the card click', () => {
+    const outside = {};
+    const inside = {};
+    const target = { closest: (): unknown => hit };
+    let hit: object | null = null;
+    const card = { contains: (n: unknown) => n === inside || n === target };
+    hit = outside;
+    expect(cardClickActivates(target as unknown as EventTarget, card)).toBe(true);
+    hit = inside;
+    expect(cardClickActivates(target as unknown as EventTarget, card)).toBe(false);
+    hit = null;
+    expect(cardClickActivates(target as unknown as EventTarget, card)).toBe(true);
+    // A click in a portalled popover (not in the card's DOM) never opens the card.
+    const portalled = { closest: () => null };
+    expect(cardClickActivates(portalled as unknown as EventTarget, card)).toBe(false);
+    expect(src('components/Activity/PrCardShell.tsx')).toMatch(/cardClickActivates\(e\.target, e\.currentTarget\)/);
+  });
 });
 
 describe('both surfaces mount the shared shell', () => {

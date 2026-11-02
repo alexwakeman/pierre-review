@@ -72,6 +72,7 @@ import {
   type TokenUsage,
 } from '../codex/events.js';
 import { pathGuardHook, verifyHookTrusted } from '../codex/hook.js';
+import { noteProviderFailure } from '../usage-lockout.js';
 import { codexBinary, codexHome, ensureCodexHomeConfig } from '../codex/home.js';
 import { armCodexThreadSweeps, queueCodexThreadCleanup } from '../codex/threads.js';
 import { runCodexExec, type CodexExecResult } from '../codex/run.js';
@@ -220,6 +221,16 @@ export function codexExecEnv(
 const DEFAULT_AGENT_TIMEOUT_MS = 45 * 60_000;
 const DEFAULT_COMPLETE_TIMEOUT_MS = 5 * 60_000;
 
+/**
+ * `execFailure`, and a usage limit noted as a LOCKOUT (ai/usage-lockout.ts): every automatic run on
+ * Codex stands down until the reset the error names. Every run kind's failure passes through here.
+ */
+function failureOf(res: CodexExecResult): string | null {
+  const failure = execFailure(res);
+  if (failure) noteProviderFailure('codex', failure);
+  return failure;
+}
+
 /** Why a finished `codex exec` did not produce an answer, as one sentence; null when it did. */
 export function execFailure(res: CodexExecResult): string | null {
   if (res.cancelled) return 'The run was cancelled.';
@@ -366,7 +377,7 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     } finally {
       queueCodexThreadCleanup(home, res.threadId);
     }
-    const failure = execFailure(res);
+    const failure = failureOf(res);
     if (failure) throw new CodexRunError(failure, res.cancelled);
     const text = res.finalResponse.trim();
     if (!text) throw new Error('Codex returned no text. Check the Codex sign-in: limn ai login codex');
@@ -639,7 +650,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       first = await runCodexExec(args, { cwd, env, signal, onEvent, stdin: spec.prompt, timeoutMs });
       final = first;
       usage = first.usage;
-      failure = execFailure(first);
+      failure = failureOf(first);
 
       if (!failure && resultTool && toolSchema) {
         let verdict = await judge(z, resultTool, toolSchema, first.finalResponse);
@@ -660,7 +671,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
             // usage is unknown (cancelled, no turn.completed) KEEPS the first turn's known tokens.
             if (retry.usage) usage = addUsage(usage, usageDelta(retry.usage, first.usage));
             final = retry;
-            failure = execFailure(retry);
+            failure = failureOf(retry);
             if (!failure) {
               verdict = await judge(z, resultTool, toolSchema, retry.finalResponse);
               if (!verdict.ok) failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;

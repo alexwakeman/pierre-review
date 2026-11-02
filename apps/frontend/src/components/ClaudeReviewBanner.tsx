@@ -210,6 +210,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
       summary={running.length > 0 ? `${running.length} running` : `${ready} ready`}
       onDismiss={allDone ? dismissAll : undefined}
       dismissLabel="Dismiss the AI reviews card"
+      count={running.length > 0 ? running.length : ready}
     >
       <ToastList>
         {visible.map((e) => (

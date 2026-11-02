@@ -150,6 +150,7 @@ const CAPTURE_CSS = `
   [role="status"][aria-label="Background loading"] { display: none !important; }
   div.h-7.border-amber-200.bg-amber-50 { display: none !important; }
   [data-testid="global-loading-bar"] { display: none !important; }
+  [data-testid="header-toast-cluster"]:not(:has([data-testid="header-toast-strip"] > :not([data-testid="global-loading-bar"]))) { display: none !important; }
 `;
 
 /**

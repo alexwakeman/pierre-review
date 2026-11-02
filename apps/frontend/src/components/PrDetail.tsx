@@ -58,6 +58,15 @@ import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import { useOpenStory } from '../lib/ticketTab.js';
 import {
+  rememberedPrScroll,
+  rememberedPrTab,
+  rememberedPrThreadsOnly,
+  rememberPrScroll,
+  rememberPrTab,
+  rememberPrThreadsOnly,
+  restorePaneScroll,
+} from '../lib/prViewMemory.js';
+import {
   BotIcon,
   ChevronIcon,
   CommentIcon,
@@ -859,8 +868,16 @@ export function PrDetail({
    * live bug. Clearing on EVERY tab change makes the stale-target state unrepresentable instead
    * of making each new call site remember.
    */
+  // The scroll restore started when this PR's pane ARRIVED (below, `lib/prViewMemory.ts`). Any
+  // move the reader or a deep link makes cancels it, so it never fights a reveal.
+  const restoreCancelRef = useRef<(() => void) | null>(null);
+  const cancelScrollRestore = (): void => {
+    restoreCancelRef.current?.();
+    restoreCancelRef.current = null;
+  };
   const goToTab = useCallback(
     (t: Tab): void => {
+      cancelScrollRestore();
       setChangesFocus(null);
       setPrDetailTab(prId, t);
     },
@@ -895,6 +912,7 @@ export function PrDetail({
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
     // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
     // no clearing sits between the two. It is also "Show in context": the code comes back.
+    cancelScrollRestore();
     setPrDetailTab(prId, 'changes');
     setChangesThreadsOnly(false);
     setChangesFocus({ path, line, side, threadId: threadId ?? null, nonce: Date.now() });
@@ -1018,6 +1036,7 @@ export function PrDetail({
       return;
     }
     handledThreadRef.current = threadId;
+    cancelScrollRestore();
     // `selectThread` also clears the state/severity pill presets that could filter it out.
     useFilters.getState().selectThread(prId, threadId);
     setPrDetailTab(prId, 'changes');
@@ -1161,10 +1180,12 @@ export function PrDetail({
   // matching PR. The signal is NOT consumed here — AiFixTab reads its `reviewId`, then
   // consumes it.
   useEffect(() => {
-    if (aiFixTabEnabled && aiFixTabFocus && pr && aiFixTabFocus.prId === pr.id) {
+    // Keyed on `prId`, not the loaded `pr`: the tab is seated on the first render, so the AI Fix
+    // tab draws the moment the PR arrives instead of one effect later.
+    if (aiFixTabEnabled && aiFixTabFocus && aiFixTabFocus.prId === prId) {
       seedTab('ai_fix');
     }
-  }, [aiFixTabFocus, pr, aiFixTabEnabled, seedTab]);
+  }, [aiFixTabFocus, prId, aiFixTabEnabled, seedTab]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
   // pane") forces the Comments tab, where PrCommentsList then scrolls to + flashes
@@ -1285,6 +1306,75 @@ export function PrDetail({
     prId,
     liveVisible && pr?.state === 'open',
   );
+
+  /**
+   * REOPENING A PR LANDS WHERE THE READER LEFT IT (`lib/prViewMemory.ts`, this session only): the
+   * last tab, that tab's scroll position, and the Changes tab's "Threads only" switch. Read ONCE
+   * per ARRIVAL — this copy becoming the one on screen (a mount, or the pane coming back out from
+   * under another PR's overlay) — never on a tab switch inside the PR.
+   *
+   * ⚠ A MEMORY, NEVER AN INSTRUCTION. Anything that asked for a place wins: a `{prId, tab}` pair
+   * already naming THIS PR (an explicit `?prTab=`, a Pending card's tab) keeps its tab, and a
+   * thread / comment / activity / review / fix / changes deep link skips the restore entirely (its
+   * own effect below seats the tab and its reveal does the scrolling). The tab is seated through
+   * `seedTab` (a URL correction, never a history entry of its own).
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!liveVisible) return;
+    const s = useFilters.getState();
+    const deepLink =
+      selectedThreadId != null ||
+      s.activityFocus?.prId === prId ||
+      s.commentFocus?.prId === prId ||
+      s.claudeTabFocus?.prId === prId ||
+      s.aiFixTabFocus?.prId === prId ||
+      s.prChangesFocus?.prId === prId ||
+      s.threadsViewRequest === prId ||
+      s.threadBotFilter != null ||
+      (s.selectedPrId === prId && (s.threadStateFilter.size > 0 || s.threadSeverityFilter.size > 0));
+    if (deepLink) return;
+    const pairIsOurs = s.prDetailTab?.prId === prId;
+    const target = pairIsOurs ? (s.prDetailTab?.tab ?? null) : rememberedPrTab(prId);
+    if (target == null) return;
+    const top = rememberedPrScroll(prId, target);
+    if (!pairIsOurs && target !== 'overview') seedTab(target);
+    if (target === 'changes' && rememberedPrThreadsOnly(prId)) setChangesThreadsOnly(true);
+    if (top != null && top > 0) {
+      cancelScrollRestore();
+      restoreCancelRef.current = restorePaneScroll(() => panelRef.current, top);
+    }
+    // Leaving the screen (or unmounting) stops a restore still holding the pane.
+    return cancelScrollRestore;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival (`liveVisible` turning true); the rest is read live
+  }, [liveVisible, prId]);
+  // What to remember: the tab whenever the pair names this PR, and "Threads only" once the reader
+  // changes it (the first run is the mount's `false`, which must not overwrite the memory the
+  // arrival above is about to read).
+  useEffect(() => {
+    if (prDetailTab?.prId === prId) rememberPrTab(prId, prDetailTab.tab);
+  }, [prDetailTab, prId]);
+  const threadsOnlySeen = useRef(false);
+  useEffect(() => {
+    if (!threadsOnlySeen.current) {
+      threadsOnlySeen.current = true;
+      return;
+    }
+    rememberPrThreadsOnly(prId, changesThreadsOnly);
+  }, [changesThreadsOnly, prId]);
+  // The pane's scroll is remembered as the reader scrolls (`onScroll` on the tab panel) and when
+  // the tab changes: the tabs share ONE scroller that is never reset, so a switch can leave a tab
+  // at a position no scroll event reported. Not on the mount (nothing has moved yet).
+  const tabScrollSeen = useRef(false);
+  useEffect(() => {
+    if (!tabScrollSeen.current) {
+      tabScrollSeen.current = true;
+      return;
+    }
+    const pane = panelRef.current;
+    if (pane != null && liveVisible) rememberPrScroll(prId, effectiveTab, pane.scrollTop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a tab change only
+  }, [effectiveTab]);
   // "Copy the GitHub link" from the … menu: a short "Link copied" note beside the menu (the menu
   // closes on select, so the note is the only confirmation). Cleared on a timer.
   const [linkCopied, setLinkCopied] = useState<'copied' | 'failed' | null>(null);
@@ -1779,6 +1869,12 @@ export function PrDetail({
         // On a phone the header scrolls away with the content (one scroller, the outer box): a
         // fixed header would leave a third of the screen for the diff.
         className="min-h-0 flex-1 overflow-auto max-md:flex-none max-md:overflow-visible"
+        ref={panelRef}
+        // Only the copy on screen records: the board's pane copy of the same PR can sit mounted
+        // under the overlay, and its scroller clamps (a scroll event) when the shared tab changes.
+        onScroll={(e) => {
+          if (liveVisible) rememberPrScroll(prId, effectiveTab, e.currentTarget.scrollTop);
+        }}
         role="tabpanel"
         id={panelId(`pr-${pr.id}`, effectiveTab)}
         aria-labelledby={tabId(`pr-${pr.id}`, stripValue)}

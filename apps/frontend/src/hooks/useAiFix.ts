@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
   AiFixChecksPreview,
   AiFixPickerPreview,
@@ -12,6 +12,7 @@ import type {
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
+import { DETAIL_GC_TIME } from './usePr.js';
 
 // Query/mutation hooks for the AI Fix tab. Mirrors useClaudeReview; every query's `enabled` is
 // gated by the caller.
@@ -21,6 +22,34 @@ export function useAiFix(prId: number | null, enabled: boolean) {
     queryKey: ['ai-fix', prId],
     queryFn: () => api.aiFix(prId as number),
     enabled: prId != null && enabled,
+  });
+}
+
+/**
+ * WARM THE AI FIX TAB BEFORE IT OPENS — called by the header's AI fix row when a run finishes and
+ * again on hover / focus / press, so a click on "Fix ready" opens on the result rather than on
+ * "Loading…". Without it the click was a waterfall: the PR detail, THEN (once PrDetail had the PR and
+ * seated the tab) the lazily-loaded tab's code, THEN `GET …/ai-fix` — and that route makes one live
+ * GitHub read (the head, for the push controls), ~0.5s on its own.
+ *
+ * ⚠ THE SAME KEYS AND FETCHERS AS THE HOOKS THE TAB MOUNTS (`usePr`, `useAiFix`, `useClaudeReview`),
+ * so the tab finds them in the cache. A short `staleTime` here only stops a hover storm refetching;
+ * the tab's own hooks keep their own freshness rules.
+ */
+export function prefetchAiFixTab(qc: QueryClient, prId: number): void {
+  // The lazy tab's code (PrDetail's `lazy(() => import('../components/AiFixTab.js'))`): same module.
+  void import('../components/AiFixTab.js').catch(() => undefined);
+  void qc.prefetchQuery({
+    queryKey: ['pr', prId],
+    queryFn: () => api.pr(prId),
+    staleTime: Infinity,
+    gcTime: DETAIL_GC_TIME,
+  });
+  void qc.prefetchQuery({ queryKey: ['ai-fix', prId], queryFn: () => api.aiFix(prId), staleTime: 15_000 });
+  void qc.prefetchQuery({
+    queryKey: ['claude-review', prId],
+    queryFn: () => api.claudeReview(prId),
+    staleTime: 15_000,
   });
 }
 

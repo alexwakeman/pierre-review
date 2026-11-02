@@ -360,8 +360,13 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   green ready, grey otherwise) · title · repo#N · CI icon · review standing · open threads · ONE AI
   marker · +A −D · author · age; every old chip is in words in the panel (+ the unchanged
   `ClaudeReviewPanel`). Keys: j/k, ↵ panel then PR, `o` GitHub, `r` AI review; double-click opens the
-  PR; selection, panel state and the drawn window survive Back (session memo). Grouped by ticket =
-  collapsible groups (fold per session, never stored) with one ticket line. Drawing pages are 60
+  PR; selection, panel state and the drawn window survive Back (session memo). The icon columns sit
+  under a HEADING ROW (Review · CI · Threads · AI review · Size · Author · Updated, each with a
+  tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so
+  a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
+  session, never stored) whose line is the chevron, the ticket key + story name (→ the story view) and
+  the PR count ONLY — status, assignee, criteria met, Re-check and the roll-up are in the story view
+  (2026-11-02). Drawing pages are 60
   rows. The story view and Reports → "Merged so far" keep the CARDS described below. The Feed keeps
   its stream but in the row language (no borders, grey category icons, My Turn = accent bar + words,
   `data-my-turn`). Both register their switches in ⌘K. Pinned in `test/openPrsRows.test.ts`.
@@ -792,6 +797,29 @@ section while seated on `'activity'` moves the tab to `'overview'`. **Comments**
 badge = issue comments + review bodies, `prConversationCount`) holds `PrCommentsList` + the composer;
 a PR-comment deep link (`commentFocus`) seats it.
 
+**REOPENING A PR LANDS WHERE THE READER LEFT IT** (2026-11-02; `lib/prViewMemory.ts`,
+`test/prViewMemory.test.ts`): per PR, the last tab, the tab panel's scroll position PER TAB, and the
+Changes tab's "Threads only" switch, in a module Map — **this session only**, never storage or the store
+(a reload starts on Overview; ≤ 50 PRs, least recently used out). Read ONCE per ARRIVAL (`liveVisible`
+turning true: a mount, or the pane coming out from under another PR's overlay), never on a tab switch
+inside the PR. ⚠ **A memory, never an instruction:** a `{prId, tab}` pair already naming this PR (an
+explicit `?prTab=`, a Pending card's tab) keeps its tab, and any deep link for this PR (`?thread=`, a
+comment / activity / AI Review / AI Fix / changes focus, a threads-view request or preset) skips the
+restore. The tab is seated through `seedTab` (a URL correction). The scroll is re-applied each frame
+(`restorePaneScroll`) until the lazily-mounted content can hold it and its height stops moving; reader
+input, any `goToTab` / `openInChanges` / `showThread`, or a 5s cap stops it. Positions are recorded (by the copy on screen only) on
+`onScroll` and on a tab change (the tabs share one scroller). Known limit: an absolute `scrollTop`, so a
+Changes position can land a little off (≈ 100px measured) where placeholders above it re-estimate.
+
+**A FINISHED AI FIX OPENS ON ITS RESULT** (2026-11-02; `hooks/useAiFix.ts` `prefetchAiFixTab`). The
+click from the header's AI fixes toast was a waterfall: `GET /api/prs/:id`, then (once PrDetail seated
+the tab) the lazy `AiFixTab` chunk, then `GET …/ai-fix`, which makes one live GitHub read (the head, for
+the push controls, ~0.5s alone). `AiFixBanner` now warms all of it under the tab's OWN keys (`['pr', id]`,
+`['ai-fix', id]`, `['claude-review', id]` + the chunk) as soon as a run reads `succeeded` / `planned`
+(at the banner level: the rows mount only while the toast panel is open) and again on the row's hover,
+focus and press; and PrDetail seats `ai_fix` from `aiFixTabFocus.prId === prId` without waiting for the
+PR. Measured on the dev stack: click → result 2.2–3.7s cold, ≈ 0.85s warmed.
+
 **THE TAB ON THE WIRE** (2026-10-31; `hooks/useUrlState.ts` `prTabToUrl` / `prTabFromUrl`,
 `test/prTabWire.test.ts`, e2e `pr-tabs.spec.ts`): the AI Review tab is **`?prTab=ai_review`** —
 agent-agnostic. Internally it stays `PrDetailTab` `'claude_review'` (store, effects, ⌘K ids); ONLY the
@@ -945,7 +973,7 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   undo of a close and is itself undone by the Close button beside it, so a two-click gate would be
   ceremony around a reversible act. It prints GitHub's own refusal sentence when the 409 comes back
   — normally the head branch was deleted after the close) — then the PR **Summary** (markdown,
-  clamped to 3 lines, tall images hidden when collapsed). The collapsed **Activity** section rounds
+  clamped to 8 lines (`SUMMARY_COLLAPSED_LINES`), tall images hidden when collapsed). The collapsed **Activity** section rounds
   the tab off (rendered by `PrDetail`, not `ChecksTab`); the **PR comments** moved to the Comments
   tab. (The AI PR summary under the description and the per-comment "Check review" + its
   annotations are REMOVED 2026-10-18.) The **Checks
@@ -1338,7 +1366,12 @@ Every review thread — **resolved included** — renders inside the diff as a *
 (`InlineThread` in `FileDiffView.tsx`): state dot, author, age, `~` when approximate, reply count,
 plain-text excerpt and chevron. Opened, the pill becomes the full `ThreadCard`'s collapse header
 ("Hide thread"). **Unresolved threads — `untouched`, `replied_unresolved`, `likely_addressed` —
-START OPEN; only `resolved` starts SHUT** (dimmed, `✓` for the dot, no coloured border). That is
+START OPEN; only `resolved` starts SHUT** — drawn exactly like the others (2026-11-02): **ONE STATE EDGE
+for every thread card and pill, resolved included** (`lib/threadEdge.ts` `threadEdgeColor`: a 2px left
+border + the state dot, resolved GREEN, the open states their `DERIVED_STATE_META` colour, an open thread
+an AI run judged the AI signal fill). It is worn by the pill, `ThreadCard` (every mount) and the Threads
+only view's shut row (`FileGroup`, the state pill first, like the open card's header). Resolved threads
+were dimmed with a `✓` and no edge, which made them the hardest to find while scrolling. That is
 GitHub's own Files-changed default, and one pure helper decides it: `inlineThreadStartsOpen`
 (`lib/diff.ts`, pinned by `test/inlineThreadOpen.test.ts`). It used to be every thread shut,
 because full cards at ~200–600px buried the diff (a 47-thread PR rendered ~47 cards). That is now
@@ -1644,8 +1677,9 @@ reappears.
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
     "Story edited since". "+ Add story" is only for pasting: a ticket already listed as a block is
     not offered as "Pull KEY from Jira".
-  - **THE WHOLE STORY LIVES ONCE, IN THE STORY VIEW; the pane shows its own share.** The Open PRs
-    stack header carries the coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; the
+  - **THE WHOLE STORY LIVES ONCE, IN THE STORY VIEW; the pane shows its own share.** The story
+    view's stack header (the CARDS; Open PRs' row groups show the key and name only) carries the
+    coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; the
     story view (§ The story view) adds the "Story" section (`Activity/TicketStorySection.tsx`, always
     open), which reads the run by the states' `latestRunId`: summary, every criterion with "Done in api#88" / "Belongs in …", missing and
     not-asked-for items, currency pill, the Story — and NO Post buttons (`viewedPrId: null` in the
@@ -2402,7 +2436,7 @@ the next refetch.
 
 ### This Sprint (a fixed tab — formerly "Activity → This Sprint")
 
-**Story tray over the board (2026-11-01).** Wide screens: default width `min(35rem, 55%)` (a dragged width in `limn:sprintTrayWidth` still wins). The tray reports its width (`onWidth`); the board adds exactly that much scroll room after its last column (LaneBoard `endRoom` — padding outside an unchanged content box, so no column narrows), removed on close. The open card is scrolled to just left of the tray (`Sprint/trayBoard.ts` `revealCard`) once per card opened, only when hidden or covered. It wears the accent ring + a left accent bar + `aria-current`; cards in its row under the tray show as "+N under the panel" (`TrayRowMarker`; a click opens the nearest). Previous/Next in the tray header and j/k (not while typing or under a popover/modal; also in ⌘K) step through cards in rendered order, per view, skipping collapsed cells. A click on the board outside a card and its controls closes the tray (native listener on `sprint-view`; portalled popovers never count); Escape closes and refocuses the card. The tray draws NO ticket design (`TicketStack withDesign={page || embedded}`).
+**Story tray over the board (2026-11-01).** Wide screens: default width `min(35rem, 55%)` (a dragged width in `limn:sprintTrayWidth` still wins). The tray reports its width (`onWidth`); the board adds exactly that much scroll room after its last column (LaneBoard `endRoom` — padding outside an unchanged content box, so no column narrows), removed on close. The open card is scrolled to just left of the tray (`Sprint/trayBoard.ts` `revealCard`) once per card opened, only when hidden or covered. It wears the accent ring + a left accent bar + `aria-current`; cards in its row under the tray show as "+N under the panel" (`TrayRowMarker`; a click opens the nearest). Previous/Next in the tray header and j/k (not while typing or under a popover/modal; also in ⌘K) step through cards in rendered order, per view, skipping collapsed cells. A click on the board outside a card and its controls closes the tray (native listener on `sprint-view`; portalled popovers never count). The tray's `<aside>` is `data-noactivate`, so `cardClickActivates` (PrCardShell.tsx) counts only controls INSIDE the card (and refuses a target outside the card's DOM, a portal): a PR card in the tray opens its PR, and its "Merged (n)" rows do too (2026-11-02 — before, every tray card click was swallowed); Escape closes and refocuses the card. The tray draws NO ticket design (`TicketStack withDesign={page || embedded}`).
 
 **REDESIGN (2026-10, docs/redesign/DESIGN.md).** One page header (`text-display` "This Sprint", then the
 shared `Tabs` — `1`–`4` switch them); a compact toolbar (sprint name + ⓘ, dates · tickets; Ask / Statuses as
@@ -4904,7 +4938,7 @@ shared between the header sync button and the WorkspaceManager's embedded progre
 
 ⚠ **Never add an independent `fixed` toast element, and never a second strip.** The old
 bottom-right column (itself the fix for three `fixed bottom-4 right-4` elements painting over
-each other) is GONE: every toast is now a horizontal card in the top header, in
+each other) is GONE: every toast is now a circle in ONE cluster at the top right, in
 `<HeaderToastStrip>`, which fills the right of the slim `TopBar` (components/shell/TopBar.tsx; the
 controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
 foot). App.tsx mounts, left to right: `UndoToast` (FIRST — it lives seconds and must be reachable
@@ -4916,58 +4950,46 @@ On lg+ a page with its own header seats the strip there and the empty top bar hi
 (the story tab) and the full-screen PR detail tab, both through `PageToastSlot`. The bottom PR pane on
 the Timeline never hosts it.
 
-- **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;
-  below `sm` the words are `max-sm:sr-only`, leaving the icon, the action and the X), one line
-  layout: icon · label · summary · [one on-line action] · [X]. ⚠ **ONE LINE WHEN COLLAPSED, ALWAYS**
-  — the words are `truncate` (nowrap + ellipsis) and the full text is in the expanded panel and the
-  toggle's accessible name. ⚠ Never `sr-only sm:not-sr-only`: `not-sr-only` sets `white-space:
-  normal` + `overflow: visible`, which beat `truncate` and wrapped "Merge when ready · 2 armed · 4
-  merged" onto a second, clipped line inside the 26px card.
-- **THE TOP BAR HAS A FIXED HEIGHT** (`h-11`, no vertical padding, `TopBar`). It used to be
-  content-sized (`py-2`), so a 28px card made it 45px against 43px with no toast and the whole page
-  jumped as cards came and went; measured 44px both ways now.
-- **EXPANDS ON CLICK, NEVER ON HOVER OR FOCUS, and only when it has more to show** (`children` /
-  `footer`, or a line truncated sideways — including the words hidden at a narrow width). The whole
-  line is the click target; a `<button aria-expanded>` inside it is the keyboard stop (Enter /
-  Space) and its click bubbles to the same toggle. A card that opened under a passing pointer
-  covered the page the reader was aiming at. **The expanded panel is laid out the same on every
-  card**: the card's line again (now wrapping, so the full text shows), then the rows (`ToastList` +
-  `ToastRow`), then the `footer` (secondary actions such as `ToastShowMore` / "Dismiss finished",
-  and a short note). The detail is MOUNTED ONLY WHILE EXPANDED, so nothing focusable hides inside a
-  clipped one-line card. The panel lifts to `position: fixed` and OVERLAYS the page — fixed, not
-  absolute, because the strip is a horizontal scroller and a scroller clips both axes. ⚠ **It
-  anchors at the card's TOP-LEFT** (`anchorToastPanel`, `lib/toastAnchor.ts`): its top-left corner
-  sits exactly on the collapsed card's, it grows RIGHT and DOWN only (at least 320px wide, at most
-  448px tall), and only a panel that would cross the viewport's right gutter shifts left, by just
-  enough. (The old "grow leftwards from the slot's right edge" rule existed for hover-to-expand,
-  which is gone.) It closes on a second click on the line, on any press outside the panel
-  (`pointerdown`, capture — so pressing another card closes this one before that one opens), on
-  Escape wherever focus is, and on any scroll or resize (the rect is stale). Only one card is
-  expanded at a time. ⚠ The X and the on-line `action` (`ToastLineButton`) STOP PROPAGATION, so
-  dismissing or pressing Undo / Reopen never toggles the card.
+- **A CLUSTER OF CIRCLES, ONE PER ACTIVE JOB** (2026-11-02; it replaced the row of one-line cards).
+  Each job component still renders ONE `HeaderToast`, which PORTALS a 28px circle into the cluster
+  button and, while the panel is open, its section into the panel. A circle is the job's icon, a
+  PROGRESS RING when `progress` is set, a COUNT BADGE (`count`), and a red ring + dot when `alert`
+  (a failed merge or AI fix, failed dependency results, the AI budget pause). Circles overlap like an
+  avatar stack; `toastRank` (lib/toastAnchor.ts) puts alert > on-line action (Undo, Reopen) >
+  progress > the rest, newest first within a tier, furthest RIGHT and on top — and the panel lists
+  the sections in that same order, top down. Each circle keeps its words `sr-only` (the live region
+  announces a circle appearing; `undo-toast` etc. test ids sit on the circle, the section is
+  `<testId>-panel`). ⚠ **The cluster's click is a NATIVE listener**: a React `onClick` on the button
+  never fires for a click on a portalled circle (React bubbles through the job's own tree).
+- **THE TOP BAR HAS A FIXED HEIGHT** (`h-11`, no vertical padding, `TopBar`); the cluster is 32px
+  inside it and an empty cluster is `hidden`, never unmounted (the circles portal into it), so a job
+  appearing never moves the page.
+- **CLICK EXPANDS, LEFTWARDS.** The cluster is one `<button aria-expanded aria-controls>`. The panel
+  (`data-testid="header-toast-panel"`) is `position: fixed`, `z-[60]`, its right edge on the
+  cluster's, and it grows LEFT as far as its content needs but never past the main content's left
+  edge (`anchorClusterPanel`; `[data-shell-main]` in App.tsx, so the docked sidebar's edge, or the
+  viewport gutter when the sidebar is a drawer); past that it truncates/wraps, and past
+  `TOAST_PANEL_MAX_H` (560px) it scrolls. It unfolds from the right (`animate-ui-unfold-left`,
+  `motion-safe` only). Opening moves focus into the panel; it closes on a second click on the
+  cluster, a press anywhere outside both, Escape (focus back to the cluster), a resize or an outside
+  scroll. ⚠ While open it HOLDS THE ONE POPOVER SLOT (`claimActivePopover`) and takes Escape in the
+  window CAPTURE phase, stopped — so the page's single-letter shortcuts stand down, a drawer's own
+  Escape does not fire under it, and a modal opening over it closes it. Each section is laid out the same: icon · label · summary · [on-line action] · [X], then
+  its progress bar, its rows (`ToastList` + `ToastRow`), its `footer`. The detail is MOUNTED ONLY
+  WHILE OPEN. ⚠ An Undo now takes two clicks (cluster, then Undo); its circle ranks just under an
+  alert so it is the one on top.
 - ⚠ **THE PANEL IS ITS OWN ONE SCROLLER, `overscroll-behavior: contain`, AND THE ROOT IS
-  `overscroll-behavior: none`** (`index.css`). A fixed box's scroll parent is the VIEWPORT, not the
-  pane under it, so a wheel the panel could not use chained to the root — and this app's root never
-  scrolls, so on macOS the gesture became the root's ELASTIC OVERSCROLL: the whole shell slid up with
-  a blank band at the bottom, and because a wheel gesture latches to the scroller it began on,
-  wheeling the page afterwards kept rubber-banding it (a content pane reaching its own end did the
-  same). Rows therefore never carry their own `max-h-* overflow-auto` (a second scroller is a second
-  chain), and the strip is `overscroll-contain` too. Reproduced and verified by
-  `scripts/.ui-artifacts/toasts2-verify.mjs` (blank rows at the bottom mid-gesture: 82 before, 0
-  after).
-- **ITS BORDER NAMES ITS SOURCE, AND ITS PROGRESS BAR WEARS THE SAME TONE** (`tone`,
-  `HEADER_TOAST_TONE` — ONE record holding `border` and `fill` per tone): `ai`
-  (`ai-signal-fill` — Claude reviews, AI fixes), `merge` (the merge family's violet — merge when
-  ready, dependency results), `sync` (`sky-500` — loading data), `attention` (the Pending rail's
-  `amber-500` — My Turn undo), `conflicts` (`--mr-conflict` — the resolver reopen), `neutral`
-  default. Border ONLY on the card: the background stays neutral, and the icon and label already say
-  the same thing in words. Error states keep their own red text and icon.
-- **`HeaderToast` props**: `label` (leads the line, names the card's `role="group"`), `icon` (from
-  `Icons.tsx`, `size={13}`), `summary`, `action` (ONE compact `ToastLineButton` kept on the line —
-  Undo, Reopen — never hidden behind a hover), `onDismiss` + `dismissLabel` (the X, named
-  "Dismiss …"; ABSENT = not dismissible, no X), `progress` (a bar along the bottom of the line, which
-  stays on the collapsed card), `tone` (the border and the bar, above), `children` (the rows),
-  `footer` (the panel's last line).
+  `overscroll-behavior: none`** (`index.css`). A fixed box's scroll parent is the VIEWPORT, so a
+  wheel the panel could not use chained to the root and became macOS's ELASTIC OVERSCROLL (the shell
+  slid up with a blank band). Rows therefore never carry their own `max-h-* overflow-auto`.
+- **ITS TONE NAMES ITS SOURCE** (`tone`, `HEADER_TOAST_TONE` — ONE record holding the icon `mark`,
+  the bar `fill` and the ring `stroke`): `ai` (Claude reviews, AI fixes, the budget), `merge` (merge
+  when ready, dependency results), `sync` (loading data), `conflicts` (the resolver reopen),
+  `neutral`/`attention` grey. The icon and label say the same thing in words.
+- **`HeaderToast` props**: `label` (names the circle, leads the section, names the X), `icon` (from
+  `Icons.tsx`, `size={13}`), `summary`, `action` (ONE `ToastLineButton` on the section's line — Undo,
+  Reopen), `onDismiss` + `dismissLabel` (the X; ABSENT = no X), `progress` (ring + bar), `count`
+  (badge), `alert` (red ring + dot, ranks first), `tone`, `children` (the rows), `footer`.
   Each toast keeps its own dismiss semantics: AI fixes and merge-when-ready offer the X only once
   nothing is still running/armed; the loading bar is an INDICATOR with no X and no action; the
   timed toasts (resolver reopen 20s, dependency results 15s, My Turn undo 10s) still auto-remove.
@@ -4976,12 +4998,11 @@ the Timeline never hosts it.
   button "Show N more" (`aria-expanded`, `aria-controls` the list) that reveals EVERY row inside
   the expanded panel, which scrolls within its max height, and then reads "Show fewer". It sits
   inside the panel, so clicking it keeps the card open and Escape still collapses it.
-- **Claude reviews** (`ClaudeReviewBanner`) is a `HeaderToast` like the rest: "N running" / "N ready"
-  on the line, each review (open it, or its own X once ready) in the expanded panel, the card's X once
-  nothing is running.
-- **The strip is the polite live region** (`role="status"`, `aria-atomic="false"`,
-  `aria-relevant="additions"`) — cards are not, so a card (or a row in one) appearing is
-  announced and a percentage ticking in place is not.
+- **Claude reviews** (`ClaudeReviewBanner`) is a `HeaderToast` like the rest: "N running" / "N ready",
+  each review (open it, or its own X once ready) in its section, the job's X once nothing runs.
+- **The cluster is the polite live region** (`role="status"`, `aria-atomic="false"`,
+  `aria-relevant="additions"`) — the panel is not, so a circle appearing is announced and a
+  percentage ticking in place is not.
 
 ### The armed-merge progress stack (`AutoMergeBanner`)
 
@@ -5004,6 +5025,15 @@ already showing.
 - **Adaptive poll, one query**: `useArmedMerges` is 8s while any row is `armed`, 45s otherwise,
   `refetchIntervalInBackground:false`. ⚠ The stack must NEVER call `useMergeOptions` per armed PR
   (~3 GitHub calls each) — the row carries its own repo/PR identity precisely so it doesn't.
+- **ONE ROW PER ARMING, ONE STATUS** (2026-11-02): `[dot] [repo#n title] [status] [time since] [Cancel |
+  Dismiss]` on a shared grid, so the columns line up. The status is `liveMergeStatus` /
+  `outcomeMergeStatus` ("Waiting for CI", "Merging", "Blocked: needs approval", "Merged", "Failed:
+  <short reason>"); ⚠ never a phase line plus a reason line again — the watcher's `lastReason` (and
+  "Armed automatically") ride the status's tooltip, and only `shortMergeReason` of it ends a
+  "Failed:"/"Stopped:" status. The time is since `armedAt` (live) or since the outcome landed
+  (`Outcome.at` = the row's `lastCheckedAt`, which the watcher's terminal write stamps; ⚠ never "when
+  this tab saw it" — a reload surfaces an hours-old outcome through the persisted baseline), re-rendered
+  every 30s. `armedPhaseHeadline` stays the Pending board's spelling.
 - **Indicator + Cancel only.** Arming is consent anchored to `expectedHeadOid` and exactly ONE UI
   path (`MergeWhenReadyControl`) may arm; the stack must never grow a re-arm / "update now" /
   freshen action. Rows are click-to-open (`openPrDetailTab`), capped at 4; a "Show N more" button (`ToastShowMore`, `HeaderToasts.tsx`) reveals every row inside the expanded card, which scrolls within its max height, then reads "Show fewer". Outcomes are still remembered 5 at a time.
@@ -5411,6 +5441,10 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   (`ExpandAllIcon` / `CollapseAllIcon`, `aria-label` + `title`) sit above it, open every
   `docTreeBranchKeys` key or none, and disable themselves when there is nothing left to do. The open
   set is `useState` in `DocTree` — closing the document forgets it; nothing reaches the store or URL.
+  **A NAME works like its chevron too** (2026-11-02, `lib/referenceDocs.ts` `contentsNameClick`, a
+  document's row and a section with rows under it): closed → open it in the viewer and expand;
+  expanded AND on show → collapse (it stays on show); expanded but something else on show → open it,
+  still expanded. Buttons, so Enter / Space do the same. Pinned in `test/docsContentsNameClick.test.ts`.
 - **Build progress**: an SSE stream per document the server is WORKING ON (`GET /api/docs/:id/stream`)
   patches its row in the list cache; `done` patches the status and invalidates the list, trees and
   sections. ⚠ **A `queued` row is NEVER streamed and at most `MAX_DOC_STREAMS` (2) are open**: each

@@ -90,7 +90,7 @@ describe('the AI Review tab wide layout', () => {
     expect(diagrams.match(/<RailWide className=/g)?.length).toBe(1);
     expect(diagrams).toMatch(/<RailWideToggle className="ml-auto" \/>/);
     expect(diagrams).not.toMatch(/data\.stories\.map/);
-    expect(tab).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/);
+    expect(tab).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}[^>]*>/);
   });
   it('every section the nav lists is marked where it renders', () => {
     const marks: Record<string, string> = {

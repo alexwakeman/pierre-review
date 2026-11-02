@@ -1423,6 +1423,15 @@ look that succeeds (`stampRepoScanned`); while set the repository is not looked 
 `accountScopedTables()` is unchanged and the export carries them. docs/REFERENCE-DOCS.md § A repository
 whose files can't be read. Journal `idx` 158, `when` sqlite `1792224061016`.
 
+### `0159_team_claims_default_on` — team claims ON by default + `team_claim_seen`
+`UPDATE workspaces SET team_claims_enabled = 1` (every workspace, a switched-off one included — the
+owner: "Just on by default on all workspaces"); from now NULL reads ON, only a stored false is off. And
+a NEW table `team_claim_seen` (one row per `(account_id, pr_id, head_sha, provider)`, unique index
+`team_claim_seen_account_pr_head_provider`): the teammate line this Limn stood down for, read by the AI
+Review tab. No FK on `pr_id`: both delete paths delete its rows inside `deleteSettledClaimLinesForPrs`;
+the erasure deletes it and `accountScopedTables()` lists it. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team
+claims → THE TEAMMATE'S LINE ON THE TAB. Journal `idx` 159, `when` sqlite `1792224062016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

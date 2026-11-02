@@ -13,6 +13,7 @@
 //      and the code consolidation naming the failed half otherwise.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/pair-pipeline
+import { clearUsageLockout } from '../../ai/usage-lockout.js';
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeReview } from '@pierre-review/shared';
@@ -159,6 +160,8 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  // A Codex "usage limit" in one test locks Codex out of automatic runs (ai/usage-lockout.ts).
+  clearUsageLockout();
   calls.length = 0;
   ended.length = 0;
   autoPostCalls.length = 0;
@@ -366,6 +369,92 @@ describe('an auto pair', () => {
     } finally {
       (ctx.review as any).runReview = orig;
       await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
+    }
+  });
+});
+
+describe('a usage limit is a lockout (ai/usage-lockout.ts)', () => {
+  it('Codex locked out ⇒ an auto pair runs Claude alone (one row, no pair); nothing is retried', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'both' });
+    const { noteProviderFailure } = await import('../../ai/usage-lockout.js');
+    noteProviderFailure('codex', 'Codex could not finish: You’ve hit your usage limit. Try again in 40 minutes.', Date.now());
+    try {
+      const prId = await newPr();
+      expect(manager.enqueueAutoReview(ctx, 1, prId, wsId)).toBe('queued');
+      const runs = await settled(prId, 1);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(runs).toHaveLength(1);
+      expect(runs[0]).toMatchObject({ trigger: 'auto', provider: 'claude', status: 'succeeded' });
+      expect(runs[0]!.pair ?? null).toBeNull();
+      expect(calls.map((c) => c.provider)).toEqual(['claude']);
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
+    }
+  });
+
+  it('a MANUAL press of Codex is never blocked', async () => {
+    const { noteProviderFailure } = await import('../../ai/usage-lockout.js');
+    noteProviderFailure('codex', 'You’ve hit your usage limit. Try again in 40 minutes.', Date.now());
+    const prId = await newPr();
+    const r = await manager.startReview(ctx, 1, prId, 'claude-opus-5-5' as any, 'codex');
+    expect(r.ok).toBe(true);
+    const runs = await settled(prId, 1);
+    expect(runs[0]).toMatchObject({ provider: 'codex', trigger: 'manual' });
+  });
+});
+
+describe('the run watchdog (run-watchdog.ts)', () => {
+  it('a run cut off by a sleep is FAILED with a transient reason (never cancelled) and its seat released', async () => {
+    const { INTERRUPTED_SLEPT, WAKE_GRACE_MS } = await import('./run-watchdog.js');
+    const { classifyAutoReviewFailure } = await import('./auto-retry.js');
+    const orig = ctx.review.runReview;
+    // A run that hangs until it is aborted (a dead connection after the lid opened).
+    (ctx.review as any).runReview = (args: RunReviewArgs) =>
+      new Promise((resolve) => {
+        args.abortController?.signal.addEventListener('abort', () =>
+          resolve({ submitted: false, aborted: true, costUsd: null, inputTokens: null, outputTokens: null, numTurns: 0 } as any),
+        );
+      });
+    try {
+      const prId = await newPr();
+      expect(manager.enqueueAutoReview(ctx, 1, prId, wsId)).toBe('queued');
+      for (let i = 0; i < 200 && manager._watchdogRunsForTest().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      // Let the run reach the agent (its last progress is then before the wake).
+      await new Promise((r) => setTimeout(r, 100));
+      const now = Date.now() + 60_000;
+      manager._setWatchdogLastTickForTest(now - 30 * 60_000); // the timer did not fire for 30 minutes
+      await manager.watchdogTick(now);
+      expect(manager._watchdogRunsForTest()[0]).toMatchObject({ wokeAtMs: now, interrupted: null });
+      await manager.watchdogTick(now + WAKE_GRACE_MS);
+      const [run] = await settled(prId, 1);
+      expect(run).toMatchObject({ status: 'failed', error: INTERRUPTED_SLEPT, trigger: 'auto' });
+      expect(classifyAutoReviewFailure(run!.error)).toBe('transient');
+      expect(manager._watchdogRunsForTest()).toEqual([]);
+    } finally {
+      (ctx.review as any).runReview = orig;
+    }
+  });
+
+  it('a run that ignores its abort is released anyway (FORCE_RELEASE_MS), so the queue moves', async () => {
+    const { INTERRUPTED_STALLED, STALL_MS, FORCE_RELEASE_MS } = await import('./run-watchdog.js');
+    const orig = ctx.review.runReview;
+    (ctx.review as any).runReview = () => new Promise(() => {}); // never ends, ignores the abort
+    try {
+      const prId = await newPr();
+      manager.enqueueAutoReview(ctx, 1, prId, wsId);
+      for (let i = 0; i < 200 && manager._watchdogRunsForTest().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 100));
+      const t = Date.now() + STALL_MS + 1000;
+      manager._setWatchdogLastTickForTest(t - 30_000);
+      await manager.watchdogTick(t);
+      expect(manager._watchdogRunsForTest()[0]).toMatchObject({ interrupted: INTERRUPTED_STALLED });
+      manager._setWatchdogLastTickForTest(t + FORCE_RELEASE_MS - 30_000);
+      await manager.watchdogTick(t + FORCE_RELEASE_MS);
+      const [run] = await settled(prId, 1);
+      expect(run).toMatchObject({ status: 'failed', error: INTERRUPTED_STALLED });
+      expect(manager._watchdogRunsForTest()).toEqual([]);
+    } finally {
+      (ctx.review as any).runReview = orig;
     }
   });
 });

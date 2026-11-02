@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TimelinePr } from '@pierre-review/shared';
-import { ciStatusIcon, leadStatus, reviewStanding } from '../src/components/Activity/OpenPrsRows.js';
+import { ciStatusIcon, leadStatus, openPrsColumns, reviewStanding } from '../src/components/Activity/OpenPrsRows.js';
 
 const src = (p: string): string => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
@@ -113,14 +113,32 @@ describe('the wiring', () => {
     expect(ai).not.toMatch(/PILL|rounded-ui bg-|bg-ai-surface|ring-1/);
   });
 
-  it('a ticket group folds (per session, never stored) and keeps its ticket line', () => {
+  it('a ticket group folds (per session, never stored); its line is the key, the story name and the PR count only', () => {
     const group = rows.slice(rows.indexOf('function TicketGroup('), rows.indexOf('function MergedRows('));
     expect(group).toMatch(/aria-expanded=\{!folded\}/);
     expect(group).toMatch(/<TicketKeyButton/);
-    expect(group).toMatch(/<GroupCoverage/);
     expect(group).toMatch(/prCountLabel\(stack\.rows\.length\)/);
-    expect(rows).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'ticket_review'\)/);
+    // Status, type, assignee, criteria met, Re-check, "changed since", "reviewed ago" and the roll-up
+    // live in the story view, not on the group line.
+    expect(group).not.toMatch(/TicketFacts|GroupCoverage|stackRollup|<ReviewedAgo|useStartTicketReview|t\.assignee|t\.issueType|t\.status/);
     expect(src('store/openPrsView.ts')).not.toMatch(/folded|collapsed/);
+  });
+
+  it('the icon columns: ONE spec for the heading row and every row, fixed widths, plain labels', () => {
+    const all = openPrsColumns({ claudeOn: true, compact: false });
+    expect(all.map((c) => c.label)).toEqual(['Review', 'CI', 'Threads', 'AI review', 'Size', 'Author', 'Updated']);
+    for (const c of all) {
+      expect(c.width).toBeGreaterThanOrEqual(36);
+      expect(c.title.length).toBeGreaterThan(0);
+    }
+    // No AI column where AI does not run; the docked panel takes size and author.
+    expect(openPrsColumns({ claudeOn: false, compact: false }).map((c) => c.key)).not.toContain('ai');
+    expect(openPrsColumns({ claudeOn: true, compact: true }).map((c) => c.key)).toEqual(['review', 'ci', 'threads', 'ai', 'age']);
+    // The row and the heading draw the same cells from the same spec.
+    const row = rows.slice(rows.indexOf('function PrRow('), rows.indexOf('function TicketGroup('));
+    expect(row).toMatch(/openPrsColumns\(\{ claudeOn: data\.claudeOn, compact \}\)/);
+    expect(row).toMatch(/<ColCell key=\{col\.key\} col=\{col\}/);
+    expect(rows).toMatch(/<ColumnHeadings columns=\{openPrsColumns\(\{ claudeOn: props\.claudeOn, compact: compactRows \}\)\}/);
   });
 
   it('the Feed marks My Turn with the accent bar and the words, not a yellow border', () => {

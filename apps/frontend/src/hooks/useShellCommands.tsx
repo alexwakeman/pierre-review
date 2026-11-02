@@ -272,10 +272,10 @@ export function useShellCommands({
         hint: `${armedCount} armed`,
         icon: <MergeIcon size={14} />,
         keywords: ['auto-merge', 'armed', 'queue'],
-        // Opens the one "Merge when ready" card in the header strip (AutoMergeBanner).
+        // Opens the header toast panel, where "Merge when ready" lists every arming (AutoMergeBanner).
         run: () => {
           window.setTimeout(() => {
-            document.querySelector<HTMLElement>('[data-testid="auto-merge-toast"] [aria-expanded="false"]')?.click();
+            document.querySelector<HTMLElement>('[data-testid="header-toast-cluster"][aria-expanded="false"]')?.click();
           }, 0);
         },
       });

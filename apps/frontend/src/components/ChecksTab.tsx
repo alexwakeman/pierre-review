@@ -316,16 +316,19 @@ function SuggestedReviewersRow({
 }
 
 // The PR description (markdown), shown in the Overview between "Merged by" and
-// "Checks". Collapsed to the first three lines by default with a Show more/less
+// "Checks". Collapsed to the first eight lines by default (`SUMMARY_COLLAPSED_LINES`) with a Show more/less
 // toggle — surfaced only when the body actually overflows. No own top border: it
 // sits inside the divide-y section list, which separates it from its neighbours.
+/** How many lines of the PR summary show while it is collapsed. */
+const SUMMARY_COLLAPSED_LINES = 8;
+
 function PrSummary({ body }: { body: string }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const [hasHiddenImage, setHasHiddenImage] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Classify "tall" images (screenshots) so the collapsed 3-line preview can hide
+  // Classify "tall" images (screenshots) so the collapsed preview can hide
   // them instead of letting -webkit-line-clamp squash them — they reappear once
   // expanded. We measure from NATURAL dimensions: the clamp constrains rendered
   // height, so offsetHeight would read the (wrong) squashed value. The class lands
@@ -340,7 +343,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
     const el = ref.current;
     if (!el) return;
     // Only HIDE genuinely tall screenshots; allow moderately tall images to ride
-    // along in the collapsed preview (they're cropped by the 3-line clamp like any
+    // along in the collapsed preview (they're cropped by the line clamp like any
     // overflow, no longer squashed — see .md-body img width/height:auto). 160px ≈
     // 2-3× the preview height; e.g. PR #77's ~384px render stays hidden, a ~100px
     // inline image does not.
@@ -435,7 +438,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           style={
             expanded
               ? undefined
-              : { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }
+              : { display: '-webkit-box', WebkitLineClamp: SUMMARY_COLLAPSED_LINES, WebkitBoxOrient: 'vertical' }
           }
         >
           <Markdown>{body}</Markdown>

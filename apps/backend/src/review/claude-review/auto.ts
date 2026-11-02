@@ -116,6 +116,7 @@ import {
   classifyAutoReviewFailure,
   parseRetryAtMs,
 } from './auto-retry.js';
+import { usageLockout } from '../../ai/usage-lockout.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
 import { teamClaimHeldHead } from './team-claim.js';
@@ -175,6 +176,8 @@ export interface AutoRetryInput {
   currentProvider: 'claude' | 'codex';
   /** The failed provider's usage reading's reset for this failure (`usageResetFromReading`), if any. */
   usageResetAtMs?: number | null;
+  /** When the failed provider's usage LOCKOUT ends (ai/usage-lockout.ts), or null when it is not locked. */
+  lockedUntilMs?: number | null;
 }
 
 /**
@@ -211,6 +214,12 @@ export function autoReviewDue(input: {
     const kind = classifyAutoReviewFailure(retry.error);
     if (kind === 'final') return { due: false, reason: 'not_retryable' };
     if (retry.attempts >= AUTO_RETRY_MAX_ATTEMPTS) return { due: false, reason: 'attempts_used' };
+    // ⚠ A USAGE LIMIT IS A LOCKOUT: while the provider that hit it is still locked out, the failure is
+    // not retried — not even when the default provider changed (a pair would run the locked half
+    // again; 2026-11-02, PR 199965: three failures a minute apart).
+    if (kind === 'usage_limit' && retry.lockedUntilMs != null && retry.lockedUntilMs > nowMs) {
+      return { due: false, reason: 'retry_wait', retryAtMs: retry.lockedUntilMs };
+    }
     if (retry.failedProvider !== retry.currentProvider) return { due: true };
     const resetAtMs =
       kind === 'usage_limit' ? (parseRetryAtMs(retry.error, retry.failedAtMs) ?? retry.usageResetAtMs ?? null) : null;
@@ -412,7 +421,9 @@ export async function runAutoReviewSweep(
     // A PRESS does not ask: the reader chose the run (the SPA's two-press confirm ran when over).
     const budgetOk = new Map<number, boolean>();
     for (const accountId of pressed ? [] : new Set(roster.map((w) => w.accountId))) {
-      const ok = await automaticRunAllowed(ctx, accountId, 'auto review');
+      // `null`: the budget only — the usage-limit lockout is asked per item, when its provider is
+      // chosen (manager.ts startAutoItem moves a locked default to the other provider).
+      const ok = await automaticRunAllowed(ctx, accountId, 'auto review', null);
       budgetOk.set(accountId, ok);
       if (!ok) result.overBudget = true;
     }
@@ -508,6 +519,7 @@ export async function runAutoReviewSweep(
             failedProvider: cand.provider,
             currentProvider: providerNow,
             usageResetAtMs,
+            lockedUntilMs: usageLockout(cand.provider, nowMs)?.untilMs ?? null,
           },
           pressed,
         });

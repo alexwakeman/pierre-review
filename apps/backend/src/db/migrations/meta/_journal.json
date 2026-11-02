@@ -1114,6 +1114,13 @@
       "when": 1792224061016,
       "tag": "0158_repo_docs_unreadable",
       "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "6",
+      "when": 1792224062016,
+      "tag": "0159_team_claims_default_on",
+      "breakpoints": true
     }
   ]
 }

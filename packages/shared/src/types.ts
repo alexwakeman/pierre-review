@@ -3792,6 +3792,9 @@ export interface AiClaudeProviderStatus {
   runtime?: 'ready' | 'absent' | 'installing' | 'failed';
   /** While 'installing', the current step; when 'failed' (or stale), why. Optional: an older server omits it. */
   runtimeMessage?: string | null;
+  /** Claude hit its usage limit: automatic runs stand down until this time (ISO-8601); a reader's press
+   *  still runs (ai/usage-lockout.ts). null/absent = not locked out. */
+  usageLockedUntil?: string | null;
 }
 
 /** `MeResponse.ai.providers.codex` — the Codex install and Limn's own Codex sign-in. */
@@ -3819,6 +3822,9 @@ export interface AiCodexProviderStatus {
    * sentence (not ported yet, not set up, no sign-in).
    */
   kinds: Record<AiRunKind, AiKindStatus>;
+  /** Codex hit its usage limit: automatic runs stand down until this time (ISO-8601); a reader's press
+   *  still runs (ai/usage-lockout.ts). null/absent = not locked out. */
+  usageLockedUntil?: string | null;
 }
 
 /**
@@ -7483,6 +7489,10 @@ export interface ClaudeReviewResponse {
   // TEAM CLAIMS: the auto review at the PR's current head was SKIPPED because a teammate's Limn
   // holds it (in memory; a restart forgets it). null/absent = not skipped.
   teamClaimSkip?: ClaudeTeamClaimSkip | null;
+  // EVERY teammate line this Limn stood down for at the PR's CURRENT head, one per provider, Claude's
+  // first — DURABLE (`team_claim_seen`, migration 0159), so the tab still says "Robin Dunn reviewed
+  // this commit with Claude · no comments" after a reload or a restart. Absent/empty = none.
+  teamClaimTeammates?: ClaudeTeamClaimSkip[];
   // The pending Limn line at the current head a "Clear" would replace with "Cleared by <you>"
   // (a teammate's live claim, or this machine's unfinished run). null/absent = nothing to clear.
   teamClaimPending?: ClaudeTeamClaimPending | null;
@@ -7505,6 +7515,11 @@ export interface ClaudeTeamClaimSkip {
   headSha: string;
   // When their line was posted (ISO-8601).
   at: string;
+  // Their line as GitHub shows it ("robin-dunn reviewed · no comments"). Optional: absent on a skip
+  // remembered before 2026-11-02.
+  description?: string | null;
+  // The teammate's display name from the synced users table, when known ("Robin Dunn").
+  name?: string | null;
 }
 
 export interface ClaudeTeamClaimPending {

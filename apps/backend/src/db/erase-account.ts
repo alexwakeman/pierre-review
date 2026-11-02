@@ -214,6 +214,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.sonarSnapshots).where(eq(schema.sonarSnapshots.accountId, accountId)).execute();
     // The team-claim ledger (migration 0138): GitHub logins and heads. No FK, so this is the whole guarantee.
     await tx.delete(schema.teamClaimLines).where(eq(schema.teamClaimLines.accountId, accountId)).execute();
+    // The teammate lines the AI Review tab names (migration 0159): GitHub logins. No FK.
+    await tx.delete(schema.teamClaimSeen).where(eq(schema.teamClaimSeen.accountId, accountId)).execute();
     // The worktree ledger (migration 0146): which PR / ticket a checkout on disk was for. No FK. The
     // directories themselves become unledgered orphans the worktree sweep collects by age.
     await tx.delete(schema.worktreeLedger).where(eq(schema.worktreeLedger.accountId, accountId)).execute();
@@ -412,6 +414,8 @@ export function accountScopedTables(): {
     { name: 'sonarSnapshots', col: schema.sonarSnapshots.accountId, table: schema.sonarSnapshots },
     // The team-claim ledger (migration 0138), erased explicitly above.
     { name: 'teamClaimLines', col: schema.teamClaimLines.accountId, table: schema.teamClaimLines },
+    // The teammate lines (migration 0159), erased explicitly above.
+    { name: 'teamClaimSeen', col: schema.teamClaimSeen.accountId, table: schema.teamClaimSeen },
     // The worktree ledger (migration 0146), erased explicitly above.
     { name: 'worktreeLedger', col: schema.worktreeLedger.accountId, table: schema.worktreeLedger },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },

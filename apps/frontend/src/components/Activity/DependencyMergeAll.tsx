@@ -227,6 +227,8 @@ export function DependencyMergeToast(): JSX.Element | null {
       summary={parts.length > 0 ? parts.join(' · ') : 'Nothing changed.'}
       onDismiss={clear}
       dismissLabel="Dismiss dependency update results"
+      count={last.length}
+      alert={failed.length > 0}
       footer={
         failed.length > FAILED_ROWS ? (
           <ToastShowMore

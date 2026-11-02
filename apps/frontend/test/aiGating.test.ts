@@ -178,10 +178,10 @@ describe('the wiring', () => {
     // (the chat, a plan pass, the build) goes to ONE provider, so its gate says `followUp`, never
     // `anyProvider` — a ready Codex must not offer Ask on a chat that will run on a signed-out Claude.
     expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(
-      /<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
+      /<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}[^>]*>/,
     );
     expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(
-      /<AiRunGate kind="fix" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
+      /<AiRunGate kind="fix" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}[^>]*>/,
     );
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(
       /<AiRunGate kind="review_chat" followUp provider=\{chatProvider\}>/,

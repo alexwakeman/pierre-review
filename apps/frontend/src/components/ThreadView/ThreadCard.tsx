@@ -11,6 +11,9 @@ import { ResolveThread } from './ResolveThread.js';
 import { ReplyComposer } from './ReplyComposer.js';
 import { isNewComment } from './NewCommentHighlight.js';
 import { ClaudeThreadReason, ThreadStatePill } from './ClaudeThreadBadge.js';
+import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
+import { threadPillFor } from '../../lib/claudeThreadMarker.js';
+import { threadEdgeColor } from '../../lib/threadEdge.js';
 
 // A single review thread rendered conversation-first: the code it's anchored to
 // sits inside the opening comment, replies follow as plain conversation.
@@ -84,9 +87,16 @@ export function ThreadCard({
         )
       : undefined;
 
+  // The state edge every thread card wears, resolved included (lib/threadEdge.ts). The judgements
+  // are the SAME batched read the state pill below makes.
+  const aiJudged = threadPillFor(thread, useClaudeThreadJudgements(thread.prId)).kind === 'claude';
+
   return (
     <div
-      className={`rounded-ui border px-2.5 py-2 ${
+      data-thread-state={thread.derivedState}
+      // Inline colour for the left edge: a border-l colour class loses to `border-ui-line`.
+      style={{ borderLeftColor: threadEdgeColor(thread.derivedState, aiJudged) }}
+      className={`rounded-ui border border-l-2 px-2.5 py-2 ${
         selected
           ? 'border-ui-line bg-ui-raise'
           : 'border-ui-line'

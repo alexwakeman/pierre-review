@@ -1,7 +1,12 @@
 import { useEffect } from 'react';
 import type { AiFixStatus } from '@pierre-review/shared';
-import { useIsMutating } from '@tanstack/react-query';
-import { aiFixPlanMutationKey, aiFixStartMutationKey, useAiFixStream } from '../hooks/useAiFix.js';
+import { useIsMutating, useQueryClient } from '@tanstack/react-query';
+import {
+  aiFixPlanMutationKey,
+  aiFixStartMutationKey,
+  prefetchAiFixTab,
+  useAiFixStream,
+} from '../hooks/useAiFix.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
@@ -67,6 +72,15 @@ export function AiFixBanner(): JSX.Element | null {
   // Oldest first: a run that has been going longest is the one whose finish is imminent, so it
   // is the one that keeps its stream when more than MAX_LIVE_STREAMS are open.
   const rows = Object.values(runs).sort((a, b) => a.startedAt - b.startedAt);
+  // A finished fix's details are loaded as soon as the toast knows it is ready — here, not only in
+  // the row, because the rows are mounted only while the cluster's panel is open.
+  const qc = useQueryClient();
+  const readyKey = enabled
+    ? rows.filter((r) => r.status === 'succeeded' || r.status === 'planned').map((r) => r.prId).join(',')
+    : '';
+  useEffect(() => {
+    for (const id of readyKey.split(',')) if (id !== '') prefetchAiFixTab(qc, Number(id));
+  }, [readyKey, qc]);
   if (!enabled || rows.length === 0) return null;
 
   const running = rows.filter((r) => !TERMINAL.has(r.status));
@@ -93,6 +107,8 @@ export function AiFixBanner(): JSX.Element | null {
         running.length === 0 ? () => rows.forEach((r) => dismissRun(r.prId)) : undefined
       }
       dismissLabel="Dismiss AI fix results"
+      count={running.length > 0 ? running.length : rows.length}
+      alert={rows.some((r) => r.status === 'failed')}
     >
       <ToastList>
         {rows.map((r) => (
@@ -140,10 +156,21 @@ function AiFixBannerRow({
 
   const finished = doneLine(run.status);
 
+  // A finished fix's details are loaded as soon as the row says so (and again on hover / press), so
+  // opening it shows the result at once (`prefetchAiFixTab`).
+  const qc = useQueryClient();
+  const warm = (): void => prefetchAiFixTab(qc, run.prId);
+  useEffect(() => {
+    if (run.status === 'succeeded' || run.status === 'planned') prefetchAiFixTab(qc, run.prId);
+  }, [run.status, run.prId, qc]);
+
   return (
     <ToastRow>
       <button
         type="button"
+        onPointerEnter={warm}
+        onFocus={warm}
+        onPointerDown={warm}
         onClick={() =>
           openAiFix({
             id: run.prId,

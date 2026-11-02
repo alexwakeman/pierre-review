@@ -11,6 +11,7 @@ import {
 import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 import { useMe } from '../hooks/useTriage.js';
 import { aiGateReadyFor } from '../lib/aiCapabilities.js';
+import { usageLockLines } from '../lib/usageLockout.js';
 
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
@@ -47,6 +48,7 @@ export function AiRunGate({
   anyProvider = false,
   followUp = false,
   provider,
+  lockProviders,
 }: {
   children: ReactNode;
   auth?: 'ok' | 'none';
@@ -55,6 +57,8 @@ export function AiRunGate({
   anyProvider?: boolean;
   followUp?: boolean;
   provider?: AiProviderId | null;
+  /** The providers the press runs on, for the usage-limit line (a pair: both; `[]`: no line). */
+  lockProviders?: readonly AiProviderId[];
 }): JSX.Element | null {
   const ai = useAiCapabilities();
   const me = useMe().data;
@@ -69,10 +73,18 @@ export function AiRunGate({
   }
   // A gate with nothing inside (a surface that only wants the setup/auth line) gets no budget UI.
   if (children == null) return null;
+  // A provider over its usage limit: the press still runs (only automatic runs stand down), so one
+  // plain line says so, on its own row. `lockProviders` when given, else the run's provider.
+  const lockLines = usageLockLines(me, lockProviders ?? (provider != null ? [provider] : [ai.provider]));
   return (
     <>
       <OverBudgetConfirm provider={provider}>{children}</OverBudgetConfirm>
       {meter && <AiBudgetMeter provider={provider} />}
+      {lockLines.map((line) => (
+        <span key={line} className="basis-full text-meta text-ui-mute">
+          {line}
+        </span>
+      ))}
     </>
   );
 }

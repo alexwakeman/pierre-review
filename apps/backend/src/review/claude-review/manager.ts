@@ -21,6 +21,8 @@ import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from './ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
+import { detectWake, FORCE_RELEASE_MS, runsToInterrupt, WATCHDOG_TICK_MS } from './run-watchdog.js';
+import { automaticRunProviders, isLockedOut, LOCKOUT_MAX_MS, noteProviderFailure, restoreUsageLockouts } from '../../ai/usage-lockout.js';
 import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
 import {
@@ -34,7 +36,7 @@ import {
   type PromptPairInput,
   type PromptPeer,
 } from './prompts.js';
-import { pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
+import { PAIR_ORDER, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
 import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
 import { markPairBusy } from './pair-view.js';
 import { preflightFor } from '../../ai/run-choice.js';
@@ -72,6 +74,7 @@ import {
   markReviewFailed,
   markReviewRouted,
   reconcileOrphanedReviewRuns,
+  failedRunsSinceLastSuccess,
   saveReviewSuccess,
   type ReconciledReviewRun,
   type ReviewPrContext,
@@ -143,6 +146,13 @@ interface QueueItem {
   // Set when the run (or its whole pair) ends: the auto-post it started, if any. The team claim's
   // final line waits for it (the comment count and the posted review's link).
   autoPosted?: Promise<AutoPostOutcome | null>;
+  // THE RUN WATCHDOG (run-watchdog.ts): the newest progress, the wake this run lived through, and —
+  // once interrupted — why (the row is FAILED with it, never cancelled) and the hard stop that ends a
+  // run which ignores its abort.
+  lastProgressMs?: number;
+  wokeAtMs?: number | null;
+  interrupt?: { reason: string; atMs: number };
+  forceStop?: () => void;
 }
 
 // The pair as one half carries it. The providers are resolved ONCE, when the pair starts. The two
@@ -518,10 +528,35 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
     if (!agenticRunReady(ctx, 'review')) return;
+    // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now — unless the workspace
+    // asks for Claude + Codex (`auto_review_providers = 'both'`): then a PAIR when both can review,
+    // else the one that can. ⚠ A provider LOCKED OUT by its usage limit (ai/usage-lockout.ts) never
+    // starts an automatic run: a pair runs its other half alone; a single run moves to the other
+    // provider when that one is ready, else the item is dropped with no row (a skip, not a failure).
+    // A READER'S PRESS is the reader's choice: it is not moved.
+    const detect = preflightFor(ctx);
+    const nowMs = Date.now();
+    const wantsPair = (await readAutoReviewProvidersForPr(ctx, accountId, prId)) === 'both';
+    const providers = automaticRunProviders({
+      defaultProvider: activeProviderId(),
+      pair: wantsPair,
+      order: PAIR_ORDER,
+      ready: (p) => detect(p, 'review').status === 'ok',
+      locked: (p) => !a.pressed && isLockedOut(p, nowMs),
+    });
+    if (providers.length === 0) {
+      ctx.log.info(`auto claude review pr ${prId}: skipped — no provider outside its usage limit`);
+      return;
+    }
+    let provider: AgentProviderId = providers[0]!;
+    let pair: PairState | undefined =
+      providers.length === 2
+        ? { role: 'first', pairId: 0, secondProvider: providers[1]!, ...(a.pressed ? { pressed: true } : {}) }
+        : undefined;
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
     // sweeper re-derives it once the budget is under its limit again.
     // A READER'S PRESS is not asked again: they chose it (the SPA's over-budget confirm ran).
-    if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review'))) return;
+    if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review', provider))) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
     // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered
@@ -531,18 +566,6 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId, a.pressed === true))) return;
     } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
-    // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now — unless the workspace
-    // asks for Claude + Codex (`auto_review_providers = 'both'`): then a PAIR when both can review,
-    // else the one that can.
-    let provider: AgentProviderId = activeProviderId();
-    let pair: PairState | undefined;
-    if ((await readAutoReviewProvidersForPr(ctx, accountId, prId)) === 'both') {
-      const ready = pairProvidersReady(preflightFor(ctx));
-      if (ready.length > 0) provider = ready[0]!;
-      if (ready.length === 2) {
-        pair = { role: 'first', pairId: 0, secondProvider: ready[1]!, ...(a.pressed ? { pressed: true } : {}) };
-      }
-    }
     // TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts): a teammate's Limn already holds
     // this head for this provider ⇒ drop the item with NO row (a skip is not a failure: no retry
     // count, no daily-cap use; the tab shows it from memory). Otherwise claim it. Never throws.
@@ -627,7 +650,16 @@ function launch(item: QueueItem): void {
   const controller = new AbortController();
   controllers.set(reviewId, controller);
 
+  item.lastProgressMs = Date.now();
+  item.wokeAtMs = null;
+  startWatchdog();
+  // A run that ignores its abort is released anyway (the watchdog's FORCE_RELEASE_MS): the pipeline
+  // races this, so the end and the seat's release below still run.
+  const hardStop = new Promise<boolean>((resolve) => {
+    item.forceStop = () => resolve(false);
+  });
   const emit = (progress: ClaudeReviewProgress): void => {
+    item.lastProgressMs = Date.now();
     progressByReview.set(reviewId, progress);
     // The PR's stream follows the half in the per-PR seat; a partner's progress is kept for when
     // it moves there.
@@ -646,7 +678,7 @@ function launch(item: QueueItem): void {
 
   // Did this run end the whole job (an ordinary run, or the LAST half of a pair)?
   let ends = true;
-  void runPipeline(item, controller, emit)
+  void Promise.race([runPipeline(item, controller, emit), hardStop])
     .then((succeeded) => {
       item.succeeded = succeeded;
     })
@@ -905,7 +937,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
   // Why the second half did not start (the pair's one review names it).
   let why: 'budget' | 'claimed' | 'stopped' | 'error' = 'error';
   try {
-    if (first.trigger === 'auto' && !pair.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review (second half)'))) {
+    if (first.trigger === 'auto' && !pair.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review (second half)', provider))) {
       why = 'budget';
       return;
     }
@@ -1215,7 +1247,7 @@ async function runPipeline(
     // on Codex, where Limn runs each specialist as its own run — the spend budget asked before each.
     usage: { accountId: item.accountId, prId: item.prId },
     ...(item.trigger === 'auto'
-      ? { allowSpecialistStart: () => automaticRunAllowed(ctx, item.accountId, 'auto review specialist') }
+      ? { allowSpecialistStart: () => automaticRunAllowed(ctx, item.accountId, 'auto review specialist', item.provider) }
       : {}),
     applyAuthEnv: APPLY_AUTH_ENV,
     abortController: controller,
@@ -1245,10 +1277,17 @@ async function runPipeline(
     diffCapped: prep.diffCapped,
     ...(res.usageRecorded ? { usageRecorded: true } : {}),
   };
-  if (res.aborted) {
+  if (res.aborted && item.interrupt) {
+    // THE WATCHDOG stopped it (a sleep, or no progress): FAILED with a TRANSIENT reason, so the
+    // auto-retry rule re-runs it when still required — never "cancelled", which is never retried.
+    await markReviewFailed(ctx, reviewId, item.interrupt.reason, { ...telemetry, excludedFiles: prep.excludedFiles });
+    return false;
+  } else if (res.aborted) {
     await markReviewCancelled(ctx, reviewId);
     return false;
   } else if (!res.submitted) {
+    // A usage limit locks the provider out of automatic runs until its reset (ai/usage-lockout.ts).
+    noteProviderFailure(item.provider, res.failureReason);
     await markReviewFailed(ctx, reviewId, res.failureReason ?? 'review failed', {
       ...telemetry,
       scope: res.scope,
@@ -1519,6 +1558,71 @@ function pump(): void {
   }
 }
 
+// ---- THE RUN WATCHDOG (run-watchdog.ts; docs/CLAUDE-REVIEW.md § Auto review → Sleep and stalled runs) ----
+
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+let lastWatchdogTickMs: number | null = null;
+
+/** Every run in flight in this process (each half of a pair). */
+function inFlightRuns(): QueueItem[] {
+  return [...runningItems.values(), ...pairPartners.values()].filter((it) => it.done !== true);
+}
+
+function startWatchdog(): void {
+  if (watchdogTimer) return;
+  lastWatchdogTickMs = Date.now();
+  watchdogTimer = setInterval(() => {
+    void watchdogTick(Date.now());
+  }, WATCHDOG_TICK_MS);
+  watchdogTimer.unref?.();
+}
+
+/**
+ * One watchdog tick (exported for the test). A late tick ⇒ the machine slept: every run in flight is
+ * marked woken. Then each run `runsToInterrupt` names is aborted with its reason (failed, not
+ * cancelled); one still not ended FORCE_RELEASE_MS after its abort is failed in the DB and released.
+ * Stops its timer when nothing is in flight.
+ */
+export async function watchdogTick(nowMs: number): Promise<void> {
+  const woke = detectWake(lastWatchdogTickMs, nowMs);
+  lastWatchdogTickMs = nowMs;
+  const runs = inFlightRuns();
+  if (woke != null) for (const it of runs) it.wokeAtMs = woke;
+  const byId = new Map(runs.map((it) => [it.reviewId, it]));
+  for (const it of runs) {
+    if (it.interrupt && nowMs - it.interrupt.atMs >= FORCE_RELEASE_MS) {
+      const why = it.interrupt.reason;
+      it.ctx.log.warn(`claude review pr ${it.prId}: run ${it.reviewId} did not stop after "${why}"; releasing it`);
+      await markReviewFailed(it.ctx, it.reviewId, why).catch(() => {});
+      it.forceStop?.();
+    }
+  }
+  const watched = runs
+    .filter((it) => !it.interrupt)
+    .map((it) => ({ reviewId: it.reviewId, lastProgressMs: it.lastProgressMs ?? nowMs, wokeAtMs: it.wokeAtMs ?? null }));
+  for (const { reviewId, reason } of runsToInterrupt(watched, nowMs)) {
+    const it = byId.get(reviewId);
+    if (!it) continue;
+    it.ctx.log.warn(`claude review pr ${it.prId}: run ${reviewId} interrupted — ${reason}`);
+    it.interrupt = { reason, atMs: nowMs };
+    controllers.get(reviewId)?.abort();
+  }
+  if (runs.length === 0 && watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+}
+
+/** Test seam: the in-flight runs' watchdog view. */
+export function _watchdogRunsForTest(): Array<{ reviewId: number; wokeAtMs: number | null; interrupted: string | null }> {
+  return inFlightRuns().map((it) => ({ reviewId: it.reviewId, wokeAtMs: it.wokeAtMs ?? null, interrupted: it.interrupt?.reason ?? null }));
+}
+
+/** Test seam: pretend the previous tick ran at `ms` (null = no tick yet). */
+export function _setWatchdogLastTickForTest(ms: number | null): void {
+  lastWatchdogTickMs = ms;
+}
+
 /**
  * Cancel the review for a PR. `accountId` is REQUIRED and enforced against the queue entry's
  * own owner: without it, one tenant could abort another tenant's in-flight (billed) agentic run
@@ -1685,6 +1789,9 @@ export async function reconcileReviewsOnStartup(
   ctx: AgentContext,
 ): Promise<{ pairsFinished: Promise<number[]> }> {
   const runs = await reconcileOrphanedReviewRuns(ctx);
+  // A provider still inside a usage limit a run hit before the restart stays locked out of
+  // automatic runs (ai/usage-lockout.ts). Cheap: one bounded read.
+  await restoreUsageLockouts(() => failedRunsSinceLastSuccess(ctx, Date.now() - LOCKOUT_MAX_MS));
   if (runs.length > 0) ctx.log.info(`reconciled ${runs.length} orphaned claude review(s) -> failed`);
   const pairsFinished = finishInterruptedPairs(ctx, runs).catch((err) => {
     ctx.log.warn(`claude review: ending interrupted pairs failed: ${err instanceof Error ? err.message : String(err)}`);

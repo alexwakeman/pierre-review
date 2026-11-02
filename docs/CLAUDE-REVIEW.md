@@ -663,6 +663,32 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   line names the step: "Claude and Codex reviewing…" while both run (`ClaudeReviewStatusResponse.pair.both`),
   then the one still running ("Codex reviewing…"), then "Merging the two reviews…" (`pairRunningLabel`,
   the last half's `merging` phase).
+- **USAGE LIMITS ARE A LOCKOUT** (2026-11-02, `ai/usage-lockout.ts`). Real: PR 199965 at `0a3526d2` —
+  a teammate's Limn held the Claude half, so the auto review ran Codex alone, which answered "You've
+  hit your usage limit … try again at 8:54 PM" three times a minute apart (runs 1056–1058; the retry
+  rule saw "the default provider changed" and retried at once). Now a provider's usage-limit failure
+  (`isUsageLockoutError`: "usage limit", "hit your … limit" (never "hit your rate limit"), "out of usage credits", "quota exceeded" —
+  ⚠ NOT a plain rate limit, a 429 or an overload) LOCKS IT OUT until the reset the error names
+  (`parseRetryAtMs`: "try again at 8:54 PM" as the next such local time, "try again in 45 minutes", an
+  epoch, a dated time, an ISO-8601 time after the reset words), else for `LOCKOUT_DEFAULT_MS` (1 h), never past `LOCKOUT_MAX_MS` (8 days).
+  Noted where the failure is made: every Codex run kind (`codex.ts failureOf`) and every review run
+  of either provider (`manager.ts`). IN MEMORY per process; the boot re-derives it from the failed
+  review rows newer than each provider's latest success (`failedRunsSinceLastSuccess` →
+  `restoreUsageLockouts`). While locked:
+  - an AUTOMATIC review never starts on it (`automaticRunProviders`, read in `startAutoItem`): a pair
+    runs its other half ALONE (an ordinary run); a single run whose default provider is locked moves
+    to the other provider when that one is ready, else the item is dropped with NO row (a skip, not a
+    failure — the sweeper re-derives it). ⚠ The SWEEP asks the gate with `provider: null` (the budget
+    only): asking for the default would stop the whole sweep while the default is locked, and its items
+    could never move to Claude. The pair's second half and Codex's specialists ask for THEIR provider;
+  - every other automatic run on it is skipped by the ONE gate (`review/budget-gate.ts`
+    `automaticRunAllowed(ctx, account, what, provider?)` refuses a locked provider, the default when
+    none is named) — it does not move to the other provider;
+  - the retry rule does not retry a usage-limit failure of that provider (`AutoRetryInput.lockedUntilMs`,
+    checked BEFORE "the default provider changed");
+  - ⚠ A READER'S PRESS IS NEVER BLOCKED (manual runs and a pressed auto item ignore the lock). The Run
+    area (`AiRunGate`) shows one line per locked provider the run may use — "Codex is over its usage
+    limit until 8:54 PM." (`lib/usageLockout.ts`, from `MeResponse.ai.providers.<p>.usageLockedUntil`).
 - **A restart** fails every run it cut off; `finishInterruptedPairs` then ends each pair with a half
   among them whose OTHER half succeeded (either half, since they run together): consolidated in code
   and the run-end hooks on the half that succeeded. Both halves cut off ⇒ nothing to end.
@@ -2417,7 +2443,22 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
      `usageResetFromReading`: the latest reset of the windows it shows exhausted, or a reading
      taken after the failure that shows none exhausted). ⚠ When a reset time is known the backoff
      does NOT apply — an earlier retry would fail the same way and use up an attempt. Otherwise the
-     backoff: 1 h after the first failure, 4 h after later ones.
+     backoff: 1 h after the first failure, 4 h after later ones. ⚠ While the failed provider is LOCKED
+     OUT by its usage limit (§ Claude + Codex → USAGE LIMITS ARE A LOCKOUT) it is not due at all, even
+     when the default provider changed.
+- **SLEEP AND STALLED RUNS** (2026-11-02, `run-watchdog.ts`, `manager.ts watchdogTick`). The owner:
+  "Retry automatically and stop if not required." A watchdog ticks every 30 s while any review is in
+  flight. A tick more than 90 s late means the machine SLEPT: every run in flight is marked woken, and
+  one that has reported NO progress since the wake 2 min later is interrupted — "Interrupted: the
+  computer slept"; a run that reports progress after the wake survived and is left alone (a long sleep
+  never reads as a stall: the stall clock restarts at the wake). Any run with no progress for 30 min is
+  interrupted — "Interrupted: the run stopped making progress". ⚠ An interrupted run is FAILED, never
+  cancelled (a Stop is never retried), and both reasons are TRANSIENT (`classifyAutoReviewFailure`),
+  so THE SAME RETRY RULE re-runs an auto run only while still required: the head unchanged, nothing
+  succeeded there, the PR open, under the per-head cap (3) and the daily cap. A manual run is failed the
+  same way and never retried by itself. ⚠ A HUNG RUN NEVER BLOCKS THE QUEUE: one that ignores its abort
+  is failed in the DB and released 2 min later (the pipeline races a hard stop, so the pair's end, the
+  claim's final line and the seat's release still run).
   A retry is an ordinary auto run (same lane, daily cap, spend-budget gate, default provider,
   auto-post / auto fix rules); the lane re-checks `isAutoRetryStillDue` (the failed run is still the
   LATEST row at the head; for a press, the latest AUTO row with no AUTO success there — below) before
@@ -2476,8 +2517,12 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 
 ## Team claims ("Mark auto reviews on GitHub", 2026-10-27)
 
-For teams where more than one person runs Limn with auto review on the same repos. Per workspace, OFF
-by default (`workspaces.team_claims_enabled`, migration 0134; Settings → Auto review, under the
+For teams where more than one person runs Limn with auto review on the same repos. Per workspace, ON
+by default since 2026-11-02 (the owner: "Just on by default on all workspaces"; migration 0159 set every
+existing workspace on, a switched-off one included, and only a stored false is off — NULL reads ON in
+`autoReviewOf`, `setWorkspaceAutoReview` and `teamClaimsOnForPr`; ⚠ under vitest the real GitHub
+adapter knows no login, so a test's auto run never reaches GitHub — claim tests pass a fake). Before:
+OFF by default (`workspaces.team_claims_enabled`, migration 0134; Settings → Auto review, under the
 auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (the one module), wired in
 `manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold); the ledger
 `team-claim-ledger.ts` and the reconciler `team-claim-release.ts` (§ Releasing stale lines).
@@ -2512,6 +2557,19 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).
 - **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
   re-posts the winner's description, so GitHub's displayed latest line names the winner.
+- **THE TEAMMATE'S LINE ON THE TAB** (2026-11-02, migration 0159, `team-claim-seen.ts`). Real: PR
+  199965 — our Limn stood down for robin-dunn's Claude review, then its Codex half claimed freely and
+  FORGOT the Claude skip (the memory was one entry per PR), so the tab showed only Codex's failure and
+  looked as if Claude never ran. Now the skip memory is PER PROVIDER, and every skip is also written to
+  `team_claim_seen` (one row per (account, PR, head, provider): kind, login, their line's description),
+  refreshed when the reconciler re-reads the head (their success ⇒ 'reviewed' with its line; a free line
+  ⇒ the row goes), deleted by a Clear, and ⚠ deleted when this machine's own claim finds the head free
+  (or its own) — or a stale "is reviewing" line would sit beside this machine's review for good. The GET serves the rows at the synced head as
+  `ClaudeReviewResponse.teamClaimTeammates` (the name from the synced `users` table); the tab
+  (`TeamClaimLine`, `teammateReviewLine`) says "Robin Dunn reviewed this commit with Claude · no
+  comments" ("· 4 comments"; "kept in Limn" reads "not posted on GitHub") or "Robin Dunn is reviewing
+  this commit with Claude" — after a reload and after a restart. Both delete paths and the erasure
+  delete its rows.
 - ⚠ **A SKIP IS NOT A FAILURE AND WRITES NO ROW** — no retry count, no failure, no daily-cap use. It is
   remembered IN MEMORY per PR (`teamClaimSkipFor`), shown on the AI Review tab ("Auto review skipped:
   being reviewed by @bob") and the Open PRs panel ("Being reviewed by @bob",

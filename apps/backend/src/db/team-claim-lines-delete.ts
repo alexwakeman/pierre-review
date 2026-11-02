@@ -14,4 +14,7 @@ export async function deleteSettledClaimLinesForPrs(tx: any, prIds: number[]): P
     .delete(tl)
     .where(and(inArray(tl.prId, prIds), not(and(eq(tl.whose, 'mine'), inArray(tl.state, ['claiming', 'pending']))!)))
     .execute();
+  // The teammate lines the AI Review tab names (migration 0159): nothing on GitHub to release, so
+  // every row of these PRs goes.
+  await tx.delete(schema.teamClaimSeen).where(inArray(schema.teamClaimSeen.prId, prIds)).execute();
 }

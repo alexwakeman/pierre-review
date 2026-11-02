@@ -227,6 +227,16 @@ export function docTreeTrail(nodes: readonly DocTreeNode[], path: string, anchor
   return walk(nodes, []) ?? sectionHit;
 }
 
+/**
+ * A click (or Enter / Space) on a contents row's NAME — a document's, or a section with rows under it.
+ * Closed → open it in the viewer and expand it. Expanded and on show → collapse it (it stays on show).
+ * Expanded but something else on show → open it, still expanded (a second click collapses it).
+ */
+export function contentsNameClick({ expanded, current }: { expanded: boolean; current: boolean }): { open: boolean; expanded: boolean } {
+  if (expanded && current) return { open: false, expanded: false };
+  return { open: !current, expanded: true };
+}
+
 /** The document slug a library path names (`<slug>/…`), or null for INDEX.md. */
 export const slugOfLibraryPath = (path: string): string | null => {
   const i = path.indexOf('/');

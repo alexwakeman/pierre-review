@@ -2075,7 +2075,7 @@ export function ClaudeReviewTab({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={isRunning || starting} />
-            <AiRunGate kind="review" auth={data?.auth} anyProvider provider={modelPick.chosen.provider}>
+            <AiRunGate kind="review" auth={data?.auth} anyProvider provider={modelPick.chosen.provider} lockProviders={modelPick.pair ? ['claude', 'codex'] : [modelPick.chosen.provider]}>
             <button
               type="button"
               onClick={onRunClick}
@@ -2556,7 +2556,7 @@ function FailedAutoReviewLine({
         Auto review failed: {message}
       </span>
       {canRetry && (
-        <AiRunGate kind="review" meter={false}>
+        <AiRunGate kind="review" meter={false} lockProviders={[]}>
           <button
             type="button"
             onClick={() => {

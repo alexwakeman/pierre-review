@@ -447,7 +447,7 @@ body {
      upscales it — never inventing pixels is the better default. */
   max-width: min(100%, var(--md-img-w, 100%));
   /* 24rem keeps a single tall screenshot from blowing out the layout (and, in the
-     clamped 3-line PR Summary preview, from dominating before Show more). */
+     clamped 8-line PR Summary preview, from dominating before Show more). */
   max-height: min(24rem, var(--md-img-h, 24rem));
   width: auto;
   height: auto;

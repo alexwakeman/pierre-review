@@ -91,7 +91,8 @@ describe('the switch and its floor', () => {
       autoFixEnabled: false,
       // Automatic design diagrams are ON by default (0126).
       autoDiagramsEnabled: true,
-      teamClaimsEnabled: false,
+      // "Mark auto reviews on GitHub" is ON by default (0159).
+      teamClaimsEnabled: true,
       // Claude + Codex is the default (2026-11-01); with one signed in, that one runs alone.
       autoReviewProviders: 'both',
       pairStrictness: 'strict',

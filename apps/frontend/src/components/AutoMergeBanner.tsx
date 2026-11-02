@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ArmedMergePhase,
@@ -8,14 +8,9 @@ import type {
 import { useArmedMerges, useDisarmAutoMerge } from '../hooks/useAutoMerge.js';
 import { invalidateAfterPrWrite } from '../hooks/prCacheSync.js';
 import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
-import { CheckIcon, MergeIcon, WarningIcon } from './Icons.js';
-import {
-  HeaderToast,
-  ToastFooterButton,
-  ToastList,
-  ToastRow,
-  ToastShowMore,
-} from './HeaderToasts.js';
+import { MergeIcon } from './Icons.js';
+import { dateTime, relativeTime } from '../lib/ui.js';
+import { HeaderToast, ToastFooterButton, ToastList, ToastShowMore } from './HeaderToasts.js';
 
 // The global auto-merge progress stack, rendered as ONE card in the app's ONE header toast strip
 // (HeaderToasts.tsx, mounted in App.tsx): a one-line summary, the rows when it expands.
@@ -101,32 +96,14 @@ function queuedLocalHeadline(row: ArmedMergeRequest): string {
  * for the row above it — and a phase the watcher could not honestly characterise comes back as
  * the truthful "Waiting…", never a hole.
  */
-/** WHO ARMED IT, when it was not a person — THE one spelling, shown under the headline on every
- *  surface that draws an armed intent (this stack, the PR's merge control, the Pending card). */
+/** WHO ARMED IT, when it was not a person — THE one spelling, shown under the headline on the PR's
+ *  merge control and the Pending card, and in the row's tooltip in this stack (one status per row). */
 export const ARMED_BY_POLICY_LABEL = 'Armed automatically (dependency setting)';
 
 export function armedPhaseHeadline(row: ArmedMergeRequest): string {
   if (row.phase === 'queued_local') return queuedLocalHeadline(row);
   return row.phase != null ? PHASE_LABEL[row.phase] : 'Waiting…';
 }
-
-// Phases where Limn (or GitHub) is actively doing something right now, as opposed to waiting
-// on a human or a check — the only ones that earn a spinner.
-const WORKING_PHASES: ReadonlySet<ArmedMergePhase> = new Set<ArmedMergePhase>([
-  'updating_rebase',
-  'updating_merge',
-  'enqueuing',
-  'merging',
-]);
-
-// Phases where the intent is parked on something outside our control. Amber, not "in flight".
-const STALLED_PHASES: ReadonlySet<ArmedMergePhase> = new Set<ArmedMergePhase>([
-  'waiting_conflicts',
-  'waiting_behind',
-  'blocked_protection',
-  'retrying',
-  'checks_failed',
-]);
 
 // TERMINALS RENDER OFF `state`, NEVER off `lastReason` — the watcher NULLs the reason on a
 // successful merge, so a card whose body is the reason line goes blank at the exact moment it
@@ -192,6 +169,11 @@ interface Outcome {
   prNumber: number;
   prTitle: string;
   reason: string | null;
+  /** When it finished (ISO-8601) — the row's "time since". The watcher's terminal write stamps
+   *  `lastCheckedAt`, so that is the finish time; "now" only when the row carries none. ⚠ Never
+   *  "when this tab saw it": after a reload the persisted baseline surfaces an hours-old outcome,
+   *  which would read "just now". */
+  at: string;
 }
 
 // ⚠ EVERY CAPTURE GETS ITS OWN IDENTITY, and it is NOT `${prId}:${state}`. A PR reaches the same
@@ -224,6 +206,7 @@ export interface ArmedPollFold {
 export function foldArmedPoll(
   prev: ReadonlyMap<number, ArmedMergeState>,
   requests: readonly ArmedMergeRequest[],
+  nowMs: number = Date.now(),
 ): ArmedPollFold {
   const fresh: Outcome[] = [];
   const superseded = new Set<number>();
@@ -243,6 +226,7 @@ export function foldArmedPoll(
         prNumber: r.prNumber,
         prTitle: r.prTitle,
         reason: r.lastReason,
+        at: r.lastCheckedAt ?? new Date(nowMs).toISOString(),
       });
       if (r.state === 'merged') landed = true;
     }
@@ -274,51 +258,168 @@ function tabMetaOf(row: {
   };
 }
 
-function StatusDot({
-  tone,
-}: {
-  tone: 'working' | 'waiting' | 'stalled' | 'good' | 'bad';
-}): JSX.Element {
-  if (tone === 'working') {
-    return (
-      <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
-    );
-  }
-  const color =
-    tone === 'good'
-      ? 'bg-ui-success'
-      : tone === 'bad'
-        ? 'bg-ui-danger'
-        : tone === 'stalled'
-          ? 'bg-ui-warn'
-          : 'bg-ui-accent-fill animate-pulse';
-  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${color}`} />;
+// ── ONE ROW PER ARMING ──────────────────────────────────────────────────────────────────────────
+//
+// Each row is the PR, ONE status in plain words, and the time since that arming (or since its
+// outcome landed), in aligned columns: [dot] [repo#n title] [status] [time] [Cancel | Dismiss].
+// ⚠ ONE STATUS, never a phase line plus a reason line: the two said the same thing twice ("Waiting
+// for checks to pass" over "checks failed — waiting for them to pass"). The watcher's prose
+// (`lastReason`) is only ever the short tail of a "Stopped:"/"Failed:" status and the row's tooltip.
+
+export type MergeRowTone = 'working' | 'waiting' | 'blocked' | 'good' | 'bad';
+
+export interface MergeRowStatus {
+  text: string;
+  tone: MergeRowTone;
 }
 
-/** A PR title + coordinate, the clickable half of every row. */
-function RowHeader({
+/** The watcher's prose, cut to a status tail: no "github:" / "waiting:" prefix, first clause only. */
+export function shortMergeReason(reason: string | null, max = 48): string | null {
+  if (reason == null) return null;
+  let r = reason.trim().replace(/^(github|waiting):\s*/i, '');
+  r = r.split(/\s+[—–]\s+|;\s+|\n/)[0]!.trim();
+  if (r.length === 0) return null;
+  if (r.length > max) r = `${r.slice(0, max - 1).trimEnd()}…`;
+  return r;
+}
+
+/** A LIVE intent's one status. */
+export function liveMergeStatus(row: ArmedMergeRequest): MergeRowStatus {
+  switch (row.phase) {
+    case 'pending_first_check':
+      return { text: 'Armed — first check soon', tone: 'waiting' };
+    case 'awaiting_checks':
+      return { text: 'Waiting for CI', tone: 'waiting' };
+    case 'awaiting_review':
+      return { text: 'Blocked: needs approval', tone: 'blocked' };
+    case 'blocked_protection':
+      return { text: 'Blocked: branch protection', tone: 'blocked' };
+    case 'waiting_conflicts':
+      return { text: 'Blocked: conflicts', tone: 'blocked' };
+    case 'waiting_behind':
+      return { text: 'Blocked: behind base branch', tone: 'blocked' };
+    case 'checks_failed':
+      return { text: 'Blocked: checks failed', tone: 'blocked' };
+    case 'updating_rebase':
+    case 'updating_merge':
+      return { text: 'Updating the branch', tone: 'working' };
+    case 'enqueuing':
+      return { text: 'Adding to merge queue', tone: 'working' };
+    case 'queued':
+      return { text: 'In the merge queue', tone: 'waiting' };
+    case 'merging':
+      return { text: 'Merging', tone: 'working' };
+    case 'retrying':
+      return { text: 'Retrying after a GitHub error', tone: 'blocked' };
+    case 'queued_local':
+      if (row.yieldedForFailedChecks) return { text: 'Blocked: checks failed', tone: 'blocked' };
+      // ⚠ A wait needs somebody ahead (`position > 1`) — see `queuedLocalHeadline`.
+      if (row.queuePosition != null && row.queueDepth != null && row.queuePosition > 1) {
+        return { text: `Waiting its turn (${row.queuePosition} of ${row.queueDepth})`, tone: 'waiting' };
+      }
+      if (row.queuePosition === 1) return { text: 'Next up', tone: 'waiting' };
+      return { text: 'Waiting its turn', tone: 'waiting' };
+    default:
+      return { text: 'Waiting', tone: 'waiting' };
+  }
+}
+
+/** A FINISHED intent's one status — off `state`, never off `lastReason` (NULL at success). */
+export function outcomeMergeStatus(state: ArmedMergeState, reason: string | null): MergeRowStatus {
+  const why = shortMergeReason(reason);
+  switch (state) {
+    case 'merged':
+      return { text: 'Merged', tone: 'good' };
+    case 'disarmed_head_moved':
+      return { text: 'Stopped: the branch moved', tone: 'bad' };
+    case 'expired':
+      return { text: 'Expired', tone: 'bad' };
+    case 'disarmed_blocked':
+      return { text: why != null ? `Stopped: ${why}` : 'Stopped', tone: 'bad' };
+    case 'failed':
+      return { text: why != null ? `Failed: ${why}` : 'Failed', tone: 'bad' };
+    default:
+      return { text: 'Finished', tone: 'bad' };
+  }
+}
+
+const DOT: Record<MergeRowTone, string> = {
+  working: 'animate-pulse bg-ui-accent-fill',
+  waiting: 'bg-ui-accent-fill',
+  blocked: 'bg-ui-warn',
+  good: 'bg-ui-success',
+  bad: 'bg-ui-danger',
+};
+
+const STATUS_INK: Record<MergeRowTone, string> = {
+  working: 'text-ui-ink',
+  waiting: 'text-ui-mute',
+  blocked: 'text-ui-ink',
+  good: 'text-ui-success',
+  bad: 'text-ui-danger',
+};
+
+/** Re-render every 30s, so "3 min ago" stays true while the panel is open. */
+function useMinuteTick(): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+}
+
+// The columns every row shares, so status and time line up down the list.
+const ROW_GRID =
+  'grid grid-cols-[0.5rem_minmax(0,1fr)_minmax(0,14rem)_5rem_4.75rem] items-center gap-x-3';
+
+/** One arming: the PR (click opens it), its status, the time since, and its one action. */
+function MergeRow({
   repoFullName,
   prNumber,
   prTitle,
-  tone,
+  status,
+  at,
+  atWords,
+  detail,
   onOpen,
+  action,
 }: {
   repoFullName: string;
   prNumber: number;
   prTitle: string;
-  tone: 'working' | 'waiting' | 'stalled' | 'good' | 'bad';
+  status: MergeRowStatus;
+  at: string;
+  /** What the time measures ("Armed", "Finished"), for the tooltip. */
+  atWords: string;
+  /** The full prose for the tooltip (the watcher's reason, who armed it). */
+  detail: string | null;
   onOpen: () => void;
+  action: ReactNode;
 }): JSX.Element {
+  useMinuteTick();
+  const repoName = repoFullName.split('/').pop() ?? repoFullName;
   return (
-    <button type="button" onClick={onOpen} className="hit block w-full text-left" title="Open this PR">
-      <div className="flex items-center gap-1.5">
-        <StatusDot tone={tone} />
-        <span className="truncate font-medium text-ui-ink hover:underline">
-          {repoFullName} #{prNumber}
+    <li className={`${ROW_GRID} px-3 py-1.5 text-meta leading-snug`} data-testid="auto-merge-row">
+      <span aria-hidden className={`h-2 w-2 rounded-full ${DOT[status.tone]}`} />
+      <button
+        type="button"
+        onClick={onOpen}
+        title={`Open ${repoFullName} #${prNumber}`}
+        className="hit flex min-w-0 items-baseline gap-1.5 rounded-ui text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+      >
+        <span className="shrink-0 tabular-nums text-ui-mute">
+          {repoName}#{prNumber}
         </span>
-      </div>
-      <div className="mt-0.5 truncate text-ui-mute">{prTitle}</div>
-    </button>
+        <span className="truncate text-ui-ink">{prTitle}</span>
+      </button>
+      <span className={`truncate ${STATUS_INK[status.tone]}`} title={detail ?? status.text}>
+        {status.text}
+      </span>
+      <time dateTime={at} title={`${atWords} ${dateTime(at)}`} className="whitespace-nowrap text-right tabular-nums text-ui-mute">
+        {relativeTime(at)}
+      </time>
+      <span className="flex justify-end">{action}</span>
+    </li>
   );
 }
 
@@ -332,119 +433,63 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const disarm = useDisarmAutoMerge(row.prId);
   const repoFullName = `${row.repoOwner}/${row.repoName}`;
-  const phase = row.phase;
-  const tone =
-    phase == null
-      ? 'waiting'
-      : WORKING_PHASES.has(phase)
-        ? 'working'
-        : STALLED_PHASES.has(phase)
-          ? 'stalled'
-          : // Waiting its TURN is ordinary progress, but a row that yielded because its checks
-            // failed is parked on a human exactly like `blocked_protection` — same phase, two
-            // very different states, so the tone reads the field rather than the phase.
-            phase === 'queued_local' && row.yieldedForFailedChecks
-            ? 'stalled'
-            : 'waiting';
-  // A phase the watcher couldn't honestly characterise comes back null; the prose is then the
-  // only line there is, and "Waiting…" is the truthful headline for it.
-  const headline = armedPhaseHeadline(row);
-
+  // The tooltip keeps what the one status line leaves out: the watcher's own words and who armed it.
+  const detail = [row.lastReason, row.armedByPolicy ? ARMED_BY_POLICY_LABEL : null]
+    .filter((p): p is string => p != null && p !== '')
+    .join(' · ');
   return (
-    <ToastRow>
-      <RowHeader
-        repoFullName={repoFullName}
-        prNumber={row.prNumber}
-        prTitle={row.prTitle}
-        tone={tone}
-        onOpen={() =>
-          openPrDetailTab(
-            tabMetaOf({
-              prId: row.prId,
-              prNumber: row.prNumber,
-              prTitle: row.prTitle,
-              repoFullName,
-            }),
-          )
-        }
-      />
-      <div className="mt-0.5 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-ui-mute">{headline}</div>
-          {row.armedByPolicy && (
-            <div className="text-ui-mute">{ARMED_BY_POLICY_LABEL}</div>
-          )}
-          {/* ⚠ `lastReason` is the SPECIFICS under the headline — which branch, which error. For
-              a POSITIONED `queued_local` alone it is not: the watcher writes "waiting its turn —
-              3rd of 3 armed on acme/mine", which is the same fact the headline already derived
-              from `queuePosition`/`queueDepth`, in a second spelling ("3rd of 3" under "3 of 3").
-              Both lines are correct and the pair reads as two different statuses. The prose stays
-              on the wire — it is the fallback for a client that does not know the phase — and is
-              simply not drawn beneath its own restatement. ⚠ The position is what makes it a
-              restatement, so the test is the FIELD, not the phase: a `queued_local` row with no
-              position (an intent spending one tick taking its place in the landing order after
-              its merge queue was disabled) has prose that says something the headline cannot. */}
-          {row.lastReason && !(row.phase === 'queued_local' && row.queuePosition != null) && (
-            <div className="mt-0.5 text-meta leading-snug text-ui-faint">{row.lastReason}</div>
-          )}
-        </div>
+    <MergeRow
+      repoFullName={repoFullName}
+      prNumber={row.prNumber}
+      prTitle={row.prTitle}
+      status={liveMergeStatus(row)}
+      at={row.armedAt}
+      atWords="Armed"
+      detail={detail || null}
+      onOpen={() =>
+        openPrDetailTab(tabMetaOf({ prId: row.prId, prNumber: row.prNumber, prTitle: row.prTitle, repoFullName }))
+      }
+      action={
         <button
           type="button"
           onClick={() => disarm.mutate()}
           disabled={disarm.isPending}
-          className="hit shrink-0 text-meta text-ui-faint hover:text-ui-danger disabled:opacity-50"
+          aria-label={`Cancel merge when ready for ${repoFullName} #${row.prNumber}`}
+          className="hit text-meta text-ui-mute hover:text-ui-danger disabled:opacity-50"
         >
           {disarm.isPending ? 'Cancelling…' : 'Cancel'}
         </button>
-      </div>
-    </ToastRow>
+      }
+    />
   );
 }
 
-function OutcomeRow({
-  outcome,
-  onDismiss,
-}: {
-  outcome: Outcome;
-  onDismiss: () => void;
-}): JSX.Element {
+function OutcomeRow({ outcome, onDismiss }: { outcome: Outcome; onDismiss: () => void }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const merged = outcome.state === 'merged';
   return (
-    <ToastRow>
-      <RowHeader
-        repoFullName={outcome.repoFullName}
-        prNumber={outcome.prNumber}
-        prTitle={outcome.prTitle}
-        tone={merged ? 'good' : 'bad'}
-        onOpen={() => openPrDetailTab(tabMetaOf(outcome))}
-      />
-      <div className="mt-0.5 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className={merged ? 'text-ui-success' : 'text-ui-mute'}>
-            {merged ? (
-              <CheckIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-            ) : (
-              <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
-            )}
-            {TERMINAL_LABEL[outcome.state] ?? 'Auto-merge finished'}
-          </div>
-          {outcome.reason && (
-            <div className="mt-0.5 text-meta leading-snug text-ui-faint">{outcome.reason}</div>
-          )}
-        </div>
+    <MergeRow
+      repoFullName={outcome.repoFullName}
+      prNumber={outcome.prNumber}
+      prTitle={outcome.prTitle}
+      status={outcomeMergeStatus(outcome.state, outcome.reason)}
+      at={outcome.at}
+      atWords="Finished"
+      detail={outcome.reason}
+      onOpen={() => openPrDetailTab(tabMetaOf(outcome))}
+      action={
         <button
           type="button"
           onClick={onDismiss}
           aria-label={`Dismiss the result for ${outcome.repoFullName} #${outcome.prNumber}`}
-          className="hit shrink-0 text-meta text-ui-mute hover:text-ui-ink"
+          className="hit text-meta text-ui-mute hover:text-ui-ink"
         >
           Dismiss
         </button>
-      </div>
-    </ToastRow>
+      }
+    />
   );
 }
+
 
 export function AutoMergeBanner(): JSX.Element | null {
   const { data } = useArmedMerges();
@@ -546,6 +591,8 @@ export function AutoMergeBanner(): JSX.Element | null {
       // Cancel, so the X is offered only once nothing is still armed.
       onDismiss={live.length === 0 ? dismissAll : undefined}
       dismissLabel="Dismiss merge-when-ready results"
+      count={total}
+      alert={otherOutcomes > 0}
       footer={
         <>
           <span>Auto-merge only runs while Limn is running.</span>

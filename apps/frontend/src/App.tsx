@@ -294,7 +294,7 @@ export default function App(): JSX.Element {
           its foot); below lg it is a drawer, below md the phone also gets the bottom bar. */}
       <div className="flex min-h-0 flex-1">
         <Sidebar dark={dark} toggleDark={toggleDark} />
-        <div className="flex min-w-0 flex-1 flex-col bg-ui-bg">
+        <div data-shell-main className="flex min-w-0 flex-1 flex-col bg-ui-bg">
           <TopBar toasts={toastsInPage ? null : toasts} collapsed={toastsInPage} />
           {toastsInPage && pageToastSlot != null && createPortal(toasts, pageToastSlot)}
           {/* The Timeline's board filters (and a PR Focus tab's two) — nothing on other views. */}

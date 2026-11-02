@@ -82,7 +82,8 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 //
 // TEAM CLAIMS ("Mark auto reviews on GitHub") ride the same route as one more column,
 // `team_claims_enabled` (migration 0134): may an AUTO review post a status line on the PR's head so
-// teammates' Limn skips it (team-claim.ts)? OFF by default — only a stored true is on.
+// teammates' Limn skips it (team-claim.ts)? ⚠ ON BY DEFAULT since 2026-11-02 (migration 0159 switched
+// every workspace on) — only a stored false is off, in every reader and in the writer.
 //
 // AUTOMATIC DESIGN DIAGRAMS ride the same route as one more column, `auto_diagrams_enabled`
 // (migration 0126): may a succeeded review (MANUAL OR AUTO) queue its design diagrams
@@ -200,7 +201,7 @@ interface AutoRow {
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
   autoDiagramsEnabled: boolean | null;
-  // "Mark auto reviews on GitHub" (migration 0134). Only a stored true is on.
+  // "Mark auto reviews on GitHub" (migration 0134). Only a stored false is off (0159).
   teamClaimsEnabled?: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
@@ -223,8 +224,8 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     pairStrictness: resolvePairStrictness(row?.pairStrictness),
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings, row?.approveLeftovers),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
-    // OFF unless explicitly switched on (0134).
-    teamClaimsEnabled: row?.teamClaimsEnabled === true,
+    // ON unless explicitly switched off (0159).
+    teamClaimsEnabled: row?.teamClaimsEnabled !== false,
   };
 }
 
@@ -418,8 +419,8 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0126).
   const diagramsWas = existing.autoDiagramsEnabled !== false;
   const diagrams = autoDiagramsEnabled ?? diagramsWas;
-  // Only a stored true is on (OFF by default, 0134).
-  const claimsWas = existing.teamClaimsEnabled === true;
+  // Only a stored false is off (ON by default, 0159).
+  const claimsWas = existing.teamClaimsEnabled !== false;
   const claims = teamClaimsEnabled ?? claimsWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;

@@ -45,6 +45,9 @@ const TRANSIENT = new RegExp(
     'service unavailable',
     'temporarily unavailable',
     'interrupted by restart',
+    // The run watchdog (run-watchdog.ts): a sleep, or a run that stopped making progress.
+    'interrupted: the computer slept',
+    'interrupted: the run stopped making progress',
     'not signed in',
     'not logged in',
     'please run /login',
@@ -89,6 +92,13 @@ export function parseRetryAtMs(error: string | null | undefined, failedAtMs: num
     const n = Number(epoch[1]);
     const ms = n < 1e12 ? n * 1000 : n;
     if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  // An ISO-8601 time after the reset words: "try again at 2026-11-02T20:54:00Z" (no zone ⇒ local).
+  const iso =
+    /(?:try again|retry|resets?|available again|until)(?: at| after| on)?:?\s{1,3}(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)/i.exec(e);
+  if (iso) {
+    const ms = Date.parse(iso[1]!.replace(' ', 'T'));
+    if (Number.isFinite(ms)) return ms;
   }
   // "try again in 2 hours 5 minutes" / "resets in 45m".
   const inAt = /(?:try again|retry|resets?|available again) in\b/i.exec(e);

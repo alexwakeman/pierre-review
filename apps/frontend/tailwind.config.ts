@@ -41,6 +41,11 @@ export default {
         'ui-sheet-up': { from: { opacity: '0', transform: 'translateY(16px)' }, to: { opacity: '1', transform: 'none' } },
         'ui-drawer-in': { from: { transform: 'translateX(-100%)' }, to: { transform: 'none' } },
         'ui-fade': { from: { opacity: '0' }, to: { opacity: '1' } },
+        // The header toast panel unfolding LEFTWARDS from the cluster (HeaderToasts.tsx).
+        'ui-unfold-left': {
+          from: { opacity: '0.4', clipPath: 'inset(0 0 calc(100% - 2.5rem) calc(100% - 4rem) round 999px)' },
+          to: { opacity: '1', clipPath: 'inset(0 0 0 0 round 0.375rem)' },
+        },
       },
       animation: {
         'ui-pop': 'ui-pop 140ms cubic-bezier(0.2, 0.7, 0.2, 1)',
@@ -48,6 +53,7 @@ export default {
         'ui-sheet-up': 'ui-sheet-up 180ms cubic-bezier(0.2, 0.7, 0.2, 1)',
         'ui-drawer-in': 'ui-drawer-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1)',
         'ui-fade': 'ui-fade 140ms linear',
+        'ui-unfold-left': 'ui-unfold-left 200ms cubic-bezier(0.2, 0.7, 0.2, 1)',
       },
       colors: {
         // The dark PAGE GROUND (`dark:bg-gray-950` and the veils that mimic it) is Claude Code

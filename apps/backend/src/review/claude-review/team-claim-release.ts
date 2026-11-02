@@ -36,6 +36,7 @@ import type { AgentContext } from '../agent-context.js';
 import {
   claimErrorKind,
   claimLineFinishing,
+  decideTeamClaim,
   defaultTeamClaimGithub,
   expiredReviewingSkips,
   forgetTeamClaimSkip,
@@ -58,6 +59,7 @@ import {
   teammateLineReleased,
   type ClaimLineRow,
 } from './team-claim-ledger.js';
+import { forgetTeammateLine, recordTeammateLine } from './team-claim-seen.js';
 
 export { RELEASE_MAX_ATTEMPTS };
 /** The wait before retry n (1-based): 1, 2, 4, 8 minutes. */
@@ -287,11 +289,11 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
     try {
       if (deps.held?.(prId)) continue; // the sweeper took it back: its own claim replaces the line
       if (!(await teamClaimsOnForPr(ctx, accountId, prId))) {
-        forgetTeamClaimSkip(accountId, prId);
+        forgetTeamClaimSkip(accountId, prId, skip.provider);
         continue;
       }
       if (await teammateLineReleased(ctx, accountId, prId, skip.headSha, skip.provider, skip.login)) {
-        forgetTeamClaimSkip(accountId, prId);
+        forgetTeamClaimSkip(accountId, prId, skip.provider);
         continue;
       }
       const where = await prRepo(ctx, accountId, prId);
@@ -301,7 +303,22 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       const lines = await gh.listLines(accountId, where.owner, where.name, skip.headSha, context);
       const stale = staleTeammateLine(lines, me, nowMs);
       if (!stale) {
-        forgetTeamClaimSkip(accountId, prId); // settled (or claimed again): nothing to release
+        // Settled (or claimed again): nothing to release. The tab's durable line follows what the head
+        // says now: their review ⇒ "reviewed" with their line; a free line ⇒ none.
+        const now = decideTeamClaim(lines, me, nowMs);
+        if (now.kind === 'reviewed' || now.kind === 'reviewing') {
+          await recordTeammateLine(ctx, accountId, prId, {
+            provider: skip.provider,
+            kind: now.kind,
+            login: now.login,
+            headSha: skip.headSha,
+            at: new Date(now.kind === 'reviewed' ? now.atMs : now.firstAtMs).toISOString(),
+            description: now.description,
+          }).catch(() => {});
+        } else {
+          await forgetTeammateLine(ctx, accountId, prId, skip.headSha, skip.provider).catch(() => {});
+        }
+        forgetTeamClaimSkip(accountId, prId, skip.provider);
         continue;
       }
       let lastError: string | null = null;
@@ -321,7 +338,7 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       }
       // Posted ONCE: recorded either way, so it is never re-posted every tick.
       await recordTeammateRelease(ctx, { accountId, prId, headSha: skip.headSha, provider: skip.provider, login: stale.login, lastError });
-      forgetTeamClaimSkip(accountId, prId);
+      forgetTeamClaimSkip(accountId, prId, skip.provider);
     } catch (err) {
       const kind = claimErrorKind(err, accountId);
       if (kind === 'rate_limited') {

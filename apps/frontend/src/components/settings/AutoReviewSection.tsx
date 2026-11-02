@@ -159,8 +159,8 @@ export function AutoReviewSection(): JSX.Element {
   // ON unless a stored false says otherwise (an older server sends nothing).
   const storedDiagrams = stored?.autoDiagramsEnabled !== false;
   const [diagramsOn, setDiagramsOn] = useState(storedDiagrams);
-  // TEAM CLAIMS ("Mark auto reviews on GitHub"): OFF unless a stored true says otherwise.
-  const storedClaims = stored?.teamClaimsEnabled === true;
+  // TEAM CLAIMS ("Mark auto reviews on GitHub"): ON unless the workspace switched it off (0159).
+  const storedClaims = stored?.teamClaimsEnabled !== false;
   const [claimsOn, setClaimsOn] = useState(storedClaims);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
@@ -325,6 +325,7 @@ export function AutoReviewSection(): JSX.Element {
             review the commit. You can also Clear a line from the AI Review tab.
           </p>
           <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
+          <p>On by default.</p>
         </InfoButton>
       </div>
       <div className={`space-y-1.5 pl-5 text-body ${on ? '' : 'opacity-60'}`}>

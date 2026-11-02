@@ -36,6 +36,7 @@ import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
+import { usageLockedUntilIso } from '../../ai/usage-lockout.js';
 import { aiEffortSettingStatus } from '../../ai/effort.js';
 import {
   aiProviderSettingStatus,
@@ -263,6 +264,8 @@ function agenticAiStatus(): MeResponse['ai'] {
         // models only when it is ready and signed in (the per-run choice, ai/run-choice.ts).
         runtime: claudeRt.runtime,
         runtimeMessage: claudeRt.runtimeMessage,
+        // A usage limit's lockout (ai/usage-lockout.ts): the Run area's one line.
+        usageLockedUntil: usageLockedUntilIso('claude'),
       },
       codex: {
         runtime: codex.runtime,
@@ -282,6 +285,7 @@ function agenticAiStatus(): MeResponse['ai'] {
           const r = codexKindStatus(kind);
           return r.status === 'ok' ? { auth: 'ok', message: null } : { auth: 'none', message: r.message };
         }),
+        usageLockedUntil: usageLockedUntilIso('codex'),
       },
     },
   };

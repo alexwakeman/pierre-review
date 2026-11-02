@@ -52,7 +52,6 @@ import {
 import { revealIntoView } from '../../lib/settleScroll.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import {
-  CheckIcon,
   ChevronIcon,
   ExternalLinkIcon,
   FoldIcon,
@@ -61,6 +60,7 @@ import {
 } from '../Icons.js';
 import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
 import { threadPillFor } from '../../lib/claudeThreadMarker.js';
+import { threadEdgeColor } from '../../lib/threadEdge.js';
 import { ClaudeThreadPills } from '../ThreadView/ClaudeThreadBadge.js';
 import { LimnSeverityChip } from '../LimnSeverityChip.js';
 import { CopyButton } from '../CopyButton.js';
@@ -489,29 +489,15 @@ function InlineThread({
             : `${meta.label} — ${meta.description}`
         }
         // Inline colour, not a class pair: border-l colour classes lose to the shorthand
-        // border-colour class depending on utility order. Transparent (not absent) when
-        // resolved so the pills stay column-aligned.
-        // A Claude judgement replaces the state colour too, or the edge keeps saying "Likely
-        // addressed" beside the marker that replaced it.
-        style={{
-          borderLeftColor: resolved
-            ? 'transparent'
-            : claude != null
-              ? 'rgb(var(--ai-signal-fill))'
-              : meta.color,
-        }}
-        className={`flex w-full items-center gap-1.5 rounded-ui border-l-2 bg-ui-surface px-2 py-1 text-left text-meta hover:bg-ui-hover ${
-          resolved
-            ? 'text-ui-faint opacity-70'
-            : 'text-ui-mute'
-        }`}
+        // border-colour class depending on utility order. EVERY STATE wears the edge and the dot
+        // (`lib/threadEdge.ts`): resolved is green, drawn like the rest, never faded — a resolved
+        // thread is one to find while scrolling, not one to hide.
+        // A Claude judgement replaces the state colour of an open thread, or the edge keeps saying
+        // "Likely addressed" beside the marker that replaced it.
+        style={{ borderLeftColor: threadEdgeColor(thread.derivedState, claude != null) }}
+        className="flex w-full items-center gap-1.5 rounded-ui border-l-2 bg-ui-surface px-2 py-1 text-left text-meta text-ui-mute hover:bg-ui-hover"
       >
-        {resolved ? (
-          <CheckIcon
-            size={11}
-            className="shrink-0 text-ui-success"
-          />
-        ) : claude != null ? (
+        {claude != null && !resolved ? (
           // Shut, the Claude pills below carry the mark themselves.
           open ? <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" /> : null
         ) : (

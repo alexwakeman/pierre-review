@@ -878,12 +878,17 @@ export function SparkleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
-// A wrench — AI Fix: a model changes the PR's code (PR detail's AI Fix tab). Not the hammer below,
-// which is "Implement story" (building a ticket from nothing), and not the merge resolver's wand.
+// A spanner (an open-ended wrench) — AI Fix: a model changes the PR's code (PR detail's AI Fix tab).
+// Not the hammer below, which is "Implement story" (building a ticket from nothing), and not the merge
+// resolver's wand. Drawn level (round-ended handle, open jaw on the right) and turned 45° so the jaw
+// sits top-right; the jaw's gap is wide enough to stay open at 12px.
 export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={1.9} {...rest}>
-      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.4-3.4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
+      <path
+        transform="rotate(-45 12 12)"
+        d="M11.77 10.3H1.2a1.7 1.7 0 0 0 0 3.4h10.57A5.5 5.5 0 0 0 22 14.3H16.3V9.7H22A5.5 5.5 0 0 0 11.77 10.3z"
+      />
     </IconShell>
   );
 }

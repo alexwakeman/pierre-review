@@ -1631,7 +1631,7 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
             dailyCap: 20,
             autoFixEnabled: false,
             autoDiagramsEnabled: true,
-            teamClaimsEnabled: false,
+            teamClaimsEnabled: true,
             autoReviewProviders: 'default',
             pairStrictness: 'strict',
             autoFix: {

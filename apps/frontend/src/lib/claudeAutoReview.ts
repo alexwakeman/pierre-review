@@ -8,6 +8,7 @@ import {
   type ClaudeReviewResponse,
   type ClaudeTeamClaimRecord,
   type ClaudeTeamClaimSkip,
+  aiProviderName,
 } from '@pierre-review/shared';
 
 // The words for auto review's quiet states: why the next auto review is waiting (the Claude Review
@@ -115,6 +116,25 @@ export function teamClaimSkipLine(skip: Pick<ClaudeTeamClaimSkip, 'kind' | 'logi
   return skip.kind === 'reviewed'
     ? `Auto review skipped: already reviewed by @${skip.login}`
     : `Auto review skipped: being reviewed by @${skip.login}`;
+}
+
+/**
+ * A TEAMMATE'S LINE this Limn stood down for (`ClaudeReviewResponse.teamClaimTeammates`, durable):
+ * "Robin Dunn reviewed this commit with Claude · no comments" / "Robin Dunn is reviewing this commit
+ * with Claude". The name from the synced users table, else @login. The detail is the part of their
+ * own line after " · " ("no comments", "4 comments"); "kept in Limn" (nothing posted) reads "not
+ * posted on GitHub".
+ */
+export function teammateReviewLine(
+  t: Pick<ClaudeTeamClaimSkip, 'kind' | 'login' | 'provider'> & { name?: string | null; description?: string | null },
+): string {
+  const who = t.name != null && t.name.trim() !== '' ? t.name.trim() : `@${t.login}`;
+  const by = aiProviderName(t.provider);
+  if (t.kind === 'reviewing') return `${who} is reviewing this commit with ${by}`;
+  const dot = (t.description ?? '').indexOf(' · ');
+  const raw = dot >= 0 ? (t.description ?? '').slice(dot + 3).trim() : '';
+  const detail = raw === 'kept in Limn' ? 'not posted on GitHub' : raw;
+  return `${who} reviewed this commit with ${by}${detail !== '' ? ` · ${detail}` : ''}`;
 }
 
 /** What the team claim did for one auto run, or null when none was attempted. */

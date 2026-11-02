@@ -32,6 +32,7 @@ import {
   docTreeNodes,
   docTreeRows,
   docTreeTrail,
+  contentsNameClick,
   isDocBuilding,
   slugOfLibraryPath,
   type DocTreeNode,
@@ -241,7 +242,8 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
       else next.add(key);
       return next;
     });
-  // Opening a row that has rows under it also opens its disclosure (never closes it: the chevron does that).
+  // Opening a closed row that has rows under it also opens its disclosure; its name on an expanded row
+  // closes it (`contentsNameClick`).
   const expand = (key: string): void => setExpanded((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
   const allOpen = branchKeys.every((k) => expanded.has(k));
   return (
@@ -293,7 +295,7 @@ function DocTreeItem({
   level: number;
   expanded: ReadonlySet<string>;
   onToggle: (key: string) => void;
-  /** Opens a branch (a no-op when it is open) — a click on a row's title opens its section AND this. */
+  /** Opens a branch (a no-op when it is open) — a click on a closed row's title opens its section AND this. */
   onExpand: (key: string) => void;
   open: DocsOpen;
   onOpen: (path: string, anchor: string | null) => void;
@@ -342,10 +344,15 @@ function DocTreeItem({
           <button
             type="button"
             onClick={() => {
-              onOpen(r.path, anchor);
-              if (hasChildren) onExpand(r.key);
+              if (!hasChildren) return onOpen(r.path, anchor);
+              // The name works like the chevron too: the expanded section on show collapses (lib/referenceDocs.ts).
+              const next = contentsNameClick({ expanded: isOpen, current: on });
+              if (next.open) onOpen(r.path, anchor);
+              if (next.expanded) onExpand(r.key);
+              else onToggle(r.key);
             }}
             aria-current={on ? 'true' : undefined}
+            aria-expanded={hasChildren ? isOpen : undefined}
             title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
             className={cx('block min-w-0 flex-1 rounded-ui px-1.5 py-1 text-left touch:min-h-10', r.kind === 'heading' ? 'text-meta' : 'text-body', on ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
           >
@@ -445,8 +452,10 @@ function DocRow({
             <button
               type="button"
               onClick={() => {
-                onOpen(contentsPath, null);
-                setExpanded(workspaceId, doc.id, true);
+                // Like the chevron too: the expanded document on show collapses (lib/referenceDocs.ts).
+                const next = contentsNameClick({ expanded, current: onContents });
+                if (next.open) onOpen(contentsPath, null);
+                setExpanded(workspaceId, doc.id, next.expanded);
               }}
               aria-current={onContents ? 'true' : undefined}
               aria-expanded={expanded}

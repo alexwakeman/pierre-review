@@ -66,6 +66,7 @@ import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-ju
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
+import { teammateLinesAtHead } from './team-claim-seen.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
 
@@ -232,6 +233,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const syncedHead = review?.head?.currentHeadSha ?? (await getReviewPrContext(ctx, id, accountId))?.headSha ?? null;
     const teamClaimSkip = teamClaimSkipFor(accountId, id, syncedHead);
     const teamClaimPending = await teamClaimPendingFor(ctx, accountId, id, syncedHead, autoReview != null).catch(() => null);
+    // The teammate lines this Limn stood down for at the head — durable (team-claim-seen.ts).
+    const teamClaimTeammates = await teammateLinesAtHead(ctx, accountId, id, syncedHead).catch(() => []);
     return {
       enabled: true,
       auth: auth.status,
@@ -254,6 +257,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
       teamClaimSkip,
+      ...(teamClaimTeammates.length > 0 ? { teamClaimTeammates } : {}),
       teamClaimPending,
       // The replies pass: unjudged replies on Limn's own findings and the newest pass (DB-only).
       // (Lazy: replies-check.ts registers a slot peer with the manager at import.)

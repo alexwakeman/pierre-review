@@ -2419,6 +2419,33 @@ export async function reconcileOrphanedReviewRuns(ctx: AgentContext): Promise<Re
     .execute()) as ReconciledReviewRun[];
 }
 
+/**
+ * USAGE LOCKOUTS AT BOOT (ai/usage-lockout.ts): per provider, the FAILED runs that finished after
+ * `sinceMs` and after that provider's newest success (a success means the limit had lifted), newest
+ * first. DB only.
+ */
+export async function failedRunsSinceLastSuccess(
+  ctx: AgentContext,
+  sinceMs: number,
+): Promise<Array<{ provider: string | null; error: string | null; finishedAtMs: number | null }>> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ provider: cr.provider, status: cr.status, error: cr.error, finishedAt: cr.finishedAt })
+    .from(cr)
+    .where(and(inArray(cr.status, ['failed', 'succeeded']), gte(cr.finishedAt, new Date(sinceMs))))
+    .orderBy(desc(cr.finishedAt), desc(cr.id))
+    .limit(200)
+    .execute()) as Array<{ provider: string | null; status: string; error: string | null; finishedAt: Date | null }>;
+  const succeeded = new Set<string>();
+  const out: Array<{ provider: string | null; error: string | null; finishedAtMs: number | null }> = [];
+  for (const r of rows) {
+    const p = r.provider ?? 'claude';
+    if (r.status === 'succeeded') succeeded.add(p);
+    else if (!succeeded.has(p)) out.push({ provider: p, error: r.error, finishedAtMs: r.finishedAt?.getTime() ?? null });
+  }
+  return out;
+}
+
 export async function reconcileOrphanedReviews(ctx: AgentContext): Promise<number> {
   return (await reconcileOrphanedReviewRuns(ctx)).length;
 }

@@ -3,87 +3,230 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { CloseIcon } from './Icons.js';
-import { anchorToastPanel } from '../lib/toastAnchor.js';
+import { anchorClusterPanel, toastRank, type ToastPanelBox } from '../lib/toastAnchor.js';
+import { claimActivePopover } from '../lib/activePopover.js';
 
-// ── THE ONE HEADER TOAST STRIP ───────────────────────────────────────────────────────────────
+// ── THE ONE HEADER TOAST CLUSTER ─────────────────────────────────────────────────────────────
 //
-// Every toast in the app renders as a HORIZONTAL CARD in the slim top bar (components/shell/
-// TopBar.tsx; App.tsx mounts `<HeaderToastStrip>` exactly once). It replaced
-// the bottom-right toast column; ⚠ never add an independent `fixed` toast element anywhere else,
-// and never a second strip.
+// Every toast in the app is ONE CIRCLE in a cluster at the top right (the slim TopBar, or the page
+// header's toast seat at ≥ lg; App.tsx mounts `<HeaderToastStrip>` exactly once). ⚠ Never add an
+// independent `fixed` toast element anywhere else, and never a second strip or cluster.
 //
-// Every card is the SAME card — one component, one set of rules:
-//
-//  • ONE LINE WHEN COLLAPSED, ALWAYS: icon · label · summary · [one on-line action] · [X]. The
-//    words never wrap (`truncate`: nowrap + ellipsis); the full text is in the expanded panel and in
-//    the toggle's accessible name. Every slot has the same width and height, so a card appearing,
-//    changing or disappearing never moves the header's other controls, and the header itself has a
-//    FIXED height (App.tsx) the strip fits inside. Many cards scroll the strip sideways.
-//    ⚠ Below `sm` the words are `max-sm:sr-only`. NEVER `sr-only sm:not-sr-only`: `not-sr-only`
-//    sets `white-space: normal` and `overflow: visible`, which beat `truncate` and wrapped a long
-//    summary onto a second line inside the one-line card ("Merge when ready · 2 armed · 4 merged").
-//  • IT EXPANDS ON CLICK (or Enter / Space on its focused toggle), NEVER ON HOVER OR FOCUS, and
-//    only when it has more to show: detail (`children` / `footer`) or a line truncated sideways.
-//    The expanded panel is ALWAYS laid out the same way — the card's line again (now wrapping, so
-//    the full text shows), then the rows (`children`, built from `ToastList` / `ToastRow`), then
-//    the `footer` — and the detail is MOUNTED ONLY WHILE EXPANDED, so nothing focusable hides
-//    inside a clipped one-line card. The panel OVERLAYS THE PAGE (`position: fixed`) rather than
-//    growing the header. Fixed, not absolute, because the strip is a horizontal scroller and a
-//    scroller clips both axes. ⚠ IT ANCHORS AT THE CARD'S TOP-LEFT and grows right and down only
-//    (`anchorToastPanel`, lib/toastAnchor.ts), shifting left only as far as the viewport's right
-//    gutter demands. It closes on a second click on the card's line, on any press outside the
-//    panel, on Escape, and on any scroll or resize (the measured rect is stale). The X and an
-//    on-line action never toggle it.
+//  • ONE CIRCLE PER JOB TYPE that is active now (sync, merge when ready, AI reviews, AI fixes, the
+//    AI budget pause, dependency results, the resolver reopen, Undo). Each circle is the job's icon,
+//    a PROGRESS RING when the job has a known fraction, a COUNT BADGE when it has a count, and a red
+//    ring + dot when it needs attention (`alert`). The circles OVERLAP like an avatar stack; the most
+//    urgent, then the newest, sits furthest right and on top (`toastRank`). Each circle carries its
+//    words for assistive tech (`sr-only`) and a tooltip.
+//  • THE CLUSTER IS ONE BUTTON (`aria-expanded`). A click EXPANDS it into ONE PANEL anchored to the
+//    cluster's right edge that grows LEFTWARDS as far as its content needs, never past the main
+//    content's left edge (`anchorClusterPanel`, lib/toastAnchor.ts; `[data-shell-main]` in App.tsx);
+//    past that the panel scrolls (its scroll bar on the right). The panel OVERLAYS the page
+//    (`position: fixed`, `z-[60]`: above a SidePanel sheet, below the resolver and modals). It lists
+//    every job's full content, in the circles' order (right-most first): the job's line (icon, label,
+//    summary, its one on-line action, its X), its progress bar, its rows, its footer.
+//  • It closes on a second click on the cluster, on any press outside the panel and the cluster, on
+//    Escape (focus returns to the cluster), and on a resize or an outside scroll (the measured rect
+//    is stale). Opening moves focus into the panel. The open animation unfolds it from the right and
+//    is `motion-safe` only.
+//  • THE TOP BAR NEVER SHIFTS: the cluster is 28px tall inside the fixed `h-11` bar, and an empty
+//    cluster is `hidden`, not unmounted (the circles portal into it).
 //  • THE PANEL IS ITS OWN ONE SCROLLER, `overscroll-behavior: contain`. ⚠ A `position: fixed`
-//    box's scroll parent is the VIEWPORT, not the pane under it: a wheel the panel could not use
-//    chained straight to the root, and the root of this app never scrolls — so on macOS the
-//    gesture became the root's ELASTIC OVERSCROLL. The whole app (header, rail, content) slid up
-//    with a blank band at the bottom, and because a wheel gesture LATCHES to the scroller it began
-//    on, wheeling "the page" afterwards kept rubber-banding the root instead of scrolling the
-//    content. Rows therefore never carry their own `max-h-* overflow-auto` (a second scroller is a
-//    second chain), and the strip is contained too, for a wheel over a collapsed card.
-//  • ITS BORDER NAMES ITS SOURCE (`tone`): AI violet, the merge accent, the sync sky, the
-//    Pending amber, the resolver's conflict red. Border only — the background stays neutral, and
-//    the icon + label still say the same thing in words, so the colour is never the only signal.
-//    A PROGRESS BAR wears the SAME tone: `HEADER_TOAST_TONE` is the one mapping for both.
-//  • THE X IS THE TOAST'S OWN DISMISS — `onDismiss` absent means the toast is not dismissible
-//    (an indicator, or one whose dismiss is gated, like a running AI fix) and gets no X.
-//  • A PROGRESS BAR STAYS VISIBLE ON THE COLLAPSED LINE, along the line's bottom edge.
-//  • THE STRIP IS THE POLITE LIVE REGION; cards are not. `aria-relevant="additions"` announces a
-//    card (or a row inside one) appearing, never a percentage ticking in place.
+//    box's scroll parent is the VIEWPORT: a wheel the panel could not use chained to the root, and
+//    on macOS that became the root's ELASTIC OVERSCROLL (the whole shell slid up). Rows therefore
+//    never carry their own `max-h-* overflow-auto` (a second scroller is a second chain).
+//  • THE CLUSTER IS THE POLITE LIVE REGION; the panel is not. `aria-relevant="additions"` announces
+//    a circle appearing (its sr-only words), never a percentage ticking in place.
+//
+// Each job is still its own component with its own state (App.tsx); `HeaderToast` PORTALS its circle
+// into the cluster and, while the panel is open, its section into the panel. The detail is MOUNTED
+// ONLY WHILE OPEN.
 
-const ExpandedCtx = createContext<{
-  openId: string | null;
-  setOpenId: (id: string | null) => void;
-} | null>(null);
+interface ClusterCtx {
+  circleHost: HTMLElement | null;
+  /** The expanded panel's section list. */
+  listHost: HTMLElement | null;
+  expanded: boolean;
+  setLabel: (id: string, label: string | null) => void;
+}
+
+const Ctx = createContext<ClusterCtx | null>(null);
+
+/** The main content's left edge (the docked sidebar's right edge; 0 when the sidebar is a drawer). */
+function contentLeft(): number {
+  const main = document.querySelector<HTMLElement>('[data-shell-main]');
+  return main != null ? main.getBoundingClientRect().left : 0;
+}
 
 export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Element {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [circleHost, setCircleHost] = useState<HTMLSpanElement | null>(null);
+  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
+  const [listHost, setListHost] = useState<HTMLDivElement | null>(null);
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [box, setBox] = useState<ToastPanelBox | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const expanded = box != null;
+  const names = Object.values(labels);
+  const count = names.length;
+
+  const setLabel = useCallback((id: string, label: string | null) => {
+    setLabels((prev) => {
+      if (label == null) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      if (prev[id] === label) return prev;
+      return { ...prev, [id]: label };
+    });
+  }, []);
+
+  const collapse = useCallback((refocus: boolean) => {
+    setBox(null);
+    if (refocus) buttonRef.current?.focus();
+  }, []);
+
+  const toggle = (): void => {
+    if (expanded) {
+      collapse(false);
+      return;
+    }
+    const b = buttonRef.current;
+    if (b == null) return;
+    const r = b.getBoundingClientRect();
+    setBox(anchorClusterPanel(r, contentLeft(), window.innerWidth, window.innerHeight));
+  };
+
+  // ⚠ A NATIVE click listener, not `onClick`: the circles are PORTALLED into this button, and a
+  // React event bubbles through the React tree (the job's component), never through the DOM parent
+  // it was portalled into — so a click on a circle never reached a React `onClick` here.
+  const toggleRef = useRef(toggle);
+  toggleRef.current = toggle;
+  useEffect(() => {
+    const b = buttonRef.current;
+    if (b == null) return;
+    const onClick = (): void => toggleRef.current();
+    b.addEventListener('click', onClick);
+    return () => b.removeEventListener('click', onClick);
+  }, []);
+
+  // Nothing left to show: close.
+  useEffect(() => {
+    if (expanded && count === 0) collapse(false);
+  }, [expanded, count, collapse]);
+
+  // Opening moves focus into the panel (after the sections have portalled in).
+  useEffect(() => {
+    if (expanded) panelHost?.focus({ preventScroll: true });
+  }, [expanded, panelHost]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const inside = (t: EventTarget | null): boolean =>
+      t instanceof Node &&
+      ((panelHost != null && panelHost.contains(t)) ||
+        (buttonRef.current != null && buttonRef.current.contains(t)));
+    // `pointerdown`, capture: a press anywhere else closes the panel; a press on the cluster is
+    // left to its own click (which toggles).
+    const onPointerDown = (e: PointerEvent): void => {
+      if (!inside(e.target)) collapse(false);
+    };
+    // ⚠ The panel HOLDS THE ONE POPOVER SLOT (lib/activePopover.ts) and takes Escape in the CAPTURE
+    // phase on window, stopped — as every layer above the page does. A bubble-phase listener ran
+    // after a drawer's capture-phase Escape (the drawer closed, the panel stayed), and the slot is
+    // what makes the page's single-letter shortcuts stand down while the reader is in the panel.
+    const release = claimActivePopover(() => collapse(false));
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        collapse(true);
+      }
+    };
+    const onScroll = (e: Event): void => {
+      if (panelHost != null && e.target instanceof Node && panelHost.contains(e.target)) return;
+      collapse(false);
+    };
+    const onResize = (): void => collapse(false);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      release();
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [expanded, collapse, panelHost]);
+
+  const panelStyle: CSSProperties | undefined =
+    box != null
+      ? {
+          position: 'fixed',
+          top: box.top,
+          right: box.right,
+          minWidth: box.minWidth,
+          maxWidth: box.maxWidth,
+          maxHeight: box.maxHeight,
+        }
+      : undefined;
+
+  const name =
+    count === 0 ? 'Notifications' : `Notifications: ${names.join(', ')}`;
+
   return (
-    <ExpandedCtx.Provider value={{ openId, setOpenId }}>
-      <div
-        role="status"
-        aria-live="polite"
-        aria-atomic="false"
-        aria-relevant="additions"
-        aria-label="Notifications"
-        className="min-w-0 flex-1"
-      >
-        <div
-          data-testid="header-toast-strip"
-          className="flex min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden overscroll-contain [scrollbar-width:thin]"
-        >
-          {children}
+    <Ctx.Provider value={{ circleHost, listHost, expanded, setLabel }}>
+      <div className="flex min-w-0 flex-1 justify-end">
+        <div role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" aria-label="Notifications">
+          <button
+            ref={buttonRef}
+            type="button"
+            data-testid="header-toast-cluster"
+            aria-expanded={expanded}
+            aria-controls={panelId}
+            aria-label={name}
+            title={count === 0 ? undefined : expanded ? 'Hide details' : names.join(' · ')}
+            className={`${count === 0 ? 'hidden' : 'flex'} h-8 items-center rounded-full py-0.5 pl-2.5 pr-0.5 outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${
+              expanded ? 'bg-ui-hover' : ''
+            }`}
+          >
+            <span ref={setCircleHost} data-testid="header-toast-strip" className="isolate flex items-center" />
+          </button>
         </div>
+        <div
+          ref={setPanelHost}
+          id={panelId}
+          role="region"
+          aria-label="Notifications"
+          tabIndex={-1}
+          data-testid="header-toast-panel"
+          style={panelStyle}
+          className={
+            expanded
+              ? 'z-[60] flex w-max flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-ui bg-ui-raise text-ui-ink shadow-lg outline-none ring-1 ring-ui-line motion-safe:animate-ui-unfold-left'
+              : 'hidden'
+          }
+        >
+          {/* -mt-px hides the first section's top divider under the panel's top edge, whatever
+              order the sections land in. */}
+          <div ref={setListHost} className="-mt-px flex flex-col" />
+        </div>
+        {children}
       </div>
-    </ExpandedCtx.Provider>
+    </Ctx.Provider>
   );
 }
 
@@ -97,179 +240,63 @@ export interface HeaderToastProgress {
 /** A toast's source, as a colour. Each reuses the accent its home surface already wears. */
 export type HeaderToastTone = 'neutral' | 'ai' | 'merge' | 'sync' | 'attention' | 'conflicts';
 
-// THE ONE TONE MAPPING (the redesign's colour rule, docs/redesign/DESIGN.md § 3): a card is a
-// toned surface with NO border. Its source shows only on the ICON and the PROGRESS FILL, and only
-// where the colour means something: the AI family for a model's run, danger for conflicts (they
-// block), the accent for the sync / merge machinery the reader set going, grey for the rest.
-// Non-text colours on the fill; the icon colours are the measured `--ui-*` / `--ai-*` inks.
-export const HEADER_TOAST_TONE: Record<HeaderToastTone, { mark: string; fill: string }> = {
-  neutral: { mark: 'text-ui-mute', fill: 'bg-ui-faint' },
-  ai: { mark: 'text-ai-signal', fill: 'bg-ai-signal-fill' },
-  merge: { mark: 'text-ui-accent', fill: 'bg-ui-accent' },
-  sync: { mark: 'text-ui-accent', fill: 'bg-ui-accent' },
-  attention: { mark: 'text-ui-mute', fill: 'bg-ui-faint' },
-  conflicts: { mark: 'text-ui-danger', fill: 'bg-ui-danger' },
+// THE ONE TONE MAPPING (docs/redesign/DESIGN.md § 3): a toast's source shows only on the ICON and
+// the PROGRESS FILL (the circle's ring and the panel's bar), and only where the colour means
+// something: the AI family for a model's run, danger for conflicts (they block), the accent for the
+// sync / merge machinery the reader set going, grey for the rest.
+export const HEADER_TOAST_TONE: Record<HeaderToastTone, { mark: string; fill: string; stroke: string }> = {
+  neutral: { mark: 'text-ui-mute', fill: 'bg-ui-faint', stroke: 'stroke-ui-faint' },
+  ai: { mark: 'text-ai-signal', fill: 'bg-ai-signal-fill', stroke: 'stroke-ai-signal-fill' },
+  merge: { mark: 'text-ui-accent', fill: 'bg-ui-accent', stroke: 'stroke-ui-accent' },
+  sync: { mark: 'text-ui-accent', fill: 'bg-ui-accent', stroke: 'stroke-ui-accent' },
+  attention: { mark: 'text-ui-mute', fill: 'bg-ui-faint', stroke: 'stroke-ui-faint' },
+  conflicts: { mark: 'text-ui-danger', fill: 'bg-ui-danger', stroke: 'stroke-ui-danger' },
 };
 
 interface HeaderToastProps {
-  /** What the card is about, in a few words. Leads the line; names the card and its X. */
+  /** What the job is, in a few words. Names the circle, leads its section, names its X. */
   label: string;
-  /** A component from `Icons.tsx` at `size={13}`. Always visible, including at narrow widths. */
+  /** A component from `Icons.tsx` at `size={13}`. */
   icon: ReactNode;
+  /** On the circle (the section gets `<testId>-panel`). */
   testId?: string;
-  /** Extra classes on the slot (e.g. a fade-out opacity). */
+  /** Extra classes on the circle (e.g. a fade-out opacity). */
   className?: string;
-  /** Where the toast comes from — the card's BORDER and its progress fill. Default `neutral`. */
+  /** Where the toast comes from — the icon colour and the progress fill. Default `neutral`. */
   tone?: HeaderToastTone;
-  /** The rest of the one line, after the label. Plain words: it is truncated, never wrapped. */
+  /** The rest of the job's line, after the label. Plain words. */
   summary?: ReactNode;
-  /** One compact control kept ON the line (Undo, Reopen) — an action hidden behind a hover is
-   *  an action nobody finds. Use `ToastLineButton`. */
+  /** One compact control on the job's line (Undo, Reopen). Use `ToastLineButton`. */
   action?: ReactNode;
   /** The toast's own dismiss. Absent = not dismissible, no X. */
   onDismiss?: () => void;
   /** The X's accessible name. Default "Dismiss <label>". */
   dismissLabel?: string;
+  /** A known fraction: a ring on the circle, a bar in the panel. */
   progress?: HeaderToastProgress | null;
-  /** The rows shown when the card expands (`ToastList` + `ToastRow`, or a few `ToastRow`s). */
+  /** A count badge on the circle (running jobs, armed merges). 0 or absent = no badge. */
+  count?: number;
+  /** Something failed or needs the reader: a red ring and dot on the circle, and it moves to the
+   *  top of the cluster. */
+  alert?: boolean;
+  /** The rows shown in the expanded panel (`ToastList` + `ToastRow`). */
   children?: ReactNode;
-  /** The expanded panel's last line: secondary actions ("Show 3 more", "Dismiss finished") and a
-   *  short note. */
+  /** The section's last line: secondary actions ("Show 3 more", "Dismiss finished") and a note. */
   footer?: ReactNode;
 }
 
-let nextId = 0;
-function useToastId(): string {
-  const ref = useRef<string | null>(null);
-  if (ref.current == null) ref.current = `hdr-toast-${++nextId}`;
-  return ref.current;
-}
+let nextSeq = 0;
 
-/**
- * The expand/collapse mechanics: the slot holds the place in the strip, the panel is the card, and
- * it lifts out to `position: fixed` while expanded. Opening is a CLICK on the card's line (the
- * toggle button inside it takes Enter / Space natively, and its click bubbles to the same handler).
- */
-function useExpandable(hasDetail: boolean): {
-  slotRef: React.RefObject<HTMLDivElement>;
-  panelRef: React.RefObject<HTMLDivElement>;
-  expanded: boolean;
-  panelStyle: CSSProperties | undefined;
-  toggle: () => void;
-} {
-  const id = useToastId();
-  const ctx = useContext(ExpandedCtx);
-  const [localOpen, setLocalOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const slotRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Only one card is expanded at a time across the strip.
-  const expanded = localOpen && rect != null && (ctx == null || ctx.openId === id);
-
-  const collapse = useCallback(() => {
-    setLocalOpen(false);
-    setRect(null);
-    if (ctx && ctx.openId === id) ctx.setOpenId(null);
-  }, [ctx, id]);
-
-  const tryExpand = (): void => {
-    const slot = slotRef.current;
-    const panel = panelRef.current;
-    if (!slot || !panel) return;
-    // "More to show": detail rows / a footer, or the line truncated sideways (its words are wider
-    // than their box — which includes the `sr-only` words at a narrow width).
-    let longer = hasDetail;
-    if (!longer) {
-      for (const el of Array.from(panel.querySelectorAll<HTMLElement>('[data-toast-line]'))) {
-        if (el.scrollWidth > el.clientWidth + 1 || el.clientWidth <= 1) {
-          longer = true;
-          break;
-        }
-      }
-    }
-    if (!longer) return;
-    setRect(slot.getBoundingClientRect());
-    setLocalOpen(true);
-    ctx?.setOpenId(id);
-  };
-
-  const toggle = (): void => {
-    if (expanded) collapse();
-    else tryExpand();
-  };
-
-  // While open: a press OUTSIDE the panel closes it, and so does Escape wherever focus is. A
-  // measured rect goes stale on any scroll (the strip, the page) or resize — collapse rather than
-  // float in the wrong place. A scroll INSIDE the expanded panel is the reader reading (and, being
-  // `overscroll-behavior: contain`, it never reaches the page).
-  // `pointerdown`, not `click`: a press on another card's line closes this one before that card's
-  // own click opens it, so the one-open-at-a-time rule never sees two.
-  useEffect(() => {
-    if (!expanded) return;
-    const inside = (t: EventTarget | null): boolean =>
-      panelRef.current != null && t instanceof Node && panelRef.current.contains(t);
-    const onPointerDown = (e: PointerEvent): void => {
-      if (!inside(e.target)) collapse();
-    };
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        collapse();
-      }
-    };
-    const onScroll = (e: Event): void => {
-      if (inside(e.target)) return;
-      collapse();
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKeyDown);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', collapse);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', collapse);
-    };
-  }, [expanded, collapse]);
-
-  // Another card took the expansion: forget ours.
-  useLayoutEffect(() => {
-    if (localOpen && ctx && ctx.openId !== id) {
-      setLocalOpen(false);
-      setRect(null);
-    }
-  }, [ctx, ctx?.openId, id, localOpen]);
-
-  let panelStyle: CSSProperties | undefined;
-  if (expanded && rect) {
-    panelStyle = {
-      position: 'fixed',
-      ...anchorToastPanel(rect, window.innerWidth, window.innerHeight),
-    };
-  }
-
-  return { slotRef, panelRef, expanded, panelStyle, toggle };
-}
-
-/** Stop a click on the X or an on-line action from reaching the line's toggle. */
+/** Stop a click on the X or an on-line action from reaching anything behind it. */
 function stop(e: React.SyntheticEvent): void {
   e.stopPropagation();
 }
 
-// ONE slot size for every card: the words show from `sm` up; below it the icon, the action and the
-// X (the words return on expand).
-const SLOT = 'relative h-7 w-28 shrink-0 sm:w-56 lg:w-64 touch:h-10';
-const PANEL_BASE = 'rounded-ui bg-ui-raise text-ui-ink';
-const PANEL_COLLAPSED = 'absolute inset-0 overflow-hidden';
-// ⚠ `overscroll-contain` is the scroll-bug fix, not polish — see the header comment.
-// z-[60]: above a SidePanel sheet (z-50), which starts under the top bar.
-const PANEL_EXPANDED = 'z-[60] overflow-y-auto overscroll-contain shadow-lg';
-// The one inner divider every section of an expanded panel uses.
-const SECTION = 'border-t border-ui-line/60';
+// The circle: 28px, the icon in the middle, the ring drawn just inside its edge.
+const RING_R = 12.5;
+const RING_C = 2 * Math.PI * RING_R;
 
-/** A toast card. */
+/** One job: a circle in the cluster and, while the panel is open, a section in it. */
 export function HeaderToast({
   label,
   icon,
@@ -278,132 +305,175 @@ export function HeaderToast({
   onDismiss,
   dismissLabel,
   progress,
+  count,
+  alert = false,
   children,
   footer,
   testId,
   className = '',
   tone = 'neutral',
-}: HeaderToastProps): JSX.Element {
-  const hasDetail = children != null || footer != null;
-  const { slotRef, panelRef, expanded, panelStyle, toggle } = useExpandable(hasDetail);
+}: HeaderToastProps): JSX.Element | null {
+  const ctx = useContext(Ctx);
+  const idRef = useRef<{ id: string; seq: number } | null>(null);
+  if (idRef.current == null) {
+    const seq = ++nextSeq;
+    idRef.current = { id: `hdr-toast-${seq}`, seq };
+  }
+  const { id, seq } = idRef.current;
+  const setLabel = ctx?.setLabel;
+  useLayoutEffect(() => {
+    setLabel?.(id, label);
+  }, [setLabel, id, label]);
+  useLayoutEffect(() => () => setLabel?.(id, null), [setLabel, id]);
+
+  if (ctx == null) return null;
   const pct = progress ? Math.max(0, Math.min(100, Math.round(progress.value))) : 0;
   const colours = HEADER_TOAST_TONE[tone];
-  return (
-    <div ref={slotRef} data-testid={testId} className={`${SLOT} ${className}`}>
-      <div
-        ref={panelRef}
-        role="group"
-        aria-label={label}
-        data-tone={tone}
-        data-expanded={expanded ? 'true' : undefined}
-        style={panelStyle}
-        className={`${PANEL_BASE} ${expanded ? PANEL_EXPANDED : PANEL_COLLAPSED}`}
-      >
-        {/* THE LINE — the same in both states. It is the click target (icon, words, empty space);
-            the button inside it (icon + words) is the keyboard stop and carries aria-expanded. Its own click
-            bubbles here, so Enter / Space and a pointer take the one path. Collapsed, the words
-            are one truncated line in exactly 26px; expanded, they wrap so the full text shows. */}
-        <div
-          className="relative flex min-h-[26px] cursor-pointer items-center gap-1.5 px-2 touch:min-h-10"
-          onClick={toggle}
+  const rank = toastRank({ alert, action: action != null, progress: progress != null }, seq);
+  const badge = count != null && count > 0 ? (count > 99 ? '99+' : String(count)) : null;
+
+  const circle = (
+    <span
+      data-testid={testId}
+      data-tone={tone}
+      data-alert={alert ? 'true' : undefined}
+      title={badge != null ? `${label} · ${badge}` : label}
+      style={{ order: rank, zIndex: rank }}
+      className={`relative -ml-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ui-raise ring-2 ${
+        alert ? 'ring-ui-danger' : 'ring-ui-bg'
+      } ${colours.mark} touch:h-9 touch:w-9 ${className}`}
+    >
+      {progress != null && (
+        <svg aria-hidden viewBox="0 0 28 28" className="pointer-events-none absolute inset-0 h-full w-full -rotate-90">
+          <circle cx="14" cy="14" r={RING_R} fill="none" strokeWidth="2" className="stroke-ui-line" />
+          <circle
+            cx="14"
+            cy="14"
+            r={RING_R}
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={RING_C}
+            strokeDashoffset={RING_C * (1 - pct / 100)}
+            className={`${colours.stroke} motion-safe:transition-[stroke-dashoffset] motion-safe:duration-500`}
+          />
+        </svg>
+      )}
+      <span aria-hidden className="flex items-center">
+        {icon}
+      </span>
+      {/* ⚠ The badge and the alert dot sit on the circle's LEFT: each circle overlaps the one to
+          its left and paints above it, so anything on a circle's right half is under its neighbour
+          (a merge count was hidden under the loading circle). */}
+      {badge != null && (
+        <span
+          aria-hidden
+          className="absolute -bottom-1.5 -left-2 min-w-[18px] rounded-full bg-ui-accent-fill px-1 text-center text-meta font-medium leading-[18px] tabular-nums text-ui-on-accent"
         >
-          {/* The icon sits INSIDE the toggle, so below `sm` (words visually hidden) the keyboard
-              stop still has a body to draw its focus ring around. */}
+          {badge}
+        </span>
+      )}
+      {alert && <span aria-hidden className="absolute -left-0.5 -top-0.5 h-2 w-2 rounded-full bg-ui-danger ring-2 ring-ui-bg" />}
+      {/* The words, for the live region and for tests; the button's own name lists every label. */}
+      <span className="sr-only">
+        {label}
+        {summary != null && <> · {summary}</>}
+      </span>
+    </span>
+  );
+
+  const section = (
+    <section
+      role="group"
+      aria-label={label}
+      data-testid={testId != null ? `${testId}-panel` : undefined}
+      data-tone={tone}
+      style={{ order: -rank }}
+      className="border-t border-ui-line/60"
+    >
+      <div className="flex items-start gap-2 px-3 py-2">
+        <span className={`flex h-[18px] shrink-0 items-center ${colours.mark}`}>{icon}</span>
+        <p className="min-w-0 flex-1 break-words text-meta leading-[18px]">
+          <span className="font-medium">{label}</span>
+          {summary != null && (
+            <span className="text-ui-mute">
+              {' · '}
+              {summary}
+            </span>
+          )}
+        </p>
+        {action != null && (
+          <span className="flex shrink-0 items-center" onClick={stop}>
+            {action}
+          </span>
+        )}
+        {onDismiss != null && (
           <button
             type="button"
-            data-toast-toggle
-            aria-expanded={expanded}
-            className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 rounded-ui text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss();
+            }}
+            aria-label={dismissLabel ?? `Dismiss ${label}`}
+            title={dismissLabel ?? `Dismiss ${label}`}
+            className="hit -mr-1 flex shrink-0 items-center rounded-ui p-0.5 text-ui-faint hover:bg-ui-hover hover:text-ui-ink"
           >
-            <span className={`flex h-[18px] shrink-0 items-center ${colours.mark}`}>
-              {icon}
-            </span>
-            <span
-              data-toast-line
-              className={`block min-w-0 flex-1 text-meta leading-[18px] ${
-                expanded ? 'whitespace-normal break-words py-1' : `truncate${summary == null ? ' max-sm:sr-only' : ''}`
-              }`}
-            >
-              {/* Below `sm` a collapsed card with a summary shows the summary alone ("1 armed"), the
-                  label staying in the accessible name; a card without one shows its icon only. */}
-              <span className={`font-medium${expanded ? '' : ' max-sm:sr-only'}`}>{label}</span>
-              {summary != null && (
-                <span className="text-ui-mute">
-                  <span className={expanded ? undefined : 'max-sm:sr-only'}> · </span>
-                  {summary}
-                </span>
-              )}
-            </span>
+            <CloseIcon size={12} />
           </button>
-          {action != null && (
-            <span className="flex shrink-0 items-center" onClick={stop}>
-              {action}
-            </span>
-          )}
-          {onDismiss != null && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismiss();
-              }}
-              aria-label={dismissLabel ?? `Dismiss ${label}`}
-              title={dismissLabel ?? `Dismiss ${label}`}
-              className="hit -mr-1 flex shrink-0 items-center rounded-ui p-0.5 text-ui-faint hover:bg-ui-hover hover:text-ui-ink"
-            >
-              <CloseIcon size={12} />
-            </button>
-          )}
-          {progress != null && (
-            <div
-              role="progressbar"
-              aria-label={progress.label}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={pct}
-              className="absolute inset-x-1 bottom-0 h-[3px] overflow-hidden rounded-[2px] bg-ui-hover"
-            >
-              <div
-                className={`h-full rounded-[2px] ${colours.fill} motion-safe:transition-all motion-safe:duration-500`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          )}
-        </div>
-        {/* THE DETAIL — mounted only while expanded: rows, then the footer. */}
-        {expanded && children != null && (
-          <div className={`${SECTION} px-2 py-1 text-meta`}>{children}</div>
-        )}
-        {expanded && footer != null && (
-          <div
-            className={`${SECTION} flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 py-1.5 text-meta text-ui-mute`}
-          >
-            {footer}
-          </div>
         )}
       </div>
-    </div>
+      {progress != null && (
+        <div
+          role="progressbar"
+          aria-label={progress.label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          className="mx-3 mb-2 h-[3px] overflow-hidden rounded-[2px] bg-ui-hover"
+        >
+          <div
+            className={`h-full rounded-[2px] ${colours.fill} motion-safe:transition-all motion-safe:duration-500`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+      {children != null && <div className="px-3 pb-1 text-meta">{children}</div>}
+      {footer != null && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-ui-line/60 px-3 py-1.5 text-meta text-ui-mute">
+          {footer}
+        </div>
+      )}
+    </section>
+  );
+
+  return (
+    <>
+      {ctx.circleHost != null && createPortal(circle, ctx.circleHost)}
+      {/* ⚠ ALWAYS MOUNTED, open or shut (the shut panel is `hidden`): a section's rows own live work —
+          an AI Fix row drives its run's status stream, which is what turns it into "Fix ready". */}
+      {ctx.listHost != null && createPortal(section, ctx.listHost)}
+    </>
   );
 }
 
 /**
- * A card's rows, divided. Rows bleed to the panel's edges; the list is NEVER its own scroller
+ * A job's rows, divided. Rows bleed to the section's edges; the list is NEVER its own scroller
  * (no `max-h-* overflow-auto`) — the expanded panel is the one scroller (see the header comment).
  */
 export function ToastList({ id, children }: { id?: string; children: ReactNode }): JSX.Element {
   return (
-    <ul id={id} className="-mx-2 -my-1 divide-y divide-ui-line/60">
+    <ul id={id} className="-mx-3 divide-y divide-ui-line/60 border-t border-ui-line/60">
       {children}
     </ul>
   );
 }
 
-/** One row of a card: the same padding, type size and line layout on every card. */
+/** One row of a job: the same padding, type size and line layout everywhere. */
 export function ToastRow({ children }: { children: ReactNode }): JSX.Element {
-  return <li className="px-2 py-1.5 text-meta leading-snug">{children}</li>;
+  return <li className="px-3 py-1.5 text-meta leading-snug">{children}</li>;
 }
 
-/** The compact control kept on a card's line (Undo, Reopen) — one look for every card. */
+/** The compact control kept on a job's line (Undo, Reopen) — one look for every job. */
 export function ToastLineButton({
   onClick,
   disabled,
@@ -425,7 +495,7 @@ export function ToastLineButton({
   );
 }
 
-/** A secondary action in a card's footer ("Dismiss finished"). */
+/** A secondary action in a job's footer ("Dismiss finished"). */
 export function ToastFooterButton({
   onClick,
   children,
@@ -449,9 +519,8 @@ export function ToastFooterButton({
 }
 
 /**
- * The "N more" control under a card's capped list, for its FOOTER: it reveals every row inside the
- * expanded panel (which scrolls within its max height), then offers "Show fewer". It lives INSIDE
- * the panel, so clicking it keeps the card open and Escape still collapses the card.
+ * The "N more" control under a job's capped list, for its FOOTER: it reveals every row inside the
+ * expanded panel (which scrolls within its max height), then offers "Show fewer".
  */
 export function ToastShowMore({
   hidden,

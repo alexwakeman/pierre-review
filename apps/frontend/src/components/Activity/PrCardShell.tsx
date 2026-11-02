@@ -63,11 +63,20 @@ export function LineDelta({ additions, deletions }: { additions: number; deletio
   );
 }
 
-/** Should a whole-card click on `target` open the card? False when it landed on a control. */
-export function cardClickActivates(target: EventTarget | null): boolean {
+/**
+ * Should a whole-card click on `target` open the card (`card`, the click's currentTarget)? False when
+ * it landed on a control INSIDE the card, or outside the card's DOM (a portalled popover or modal,
+ * whose clicks React bubbles through the card). ⚠ A `[data-noactivate]` AROUND the card (This Sprint's
+ * story tray marks its whole panel) must not swallow the card's own click — it did, and the tray's PR
+ * cards opened nothing.
+ */
+export function cardClickActivates(target: EventTarget | null, card?: { contains(other: Node | null): boolean } | null): boolean {
   const el = target as { closest?: (s: string) => unknown } | null;
   if (el == null || typeof el.closest !== 'function') return true;
-  return el.closest(CARD_CONTROL_SELECTOR) == null;
+  if (card != null && !card.contains(el as unknown as Node)) return false;
+  const hit = el.closest(CARD_CONTROL_SELECTOR);
+  if (hit == null) return true;
+  return card != null && !card.contains(hit as Node);
 }
 
 /**
@@ -109,7 +118,7 @@ export function PrCardFrame({
     : undefined;
   const onClick = onOpen
     ? (e: MouseEvent<HTMLLIElement>): void => {
-        if (!cardClickActivates(e.target)) return;
+        if (!cardClickActivates(e.target, e.currentTarget)) return;
         onOpen();
       }
     : undefined;

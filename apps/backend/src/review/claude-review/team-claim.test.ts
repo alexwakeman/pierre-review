@@ -69,6 +69,7 @@ describe('decideTeamClaim (the one fold)', () => {
       kind: 'reviewed',
       login: 'bob',
       atMs: NOW - 5 * MIN,
+      description: 'bob reviewed · 2 comments',
     });
     expect(decideTeamClaim([line('me', 'success', NOW - 5 * MIN, 'me reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
     expect(decideTeamClaim([line('bob', 'success', NOW - 9 * MIN, 'bob reviewed'), line('carol', 'success', NOW - MIN, 'Cleared by carol')], 'me', NOW).kind).toBe(
@@ -246,8 +247,12 @@ beforeEach(async () => {
 });
 
 describe('the workspace switch', () => {
-  it('is OFF by default, and the one writer turns it on and off', async () => {
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(false);
+  it('is ON by default (0159: only a stored false is off), and the one writer turns it off and on', async () => {
+    // A workspace that never touched the switch (NULL) reads ON.
+    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
+    expect(await tc.teamClaimsOnForPr(ctx, 1, prId)).toBe(true);
+    const off = await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
+    expect(off?.teamClaimsEnabled).toBe(false);
     const f = fakeGh();
     expect((await tc.claimBeforeAutoRun(ctx, target(), {}, f.gh)).kind).toBe('off');
     expect(f.posts).toEqual([]);
@@ -400,5 +405,88 @@ describe('finish and clear', () => {
     expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
     const refused = fakeGh({ postFails: Object.assign(new Error('404'), { status: 404 }) });
     expect(await tc.clearTeamClaim(ctx, target(), refused.gh)).toMatchObject({ ok: false, error: 'no_access' });
+  });
+});
+
+describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () => {
+  beforeAll(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
+  });
+
+  it('a skip is recorded durably with their line and name; a Codex claim at the same head keeps the Claude skip', async () => {
+    const seen = await import('./team-claim-seen.js');
+    await db.delete(schema.teamClaimSeen).execute();
+    await db
+      .insert(schema.users)
+      .values({ githubLogin: 'robin-dunn', displayName: 'Robin Dunn', githubNodeId: 'U_robin' })
+      .onConflictDoNothing()
+      .execute();
+    const f = fakeGh();
+    f.seed('limn/review-claude', { id: 1, state: 'pending', description: 'robin-dunn is reviewing with Claude', createdAtMs: NOW - 20 * MIN, login: 'robin-dunn' });
+    f.seed('limn/review-claude', { id: 2, state: 'success', description: 'robin-dunn reviewed · no comments', createdAtMs: NOW - 2 * MIN, login: 'robin-dunn' });
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    expect(r.kind).toBe('skip');
+    // The Codex half claims freely at the same head — and the Claude skip is NOT forgotten (per provider).
+    const codex = await tc.claimBeforeAutoRun(ctx, { ...target(), provider: 'codex' }, { nowMs: () => NOW }, f.gh);
+    expect(codex.kind).toBe('run');
+    expect(tc.teamClaimSkipFor(1, prId, 'head1')).toMatchObject({ provider: 'claude', kind: 'reviewed', login: 'robin-dunn' });
+    // Durable: read back from the DB (what the tab shows after a reload or a restart).
+    for (let i = 0; i < 50; i++) {
+      if ((await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).length > 0) break;
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    tc._resetTeamClaimsForTest();
+    const lines = await seen.teammateLinesAtHead(ctx, 1, prId, 'head1');
+    expect(lines).toEqual([
+      {
+        provider: 'claude',
+        kind: 'reviewed',
+        login: 'robin-dunn',
+        headSha: 'head1',
+        at: new Date(NOW - 2 * MIN).toISOString(),
+        description: 'robin-dunn reviewed · no comments',
+        name: 'Robin Dunn',
+      },
+    ]);
+    // Another head shows nothing; a Clear forgets it.
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head2')).toEqual([]);
+    await seen.forgetTeammateLine(ctx, 1, prId, 'head1', 'claude');
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toEqual([]);
+  });
+
+  it("⚠ a head that is FREE again forgets the teammate's line — it never sits beside this machine's own review", async () => {
+    const seen = await import('./team-claim-seen.js');
+    await db.delete(schema.teamClaimSeen).execute();
+    tc._resetTeamClaimsForTest();
+    await seen.recordTeammateLine(ctx, 1, prId, {
+      provider: 'claude',
+      kind: 'reviewing',
+      login: 'robin-dunn',
+      headSha: 'head1',
+      at: new Date(NOW - 40 * MIN).toISOString(),
+      description: 'robin-dunn is reviewing with Claude',
+    });
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toHaveLength(1);
+    // Their line is gone from the head (no lines at all): this machine claims and runs.
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, fakeGh().gh);
+    expect(r.kind).toBe('run');
+    for (let i = 0; i < 50; i++) {
+      if ((await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).length === 0) break;
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toEqual([]);
+  });
+
+  it('migration 0159 switches every existing workspace ON (also one switched off)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { eq } = await import('drizzle-orm');
+    const sqlText = readFileSync(new URL('../../db/migrations/0159_team_claims_default_on.sql', import.meta.url), 'utf8');
+    const update = sqlText.split('--> statement-breakpoint')[0]!.split('\n').filter((l) => !l.startsWith('--')).join('\n').trim();
+    expect(update).toBe('UPDATE `workspaces` SET `team_claims_enabled` = 1;');
+    await db.update(schema.workspaces).set({ teamClaimsEnabled: false }).where(eq(schema.workspaces.id, workspaceId)).execute();
+    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(false);
+    const { sql } = await import('drizzle-orm');
+    await db.run(sql.raw(update));
+    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
   });
 });

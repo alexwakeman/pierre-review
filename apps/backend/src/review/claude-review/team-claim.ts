@@ -1,8 +1,8 @@
 // TEAM CLAIMS — "Mark auto reviews on GitHub" (docs/CLAUDE-REVIEW.md § Team claims).
 //
 // Limn runs on each person's machine. When several people on one team switch auto review on for the
-// same repos, every install would review every new head. With this switch on (per workspace, OFF by
-// default, `workspaces.team_claims_enabled`), an AUTO review marks the PR's head commit with a GitHub
+// same repos, every install would review every new head. With this switch on (per workspace, ON by
+// default since 0159, `workspaces.team_claims_enabled`), an AUTO review marks the PR's head commit with a GitHub
 // COMMIT STATUS before it runs, so a teammate's Limn sees the line and skips that head:
 //
 //     context  limn/review-claude | limn/review-codex   (ONE per provider family, the RUN's provider —
@@ -57,6 +57,7 @@ import {
   releaseClaimLinesAtHead,
   setClaimLine,
 } from './team-claim-ledger.js';
+import { forgetTeammateLine, recordTeammateLine } from './team-claim-seen.js';
 
 /** How long a pending line holds the head after its claimant's NEWEST line. */
 export const TEAM_CLAIM_LEASE_MS = 25 * 60 * 1000;
@@ -126,7 +127,8 @@ export type TeamClaimDecision =
   | { kind: 'free' }
   // The reader's own live claim (a restart mid-run, another of their machines): theirs to take.
   | { kind: 'mine' }
-  | { kind: 'reviewed'; login: string; atMs: number }
+  // `description`: their success line as GitHub shows it ("robin-dunn reviewed · no comments").
+  | { kind: 'reviewed'; login: string; atMs: number; description: string | null }
   | {
       kind: 'reviewing';
       login: string;
@@ -146,7 +148,7 @@ export function decideTeamClaim(lines: readonly TeamClaimLine[], me: string | nu
   const last = sorted[sorted.length - 1]!;
   if (last.state === 'success') {
     if (isFreeLine(last) || sameLogin(last.login, me) || last.login == null) return { kind: 'free' };
-    return { kind: 'reviewed', login: last.login, atMs: last.createdAtMs };
+    return { kind: 'reviewed', login: last.login, atMs: last.createdAtMs, description: last.description };
   }
   if (settles(last)) return { kind: 'free' };
   // Under a pending line: the race since the last settling line.
@@ -255,6 +257,10 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
     });
   },
   async login(accountId) {
+    // ⚠ UNDER TEST the real adapter never reaches GitHub: the switch is ON by default (0159), so every
+    // auto run in a test would otherwise read and write real commit statuses. No login ⇒ the run goes
+    // ahead without a line. Tests of the claim pass their own fake adapter.
+    if (process.env.VITEST) return null;
     const { accountGithubLogin } = await import('../../db/review-threads-for-review.js');
     return accountGithubLogin(accountId);
   },
@@ -308,7 +314,11 @@ interface SkipEntry {
   skip: ClaudeTeamClaimSkip;
   recheckAtMs: number;
 }
-const skips = new Map<string, SkipEntry>(); // `${accountId}:${prId}`
+// ⚠ PER PROVIDER (2026-11-02): a pair's Claude half skipped for a teammate must stay remembered while
+// its Codex half claims and runs (one key per PR forgot it, and the tab showed nothing).
+const skips = new Map<string, SkipEntry>(); // `${accountId}:${prId}:${provider}`
+const skipKey = (accountId: number, prId: number, provider: AiProviderId): string => `${accountId}:${prId}:${provider}`;
+const prPrefix = (accountId: number, prId: number): string => `${accountId}:${prId}:`;
 
 /** Test hook. */
 export function _resetTeamClaimsForTest(): void {
@@ -316,12 +326,21 @@ export function _resetTeamClaimsForTest(): void {
   finishing.clear();
 }
 
-/** The remembered skip for this PR at `headSha` (any provider when `headSha` is null). */
+/** The PR's remembered skips (every provider), Claude's first. */
+function skipsOfPr(accountId: number, prId: number): SkipEntry[] {
+  const pre = prPrefix(accountId, prId);
+  return [...skips.entries()]
+    .filter(([k]) => k.startsWith(pre))
+    .map(([, e]) => e)
+    .sort((a, b) => (a.skip.provider === b.skip.provider ? 0 : a.skip.provider === 'claude' ? -1 : 1));
+}
+
+/** The remembered skip for this PR at `headSha` (any head when `headSha` is null); Claude's first. */
 export function teamClaimSkipFor(accountId: number, prId: number, headSha: string | null): ClaudeTeamClaimSkip | null {
-  const e = skips.get(`${accountId}:${prId}`);
-  if (!e) return null;
-  if (headSha != null && e.skip.headSha !== headSha) return null;
-  return e.skip;
+  for (const e of skipsOfPr(accountId, prId)) {
+    if (headSha == null || e.skip.headSha === headSha) return e.skip;
+  }
+  return null;
 }
 
 /** Skips for a list of PRs at their current heads (the Open PRs line). */
@@ -343,8 +362,8 @@ export function teamClaimSkipsFor(
  * every minute only to be dropped again; it compares the head with the synced one.
  */
 export function teamClaimHeldHead(accountId: number, prId: number, nowMs: number): string | null {
-  const e = skips.get(`${accountId}:${prId}`);
-  return e && nowMs < e.recheckAtMs ? e.skip.headSha : null;
+  const e = skipsOfPr(accountId, prId).find((x) => nowMs < x.recheckAtMs);
+  return e ? e.skip.headSha : null;
 }
 
 /** Remembered "being reviewed" skips whose holder's lease has ended (the reconciler's teammate pass). */
@@ -358,21 +377,27 @@ export function expiredReviewingSkips(nowMs: number): Array<{ accountId: number;
   return out;
 }
 
-/** Forget a remembered skip (the reconciler, once the teammate's line is settled). */
-export function forgetTeamClaimSkip(accountId: number, prId: number): void {
-  forgetSkip(accountId, prId);
+/** Forget a remembered skip (the reconciler, once the teammate's line is settled). No provider ⇒ all. */
+export function forgetTeamClaimSkip(accountId: number, prId: number, provider?: AiProviderId): void {
+  if (provider) {
+    forgetSkip(accountId, prId, provider);
+    return;
+  }
+  const pre = prPrefix(accountId, prId);
+  for (const k of [...skips.keys()]) if (k.startsWith(pre)) skips.delete(k);
 }
 
 function rememberSkip(accountId: number, prId: number, skip: ClaudeTeamClaimSkip, recheckAtMs: number): void {
-  skips.set(`${accountId}:${prId}`, { skip, recheckAtMs });
+  skips.set(skipKey(accountId, prId, skip.provider), { skip, recheckAtMs });
 }
-function forgetSkip(accountId: number, prId: number): void {
-  skips.delete(`${accountId}:${prId}`);
+function forgetSkip(accountId: number, prId: number, provider: AiProviderId): void {
+  skips.delete(skipKey(accountId, prId, provider));
 }
 
 // ---- the workspace switch ----
 
-/** Is "Mark auto reviews on GitHub" on for the workspace holding this PR's repo? Only a stored true. */
+/** Is "Mark auto reviews on GitHub" on for the workspace holding this PR's repo? ON unless a stored
+ *  false (migration 0159). A repo in no workspace reads OFF. */
 export async function teamClaimsOnForPr(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   if (!w?.teamClaimsEnabled) return false;
@@ -384,7 +409,7 @@ export async function teamClaimsOnForPr(ctx: AgentContext, accountId: number, pr
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)
     .execute()) as Array<{ on: boolean | null }>;
-  return rows[0]?.on === true;
+  return rows.length > 0 && rows[0]!.on !== false;
 }
 
 // ---- the lifecycle ----
@@ -498,8 +523,8 @@ export async function claimBeforeAutoRun(
   });
 
   // A remembered skip at this head and provider, still inside its wait: skip without a GitHub read.
-  const mem = skips.get(`${accountId}:${prId}`);
-  if (mem && mem.skip.headSha === headSha && mem.skip.provider === provider && !opts.pressed && now() < mem.recheckAtMs) {
+  const mem = skips.get(skipKey(accountId, prId, provider));
+  if (mem && mem.skip.headSha === headSha && !opts.pressed && now() < mem.recheckAtMs) {
     return { kind: 'skip', skip: mem.skip };
   }
 
@@ -534,7 +559,12 @@ export async function claimBeforeAutoRun(
       login: d.login,
       headSha,
       at: nowIso(d.kind === 'reviewed' ? d.atMs : d.firstAtMs),
+      description: d.description,
     };
+    // DURABLE for the tab (team_claim_seen): a reload or a restart still names the teammate.
+    void recordTeammateLine(ctx, accountId, prId, skip).catch((err) =>
+      ctx.log.warn(`team claim pr ${prId}: teammate line not recorded: ${errText(err)}`),
+    );
     rememberSkip(
       accountId,
       prId,
@@ -544,7 +574,10 @@ export async function claimBeforeAutoRun(
     return { kind: 'skip', skip };
   };
   if (first.kind === 'reviewed' || first.kind === 'reviewing') return skipOf(first);
-  forgetSkip(accountId, prId);
+  forgetSkip(accountId, prId, provider);
+  // The head is free (or ours) now: a teammate's line the tab named here is no longer the newest one,
+  // so it must not sit beside this machine's own review ("Robin Dunn is reviewing…" forever).
+  void forgetTeammateLine(ctx, accountId, prId, headSha, provider).catch(() => {});
 
   // STEP 2 — claim, then re-read: the earliest live claimant wins.
   // ⚠ THE LEDGER FIRST: the intent is written BEFORE the pending line is posted, so a line that reaches
@@ -746,8 +779,8 @@ export async function teamClaimPendingFor(
   running: boolean,
 ): Promise<ClaudeTeamClaimPending | null> {
   if (!headSha) return null;
-  const skip = teamClaimSkipFor(accountId, prId, headSha);
-  if (skip?.kind === 'reviewing') return { provider: skip.provider, login: skip.login, mine: false };
+  const skip = skipsOfPr(accountId, prId).find((e) => e.skip.headSha === headSha && e.skip.kind === 'reviewing')?.skip;
+  if (skip) return { provider: skip.provider, login: skip.login, mine: false };
   if (running) return null;
   const row = (await openClaimLinesAtHead(ctx, accountId, prId, headSha)).find((r) => !claimLineFinishing(r.id));
   if (!row) return null;
@@ -782,8 +815,9 @@ export async function clearTeamClaim(
       ? { ok: false, error: 'no_access', message: 'GitHub refused: you need write access to this repo.' }
       : { ok: false, error: 'error', message: errText(err).slice(0, 200) };
   }
-  const mem = skips.get(`${accountId}:${prId}`);
-  if (mem && mem.skip.provider === provider) forgetSkip(accountId, prId);
+  forgetSkip(accountId, prId, provider);
+  // The teammate's line the tab showed is no longer the newest one.
+  await forgetTeammateLine(ctx, accountId, prId, headSha, provider).catch(() => {});
   // The ledger: every open row at this head and provider is settled by the Clear.
   await releaseClaimLinesAtHead(ctx, accountId, prId, headSha, provider, 'cleared').catch((err) =>
     ctx.log.warn(`team claim pr ${prId}: ledger not cleared: ${errText(err)}`),

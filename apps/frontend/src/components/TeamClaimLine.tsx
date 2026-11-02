@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ClaudeReviewResponse } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
 import { useClearTeamClaim } from '../hooks/useClaudeReview.js';
-import { teamClaimRecordLine, teamClaimSkipLine } from '../lib/claudeAutoReview.js';
+import { teamClaimRecordLine, teamClaimSkipLine, teammateReviewLine } from '../lib/claudeAutoReview.js';
 
 // TEAM CLAIMS ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims) on the AI Review
 // tab: why the auto review here was skipped (a teammate's Limn holds this commit), what the latest
@@ -15,15 +15,20 @@ import { teamClaimRecordLine, teamClaimSkipLine } from '../lib/claudeAutoReview.
 export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReviewResponse | undefined }): JSX.Element | null {
   const clear = useClearTeamClaim(prId);
   const [confirming, setConfirming] = useState(false);
-  const skipLine = teamClaimSkipLine(data?.teamClaimSkip);
+  // The teammates this Limn stood down for at this commit (durable), else the in-memory skip.
+  const teammates = (data?.teamClaimTeammates ?? []).map(teammateReviewLine);
+  const skipLine = teammates.length > 0 ? null : teamClaimSkipLine(data?.teamClaimSkip);
   const recordLine = data?.review?.trigger === 'auto' ? teamClaimRecordLine(data.review.teamClaim) : null;
   const pending = data?.teamClaimPending ?? null;
-  if (skipLine == null && recordLine == null && pending == null) return null;
+  if (teammates.length === 0 && skipLine == null && recordLine == null && pending == null) return null;
   const pendingLine =
-    pending?.mine && skipLine == null ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
+    pending?.mine && skipLine == null && teammates.length === 0 ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
   return (
     <div className="mt-2 space-y-1 text-meta text-ui-mute">
+      {teammates.map((line) => (
+        <div key={line}>{line}</div>
+      ))}
       {skipLine != null && <div>{skipLine}</div>}
       {skipLine == null && recordLine != null && pendingLine == null && <div>{recordLine}</div>}
       {pendingLine != null && <div>{pendingLine}</div>}

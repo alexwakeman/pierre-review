@@ -194,12 +194,15 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   the automatic draw (review/diagrams/trigger.ts); Draw / Redraw still works. The ONE writer is
   `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Design diagrams.
 - **TEAM CLAIMS** (migration `0134`, docs/CLAUDE-REVIEW.md § Team claims): `workspaces.teamClaimsEnabled`
-  (`team_claims_enabled`, nullable, no default — NULL/false = OFF; only a stored true is on; the ONE
+  (`team_claims_enabled`, nullable, no default — ⚠ since `0159` NULL reads ON, only a stored false is off
+  (`0159` set every existing row to 1); the ONE
   writer is `setWorkspaceAutoReview`) and `claudeReviews.teamClaim` (`team_claim`, JSON
   `ClaudeTeamClaimRecord {context, state: 'marked'|'unmarked', reason, lastLine, at}`: the GitHub status
   line an AUTO run posted, or why it ran without one; NULL = no claim attempted — a manual run, or the
-  switch off). A SKIPPED auto run (a teammate's Limn holds the head) writes NO row: skips live in
-  memory only (team-claim.ts).
+  switch off). A SKIPPED auto run (a teammate's Limn holds the head) writes NO run row: the skip lives in
+  memory (team-claim.ts, per provider) and, for the AI Review tab, in `teamClaimSeen` (`team_claim_seen`,
+  migration `0159`: one row per `(accountId, prId, headSha, provider)` — kind `reviewing|reviewed`, the
+  teammate's login and line; no FK, both delete paths and the erasure delete it).
 - **THE TEAM-CLAIM LEDGER** (`teamClaimLines`, `team_claim_lines`, migration `0138`; docs/CLAUDE-REVIEW.md
   § Team claims → Releasing stale lines): one row per status line this machine holds or released —
   `(accountId, prId, repoId, owner, name, headSha, provider, reviewId?, whose 'mine'|'teammate', state

@@ -4,6 +4,9 @@ import { ChevronIcon } from '../Icons.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCountChips, rollupCounts } from './ThreadCountChips.js';
+import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
+import { threadPillFor } from '../../lib/claudeThreadMarker.js';
+import { threadEdgeColor } from '../../lib/threadEdge.js';
 import {
   effectiveResolved,
   forcedOpen,
@@ -68,6 +71,9 @@ export function FileGroup({
   onToggleResolved: (threadId: number) => void;
 }): JSX.Element {
   const counts = rollupCounts(threads);
+  // One batched read per PR (the pills below make the same one): which threads an AI run judged.
+  const judgements = useClaudeThreadJudgements(threads[0]?.prId ?? null);
+  const aiJudged = (t: ThreadDetail): boolean => threadPillFor(t, judgements).kind === 'claude';
   const segments = path.split('/');
   const fileName = segments.at(-1);
   const dir = segments.slice(0, -1).join('/');
@@ -94,13 +100,21 @@ export function FileGroup({
             const author = authorId != null ? usersById.get(authorId) : undefined;
             return (
               <div key={t.id} ref={(el) => registerRef(t.id, el)}>
+                {/* A SHUT CARD, drawn like an open one (ThreadCard): the same border, state edge,
+                    padding, and the state pill first — only the conversation is folded away. */}
                 <button
                   type="button"
                   onClick={() => onToggleResolved(t.id)}
                   aria-expanded={false}
-                  className="hit bg-ui-raise flex w-full min-w-0 items-center gap-2 rounded-ui px-2.5 py-1.5 text-left text-meta text-ui-mute hover:bg-ui-hover"
+                  data-thread-state={t.derivedState}
+                  style={{ borderLeftColor: threadEdgeColor(t.derivedState, aiJudged(t)) }}
+                  className="hit flex w-full min-w-0 items-center gap-2 rounded-ui border border-l-2 border-ui-line px-2.5 py-2 text-left text-meta text-ui-mute hover:bg-ui-hover"
                 >
-                  <ChevronIcon dir="right" className="shrink-0 text-ui-faint" />
+                  {/* Claude's outcome when there is one ("Reply accepted · Resolved"), else the plain
+                      state. No ⓘ: this row is itself a button. */}
+                  <span className="flex shrink-0 items-center gap-1">
+                    <ThreadStatePill thread={t} noInfo />
+                  </span>
                   <span className="shrink-0 tabular-nums">{lineLabel}</span>
                   {author && (
                     <span className="shrink-0 font-medium text-ui-mute">
@@ -111,11 +125,7 @@ export function FileGroup({
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate">{snippet(t)}</span>
-                  {/* Claude's outcome when there is one ("Reply accepted · Resolved"), else the plain
-                      state. No ⓘ: this row is itself a button. */}
-                  <span className="flex shrink-0 items-center gap-1">
-                    <ThreadStatePill thread={t} noInfo />
-                  </span>
+                  <ChevronIcon dir="down" className="shrink-0 text-ui-faint" />
                 </button>
               </div>
             );

@@ -146,6 +146,7 @@ export function AiBudgetToast(): JSX.Element | null {
       summary={sentence}
       action={<ToastLineButton onClick={() => openSettings('claude-spend')}>Settings</ToastLineButton>}
       onDismiss={() => setDismissedFor(key)}
+      alert
       footer={<span>Your own use of {name} is not limited. Runs you start still run after you confirm.</span>}
     />
   );

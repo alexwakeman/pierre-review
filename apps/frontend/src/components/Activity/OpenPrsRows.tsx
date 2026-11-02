@@ -14,9 +14,7 @@ import { useMergedPanelOpen } from '../../hooks/useTicketMergedPrs.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { reviewCellFor, reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
 import { cardTicketLabel, type CardTicket } from '../../lib/cardTickets.js';
-import { cardTicketPills, refusalSentence, ticketCoverage, ticketCurrency } from '../../lib/ticketReview.js';
-import { useStartTicketReview, useTicketReviewStarting } from '../../hooks/useTicketReview.js';
-import { ReviewedAgo } from '../ReviewedAgo.js';
+import { cardTicketPills } from '../../lib/ticketReview.js';
 import {
   CI_META,
   dateTime,
@@ -26,9 +24,9 @@ import {
   safeExternalUrl,
   userLabel,
 } from '../../lib/ui.js';
-import { prCountLabel, stackRollup, stackRollupParts, type OpenPrsStack } from '../../lib/openPrsStacks.js';
+import { prCountLabel, type OpenPrsStack } from '../../lib/openPrsStacks.js';
 import { githubPrUrl } from '../../lib/prLink.js';
-import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { Avatar } from '../CommentCard.js';
 import { CopyButton } from '../CopyButton.js';
 import {
@@ -55,7 +53,6 @@ import {
   List,
   Row,
   RowLead,
-  RowMeta,
   HEADER_ACTION_CLASS,
   SidePanel,
   StatusIcon,
@@ -84,8 +81,9 @@ import { useFillToPaneBottom } from '../ui/stickyFill.js';
 // THE ROW, left to right, most important first:
 //   lead: can it land? (mergeVerdict — red conflicts/blocked, green ready, grey otherwise, Draft)
 //   title · repo#N (· the ticket key in List)
-//   CI as an icon · review standing as an icon · open threads (count) · the AI review as ONE quiet
-//   marker · size (+A −D) · author · age.
+//   review standing · CI · open threads (count) · the AI review as ONE quiet marker · size (+A −D) ·
+//   author · age — each a FIXED-WIDTH column under a heading row (`openPrsColumns`, ONE spec for the
+//   headings and the rows, so a review tick and a CI tick never share a place).
 // Every icon carries its words as the tooltip and the accessible name. Every fact the old card
 // said is in the SIDE PANEL, in words (status list, tickets, meta, reach, the AI review panel).
 //
@@ -94,8 +92,8 @@ import { useFillToPaneBottom } from '../ui/stickyFill.js';
 // ⚠ Nothing here fetches on selection: the panel reads the list's batched answers only.
 //
 // GROUPED BY TICKET: one collapsible group per ticket (the collapse is the reader's, per session,
-// never stored): the ticket line (key + title → the story view, status, type, assignee, the ticket
-// review's criteria met + Re-check, the roll-up, the PR count), its rows, then "Merged (n)".
+// never stored): the ticket line (chevron, key + story name → the story view, the PR count — nothing
+// else; status, assignee, criteria and Re-check are in the story view), its rows, then "Merged (n)".
 
 /** Rows drawn per page (the list stays whole for counts, sorts and groups; only drawing pages). */
 export const OPEN_PRS_ROWS_PAGE = 60;
@@ -187,6 +185,74 @@ function shortAge(iso: string): string {
   const d = Math.round(h / 24);
   if (d < 60) return `${d}d`;
   return `${Math.round(d / 30)}mo`;
+}
+
+// ---- the icon columns: ONE spec shared by the heading row and every PR row ----
+
+export type OpenPrsColumnKey = 'ci' | 'review' | 'threads' | 'ai' | 'size' | 'author' | 'age';
+
+export interface OpenPrsColumn {
+  key: OpenPrsColumnKey;
+  /** The heading over the column. */
+  label: string;
+  /** The heading's tooltip: what the column's marks mean. */
+  title: string;
+  /** Fixed width in px, the same in the heading and every row, so marks never drift. */
+  width: number;
+  align: 'center' | 'left' | 'right';
+  /** Dropped below this width (its fact is still in the side panel). */
+  hideBelow: 'sm' | 'md' | 'lg' | null;
+}
+
+const COLUMNS: readonly OpenPrsColumn[] = [
+  { key: 'review', label: 'Review', title: 'Approved (green) or changes requested (red)', width: 52, align: 'center', hideBelow: 'sm' },
+  { key: 'ci', label: 'CI', title: 'Checks failing (red cross), passing (tick) or running (ring)', width: 36, align: 'center', hideBelow: 'sm' },
+  { key: 'threads', label: 'Threads', title: 'Open review threads; a red dot means one has no reply', width: 56, align: 'center', hideBelow: 'md' },
+  { key: 'ai', label: 'AI review', title: 'The AI review’s verdict; it pulses while a run works', width: 64, align: 'center', hideBelow: 'sm' },
+  { key: 'size', label: 'Size', title: 'Lines added and removed', width: 100, align: 'right', hideBelow: 'lg' },
+  { key: 'author', label: 'Author', title: 'Who opened the pull request', width: 108, align: 'left', hideBelow: 'md' },
+  { key: 'age', label: 'Updated', title: 'Time since the last activity', width: 60, align: 'right', hideBelow: null },
+];
+
+/** The columns a row draws: AI review only where AI runs; size and author give way to the docked panel. */
+export function openPrsColumns({ claudeOn, compact }: { claudeOn: boolean; compact: boolean }): OpenPrsColumn[] {
+  return COLUMNS.filter((c) => (c.key !== 'ai' || claudeOn) && (!compact || (c.key !== 'size' && c.key !== 'author')));
+}
+
+const HIDE_BELOW: Record<'sm' | 'md' | 'lg', string> = { sm: 'max-sm:hidden', md: 'max-md:hidden', lg: 'max-lg:hidden' };
+const ALIGN: Record<OpenPrsColumn['align'], string> = { center: 'justify-center', left: 'justify-start', right: 'justify-end' };
+
+/** One fixed-width cell of a column (heading or row). */
+function ColCell({ col, className, children, title }: { col: OpenPrsColumn; className?: string; children?: ReactNode; title?: string }): JSX.Element {
+  return (
+    <span
+      className={cx('flex shrink-0 items-center', ALIGN[col.align], col.hideBelow != null && HIDE_BELOW[col.hideBelow], className)}
+      style={{ width: col.width }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** The heading row over the PR rows: the same paddings, gaps and cells as `PrRow`. */
+function ColumnHeadings({ columns }: { columns: readonly OpenPrsColumn[] }): JSX.Element {
+  return (
+    <div
+      data-testid="open-prs-headings"
+      className="-mx-1 flex h-7 items-center gap-3 border-b border-ui-line px-3 text-meta text-ui-mute"
+    >
+      <span aria-hidden className="w-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">Pull request</span>
+      {columns.map((c) => (
+        // The label truncates INSIDE the cell: a right-aligned flex cell that clipped would cut the
+        // label's first letters ("Jpdated"), not its tail.
+        <ColCell key={c.key} col={c} title={c.title}>
+          <span className="min-w-0 truncate">{c.label}</span>
+        </ColCell>
+      ))}
+    </div>
+  );
 }
 
 function repoShort(full: string): string {
@@ -533,6 +599,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
     <div className="flex min-w-0 items-start gap-4">
       <div className="min-w-0 flex-1">
         {props.offer}
+        {(stacks != null ? stacks.length > 0 : drawn.length > 0) && <ColumnHeadings columns={openPrsColumns({ claudeOn: props.claudeOn, compact: compactRows })} />}
         <List
           id={listId}
           label="Open pull requests"
@@ -625,6 +692,7 @@ function PrRow({
   const ticketRunning =
     data.ticketReviewOn && data.ticketsOf(pr).some((t) => t.ident != null && data.ticketStates.get(t.ident)?.status === 'running');
   const activity = pr.updatedAt ?? pr.openedAt;
+  const columns = openPrsColumns({ claudeOn: data.claudeOn, compact });
   return (
     <Row listId={listId} index={index} selected={selected} onSelect={onSelect} className="select-none">
       <span className="contents" onDoubleClick={onDoubleOpen}>
@@ -647,54 +715,63 @@ function PrRow({
             </span>
           )}
         </span>
-        <span className="flex w-4 shrink-0 items-center justify-center max-sm:hidden">
-          {ci != null && <StatusIcon tone={ci.tone} icon={ci.icon} label={ci.label} iconOnly />}
-        </span>
-        <span className="flex w-4 shrink-0 items-center justify-center max-sm:hidden">
-          {review != null && <StatusIcon tone={review.tone} icon={review.icon} label={review.label} iconOnly />}
-        </span>
-        <span
-          className={cx(
-            // ONE grey number; an untouched thread adds a small red dot, never an amber count.
-            'flex w-9 shrink-0 items-center gap-1 text-meta tabular-nums text-ui-faint max-md:hidden',
-          )}
-          title={threads != null ? `Review threads: ${threads.text}` : undefined}
-        >
-          {threads != null && openThreads > 0 && (
-            <>
-              <ThreadsIcon size={12} aria-hidden />
-              <span className="sr-only">Review threads: {threads.text}</span>
-              <span aria-hidden>{openThreads}</span>
-              {pr.threadCounts.untouched > 0 && (
-                <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger" />
-              )}
-            </>
-          )}
-        </span>
-        {data.claudeOn && (
-          <span className="max-sm:hidden">
-            <AiMarker
-              prId={pr.id}
-              state={data.claudeStates.get(pr.id)}
-              ciRunning={data.ciStates.get(pr.id)?.status === 'running'}
-              ticketRunning={ticketRunning}
-            />
-          </span>
-        )}
-        {!compact && (
-          <RowMeta hideBelow="lg" width={76} className="text-right font-mono">
-            <span title={`${filesLabel(pr.changedFiles)} · ${pr.additions} added, ${pr.deletions} removed`}>{sizeText(pr)}</span>
-          </RowMeta>
-        )}
-        {!compact && (
-          <RowMeta hideBelow="md" width={112} className="flex items-center gap-1.5 text-ui-mute">
-            <Avatar user={author} size={14} />
-            <span className="truncate">{userLabel(author, pr.authorId)}</span>
-          </RowMeta>
-        )}
-        <RowMeta width={32} className="text-right">
-          <span title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>{shortAge(activity)}</span>
-        </RowMeta>
+        {columns.map((col) => {
+          switch (col.key) {
+            case 'ci':
+              return <ColCell key={col.key} col={col}>{ci != null && <StatusIcon tone={ci.tone} icon={ci.icon} label={ci.label} iconOnly />}</ColCell>;
+            case 'review':
+              return <ColCell key={col.key} col={col}>{review != null && <StatusIcon tone={review.tone} icon={review.icon} label={review.label} iconOnly />}</ColCell>;
+            case 'threads':
+              // ONE grey number; an untouched thread adds a small red dot, never an amber count.
+              return (
+                <ColCell
+                  key={col.key}
+                  col={col}
+                  className="gap-1 text-meta tabular-nums text-ui-faint"
+                  title={threads != null ? `Review threads: ${threads.text}` : undefined}
+                >
+                  {threads != null && openThreads > 0 && (
+                    <>
+                      <ThreadsIcon size={12} aria-hidden />
+                      <span className="sr-only">Review threads: {threads.text}</span>
+                      <span aria-hidden>{openThreads}</span>
+                      {pr.threadCounts.untouched > 0 && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger" />}
+                    </>
+                  )}
+                </ColCell>
+              );
+            case 'ai':
+              return (
+                <ColCell key={col.key} col={col}>
+                  <AiMarker
+                    prId={pr.id}
+                    state={data.claudeStates.get(pr.id)}
+                    ciRunning={data.ciStates.get(pr.id)?.status === 'running'}
+                    ticketRunning={ticketRunning}
+                  />
+                </ColCell>
+              );
+            case 'size':
+              return (
+                <ColCell key={col.key} col={col} className="font-mono text-meta tabular-nums text-ui-faint">
+                  <span className="truncate" title={`${filesLabel(pr.changedFiles)} · ${pr.additions} added, ${pr.deletions} removed`}>{sizeText(pr)}</span>
+                </ColCell>
+              );
+            case 'author':
+              return (
+                <ColCell key={col.key} col={col} className="gap-1.5 text-meta text-ui-mute">
+                  <Avatar user={author} size={14} />
+                  <span className="min-w-0 truncate">{userLabel(author, pr.authorId)}</span>
+                </ColCell>
+              );
+            case 'age':
+              return (
+                <ColCell key={col.key} col={col} className="text-meta tabular-nums text-ui-faint">
+                  <span title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>{shortAge(activity)}</span>
+                </ColCell>
+              );
+          }
+        })}
       </span>
     </Row>
   );
@@ -721,12 +798,7 @@ function TicketGroup({
   const t = stack.ticket;
   const headId = useId();
   const href = t != null ? safeExternalUrl(t.url) : null;
-  const rollup = stackRollupParts(stackRollup(stack.rows));
   const merged = data.mergedStacks.get(stack.id) ?? [];
-  const review =
-    data.ticketReviewOn && t?.ident != null && stack.rows[0] != null
-      ? { ident: t.ident, state: data.ticketStates.get(t.ident), prId: stack.rows[0].pr.id }
-      : null;
   return (
     <li role="presentation" className="mt-5 first:mt-0">
       <div
@@ -736,12 +808,10 @@ function TicketGroup({
         tabIndex={-1}
         className="scroll-mt-4 rounded-ui outline-none"
       >
-        {/* ONE line at every width: chevron · key + title (→ the story view) … status · type ·
-            assignee · criteria met + Re-check · roll-up · PR count. Below md only the title, a red
-            dot when something in the group blocks, and the PR count stay on the line — the status,
-            criteria and Re-check are one tap away in the ticket's story view. */}
-        <div role="presentation" className="flex min-w-0 items-center gap-x-3 gap-y-0.5 rounded-ui px-1 py-1.5 md:flex-wrap">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 md:basis-[18rem]">
+        {/* ONE line at every width: chevron · key + story name (→ the story view) … PR count. The
+            ticket's status, assignee, criteria met and Re-check live in the story view, one click away. */}
+        <div role="presentation" className="flex min-w-0 items-center gap-3 rounded-ui px-1 py-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <button
               type="button"
               onClick={onFold}
@@ -782,29 +852,7 @@ function TicketGroup({
               )}
             </h3>
           </div>
-          <div className="flex shrink-0 items-center gap-x-3 gap-y-0.5 text-meta text-ui-mute md:ml-auto md:min-w-0 md:shrink md:flex-wrap md:justify-end">
-            {t != null && (
-              <span className="contents max-md:hidden">
-                <TicketFacts t={t} />
-              </span>
-            )}
-            {review != null && (
-              <span className="contents max-md:hidden">
-                <GroupCoverage ident={review.ident} state={review.state} prId={review.prId} />
-              </span>
-            )}
-            {rollup.map((p) => (
-              <span key={p.text} className={cx('shrink-0 max-md:hidden', p.tone === 'bad' ? 'text-ui-danger' : 'text-ui-success')}>
-                {p.text}
-              </span>
-            ))}
-            {rollup.some((p) => p.tone === 'bad') && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger md:hidden" title={rollup.filter((p) => p.tone === 'bad').map((p) => p.text).join(' · ')}>
-                <span className="sr-only">{rollup.filter((p) => p.tone === 'bad').map((p) => p.text).join(', ')}</span>
-              </span>
-            )}
-            <span className="shrink-0 tabular-nums text-ui-faint">{prCountLabel(stack.rows.length)}</span>
-          </div>
+          <span className="shrink-0 text-meta tabular-nums text-ui-faint">{prCountLabel(stack.rows.length)}</span>
         </div>
         {/* The group's rows sit INSIDE the ticket: inset so a row's status icon lines up with the
             ticket icon (12px on a phone), with a quiet guide line under the chevron. Every row of
@@ -868,77 +916,6 @@ function MergedRows({ stackId, prs, onOpen }: { stackId: string; prs: readonly T
         ))}
       </ul>
     </div>
-  );
-}
-
-/** The ticket's status, type and assignee as quiet words (the board's chips, without the colour). */
-function TicketFacts({ t }: { t: NonNullable<OpenPrsStack['ticket']> }): JSX.Element {
-  const cat = t.statusCategory ?? null;
-  const status = t.status ?? (cat === 'done' ? 'Complete' : cat === 'indeterminate' ? 'In progress' : cat === 'new' ? 'To do' : null);
-  return (
-    <>
-      {status != null && (
-        <span className="inline-flex shrink-0 items-center gap-1" title="Status in the tracker">
-          <span
-            aria-hidden
-            className={cx('h-1.5 w-1.5 rounded-full', cat === 'done' ? 'bg-ui-success' : cat === 'indeterminate' ? 'bg-ui-mute' : 'bg-ui-faint')}
-          />
-          {status}
-        </span>
-      )}
-      {t.issueType != null && <span className="shrink-0 text-ui-faint max-lg:hidden">{t.issueType}</span>}
-      {t.assignee != null ? (
-        <span className="max-w-[9rem] shrink-0 truncate text-ui-faint" title={`Assigned to ${t.assignee.name}`}>
-          {t.assignee.name}
-        </span>
-      ) : (
-        status != null && <span className="shrink-0 text-ui-faint">Unassigned</span>
-      )}
-    </>
-  );
-}
-
-/** The ticket review's criteria met ("2 of 3 met"; red when none, green when all) and Check / Re-check. */
-function GroupCoverage({ ident, state, prId }: { ident: string; state: TicketReviewState | undefined; prId: number }): JSX.Element | null {
-  const ready = aiReadyFor(useAiCapabilities(), 'ticket_review');
-  const start = useStartTicketReview(ident);
-  const starting = useTicketReviewStarting(ident);
-  const cov = ticketCoverage(state);
-  const currency = state != null ? ticketCurrency(state) : null;
-  const running = state?.status === 'running';
-  const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
-  return (
-    <span className="inline-flex shrink-0 flex-wrap items-center gap-x-2">
-      {cov != null && (
-        <span
-          className={cx('inline-flex items-center gap-1', cov.tone === 'bad' ? 'text-ui-danger' : cov.tone === 'ok' ? 'text-ui-success' : 'text-ui-mute')}
-          title={cov.title}
-        >
-          {cov.running && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ai-signal-fill motion-safe:animate-pulse" />}
-          {cov.label}
-        </span>
-      )}
-      {cov != null && cov.stale && currency != null && (
-        <span className="text-ui-mute" title={currency.title}>
-          {currency.label}
-        </span>
-      )}
-      {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-meta max-xl:hidden" />}
-      {ready && !running && (
-        <button
-          type="button"
-          disabled={starting}
-          onClick={() => start.mutate({ prId, ident })}
-          title="Check this ticket against all its PRs"
-          className="inline-flex h-6 items-center gap-1 rounded-ui px-1.5 font-medium text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10"
-        >
-          <SparkleIcon size={11} className="text-ai-signal" />
-          {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
-        </button>
-      )}
-      {refused != null && <span className="text-ui-danger">{refusalSentence(refused)}</span>}
-      {start.isError && <span className="text-ui-danger">Could not start the check.</span>}
-    </span>
   );
 }
 

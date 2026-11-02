@@ -179,6 +179,22 @@ describe('runAutoReviewSweep', () => {
     expect(calls.map((c) => c.workspaceId)).toEqual([7]);
   });
 
+  it('⚠ a provider locked out by its usage limit does NOT stop the sweep — the item moves provider when it starts', async () => {
+    // Both locked, so whatever the default is, it is locked: the sweep still hands the lane its items
+    // (manager.ts startAutoItem asks the lock per item and moves a locked default to Claude).
+    const { noteProviderFailure, clearUsageLockout } = await import('../../ai/usage-lockout.js');
+    noteProviderFailure('codex', 'You’ve hit your usage limit. Try again in 2 hours');
+    noteProviderFailure('claude', 'You’ve hit your usage limit. Try again in 2 hours');
+    try {
+      answers.set(7, { prIds: [11], autoToday: 0 });
+      const r = await runAutoReviewSweep(makeCtx(), NOW);
+      expect(r.overBudget).not.toBe(true);
+      expect(enqueued).toEqual([[1, 11]]);
+    } finally {
+      clearUsageLockout();
+    }
+  });
+
   it('a PR a person already started does not use up the day', async () => {
     answers.set(7, { prIds: [1, 2, 3], autoToday: 19 });
     enqueueAnswer = (p) => (p === 1 ? 'already' : 'queued');
