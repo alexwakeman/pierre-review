@@ -14,6 +14,7 @@ import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { InsightsView } from './InsightsView.js';
 import { DocsView } from './DocsView.js';
+import { DocsSearchView } from './DocsSearchView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -123,6 +124,8 @@ export function ActivityView(): JSX.Element {
   // Docs — the sidebar shows it only where agentic AI runs; a `?activityRepo=docs` link opened
   // elsewhere still selects the pane, which then says in one line why there is nothing to show.
   const showingDocs = activityRepoId === 'docs';
+  // Library → Search: the same gate as Docs, and no repos needed either.
+  const showingDocsSearch = activityRepoId === 'docs-search';
   const showingBots = activityRepoId === 'bots';
 
   // The pane is scoped to the WORKSPACE's repos, so an empty pane has two distinct causes: no repos
@@ -138,7 +141,7 @@ export function ActivityView(): JSX.Element {
   // padding; the pane carries the ONE page gutter, so every title starts at the same x.
   const pageHeaded =
     !noReposAtAll &&
-    (showingOpenPrs || showingBots || showingInsights || showingDocs || (showingFeed && !noRepos) || selectedRepo != null);
+    (showingOpenPrs || showingBots || showingInsights || showingDocs || showingDocsSearch || (showingFeed && !noRepos) || selectedRepo != null);
 
   return (
     // ⚠ `relative` IS LOAD-BEARING: it makes this pane the containing block for its own `absolute`
@@ -174,6 +177,8 @@ export function ActivityView(): JSX.Element {
       ) : showingDocs ? (
         // Docs — the reference library. Needs no repos; owns its own empty and AI-off states.
         <DocsView />
+      ) : showingDocsSearch ? (
+        <DocsSearchView />
       ) : noRepos ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-body text-ui-mute">
           {hasAnyRepo ? (

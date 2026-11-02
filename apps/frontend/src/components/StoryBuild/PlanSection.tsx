@@ -29,6 +29,7 @@ import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { StoryBuildSection } from './StoryBuildSection.js';
 import { storyBuildRefAnchor } from './CoverageSection.js';
+import { AgentActivityLog } from '../AgentActivityLog.js';
 
 // THE PLAN: the 2–3 sentence summary, one card per repository the plan CHANGES (the One PR card shell
 // look; build order = card order) with its why, the base, an editable branch, Include, Run tests and the
@@ -211,11 +212,7 @@ function PlanChatBlock({ build, progress }: { build: StoryBuild; progress: Story
               Cancel
             </Button>
           </div>
-          {progress?.recentActivity != null && progress.recentActivity.length > 0 && (
-            <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-ui-surface p-2 text-meta leading-relaxed text-ui-mute">
-              {progress.recentActivity.slice(-8).join('\n')}
-            </pre>
-          )}
+          <AgentActivityLog lines={progress?.recentActivity} runKey={build.id} className="mt-1" />
         </div>
       )}
       {ready && (

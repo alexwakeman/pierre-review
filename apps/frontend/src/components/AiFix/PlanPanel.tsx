@@ -27,6 +27,7 @@ import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
 import { aiProviderName, aiRunProvider, aiRunProviderName } from '@pierre-review/shared';
 import { useFollowUpProvider } from '../../hooks/useModelPick.js';
 import { PlanMessageBox, PlanTranscript } from './PlanChat.js';
+import { AgentActivityLog } from '../AgentActivityLog.js';
 
 // PLAN MODE (manual AI Fix only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Claude reads the code
 // and writes a plan; it edits nothing. The reader steers it by chat — each message runs a fresh
@@ -221,11 +222,7 @@ export function PlanPanel({
               Cancel
             </button>
           </div>
-          {liveStatus?.progress?.recentActivity && liveStatus.progress.recentActivity.length > 0 && (
-            <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-ui-surface p-2 text-meta leading-relaxed text-ui-mute">
-              {liveStatus.progress.recentActivity.slice(-8).join('\n')}
-            </pre>
-          )}
+          <AgentActivityLog lines={liveStatus?.progress?.recentActivity} className="mt-1" />
         </div>
       )}
 

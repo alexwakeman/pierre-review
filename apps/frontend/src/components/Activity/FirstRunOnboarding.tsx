@@ -8,6 +8,7 @@ import { RepoSearch } from '../RepoSearch.js';
 import { StarIcon } from '../Icons.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { firstSyncNote } from '../../lib/firstSyncNote.js';
+import { suggestedReposQuery } from '../../lib/firstRunLanding.js';
 
 // How many detected repos are pre-checked. Kept small so the one-click "Add selected" flow
 // doesn't kick off a 30-repo two-phase backfill storm on the user's very first action.
@@ -62,11 +63,9 @@ export function FirstRunOnboarding(): JSX.Element {
   const qc = useQueryClient();
   const requestSyncModal = useFilters((s) => s.requestSyncModal);
 
-  const { data, isLoading, isError } = useQuery<SuggestedReposResponse>({
-    queryKey: ['repo-suggested'],
-    queryFn: () => api.suggestedRepos(),
-    staleTime: 5 * 60_000,
-  });
+  // The shared query: `useWorkspaceShell` reads the same answer to decide whether the manager
+  // opens on first run, so this is one fetch.
+  const { data, isLoading, isError } = useQuery<SuggestedReposResponse>(suggestedReposQuery);
 
   const suggestions = useMemo(() => data?.results ?? [], [data]);
 

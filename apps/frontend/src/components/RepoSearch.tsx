@@ -82,9 +82,10 @@ export function RepoSearch({
   onAdded,
   // Optional placeholder override (e.g. "Add a repo to Platform…" in WorkspaceManager).
   placeholder = 'Search repos to add…',
-  // Focus the box on mount, which opens the curated suggestions (focus with an empty query shows
-  // them). WorkspaceManager sets it for a zero-repo account, so a first-time reader sees repos to
-  // try without having to find the box first.
+  // Focus the box on mount so the reader can type straight away. WorkspaceManager sets it for a
+  // zero-repo account. This programmatic focus does NOT open the suggestions list: it opens on the
+  // reader's own click or keystroke, so a first-run modal is not covered by a dropdown nobody asked
+  // for.
   autoFocus = false,
 }: {
   onAdded?: (repo: Repo) => void;
@@ -96,7 +97,18 @@ export function RepoSearch({
   const showRepo = useFilters((s) => s.showRepo);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
+  // True from the mount-time autofocus until the list first opens: the focus event that autofocus
+  // fires must not open the list, and a click into the ALREADY-focused box fires no focus event, so
+  // that click opens it instead.
+  const autoFocusHeld = useRef(false);
+  useEffect(() => {
+    if (!autoFocus) return;
+    autoFocusHeld.current = true;
+    inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only, like the autoFocus attribute
+  }, []);
 
   const [value, setValue] = useState('');
   const [open, setOpen] = useState(false);
@@ -257,6 +269,14 @@ export function RepoSearch({
       setOpen(false);
       return;
     }
+    // The mount-time autofocus left the list shut: an arrow key is the keyboard reader's way to
+    // open it (a typed character opens it through onChange).
+    if (!panelOpen && autoFocusHeld.current && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      autoFocusHeld.current = false;
+      setOpen(true);
+      return;
+    }
     if (!panelOpen) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -341,12 +361,24 @@ export function RepoSearch({
         type="search"
         value={value}
         onChange={(e) => {
+          autoFocusHeld.current = false;
           setValue(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        ref={inputRef}
+        onFocus={() => {
+          if (!autoFocusHeld.current) setOpen(true);
+        }}
+        onClick={() => {
+          if (!autoFocusHeld.current) return;
+          autoFocusHeld.current = false;
+          setOpen(true);
+        }}
+        onBlur={() => {
+          // Any LATER focus (a Tab back in) is the reader's own, so it opens the list as usual.
+          autoFocusHeld.current = false;
+        }}
         onKeyDown={onKeyDown}
-        autoFocus={autoFocus}
         placeholder={placeholder}
         role="combobox"
         aria-expanded={panelOpen}

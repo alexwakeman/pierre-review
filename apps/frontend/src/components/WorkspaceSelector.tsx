@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { Workspace } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
@@ -6,13 +7,14 @@ import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUr
 import { useRepos } from '../hooks/useTimeline.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
+import { firstRunLanding, suggestedReposQuery } from '../lib/firstRunLanding.js';
 import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
 
 /**
- * Whether this page load has already opened the manager for a zero-repo account. MODULE state, not
- * component state: the selector remounts (StrictMode, a view switch), and a reader who closed the
- * modal must not have it pop back on the next mount. A reload is a new load, so an account that is
- * still empty sees it again — which is the point: signing in with nothing to show opens here.
+ * Whether this page load has already DECIDED the zero-repo landing (opened the manager, or chose
+ * the onboarding panel instead). MODULE state, not component state: the selector remounts
+ * (StrictMode, a view switch), and a reader who closed the modal must not have it pop back on the
+ * next mount. A reload is a new load, so an account that is still empty is decided again.
  */
 let firstRunManagerShown = false;
 
@@ -179,18 +181,25 @@ export function useWorkspaceShell(): { managerOpen: boolean; closeManager: () =>
   const { data: workspaces } = useWorkspaces();
   const managerOpen = useFilters((s) => s.managerOpen);
   const setManagerOpen = useFilters((s) => s.setManagerOpen);
-  // A FIRST-TIME account (no repos at all) opens straight into the manager, once per page load, so
+  // A FIRST-TIME account (no repos at all) gets ONE landing, decided once per page load
+  // (`firstRunLanding`): when the suggested-repos lookup (the SAME ['repo-suggested'] query the
+  // FirstRunOnboarding panel lists, so one fetch) finds repos the reader works on, the panel is the
+  // whole landing and the manager stays shut; when it finds none, or fails, the manager opens so
   // the first thing on screen is the way to add a repo. `repos` is never persisted to IndexedDB, so
   // an empty list here is the server's answer for this load, not a stale one; `undefined` is
-  // "still loading" and must not open anything. It waits for the workspaces too, so the add box
-  // opens already aimed at a workspace. Never closed for the reader: once a repo is added the
-  // modal stays up showing its sync.
+  // "still loading" and must not open anything — nor may suggestions still in flight. It waits for
+  // the workspaces too, so the add box opens already aimed at a workspace. Never closed for the
+  // reader: once a repo is added the modal stays up showing its sync.
+  const emptyAccount = repos != null && repos.length === 0;
+  const suggested = useQuery({ ...suggestedReposQuery, enabled: emptyAccount });
+  const landing = firstRunLanding(repos, suggested.data, suggested.isError);
   useEffect(() => {
-    if (firstRunManagerShown || repos == null || workspaces == null) return;
-    if (repos.length > 0) return;
+    if (firstRunManagerShown || workspaces == null) return;
+    // 'none' (the account has repos) decides nothing, exactly as before: it leaves the flag unset.
+    if (landing === 'wait' || landing === 'none') return;
     firstRunManagerShown = true;
-    setManagerOpen(true);
-  }, [repos, workspaces, setManagerOpen]);
+    if (landing === 'manager') setManagerOpen(true);
+  }, [landing, workspaces, setManagerOpen]);
   return { managerOpen, closeManager: () => setManagerOpen(false) };
 }
 

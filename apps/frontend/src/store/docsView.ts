@@ -14,6 +14,11 @@ export interface DocsOpen {
    * citation, a finding's borrowed quote), highlighted in the section; null = anchor only.
    */
   quote: string | null;
+  /**
+   * Opened from the library SEARCH: the words it matched (lower-cased, plain text), highlighted
+   * wherever they appear in the section. Never set together with `quote`; any later open drops them.
+   */
+  terms?: readonly string[];
   /** Bumped on every open, so re-opening the same anchor scrolls to it again. */
   seq: number;
   /** Opened from OUTSIDE the library list (a citation in a review, a chat, a story check, a deep
@@ -30,7 +35,14 @@ interface DocsViewState {
   conversation: Record<number, string | null | undefined>;
   /** Below the wide breakpoint the viewer and the chat share one column. */
   narrowPane: 'library' | 'viewer' | 'chat';
-  openPath: (workspaceId: number, path: string, anchor?: string | null, quote?: string | null, reveal?: boolean) => void;
+  openPath: (
+    workspaceId: number,
+    path: string,
+    anchor?: string | null,
+    quote?: string | null,
+    reveal?: boolean,
+    terms?: readonly string[] | null,
+  ) => void;
   toggleExpanded: (workspaceId: number, docId: number) => void;
   setExpanded: (workspaceId: number, docId: number, on: boolean) => void;
   setConversation: (workspaceId: number, conversationId: string | null) => void;
@@ -51,8 +63,21 @@ export const useDocsView = create<DocsViewState>((set) => ({
   expanded: {},
   conversation: {},
   narrowPane: 'library',
-  openPath: (workspaceId, path, anchor = null, quote = null, reveal = false) =>
-    set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, quote, seq: ++seq, ...(reveal ? { reveal: true } : {}) } }, narrowPane: 'viewer' })),
+  openPath: (workspaceId, path, anchor = null, quote = null, reveal = false, terms = null) =>
+    set((s) => ({
+      open: {
+        ...s.open,
+        [workspaceId]: {
+          path,
+          anchor,
+          quote,
+          seq: ++seq,
+          ...(reveal ? { reveal: true } : {}),
+          ...(quote == null && terms != null && terms.length > 0 ? { terms } : {}),
+        },
+      },
+      narrowPane: 'viewer',
+    })),
   // ⚠ AN ACCORDION: expanding a document collapses any other.
   toggleExpanded: (workspaceId, docId) =>
     set((s) => {

@@ -267,6 +267,18 @@ export const STEPS = [
     },
   },
 
+  // ── Docs search (docs/REFERENCE-DOCS.md § Search): one query, both sorts, page 1 and 2 ──
+  {
+    name: 'docs-search',
+    run: async (h) => {
+      await h.go('?view=activity&activityRepo=docs-search');
+      for (const sort of ['relevance', 'newest']) {
+        await h.go(`?view=activity&activityRepo=docs-search&docsQ=webhook&docsSort=${sort}`);
+        for (const page of [1, 2]) await h.fetchGet(`/api/docs/search?workspace=1&q=webhook&sort=${sort}&page=${page}`);
+      }
+    },
+  },
+
   // ── This Sprint ──
   ...['themes', 'paths', 'people', 'merged'].map((t) => ({
     name: `sprint:${t}`,

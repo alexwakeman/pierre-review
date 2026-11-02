@@ -62,6 +62,7 @@ import { DocsOfferCard } from './DocsOfferCard.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
+import { docSourceLabel } from '../../lib/docsSearch.js';
 import { aiCredentialWords, aiModelWords, aiRunLabel } from '@pierre-review/shared';
 
 // THE DOCS RAIL LINE (Activity → Docs, `?activityRepo=docs`; docs/REFERENCE-DOCS.md § The SPA).
@@ -99,18 +100,8 @@ const COLLAPSE_BUTTON =
 const TREE_TOGGLE =
   'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10';
 
-const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
-  pdf: 'PDF',
-  docx: 'Word',
-  text: 'Text',
-  markdown: 'Markdown',
-  html: 'Web page',
-  url: 'Web page',
-  wiki: 'Wiki',
-};
-
 /** The source words on a document's line: the wiki's own name for a wiki tree. */
-const sourceLabel = (doc: ReferenceDoc): string => (doc.wiki ? WIKI_PROVIDER_NAMES[doc.wiki.provider] : KIND_LABEL[doc.sourceKind]);
+const sourceLabel = (doc: ReferenceDoc): string => docSourceLabel(doc.sourceKind, doc.wiki?.provider ?? null);
 
 /** A wiki's mark (Confluence, Notion), in the current ink. */
 function WikiMark({ provider, size, className }: { provider: WikiProviderId; size: number; className?: string }): JSX.Element {

@@ -494,6 +494,33 @@ export function WarningIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A page laid out in blocks — an OVERVIEW (PR detail's first tab: status, reviews, summary). Not
+// the circled i below, which is reserved for the ⓘ explanation button.
+export function OverviewIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" />
+      <line x1="3.5" y1="9" x2="20.5" y2="9" />
+      <line x1="10" y1="9" x2="10" y2="20.5" />
+      <line x1="13.4" y1="13" x2="17.2" y2="13" />
+      <line x1="13.4" y1="16.4" x2="16" y2="16.4" />
+    </IconShell>
+  );
+}
+
+// A file with a plus over a minus — a DIFF: the lines a PR changes (PR detail's Changes tab).
+export function DiffIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M14 3H6.5a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z" />
+      <polyline points="14 3 14 8 19 8" />
+      <line x1="12" y1="9.6" x2="12" y2="14.2" />
+      <line x1="9.7" y1="11.9" x2="14.3" y2="11.9" />
+      <line x1="9.7" y1="17.2" x2="14.3" y2="17.2" />
+    </IconShell>
+  );
+}
+
 // Circled i — an inline footnote/explanation marker.
 export function InfoIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (
@@ -847,6 +874,16 @@ export function SparkleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
     <IconShell size={size} strokeWidth={1.7} {...rest}>
       <path d="M10.6 3.2 12.3 8.3 17.4 10 12.3 11.7 10.6 16.8 8.9 11.7 3.8 10 8.9 8.3z" />
       <path d="M17.8 14.2 18.7 16.7 21.2 17.6 18.7 18.5 17.8 21 16.9 18.5 14.4 17.6 16.9 16.7z" />
+    </IconShell>
+  );
+}
+
+// A wrench — AI Fix: a model changes the PR's code (PR detail's AI Fix tab). Not the hammer below,
+// which is "Implement story" (building a ticket from nothing), and not the merge resolver's wand.
+export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.4-3.4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
     </IconShell>
   );
 }

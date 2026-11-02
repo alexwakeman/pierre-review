@@ -33,6 +33,7 @@ export function Tabs<T extends string>({
   numberKeys = false,
   idPrefix,
   className,
+  variant = 'plain',
 }: {
   tabs: readonly TabItem<T>[];
   value: T;
@@ -43,8 +44,15 @@ export function Tabs<T extends string>({
   /** Prefix for tab / panel ids, so a panel can say `aria-labelledby={tabId(prefix, id)}`. */
   idPrefix?: string;
   className?: string;
+  /**
+   * `plain` (default): tone only, the page-header tablist. `boxed`: every tab is drawn as a button
+   * (1px edge, raised ground, hover), the selected one filled with the accent — for a strip a new
+   * reader must recognise as clickable among other content (PR detail's tabs).
+   */
+  variant?: 'plain' | 'boxed';
 }): JSX.Element {
   const shown = tabs.filter((t) => !t.hidden);
+  const boxed = variant === 'boxed';
   const refs = useRef(new Map<T, HTMLButtonElement>());
   const live = useRef({ shown, onChange });
   live.current = { shown, onChange };
@@ -132,7 +140,7 @@ export function Tabs<T extends string>({
       onScroll={measure}
       style={fade}
       data-overflow={edges.left || edges.right ? 'true' : undefined}
-      className={cx('flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}
+      className={cx('flex min-w-0 items-center overflow-x-auto', boxed ? 'gap-1.5 p-[3px]' : 'gap-0.5', '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}
     >
       {shown.map((t, i) => {
         const on = t.id === value;
@@ -156,14 +164,23 @@ export function Tabs<T extends string>({
             aria-keyshortcuts={numberKeys && i < 9 ? String(i + 1) : undefined}
             onClick={() => onChange(t.id)}
             className={cx(
-              'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui px-2 text-body touch:h-10 touch:px-3',
+              'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui text-body touch:h-10 touch:px-3',
               'motion-safe:transition-colors motion-safe:duration-ui-fast',
-              on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+              boxed
+                ? cx(
+                    'h-8 border px-2.5',
+                    on
+                      ? 'border-ui-accent bg-ui-accent/15 text-ui-ink shadow-[inset_0_0_0_1px_rgb(var(--ui-accent))]'
+                      : 'border-ui-line bg-ui-raise text-ui-mute hover:border-ui-faint/60 hover:bg-ui-hover hover:text-ui-ink',
+                  )
+                : cx('h-7 px-2', on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink'),
               zero && !on && 'text-ui-faint',
               FOCUS_RING,
             )}
           >
-            {t.icon != null && <span className="flex shrink-0 items-center">{t.icon}</span>}
+            {t.icon != null && (
+              <span className={cx('flex shrink-0 items-center', boxed && (on ? 'text-ui-accent' : 'text-ui-faint'))}>{t.icon}</span>
+            )}
             <span>{t.label}</span>
             {t.count != null && (
               <span className={cx('text-meta tabular-nums', on ? 'text-ui-mute' : 'text-ui-faint')}>

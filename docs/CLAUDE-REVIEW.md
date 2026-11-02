@@ -865,6 +865,20 @@ showed.
   `RELATED_REPOS_MAX_PER_REPO` (8) per repo, ⚠ ON BOTH SIDES: `setRelatedRepos` skips a partner that
   already has 8 relations of its own (Settings disables its box, "already has 8"; `partnerIsFull`),
   else nine repos each saving [A] gave A nine. Off by default (no rows). In the export and the erasure.
+- **The map** (2026-11-02, `RelatedReposSection`; geometry + draft arithmetic pure in
+  `settings/relatedReposGeometry.ts`, pinned by `test/relatedReposGeometry.test.ts`). Two columns of
+  the workspace's repos: select one on the LEFT (a listbox; default the first with a relation, else
+  the first; each row counts its stored links), click repos on the RIGHT (`aria-pressed` buttons; the
+  selected repo itself and a full partner disabled, "already has 8"; when the selected repo's draft
+reaches 8 the rest are disabled UNLABELLED and one line under Save says so — `blockReason`, never blame
+the partner) to toggle the DRAFT. An `aria-hidden` SVG draws a
+  cubic curve + arrowhead per link from the selected row's right edge to each partner's left edge:
+  solid = stored, dashed accent = to add, faded dashed = to remove; hover on a row or a curve
+  highlights that pair. Re-measured (rAF) on ResizeObserver, list scroll and row changes; a row
+  scrolled out of its list pins its end to the list edge, faded (`clampToBand`). One line beside Save
+  ("Not saved: 1 to add.") + Discard. ⚠ The save path is unchanged: ONE repo's full list per PUT, and
+  selecting another repo drops an unsaved draft. A shared owner is left off the names. Below `md`
+  (`PHONE_QUERY`): the old stacked checklist (picker → checkboxes) plus the pair list.
 - **The match** (`review/claude-review/related-repos.ts` `relatedRepoPeersFor`), per related repo, the
   FIRST that holds: (1) an OPEN PR whose head branch has the same name → "Companion PR: same branch
   name"; (2) an OPEN PR whose title or branch carries one of this PR's ticket keys → "Companion PR:

@@ -16,3 +16,14 @@ export function openDocsSection(workspaceId: number, path: string, anchor: strin
   usePinnedTabs.getState().showActivity();
   useFilters.getState().setActivityRepo('docs');
 }
+
+/**
+ * Open a library SEARCH result in Activity → Docs: its section at the passage's anchor, the matched
+ * words highlighted in it (DocsViewer). Switching the line from Search to Docs is a navigation, so
+ * Back returns to the results.
+ */
+export function openDocsSearchResult(workspaceId: number, path: string, anchor: string | null, terms: readonly string[]): void {
+  useDocsView.getState().openPath(workspaceId, path, anchor, null, true, terms);
+  usePinnedTabs.getState().showActivity();
+  useFilters.getState().setActivityRepo('docs');
+}

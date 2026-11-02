@@ -14,6 +14,7 @@ import {
   type BotTheme,
   type BotWindowKind,
   type DerivedState,
+  type DocsSearchSort,
   type EventCategory,
   type EventType,
   type FeedPrEventChip,
@@ -749,7 +750,12 @@ export interface FilterState {
   // `?activityRepo=sprint` link lands on that tab — useUrlState's landingTabFromUrl.)
   // 'docs' is the **Docs** rail line (the workspace reference library, `?activityRepo=docs`): CORE,
   // free, LOCAL ONLY — the rail entry renders only on `me.ai.enabled` (docs/REFERENCE-DOCS.md § The SPA).
-  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'insights' | 'bots' | null;
+  // 'docs-search' is the **Search** line under Library (`?activityRepo=docs-search&docsQ=…`): the
+  // library's full-text search, on the same AI gate as Docs (docs/REFERENCE-DOCS.md § Search).
+  activityRepoId: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'docs-search' | 'insights' | 'bots' | null;
+  // The library search's text, sort and page. URL-OWNED (`docsQ` / `docsSort` / `docsPage`, emitted
+  // only while the Search line is on screen) and transient — never persisted, not in FilterDefaults.
+  docsSearch: DocsSearchState;
   // Soft thread-state filter inside an Activity repo console: clicking a thread-state
   // segment narrows the PRs-by-author list to PRs carrying that derived state.
   // null = no filter. Transient, URL-silent.
@@ -1157,7 +1163,9 @@ export interface FilterState {
   bumpClaudeReviewKickoff: () => void;
   // Select an Activity detail target (a repo id, or one of the pseudo-rows: 'feed' for the
   // cross-repo consolidated Feed, 'bots', 'attention', 'insights').
-  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'insights' | 'bots') => void;
+  setActivityRepo: (id: number | 'open-prs' | 'feed' | 'attention' | 'docs' | 'docs-search' | 'insights' | 'bots') => void;
+  // The library search: a new text or sort goes back to page 1 unless the patch names a page.
+  setDocsSearch: (patch: Partial<DocsSearchState>) => void;
   // Set/clear the Activity repo console's soft thread-state filter (toggles off when
   // the same state is re-selected).
   setActivityThreadFilter: (s: DerivedState | null) => void;
@@ -1183,6 +1191,15 @@ export interface FilterState {
   resetAllFilters: () => void;
   hydrate: (partial: Partial<FilterState>) => void;
 }
+
+/** The library search's URL-owned state (`?docsQ=&docsSort=&docsPage=`). */
+export interface DocsSearchState {
+  q: string;
+  sort: DocsSearchSort;
+  /** 1-based. */
+  page: number;
+}
+export const DOCS_SEARCH_DEFAULT: Readonly<DocsSearchState> = { q: '', sort: 'relevance', page: 1 };
 
 function toggle<T>(arr: T[], value: T): T[] {
   return arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
@@ -1413,6 +1430,7 @@ function freshDefaults(): FilterData {
     // on Open PRs — one card per open PR — for every tier, with no thread-state filter. Pending
     // is one rail click below it.
     activityRepoId: 'open-prs',
+    docsSearch: { ...DOCS_SEARCH_DEFAULT },
     activityThreadFilter: null,
     repoConsoleTabs: {},
     expandedDiffHunks: [],
@@ -1455,6 +1473,7 @@ function freshDefaults(): FilterData {
 export type UrlOwnedState = Pick<
   FilterData,
   | 'activityRepoId'
+  | 'docsSearch'
   | 'insightsReportKey'
   | 'insightsReportGrain'
   | 'selectedPrId'
@@ -1476,6 +1495,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
   const d = freshDefaults();
   return {
     activityRepoId: d.activityRepoId,
+    docsSearch: d.docsSearch,
     insightsReportKey: d.insightsReportKey,
     insightsReportGrain: d.insightsReportGrain,
     selectedPrId: d.selectedPrId,
@@ -2007,6 +2027,13 @@ export const useFilters = create<FilterState>((set, get) => ({
             attentionTab: null,
                   },
     ),
+  setDocsSearch: (patch) =>
+    set((s) => {
+      const next: DocsSearchState = { ...s.docsSearch, ...patch };
+      if (patch.page == null && (next.q !== s.docsSearch.q || next.sort !== s.docsSearch.sort)) next.page = 1;
+      const same = next.q === s.docsSearch.q && next.sort === s.docsSearch.sort && next.page === s.docsSearch.page;
+      return same ? {} : { docsSearch: next };
+    }),
   setActivityThreadFilter: (st) =>
     set((s) => ({ activityThreadFilter: s.activityThreadFilter === st ? null : st })),
   setRepoConsoleTab: (repoId, tab) =>

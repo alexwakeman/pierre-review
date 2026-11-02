@@ -72,7 +72,7 @@ import {
 //   wordmark · workspace picker · "Search or jump ⌘K"
 //   Pending · Open pull requests · This Sprint · Timeline          (primary; the phone's bottom bar)
 //   Needs you                                                      (other workspaces' My Turn)
-//   Library: Docs · Feed      Insights: Reports · Bots Monitoring
+//   Library: Search · Docs · Feed      Insights: Reports · Bots Monitoring
 //   Repositories (collapsible): the top four repos, "Show all" for the rest
 //   Open tabs: every open tab (a PR, a story, a drill-down) — the top bar's strip only shows them
 //              from md to lg, where this sidebar is a drawer
@@ -98,6 +98,7 @@ const NAV_ICON: Record<DestinationId, (p: { size?: number; className?: string })
   'open-prs': PullRequestIcon,
   sprint: TicketIcon,
   timeline: TimelineIcon,
+  'docs-search': MagnifierIcon,
   docs: BookIcon,
   feed: FeedIcon,
   insights: ChartIcon,

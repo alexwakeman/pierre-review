@@ -107,7 +107,10 @@ export function useShellCommands({
         },
       })),
       ...(aiOn
-        ? [{ id: 'docs', group: 'Go to' as const, title: 'Docs', icon: <BookIcon size={14} />, keywords: ['reference', 'library'], run: activity('docs') }]
+        ? [
+            { id: 'docs-search', group: 'Go to' as const, title: 'Search the docs', icon: <MagnifierIcon size={14} />, keywords: ['reference', 'library', 'find'], run: activity('docs-search') },
+            { id: 'docs', group: 'Go to' as const, title: 'Docs', icon: <BookIcon size={14} />, keywords: ['reference', 'library'], run: activity('docs') },
+          ]
         : []),
       ...(shown('feed')
         ? [{ id: 'feed', group: 'Go to' as const, title: 'Feed', icon: <FeedIcon size={14} />, keywords: ['stream', 'activity'], run: activity('feed') }]

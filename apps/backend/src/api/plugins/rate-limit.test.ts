@@ -231,6 +231,8 @@ describe('tierFor — reference docs', () => {
     expect(tiers('GET', '/api/docs')).toEqual(['read']);
     expect(tiers('GET', '/api/docs/tree')).toEqual(['read']);
     expect(tiers('GET', '/api/docs/section')).toEqual(['read']);
+    // The search box: DB only (the FTS5 index), no model, no GitHub.
+    expect(tiers('GET', '/api/docs/search')).toEqual(['read']);
     expect(tiers('GET', '/api/docs/7/stream')).toEqual(['read']);
     expect(tiers('POST', '/api/docs/7/cancel')).toEqual(['read']);
     expect(tiers('DELETE', '/api/docs/7')).toEqual(['read']);

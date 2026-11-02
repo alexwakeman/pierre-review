@@ -26,6 +26,7 @@ import { DiffWrapToggle, FileDiffView, type DiffFile } from '../diff/FileDiffVie
 import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { storyBuildRefAnchor } from './CoverageSection.js';
+import { AgentActivityLog } from '../AgentActivityLog.js';
 
 // THE BUILD: one card per included repository, in build order (the One PR card shell look). Each card:
 // its status (and the live step while it runs, the AI Fix banner's bar), what the AI says it changed
@@ -127,11 +128,7 @@ function BuildRepoCard({
           <div className="mt-2">
             <RegenProgressBar active label={`Building ${repo.fullName}`} value={storyBuildProgressPct(progress)} timeConstantSec={90} />
             <p className="mt-1 text-meta text-ui-mute">{progress != null ? STORY_BUILD_PHASE_LABEL[progress.phase] : STORY_BUILD_REPO_STATUS_WORDS[repo.status]}</p>
-            {progress?.recentActivity != null && progress.recentActivity.length > 0 && (
-              <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-ui-raise p-2 text-meta leading-relaxed text-ui-mute">
-                {progress.recentActivity.slice(-8).join('\n')}
-              </pre>
-            )}
+            <AgentActivityLog lines={progress?.recentActivity} tone="raise" className="mt-1" />
           </div>
         )}
         {repo.status === 'queued' && <p className="mt-1 text-meta text-ui-mute">Waits for the repositories before it.</p>}

@@ -1,6 +1,8 @@
 import type {
   ReferenceDocMutationResponse,
   ReferenceDocSectionResponse,
+  DocsSearchResponse,
+  DocsSearchSort,
   ReferenceDocTreeResponse,
   ReferenceDocsChatBody,
   ReferenceDocsChatResponse,
@@ -1696,6 +1698,11 @@ export const api = {
   // `path` is library-relative and server-validated (a strict grammar; anything else is a 400).
   referenceDocSection: (workspaceId: number, path: string) =>
     get<ReferenceDocSectionResponse>(`/api/docs/section?${workspaceParam(workspaceId)}&path=${encodeURIComponent(path)}`),
+  // The library's search box: DB only (docs/REFERENCE-DOCS.md § Search).
+  searchReferenceDocs: (workspaceId: number, q: string, sort: DocsSearchSort, page: number) =>
+    get<DocsSearchResponse>(
+      `/api/docs/search?${workspaceParam(workspaceId)}&q=${encodeURIComponent(q)}&sort=${sort}&page=${page}`,
+    ),
   askReferenceDocs: (body: ReferenceDocsChatBody) =>
     fetch('/api/docs/chat', jsonBody('POST', body)).then((r) => handle<ReferenceDocsChatResponse>(r)),
   referenceDocsConversations: (workspaceId: number) =>

@@ -660,6 +660,54 @@ found 0.6; ~3 ms a query.
   `review/story-docs/candidates.ts`) and the chat's opening passages (§ The chat). Reviews still walk the
   tree.
 
+## Search (`search.ts`; the SPA's Library → Search; 2026-11-02)
+
+The reader's search box over the SAME FTS5 index (§ Retrieval). DB only, no model. `GET
+/api/docs/search?workspace=&q=&sort=relevance|newest&page=` (docs/API.md § Reference docs), tier `read`,
+registered with the other docs routes (absent under `LIMN_AI_DISABLED`; the sidebar entry is on the same
+`me.ai.enabled` gate as Docs, because the library itself is).
+
+- **The query is UNTRUSTED** and never carries FTS5 syntax: `searchClauses` cuts it into plain word
+  terms (letters and digits), each one QUOTED. **Every clause must match the SECTION**
+  (`searchMatchPlan`): passages are found and ranked by the clauses OR-joined (`any`), then kept only
+  where EACH clause matches some passage of the same section (`each`, one MATCH per clause, intersected
+  by (doc, path)). ⚠ Not a passage-level AND: most sections are several ~220-word passages (178 of 199
+  in a real library), so `"a" AND "b"` on one passage missed sections with the words in different
+  paragraphs. A `"quoted run"`
+  and a hyphenated word (`co-change`) become one quoted multi-word string, FTS5's phrase. Quoting does not
+  stop the porter stemmer ("refunds" finds "refund"). Bare stopwords (retrieve.ts's list + common
+  two-letter words) drop out unless nothing else is left; ≤ 32 clauses. An unclosed quote reads as bare
+  words. ⚠ `ftsMatchQuery` (OR, for the chat and the story-docs check) is a different query and stays
+  as it is: a model wants wide recall, a reader wants precision.
+- **One result per SECTION**, by its best passage under the OR query (bm25, then reading order; a window function), only a
+  document's CURRENT build, account + workspace predicates on every row. At most
+  `DOCS_SEARCH_MAX_RESULTS` (2000) sections are counted; past that `totalCapped` and the SPA says "2000+".
+- **Ranking** (`orderSearchHits`, pure). `relevance`: bm25 ascending; a RUN of scores within
+  `SEARCH_TIE` (5%) of the run's BEST score counts as equal and is ordered by the document's `created_at`
+  (added to the library), newest first, then path. Runs are measured from their own best — never
+  chained. `newest`: `created_at` desc, then bm25, then path. 20 a page (`DOCS_SEARCH_PAGE_SIZE`); a page
+  past the end is empty with the true total.
+- **The snippet**: the page's passages are re-read with `highlight()` (control-character markers), the
+  indexed prefix (document › trail › section + summary) is left off, markdown marks are reduced to text
+  (`plainSnippetText`), and ~36 words are cut around the densest run of matches, "…" where cut. It goes
+  out as plain text runs `{text, match}` — ⚠ the SPA renders them as text and `<mark>`, never HTML.
+  `matchedWords` (the passage's matched surface forms, lower-cased) ride along for the viewer.
+- `indexed: false` ⇒ nothing in the workspace's library is indexed yet (an empty library, or every
+  document still building): the SPA says so instead of "no results".
+
+**The SPA** (`components/Activity/DocsSearchView.tsx`, `lib/docsSearch.ts`). Sidebar Library → **Search**
+(directly above Docs, `g l`, ⌘K "Search the docs") → `?activityRepo=docs-search&docsQ=…&docsSort=newest&docsPage=2`
+(`filters.docsSearch`, URL-owned, transient; the defaults are omitted; switching the line is a
+navigation, typing / sorting / paging replace the entry). A box (autofocus, 300 ms debounce, Enter
+commits), "N results", Relevance | Newest first, one row per section (section title; document › trail;
+source label + name, a URL only through `safeExternalUrl`; Added date; the snippet), Previous / Next.
+**Open** (`openDocsSearchResult`) opens the section in Docs at the passage's anchor with `terms` =
+`matchedWords` on the `DocsOpen`: the viewer paints every whole-word occurrence in the section BODY
+(never the server-written header) with the same `doc-quote` highlight, scrolls to the first at or after
+the anchor, and the one line above the page reads "Your search words are highlighted." (or "Scrolled to
+…" / "… not in this section any more", `termsStripText`). Any later open drops the terms; a quote and
+terms are never set together. Back returns to the results.
+
 ## The chat (`chat.ts`)
 
 `POST /api/docs/chat {workspaceId?, conversationId?, question}` → ONE Sonnet 5 answer, synchronous (5
@@ -965,7 +1013,9 @@ fake model, the bundle) · `convert.test.ts` (sniffing, HTML conversion) ·
 `build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `retrieve.test.ts` (the chunker,
 MATCH never carries syntax, best-passage ranking, the cap, the chat's query and budget) · `retrieve-db.test.ts`
 (FTS5 over real migrations: stemming, tenancy, stale builds, the backfill, the triggers through document /
-workspace / account deletes under FTS5's content-aware integrity check) · `reference-docs-db.test.ts`
+workspace / account deletes under FTS5's content-aware integrity check) · `search.test.ts` (the search query's grammar and
+syntax safety, the 5% tie rule, the snippet) · `search-db.test.ts` (AND, phrases, stemming, injection,
+tenancy, current build only, the tie and newest orders, paging) · `reference-docs-db.test.ts`
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
 remove, erasure deletes files) · `chat-quotes.test.ts` (a chat citation's quote: candidates, the check,
 header and too-short quotes dropped, first verified wins, the stored re-read, the two folds agree) · `review-refs.test.ts` (the reference check — a quote not in its section,

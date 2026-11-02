@@ -49,6 +49,7 @@ import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './Ai
 import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
 import { CheckboxBox, RadioBox } from './ui/FormControls.js';
 import { ChecksReport, ChecksStatus, RunTestsOption, useRunTests } from './AiFix/RunTests.js';
+import { AgentActivityLog } from './AgentActivityLog.js';
 
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
@@ -444,12 +445,7 @@ function FixerSection({
                   {fix?.trigger === 'auto' && <AutoFixChip />}
                   {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
                 </div>
-                {liveStatus?.progress?.recentActivity &&
-                  liveStatus.progress.recentActivity.length > 0 && (
-                    <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-ui-surface p-2 text-meta leading-relaxed text-ui-mute">
-                      {liveStatus.progress.recentActivity.slice(-8).join('\n')}
-                    </pre>
-                  )}
+                <AgentActivityLog lines={liveStatus?.progress?.recentActivity} runKey={fix?.id ?? null} className="mt-1" />
               </div>
             )}
 

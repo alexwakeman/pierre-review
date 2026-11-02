@@ -21,6 +21,7 @@ import {
   sanitizePersistedScope,
   useFilters,
   type BotsInnerTab,
+  type DocsSearchState,
   type FilterState,
   type InsightsInnerTab,
   type PrDetailTab,
@@ -28,6 +29,9 @@ import {
 } from '../store/filters.js';
 import {
   DERIVED_STATES,
+  DOCS_SEARCH_MAX_QUERY_CHARS,
+  DOCS_SEARCH_MAX_RESULTS,
+  DOCS_SEARCH_PAGE_SIZE,
   PENDING_TABS,
   type DerivedState,
   type EventCategory,
@@ -296,6 +300,17 @@ export function landingTabFromUrl(search: string): ActiveTab {
 }
 
 /** Exported for its unit test only — see test/feedCiFailuresToggle.test.ts. */
+/** `?docsQ=&docsSort=&docsPage=` → the library search's state; anything unreadable is the default. */
+export function readDocsSearch(p: URLSearchParams): DocsSearchState {
+  const page = Number.parseInt(p.get('docsPage') ?? '', 10);
+  const maxPage = Math.ceil(DOCS_SEARCH_MAX_RESULTS / DOCS_SEARCH_PAGE_SIZE);
+  return {
+    q: (p.get('docsQ') ?? '').slice(0, DOCS_SEARCH_MAX_QUERY_CHARS).trim(),
+    sort: p.get('docsSort') === 'newest' ? 'newest' : 'relevance',
+    page: Number.isFinite(page) && page >= 1 && page <= maxPage ? page : 1,
+  };
+}
+
 export function readFromUrl(): Partial<FilterState> {
   const p = new URLSearchParams(window.location.search);
   const out: Partial<FilterState> = {};
@@ -397,6 +412,11 @@ export function readFromUrl(): Partial<FilterState> {
     // The local-only Docs rail line (the reference library). Parsed on every build: a link opened
     // where agentic AI is off lands on the pane's own one line, never on a guess.
     else if (activityRepo === 'docs') out.activityRepoId = 'docs';
+    // The library's search box (docs/REFERENCE-DOCS.md § Search): its text, sort and page ride along.
+    else if (activityRepo === 'docs-search') {
+      out.activityRepoId = 'docs-search';
+      out.docsSearch = readDocsSearch(p);
+    }
     else {
       const n = Number.parseInt(activityRepo, 10);
       if (Number.isFinite(n)) out.activityRepoId = n;
@@ -730,6 +750,13 @@ export function writeToUrl(s: FilterState): void {
       p.set('activityRepo', 'bots');
     } else if (s.activityRepoId === 'docs') {
       p.set('activityRepo', 'docs');
+    } else if (s.activityRepoId === 'docs-search') {
+      p.set('activityRepo', 'docs-search');
+      // ⚠ THE OMITTED VALUES ARE THE DEFAULTS (no text, relevance, page 1) — readDocsSearch reads
+      // an absent key as exactly that.
+      if (s.docsSearch.q !== '') p.set('docsQ', s.docsSearch.q);
+      if (s.docsSearch.sort !== 'relevance') p.set('docsSort', s.docsSearch.sort);
+      if (s.docsSearch.page > 1) p.set('docsPage', String(s.docsSearch.page));
     } else if (s.activityRepoId === 'insights') {
       p.set('activityRepo', 'insights');
       // The pane's sub-tab, on the same "only where the strip is on screen" gate as `feedTab` /

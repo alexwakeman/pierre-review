@@ -456,6 +456,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   POST   /api/docs/chat             ONE Sonnet 5 agent answer                            → ai + ai_hourly
   //   POST   /api/docs/story-alignment  ONE Haiku shortlist + ONE Sonnet 5 read of a story   → ai + ai_hourly
   //   GET    /api/docs/story-alignment  the stored runs (DB + disk)                          → read
+  //   GET    /api/docs/search           full-text search of the library (DB only)            → read
   //   everything else (list, tree, section, stream, cancel, delete, chats, settings)         → read
   // The upload's bytes ride the same `ai` bucket: twenty 25 MB files a minute is far past a person
   // adding reference material, and a script hits the hourly window long before the disk notices.

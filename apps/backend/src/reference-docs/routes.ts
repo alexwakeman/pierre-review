@@ -4,7 +4,12 @@ import {
   REFERENCE_DOC_CRAWL_MAX_DEPTH,
   REFERENCE_DOC_CRAWL_MAX_PAGES,
   REFERENCE_DOC_MAX_BYTES,
+  DOCS_SEARCH_MAX_QUERY_CHARS,
+  DOCS_SEARCH_MAX_RESULTS,
+  DOCS_SEARCH_PAGE_SIZE,
   type AddReferenceDocUrlBody,
+  type DocsSearchResponse,
+  type DocsSearchSort,
   type ReferenceDocMutationResponse,
   type ReferenceDocSectionResponse,
   type ReferenceDocTreeResponse,
@@ -45,6 +50,7 @@ import {
   type NewDoc,
 } from './store.js';
 import { UrlFetchError, checkPageUrl } from './url-fetch.js';
+import { searchDocs } from './search.js';
 import { deleteWikiPages } from './wiki/pages.js';
 import { noteDocsUsed } from './wiki/refresh.js';
 import { registerWikiDocRoutes } from './wiki/routes.js';
@@ -66,6 +72,7 @@ import { providerName } from '../ai/prompt-tools.js';
 //   GET    /api/docs/:id/stream                       SSE progress while a build runs          → read
 //   GET    /api/docs/tree?workspace=&doc=             INDEX.md (+ one doc's CONTENTS.md)       → read
 //   GET    /api/docs/section?workspace=&path=         one library file, path-validated         → read
+//   GET    /api/docs/search?workspace=&q=&sort=&page= full-text search, one result per section  → read
 //   POST   /api/docs/chat                             one Sonnet answer                        → ai + ai_hourly
 //   GET    /api/docs/chats?workspace=                 conversations                            → read
 //   GET    /api/docs/chats/:conversationId?workspace= one conversation                         → read
@@ -447,6 +454,31 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
         prev: at > 0 ? sections[at - 1]!.path : null,
         next: at >= 0 && at < sections.length - 1 ? sections[at + 1]!.path : null,
       };
+    },
+  );
+
+  // ---- searching (DB only: the FTS5 index; search.ts) ----
+  app.get(
+    '/api/docs/search',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: {
+            workspace: { type: 'string', maxLength: 20 },
+            q: { type: 'string', maxLength: DOCS_SEARCH_MAX_QUERY_CHARS },
+            sort: { type: 'string', enum: ['relevance', 'newest'] },
+            page: { type: 'integer', minimum: 1, maximum: Math.ceil(DOCS_SEARCH_MAX_RESULTS / DOCS_SEARCH_PAGE_SIZE) },
+          },
+        },
+      },
+    },
+    async (req, reply): Promise<DocsSearchResponse | ErrorBody> => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const accountId = ctx.accountIdOf(req);
+      const q = req.query as { workspace?: string; q?: string; sort?: DocsSearchSort; page?: number };
+      const workspaceId = await workspaceOf(accountId, q.workspace);
+      return searchDocs({ accountId, workspaceId, query: (q.q ?? '').trim(), sort: q.sort ?? 'relevance', page: q.page ?? 1 });
     },
   );
 

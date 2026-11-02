@@ -13,6 +13,7 @@ import {
   type QuoteOutcome,
   type QuoteTextSegment,
 } from '../../lib/docQuoteMatch.js';
+import { findTermRanges, termsStripText } from '../../lib/docsSearch.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { ArrowIcon, CloseIcon } from '../Icons.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
@@ -29,6 +30,10 @@ import type { DocsOpen } from '../../store/docsView.js';
 // Highlight API (`::highlight(doc-quote)` in index.css — no DOM React owns is changed) and scrolled
 // to, in THIS box. One line above the page says so and clears it; when the words are gone (the
 // document was rebuilt) the same line says that instead and the view lands on the anchor.
+//
+// THE SEARCH WORDS: an open from Library → Search carries `terms` (the result's matched words) instead
+// of a quote; every whole-word occurrence in the section body is painted the same way
+// (`lib/docsSearch.ts` `findTermRanges`), and the same line says so (`termsStripText`).
 
 const MUTED = 'text-ui-mute';
 const LINK = 'cursor-pointer text-ui-ink underline underline-offset-2 hover:text-ui-ink';
@@ -116,6 +121,45 @@ function clearHighlight(): void {
  * matched (`sectionHeaderEnd` — the same header the server's `sectionBodyOf` leaves off).
  */
 function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anchor: string | null, isSection: boolean): QuoteOutcome {
+  const { nodes, segments, bodyFrom, after } = textRuns(root, isSection);
+  const heading = anchor != null ? Array.from(root.querySelectorAll<HTMLElement>('[data-doc-anchor]')).find((h) => h.dataset.docAnchor === anchor) ?? null : null;
+  const ranges = findQuoteRanges(segments, quote, { bodyFrom, preferFrom: after(heading) });
+  if (ranges == null || ranges.length === 0) return 'missing';
+  const domRanges = ranges.map((r) => {
+    const range = document.createRange();
+    range.setStart(nodes[r.startSeg]!, r.startOffset);
+    range.setEnd(nodes[r.endSeg]!, r.endOffset);
+    return range;
+  });
+  return paintAndScroll(box, domRanges, domRanges[0]!);
+}
+
+/**
+ * A SEARCH result's matched words: every whole-word occurrence in the section's body (never its
+ * server-written header), painted; the box scrolls to the first one at or after the passage's
+ * heading (else the first one). Same outcomes as a quote.
+ */
+function highlightWords(box: HTMLElement, root: HTMLElement, words: readonly string[], anchor: string | null, isSection: boolean): QuoteOutcome {
+  const { nodes, segments, bodyFrom, after } = textRuns(root, isSection);
+  const ranges = findTermRanges(segments.map((x) => x.text), words, bodyFrom);
+  if (ranges.length === 0) return 'missing';
+  const heading = anchor != null ? Array.from(root.querySelectorAll<HTMLElement>('[data-doc-anchor]')).find((h) => h.dataset.docAnchor === anchor) ?? null : null;
+  const from = after(heading);
+  const domRanges = ranges.map((r) => {
+    const range = document.createRange();
+    range.setStart(nodes[r.seg]!, r.start);
+    range.setEnd(nodes[r.seg]!, r.end);
+    return range;
+  });
+  const firstAt = from == null ? 0 : Math.max(0, ranges.findIndex((r) => r.seg >= from));
+  return paintAndScroll(box, domRanges, domRanges[firstAt]!);
+}
+
+/** The rendered file's text nodes, as runs with their block, and where the body starts. */
+function textRuns(
+  root: HTMLElement,
+  isSection: boolean,
+): { nodes: Text[]; segments: QuoteTextSegment[]; bodyFrom: number; after: (el: Element | null) => number | null } {
   const nodes: Text[] = [];
   const segments: QuoteTextSegment[] = [];
   const blockIds = new Map<Element, number>();
@@ -143,15 +187,11 @@ function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anch
     const next = nodes.findIndex((t) => !last.contains(t) && (last.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
     bodyFrom = next < 0 ? nodes.length : next;
   }
-  const heading = anchor != null ? Array.from(root.querySelectorAll<HTMLElement>('[data-doc-anchor]')).find((h) => h.dataset.docAnchor === anchor) ?? null : null;
-  const ranges = findQuoteRanges(segments, quote, { bodyFrom, preferFrom: after(heading) });
-  if (ranges == null || ranges.length === 0) return 'missing';
-  const domRanges = ranges.map((r) => {
-    const range = document.createRange();
-    range.setStart(nodes[r.startSeg]!, r.startOffset);
-    range.setEnd(nodes[r.endSeg]!, r.endOffset);
-    return range;
-  });
+  return { nodes, segments, bodyFrom, after };
+}
+
+/** Paint the ranges (when this browser can) and scroll THIS box to `first`. */
+function paintAndScroll(box: HTMLElement, domRanges: Range[], first: Range): QuoteOutcome {
   const reg = highlightRegistry();
   if (reg != null) {
     const H = (globalThis as unknown as { Highlight: new (...r: Range[]) => unknown }).Highlight;
@@ -160,7 +200,6 @@ function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anch
   const outcome: QuoteOutcome = reg != null ? 'painted' : 'found';
   // Scroll THIS box (never `scrollIntoView`) so the passage sits a third of the way down; a passage
   // in a wide table also scrolls that table's own sideways box.
-  const first = domRanges[0]!;
   const rect = first.getBoundingClientRect();
   const boxRect = box.getBoundingClientRect();
   box.scrollTop += rect.top - boxRect.top - box.clientHeight / 3;
@@ -201,22 +240,27 @@ export function DocsViewer({
   // Land on the quoted passage, else the requested heading (or the top), whenever a file is opened or
   // arrives. Every open clears the last highlight first.
   const cleared = quoteState?.seq === open.seq && quoteState.status === 'cleared';
+  // Opened from a search result: its matched words are painted instead of a quote.
+  const hasTerms = open.quote == null && open.terms != null && open.terms.length > 0;
   useEffect(() => {
     clearHighlight();
     if (box.current == null || data == null) return;
-    if (open.quote != null && !cleared && page.current != null && data.path === open.path) {
-      const outcome = highlightQuote(box.current, page.current, open.quote, open.anchor, isSection);
+    if ((open.quote != null || hasTerms) && !cleared && page.current != null && data.path === open.path) {
+      const outcome =
+        open.quote != null
+          ? highlightQuote(box.current, page.current, open.quote, open.anchor, isSection)
+          : highlightWords(box.current, page.current, open.terms ?? [], open.anchor, isSection);
       setQuoteState((s) => (s?.seq === open.seq && s.status === 'cleared' ? s : { seq: open.seq, status: outcome }));
       if (outcome !== 'missing') return;
     }
     if (!cleared) scrollToAnchor(box.current, open.anchor);
-  }, [data, open.path, open.anchor, open.quote, open.seq, isSection, cleared]);
+  }, [data, open.path, open.anchor, open.quote, open.terms, hasTerms, open.seq, isSection, cleared]);
   useEffect(() => clearHighlight, []);
   const clearQuote = useCallback(() => {
     clearHighlight();
     setQuoteState({ seq: open.seq, status: 'cleared' });
   }, [open.seq]);
-  const strip = open.quote != null && quoteState?.seq === open.seq && quoteState.status !== 'cleared' ? quoteState.status : null;
+  const strip = (open.quote != null || hasTerms) && quoteState?.seq === open.seq && quoteState.status !== 'cleared' ? quoteState.status : null;
   const notFound = section.error instanceof ApiError && (section.error.status === 404 || section.error.status === 400);
 
   const body = useMemo(() => data?.markdown ?? '', [data?.markdown]);
@@ -287,7 +331,7 @@ export function DocsViewer({
         >
           {strip === 'painted' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-ui" />}
           <span className="min-w-0 flex-1">
-            {quoteStripText(strip)}
+            {open.quote != null ? quoteStripText(strip) : termsStripText(strip)}
           </span>
           <button
             type="button"

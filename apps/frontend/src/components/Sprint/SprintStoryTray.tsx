@@ -3,6 +3,7 @@ import type { SprintGraphNode } from '@pierre-review/shared';
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
 import { hasActivePopover } from '../../lib/activePopover.js';
+import { expandedBlockTakesEscape } from '../../lib/expandedBlocks.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { StoryViewBody } from '../Ticket/StoryViewBody.js';
 import { ArrowIcon, ChevronIcon, CloseIcon } from '../Icons.js';
@@ -94,7 +95,7 @@ export function SprintStoryTray({
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
-      if (isTypingTarget(e.target) || escapeOwnedByControl(e.target) || hasActivePopover()) return;
+      if (isTypingTarget(e.target) || escapeOwnedByControl(e.target) || hasActivePopover() || expandedBlockTakesEscape()) return;
       if (document.querySelector('[aria-modal="true"]') != null) return;
       e.stopImmediatePropagation();
       closeRef.current();

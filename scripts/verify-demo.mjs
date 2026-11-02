@@ -132,6 +132,14 @@ const VIEWS = [
       expect: ['Release handbook', 'Confluence · 3 pages', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI', 'On-call runbooks', 'GitHub · 3 pages'],
     },
   ],
+  // DOCS SEARCH (docs/REFERENCE-DOCS.md § Search): the library's full-text search, one result with its
+  // source, the section and the matched word.
+  [
+    'docs-search',
+    '?view=activity&activityRepo=docs-search&docsQ=webhook',
+    null,
+    { expect: ['1 result', 'Platform API conventions', 'Webhooks', 'Relevance', 'Newest first', 'webhook signature'] },
+  ],
   // THE DOCS OFFER (docs/REFERENCE-DOCS.md § Docs offered from your repositories): two folders found in
   // Platform's repositories, a checkbox each, and one too large to add in one go (seed-demo.ts).
   [
@@ -526,7 +534,7 @@ const VIEWS = [
     'settings:related-repos',
     '?view=activity',
     null,
-    { act: openSettingsTab('AI review'), expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
+    { act: openSettingsTab('AI review'), expect: ['Related repos', 'Select a repo, then click', 'Related to', 'infrastructure'] },
   ],
   // Settings → Docs → Confluence: the site and email saved, the token never shown; pages on the
   // demo's Jira site read with the Jira token.

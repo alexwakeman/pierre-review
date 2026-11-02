@@ -132,6 +132,7 @@ import {
   settledEarlierRows,
   type ReraisedStatus,
 } from '../lib/claudeReviewFollowUp.js';
+import { AgentActivityLog } from './AgentActivityLog.js';
 
 // "Show this finding in the Changes tab" — supplied by PrDetail, which owns the tab state.
 // Optional everywhere below so the tab still renders (link-only, as before) if it is ever
@@ -363,30 +364,6 @@ function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | nul
             {it.label} {fmtTokens(it.value)}
           </span>
         </span>
-      ))}
-    </div>
-  );
-}
-
-// Live activity feed shown under the running spinner — the agent's rolling log
-// (newest-last). Auto-scrolls to the bottom as new lines stream in. Renders
-// nothing when there are no lines.
-function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (el != null) el.scrollTop = el.scrollHeight;
-  }, [lines]);
-  if (lines.length === 0) return null;
-  return (
-    <div
-      ref={ref}
-      className="mt-2 max-h-32 overflow-y-auto rounded-ui bg-ui-surface px-2 py-1.5 font-mono text-meta leading-snug text-ui-mute"
-    >
-      {lines.map((l, i) => (
-        <div key={i} className="whitespace-pre-wrap break-words">
-          {l === '' ? ' ' : l}
-        </div>
       ))}
     </div>
   );
@@ -2252,7 +2229,7 @@ export function ClaudeReviewTab({
             </div>
           )}
           {/* Live activity feed from the agent run (newest-last). */}
-          <ActivityLog lines={status?.progress?.recentActivity ?? []} />
+          <AgentActivityLog lines={status?.progress?.recentActivity} runKey={status?.reviewId ?? null} />
         </div>
       )}
 

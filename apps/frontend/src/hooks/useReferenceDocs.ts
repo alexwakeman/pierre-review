@@ -9,6 +9,8 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import type {
+  DocsSearchResponse,
+  DocsSearchSort,
   ReferenceDoc,
   ReferenceDocMutationResponse,
   ReferenceDocStreamEvent,
@@ -38,6 +40,8 @@ import { useDocsView } from '../store/docsView.js';
 export const referenceDocsKey = (workspaceId: number | null) => ['reference-docs', workspaceId] as const;
 const treeKey = (workspaceId: number | null, docId: number | null) => ['reference-docs-tree', workspaceId, docId] as const;
 const sectionKey = (workspaceId: number | null, path: string | null) => ['reference-docs-section', workspaceId, path] as const;
+const docsSearchKey = (workspaceId: number | null, q: string, sort: DocsSearchSort, page: number) =>
+  ['reference-docs-search', workspaceId, q, sort, page] as const;
 const conversationsKey = (workspaceId: number | null) => ['reference-docs-chats', workspaceId] as const;
 export const docsConversationKey = (workspaceId: number, conversationId: string) =>
   ['reference-docs-chat', workspaceId, conversationId] as const;
@@ -51,6 +55,7 @@ function invalidateLibrary(qc: QueryClient, workspaceId: number): void {
   void qc.invalidateQueries({ queryKey: referenceDocsKey(workspaceId) });
   void qc.invalidateQueries({ queryKey: ['reference-docs-tree', workspaceId] });
   void qc.invalidateQueries({ queryKey: ['reference-docs-section', workspaceId] });
+  void qc.invalidateQueries({ queryKey: ['reference-docs-search', workspaceId] });
 }
 
 function patchDoc(qc: QueryClient, workspaceId: number, docId: number, patch: Partial<ReferenceDoc>): void {
@@ -165,6 +170,21 @@ export function useReferenceDocSection(workspaceId: number | null, path: string 
     queryKey: sectionKey(workspaceId, path),
     queryFn: workspaceId != null && path != null ? () => api.referenceDocSection(workspaceId, path) : skipToken,
     staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * The library search (`GET /api/docs/search`, DB only). Off while the text is empty or the workspace
+ * unresolved. The previous page stays on screen while the next one loads — but only within the SAME
+ * workspace (another workspace's results are never shown under this one's name).
+ */
+export function useDocsSearch(workspaceId: number | null, q: string, sort: DocsSearchSort, page: number) {
+  return useQuery<DocsSearchResponse>({
+    queryKey: docsSearchKey(workspaceId, q, sort, page),
+    queryFn: workspaceId != null && q !== '' ? () => api.searchReferenceDocs(workspaceId, q, sort, page) : skipToken,
+    placeholderData: (prev) => (prev != null && prev.workspaceId === workspaceId ? prev : undefined),
+    staleTime: 30_000,
     retry: false,
   });
 }

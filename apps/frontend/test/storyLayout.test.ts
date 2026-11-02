@@ -40,7 +40,13 @@ describe('the wide block (the design)', () => {
     expect(layout).not.toMatch(/rail-bottom|railSegments|topSlots/);
     // Expand lays it over the rail; Escape or Collapse puts it back.
     expect(layout).toMatch(/export function RailWideToggle/);
-    expect(layout).toMatch(/e\.key === 'Escape'/);
+    // Escape is taken in the CAPTURE phase and stopped, so it never also leaves the PR view.
+    expect(layout).toMatch(/e\.key !== 'Escape'/);
+    expect(layout).toMatch(/addEventListener\('keydown', onKey, true\)/);
+    expect(layout.match(/onEscapeFirst\(\(\) => setExpanded\(false\), el\)/g)?.length).toBe(2);
+    // A layer holding the block (the PR drawer, the story tray) lets the block take Escape first.
+    expect(src('components/ui/keys.ts')).toMatch(/!expandedBlockTakesEscape\(\)/);
+    expect(src('components/Sprint/SprintStoryTray.tsx')).toMatch(/expandedBlockTakesEscape\(\)\) return/);
     // Both design headers carry the button.
     expect(src('components/Activity/StoryDesignSection.tsx')).toMatch(/<RailWideToggle/);
     expect(src('components/ClaudeReviewDiagrams.tsx')).toMatch(/<RailWideToggle/);

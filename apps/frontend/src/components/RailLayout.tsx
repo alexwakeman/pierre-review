@@ -34,9 +34,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { hasActivePopover } from '../lib/activePopover.js';
+import { escapeOwnedByControl } from '../lib/escapeOwner.js';
+import { escapeReachesBlock, openModals, registerExpandedBlock } from '../lib/expandedBlocks.js';
 import { storyTwoColumn } from '../lib/storyLayout.js';
 import { CollapseWideIcon, ExpandWideIcon } from './Icons.js';
 
@@ -195,6 +199,29 @@ export function RailPiece({ slot, inline = false, children }: { slot: string; in
   return inline ? <>{children}</> : null;
 }
 
+/**
+ * Escape collapses an expanded block — and ONLY that: taken in the CAPTURE phase and stopped, as every
+ * layer above the page does (hooks/useKeyboard.ts), or the app's own Escape also leaves the PR view.
+ * The block is registered (lib/expandedBlocks.ts), so a layer holding it (the PR drawer, the story
+ * tray) steps aside; a modal opened over it, an open popover or a control that owns Escape keeps the
+ * key. `el` is the block's root. Returns the cleanup.
+ */
+export function onEscapeFirst(close: () => void, el: Element | null): () => void {
+  const release = registerExpandedBlock(el);
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (escapeOwnedByControl(e.target) || hasActivePopover() || !escapeReachesBlock(el, openModals())) return;
+    e.stopPropagation();
+    e.preventDefault();
+    close();
+  };
+  window.addEventListener('keydown', onKey, true);
+  return () => {
+    release();
+    window.removeEventListener('keydown', onKey, true);
+  };
+}
+
 // The expand control of the enclosing <RailWide> (null outside one, or while it cannot expand).
 const WideCtx = createContext<{ expanded: boolean; toggle: () => void } | null>(null);
 
@@ -227,14 +254,7 @@ export function RailWide({ children, className = '' }: { children: ReactNode; cl
     ro.observe(root);
     return () => ro.disconnect();
   }, [on, el, root]);
-  useEffect(() => {
-    if (!on) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setExpanded(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [on]);
+  useEffect(() => (on ? onEscapeFirst(() => setExpanded(false), el) : undefined), [on, el]);
   const ctx = useMemo(() => (can ? { expanded: on, toggle: () => setExpanded((v) => !v) } : null), [can, on]);
   const name = layout?.config.name ?? 'rail';
   const over = on && width != null && layout != null;
@@ -262,7 +282,19 @@ const RAIL_LEFT_MAX_PX = 768;
  * lays it over the reading column — keeping its right edge, up to RAIL_LEFT_MAX_PX wide — until
  * "Collapse" or Escape. Outside the rail (narrow, inline, outside a layout) a plain block.
  */
-export function RailWideLeft({ children, className = '' }: { children: ReactNode; className?: string }): JSX.Element {
+export function RailWideLeft({
+  children,
+  className = '',
+  maxPx = RAIL_LEFT_MAX_PX,
+  style,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** The widest it grows (a live log takes more than a card's reading measure). */
+  maxPx?: number;
+  /** Extra style, kept while it is expanded (a live log's height). */
+  style?: CSSProperties;
+}): JSX.Element {
   const layout = useRailLayout();
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -278,7 +310,7 @@ export function RailWideLeft({ children, className = '' }: { children: ReactNode
     }
     const read = (): void => {
       const own = host.getBoundingClientRect();
-      const width = Math.floor(Math.min(RAIL_LEFT_MAX_PX, own.right - root.getBoundingClientRect().left));
+      const width = Math.floor(Math.min(maxPx, own.right - root.getBoundingClientRect().left));
       const next = { width, shift: Math.max(0, width - Math.floor(own.width)) };
       setBox((prev) => (prev?.width === next.width && prev.shift === next.shift ? prev : next));
     };
@@ -287,15 +319,8 @@ export function RailWideLeft({ children, className = '' }: { children: ReactNode
     const ro = new ResizeObserver(read);
     ro.observe(root);
     return () => ro.disconnect();
-  }, [on, el, root]);
-  useEffect(() => {
-    if (!on) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setExpanded(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [on]);
+  }, [on, el, root, maxPx]);
+  useEffect(() => (on ? onEscapeFirst(() => setExpanded(false), el) : undefined), [on, el]);
   const ctx = useMemo(() => (can ? { expanded: on, toggle: () => setExpanded((v) => !v) } : null), [can, on]);
   const over = on && box != null;
   return (
@@ -305,12 +330,18 @@ export function RailWideLeft({ children, className = '' }: { children: ReactNode
         data-rail-wide-left={over ? 'true' : 'false'}
         // z-30: above the reading column's sticky diagram lanes (FlowDiagram, z-20).
         className={`${className}${over ? ' relative z-30 shadow-lg ring-1 ring-ui-line' : ''}`}
-        style={over ? { width: box.width, marginLeft: -box.shift } : undefined}
+        style={over ? { ...style, width: box.width, marginLeft: -box.shift } : style}
       >
         {children}
       </div>
     </WideCtx.Provider>
   );
+}
+
+/** The enclosing <RailWide> / <RailWideLeft>'s expand state and toggle (null outside one, or while it
+ *  cannot expand). For a block that draws its own control or falls back to expanding in place. */
+export function useRailWideControl(): { expanded: boolean; toggle: () => void } | null {
+  return useContext(WideCtx);
 }
 
 /** The enclosing <RailWide>'s Expand / Collapse button, for its header. Nothing when it cannot expand. */
@@ -324,16 +355,33 @@ export function RailWideToggle({
 }): JSX.Element | null {
   const wide = useContext(WideCtx);
   if (wide == null) return null;
+  return <WideToggleButton expanded={wide.expanded} onToggle={wide.toggle} expandTitle={expandTitle} className={className} />;
+}
+
+/** The Expand / Collapse button itself (RailWideToggle's look), for a block that owns its own state. */
+export function WideToggleButton({
+  expanded,
+  onToggle,
+  expandTitle,
+  collapseTitle = 'Back to the column (Esc)',
+  className = '',
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  expandTitle: string;
+  collapseTitle?: string;
+  className?: string;
+}): JSX.Element {
   return (
     <button
       type="button"
-      onClick={wide.toggle}
-      aria-pressed={wide.expanded}
-      title={wide.expanded ? 'Back to the column (Esc)' : expandTitle}
+      onClick={onToggle}
+      aria-pressed={expanded}
+      title={expanded ? collapseTitle : expandTitle}
       className={`hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${className}`}
     >
-      {wide.expanded ? <CollapseWideIcon size={14} /> : <ExpandWideIcon size={14} />}
-      {wide.expanded ? 'Collapse' : 'Expand'}
+      {expanded ? <CollapseWideIcon size={14} /> : <ExpandWideIcon size={14} />}
+      {expanded ? 'Collapse' : 'Expand'}
     </button>
   );
 }
@@ -397,12 +445,19 @@ const PANE_EDGE_PX = 20;
  * than its column (a phone) is left alone. Inside a WIDE rail layout it stays put — the layout's
  * <RailWide> around the section expands it there, on the reader's press.
  */
-export function PaneWide({ children }: { children: ReactNode }): JSX.Element {
+export function PaneWide({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  /** False keeps it in its column (same element, so its content is not remounted). */
+  enabled?: boolean;
+}): JSX.Element {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState<number | null>(null);
   const inWideLayout = useRailLayout()?.wide === true;
   useIsoLayoutEffect(() => {
-    if (el == null || inWideLayout) {
+    if (el == null || inWideLayout || !enabled) {
       setWidth(null);
       return;
     }
@@ -434,7 +489,7 @@ export function PaneWide({ children }: { children: ReactNode }): JSX.Element {
     ro.observe(host);
     if (el.parentElement != null) ro.observe(el.parentElement);
     return () => ro.disconnect();
-  }, [el, inWideLayout]);
+  }, [el, inWideLayout, enabled]);
   return (
     <div ref={setEl} data-pane-wide={width != null ? 'true' : 'false'} className="relative" style={width != null ? { width } : undefined}>
       {children}

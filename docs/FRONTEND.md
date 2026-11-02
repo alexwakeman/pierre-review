@@ -150,7 +150,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 - **`Sidebar`** (`components/shell/Sidebar.tsx`) — top to bottom: the wordmark (the `h1`), the
   **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
   (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests · This Sprint · Timeline;
-  Library: Docs (AI only) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
+  Library: Search · Docs (both AI only) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
   Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
   rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
   ⓘ), **Open tabs** (EVERY open tab at every width — `useTabChip`'s icon + words, a ✕, the strip's
@@ -219,13 +219,17 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
     add pops the sync-progress modal via `syncModalSignal`); `RepoSearch` also mounts standalone
     inside `FirstRunOnboarding` (zero-repo first run; top 5 pre-checked, and more than 10 chosen
     shows one line, "The first sync will take longer with this many repositories."
-    — `lib/firstSyncNote.ts`; nothing is unchecked for the user). ⚠ **A ZERO-REPO account opens straight into
-    that modal**, once per PAGE LOAD (a module flag in `WorkspaceSelector`, so a remount or a view
-    switch never re-opens it after a close; a reload — which is what signing in is — does). It waits
-    for BOTH `['repos']` and `['workspaces']`: `undefined` is "still loading", never "empty", and
-    `repos` is not IndexedDB-persisted, so `[]` is the server's answer for this load. In that state
-    the modal leads with "Add a repo to get started" and `RepoSearch autoFocus` opens its curated
-    suggestions without a click. It never closes itself — an added repo's sync shows in the modal.
+    — `lib/firstSyncNote.ts`; nothing is unchecked for the user). ⚠ **A ZERO-REPO account gets ONE
+    landing, decided once per PAGE LOAD** by the pure `lib/firstRunLanding.ts` `firstRunLanding`
+    (a module flag in `WorkspaceSelector`, so a remount or a view switch never re-decides it after
+    a close; a reload — which is what signing in is — does). It waits for `['repos']`,
+    `['workspaces']` AND the suggested-repos answer (`suggestedReposQuery`, the SAME
+    `['repo-suggested']` query `FirstRunOnboarding` lists — one fetch): ≥ 1 suggestion ⇒ ONLY the
+    `FirstRunOnboarding` panel, the manager stays shut; 0 suggestions or a failed lookup ⇒ the
+    manager opens. `undefined` is "still loading", never "empty", and `repos` is not
+    IndexedDB-persisted, so `[]` is the server's answer for this load. In the manager the modal
+    leads with "Add a repo to get started"; `RepoSearch autoFocus` focuses the box but that
+    PROGRAMMATIC focus never opens the curated suggestions — the reader's click or keystroke does. It never closes itself — an added repo's sync shows in the modal.
     Each row also carries an **amber My-Turn
     badge** and the collapsed trigger carries the OTHER workspaces' total — see *Per-workspace
     "My Turn"* below.
@@ -842,6 +846,25 @@ META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` 
   The Design section sits in `<RailWide>` (the story view's rule, below): in the reading column,
   scrolling sideways; its header's "Expand" lays it over the rail. `PaneWide` inside it stands down
   while a wide layout is around it, so the two never overlap.
+
+### The agent's live log
+
+Every agentic run's rolling log is ONE component, `components/AgentActivityLog.tsx` (AI Review's run
+block, AI Fix, AI Fix's plan, the story build's plan and each repo's build). Collapsed: a short box
+that follows the newest line. Its "Expand" makes it tall (`lib/agentActivityLog.ts`
+`expandedLogHeight`: the room below it in its scroll pane, at least 60% of the pane):
+- in a rail slot (the AI Review tab's `run` piece, wide) it is a `<RailWideLeft>` (max 1100px) and
+  widens LEFTWARDS over the reading column — the mirror of the design's `RailWide`;
+- elsewhere it grows in place and, through `<PaneWide enabled>`, reaches the pane's right edge.
+"Collapse" or Escape restores it. Escape for every expanded block goes through `RailLayout.tsx`
+`onEscapeFirst` — capture phase, stopped — or the app's own Escape (`useKeyboard`) also leaves the PR
+view. ⚠ Each expanded block is REGISTERED (`lib/expandedBlocks.ts`): a layer that holds it and whose
+own capture listener was added first (the Open PRs `SidePanel` via `escapeBelongsToLayer`, the sprint
+story tray) steps aside while `expandedBlockTakesEscape()`, and the block steps aside for a modal
+opened over it (the palette, Settings), an open popover or a control that owns Escape. It follows the newest line unless the reader scrolled up (`isScrolledToBottom`); back at the
+bottom it follows again. ⚠ The server sends only the run's LAST 25 lines (`ACTIVITY_LOG_CAP` per
+agent); the panel keeps every line seen since it mounted (`mergeActivityWindow`, longest overlap,
+idempotent, ≤ 2000 lines), reset when `runKey` changes. A log opened mid-run starts at that window.
 
 Header carries **Show** + **Focus** links (drive the timeline) and, on OPEN PRs only, a **CI
 readout**: a 12px `CiDot` plus its word (`prHeaderCi(state, ciStatus)` in `lib/ui.ts`, pinned by

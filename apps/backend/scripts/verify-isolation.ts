@@ -4458,6 +4458,13 @@ check(
   check("retrieveSections(B, B's workspace) returns B's passage (mutation check)", hitsB?.length === 1 && hitsB[0]!.passage.includes('account 2'));
   check("indexDocChunks(A, B's doc id) writes nothing", (await ch.indexDocChunks(1, bId)) === null);
   check("B's passage survives A's indexDocChunks naming it", (await rt.retrieveSections({ accountId: 2, workspaceId: defaultB, query: 'refunds', k: 10 }))?.length === 1);
+  // THE SEARCH BOX (search.ts, GET /api/docs/search): the same index, its own query.
+  const srch = await import('../src/reference-docs/search.js');
+  const sA = await srch.searchDocs({ accountId: 1, workspaceId: defaultA, query: 'refunds', sort: 'relevance', page: 1 });
+  check("searchDocs(A, A's workspace) returns A's section only", sA.total === 1 && sA.results[0]?.docId === ids[1]);
+  check("searchDocs(A, B's workspace) finds nothing", (await srch.searchDocs({ accountId: 1, workspaceId: defaultB, query: 'refunds', sort: 'newest', page: 1 })).total === 0);
+  const sB = await srch.searchDocs({ accountId: 2, workspaceId: defaultB, query: 'refunds', sort: 'relevance', page: 1 });
+  check("searchDocs(B, B's workspace) returns B's section (mutation check)", sB.total === 1 && sB.results[0]?.docId === bId);
 
   const Fastify = (await import('fastify')).default;
   const rapp = Fastify({ logger: false });

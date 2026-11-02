@@ -145,9 +145,11 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
     () => [...(repos ?? [])].sort((a, b) => a.fullName.localeCompare(b.fullName)),
     [repos],
   );
-  // A FIRST-TIME account: the repo list has loaded and is empty. The selector opens this modal by
-  // itself for such an account (WorkspaceSelector), so the modal says what to do first and focuses
-  // the add box — whose empty-query state lists public repos to try. `undefined` is still loading.
+  // A FIRST-TIME account: the repo list has loaded and is empty. The shell opens this modal by
+  // itself for such an account when no suggested repos were found (WorkspaceSelector
+  // `useWorkspaceShell`), so the modal says what to do first and focuses the add box — whose list
+  // of public repos to try opens on the reader's click or keystroke, never on that focus.
+  // `undefined` is still loading.
   const noReposYet = repos != null && repos.length === 0;
   const inSelected = useMemo(
     () => (selected ? sortedRepos.filter((r) => homeOf(r) === selected.id) : []),

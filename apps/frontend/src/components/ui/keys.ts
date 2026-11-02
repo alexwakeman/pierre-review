@@ -8,6 +8,7 @@
 
 import { hasActivePopover } from '../../lib/activePopover.js';
 import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
+import { expandedBlockTakesEscape } from '../../lib/expandedBlocks.js';
 
 interface TargetLike {
   tagName?: unknown;
@@ -66,9 +67,10 @@ export function shortcutBlocked(e: KeyLike, opts: { insideModal?: boolean } = {}
   return false;
 }
 
-/** Escape should close THIS layer unless an open control inside it owns the key. */
+/** Escape should close THIS layer unless an open control inside it, or an expanded block in it
+ *  (lib/expandedBlocks.ts — it collapses first), owns the key. */
 export function escapeBelongsToLayer(e: KeyLike): boolean {
-  return e.key === 'Escape' && !escapeOwnedByControl(e.target) && !hasActivePopover();
+  return e.key === 'Escape' && !escapeOwnedByControl(e.target) && !hasActivePopover() && !expandedBlockTakesEscape();
 }
 
 /** "⌘" on Apple platforms, "Ctrl" elsewhere — for the words a Kbd shows. */

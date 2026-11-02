@@ -27,6 +27,7 @@ export * from './reference-docs.js';
 export * from './reference-docs-wiki.js';
 export * from './reference-docs-offers.js';
 export * from './reference-docs-quote.js';
+export * from './reference-docs-search.js';
 export * from './sprint-members.js';
 export * from './story-docs-alignment.js';
 export * from './ai-budget.js';

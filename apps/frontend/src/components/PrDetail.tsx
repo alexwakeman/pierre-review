@@ -58,7 +58,10 @@ import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import { useOpenStory } from '../lib/ticketTab.js';
 import {
+  BotIcon,
   ChevronIcon,
+  CommentIcon,
+  DiffIcon,
   DotIcon,
   EllipsisIcon,
   ExternalLinkIcon,
@@ -71,11 +74,14 @@ import {
   PullRequestIcon,
   LinkIcon,
   OctocatIcon,
+  OverviewIcon,
   RefreshIcon,
+  SparkleIcon,
   TicketIcon,
   TimelineIcon,
   TimerIcon,
   WarningIcon,
+  WrenchIcon,
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
 import { ThreadList } from './ThreadList/index.js';
@@ -150,6 +156,20 @@ const TAB_LABELS: Record<Tab, string> = {
   ai_fix: 'AI Fix',
   // The PR's linked story (the story view, inside the PR) — listed only while it names one.
   story: 'Ticket',
+};
+
+// Every tab carries an icon, so the strip reads as a row of buttons (a new reader took the bare
+// words for a heading). The two agentic tabs draw theirs in the AI signal colour, as every other AI
+// surface does. 14 is the call-site size (it renders at ICON_SCALE).
+const TAB_ICONS: Record<Tab, JSX.Element> = {
+  overview: <OverviewIcon size={14} />,
+  comments: <CommentIcon size={14} />,
+  activity: <OverviewIcon size={14} />,
+  changes: <DiffIcon size={14} />,
+  bot_activity: <BotIcon size={14} />,
+  claude_review: <SparkleIcon size={14} className="text-ai-signal" />,
+  ai_fix: <WrenchIcon size={14} className="text-ai-signal" />,
+  story: <TicketIcon size={14} />,
 };
 
 // The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
@@ -740,9 +760,9 @@ function PrDetailSkeleton(): JSX.Element {
         </div>
       </div>
       {/* Tab strip. */}
-      <div className="flex gap-3 px-4 py-3 md:px-5">
-        {[16, 14, 14, 14].map((w, i) => (
-          <SkeletonLine key={i} className="h-3.5" style={{ width: `${w * 4}px` }} />
+      <div className="flex gap-1.5 px-4 pb-2 pt-2.5 md:px-5">
+        {[26, 26, 24, 22].map((w, i) => (
+          <SkeletonLine key={i} className="h-8 rounded-ui" style={{ width: `${w * 4}px` }} />
         ))}
       </div>
       {/* Content blocks. */}
@@ -1439,9 +1459,11 @@ export function PrDetail({
     id: `story:${k}`,
     label: `Ticket ${st.key}`,
     title: `${st.key}: the ticket and its pull requests`,
+    icon: TAB_ICONS.story,
   }));
   const tabItems: TabItem<StripId>[] = tabIds.flatMap((t): TabItem<StripId>[] => t === 'story' ? storyItems : [{
     id: t,
+    icon: TAB_ICONS[t],
     label: (
       <>
         {TAB_LABELS[t]}
@@ -1747,7 +1769,10 @@ export function PrDetail({
           label={`Pull request #${pr.number} tabs`}
           numberKeys={liveVisible}
           idPrefix={`pr-${pr.id}`}
-          className="-mx-1 pb-2"
+          variant="boxed"
+          // md+: a strip too wide for the pane WRAPS, so no tab hides behind the edge fade. Below
+          // md it stays one sticky scrolling row (two rows would eat the phone's screen).
+          className="-mx-[3px] mb-1.5 md:flex-wrap md:gap-y-1.5"
         />
       </div>
       <div

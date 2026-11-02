@@ -126,7 +126,11 @@ All in `components/ui/`, exported from `components/ui/index.ts`.
   no tab stops; actions live in the panel and on keys. Nothing fetches on selection.
 - **`SidePanel`** — docked ≥ lg, sheet below. `footer` is the action bar (primary first).
 - **`Tabs`** — page tabs with counts (`number` · `'loading'` → "…" · `null` → nothing; 0 stays
-  visible and dimmed). `numberKeys` gives 1–9 to the page's own tablist only.
+  visible and dimmed). `numberKeys` gives 1–9 to the page's own tablist only. `variant="boxed"`
+  draws each tab as a button (1px `ui-line` edge, `ui-raise` ground, hover; selected = a 2px accent
+  edge, border + inset ring so nothing shifts, + accent/15 fill + accent icon) — PR detail only,
+  where bare words were not read as tabs; every PR-detail tab carries an icon (`TAB_ICONS`; the two
+  AI tabs in `text-ai-signal`) and the strip wraps at md+, scrolls below.
 - **`Button` / `IconButton`** — `primary` (one per surface), `secondary`, `ghost`, `danger` (danger
   ink, never a red ground). `kbd` names the shortcut in `aria-keyshortcuts` and the tooltip — it is
   NEVER printed on the button (shortcuts are listed by ⌘K and the `?` sheet). `IconButton` requires

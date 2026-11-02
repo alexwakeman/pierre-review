@@ -19,7 +19,7 @@ export const RETRIEVE_PASSAGES = 200;
 /** The most query terms sent to MATCH (a long story keeps its first ones). */
 export const RETRIEVE_MAX_TERMS = 120;
 
-const STOPWORDS = new Set(
+export const STOPWORDS: ReadonlySet<string> = new Set(
   (
     'the and for are but not you all any can had her was one our out has have him his how its may new now ' +
     'old see two way who did get let put say she too use that with this from they will would there their ' +
@@ -98,7 +98,7 @@ export function rankSections(hits: readonly PassageHit[], k: number, perDocCap?:
 }
 
 /** Does the workspace have any passage of a current build? */
-async function workspaceIndexed(accountId: number, workspaceId: number): Promise<boolean> {
+export async function workspaceIndexed(accountId: number, workspaceId: number): Promise<boolean> {
   const c = schema.referenceDocChunks;
   const d = schema.referenceDocs;
   const rows = await db
