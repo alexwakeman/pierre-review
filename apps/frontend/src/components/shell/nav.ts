@@ -19,7 +19,6 @@ export type DestinationId =
   | 'open-prs'
   | 'sprint'
   | 'timeline'
-  | 'docs-search'
   | 'docs'
   | 'feed'
   | 'insights'
@@ -46,7 +45,6 @@ export const DESTINATIONS: readonly Destination[] = [
   { id: 'open-prs', label: 'Open pull requests', title: 'Every open pull request in this workspace', group: 'primary', goKey: 'o' },
   { id: 'sprint', label: 'This Sprint', title: "The tracker's current sprint: themes, critical path, people and what merged", group: 'primary', goKey: 's' },
   { id: 'timeline', label: 'Timeline', title: 'The activity board: every pull request over time', group: 'primary', goKey: 't' },
-  { id: 'docs-search', label: 'Search', title: "Search every document in this workspace's library", group: 'library', goKey: 'l', aiOnly: true },
   { id: 'docs', label: 'Docs', title: 'Reference documents for this workspace, and a chat that answers from them', group: 'library', goKey: 'd', aiOnly: true },
   { id: 'feed', label: 'Feed', title: 'One chronological stream across every repo in this workspace', group: 'library', goKey: 'f' },
   { id: 'insights', label: 'Reports', title: 'Flow metrics and period reports for this workspace', group: 'insights', goKey: 'r' },
@@ -113,12 +111,14 @@ export type Location = DestinationId | number | null;
 export function currentLocation(
   activeTab: string,
   tabs: readonly Pick<Tab, 'key'>[],
-  activityRepoId: number | DestinationId | null,
+  activityRepoId: number | DestinationId | 'docs-search' | null,
 ): Location {
   if (activeTab === 'timeline') return 'timeline';
   if (activeTab === 'sprint') return 'sprint';
   if (activeTab === 'activity') {
     if (typeof activityRepoId === 'number') return activityRepoId;
+    // Docs search is a pane INSIDE Docs (its Library panel's "Search" row), so Docs is where you are.
+    if (activityRepoId === 'docs-search') return 'docs';
     return activityRepoId ?? 'open-prs';
   }
   if (!isFixedView(activeTab) && !tabs.some((t) => t.key === activeTab)) return 'timeline';

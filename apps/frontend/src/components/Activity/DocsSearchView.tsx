@@ -10,7 +10,7 @@ import { openDocsSearchResult } from '../../store/openDocs.js';
 import { useFilters } from '../../store/filters.js';
 import { InfoButton } from '../InfoModal.js';
 import { ArrowIcon, MagnifierIcon } from '../Icons.js';
-import { Button, PageHeader, cx, FOCUS_RING } from '../ui/index.js';
+import { Button, cx, FOCUS_RING } from '../ui/index.js';
 
 // LIBRARY → SEARCH (`?activityRepo=docs-search&docsQ=…`; docs/REFERENCE-DOCS.md § Search). The
 // workspace library's full-text search: one result per section, its best passage quoted with the
@@ -27,19 +27,9 @@ const SORTS: ReadonlyArray<{ id: DocsSearchSort; label: string }> = [
   { id: 'newest', label: 'Newest first' },
 ];
 
-export function DocsSearchView(): JSX.Element | null {
-  const me = useMe();
-  const ai = useAiCapabilities();
-  const workspaceId = useFilters((s) => s.workspaceId);
-  if (me.data == null) return null;
-  if (!ai.enabled) {
-    return <p className={`px-6 py-10 text-center text-body ${MUTED}`}>Reference docs need AI, which is switched off here.</p>;
-  }
-  if (workspaceId == null) return null;
-  return <DocsSearchPane workspaceId={workspaceId} />;
-}
-
-function DocsSearchPane({ workspaceId }: { workspaceId: number }): JSX.Element {
+// Docs' CENTRE PANE while the Library panel's "Search" row is selected (`?activityRepo=docs-search`):
+// DocsView renders it in place of the document viewer, so results sit where a document's contents do.
+export function DocsSearchPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const search = useFilters((s) => s.docsSearch);
   const setDocsSearch = useFilters((s) => s.setDocsSearch);
   const [text, setText] = useState(search.q);
@@ -60,7 +50,7 @@ function DocsSearchPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const pageCount = data != null ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const goPage = (page: number): void => {
     setDocsSearch({ page });
-    input.current?.closest('[data-docs-search]')?.scrollIntoView?.({ block: 'start' });
+    input.current?.closest('[data-docs-search]')?.scrollTo?.({ top: 0 });
   };
 
   const info = (
@@ -75,8 +65,12 @@ function DocsSearchPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   );
 
   return (
-    <div data-docs-search className="mx-auto w-full max-w-[56rem]">
-      <PageHeader inset={false} title="Search" info={info} />
+    <section aria-label="Search the docs" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-11 items-center gap-1 px-4 py-2">
+        <h3 className="text-body font-semibold text-ui-ink">Search</h3>
+        {info}
+      </div>
+    <div data-docs-search className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 md:px-6">
       <form
         role="search"
         onSubmit={(e) => {
@@ -170,6 +164,7 @@ function DocsSearchPane({ workspaceId }: { workspaceId: number }): JSX.Element {
         </>
       )}
     </div>
+    </section>
   );
 }
 

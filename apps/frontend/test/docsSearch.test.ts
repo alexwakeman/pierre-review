@@ -79,13 +79,11 @@ describe('the search link', () => {
   });
 });
 
-describe('the sidebar entry', () => {
-  it('sits directly above Docs under Library, and only where AI runs', () => {
-    const library = DESTINATIONS.filter((d) => d.group === 'library').map((d) => d.id);
-    expect(library.slice(0, 2)).toEqual(['docs-search', 'docs']);
-    expect(shownDestinations({ aiOn: false, features: undefined }).some((d) => d.id === 'docs-search')).toBe(false);
-    expect(shownDestinations({ aiOn: true, features: undefined }).some((d) => d.id === 'docs-search')).toBe(true);
-    expect(currentLocation('activity', [], 'docs-search')).toBe('docs-search');
+describe('where search lives', () => {
+  it('is a pane inside Docs, not a sidebar entry: the sidebar keeps Docs highlighted', () => {
+    expect(DESTINATIONS.map((d) => d.id as string)).not.toContain('docs-search');
+    expect(shownDestinations({ aiOn: true, features: undefined }).filter((d) => d.group === 'library').map((d) => d.id)).toEqual(['docs', 'feed']);
+    expect(currentLocation('activity', [], 'docs-search')).toBe('docs');
   });
 });
 

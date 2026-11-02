@@ -150,7 +150,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 - **`Sidebar`** (`components/shell/Sidebar.tsx`) — top to bottom: the wordmark (the `h1`), the
   **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
   (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests · This Sprint · Timeline;
-  Library: Search · Docs (both AI only) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
+  Library: Docs (AI only; its search is a row in Docs' own Library panel) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
   Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
   rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
   ⓘ), **Open tabs** (EVERY open tab at every width — `useTabChip`'s icon + words, a ✕, the strip's

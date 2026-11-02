@@ -14,7 +14,6 @@ import { FeedView } from './FeedView.js';
 import { FeedIsolationBanner } from './FeedIsolationBanner.js';
 import { InsightsView } from './InsightsView.js';
 import { DocsView } from './DocsView.js';
-import { DocsSearchView } from './DocsSearchView.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -174,11 +173,10 @@ export function ActivityView(): JSX.Element {
         <AttentionView />
       ) : showingInsights ? (
         <InsightsView />
-      ) : showingDocs ? (
-        // Docs — the reference library. Needs no repos; owns its own empty and AI-off states.
+      ) : showingDocs || showingDocsSearch ? (
+        // Docs — the reference library. Needs no repos; owns its own empty and AI-off states. Its
+        // search (`docs-search`) is a pane INSIDE it: the Library panel's "Search" row.
         <DocsView />
-      ) : showingDocsSearch ? (
-        <DocsSearchView />
       ) : noRepos ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-body text-ui-mute">
           {hasAnyRepo ? (

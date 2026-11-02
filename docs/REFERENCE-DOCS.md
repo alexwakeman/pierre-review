@@ -695,8 +695,11 @@ registered with the other docs routes (absent under `LIMN_AI_DISABLED`; the side
 - `indexed: false` ⇒ nothing in the workspace's library is indexed yet (an empty library, or every
   document still building): the SPA says so instead of "no results".
 
-**The SPA** (`components/Activity/DocsSearchView.tsx`, `lib/docsSearch.ts`). Sidebar Library → **Search**
-(directly above Docs, `g l`, ⌘K "Search the docs") → `?activityRepo=docs-search&docsQ=…&docsSort=newest&docsPage=2`
+**The SPA** (`components/Activity/DocsSearchView.tsx` `DocsSearchPane`, `lib/docsSearch.ts`). Inside
+Docs: the Library panel's **Search** row (pinned under its heading, above "All documents"; ⌘K "Search the
+docs") swaps the CENTRE pane from the document viewer to the search, so results sit where a document's
+contents do; opening anything in the panel goes back to reading. NOT a sidebar entry (the sidebar keeps
+Docs highlighted, `currentLocation`) → `?activityRepo=docs-search&docsQ=…&docsSort=newest&docsPage=2`
 (`filters.docsSearch`, URL-owned, transient; the defaults are omitted; switching the line is a
 navigation, typing / sorting / paging replace the entry). A box (autofocus, 300 ms debounce, Enter
 commits), "N results", Relevance | Newest first, one row per section (section title; document › trail;

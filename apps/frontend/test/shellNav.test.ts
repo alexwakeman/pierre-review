@@ -47,8 +47,8 @@ describe('the destinations', () => {
     expect(GO_KEYS).toMatchObject({ p: 'attention', o: 'open-prs', s: 'sprint', t: 'timeline', r: 'insights', b: 'bots', d: 'docs' });
   });
 
-  it('only marks the library (Search and Docs) as AI-only', () => {
-    expect(DESTINATIONS.filter((d) => d.aiOnly).map((d) => d.id)).toEqual(['docs-search', 'docs']);
+  it('only marks Docs as AI-only', () => {
+    expect(DESTINATIONS.filter((d) => d.aiOnly).map((d) => d.id)).toEqual(['docs']);
   });
 });
 

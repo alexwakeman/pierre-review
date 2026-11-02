@@ -41,6 +41,7 @@ import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
 import {
   BookIcon,
+  MagnifierIcon,
   ChevronIcon,
   CollapseAllIcon,
   ConfluenceIcon,
@@ -62,6 +63,7 @@ import { DocsOfferCard } from './DocsOfferCard.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
+import { DocsSearchPane } from './DocsSearchView.js';
 import { docSourceLabel } from '../../lib/docsSearch.js';
 import { aiCredentialWords, aiModelWords, aiRunLabel } from '@pierre-review/shared';
 
@@ -535,9 +537,16 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   // A docs offer's "Choose part of it": the wizard opens on that repository.
   const [addingRepo, setAddingRepo] = useState<string | undefined>(undefined);
   const setNarrowPane = useDocsView((s) => s.setNarrowPane);
+  // SEARCH is this view's centre pane while the Library panel's "Search" row is selected
+  // (`?activityRepo=docs-search`); opening anything else goes back to reading.
+  const searching = useFilters((s) => s.activityRepoId) === 'docs-search';
+  const setActivityRepo = useFilters((s) => s.setActivityRepo);
   const onOpen = useCallback(
-    (path: string, anchor: string | null, quote: string | null = null) => openPath(workspaceId, path, anchor, quote),
-    [openPath, workspaceId],
+    (path: string, anchor: string | null, quote: string | null = null) => {
+      openPath(workspaceId, path, anchor, quote);
+      if (useFilters.getState().activityRepoId === 'docs-search') setActivityRepo('docs');
+    },
+    [openPath, workspaceId, setActivityRepo],
   );
 
   // A DEEP LINK (`&doc=…&section=…`, lib/docReferences.ts — a review's reference opened in a new tab):
@@ -846,6 +855,26 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
             <div className="px-1.5 empty:hidden">
               <AiRunGate kind="docs_build">{null}</AiRunGate>
             </div>
+            {/* SEARCH stays in reach above the list, however far a document's contents are open. */}
+            <div className="-mt-1">
+      <button
+        type="button"
+        onClick={() => {
+          setActivityRepo('docs-search');
+          setNarrowPane('viewer');
+        }}
+        aria-current={searching ? 'true' : undefined}
+        data-testid="docs-search-open"
+        className={cx(
+          'flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body font-medium touch:h-11',
+          searching ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
+          FOCUS_RING,
+        )}
+      >
+        <MagnifierIcon size={12} className="text-ui-mute" />
+        <span className="flex-1">Search</span>
+      </button>
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {library.isPending ? (
                 <p className="px-2 text-meta text-ui-mute">Loading…</p>
@@ -856,10 +885,10 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
                   <button
                     type="button"
                     onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}
-                    aria-current={open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
+                    aria-current={!searching && open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
                     className={cx(
                       'flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body font-medium touch:h-11',
-                      open.path === LIBRARY_INDEX_PATH ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
+                      !searching && open.path === LIBRARY_INDEX_PATH ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
                       FOCUS_RING,
                     )}
                   >
@@ -886,7 +915,11 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
         {/* CENTRE + RIGHT: side by side at xl; one at a time, by the header's tabs, below. */}
         <div className={cx('min-h-0 min-w-0 flex-1 lg:flex', pane === 'library' ? 'hidden' : 'flex')}>
           <div className={cx('min-h-0 min-w-0 flex-1', pane === 'viewer' ? 'flex' : 'hidden xl:flex')}>
-            <DocsViewer workspaceId={workspaceId} open={open} hasDocs={builtCount > 0} onOpen={onOpen} />
+            {searching ? (
+              <DocsSearchPane workspaceId={workspaceId} />
+            ) : (
+              <DocsViewer workspaceId={workspaceId} open={open} hasDocs={builtCount > 0} onOpen={onOpen} />
+            )}
           </div>
           {chatCollapsed ? (
             // RIGHT, collapsed: a slim strip — the whole strip is the expand control, not just the chevron.
