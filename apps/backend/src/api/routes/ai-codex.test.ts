@@ -85,6 +85,8 @@ describe('/api/me — the AI provider on the wire', () => {
       plan: 'plus',
       available: true,
       message: null,
+      // Not over Codex's usage limit (ai/usage-lockout.ts).
+      usageLockedUntil: null,
     });
     // Codex's OWN per-kind answer while Claude is active: every kind is ported (`plan` last), so every
     // run kind is 'ok' once signed in.
