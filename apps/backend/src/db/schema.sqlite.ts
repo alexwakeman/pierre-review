@@ -3975,6 +3975,48 @@ export const referenceDocWikiPages = sqliteTable(
   }),
 );
 
+// ---- FULL-TEXT SEARCH (migration 0152; docs/REFERENCE-DOCS.md § Retrieval) ----
+// reference_doc_chunks — a built document's section text in passages of ≤ 220 words, each prefixed with
+// "Document › trail › section" and the section's summary (reference-docs/chunks.ts). DERIVED from the
+// files on disk: rewritten whole by every build, rebuilt at boot when missing. ⚠ Its FTS5 index
+// `reference_doc_chunks_fts` and the three triggers that keep it in step exist ONLY in the .sql
+// migration (Drizzle cannot declare them); query it through reference-docs/retrieve.ts.
+export const referenceDocChunks = sqliteTable(
+  'reference_doc_chunks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    docId: integer('doc_id').notNull(),
+    // The document's `built_at` these passages were cut from (a rebuild replaces them).
+    builtAt: integer('built_at', { mode: 'timestamp' }).notNull(),
+    // Library-relative: `<slug>/sections/NN-name.md` — the citation unit.
+    sectionPath: text('section_path').notNull(),
+    // The nearest heading's anchor at or above the passage; NULL = the section's top.
+    anchor: text('anchor'),
+    // Reading order within the document.
+    ordinal: integer('ordinal').notNull(),
+    // The passage as indexed (prefix + text).
+    text: text('text').notNull(),
+  },
+  (t) => ({
+    scopeIdx: index('reference_doc_chunks_scope').on(t.accountId, t.workspaceId, t.docId),
+    docIdx: index('reference_doc_chunks_doc').on(t.docId, t.accountId),
+    docAccountFk: foreignKey({
+      name: 'reference_doc_chunks_doc_account_fk',
+      columns: [t.docId, t.accountId],
+      foreignColumns: [referenceDocs.id, referenceDocs.accountId],
+    }).onDelete('cascade'),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_doc_chunks_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // workspace_wiki_credentials — a wiki credential per (workspace, provider): Confluence's site, the
 // Atlassian account email and the API token, SEALED like a tracker token (tracker/secret.ts) and
 // never returned. A Confluence page on the workspace's JIRA host is read with the Jira credential

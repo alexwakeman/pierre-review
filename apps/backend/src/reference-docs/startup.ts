@@ -1,4 +1,5 @@
 import type { AgentContext } from '../review/agent-context.js';
+import { backfillDocChunks } from './chunks.js';
 import { sweepDocsOnStartup } from './library.js';
 import { reconcileInterruptedBuilds } from './store.js';
 
@@ -6,7 +7,8 @@ import { reconcileInterruptedBuilds } from './store.js';
 // marked failed (its last built version stays readable; Rebuild starts again), then this database's
 // folders are moved out of the old shared docs root (once), then the disk janitor removes every
 // staging folder and anything no row accounts for — in the folders THIS database owns only
-// (owner.ts).
+// (owner.ts). Last, built documents with no full-text passages (built before migration 0152, or a
+// failed indexing) are indexed from their files, one at a time, in the background.
 export async function reconcileReferenceDocsOnStartup(ctx: Pick<AgentContext, 'log'>): Promise<void> {
   const failed = await reconcileInterruptedBuilds();
   if (failed.length > 0) ctx.log.info(`reconciled ${failed.length} interrupted reference doc build(s) -> failed`);
@@ -25,4 +27,9 @@ export async function reconcileReferenceDocsOnStartup(ctx: Pick<AgentContext, 'l
       `reference docs: left ${r.leftUnowned.length} unmarked workspace folder(s) untouched (${r.leftUnowned.join(', ')})`,
     );
   }
+  void backfillDocChunks((docId, err) => ctx.log.warn({ err }, `reference doc ${docId}: indexing failed`))
+    .then((n) => {
+      if (n > 0) ctx.log.info(`indexed ${n} reference doc(s) for full-text search`);
+    })
+    .catch((err) => ctx.log.warn({ err }, 'reference docs: indexing backfill failed'));
 }

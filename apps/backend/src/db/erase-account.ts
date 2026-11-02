@@ -228,6 +228,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // Wiki sources (migration 0140): the page rows (before their documents — composite FK) and the
     // sealed wiki credential. Both cascade too, and are explicit anyway.
     await tx.delete(schema.referenceDocWikiPages).where(eq(schema.referenceDocWikiPages.accountId, accountId)).execute();
+    // Full-text passages (migration 0152): derived from the files, before their documents (composite FK).
+    // The FTS5 index follows by trigger. They cascade too, and are explicit anyway.
+    await tx.delete(schema.referenceDocChunks).where(eq(schema.referenceDocChunks.accountId, accountId)).execute();
     await tx.delete(schema.workspaceWikiCredentials).where(eq(schema.workspaceWikiCredentials.accountId, accountId)).execute();
     // Figure descriptions (migration 0143): the account's image-description cache.
     await tx.delete(schema.referenceDocFigureDescriptions).where(eq(schema.referenceDocFigureDescriptions.accountId, accountId)).execute();
@@ -421,6 +424,8 @@ export function accountScopedTables(): {
     },
     // Wiki sources (migration 0140), erased explicitly above; `workspaceWikiCredentials` holds a credential.
     { name: 'referenceDocWikiPages', col: schema.referenceDocWikiPages.accountId, table: schema.referenceDocWikiPages },
+    // Full-text passages (migration 0152), erased explicitly above. Derived, so not exported.
+    { name: 'referenceDocChunks', col: schema.referenceDocChunks.accountId, table: schema.referenceDocChunks },
     // Figure descriptions (migration 0143), erased explicitly above.
     {
       name: 'referenceDocFigureDescriptions',

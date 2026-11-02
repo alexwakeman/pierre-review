@@ -17,8 +17,9 @@ table-of-contents tree whose nodes carry summaries, and retrieves by letting an 
 agent reads with its ordinary file tools. This library is both: the tree IS the files, and the walk is
 the agent's own Read/Glob/Grep, guided by one prompt block (`docsNavigationPrompt`).
 
-Planned (not built): hybrid retrieval (FTS5 + local embeddings) to pick what the model reads first,
-measured on the 2018 Intel MacBook Pro: [DOCS-RAG.md](DOCS-RAG.md).
+**Full-text search picks what a model reads first** (§ Retrieval, 2026-11-01): SQLite FTS5 over the
+sections' TEXT, for the story-docs candidates and the chat's opening passages. The walk and every
+grounding check are unchanged. Local embeddings are measured and deferred: [DOCS-RAG.md](DOCS-RAG.md).
 
 ## The three levels
 
@@ -540,6 +541,34 @@ retry), so its retry is the build's LAST finish attempt (`finishAttempts` starts
 binary file. The "Summarising sections (n of m)" count moves only when the answer arrives. Codex writes
 its own ledger row (`usageRecord`, provider `codex`), so the manager records none for it.
 
+## Retrieval (`chunks.ts`, `retrieve.ts`; migration `0152`)
+
+Full-text search decides WHAT a model reads first; it is never evidence (every reference and quote is
+still checked against the section's text). Measured in [DOCS-RAG.md](DOCS-RAG.md): on paraphrased
+questions it finds the right section in the top 8 about 0.8 of the time where titles and summaries alone
+found 0.6; ~3 ms a query.
+
+- **Passages** (`chunks.ts`): after every build, `indexDocChunks` cuts the INSTALLED files into
+  `reference_doc_chunks` rows: within ONE section, paragraphs packed to ≤ 220 words, a paragraph over 300
+  words cut into 220-word pieces, HTML reduced to its text and link targets dropped. Each passage is
+  prefixed `Document › trail › section` + the section's stored summary, and carries the nearest heading's
+  anchor. The document's passages are replaced WHOLE in one transaction; a failure is logged and never fails
+  the build. **Derived**: not exported; rebuilt at boot (`backfillDocChunks`, `startup.ts`) for every built
+  document whose passages are missing or from an older `built_at`.
+- **The index** is `reference_doc_chunks_fts` (FTS5, external content, `porter unicode61`). ⚠ It and its
+  three triggers exist ONLY in `0152_reference_doc_chunks.sql`; the triggers keep it in step through every
+  delete, including the FK cascades from a document, workspace or account.
+- **The query** (`retrieve.ts` `retrieveSections`): ⚠ the text is UNTRUSTED, so FTS5 syntax never reaches
+  `MATCH` — it is cut into plain word terms (≥ 3 characters, stopwords out, ≤ 120), each quoted, OR-joined
+  (`ftsMatchQuery`). `bm25()` ranks passages (only a document's CURRENT build counts, account + workspace
+  predicates on every row); a section ranks by its best passage, ties by path. `perDocCap` keeps one
+  document from filling a short list when others match (a story's own spec otherwise crowds out the
+  reference — DOCS-RAG.md § Crowding); places it would leave empty are filled in rank order. **null ⇒
+  nothing indexed** (the caller falls back), `[]` ⇒ indexed and nothing matched.
+- **Who uses it**: the story-docs candidates (§ Check a story against the docs, both modes, through
+  `review/story-docs/candidates.ts`) and the chat's opening passages (§ The chat). Reviews still walk the
+  tree.
+
 ## The chat (`chat.ts`)
 
 `POST /api/docs/chat {workspaceId?, conversationId?, question}` → ONE Sonnet 5 answer, synchronous (5
@@ -551,6 +580,14 @@ answers fenced as context, the question fenced as the one instruction). One turn
 (claimed synchronously). **Citations** are the answer's links that parse as library paths
 (`parseLibraryPath`) AND name a file of a built document of THIS workspace — anything else (a made-up
 section, `../`, a web link) is dropped; the SPA opens them through `GET /api/docs/section?path=`.
+
+**Opening passages** (§ Retrieval): before the run, `retrieveSections` over the question AND the previous
+question (a follow-up rarely names its subject; `chatRetrievalQuery`) → the best `CHAT_PASSAGES` (6)
+sections, ≤ `CHAT_PASSAGES_PER_DOC` (3) from one document, their best passages ≤ `CHAT_PASSAGES_CHARS`
+(12k) in all, each in its own `PASSAGE n` fence with its section link, before the question. The prompt says
+they are excerpts: open the section before citing it, look further when they do not answer. The tools and
+every check are unchanged; a search failure or an unindexed library ⇒ no passages, and the prompt is
+byte-identical to before (`docs.test.ts` pins it).
 
 **A citation's quote** (`chat-quotes.ts`, no migration — inside the stored `citations` JSON, optional
 `quote` on `ReferenceDocCitation`). The prompt asks for the exact words in quotation marks beside each
@@ -649,6 +686,8 @@ conversation_id)`; same FK), plus `workspaces.docs_in_review`. Both tables are i
 `accountScopedTables()`, erased (files too), exported (metadata + chat; the text is the user's own
 upload), and checked by `verify:isolation`. `reference_docs.crawl_json` (migration `0124`,
 nullable JSON) is a column on the same row, so it needed no new erasure or isolation entry.
+`reference_doc_chunks` (migration `0152`, § Retrieval) is DERIVED: in `accountScopedTables()`, erased,
+checked by `verify:isolation`, never exported.
 `instance_meta` (migration `0139`, key → value, NOT account-scoped, never erased) holds the
 database's `instance_id`, the `.owner` marker's value. [MIGRATIONS.md](MIGRATIONS.md).
 
@@ -759,11 +798,15 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   `wholeLibraryShortlist` makes EVERY section the shortlist (reason `''`, each checked by `citationOf`; a
   listed section missing from disk ⇒ shortlist instead) — no Haiku call, no `story_docs_shortlist` usage, the
   row's `shortlist_model` NULL. Otherwise:
-  - **The prefilter** (`prefilterSections`, pure, deterministic): BM25 (k1 1.2, b 0.75) of the story's and
-    criteria's terms (lower-cased, ≥ 3 letters, stopwords out, a plural folded) against each section's title
-    (×2), trail, merged headings, one-line summary and document title (the stored `sections`, not
-    CONTENTS.md). Only sections sharing a term score; ties by path. The top `STORY_DOCS_PREFILTER_MAX` (30) are
-    the CANDIDATES.
+  - **The candidates** (`candidates.ts` `storyDocsCandidates`, shared with the `build` mode so the two cannot
+    drift): full-text search over the sections' TEXT (§ Retrieval) with the story title, description,
+    acceptance criteria and criteria as the query → the top `STORY_DOCS_PREFILTER_MAX` (30), in plain rank
+    order (NO per-document cap: a cap lost sections at 30 — DOCS-RAG.md § Crowding), each named by a stored
+    section of a built document. ⚠ The fingerprint's `models` list carries `STORY_DOCS_RETRIEVAL_ID`
+    (`fts-v1`): a change to how candidates are found must change it. A library with NO passages yet falls back
+    to **the prefilter** (`prefilterSections`, pure): BM25 (k1 1.2, b 0.75) of the same terms against each
+    section's title (×2), trail, merged headings, one-line summary and document title; only sections sharing a
+    term score; ties by path.
   - **Haiku 5.5** (one `cheapComplete`, one retry on an unparseable answer — including a non-empty list of
     which no entry survives the check): the fenced story + the fenced candidate lines (`link — doc › section:
     summary`) → ≤ 8 section links. ⚠ When NOTHING scores (no shared term), it falls back to the old prompt:
@@ -827,7 +870,10 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
 link extraction, robots.txt, same site, depth and page caps, redirect / canonical / same-text
 duplicates, non-HTML and failing pages skipped, cancel, the ranking fence + validation + retry with a
 fake model, the bundle) · `convert.test.ts` (sniffing, HTML conversion) ·
-`build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `reference-docs-db.test.ts`
+`build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `retrieve.test.ts` (the chunker,
+MATCH never carries syntax, best-passage ranking, the cap, the chat's query and budget) · `retrieve-db.test.ts`
+(FTS5 over real migrations: stemming, tenancy, stale builds, the backfill, the triggers through document /
+workspace / account deletes under FTS5's content-aware integrity check) · `reference-docs-db.test.ts`
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
 remove, erasure deletes files) · `chat-quotes.test.ts` (a chat citation's quote: candidates, the check,
 header and too-short quotes dropped, first verified wins, the stored re-read, the two folds agree) · `review-refs.test.ts` (the reference check — a quote not in its section,

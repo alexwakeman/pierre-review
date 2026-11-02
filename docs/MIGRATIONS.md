@@ -1355,6 +1355,20 @@ applies the same rule on every walk. No new table, so `accountScopedTables()` is
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are bots. Journal `idx` 151, `when` sqlite
 `1792224054016`.
 
+### `0152_reference_doc_chunks` — full-text search over the reference library
+A new table `reference_doc_chunks` (passages of a built document: `account_id`, `workspace_id`, `doc_id`,
+`built_at`, `section_path`, `anchor`, `ordinal`, `text`; named composite FKs onto `reference_docs (id,
+account_id)` and `workspaces (id, account_id)`, cascade; indexes `(account_id, workspace_id, doc_id)` and
+`(doc_id, account_id)`), the FTS5 virtual table `reference_doc_chunks_fts` (external content,
+`content_rowid='id'`, `porter unicode61`) and three triggers (`_fts_ai` / `_ad` / `_au`) that keep it in
+step. ⚠ The virtual table and the triggers exist ONLY in the `.sql` (Drizzle cannot declare them): the
+schema declares the table alone. ⚠ The FK cascades fire the delete trigger, so a deleted document,
+workspace or account leaves no index row (`retrieve-db.test.ts` runs FTS5's content-aware integrity
+check after each). No SQL backfill: the rows are derived from the files, so the boot backfill
+(`reference-docs/chunks.ts` `backfillDocChunks`) indexes every built document. `accountScopedTables()`,
+erasure and `verify:isolation` take the table; the export leaves it out (derived).
+[REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Retrieval. Journal `idx` 152, `when` sqlite `1792224055016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

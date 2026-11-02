@@ -883,6 +883,12 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   (`reference-docs/figure-cache.ts`). In `accountScopedTables()`, erased, exported, checked by
   `verify:isolation`. Also new: `reference_docs.figures_json` (`ReferenceDocFigures`, the latest build's
   figures line) (docs/REFERENCE-DOCS.md § Figures).
+- **`reference_doc_chunks`** (migration `0152`) — a built document's section text as passages of ≤ 220 words
+  (prefix + text, section path, nearest anchor, ordinal, the `built_at` they were cut from), DERIVED from the
+  files and rewritten whole by every build (`reference-docs/chunks.ts`). Named composite FKs onto
+  `reference_docs (id, account_id)` and `workspaces (id, account_id)`, cascade. ⚠ Its FTS5 index
+  `reference_doc_chunks_fts` and three triggers are in the `.sql` only. `accountScopedTables()`, erasure,
+  `verify:isolation`; not exported (derived). Read only through `reference-docs/retrieve.ts`.
 - **`workspace_wiki_credentials`** (migration `0140`) — a SEALED wiki token per (account, workspace,
   provider), plus site + email; never returned (`hasToken`). Composite workspace FK, cascade. Read only
   through `reference-docs/wiki/credentials.ts` `resolveWikiCredential` (own token on the same host, else the

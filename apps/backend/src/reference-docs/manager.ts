@@ -32,6 +32,7 @@ import { fetchImageBytes, imageSources } from './figure-fetch.js';
 import { figuresDirOf, figuresOf, folderFigureSink, pruneFigures, readFigure, resolveFigures, FIGURE_MAX_FETCHES_PER_BUILD, type FigureSink } from './figures.js';
 import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from './crawl.js';
 import { makeLinkRanker } from './crawl-rank.js';
+import { indexDocChunks } from './chunks.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
 import { claimWorkspaceDir, loadDocsOwner } from './owner.js';
 import { sourcesDir, stagingRoot, workspaceDocsDir } from './paths.js';
@@ -585,6 +586,9 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     if ((await getDocRow(accountId, docId)) == null) return;
     installDocFolder(accountId, row.workspaceId, row.slug, outDir);
     await saveDocBuilt(accountId, docId, { title, summary: finish.summary, topics: finish.topics, sections: entries }, telemetry);
+    // The full-text passages (chunks.ts), cut from the files just installed. A failure leaves the document
+    // readable and searchable as before (the boot backfill retries it); it never fails the build.
+    await indexDocChunks(accountId, docId).catch((err) => ctx.log.warn({ err }, `reference doc ${docId}: indexing failed`));
     if (crawled) await patchDoc(accountId, docId, { crawl: crawled.stored });
     if (mode === 'sections') {
       await patchDoc(accountId, docId, { figures: figureInfo });

@@ -298,7 +298,8 @@ own answer `submit_build_docs` (`review/story-docs/schema.ts`, strict form in `a
   this plan." with no items.
 - **Inputs** (`docs.ts buildDocsInputsOf`): the frozen seed (story, comments), the gap fold (else the seed's
   criteria as `AC<n>`), the CURRENT plan revision and the candidates' names — all nonce-fenced, all in the
-  nonce scan. The prefilter's query adds the plan's steps.
+  nonce scan. The candidates' search query (`storyDocsCandidates`, the same as Check against the docs) adds
+  the plan's steps.
 - **Storage**: the SESSION's row only (`docs_status` running → ready | failed | refused, `docs_json`,
   `docs_error`, `docs_cost_usd` summed across runs) — never `story_docs_alignments`. A new run CLEARS
   `docs_decisions_json` (its ids name different points). Ledger: `story_docs_shortlist` + `story_build_docs`.

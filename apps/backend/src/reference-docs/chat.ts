@@ -7,7 +7,8 @@ import { pickReviewNonce } from '../review/claude-review/prompts.js';
 import { docsContextFor } from './context.js';
 import { readLibraryFile } from './library.js';
 import { parseLibraryPath } from './paths.js';
-import { buildChatPrompt, chatSystemPrompt, type ChatPriorTurn } from './prompts.js';
+import { buildChatPrompt, chatSystemPrompt, type ChatPassage, type ChatPriorTurn } from './prompts.js';
+import { retrieveSections } from './retrieve.js';
 import { extractCitations } from './chat-quotes.js';
 import { conversationRows, insertChatTurn, listDocRows, toChatMessage, type DocRow } from './store.js';
 
@@ -23,12 +24,19 @@ import { conversationRows, insertChatTurn, listDocRows, toChatMessage, type DocR
 //     then a read) — the SPA opens them through GET /api/docs/section. A section citation carries the
 //     quote beside its link when it passes the review quote check (chat-quotes.ts), so the viewer
 //     highlights it.
+//   • PASSAGES FIRST: before the run, full-text search (retrieve.ts) over the question AND the previous
+//     question (a follow-up rarely names its subject) puts the best CHAT_PASSAGES sections' best passages
+//     in the prompt, at most CHAT_PASSAGES_PER_DOC from one document, ≤ CHAT_PASSAGES_CHARS in all. The
+//     tools stay: a passage is where to start, never a citation by itself. A search failure ⇒ none.
 
 export const CHAT_MAX_PRIOR_TURNS = 8;
 export const CHAT_TRANSCRIPT_MAX_CHARS = 40_000;
 const STORED_ANSWER_CHARS = 20_000;
 const CHAT_TIMEOUT_MS = 5 * 60_000;
 export const CONVERSATION_ID = /^[a-f0-9]{16,32}$/;
+export const CHAT_PASSAGES = 6;
+export const CHAT_PASSAGES_PER_DOC = 3;
+export const CHAT_PASSAGES_CHARS = 12_000;
 
 export { extractCitations };
 
@@ -59,6 +67,24 @@ export function priorTurns(rows: ReadonlyArray<{ role: string; content: string }
   return kept;
 }
 
+/** The search text for a turn: the question, and the previous question when there is one. */
+export function chatRetrievalQuery(prior: readonly ChatPriorTurn[], question: string): string {
+  const lastQuestion = [...prior].reverse().find((t) => t.role === 'user');
+  return lastQuestion != null ? `${question}\n${lastQuestion.text}` : question;
+}
+
+/** Retrieved sections → prompt passages, best first, within the character budget. Pure. */
+export function chatPassagesOf(found: ReadonlyArray<{ path: string; anchor: string | null; passage: string }>, budget = CHAT_PASSAGES_CHARS): ChatPassage[] {
+  const out: ChatPassage[] = [];
+  let used = 0;
+  for (const f of found) {
+    if (used + f.passage.length > budget) continue;
+    used += f.passage.length;
+    out.push({ link: f.anchor != null ? `${f.path}#${f.anchor}` : f.path, text: f.passage });
+  }
+  return out;
+}
+
 export interface AskArgs {
   accountId: number;
   workspaceId: number;
@@ -83,7 +109,18 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
     if (!library.hasDocs) throw new DocsChatError(409, 'EmptyLibrary', 'There are no documents to ask about yet.');
     const conversationId = a.conversationId ?? randomBytes(12).toString('hex');
     const prior = a.conversationId != null ? priorTurns(await conversationRows(a.accountId, a.workspaceId, conversationId)) : [];
-    const nonce = pickReviewNonce([a.question, ...prior.map((t) => t.text)]);
+    const found = await retrieveSections({
+      accountId: a.accountId,
+      workspaceId: a.workspaceId,
+      query: chatRetrievalQuery(prior, a.question),
+      k: CHAT_PASSAGES,
+      perDocCap: CHAT_PASSAGES_PER_DOC,
+    }).catch((err: unknown) => {
+      ctx.log.warn({ err }, 'docs chat: passage search failed');
+      return null;
+    });
+    const passages = chatPassagesOf(found ?? []);
+    const nonce = pickReviewNonce([a.question, ...prior.map((t) => t.text), ...passages.map((p) => `${p.link}\n\n${p.text}`)]);
 
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
@@ -95,7 +132,7 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
       res = await runDocsChatAgent({
         cwd: library.dir,
         systemPrompt: chatSystemPrompt(),
-        prompt: buildChatPrompt(prior, a.question, nonce),
+        prompt: buildChatPrompt(prior, a.question, nonce, passages),
         applyAuthEnv: chatMayApplyAuthEnv(),
         abortController: controller,
         // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).

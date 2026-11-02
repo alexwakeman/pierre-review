@@ -42,7 +42,8 @@ import { activeProviderId } from '../../ai/provider-setting.js';
 import type { AgentProviderId } from '../../ai/provider.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools, providerName } from '../../ai/prompt-tools.js';
-import { prefilterSections, runShortlist, wholeLibraryShortlist, type ShortlistDoc } from './shortlist.js';
+import { STORY_DOCS_RETRIEVAL_ID, storyDocsCandidates } from './candidates.js';
+import { runShortlist, wholeLibraryShortlist, type ShortlistDoc } from './shortlist.js';
 import { validateAlignment } from './validate.js';
 
 // THE STORY DOCS CHECK QUEUE — a separate agentic process (docs/REFERENCE-DOCS.md § Check a story
@@ -137,7 +138,7 @@ export function currentStoryDocsFingerprint(
     storyHash: inputs.storyHash,
     criteriaHash: inputs.criteriaHash,
     libraryHash,
-    models: [STORY_DOCS_SHORTLIST_MODEL, readModelOn(providerId)],
+    models: [STORY_DOCS_SHORTLIST_MODEL, readModelOn(providerId), STORY_DOCS_RETRIEVAL_ID],
     provider: providerId,
   });
 }
@@ -267,7 +268,7 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
     sl = { entries: whole, costUsd: 0, inputTokens: 0, outputTokens: 0 };
   } else {
     const docs = shortlistDocsOf(lib);
-    const candidates = prefilterSections({ story: inputs.story, criteria: inputs.criteria }, docs);
+    const candidates = await storyDocsCandidates({ accountId, workspaceId }, { story: inputs.story, criteria: inputs.criteria }, docs);
     sl = await runShortlist({
       input: { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, index, docs, candidates },
       lib,

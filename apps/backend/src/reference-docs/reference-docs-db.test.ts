@@ -7,7 +7,8 @@
 //      workspace's documents.
 //   3. Tenancy: another account's document id is a 404 everywhere; its workspace is refused by the
 //      composite FK; its settings route is a 404.
-//   4. The chat: the answer's citations are only links to real files of the library.
+//   4. The chat: the answer's citations are only links to real files of the library; the build's
+//      full-text passages reach the prompt.
 //   5. Remove: deletes the files and rewrites INDEX.md. Erasure deletes the account's files.
 //   6. Ownership (owner.ts): a workspace folder carries this database's id; two databases sharing
 //      one root never delete each other's folders; an unmarked folder is left alone; the one-time
@@ -34,15 +35,19 @@ vi.mock('./agent.js', async () => {
       const f = judge.judgeFinish(state, { summary: 'How refunds work.', topics: ['refunds', 'invoices'] }, []);
       return { state, finish: 'accepted' in f ? f.accepted : null, aborted: false, costUsd: 0.01, inputTokens: 10, outputTokens: 5, numTurns: 2 };
     },
-    runDocsChatAgent: async () => ({
-      ok: true,
-      text: 'Refunds take 14 days [Partial refunds](refund-handbook/sections/01-refund-handbook.md#partial-refunds). See also [made up](refund-handbook/sections/99-nope.md) and [outside](../../etc/passwd) and [web](https://example.com).',
-      aborted: false,
-      costUsd: 0.002,
-      inputTokens: 5,
-      outputTokens: 5,
-      numTurns: 1,
-    }),
+    runDocsChatAgent: async (args: { prompt: string }) => {
+      // The prompts it was given, for the chat test (vi.mock is hoisted: no module-level variable).
+      ((globalThis as any).__docsChatPrompts ??= []).push(args.prompt);
+      return {
+        ok: true,
+        text: 'Refunds take 14 days [Partial refunds](refund-handbook/sections/01-refund-handbook.md#partial-refunds). See also [made up](refund-handbook/sections/99-nope.md) and [outside](../../etc/passwd) and [web](https://example.com).',
+        aborted: false,
+        costUsd: 0.002,
+        inputTokens: 5,
+        outputTokens: 5,
+        numTurns: 1,
+      };
+    },
   };
 });
 
@@ -272,6 +277,11 @@ describe('the chat', () => {
   it('stores the turn and keeps only citations that are real files of the library', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/docs/chat', headers: as(1), payload: { question: 'How long do refunds take?' } });
     expect(res.statusCode).toBe(200);
+    // The build indexed the document; the question's best passages went into the prompt, fenced, with
+    // their section links (full-text search, retrieve.ts).
+    const prompt = ((globalThis as any).__docsChatPrompts as string[]).at(-1)!;
+    expect(prompt).toMatch(/---BEGIN PASSAGE 1 [^\n]+---\nrefund-handbook\/sections\/\d{2}-[a-z-]+\.md(#[a-z-]+)?\n\nRefund handbook › /);
+    expect(prompt.indexOf('PASSAGE 1')).toBeLessThan(prompt.indexOf('QUESTION'));
     const body = res.json();
     expect(body.conversationId).toMatch(/^[a-f0-9]{24}$/);
     expect(body.answer.citations).toEqual([

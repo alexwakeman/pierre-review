@@ -18,9 +18,10 @@ import type { StoryText } from './inputs.js';
 // STEP 1 OF A STORY DOCS CHECK — THE SHORTLIST. Only when the library is too big to send whole (the
 // manager skips this step when every section fits STORY_DOCS_INLINE_CHARS).
 //
-//   PREFILTER (`prefilterSections`, pure, no model): a BM25 score of the story's and criteria's terms
-//   against each section's title, trail, headings, one-line summary and document title. The top
-//   STORY_DOCS_PREFILTER_MAX scoring sections are the CANDIDATES.
+//   CANDIDATES (candidates.ts `storyDocsCandidates`): full-text search (FTS5) over the sections' TEXT,
+//   the top STORY_DOCS_PREFILTER_MAX sections. A library not indexed yet falls back to the PREFILTER
+//   (`prefilterSections`, pure, no model): BM25 of the story's and criteria's terms against each
+//   section's title, trail, headings, one-line summary and document title.
 //   HAIKU 5.5 (one tool-less completion): the fenced story + the candidates (link, titles, summary) →
 //   at most STORY_DOCS_SHORTLIST_MAX section links. When NOTHING scores (no shared term at all), it is
 //   shown INDEX.md + every CONTENTS.md (≤ SHORTLIST_CONTENTS_BUDGET) as before — never a guess from a

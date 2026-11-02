@@ -39,7 +39,7 @@ import {
 } from '../../review/story-docs/build-prompts.js';
 import { validateBuildDocs } from '../../review/story-docs/build-validate.js';
 import { inlineSections, storyDocsRoots, storyDocsTurnCap } from '../../review/story-docs/prompts.js';
-import { prefilterSections, runShortlist, wholeLibraryShortlist } from '../../review/story-docs/shortlist.js';
+import { runShortlist, wholeLibraryShortlist } from '../../review/story-docs/shortlist.js';
 import type { CompleteFn } from '../../review/story-labels/manager.js';
 import { storyBuildLimits } from './limits.js';
 import { getStoryBuildRow, listStoryBuildRepoRows, updateStoryBuild, type StoryBuildRepoRow, type StoryBuildRow } from './persist.js';
@@ -49,7 +49,7 @@ import type { DocsBlocksFn, RunBuildDocsFn, StoryBuildDocsBlocks } from './seams
 //
 //   runBuildDocs   the story-docs pipeline's `build` mode over ONE session: the frozen story (seed), the
 //                  gap fold and the CURRENT plan revision → the shortlist (the whole library when it fits,
-//                  else the BM25 prefilter → Haiku) → ONE low-effort read over the inlined sections,
+//                  else full-text search → Haiku) → ONE low-effort read over the inlined sections,
 //                  answering `submit_build_docs` (grounded / superseded / suggestion) → every reference
 //                  checked against the shortlisted documents (an unreferenced item DROPPED) → stored on the
 //                  SESSION's row (`docs_json`; never `story_docs_alignments`, so the per-story check's
@@ -195,11 +195,12 @@ export const runBuildDocs: RunBuildDocsFn = async (ctx, { accountId, buildId, fo
   const budgetLeft = storyBuildBudgetLeftUsd(row, await listStoryBuildRepoRows(ctx, accountId, buildId));
   if (budgetLeft < STORY_BUILD_MIN_BUDGET_LEFT_USD) return finish({ docsStatus: 'failed', docsError: BUILD_DOCS_TEXT.budget });
 
-  const [{ loadLibrarySnapshot }, { readIndex }, { libraryDir }, { shortlistDocsOf }] = await Promise.all([
+  const [{ loadLibrarySnapshot }, { readIndex }, { libraryDir }, { shortlistDocsOf }, { storyDocsCandidates }] = await Promise.all([
     import('../../reference-docs/context.js'),
     import('../../reference-docs/library.js'),
     import('../../reference-docs/paths.js'),
     import('../../review/story-docs/manager.js'),
+    import('../../review/story-docs/candidates.js'),
   ]);
   const [index, lib] = await Promise.all([readIndex(accountId, row.workspaceId), loadLibrarySnapshot(accountId, row.workspaceId)]);
 
@@ -222,7 +223,7 @@ export const runBuildDocs: RunBuildDocsFn = async (ctx, { accountId, buildId, fo
         criteria: queryCriteria,
         index,
         docs,
-        candidates: prefilterSections({ story: storyText, criteria: queryCriteria }, docs),
+        candidates: await storyDocsCandidates({ accountId, workspaceId: row.workspaceId }, { story: storyText, criteria: queryCriteria }, docs),
       },
       lib,
       ...(seams.complete ? { complete: seams.complete } : {}),

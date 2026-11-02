@@ -4435,6 +4435,30 @@ check(
   await fc.saveFigureDescription(1, sharedHash, "A's own words", { provider: 'claude', model: 'claude-haiku-5-5', costUsd: 0.001 });
   check("A's description of the same image never overwrites B's", (await fc.cachedFigureDescriptions(2, [sharedHash])).get(sharedHash) === "B's diagram");
 
+  // FULL-TEXT PASSAGES (migration 0152): both accounts' documents get a section under the SAME path with
+  // the SAME word, so a dropped account or workspace predicate in the FTS5 query has something to leak.
+  const { writeFileSync: writeIso, mkdirSync: mkdirIso } = await import('node:fs');
+  const ch = await import('../src/reference-docs/chunks.js');
+  const rt = await import('../src/reference-docs/retrieve.js');
+  const secPath = 'handbook/sections/01-refunds.md';
+  for (const [acct, ws] of [
+    [1, defaultA],
+    [2, defaultB],
+  ] as const) {
+    const file = joinPath(paths.libraryDir(acct, ws), secPath);
+    mkdirIso(joinPath(file, '..'), { recursive: true });
+    writeIso(file, `Refunds for account ${acct} take fourteen days.`);
+    await ds.saveDocBuilt(acct, ids[acct]!, { title: `Handbook ${acct}`, summary: `s${acct}`, topics: [], sections: [{ path: secPath, title: 'Refunds', summary: '', depth: 1, trail: [], headings: [], words: 6 }] }, {});
+    await ch.indexDocChunks(acct, ids[acct]!);
+  }
+  const hitsA = await rt.retrieveSections({ accountId: 1, workspaceId: defaultA, query: 'refunds', k: 10 });
+  check("retrieveSections(A, A's workspace) returns A's passage only", hitsA?.length === 1 && hitsA[0]!.passage.includes('account 1'));
+  check("retrieveSections(A, B's workspace) finds nothing", (await rt.retrieveSections({ accountId: 1, workspaceId: defaultB, query: 'refunds', k: 10 })) === null);
+  const hitsB = await rt.retrieveSections({ accountId: 2, workspaceId: defaultB, query: 'refunds', k: 10 });
+  check("retrieveSections(B, B's workspace) returns B's passage (mutation check)", hitsB?.length === 1 && hitsB[0]!.passage.includes('account 2'));
+  check("indexDocChunks(A, B's doc id) writes nothing", (await ch.indexDocChunks(1, bId)) === null);
+  check("B's passage survives A's indexDocChunks naming it", (await rt.retrieveSections({ accountId: 2, workspaceId: defaultB, query: 'refunds', k: 10 }))?.length === 1);
+
   const Fastify = (await import('fastify')).default;
   const rapp = Fastify({ logger: false });
   registerReferenceDocsRoutes(rapp, {
