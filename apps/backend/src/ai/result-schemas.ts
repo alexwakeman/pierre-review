@@ -142,6 +142,16 @@ function nullable(schema: JsonSchema): JsonSchema {
  * descriptions) is kept as it is.
  */
 export function toStrictJsonSchema(schema: JsonSchema): JsonSchema {
+  // ⚠ zod 4.6 writes a nullable primitive as `type: ['number', 'null']`, where 4.4 wrote `anyOf`.
+  // Spell it the old way so the schema Codex gets does not change with the zod version.
+  if (Array.isArray(schema.type) && schema.type.length === 2 && schema.type.includes('null')) {
+    const { description, type, ...rest } = schema;
+    const other = (type as unknown[]).find((t) => t !== 'null');
+    return toStrictJsonSchema({
+      ...(description !== undefined ? { description } : {}),
+      anyOf: [{ ...rest, type: other }, { type: 'null' }],
+    });
+  }
   const out: JsonSchema = { ...schema };
   if (isObj(schema.properties)) {
     const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);

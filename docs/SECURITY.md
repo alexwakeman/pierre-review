@@ -461,8 +461,13 @@ code this app actually runs, so they are worth knowing:
   halts it.
 - **Knowingly left below the gate in the DEV tree only**, neither shipped nor reachable: `uuid`
   (moderate — via `vis-data`, and the bug needs v3/v5/v6 with a `buf` argument; vis-data calls v4
-  with none) and `body-parser` (low — inside express inside the MCP SDK, an AI dep that ships in
-  no release artifact).
+  with none). `body-parser` was cleared 2026-11-02 (below).
+- **2026-11-02, new advisories** (the scheduled audit went red): `fastify` → ^5.12.8,
+  `@modelcontextprotocol/sdk` → ^1.32.2 (brings express 5.3: fixed `body-parser` and `proxy-addr`),
+  `zod` → ^4.6.7, and overrides `brace-expansion@>=4.0.0 <5.0.11` → ^5.0.11, `shell-quote` → ^1.11.0,
+  `adm-zip@<0.6.1` → ^0.6.1 (onnxruntime-node's CUDA-download script; it only opens a zip and reads
+  entries, unchanged in 0.6). The MCP SDK and zod are AI runtime pins, so the first-use AI download
+  moves with them. Dev-only advisories (vitest 2 and its vite/tinypool) stay outside the `--prod` gate.
 - Fastify 5.10 deprecated the top-level `disableRequestLogging` (FSTDEP023); it moved to
   `logController: new LogController({...})`. Same class of fix as `routerOptions.maxParamLength`
   — a boot-time deprecation warning is noise in the terminal of every packaged-CLI user.
