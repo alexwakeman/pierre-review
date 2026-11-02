@@ -56,7 +56,7 @@ const SKIPPED_DIRS = new Set([
 ]);
 /** Boilerplate a library does not need (licences, changelogs, ownership files). */
 const SKIPPED_BASENAMES = /^(?:license|licence|copying|notice|patents|authors|contributors|codeowners|changelog|changes|history|news)(?:\.[a-z0-9]+)?$/i;
-const README_NAMES = ['readme', 'index', '_index'];
+export const README_NAMES = ['readme', 'index', '_index'];
 
 /**
  * Is this repository path a TEXT DOCUMENT the library reads? A fifth question, beside the four path
@@ -111,7 +111,7 @@ export interface RepoTree {
 }
 
 /** One folder's place in the document tree: its README (if any) and what is below it. */
-interface Folder {
+export interface Folder {
   path: string;
   readme: RepoTreeEntry | null;
   docs: RepoTreeEntry[];

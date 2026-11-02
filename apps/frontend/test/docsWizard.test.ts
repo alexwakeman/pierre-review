@@ -1,7 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { DOCS_SOURCE_LABEL, DOCS_WIZARD_STEPS, githubReviewSentence, nextStep, previousStep, wikiOverCapSentence, wikiReviewSentence } from '../src/lib/docsWizard.js';
+import { isRepoDocsUnreadableShown, repoDocsUnreadableLine, type RepoDocsOffer } from '@pierre-review/shared';
+import {
+  DOCS_SOURCE_LABEL,
+  DOCS_WIZARD_STEPS,
+  githubReviewSentence,
+  nextStep,
+  pickedRepoFolders,
+  previousStep,
+  repoFoldersNote,
+  repoFoldersReviewSentence,
+  shownUnreadableRepos,
+  unreadableRepoText,
+  wikiOverCapSentence,
+  wikiReviewSentence,
+} from '../src/lib/docsWizard.js';
 import { docTreeNodes, docTreeTrail, slugOfLibraryPath } from '../src/lib/referenceDocs.js';
 import { useDocsView } from '../src/store/docsView.js';
 
@@ -101,5 +115,93 @@ describe('the document list is an accordion', () => {
     expect(useDocsView.getState().open[7]?.reveal).toBe(true);
     s.openPath(7, 'h/sections/01-x.md');
     expect(useDocsView.getState().open[7]?.reveal).toBeUndefined();
+  });
+});
+
+// "From your repositories" (docs/REFERENCE-DOCS.md § Docs offered from your repositories): the docs
+// offer's SAME check and the offer's own Add, gated like every AI surface.
+describe('the wizard: From your repositories', () => {
+  const src = (rel: string): string => readFileSync(fileURLToPath(new URL(`../src/${rel}`, import.meta.url)), 'utf8');
+  const wizard = src('components/Activity/DocsAddWizard.tsx');
+  const folder = (id: number, extra: Partial<RepoDocsOffer> = {}): RepoDocsOffer => ({
+    id,
+    repoId: 1,
+    repoFullName: 'acme/api',
+    path: `docs${id}`,
+    docs: 4,
+    words: 2400,
+    tooLarge: false,
+    ...extra,
+  });
+
+  it('walks the type, the folders, then the review', () => {
+    expect(DOCS_SOURCE_LABEL.repos).toBe('From your repositories');
+    expect(DOCS_WIZARD_STEPS.repos).toEqual(['type', 'folders', 'review']);
+    expect(nextStep('repos', 'type')).toBe('folders');
+    expect(previousStep('repos', 'review')).toBe('folders');
+  });
+
+  it('adds only ticked folders that fit, and says how many', () => {
+    const list = [folder(1), folder(2, { tooLarge: true }), folder(3)];
+    expect(pickedRepoFolders(list, new Set([2, 3])).map((f) => f.id)).toEqual([3]);
+    expect(pickedRepoFolders(list, new Set())).toEqual([]);
+    expect(repoFoldersReviewSentence(1)).toBe('This will add 1 folder from your repositories as one document.');
+    expect(repoFoldersReviewSentence(3)).toBe('This will add 3 folders from your repositories, one document each.');
+    expect(repoFoldersNote(2, 0)).toBeNull();
+    expect(repoFoldersNote(0, 0)).toBe('No docs folders found in this workspace’s repositories.');
+    expect(repoFoldersNote(1, 3)).toBe('3 repositories not checked yet. Try again shortly.');
+  });
+
+  it('runs the offer’s check and the offer’s Add, behind the AI gates, with the cost through useRunCostText', () => {
+    expect(wizard).toContain('useCheckDocsFolders(workspaceId)');
+    expect(wizard).toContain("useAddDocsOffers(workspaceId, 'wizard')");
+    expect(wizard).toContain("t !== 'repos' || ai.enabled");
+    expect(wizard).toContain('useRunCostText()');
+    // The Add (the review's run button) is inside the ONE gate.
+    const gate = wizard.slice(wizard.indexOf('<AiRunGate kind="docs_build" meter={false}>\n                  <Button variant="primary" data-ai-run onClick={goNext}'));
+    expect(gate).toContain("{type === 'repos' ? 'Add' : 'Start'}");
+    // A too-large folder points at the GitHub repository source.
+    expect(wizard).toContain('Choose part of it');
+    expect(wizard).toContain("setType('github')");
+    expect(wizard).not.toMatch(/\b(plan|paid|Pro)\b/);
+  });
+});
+
+describe('a repository whose files can’t be read', () => {
+  it('the wizard names the repository and the reason; the repo page says what it means', () => {
+    const at = '2026-11-02T00:00:00.000Z';
+    expect(unreadableRepoText({ repoId: 1, repoFullName: 'acme/legacy', reason: 'no_access', failedAt: at })).toBe(
+      'acme/legacy: Limn can’t read its files (no access).',
+    );
+    expect(unreadableRepoText({ repoId: 2, repoFullName: 'acme/blank', reason: 'empty', failedAt: at })).toBe(
+      'acme/blank: Limn can’t read its files (the repository is empty).',
+    );
+    expect(repoDocsUnreadableLine('not_found')).toBe(
+      'Limn can’t read this repository’s files, so its docs can’t be offered: not found on GitHub.',
+    );
+    expect(repoDocsUnreadableLine('unavailable')).toMatch(/GitHub did not answer\.$/);
+  });
+
+  it('shows only the lasting reasons; a transient failure is never shown', () => {
+    expect(isRepoDocsUnreadableShown('no_access')).toBe(true);
+    expect(isRepoDocsUnreadableShown('empty')).toBe(true);
+    expect(isRepoDocsUnreadableShown('not_found')).toBe(true);
+    expect(isRepoDocsUnreadableShown('unavailable')).toBe(false);
+    expect(isRepoDocsUnreadableShown(null)).toBe(false);
+    expect(isRepoDocsUnreadableShown(undefined)).toBe(false);
+    const at = '2026-11-02T00:00:00.000Z';
+    const shown = shownUnreadableRepos([
+      { repoId: 1, repoFullName: 'acme/legacy', reason: 'no_access', failedAt: at },
+      { repoId: 2, repoFullName: 'acme/flaky', reason: 'unavailable', failedAt: at },
+      { repoId: 3, repoFullName: 'acme/gone', reason: 'not_found', failedAt: at },
+    ]);
+    expect(shown.map((u) => u.repoId)).toEqual([1, 3]);
+  });
+
+  it('the repo status panel decides through the shared predicate', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../src/components/Activity/RepoStatusPanel.tsx', import.meta.url)), 'utf8');
+    expect(panel).toMatch(/isRepoDocsUnreadableShown\(repo\.docsUnreadable\)/);
+    const wizard = readFileSync(fileURLToPath(new URL('../src/components/Activity/DocsAddWizard.tsx', import.meta.url)), 'utf8');
+    expect(wizard).toMatch(/shownUnreadableRepos\(folderCheck\.data\?\.unreadable/);
   });
 });

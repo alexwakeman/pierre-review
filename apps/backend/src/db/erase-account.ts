@@ -234,6 +234,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.workspaceWikiCredentials).where(eq(schema.workspaceWikiCredentials.accountId, accountId)).execute();
     // Figure descriptions (migration 0143): the account's image-description cache.
     await tx.delete(schema.referenceDocFigureDescriptions).where(eq(schema.referenceDocFigureDescriptions.accountId, accountId)).execute();
+    // Docs offers (migration 0155): cascade from workspaces and repos too, and are explicit anyway.
+    await tx.delete(schema.referenceDocRepoOffers).where(eq(schema.referenceDocRepoOffers.accountId, accountId)).execute();
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
     await tx.delete(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, accountId)).execute();
@@ -426,6 +428,8 @@ export function accountScopedTables(): {
     { name: 'referenceDocWikiPages', col: schema.referenceDocWikiPages.accountId, table: schema.referenceDocWikiPages },
     // Full-text passages (migration 0152), erased explicitly above. Derived, so not exported.
     { name: 'referenceDocChunks', col: schema.referenceDocChunks.accountId, table: schema.referenceDocChunks },
+    // Docs offers (migration 0155), erased explicitly above.
+    { name: 'referenceDocRepoOffers', col: schema.referenceDocRepoOffers.accountId, table: schema.referenceDocRepoOffers },
     // Figure descriptions (migration 0143), erased explicitly above.
     {
       name: 'referenceDocFigureDescriptions',

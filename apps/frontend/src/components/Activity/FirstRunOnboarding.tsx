@@ -7,6 +7,7 @@ import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { RepoSearch } from '../RepoSearch.js';
 import { StarIcon } from '../Icons.js';
 import { CheckboxBox } from '../ui/FormControls.js';
+import { firstSyncNote } from '../../lib/firstSyncNote.js';
 
 // How many detected repos are pre-checked. Kept small so the one-click "Add selected" flow
 // doesn't kick off a 30-repo two-phase backfill storm on the user's very first action.
@@ -92,6 +93,7 @@ export function FirstRunOnboarding(): JSX.Element {
   const [pendingSuccessIds, setPendingSuccessIds] = useState<number[]>([]);
 
   const chosen = suggestions.filter((r) => selected.has(r.githubNodeId));
+  const syncNote = firstSyncNote(chosen.length);
 
   function toggle(id: string): void {
     if (running) return;
@@ -124,7 +126,10 @@ export function FirstRunOnboarding(): JSX.Element {
     for (const r of chosen) {
       setProgress({ done, total: chosen.length, current: r.fullName });
       try {
-        const repo = await api.addRepo({ owner: r.owner, name: r.name });
+        // `firstRun` marks every repo of this batch as first-onboarding (My Turn looks back a
+        // week before it was added; Pending shows its summary). The server honours it only while
+        // every repo the account has came from this batch.
+        const repo = await api.addRepo({ owner: r.owner, name: r.name, firstRun: true });
         // The backfill is already running server-side; the sync-modal signal is DEFERRED to
         // flushBatch — signalling now would make SyncStatus invalidate ['repos'] and unmount
         // this component mid-loop (killing the progress display and any failure report).
@@ -259,6 +264,8 @@ export function FirstRunOnboarding(): JSX.Element {
               </span>
             )}
           </div>
+
+          {!running && syncNote && <p className="text-meta text-ui-mute">{syncNote}</p>}
 
           {failures.length > 0 && (
             <div className="rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-warn">

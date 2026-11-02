@@ -23,6 +23,9 @@ import type {
   GithubDocsPreflightResponse,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
+  AttentionCardsResponse,
+  RepoDocsCheckResponse,
+  RepoDocsOffersAddResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
@@ -360,6 +363,66 @@ export function useSetReferenceDocsSettings(workspaceId: number | null) {
       qc.setQueryData<ReferenceDocsResponse>(referenceDocsKey(resp.workspaceId), (prev) =>
         prev ? { ...prev, docsInReview: resp.docsInReview } : prev,
       );
+    },
+  });
+}
+
+// ---- DOCS OFFERED FROM THE REPOSITORIES (docs/REFERENCE-DOCS.md § Docs offered) ----
+// The list rides the library (`GET /api/docs` `offers`) and Pending's board (`docsOffers`); a decision
+// takes the folders off BOTH caches at once, then both are read again.
+
+function dropOffers(qc: QueryClient, workspaceId: number, ids: readonly number[]): void {
+  const gone = new Set(ids);
+  const keep = <T extends { offers: { id: number }[] }>(o: T | null | undefined): T | null => {
+    if (o == null) return null;
+    const offers = o.offers.filter((x) => !gone.has(x.id));
+    return offers.length === 0 ? null : { ...o, offers };
+  };
+  qc.setQueryData<ReferenceDocsResponse>(referenceDocsKey(workspaceId), (prev) => {
+    if (!prev?.offers) return prev;
+    const next = keep(prev.offers);
+    const { offers: _drop, ...rest } = prev;
+    return next ? { ...rest, offers: next } : rest;
+  });
+  qc.setQueriesData<AttentionCardsResponse>({ queryKey: ['attention-cards'] }, (d) =>
+    d?.docsOffers ? { ...d, docsOffers: keep(d.docsOffers) } : d,
+  );
+}
+
+function refetchAfterOffers(qc: QueryClient, workspaceId: number): void {
+  invalidateLibrary(qc, workspaceId);
+  void qc.invalidateQueries({ queryKey: ['attention-cards'] });
+}
+
+/** Add: one build per chosen folder (the reader's yes). Folders that failed stay on offer. `from:
+ *  'wizard'` = the add-documents wizard's "From your repositories". */
+export function useAddDocsOffers(workspaceId: number | null, from?: 'card' | 'wizard') {
+  const qc = useQueryClient();
+  return useMutation<RepoDocsOffersAddResponse, Error, number[]>({
+    mutationFn: (ids) => api.addDocsOffers(workspaceId!, ids, from),
+    onSuccess: (res) => {
+      if (workspaceId == null) return;
+      dropOffers(qc, workspaceId, res.added.map((a) => a.offerId));
+      refetchAfterOffers(qc, workspaceId);
+    },
+  });
+}
+
+/** The wizard's "From your repositories": the offer's check over the workspace's repositories (click-gated). */
+export function useCheckDocsFolders(workspaceId: number | null) {
+  return useMutation<RepoDocsCheckResponse, Error, void>({ mutationFn: () => api.checkDocsFolders(workspaceId!) });
+}
+
+/** "Not now": the card is hidden for DOCS_OFFER_SNOOZE_DAYS (the folders stay in the wizard). */
+export function useDismissDocsOffers(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<unknown, Error, number[]>({
+    mutationFn: (ids) => api.dismissDocsOffers(workspaceId!, ids),
+    onMutate: (ids) => {
+      if (workspaceId != null) dropOffers(qc, workspaceId, ids);
+    },
+    onSettled: () => {
+      if (workspaceId != null) refetchAfterOffers(qc, workspaceId);
     },
   });
 }

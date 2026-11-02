@@ -19,6 +19,11 @@ import type {
   GithubDocsPreflightBody,
   GithubDocsPreflightResponse,
   AddReferenceDocGithubBody,
+  RepoDocsCheckBody,
+  RepoDocsCheckResponse,
+  RepoDocsOffersAddResponse,
+  RepoDocsOffersBody,
+  RepoDocsOffersDismissResponse,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
   SetReferenceDocsSettingsBody,
@@ -163,6 +168,9 @@ import type {
   LargePrThresholdResponse,
   MyTurnSettings,
   MyTurnSettingsBody,
+  FeatureSettings,
+  FeatureSettingsBody,
+  FeatureSettingsResponse,
   MyTurnSettingsResponse,
   AiBudgetBody,
   AiBudgetResponse,
@@ -291,6 +299,7 @@ import type {
   StoryBuildPushResponse,
   StoryBuildStartBody,
   StoryBuildStartResponse,
+  ReviewSuggestionDismissResponse,
 } from '@pierre-review/shared';
 import { storyBuildPath } from '@pierre-review/shared';
 
@@ -950,6 +959,13 @@ export const api = {
       '/api/me/my-turn-settings',
       jsonBody('PUT', { settings } as MyTurnSettingsBody),
     ).then((r) => handle<MyTurnSettingsResponse>(r)),
+  // SETTINGS → FEATURES: which sidebar destinations show. ACCOUNT-GRAINED, a PUT of the WHOLE
+  // switches object (overrides only; `null` resets every switch). Echoes what was stored and the
+  // resolved `features`, which the SPA seats on `['me']` at once.
+  setFeatureSettings: (settings: FeatureSettings | null) =>
+    fetch('/api/me/feature-settings', jsonBody('PUT', { settings } as FeatureSettingsBody)).then((r) =>
+      handle<FeatureSettingsResponse>(r),
+    ),
   // THE CLAUDE SPEND BUDGET (one per machine; backend ai/budget.ts). Registered only when AI is on.
   // `status.overBudget` ⇒ automatic runs are paused (`status.limitedBy` says by the week or the
   // 5-hour session); a Run click should warn and ask first. `usage` feeds the header's usage item and
@@ -1055,6 +1071,11 @@ export const api = {
   // The attention cards (CORE/free) for the **Pending** rail entry.
   attentionCards: (workspaceId: number) =>
     get<AttentionCardsResponse>(withQuery('/api/attention', workspaceParam(workspaceId))),
+  // Pending's one-time "Review your PR with Claude" card, dismissed for good (account-wide).
+  dismissReviewSuggestion: () =>
+    fetch('/api/me/review-suggestion/dismiss', jsonBody('POST')).then((r) =>
+      handle<ReviewSuggestionDismissResponse>(r),
+    ),
   // The board's batched liveness sweep — ONE GitHub question for the whole board (2 GraphQL
   // points), so a PR merged by somebody else stops being a card within seconds rather than
   // within an adaptive bucket. A POST because it carries an id LIST in its body (the
@@ -1632,6 +1653,23 @@ export const api = {
   addReferenceDocGithub: (workspaceId: number, repo: string, path: string) =>
     fetch('/api/docs/github', jsonBody('POST', { workspaceId, repo, path } satisfies AddReferenceDocGithubBody)).then((r) =>
       handle<ReferenceDocMutationResponse>(r),
+    ),
+  // Docs folders found in the workspace's repositories: Add queues one build per chosen folder (the
+  // reader's yes — nothing is built before it); "Not now" hides the card for DOCS_OFFER_SNOOZE_DAYS.
+  // `from: 'wizard'` = the add-documents wizard's "From your repositories".
+  addDocsOffers: (workspaceId: number, ids: number[], from?: 'card' | 'wizard') =>
+    fetch('/api/docs/offers/add', jsonBody('POST', { workspaceId, ids, ...(from ? { from } : {}) } satisfies RepoDocsOffersBody)).then((r) =>
+      handle<RepoDocsOffersAddResponse>(r),
+    ),
+  // The wizard's "From your repositories": the offer's check over every repository of the workspace
+  // (GitHub reads for repositories not looked at recently). Click-gated: the wizard's Next runs it.
+  checkDocsFolders: (workspaceId: number) =>
+    fetch('/api/docs/offers/check', jsonBody('POST', { workspaceId } satisfies RepoDocsCheckBody)).then((r) =>
+      handle<RepoDocsCheckResponse>(r),
+    ),
+  dismissDocsOffers: (workspaceId: number, ids: number[]) =>
+    fetch('/api/docs/offers/dismiss', jsonBody('POST', { workspaceId, ids } satisfies RepoDocsOffersBody)).then((r) =>
+      handle<RepoDocsOffersDismissResponse>(r),
     ),
   // A wiki document: check the wiki now; only changed pages are read and only changed sections summarised.
   refreshReferenceDoc: (docId: number) =>

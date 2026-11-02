@@ -54,15 +54,47 @@ export type SprintSource =
   // Notion: the current sprint by the workspace's mapping (a Sprints relation, a select or a date).
   | { kind: 'sprint'; provider: 'jira' | 'notion'; names: string[] }
   | { kind: 'cycle'; provider: 'linear'; names: string[] }
-  | { kind: 'milestone'; provider: 'github'; name: string; dueOn: string | null; repos: string[] }
+  // GitHub: the CURRENT iteration of a Projects (v2) iteration field — the one whose start..start +
+  // duration holds today — on a project this workspace's issues belong to (docs/TRACKERS.md § GitHub
+  // Projects iterations). `startsOn` is GitHub's date (YYYY-MM-DD); `endsOn` the day AFTER the last.
   | {
+      kind: 'iteration';
+      provider: 'github';
+      name: string;
+      /** The project's title. */
+      project: string;
+      /** The iteration field's name ("Sprint", "Iteration"). */
+      field: string;
+      startsOn: string;
+      endsOn: string;
+      repos: string[];
+    }
+  | ({ kind: 'milestone'; provider: 'github'; name: string; dueOn: string | null; repos: string[] } & GithubProjectsNote)
+  | ({
       kind: 'status_fallback';
       provider: TrackerProvider;
       reason: SprintFallbackReason;
       /** ISO-8601 — the "touched in" window. */
       from: string;
       to: string;
-    };
+    } & GithubProjectsNote);
+
+/** Why a GitHub read could not look at Projects iterations (it fell back to milestones). Only
+ *  `'needs_scope'` is said on screen: the gh login lacks `read:project`, which `gh` does not grant by
+ *  default. Absent = Projects were read (or the tracker is not GitHub). */
+export type GithubProjectsAccess = 'needs_scope';
+
+export interface GithubProjectsNote {
+  projectsAccess?: GithubProjectsAccess;
+}
+
+/** The command This Sprint's one line names when Projects need a scope. */
+export const GITHUB_PROJECTS_SCOPE_COMMAND = 'gh auth refresh -s read:project';
+
+/** Should This Sprint show the "Run gh auth refresh -s read:project…" line for this source? Pure. */
+export function needsGithubProjectsScope(s: SprintSource | null | undefined): boolean {
+  return s != null && (s.kind === 'milestone' || s.kind === 'status_fallback') && s.projectsAccess === 'needs_scope';
+}
 
 /** The heading's name for a source ("Sprint 42", "Cycle 12 and Cycle 13", "Milestone v2.3"). */
 export function sprintSourceTitle(s: SprintSource): string {
@@ -74,6 +106,7 @@ export function sprintSourceTitle(s: SprintSource): string {
     case 'cycle':
       return join(s.names) || 'Active cycle';
     case 'milestone':
+    case 'iteration':
       return s.name;
     case 'status_fallback':
       return 'To do and in progress';

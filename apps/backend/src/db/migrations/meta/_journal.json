@@ -1072,6 +1072,48 @@
       "when": 1792224055016,
       "tag": "0152_reference_doc_chunks",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "6",
+      "when": 1792224056016,
+      "tag": "0153_feature_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "6",
+      "when": 1792224057016,
+      "tag": "0154_first_landing",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "6",
+      "when": 1792224058016,
+      "tag": "0155_repo_docs_offers",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "6",
+      "when": 1792224059016,
+      "tag": "0156_ci_history_pending",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "6",
+      "when": 1792224060016,
+      "tag": "0157_sprint_source_probe",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "6",
+      "when": 1792224061016,
+      "tag": "0158_repo_docs_unreadable",
+      "breakpoints": true
     }
   ]
 }

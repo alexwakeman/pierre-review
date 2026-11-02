@@ -4,7 +4,8 @@ import { CloseIcon } from '../Icons.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 import { Kbd, KbdGroup } from '../ui/Kbd.js';
 import { modKeyLabel } from '../ui/keys.js';
-import { DESTINATIONS } from './nav.js';
+import { useNavGates } from '../../hooks/useNavGates.js';
+import { shownDestinations, type Destination } from './nav.js';
 
 // THE KEY SHEET (`?`, the sidebar's keyboard button, ⌘K → "Keyboard shortcuts"). Every key the app
 // answers, in the words of docs/redesign/DESIGN.md § 8. A modal: Escape (capture phase) and the
@@ -12,7 +13,7 @@ import { DESTINATIONS } from './nav.js';
 
 type Line = readonly [keys: readonly string[], does: string];
 
-function sections(): ReadonlyArray<readonly [string, readonly Line[]]> {
+function sections(destinations: readonly Destination[]): ReadonlyArray<readonly [string, readonly Line[]]> {
   const mod = modKeyLabel();
   return [
     [
@@ -25,7 +26,7 @@ function sections(): ReadonlyArray<readonly [string, readonly Line[]]> {
         [['Esc'], 'Close the top layer; then leave a tab for the Timeline, or clear its selection'],
       ],
     ],
-    ['Go to', DESTINATIONS.map((d): Line => [['g', d.goKey], d.label])],
+    ['Go to', destinations.map((d): Line => [['g', d.goKey], d.label])],
     [
       'Lists',
       [
@@ -56,6 +57,8 @@ function sections(): ReadonlyArray<readonly [string, readonly Line[]]> {
 
 export function ShortcutsSheet({ onClose }: { onClose: () => void }): JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
+  // A destination Settings → Features hides is left out here too (its `g` key still works).
+  const destinations = shownDestinations(useNavGates());
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     closeActivePopover();
@@ -100,7 +103,7 @@ export function ShortcutsSheet({ onClose }: { onClose: () => void }): JSX.Elemen
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
-          {sections().map(([title, lines]) => (
+          {sections(destinations).map(([title, lines]) => (
             <section key={title} className="mt-3 first:mt-0">
               <h3 className="mb-1 text-meta text-ui-faint">{title}</h3>
               <dl className="m-0">

@@ -8,10 +8,14 @@ import {
   parseGithubRepoName,
   wikiProviderOfUrl,
   type GithubDocsFolder,
+  type RepoDocsOffer,
+  type RepoDocsUnreadable,
   type WikiCredentialsSettings,
 } from '@pierre-review/shared';
 import {
+  useAddDocsOffers,
   useAddReferenceDocGithub,
+  useCheckDocsFolders,
   useAddReferenceDocUrl,
   useAddReferenceDocWikiTree,
   usePreflightGithubDocs,
@@ -19,35 +23,46 @@ import {
   useUploadReferenceDoc,
   useWikiCredentials,
 } from '../../hooks/useReferenceDocs.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { closeActivePopover } from '../../lib/activePopover.js';
 import { DOC_UPLOAD_ACCEPT, uploadRefusal } from '../../lib/referenceDocs.js';
+import { offerFiles, offerLabel, offersAddProblem } from '../../lib/docsOffers.js';
 import {
   DOCS_SOURCE_LABEL,
   DOCS_WIZARD_STEPS,
   folderLabel,
   githubReviewSentence,
   nextStep,
+  pickedRepoFolders,
   previousStep,
+  repoFoldersNote,
+  shownUnreadableRepos,
+  unreadableRepoText,
+  repoFoldersReviewSentence,
   wikiOverCapSentence,
   wikiReviewSentence,
   type DocsSourceType,
   type DocsWizardStep,
 } from '../../lib/docsWizard.js';
-import { CheckCircleIcon, CloseIcon, ConfluenceIcon, GlobeIcon, NotionIcon, OctocatIcon, UploadIcon } from '../Icons.js';
+import { CheckCircleIcon, CloseIcon, ConfluenceIcon, GlobeIcon, NotionIcon, OctocatIcon, RepoIcon, UploadIcon } from '../Icons.js';
 import { ConfluenceForm } from '../settings/ConfluenceSection.js';
 import { NotionForm } from '../settings/NotionSection.js';
 import { inputCls } from '../settings/ui.js';
 import { AiRunGate } from '../AiSetup.js';
-import { Button, RadioBox, Select, cx } from '../ui/index.js';
+import { Button, CheckboxBox, RadioBox, Select, TEXT_LINK, FOCUS_RING, cx } from '../ui/index.js';
 
 // THE ADD-DOCUMENTS WIZARD (docs/REFERENCE-DOCS.md § The SPA → Adding), opened by the Library's "+".
 //
-//   1. the source type: an upload, a web page or site, Confluence, Notion, a GitHub repository;
+//   1. the source type: an upload, a web page or site, Confluence, Notion, a GitHub repository, or
+//      "From your repositories";
 //   2. per type — the files (an upload: chosen or dropped, each SENT AT ONCE, as the Library's old
 //      "Choose files" box did; no review step), the address and "links to follow" (web); the connection, then the page (a wiki);
-//      the repository, then the folder (GitHub);
+//      the repository, then the folder (GitHub); a checkbox per qualifying docs folder (From your
+//      repositories: the docs offer's SAME check, `POST /api/docs/offers/check`, run by Next on the type
+//      step; added through the offer's own Add, `from: 'wizard'`);
 //   3. the REVIEW: what will be added, COUNTED by the server first ("This will add 12 pages from
 //      Payments handbook"), then Start.
 //
@@ -64,6 +79,7 @@ const TYPE_ICON: Record<DocsSourceType, (p: { size: number }) => JSX.Element> = 
   confluence: (p) => <ConfluenceIcon {...p} aria-hidden />,
   notion: (p) => <NotionIcon {...p} aria-hidden />,
   github: (p) => <OctocatIcon {...p} aria-hidden />,
+  repos: (p) => <RepoIcon {...p} aria-hidden />,
 };
 
 const TYPE_HINT: Record<DocsSourceType, string> = {
@@ -72,6 +88,7 @@ const TYPE_HINT: Record<DocsSourceType, string> = {
   confluence: 'A whole space, or one page and every page below it.',
   notion: 'A whole wiki, or one page and every page below it.',
   github: 'The markdown and text documents in a repository or one of its folders.',
+  repos: 'The docs folders Limn finds in this workspace’s repositories.',
 };
 
 const STEP_TITLE: Record<DocsWizardStep, string> = {
@@ -82,6 +99,7 @@ const STEP_TITLE: Record<DocsWizardStep, string> = {
   page: 'Which part of the wiki?',
   repo: 'Which repository?',
   folder: 'Which folder?',
+  folders: 'Which folders?',
   review: 'Ready to add',
 };
 
@@ -92,12 +110,23 @@ function wikiReady(type: 'confluence' | 'notion', c: WikiCredentialsSettings | u
   return (c.confluence.hasToken && c.confluence.siteUrl != null) || c.confluence.jiraSite != null;
 }
 
-export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId: number; maxBytes: number; onClose: () => void }): JSX.Element {
+export function DocsAddWizard({
+  workspaceId,
+  maxBytes,
+  onClose,
+  initialRepo,
+}: {
+  workspaceId: number;
+  maxBytes: number;
+  onClose: () => void;
+  /** Open on the GitHub repository step with this `owner/name` filled in (a docs offer's "Choose part of it"). */
+  initialRepo?: string;
+}): JSX.Element {
   const titleId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const { refs, context } = useFloating({ open: true, onOpenChange: (o) => !o && onClose() });
-  const [type, setType] = useState<DocsSourceType>('upload');
-  const [step, setStep] = useState<DocsWizardStep>('type');
+  const [type, setType] = useState<DocsSourceType>(initialRepo != null ? 'github' : 'upload');
+  const [step, setStep] = useState<DocsWizardStep>(initialRepo != null ? 'repo' : 'type');
   // Upload: the file being sent, while one is.
   const [sending, setSending] = useState<string | null>(null);
   // Web
@@ -106,8 +135,12 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
   // Wiki
   const [pageUrl, setPageUrl] = useState('');
   // GitHub
-  const [repo, setRepo] = useState('');
+  const [repo, setRepo] = useState(initialRepo ?? '');
   const [folder, setFolder] = useState<GithubDocsFolder | null>(null);
+  // From your repositories: the ticked folders (offer ids).
+  const [picked, setPicked] = useState<ReadonlySet<number>>(() => new Set());
+  const [reposProblem, setReposProblem] = useState<string | null>(null);
+  const ai = useAiCapabilities();
 
   const creds = useWikiCredentials(type === 'confluence' || type === 'notion' ? workspaceId : null);
   const wikiCount = usePreflightWikiDocs(workspaceId);
@@ -115,7 +148,11 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
   const addUrl = useAddReferenceDocUrl(workspaceId);
   const addWiki = useAddReferenceDocWikiTree(workspaceId);
   const addRepo = useAddReferenceDocGithub(workspaceId);
-  const adding = type === 'web' ? addUrl : type === 'github' ? addRepo : addWiki;
+  const folderCheck = useCheckDocsFolders(workspaceId);
+  const addFolders = useAddDocsOffers(workspaceId, 'wizard');
+  const adding = type === 'web' ? addUrl : type === 'github' ? addRepo : type === 'repos' ? addFolders : addWiki;
+  const repoFolders = folderCheck.data?.folders ?? [];
+  const chosenFolders = pickedRepoFolders(repoFolders, picked);
 
   useEffect(() => {
     closeActivePopover();
@@ -142,7 +179,7 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
   const canNext = ((): boolean => {
     switch (step) {
       case 'type':
-        return true;
+        return !folderCheck.isPending;
       case 'files':
         return false;
       case 'address':
@@ -155,6 +192,8 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
         return repoName != null && !repoCount.isPending;
       case 'folder':
         return folder != null && folder.docs > 0;
+      case 'folders':
+        return chosenFolders.length > 0;
       case 'review':
         return !adding.isPending;
     }
@@ -162,6 +201,10 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
 
   const goNext = (): void => {
     if (!canNext) return;
+    if (step === 'type' && type === 'repos') {
+      folderCheck.mutate(undefined, { onSuccess: () => setStep('folders') });
+      return;
+    }
     if (step === 'page') {
       wikiCount.mutate(pageUrl.trim(), { onSuccess: () => setStep('review') });
       return;
@@ -177,6 +220,20 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
     }
     if (step === 'review') {
       const done = { onSuccess: () => onClose() };
+      if (type === 'repos') {
+        setReposProblem(null);
+        addFolders.mutate(
+          chosenFolders.map((f) => f.id),
+          {
+            onSuccess: (res) => {
+              const problem = offersAddProblem(res);
+              if (problem == null) onClose();
+              else setReposProblem(problem);
+            },
+          },
+        );
+        return;
+      }
       if (type === 'web') addUrl.mutate({ url: url.trim(), crawlDepth: crawlDepth > 0 ? crawlDepth : null }, done);
       else if (type === 'github' && repoName && folder) addRepo.mutate({ repo: `${repoName.owner}/${repoName.repo}`, path: folder.path }, done);
       else addWiki.mutate(pageUrl.trim(), done);
@@ -195,7 +252,8 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
     case 'type':
       body = (
         <div role="radiogroup" aria-label="Source" className="space-y-1">
-          {(Object.keys(DOCS_WIZARD_STEPS) as DocsSourceType[]).map((t) => (
+          {/* "From your repositories" runs the AI on Add: shown only where AI is on (`me.ai.enabled`). */}
+          {(Object.keys(DOCS_WIZARD_STEPS) as DocsSourceType[]).filter((t) => t !== 'repos' || ai.enabled).map((t) => (
             <label
               key={t}
               className={cx(
@@ -211,6 +269,8 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
               </span>
             </label>
           ))}
+          {type === 'repos' && folderCheck.isPending && <p className="px-3 pt-1 text-body text-ui-mute">Looking through your repositories…</p>}
+          {type === 'repos' && folderCheck.isError && <p className="px-3 pt-1 text-body text-ui-danger">{folderCheck.error.message}</p>}
         </div>
       );
       break;
@@ -345,7 +405,28 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
       );
       break;
     }
+    case 'folders':
+      body = (
+        <RepoFoldersStep
+          folders={repoFolders}
+          notLookedAt={folderCheck.data?.notLookedAt ?? 0}
+          unreadable={shownUnreadableRepos(folderCheck.data?.unreadable ?? [])}
+          picked={picked}
+          setPicked={setPicked}
+          onChoosePart={(repoFullName) => {
+            setType('github');
+            setRepo(repoFullName);
+            repoCount.reset();
+            setStep('repo');
+          }}
+        />
+      );
+      break;
     case 'review':
+      if (type === 'repos') {
+        body = <RepoFoldersReview folders={chosenFolders} budgetUsd={folderCheck.data?.budgetUsd ?? null} problem={reposProblem} />;
+        break;
+      }
       body = <ReviewStep type={type} url={url} crawlDepth={crawlDepth} wiki={wikiCount.data ?? null} repo={repoName ? `${repoName.owner}/${repoName.repo}` : ''} folder={folder} />;
       break;
   }
@@ -402,11 +483,11 @@ export function DocsAddWizard({ workspaceId, maxBytes, onClose }: { workspaceId:
                 // The run button: behind the ONE gate (setup / sign-in line, the over-budget confirm).
                 <AiRunGate kind="docs_build" meter={false}>
                   <Button variant="primary" data-ai-run onClick={goNext} disabled={!canNext} busy={adding.isPending}>
-                    Start
+                    {type === 'repos' ? 'Add' : 'Start'}
                   </Button>
                 </AiRunGate>
               ) : (
-                <Button variant="primary" onClick={goNext} disabled={!canNext} busy={wikiCount.isPending || repoCount.isPending}>
+                <Button variant="primary" onClick={goNext} disabled={!canNext} busy={wikiCount.isPending || repoCount.isPending || folderCheck.isPending}>
                   Next
                 </Button>
               )}
@@ -524,6 +605,107 @@ function UploadStep({
         </ul>
       )}
       <p className="text-meta text-ui-mute">Building starts as soon as a file is sent, and runs on your machine.</p>
+    </div>
+  );
+}
+
+/**
+ * From your repositories, the folders step: every qualifying folder not in Docs yet (the docs offer's own
+ * check), a checkbox each — none ticked to begin with. A too-large folder has no checkbox: it points at the
+ * GitHub repository source, opened on that repository, to add part of it.
+ */
+function RepoFoldersStep({
+  folders,
+  notLookedAt,
+  unreadable,
+  picked,
+  setPicked,
+  onChoosePart,
+}: {
+  folders: readonly RepoDocsOffer[];
+  notLookedAt: number;
+  /** Repositories whose files Limn could not read (the stored failure): one line each, after the list. */
+  unreadable: readonly RepoDocsUnreadable[];
+  picked: ReadonlySet<number>;
+  setPicked: (next: ReadonlySet<number>) => void;
+  onChoosePart: (repoFullName: string) => void;
+}): JSX.Element {
+  const note = repoFoldersNote(folders.length, notLookedAt);
+  const toggle = (id: number, on: boolean): void => {
+    const next = new Set(picked);
+    if (on) next.add(id);
+    else next.delete(id);
+    setPicked(next);
+  };
+  return (
+    <div className="space-y-2" data-testid="docs-wizard-repo-folders">
+      {folders.length > 0 && (
+        <ul className="max-h-72 space-y-px overflow-y-auto">
+          {folders.map((f) =>
+            f.tooLarge ? (
+              <li key={f.id} className="flex flex-wrap items-baseline gap-x-2 px-2.5 py-1.5 pl-9 text-body">
+                <span className="min-w-0 truncate text-ui-ink">{offerLabel(f)}</span>
+                <span className="text-meta text-ui-faint">{offerFiles(f)} · too large to add in one go</span>
+                <button type="button" className={cx('rounded-ui text-meta', TEXT_LINK, FOCUS_RING)} onClick={() => onChoosePart(f.repoFullName)}>
+                  Choose part of it
+                </button>
+              </li>
+            ) : (
+              <li key={f.id}>
+                <label className={cx('flex cursor-pointer items-center gap-2.5 rounded-ui px-2.5 py-1.5 touch:min-h-10', picked.has(f.id) ? 'bg-ui-sel' : 'hover:bg-ui-hover')}>
+                  <CheckboxBox checked={picked.has(f.id)} onChange={(e) => toggle(f.id, e.currentTarget.checked)} />
+                  <span className="min-w-0 flex-1 truncate text-body text-ui-ink">{offerLabel(f)}</span>
+                  <span className="shrink-0 text-meta tabular-nums text-ui-mute">{offerFiles(f)}</span>
+                </label>
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+      {note != null && <p className={folders.length === 0 ? 'text-body text-ui-ink' : 'text-meta text-ui-mute'}>{note}</p>}
+      {unreadable.length > 0 && (
+        <ul className="space-y-0.5" data-testid="docs-wizard-unreadable">
+          {unreadable.map((u) => (
+            <li key={u.repoId} className="text-meta text-ui-mute" data-reason={u.reason}>
+              {unreadableRepoText(u)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** From your repositories, the review: what will be added, and what one build may cost. */
+function RepoFoldersReview({
+  folders,
+  budgetUsd,
+  problem,
+}: {
+  folders: readonly RepoDocsOffer[];
+  budgetUsd: number | null;
+  problem: string | null;
+}): JSX.Element {
+  const ai = useAiCapabilities();
+  const costText = useRunCostText();
+  const cost = costText(budgetUsd, ai.provider);
+  return (
+    <div className="space-y-2" data-testid="docs-wizard-review">
+      <p className="flex items-start gap-2 font-medium text-ui-ink">
+        <CheckCircleIcon size={14} className="mt-0.5 shrink-0 text-ui-success" aria-hidden />
+        <span>{repoFoldersReviewSentence(folders.length)}</span>
+      </p>
+      <ul className="space-y-0.5 pl-6 text-body text-ui-ink">
+        {folders.map((f) => (
+          <li key={f.id}>
+            {offerLabel(f)} <span className="text-meta text-ui-faint">· {offerFiles(f)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-meta text-ui-mute">
+        Building uses {ai.providerName}, on your machine.{cost != null && ` Up to ${cost} each.`}
+      </p>
+      {problem != null && <p className="text-meta text-ui-danger">{problem}</p>}
     </div>
   );
 }

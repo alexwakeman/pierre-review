@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { sprintShouldAutoRefetch } from '../../lib/sprintChangeToken.js';
 import {
+  GITHUB_PROJECTS_SCOPE_COMMAND,
+  needsGithubProjectsScope,
   SPRINT_GHOST_MAX,
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
@@ -18,6 +20,7 @@ import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
 import { InfoButton } from '../InfoModal.js';
+import { CopyButton } from '../CopyButton.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
 import { SprintBoardFilters, SprintPathsView, SprintPeopleView, SprintThemesView, type SprintCardActions } from './SprintBoards.js';
@@ -330,6 +333,16 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
         <p className="flex items-center gap-1.5 text-meta text-ui-danger">
           <WarningIcon size={12} />
           {data.read.error}
+        </p>
+      )}
+      {/* GitHub Projects iterations need `read:project`, which gh does not grant by default: the read
+          fell back to milestones. ONE plain line, never an error (docs/TRACKERS.md § GitHub Projects iterations). */}
+      {needsGithubProjectsScope(data.source) && (
+        <p data-testid="sprint-projects-scope" className={`flex flex-wrap items-center gap-1 text-meta ${MUTED}`}>
+          <span>
+            Run <code className="font-mono">{GITHUB_PROJECTS_SCOPE_COMMAND}</code> to use your GitHub Projects iterations.
+          </span>
+          <CopyButton text={GITHUB_PROJECTS_SCOPE_COMMAND} what="command" title="Copy the command" />
         </p>
       )}
       {(data.read.truncated || (data.ghostsTruncated && view === 'paths')) && (

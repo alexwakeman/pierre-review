@@ -264,6 +264,14 @@ describe('tierFor — reference docs', () => {
     expect(tiers('POST', '/api/docs/wiki/preflight')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/docs/github/preflight')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/docs/github')).toEqual(['search', 'ai', 'ai_hourly']);
+    // The docs offers: Add reads GitHub and queues builds; "Not now" is DB only.
+    expect(tiers('POST', '/api/docs/offers/add')).toEqual(['search', 'ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/offers/dismiss')).toEqual(['read']);
+    // The wizard's "From your repositories": GitHub tree reads, no model.
+    expect(tiers('POST', '/api/docs/offers/check')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/docs/offers/checks')).not.toContain('search');
+    expect(tiers('GET', '/api/docs/offers/check')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/offers/adds')).not.toContain('search');
   });
   it('a wizard near-miss is not swept in', () => {
     expect(tiers('GET', '/api/docs/github')).not.toContain('search');
@@ -426,6 +434,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/me/my-turn-settings')).toEqual(['read']);
     expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('github_write');
     expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('ai');
+  });
+
+  // PUT /api/me/feature-settings — Settings → Features. DB-only, like its neighbours.
+  it('keeps the Features settings write on read', () => {
+    expect(tiers('PUT', '/api/me/feature-settings')).toEqual(['read']);
+    expect(tiers('PUT', '/api/me/feature-settings')).not.toContain('github_write');
+    expect(tiers('PUT', '/api/me/feature-settings')).not.toContain('ai');
+  });
+
+  // POST /api/me/review-suggestion/dismiss — Pending's one-time AI review card. DB-only.
+  it('keeps the review suggestion dismissal on read', () => {
+    expect(tiers('POST', '/api/me/review-suggestion/dismiss')).toEqual(['read']);
+    expect(tiers('POST', '/api/me/review-suggestion/dismiss')).not.toContain('ai');
   });
 
   // PUT / DELETE /api/my-turn/dismissals/:kind/:id — dismiss or bring back a My Turn entry. DB-only.

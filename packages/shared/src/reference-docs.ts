@@ -1,3 +1,4 @@
+import type { RepoDocsOffers } from './reference-docs-offers.js';
 // THE REFERENCE DOCS LIBRARY (CORE, free, LOCAL ONLY — agentic; docs/REFERENCE-DOCS.md).
 //
 // A workspace's uploaded reference material (PDF, Word, text, markdown, web pages), turned into a
@@ -131,6 +132,9 @@ export interface ReferenceDocsResponse {
   /** Settings → use the library in Claude Review (off by default). */
   docsInReview: boolean;
   maxBytes: number;
+  /** Docs folders found in the workspace's repositories, waiting for the reader's yes (nothing is built
+   *  before it). Trailing optional: an older server sends none. */
+  offers?: RepoDocsOffers;
 }
 
 /** POST /api/docs/upload, /api/docs/url, /api/docs/:id/rebuild, /api/docs/:id/cancel. */

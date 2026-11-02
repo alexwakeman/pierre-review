@@ -223,6 +223,11 @@ export type UserResolver = ReturnType<typeof createUserResolver>;
  *
  * Safe against `runTransaction`'s bare `BEGIN`: `upsertRepo` has no caller already inside a
  * transaction (`api/routes/repos.ts`, `sync/sync-repo.ts`).
+ *
+ * `added` is the reader's ADD (POST /api/repos) and nothing else: it decides the repo's
+ * first-onboarding mark (`firstOnboardingFor`) INSIDE the transaction, so the read of the account's
+ * repos and the insert are one step. A walk's upsert never passes it, so a walk that re-creates a
+ * row never marks it. The mark is set on insert only — the conflict update leaves it as it was.
  */
 export async function upsertRepo(
   owner: string,
@@ -232,6 +237,7 @@ export async function upsertRepo(
   accountId: number,
   viewerPermission?: string | null,
   description?: string | null,
+  added?: { firstRun: boolean },
 ): Promise<number> {
   // default_branch: only overwrite when known (a branch is never revoked, and the
   // lightweight add-repo path omits it) so we never null a synced value.
@@ -257,6 +263,18 @@ export async function upsertRepo(
   const workspaceId = await ensureDefaultWorkspace(accountId);
 
   return runTransaction(async (tx) => {
+    let firstOnboarding = false;
+    if (added != null) {
+      const existing = await tx
+        .select({ firstOnboarding: repos.firstOnboarding })
+        .from(repos)
+        .where(eq(repos.accountId, accountId))
+        .execute();
+      firstOnboarding = firstOnboardingFor(
+        existing.map((r) => r.firstOnboarding),
+        added.firstRun,
+      );
+    }
     const row = (
       await tx
         .insert(repos)
@@ -268,6 +286,7 @@ export async function upsertRepo(
           defaultBranch: defaultBranch ?? null,
           viewerPermission: viewerPermission ?? null,
           description: description ?? null,
+          firstOnboarding,
         })
         .onConflictDoUpdate({
           target: [repos.accountId, repos.githubNodeId],
@@ -283,6 +302,18 @@ export async function upsertRepo(
       .execute();
     return row.id;
   });
+}
+
+/**
+ * IS THIS ADD PART OF THE ACCOUNT'S FIRST ONBOARDING? (docs/BACKEND.md § My Turn — The
+ * first-onboarding lookback.) Yes when the account has no repos yet, or when the first-run screen
+ * says so (`firstRun`) AND every repo the account has came from that same batch. The second test is
+ * what keeps a stray flag from marking a later add: once any repo was added another way, no add is
+ * first-onboarding again (until the account is back to no repos). Pure, for the test.
+ */
+export function firstOnboardingFor(existingMarks: readonly boolean[], firstRun: boolean): boolean {
+  if (existingMarks.length === 0) return true;
+  return firstRun && existingMarks.every((m) => m);
 }
 
 function prState(s: GqlPullRequest['state']): 'open' | 'merged' | 'closed' {

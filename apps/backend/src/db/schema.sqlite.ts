@@ -82,6 +82,7 @@ import type {
   StoryBuildDocsDecisions,
   StoryBuildMessage,
   StoryBuildPlan,
+  FeatureSettings,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -172,6 +173,16 @@ export const accounts = sqliteTable('accounts', {
   // NULL = never chosen (Default: each provider's own depth). An explicitly set REVIEW_EFFORT wins
   // over it (ai/effort.ts).
   aiEffort: text('ai_effort'),
+  // 0153. SETTINGS → FEATURES (shared features.ts): which sidebar destinations show. OVERRIDES ONLY,
+  // `{feed?, reports?, sprint?, bots?}` booleans; NULL = every default applies. One writer: PUT
+  // /api/me/feature-settings (compacted). Visibility only — nothing else reads it.
+  featureSettings: text('feature_settings', { mode: 'json' }).$type<FeatureSettings>(),
+  // 0153. The account had repositories BEFORE Features existed (stamped once by the migration): every
+  // destination's default is "shown", so an existing install looks as it did. A new install is 0.
+  featuresExistingInstall: integer('features_existing_install', { mode: 'boolean' }).notNull().default(false),
+  // 0154. When the reader dismissed Pending's one-time "Review your PR with Claude" card
+  // (db/pending-first-landing.ts). NULL = never; once set, the card never shows again.
+  reviewSuggestionDismissedAt: integer('review_suggestion_dismissed_at', { mode: 'timestamp' }),
 });
 
 export const repos = sqliteTable(
@@ -224,6 +235,22 @@ export const repos = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // 0154. THE FIRST-ONBOARDING MARK (docs/BACKEND.md § My Turn — The first-onboarding lookback):
+    // true when the repo was added while the account had no repos, or in that same first-run batch.
+    // Its My Turn floor is `createdAt` minus FIRST_ONBOARDING_LOOKBACK_DAYS (db/my-turn-floor.ts),
+    // and the earliest such `createdAt` starts Pending's summary window. Written ONCE at insert
+    // (sync/upsert.ts `upsertRepo`), never by the conflict update.
+    firstOnboarding: integer('first_onboarding', { mode: 'boolean' }).notNull().default(false),
+    // 0155. When the repo's default-branch tree was last looked at for docs folders to OFFER
+    // (reference-docs/repo-offers.ts; docs/REFERENCE-DOCS.md § Docs offered from your repositories).
+    // NULL = never. Looked at again after DOCS_OFFER_RESCAN_DAYS.
+    docsOfferScannedAt: integer('docs_offer_scanned_at', { mode: 'timestamp' }),
+    // 0158. The docs-offer look at the tree last FAILED (docs/REFERENCE-DOCS.md § A repository whose
+    // files can't be read): when, and why ('no_access' | 'empty' | 'not_found' | 'unavailable'). Not
+    // looked at again for DOCS_OFFER_FAILURE_RETRY_HOURS; cleared by the next look that succeeds. The
+    // PR sync never reads them.
+    docsOfferFailedAt: integer('docs_offer_failed_at', { mode: 'timestamp' }),
+    docsOfferFailure: text('docs_offer_failure'),
     // ---- Does this repo use GitHub Issues? (migration 0094; docs/TRACKERS.md § Automatic default) ----
     // true = issues are ENABLED and at least one issue was linked to a PR in the last 90 days; the
     // tracker worker asks GitHub at most once a day per repo, and only for repos in a workspace
@@ -1231,6 +1258,9 @@ export const syncState = sqliteTable('sync_state', {
   }),
   lastSyncStatus: text('last_sync_status'),
   lastSyncError: text('last_sync_error'),
+  // Set while a completed FULL walk still owes the one-time CI-history backfill (migration 0156;
+  // sync/ci-history-pending.ts). Cleared once it ran; NULL = nothing owed.
+  ciHistoryPendingAt: integer('ci_history_pending_at', { mode: 'timestamp' }),
 });
 
 // ---- Claude Review (agentic PR review) ----
@@ -3279,6 +3309,15 @@ export const sprintReads = sqliteTable(
     storyAttemptAt: integer('story_attempt_at', { mode: 'timestamp' }),
     storyAttemptHash: text('story_attempt_hash'),
     storyAttemptError: text('story_attempt_error'),
+    // THE SPRINT-SOURCE PROBE (migration 0157; tracker/sprint/probe.ts, docs/TRACKERS.md § The
+    // sprint-source probe): for a GitHub Issues workspace with no sprint read yet, the tracker worker
+    // asks GitHub — on its own cadence, never on a view — whether a current Projects iteration or an
+    // open milestone with a due date exists. `probeCheckedAt` = when it last asked (NULL = never);
+    // `probeSourceJson` = what it found (an 'iteration' or dated 'milestone' `SprintSource`; NULL =
+    // nothing). Read ONLY by `hasSprintSource` (db/feature-gates.ts), and only while `readAt` is NULL.
+    // A probe may create the row (`viewedAt` / `nextReadAt` = epoch 0): the demand gate is unchanged.
+    probeCheckedAt: integer('probe_checked_at', { mode: 'timestamp' }),
+    probeSourceJson: text('probe_source_json', { mode: 'json' }).$type<SprintSource>(),
   },
   (t) => ({
     accountWorkspaceUx: uniqueIndex('sprint_reads_account_workspace').on(t.accountId, t.workspaceId),
@@ -4013,6 +4052,51 @@ export const referenceDocChunks = sqliteTable(
       name: 'reference_doc_chunks_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- DOCS OFFERED FROM THE REPOSITORIES (migration 0155; docs/REFERENCE-DOCS.md § Docs offered) ----
+// reference_doc_repo_offers — ONE row per (workspace, repository, folder) that looks like a docs
+// collection. `state`: 'offered' (waiting for the reader), 'declined' ("Not now" — the workspace's
+// card hides for DOCS_OFFER_SNOOZE_DAYS from the latest `decided_at`, then offers it again) or 'added'
+// (a document was queued, `doc_id`; or the scan found it already in the library — kept after that
+// document is removed so the CARD does not offer it again; the wizard's "From your repositories" lists
+// it once it is out of the library). ⚠ NOTHING IS BUILT FROM A ROW until the reader presses Add: a build
+// spends AI. The scan updates the counts of an existing row and NEVER its state (save an open folder now
+// in the library → 'added').
+export const referenceDocRepoOffers = sqliteTable(
+  'reference_doc_repo_offers',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    path: text('path').notNull(),
+    docCount: integer('doc_count').notNull(),
+    wordEstimate: integer('word_estimate').notNull(),
+    pageCount: integer('page_count').notNull(),
+    tooLarge: integer('too_large', { mode: 'boolean' }).notNull().default(false),
+    // 'offered' | 'declined' | 'added'.
+    state: text('state').notNull().default('offered'),
+    docId: integer('doc_id'),
+    detectedAt: integer('detected_at', { mode: 'timestamp' }).notNull(),
+    decidedAt: integer('decided_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    folderUx: uniqueIndex('reference_doc_repo_offers_folder').on(t.accountId, t.workspaceId, t.repoId, t.path),
+    scopeIdx: index('reference_doc_repo_offers_scope').on(t.accountId, t.workspaceId, t.state),
+    workspaceAccountFk: foreignKey({
+      name: 'reference_doc_repo_offers_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'reference_doc_repo_offers_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );

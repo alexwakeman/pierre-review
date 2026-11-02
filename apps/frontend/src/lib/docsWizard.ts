@@ -1,6 +1,10 @@
 import {
   REFERENCE_DOC_WIKI_MAX_PAGES,
+  isRepoDocsUnreadableShown,
+  repoDocsUnreadableReasonText,
   type GithubDocsFolder,
+  type RepoDocsOffer,
+  type RepoDocsUnreadable,
   type WikiPreflightResponse,
   type WikiProviderId,
 } from '@pierre-review/shared';
@@ -9,9 +13,9 @@ import {
 // source type walks, and the review step's one sentence. `components/Activity/DocsAddWizard.tsx`
 // renders it; `test/docsWizard.test.ts` pins it.
 
-export type DocsSourceType = 'upload' | 'web' | 'confluence' | 'notion' | 'github';
+export type DocsSourceType = 'upload' | 'web' | 'confluence' | 'notion' | 'github' | 'repos';
 
-export type DocsWizardStep = 'type' | 'files' | 'address' | 'connection' | 'page' | 'repo' | 'folder' | 'review';
+export type DocsWizardStep = 'type' | 'files' | 'address' | 'connection' | 'page' | 'repo' | 'folder' | 'folders' | 'review';
 
 /**
  * Every step a source type walks, in order (the type list shows them in this order). The first is
@@ -24,6 +28,9 @@ export const DOCS_WIZARD_STEPS: Record<DocsSourceType, readonly DocsWizardStep[]
   confluence: ['type', 'connection', 'page', 'review'],
   notion: ['type', 'connection', 'page', 'review'],
   github: ['type', 'repo', 'folder', 'review'],
+  // "From your repositories": the docs offer's check over every repository of the workspace (Next on the
+  // type step runs it), then a checkbox per qualifying folder, then the review.
+  repos: ['type', 'folders', 'review'],
 };
 
 export const DOCS_SOURCE_LABEL: Record<DocsSourceType, string> = {
@@ -32,10 +39,12 @@ export const DOCS_SOURCE_LABEL: Record<DocsSourceType, string> = {
   confluence: 'Confluence',
   notion: 'Notion',
   github: 'GitHub repository',
+  repos: 'From your repositories',
 };
 
 /** The wiki a source type reads, or null (a web page). */
-export const wikiOfType = (t: DocsSourceType): WikiProviderId | null => (t === 'confluence' || t === 'notion' ? t : t === 'github' ? 'github' : null);
+export const wikiOfType = (t: DocsSourceType): WikiProviderId | null =>
+  t === 'confluence' || t === 'notion' ? t : t === 'github' || t === 'repos' ? 'github' : null;
 
 /** The step after `step` for `type`, or null at the review. */
 export function nextStep(type: DocsSourceType, step: DocsWizardStep): DocsWizardStep | null {
@@ -72,3 +81,33 @@ export function githubReviewSentence(repo: string, folder: GithubDocsFolder): st
 
 /** A folder's line in the picker: "Whole repository · 12" / "docs · 9". */
 export const folderLabel = (f: GithubDocsFolder): string => (f.path === '' ? 'Whole repository' : f.path);
+
+// ---- "From your repositories" ----
+
+/** The ticked folders that can be added, in list order (a too-large one has no checkbox). */
+export function pickedRepoFolders(folders: readonly RepoDocsOffer[], picked: ReadonlySet<number>): RepoDocsOffer[] {
+  return folders.filter((f) => !f.tooLarge && picked.has(f.id));
+}
+
+/** "This will add 3 folders from your repositories, one document each." — the review's sentence. */
+export function repoFoldersReviewSentence(n: number): string {
+  return n === 1 ? 'This will add 1 folder from your repositories as one document.' : `This will add ${n} folders from your repositories, one document each.`;
+}
+
+/** The unreadable repositories the folders step lists: the LASTING reasons only (a transient
+ *  'unavailable' is not shown; it still backs off). */
+export function shownUnreadableRepos(list: readonly RepoDocsUnreadable[]): RepoDocsUnreadable[] {
+  return list.filter((u) => isRepoDocsUnreadableShown(u.reason));
+}
+
+/** One unreadable repository in the folders step: "acme/legacy: Limn can't read its files (no access)." */
+export function unreadableRepoText(u: RepoDocsUnreadable): string {
+  return `${u.repoFullName}: Limn can’t read its files (${repoDocsUnreadableReasonText(u.reason)}).`;
+}
+
+/** The folders step's line when nothing qualifies, or when some repositories were not looked at. */
+export function repoFoldersNote(folders: number, notLookedAt: number): string | null {
+  const rest = notLookedAt > 0 ? `${plural(notLookedAt, 'repository', 'repositories')} not checked yet. Try again shortly.` : null;
+  if (folders === 0) return rest != null ? `No docs folders found so far. ${rest}` : 'No docs folders found in this workspace’s repositories.';
+  return rest;
+}

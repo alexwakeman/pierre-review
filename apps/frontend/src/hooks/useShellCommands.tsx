@@ -30,13 +30,13 @@ import { useSettingsModal } from '../store/settingsModal.js';
 import { PENDING_TABS } from '@pierre-review/shared';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { useRepos, useUsers } from './useTimeline.js';
-import { useWorkspaceOpenPrs } from './useTriage.js';
+import { useMe, useWorkspaceOpenPrs } from './useTriage.js';
 import { useWorkspaces } from './useWorkspaces.js';
 import { useArmedMerges } from './useAutoMerge.js';
 import { useMyTurnByWorkspace } from './useMyTurnByWorkspace.js';
 import { useNotificationToggle } from './useNotificationPref.js';
 import { usePaletteSearch } from './usePaletteSearch.js';
-import { DESTINATIONS, goTo } from '../components/shell/nav.js';
+import { DESTINATIONS, goTo, isDestinationShown } from '../components/shell/nav.js';
 import { tabWords } from '../components/shell/Sidebar.js';
 import { openWorkspaceManager } from '../components/WorkspaceSelector.js';
 import { useShell } from '../store/shell.js';
@@ -73,10 +73,15 @@ export function useShellCommands({
   openHelp: () => void;
 }): void {
   const aiOn = useAiCapabilities().enabled;
+  // Settings → Features: a hidden destination (and its sub-pages) is left out of ⌘K. A deep link
+  // still opens it.
+  const features = useMe().data?.features;
   const { data: workspaces } = useWorkspaces();
   const workspaceId = useFilters((s) => s.workspaceId);
 
   const commands = useMemo<Command[]>(() => {
+    const shown = (id: 'feed' | 'insights' | 'sprint' | 'bots'): boolean =>
+      isDestinationShown(DESTINATIONS.find((d) => d.id === id)!, { aiOn, features });
     const f = (): ReturnType<typeof useFilters.getState> => useFilters.getState();
     const t = (): ReturnType<typeof usePinnedTabs.getState> => usePinnedTabs.getState();
     const activity = (id: Parameters<ReturnType<typeof useFilters.getState>['setActivityRepo']>[0]) => (): void => {
@@ -104,9 +109,13 @@ export function useShellCommands({
       ...(aiOn
         ? [{ id: 'docs', group: 'Go to' as const, title: 'Docs', icon: <BookIcon size={14} />, keywords: ['reference', 'library'], run: activity('docs') }]
         : []),
-      { id: 'feed', group: 'Go to', title: 'Feed', icon: <FeedIcon size={14} />, keywords: ['stream', 'activity'], run: activity('feed') },
-      { id: 'reports', group: 'Go to', title: 'Reports', icon: <ChartIcon size={14} />, keywords: ['insights', 'metrics'], run: activity('insights') },
-      ...REPORT_TABS.map(([id, label]) => ({
+      ...(shown('feed')
+        ? [{ id: 'feed', group: 'Go to' as const, title: 'Feed', icon: <FeedIcon size={14} />, keywords: ['stream', 'activity'], run: activity('feed') }]
+        : []),
+      ...(shown('insights')
+        ? [{ id: 'reports', group: 'Go to' as const, title: 'Reports', icon: <ChartIcon size={14} />, keywords: ['insights', 'metrics'], run: activity('insights') }]
+        : []),
+      ...(shown('insights') ? REPORT_TABS : []).map(([id, label]) => ({
         id: `reports:${id}`,
         group: 'Go to' as const,
         title: `Reports: ${label}`,
@@ -117,8 +126,10 @@ export function useShellCommands({
           t().showActivity();
         },
       })),
-      { id: 'bots', group: 'Go to', title: 'Bots Monitoring', icon: <BotIcon size={14} />, run: activity('bots') },
-      ...BOT_TABS.filter(([id]) => aiOn || id !== 'themes').map(([id, label]) => ({
+      ...(shown('bots')
+        ? [{ id: 'bots', group: 'Go to' as const, title: 'Bots Monitoring', icon: <BotIcon size={14} />, run: activity('bots') }]
+        : []),
+      ...(shown('bots') ? BOT_TABS : []).filter(([id]) => aiOn || id !== 'themes').map(([id, label]) => ({
         id: `bots:${id}`,
         group: 'Go to' as const,
         title: `Bots: ${label}`,
@@ -129,8 +140,10 @@ export function useShellCommands({
           t().showActivity();
         },
       })),
-      { id: 'sprint', group: 'Go to', title: 'This Sprint', icon: <TimelineIcon size={14} />, keywords: ['tickets', 'jira'], run: () => t().showSprint() },
-      ...SPRINT_TABS.map(([id, label]) => ({
+      ...(shown('sprint')
+        ? [{ id: 'sprint', group: 'Go to' as const, title: 'This Sprint', icon: <TimelineIcon size={14} />, keywords: ['tickets', 'jira'], run: () => t().showSprint() }]
+        : []),
+      ...(shown('sprint') ? SPRINT_TABS : []).map(([id, label]) => ({
         id: `sprint:${id}`,
         group: 'Go to' as const,
         title: `This Sprint: ${label}`,
@@ -189,7 +202,7 @@ export function useShellCommands({
       if (c) c.shortcut = `G ${d.goKey.toUpperCase()}`;
     }
     return out;
-  }, [aiOn, workspaces, workspaceId, toggleTheme, openHelp]);
+  }, [aiOn, features, workspaces, workspaceId, toggleTheme, openHelp]);
 
   useRegisterCommands('shell', commands);
 

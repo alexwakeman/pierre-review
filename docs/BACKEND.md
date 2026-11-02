@@ -84,7 +84,9 @@ incremental, fetch loop, cancel, rate limits). In brief:
   an install pinning `*/5` silently keeps the old cadence with adaptive on.
 - **Plan** (`sync-manager.ts`): never-synced → **full backfill** (`since = now −
   backfillDays`, default 90), run **two-phase** (a fast ~14-day foreground pass, then the
-  deep backfill in the background) so the board fills in seconds; else **incremental** from
+  deep backfill in the background) so the board fills in seconds — **breadth-first** across
+  repos queued together: every repo's foreground pass before any repo's backfill
+  ([SYNC.md § Breadth-first first sync](SYNC.md#breadth-first-first-sync)); else **incremental** from
   `lastIncrementalSyncAt − syncOverlapMinutes` (default 20). Status in `syncState`; a
   process-local running/progress set feeds the live UI.
 - **Fetch** (`sync-repo.ts` + `github/queries.ts`): one fat `REPO_ACTIVITY_QUERY` (25
@@ -324,6 +326,26 @@ says so. What IS stored is the reader's choice of which TYPES exist (§ Settings
 promotions) and — since migration `0069` — a per-SUBJECT dismissal whose only power is to
 hide what happened BEFORE it (§ Dismissals and one card per PR).
 
+### The first-onboarding lookback (`db/my-turn-floor.ts`, migration `0154`)
+
+Every rule that reads the ONBOARDING FLOOR (S2, S3c, S3d, S5, S6; the table below) reads it through
+ONE map built in `getMyTurn` by `myTurnFloorOf`: the repo's add time (`repos.createdAt`), or, for a
+repo of the account's **first onboarding** (`repos.first_onboarding`), that time minus
+`FIRST_ONBOARDING_LOOKBACK_DAYS` (7, `pending-rules.ts`). So the first landing on Pending shows the
+last week's open business — a reply, a mention, a push since your review — instead of an empty
+board, while a repo added later still starts clean at its add time.
+
+- **The mark is written ONCE, at insert, by the reader's add** (`POST /api/repos` →
+  `upsertRepo(…, { firstRun })`, `firstOnboardingFor`, inside the insert's transaction): true when
+  the account has no repos yet, or when the request says `firstRun` (the first-run screen sends it
+  for every repo of its batch — it adds them one at a time) AND every repo the account already has
+  carries the mark. A walk's upsert never passes the option, the conflict update never touches the
+  column, and once any repo was added another way no later add is marked (until the account is
+  back to no repos). Existing repos were left 0 by the migration: an install that had repos is past
+  its first landing.
+- The same mark opens Pending's summary window (`PENDING_SUMMARY_DAYS` from the earliest marked
+  add; docs/FRONTEND.md § Pending on the first landing). Pinned by `db/pending-first-landing.test.ts`.
+
 ### Limn findings never move the ball
 
 A Limn finding comment is stored under the poster's `limn:` bot (CLAUDE-REVIEW.md § Limn findings
@@ -422,7 +444,8 @@ author id that is known, is not you, and is not in the global automation set (be
   S3c used to share S2's section and relevance; it is its own type now, so the two have separate
   switches and S2 alone keeps the maintainer test (`'maintained'` / `'none'`).
 - **The onboarding floor reaches the new sources.** S3d, S5 and S6 need the summoning event at or
-  after the repo's `createdAt`; without it, adding a repo and its 90-day backfill would surface two
+  after the repo's floor (its `createdAt`, a week earlier for a first-onboarding repo — § The
+  first-onboarding lookback); without it, adding a repo and its 90-day backfill would surface two
   months of old replies and mentions at once. (S2 and S3c already read it through
   `getAddedRepoActionablePrIds`.)
 - **S6 reads a clock the scanner stamps** (`sync/mention-scan.ts`, [SYNC.md](SYNC.md) § "@mention

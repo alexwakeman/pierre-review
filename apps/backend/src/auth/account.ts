@@ -5,10 +5,11 @@ import type {
   BlastSensitivity,
   BlastSurface,
   BlastThresholds,
+  FeatureSettings,
   LocalUser,
   MyTurnSettings,
 } from '@pierre-review/shared';
-import { compactMyTurnSettings } from '@pierre-review/shared';
+import { compactFeatureSettings, compactMyTurnSettings } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
 
@@ -36,6 +37,11 @@ export interface Account {
   // as the two settings above. Optional only so the auth hook's no-account-yet fallback literal
   // (api/plugins/auth.ts) needs no entry: absent reads exactly as null.
   myTurnSettings?: MyTurnSettings | null;
+  // SETTINGS → FEATURES: the stored switches (overrides only; null = every default) and whether the
+  // account is an EXISTING install (migration 0153; everything shown by default). Optional for the
+  // same fallback-literal reason as `myTurnSettings`.
+  featureSettings?: FeatureSettings | null;
+  featuresExistingInstall?: boolean;
 }
 
 const STALE_MS = 24 * 60 * 60 * 1000; // re-fetch the local identity once a day
@@ -78,6 +84,8 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     largePrCodeLocThreshold: row.largePrCodeLocThreshold ?? null,
     blastRadiusConfig: row.blastRadiusConfig ?? null,
     myTurnSettings: row.myTurnSettings ?? null,
+    featureSettings: row.featureSettings ?? null,
+    featuresExistingInstall: row.featuresExistingInstall,
   };
 }
 
@@ -355,6 +363,26 @@ export async function setMyTurnSettings(
     .execute();
   // ⚠ Same rule as the two settings above, and the same failure without it: Settings would save,
   // then `/api/me` would hand the old value back and revert the form.
+  await refreshLocalAccountCache(accountId);
+  return value;
+}
+
+/**
+ * SETTINGS → FEATURES: store the reader's switches (overrides only, compacted; null resets every
+ * switch to its default). Returns what was stored.
+ */
+export async function setFeatureSettings(
+  accountId: number,
+  settings: FeatureSettings | null,
+): Promise<FeatureSettings | null> {
+  const { accounts } = schema;
+  const value = compactFeatureSettings(settings);
+  await db
+    .update(accounts)
+    .set({ featureSettings: value })
+    .where(eq(accounts.id, accountId))
+    .execute();
+  // ⚠ The settings rule above: without the refresh, /api/me would hand the old value back.
   await refreshLocalAccountCache(accountId);
   return value;
 }

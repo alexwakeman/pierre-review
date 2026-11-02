@@ -7,10 +7,13 @@ import {
   aiKindsAll,
   aiProviderName,
   aiRunProvider,
+  compactFeatureSettings,
   isAiEffort,
   isAiProviderSetting,
   LARGE_PR_CODE_LOC_DEFAULT,
+  resolveFeatures,
   type AiFixChecksPreview,
+  type FeatureSettings,
   type CloneStorageResponse,
   type NotionPropertyInfo,
   type NotionSchemaResponse,
@@ -449,6 +452,25 @@ export const ROUTES: DemoRoute[] = [
       const myTurnSettings = bodyRecord(req).settings ?? null;
       storeMe(srv, { myTurnSettings });
       return OK({ status: 'ok', myTurnSettings });
+    },
+  },
+  {
+    method: 'PUT',
+    re: /^\/api\/me\/feature-settings$/,
+    run: (req, _m, srv) => {
+      // The demo account is an existing install: every default is "shown".
+      const featureSettings = compactFeatureSettings((bodyRecord(req).settings ?? null) as FeatureSettings | null);
+      const features = resolveFeatures(featureSettings, { existingInstall: true, reportsReady: true, sprintSource: true });
+      storeMe(srv, { features });
+      return OK({ status: 'ok', featureSettings, features });
+    },
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/me\/review-suggestion\/dismiss$/,
+    run: (_req, _m, srv) => {
+      srv.overlay.stored.set(REVIEW_SUGGESTION_DISMISSED, true);
+      return OK({ status: 'ok' });
     },
   },
   { method: 'POST', re: /^\/api\/me\/benchmark-consent$/, run: (req) => OK({ status: 'ok', benchmarkOptIn: Boolean(bodyRecord(req).optIn) }) },
@@ -1080,6 +1102,34 @@ export const ROUTES: DemoRoute[] = [
       });
     },
   },
+  // THE DOCS OFFER (docs/REFERENCE-DOCS.md § Docs offered from your repositories): "Not now" hides the
+  // folders for this visit (GET /api/docs and /api/attention read them off); Add builds, which the demo
+  // does not do — it answers as the wizard's Start does.
+  {
+    method: 'POST',
+    re: /^\/api\/docs\/offers\/dismiss$/,
+    run: (req, _m, srv) => {
+      const ids = Array.isArray(bodyRecord(req).ids) ? (bodyRecord(req).ids as unknown[]).filter((x): x is number => typeof x === 'number') : [];
+      const prev = srv.overlay.stored.get(DOCS_OFFERS_DECLINED);
+      srv.overlay.stored.set(DOCS_OFFERS_DECLINED, [...(Array.isArray(prev) ? prev : []), ...ids]);
+      return OK({ dismissed: ids.length });
+    },
+  },
+  { method: 'POST', re: /^\/api\/docs\/offers\/add$/, run: () => notInDemo() },
+  // The wizard's "From your repositories" (POST /api/docs/offers/check): the SAME folders the recorded
+  // library offers (seed-demo.ts scans Platform's fictional trees), "Not now" or not — the wizard lists
+  // every folder not in Docs whatever the card's state. No repository is read.
+  {
+    method: 'POST',
+    re: /^\/api\/docs\/offers\/check$/,
+    run: (req, _m, srv) => {
+      const ws = typeof bodyRecord(req).workspaceId === 'number' ? (bodyRecord(req).workspaceId as number) : 1;
+      const rec = srv.recorded('GET', `/api/docs?workspace=${ws}`);
+      const block = isRecord(rec) && isRecord(rec.offers) ? rec.offers : null;
+      const folders = block != null && Array.isArray(block.offers) ? block.offers : [];
+      return OK({ workspaceId: ws, folders, notLookedAt: 0, budgetUsd: typeof block?.budgetUsd === 'number' ? block.budgetUsd : 6 });
+    },
+  },
   // Settings → Confluence / Notion: a save answers the saved settings (no token ever comes back); the
   // test reads the fictional site (or Notion).
   {
@@ -1433,7 +1483,8 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
 
   if (p === '/api/story-builds' && isRecord(body) && isRecord(body.build)) return { ...body, build: patchStoryBuild(srv, body.build) };
   if (/^\/api\/story-builds\/\d+$/.test(p) && isRecord(body)) return patchStoryBuild(srv, body);
-  if (p === '/api/attention' && isRecord(body)) return patchAttention(srv, body).body;
+  if (p === '/api/attention' && isRecord(body)) return withoutDeclinedOffers(srv, withReviewSuggestion(srv, patchAttention(srv, body).body), 'docsOffers');
+  if (p === '/api/docs' && isRecord(body)) return withoutDeclinedOffers(srv, body, 'offers');
   if (p === '/api/my-turn' && isRecord(body)) return patchMyTurn(srv, body);
   if (p === '/api/daily-brief' && isRecord(body)) return patchDailyBrief(srv, body);
   if (p === '/api/pro/work-plan' && isRecord(body)) return patchWorkPlan(srv, body);
@@ -1637,6 +1688,48 @@ function patchAttention(srv: DemoServer, body: Rec): { body: Rec; removed: Rec[]
   return {
     body: { ...body, cards: kept, tabs, scores, myTurnDismissed: appendDismissed(body.myTurnDismissed, dismissed) },
     removed,
+  };
+}
+
+/** The overlay key the docs offers' "Not now" stores its folder ids under. */
+const DOCS_OFFERS_DECLINED = 'docs-offers:declined';
+
+/** The docs offer block (`offers` on GET /api/docs, `docsOffers` on /api/attention) less the declined folders. */
+function withoutDeclinedOffers(srv: DemoServer, body: Rec, key: 'offers' | 'docsOffers'): Rec {
+  const declined = srv.overlay.stored.get(DOCS_OFFERS_DECLINED);
+  const block = body[key];
+  if (!Array.isArray(declined) || declined.length === 0 || !isRecord(block) || !Array.isArray(block.offers)) return body;
+  const gone = new Set(declined);
+  const offers = block.offers.filter((o) => !(isRecord(o) && gone.has(o.id)));
+  return { ...body, [key]: offers.length === 0 ? null : { ...block, offers } };
+}
+
+/** The overlay key Pending's AI review suggestion is dismissed under (POST /api/me/review-suggestion/dismiss). */
+const REVIEW_SUGGESTION_DISMISSED = 'review-suggestion:dismissed';
+/** `REVIEW_BUDGET_USD`'s default — the per-review cap the card words as "Up to …". */
+const DEMO_REVIEW_BUDGET_USD = 6.75;
+
+/**
+ * PENDING'S ONE-TIME AI REVIEW SUGGESTION, kept visible in the demo (docs/FRONTEND.md § Pending on the
+ * first landing). The server stops suggesting once any review has run for the account, and the demo
+ * account has run many, so the recording never carries one. On a board that lists the reader's own
+ * open PRs (the Admin workspace), the newest non-draft one is suggested — until the reader dismisses
+ * the card or starts a review of that PR here.
+ */
+function withReviewSuggestion(srv: DemoServer, body: Rec): Rec {
+  if (srv.overlay.stored.has(REVIEW_SUGGESTION_DISMISSED)) return { ...body, reviewSuggestion: null };
+  if (isRecord(body.reviewSuggestion) || !Array.isArray(body.ownOpenPrs)) return body;
+  const pr = body.ownOpenPrs.filter(isRecord).find((x) => x.isDraft !== true && typeof x.prId === 'number');
+  if (pr == null || srv.runs.latestFor('claude-review', pr.prId as number) != null) return body;
+  return {
+    ...body,
+    reviewSuggestion: {
+      prId: pr.prId,
+      repoFullName: pr.repoFullName,
+      number: pr.number,
+      title: pr.title,
+      budgetUsd: DEMO_REVIEW_BUDGET_USD,
+    },
   };
 }
 

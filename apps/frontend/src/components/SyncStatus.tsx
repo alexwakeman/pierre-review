@@ -107,9 +107,11 @@ export function SyncStatus({ variant = 'header' }: { variant?: 'header' | 'sideb
   // Two-phase first sync: true once every running in-scope repo has finished its
   // fast foreground window and is extending the backfill in the background — the
   // moment to drop the user into the (now-populated) recent board. Rows waiting in
-  // the per-account serial queue (paused.reason === 'queued') are excluded: they
-  // can't start their foreground pass until the repos ahead finish their whole
-  // backfill, so counting them would block a multi-add round's handoff forever.
+  // the per-account serial queue (paused.reason === 'queued') are excluded: a waiter is
+  // either not started or, between a first sync's two jobs, done with its foreground
+  // and waiting for its backfill. The queue runs every waiting foreground pass before
+  // any backfill (docs/SYNC.md § Breadth-first first sync), so the first un-queued row
+  // that reads foregroundComplete means every repo's recent PRs are in.
   const nonQueuedRunning = runningScoped.filter(
     (s) => s.progress?.paused?.reason !== 'queued',
   );

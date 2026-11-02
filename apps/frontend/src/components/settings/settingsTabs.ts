@@ -19,6 +19,7 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 export type SettingsTabId =
   | 'pull-requests'
   | 'pending'
+  | 'features'
   | 'dependencies'
   | 'ai'
   | 'ai-review'
@@ -47,6 +48,8 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     workspace: [],
   },
   { id: 'pending', label: 'Pending', summary: 'My Turn, muted repositories', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
+  // Which pages the sidebar shows (Settings → Features; visibility only).
+  { id: 'features', label: 'Features', summary: 'Pages shown in the sidebar', global: ['FeaturesSection'], workspace: [] },
   {
     id: 'dependencies',
     label: 'Dependencies', summary: 'Merge, approve and resolve dependency updates',

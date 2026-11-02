@@ -61,6 +61,7 @@ import { ghRestGetConditional } from '../github/client.js';
 import { syncRepo } from './sync-repo.js';
 import { __resetAdaptiveState } from './adaptive.js';
 import { syncAllRepos } from './sync-manager.js';
+import { onRepoWalked } from './walk-listeners.js';
 
 const mockSyncRepo = vi.mocked(syncRepo) as unknown as Mock;
 const mockProbe = vi.mocked(ghRestGetConditional) as unknown as Mock;
@@ -144,5 +145,29 @@ describe('a failing repo backs off instead of retrying at the tick rate', () => 
     // adaptive.test.ts against a controllable clock.
     const { backoffMsFor } = await import('./adaptive.js');
     expect(backoffMsFor(1)).toBe(0);
+  });
+});
+
+// THE AFTER-A-WALK RULE ON THE SCHEDULED PATH (walk-listeners.ts; docs/SYNC.md § After a walk):
+// listeners run only for a walk that ended uncancelled. The scheduler used to drop syncRepo's
+// result and notify regardless, so a cancelled scheduled walk still started a docs-offer scan.
+describe('the scheduled path notifies walk listeners only for an uncancelled walk', () => {
+  it('a cancelled walk notifies nobody; a completed one does', async () => {
+    const heard: number[] = [];
+    const off = onRepoWalked((_a, repoId) => heard.push(repoId));
+    try {
+      mockSyncRepo.mockResolvedValue({ cancelled: true });
+      await syncAllRepos(makeLog());
+      expect(mockSyncRepo).toHaveBeenCalledTimes(1);
+      expect(heard).toEqual([]);
+
+      __resetAdaptiveState();
+      mockSyncRepo.mockResolvedValue({ cancelled: false });
+      await syncAllRepos(makeLog());
+      expect(mockSyncRepo).toHaveBeenCalledTimes(2);
+      expect(heard).toEqual([1]);
+    } finally {
+      off();
+    }
   });
 });

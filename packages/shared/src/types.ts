@@ -12,10 +12,12 @@ import type {
 } from './pending-rules.js';
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
+import type { FeaturesStatus } from './features.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
+import type { RepoDocsOffers, RepoDocsUnreadableReason } from './reference-docs-offers.js';
 import type { LimnSeverity } from './limn-severity.js';
 
 export type DerivedState =
@@ -3975,6 +3977,10 @@ export interface MeResponse {
   // the Do next weights. RAW STORED OVERRIDES — `null` means "never changed anything", and the SPA
   // resolves through the ONE `resolveMyTurnSettings` (the `blastRadius` precedent above).
   myTurnSettings: MyTurnSettings | null;
+  // SETTINGS → FEATURES (shared features.ts): which sidebar destinations show, RESOLVED (the stored
+  // switch, else the default for this install). Visibility only — a deep link still opens a hidden
+  // one. Optional: an older server omits it and every destination shows.
+  features?: FeaturesStatus;
 }
 
 /** Body of PUT /api/me/my-turn-settings. `null` resets everything to the product default. */
@@ -6346,6 +6352,10 @@ export interface FeedResponse {
 export interface CreateRepoBody {
   owner: string;
   name: string;
+  /** Sent by the first-run screen for every repo of its batch. Honoured only while every repo the
+   *  account already has came from that same batch (docs/BACKEND.md § My Turn — The
+   *  first-onboarding lookback); a repo added to an account with no repos is first-onboarding anyway. */
+  firstRun?: boolean;
 }
 
 // ---- repo search (Add-repo picker) ----
@@ -9423,6 +9433,10 @@ export interface ActivityRepo {
   // Those PRs, each with when you last opened it (null when the stamp went missing). ABSENT on an
   // answer cached before this field existed — read it through `repoStatusSummary`, which copes.
   unreadPrs?: ActivityUnreadPr[];
+  // The repository's files could not be read for the docs offers (repos.docs_offer_failure, migration
+  // 0158; docs/REFERENCE-DOCS.md § A repository whose files can't be read): the stored reason, or null.
+  // Read from the DB in the same request — the repo status panel never fetches. ABSENT on an older answer.
+  docsUnreadable?: RepoDocsUnreadableReason | null;
   prs: TimelinePr[]; // caller groups by authorId
 }
 
@@ -10647,6 +10661,57 @@ export interface AttentionCardsResponse {
    *  the tab lists them under "Dismissed" with a way back. NOT counted in any tab, chip or lens:
    *  a dismissed subject is out of the inbox. Trailing optional. */
   myTurnDismissed?: MyTurnDismissedItem[];
+  // ── THE FIRST LANDING (docs/FRONTEND.md § Pending on the first landing). Set by `GET
+  //    /api/attention` only (`buildPendingBoard`'s `live`), never by the Slack snapshot. All three
+  //    are trailing optional: an older server sends none and the board renders as before.
+  /** Show the one-line summary over the tabs: true for `PENDING_SUMMARY_DAYS` after the account's
+   *  first-onboarding batch (`repos.first_onboarding`). Its figures are the tabs' own `total`s. */
+  summary?: boolean;
+  /** The reader's own open PRs in this workspace, newest first, at most `PENDING_OWN_PRS_SHOWN`,
+   *  with the SYNCED merge facts the empty state reads through `mergeVerdict()`. Sent ONLY when
+   *  every tab's total is 0 (absent otherwise); `ownOpenPrTotal` counts all of them. */
+  ownOpenPrs?: PendingOwnPr[];
+  ownOpenPrTotal?: number;
+  /** The one-time "Review your PR with Claude" suggestion, or null. Present only while AI is on,
+   *  the reader has not dismissed it and no AI review has ever run for the account. */
+  reviewSuggestion?: PendingReviewSuggestion | null;
+  /** Docs folders found in the workspace's repositories, waiting for the reader's yes — the same list
+   *  the Docs page shows (`GET /api/docs` `offers`). Present only while AI is on and at least one is
+   *  waiting; nothing is built before the reader presses Add. */
+  docsOffers?: RepoDocsOffers | null;
+}
+
+/** One of the reader's own open PRs on an empty Pending board — synced columns only, no fetch. */
+export interface PendingOwnPr {
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  number: number;
+  title: string;
+  githubUrl: string;
+  isDraft: boolean;
+  mergeable: Mergeable;
+  mergeStateStatus: MergeStateStatus;
+  inMergeQueue: boolean;
+  /** ⚠ Only what the PLAIN `mergeVerdict()` reads: what blocks a `blocked` PR (`blockers[]`) is
+   *  derived in PR detail only, so no review, CI or thread facts ride here. */
+  openedAt: string;
+}
+
+/** The one-time AI review suggestion on Pending (db/pending-first-landing.ts). */
+export interface PendingReviewSuggestion {
+  prId: number;
+  repoFullName: string;
+  number: number;
+  title: string;
+  /** The per-review spend cap (`REVIEW_BUDGET_USD`) — the most one review can cost. The SPA words
+   *  it through `useRunCostText()`, never on its own. */
+  budgetUsd: number;
+}
+
+/** POST /api/me/review-suggestion/dismiss — the suggestion never shows again. */
+export interface ReviewSuggestionDismissResponse {
+  status: 'ok';
 }
 
 /** One account's Pending board for one workspace, as the Pro Slack digest reads it

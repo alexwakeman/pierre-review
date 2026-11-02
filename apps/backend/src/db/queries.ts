@@ -180,6 +180,7 @@ import type {
 // literal would let the app explain an order it no longer produces. See pending-rules.ts.
 import {
   aiRunProvider,
+  asUnreadableReason,
   automationVendorFor,
   MY_TURN_REPLY_MAX_CHARS,
   MY_TURN_SEVERITY,
@@ -226,6 +227,7 @@ import {
 } from './triage.js';
 import { getAccountById, getAccountUserId } from '../auth/account.js';
 import { getMyTurnSettings } from './my-turn-settings.js';
+import { myTurnFloorOf } from './my-turn-floor.js';
 import { getMutedPendingRepoIds, repoGrainedPendingMutes } from './pending-mute.js';
 import {
   MyTurnDismissalFilter,
@@ -2821,6 +2823,15 @@ export async function getActivity(
     for (const r of rows) lastViewedByPr.set(r.prId, r.lastViewedAt);
   }
 
+  // The docs-offer look's stored failure per repo (docs/REFERENCE-DOCS.md § A repository whose files
+  // can't be read): the repo status panel's one line, read here so the panel never fetches.
+  const unreadableRows = await db
+    .select({ id: repos.id, failure: repos.docsOfferFailure })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, scopedIds), isNotNull(repos.docsOfferFailedAt)))
+    .execute();
+  const unreadableByRepo = new Map(unreadableRows.map((r) => [r.id, asUnreadableReason(r.failure)]));
+
   // Preserve listRepos order (stable, not jumpy across loads).
   const activityRepos: ActivityRepo[] = reposScoped.map((repo) => {
     const repoPrs = prsByRepo.get(repo.id) ?? [];
@@ -2894,6 +2905,7 @@ export async function getActivity(
       attentionCount,
       hasUnread,
       unreadPrs,
+      docsUnreadable: unreadableByRepo.get(repo.id) ?? null,
       prs: repoPrs,
     };
   });
@@ -7755,6 +7767,7 @@ export async function getMyTurn(
       owner: repos.owner,
       name: repos.name,
       createdAt: repos.createdAt,
+      firstOnboarding: repos.firstOnboarding,
       viewerPermission: repos.viewerPermission,
       defaultBranchName: repos.defaultBranchName,
       defaultBranchHeadSha: repos.defaultBranchHeadSha,
@@ -7769,7 +7782,8 @@ export async function getMyTurn(
   const writable = new Set<number>();
   for (const r of repoRows) {
     repoNameById.set(r.id, `${r.owner}/${r.name}`);
-    addedAtByRepo.set(r.id, r.createdAt);
+    // The floor: the add time, or a week before it for a first-onboarding repo (db/my-turn-floor.ts).
+    addedAtByRepo.set(r.id, myTurnFloorOf(r));
     if (WRITE_PERMISSIONS.has(r.viewerPermission ?? '')) writable.add(r.id);
   }
   /** The onboarding floor — see `repoRows`. A repo we cannot place has no floor to pass. */
@@ -9576,6 +9590,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // nothing else, but a surviving row would keep this repo's file paths after the repo is gone
     // AND, on Postgres, block the `repos` delete outright.
     await tx.delete(schema.repoFileCoupling).where(eq(schema.repoFileCoupling.repoId, id)).execute();
+    // Docs folders offered from this repo (migration 0155). The composite FK cascades; explicit
+    // anyway, for the same stated reason as the rows above.
+    await tx
+      .delete(schema.referenceDocRepoOffers)
+      .where(and(eq(schema.referenceDocRepoOffers.repoId, id), eq(schema.referenceDocRepoOffers.accountId, accountId)))
+      .execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();

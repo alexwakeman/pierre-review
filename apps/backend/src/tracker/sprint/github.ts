@@ -1,16 +1,25 @@
-import { SPRINT_TICKETS_MAX } from '@pierre-review/shared';
+import { SPRINT_TICKETS_MAX, type GithubProjectsAccess } from '@pierre-review/shared';
+import { isRateLimitError } from '../../github/client.js';
+import { isBudgetLow, noteLimited } from '../../github/rate-budget.js';
 import { JiraFetchError } from '../jira/fetch.js';
 import { githubGraphql, noteGithubBudget, SUB_ISSUE_CAP, githubStatusOrder, toFetchedTicket } from '../github/reader.js';
 import type { GithubCallAccess } from '../types.js';
 import type { SprintFetchedTicket, SprintListDates, SprintListResult, SprintLister } from './types.js';
 
-// GITHUB ISSUES — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read). GitHub's nearest thing
-// to a sprint is a MILESTONE: the open milestone with the NEAREST due date (today or later) across
-// the workspace's repos; an undated one ranks after every dated one, and an overdue one is not
-// picked. Its open issues are read in EVERY repo with an open milestone of the same title (a team
-// that names one milestone per repo for the same release reads as one list).
+// GITHUB ISSUES — THE SPRINT LIST (docs/TRACKERS.md § The sprint list read). Three sources, in order:
 //
-// No open milestone → the status fallback (`none_active`): open issues updated in the window.
+// 1. A GITHUB PROJECTS (v2) ITERATION (§ GitHub Projects iterations): the CURRENT iteration (its
+//    start..start + duration holds today) of an iteration field on a project this workspace's issues
+//    belong to — the one holding the most of the scanned issues when several are current. Its tickets
+//    are the project's items in that iteration that are issues in THIS workspace's repos (never another
+//    workspace's), open or closed; its dates are the iteration's. Projects need `read:project`, which
+//    `gh` does not grant by default: a missing scope, FORBIDDEN or NOT_FOUND falls back SILENTLY to
+//    (2), and a missing scope is noted on the source (`projectsAccess: 'needs_scope'`) for ONE line.
+// 2. A MILESTONE: the open milestone with the NEAREST due date (today or later) across the
+//    workspace's repos; an undated one ranks after every dated one, and an overdue one is not
+//    picked. Its open issues are read in EVERY repo with an open milestone of the same title (a team
+//    that names one milestone per repo for the same release reads as one list).
+// 3. No open milestone → the status fallback (`none_active`): open issues updated in the window.
 // Read with the ACCOUNT's own GitHub token (`TrackerCall.github`), through `githubGraphql` — the
 // reader's budget pre-emption and limit rules — and folded by the SAME `toFetchedTicket`.
 
@@ -91,7 +100,7 @@ const isoDate = (s: string | null | undefined): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-function splitRepo(full: string): { owner: string; name: string } | null {
+export function splitRepo(full: string): { owner: string; name: string } | null {
   const m = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(full.trim());
   return m == null ? null : { owner: m[1]!, name: m[2]! };
 }
@@ -174,6 +183,346 @@ async function readPages(
   }
 }
 
+// ── GitHub Projects iterations ────────────────────────────────────────────────────────────────────
+
+/** Issues scanned per repo for their project iterations (one page, most recently updated first). */
+export const SPRINT_ITERATION_SCAN_ISSUES = 50;
+/** Projects looked at per scanned issue. */
+export const SPRINT_ITERATION_PROJECTS_PER_ISSUE = 5;
+/** Items of the picked project read per pass at most (pages of `ITEM_PAGE`); more → `truncated`. */
+export const SPRINT_ITERATION_ITEMS_MAX = 500;
+const ITEM_PAGE = 50;
+
+export const GITHUB_ITERATION_SCAN_QUERY = /* GraphQL */ `
+  query LimnSprintIterationScan($owner: String!, $name: String!) {
+    repository(owner: $owner, name: $name) {
+      issues(first: ${SPRINT_ITERATION_SCAN_ISSUES}, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        nodes {
+          number
+          projectItems(first: ${SPRINT_ITERATION_PROJECTS_PER_ISSUE}, includeArchived: false) {
+            nodes {
+              project { id title closed }
+              fieldValues(first: 20) {
+                nodes {
+                  ... on ProjectV2ItemFieldIterationValue {
+                    iterationId
+                    title
+                    startDate
+                    duration
+                    field { ... on ProjectV2IterationField { id name } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    rateLimit { cost remaining resetAt }
+  }
+`;
+
+export const GITHUB_ITERATION_ITEMS_QUERY = /* GraphQL */ `
+  query LimnSprintIterationItems($project: ID!, $field: String!, $after: String) {
+    node(id: $project) {
+      ... on ProjectV2 {
+        items(first: ${ITEM_PAGE}, after: $after) {
+          nodes {
+            isArchived
+            fieldValueByName(name: $field) { ... on ProjectV2ItemFieldIterationValue { iterationId } }
+            content { ... on Issue { ${ISSUE_FIELDS} repository { nameWithOwner } } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+    rateLimit { cost remaining resetAt }
+  }
+`;
+
+/** One current-or-not iteration value seen on a scanned issue. */
+export interface IterationSighting {
+  /** `owner/name#number` — counted once per candidate. */
+  issue: string;
+  projectId: string;
+  projectTitle: string;
+  fieldId: string;
+  fieldName: string;
+  iterationId: string;
+  title: string;
+  /** GitHub's YYYY-MM-DD. */
+  startDate: string;
+  /** Days. */
+  duration: number;
+}
+
+export interface PickedIteration {
+  projectId: string;
+  projectTitle: string;
+  fieldName: string;
+  iterationId: string;
+  title: string;
+  startsAt: Date;
+  /** The day AFTER the last (exclusive, midnight UTC). */
+  endsAt: Date;
+  /** Distinct scanned issues in it. */
+  count: number;
+}
+
+/** An iteration's [start, end) in ms, or null for a malformed date / duration. Pure. */
+export function iterationSpan(startDate: string, duration: number): { startMs: number; endMs: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isInteger(duration) || duration <= 0) return null;
+  const startMs = Date.parse(`${startDate}T00:00:00Z`);
+  if (Number.isNaN(startMs)) return null;
+  return { startMs, endMs: startMs + duration * DAY_MS };
+}
+
+/**
+ * The CURRENT iteration to read: among the sightings whose [start, start + duration) holds today (UTC
+ * day), the one seen on the most distinct issues; ties go to the earliest start, then the first seen.
+ * Null when none is current. Exported for its test. Pure.
+ */
+export function pickIteration(sightings: readonly IterationSighting[], nowMs: number): PickedIteration | null {
+  const today = Math.floor(nowMs / DAY_MS) * DAY_MS;
+  const byKey = new Map<string, { s: IterationSighting; startMs: number; endMs: number; issues: Set<string>; order: number }>();
+  for (const s of sightings) {
+    const span = iterationSpan(s.startDate, s.duration);
+    if (span == null || span.startMs > today || today >= span.endMs) continue;
+    const key = `${s.projectId}\u0000${s.fieldId}\u0000${s.iterationId}`;
+    const hit = byKey.get(key) ?? { s, ...span, issues: new Set<string>(), order: byKey.size };
+    hit.issues.add(s.issue);
+    byKey.set(key, hit);
+  }
+  let best: { s: IterationSighting; startMs: number; endMs: number; issues: Set<string>; order: number } | null = null;
+  for (const c of byKey.values()) {
+    if (
+      best == null ||
+      c.issues.size > best.issues.size ||
+      (c.issues.size === best.issues.size && (c.startMs < best.startMs || (c.startMs === best.startMs && c.order < best.order)))
+    )
+      best = c;
+  }
+  if (best == null) return null;
+  return {
+    projectId: best.s.projectId,
+    projectTitle: best.s.projectTitle,
+    fieldName: best.s.fieldName,
+    iterationId: best.s.iterationId,
+    title: best.s.title,
+    startsAt: new Date(best.startMs),
+    endsAt: new Date(best.endMs),
+    count: best.issues.size,
+  };
+}
+
+const errorTypesOf = (errors: unknown): string[] =>
+  Array.isArray(errors) ? errors.map((e) => String((e as { type?: unknown })?.type ?? '')) : [];
+
+/** A GraphQL error list that says the token lacks a scope (GitHub's INSUFFICIENT_SCOPES, or a message
+ *  naming `read:project`). Pure. */
+export function isMissingScope(errors: unknown): boolean {
+  if (errorTypesOf(errors).includes('INSUFFICIENT_SCOPES')) return true;
+  return Array.isArray(errors) && errors.some((e) => /read:project/i.test(String((e as { message?: unknown })?.message ?? '')));
+}
+
+/**
+ * One Projects call. Like `githubGraphql` (the budget pre-emption, a rate limit → 429, a refused token →
+ * `unauthorized`), except that a GraphQL refusal GitHub THROWS (no data: a missing scope, FORBIDDEN,
+ * NOT_FOUND, an HTTP 403 / 404) comes back as `errors`, so the caller can fall back to milestones and
+ * keep the reason. Anything else is transient and fails the read (its last good list stays).
+ */
+export async function projectsGraphql<T>(
+  gh: GithubCallAccess,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<{ data: T | null; errors: unknown }> {
+  if (isBudgetLow(gh.accountId)) throw new JiraFetchError('http', 429);
+  let res: { data: T | null; errors?: unknown };
+  try {
+    res = await gh.graphql<T>(query, variables);
+  } catch (err) {
+    const rl = isRateLimitError(err);
+    if (rl.limited) {
+      noteLimited(gh.accountId, rl.resumeAt);
+      throw new JiraFetchError('http', 429);
+    }
+    const status = (err as { status?: number })?.status ?? (err as { response?: { status?: number } })?.response?.status;
+    if (status === 401) throw new JiraFetchError('unauthorized', 401);
+    const errors = (err as { errors?: unknown })?.errors;
+    if (Array.isArray(errors) && errors.length > 0) return { data: null, errors };
+    if (status === 403) return { data: null, errors: [{ type: 'FORBIDDEN' }] };
+    if (status === 404) return { data: null, errors: [{ type: 'NOT_FOUND' }] };
+    throw new JiraFetchError('network');
+  }
+  if (errorTypesOf(res.errors).includes('RATE_LIMITED')) {
+    noteLimited(gh.accountId, null);
+    throw new JiraFetchError('http', 429);
+  }
+  return { data: res.data ?? null, errors: res.errors };
+}
+
+export interface ScanData {
+  repository?: {
+    issues?: {
+      nodes?: Array<{
+        number?: number | null;
+        projectItems?: {
+          nodes?: Array<{
+            project?: { id?: string | null; title?: string | null; closed?: boolean | null } | null;
+            fieldValues?: {
+              nodes?: Array<{
+                iterationId?: string | null;
+                title?: string | null;
+                startDate?: string | null;
+                duration?: number | null;
+                field?: { id?: string | null; name?: string | null } | null;
+              } | null> | null;
+            } | null;
+          } | null> | null;
+        } | null;
+      } | null> | null;
+    } | null;
+  } | null;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null } | null;
+}
+
+/** A scan answer → its iteration sightings (closed projects and malformed values dropped). Pure. */
+export function sightingsOf(repo: string, data: ScanData | null): IterationSighting[] {
+  const out: IterationSighting[] = [];
+  for (const issue of data?.repository?.issues?.nodes ?? []) {
+    if (issue == null || typeof issue.number !== 'number') continue;
+    for (const item of issue.projectItems?.nodes ?? []) {
+      const p = item?.project;
+      if (p == null || typeof p.id !== 'string' || p.closed === true) continue;
+      for (const v of item?.fieldValues?.nodes ?? []) {
+        if (v == null || typeof v.iterationId !== 'string' || typeof v.startDate !== 'string' || typeof v.duration !== 'number') continue;
+        const fieldId = v.field?.id;
+        const fieldName = v.field?.name;
+        if (typeof fieldId !== 'string' || typeof fieldName !== 'string' || fieldName.trim() === '') continue;
+        out.push({
+          issue: `${repo.toLowerCase()}#${issue.number}`,
+          projectId: p.id,
+          projectTitle: (p.title ?? '').trim().slice(0, 200),
+          fieldId,
+          fieldName,
+          iterationId: v.iterationId,
+          title: (v.title ?? '').trim().slice(0, 200),
+          startDate: v.startDate,
+          duration: v.duration,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+interface ItemsData {
+  node?: {
+    items?: {
+      nodes?: Array<{
+        isArchived?: boolean | null;
+        fieldValueByName?: { iterationId?: string | null } | null;
+        content?: (GqlIssue & { repository?: { nameWithOwner?: string | null } | null }) | null;
+      } | null> | null;
+      pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+    } | null;
+  } | null;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null } | null;
+}
+
+/** What the iteration path found: a list to store, or why it fell back (null = nothing current). */
+type IterationOutcome =
+  | { kind: 'list'; result: SprintListResult }
+  | { kind: 'fallback'; access: GithubProjectsAccess | null };
+
+async function readIteration(
+  gh: GithubCallAccess,
+  repos: ReadonlyArray<{ repo: string; owner: string; name: string }>,
+  cut: boolean,
+  nowMs: number,
+): Promise<IterationOutcome> {
+  // 1. THE SCAN: the most recently updated issues of each repo, with the iterations they sit in.
+  const sightings: IterationSighting[] = [];
+  for (const r of repos) {
+    const { data, errors } = await projectsGraphql<ScanData>(gh, GITHUB_ITERATION_SCAN_QUERY, { owner: r.owner, name: r.name });
+    noteGithubBudget(gh.accountId, data?.rateLimit);
+    // The token cannot read Projects at all: every repo would say the same — stop, say why once.
+    if (isMissingScope(errors)) return { kind: 'fallback', access: 'needs_scope' };
+    // FORBIDDEN / NOT_FOUND (an SSO wall, a project this login cannot see): keep what did come back.
+    sightings.push(...sightingsOf(r.repo, data));
+  }
+  const pick = pickIteration(sightings, nowMs);
+  if (pick == null) return { kind: 'fallback', access: null };
+
+  // 2. THE ITEMS of the picked project in that iteration — issues in THIS workspace's repos only.
+  const inWorkspace = new Map(repos.map((r) => [r.repo.toLowerCase(), r.repo] as const));
+  const tickets: SprintFetchedTicket[] = [];
+  const seen = new Set<string>();
+  const contributing = new Set<string>();
+  let truncated = false;
+  let after: string | null = null;
+  let scanned = 0;
+  for (;;) {
+    const answer: { data: ItemsData | null; errors: unknown } = await projectsGraphql<ItemsData>(gh, GITHUB_ITERATION_ITEMS_QUERY, {
+      project: pick.projectId,
+      field: pick.fieldName,
+      after,
+    });
+    const { data, errors } = answer;
+    noteGithubBudget(gh.accountId, data?.rateLimit);
+    const items: NonNullable<ItemsData['node']>['items'] = data?.node?.items;
+    if (items == null) {
+      // Refused after the scan saw it (a scope or SSO change between calls): milestones, silently.
+      return { kind: 'fallback', access: isMissingScope(errors) ? 'needs_scope' : null };
+    }
+    for (const it of items.nodes ?? []) {
+      scanned += 1;
+      if (it == null || it.isArchived === true || it.fieldValueByName?.iterationId !== pick.iterationId) continue;
+      const c = it.content;
+      const repo = c?.repository?.nameWithOwner != null ? inWorkspace.get(c.repository.nameWithOwner.toLowerCase()) : undefined;
+      if (c == null || repo == null) continue;
+      if (tickets.length >= SPRINT_TICKETS_MAX) {
+        truncated = true;
+        break;
+      }
+      const t = toGithubSprintTicket(repo, c, pick.title);
+      if (t == null || seen.has(t.key)) continue;
+      seen.add(t.key);
+      contributing.add(repo);
+      tickets.push(t);
+    }
+    if (truncated) break;
+    const next: string | null = items.pageInfo?.hasNextPage === true ? (items.pageInfo.endCursor ?? null) : null;
+    if (next == null) break;
+    if (scanned >= SPRINT_ITERATION_ITEMS_MAX) {
+      truncated = true;
+      break;
+    }
+    after = next;
+  }
+  // Nothing of this workspace's left in it (every item archived, moved, or in another repo): milestones.
+  if (tickets.length === 0 && !truncated) return { kind: 'fallback', access: null };
+  return {
+    kind: 'list',
+    result: {
+      source: {
+        kind: 'iteration',
+        provider: 'github',
+        name: pick.title,
+        project: pick.projectTitle,
+        field: pick.fieldName,
+        startsOn: pick.startsAt.toISOString().slice(0, 10),
+        endsOn: pick.endsAt.toISOString().slice(0, 10),
+        repos: repos.filter((r) => contributing.has(r.repo)).map((r) => r.repo),
+      },
+      tickets,
+      truncated: truncated || cut,
+      statusOrder: githubStatusOrder(new Date().toISOString()),
+      dates: { startsAt: pick.startsAt, endsAt: pick.endsAt },
+    },
+  };
+}
+
 export function makeGithubLister(now: () => number = Date.now): SprintLister {
   return async (a): Promise<SprintListResult> => {
     const gh = a.call.github;
@@ -182,6 +531,15 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
     if (repos.length === 0) throw new JiraFetchError('not_found');
     const cut = repos.length > SPRINT_GITHUB_REPOS_MAX;
     const read = repos.slice(0, SPRINT_GITHUB_REPOS_MAX);
+    const nowMs = now();
+    const iteration = await readIteration(
+      gh,
+      read.map((r) => ({ repo: r.full, owner: r.parts!.owner, name: r.parts!.name })),
+      cut,
+      nowMs,
+    );
+    if (iteration.kind === 'list') return iteration.result;
+    const note = iteration.access != null ? { projectsAccess: iteration.access } : {};
     const byRepo: Array<{ repo: string; owner: string; name: string; milestones: Milestone[] }> = [];
     for (const r of read) {
       const { data } = await githubGraphql<{
@@ -197,7 +555,7 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
       byRepo.push({ repo: r.full, owner: r.parts!.owner, name: r.parts!.name, milestones });
     }
     const into = { tickets: [] as SprintFetchedTicket[], truncated: false };
-    const pick = pickMilestone(byRepo, now());
+    const pick = pickMilestone(byRepo, nowMs);
     if (pick != null) {
       const inRepos: string[] = [];
       for (const r of byRepo) {
@@ -216,7 +574,7 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
         if (into.truncated) break;
       }
       return {
-        source: { kind: 'milestone', provider: 'github', name: pick.title, dueOn: pick.dueOn, repos: inRepos },
+        source: { kind: 'milestone', provider: 'github', name: pick.title, dueOn: pick.dueOn, repos: inRepos, ...note },
         tickets: into.tickets,
         truncated: into.truncated || cut,
         statusOrder: githubStatusOrder(new Date().toISOString()),
@@ -243,6 +601,7 @@ export function makeGithubLister(now: () => number = Date.now): SprintLister {
         reason: 'none_active',
         from: new Date(a.fallbackWindow.fromMs).toISOString(),
         to: new Date(a.fallbackWindow.toMs).toISOString(),
+        ...note,
       },
       tickets: into.tickets,
       truncated: into.truncated || cut,

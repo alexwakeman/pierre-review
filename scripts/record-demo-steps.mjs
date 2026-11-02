@@ -236,6 +236,8 @@ export const STEPS = [
       await h.go('?view=activity&activityRepo=docs');
       await explore(h, { max: 16, scope: 'main' });
       // Every built section, its contents page and the conversation, by the paths the viewer asks.
+      // The library's answer also carries the DOCS OFFER (`offers`: folders found in Platform's
+      // repositories, seed-demo.ts); Pending's board carries the same list as `docsOffers`.
       const docs = await h.fetchGet('/api/docs?workspace=1');
       const paths = new Set(['INDEX.md']);
       const collect = (v) => {
@@ -257,7 +259,9 @@ export const STEPS = [
       for (const c of chats?.conversations ?? []) await h.fetchGet(`/api/docs/chats/${enc(c.conversationId ?? c.id)}?workspace=1`);
       await h.fetchGet('/api/workspaces/1/docs-settings');
       // The add-documents wizard reads the wiki connection and the repository list (its counts are the
-      // demo's own fixed answers, demo/routes.ts).
+      // demo's own fixed answers, demo/routes.ts). Its "From your repositories" check
+      // (POST /api/docs/offers/check) is answered from the library's recorded `offers` above — the same
+      // folders, whatever the card's "Not now" — so it needs no recording of its own.
       await h.fetchGet('/api/workspaces/1/wiki-credentials');
       await h.fetchGet('/api/repos');
     },
@@ -422,6 +426,8 @@ export const STEPS = [
       await h.openSettings();
       await h.scrollModal();
       await h.escape();
+      // Settings → Features reads only /api/me (its `features`; the demo DB is an existing install, so
+      // every destination shows) and its write is simulated (demo/routes.ts): nothing to fetch here.
       // Settings → Dependencies, both workspaces (scrollModal visits the tab; these make sure).
       await h.fetchGet('/api/workspaces/1/dependency-automation');
       await h.fetchGet('/api/workspaces/2/dependency-automation');
@@ -456,6 +462,7 @@ export const STEPS = [
       for (let id = 1; id <= 8; id++) await h.fetchGet(`/api/ticket-reviews/${id}`);
       await h.fetchGet('/api/sprint-graph/token?workspace=1');
       await h.fetchGet('/api/sprint-graph/token?workspace=2');
+      await h.fetchGet('/api/sprint-graph/token?workspace=3');
       await h.fetchGet('/api/workspace-metrics/detail?workspace=1');
       await h.fetchGet('/api/workspace-metrics/detail?workspace=2');
       await h.fetchGet('/api/repos/suggested');
@@ -479,6 +486,14 @@ export const STEPS = [
   })),
   { name: 'ws2:sprint', run: (h) => h.go('?view=sprint&workspace=2') },
   { name: 'ws2:chronology', run: (h) => h.go('?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks') },
+  // ── The third workspace, "Admin": GitHub Issues by default, its sprint a GitHub Projects ITERATION
+  //    (apps/backend/scripts/seed-demo-github-iteration.ts; docs/TRACKERS.md § GitHub Projects iterations).
+  { name: 'ws3:open-prs', run: (h) => h.go('?view=activity&workspace=3') },
+  { name: 'ws3:sprint', run: (h) => h.go('?view=sprint&workspace=3') },
+  // Admin's Pending board is empty: it lists Morgan's own open PR with what blocks it, and the
+  // one-time AI review suggestion (docs/FRONTEND.md § Pending on the first landing). One read,
+  // /api/attention?workspace=3; the suggestion is the demo overlay's (demo/routes.ts).
+  { name: 'ws3:pending', run: (h) => h.go('?view=activity&activityRepo=attention&workspace=3') },
   ...WEB_PRS.flatMap((id) =>
     ['overview', 'changes', 'ai_review'].map((t) => ({
       name: `pr:${id}:${t}`,

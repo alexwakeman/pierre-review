@@ -1369,6 +1369,60 @@ check after each). No SQL backfill: the rows are derived from the files, so the 
 erasure and `verify:isolation` take the table; the export leaves it out (derived).
 [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Retrieval. Journal `idx` 152, `when` sqlite `1792224055016`.
 
+### `0153_feature_visibility` — Settings → Features
+Two `accounts` columns: `feature_settings` (text JSON, nullable — the switches, overrides only) and
+`features_existing_install` (integer, NOT NULL DEFAULT 0), then ONE backfill: `UPDATE accounts SET
+features_existing_install = 1 WHERE EXISTS (SELECT 1 FROM repos WHERE repos.account_id = accounts.id)`.
+That stamp is the whole "existing installs keep everything visible" rule — a fresh install runs it with
+account 1 (seeded by `0008`) and no repos, so it stays 0; an account that adds its first repo later is
+never re-stamped. The demo seed sets it to 1 by hand (its repos arrive after the migration).
+`me-feature-settings.test.ts` replays the UPDATE before and after a repo exists. No new table.
+docs/FRONTEND.md § Features shown. Journal `idx` 153, `when` sqlite `1792224056016`.
+
+### `0154_first_landing` — Pending on the first landing
+Two columns: `repos.first_onboarding` (integer, NOT NULL DEFAULT 0) and
+`accounts.review_suggestion_dismissed_at` (integer timestamp, nullable). Additive, NO backfill: an
+existing repo stays 0, so an install that already had repos keeps today's My Turn floor and never
+sees the first-landing summary. No new table, so `accountScopedTables()` is unchanged; the account
+column joins the export. docs/BACKEND.md § My Turn — The first-onboarding lookback. Journal `idx`
+154, `when` sqlite `1792224057016`.
+
+### `0155_repo_docs_offers` — docs offered from the repositories
+A NEW table, `reference_doc_repo_offers` (one row per account × workspace × repository × folder; unique
+`reference_doc_repo_offers_folder`; index `(account_id, workspace_id, state)`; named composite FKs onto
+`workspaces (id, account_id)` and `repos (id, account_id)`, both cascade, and `deleteRepo` deletes its rows
+explicitly too), and ONE column, `repos.docs_offer_scanned_at` (integer timestamp, nullable). Additive, no
+backfill: every repository reads as never looked at, so each is looked at after its next walk. The table
+joins `accountScopedTables()`, erasure, the export and `verify:isolation`. The scan's upsert targets the
+unique index and NEVER sets `state`. docs/REFERENCE-DOCS.md § Docs offered from your repositories.
+Journal `idx` 155, `when` sqlite `1792224058016`.
+
+### `0156_ci_history_pending` — the CI-history backfill is owed until it ran
+ONE column, `sync_state.ci_history_pending_at` (integer timestamp, nullable). Additive, no backfill: an
+existing repo reads as owing nothing. Set when a completed FULL walk owes the one-time CI-history backfill,
+BEFORE the follow-ons run or are parked in the in-memory queue; cleared once the backfill ran uncancelled.
+A repo's next walk, or the boot recovery (`resumePendingCiHistory`), runs it while the stamp stands.
+`sync_state` is repo-keyed, so `accountScopedTables()` is unchanged. docs/SYNC.md § The CI-history
+backfill is owed until it ran. Journal `idx` 156, `when` sqlite `1792224059016`.
+
+### `0157_sprint_source_probe` — This Sprint appears when a milestone or iteration is found
+TWO columns on `sprint_reads`: `probe_checked_at` (integer timestamp, nullable) and `probe_source_json`
+(text JSON, a `SprintSource`, nullable). Additive, no backfill: every workspace reads as never probed. The
+tracker worker's sprint-source probe (`tracker/sprint/probe.ts`) writes them for a GitHub Issues workspace
+with no sprint read yet, and may CREATE the workspace's row with `viewed_at` / `next_read_at` = epoch 0 (so
+the demand-gated read never picks it up); its upsert targets `[account_id, workspace_id]` like every other.
+Read only by `hasSprintSource`. `sprint_reads` is already in `accountScopedTables()`. docs/TRACKERS.md § The
+sprint-source probe. Journal `idx` 157, `when` sqlite `1792224060016`.
+
+### `0158_repo_docs_unreadable` — a repository whose files can't be read
+TWO columns on `repos`: `docs_offer_failed_at` (integer timestamp, nullable) and `docs_offer_failure` (text,
+nullable: `'no_access' | 'empty' | 'not_found' | 'unavailable'`). Additive, no backfill: every repository
+reads as never failed. Set together when the docs-offer look at the tree fails, cleared together by the next
+look that succeeds (`stampRepoScanned`); while set the repository is not looked at again for
+`DOCS_OFFER_FAILURE_RETRY_HOURS`. The PR sync never reads them. Columns on `repos`, so
+`accountScopedTables()` is unchanged and the export carries them. docs/REFERENCE-DOCS.md § A repository
+whose files can't be read. Journal `idx` 158, `when` sqlite `1792224061016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

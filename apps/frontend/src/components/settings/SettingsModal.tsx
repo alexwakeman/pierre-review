@@ -8,6 +8,7 @@ import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
+import { FeaturesSection } from './FeaturesSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
 import { DiskSpaceSection } from './DiskSpaceSection.js';
@@ -83,6 +84,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   BlastRadiusSection,
   MyTurnSection,
   PendingMuteSection,
+  FeaturesSection,
   AiProviderSection,
   ClaudeSpendSection,
   DiskSpaceSection,

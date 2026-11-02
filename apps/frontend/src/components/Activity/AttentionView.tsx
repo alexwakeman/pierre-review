@@ -54,6 +54,10 @@ import { DependencyAutomationLog } from './DependencyAutomationLog.js';
 import { MyTurnDismissedList } from './MyTurnDismissedList.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
+import { PendingEmptyBoard, PendingSummaryLine, ReviewSuggestionCard } from './PendingFirstLanding.js';
+import { DocsOfferCard } from './DocsOfferCard.js';
+import { goTo } from '../shell/nav.js';
+import { pendingBoardEmpty } from '../../lib/pendingFirstLanding.js';
 import { aiRunLabel } from '@pierre-review/shared';
 
 // The **Pending** rail entry — the attention cards (your turn / stalled reviews / untouched
@@ -433,6 +437,12 @@ export function AttentionView(): JSX.Element {
     cards: view.cards.length,
     people: view.people.length,
   });
+  // THE FIRST LANDING (docs/FRONTEND.md § Pending on the first landing) — all from this response.
+  // Every tab empty and the server sent the reader's own PRs: the board says so and lists them
+  // instead of one tab's empty sentence.
+  const boardEmpty = !isLoading && !isError && data?.ownOpenPrs != null && pendingBoardEmpty(tabs);
+  const suggestion = !isLoading && !isError ? (data?.reviewSuggestion ?? null) : null;
+  const docsOffers = !isLoading && !isError ? (data?.docsOffers ?? null) : null;
   const emptyNote = empty != null && (
     <div className="flex flex-col items-center gap-3 px-6 py-12 text-center text-body text-ui-mute">
       <p className="flex items-center gap-2">
@@ -637,6 +647,18 @@ export function AttentionView(): JSX.Element {
               </p>
             )}
             {canNarrate && !generate.isError && notice != null && <p className="mt-0.5 text-meta text-ui-mute">{notice}</p>}
+            {/* THE ONE-LINE SUMMARY, while the account is new (`summary`, server-decided). Each part
+                is its tab's own badge figure and opens that tab. */}
+            {!isLoading && !isError && data?.summary === true && (
+              <PendingSummaryLine
+                tabs={shownTabs}
+                lens={attentionAuthorLens}
+                onOpenTab={(k) => {
+                  setAttentionRelevance(null);
+                  setAttentionTab(k);
+                }}
+              />
+            )}
           </>
         }
       >
@@ -765,7 +787,22 @@ export function AttentionView(): JSX.Element {
               <>
                 {/* ⚠ A NARROWED view with no cards still lists the review-load group — it counts
                     REVIEWERS, so no PR narrowing applies to it — and the note says so, with its way back. */}
-                {empty != null && emptyNote}
+                {/* The one-time AI review suggestion — on every tab until run or dismissed. */}
+                {suggestion != null && <ReviewSuggestionCard suggestion={suggestion} />}
+                {/* Docs folders found in the workspace's repositories — until added or "Not now". */}
+                {docsOffers != null && workspaceId != null && (
+                  <DocsOfferCard
+                    workspaceId={workspaceId}
+                    offers={docsOffers}
+                    className="mx-5 mt-3 max-md:mx-2"
+                    onChoosePart={() => goTo('docs')}
+                  />
+                )}
+                {boardEmpty ? (
+                  <PendingEmptyBoard prs={data?.ownOpenPrs ?? []} total={data?.ownOpenPrTotal ?? 0} />
+                ) : (
+                  empty != null && emptyNote
+                )}
                 {/* Dependencies: one press merges what can land and arms the rest (the server's dry
                     run is the confirm dialog). Renders nothing when no listed card is a dependency PR. */}
                 {tabKey === 'deps' && empty?.placement !== 'alone' && (

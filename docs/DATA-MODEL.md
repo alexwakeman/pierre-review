@@ -32,7 +32,9 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `verify:isolation` still proves it. `accessTokenEnc`, `lastActiveAt`, `plan`,
   `stripeCustomerId`, `aiCreditAllowance` and `benchmarkOptIn` are DORMANT (§ Dormant tables).
   Replaces the old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
-  JSON (`blast_radius_config`, and `my_turn_settings` — § `accounts.my_turn_settings` below).
+  JSON (`blast_radius_config`, `my_turn_settings` — § `accounts.my_turn_settings` below — and
+  `feature_settings`, Settings → Features, beside the one-time `features_existing_install` stamp — §
+  `accounts.feature_settings` below).
 - **`repos`** — the account's repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`). The `repos_id_account` unique index is NOT a lookup index — it is
   the PARENT KEY of the composite `(repo_id, account_id)` FK on `workspace_repos`.
@@ -545,6 +547,28 @@ Per ACCOUNT, not per workspace: one account is one reader. Written only by
 `PUT /api/me/my-turn-settings`; exported with the account; erased with the `accounts` row. Contract:
 [BACKEND.md](BACKEND.md) § My Turn — Settings: gates and promotions.
 
+## `repos.first_onboarding` + `accounts.review_suggestion_dismissed_at` (CORE — Pending's first landing)
+
+Migration `0154`. `repos.first_onboarding` (integer boolean, NOT NULL default 0) marks a repo added
+while the account had no repos, or in that same first-run batch; written ONCE at insert by the
+reader's add (`upsertRepo`'s `added` option), never by a walk or the conflict update. It moves the
+repo's My Turn floor `FIRST_ONBOARDING_LOOKBACK_DAYS` before `createdAt` (`db/my-turn-floor.ts`) and
+the earliest marked `createdAt` starts Pending's summary window. `accounts.review_suggestion_dismissed_at`
+(timestamp, nullable) is when the reader dismissed Pending's one-time AI review card. Both ride
+their rows' existing export and erasure (no new table). docs/BACKEND.md § My Turn — The
+first-onboarding lookback; docs/FRONTEND.md § Pending on the first landing.
+
+## `accounts.feature_settings` + `accounts.features_existing_install` (CORE — Settings → Features)
+
+Migration `0153`. `feature_settings` is JSON holding OVERRIDES ONLY — `{feed?, reports?, sprint?,
+bots?}` booleans, whether each sidebar destination shows; NULL = every default applies.
+`features_existing_install` (integer boolean, NOT NULL default 0) is stamped ONCE by the migration for an
+account that already had repos, and is never written again: its defaults show everything. Both are
+resolved by shared `resolveFeatures` with the DB-only facts from `db/feature-gates.ts` (a finished
+backfill; a sprint source). Visibility only — nothing else reads them. Written only by `PUT
+/api/me/feature-settings`; exported with the account; erased with the `accounts` row (no new table, so
+`accountScopedTables()` is unchanged). docs/FRONTEND.md § Features shown.
+
 ## `my_turn_dismissals` (CORE — Pending → My turn → "Dismiss")
 
 One row per dismissed SUBJECT — `pr_id` for a pull request, `repo_id` for a red default branch;
@@ -811,7 +835,11 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
   (migration `0101`) it was read from — a workspace that moved tracker or site since is
-  reset on the next view (no source, no read time, due now).
+  reset on the next view (no source, no read time, due now). Plus the SPRINT-SOURCE PROBE's answer
+  (migration `0157`): `probe_checked_at` + `probe_source_json` (an `iteration` or dated `milestone`
+  source, or NULL), written by the tracker worker for a GitHub Issues workspace with no read yet (it
+  may create the row with `viewed_at` = epoch 0), read only by `hasSprintSource` while `read_at` is
+  NULL. docs/TRACKERS.md § The sprint-source probe.
 - **`sprint_tickets`** — one per (account, workspace, `ident`): the sprint list's tickets, PR or not
   (they cannot live in `tracker_tickets`, keyed on a PR). Story text, status, assignee, project /
   epic / components, `sprint_name`, `in_sprint` (false once a read stops returning it),
@@ -889,6 +917,21 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   `reference_docs (id, account_id)` and `workspaces (id, account_id)`, cascade. ⚠ Its FTS5 index
   `reference_doc_chunks_fts` and three triggers are in the `.sql` only. `accountScopedTables()`, erasure,
   `verify:isolation`; not exported (derived). Read only through `reference-docs/retrieve.ts`.
+- **`reference_doc_repo_offers`** (migration `0155`) — a docs folder found in a workspace's repository and
+  the reader's answer: `path`, `doc_count`, `word_estimate` (from the tree's sizes), `page_count`,
+  `too_large`, `state` (`offered` · `declined` — "Not now": the workspace's card hides for
+  `DOCS_OFFER_SNOOZE_DAYS` from the latest `decided_at`, then offers it again · `added`, with the queued
+  `doc_id`, or found already in the library; kept after that document is removed), `detected_at`,
+  `decided_at`. Unique `(account_id,
+  workspace_id, repo_id, path)`; named composite FKs onto `workspaces` and `repos`, cascade. ⚠ The scan
+  (`reference-docs/repo-offers.ts`) updates counts and NEVER `state` (save an open folder now in the
+  library → `added`); only the reader's Add / Not now move it (`repo-offers-store.ts`, the Add CLAIMED by compare-and-set). `accountScopedTables()`, erasure,
+  export, `verify:isolation`; `deleteRepo` clears it. Plus `repos.docs_offer_scanned_at` (when the
+  repository's tree was last SUCCESSFULLY looked at; NULL = never), and (migration `0158`)
+  `repos.docs_offer_failed_at` + `repos.docs_offer_failure` (the last failed look: when, and `no_access` /
+  `empty` / `not_found` / `unavailable`; set and cleared together, cleared by the next success; a 24-hour
+  back-off; never read by the PR sync). docs/REFERENCE-DOCS.md § Docs offered from your repositories, § A
+  repository whose files can't be read.
 - **`workspace_wiki_credentials`** (migration `0140`) — a SEALED wiki token per (account, workspace,
   provider), plus site + email; never returned (`hasToken`). Composite workspace FK, cascade. Read only
   through `reference-docs/wiki/credentials.ts` `resolveWikiCredential` (own token on the same host, else the

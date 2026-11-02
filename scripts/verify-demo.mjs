@@ -132,6 +132,25 @@ const VIEWS = [
       expect: ['Release handbook', 'Confluence · 3 pages', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI', 'On-call runbooks', 'GitHub · 3 pages'],
     },
   ],
+  // THE DOCS OFFER (docs/REFERENCE-DOCS.md § Docs offered from your repositories): two folders found in
+  // Platform's repositories, a checkbox each, and one too large to add in one go (seed-demo.ts).
+  [
+    'docs:offer',
+    '?view=activity&activityRepo=docs',
+    'docs-offer',
+    {
+      expect: [
+        'Add 2 docs collections from your repositories?',
+        'acme/api › docs',
+        'acme/infrastructure › runbooks',
+        'too large to add in one go',
+        'Choose part of it',
+        'Not now',
+      ],
+    },
+  ],
+  // The same offer as a card on Pending (every tab, until added or "Not now").
+  ['pending:docs-offer', '?view=activity&activityRepo=attention', null, { expect: ['Add 2 docs collections from your repositories?', 'acme/api › docs'] }],
   // A document's "…" menu holds Refresh now, Rebuild and Remove (docs/REFERENCE-DOCS.md § The SPA).
   [
     'docs:menu',
@@ -163,6 +182,27 @@ const VIEWS = [
         await wizard.getByRole('button', { name: 'Next' }).click();
       },
       expect: ['This will add 11 documents from acme/web/docs.', 'Start'],
+    },
+  ],
+  // "From your repositories": the docs offer's check over the workspace's repositories, a checkbox per
+  // folder (a too-large one points at the GitHub source), then the review.
+  [
+    'docs:wizard-repos',
+    '?view=activity&activityRepo=docs',
+    null,
+    {
+      act: async (page) => {
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
+        await page.getByRole('button', { name: 'Add documents' }).first().click();
+        const wizard = page.getByTestId('docs-add-wizard');
+        await wizard.getByText('From your repositories', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByTestId('docs-wizard-repo-folders').waitFor({ timeout: 10_000 });
+        await wizard.getByText('Choose part of it', { exact: true }).first().waitFor({ timeout: 10_000 });
+        await wizard.getByText('acme/api › docs', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+      },
+      expect: ['This will add 1 folder from your repositories as one document.', 'acme/api › docs', 'Add'],
     },
   ],
   [
@@ -452,6 +492,13 @@ const VIEWS = [
       expect: ['Default: Codex.'],
     },
   ],
+  // Settings → Features: every destination switched on (the demo is an existing install).
+  [
+    'settings:features',
+    '?view=activity',
+    null,
+    { act: openSettingsTab('Features'), expect: ['Choose which pages the sidebar shows.', 'This Sprint', 'Bots Monitoring'] },
+  ],
   // Settings → Dependencies: merge, approve and resolve conflicts, the policy, and Dependabot trusted.
   [
     'settings:dependencies',
@@ -501,6 +548,18 @@ const VIEWS = [
   // The Web workspace reads NOTION (docs/TRACKERS.md § Notion): the sprint from the Sprints database,
   // a ticket's story with its comments (the bot's hidden), and Settings → Integrations' mapping.
   ['ws2:sprint', '?view=sprint&workspace=2', null, { expect: ['Web Sprint 9'] }],
+  // The Admin workspace's sprint is the CURRENT iteration of a GitHub Projects board.
+  ['ws3:open-prs', '?view=activity&workspace=3', null],
+  ['ws3:sprint', '?view=sprint&workspace=3', null, { expect: ['Sprint 14'] }],
+  // Pending on the first landing (docs/FRONTEND.md): Admin's empty board lists Morgan's own PR and
+  // what blocks it, under the one-time AI review suggestion; Platform's board carries the summary line.
+  [
+    'ws3:pending',
+    '?view=activity&activityRepo=attention&workspace=3',
+    null,
+    { expect: ['Nothing here needs you right now.', 'Show who changed a role in the audit log', 'blocked', 'Review your PR #14 with'] },
+  ],
+  ['pending:summary', '?view=activity&activityRepo=attention', null, { expect: ['waiting on you', 'unanswered threads'] }],
   [
     'ticket:notion:WEB-34',
     `?view=${encodeURIComponent('ticket:notion:https://www.notion.so/5e1f0c2a7b3d4e8f9a0b1c2d3e4f5a6b#WEB-34')}&workspace=2`,

@@ -209,20 +209,21 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
 - **Providers** (`SPRINT_LISTERS`): Jira `project in (<keys>) AND sprint in openSprints()` through
   `jiraGetJson` (`/rest/api/3/search/jql`, one retry on Server's `/rest/api/2/search` after a 404),
   sprint names from the `gh-sprint` field; Linear each team's `activeCycle`; GitHub Issues the
-  nearest-due open milestone across the workspace's repos (never an overdue one; ≤ 20 repos per pass,
-  `truncated` when cut); Notion the workspace's mapped current-sprint rule (§ Notion). Project keys /
+  CURRENT GitHub Projects iteration (§ GitHub Projects iterations), else the nearest-due open milestone
+  across the workspace's repos (never an overdue one; ≤ 20 repos per pass, `truncated` when cut); Notion the workspace's mapped current-sprint rule (§ Notion). Project keys /
   team keys are the ones seen on this workspace's stored `tracker_tickets` (+ the tracker's
   `project_keys`); none → `no_projects`.
 - **The sprint's DATES** (migration `0111`, `sprint_reads.sprint_starts_at / _ends_at`): read
   off the same answers, never a second call — the Jira sprint field's `startDate` / `endDate` (Cloud
   objects; Server's `…[startDate=…,endDate=<null>,…]` string, `sprintsOf`), Linear's `activeCycle {
-  startsAt endsAt }`, a GitHub milestone's `dueOn` as the END only. Several active sprints / cycles →
+  startsAt endsAt }`, a GitHub iteration's `startDate` + `duration` (the end = the day after its last,
+  midnight UTC), a GitHub milestone's `dueOn` as the END only. Several active sprints / cycles →
   the one holding the most read tickets (`busiestSprintDates`, ties to the earliest start). Written on
   every good read (the status fallback, or none given, clears them). The page header ("14 Oct – 27 Oct ·
   day 1 of 14") and the pace's and the sprint builder's day facts read them; the cadence window is only the fallback.
 - **Fallback** when the tracker has no sprint concept or none is active: To do + In progress tickets
   touched in the workspace's reporting window (`getReportingWindow`), else the trailing 14 days. The
-  `source` says which (`sprint` / `cycle` / `milestone` / `status_fallback` + reason).
+  `source` says which (`sprint` / `cycle` / `iteration` / `milestone` / `status_fallback` + reason).
   ⚠ Jira's JQL says `updated >= -<N>m` (a relative duration), never a date literal: Jira reads a
   literal in the token owner's profile time zone.
 - **Storage**: `sprint_tickets` (keyed `(account, workspace, ident)` — they cannot live in
@@ -261,6 +262,73 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   - **The store**: a FULL lookup that finished REPLACES the workspace's rows (`depth` = hops from the
     sprint); one cut short keeps what it could not re-read; a failure never fails the read.
     `knownTicketsFor` reads them as its LAST source.
+
+## GitHub Projects iterations — GitHub Issues' first sprint source (`tracker/sprint/github.ts`)
+
+A team that plans in GitHub Projects (v2) keeps its sprint in an ITERATION field, not a milestone. The
+GitHub lister tries, in order: (1) the current iteration, (2) the nearest-due open milestone, (3) the
+status fallback. `source.kind` says which (`iteration` / `milestone` / `status_fallback`).
+
+- **WHICH ITERATION.** The SCAN (`LimnSprintIterationScan`, one query per repo, the same ≤ 20 repos):
+  each repo's `SPRINT_ITERATION_SCAN_ISSUES` (50) most recently updated issues, open or closed, with
+  `projectItems(first: 5, includeArchived: false)` and their iteration field values. A value is CURRENT
+  when its `[startDate, startDate + duration days)` holds today (UTC day). Several current → the one on
+  the most distinct scanned issues (key: project + field + iteration), ties to the earliest start, then
+  the first seen (`pickIteration`, pure). A closed project never counts. None current → milestones.
+- **ITS TICKETS** (`LimnSprintIterationItems`): the picked project's items, pages of 50, each item's
+  `fieldValueByName(<the field>)`. Kept: items in THAT iteration, not archived, whose content is an
+  ISSUE in one of THIS workspace's repos (a PR, a draft, another workspace's or another org's issue is
+  left out — the scope is the workspace), open AND closed (a closed issue is the sprint's done work),
+  folded by the same `toGithubSprintTicket`, `sprintName` = the iteration's title. Nothing of this
+  workspace's left in it → milestones.
+- **BOUNDS.** ≤ 20 scan queries + ≤ `SPRINT_ITERATION_ITEMS_MAX` (500) items (10 pages) per read, on the
+  read's own cadence only (a view never reads). More items, or `SPRINT_TICKETS_MAX` tickets, → the read
+  says `truncated`. A token without the scope costs ONE query: the scan stops at the first refusal.
+- **SOURCE + DATES.** `{kind: 'iteration', provider: 'github', name, project, field, startsOn, endsOn,
+  repos}` (`startsOn`/`endsOn` YYYY-MM-DD, `endsOn` the day after the last); the stored dates are the
+  iteration's (`dates`), so the header reads "26 Oct – 8 Nov · day 7 of 14". Titled by the iteration's
+  own name (`sprintSourceTitle`).
+- ⚠ **THE SCOPE.** Projects need `read:project`, which `gh auth login` does not grant. A missing scope
+  (`INSUFFICIENT_SCOPES`, or a message naming `read:project` — thrown with no data or returned beside
+  partial data), FORBIDDEN, NOT_FOUND or an HTTP 403 / 404 on a Projects call is NEVER an error: the
+  read falls back to milestones SILENTLY (`projectsGraphql`, which returns the refusal instead of
+  throwing; a rate limit is still the reader's 429, a 401 still `unauthorized`, anything else still
+  transient). Only a missing scope is REMEMBERED: the milestone / status-fallback source carries
+  `projectsAccess: 'needs_scope'`, and This Sprint shows ONE muted line — "Run `gh auth refresh -s
+  read:project` to use your GitHub Projects iterations." with a copy button (shared
+  `needsGithubProjectsScope`, `GITHUB_PROJECTS_SCOPE_COMMAND`). Nothing is stored about the token; the
+  next read after `gh auth refresh` simply finds the iteration.
+- **SETTINGS → FEATURES.** A stored `iteration` source counts as a sprint source
+  (`db/feature-gates.ts` `isSprintSource`), so This Sprint's default turns on for a new install —
+  before any read too, through the probe below.
+- **THE DEMO.** The third workspace, Admin (`acme/admin-console`, no tracker chosen → GitHub Issues by
+  default), reads "Sprint 14" of a fictional "Admin roadmap" board through the real read, the GraphQL
+  faked at `TrackerContext.github` (`scripts/seed-demo-github-iteration.ts`).
+
+## The sprint-source probe — This Sprint appears by itself (`tracker/sprint/probe.ts`)
+
+Settings → Features shows This Sprint on a new install once a sprint source exists (`hasSprintSource`).
+A GitHub milestone or iteration is seen by the sprint read — which runs only once the tab is OPENED —
+so a GitHub-Issues-only install would never show the tab by itself. The PROBE asks GitHub, cheaply and
+in the background, whether there is anything to show. ⚠ **A view never triggers it**: it runs only at
+the end of the worker's `runTrackerTick`, after the sprint read tick; `GET /api/me` and
+`GET /api/sprint-graph` read its stored answer, never GitHub.
+
+- **Who**: a workspace whose EFFECTIVE tracker is GitHub Issues (stored, or the automatic default) with
+  NO successful sprint read (`sprint_reads.read_at` NULL — once a read exists, its source is the
+  answer), of an account that is not an existing install (whose defaults show everything anyway); its
+  call prepares and the worker has not backed it off.
+- **How often**: once per workspace per `SPRINT_PROBE_INTERVAL_MS` (6 h, `probe_checked_at`), never
+  probed first; ≤ `SPRINT_PROBE_WORKSPACES` (2) workspaces per tick; ≤ 20 repos each (repos that use
+  Issues first).
+- **What**: cheapest first, stopping at the first hit — each repo's open milestones (the read's
+  `LimnSprintMilestones`; one due today or later counts, undated and overdue ones do not), then each
+  repo's iteration SCAN (the read's `LimnSprintIterationScan`; a CURRENT iteration counts). A token
+  without `read:project` ends the iteration half SILENTLY — milestones only. No ticket is listed.
+- **Stored** (migration `0157`): `sprint_reads.probe_checked_at` + `probe_source_json` (the
+  `iteration` or dated `milestone` source, or NULL). The probe may CREATE the row with `viewed_at` =
+  epoch 0, so the demand gate is unchanged. A failed probe (rate limit, network) stamps the attempt and
+  keeps the last answer. `hasSprintSource` counts the answer only while `read_at` is NULL.
 
 ## Blocking links — read in the same issue read (`blocked_by_json`)
 

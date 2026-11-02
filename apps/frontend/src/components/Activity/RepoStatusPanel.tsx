@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { repoStatusSummary, type ActivityRepo, type RepoStatusLine } from '@pierre-review/shared';
+import { isRepoDocsUnreadableShown, repoDocsUnreadableLine, repoStatusSummary, type ActivityRepo, type RepoStatusLine } from '@pierre-review/shared';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useMarkRepoSeen } from '../../hooks/useMarkRepoSeen.js';
 import { InfoButton } from '../InfoModal.js';
@@ -18,6 +19,12 @@ import { Button } from '../ui/Button.js';
 // ⚠ NOTHING HERE FETCHES. It reads the `/api/activity` repo entry its caller already holds and the
 // whole-workspace `/api/branch-status` key the sidebar keeps live. "Mark all seen" is a click.
 //
+// One more line, with NO dot (it is neither red nor blue): when Limn could not read the repository's
+// files for the docs offers (`repo.docsUnreadable`, the STORED failure; docs/REFERENCE-DOCS.md § A
+// repository whose files can't be read), it says so and why — for a LASTING reason only (shared
+// `isRepoDocsUnreadableShown`; a transient 'unavailable' is never shown). Shown only where AI runs — the offers
+// exist only there.
+//
 // ⚠ OPENING THE REPO VIEW DOES NOT CLEAR THE BLUE. The seen stamp is per PR (`pr_views`): opening
 // a PR clears that PR's share; "Mark all seen" clears the repo's. Clearing on view would wipe the
 // very list the reader came here to read.
@@ -30,6 +37,9 @@ export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
   );
   const summary = useMemo(() => repoStatusSummary(repo, branch), [repo, branch]);
   const markSeen = useMarkRepoSeen(repo.repoId);
+  const ai = useAiCapabilities();
+  // Only a LASTING reason is shown; a transient 'unavailable' still backs off, silently.
+  const docsUnreadable = ai.enabled && isRepoDocsUnreadableShown(repo.docsUnreadable) ? repo.docsUnreadable : null;
 
   return (
     <section
@@ -90,6 +100,11 @@ export function RepoStatusPanel({ repo }: { repo: ActivityRepo }): JSX.Element {
             <StatusLine key={line.kind} line={line} />
           ))}
         </ul>
+      )}
+      {docsUnreadable != null && (
+        <p className="mt-1.5 text-body text-ui-mute" data-testid="repo-status-docs-unreadable" data-reason={docsUnreadable}>
+          {repoDocsUnreadableLine(docsUnreadable)}
+        </p>
       )}
       {markSeen.isError && (
         <p className="mt-1.5 text-meta text-ui-danger" role="alert">

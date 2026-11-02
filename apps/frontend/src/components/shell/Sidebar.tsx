@@ -8,7 +8,7 @@ import {
 } from '@pierre-review/shared';
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useNavGates } from '../../hooks/useNavGates.js';
 import { activeWorkspaceBadge, useMyTurnByWorkspace } from '../../hooks/useMyTurnByWorkspace.js';
 import { useNotificationToggle } from '../../hooks/useNotificationPref.js';
 import { useRepos } from '../../hooks/useTimeline.js';
@@ -56,7 +56,7 @@ import { useIsDesktop } from '../ui/media.js';
 import { useEdgeFade } from '../ui/edgeFade.js';
 import {
   currentLocation,
-  DESTINATIONS,
+  shownDestinations,
   goTo,
   GROUP_LABEL,
   type Destination,
@@ -162,7 +162,7 @@ function GroupHeading({ children }: { children: ReactNode }): JSX.Element {
 
 /** The destinations, with the two counts the shell owns. */
 function Destinations({ location }: { location: ReturnType<typeof currentLocation> }): JSX.Element {
-  const aiOn = useAiCapabilities().enabled;
+  const gates = useNavGates();
   // Open PRs: NON-DRAFT open PRs, blank (never 0) until it answers or while the previous
   // workspace's placeholder is showing (lib/openPrsTab.ts). The palette reads the same key.
   const openPrsQuery = useWorkspaceOpenPrs();
@@ -201,7 +201,7 @@ function Destinations({ location }: { location: ReturnType<typeof currentLocatio
   return (
     <nav aria-label="Main">
       {groups.map((g) => {
-        const items = DESTINATIONS.filter((d) => d.group === g && (!d.aiOnly || aiOn));
+        const items = shownDestinations(gates).filter((d) => d.group === g);
         if (items.length === 0) return null;
         return (
           <div key={g}>

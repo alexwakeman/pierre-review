@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   AiKindStatus,
+  FeatureSettingsBody,
+  FeatureSettingsResponse,
+  ReviewSuggestionDismissResponse,
+  FeaturesStatus,
   AiRunKind,
   BlastRadiusConfigBody,
   BlastRadiusConfigResponse,
@@ -12,11 +16,12 @@ import type {
   MyTurnSettingsBody,
   MyTurnSettingsResponse,
 } from '@pierre-review/shared';
-import { MY_TURN_TOGGLES, validateMyTurnSettings } from '@pierre-review/shared';
+import { FEATURE_IDS, MY_TURN_TOGGLES, resolveFeatures, validateMyTurnSettings } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
   accountToLocalUser,
   setBlastRadiusConfig,
+  setFeatureSettings,
   setLargePrCodeLocThreshold,
   setMyTurnSettings,
 } from '../../auth/account.js';
@@ -42,6 +47,32 @@ import {
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
+import { featureFacts } from '../../db/feature-gates.js';
+import { dismissReviewSuggestion } from '../../db/pending-first-landing.js';
+import type { Account } from '../../auth/account.js';
+
+// SETTINGS → FEATURES: the switches as a whole object (a PUT replaces it). Booleans only, the known
+// keys only; `null` resets every switch to its default.
+const featureSettingsSchema = {
+  body: {
+    type: 'object',
+    required: ['settings'],
+    additionalProperties: false,
+    properties: {
+      settings: {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        properties: Object.fromEntries(FEATURE_IDS.map((k) => [k, { type: 'boolean' }])),
+      },
+    },
+  },
+};
+
+/** Which sidebar destinations show (shared features.ts). DB reads only. */
+async function featuresFor(accountId: number, account: Account | null | undefined): Promise<FeaturesStatus> {
+  const facts = await featureFacts(accountId, account?.featuresExistingInstall === true);
+  return resolveFeatures(account?.featureSettings ?? null, facts);
+}
 
 // The LARGE-PR FLAG's threshold. `null` is a first-class value meaning "reset to the product
 // default", so the type is the union — NOT an optional key, which would make "clear it" and
@@ -305,6 +336,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // The MY TURN settings, RAW and nullable (the stored overrides) — the `blastRadius` rule: the
       // SPA resolves them through the ONE `resolveMyTurnSettings`, so nothing is duplicated here.
       myTurnSettings: req.account?.myTurnSettings ?? null,
+      // SETTINGS → FEATURES, resolved (visibility only; a deep link still opens a hidden one).
+      features: await featuresFor(accountId, req.account),
       // Orgs currently SAML-blocked for this account (empty in the normal case).
       authNotices: getAuthNotices(accountId),
     };
@@ -395,6 +428,29 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     // must not leave "Elsewhere" lines counting it until the TTL runs out.
     clearDailyBriefCountsFor(accountId);
     const body: MyTurnSettingsResponse = { status: 'ok', myTurnSettings: stored };
+    return body;
+  });
+
+  // SETTINGS → FEATURES — the fourth ONE-PER-ACCOUNT setting: which sidebar destinations show.
+  // A PUT of the WHOLE switches object (null resets all); echoes what was STORED and the resolved
+  // result, so the sidebar and Settings agree without waiting for /api/me. Visibility only: no
+  // sync, read or scoring changes. Rate tier `read` (pinned in rate-limit.test.ts): one validated
+  // UPDATE plus the DB-only facts, no GitHub and no model.
+  app.put('/api/me/feature-settings', { schema: featureSettingsSchema }, async (req) => {
+    const accountId = accountIdOf(req);
+    const { settings } = req.body as FeatureSettingsBody;
+    const stored = await setFeatureSettings(accountId, settings);
+    const features = await featuresFor(accountId, { ...(req.account as Account), featureSettings: stored });
+    const body: FeatureSettingsResponse = { status: 'ok', featureSettings: stored, features };
+    return body;
+  });
+
+  // PENDING'S ONE-TIME AI REVIEW SUGGESTION — dismissed for good (db/pending-first-landing.ts). One
+  // UPDATE of one account column, stamped once (a second press keeps the first time). Rate tier
+  // `read` (pinned in rate-limit.test.ts): no GitHub, no model.
+  app.post('/api/me/review-suggestion/dismiss', async (req) => {
+    await dismissReviewSuggestion(accountIdOf(req));
+    const body: ReviewSuggestionDismissResponse = { status: 'ok' };
     return body;
   });
 

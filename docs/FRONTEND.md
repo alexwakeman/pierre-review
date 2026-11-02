@@ -217,7 +217,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
     **`WorkspaceManager`** modal ("Manage repos & workspaces"), where repo add/remove/assignment
     and the debounced GitHub search picker (`RepoSearch` → `/api/repos/search`) live (a successful
     add pops the sync-progress modal via `syncModalSignal`); `RepoSearch` also mounts standalone
-    inside `FirstRunOnboarding` (zero-repo first run). ⚠ **A ZERO-REPO account opens straight into
+    inside `FirstRunOnboarding` (zero-repo first run; top 5 pre-checked, and more than 10 chosen
+    shows one line, "The first sync will take longer with this many repositories."
+    — `lib/firstSyncNote.ts`; nothing is unchecked for the user). ⚠ **A ZERO-REPO account opens straight into
     that modal**, once per PAGE LOAD (a module flag in `WorkspaceSelector`, so a remount or a view
     switch never re-opens it after a close; a reload — which is what signing in is — does). It waits
     for BOTH `['repos']` and `['workspaces']`: `undefined` is "still loading", never "empty", and
@@ -546,6 +548,39 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   switches and tab round-trips; cross-view jumps set it explicitly (e.g. Show-in-feed →
   `setRepoConsoleTab(repoId,'bots')` BEFORE `setActivityRepo`, isolation set AFTER — the
   setter clears `feedIsolatedPrId`).
+
+### Features shown — Settings → Features (`nav.ts` `isDestinationShown`, shared `features.ts`)
+
+Four destinations can be left out of the sidebar, the phone's bottom bar, the key sheet and ⌘K:
+**Feed**, **Reports**, **This Sprint** and **Bots Monitoring** (`DESTINATION_FEATURE`). Their state rides
+`GET /api/me` as `features` (`FeaturesStatus`: per feature `{visible, setting, defaultOn}`), so the shell
+needs no extra fetch; `useNavGates()` combines it with the AI gate, and every list goes through
+`shownDestinations(gates)`. An absent `features` (an older server, or `/api/me` not loaded) lists
+everything.
+
+- ⚠ **VISIBILITY ONLY.** A deep link (`?activityRepo=bots`, `?view=sprint` …) and the `g` keys still
+  land on a hidden destination (`currentLocation` never reads the gate); no sync, tracker read or ML
+  scoring changes with a switch.
+- **The defaults** (shared `resolveFeatures`, one resolver for the server, the demo and the tests): a
+  stored switch wins; else an EXISTING install (`accounts.features_existing_install`, stamped by migration
+  `0153` for an account that already had repos) shows everything; a NEW install starts with Feed and
+  Bots Monitoring hidden, shows Reports once a repository's 90-day backfill has finished
+  (`sync_state.last_full_sync_at`), and This Sprint once a sprint source exists (backend
+  `db/feature-gates.ts` `hasSprintSource`: a sprint, a cycle, a current GitHub Projects iteration or a
+  dated milestone, or a configured Jira / Linear / Notion tracker not yet read). `/api/me` is
+  refetched when a sync round ends, so Reports appears on its own. A GitHub iteration or milestone is
+  seen by a sprint read (which runs only once This Sprint is OPENED) OR, before any read, by the tracker
+  worker's SPRINT-SOURCE PROBE (`tracker/sprint/probe.ts`, docs/TRACKERS.md § The sprint-source probe:
+  GitHub Issues workspaces only, every few hours, never on a view) — so on a GitHub-Issues-only install
+  This Sprint appears by itself once a current iteration or a dated milestone exists, and the switch's
+  hint says so.
+- **The form** (`settings/FeaturesSection.tsx`, its own Settings tab "Features"): one `Switch` per
+  feature, checked = shown, saved on the click. It writes OVERRIDES ONLY (`lib/featureSwitches.ts`
+  `nextFeatureSettings`): a switch moved back to what the default says is dropped, so it follows the
+  default again (Reports switched back on keeps waiting for its backfill). The response's resolved
+  `features` is seated on `['me']` at once (`useSetFeatureSettings`).
+- **The demo** is an existing install (`seed-demo.ts`), so every destination shows; the write is
+  simulated in `demo/routes.ts`.
 
 ### The timeline (`components/Timeline/`)
 
@@ -2349,6 +2384,12 @@ cards two to a row, the Complete toggle as a line above, and the ARROWS as a VIS
 narrow mode, columns ≥ 9rem, scrolling sideways in its own box with snap. The story tray is a
 FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky column at lg+.
 
+**GitHub Projects scope line.** When a GitHub Issues read fell back to milestones because the gh login
+lacks `read:project`, the source carries `projectsAccess: 'needs_scope'` and the toolbar is followed by ONE
+muted line, "Run `gh auth refresh -s read:project` to use your GitHub Projects iterations.", with a
+`CopyButton` for the command (`data-testid="sprint-projects-scope"`; shared `needsGithubProjectsScope`).
+Never the danger line: it is not an error (docs/TRACKERS.md § GitHub Projects iterations).
+
 (The heading keeps its old name because links point at it.) This Sprint is a **FIXED TAB** beside
 Activity — strip order Activity · This Sprint · Timeline; `activeTab === 'sprint'`, `?view=sprint`,
 rendered by `components/Sprint/SprintTabView.tsx` in its own `sprint-overlay` (App.tsx). It was an
@@ -2964,6 +3005,45 @@ besides an armed intent's Cancel.
   Needs fixing), so neither hides the other.
 - ⚠ **`INSIGHT_KINDS` in `useUrlState.ts` must carry `'conflicts'`** or `?attn=conflicts` is a
   discarded parse — see the four touch points below.
+
+### Pending on the first landing (`PendingFirstLanding.tsx`, `lib/pendingFirstLanding.ts`, `db/pending-first-landing.ts`)
+
+Four additions, every one built from the `GET /api/attention` response the page already holds —
+nothing fetches on mount, and the Slack snapshot carries none of them (`buildPendingBoard`'s `live`).
+
+- **The one-line summary** under the header ("3 waiting on you · 2 to fix · 1 unanswered thread"),
+  one part per non-empty tab in tab order, each a link that opens its tab. ⚠ Each figure IS that
+  tab's badge (`pendingSummaryParts` reads `total`, or the author lens's own side — `tabBadgeCount`'s
+  rule), so a part and the tab it opens never disagree. Shown while the response says `summary: true`:
+  for `PENDING_SUMMARY_DAYS` (14) after the account's first-onboarding batch (the earliest
+  `repos.first_onboarding` add, server-side). An install that had repos before migration `0154`
+  never sees it.
+- **An empty board that still helps.** When every tab's total is 0 the server adds `ownOpenPrs`
+  (the reader's own open PRs in the workspace, newest first, at most `PENDING_OWN_PRS_SHOWN`, plus
+  `ownOpenPrTotal`) and the page shows "Nothing here needs you right now." then each PR with its
+  PLAIN merge verdict: `mergeVerdict()` over the SYNCED fields sent (merge state, mergeable, draft,
+  queue) WITHOUT `blockFacts` (`ownPrVerdict`) — "blocked", "checks failing", "behind base",
+  "conflicts", "ready to merge" and the verdict's own detail. ⚠ The ranked `blockers[]` are derived
+  for PR DETAIL ONLY, so the response carries no review, CI or thread facts and a `blocked` PR never
+  lists them here; the PR title opens the PR, where they are. The explanation is behind the ⓘ.
+- **The one-time AI review suggestion** ("Review your PR #12 with Claude", the provider name from
+  `useAiCapabilities().providerName`), on every tab above the list. The server sends
+  `reviewSuggestion` only while agentic AI is on, the reader never dismissed it
+  (`accounts.review_suggestion_dismissed_at`) and NO AI review has ever run for the account — the
+  newest open, non-draft own PR with a synced head. The card shows only where a review can run (AI
+  on, runtime ready, `aiAuthFor(ai, 'review')` ok). Its cost line is the per-review cap,
+  `REVIEW_BUDGET_USD`, worded by `useRunCostText()` ("Up to …"); Run sits in `AiRunGate kind="review"`
+  and goes through the list's manual start (`useStartReviewFromList`) — nothing runs before the
+  press. Run or ✕ takes it off every cached board at once; ✕ is `POST
+  /api/me/review-suggestion/dismiss` (stored per account, never `localStorage`).
+- **The docs offer** (`DocsOfferCard.tsx`, `lib/docsOffers.ts`), on every tab under the suggestion while
+  the response carries `docsOffers`: "Add 2 docs collections from your repositories?", each folder
+  (repo › path, file count) with a checkbox, Add and Not now. It is the SAME card and list as the Docs
+  page's (`GET /api/docs` `offers`), so a decision on either takes the folders off both caches at once.
+  Not now hides the card for `DOCS_OFFER_SNOOZE_DAYS` (30); the folders stay in the add-documents
+  wizard's "From your repositories".
+  Add sits in `AiRunGate kind="docs_build"`; a too-large folder's "Choose part of it" goes to Docs.
+  Contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Docs offered from your repositories.
 
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
@@ -4029,6 +4109,7 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
 |---|---|---|---|
 | Pull requests | `LargePrThresholdSection`, `BlastRadiusSection` | — | none |
 | Pending | `MyTurnSection` (per ACCOUNT) | `PendingMuteSection` | none |
+| Features | `FeaturesSection` (per ACCOUNT; which sidebar pages show — § Features shown) | — | none |
 | Dependencies | — | `DependencyAutomationSection` (merge / approve / resolve conflicts, the policy, trusted bots; its AI sentence only with `me.ai.enabled`) | none |
 | AI | `AiProviderSection`, `ClaudeSpendSection` | — | tab shown only with `me.ai.enabled` |
 | AI review | — | `AutoReviewSection` (auto review, auto-post, auto fix, diagrams), `ReferenceDocsSection`, `RelatedReposSection` | tab shown only with `me.ai.enabled` |
@@ -4982,6 +5063,15 @@ branch)` — the dot and the panel cannot disagree.
   and the feed's state filter row (main Feed and repo feed, one row in `FeedView`) reads "Thread
   state". Nothing in it fetches: it reads the `/api/activity` entry and the whole-workspace
   `/api/branch-status` key the sidebar already holds. Nothing to report → ONE calm line.
+- **One more line, with NO dot — the repository's files can't be read.** When the docs offers' look
+  at the repository's tree failed (`ActivityRepo.docsUnreadable`, the STORED reason from
+  `repos.docs_offer_failure`, read by `getActivity` in the same request), the panel adds "Limn can't
+  read this repository's files, so its docs can't be offered: no access." (shared
+  `repoDocsUnreadableLine`: no access / the repository is empty / not found on GitHub), for a LASTING
+  reason only (shared `isRepoDocsUnreadableShown`; a transient `unavailable` is never shown, though it
+  still backs off). It is neither red nor blue — it moves no dot and no count — and shows only on
+  `me.ai.enabled` (the offers exist only there). docs/REFERENCE-DOCS.md § A repository whose files
+  can't be read. Demo: acme/infrastructure is seeded in that state.
 - The explanation lives behind the ⓘ ("What the dots mean"); the sidebar's Repositories ⓘ says the
   same in two lines. Demo: `seed-demo.ts` seeds `pr_views` so acme/api reads both colours
   (`verify-demo.mjs` view `repo:api`). Tests: `db/repo-status-fold.test.ts` (the fold),
@@ -5258,11 +5348,20 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
 - **Adding is a WIZARD** (2026-10-30, `Activity/DocsAddWizard.tsx`, steps as data in
   `lib/docsWizard.ts`, test/docsWizard.test.ts): the Library header's "+" (shown only when
   `aiReadyFor(ai, 'docs_build')`; ⌘K "Add documents to Docs") opens a real dialog — the type (web page
-  or site, Confluence, Notion, GitHub repository), then per type the address + links to follow, the
-  CONNECTION (the settings' own `ConfluenceForm` / `NotionForm`, so a token typed here is the same
-  sealed write-only row) then the page, or the repository then the folder, then a REVIEW that states
-  the server's count. ⚠ The counts are click-gated MUTATIONS ("Next"), never a query on mount. ⚠
-  Start sits behind `AiRunGate kind="docs_build"`. The drop zone stays for files.
+  or site, Confluence, Notion, GitHub repository, From your repositories), then per type the address +
+  links to follow, the CONNECTION (the settings' own `ConfluenceForm` / `NotionForm`, so a token typed
+  here is the same sealed write-only row) then the page, or the repository then the folder, then a
+  REVIEW that states the server's count. ⚠ The counts are click-gated MUTATIONS ("Next"), never a query
+  on mount. ⚠ Start sits behind `AiRunGate kind="docs_build"`. The drop zone stays for files.
+- **"From your repositories"** (steps `type → folders → review`; listed only on `me.ai.enabled`): Next
+  on the type step runs `POST /api/docs/offers/check` (`useCheckDocsFolders`, a mutation — the docs
+  offer's SAME check over every repository of the workspace, stored scans reused). The folders step lists
+  every qualifying folder not in Docs — repo › path, file count, a checkbox each, NONE ticked at first;
+  a too-large one has no checkbox and "Choose part of it" switches to the GitHub repository source on
+  that repository; folders the card's "Not now" hid are listed too. The review lists the chosen folders
+  and "Up to <cap> each." (`useRunCostText`); Add (`AiRunGate kind="docs_build"`) goes through the
+  offer's own Add, `useAddDocsOffers(workspaceId, 'wizard')`, and closes unless a folder failed (then
+  the failures' sentence stays).
 - **The document list is an ACCORDION** (`store/docsView.ts` keeps at most ONE expanded id): a
   document's title opens its contents AND expands it, closing any other. Refresh now, Rebuild, "Open
   the source" and Remove live in the row's "…" `Menu` (Remove still confirms in the row); only

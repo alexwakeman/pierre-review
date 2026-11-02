@@ -58,6 +58,7 @@ import {
 import { Button, IconButton, Menu, PageHeader, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command, type MenuEntry } from '../ui/index.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { DocsAddWizard } from './DocsAddWizard.js';
+import { DocsOfferCard } from './DocsOfferCard.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -540,6 +541,8 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const narrowPane = useDocsView((s) => s.narrowPane);
   const ai = useAiCapabilities();
   const [adding, setAdding] = useState(false);
+  // A docs offer's "Choose part of it": the wizard opens on that repository.
+  const [addingRepo, setAddingRepo] = useState<string | undefined>(undefined);
   const setNarrowPane = useDocsView((s) => s.setNarrowPane);
   const onOpen = useCallback(
     (path: string, anchor: string | null, quote: string | null = null) => openPath(workspaceId, path, anchor, quote),
@@ -737,7 +740,17 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col" data-testid="docs-view">
-      {adding && <DocsAddWizard workspaceId={workspaceId} maxBytes={maxBytes} onClose={() => setAdding(false)} />}
+      {adding && (
+        <DocsAddWizard
+          workspaceId={workspaceId}
+          maxBytes={maxBytes}
+          initialRepo={addingRepo}
+          onClose={() => {
+            setAdding(false);
+            setAddingRepo(undefined);
+          }}
+        />
+      )}
       {/* THE PAGE HEADER: the title, its ⓘ, the count — and, while the panes share a column, their tabs. */}
       <PageHeader
         inset={false}
@@ -763,6 +776,18 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
         }
       />
 
+      {/* Docs folders found in the workspace's repositories, waiting for the reader's yes. */}
+      {library.data?.offers != null && (
+        <DocsOfferCard
+          workspaceId={workspaceId}
+          offers={library.data.offers}
+          className="mb-3"
+          onChoosePart={(repo) => {
+            setAddingRepo(repo);
+            setAdding(true);
+          }}
+        />
+      )}
       <div ref={rowRef} className="flex min-h-0 flex-1">
         {/* LEFT: the library — or, collapsed, a slim strip with the expand control and the count */}
         {collapsed ? (

@@ -48,6 +48,8 @@ import { UrlFetchError, checkPageUrl } from './url-fetch.js';
 import { deleteWikiPages } from './wiki/pages.js';
 import { noteDocsUsed } from './wiki/refresh.js';
 import { registerWikiDocRoutes } from './wiki/routes.js';
+import { registerRepoOffersRoutes } from './repo-offers-routes.js';
+import { docsOffersFor } from './repo-offers-store.js';
 import { config } from '../config.js';
 import { providerName } from '../ai/prompt-tools.js';
 
@@ -72,6 +74,7 @@ import { providerName } from '../ai/prompt-tools.js';
 //   PUT    /api/workspaces/:id/docs-settings          { docsInReview }                         → read
 //   + the wiki routes (wiki/routes.ts): POST /api/docs/wiki, POST /api/docs/:id/refresh, and
 //     GET / PUT / POST …/check /api/workspaces/:id/wiki-credentials
+//   + the docs offers (repo-offers-routes.ts): POST /api/docs/offers/add, /api/docs/offers/dismiss
 //
 // TENANCY: `?workspace=` (and a body's `workspaceId`) resolves through `resolveWorkspaceScope` —
 // absent, unknown or another account's ⇒ this account's DEFAULT workspace, never a 404. A document id
@@ -167,15 +170,28 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
   }
 
   // Wiki sources (Confluence): add a page tree, refresh it, the workspace's wiki credential.
-  registerWikiDocRoutes(app, ctx, { fail, featureOff, workspaceOf, preflight, insertWithSlug, maxDocs: MAX_DOCS_PER_WORKSPACE });
+  const wikiHelpers = { fail, featureOff, workspaceOf, preflight, insertWithSlug, maxDocs: MAX_DOCS_PER_WORKSPACE };
+  registerWikiDocRoutes(app, ctx, wikiHelpers);
+  // Docs folders found in the workspace's repositories: the reader's yes (Add) or "Not now".
+  registerRepoOffersRoutes(app, ctx, wikiHelpers);
 
   app.get('/api/docs', { schema: wsQuery }, async (req, reply): Promise<ReferenceDocsResponse | ErrorBody> => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const accountId = ctx.accountIdOf(req);
     const workspaceId = await workspaceOf(accountId, (req.query as { workspace?: string }).workspace);
     noteDocsUsed(accountId, workspaceId);
-    const [rows, docsInReview] = await Promise.all([listDocRows(accountId, workspaceId), readDocsInReview(accountId, workspaceId)]);
-    return { workspaceId, docs: rows.map(toReferenceDoc), docsInReview, maxBytes: REFERENCE_DOC_MAX_BYTES };
+    const [rows, docsInReview, offers] = await Promise.all([
+      listDocRows(accountId, workspaceId),
+      readDocsInReview(accountId, workspaceId),
+      docsOffersFor(accountId, workspaceId),
+    ]);
+    return {
+      workspaceId,
+      docs: rows.map(toReferenceDoc),
+      docsInReview,
+      maxBytes: REFERENCE_DOC_MAX_BYTES,
+      ...(offers ? { offers } : {}),
+    };
   });
 
   // ---- adding ----

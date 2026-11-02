@@ -72,7 +72,7 @@ export interface WikiRouteHelpers {
 const PREFLIGHT_TIMEOUT_MS = 90_000;
 
 /** An AbortSignal that fires on the timeout or when the reader goes away (the REPLY socket). */
-function requestSignal(reply: FastifyReply): { signal: AbortSignal; done(): void } {
+export function requestSignal(reply: FastifyReply): { signal: AbortSignal; done(): void } {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), PREFLIGHT_TIMEOUT_MS);
   const onClose = (): void => {
@@ -129,6 +129,59 @@ const githubSource = (): ReturnType<typeof githubDocsSource> => (wikiSourceFor('
 const idParam = {
   params: { type: 'object', required: ['id'], properties: { id: { type: 'integer', minimum: 1 } } },
 };
+
+export type AddGithubFolderResult = { ok: true; row: DocRow } | { ok: false; status: number; error: string; message: string };
+
+/**
+ * ADD ONE REPOSITORY FOLDER as a document and queue its build — `POST /api/docs/github` and the docs
+ * offers' Add (repo-offers-routes.ts) both come here, so an offered folder is added exactly as the
+ * wizard adds it. Checks the library's room and the `gh` sign-in, reads the default branch and the
+ * folder's root (GitHub, no model), then inserts the row and queues the build. The caller has already
+ * checked the AI credential (`h.preflight`).
+ */
+export async function addGithubFolderDoc(
+  ctx: AgentContext,
+  h: Pick<WikiRouteHelpers, 'insertWithSlug' | 'maxDocs'>,
+  a: { accountId: number; workspaceId: number; owner: string; repo: string; path: string; signal?: AbortSignal },
+): Promise<AddGithubFolderResult> {
+  if ((await listDocRows(a.accountId, a.workspaceId)).length >= h.maxDocs) {
+    return { ok: false, status: 409, error: 'LibraryFull', message: `A workspace holds at most ${h.maxDocs} documents. Remove one first.` };
+  }
+  const cred = await resolveWikiCredential(a.accountId, a.workspaceId, { provider: 'github', host: 'github.com' });
+  if (cred.state !== 'ok') {
+    return { ok: false, status: 400, error: 'NoGithubAuth', message: wikiErrorMessage('GitHub', new WikiSourceError('no_credential')) };
+  }
+  let root: WikiRoot;
+  try {
+    const gh = githubSource();
+    const call = { credential: cred.credential, signal: a.signal };
+    const branch = await gh.defaultBranch(a.owner, a.repo, call);
+    const ref: WikiPageRef = {
+      provider: 'github',
+      origin: 'https://github.com',
+      host: 'github.com',
+      pageId: '',
+      scope: { kind: 'repo', owner: a.owner, repo: a.repo, path: a.path, branch },
+    };
+    root = await resolveWikiRoot(gh, ref, call);
+  } catch (err) {
+    return { ok: false, status: 400, error: 'GithubUnreachable', message: wikiErrorMessage('GitHub', err) };
+  }
+  const url = githubSource().pageUrl(root.ref, root.ref.pageId);
+  const row = await h.insertWithSlug({
+    accountId: a.accountId,
+    workspaceId: a.workspaceId,
+    title: root.title,
+    sourceKind: 'wiki',
+    sourceName: `${a.owner}/${a.repo}${a.path ? `/${a.path}` : ''}`,
+    sourceUrl: url,
+    byteSize: 0,
+    pageCount: null,
+    wiki: scopedState(root, url),
+  });
+  enqueueBuild(ctx, a.accountId, a.workspaceId, row.id, { full: true });
+  return { ok: true, row };
+}
 
 export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h: WikiRouteHelpers): void {
   app.post(
@@ -350,47 +403,17 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
     const path = normalizeRepoFolder(b.path);
     if (path == null) return h.fail(reply, 400, 'BadFolder', 'That is not a folder path in the repository.');
     const workspaceId = await h.workspaceOf(accountId, b.workspaceId);
-    if ((await listDocRows(accountId, workspaceId)).length >= h.maxDocs) {
-      return h.fail(reply, 409, 'LibraryFull', `A workspace holds at most ${h.maxDocs} documents. Remove one first.`);
-    }
-    const cred = await resolveWikiCredential(accountId, workspaceId, { provider: 'github', host: 'github.com' });
-    if (cred.state !== 'ok') return h.fail(reply, 400, 'NoGithubAuth', wikiErrorMessage('GitHub', new WikiSourceError('no_credential')));
     const pre = await h.preflight(ctx, accountId, reply);
     if (pre) return pre;
     const r = requestSignal(reply);
-    let root: WikiRoot;
     try {
-      const gh = githubSource();
-      const call = { credential: cred.credential, signal: r.signal };
-      const branch = await gh.defaultBranch(name.owner, name.repo, call);
-      const ref: WikiPageRef = {
-        provider: 'github',
-        origin: 'https://github.com',
-        host: 'github.com',
-        pageId: '',
-        scope: { kind: 'repo', owner: name.owner, repo: name.repo, path, branch },
-      };
-      root = await resolveWikiRoot(gh, ref, call);
-    } catch (err) {
-      return h.fail(reply, 400, 'GithubUnreachable', wikiErrorMessage('GitHub', err));
+      const res = await addGithubFolderDoc(ctx, h, { accountId, workspaceId, owner: name.owner, repo: name.repo, path, signal: r.signal });
+      if (!res.ok) return h.fail(reply, res.status, res.error, res.message);
+      reply.status(202);
+      return { doc: toReferenceDoc(res.row) };
     } finally {
       r.done();
     }
-    const url = githubSource().pageUrl(root.ref, root.ref.pageId);
-    const row = await h.insertWithSlug({
-      accountId,
-      workspaceId,
-      title: root.title,
-      sourceKind: 'wiki',
-      sourceName: `${name.owner}/${name.repo}${path ? `/${path}` : ''}`,
-      sourceUrl: url,
-      byteSize: 0,
-      pageCount: null,
-      wiki: scopedState(root, url),
-    });
-    enqueueBuild(ctx, accountId, workspaceId, row.id, { full: true });
-    reply.status(202);
-    return { doc: toReferenceDoc(row) };
   });
 
   app.post('/api/docs/:id/refresh', { schema: idParam }, async (req, reply): Promise<ReferenceDocMutationResponse | ErrorBody> => {

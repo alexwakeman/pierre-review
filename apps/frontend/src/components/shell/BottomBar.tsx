@@ -5,7 +5,8 @@ import { EllipsisIcon, PendingBallIcon, PullRequestIcon, TicketIcon, TimelineIco
 import { cx } from '../ui/cx.js';
 import { AlertDot } from './AlertDot.js';
 import { useShellSignals } from './shellSignals.js';
-import { currentLocation, destination, DESTINATIONS, goTo, SHORT_LABEL, type DestinationId } from './nav.js';
+import { useNavGates } from '../../hooks/useNavGates.js';
+import { currentLocation, destination, goTo, shownDestinations, SHORT_LABEL, type DestinationId } from './nav.js';
 
 const ICON: Partial<Record<DestinationId, JSX.Element>> = {
   attention: <PendingBallIcon size={18} />,
@@ -32,7 +33,7 @@ export function BottomBar(): JSX.Element {
     signals.alertWords,
     signals.elsewhere > 0 ? `${signals.elsewhere} need you in other workspaces` : null,
   ].filter(Boolean);
-  const primaries = DESTINATIONS.filter((d) => d.group === 'primary');
+  const primaries = shownDestinations(useNavGates()).filter((d) => d.group === 'primary');
   // "More" is where you are when you are anywhere the four do not cover.
   const elsewhere = !primaries.some((d) => d.id === loc);
   const item = (on: boolean): string =>

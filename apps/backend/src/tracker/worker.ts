@@ -18,6 +18,7 @@ import type { DetectInput, DetectedTicket, LinkerPr, TrackerCall } from './types
 import { ticketDateFields } from './dates.js';
 import { writeTicketComments } from './comments.js';
 import { runSprintReadTick } from './sprint/read.js';
+import { runSprintProbeTick } from './sprint/probe.js';
 import { datesOwedFor, noteDatesTried, reopenDatesBackfill, resetDatesBackfill, DATES_BACKFILL_BATCH } from './dates-backfill.js';
 import {
   deleteStaleKeys,
@@ -1096,6 +1097,10 @@ export async function runTrackerTick(
     // Activity → This Sprint: the demand-gated sprint list read (./sprint/read.ts — the one tracker
     // read NOT triggered by a received PR). Never throws.
     await runSprintReadTick(ctx, opts).catch(() => {});
+    // Settings → Features' This Sprint default: a few GitHub Issues workspaces with no sprint read are
+    // asked whether a current Projects iteration or a dated milestone exists (./sprint/probe.ts —
+    // bounded, every few hours, never on a view). Never throws.
+    await runSprintProbeTick(ctx, opts.now != null ? { now: opts.now } : {}).catch(() => {});
   } catch (err) {
     const { code } = errorCodeOf(err);
     ctx.log.warn({ code, route: 'tracker-worker' }, 'ticket tick failed (non-fatal)');

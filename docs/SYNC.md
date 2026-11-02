@@ -71,6 +71,64 @@ The UI drops you into the recent view the moment phase 1 completes; phase 2 fill
 history in the background. A cancel during either phase leaves the repo
 "never synced" (see [Cancel](#cancel)).
 
+### Breadth-first first sync
+
+An API-triggered first sync (repo add, `enqueueSyncForRepo`) runs its two phases as **two
+jobs** in the account's queue, not one, so five repos added at onboarding show all five
+repos' recent PRs before any repo's 90 days start. The queue has a **front** (ordinary
+walks, FIFO: every first sync's phase 1, manual and deep syncs) and a **back** (deferred
+work: phase-2 backfills and parked follow-on work); it always takes a front job first.
+
+- **Phase 1 → back.** When a queued repo's phase 1 completes, the repo moves from `running`
+  to `queuedRepos` **synchronously** (`parkInQueue`, `queuedRepos.add` before
+  `running.delete`) with a `paused: 'queued'` + `foregroundComplete: true` row, and its
+  backfill job joins the END of the back. ⚠ It must never read idle in between: its
+  `syncState` is still unstamped, so the scheduler would start a single-pass 90-day walk.
+- **Phase 2 continues phase 1's cursor** — never a re-walk from scratch. The gap between the
+  phases (other repos' phase 1s, rate-limit waits) is the one thing the continued cursor
+  does not cover: a PR updated in it moves to the front of the newest-first order, behind
+  the cursor. So the completed backfill stamps `lastIncrementalSyncAt` with **phase 1's
+  START** (`syncRepo`'s `stampIncrementalAt`; `lastFullSyncAt` stays the end), and the next
+  incremental walk re-reads everything updated since the first page was fetched — a few
+  recent pages, not 90 days. The adaptive walk clock (`recordFullWalk`) takes the same
+  instant, so a dirty flag raised between the phases is not treated as covered. (A
+  re-walk from the top was the alternative: it re-spends the whole foreground window's
+  pages and commit-file fan-out to cover what the earlier stamp covers for free.)
+- **A running backfill YIELDS** the moment a front job is waiting: its `shouldCancel`
+  also asks "is the front non-empty?", the walk stops at its next page/PR check, and the
+  cancelled result's `endCursor` (the page it was on) is the resume point. The backfill
+  goes back FIRST in the back, its counts carried (`prsDone`/`pagesDone`) so the bar
+  never counts backwards. A yield is not a cancel: nothing is stamped, no follow-on runs.
+- **Follow-on work waits for every first pass — and ONLY for a first pass.** When a queued
+  FULL walk completes (a backfill, or a deep sync) while a never-synced repo's PHASE 1 is
+  waiting in the front (`firstPassWaiting`: a front `walk` job enqueued with `firstPass`,
+  decided at enqueue from the same plan as `isTwoPhase`), its bookkeeping (`noteWalkSuccess`,
+  `recordFullWalk`, a deep sync's ML purge) runs at once but the follow-on work — the
+  one-time CI-history backfill and everything after it — is parked as the FIRST back job,
+  the repo held in `queuedRepos` (status still `running`) until it runs with the `running`
+  slot again. ⚠ Behind any OTHER front job (a manual or deep walk) a completed walk runs its
+  follow-ons at once, as before the breadth-first queue: parking behind every front job made
+  "Deep sync everything" hold every repo's follow-ons until the LAST deep walk ended — by
+  then `deepSyncing` was empty, so the deep-sync stand-down no longer covered them. And once
+  no first pass waits, parked follow-ons are taken AHEAD of the front (`nextJob`), so they
+  never wait behind a deep walk queued after the first pass. An incremental walk's tail is
+  never parked. The CI-history "owed" stamp (§ below) is written before running or parking,
+  either way.
+- **Cancel / delete** at any point between jobs is the queued path: `requestSyncCancel`
+  drops the repo from `queuedRepos` and removes its job from the queue (`dropQueuedJobs`)
+  synchronously, so `waitForSyncToStop` returns at once and a never-stamped repo is
+  deleted by the cancel endpoint. ⚠ EXCEPT a stamped repo waiting only for its parked
+  follow-ons: a cancel leaves that job alone (the walk is done; nothing else would ask for the
+  work again). Only removing the repo drops it (`requestSyncCancel(id, { dropFollowOns: true })`).
+- **Slots:** every job claims `running` through `prepareWalk` (synchronously, before any
+  await) and releases it — and any `deepSyncing` entry and its progress row — on every
+  bail path, including a thrown repo/plan lookup or token failure; a failed backfill or
+  follow-on job is dropped, never wedges the queue. After a restart the in-memory jobs are
+  gone; a repo whose backfill never completed is still unstamped, so the scheduler plans
+  its full walk as before. A repo whose walk WAS stamped but whose follow-ons were parked is
+  recovered through the CI-history stamp (§ The CI-history backfill is owed until it ran).
+- Direct `runSyncForRepo` (tests) still runs both phases back to back, then the follow-ons.
+
 ### CI-history backfill (after the full walk)
 
 A newly added repo would otherwise start with **blank CI charts**: the trunk DayStrip
@@ -82,6 +140,16 @@ first sync or a forced deep re-sync — never incremental, never after a cancel)
 `runSyncForRepo`'s completion hook runs `runCiHistoryBackfill`
 (`sync/backfill-ci-history.ts`), gated by `config.ciHistoryBackfill` and loaded via
 dynamic import. It has two independently non-fatal halves:
+
+**The CI-history backfill is owed until it ran** (migration `0156`,
+`sync/ci-history-pending.ts`). The walk is stamped (`lastFullSyncAt`) BEFORE its follow-ons run or
+are parked in the in-memory queue, and from then on the repo plans incremental walks — so a restart,
+or a dropped parked job, would leave its CI charts empty until a deep sync. So `afterCompletedWalk`
+stamps `sync_state.ci_history_pending_at` for every completed full walk first; `runFollowOns` runs
+the backfill on a full walk OR whenever that stamp stands (so any later incremental walk pays the
+debt), and clears it only when the backfill ran uncancelled. At boot (`index.ts`, after listen,
+scheduler enabled) `resumePendingCiHistory` queues one ordinary walk per owed repo. Every read and
+write of the stamp is non-fatal.
 
 1. **Trunk history** (`backfillBranchHistory` in `sync/branch-status.ts`): paginated
    `history(since: now − 90d)` on the default branch, ≤10 pages × 100 commits at ~4
@@ -152,6 +220,21 @@ any still UNKNOWN, and hands at most 5 PRs whose CI has sat `pending` for over 2
 settle ladder. Both changes leave `updatedAt` alone, so no walk would ever re-read them. Free
 when nothing is unsettled; budget-aware; strictly non-fatal. Cooldowns, caps and the reasoning:
 [REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle).
+
+### After a walk: listeners (`walk-listeners.ts`)
+`notifyRepoWalked(accountId, repoId, walk)` fires when a first sync's FOREGROUND pass ends (both the
+queued and the direct path, before the backfill is parked or run) and when any other manual, queued or
+SCHEDULED walk ends — ⚠ and ONLY for a walk that was not cancelled. ONE place decides: every caller passes
+the walk's own result (`{ cancelled }`, syncRepo's) and `notifyRepoWalked` returns without calling anyone
+on a cancelled walk. (The scheduled path used to drop syncRepo's result and notify regardless, so a
+cancelled scheduled walk still started a docs-offer scan.) Listeners are registered from OUTSIDE the sync
+(`onRepoWalked`) so the sync imports nothing of theirs; each is called synchronously, must queue its
+own background work, and a throwing one is ignored. Today the one listener is the docs offers' scan
+(`reference-docs/repo-offers.ts` `bindRepoDocOffers`, bound at agentic boot): it looks at the
+repository's tree at most once per `DOCS_OFFER_RESCAN_DAYS`, one repository at a time, and builds
+nothing; a repository whose files can't be read is not read again for a day, and the PR sync is never
+affected (docs/REFERENCE-DOCS.md § Docs offered from your repositories, § A repository whose files can't
+be read).
 
 ## Incremental updates (every subsequent sync)
 
@@ -262,10 +345,12 @@ what `planSync` reads to decide full vs incremental.
   scheduled incremental loop **stands down entirely**, so a cron tick doesn't reset a
   deep sync's progress bar to 0% the moment one repo finishes.
 - `cancelRequested` — user cancel flags (see below).
-- `queuedRepos` + `apiSyncChain` — the per-account **serial queue** for API-triggered
-  walks (`enqueueSyncForRepo`; see *Tokens, rate limits, isolation* below). A queued repo
-  reads as `running` with `progress.paused = { reason: 'queued' }`; a cancel while queued
-  drops it synchronously (never started, `waitForSyncToStop` sees not-running).
+- `queuedRepos` + `accountQueues` — the per-account **serial queue** for API-triggered
+  walks (`enqueueSyncForRepo`; see *Tokens, rate limits, isolation* below and
+  [Breadth-first first sync](#breadth-first-first-sync)). A queued repo — waiting to start,
+  or between a first sync's jobs — reads as `running` with
+  `progress.paused = { reason: 'queued' }`; a cancel while queued drops it synchronously
+  (`waitForSyncToStop` sees not-running).
 - `progressByRepo` — live `SyncProgress` surfaced to the UI via
   `GET /api/repos/:id/sync-status`.
 - (in `github/rate-budget.ts`) the per-account **rate budget** — `remaining`/`resetAt`
@@ -319,8 +404,8 @@ resumed on the next sync for an existing repo).
     { reason: 'rate_limit', resumeAt }` rides the normal progress plumbing — status
     stays `running`, and the flag clears the moment the walk moves again.
   - **The per-account queue** (`enqueueSyncForRepo` in `sync-manager.ts`): API-triggered
-    walks (repo add, manual/deep sync) run one at a time per account; waiters show
-    `paused: { reason: 'queued' }`. This replaced the process-wide
+    walks (repo add, manual/deep sync) run one at a time per account, first syncs
+    breadth-first (phase 1s before backfills); waiters show `paused: { reason: 'queued' }`. This replaced the process-wide
     `MAX_CONCURRENT_SYNCS` cap and its 429 on `POST /api/repos/:id/sync` (the per-repo
     cooldown 429s remain). The scheduler's own sequential loop is exempt.
 

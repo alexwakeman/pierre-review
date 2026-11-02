@@ -118,6 +118,9 @@ export interface AccountExport {
   workspaceWikiCredentials: Record<string, unknown>[];
   /** The image-description cache (core `reference_doc_figure_descriptions`, migration 0143). */
   referenceDocFigureDescriptions: Record<string, unknown>[];
+  /** Docs folders found in the repositories and the reader's answer to each (core
+   *  `reference_doc_repo_offers`, migration 0155): folder, counts, offered / declined / added. */
+  referenceDocRepoOffers: Record<string, unknown>[];
   /**
    * Related repos (core `repo_relations`, migration 0131): the pairs the user chose, both directions,
    * per workspace.
@@ -173,6 +176,9 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       largePrCodeLocThreshold: accounts.largePrCodeLocThreshold,
       blastRadiusConfig: accounts.blastRadiusConfig,
       myTurnSettings: accounts.myTurnSettings,
+      featureSettings: accounts.featureSettings,
+      featuresExistingInstall: accounts.featuresExistingInstall,
+      reviewSuggestionDismissedAt: accounts.reviewSuggestionDismissedAt,
       aiBudgetSettings: accounts.aiBudgetSettings,
       aiBudgetReading: accounts.aiBudgetReading,
       lastLoginAt: accounts.lastLoginAt,
@@ -291,6 +297,22 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.referenceDocFigureDescriptions)
     .where(eq(schema.referenceDocFigureDescriptions.accountId, accountId))
+    .execute();
+  const repoOfferRows = await db
+    .select({
+      workspaceId: schema.referenceDocRepoOffers.workspaceId,
+      repoId: schema.referenceDocRepoOffers.repoId,
+      path: schema.referenceDocRepoOffers.path,
+      docCount: schema.referenceDocRepoOffers.docCount,
+      wordEstimate: schema.referenceDocRepoOffers.wordEstimate,
+      tooLarge: schema.referenceDocRepoOffers.tooLarge,
+      state: schema.referenceDocRepoOffers.state,
+      docId: schema.referenceDocRepoOffers.docId,
+      detectedAt: schema.referenceDocRepoOffers.detectedAt,
+      decidedAt: schema.referenceDocRepoOffers.decidedAt,
+    })
+    .from(schema.referenceDocRepoOffers)
+    .where(eq(schema.referenceDocRepoOffers.accountId, accountId))
     .execute();
   const docChatRows = await db
     .select({
@@ -539,6 +561,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     // ⚠ PRESENCE ONLY — never the stored token, in any form.
     workspaceWikiCredentials: wikiCredentialRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     referenceDocFigureDescriptions: figureRows,
+    referenceDocRepoOffers: repoOfferRows,
     repoRelations: repoRelationRows,
     sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),

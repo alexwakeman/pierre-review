@@ -62,6 +62,14 @@ export interface SyncRepoOptions {
   // completes. Phase 1 of a two-phase sync passes false so the repo stays "not
   // fully synced" until phase 2 finishes the deep backfill. Defaults to true.
   commitState?: boolean;
+  // The instant written as `lastIncrementalSyncAt` when `commitState` stamps the walk, when it
+  // must be EARLIER than the walk's end. A two-phase first sync passes phase 1's START: its
+  // phase 2 continues phase 1's cursor, possibly after other repos' foreground passes, and a PR
+  // updated in that gap moves to the front of the newest-first order, behind the cursor. Stamping
+  // the end would let the next incremental walk (`since = stamp − overlap`) skip it for good;
+  // stamping phase 1's start makes the next walk re-read everything updated since the first page
+  // was fetched. `lastFullSyncAt` is still the end. Absent ⇒ the walk's end, as before.
+  stampIncrementalAt?: Date;
   // The LOCAL repos-row id, when the caller already knows it (every scheduler and
   // sync-manager path does — that is how it found the repo at all).
   //
@@ -465,10 +473,11 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     // synced (and the cancel endpoint as an initial backfill) until then.
     if (commitState) {
       const now = new Date();
+      const incrementalAt = opts.stampIncrementalAt ?? now;
       const statePatch =
         mode === 'full'
-          ? { lastFullSyncAt: now, lastIncrementalSyncAt: now }
-          : { lastIncrementalSyncAt: now };
+          ? { lastFullSyncAt: now, lastIncrementalSyncAt: incrementalAt }
+          : { lastIncrementalSyncAt: incrementalAt };
       await db
         .insert(syncState)
         .values({ repoId, ...statePatch, lastSyncStatus: 'ok', lastSyncError: null })

@@ -124,6 +124,14 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
   kickWorktreeSweep('boot');
 
+  // A CI-history backfill a restart left OWED (its parked follow-on job lived only in memory):
+  // queue each such repo's walk, whose follow-ons run it. After listen, never awaited.
+  if (!config.disableScheduler) {
+    void import('./sync/sync-manager.js')
+      .then(({ resumePendingCiHistory }) => resumePendingCiHistory(app.log))
+      .catch((err: unknown) => app.log.warn({ err }, 'ci-history resume not started'));
+  }
+
   // Claude and Codex come with Limn: a boot that finds either runtime missing downloads both in the
   // BACKGROUND (ai/auto-install.ts). After listen and never awaited, so it cannot slow the boot; a
   // no-op under LIMN_AI_DISABLED / LIMN_AI_AUTO_INSTALL=false or when both are already there.

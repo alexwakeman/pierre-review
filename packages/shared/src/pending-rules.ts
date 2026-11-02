@@ -392,3 +392,20 @@ export function pendingTabOfCard(card: InsightCard): PendingTabKey | null {
 export function pendingAuthorSideOf(card: InsightCard): PendingAuthorLens {
   return 'automation' in card && card.automation != null ? 'automation' : 'people';
 }
+
+// ── THE FIRST LANDING (docs/BACKEND.md § My Turn — The first-onboarding lookback; docs/FRONTEND.md
+//    § Pending on the first landing) ──────────────────────────────────────────────────────────
+
+/**
+ * How far before its add time a FIRST-ONBOARDING repo's My Turn floor sits, in days. A repo added
+ * while the account had no repos (or in the same first-run batch, `repos.first_onboarding`) shows
+ * the replies, mentions and pushes of the week before it was added, so the first landing on Pending
+ * is not empty. A repo added later keeps its add time as the floor.
+ */
+export const FIRST_ONBOARDING_LOOKBACK_DAYS = 7;
+
+/** For how many days after the first-onboarding batch Pending shows its one-line summary. */
+export const PENDING_SUMMARY_DAYS = 14;
+
+/** How many of the reader's own open PRs an empty Pending board lists, newest first. */
+export const PENDING_OWN_PRS_SHOWN = 10;

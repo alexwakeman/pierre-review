@@ -348,6 +348,97 @@ branch at the time it was added (`scope.repo.branch`).
   `GET /repos/{o}/{r}/git/blobs/{sha}` — on the account's GitHub quota; a 404 / 401 / 403 / rate limit map to
   the wiki codes (`githubErrorCode`), and the document line says "Can't reach this folder on GitHub".
 
+### Docs offered from your repositories (`repo-offers.ts`, `repo-offers-store.ts`, `repo-offers-routes.ts`; migration `0155`)
+
+The workspace's repositories often hold their own docs. Limn FINDS them by itself and ADDS them only after
+the reader says yes: building a document runs the AI, so ⚠ **nothing is built before the reader presses Add**.
+
+- **When it looks.** After a repository's walk (`sync/walk-listeners.ts`: a first sync's foreground pass,
+  any later walk), at most once per `DOCS_OFFER_RESCAN_DAYS` (14) per repository (`repos.docs_offer_scanned_at`),
+  one repository at a time across the process, never awaited by the sync. Bound at agentic boot
+  (`bindRepoDocOffers`), so only where the library exists. A repository added later is looked at after its
+  own first pass. A missing `gh` sign-in is not stamped (the next walk tries again); a repository whose files
+  can't be read records its failure and BACKS OFF (§ A repository whose files can't be read, below).
+- **What it reads.** The wizard's own GitHub calls through the `github` adapter: the default-branch tree, ONE
+  recursive request (plus `GET /repos/{o}/{r}` only when the sync has not stored `repos.default_branch`), on
+  the account's GitHub quota. ⚠ **No file is read**: words are ESTIMATED from the tree's blob sizes
+  (`DOCS_OFFER_BYTES_PER_WORD`, 6 bytes a word), so a scan costs one or two requests per repository and no model.
+- **Which folders qualify** (`qualifyingDocFolders`, pure; every threshold once in shared
+  `reference-docs-offers.ts`): ALL of —
+  1. a docs-style folder (`DOCS_OFFER_FOLDER_NAMES`: `docs`, `doc`, `documentation`, `handbook`, `wiki`, `adr`,
+     `decisions`, at any depth), OR any folder holding ≥ `DOCS_OFFER_ANY_FOLDER_MIN_FILES` (5) documents
+     DIRECTLY (direct, so every ancestor of a docs folder does not qualify by inheritance);
+  2. ≥ `DOCS_OFFER_MIN_FILES` (3) documents counting its sub-folders (`isRepoDocPath`, the wizard's own rule,
+     ≤ 1 MB each), not all of them READMEs / index files — **a README alone never qualifies**;
+  3. ≈ ≥ `DOCS_OFFER_MIN_WORDS` (1,500) words.
+  A qualifying folder inside a qualifying folder is NOT offered separately (the walk stops at the outer one).
+  The repository's top folder is never offered (it would take in every folder's documents; the wizard still
+  adds it). A folder past one document's limits — more than `REFERENCE_DOC_WIKI_MAX_PAGES` pages as the import
+  counts them (the folder, each document, each sub-folder) or `REFERENCE_DOC_MAX_BYTES` — is offered
+  `tooLarge`: no checkbox, "too large to add in one go" and "Choose part of it", which opens the wizard on that
+  repository. A folder already in the library (itself, a folder holding it, or one inside it — `inLibrary`) is
+  not offered, and drops off the list at once when the reader adds it through the wizard meanwhile. The scan
+  records it all the same, as `added`, so the wizard can list it again once its document is removed.
+- **The rows** (`reference_doc_repo_offers`, per account × workspace × repository × folder): `offered` →
+  `declined` ("Not now") or `added` (with the queued `doc_id`, or found already in the library). ⚠ A scan
+  updates a known folder's counts and NEVER its state (except an open one now in the library → `added`), so an
+  added folder is not offered on the card again even after its document is removed; an open (`offered` /
+  `declined`) folder the scan no longer finds is removed. A folder that qualifies LATER is new, so it is offered.
+- **"Not now" is TEMPORARY** (`DOCS_OFFER_SNOOZE_DAYS`, 30, once in shared `reference-docs-offers.ts`): it
+  marks every listed folder `declined` with `decided_at`, and the workspace's card (Pending and Docs) stays
+  hidden while its LATEST decline is younger than that (`offersSnoozedUntil`; no new column). Afterwards the
+  card lists every folder still not added again — declined ones included. A new folder found during the
+  snooze waits for its end. The wizard lists them all along.
+- **The offer.** The list rides `GET /api/docs` (`offers`) and Pending's `GET /api/attention` (`docsOffers`) —
+  neither page fetches anything of its own. ONE card, `DocsOfferCard`, on the Docs page above the columns and on
+  Pending above the list: "Add 2 docs collections from your repositories?" (`docsOfferQuestion`), "Building them
+  uses Claude." (the provider's name from `useAiCapabilities`) and "Up to US$6 each." — the per-build cap
+  (`DOCS_BUILD_BUDGET_USD`, sent as `budgetUsd`; no pre-run estimate exists) through `useRunCostText`, so a
+  subscription reads a share of the week; each folder (repo › path, file count) with a checkbox, all ticked;
+  Add (inside `AiRunGate kind="docs_build"`) and Not now (every listed folder; the card hides for 30 days). The
+  rule and the snooze are behind the ⓘ. The card renders only on `me.ai.enabled`.
+- **The wizard's "From your repositories"** (`POST /api/docs/offers/check`, `checkWorkspaceRepoFolders` in
+  `repo-offers.ts`): the SAME rule over every repository of the workspace, on demand — ⚠ NOT a fork: a
+  repository looked at within `DOCS_OFFER_RESCAN_DAYS` is answered from its STORED scan (no GitHub read); one
+  never looked at, or due again, is scanned now through `scanRepoForDocOffers` (the shared tree reader and its
+  short-lived cache), ≤ `DOCS_FROM_REPOS_SCAN_MAX` (20) per check, oldest first, the rest counted as
+  `notLookedAt` (and looked at by the next check). It lists every row not in the library, WHATEVER its state
+  (`listRepoFolders`) — a declined folder, and an added one whose document was removed — and, after the list,
+  one line per repository whose files can't be read (`unreadable`, the STORED failures: "acme/legacy: Limn
+  can't read its files (no access)."). Its Add is the offer's Add with `from: 'wizard'`.
+- **A repository whose files can't be read** (migration `0158`: `repos.docs_offer_failed_at` +
+  `repos.docs_offer_failure`). The scan runs after EVERY walk, so a repository whose tree read fails used to
+  re-read GitHub on every walk, forever. Now the failure is RECORDED (`recordRepoUnreadable`: when, and why —
+  `no_access` for a 401/403, `empty` for GitHub's 409 "repository is empty", `not_found` for a 404,
+  `unavailable` for anything else: network, rate limit, a server error; `unreadableReasonOf`) and the
+  repository is not looked at again for `DOCS_OFFER_FAILURE_RETRY_HOURS` (24) after the LAST failure
+  (`offerScanBackedOff`, checked before any read, `force` included) — so at most once a day while it keeps
+  failing. ⚠ The stamp of the last SUCCESSFUL look (`docs_offer_scanned_at`) and its offers stand; the next
+  look that succeeds clears the failure (`stampRepoScanned`). ⚠ **The PR sync is never touched** — the walk
+  never reads these columns. Surfaced from the STORED state only, nothing fetches for it: the repository's
+  page (the repo status panel, from `GET /api/activity`'s `docsUnreadable`) prints one undotted line, "Limn
+  can't read this repository's files, so its docs can't be offered: no access." (`repoDocsUnreadableLine`,
+  shown only on `me.ai.enabled`), and the wizard's "From your repositories" lists it (above). ⚠ **Only a
+  LASTING reason is shown** — `no_access`, `empty`, `not_found` — decided ONCE by shared
+  `isRepoDocsUnreadableShown` (`reference-docs-offers.ts`; the wizard filters through `shownUnreadableRepos`).
+  A transient `unavailable` (network, rate limit, a server error) is stored and backs off for the same 24 h,
+  but neither the panel nor the wizard shows it; the wire still carries it. A repository in
+  its back-off is neither read by the wizard's check nor counted in `notLookedAt`.
+- **Add** (`POST /api/docs/offers/add`): a folder now in the library is refused ("already in Docs"); each
+  chosen offer is CLAIMED (`offered` / `declined` → `added`, compare-and-set; with `from: 'wizard'` an `added`
+  row too, under a per-offer in-process lock held across the whole add) before GitHub is read or a build
+  queued — a double press adds one document — then goes through
+  `addGithubFolderDoc` (`wiki/routes.ts`), the SAME helper `POST /api/docs/github` uses, so an offered folder is
+  exactly the wizard's GitHub document (normal build queue, one build at a time per account). A failed add (the
+  library full, `gh` signed out, GitHub unreachable) puts the offer back in the state it was claimed from and
+  says why. A reader's click: no
+  spend-budget gate, like every manual add.
+- **Tests**: `repo-offers.test.ts` (the rule: README-only, small, nested, ≥ 5 direct, too large, vendored and
+  dot folders), `repo-offers-db.test.ts` (no build before consent, the rescan interval, the 30-day Not now, the
+  library overlap, the claim and the wizard's re-claim, the wizard's check reusing stored scans and its cap,
+  an unreadable repository's stored reason, back-off and clearing, tenancy, `deleteRepo`), `verify:isolation` (list / get / decline / claim / the wizard's list and snooze across
+  accounts), and the SPA's `test/docsOffers.test.ts` + `test/docsWizard.test.ts`.
+
 ### Notion (`wiki/notion.ts`, `wiki/notion-blocks.ts`)
 
 A Notion page — `notion.so` / `www.notion.so` / `notion.com` / `<name>.notion.site` addresses ending in the
@@ -645,9 +736,10 @@ zone or file picker of its own). Its first choice, **"Upload a document"** (step
 step), sends each chosen or dropped file (PDF, .docx, .txt, .md, HTML) at once through the upload `POST`,
 checked by `uploadRefusal`; the wizard closes when every file went in and stays open listing any refused.
 A built document's whole row opens it. The other source types (web page or site, Confluence, Notion,
-GitHub repository) go on to the
-address and "Links to follow" (web), the connection and the page (a wiki; § Scopes), or the repository and
-the folder (GitHub), then a review that states the server's count ("This will add 12 pages from Payments
+GitHub repository, From your repositories) go on to the
+address and "Links to follow" (web), the connection and the page (a wiki; § Scopes), the repository and
+the folder (GitHub), or a checkbox per qualifying docs folder of the workspace's repositories (From your
+repositories — the docs offer's own check and Add, § Docs offered from your repositories), then a review that states the server's count ("This will add 12 pages from Payments
 handbook") and Start. The list is an ACCORDION (opening a document closes the other); Refresh now, Rebuild
 and Remove sit in each document's "…" menu; a citation opened from anywhere REVEALS its section in the
 contents tree (ancestors opened, scrolled to, marked briefly). A crawled document's line reads

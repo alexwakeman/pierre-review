@@ -16,9 +16,10 @@
 //
 // The three repos are split across TWO workspaces — "Platform" (the DEFAULT, and
 // so what the SPA lands on: acme/api + acme/infrastructure) and "Web"
-// (acme/web-app) — so the "Compare workspaces" rail line, gated on two or more
-// workspaces, is reachable. See the "workspaces" block for why the split falls
-// where it does.
+// (acme/web-app). See the "workspaces" block for why the split falls where it
+// does. A third, "Admin" (acme/admin-console, one open PR of Morgan's), is created
+// with the tracker seeds: its sprint is a GitHub Projects iteration, and its
+// Pending board is empty (the first-landing empty state and review suggestion).
 //
 // The seeder also applies the platform's own migrations (src/platform/migrations, with
 // pro_migrations bookkeeping, so the backend's boot-time run is a no-op) and seeds the platform
@@ -109,6 +110,8 @@ await db
     avatarUrl: null,
     isLocal: true,
     lastLoginAt: now,
+    // Settings → Features: the demo is an EXISTING install, so every destination shows.
+    featuresExistingInstall: true,
   })
   .where(eq(schema.accounts.id, 1))
   .execute();
@@ -155,6 +158,8 @@ const ACME_CI = 10;
 const WEB = 1;
 const API = 2;
 const INFRA = 3;
+/** acme/admin-console — the Admin workspace's one repo (seeded with This Sprint's GitHub iteration). */
+const ADMIN = 9;
 await db
   .insert(schema.repos)
   .values([
@@ -174,6 +179,8 @@ await db
     // viewerPermission=ADMIN so write-gated UI (approve, AI Fix push controls) renders.
     { id: WEB, accountId: 1, owner: 'acme', name: 'web-app', githubNodeId: 'R_web', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
     { id: API, accountId: 1, owner: 'acme', name: 'api', githubNodeId: 'R_api', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
+    // Its files could not be read for the docs offers (migration 0158): the repo page's status panel
+    // and the docs wizard's "From your repositories" say so ("… can't be offered: no access.").
     { id: INFRA, accountId: 1, owner: 'acme', name: 'infrastructure', githubNodeId: 'R_infra', defaultBranch: 'main', createdAt: day(112), viewerPermission: 'ADMIN' },
   ])
   .execute();
@@ -223,6 +230,8 @@ const WEB_WS = (await createWorkspace(1, 'Web')).id;
 // split and non-deterministic (it depends on which request lands first).
 await assignReposToWorkspace(PLATFORM_WS, 1, [API, INFRA]);
 await assignReposToWorkspace(WEB_WS, 1, [WEB]);
+/** The third workspace, "Admin" — created with its repo in the tracker block below. */
+let ADMIN_WS = 0;
 
 // ---- pull requests ---------------------------------------------------------
 // id == number for clarity (?pr=<id> opens the PR).
@@ -307,9 +316,27 @@ const PRS: PrSeed[] = [
   { id: 142, repoId: INFRA, authorId: 6, title: 'Terraform: migrate remote state to S3 + DynamoDB', state: 'open', openedDaysAgo: 28, ci: 'success', mergeable: 'mergeable', mss: 'clean', head: 'INFRA-260-remote-state-migration', labels: [{ name: 'terraform', color: '5319e7' }], checks: [{ name: 'terraform plan', state: 'success', url: null }, { name: 'tflint', state: 'success', url: null }] },
 ];
 
+// ⚠ THE CURRENT REPORTING WEEK ALWAYS HOLDS A MERGE. Chronology → Over time reads the Platform
+// workspace's weeks (Monday 00:00 in its zone, set by seed-demo-platform.ts) and its last marker
+// ("acme/api joined", the seed's own moment) says "N merged so far · Not counted until the week ends"
+// — `verify-demo`'s `reports:chronology-event`. Whole-day dating (`day(n)`) leaves that week empty
+// early in the week (#106, the newest measured merge, lands 2 days back: Sunday, seen from a Monday),
+// and the popover then reads "Nothing merged that week". So when #106's usual moment falls before the
+// week began, it lands inside the week instead: at max(week start + 5 min, now − 2 h), never after
+// now. From Wednesday on (and later on Tuesday) nothing moves, so no other recorded view changes.
+const { localWeeksEndingAt } = await import('../src/db/working-hours.js');
+const PLATFORM_FLOW_TZ = 'Europe/London'; // seed-demo-platform.ts's flow-settings timeZone
+const reportingWeekStart = localWeeksEndingAt(now.getTime(), PLATFORM_FLOW_TZ, 1)[0]!.startMs;
+const IN_WEEK_MERGE_PR = 106;
+const inWeekMergeAt = (usual: Date): Date =>
+  usual.getTime() >= reportingWeekStart
+    ? usual
+    : new Date(Math.min(now.getTime(), Math.max(reportingWeekStart + 5 * 60_000, now.getTime() - 2 * 3_600_000)));
+
 const prRows = PRS.map((p) => {
   const opened = day(p.openedDaysAgo);
-  const closed = p.closedDaysAgo != null ? day(p.closedDaysAgo) : null;
+  const usualClose = p.closedDaysAgo != null ? day(p.closedDaysAgo) : null;
+  const closed = usualClose != null && p.id === IN_WEEK_MERGE_PR ? inWeekMergeAt(usualClose) : usualClose;
   const lastCommit = p.state === 'merged' ? closed : day(Math.max(1, p.openedDaysAgo - 3));
   const [additions, deletions, changedFiles] = p.size ?? [
     20 + ((p.id * 37) % 220),
@@ -2293,7 +2320,7 @@ console.log('Seeded demo data into', config.dbPath);
 console.log('  repos: acme/web-app (1), acme/api (2), acme/infrastructure (3)');
 console.log(
   `  workspaces: Platform (${PLATFORM_WS}, DEFAULT) ← api + infrastructure ·`,
-  `Web (${WEB_WS}) ← web-app`,
+  `Web (${WEB_WS}) ← web-app · Admin ← admin-console`,
 );
 console.log('  me: Morgan Diaz (account 1 → users.id 1)');
 console.log('  bot-triage: 3 workspace_reviewers rows (one per actor) in Platform;');
@@ -2353,6 +2380,72 @@ if (proSeeded) {
   const { seedDemoNotion } = await import('./seed-demo-notion.js');
   const n = await seedDemoNotion({ db, schema, now, workspaceId: WEB_WS });
   console.log(`  notion (Web): ${n.tickets} PR tickets, ${n.sprintTickets} in the current sprint`);
+  // A THIRD workspace, "Admin" (acme/admin-console, repo 9): no tracker chosen, so GitHub Issues is
+  // its automatic default, and its sprint is the CURRENT iteration of a GitHub Projects board
+  // (scripts/seed-demo-github-iteration.ts; docs/TRACKERS.md § GitHub Projects iterations). Its one
+  // pull request is Morgan's, waiting on review (Pending's first landing, below).
+  await db
+    .insert(schema.repos)
+    .values({
+      id: ADMIN,
+      accountId: 1,
+      owner: 'acme',
+      name: 'admin-console',
+      githubNodeId: 'R_admin_console',
+      description: 'The admin console: members, roles and the audit log',
+      defaultBranch: 'main',
+      // Added ten days ago in a FIRST ONBOARDING (docs/FRONTEND.md § Pending on the first landing):
+      // inside PENDING_SUMMARY_DAYS, so Pending shows its one-line summary in every workspace.
+      createdAt: day(10),
+      firstOnboarding: true,
+      viewerPermission: 'ADMIN',
+      usesGithubIssues: true,
+    })
+    .execute();
+  // Morgan's own open PR here, waiting on Priya's review: nothing on Admin's Pending board needs
+  // Morgan, so the empty board lists it with what blocks it — and, as no review has run on it, it is
+  // the PR the one-time AI review suggestion names (the demo's /api/attention overlay, since the
+  // demo account has run reviews elsewhere).
+  const ADMIN_PR = 9001;
+  await db
+    .insert(schema.pullRequests)
+    .values({
+      id: ADMIN_PR,
+      githubNodeId: `PR_${ADMIN_PR}`,
+      accountId: 1,
+      repoId: ADMIN,
+      number: 14,
+      title: 'Show who changed a role in the audit log',
+      body: 'Demo PR — Show who changed a role in the audit log.',
+      authorId: ME,
+      baseRefName: 'main',
+      headRefName: 'audit-log-role-changes',
+      state: 'open',
+      isDraft: false,
+      openedAt: min(90),
+      lastCommitAt: min(95),
+      updatedAt: min(90),
+      headSha: hexSha(`${ADMIN_PR}head`),
+      ciStatus: 'success',
+      mergeable: 'mergeable',
+      mergeStateStatus: 'blocked',
+      reviewDecision: 'review_required',
+      additions: 64,
+      deletions: 9,
+      changedFiles: 3,
+    })
+    .execute();
+  await db.insert(schema.reviewRequests).values({ prId: ADMIN_PR, userId: 2 }).execute();
+  await db
+    .insert(schema.events)
+    .values({ accountId: 1, repoId: ADMIN, actorId: ME, prId: ADMIN_PR, type: 'pr_opened', occurredAt: min(90), dedupeKey: `pr_opened:PR_${ADMIN_PR}` })
+    .execute();
+  await db.insert(schema.syncState).values({ repoId: ADMIN, lastFullSyncAt: day(7), lastIncrementalSyncAt: min(8), lastSyncStatus: 'ok' }).execute();
+  ADMIN_WS = (await createWorkspace(1, 'Admin')).id;
+  await assignReposToWorkspace(ADMIN_WS, 1, [ADMIN]);
+  const { seedDemoGithubIteration } = await import('./seed-demo-github-iteration.js');
+  const it = await seedDemoGithubIteration({ now, workspaceId: ADMIN_WS });
+  console.log(`  github iteration (Admin, workspace ${ADMIN_WS}): ${it.source}, ${it.sprintTickets} issues`);
 }
 
 // ===========================================================================
@@ -2364,6 +2457,46 @@ if (proSeeded) {
   const { seedDemoAgentic } = await import('./seed-demo-agentic.js');
   const a = await seedDemoAgentic({ db, schema, now, platformWs: PLATFORM_WS });
   console.log(`  agentic runs: ${JSON.stringify(a)}`);
+}
+
+// ===========================================================================
+// DOCS OFFERED FROM THE REPOSITORIES (docs/REFERENCE-DOCS.md § Docs offered from your repositories):
+// the product's own scan over fictional trees (its GitHub reads answered here), in Platform — acme/api's
+// docs/ and acme/infrastructure's runbooks/ are offered, and infrastructure's docs/ is too large to add in
+// one go (it points at the wizard). Nothing is built: the card waits for the reader's Add, on Docs and
+// on Pending.
+// ===========================================================================
+{
+  const { scanRepoForDocOffers } = await import('../src/reference-docs/repo-offers.js');
+  const f = (path: string, words: number) => ({ path, type: 'blob' as const, sha: hexSha(`tree:${path}`), size: words * 6 });
+  const trees: Record<string, ReturnType<typeof f>[]> = {
+    'acme/api': [
+      f('README.md', 600),
+      ...['overview', 'authentication', 'errors', 'pagination', 'webhooks', 'rate-limits', 'versioning', 'idempotency'].map((n) => f(`docs/${n}.md`, 900)),
+      f('src/server.ts', 4000),
+    ],
+    'acme/infrastructure': [
+      ...['database-failover', 'rotate-secrets', 'scale-workers', 'restore-backup', 'incident-comms', 'dns-cutover'].map((n) => f(`runbooks/${n}.md`, 700)),
+      ...Array.from({ length: 130 }, (_, i) => f(`docs/modules/module-${String(i + 1).padStart(3, '0')}.md`, 400)),
+    ],
+  };
+  const source = {
+    defaultBranch: async () => 'main',
+    listTree: async (owner: string, repo: string) => ({ entries: trees[`${owner}/${repo}`] ?? [], truncated: false }),
+  };
+  for (const repoId of [API, INFRA]) {
+    const res = await scanRepoForDocOffers(1, repoId, { source, token: 'demo', force: true, now: () => now.getTime() });
+    console.log(`  docs offers (repo ${repoId}): ${res}`);
+  }
+  // acme/infrastructure's LATER look failed (no access; the successful one dated 3 days back): the repo page says Limn can't read its files,
+  // while the offers from the earlier successful look stand (docs/REFERENCE-DOCS.md § A repository whose
+  // files can't be read). Stamped AFTER the scan — stamped before, the 24 h back-off skips the scan (even
+  // forced) and infrastructure's offers never exist.
+  await db
+    .update(schema.repos)
+    .set({ docsOfferScannedAt: day(3), docsOfferFailedAt: min(360), docsOfferFailure: 'no_access' })
+    .where(eq(schema.repos.id, INFRA))
+    .execute();
 }
 
 // ===========================================================================

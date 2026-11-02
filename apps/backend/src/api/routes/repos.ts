@@ -64,6 +64,7 @@ const createRepoSchema = {
     properties: {
       owner: { type: 'string', minLength: 1 },
       name: { type: 'string', minLength: 1 },
+      firstRun: { type: 'boolean' },
     },
   },
 };
@@ -388,7 +389,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/repos', { schema: createRepoSchema }, async (req, reply) => {
-    const { owner, name } = req.body as CreateRepoBody;
+    const { owner, name, firstRun } = req.body as CreateRepoBody;
     const accountId = accountIdOf(req);
 
     let resp: RepoIdResponse;
@@ -430,6 +431,11 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
       resp.repository.id,
       null,
       accountId,
+      undefined,
+      undefined,
+      // The reader's add: decides the first-onboarding mark (My Turn's 7-day lookback, Pending's
+      // summary window) inside the same transaction as the insert.
+      { firstRun: firstRun === true },
     );
 
     // No second visibility axis to set: `upsertRepo` gives the repo its workspace membership
@@ -472,7 +478,7 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     // A repo still WAITING in the per-account queue would resurrect the deleted repo
     // when its turn came (the walk's upsertRepo re-creates the row). Cancelling a queued
     // repo is synchronous: it dequeues + clears the progress row, so the delete can go.
-    if (isSyncQueued(id)) requestSyncCancel(id);
+    if (isSyncQueued(id)) requestSyncCancel(id, { dropFollowOns: true });
     // A sync in flight would re-create the repo (and its rows) right after we
     // delete them, since the sync's upserts are still running. Refuse until it
     // settles — the cron tick / initial backfill is short.

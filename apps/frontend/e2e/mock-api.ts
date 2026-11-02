@@ -79,6 +79,9 @@ import type {
   StoryBuildStreamEvent,
   WorkspaceProSettings,
   WorkspaceSlackTargetResponse,
+  RepoDocsCheckResponse,
+  RepoDocsOffersAddResponse,
+  RepoDocsOffersDismissResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -89,6 +92,7 @@ import {
   PENDING_TABS,
   pendingTabHolds,
   pendingAuthorSideOf,
+  resolveFeatures,
   resolveMyTurnSettings,
   STORY_BUILD_API,
 } from '@pierre-review/shared';
@@ -364,6 +368,9 @@ const ME_RESPONSE: MeResponse = {
   blastRadius: null,
   // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
   myTurnSettings: null,
+  // Settings → Features: an existing install, so every destination shows (specs navigate to all of
+  // them through the sidebar).
+  features: resolveFeatures(null, { existingInstall: true, reportsReady: true, sprintSource: true }),
   authNotices: [],
 };
 
@@ -1032,6 +1039,8 @@ const ACTIVITY: ActivityResponse = {
       attentionCount: 1,
       hasUnread: false,
       unreadPrs: [],
+      // The docs-offer look's stored failure (null = none): the repo status panel's one line.
+      docsUnreadable: null,
       prs: PRS,
     },
   ],
@@ -1589,6 +1598,27 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       }
       if (path.endsWith('/api/docs/chats')) {
         return json(route, { workspaceId: WORKSPACE.id, conversations: [] } satisfies ReferenceDocsConversationsResponse);
+      }
+      // The add-documents wizard's "From your repositories" (POST, click-gated): one qualifying folder and
+      // one too large for one document, so a spec can tick, review and see the "Choose part of it" pointer.
+      if (path.endsWith('/api/docs/offers/check') && route.request().method() === 'POST') {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          folders: [
+            { id: 901, repoId: 1, repoFullName: 'acme/api', path: 'docs', docs: 12, words: 9400, tooLarge: false },
+            { id: 902, repoId: 1, repoFullName: 'acme/api', path: 'handbook', docs: 140, words: 88_000, tooLarge: true },
+          ],
+          notLookedAt: 0,
+          // A repository whose files Limn could not read (the stored failure): one line after the list.
+          unreadable: [{ repoId: 2, repoFullName: 'acme/legacy', reason: 'no_access', failedAt: iso(0) }],
+          budgetUsd: 6,
+        } satisfies RepoDocsCheckResponse);
+      }
+      if (path.endsWith('/api/docs/offers/add') && route.request().method() === 'POST') {
+        return json(route, { added: [], failed: [] } satisfies RepoDocsOffersAddResponse);
+      }
+      if (path.endsWith('/api/docs/offers/dismiss') && route.request().method() === 'POST') {
+        return json(route, { dismissed: 0 } satisfies RepoDocsOffersDismissResponse);
       }
       // Settings → Auto Claude review (mounted only while AI is on). Every switch at its default:
       // auto review, auto fix and auto-posting off; design diagrams after each review ON.

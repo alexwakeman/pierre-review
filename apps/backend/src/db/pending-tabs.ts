@@ -56,6 +56,7 @@ import {
 } from './queries.js';
 import { scoreCards, type ScoredCard } from './work-plan.js';
 import { getMyTurnSettings, rankRulesOf } from './my-turn-settings.js';
+import { getPendingFirstLanding } from './pending-first-landing.js';
 
 export interface PendingBoard {
   tabs: PendingTab[];
@@ -308,7 +309,14 @@ export async function buildPendingBoard(
           mapUser,
         )
       : [];
+  // THE FIRST LANDING (db/pending-first-landing.ts): the summary switch, the reader's own open PRs
+  // when every tab is empty, and the one-time AI review suggestion. The route's only — the Slack
+  // snapshot shows none of them.
+  const firstLanding = live
+    ? await getPendingFirstLanding(accountId, scope, board.tabs, opts.now ?? Date.now())
+    : null;
   return {
+    ...(firstLanding ?? {}),
     workspaceId: scope.workspaceId,
     cards: board.cards,
     users: [...insights.users, ...board.extraUsers, ...factUsers],

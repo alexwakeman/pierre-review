@@ -4683,6 +4683,118 @@ check(
   await bapp.close();
 }
 
+// ── SETTINGS → FEATURES: the default facts (db/feature-gates.ts) ─────────────────────────────────
+// B finishes a backfill and has a Jira tracker; A has neither. A's facts must not see B's rows.
+{
+  const fg = await import('../src/db/feature-gates.js');
+  const before = await fg.featureFacts(1, false);
+  await db
+    .insert(schema.syncState)
+    .values({ repoId: B.repoId, lastFullSyncAt: new Date() })
+    .onConflictDoUpdate({ target: schema.syncState.repoId, set: { lastFullSyncAt: new Date() } })
+    .execute();
+  await db
+    .insert(schema.workspaceTrackers)
+    .values({ accountId: 2, workspaceId: defaultB, provider: 'jira' })
+    .onConflictDoUpdate({ target: [schema.workspaceTrackers.accountId, schema.workspaceTrackers.workspaceId], set: { provider: 'jira' } })
+    .execute();
+  check("featureFacts(B) sees B's finished backfill (mutation check)", await fg.hasCompletedBackfill(2));
+  check("featureFacts(B) sees B's Jira tracker (mutation check)", await fg.hasSprintSource(2));
+  const after = await fg.featureFacts(1, false);
+  check("featureFacts(A) ignores B's backfill", after.reportsReady === before.reportsReady);
+  check("featureFacts(A) ignores B's tracker", after.sprintSource === before.sprintSource);
+  await db.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, 2)).execute();
+}
+
+// ── PENDING ON THE FIRST LANDING (db/pending-first-landing.ts) ───────────────────────────────────
+// Both accounts sign in as the SAME GitHub user, who authors both seeded PRs — so only the account
+// and workspace predicates keep B's PR off A's empty board and out of A's review suggestion.
+{
+  const fl = await import('../src/db/pending-first-landing.js');
+  const { users } = schema;
+  const [loginA] = await db.select({ l: accounts.githubLogin }).from(accounts).where(eq(accounts.id, 1)).execute();
+  const [loginB] = await db.select({ l: accounts.githubLogin }).from(accounts).where(eq(accounts.id, 2)).execute();
+  const shared = (
+    await db.insert(users).values({ githubLogin: 'fl-shared', githubNodeId: 'U_fl_shared', isBot: false }).returning().execute()
+  )[0]!.id;
+  await db.update(accounts).set({ githubLogin: 'fl-shared' }).where(inArray(accounts.id, [1, 2])).execute();
+  const cols = { headSha: pullRequests.headSha, authorId: pullRequests.authorId, state: pullRequests.state, isDraft: pullRequests.isDraft };
+  const [prA] = await db.select(cols).from(pullRequests).where(eq(pullRequests.id, A.prId)).execute();
+  const [prB] = await db.select(cols).from(pullRequests).where(eq(pullRequests.id, B.prId)).execute();
+  // Earlier blocks may have merged or closed a seeded PR: open both again for this check.
+  await db.update(pullRequests).set({ authorId: shared, headSha: 'fl-head', state: 'open', isDraft: false }).where(inArray(pullRequests.id, [A.prId, B.prId])).execute();
+  await db.update(accounts).set({ reviewSuggestionDismissedAt: null }).where(inArray(accounts.id, [1, 2])).execute();
+  const emptyTabs = [{ total: 0 }] as never;
+  // Each fold reads the workspace that holds the account's seeded repo (an earlier block moves them).
+  const homeOf = async (repoId: number): Promise<number> =>
+    (await db.select({ ws: schema.workspaceRepos.workspaceId }).from(schema.workspaceRepos).where(eq(schema.workspaceRepos.repoId, repoId)).execute())[0]!.ws;
+  const wsA = await homeOf(A.repoId);
+  const wsB = await homeOf(B.repoId);
+  const flA = await fl.getPendingFirstLanding(1, await q.resolveWorkspaceScope(1, wsA), emptyTabs);
+  const flB = await fl.getPendingFirstLanding(2, await q.resolveWorkspaceScope(2, wsB), emptyTabs);
+  // B's workspace id handed to A's fold resolves to A's Default, never to B's repos.
+  const flCross = await fl.getPendingFirstLanding(1, await q.resolveWorkspaceScope(1, wsB), emptyTabs);
+  check("first landing (A, B's workspace id) never lists B's PR", flCross.ownOpenPrs?.some((p) => p.prId === B.prId) !== true);
+  check("first landing (B) lists B's own PR (mutation check)", flB.ownOpenPrs?.some((p) => p.prId === B.prId) === true);
+  check("first landing (A) never lists B's PR", flA.ownOpenPrs?.some((p) => p.prId === B.prId) === false);
+  // The suggestion also needs "no review ran": A and B each have claude_reviews rows from earlier
+  // blocks or not — what matters is that neither names the other's PR.
+  check("review suggestion (A) never names B's PR", flA.reviewSuggestion?.prId !== B.prId);
+  check("review suggestion (B) never names A's PR", flB.reviewSuggestion?.prId !== A.prId);
+  // A's dismissal is A's alone.
+  await fl.dismissReviewSuggestion(1);
+  const [dB] = await db.select({ at: accounts.reviewSuggestionDismissedAt }).from(accounts).where(eq(accounts.id, 2)).execute();
+  check("dismissReviewSuggestion(A) leaves B's account untouched", dB?.at == null);
+  // Restore what earlier blocks may rely on.
+  await db.update(accounts).set({ githubLogin: loginA!.l }).where(eq(accounts.id, 1)).execute();
+  await db.update(accounts).set({ githubLogin: loginB!.l }).where(eq(accounts.id, 2)).execute();
+  await db.update(pullRequests).set(prA!).where(eq(pullRequests.id, A.prId)).execute();
+  await db.update(pullRequests).set(prB!).where(eq(pullRequests.id, B.prId)).execute();
+}
+
+// ── DOCS OFFERED FROM THE REPOSITORIES (reference-docs/repo-offers-store.ts) ──────────────────────
+// B's offer must never be listed, declined, claimed or read through A's account — even when A hands
+// B's workspace id (it resolves to A's Default) or B's offer id.
+{
+  const os = await import('../src/reference-docs/repo-offers-store.js');
+  const homeOf = async (repoId: number): Promise<number> =>
+    (await db.select({ ws: schema.workspaceRepos.workspaceId }).from(schema.workspaceRepos).where(eq(schema.workspaceRepos.repoId, repoId)).execute())[0]!.ws;
+  const wsA = await homeOf(A.repoId);
+  const wsB = await homeOf(B.repoId);
+  const cand = { path: 'docs', docs: 4, words: 2400, pages: 5, tooLarge: false };
+  await os.recordScan(1, wsA, A.repoId, [cand]);
+  await os.recordScan(2, wsB, B.repoId, [cand]);
+  const listA = await os.listOpenOffers(1, wsA);
+  const listB = await os.listOpenOffers(2, wsB);
+  const bId = listB[0]?.id ?? -1;
+  check("docs offers (B) lists B's own folder (mutation check)", listB.length === 1 && listB[0]!.repoId === B.repoId);
+  check("docs offers (A) never list B's folder", listA.every((o) => o.repoId !== B.repoId));
+  check("docs offers (A, B's workspace id) never list B's folder", (await os.listOpenOffers(1, wsB)).every((o) => o.repoId !== B.repoId));
+  check("getOffer(A, B's offer id) is null", (await os.getOffer(1, wsA, bId)) == null && (await os.getOffer(1, wsB, bId)) == null);
+  check("declineOffers(A, B's offer id) declines nothing", (await os.declineOffers(1, wsB, [bId])) === 0);
+  check("claimOffer(A, B's offer id) claims nothing", !(await os.claimOffer(1, wsB, bId)));
+  check("claimOffer(A, B's offer id, the wizard's re-add) claims nothing", !(await os.claimOffer(1, wsB, bId, new Date(), { reclaimAdded: true })));
+  check("B's offer is still on offer after A's attempts", (await os.listOpenOffers(2, wsB)).some((o) => o.id === bId));
+  check("the wizard's folders (B) list B's own folder (mutation check)", (await os.listRepoFolders(2, wsB)).some((o) => o.id === bId));
+  check("the wizard's folders (A, B's workspace id) never list B's folder", (await os.listRepoFolders(1, wsB)).every((o) => o.repoId !== B.repoId));
+  // A repository whose files can't be read (migration 0158): A's write never stamps B's repo, and A's
+  // list never names B's.
+  await os.recordRepoUnreadable(2, B.repoId, 'no_access');
+  await os.recordRepoUnreadable(1, B.repoId, 'empty');
+  const unreadB = await os.listUnreadableRepos(2, wsB);
+  check("unreadable repos (B) lists B's own repo (mutation check)", unreadB.length === 1 && unreadB[0]!.reason === 'no_access');
+  check("unreadable repos (A, B's workspace id) never list B's repo", (await os.listUnreadableRepos(1, wsB)).every((u) => u.repoId !== B.repoId));
+  await os.stampRepoScanned(1, B.repoId);
+  check("stampRepoScanned(A, B's repo) never clears B's failure", (await os.listUnreadableRepos(2, wsB)).length === 1);
+  await os.stampRepoScanned(2, B.repoId);
+  check("offersSnoozedUntil(A, B's workspace) never reads B's 'Not now'", await (async () => {
+    await os.declineOffers(2, wsB, [bId]);
+    const ok = (await os.offersSnoozedUntil(1, wsB)) == null && (await os.offersSnoozedUntil(2, wsB)) != null;
+    return ok;
+  })());
+  await db.delete(schema.referenceDocRepoOffers).where(inArray(schema.referenceDocRepoOffers.accountId, [1, 2])).execute();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

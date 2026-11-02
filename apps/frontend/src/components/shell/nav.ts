@@ -1,3 +1,4 @@
+import type { FeatureId, FeaturesStatus } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { isFixedView, usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
 import { useShell } from '../../store/shell.js';
@@ -49,6 +50,37 @@ export const DESTINATIONS: readonly Destination[] = [
   { id: 'insights', label: 'Reports', title: 'Flow metrics and period reports for this workspace', group: 'insights', goKey: 'r' },
   { id: 'bots', label: 'Bots Monitoring', title: "Measure and triage this workspace's review bots", group: 'insights', goKey: 'b' },
 ];
+
+/**
+ * SETTINGS → FEATURES (shared features.ts): the destinations a switch can hide. Hiding is VISIBILITY
+ * ONLY — the sidebar, the bottom bar, the key sheet and ⌘K leave it out, while a deep link, the
+ * `g` keys and every background job still reach it.
+ */
+export const DESTINATION_FEATURE: Partial<Record<DestinationId, FeatureId>> = {
+  feed: 'feed',
+  insights: 'reports',
+  sprint: 'sprint',
+  bots: 'bots',
+};
+
+/** What decides whether a destination is listed. `features` absent (an older server, or /api/me not
+ *  loaded yet) lists everything, as before Features existed. */
+export interface NavGates {
+  aiOn: boolean;
+  features: FeaturesStatus | undefined;
+}
+
+export function isDestinationShown(d: Destination, gates: NavGates): boolean {
+  if (d.aiOnly === true && !gates.aiOn) return false;
+  const f = DESTINATION_FEATURE[d.id];
+  if (f == null || gates.features == null) return true;
+  return gates.features[f]?.visible !== false;
+}
+
+/** The destinations listed, in sidebar order. */
+export function shownDestinations(gates: NavGates): Destination[] {
+  return DESTINATIONS.filter((d) => isDestinationShown(d, gates));
+}
 
 export const GROUP_LABEL: Record<NavGroup, string | null> = {
   primary: null,

@@ -205,6 +205,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // EXACT `===` for the same near-miss.
   if (path === '/api/me/my-turn-settings') return [TIERS.read];
 
+  // PUT /api/me/feature-settings — Settings → Features (which sidebar destinations show). One
+  // validated UPDATE plus DB-only reads; no GitHub, no model. Recorded, EXACT `===`.
+  if (path === '/api/me/feature-settings') return [TIERS.read];
+
+  // POST /api/me/review-suggestion/dismiss — Pending's one-time AI review card, dismissed for good.
+  // One UPDATE of one account column; no GitHub, no model (the card's Run goes through the review
+  // start route, which keeps its own tier). Recorded, EXACT `===`.
+  if (path === '/api/me/review-suggestion/dismiss') return [TIERS.read];
+
   // PUT / DELETE /api/my-turn/dismissals/:kind/:id — dismiss or bring back one My Turn entry. One
   // ownership read and one upsert/delete on a tiny table; no GitHub call, no model call. Recorded
   // rather than inherited, and spelled with the `/`-terminated prefix: `/api/my-turn` itself (the
@@ -467,8 +476,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // → search + ai + ai_hourly. Spelled EXACTLY here, above the family's `read` line: these GitHub reads
   // never reach the `hitsGithub` alternation below (that is the GitHub WRITE bucket, and this family
   // returns first).
-  if (method === 'POST' && (path === '/api/docs/wiki/preflight' || path === '/api/docs/github/preflight')) return [TIERS.search, TIERS.read];
-  if (method === 'POST' && path === '/api/docs/github') return [TIERS.search, TIERS.ai, TIERS.aiHourly];
+  // The wizard's "From your repositories" (`POST /api/docs/offers/check`, reference-docs/repo-offers-routes.ts)
+  // looks at up to DOCS_FROM_REPOS_SCAN_MAX repositories' trees on the reader's GitHub quota (a stored scan
+  // is reused) and runs no model → search + read, like the preflights. EXACT `===`.
+  if (
+    method === 'POST' &&
+    (path === '/api/docs/wiki/preflight' || path === '/api/docs/github/preflight' || path === '/api/docs/offers/check')
+  )
+    return [TIERS.search, TIERS.read];
+  // THE DOCS OFFERS' ADD (reference-docs/repo-offers-routes.ts): each chosen folder is read on GitHub and
+  // its build queued, exactly as `POST /api/docs/github` → search + ai + ai_hourly. Its "Not now"
+  // (`/api/docs/offers/dismiss`) is DB only and falls to the family's `read` line.
+  if (method === 'POST' && (path === '/api/docs/github' || path === '/api/docs/offers/add')) return [TIERS.search, TIERS.ai, TIERS.aiHourly];
   if (path === '/api/docs' || path.startsWith('/api/docs/')) return [TIERS.read];
   if (/^\/api\/workspaces\/\d+\/docs-settings$/.test(path)) return [TIERS.read];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];
