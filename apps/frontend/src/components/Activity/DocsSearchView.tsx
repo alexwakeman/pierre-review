@@ -175,7 +175,17 @@ function ResultRow({ result: r, onOpen }: { result: DocsSearchResult; onOpen: ()
     <li className="py-3" data-testid="docs-search-result">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-body font-medium text-ui-ink">{r.sectionTitle}</p>
+          <p className="text-body font-medium text-ui-ink">
+            {/* The title opens the section too, styled like the viewer's in-library links. */}
+            <button
+              type="button"
+              onClick={onOpen}
+              data-testid="docs-search-title"
+              className={cx('cursor-pointer text-left underline underline-offset-2 hover:decoration-2', FOCUS_RING)}
+            >
+              {r.sectionTitle}
+            </button>
+          </p>
           <p className={`mt-0.5 truncate text-meta ${MUTED}`} title={where}>
             {where}
           </p>
