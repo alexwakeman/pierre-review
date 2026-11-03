@@ -112,11 +112,15 @@ export interface TeamClaimLine {
 // A FREE line: a success starting "Cleared by " (a Clear, a release of ours or of a teammate's expired
 // line), a success "free to claim" or "Released:" (a 2026-10-28 build's wording), or a pending "free to
 // claim" (older Limn versions).
+// A teammate's review KEPT IN LIMN put nothing on GitHub: the team got nothing from it, so it holds
+// nothing (2026-11-03 — robin-dunn's kept-in-Limn Claude reviews held six PRs, the pair fell back to a
+// Codex over its usage limit, and nobody got a review).
+const KEPT_PHRASE = ' reviewed · kept in Limn';
 const isFreeLine = (l: TeamClaimLine): boolean => {
   const d = l.description ?? '';
   if (l.state === 'pending') return d.includes(FREE_PHRASE);
   if (l.state !== 'success') return false;
-  return d.includes(FREE_PHRASE) || d.startsWith(CLEARED_PREFIX) || d.startsWith(RELEASED_PREFIX);
+  return d.includes(FREE_PHRASE) || d.startsWith(CLEARED_PREFIX) || d.startsWith(RELEASED_PREFIX) || d.endsWith(KEPT_PHRASE);
 };
 const settles = (l: TeamClaimLine): boolean => l.state !== 'pending' || isFreeLine(l);
 const sameLogin = (a: string | null, b: string | null): boolean =>

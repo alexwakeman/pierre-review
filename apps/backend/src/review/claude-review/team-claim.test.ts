@@ -72,6 +72,9 @@ describe('decideTeamClaim (the one fold)', () => {
       description: 'bob reviewed · 2 comments',
     });
     expect(decideTeamClaim([line('me', 'success', NOW - 5 * MIN, 'me reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
+    // A teammate's review kept in Limn put nothing on GitHub: it holds nothing.
+    expect(decideTeamClaim([line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
+    expect(decideTeamClaim([line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · no comments')], 'me', NOW).kind).toBe('reviewed');
     expect(decideTeamClaim([line('bob', 'success', NOW - 9 * MIN, 'bob reviewed'), line('carol', 'success', NOW - MIN, 'Cleared by carol')], 'me', NOW).kind).toBe(
       'free',
     );

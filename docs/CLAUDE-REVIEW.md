@@ -2532,6 +2532,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   head; § The replies pass), and the Clear button's reads skip its rows (`kind IS NULL`).
 - **A Claude + Codex pair claims per half**, each on its own provider's context, when that half starts
   (§ Claude + Codex → With team claims); a held half never starts, the other still runs.
+  ⚠ A pair drops a half LOCKED OUT by its usage limit even on "Run auto reviews now", while the other
+  can run (`startAutoItem` `pick`): it would fail at once. Only when every provider is locked does a
+  press run anyway.
 - **ONE CONTEXT PER PROVIDER FAMILY**, keyed by the RUN's provider: `limn/review-claude`,
   `limn/review-codex`. A teammate reviewing with Claude never holds the head for a Codex run.
 - **THE LINES** (≤ 140 characters, plain English, naming the GitHub login):
@@ -2551,7 +2554,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   ("Cleared by" — every free success line —, "free to claim" — a success, or an older Limn's pending —
   and "Released:") are read back.
   The newest line settles it: a success by someone else ⇒ skip "already reviewed by @x" (mine, or a
-  free line, is free); failure/error ⇒ free. Under a pending
+  free line, is free) — ⚠ EXCEPT their "· kept in Limn" (2026-11-03): it put nothing on GitHub, so it
+  is free (robin-dunn's kept-in-Limn Claude reviews held six PRs; our pair fell back to a locked-out
+  Codex and nobody got a review); failure/error ⇒ free. Under a pending
   line, the claimants since the last settling line race: those whose NEWEST line is inside the
   25-minute lease are live, and the one whose FIRST line is earliest (created_at, then id) holds the
   head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).

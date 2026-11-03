@@ -537,13 +537,19 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     const detect = preflightFor(ctx);
     const nowMs = Date.now();
     const wantsPair = (await readAutoReviewProvidersForPr(ctx, accountId, prId)) === 'both';
-    const providers = automaticRunProviders({
-      defaultProvider: activeProviderId(),
-      pair: wantsPair,
-      order: PAIR_ORDER,
-      ready: (p) => detect(p, 'review').status === 'ok',
-      locked: (p) => !a.pressed && isLockedOut(p, nowMs),
-    });
+    // ⚠ A PAIR drops a locked half EVEN ON A PRESS while the other half can run: that half would
+    // fail at once (2026-11-03: six pressed Codex halves over the limit, nothing reviewed). Only when
+    // every provider is locked does a press run anyway (the reader's choice).
+    const pick = (lockedOk: boolean): AgentProviderId[] =>
+      automaticRunProviders({
+        defaultProvider: activeProviderId(),
+        pair: wantsPair,
+        order: PAIR_ORDER,
+        ready: (p) => detect(p, 'review').status === 'ok',
+        locked: (p) => !lockedOk && isLockedOut(p, nowMs),
+      });
+    let providers = pick(a.pressed === true && !wantsPair);
+    if (providers.length === 0 && a.pressed) providers = pick(true);
     if (providers.length === 0) {
       ctx.log.info(`auto claude review pr ${prId}: skipped — no provider outside its usage limit`);
       return;

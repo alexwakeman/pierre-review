@@ -392,6 +392,23 @@ describe('a usage limit is a lockout (ai/usage-lockout.ts)', () => {
     }
   });
 
+  it('a PRESSED auto pair with Codex locked out still runs Claude alone (never a doomed Codex half)', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'both' });
+    const { noteProviderFailure } = await import('../../ai/usage-lockout.js');
+    noteProviderFailure('codex', 'Codex could not finish: You’ve hit your usage limit. Try again in 40 minutes.', Date.now());
+    try {
+      const prId = await newPr();
+      expect(manager.enqueueAutoReview(ctx, 1, prId, wsId, null, { pressed: true })).toBe('queued');
+      const runs = await settled(prId, 1);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(runs).toHaveLength(1);
+      expect(runs[0]).toMatchObject({ trigger: 'auto', provider: 'claude', status: 'succeeded' });
+      expect(calls.map((c) => c.provider)).toEqual(['claude']);
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
+    }
+  });
+
   it('a MANUAL press of Codex is never blocked', async () => {
     const { noteProviderFailure } = await import('../../ai/usage-lockout.js');
     noteProviderFailure('codex', 'You’ve hit your usage limit. Try again in 40 minutes.', Date.now());
