@@ -3131,7 +3131,21 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     `withoutAutoPostFooter`). The PR tab label carries no verdict pill. A run of the reader's that is queued or running is the newest work. A FAILED run or a
     skip (`review_mode = 'skip'`) reviewed nothing, so any teammate review leads over it — the tab
     and the Overview card agree, and so does the review count. The reader's older review stays in
-    the history list.
+    the history list. ⚠ **THE RULE IS ONE PURE FUNCTION, `teamReviewLead(own, newestTeammateAt)`**
+    (team-view.ts): `foldTeamReview` and the states batch both call it — never fork it.
+  - **The Open PRs column and the Pending cards follow the same lead** (`POST
+    /api/claude-review/states` → `ClaudeReviewPrState.teammateLead`, `persist.ts`
+    `foldTeammateLeads`): ONE extra batched read for every listed PR's NEWEST teammate review
+    (`db/teammate-reviews.ts` `newestTeammateReviewsForPrs`, the fold's `newest`: posted time, ties
+    to the higher id), then `teamReviewLead` against the reader's latest full run (the pair's
+    status for a Claude + Codex pair; `at` = finished, else created). `teammateLead = {reviewId,
+    login, name, avatarUrl, verdict, postedAt, reviewedHeadSha, headMoved}` is set ONLY when the
+    teammate leads; every other field stays the reader's own, so auto holds, AI Fix and team claims
+    read exactly what they did. A PR with NO run of the reader's but a teammate review is listed
+    (`reviewId: null`, `status: 'succeeded'`, no `trigger` / `summary` / `ranOn` / `fix`) so its
+    column is not blank. An auto-review hold still replaces the entry (`withAutoHolds`): the
+    reader's queued run is the newest work. No open-findings count rides it (that needs the full
+    fold, per PR) — the surfaces show the verdict, attributed, and none of the reader's older counts.
   - **A teammate's finding is in the one Findings list** while its GitHub thread is UNRESOLVED and no
     later review judged it settled: the LATEST follow-up item naming it (directly, or through the
     reader's re-raise chain along `prior_finding_id`, or — for a twin matched only by spot — the

@@ -94,6 +94,32 @@ const VIEWS = [
       },
     },
   ],
+  // THE NEWEST REVIEW LEADS (docs/CLAUDE-REVIEW.md § Teammates' reviews): Priya's posted review on #114
+  // is newer than Morgan's own run, so the Open PRs drawer shows hers, attributed.
+  [
+    'open-prs:teammate-lead',
+    '?view=activity',
+    null,
+    {
+      act: async (page) => {
+        await page.locator('main [role="option"]', { hasText: 'right-size the EKS' }).first().click();
+        await page.getByTestId('open-prs-panel-ai-review').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Priya · Request changes'],
+    },
+  ],
+  // …and a Pending card: Lena's posted review is the only one on #141 (Morgan never ran his).
+  [
+    'pending:teammate-lead',
+    '?view=activity&activityRepo=attention&attnTab=my_turn',
+    null,
+    {
+      act: async (page) => {
+        await page.getByTestId('activity-overlay').getByText('Migrate the sync scheduler to a job queue').first().click();
+      },
+      expect: ['Lena · Comment'],
+    },
+  ],
   // The header's daily auto-review limit toast: Platform's limit is today's count
   // (seed-demo-platform.ts), so it reads "reached" with "Change limit".
   [

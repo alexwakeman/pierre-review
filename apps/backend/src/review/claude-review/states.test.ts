@@ -472,3 +472,102 @@ describe('POST /api/claude-review/states — the AI Fix pill', () => {
     fixRunning.clear();
   });
 });
+
+// THE NEWEST REVIEW LEADS (team-view.ts `teamReviewLead`): a teammate's POSTED review newer than the
+// reader's latest succeeded, non-skip run rides the state as `teammateLead`; the reader's own fields
+// stay. A teammate-only PR is listed too.
+describe('POST /api/claude-review/states — a teammate review leads', () => {
+  let mateNewer = 0;
+  let ownNewer = 0;
+  let ownRunning = 0;
+  let ownFailed = 0;
+  let mateOnly = 0;
+  let robin = 0;
+  const T_OLD = new Date('2026-11-01T10:00:00Z');
+  const T_NEW = new Date('2026-11-02T10:00:00Z');
+
+  beforeAll(async () => {
+    const { repos, pullRequests, users, claudeReviews } = schema;
+    const repoId = (
+      await db.insert(repos).values({ accountId: 1, owner: 'acme', name: 'states-team', githubNodeId: 'R_states_team' }).returning().execute()
+    )[0].id as number;
+    const pr = async (key: string, n: number) =>
+      (
+        await db
+          .insert(pullRequests)
+          .values({ githubNodeId: `PR_team_${key}`, accountId: 1, repoId, number: n, title: key, state: 'open', isDraft: false, openedAt: new Date(), updatedAt: new Date(), headSha: HEAD })
+          .returning()
+          .execute()
+      )[0].id as number;
+    mateNewer = await pr('mate-newer', 1);
+    ownNewer = await pr('own-newer', 2);
+    ownRunning = await pr('own-running', 3);
+    ownFailed = await pr('own-failed', 4);
+    mateOnly = await pr('mate-only', 5);
+    robin = (
+      await db.insert(users).values({ githubLogin: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: 'https://avatars.example/robin' }).returning().execute()
+    )[0].id as number;
+    const own = async (prId: number, status: string, at: Date) =>
+      db
+        .insert(claudeReviews)
+        .values({ accountId: 1, prId, headSha: HEAD, status, model: 'claude-opus-5-5', verdict: status === 'succeeded' ? 'APPROVE' : null, createdAt: at, finishedAt: status === 'succeeded' || status === 'failed' ? at : null })
+        .execute();
+    const mate = async (prId: number, at: Date, headSha = HEAD) =>
+      db
+        .insert(claudeReviews)
+        .values({ accountId: 1, prId, headSha, status: 'succeeded', model: 'claude-opus-5-5', kind: 'teammate', sourceUserId: robin, verdict: 'REQUEST_CHANGES', postedAt: at, createdAt: at, finishedAt: at })
+        .execute();
+    await own(mateNewer, 'succeeded', T_OLD);
+    await mate(mateNewer, T_NEW);
+    await own(ownNewer, 'succeeded', T_NEW);
+    await mate(ownNewer, T_OLD);
+    await own(ownRunning, 'running', T_OLD);
+    await mate(ownRunning, T_NEW);
+    await own(ownFailed, 'failed', T_NEW);
+    await mate(ownFailed, T_OLD);
+    // Two teammate reviews: the NEWEST leads (posted at an older head ⇒ moved).
+    await mate(mateOnly, T_OLD);
+    await mate(mateOnly, T_NEW, OLD);
+  });
+
+  it('leads by THE rule: teammate newer, own failed and teammate-only lead; own newer / running do not', async () => {
+    const res = await states([mateNewer, ownNewer, ownRunning, ownFailed, mateOnly]);
+    expect(res.statusCode).toBe(200);
+    const byPr = new Map((res.json().states as any[]).map((s) => [s.prId, s]));
+    expect(byPr.get(mateNewer)).toMatchObject({
+      status: 'succeeded',
+      verdict: 'APPROVE', // the reader's own fields stay
+      teammateLead: {
+        login: 'robin-dev',
+        name: 'Robin Dunn',
+        avatarUrl: 'https://avatars.example/robin',
+        verdict: 'REQUEST_CHANGES',
+        postedAt: T_NEW.toISOString(),
+        reviewedHeadSha: HEAD,
+        headMoved: false,
+      },
+    });
+    expect(byPr.get(ownNewer).teammateLead).toBeUndefined();
+    expect(byPr.get(ownRunning)).toMatchObject({ status: 'running' });
+    expect(byPr.get(ownRunning).teammateLead).toBeUndefined();
+    expect(byPr.get(ownFailed)).toMatchObject({ status: 'failed', teammateLead: { verdict: 'REQUEST_CHANGES' } });
+    expect(byPr.get(mateOnly)).toMatchObject({
+      reviewId: null,
+      status: 'succeeded',
+      verdict: null,
+      currentHeadSha: HEAD,
+      teammateLead: { postedAt: T_NEW.toISOString(), reviewedHeadSha: OLD, headMoved: true },
+    });
+    expect(byPr.get(mateOnly).trigger).toBeUndefined();
+    expect(byPr.get(mateOnly).summary).toBeUndefined();
+  });
+
+  it("a teammate review never shows to another account; an auto hold on a teammate-only PR leads", async () => {
+    expect((await states([mateOnly], 2)).json().states).toEqual([]);
+    holds.set(mateOnly, 'queued');
+    const s = (await states([mateOnly])).json().states[0];
+    expect(s).toMatchObject({ reviewId: null, status: 'queued', trigger: 'auto' });
+    expect(s.teammateLead).toBeUndefined();
+    holds.delete(mateOnly);
+  });
+});

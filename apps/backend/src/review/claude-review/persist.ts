@@ -19,6 +19,7 @@ import type {
   ClaudeReviewPairConsolidation,
   ClaudeReviewPairInfo,
   ClaudeReviewPrState,
+  ClaudeTeammateLead,
   ClaudeReviewScope,
   ClaudeReviewStateSummary,
   ClaudeReviewSummary,
@@ -44,7 +45,8 @@ import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/sh
 import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../platform/contract.js';
 import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
-import { TEAMMATE_KIND, ownFindingsOnly, ownRunsOnly } from '../../db/teammate-reviews.js';
+import { TEAMMATE_KIND, newestTeammateReviewsForPrs, ownFindingsOnly, ownRunsOnly } from '../../db/teammate-reviews.js';
+import { teamReviewLead } from './team-view.js';
 import { ticketEntriesOf } from './ticket.js';
 import { overlayFollowUpItems } from './replies-pass.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
@@ -1086,6 +1088,7 @@ export async function getLatestReviewStates(
       verdict: cr.verdict,
       headSha: cr.headSha,
       finishedAt: cr.finishedAt,
+      createdAt: cr.createdAt,
       ticket: cr.ticket,
       prHeadSha: prs.headSha,
       trigger: cr.trigger,
@@ -1110,6 +1113,7 @@ export async function getLatestReviewStates(
     verdict: ClaudeReviewVerdict | null;
     headSha: string;
     finishedAt: Date | null;
+    createdAt: Date;
     ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
     prHeadSha: string | null;
     trigger: string | null;
@@ -1175,7 +1179,70 @@ export async function getLatestReviewStates(
   }
   await foldStateSummaries(ctx, out, latestByPr, repliesAfter);
   if (fixRunning) await foldFixStates(ctx, out, latestByPr, accountId, fixRunning);
+  await foldTeammateLeads(ctx, out, latestByPr, prIds, accountId);
   return out;
+}
+
+/**
+ * THE NEWEST REVIEW LEADS on the Open PRs column and the Pending cards too (`teammateLead`): ONE
+ * batched read of every listed PR's newest teammate review, then THE lead rule (`teamReviewLead`,
+ * the AI Review tab's own). Runs AFTER the own-only folds (summary, fix), which it leaves alone. A
+ * PR with no run of the reader's but a teammate review is appended, so its column is not blank.
+ * Mutates `states` in place. DB-only.
+ */
+async function foldTeammateLeads(
+  ctx: AgentContext,
+  states: ClaudeReviewPrState[],
+  latestByPr: ReadonlyMap<number, { status: ClaudeReview['status']; reviewMode: string | null; finishedAt: Date | null; createdAt: Date }>,
+  prIds: readonly number[],
+  accountId: number,
+): Promise<void> {
+  const newest = await newestTeammateReviewsForPrs(ctx.db, accountId, prIds);
+  if (newest.size === 0) return;
+  const byPr = new Map(states.map((s) => [s.prId, s]));
+  for (const prId of prIds) {
+    const mate = newest.get(prId);
+    if (mate == null) continue;
+    const row = latestByPr.get(prId);
+    const state = byPr.get(prId);
+    // The state's status is the pair's for a Claude + Codex pair (busy halves read 'running').
+    const own =
+      row != null && state != null
+        ? {
+            status: state.status,
+            reviewMode: row.reviewMode as ClaudeReview['reviewMode'] | null,
+            at: (row.finishedAt ?? row.createdAt).getTime(),
+          }
+        : null;
+    if (teamReviewLead(own, mate.postedAt.getTime()) !== 'teammate') continue;
+    const teammateLead: ClaudeTeammateLead = {
+      reviewId: mate.reviewId,
+      login: mate.poster.login,
+      name: mate.poster.displayName,
+      avatarUrl: mate.poster.avatarUrl,
+      verdict: mate.verdict,
+      postedAt: mate.postedAt.toISOString(),
+      reviewedHeadSha: mate.headSha,
+      headMoved: mate.prHeadSha != null && mate.prHeadSha !== mate.headSha,
+    };
+    if (state != null) {
+      state.teammateLead = teammateLead;
+      continue;
+    }
+    states.push({
+      prId,
+      reviewId: null,
+      status: 'succeeded',
+      verdict: null,
+      reviewedHeadSha: null,
+      finishedAt: null,
+      ticket: null,
+      tickets: [],
+      headMoved: false,
+      currentHeadSha: mate.prHeadSha,
+      teammateLead,
+    });
+  }
 }
 
 /**

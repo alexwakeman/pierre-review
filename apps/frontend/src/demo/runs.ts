@@ -608,10 +608,12 @@ export class RunSimulator {
   /** The Open PRs "Claude review" column's row for a PR with a run started here. */
   claudeState(run: SimulatedRun, base: Record<string, unknown> | null): Record<string, unknown> {
     const done = this.isDone(run);
+    // A run started here is the reader's newest: a teammate's review no longer leads.
+    const { teammateLead: _lead, ...rest } = base ?? {};
     return {
       ticket: null,
       headMoved: false,
-      ...(base ?? {}),
+      ...rest,
       prId: run.prId,
       reviewId: run.id,
       status: this.statusOf(run),

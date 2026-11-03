@@ -7,8 +7,10 @@ import {
   followUpTally,
   heldByAutoReview,
   ignoredLabel,
+  leadCurrency,
+  leadFinishedAt,
+  ownSummaryFor,
   reviewCellFor,
-  reviewCurrency,
   severityPills,
   threadsToFixLabel,
 } from '../../lib/claudeReviewColumn.js';
@@ -19,7 +21,7 @@ import type { CardTicketPill } from '../../lib/ticketReview.js';
 import { dateTime, relativeTime } from '../../lib/ui.js';
 import { AiRunGate } from '../AiSetup.js';
 import { CheckIcon, CommitIcon, SparkleIcon, WarningIcon } from '../Icons.js';
-import { VerdictIcon } from '../VerdictIcon.js';
+import { LeadVerdict } from './ClaudeReviewCell.js';
 import { Button, cx, FOCUS_RING, TEXT_LINK } from '../ui/index.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 
@@ -139,11 +141,10 @@ export function DrawerAiReview({
             <button
               type="button"
               onClick={onOpenReview}
-              title="Open the AI review"
+              title={cell.by?.title ?? 'Open the AI review'}
               className={cx(LINK, 'font-medium', cell.verdict != null ? VERDICT_TONE[cell.verdict] : 'text-ui-ink')}
             >
-              {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={13} />}
-              {cell.verdictLabel}
+              <LeadVerdict cell={cell} iconSize={13} />
             </button>,
             autoWord,
           ]}
@@ -153,13 +154,10 @@ export function DrawerAiReview({
   }
 
   // ---- the commit it is on (a finished run) ----
-  const currency =
-    cell.kind === 'done' && state != null
-      ? reviewCurrency({ reviewedHeadSha: state.reviewedHeadSha, currentHeadSha: state.currentHeadSha, commitsSince: state.commitsSince })
-      : null;
+  const currency = cell.kind === 'done' ? leadCurrency(state) : null;
 
-  // ---- what the finished run found ----
-  const summary = cell.kind === 'done' ? state?.summary : undefined;
+  // ---- what the finished run found (the reader's own run: a teammate's leading review has none here) ----
+  const summary = ownSummaryFor(cell, state);
   const pills = summary != null ? severityPills(summary) : [];
   const total = summary != null ? findingTotal(summary) : 0;
   const ignored = summary != null ? ignoredLabel(summary) : null;
@@ -177,8 +175,9 @@ export function DrawerAiReview({
             : null;
   const ciPill = ciCardPill(ciState);
   const fixLabel = fixPillLabel(state?.fix);
-  const ranOn = state?.ranOn != null && state.ranOn.length > 0 ? pairModelsLabel(state.ranOn) : null;
-  const finishedAt = state?.finishedAt ?? null;
+  const lead = cell.kind === 'done' && cell.by != null;
+  const ranOn = !lead && state?.ranOn != null && state.ranOn.length > 0 ? pairModelsLabel(state.ranOn) : null;
+  const finishedAt = cell.kind === 'done' ? leadFinishedAt(state) : (state?.finishedAt ?? null);
 
   // ---- the ONE action: start a review (through the gate), or open the finished one ----
   const canStart = cell.kind === 'start' || (cell.kind === 'done' && cell.headMoved);
@@ -307,7 +306,7 @@ export function DrawerAiReview({
         )}
 
         {(finishedAt != null || ranOn != null) && (
-          <Fact label={finishedAt != null ? 'Last run' : 'Running on'}>
+          <Fact label={lead ? 'Reviewed' : finishedAt != null ? 'Last run' : 'Running on'}>
             <span className="text-ui-mute">
               <Dotted
                 parts={[
@@ -341,7 +340,7 @@ export function DrawerAiReview({
           {canStart ? (
             <AiRunGate kind="review">
               <Button size="sm" icon={<SparkleIcon size={12} />} onClick={run}>
-                {cell.kind === 'done' ? 'Re-review' : 'Review'}
+                {cell.kind === 'done' && !lead ? 'Re-review' : 'Review'}
               </Button>
             </AiRunGate>
           ) : cell.kind === 'done' ? (

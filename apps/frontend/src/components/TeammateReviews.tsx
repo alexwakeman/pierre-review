@@ -36,7 +36,13 @@ function TeammateVerdict({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Ele
 }
 
 /** A teammate's avatar (their initials without one). */
-export function TeammateAvatar({ poster, size = 16 }: { poster: ClaudeTeammatePoster; size?: number }): JSX.Element {
+export function TeammateAvatar({
+  poster,
+  size = 16,
+}: {
+  poster: Pick<ClaudeTeammatePoster, 'login' | 'displayName' | 'avatarUrl'>;
+  size?: number;
+}): JSX.Element {
   return poster.avatarUrl ? (
     <img
       src={safeExternalUrl(poster.avatarUrl)}

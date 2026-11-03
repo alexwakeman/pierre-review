@@ -10,11 +10,15 @@ import {
   followUpTally,
   heldByAutoReview,
   ignoredLabel,
-  reviewCurrency,
+  leadCurrency,
+  leadFinishedAt,
+  leadVerdictText,
+  ownSummaryFor,
   reviewCellFor,
   reviewTone,
   severityPills,
   threadsToFixLabel,
+  type ReviewCell,
   type ReviewTone,
 } from '../../lib/claudeReviewColumn.js';
 import {
@@ -33,6 +37,7 @@ import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
+import { TeammateAvatar } from '../TeammateReviews.js';
 
 // One Open PRs card's CLAUDE REVIEW PANEL — the card's last block, on the AI surface (`--ai-*`),
 // with a left accent coloured by the run's outcome (`reviewTone`). Rendered ONLY when agentic AI
@@ -98,6 +103,18 @@ function Rule(): JSX.Element {
 
 function Group({ children }: { children: ReactNode }): JSX.Element {
   return <span className="inline-flex min-w-0 flex-wrap items-center gap-1">{children}</span>;
+}
+
+/** A finished review's verdict as a pill's content: "Approve", or — when a teammate's posted review
+ *  leads (`cell.by`) — their avatar and "Robin · Approve". */
+export function LeadVerdict({ cell, iconSize }: { cell: Extract<ReviewCell, { kind: 'done' }>; iconSize: number }): JSX.Element {
+  return (
+    <>
+      {cell.by != null && <TeammateAvatar poster={cell.by} size={iconSize + 1} />}
+      {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={iconSize} />}
+      {leadVerdictText(cell)}
+    </>
+  );
 }
 
 export function ClaudeReviewPanel({
@@ -200,26 +217,18 @@ export function ClaudeReviewPanel({
       break;
     case 'done': {
       // On the PR's current commit, or how far behind it — the same helper as the review pane.
-      const currency =
-        state != null
-          ? reviewCurrency({
-              reviewedHeadSha: state.reviewedHeadSha,
-              currentHeadSha: state.currentHeadSha,
-              commitsSince: state.commitsSince,
-            })
-          : null;
+      const currency = leadCurrency(state);
       outcome = (
         <>
           <button
             type="button"
             onClick={open}
-            title="Open the review"
+            title={cell.by?.title ?? 'Open the review'}
             className={`${VERDICT_PILL} ${
               cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-ui-raise text-ui-mute'
             } ${OUTCOME_LINK}`}
           >
-            {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={13} />}
-            {cell.verdictLabel}
+            <LeadVerdict cell={cell} iconSize={13} />
           </button>
           {cell.auto && <AutoMark />}
           {currency != null && (
@@ -227,12 +236,12 @@ export function ClaudeReviewPanel({
               {currency.label}
             </span>
           )}
-          <ReviewedAgo at={state?.finishedAt} />
+          <ReviewedAgo at={leadFinishedAt(state)} />
         </>
       );
       action = cell.headMoved ? (
         <button type="button" onClick={run} className={AI_BUTTON}>
-          Re-review
+          {cell.by != null ? 'Review' : 'Re-review'}
         </button>
       ) : (
         <button
@@ -251,7 +260,8 @@ export function ClaudeReviewPanel({
   }
 
   // ---- what the finished run found (only a succeeded run carries a summary) ----
-  const summary = cell.kind === 'done' ? state?.summary : undefined;
+  // The reader's own run's figures — not under a teammate's leading review.
+  const summary = ownSummaryFor(cell, state);
   const pills = summary != null ? severityPills(summary) : [];
   const total = summary != null ? findingTotal(summary) : 0;
   const tally = summary != null ? followUpTally(summary.followUp) : null;

@@ -139,6 +139,69 @@ export async function listTeammateReviews(
   });
 }
 
+/** A PR's NEWEST teammate review, as the Open PRs column / Pending cards name it. */
+export interface NewestTeammateReview {
+  reviewId: number;
+  poster: ClaudeTeammateReview['poster'];
+  verdict: ClaudeTeammateReview['verdict'];
+  headSha: string;
+  // When it was posted (else imported) — the same time `listTeammateReviews` reads.
+  postedAt: Date;
+  // The PR's synced head (a PR fact, read in the same query); null = not synced.
+  prHeadSha: string | null;
+}
+
+/**
+ * The NEWEST teammate review of each listed PR, in ONE query for the whole batch (never one per PR):
+ * newest by posted time (else import time), ties to the higher id — the review `foldTeamReview`
+ * calls `newest`. Account-scoped; a PR with none is absent. DB only.
+ */
+export async function newestTeammateReviewsForPrs(
+  exec: Executor,
+  accountId: number,
+  prIds: readonly number[],
+): Promise<Map<number, NewestTeammateReview>> {
+  const out = new Map<number, NewestTeammateReview>();
+  if (prIds.length === 0) return out;
+  const rows = await exec
+    .select({
+      id: cr.id,
+      prId: cr.prId,
+      headSha: cr.headSha,
+      verdict: cr.verdict,
+      postedAt: cr.postedAt,
+      createdAt: cr.createdAt,
+      userId: users.id,
+      login: users.githubLogin,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      prHeadSha: pullRequests.headSha,
+    })
+    .from(cr)
+    .innerJoin(pullRequests, eq(pullRequests.id, cr.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+    .innerJoin(users, eq(users.id, cr.sourceUserId))
+    .where(
+      and(inArray(cr.prId, [...prIds]), eq(cr.accountId, accountId), eq(repos.accountId, accountId), eq(cr.kind, TEAMMATE_KIND)),
+    )
+    .execute();
+  for (const r of rows) {
+    const at = r.postedAt ?? r.createdAt;
+    const cur = out.get(r.prId);
+    if (cur != null && (cur.postedAt.getTime() > at.getTime() || (cur.postedAt.getTime() === at.getTime() && cur.reviewId > r.id)))
+      continue;
+    out.set(r.prId, {
+      reviewId: r.id,
+      poster: { userId: r.userId, login: r.login, displayName: r.displayName, avatarUrl: r.avatarUrl },
+      verdict: r.verdict,
+      headSha: r.headSha,
+      postedAt: at,
+      prHeadSha: r.prHeadSha ?? null,
+    });
+  }
+  return out;
+}
+
 /** Where the follow-up chain can anchor: the reader's own full review, or a teammate's posted one. */
 export interface FollowUpAnchor {
   reviewId: number;

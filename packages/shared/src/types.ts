@@ -7934,6 +7934,31 @@ export interface ClaudeReviewPrState {
    *  Claude + Codex pair (oldest first). Absent for a skipped run, a row with no model, an auto
    *  review still waiting in its lane, and older servers — never a guess. */
   ranOn?: Array<{ provider: AiProviderId; model: string; effort: string | null }>;
+  /** THE NEWEST REVIEW LEADS (docs/CLAUDE-REVIEW.md § Teammates' reviews → One review; the ONE rule,
+   *  team-view.ts `teamReviewLead`): set ONLY when a teammate's POSTED review leads — it is newer
+   *  than the reader's latest run that succeeded and was not a skip (a queued / running own run
+   *  still leads; a failed, cancelled or skipped one does not). The column and the Pending cards
+   *  then show THIS verdict, attributed, instead of the reader's run; every other field above stays
+   *  the reader's own (auto holds, fix, team claims read those). A PR with NO run of the reader's is
+   *  listed for it with `reviewId: null`, `status: 'succeeded'` and no `trigger` / `summary` /
+   *  `ranOn` / `fix`. DB-only. Absent on older servers. */
+  teammateLead?: ClaudeTeammateLead;
+}
+
+/** The teammate review that leads a PR (`ClaudeReviewPrState.teammateLead`). */
+export interface ClaudeTeammateLead {
+  /** The teammate review's id (`claude_reviews.id`, kind 'teammate'). */
+  reviewId: number;
+  login: string;
+  /** Their display name; null = unknown (show the login). */
+  name: string | null;
+  avatarUrl: string | null;
+  verdict: ClaudeReviewVerdict | null;
+  postedAt: string; // ISO-8601
+  /** The head the teammate's Limn reviewed. */
+  reviewedHeadSha: string;
+  /** The PR's synced head is a different commit (false when the synced head is unknown). */
+  headMoved: boolean;
 }
 
 /** The Open PRs strip's per-run figures, folded server-side from the stored run (DB-only). */

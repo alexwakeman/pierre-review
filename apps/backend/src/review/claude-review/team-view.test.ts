@@ -10,9 +10,10 @@
 //      longer raises it; two PR-level points match on the title alone.
 //   8. The reader's follow-up settling its own finding settles a teammate's spot-matched twin.
 //   9. A failed or skipped own run never outranks a teammate review for the lead.
+//  10. THE LEAD RULE (`teamReviewLead`), the one copy the Open PRs column / Pending also read.
 import { describe, expect, it } from 'vitest';
 import type { ClaudeTeammateFinding, ClaudeTeammateReview } from '@pierre-review/shared';
-import { foldTeamReview, teamReviewCount, type TeamFoldInput } from './team-view.js';
+import { foldTeamReview, teamReviewCount, teamReviewLead, type TeamFoldInput } from './team-view.js';
 
 const ROBIN = { userId: 7, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
 const SAM = { userId: 8, login: 'sam-dev', displayName: 'Sam Lee', avatarUrl: null };
@@ -266,5 +267,36 @@ describe('teamReviewCount', () => {
   });
   it('is zero with nothing run', () => {
     expect(teamReviewCount([], [])).toEqual({ total: 0, byTeammate: [] });
+  });
+});
+
+describe('teamReviewLead (the one lead rule)', () => {
+  const t1 = new Date(T1).getTime();
+  const t2 = new Date(T2).getTime();
+  const own = (status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled', at: number, reviewMode?: 'skip') => ({
+    status,
+    at,
+    ...(reviewMode ? { reviewMode } : {}),
+  });
+  it('a teammate review newer than the reader\'s succeeded run leads', () => {
+    expect(teamReviewLead(own('succeeded', t1), t2)).toBe('teammate');
+  });
+  it('the reader\'s newer succeeded run leads (a tie keeps the reader\'s)', () => {
+    expect(teamReviewLead(own('succeeded', t2), t1)).toBe('own');
+    expect(teamReviewLead(own('succeeded', t1), t1)).toBe('own');
+  });
+  it('a queued or running own run leads, however old the teammate review', () => {
+    expect(teamReviewLead(own('running', t1), t2)).toBe('own');
+    expect(teamReviewLead(own('queued', t1), t2)).toBe('own');
+  });
+  it('a failed, cancelled or skipped own run never leads over a teammate review', () => {
+    expect(teamReviewLead(own('failed', t2), t1)).toBe('teammate');
+    expect(teamReviewLead(own('cancelled', t2), t1)).toBe('teammate');
+    expect(teamReviewLead(own('succeeded', t2, 'skip'), t1)).toBe('teammate');
+  });
+  it('a teammate-only PR is led by the teammate; nothing at all is null', () => {
+    expect(teamReviewLead(null, t1)).toBe('teammate');
+    expect(teamReviewLead(own('failed', t1), null)).toBe('own');
+    expect(teamReviewLead(null, null)).toBeNull();
   });
 });

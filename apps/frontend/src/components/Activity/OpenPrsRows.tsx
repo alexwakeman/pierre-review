@@ -12,7 +12,7 @@ import type {
 import { useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
 import { useMergedPanelOpen } from '../../hooks/useTicketMergedPrs.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
-import { reviewCellFor, reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
+import { leadVerdictText, reviewCellFor, reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
 import { cardTicketLabel, type CardTicket } from '../../lib/cardTickets.js';
 import { cardTicketPills } from '../../lib/ticketReview.js';
 import {
@@ -282,7 +282,8 @@ function AiMarker({ prId, state, ciRunning, ticketRunning }: { prId: number; sta
     tone = 'text-ai-signal';
   } else if (cell.kind === 'done') {
     icon = cell.verdict != null ? <VerdictIcon verdict={cell.verdict} size={13} /> : <CommentIcon size={13} />;
-    label = `AI review: ${cell.verdictLabel}${cell.headMoved ? ' · newer commits since' : ''}`;
+    // A teammate's newer posted review leads: "AI review: Robin · Approve".
+    label = `AI review: ${leadVerdictText(cell)}${cell.headMoved ? ' · newer commits since' : ''}`;
   } else if (cell.kind === 'start' && cell.failed) {
     icon = <WarningIcon size={13} />;
     label = 'AI review failed';

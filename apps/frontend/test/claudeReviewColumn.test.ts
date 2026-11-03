@@ -14,6 +14,10 @@
 //      even over a start in flight — the column keeps polling while one is queued, every auto run
 //      carries the "Auto review" marker, and a 409 AutoReviewInProgress keeps the button shut.
 //
+//   8. THE NEWEST REVIEW LEADS: with `teammateLead` (the server's one lead rule) the cell shows the
+//      teammate's verdict, attributed ("Robin · Approve", title "Robin’s review"), their head and
+//      time — never the reader's older counts; the reader's own run in flight still wins.
+//
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/claudeReviewColumn.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -39,6 +43,10 @@ import {
   reviewWorkInProgress,
   reviewedAgoLabel,
   reviewRunWhen,
+  leadCurrency,
+  leadFinishedAt,
+  leadVerdictText,
+  ownSummaryFor,
 } from '../src/lib/claudeReviewColumn.js';
 import { dateTime, formatDate } from '../src/lib/ui.js';
 import { fillDraftFromJira } from '../src/lib/jiraTicket.js';
@@ -424,5 +432,76 @@ describe('reviewedAgoLabel / reviewRunWhen', () => {
     expect(dateTime(iso)).toMatch(/\d{2}:\d{2}/);
     const old = ago(60 * DAY);
     expect(reviewRunWhen(old)).toBe(dateTime(old));
+  });
+});
+
+describe('the newest review leads (teammateLead)', () => {
+  const lead = {
+    reviewId: 77,
+    login: 'robin-dev',
+    name: 'Robin Dunn',
+    avatarUrl: null,
+    verdict: 'REQUEST_CHANGES' as const,
+    postedAt: '2026-10-01T09:00:00.000Z',
+    reviewedHeadSha: 'b'.repeat(40),
+    headMoved: false,
+  };
+  const summary = {
+    findings: { blocker: 2, warning: 0, nit: 0, question: 0, praise: 0 },
+    lenses: {},
+    postedFindings: 0,
+    reviewPosted: false,
+    tickets: [],
+    followUp: null,
+  };
+
+  it("shows the teammate's verdict, by first name, with their review as the title", () => {
+    const cell = reviewCellFor(st({ teammateLead: lead, summary }), false);
+    expect(cell).toMatchObject({
+      kind: 'done',
+      verdict: 'REQUEST_CHANGES',
+      verdictLabel: 'Request changes',
+      headMoved: false,
+      by: { name: 'Robin', title: 'Robin’s review', login: 'robin-dev' },
+    });
+    if (cell.kind !== 'done') throw new Error('done');
+    expect(leadVerdictText(cell)).toBe('Robin · Request changes');
+    // The reader's own counts are not the teammate's: none shown, none ranked.
+    expect(ownSummaryFor(cell, st({ teammateLead: lead, summary }))).toBeUndefined();
+    expect(findingsRank(st({ teammateLead: lead, summary }))).toBe(-1);
+  });
+
+  it('no display name ⇒ the login; the reader\'s own run reads as before', () => {
+    const cell = reviewCellFor(st({ teammateLead: { ...lead, name: null, verdict: 'APPROVE' } }), false);
+    if (cell.kind !== 'done') throw new Error('done');
+    expect(leadVerdictText(cell)).toBe('@robin-dev · Approve');
+    expect(cell.by?.title).toBe('@robin-dev’s review');
+    const own = reviewCellFor(st({ summary }), false);
+    if (own.kind !== 'done') throw new Error('done');
+    expect(leadVerdictText(own)).toBe('Approve');
+    expect(own.by).toBeUndefined();
+    expect(ownSummaryFor(own, st({ summary }))).toEqual(summary);
+  });
+
+  it("a teammate-only PR (no run of the reader's) still shows the teammate's verdict", () => {
+    const only = st({ reviewId: null, verdict: null, reviewedHeadSha: null, finishedAt: null, teammateLead: lead });
+    expect(reviewCellFor(only, false)).toMatchObject({ kind: 'done', reviewId: null, verdict: 'REQUEST_CHANGES' });
+    expect(leadFinishedAt(only)).toBe(lead.postedAt);
+  });
+
+  it("their head and time, not the reader's run's", () => {
+    const s = st({ teammateLead: { ...lead, headMoved: true }, currentHeadSha: 'c'.repeat(40), commitsSince: 4 });
+    expect(reviewCellFor(s, false)).toMatchObject({ headMoved: true });
+    expect(leadCurrency(s)).toMatchObject({ tone: 'behind', label: 'Branch changed' });
+    expect(leadFinishedAt(s)).toBe(lead.postedAt);
+    expect(leadCurrency(st({ teammateLead: lead, currentHeadSha: 'b'.repeat(40) }))).toMatchObject({ tone: 'current' });
+  });
+
+  it("a start in flight, or the reader's auto run in flight, still wins", () => {
+    expect(reviewCellFor(st({ teammateLead: lead }), true)).toEqual({ kind: 'starting' });
+    expect(reviewCellFor(st({ status: 'running', trigger: 'auto', teammateLead: lead }), false)).toEqual({
+      kind: 'running',
+      auto: true,
+    });
   });
 });

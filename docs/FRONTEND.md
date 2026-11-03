@@ -1886,6 +1886,18 @@ reappears.
   (`FindingRow` `alsoRaisedBy`). The section count and the rail counts include them. With no succeeded
   run of the reader's, `TeamOnlyReview` shows the teammate lead and their findings alone. There is no
   separate teammates' card list.
+- **The Open PRs column and the Pending cards follow the same lead** through the batched states'
+  `teammateLead` (server-decided, docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): ONE place,
+  `reviewCellFor` (`lib/claudeReviewColumn.ts`), turns it into a `done` cell with `by` (first name,
+  "Robin’s review" title, avatar), after a start in flight and the reader's own auto run in flight.
+  Every surface renders the pill through `LeadVerdict` (`ClaudeReviewCell.tsx`: avatar + verdict icon +
+  "Robin · Request changes", `leadVerdictText`) with the title "Robin’s review"; the row marker's
+  label reads "AI review: Robin · Approve". Under a teammate lead the reader's own figures are NOT
+  shown (`ownSummaryFor`; `findingsRank` reads −1), the currency pill and "reviewed … ago" read the
+  teammate's head and post time (`leadCurrency`, `leadFinishedAt`), and the start button says
+  "Review" (Pending: "Review with Claude"), not "Re-review". A Pending `claude_review` card that omits
+  the verdict (its heading names the reader's) still shows a teammate's leading one. Nothing new is
+  fetched: it rides the board's one batched states answer.
 - **When did the review run? ONE component, `ReviewedAgo` (`components/ReviewedAgo.tsx`)** over
   `reviewedAgoLabel()` (`lib/claudeReviewColumn.ts`): muted "reviewed 2 days ago" (past a month,
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the

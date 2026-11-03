@@ -6,6 +6,7 @@ import type {
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
 import { CLEAN_CLASS, OUTDATED_CLASS } from './claudeReviewFollowUp.js';
+import { teammateName } from './teammateReviews.js';
 import { dateTime, relativeTime } from './ui.js';
 
 // Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
@@ -18,6 +19,17 @@ export const CLAUDE_VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   REQUEST_CHANGES: 'Request changes',
   APPROVE: 'Approve',
 };
+
+/** Whose review a `done` cell shows when a teammate's posted review LEADS (`state.teammateLead`,
+ *  the server's ONE lead rule): their first name ("Robin", else "@robin-dev"), the hover / accessible
+ *  title ("Robin’s review") and their avatar. Absent = the reader's own run. */
+export interface ReviewCellBy {
+  login: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  name: string;
+  title: string;
+}
 
 // `auto: true` = the workspace's auto review started that run; the cell adds an "Auto review"
 // marker. A queued or running auto run HOLDS the PR: the start route answers 409
@@ -35,6 +47,8 @@ export type ReviewCell =
       verdictLabel: string;
       headMoved: boolean;
       auto?: true;
+      // A teammate's posted review leads: `verdict` / `headMoved` are THEIRS, attributed.
+      by?: ReviewCellBy;
     };
 
 /**
@@ -54,6 +68,20 @@ export function reviewCellFor(
     return { kind: state.status, ...auto };
   }
   if (starting) return { kind: 'starting' };
+  // THE NEWEST REVIEW LEADS: the server sets `teammateLead` only when a teammate's posted review is
+  // newer than the reader's last real review (and none of the reader's is in flight).
+  const mate = state.teammateLead;
+  if (mate != null) {
+    const name = teammateName({ login: mate.login, displayName: mate.name });
+    return {
+      kind: 'done',
+      reviewId: state.reviewId,
+      ...(mate.verdict != null ? { verdict: mate.verdict } : {}),
+      verdictLabel: mate.verdict != null ? CLAUDE_VERDICT_LABEL[mate.verdict] : 'Reviewed',
+      headMoved: mate.headMoved,
+      by: { login: mate.login, displayName: mate.name, avatarUrl: mate.avatarUrl, name, title: `${name}’s review` },
+    };
+  }
   switch (state.status) {
     case 'queued':
       return { kind: 'queued' };
@@ -73,6 +101,32 @@ export function reviewCellFor(
     case 'cancelled':
       return { kind: 'start' };
   }
+}
+
+/** "Robin · Approve" for a teammate's leading review; the bare verdict label for the reader's own. */
+export function leadVerdictText(cell: Extract<ReviewCell, { kind: 'done' }>): string {
+  return cell.by != null ? `${cell.by.name} · ${cell.verdictLabel}` : cell.verdictLabel;
+}
+
+/** The figures of the reader's OWN finished run (`summary`), only while that run is what the cell
+ *  shows — a teammate's leading review carries none, and the reader's older counts are not its. */
+export function ownSummaryFor(cell: ReviewCell, state: ClaudeReviewPrState | undefined): ClaudeReviewStateSummary | undefined {
+  return cell.kind === 'done' && cell.by == null ? state?.summary : undefined;
+}
+
+/** When the review the cell shows was done: the teammate's post when theirs leads, else the run. */
+export function leadFinishedAt(state: ClaudeReviewPrState | undefined): string | null {
+  return state?.teammateLead?.postedAt ?? state?.finishedAt ?? null;
+}
+
+/** Is the review the cell shows on the PR's current commit? The teammate's head when theirs leads
+ *  (the newer-commit count is the reader's run's, so it is not reused there). */
+export function leadCurrency(state: ClaudeReviewPrState | undefined): ReviewCurrency | null {
+  if (state == null) return null;
+  const mate = state.teammateLead;
+  return mate != null
+    ? reviewCurrency({ reviewedHeadSha: mate.reviewedHeadSha, currentHeadSha: state.currentHeadSha })
+    : reviewCurrency({ reviewedHeadSha: state.reviewedHeadSha, currentHeadSha: state.currentHeadSha, commitsSince: state.commitsSince });
 }
 
 /**
@@ -226,7 +280,8 @@ export function threadsToFixLabel(summary: Pick<ClaudeReviewStateSummary, 'threa
 /** The Findings sort value: most severe run first under 'desc'. A PR with no finished run sorts
  *  below a clean one (-1), so "nothing known" never ranks as "nothing found". */
 export function findingsRank(state: ClaudeReviewPrState | undefined): number {
-  const f = state?.summary?.findings;
+  // A teammate's leading review carries no counts here; the reader's older ones are not its.
+  const f = state?.teammateLead != null ? undefined : state?.summary?.findings;
   if (f == null) return -1;
   return f.blocker * 1_000_000 + f.warning * 1_000 + f.nit + f.question;
 }

@@ -9,7 +9,9 @@ import {
   findingTotal,
   followUpTally,
   heldByAutoReview,
-  reviewCurrency,
+  leadCurrency,
+  leadFinishedAt,
+  ownSummaryFor,
   reviewCellFor,
   severityPills,
   threadsToFixLabel,
@@ -25,8 +27,7 @@ import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
-import { VerdictIcon } from '../VerdictIcon.js';
-import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
+import { AutoMark, GREY_PILL, LeadVerdict, MUTED, PILL } from './ClaudeReviewCell.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { ciCardPill } from '../../lib/ciReview.js';
 
@@ -105,22 +106,24 @@ export function ClaudeReviewLine({
       );
       break;
     case 'done':
-      lead = omitVerdict ? null : (
+      // A card whose heading names the reader's verdict omits it — unless a teammate's newer review
+      // leads, which the heading does not say.
+      lead = omitVerdict && cell.by == null ? null : (
         <button
           type="button"
           onClick={open}
-          title="Open the review"
+          title={cell.by?.title ?? 'Open the review'}
           className={`${PILL} ${
             cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-ui-raise text-ui-mute'
           } ${LINK}`}
         >
-          {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={11} />}
-            {cell.verdictLabel}
+          <LeadVerdict cell={cell} iconSize={11} />
         </button>
       );
       break;
   }
-  const summary = cell.kind === 'done' ? state?.summary : undefined;
+  // The reader's own run's figures — not under a teammate's leading review.
+  const summary = ownSummaryFor(cell, state);
   // On a red-build card the diagnosis IS the line, so the VERDICT pill steps aside — only the verdict:
   // a queued, running or failed code review keeps its lead beside the CI pill. Everywhere else
   // the line is the verdict and its finding counts only — the threads-to-fix and CI-diagnosis pills
@@ -164,7 +167,7 @@ export function ClaudeReviewLine({
       )}
       {ciPill != null
         ? !ciPill.running && <ReviewedAgo at={ciState?.checkedAt} className="text-meta" />
-        : cell.kind === 'done' && <ReviewedAgo at={state?.finishedAt ?? reviewedAt} className="text-meta" />}
+        : cell.kind === 'done' && <ReviewedAgo at={leadFinishedAt(state) ?? reviewedAt} className="text-meta" />}
     </div>
   );
 }
@@ -221,7 +224,7 @@ export function ClaudeReviewActions({
     parts.push(
       cell.headMoved ? (
         <button key="rr" type="button" onClick={run} className={PENDING_AI_BUTTON}>
-          Re-review
+          {cell.by != null ? `Review with ${aiName}` : 'Re-review'}
         </button>
       ) : (
         <button
@@ -284,17 +287,12 @@ export function ClaudeReviewExtras({
   ciState?: CiReviewState;
 }): JSX.Element | null {
   const ciPill = ciCardPill(ciState);
-  const state = reviewState?.status === 'succeeded' ? reviewState : null;
+  // A finished own run, or a teammate's review that leads (over a failed own run too).
+  const state = reviewState?.status === 'succeeded' || reviewState?.teammateLead != null ? reviewState : null;
   if (state == null && ciPill == null) return null;
-  const summary = state?.summary;
-  const currency =
-    state != null
-      ? reviewCurrency({
-          reviewedHeadSha: state.reviewedHeadSha,
-          currentHeadSha: state.currentHeadSha,
-          commitsSince: state.commitsSince,
-        })
-      : null;
+  // Under a teammate's leading review: its commit only — the reader's older run's figures are not its.
+  const summary = state?.teammateLead != null ? undefined : state?.summary;
+  const currency = leadCurrency(state ?? undefined);
   const tally = summary != null ? followUpTally(summary.followUp) : null;
   const toFix = summary != null ? threadsToFixLabel(summary) : null;
   const ciLabel = ciPill?.label ?? null;

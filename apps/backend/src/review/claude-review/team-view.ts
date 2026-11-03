@@ -93,6 +93,30 @@ function addPoster(list: ClaudeTeammatePoster[], p: ClaudeTeammatePoster): void 
   if (!list.some((x) => x.userId === p.userId)) list.push(p);
 }
 
+/** The reader's latest full run as the lead rule reads it. */
+export interface TeamLeadOwn {
+  status: ClaudeReview['status'];
+  reviewMode?: ClaudeReview['reviewMode'] | null;
+  // When it was done (finished, else created), ms.
+  at: number;
+}
+
+/**
+ * THE LEAD RULE (pure), the ONE copy: who heads the PR's review — the AI Review tab
+ * (`foldTeamReview`) and the Open PRs column / Pending cards (`getLatestReviewStates`
+ * `teammateLead`) both ask it. The NEWEST review leads: a teammate's POSTED review (newest posted at,
+ * ms) leads when it is newer than the reader's latest run that SUCCEEDED and was not a skip. A run of
+ * the reader's in progress (queued / running) is the newest work and leads; a failed, cancelled or
+ * skipped run reviewed nothing, so any teammate review outranks it. null = nothing on the PR.
+ */
+export function teamReviewLead(own: TeamLeadOwn | null, newestTeammateAt: number | null): 'own' | 'teammate' | null {
+  if (newestTeammateAt == null) return own != null ? 'own' : null;
+  if (own == null) return 'teammate';
+  if (own.status === 'queued' || own.status === 'running') return 'own';
+  const ownReviewed = own.status === 'succeeded' && own.reviewMode !== 'skip';
+  return !ownReviewed || newestTeammateAt > own.at ? 'teammate' : 'own';
+}
+
 /** THE FOLD (pure). */
 export function foldTeamReview(input: TeamFoldInput): ClaudeTeamReviewView {
   const { teammateReviews, own } = input;
@@ -186,13 +210,9 @@ export function foldTeamReview(input: TeamFoldInput): ClaudeTeamReviewView {
     }
   }
 
-  // The newest review leads. A run of the reader's in progress is the newest work; a failed run or a
-  // skip reviewed nothing, so any teammate review outranks it.
+  // The newest review leads (`teamReviewLead`, THE lead rule).
   const newest = byAge[byAge.length - 1] ?? null;
-  let lead: ClaudeTeamReviewView['lead'] = own != null ? 'own' : newest != null ? 'teammate' : null;
-  const ownInProgress = own != null && (own.status === 'queued' || own.status === 'running');
-  if (own != null && newest != null && !ownInProgress && (!ownReviewed || ms(newest.postedAt) > own.at))
-    lead = 'teammate';
+  const lead = teamReviewLead(own, newest != null ? ms(newest.postedAt) : null);
 
   const reviewAt = new Map(byAge.map((r) => [r.reviewId, ms(r.postedAt)]));
   const findings = entries
