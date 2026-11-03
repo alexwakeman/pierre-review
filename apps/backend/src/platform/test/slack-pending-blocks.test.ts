@@ -201,7 +201,10 @@ describe('buildPendingBlocks', () => {
   });
 
   it('has plain wording for every PR kind on the board and every My turn reason', () => {
-    const boardKinds = PENDING_TABS.flatMap((t) => t.kinds).filter((k) => k !== 'reviewer_load');
+    // "Waiting on others" is a PERSONAL tab — never in a team digest, so it has no wording here.
+    const boardKinds = PENDING_TABS.filter((t) => t.key !== 'waiting')
+      .flatMap((t) => t.kinds)
+      .filter((k) => k !== 'reviewer_load');
     for (const kind of boardKinds) {
       expect(pendingCardText(pr(`k:${kind}`, kind, 1, { reason: 'mention', arm: 'your_pr', path: 'a.ts' })), kind).not.toBe('');
     }

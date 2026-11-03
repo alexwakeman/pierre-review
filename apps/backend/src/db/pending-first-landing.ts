@@ -26,6 +26,7 @@
 // ⚠ LIVE STATE, like the board: nothing here may enter a payload hash.
 import {
   PENDING_OWN_PRS_SHOWN,
+  PENDING_TABS,
   PENDING_SUMMARY_DAYS,
   type MergeStateStatus,
   type Mergeable,
@@ -59,9 +60,13 @@ export function summaryWindowOpen(firstOnboardingAt: Date | null, now: number): 
   return now - firstOnboardingAt.getTime() < PENDING_SUMMARY_DAYS * DAY_MS;
 }
 
-/** Is every tab empty? The tabs' totals are the board's populations (review load is not counted). */
-export function boardIsEmpty(tabs: readonly Pick<PendingTab, 'total'>[]): boolean {
-  return tabs.every((t) => t.total === 0);
+/** Is every tab empty? The tabs' totals are the board's populations (review load is not counted).
+ *  ⚠ "Waiting on others" (`byWait`) is not asked: it is information about the reader's own PRs, not
+ *  something to do — and the empty board lists those same PRs, with what blocks each. */
+export function boardIsEmpty(tabs: readonly Pick<PendingTab, 'total' | 'key'>[]): boolean {
+  return tabs.every(
+    (t) => t.total === 0 || PENDING_TABS.find((d) => d.key === t.key)?.byWait === true,
+  );
 }
 
 /** May the suggestion show at all? Pure — the PR pick is separate. */

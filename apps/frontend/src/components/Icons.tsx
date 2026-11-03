@@ -1508,6 +1508,18 @@ export function PendingStalledIcon({ size = 13, ...rest }: IconProps): JSX.Eleme
   );
 }
 
+// A person with a clock — your PR, waiting on someone else's review.
+export function PendingWaitingOnOthersIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="8.5" cy="8" r="3.6" />
+      <path d="M2.5 20.5v-.5a6 6 0 0 1 8.4-5.5" />
+      <circle cx="17" cy="16.5" r="4.5" />
+      <path d="M17 14.3v2.4l1.6 1" />
+    </IconShell>
+  );
+}
+
 // A person with a question mark — a pull request nobody has been asked to review.
 export function PendingNeedsReviewerIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (

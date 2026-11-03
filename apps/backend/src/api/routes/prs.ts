@@ -31,6 +31,8 @@ import type {
   ReopenPrResult,
   RequestReviewersBody,
   RequestReviewersResult,
+  PrReviewWaitsResponse,
+  ReviewerCandidateResponse,
   ResolveBotThreadsBody,
   SuggestedReviewersResponse,
   UpdateBranchBody,
@@ -56,6 +58,8 @@ import {
   getReviewerLogins,
   getResolvableBotThreads,
   getSuggestedReviewersBasis,
+  getPrReviewWaits,
+  getReviewerCandidate,
   type SuggestionBasis,
   getUsersByLogins,
   clearOwnReviewRequest,
@@ -1932,8 +1936,37 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // How long each outstanding review request on the PR has waited, in working hours, against the
+  // workspace's review target — the PR pane's reviewers area ("Over the 4h review target", Nudge).
+  // DB only (tier `read`, decided in tierFor). Contract row in docs/API.md.
+  app.get('/api/prs/:id/review-waits', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const resp = await getPrReviewWaits(id, accountIdOf(req));
+    if (!resp) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const out: PrReviewWaitsResponse = resp;
+    return out;
+  });
+
+  // "Ask someone else": the one suggested reviewer to ask — the least loaded of the PR's suggested
+  // people not already asked. Fetched on the reader's CLICK, never on mount: it reads CODEOWNERS
+  // (network), so `prDetail` + `read` in tierFor. Asking is then the reader's confirm, through
+  // POST …/request-reviewers below. Contract row in docs/API.md.
+  app.get('/api/prs/:id/reviewer-candidate', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const resp = await getReviewerCandidate(id, accountIdOf(req));
+    if (!resp) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const out: ReviewerCandidateResponse = resp;
+    return out;
+  });
+
   // Request reviewers on a PR (powers each Pending routing card's per-suggestion "Assign"
-  // button, one reviewer per request — contract row in docs/API.md). Server
+  // button, a waiting row's "Nudge" / "Ask someone else" and the PR pane's, one reviewer per request — contract row in docs/API.md). Server
   // re-checks write access (WRITE/MAINTAIN/ADMIN — push-style, no author exclusion:
   // an author may request reviewers on their own PR). The given user ids are resolved
   // to GitHub logins (the PR author + bots + unknown ids dropped); GitHub itself gates
@@ -1999,6 +2032,10 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         );
         // The stamp moves the routing card; signal it before replying. Never throws.
         await notePrChangedForPr(accountId, ctx.prId);
+        // ONE re-read shortly after (no expectation: the ladder stops at its first read), so the
+        // NEW request event — a "Nudge" re-asks someone already on the hook — reaches the stored
+        // history and restarts that reviewer's wait (db/review-waits.ts). Fire-and-forget.
+        schedulePrSettle(accountId, ctx.prId, asSyncLogger(req.log));
         const result: RequestReviewersResult = {
           status: 'ok',
           requestedLogins: logins,

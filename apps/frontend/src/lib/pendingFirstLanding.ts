@@ -2,6 +2,7 @@
 //
 // Everything here reads the board response the page already holds (`GET /api/attention`); nothing
 // fetches. The components are in Activity/PendingFirstLanding.tsx.
+import { PENDING_TABS } from '@pierre-review/shared';
 import type {
   MergeVerdictInfo,
   PendingAuthorLens,
@@ -22,6 +23,7 @@ const SUMMARY_PHRASE: Record<PendingTabKey, (n: number) => string> = {
   threads: (n) => `${n} unanswered ${plural(n, 'thread', 'threads')}`,
   land: (n) => `${n} ready to land`,
   deps: (n) => `${n} dependency ${plural(n, 'update', 'updates')}`,
+  waiting: (n) => `${n} of yours waiting on others`,
 };
 
 export interface PendingSummaryPart {
@@ -47,9 +49,13 @@ export function pendingSummaryParts(
   return out;
 }
 
-/** Every tab is empty — the board's own totals, never the listed cards. */
+/** Every tab is empty — the board's own totals, never the listed cards. "Waiting on others"
+ *  (`byWait`) is not asked: it is information, and the empty board lists those same PRs. */
 export function pendingBoardEmpty(tabs: readonly PendingTab[]): boolean {
-  return tabs.length > 0 && tabs.every((t) => t.total === 0);
+  return (
+    tabs.length > 0 &&
+    tabs.every((t) => t.total === 0 || PENDING_TABS.find((d) => d.key === t.key)?.byWait === true)
+  );
 }
 
 /**

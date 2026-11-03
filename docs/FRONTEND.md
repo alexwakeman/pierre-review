@@ -3198,7 +3198,8 @@ nothing fetches on mount, and the Slack snapshot carries none of them (`buildPen
 
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
-Pending is seven tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`): **My turn** ·
+Pending is eight tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`) — seven scored ones,
+then the unscored **Waiting on others** (§ below): **My turn** ·
 **Claude reviews** (finished Claude reviews you have not acted on — the my_turn cards of type
 `claude_review`, moved out of My turn; same ball rule and dismissals, one scored list) ·
 **Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
@@ -3381,6 +3382,43 @@ modal (tabs, inside a tab, the score, colours, when it is your turn).
 - `KIND_LABEL`, `cardKindLabel`, `MY_TURN_REASON_LABEL` and `myTurnReasonLabel` live in
   `pendingLabels.ts` (importing them from `AttentionCards` would be a cycle); `AttentionCards`
   re-exports them.
+
+### Waiting on others and the review target (`ReviewWaitActions.tsx`, `lib/reviewWaits.ts`)
+
+The server contract is [BACKEND.md](BACKEND.md) § Waiting on others. On screen:
+
+- **The tab** (`waiting`, last, key `8`) shows only while it holds something or is on screen (like AI
+  reviews). No "Do next" head (`buildPendingView` gives a `byWait` tab `doNextCount: 0`); its ⓘ order
+  sentence is "Longest wait first, in working hours. Not scored: nothing here is your next step."
+  Its badge is its own count and nothing else counts it — not My Turn, the banner, the brief or a
+  notification. The first-landing summary names it apart ("2 of yours waiting on others"), and
+  `pendingBoardEmpty` ignores it, so a board with only waiting rows still shows the empty board's own
+  PR list (on the Waiting tab itself the rows are the list).
+- **The row** says WHO and HOW LONG: the reason column is "With sam" (always shown on that tab, even
+  when one person has every row) and the age cell is the WORKING-hours wait ("6h", `workHoursShort`),
+  never the clock age. A team is named by its own name.
+- **The card** heads "With sam · 6 working hours", lists each holder with their wait, and past the
+  target shows the note, a **Nudge** beside each PERSON over the target and one **Ask someone else**
+  (`ReviewWaitList`). Its action line says "Nudge them or ask someone else" only when those buttons
+  are there (no imperative without its button).
+- **"Over the 4h review target — waiting 9 working hours"** (`ReviewTargetNote`, the target explained
+  behind its ⓘ) sits on any card carrying `overReviewTarget` — a waiting card, a stalled review, a
+  review asked of you — and the row's age cell turns amber with the same sentence in its tooltip.
+- **Nudge** (`NudgeButton`) is `useRequestReviewers(prId, 'nudge:<userId>')` with `{ userIds: [id] }` —
+  the existing request route; "Nudged" is read off the shared mutation key, so a tab switch keeps it.
+  **Ask someone else** (`AskSomeoneElse`) fetches `GET /api/prs/:id/reviewer-candidate` ONLY after the
+  click (`useReviewerCandidate(prId, open)`), names the person ("Ask @robin? Recent work in src ·
+  1 review waiting on them"), and asks only on "Ask @robin". ⚠ NOTHING FETCHES ON MOUNT: the board's
+  rule holds. Both HIDE (never disable) without request rights (`viewerCanPush` on the card,
+  `viewerCanRequest` in the pane) and under the target (`nudgeOffered`, `askSomeoneElseOffered`).
+  A request refreshes `invalidateAfterPrWrite` plus `['review-waits' | 'reviewer-candidate', id]`.
+- **The PR pane's "Requested" row** (`ChecksTab` `RequestedReviewersRow`) reads
+  `GET /api/prs/:id/review-waits` on an open PR (`usePrReviewWaits`, live, never persisted): each
+  chip gets its working-hours wait (amber past the target), a Nudge where offered, and under the row
+  the note and Ask someone else.
+- **Chronology's "Review target" block** (`BottlenecksPanel`, above the budgets) prints the server's
+  `reviewTarget.sentence` ("86% of first reviews arrived within 4 working hours") and "45 of 52 pull
+  requests that had a first review" from the wire counts; absent ⇒ no block.
 
 ### One PR card shell — Open PRs and Pending
 
@@ -5726,7 +5764,7 @@ shorter form of each rule; this is the full wording.
 
 ### The Pending board
 
-- **The Pending board is SEVEN scored TABS** (`PENDING_TABS`, `db/pending-tabs.ts`), each ranked by
+- **The Pending board is SEVEN scored TABS + the unscored "Waiting on others"** (`PENDING_TABS`, `db/pending-tabs.ts`), each scored one ranked by
   the ONE scorer (`db/work-plan.ts` `scoreCards`); the top 5 are "Do next". ⚠ **It ranks the
   UNCAPPED fold, then caps** per list group (`boardListCap` 50); only `/api/attention` passes
   `uncapped` and `withFailingChecks`. ⚠ **Each count is its own population** (`tab.total`,

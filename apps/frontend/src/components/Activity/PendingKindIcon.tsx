@@ -24,6 +24,7 @@ import {
   PendingThreadReplyIcon,
   PendingTrunkRedIcon,
   PendingUnansweredIcon,
+  PendingWaitingOnOthersIcon,
 } from '../Icons.js';
 
 // THE PENDING BOARD'S MARKS — one icon per card type, leading each card's heading, and one per
@@ -45,6 +46,7 @@ const KIND_ICON: Record<InsightKind, IconComponent> = {
   update_branch: PendingBehindIcon,
   security: PendingSecurityAlertIcon,
   dependency_bump: PendingDependencyIcon,
+  waiting_on_others: PendingWaitingOnOthersIcon,
   // Never on the board (the route filters them out); a mark so the Record is total.
   bot_signal: BotIcon,
   bot_only_review: BotIcon,
@@ -76,6 +78,7 @@ const TAB_ICON: Record<PendingTabKey, IconComponent> = {
   threads: PendingUnansweredIcon,
   land: PendingLandIcon,
   deps: PendingDependencyIcon,
+  waiting: PendingWaitingOnOthersIcon,
 };
 
 /** The mark for one card: its My Turn type, or its kind — with the few kinds whose card says

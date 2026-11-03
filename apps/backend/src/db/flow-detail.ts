@@ -36,6 +36,7 @@ import {
   type FlowLandingTail,
   type FlowPrFigures,
   type FlowPrLink,
+  type FlowReviewTarget,
   type FlowPrRow,
   type FlowRequestKind,
   type FlowRequestRow,
@@ -135,6 +136,7 @@ export interface FlowDetail {
   concentration: FlowConcentrationRow[];
   requests: FlowRequestStats | null;
   prFigures: FlowPrFigures;
+  reviewTarget: FlowReviewTarget | null;
 }
 
 // ── Small helpers ───────────────────────────────────────────────────────────────────────────
@@ -286,6 +288,29 @@ function budgetRow(
     sentence = base + tail;
   }
   return { measure, good, ok, prs: n, p50: r2(p50), p75: r2(p75), p90: r2(p90), verdict, sentence };
+}
+
+// ── The review target headline ──────────────────────────────────────────────────────────────
+
+/**
+ * "86% of first reviews arrived within 4 working hours" — the share of measured PRs whose first look
+ * came within the first-look budget's "good" value (THE review target; no second setting). Over the
+ * same values as the first-look budget row, so the two cannot disagree about the population.
+ * ⚠ UNKNOWN IS NEVER ZERO: null under `FLOW_BUDGET_MIN_PRS` first looks — the budget row beside it
+ * already says how few there were.
+ */
+function reviewTargetOf(worked: Worked[], settings: ResolvedFlowSettings): FlowReviewTarget | null {
+  const looks = worked.map((w) => w.firstLookWork).filter((v): v is number => v != null);
+  if (looks.length < FLOW_BUDGET_MIN_PRS) return null;
+  const targetHours = settings.budgets.firstLook.good;
+  const within = looks.filter((v) => v <= targetHours).length;
+  const share = Math.round((within / looks.length) * 100);
+  return {
+    targetHours,
+    within,
+    prs: looks.length,
+    sentence: `${share}% of first reviews arrived within ${fmtWork(targetHours, 0)}`,
+  };
 }
 
 // ── The contrast ────────────────────────────────────────────────────────────────────────────
@@ -803,6 +828,7 @@ export function buildFlowDetail(
     concentration: concentrationOf(worked, minRepoPrs),
     requests: requestsOf(worked, dayHours),
     prFigures: prFiguresOf(worked, dayHours),
+    reviewTarget: reviewTargetOf(worked, settings),
   };
 }
 

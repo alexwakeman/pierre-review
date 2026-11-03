@@ -282,11 +282,11 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - **"Where the work is happening" = two `charts/RepoRows` cards in `WorkspaceFlowMetrics`**
   (never `WorkspaceMetricsPanel`); **unknown is never zero** (`linesChanged: null` → "size
   unknown"; a null reach verdict is undrawn).
-- **The Pending board is SEVEN scored TABS** (`PENDING_TABS`, `db/pending-tabs.ts`) ranked by ONE
+- **The Pending board is SEVEN scored TABS + "Waiting on others"** (`PENDING_TABS`) ranked by ONE
   scorer (`db/work-plan.ts` `scoreCards`). ⚠ **It ranks the UNCAPPED fold, then caps**; only
   `/api/attention` passes `uncapped`. ⚠ **Each count is its own population** (`/api/daily-brief`
-  returns the same figures). ⚠ **The tabs are an ALLOW-list.** Every floor/cap/threshold lives ONCE
-  in `packages/shared/src/pending-rules.ts`. The literal stays `'attention'`.
+  returns them). ⚠ **The tabs are an ALLOW-list.** Every floor/cap/threshold lives ONCE in
+  `pending-rules.ts`. ⚠ Waiting on others: UNSCORED, counted nowhere else.
 - **NOTHING ON THE PENDING BOARD MAY FETCH ON MOUNT.** Merge buttons gate on synced fields through
   `mergeVerdict()`; live merge options are CLICK-gated; HIDE, never disable. A QUEUED PR never
   shows Merge. `conflicts` carries ONE action (the resolver), only in `writableRepoIds`.

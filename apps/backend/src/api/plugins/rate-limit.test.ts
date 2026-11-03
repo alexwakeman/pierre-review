@@ -748,6 +748,17 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/prs/42/checks/9876543/logs')).toEqual(['pr_detail', 'read']);
   });
 
+  // "Ask someone else" (Pending's waiting row, the PR pane's reviewers area) runs the SAME
+  // suggestion pipeline as `suggested-reviewers` — CODEOWNERS over REST — so the same bucket. The
+  // review waits beside it are two DB selects: `read`, decided, and the confirm click rides the
+  // existing `request-reviewers` write (github_write, asserted below).
+  it('puts "Ask someone else" on the detail bucket and the review waits on read', () => {
+    expect(tiers('GET', '/api/prs/42/reviewer-candidate')).toEqual(['pr_detail', 'read']);
+    expect(tiers('GET', '/api/prs/42/reviewer-candidates')).toEqual(['read']);
+    expect(tiers('GET', '/api/prs/42/review-waits')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/42/request-reviewers')).toEqual(['github_write']);
+  });
+
   // The Changes tab's two click-gated file reads: a gap marker's "Show N hidden lines" (one file's
   // raw text) and "Load full diff" (both sides + the merge base). Spelled with their exact segments
   // — `files/contents` (GitHub's own plural) or `file/content` must NOT ride the detail bucket.

@@ -56,6 +56,8 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   // item it is (`cardKindLabel`: a fix, or an alert), because the chip counts both.
   security: 'Security',
   dependency_bump: 'Bumps',
+  // Your own PR, with someone else — read-only, never counted as your turn.
+  waiting_on_others: 'Waiting on others',
 };
 
 /**

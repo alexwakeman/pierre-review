@@ -7,6 +7,8 @@ import type {
   PrFileFullDiffResponse,
   PrFilesResponse,
   SuggestedReviewersResponse,
+  PrReviewWaitsResponse,
+  ReviewerCandidateResponse,
   ThreadDetail,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -78,6 +80,33 @@ export function useSuggestedReviewers(id: number | null, enabled = true) {
     enabled: id != null && enabled,
     staleTime: 1000 * 60 * 2,
     gcTime: DETAIL_GC_TIME,
+  });
+}
+
+// How long each outstanding review request on a PR has waited, in working hours, against the
+// workspace's review target — the PR pane's "Requested" row. DB only; its own LIVE key (never
+// persisted: a wait grows by the minute), refreshed by every reviewer request
+// (`requestReviewersOptions`).
+export function usePrReviewWaits(id: number | null, enabled = true) {
+  return useQuery<PrReviewWaitsResponse>({
+    queryKey: ['review-waits', id],
+    queryFn: () => api.prReviewWaits(id as number),
+    enabled: id != null && enabled,
+    staleTime: 1000 * 60,
+    gcTime: DETAIL_GC_TIME,
+  });
+}
+
+// "Ask someone else": the one suggested reviewer to ask. ⚠ CLICK-GATED — `enabled` stays false
+// until the reader presses the button (it reads CODEOWNERS, and the Pending board may not fetch on
+// mount). Never persisted.
+export function useReviewerCandidate(id: number, enabled: boolean) {
+  return useQuery<ReviewerCandidateResponse>({
+    queryKey: ['reviewer-candidate', id],
+    queryFn: () => api.reviewerCandidate(id),
+    enabled,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
   });
 }
 

@@ -208,7 +208,7 @@ describe('My turn’s “Only yours”', () => {
 });
 
 describe('a response from a server that predates tabs', () => {
-  it('still gets all seven tabs, built from its cards by kind, in the order sent', () => {
+  it('still gets all eight tabs, built from its cards by kind, in the order sent', () => {
     const cards = [
       card('m', 'merge'),
       card('t', 'my_turn', { reason: 'review_request' }),
@@ -217,7 +217,16 @@ describe('a response from a server that predates tabs', () => {
       card('l', 'reviewer_load'),
     ];
     const tabs = tabsOf({ cards, users: [] });
-    expect(tabs.map((t) => t.key)).toEqual(['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps']);
+    expect(tabs.map((t) => t.key)).toEqual([
+      'my_turn',
+      'claude',
+      'fixing',
+      'review',
+      'threads',
+      'land',
+      'deps',
+      'waiting',
+    ]);
     expect(tabs.find((t) => t.key === 'land')!.cardIds).toEqual(['m', 'u']);
     expect(tabs.find((t) => t.key === 'review')!.peopleCardIds).toEqual(['l']);
     // A finished Claude review is listed in its own tab, never in My turn.

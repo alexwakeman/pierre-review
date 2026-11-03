@@ -216,6 +216,8 @@ import type {
   PrRefreshBody,
   PrRefreshResponse,
   SuggestedReviewersResponse,
+  PrReviewWaitsResponse,
+  ReviewerCandidateResponse,
   PeriodReportGenerateResponse,
   PeriodReportResponse,
   PeriodGrain,
@@ -684,6 +686,11 @@ export const api = {
   // reflects current state (empties the moment a reviewer is requested).
   suggestedReviewers: (id: number) =>
     get<SuggestedReviewersResponse>(`/api/prs/${id}/suggested-reviewers`),
+  // How long each outstanding review request has waited, against the review target (DB only).
+  prReviewWaits: (id: number) => get<PrReviewWaitsResponse>(`/api/prs/${id}/review-waits`),
+  // "Ask someone else" — the one person to ask. CLICK-gated (it reads CODEOWNERS).
+  reviewerCandidate: (id: number) =>
+    get<ReviewerCandidateResponse>(`/api/prs/${id}/reviewer-candidate`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
   // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded), each
   // flagged `isMaintainer` for this PR's repo.

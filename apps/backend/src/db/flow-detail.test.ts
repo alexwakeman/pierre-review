@@ -135,6 +135,43 @@ describe('budgets', () => {
   });
 });
 
+describe('the review target headline', () => {
+  it('states the share of first looks within the first-look budget, with its denominator', () => {
+    // First looks of 1, 2, 4 (on the line counts as within), 6 and 9 hours against the 4-hour budget.
+    const facts = [1, 2, 4, 6, 9].map((h) => pr([['reviewer', h], ['landing', 0.5]]));
+    const t = detail(facts).reviewTarget;
+    expect(t).toEqual({
+      targetHours: 4,
+      within: 3,
+      prs: 5,
+      sentence: '60% of first reviews arrived within 4 working hours',
+    });
+  });
+
+  it('reads the workspace budget — there is no second setting', () => {
+    const custom = resolveFlowSettings(
+      { ...ALWAYS, timeZone: 'UTC', budgets: { firstLook: { good: 8, ok: 16 } } },
+      'UTC',
+    );
+    const facts = [1, 2, 4, 6, 9].map((h) => pr([['reviewer', h], ['landing', 0.5]]));
+    const t = detail(facts, custom).reviewTarget!;
+    expect(t.targetHours).toBe(8);
+    expect(t.within).toBe(4);
+    expect(t.sentence).toBe('80% of first reviews arrived within 8 working hours');
+  });
+
+  it('counts only pull requests that had a first look, and says nothing below the floor', () => {
+    // Merged with no first look at all: not in the denominator.
+    const none = [1, 2, 3].map(() => pr([['reviewer', 2]]));
+    const looked = [1, 2, 3, 5].map((h) => pr([['reviewer', h], ['landing', 1]]));
+    // Four first looks: under FLOW_RULES.budgetMinPrs (5) — unknown is never zero, so no figure.
+    expect(detail([...none, ...looked]).reviewTarget).toBeNull();
+    expect(detail([]).reviewTarget).toBeNull();
+    const five = [...looked, pr([['reviewer', 7], ['landing', 1]])];
+    expect(detail([...none, ...five]).reviewTarget).toMatchObject({ within: 3, prs: 5 });
+  });
+});
+
 describe('working hours, not clock hours', () => {
   it('splits the headline by working hours in the workspace calendar', () => {
     const london = resolveFlowSettings({ timeZone: 'Europe/London' }, 'UTC');

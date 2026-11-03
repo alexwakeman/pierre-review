@@ -296,6 +296,8 @@ export function whyHere(card: InsightCard): string {
       return 'A security tool flagged a known advisory on this dependency update. It goes away when the PR is merged or closed, or the tool clears it.';
     case 'dependency_bump':
       return 'A dependency bot opened this PR. It goes away when the PR is merged or closed.';
+    case 'waiting_on_others':
+      return 'Your PR is waiting for a review from someone you asked, and nothing on it is your turn. It goes away when they review, or when the ball comes back to you.';
     default:
       return KIND_LABEL[card.kind];
   }
@@ -408,6 +410,8 @@ export function colourReason(card: InsightCard): string {
         : 'it is probably a security update';
     case 'dependency_bump':
       return 'an ordinary update, never urgent';
+    case 'waiting_on_others':
+      return 'information only, never urgent';
     default:
       return '';
   }
@@ -459,6 +463,9 @@ export function orderSentence(
 ): string {
   if (tab === 'my_turn' && scored && rules != null) {
     return `Grouped by type in your order, then by Do next score. The top ${PENDING_DO_NEXT_SIZE} are Do next.`;
+  }
+  if (PENDING_TABS.find((t) => t.key === tab)?.byWait === true) {
+    return 'Longest wait first, in working hours. Not scored: nothing here is your next step.';
   }
   if (!scored) return 'Listed in the order the server sent.';
   if (PENDING_TABS.find((t) => t.key === tab)?.groupByKind === true) {

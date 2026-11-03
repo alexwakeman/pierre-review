@@ -1056,7 +1056,7 @@ describe('the Pending tabs', () => {
       my_turn: true, ci_failing: true, stalled_review: true, untouched_thread: true,
       reviewer_load: true, reviewer_routing: true, conflicts: true, merge: true,
       update_branch: true, security: true, dependency_bump: true, bot_signal: true,
-      bot_only_review: true,
+      bot_only_review: true, waiting_on_others: true,
     };
     const kinds = Object.keys(ALL);
     const seen = PENDING_TABS.flatMap((t) => [...t.kinds]);

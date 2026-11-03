@@ -2102,6 +2102,23 @@ export interface FlowResponse {
    *  window's PRs has its history yet. */
   requests?: FlowRequestStats | null;
   prFigures?: FlowPrFigures;
+  /** THE REVIEW TARGET HEADLINE — the share of measured PRs whose first look came within the
+   *  first-look budget. Null when fewer than `FLOW_RULES.budgetMinPrs` had a first look (unknown is
+   *  never zero). Trailing optional. */
+  reviewTarget?: FlowReviewTarget | null;
+}
+
+/** "86% of first reviews arrived within 4 working hours" — over the window's measured PRs that had a
+ *  first look (bot-authored PRs and bot actions excluded, Chronology's rules). */
+export interface FlowReviewTarget {
+  /** The first-look budget's "good" value, working hours. */
+  targetHours: number;
+  /** PRs whose first look came within it. */
+  within: number;
+  /** PRs that had a first look — the denominator. */
+  prs: number;
+  /** TEMPLATED, e.g. "86% of first reviews arrived within 4 working hours". */
+  sentence: string;
 }
 
 /** One wait measured against its budget. Working hours throughout. */
@@ -9893,6 +9910,10 @@ export type InsightKind =
   // KNOWN ADVISORY also gets one `security` card here, and keeps its other cards.
   | 'security' // a dependency PR fixing a known advisory, or any PR an automation alert flagged
   | 'dependency_bump' // any other dependency-automation PR — housekeeping, with its merge actions
+  // THE READER'S OWN PRs WHERE THE BALL IS WITH SOMEONE ELSE — read-only, unscored, and counted
+  // NOWHERE but its own tab (never `myTurn*`, the brief, the work plan or Slack). See
+  // `WaitingOnOthersCard`.
+  | 'waiting_on_others'
   | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
   | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
 
@@ -10216,6 +10237,9 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   /** `own_ci_red` only, and only on `GET /api/attention`: the promoted red build's FLAKY checks —
    *  the same field as `CiFailingCard.ciFlaky`, so the card keeps its controls when it moves. */
   ciFlaky?: CiFlakySummary;
+  /** `review_request` only: the review asked of you has waited longer than the workspace's review
+   *  target — see `ReviewTargetOver`. Absent when it has not, or when not known. Board only. */
+  overReviewTarget?: ReviewTargetOver;
 }
 
 /** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */
@@ -10375,6 +10399,9 @@ export interface StalledReviewCard extends InsightCardBase, InsightPrRef {
   ageHours: number; // hours the PR has been open awaiting review
   requestedReviewerIds: number[]; // reviewers still on the hook (GitHub-pending)
   requestedTeamNames: string[]; // GitHub TEAMS still on the hook — display names, not slugs
+  /** The longest-waiting outstanding request has waited longer than the review target — see
+   *  `ReviewTargetOver`. Absent when it has not, or when not known. Board only. */
+  overReviewTarget?: ReviewTargetOver;
 }
 
 export interface UntouchedThreadCard extends InsightCardBase, InsightPrRef {
@@ -10425,6 +10452,85 @@ export interface ReviewerRoutingCard extends InsightCardBase, InsightPrRef {
    *  viewer only READS — without this nearly every button on the tab is a guaranteed 403. Rides the
    *  card because the board may not fetch on mount (MergeReadyCard.viewerCanPush, same field). */
   viewerCanPush: boolean;
+}
+
+// ── THE REVIEW TARGET AND "WAITING ON OTHERS" (docs/BACKEND.md § Waiting on others) ────────────
+//
+// THE REVIEW TARGET IS CHRONOLOGY'S FIRST-LOOK BUDGET — `ResolvedFlowSettings.budgets.firstLook
+// .good`, per workspace, in WORKING hours (Settings → Workspace → Working hours and budgets). There
+// is no second setting: the Pending note, the waiting rows and the Chronology headline all read
+// that one value.
+
+/** One outstanding review request and how long it has waited. A person (`userId`) or a GitHub
+ *  team (`teamName`, GitHub's display name); requests to automation are never listed. */
+export interface ReviewWait {
+  userId: number | null;
+  teamName: string | null;
+  /** ISO — when this request was made: the newest stored request event naming this reviewer, else
+   *  the PR's first request, else its opening (the `review_request` card's clock). */
+  since: string;
+  /** WORKING hours since `since`, in the workspace's calendar, one decimal. */
+  workHours: number;
+}
+
+/** Set on a Pending card only while a review it is about has waited LONGER than the workspace's
+ *  review target. Both figures are working hours. Display only: never in `detail`, a score, a
+ *  payload hash or a count. */
+export interface ReviewTargetOver {
+  targetHours: number;
+  waitedHours: number;
+}
+
+/**
+ * ONE OF THE READER'S OWN OPEN, NON-DRAFT PRs WHERE IT IS SOMEONE ELSE'S TURN — the "Waiting on
+ * others" tab. A requested person or team has not reviewed since they were asked, and nothing puts
+ * the ball back with the reader: no My Turn item on the PR (dismissed ones included) and no
+ * person's "changes requested" newer than the last push and the newest request.
+ *
+ * ⚠ READ-ONLY INFORMATION, COUNTED ONLY HERE. Built only for the live board (`GET /api/attention`);
+ * never in `myTurn*`, the daily brief, the work plan, Slack or a notification. UNSCORED: the tab
+ * lists the longest wait first (`PendingTabDef.byWait`) — the Do next score ranks what the READER
+ * can do, and here there is nothing to do but wait (or nudge).
+ */
+export interface WaitingOnOthersCard extends InsightCardBase, InsightPrRef {
+  kind: 'waiting_on_others';
+  /** Who has the ball — every outstanding request to a person or team, longest wait first. Never
+   *  empty. */
+  holders: ReviewWait[];
+  /** `holders[0].workHours` — the tab's order. */
+  waitHours: number;
+  /** The workspace's review target, working hours. */
+  targetHours: number;
+  /** Set when `waitHours` is over `targetHours`. */
+  overReviewTarget?: ReviewTargetOver;
+  /** May the reader REQUEST reviewers here (WRITE/MAINTAIN/ADMIN) — the VISIBILITY gate for Nudge and
+   *  Ask someone else; the route re-checks. */
+  viewerCanPush: boolean;
+}
+
+/** GET /api/prs/:id/review-waits — the PR pane's reviewers area: every outstanding request with its
+ *  wait, against the workspace's review target. DB only. */
+export interface PrReviewWaitsResponse {
+  /** Longest wait first. Requests to automation are left out. */
+  waits: ReviewWait[];
+  targetHours: number;
+  /** May the reader request reviewers on this PR — a visibility gate; the write route re-checks. */
+  viewerCanRequest: boolean;
+}
+
+/** GET /api/prs/:id/reviewer-candidate — "Ask someone else": the one person to ask, the least loaded
+ *  of the PR's suggested reviewers who is not already asked, not the author and not the reader.
+ *  Fetched on a click, never on mount. `candidate: null` = nobody to suggest. */
+export interface ReviewerCandidateResponse {
+  candidate: {
+    userId: number | null;
+    login: string;
+    reason: string;
+    /** Open reviews already waiting on them in this account; null when not known (a CODEOWNERS
+     *  login we have never synced). */
+    pendingReviews: number | null;
+  } | null;
+  users: User[];
 }
 
 // Per-vendor rollup carried by the bot_signal card.
@@ -10653,7 +10759,8 @@ export type InsightCard =
   | SecurityCard
   | DependencyBumpCard
   | BotSignalCard
-  | BotOnlyReviewCard;
+  | BotOnlyReviewCard
+  | WaitingOnOthersCard;
 
 // ---- Workspace DORA-ish flow metrics (Insights header; no AI) ----
 // Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,

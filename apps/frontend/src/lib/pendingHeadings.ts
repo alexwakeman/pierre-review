@@ -13,6 +13,7 @@ import type {
 } from '@pierre-review/shared';
 import { automatedReviewerMeta } from './ui.js';
 import { CLAUDE_VERDICT_LABEL } from './claudeReviewColumn.js';
+import { waitingHeading } from './reviewWaits.js';
 import {
   cardKindLabel,
   pendingQueueBadge,
@@ -412,6 +413,14 @@ export function pendingHeading(card: InsightCard, ctx: HeadingContext): PendingH
     }
     case 'reviewer_routing':
       return { lead: 'Nobody was asked to review this', quote: null, at: card.openedAt, atPrefix: 'opened' };
+    case 'waiting_on_others':
+      // "With sam · 6 working hours" — the wait is WORKING time; the clock is when they were asked.
+      return {
+        lead: waitingHeading(card, ctx.nameOf),
+        quote: null,
+        at: card.holders[0]?.since ?? null,
+        atPrefix: 'asked',
+      };
     case 'reviewer_load': {
       const n = card.pendingCount;
       return plain(`${name(card.reviewerId)} has ${n} review${n === 1 ? '' : 's'} waiting`, null);
@@ -799,6 +808,14 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
       return { ...base, verb: 'Chase them or review it', titleOn: false, by: byAuthor(card) };
     case 'reviewer_routing':
       return { ...base, verb: 'Assign a reviewer', titleOn: false, by: byAuthor(card) };
+    case 'waiting_on_others':
+      // ⚠ NO IMPERATIVE WITHOUT ITS BUTTON: Nudge is offered only past the target, where the reader
+      // can request reviewers. Otherwise the card states the fact and stops.
+      return {
+        ...base,
+        verb: card.overReviewTarget != null && card.viewerCanPush ? 'Nudge them or ask someone else' : null,
+        titleOn: false,
+      };
     case 'reviewer_load': {
       const n = card.reviewsThisSprint;
       return { ...base, showTitle: false, where: [{ text: `${n} done this sprint` }] };
@@ -899,6 +916,7 @@ export function pendingFactPlan(card: InsightCard): PendingFactPlan {
       return 'none';
     case 'stalled_review':
     case 'reviewer_routing':
+    case 'waiting_on_others':
       return 'review';
     case 'untouched_thread':
       return 'reply';

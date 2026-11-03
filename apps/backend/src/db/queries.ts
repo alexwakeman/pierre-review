@@ -40,6 +40,10 @@ import type {
   CardThreadComment,
   UntouchedThreadCard,
   MyTurnCard,
+  PrReviewWaitsResponse,
+  ReviewerCandidateResponse,
+  StalledReviewCard,
+  WaitingOnOthersCard,
   MyTurnCardReason,
   ReviewerSuggestion,
   ReviewerRoutingCard,
@@ -298,6 +302,7 @@ import {
   type AuthorAutomationInputs,
 } from './dependency-cards.js';
 import { deriveSecurityAlerts } from './security-alerts.js';
+import { overTarget, reviewWaitsFor } from './review-waits.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
 import { pruneOrphanTicketComments } from './ticket-comments-prune.js';
 import { pruneCiReviewsForPrs } from './ci-review-prune.js';
@@ -4367,7 +4372,15 @@ export async function getWorkspaceInsights(
   // `boardFacts` DEFERS the heading facts (below) to the caller: the fold fills in `run`, and the
   // board calls it with the ids it actually LISTED. Absent, the facts are read for every built card
   // inside `finish()`.
-  opts: { uncapped?: boolean; withFailingChecks?: boolean; boardFacts?: BoardFactsSink } = {},
+  //
+  // `withWaiting` builds the "Waiting on others" cards — the LIVE board's alone (`buildPendingBoard`
+  // with `live`), so no other consumer can ever count one.
+  opts: {
+    uncapped?: boolean;
+    withFailingChecks?: boolean;
+    boardFacts?: BoardFactsSink;
+    withWaiting?: boolean;
+  } = {},
 ): Promise<WorkspaceInsightsResponse> {
   const uncapped = opts.uncapped === true;
   const withFailingChecks = opts.withFailingChecks === true;
@@ -4470,11 +4483,55 @@ export async function getWorkspaceInsights(
   const ghUrl = (repoId: number, number: number): string =>
     `https://github.com/${repoName.get(repoId)}/pull/${number}`;
 
+  const noteReviewTargets = async (): Promise<void> => {
+    // An empty workspace returns before the bot maps below are built — and holds no card.
+    if (repoIds.length === 0) return;
+    const viewerId = await getAccountUserId(accountId);
+    const targets = cards.filter(
+      (c): c is StalledReviewCard | MyTurnCard =>
+        c.kind === 'stalled_review' || (c.kind === 'my_turn' && c.reason === 'review_request'),
+    );
+    if (targets.length === 0) return;
+    const prRows = await db
+      .select({
+        id: pullRequests.id,
+        authorId: pullRequests.authorId,
+        openedAt: pullRequests.openedAt,
+        firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
+      })
+      .from(pullRequests)
+      .where(
+        and(
+          eq(pullRequests.accountId, accountId),
+          inArray(pullRequests.id, [...new Set(targets.map((c) => c.prId))]),
+        ),
+      )
+      .execute();
+    const { waits, targetHours } = await reviewWaitsFor(
+      accountId,
+      scope.workspaceId,
+      prRows,
+      (id) => botAuthorIdSet.has(id),
+      now,
+    );
+    for (const c of targets) {
+      const list = waits.get(c.prId) ?? [];
+      // A request of YOU on your card; the longest outstanding one on a stalled review.
+      const wait =
+        c.kind === 'my_turn' ? list.find((w) => w.userId != null && w.userId === viewerId) : list[0];
+      const over = overTarget(wait?.workHours, targetHours);
+      if (over != null) c.overReviewTarget = over;
+    }
+  };
   const finish = async (): Promise<WorkspaceInsightsResponse> => {
     // No sink: the heading facts are read now, for every built card (a capped fold is bounded).
     if (withBoardFacts && opts.boardFacts == null) {
       for (const job of factJobs) for (const id of await job(null)) addUser(id);
     }
+    // OVER THE REVIEW TARGET — the board's note on a review that has waited longer than the
+    // workspace's first-look budget (db/review-waits.ts). Board only, display only: no card is
+    // added, dropped or re-scored by it, and it is in no `detail`, hash or count.
+    if (withBoardFacts) await noteReviewTargets();
     // The ORDER WITHIN ONE COLOUR, read from `shared` (PENDING_KIND_RANK) because the board's
     // "How Pending works" copy prints it. The rationale, kept here beside the sort it governs:
     //   • my_turn leads every severity tier: it is the ONLY kind that is about the VIEWER
@@ -5726,6 +5783,8 @@ export async function getWorkspaceInsights(
       // The ci_failing 'your_pr' arm's clock — the head commit the CI verdict is ABOUT. It is not
       // a "red since": there is no stored per-PR CI transition to read one from.
       lastCommitAt: pullRequests.lastCommitAt,
+      // The review-request clock's fallback (db/review-waits.ts) — board only.
+      firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
       // The two columns behind the `merge` / `update_branch` cards. ⚠ BOTH are needed and neither
       // is inferable from the other: `mergeStateStatus` is GitHub's PROTECTION-AWARE verdict (the
       // field to lead with), while `mergeable` reports ONLY conflict state. NULL in either means
@@ -6656,6 +6715,86 @@ export async function getWorkspaceInsights(
       reviewsThisSprint: x.sprint,
       pendingPrs,
     });
+  }
+
+  // (3b) WAITING ON OTHERS — the reader's own open, non-draft PRs where a requested person or team
+  // holds the ball (docs/BACKEND.md § Waiting on others). LIVE BOARD ONLY (`withWaiting`): no other
+  // consumer of this fold — the brief, the work plan, Slack, chat — ever sees one, so no figure but
+  // the tab's own can count it. Read-only and unscored; the tab lists the longest wait first.
+  //
+  // ⚠ NOT THE READER'S TURN, BY THE BALL RULE: a PR with ANY My Turn item in this fold (the cards
+  // built above, one per PR on the board) or a live dismissal is left out — the reader owes
+  // something there — and so is a PR where a person asked for changes after the last push and the
+  // newest request (the author's move).
+  if (opts.withWaiting === true) {
+    const viewerId = await getAccountUserId(accountId);
+    const yours = new Set<number>();
+    for (const c of cards) if (c.kind === 'my_turn' && c.reason !== 'trunk_red') yours.add(c.prId);
+    for (const d of myTurnDismissed ?? []) if (d.target.kind === 'pr') yours.add(d.target.id);
+    const candidates =
+      viewerId == null
+        ? []
+        : openPrs.filter(
+            (p) =>
+              p.authorId === viewerId &&
+              // A dependency PR's review state is on its Dependencies card.
+              !depPrIds.has(p.id) &&
+              requestedPrIds.has(p.id) &&
+              !yours.has(p.id),
+          );
+    const built: WaitingOnOthersCard[] = [];
+    if (candidates.length > 0) {
+      const { waits, targetHours } = await reviewWaitsFor(
+        accountId,
+        scope.workspaceId,
+        candidates,
+        (id) => botAuthorIdSet.has(id),
+        now,
+      );
+      // The newest person's "changes requested" per PR (never a bot's, never the reader's own).
+      const newestChanges = new Map<number, number>();
+      for (const r of await db
+        .select({ prId: reviews.prId, authorId: reviews.authorId, submittedAt: reviews.submittedAt })
+        .from(reviews)
+        .where(
+          and(
+            inArray(
+              reviews.prId,
+              candidates.map((p) => p.id),
+            ),
+            eq(reviews.state, 'changes_requested'),
+          ),
+        )
+        .execute()) {
+        if (r.authorId == null || r.authorId === viewerId || botAuthorIdSet.has(r.authorId)) continue;
+        const at = r.submittedAt.getTime();
+        if (at > (newestChanges.get(r.prId) ?? -Infinity)) newestChanges.set(r.prId, at);
+      }
+      for (const p of candidates) {
+        const holders = waits.get(p.id);
+        const first = holders?.[0];
+        if (holders == null || first == null) continue; // only automation was asked
+        const newestAsk = Math.max(...holders.map((h) => Date.parse(h.since)));
+        const changes = newestChanges.get(p.id);
+        if (changes != null && changes > Math.max(p.lastCommitAt?.getTime() ?? 0, newestAsk)) continue;
+        addUser(p.authorId);
+        for (const h of holders) addUser(h.userId);
+        const over = overTarget(first.workHours, targetHours);
+        built.push({
+          id: `waiting:${p.id}`,
+          kind: 'waiting_on_others',
+          severity: 'info',
+          ...prRef(p, standingsByPr.get(p.id)),
+          holders,
+          waitHours: first.workHours,
+          targetHours,
+          ...(over != null ? { overReviewTarget: over } : {}),
+          viewerCanPush: writableRepoIds.has(p.repoId),
+        });
+      }
+    }
+    kindTotals.waiting_on_others = built.length;
+    cards.push(...built);
   }
 
   // (4) REVIEWER ROUTING — orphan PRs (nobody requested, nobody reviewed) + who should review.
@@ -9039,6 +9178,200 @@ export async function stampReviewRequests(
   for (const uid of new Set(userIds)) if (!haveUser.has(uid)) toInsert.push({ prId, userId: uid, teamName: null });
   for (const tn of new Set(teamNames)) if (!haveTeam.has(tn)) toInsert.push({ prId, userId: null, teamName: tn });
   if (toInsert.length > 0) await db.insert(schema.reviewRequests).values(toInsert).execute();
+}
+
+/** The workspace a repo belongs to (a repo is in exactly ONE), else the account's default. */
+async function workspaceIdOfRepo(accountId: number, repoId: number): Promise<number> {
+  const rows = await db
+    .select({ workspaceId: workspaceRepos.workspaceId })
+    .from(workspaceRepos)
+    .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)))
+    .limit(1)
+    .execute();
+  return rows[0]?.workspaceId ?? (await resolveWorkspaceScope(accountId, undefined)).workspaceId;
+}
+
+/**
+ * GET /api/prs/:id/review-waits — the PR pane's reviewers area: every outstanding request on the PR
+ * with its working-hour wait, against the PR's workspace's review target (db/review-waits.ts). DB
+ * only. Null when the PR is not this account's (→ 404). A closed or merged PR has no waits.
+ */
+export async function getPrReviewWaits(
+  prId: number,
+  accountId: number,
+  nowMs: number = Date.now(),
+): Promise<PrReviewWaitsResponse | null> {
+  const row = (
+    await db
+      .select({
+        id: pullRequests.id,
+        repoId: pullRequests.repoId,
+        authorId: pullRequests.authorId,
+        openedAt: pullRequests.openedAt,
+        firstReviewRequestedAt: pullRequests.firstReviewRequestedAt,
+        state: pullRequests.state,
+        viewerPermission: repos.viewerPermission,
+      })
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (row == null) return null;
+  const workspaceId = await workspaceIdOfRepo(accountId, row.repoId);
+  const bots = new Set(await hiddenBotUserIds(accountId, workspaceId));
+  const { waits, targetHours } = await reviewWaitsFor(
+    accountId,
+    workspaceId,
+    row.state === 'open' ? [row] : [],
+    (id) => bots.has(id),
+    nowMs,
+  );
+  return {
+    waits: waits.get(prId) ?? [],
+    targetHours,
+    viewerCanRequest: WRITE_PERMISSIONS.has(row.viewerPermission ?? ''),
+  };
+}
+
+/**
+ * Reviews waiting on each of `userIds` across the account's open, non-draft PRs — the
+ * `reviewer_load` card's REVIEW DEBT rule: an outstanding request the reviewer has not already
+ * answered with a submitted review, on a PR GitHub has not approved.
+ */
+async function pendingReviewCounts(accountId: number, userIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (userIds.length === 0) return out;
+  const rows = await db
+    .select({
+      prId: schema.reviewRequests.prId,
+      userId: schema.reviewRequests.userId,
+      reviewDecision: pullRequests.reviewDecision,
+    })
+    .from(schema.reviewRequests)
+    .innerJoin(pullRequests, eq(pullRequests.id, schema.reviewRequests.prId))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.state, 'open'),
+        eq(pullRequests.isDraft, false),
+        inArray(schema.reviewRequests.userId, userIds),
+      ),
+    )
+    .execute();
+  const prIds = [...new Set(rows.map((r) => r.prId))];
+  const reviewed = new Set<string>();
+  if (prIds.length > 0) {
+    for (const r of await db
+      .select({ prId: reviews.prId, authorId: reviews.authorId, state: reviews.state })
+      .from(reviews)
+      .where(and(inArray(reviews.prId, prIds), inArray(reviews.authorId, userIds)))
+      .execute()) {
+      if (r.authorId != null && r.state !== 'pending') reviewed.add(`${r.prId}:${r.authorId}`);
+    }
+  }
+  const seen = new Set<string>();
+  for (const id of userIds) out.set(id, 0);
+  for (const r of rows) {
+    if (r.userId == null || r.reviewDecision === 'approved') continue;
+    const key = `${r.prId}:${r.userId}`;
+    if (reviewed.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.set(r.userId, (out.get(r.userId) ?? 0) + 1);
+  }
+  return out;
+}
+
+/**
+ * GET /api/prs/:id/reviewer-candidate — "Ask someone else". The PR's suggested reviewers (the SAME
+ * pipeline as the Suggested row: history, then CODEOWNERS — network-backed, so this is fetched on a
+ * click, never on mount), PEOPLE only, minus the author, the reader and anyone already asked; the
+ * LEAST LOADED of them wins (reviews already waiting on them; unknown load sorts last), suggestion
+ * order breaking ties. Null when the PR is not this account's (→ 404).
+ */
+export async function getReviewerCandidate(
+  prId: number,
+  accountId: number,
+): Promise<ReviewerCandidateResponse | null> {
+  const row = (
+    await db
+      .select({
+        repoId: pullRequests.repoId,
+        authorId: pullRequests.authorId,
+        files: pullRequests.files,
+        owner: repos.owner,
+        name: repos.name,
+      })
+      .from(pullRequests)
+      .innerJoin(repos, eq(repos.id, pullRequests.repoId))
+      .where(and(eq(pullRequests.id, prId), eq(repos.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (row == null) return null;
+  const viewerId = await getAccountUserId(accountId);
+  const paths = (row.files ?? []).map((f) => f.path);
+  const history = await suggestReviewersFromHistory(accountId, row.repoId, row.authorId, paths);
+  const nameIds = [row.authorId, viewerId].filter((id): id is number => id != null);
+  const named =
+    nameIds.length > 0
+      ? await db.select().from(users).where(inArray(users.id, nameIds)).execute()
+      : [];
+  const loginOf = (id: number | null): string | null =>
+    id == null ? null : named.find((u) => u.id === id)?.githubLogin ?? null;
+  const authorLogin = loginOf(row.authorId);
+  const viewerLogin = loginOf(viewerId);
+  const { suggestions, extraUsers } = await enrichReviewerSuggestions({
+    accountId,
+    owner: row.owner,
+    name: row.name,
+    authorLogin,
+    paths,
+    userSuggestions: history,
+    knownUserIds: new Set<number>(),
+    resolveUsers: getUsersByLogins,
+  });
+  const asked = new Set(
+    (
+      await db
+        .select({ userId: schema.reviewRequests.userId })
+        .from(schema.reviewRequests)
+        .where(eq(schema.reviewRequests.prId, prId))
+        .execute()
+    ).flatMap((r) => (r.userId != null ? [r.userId] : [])),
+  );
+  const lower = (s: string | null): string | null => (s == null ? null : s.toLowerCase());
+  const people = suggestions.filter(
+    (s) =>
+      s.kind === 'user' &&
+      s.login != null &&
+      (s.userId == null || (s.userId !== row.authorId && s.userId !== viewerId && !asked.has(s.userId))) &&
+      lower(s.login) !== lower(authorLogin) &&
+      lower(s.login) !== lower(viewerLogin),
+  );
+  const loads = await pendingReviewCounts(
+    accountId,
+    people.flatMap((s) => (s.userId != null ? [s.userId] : [])),
+  );
+  const ranked = people
+    .map((s, i) => ({ s, i, load: s.userId != null ? (loads.get(s.userId) ?? 0) : null }))
+    .sort((a, b) => (a.load ?? Infinity) - (b.load ?? Infinity) || a.i - b.i);
+  const top = ranked[0];
+  if (top == null) return { candidate: null, users: [] };
+  const userRows =
+    top.s.userId != null
+      ? (await db.select().from(users).where(eq(users.id, top.s.userId)).execute()).map(mapUser)
+      : extraUsers.filter((u) => lower(u.githubLogin) === lower(top.s.login));
+  return {
+    candidate: {
+      userId: top.s.userId,
+      login: top.s.login as string,
+      reason: top.s.reason,
+      pendingReviews: top.load,
+    },
+    users: userRows,
+  };
 }
 
 export async function getPrDetail(

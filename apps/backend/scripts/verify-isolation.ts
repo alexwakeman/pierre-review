@@ -175,6 +175,16 @@ check(
   (await q.getMentionCandidates(B.prId, 1)) === null,
 );
 
+// The PR pane's review waits (GET /api/prs/:id/review-waits) — id-addressed, so ownership → null → 404.
+check('getPrReviewWaits(A.pr, A) returns the waits', (await q.getPrReviewWaits(A.prId, 1)) != null);
+check('getPrReviewWaits(B.pr, A) returns null (IDOR blocked)', (await q.getPrReviewWaits(B.prId, 1)) === null);
+// "Ask someone else" (GET /api/prs/:id/reviewer-candidate) — the ownership half only: the own-PR
+// call reaches CODEOWNERS over the network, which this script does not.
+check(
+  'getReviewerCandidate(B.pr, A) returns null (IDOR blocked)',
+  (await q.getReviewerCandidate(B.prId, 1)) === null,
+);
+
 check('markPrViewed(A.pr, A) succeeds', (await q.markPrViewed(A.prId, 1)) === true);
 check('markPrViewed(B.pr, A) returns false (IDOR blocked)', (await q.markPrViewed(B.prId, 1)) === false);
 

@@ -257,6 +257,9 @@ async function buildSprintPayload(
     // feed `importance` and the PR table as that one reader's turn. No hash moves: `insightsHash`
     // already gives my_turn no slot.
     if (c.kind === 'my_turn') continue;
+    // The reader's own PRs held by someone else — the live board's alone (never built for this
+    // fold), and personal, never a team action item. Named so it cannot fall through.
+    if (c.kind === 'waiting_on_others') continue;
     if (c.kind === 'reviewer_load') {
       reviewersOverloaded += 1;
       issues.push({

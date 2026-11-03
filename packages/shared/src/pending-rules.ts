@@ -173,6 +173,7 @@ export const PENDING_KIND_RANK: Record<InsightKind, number> = {
   merge: 10,
   update_branch: 11,
   dependency_bump: 12,
+  waiting_on_others: 13,
 };
 
 /**
@@ -299,6 +300,8 @@ export const DO_NEXT_UNSCORED_KINDS: ReadonlySet<InsightKind> = new Set<InsightK
   'reviewer_load',
   'bot_signal',
   'bot_only_review',
+  // Read-only: the ball is with someone else, so there is no next step of the reader's to rank.
+  'waiting_on_others',
 ]);
 
 // ── THE PENDING TABS ──────────────────────────────────────────────────────────────────────────
@@ -306,7 +309,15 @@ export const DO_NEXT_UNSCORED_KINDS: ReadonlySet<InsightKind> = new Set<InsightK
 /** How many of a tab's highest-scoring cards sit under "Do next". The rest are "Everything else". */
 export const PENDING_DO_NEXT_SIZE = 5;
 
-export type PendingTabKey = 'my_turn' | 'claude' | 'fixing' | 'review' | 'threads' | 'land' | 'deps';
+export type PendingTabKey =
+  | 'my_turn'
+  | 'claude'
+  | 'fixing'
+  | 'review'
+  | 'threads'
+  | 'land'
+  | 'deps'
+  | 'waiting';
 
 /** The My Turn card type that has its own tab ("Claude reviews") instead of a group in My turn. */
 export const CLAUDE_REVIEW_TAB_REASONS: readonly MyTurnCardReason[] = ['claude_review'];
@@ -321,10 +332,13 @@ export interface PendingTabDef {
   reasons?: readonly MyTurnCardReason[];
   /** `my_turn` cards: list every type EXCEPT these. */
   exceptReasons?: readonly MyTurnCardReason[];
+  /** AN UNSCORED TAB: its cards get no Do next score and are listed LONGEST WAIT FIRST
+   *  (`WaitingOnOthersCard.waitHours`), with no "Do next" head. Only "Waiting on others". */
+  byWait?: true;
 }
 
 /**
- * The seven tabs, in display order, and the cards each holds. Every PR card on the board belongs to
+ * The eight tabs, in display order, and the cards each holds. Every PR card on the board belongs to
  * exactly ONE tab, so a card is listed once; a PR with two jobs (your approved PR is both "Approved"
  * in My turn and "Ready to merge") appears once per job, in each job's tab.
  *
@@ -358,6 +372,10 @@ export const PENDING_TABS: readonly PendingTabDef[] = [
   { key: 'threads', kinds: ['untouched_thread'] },
   { key: 'land', kinds: ['merge', 'update_branch'] },
   { key: 'deps', kinds: ['security', 'dependency_bump'], groupByKind: true },
+  // ⚠ READ-ONLY, AND COUNTED ONLY HERE: the reader's own PRs where the ball is with someone else.
+  // Last, so the seven action tabs keep their keys 1–7. Never in a brief figure, a My Turn count,
+  // the work plan or Slack (PERSONAL there).
+  { key: 'waiting', kinds: ['waiting_on_others'], byWait: true },
 ];
 
 /** Is this card one of this tab's PR cards? Kind first, then — for `my_turn` — its type. Review

@@ -38,7 +38,7 @@ export function toneAttachment(tone: SlackTone, fallback: string, blocks: unknow
   return { color: SLACK_TONE_COLOUR[tone], fallback, blocks };
 }
 
-type TeamTab = Exclude<PendingTabKey, 'my_turn' | 'claude'>;
+type TeamTab = Exclude<PendingTabKey, 'my_turn' | 'claude' | 'waiting'>;
 
 /** Each team Pending tab's tone: broken work red, work waiting on a person amber, work ready to
  *  land green, dependency upkeep grey. ⚠ A new tab key fails to compile here until it has one. */
@@ -94,6 +94,7 @@ export function pendingCardEmoji(card: InsightCard): string {
     case 'reviewer_load':
     case 'bot_signal':
     case 'bot_only_review':
+    case 'waiting_on_others':
       return '•';
   }
 }

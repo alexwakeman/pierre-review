@@ -208,6 +208,7 @@ const TAB_EMPTY: Record<PendingTabKey, string> = {
   threads: 'No review threads are waiting for an answer.',
   land: 'Nothing is ready to land.',
   deps: 'No dependency updates or security alerts are waiting.',
+  waiting: 'None of your PRs is waiting on someone else.',
 };
 
 /** What an empty (or emptied) list says, and where. */
@@ -291,8 +292,12 @@ export function AttentionView(): JSX.Element {
   // "AI reviews" is offered only where AI review runs — or while it holds something or is the
   // tab on screen, so a card is never stranded behind a hidden tab.
   const aiEnabled = useAiCapabilities().enabled;
+  // "Waiting on others" is information about the reader's own PRs: shown while it holds something
+  // or is on screen, so a reader with no PR out for review never sees an always-empty tab.
   const shownTabs = tabs.filter(
-    (t) => t.key !== 'claude' || aiEnabled || t.total > 0 || t.key === tabKey,
+    (t) =>
+      (t.key !== 'claude' || aiEnabled || t.total > 0 || t.key === tabKey) &&
+      (t.key !== 'waiting' || t.total > 0 || t.key === tabKey),
   );
   const view = useMemo(
     () => buildPendingView(data, tabKey, attentionIsolation, attentionRelevance, attentionAuthorLens),
@@ -665,8 +670,9 @@ export function AttentionView(): JSX.Element {
 
         {/* ── THE TABS ─────────────────────────────────────────────────────────────────────
             Each count is the tab's WHOLE population (uncapped), the same figure `/api/daily-brief`
-            returns for it. A tab with nothing in it stays, dimmed, so the layout never shifts and
-            "0" is a fact rather than an absence. 1–7 pick them. */}
+            returns for it — except "Waiting on others", which the brief never counts. A tab with
+            nothing in it stays, dimmed, so the layout never shifts and "0" is a fact rather than an
+            absence (AI reviews and Waiting on others hide instead, above). 1–8 pick them. */}
         <Tabs
           className="-mx-2 mt-3"
           label="Pending"
@@ -798,7 +804,8 @@ export function AttentionView(): JSX.Element {
                     onChoosePart={() => goTo('docs')}
                   />
                 )}
-                {boardEmpty ? (
+                {/* On "Waiting on others" its own rows are the list — never the empty board over them. */}
+                {boardEmpty && tabKey !== 'waiting' ? (
                   <PendingEmptyBoard prs={data?.ownOpenPrs ?? []} total={data?.ownOpenPrTotal ?? 0} />
                 ) : (
                   empty != null && emptyNote

@@ -144,7 +144,13 @@ describe('the board refresh waits for the last request on the PR, and only on su
   // three reads together plus the capped fold's copy of the card; a request with a sibling still in
   // flight refreshes the PR's own detail only.
   const BOARD = [['attention-cards'], ['daily-brief'], ['work-plan'], ['workspace-insights']];
-  const SUGGESTIONS = [['suggested-reviewers', 7]];
+  // The live suggestions, and the PR pane's review waits + "Ask someone else" candidate: only a
+  // reviewer request moves them, so every request refreshes all three (never the board's job).
+  const SUGGESTIONS = [
+    ['suggested-reviewers', 7],
+    ['review-waits', 7],
+    ['reviewer-candidate', 7],
+  ];
   const PR_READS = [...SUGGESTIONS, ['pr', 7]];
   const WRITE_SET = (qc: QueryClient): unknown[] => [...SUGGESTIONS, ...prWriteKeys(qc, 7)];
 

@@ -695,6 +695,62 @@ same settings apply in every workspace.
   three.js #34066, a `comment_reply` — where it held 551 before. With the app now opening on
   Pending, that account's cold open is an almost empty My turn.
 
+## Waiting on others, and the review target (CORE)
+
+The Pending board's eighth tab, **Waiting on others** (`waiting`, kind `waiting_on_others`), lists the
+reader's own open PRs where it is SOMEONE ELSE's turn, and says who has it and for how long in
+WORKING hours ("With sam · 6h"). It is READ-ONLY information.
+
+| Piece | Where |
+|---|---|
+| The wait fold | `db/review-waits.ts` `reviewWaitsFor` (one fold, three readers) |
+| The cards and the notes | `getWorkspaceInsights` — the (3b) block (`withWaiting`) and `noteReviewTargets` in `finish()` |
+| The tab | `PENDING_TABS` `{ key: 'waiting', byWait: true }`; `db/pending-tabs.ts` `listByWait` |
+| The PR pane | `GET /api/prs/:id/review-waits` (`getPrReviewWaits`), `GET /api/prs/:id/reviewer-candidate` (`getReviewerCandidate`) |
+| Tests | `db/waiting-on-others.test.ts`, `db/flow-detail.test.ts` (the headline), `rate-limit.test.ts`, `apps/frontend/test/reviewWaits.test.ts` |
+
+- **Who is listed.** The reader's own open, non-draft PRs (the board's `openPrs`: an activity event
+  inside `maxQuietDays`), not a dependency PR, with at least one OUTSTANDING request (`review_requests`
+  — GitHub drops a row the moment that person reviews, so a row IS "asked and not reviewed since") to
+  a PERSON or a GitHub TEAM. A request to automation (the workspace's bot union) or to the author is
+  not a holder; a PR whose only holders are bots is not listed.
+- ⚠ **NOT THE READER'S TURN, BY THE BALL RULE.** A PR with ANY My Turn card in the same fold (one
+  per PR on the board — a mention, a reply, new activity…) or a live dismissal (`myTurnDismissed`) is
+  left out: the reader owes something there. So is a PR where a PERSON (not a bot, not the reader)
+  asked for changes after both the last push and the newest request — the author's move. A switched-
+  off My Turn type therefore lets its PRs through: the reader's own ball rule decides.
+- **The clock.** Per holder: the NEWEST stored `requested` event naming them (a re-request — and a
+  Nudge — restarts it), else the PR's `firstReviewRequestedAt`, else `openedAt`, clamped to the PR's
+  life; a team is matched to its events by slug (`teamSlugOf`, and `owner/slug` for a locally stamped
+  team). The history keeps 25 events per PR, so a very busy PR can fall back to an EARLIER clock: an
+  over-statement, never an invented zero. `workHours` is `buildWorkingCalendar` over the PR's
+  workspace settings (Chronology's calendar). Holders are sorted longest wait first; the card's
+  `waitHours` is the first.
+- **THE REVIEW TARGET IS CHRONOLOGY'S FIRST-LOOK BUDGET** (`budgets.firstLook.good`, per workspace,
+  default 4 working hours) — there is no second setting. `overReviewTarget {targetHours, waitedHours}`
+  rides a card while its longest outstanding request has waited LONGER than it: on `waiting_on_others`,
+  on `stalled_review` (the longest outstanding request) and on a My Turn `review_request` (the request
+  of YOU). Board only (set under `withFailingChecks`), display only: never in `detail`, a score, a hash
+  or a count, and no card is added or dropped by it.
+- ⚠ **COUNTED NOWHERE BUT ITS OWN TAB.** The cards are built only when `buildPendingBoard` runs LIVE
+  (`withWaiting`) — so the Slack snapshot (a TEAM digest; `waiting` is a PERSONAL tab there), the
+  daily brief, the work plan, chat and every `/api/pro/*` payload never see one, and no `myTurn*`
+  total moves (`waiting-on-others.test.ts` pins both). The tab's `total` is `kindTotals.
+  waiting_on_others`. The first-landing "every tab is empty" test ignores it (`boardIsEmpty`): it is
+  information, and the empty board lists those same PRs with what blocks each.
+- **UNSCORED, LONGEST WAIT FIRST.** The Do next score ranks what the READER can do next; here there
+  is nothing to do but wait (or nudge). `listByWait` sorts by `waitHours`, then PR id, capped per list
+  group like every tab; no `scores` entry; `listedCardIds` (the work plan's population) never holds one.
+- **Nudge / Ask someone else** are CLICKS only, through the existing `POST /api/prs/:id/request-reviewers`
+  (re-checks write access; STAMPS `review_requests`, then `notePrChangedForPr` cascades; plus one
+  settle read so a Nudge's new request event arrives). Nudge re-asks the same PERSON (GitHub's
+  re-request; not verified against live GitHub that an already-pending request re-notifies — the API
+  call is the one the "Re-request review" button makes). A TEAM gets no Nudge: `review_requests`
+  stores GitHub's team NAME, not the slug `team_reviewers` needs. Ask someone else fetches its one
+  candidate on the click (`getReviewerCandidate`: the Suggested row's pipeline, people only, minus the
+  author, the reader and anyone asked, least loaded first by the `reviewer_load` review-debt rule),
+  names them, and asks only on the reader's confirm. It adds a reviewer; it removes nobody.
+
 ## The Dependencies tab — dependency automation and security (CORE)
 
 The last Pending tab (`deps` in `PENDING_TABS`) holds two card kinds: **`security`** and

@@ -32,6 +32,7 @@ export const TAB_LABEL: Record<PendingTabKey, string> = {
   threads: 'Unanswered threads',
   land: 'Ready to land',
   deps: 'Dependencies',
+  waiting: 'Waiting on others',
 };
 
 /**
@@ -185,7 +186,11 @@ export function buildPendingView(
   return {
     tab: tab.key,
     cards,
-    doNextCount: Math.min(PENDING_DO_NEXT_SIZE, cards.length),
+    // An unscored tab ("Waiting on others", `byWait`) has no Do next head: nothing in it is the
+    // reader's next step.
+    doNextCount: PENDING_TABS.find((d) => d.key === tab.key)?.byWait === true
+      ? 0
+      : Math.min(PENDING_DO_NEXT_SIZE, cards.length),
     shown: cards.length,
     total: Math.max(total, cards.length),
     // Under the lens a chip counts that kind's lensed side, the list its click opens.

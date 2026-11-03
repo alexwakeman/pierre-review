@@ -119,6 +119,7 @@ import {
   SparkleIcon,
   WarningIcon,
 } from '../Icons.js';
+import { ReviewTargetNote, ReviewWaitList } from '../ReviewWaitActions.js';
 import { UserName } from '../UserName.js';
 import { Markdown } from '../Markdown.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -2818,6 +2819,9 @@ function PendingCard({
           primary('Read it', commentOpen ?? (() => board.openPr(card, 'comments')));
           break;
         case 'review_request':
+          if (card.overReviewTarget != null) {
+            content.push(<ReviewTargetNote key="target" over={card.overReviewTarget} />);
+          }
           primary('Start review', () => board.openPr(card, 'changes'));
           break;
         case 'pushed_since':
@@ -2858,6 +2862,27 @@ function PendingCard({
     case 'ci_failing':
       break;
     case 'stalled_review':
+      if (card.overReviewTarget != null) {
+        content.push(<ReviewTargetNote key="target" over={card.overReviewTarget} />);
+      }
+      primary('Open PR', () => board.openPr(card, 'overview'));
+      break;
+    case 'waiting_on_others':
+      // READ-ONLY: who has it and for how long, Nudge / Ask someone else past the target. Nothing
+      // here fetches until the reader presses one of them.
+      if (card.overReviewTarget != null) {
+        content.push(<ReviewTargetNote key="target" over={card.overReviewTarget} />);
+      }
+      content.push(
+        <ReviewWaitList
+          key="waits"
+          prId={card.prId}
+          waits={card.holders}
+          targetHours={card.targetHours}
+          viewerCanRequest={card.viewerCanPush}
+          nameOf={nameOf}
+        />,
+      );
       primary('Open PR', () => board.openPr(card, 'overview'));
       break;
     case 'reviewer_routing':
@@ -3794,7 +3819,10 @@ export function AttentionCards({
   }, [explain, cards, people, split]);
 
   const summaries = useMemo(() => new Map(flat.map((c) => [c.id, pendingRowSummary(c, ctx)])), [flat, ctx]);
-  const reasonShown = reasonColumnShown([...summaries.values()].map((s) => s.reason));
+  // A waiting row's reason is WHO has it — always worth its column, even when one person has them all.
+  const reasonShown =
+    reasonColumnShown([...summaries.values()].map((s) => s.reason)) ||
+    flat.some((c) => c.kind === 'waiting_on_others');
   const whyById = explain?.whyById;
   const now = Date.now();
   const renderRow = (card: InsightCard): JSX.Element => {
@@ -3848,12 +3876,26 @@ export function AttentionCards({
         <RowMeta hideBelow="md" className="w-[7.5rem] text-ui-mute">
           {s.author ?? ''}
         </RowMeta>
-        <RowMeta className="w-9 text-right">
-          {age != null ? (
-            <span title={s.at != null ? `${s.atIsOpened ? 'Opened ' : ''}${dateTime(s.at)}` : undefined}>{age}</span>
+        <RowMeta className={`w-9 text-right ${s.overTarget != null ? 'text-ui-warn' : ''}`}>
+          {s.waitText != null ? (
+            // WORKING hours since they were asked — not the clock age the other rows show.
+            <span title={[`${s.waitText} of working time since they were asked`, s.overTarget].filter(Boolean).join('. ')}>
+              {s.waitText}
+            </span>
+          ) : age != null ? (
+            <span
+              title={
+                [s.at != null ? `${s.atIsOpened ? 'Opened ' : ''}${dateTime(s.at)}` : null, s.overTarget]
+                  .filter(Boolean)
+                  .join('. ') || undefined
+              }
+            >
+              {age}
+            </span>
           ) : (
             ''
           )}
+          {s.overTarget != null && <span className="sr-only">. {s.overTarget}</span>}
         </RowMeta>
       </Row>
     );

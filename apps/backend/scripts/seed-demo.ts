@@ -286,6 +286,10 @@ const PRS: PrSeed[] = [
   { id: 114, repoId: INFRA, authorId: 6, title: 'Terraform: right-size the EKS node-group autoscaling', state: 'open', openedDaysAgo: 2, ci: 'failure', mergeable: 'mergeable', mss: 'blocked', head: 'INFRA-231-eks-autoscaling-limits', size: [21, 9, 1], labels: [{ name: 'terraform', color: '5319e7' }, { name: 'infra', color: '0e8a16' }], checks: [{ name: 'terraform plan', state: 'failure', url: null }, { name: 'tflint', state: 'success', url: null }, { name: 'checkov', state: 'success', url: null }] },
   { id: 115, repoId: INFRA, authorId: 3, title: 'Helm: split ingress values per environment', state: 'merged', openedDaysAgo: 7, closedDaysAgo: 4, mergedById: 1, labels: [{ name: 'helm', color: '1d76db' }] },
   { id: 116, repoId: INFRA, authorId: 5, title: 'Add CloudWatch alarms for queue depth and DLQ age', state: 'open', openedDaysAgo: 4, ci: 'success', mergeable: 'mergeable', mss: 'clean', head: 'INFRA-244-cloudwatch-queue-alarms', labels: [{ name: 'monitoring', color: 'd93f0b' }], checks: [{ name: 'terraform plan', state: 'success', url: null }, { name: 'tflint', state: 'success', url: null }] },
+  // Morgan's own PR, waiting on Wei and the platform team for two days — Pending → "Waiting on
+  // others" (over the 4h review target, so its Nudge / Ask someone else show). Nobody has said
+  // anything on it since, so nothing on it is Morgan's turn.
+  { id: 117, repoId: API, authorId: 1, title: 'Retry webhook deliveries with backoff', state: 'open', openedDaysAgo: 3, ci: 'success', mergeable: 'mergeable', mss: 'blocked', head: 'PLAT-301-webhook-retry-backoff', checks: [{ name: 'build', state: 'success', url: null }, { name: 'test', state: 'success', url: null }] },
 
   // ---- MID-RANGE curated band (ids 120–134) ------------------------------
   // Fills the 9–29-day span so the 30-day board reads as a full month of work
@@ -423,6 +427,17 @@ await db
     { prId: 112, userId: 4 }, //  also Tom → "also requested 1"
     { prId: 113, teamName: 'platform' }, // a team request, shown in detail
     { prId: 116, userId: ME }, // Sam's infra PR — awaiting Morgan
+    { prId: 117, userId: 6 }, // Morgan's own PR — waiting on Wei ("Waiting on others")
+    { prId: 117, teamName: 'platform' }, //  and on the platform team
+  ])
+  .execute();
+// The request history behind #117's wait (db/review-waits.ts dates a wait from the newest request
+// event naming that reviewer): Wei two days ago, the team a little before.
+await db
+  .insert(schema.reviewRequestEvents)
+  .values([
+    { prId: 117, githubNodeId: 'RRE_117_wei', kind: 'requested', occurredAt: day(2), reviewerKind: 'user', reviewerUserId: 6, requesterUserId: ME },
+    { prId: 117, githubNodeId: 'RRE_117_platform', kind: 'requested', occurredAt: day(2.5), reviewerKind: 'team', teamSlug: 'platform', requesterUserId: ME },
   ])
   .execute();
 

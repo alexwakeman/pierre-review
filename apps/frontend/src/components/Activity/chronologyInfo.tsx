@@ -113,6 +113,28 @@ export function BudgetsInfo(): JSX.Element {
   );
 }
 
+/** The review target headline above the budgets. */
+export function ReviewTargetInfo(): JSX.Element {
+  return (
+    <>
+      <p>
+        The review target is the good mark of the first-look budget. The share counts the merged pull
+        requests that had a first review, and how many of those had it within the target, in working
+        hours.
+      </p>
+      <p>
+        A first review is the first review or comment by a person other than the author. Bot actions
+        and pull requests bots opened are not counted. With fewer than {FLOW_RULES.budgetMinPrs} first
+        reviews there is no figure.
+      </p>
+      <p>
+        Pending uses the same target: a review that has waited longer says “Over the review
+        target”.
+      </p>
+    </>
+  );
+}
+
 /** M3 — every pull request. */
 export function ScatterInfo(): JSX.Element {
   return (

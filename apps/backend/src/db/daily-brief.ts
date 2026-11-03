@@ -327,7 +327,8 @@ async function computeBriefCounts(
   // The fourth is housekeeping — an update, not something waiting on you. (`security` IS counted,
   // below, off `kindTotals` like the other survey lines.) This allow-list and the route's deny-list
   // are the two hand-maintained spellings of "which kinds count"; daily-brief.test.ts compares them
-  // per kind, so an omission here is a CI failure, not a silence.
+  // per kind, so an omission here is a CI failure, not a silence. `waiting_on_others` never reaches
+  // it at all: it is built only for the live board (`withFailingChecks`), and counted only there.
   for (const c of insights.cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
     // A finished Claude review is listed in its own tab, not My turn, so no My turn line counts it.

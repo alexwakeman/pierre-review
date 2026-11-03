@@ -74,14 +74,17 @@ describe('Slack tones', () => {
 
   it('every team tab has a tone and one heading emoji', () => {
     for (const def of PENDING_TABS) {
-      if (def.key === 'my_turn' || def.key === 'claude') continue;
+      if (def.key === 'my_turn' || def.key === 'claude' || def.key === 'waiting') continue;
       expect(PENDING_TAB_TONE[def.key], def.key).toBeDefined();
       expect(PENDING_TAB_EMOJI[def.key], def.key).toMatch(/^:[a-z_]+:$/);
     }
   });
 
   it('every Pending card kind on a team tab opens with one standard emoji', () => {
-    const kinds = PENDING_TABS.flatMap((t) => t.kinds).filter((k) => k !== 'reviewer_load');
+    // "Waiting on others" is personal — never in a team digest.
+    const kinds = PENDING_TABS.filter((t) => t.key !== 'waiting')
+      .flatMap((t) => t.kinds)
+      .filter((k) => k !== 'reviewer_load');
     for (const kind of kinds) {
       const card = { id: 'x', kind, arm: 'trunk', reason: 'trunk_red' } as unknown as InsightCard;
       expect(pendingCardEmoji(card), kind).toMatch(/^:[a-z_]+:$/);

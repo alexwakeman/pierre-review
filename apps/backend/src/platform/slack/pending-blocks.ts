@@ -49,9 +49,10 @@ const SECTION_MAX = 2900;
 /** Sections one tab may use. Five lines fit one section; the second is headroom for long titles. */
 const TAB_MAX_SECTIONS = 2;
 
-/** Tabs that read ONE person's board — never sent to a team channel. */
-export const PERSONAL_PENDING_TABS = new Set<PendingTabKey>(['my_turn', 'claude']);
-export type TeamPendingTabKey = Exclude<PendingTabKey, 'my_turn' | 'claude'>;
+/** Tabs that read ONE person's board — never sent to a team channel. "Waiting on others" is the
+ *  reader's own PRs (and is never built for this snapshot anyway: it is the live board's alone). */
+export const PERSONAL_PENDING_TABS = new Set<PendingTabKey>(['my_turn', 'claude', 'waiting']);
+export type TeamPendingTabKey = Exclude<PendingTabKey, 'my_turn' | 'claude' | 'waiting'>;
 
 // ⚠ A NEW TAB KEY FAILS TO COMPILE HERE until someone decides: a team label, or personal.
 export const PENDING_TAB_LABEL: Record<TeamPendingTabKey, string> = {
@@ -133,6 +134,8 @@ export function pendingCardText(card: InsightCard): string {
     case 'reviewer_load':
     case 'bot_signal':
     case 'bot_only_review':
+    // The reader's own PRs — a personal tab, never in a team digest.
+    case 'waiting_on_others':
       return '';
   }
 }

@@ -346,6 +346,8 @@ const TAB_BLURB: Record<(typeof PENDING_TABS)[number]['key'], string> = {
   threads: 'Review comments with no reply and no later commit to their file.',
   land: 'PRs GitHub will merge now, and PRs that need a branch update first.',
   deps: 'PRs opened by dependency bots, security fixes first, and PRs a security tool flagged for a known advisory.',
+  waiting:
+    'Your own PRs where it is someone else’s turn: a person or team you asked has not reviewed yet. Longest wait first, not scored, and not counted anywhere else.',
 };
 
 /** One row per My Turn type for the guide — when a card appears and what clears it. A `Record`,

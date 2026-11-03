@@ -1,10 +1,12 @@
 // ── THE PENDING BOARD'S TABS (CORE, deterministic, no AI) ───────────────────────────────────
 //
-// Seven tabs (`PENDING_TABS` in packages/shared/src/pending-rules.ts), each a scored list: every PR
+// Eight tabs (`PENDING_TABS` in packages/shared/src/pending-rules.ts), each a scored list: every PR
 // card is scored by the one Do next scorer (`scoreCards`, db/work-plan.ts), with the READER's
 // weights (Settings → My Turn), and each tab lists its cards highest score first — except the two
 // STRICT-GROUP tabs, whose groups come first: My turn by card type in the READER's order
 // (`groupByReason`) and Dependencies security before bumps (`groupByKind`), each scored within.
+// The one UNSCORED tab, "Waiting on others" (`byWait`), lists the longest wait first instead
+// (`listByWait`): the reader cannot act on it, so there is nothing to score.
 // There is no severity-first sort and no cross-kind spread rule — a card competes only with the
 // cards in its own tab (and group), and a PR with two jobs appears once per job, in each job's tab.
 //
@@ -147,6 +149,29 @@ export function listTab(
   return out;
 }
 
+/** THE LISTING RULE FOR AN UNSCORED TAB (`byWait` — "Waiting on others"): its cards, longest wait
+ *  first (then the lower PR id, then the card id — a total order), each list group cut to
+ *  `boardListCap`. ⚠ No score: these are read-only rows the reader cannot act on next, so the Do
+ *  next scorer has nothing to rank, and the work plan may never name one (`listedCardIds` lists
+ *  scored cards only). */
+export function listByWait(def: PendingTabDef, cards: readonly InsightCard[]): InsightCard[] {
+  const waitOf = (c: InsightCard): number => (c.kind === 'waiting_on_others' ? c.waitHours : -1);
+  const prOf = (c: InsightCard): number => ('prId' in c && c.prId != null ? c.prId : Number.MAX_SAFE_INTEGER);
+  const inTab = cards
+    .filter((c) => pendingTabHolds(def, c))
+    .sort((a, b) => waitOf(b) - waitOf(a) || prOf(a) - prOf(b) || a.id.localeCompare(b.id));
+  const perGroup = new Map<string, number>();
+  const out: InsightCard[] = [];
+  for (const c of inTab) {
+    const group = listGroupOf(c);
+    const n = perGroup.get(group) ?? 0;
+    if (n >= PENDING_LIMITS.boardListCap) continue;
+    perGroup.set(group, n + 1);
+    out.push(c);
+  }
+  return out;
+}
+
 /** Every card id any tab lists, for these cards, scores and My turn type order — the population
  *  the Pro work plan may name. A plan row whose card the board does not list would put its
  *  sentence on a card the reader cannot find. */
@@ -198,11 +223,18 @@ export async function rankPendingTabs(
     // Every scored card of the tab's kinds — in a strict-group tab by group first — highest score
     // first, then listed per list group to the cap (`listTab`, the one listing rule).
     const ids: string[] = [];
-    for (const s of listTab(def, scored, byId, orderIdx)) {
-      ids.push(s.cardId);
-      listed.push(byId.get(s.cardId)!);
-      const { cardId: _cardId, prId: _prId, ...score } = s;
-      scores[s.cardId] = score;
+    if (def.byWait === true) {
+      for (const c of listByWait(def, insights.cards)) {
+        ids.push(c.id);
+        listed.push(c);
+      }
+    } else {
+      for (const s of listTab(def, scored, byId, orderIdx)) {
+        ids.push(s.cardId);
+        listed.push(byId.get(s.cardId)!);
+        const { cardId: _cardId, prId: _prId, ...score } = s;
+        scores[s.cardId] = score;
+      }
     }
     if (def.key === 'review') {
       routingTop = ids
@@ -293,6 +325,9 @@ export async function buildPendingBoard(
   const insights = await getWorkspaceInsights(accountId, undefined, scope, {
     uncapped: true,
     withFailingChecks: live,
+    // "Waiting on others" — the reader's own PRs held by someone else. The route's alone: the
+    // Slack snapshot (a TEAM digest) never builds it.
+    withWaiting: live,
     ...(live ? { boardFacts } : {}),
   });
   const board = await rankPendingTabs(accountId, scope, insights, opts.now ?? Date.now(), {

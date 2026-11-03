@@ -7,6 +7,7 @@ import {
   type HeadingContext,
 } from '../../lib/pendingHeadings.js';
 import { cardKindLabel, myTurnReasonLabel } from './pendingLabels.js';
+import { overTargetText, waitingWith, workHoursShort } from '../../lib/reviewWaits.js';
 import type { StatusTone } from '../ui/StatusIcon.js';
 
 // ONE PENDING ITEM AS ONE LINE (docs/redesign/DESIGN.md § Lists and rows). Pure, for the test.
@@ -38,6 +39,12 @@ export interface PendingRowSummary {
   at: string | null;
   /** `at` is the PR's opening (the heading has no clock of its own) — the tooltip says so. */
   atIsOpened: boolean;
+  /** A WORKING-hours wait that replaces the clock age ("6h") — the "Waiting on others" row, whose
+   *  wait is the point of the row. Absent elsewhere. */
+  waitText?: string;
+  /** Set when a review on this card is over the review target: the note, for the age cell's
+   *  tooltip ("Over the 4h review target — waiting 9 working hours"). The cell turns amber. */
+  overTarget?: string;
 }
 
 /** Does this card block a merge or a build? */
@@ -105,7 +112,19 @@ function isPrCard(card: InsightCard): card is InsightCard & InsightPrRef {
 
 export function pendingRowSummary(card: InsightCard, ctx: HeadingContext): PendingRowSummary {
   const heading = pendingHeading(card, ctx);
-  const reason = card.kind === 'my_turn' ? myTurnReasonLabel(card) : cardKindLabel(card);
+  // A waiting row's reason IS who has it ("With sam"); its age is the working-hours wait.
+  const reason =
+    card.kind === 'my_turn'
+      ? myTurnReasonLabel(card)
+      : card.kind === 'waiting_on_others'
+        ? waitingWith(card, ctx.nameOf)
+        : cardKindLabel(card);
+  const over =
+    (card.kind === 'my_turn' && card.reason !== 'trunk_red') ||
+    card.kind === 'stalled_review' ||
+    card.kind === 'waiting_on_others'
+      ? card.overReviewTarget
+      : undefined;
   const pr = pendingCardPrLabel(card, ctx.sharedOwner);
   const prCard = isPrCard(card) ? card : null;
   const branchRef =
@@ -121,6 +140,8 @@ export function pendingRowSummary(card: InsightCard, ctx: HeadingContext): Pendi
     author: prCard != null ? authorName(prCard, ctx.nameOf) : null,
     at: heading.at ?? prCard?.openedAt ?? null,
     atIsOpened: heading.at == null && prCard?.openedAt != null,
+    ...(card.kind === 'waiting_on_others' ? { waitText: workHoursShort(card.waitHours) } : {}),
+    ...(over != null ? { overTarget: overTargetText(over) } : {}),
   };
 }
 

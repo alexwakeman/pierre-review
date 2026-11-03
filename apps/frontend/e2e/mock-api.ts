@@ -69,6 +69,8 @@ import type {
   StoryBuildChecksPreview,
   StoryBuildDiffResponse,
   StoryBuildDiscardResponse,
+  PrReviewWaitsResponse,
+  ReviewerCandidateResponse,
   StoryBuildDocsDecisionsBody,
   StoryBuildDocsDecisionsResponse,
   StoryBuildDocsResponse,
@@ -1449,6 +1451,13 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       // Suggested reviewers — its own live query now; empty is fine for the fixtures.
       if (path.match(/\/api\/prs\/\d+\/suggested-reviewers$/))
         return json(route, { suggestedReviewers: [], users: [] });
+      // The PR pane's "Requested" row reads each request's wait against the review target on mount
+      // (a bare `{}` would leave `waits` undefined). Nobody waiting is fine for the fixtures.
+      if (path.match(/\/api\/prs\/\d+\/review-waits$/))
+        return json(route, { waits: [], targetHours: 4, viewerCanRequest: false } satisfies PrReviewWaitsResponse);
+      // "Ask someone else" — click-gated; nobody to suggest in the fixtures.
+      if (path.match(/\/api\/prs\/\d+\/reviewer-candidate$/))
+        return json(route, { candidate: null, users: [] } satisfies ReviewerCandidateResponse);
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);

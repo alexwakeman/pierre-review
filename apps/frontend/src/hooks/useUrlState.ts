@@ -97,6 +97,7 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'conflicts',
   'security',
   'dependency_bump',
+  'waiting_on_others',
   'bot_signal',
   'bot_only_review',
 ];

@@ -36,6 +36,7 @@ import {
 import {
   ByRepositoryInfo,
   BudgetsInfo,
+  ReviewTargetInfo,
   ChronologyAboutInfo,
   ConcentrationInfo,
   ContrastInfo,
@@ -411,6 +412,18 @@ export function BottlenecksPanel(): JSX.Element {
               >
                 <CourtSplit courts={resp.courtsWork ?? []} size="lg" />
               </Block>
+
+              {/* THE REVIEW TARGET: the server's sentence, and its denominator from the wire counts.
+                  Absent (too few first reviews, or an older server) ⇒ nothing — never a zero. */}
+              {resp.reviewTarget != null && (
+                <Block title="Review target" info={<ReviewTargetInfo />} testId="chronology-review-target">
+                  <p className="text-title font-semibold text-ui-ink">{resp.reviewTarget.sentence}</p>
+                  <p className="mt-0.5 text-meta text-ui-mute">
+                    {formatCount(resp.reviewTarget.within)} of {formatCount(resp.reviewTarget.prs)} pull
+                    requests that had a first review
+                  </p>
+                </Block>
+              )}
 
               <Block title="Each wait against its time budget" info={<BudgetsInfo />} testId="chronology-budgets">
                 <BudgetChart rows={resp.budgets ?? []} dayHours={dayHours} />

@@ -42,7 +42,14 @@ import { FLAKY_CHIP_CLASS, flakyByName, flakyTitle } from './FlakyChecks.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { TERMINAL_LABEL } from './AutoMergeBanner.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
-import { useSuggestedReviewers } from '../hooks/usePr.js';
+import { usePrReviewWaits, useSuggestedReviewers } from '../hooks/usePr.js';
+import { AskSomeoneElse, NudgeButton, ReviewTargetNote } from './ReviewWaitActions.js';
+import {
+  holderOverTarget,
+  nudgeOffered,
+  workHoursLong,
+  workHoursShort,
+} from '../lib/reviewWaits.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import {
   BotIcon,
@@ -338,6 +345,82 @@ function SuggestedReviewersRow({
           {(request.error as Error)?.message ?? 'Couldn’t request the reviewer.'}
         </div>
       )}
+    </Row>
+  );
+}
+
+// THE "Requested" ROW — who is asked and, on an open PR, how long each has waited in WORKING hours
+// against the workspace's review target (`GET /api/prs/:id/review-waits`, DB only). Past the target a
+// person gets "Nudge" (ask again on GitHub) and the row offers "Ask someone else" — both only where
+// the reader can request reviewers (hidden, never disabled), both acting only on a click.
+function RequestedReviewersRow({
+  pr,
+  usersById,
+}: {
+  pr: PrDetailT;
+  usersById: Map<number, User>;
+}): JSX.Element {
+  const open = pr.state === 'open';
+  const { data: waits } = usePrReviewWaits(pr.id, open);
+  const nameOf = (id: number | null | undefined): string | null => {
+    if (id == null) return null;
+    const u = usersById.get(id);
+    return u?.githubLogin != null ? `@${u.githubLogin}` : null;
+  };
+  const waitFor = (r: { userId: number | null; teamName: string | null }) =>
+    waits?.waits?.find((w) =>
+      r.userId != null ? w.userId === r.userId : w.teamName != null && w.teamName === r.teamName,
+    );
+  const target = waits?.targetHours ?? null;
+  const canRequest = waits?.viewerCanRequest === true;
+  const longestOver =
+    waits?.waits != null ? waits.waits.find((w) => holderOverTarget(w, waits.targetHours)) : undefined;
+  return (
+    <Row label="Requested">
+      <div className="flex flex-col gap-1.5 text-meta">
+        <div className="flex flex-wrap items-center gap-2">
+          {pr.requestedReviewers.map((r, i) => {
+            const w = waitFor(r);
+            const over = w != null && target != null && holderOverTarget(w, target);
+            return (
+              <span key={i} className="inline-flex flex-wrap items-center gap-1.5">
+                <span className="rounded-ui bg-ui-raise px-1.5 py-0.5">
+                  {r.teamName ? (
+                    `@${r.teamName}`
+                  ) : (
+                    <UserName
+                      user={r.userId != null ? usersById.get(r.userId) : undefined}
+                      fallbackId={r.userId}
+                      repoId={pr.repoId}
+                    />
+                  )}
+                </span>
+                {w != null && (
+                  <span
+                    className={over ? 'text-ui-warn' : 'text-ui-mute'}
+                    title={`${workHoursLong(w.workHours)} of working time since they were asked`}
+                  >
+                    {workHoursShort(w.workHours)}
+                  </span>
+                )}
+                {w != null && target != null && w.userId != null && nudgeOffered(w, target, canRequest) && (
+                  <NudgeButton prId={pr.id} userId={w.userId} name={nameOf(w.userId) ?? 'them'} />
+                )}
+              </span>
+            );
+          })}
+        </div>
+        {longestOver != null && target != null && (
+          <>
+            <ReviewTargetNote over={{ targetHours: target, waitedHours: longestOver.workHours }} />
+            {canRequest && (
+              <div>
+                <AskSomeoneElse prId={pr.id} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </Row>
   );
 }
@@ -1106,25 +1189,7 @@ export function ChecksTab({
         </Row>
       )}
 
-      {pr.requestedReviewers.length > 0 && (
-        <Row label="Requested">
-          <div className="flex flex-wrap gap-2 text-meta">
-            {pr.requestedReviewers.map((r, i) => (
-              <span key={i} className="rounded-ui bg-ui-raise px-1.5 py-0.5">
-                {r.teamName ? (
-                  `@${r.teamName}`
-                ) : (
-                  <UserName
-                    user={r.userId != null ? usersById.get(r.userId) : undefined}
-                    fallbackId={r.userId}
-                    repoId={pr.repoId}
-                  />
-                )}
-              </span>
-            ))}
-          </div>
-        </Row>
-      )}
+      {pr.requestedReviewers.length > 0 && <RequestedReviewersRow pr={pr} usersById={usersById} />}
 
       {suggestions.length > 0 && (
         <SuggestedReviewersRow pr={pr} suggestions={suggestions} usersById={suggestUsersById} />

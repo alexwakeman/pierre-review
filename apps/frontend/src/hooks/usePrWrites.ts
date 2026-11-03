@@ -283,6 +283,10 @@ export function requestReviewersOptions(qc: QueryClient, prId: number, reviewerK
       // The live suggestions query re-gates to empty once anyone is requested. Not in the shared
       // set: only this write changes it.
       void qc.invalidateQueries({ queryKey: ['suggested-reviewers', prId] });
+      // The PR pane's review waits and "Ask someone else": a new request restarts a wait (once the
+      // request event syncs) and takes the person off the candidate list. Only this write moves them.
+      void qc.invalidateQueries({ queryKey: ['review-waits', prId] });
+      void qc.invalidateQueries({ queryKey: ['reviewer-candidate', prId] });
       // A sibling still in flight: refresh the PR's own detail only (staleTime:Infinity +
       // persisted), and leave the board to whichever request lands last.
       if (qc.isMutating({ mutationKey: requestReviewersMutationKey(prId) }) > 1) {

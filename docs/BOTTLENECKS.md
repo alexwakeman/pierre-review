@@ -240,6 +240,21 @@ Settings → Workspace → "Working hours and budgets"; CORE).
 - ⚠ **Budget sentences speak in hours, never working days** — a "2.2 working days" beside a
   "16-hour limit" is one figure in two spellings.
 
+### The review target headline
+
+`FlowResponse.reviewTarget` (`db/flow-detail.ts` `reviewTargetOf`): **"86% of first reviews arrived
+within 4 working hours"**, with its denominator (`within` of `prs`). The target is the first-look
+budget's `good` value — THE review target; there is no second setting, and the Pending board's "Over
+the review target" note reads the same value (docs/BACKEND.md § Waiting on others).
+
+- The population is the first-look budget row's exactly: the window's measured PRs (merged in
+  `[from, to)`, people-authored, a human acted — Chronology's rules) that had a first look. A wait
+  ON the target counts as within.
+- ⚠ **Unknown is never zero**: under `FLOW_RULES.budgetMinPrs` (5) first looks the field is null and
+  the page draws no block; the budget row beside it already says how few there were.
+- Templated server-side like every sentence here; the SPA adds only the count line.
+- It is in `buildFlowDetail`, not `flowCoreFigures`, so the 26-week trend is unchanged.
+
 ## The per-PR view
 
 `FlowResponse.prs` carries one row per measured PR (capped at 1,000: every slow PR, then an even

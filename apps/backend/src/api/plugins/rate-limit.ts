@@ -793,11 +793,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // `getAccessToken` on line 35 of github/reviewer-suggest.ts. When in doubt, follow the token.
   // Genuinely DB-only and correctly left on `read`: `/bot-behaviour`, `/bot-dedup`,
   // `/mention-candidates`, `/claude-review` (retrieval).
+  //   `/reviewer-candidate`       "Ask someone else": the same suggestion pipeline as
+  //                               `/suggested-reviewers` (CODEOWNERS + team history), on a click.
   const prGithubGet =
-    /^\/api\/prs\/\d+(\/(merge-options|files|files\/content|files\/diff|suggested-reviewers|checks\/[^/]+\/logs))?$/;
+    /^\/api\/prs\/\d+(\/(merge-options|files|files\/content|files\/diff|suggested-reviewers|reviewer-candidate|checks\/[^/]+\/logs))?$/;
   if (!mutating && prGithubGet.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }
+  // GET /api/prs/<id>/review-waits — the PR pane's review waits against the target: two indexed
+  // selects and a calendar fold, no GitHub, no model. `read`, DECIDED (spelled exactly) rather than
+  // inherited from the blanket.
+  if (!mutating && /^\/api\/prs\/\d+\/review-waits$/.test(path)) return [TIERS.read];
   // GET /api/threads/<id> hydrates the same way.
   if (!mutating && /^\/api\/threads\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
   // POST /api/prs/<id>/refresh — the PrDetail live poll (~every 5s while a PR pane is
