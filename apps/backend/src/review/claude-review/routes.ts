@@ -21,6 +21,7 @@ import type {
 } from '@pierre-review/shared';
 import {
   AI_PICKER_MODELS,
+  REVIEW_POST_MODES,
   findingSourceLabel,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
@@ -69,6 +70,8 @@ import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFo
 import { teammateLinesAtHead } from './team-claim-seen.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
+import { limnMetaForReview } from './post-meta.js';
+import { listTeammateReviews } from '../../db/teammate-reviews.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -116,6 +119,8 @@ const generateSchema = {
       fresh: { type: 'boolean' },
       // A Claude + Codex pair (pair.ts). Raw-checked the same way.
       pair: { type: 'boolean' },
+      // The split button's choice: post when it ends, or keep it in Limn (the default).
+      postMode: { type: 'string', enum: [...REVIEW_POST_MODES] },
       // No `ticket`/`tickets`: a PR review checks no story (the ticket review does, `POST
       // /api/ticket-reviews`). Fastify's ajv runs with `removeAdditional`, so a stale key from an
       // older SPA is stripped, exactly like the retired `mode`.
@@ -256,6 +261,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
+      // Reviews teammates' Limn POSTED to GitHub, imported at sync (db/teammate-reviews.ts). Read-only.
+      teammateReviews: await listTeammateReviews(ctx.db, accountId, id).catch(() => []),
       teamClaimSkip,
       ...(teamClaimTeammates.length > 0 ? { teamClaimTeammates } : {}),
       teamClaimPending,
@@ -347,6 +354,16 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           reply.status(400);
           return reply.send({ error: 'BadRequest', message: '`pair` must be true or false.' });
         }
+        // The split button's choice: exactly one of its two words (never coerced from ['post'] or 1).
+        if (
+          raw != null &&
+          typeof raw === 'object' &&
+          'postMode' in raw &&
+          !(REVIEW_POST_MODES as readonly unknown[]).includes(raw.postMode)
+        ) {
+          reply.status(400);
+          return reply.send({ error: 'BadRequest', message: '`postMode` must be "review_only" or "post".' });
+        }
       },
     },
     async (req, reply) => {
@@ -378,6 +395,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       const result = await startReview(ctx, accountId, id, choice.model, choice.provider, {
         fresh: body.fresh === true,
         ...(pair ? { pair: true } : {}),
+        // "Review and post": the press is the consent (the workspace's auto-post switch need not be on).
+        ...(body.postMode === 'post' ? { postOnFinish: true } : {}),
       });
       if (!result.ok) {
         if (result.reason === 'not_found') {
@@ -802,6 +821,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         reviewHeadSha: pctx.reviewHeadSha,
         body: review.userBody ?? '',
         verdict: userVerdict,
+        // How the review ran, in the summary marker (a teammate's Limn shows it from there).
+        limnMeta: limnMetaForReview(review),
         includedFindings: review.findings
           // A finding already on GitHub (posted on its own, or in an earlier submitted review) is
           // DONE: the SPA offers no "Post again", and a re-submitted review must not post it twice.

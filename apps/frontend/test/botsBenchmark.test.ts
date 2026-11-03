@@ -338,14 +338,14 @@ describe('the Benchmark tab has no gate', () => {
 describe('the visible Bots sub-tab is DERIVED, never written back', () => {
   it('keeps `benchmark` selected on both mounts', () => {
     // The TAB never moves, so a bookmarked `?botsTab=benchmark` lands where it says it will.
-    expect(effectiveBotsTab('benchmark', { showClassification: false })).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showClassification: true })).toBe('benchmark');
+    expect(effectiveBotsTab('benchmark', {})).toBe('benchmark');
+    expect(effectiveBotsTab('benchmark', { showThemes: false })).toBe('benchmark');
   });
 
   it('shows ROI in place of Themes while AI is off, without forgetting the choice', () => {
-    expect(effectiveBotsTab('themes', { showClassification: true, showThemes: false })).toBe('roi');
-    expect(effectiveBotsTab('themes', { showClassification: true, showThemes: true })).toBe('themes');
-    expect(effectiveBotsTab('themes', { showClassification: true })).toBe('themes');
+    expect(effectiveBotsTab('themes', { showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('themes', { showThemes: true })).toBe('themes');
+    expect(effectiveBotsTab('themes', {})).toBe('themes');
   });
 
   // ⚠ AND THE MOUNT IS NOT AN INPUT EITHER — which matters MORE since the grain split, not less.
@@ -356,37 +356,29 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
   // rule is that WHICH BODY IS DRAWN is decided inside the pane, and the TAB never moves.
   it('takes no repoId, and cannot be made to degrade `benchmark` on the per-repo mount', () => {
     // Behavioural: an opts object that smuggles a mount in changes nothing, on either mount.
-    const withRepo = { showClassification: false, repoId: 7 } as { showClassification: boolean };
+    const withRepo = { repoId: 7 } as { showThemes?: boolean };
     expect(effectiveBotsTab('benchmark', withRepo)).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showClassification: false })).toBe('benchmark');
-    // Structural: two parameters, and the second's shape is the classification flag and the AI switch —
-    // never a mount.
+    // Structural: two parameters, and the second's shape is the AI switch — never a mount.
     expect(effectiveBotsTab).toHaveLength(2);
     expect(sourceOf('components/Activity/benchmarkModel.ts')).toMatch(
-      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showClassification: boolean; showThemes\?: boolean \},?\s*\)/,
+      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showThemes\?: boolean \},?\s*\)/,
     );
   });
 
   it('keeps `roi` selected too — the same posture, older', () => {
-    expect(effectiveBotsTab('roi', { showClassification: false })).toBe('roi');
+    expect(effectiveBotsTab('roi', {})).toBe('roi');
   });
 
-  it('degrades ONLY `classification`, and only where it is not listed (the per-repo console)', () => {
-    expect(effectiveBotsTab('classification', { showClassification: false })).toBe('roi');
-    expect(effectiveBotsTab('classification', { showClassification: true })).toBe('classification');
-    // `themes` renders on both mounts now, so it never degrades.
-    expect(effectiveBotsTab('themes', { showClassification: false })).toBe('themes');
-    expect(effectiveBotsTab('themes', { showClassification: true })).toBe('themes');
-  });
-
-  it('renders ROI for a retired member (the removed Advisor) a stale state may still hold', () => {
-    expect(effectiveBotsTab('advisor' as BotsInnerTab, { showClassification: true })).toBe('roi');
+  // Classification moved to Settings → Bots (2026-11-03): a stale `classification` is a retired member.
+  it('renders ROI for a retired member (the removed Advisor, the moved Classification)', () => {
+    expect(effectiveBotsTab('advisor' as BotsInnerTab, {})).toBe('roi');
+    expect(effectiveBotsTab('classification' as BotsInnerTab, {})).toBe('roi');
+    expect(BOTS_INNER_TABS).toEqual(['roi', 'themes', 'benchmark']);
   });
 
   it('leaves every other member alone', () => {
     for (const tab of BOTS_INNER_TABS) {
-      if (tab === 'classification') continue;
-      expect(effectiveBotsTab(tab, { showClassification: false })).toBe(tab);
+      expect(effectiveBotsTab(tab, { showThemes: true })).toBe(tab);
     }
   });
 

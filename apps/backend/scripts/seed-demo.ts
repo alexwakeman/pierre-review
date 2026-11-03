@@ -85,6 +85,7 @@ for (const suffix of ['', '-shm', '-wal']) {
 const { runMigrations } = await import('../src/db/run-migrations.js');
 const { closeDb, db, schema } = await import('../src/db/client.js');
 const { eq } = await import('drizzle-orm');
+const { limnReviewMarker } = await import('@pierre-review/shared');
 
 await runMigrations();
 
@@ -760,6 +761,29 @@ const REVIEWS: ReviewSeed[] = [
   // claudeReviews(id 1).postedReviewId, so getReviewerProvenanceForPr resolves this review
   // to "Pierre · Claude · verbatim" on the ChecksTab Reviewers list (userBody===summary).
   { id: 26, prId: 113, author: ME, state: 'commented', daysAgo: 0.012, databaseId: 'PRR_demo113', body: CLAUDE_113_SUMMARY },
+  // TEAMMATES' POSTED LIMN REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews). Each body ends in the
+  // hidden summary marker; their finding comments are in the Limn findings block below, and the
+  // product's own import (`importTeammateReviews`) turns each into a read-only review in AI Review.
+  //  • #114: Priya's Limn posted an auto review of Wei's change (metadata marker, REQUEST_CHANGES).
+  { id: 27, prId: 114, author: 2, state: 'changes_requested', daysAgo: 1.2, databaseId: 'PRR_demo114priya', body: [
+    'The node group cannot scale as written: `max_size` is below `min_size`, so `terraform plan` fails. The new variable is also never read.',
+    '',
+    limnReviewMarker('demo114p', { headSha: hexSha('114head'), run: 'auto', pair: false, runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' }], verdict: 'REQUEST_CHANGES', limnVersion: '0.1.173' }),
+  ].join('\n') },
+  //  • #111: Sam's Limn reviewed his OWN pull request at its first commit (an author may only
+  //    comment). Morgan's later review follows up on it (seed-demo-agentic.ts, teammate-anchor.ts).
+  { id: 28, prId: 111, author: 5, state: 'commented', daysAgo: 3.5, databaseId: 'PRR_demo111sam', body: [
+    'The stream works, but every page of a large backfill sends a frame, and nothing tells the browser when the sync ends.',
+    '',
+    limnReviewMarker('demo111s', { headSha: hexSha('111c1'), run: 'manual', pair: false, runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' }], verdict: 'COMMENT', limnVersion: '0.1.171' }),
+  ].join('\n') },
+  //  • #141: Lena posted with an OLD Limn — the bare legacy marker, no metadata: no model label,
+  //    and the head is inferred from the commits.
+  { id: 29, prId: 141, author: 3, state: 'commented', daysAgo: 9, databaseId: 'PRR_demo141lena', body: [
+    'The queue moves the scheduler’s retries into the job table, which is the right place. Check that a job left running by a crash is picked up again after a restart.',
+    '',
+    '<!-- pierre:claude-review v=1 -->',
+  ].join('\n') },
 ];
 await db
   .insert(schema.reviews)
@@ -864,6 +888,12 @@ ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
         'Each progress frame is written without a back-pressure check, so a slow client buffers the whole sync in memory.',
         FINDING_COMMENT_MARKER,
       ].join('\n\n') },
+    // Priya's posted review of #114 (REVIEWS #27): an inline warning (a thread root).
+    { id: 64, prId: 114, path: 'terraform/eks/node-groups.tf', line: 20, poster: 2, daysAgo: 1.2,
+      body: findingCommentBody({ severity: 'warning', body: '`max_size` (4) is below `min_size` (6). EKS rejects the scaling config, which is the error the plan reports. INFRA-231 asks for 2 to 8.', editedBody: null, suggestion: null }) },
+    // Sam's posted review of his own #111 at its first commit (REVIEWS #28): an inline warning.
+    { id: 65, prId: 111, path: 'src/api/routes/sync-activity.ts', line: 56, poster: 5, daysAgo: 3.5,
+      body: findingCommentBody({ severity: 'warning', body: 'Nothing unsubscribes when the browser closes the stream, so every closed tab keeps its listener and heartbeat. Listen for `close` on the reply socket.', editedBody: null, suggestion: null }) },
   ];
   await db
     .insert(schema.reviewThreads)
@@ -890,9 +920,25 @@ ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
     .insert(schema.prComments)
     .values({ id: 60, githubNodeId: 'PC_limn_60', prId: 111, authorId: 2, body: prLevelBody, databaseId: '3000060', createdAt: day(2.4) })
     .execute();
+  // The PR-level blockers of the two teammates' posted reviews (REVIEWS #27 and #28), a few seconds
+  // after each summary, as GitHub stamps them.
+  const teammatePrLevel = [
+    { id: 61, prId: 114, poster: 2, daysAgo: 1.2 - 5 / 86_400,
+      body: prLevelFindingBody({ severity: 'blocker', path: 'terraform/eks/variables.tf', line: 33, body: '`worker_max_nodes` is declared but `node-groups.tf` still hard-codes the bound, so changing the variable does nothing.', editedBody: null, suggestion: null }) },
+    { id: 62, prId: 111, poster: 5, daysAgo: 3.5 - 5 / 86_400,
+      body: prLevelFindingBody({ severity: 'blocker', path: 'src/sync/sync-manager.ts', line: 210, body: 'Nothing sends a last frame when the sync ends, so the progress bar stays at its last value. Send a `done` event after the walk.', editedBody: null, suggestion: null }) },
+  ];
+  await db
+    .insert(schema.prComments)
+    .values(teammatePrLevel.map((c) => ({ id: c.id, githubNodeId: `PC_limn_${c.id}`, prId: c.prId, authorId: c.poster, body: c.body, databaseId: `${3_000_000 + c.id}`, createdAt: day(c.daysAgo) })))
+    .execute();
+  for (const c of teammatePrLevel) {
+    const pr = prRows.find((p) => p.id === c.prId)!;
+    events.push({ id: evId++, accountId: 1, repoId: pr.repoId, actorId: c.poster, prId: c.prId, type: 'pr_comment', occurredAt: day(c.daysAgo), refTable: 'pr_comments', refId: c.id, dedupeKey: `pr_comment:PC_limn_${c.id}` });
+  }
   // Events keyed as sync keys them (`<type>:<node id>`), so the reconcile moves their actor too.
   for (const rc of limnCommentRows) {
-    events.push({ id: evId++, accountId: 1, repoId: API, actorId: rc.authorId, prId: rc.prId, type: 'review_comment', occurredAt: rc.createdAt, refTable: 'review_threads', refId: rc.threadId, dedupeKey: `review_comment:${rc.githubNodeId}` });
+    events.push({ id: evId++, accountId: 1, repoId: prRows.find((p) => p.id === rc.prId)!.repoId, actorId: rc.authorId, prId: rc.prId, type: 'review_comment', occurredAt: rc.createdAt, refTable: 'review_threads', refId: rc.threadId, dedupeKey: `review_comment:${rc.githubNodeId}` });
   }
   events.push({ id: evId++, accountId: 1, repoId: API, actorId: 2, prId: 111, type: 'pr_comment', occurredAt: day(2.4), refTable: 'pr_comments', refId: 60, dedupeKey: 'pr_comment:PC_limn_60' });
 }
@@ -957,6 +1003,15 @@ await db
     { id: 5, reviewId: 1, path: 'README.md', line: null, side: 'RIGHT', severity: 'praise', title: 'Good fixture coverage', body: 'Nice fixture-based tests for the new transaction path — they make the behaviour change easy to verify.', anchored: false, included: false },
   ])
   .execute();
+
+// ---- teammates' posted Limn reviews → read-only reviews in AI Review (what a walk of the PR does) ----
+// After the explicit claude_reviews id 1 above: the import's rows take the next ids.
+{
+  const { importTeammateReviews } = await import('../src/db/teammate-reviews-import.js');
+  for (const prId of [114, 111, 141]) {
+    console.log(`  teammate reviews #${prId}: ${JSON.stringify(await importTeammateReviews(1, prId))}`);
+  }
+}
 
 // ---- bot-triage: the bot object ----
 // A BOT IS A PER-WORKSPACE OBJECT — ONE row per (account, workspace, actor) in

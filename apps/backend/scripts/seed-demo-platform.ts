@@ -282,6 +282,8 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
       await call('PUT', `/api/workspaces/${platformWs}/dependency-automation`, {
         autoApprove: true,
         autoResolveConflicts: true,
+        // "Fix them with AI": a dependency PR whose CI fails gets one AI fix (docs/MERGE-CI-TRUNK.md).
+        autoFix: true,
         maxLevel: 'minor',
         trustedBotIds: [depBot.id],
       });
@@ -295,8 +297,16 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
         .orderBy(schema.pullRequests.id)
         .execute()) as Array<{ id: number; head: string | null }>;
       const at = (h: number) => new Date(nowMs - h * 3_600_000);
-      const [a, b] = [depPrs.at(-1), depPrs.at(-2)];
-      const rows = [
+      const [a, b, cc, d, e, f] = [depPrs.at(-1), depPrs.at(-2), depPrs.at(-3), depPrs.at(-4), depPrs.at(-5), depPrs.at(-6)];
+      // The open bump (Bump undici), where an AI fix is running now.
+      const openDep = ((await db
+        .select({ id: schema.pullRequests.id, head: schema.pullRequests.headSha })
+        .from(schema.pullRequests)
+        .innerJoin(schema.workspaceRepos, eq(schema.workspaceRepos.repoId, schema.pullRequests.repoId))
+        .where(and(eq(schema.workspaceRepos.workspaceId, platformWs), eq(schema.pullRequests.authorId, depBot.id), eq(schema.pullRequests.state, 'open')))
+        .orderBy(schema.pullRequests.id)
+        .execute()) as Array<{ id: number; head: string | null }>)[0];
+      const rows: Array<Record<string, unknown>> = [
         ...(a ? [{ prId: a.id, headSha: a.head ?? 'demo-a', action: 'approve', state: 'done', detail: 'a patch dependency update', createdAt: at(3), updatedAt: at(3) }] : []),
         ...(b
           ? [
@@ -304,6 +314,20 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
               { prId: b.id, headSha: 'demo-b0', action: 'ai_resolve', state: 'done', detail: 'Resolved with Claude and pushed 4f2a9c1', resultSha: '4f2a9c1e0b7d', createdAt: at(6), updatedAt: at(6) },
             ]
           : []),
+        // Red CI → one AI fix, pushed; then armed, and the merge landed (docs/MERGE-CI-TRUNK.md §
+        // Dependency automation: "Merged" is a LANDED merge only).
+        ...(cc
+          ? [
+              { prId: cc.id, headSha: 'demo-c0', action: 'ai_fix', state: 'done', detail: 'Fixed with Claude and pushed 1a2b3c4', resultSha: '1a2b3c4d5e6f', createdAt: at(11), updatedAt: at(10.8) },
+              { prId: cc.id, headSha: cc.head ?? 'demo-c1', action: 'arm_merge', state: 'done', detail: null, createdAt: at(10), updatedAt: at(10) },
+              { prId: cc.id, headSha: cc.head ?? 'demo-c1', action: 'merge_landed', state: 'done', detail: null, createdAt: at(9.5), updatedAt: at(9.5) },
+            ]
+          : []),
+        ...(d ? [{ prId: d.id, headSha: 'demo-d0', action: 'ai_fix', state: 'failed', detail: 'Not pushed: the branch moved since the fix was made.', createdAt: at(14), updatedAt: at(13.8) }] : []),
+        ...(openDep ? [{ prId: openDep.id, headSha: openDep.head ?? 'demo-o', action: 'ai_fix', state: 'running', detail: null, createdAt: at(0.1), updatedAt: at(0.1) }] : []),
+        // A teammate's Limn holds the head (its `limn/deps` status): a skip, never a failure.
+        ...(e ? [{ prId: e.id, headSha: e.head ?? 'demo-e', action: 'approve', state: 'skipped', detail: null, teammateLogin: 'priya-nair', teammateHandled: false, createdAt: at(1), updatedAt: at(1) }] : []),
+        ...(f ? [{ prId: f.id, headSha: f.head ?? 'demo-f', action: 'arm_merge', state: 'skipped', detail: null, teammateLogin: 'wei-zhang', teammateHandled: true, createdAt: at(20), updatedAt: at(20) }] : []),
       ];
       if (rows.length > 0) {
         await db.insert(schema.dependencyAutomationActions).values(rows.map((r) => ({ accountId: 1, ...r }))).execute();
@@ -325,6 +349,22 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
     out.settingEvents = events.length;
     // The auto-review switch's own clock follows its marker.
     await db.update(schema.workspaces).set({ autoReviewEnabledAt: new Date(nowMs - 84 * DAY) }).where(eq(schema.workspaces.id, platformWs)).execute();
+    // THE DAILY LIMIT TOAST (components/AutoReviewCapToast.tsx): Platform's daily limit sits at what
+    // today's auto reviews already used, so the header shows "limit reached" with "Change limit" (or
+    // "nearly used up" once four or more ran today). Today = since 00:00 UTC, so the count depends on
+    // the hour the seed runs; with none today the toast stays hidden. Written straight to the column:
+    // a route write would add a setting marker after the ones dated above.
+    {
+      const { getAutoReviewCandidates } = await import('../src/db/queries.js');
+      const d0 = new Date(nowMs);
+      const dayStartMs = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate());
+      const used = (await getAutoReviewCandidates(1, platformWs, { openedSinceMs: nowMs, dayStartMs, limit: 0 }))?.autoToday ?? 0;
+      if (used > 0) {
+        const cap = used >= 4 ? Math.max(used + 1, Math.floor(used / 0.8)) : used;
+        await db.update(schema.workspaces).set({ autoReviewDailyCap: cap }).where(eq(schema.workspaces.id, platformWs)).execute();
+      }
+      out.autoReviewToday = used;
+    }
 
     // ---- 4. the written summaries through their real routes ----
     for (const window of ['rolling_14', 'rolling_30', 'sprint']) {

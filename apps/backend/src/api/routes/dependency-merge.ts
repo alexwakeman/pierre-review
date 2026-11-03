@@ -160,6 +160,7 @@ export async function dependencyMergeRoutes(app: FastifyInstance): Promise<void>
             autoMerge: { type: 'boolean' },
             autoApprove: { type: 'boolean' },
             autoResolveConflicts: { type: 'boolean' },
+            autoFix: { type: 'boolean' },
             maxLevel: { type: 'string', enum: [...DEPENDENCY_UPDATE_LEVELS] },
             securityOnly: { type: 'boolean' },
             ecosystems: {
@@ -175,7 +176,7 @@ export async function dependencyMergeRoutes(app: FastifyInstance): Promise<void>
       // Fastify's validator COERCES types, so `"true"` or 1 would read as a switch. Raw check.
       preValidation: async (req, reply) => {
         const raw = (req.body ?? {}) as Record<string, unknown>;
-        for (const k of ['autoMerge', 'autoApprove', 'autoResolveConflicts', 'securityOnly']) {
+        for (const k of ['autoMerge', 'autoApprove', 'autoResolveConflicts', 'autoFix', 'securityOnly']) {
           if (k in raw && typeof raw[k] !== 'boolean') {
             reply.status(400);
             return reply.send({ error: 'BadRequest', message: `\`${k}\` must be true or false.` });

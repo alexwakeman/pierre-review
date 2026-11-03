@@ -62,17 +62,11 @@ import { BOT_VENDOR_META } from '../../lib/ui.js';
  * `setBotsInnerTab()` would permanently forget the reader's choice for the mount that DOES render
  * it — the rule `insightsInnerTab` / `sprintInnerTab` carry the same comment against.
  *
- * Only `'classification'` can degrade: it is workspace-grain and offered on the cross-repo rail
- * alone (`showClassification`, i.e. `repoId == null`), so a raw value naming it on the per-repo
- * console has no tab to land on. `'themes'` degrades while AI is off. A value outside the union (a
- * retired member such as the removed `'advisor'`) renders the ROI tab.
+ * `'themes'` degrades while AI is off. A value outside the union (a retired member such as the
+ * removed `'advisor'`, or `'classification'`, which moved to Settings → Bots) renders the ROI tab.
  */
-export function effectiveBotsTab(
-  raw: BotsInnerTab,
-  opts: { showClassification: boolean; showThemes?: boolean },
-): BotsInnerTab {
+export function effectiveBotsTab(raw: BotsInnerTab, opts: { showThemes?: boolean }): BotsInnerTab {
   if (!(BOTS_INNER_TABS as readonly string[]).includes(raw)) return 'roi';
-  if (raw === 'classification' && !opts.showClassification) return 'roi';
   // Themes is a model's read: absent while AI is off (`me.ai.enabled`).
   if (raw === 'themes' && opts.showThemes === false) return 'roi';
   return raw;

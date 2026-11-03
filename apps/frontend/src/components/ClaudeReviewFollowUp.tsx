@@ -105,6 +105,7 @@ import { ReviewSection } from './ReviewSection.js';
 import { Select } from './ui/index.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { Markdown } from './Markdown.js';
+import { followUpItemWritable, followUpSectionTitle } from '../lib/teammateReviews.js';
 import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
@@ -1431,15 +1432,17 @@ export function ClaudeReviewFollowUpSection({
     headMoved: followUp?.headMoved ?? false,
     changedPaths,
     onOpenInChanges,
-    prId,
-    reviewId,
   };
+  // The PR AUTHOR'S threads (a follow-up on their own Limn review): shown, never written to. The
+  // reader's own carried findings in that follow-up stay writable (decided per item).
+  const writeProps = (it: { carried: boolean }) =>
+    followUpItemWritable(followUp, it) ? { prId, reviewId } : { prId: undefined, reviewId: undefined };
   const closedCount = closed.length + settledEarlier.length;
   // The previous review's findings this run did not check, by reason (never dropped silently).
   const leftOutLine = followUpLeftOutSentence(followUp?.leftOut);
   return (
     <ReviewSection
-      title="Previous review"
+      title={followUpSectionTitle(followUp)}
       section="previous"
       pills={
         <>
@@ -1467,7 +1470,7 @@ export function ClaudeReviewFollowUpSection({
       {open.length > 0 && (
         <ul className={REVIEW_ITEM_GROUP}>
           {open.map((it) => (
-            <FollowUpRow key={it.priorFindingId} item={it} muted={false} {...rowProps} />
+            <FollowUpRow key={it.priorFindingId} item={it} muted={false} {...rowProps} {...writeProps(it)} />
           ))}
         </ul>
       )}
@@ -1490,7 +1493,7 @@ export function ClaudeReviewFollowUpSection({
           {closedOpen && (
             <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`}>
               {closed.map((it) => (
-                <FollowUpRow key={it.priorFindingId} item={it} muted {...rowProps} />
+                <FollowUpRow key={it.priorFindingId} item={it} muted {...rowProps} {...writeProps(it)} />
               ))}
               {settledEarlier.map((it) => (
                 <SettledEarlierRow

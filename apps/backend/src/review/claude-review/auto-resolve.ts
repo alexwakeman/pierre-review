@@ -167,7 +167,7 @@ async function autoResolve(
   // ⚠ A follow-up names the LATEST raise of an issue, and a re-raise over an already-posted
   // comment is never posted itself (the dedupe), so the thread on GitHub belongs to an ANCESTOR:
   // `loadThreadOwners` walks `prior_finding_id` back to the first inline-posted one.
-  const owners = await loadThreadOwners(ctx, accountId, prId, [...wanted.keys()]);
+  const owners = await loadThreadOwners(ctx, accountId, prId, [...wanted.keys()], { ownOnly: true });
   const target = new Map<number, Wanted>(); // owner id → what to do (first wins)
   for (const [wantedId, want] of wanted) {
     const row = owners.get(wantedId);

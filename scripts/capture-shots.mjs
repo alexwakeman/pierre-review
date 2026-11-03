@@ -186,10 +186,15 @@ async function proShots() {
   await shot('bot-settings.png', async () => {
     const c = await ctx({ height: 1050 });
     const p = await c.newPage();
-    await console_(p, 'bots', '&botsTab=classification');
-    await p.getByTestId('bot-settings-panel').waitFor({ timeout: 15_000 });
+    // Settings → Bots (it was Bots Monitoring → Classification): opened from the account menu.
+    await open(p, '?view=activity');
+    await p.locator('button[title^="Signed in as"]').first().click();
+    await p.getByRole('menuitem', { name: 'Settings' }).click();
+    const dialog = p.getByRole('dialog', { name: 'Settings' });
+    await dialog.getByRole('tab', { name: 'Bots', exact: true }).click();
+    await p.getByTestId('bot-classification-card').first().waitFor({ timeout: 15_000 });
     await p.waitForTimeout(2200);
-    await crop(p, p.getByTestId('bot-settings-panel'), 'bot-settings.png', { maxHeight: 1050 });
+    await crop(p, dialog, 'bot-settings.png', { maxHeight: 1050 });
     await c.close();
   });
 

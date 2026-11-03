@@ -1,13 +1,12 @@
 import { SPRINT_INNER_TABS, type SprintInnerTab } from '../../store/filters.js';
 
 // The This Sprint rail line's sub-tabs, in strip order. FREE on every tier: no tab here is gated.
-// Three independent views of the sprint on ONE lane board (components/LaneBoard.tsx), then the list
-// of what has merged.
+// Three independent views of the sprint on ONE lane board (components/LaneBoard.tsx). (What has
+// merged is Open PRs → Merged now.)
 export const SPRINT_RAIL_TABS: ReadonlyArray<{ key: SprintInnerTab; label: string }> = [
   { key: 'themes', label: 'Theme' },
   { key: 'paths', label: 'Critical path' },
   { key: 'people', label: 'People' },
-  { key: 'merged', label: 'Merged so far' },
 ];
 
 /**

@@ -75,7 +75,7 @@ function fillGaps(into: CardTicket, from: CardTicket): void {
 /**
  * Group the (already sorted) open PRs into ticket stacks. `ticketsOf` answers each PR's tickets
  * in the card's own order (`cardTickets`). `activityOf` is the clock a stack's `latestActivity`
- * (and so the between-stack order) reads: `updatedAt` for open work; Reports → Merged so far passes
+ * (and so the between-stack order) reads: `updatedAt` for open work; Open PRs → Merged passes
  * `mergedAt`, since a merged PR's `updatedAt` moves with any later comment or label.
  */
 export function stackOpenPrs(

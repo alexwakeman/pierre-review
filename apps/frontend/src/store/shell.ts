@@ -29,6 +29,16 @@ function readSidebarWidth(): number {
   }
 }
 
+// The sidebar's Open tabs list grouped under each PR's author ('1'); off by default.
+const TABS_BY_AUTHOR_KEY = 'limn:sidebarTabsByAuthor';
+function readTabsByAuthor(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(TABS_BY_AUTHOR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 // Collapsed by default: only a reader's explicit expand ('1', written on toggle) opens it. The key
 // is written only when the reader toggles, so a reader who never touched it starts collapsed.
 function readReposOpen(): boolean {
@@ -56,6 +66,9 @@ interface ShellState {
   sidebarWidth: number;
   /** `persist` false while a drag is in flight (one write on release, not one per pointermove). */
   setSidebarWidth: (w: number, persist?: boolean) => void;
+  /** The sidebar's Open tabs, grouped under each PR's author. Off by default; remembered. */
+  tabsByAuthor: boolean;
+  setTabsByAuthor: (on: boolean) => void;
   /** "Needs you" hidden for this session (the Welcome-back strip's ×, kept). */
   needsYouDismissed: boolean;
   dismissNeedsYou: () => void;
@@ -88,6 +101,15 @@ export const useShell = create<ShellState>((set) => ({
       }
     }
     set({ sidebarWidth: width });
+  },
+  tabsByAuthor: readTabsByAuthor(),
+  setTabsByAuthor: (on) => {
+    try {
+      globalThis.localStorage?.setItem(TABS_BY_AUTHOR_KEY, on ? '1' : '0');
+    } catch {
+      /* private mode: the choice lasts the session */
+    }
+    set({ tabsByAuthor: on });
   },
   needsYouDismissed: false,
   dismissNeedsYou: () => set({ needsYouDismissed: true }),

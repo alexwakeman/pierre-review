@@ -98,16 +98,26 @@ describe('landingTabFromUrl — the decision table', () => {
 
   it('legacy ?activityRepo=sprint → sprint, with or without view=activity', () => {
     expect(landingTabFromUrl('?workspace=5&view=activity&activityRepo=sprint')).toBe('sprint');
-    expect(landingTabFromUrl('?activityRepo=sprint&sprintTab=merged')).toBe('sprint');
+    expect(landingTabFromUrl('?activityRepo=sprint&sprintTab=people')).toBe('sprint');
     // An explicit other board keeps its board.
     expect(landingTabFromUrl('?view=timeline&activityRepo=sprint')).toBe('timeline');
   });
 
-  it('legacy ?insightsTab=sprint|merged → sprint, only when Reports or no rail is named', () => {
+  it('legacy ?insightsTab=sprint → sprint, only when Reports or no rail is named', () => {
     expect(landingTabFromUrl('?view=activity&activityRepo=insights&insightsTab=sprint')).toBe('sprint');
-    expect(landingTabFromUrl('?view=activity&insightsTab=merged')).toBe('sprint');
+    expect(landingTabFromUrl('?view=activity&activityRepo=feed&insightsTab=sprint')).toBe('activity');
     expect(landingTabFromUrl('?view=activity&activityRepo=feed&insightsTab=merged')).toBe('activity');
     expect(landingTabFromUrl('?view=activity&activityRepo=insights&insightsTab=stories')).toBe('activity');
+  });
+
+  // "Merged so far" is Open PRs → Merged now: every legacy spelling of it lands on Activity.
+  it('legacy Merged so far links → activity', () => {
+    expect(landingTabFromUrl('?view=activity&insightsTab=merged')).toBe('activity');
+    expect(landingTabFromUrl('?view=activity&activityRepo=insights&insightsTab=merged')).toBe('activity');
+    expect(landingTabFromUrl('?workspace=5&view=sprint&sprintTab=merged')).toBe('activity');
+    expect(landingTabFromUrl('?activityRepo=sprint&sprintTab=merged')).toBe('activity');
+    // An explicit other board keeps its board.
+    expect(landingTabFromUrl('?view=timeline&sprintTab=merged')).toBe('timeline');
   });
 
   it('?view=activity → activity', () => {

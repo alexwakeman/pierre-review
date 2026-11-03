@@ -27,6 +27,7 @@ import type {
   GqlReviewRequestEvent,
 } from '../github/queries.js';
 import {
+  hasLimnReviewMarker,
   isLimnStatusContext,
   limnFindingPost,
   mergeStateWithoutLimn,
@@ -35,6 +36,7 @@ import {
 } from '@pierre-review/shared';
 import { ensureLimnBotUser, ensureLimnReviewerRow } from '../db/limn-bots.js';
 import { syncLimnFindingLabels } from '../db/limn-finding-labels.js';
+import { importTeammateReviews } from '../db/teammate-reviews-import.js';
 import { checkContextState } from '../github/check-context-state.js';
 
 const {
@@ -782,6 +784,8 @@ export async function persistPr(
   // Set inside the transaction; the Pro merge event hook fires only AFTER the commit (never a
   // network call under the write lock). See sync/merge-notice.ts for what counts as LIVE.
   let liveMergePrId: number | null = null;
+  // The PR's local id, for the teammate-review import after the commit.
+  let persistedPrId: number | null = null;
   await runTransaction(async (tx) => {
     const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
@@ -985,6 +989,7 @@ export async function persistPr(
       .execute()
     )[0]!;
     const prId = prRow.id;
+    persistedPrId = prId;
 
     // ---- cross-team search index rows (accumulated, written once at the end) ----
     // `bodyText` (plain-text description) is fetched unconditionally, so the PR row indexes the
@@ -1500,6 +1505,17 @@ export async function persistPr(
   });
   if (boardMoved) notePrChanged(accountId, repoId);
   if (liveMergePrId != null) emitPullRequestMerged({ accountId, repoId, prId: liveMergePrId });
+  // TEAMMATES' POSTED REVIEWS (db/teammate-reviews.ts): a Limn review summary on the PR (anyone's —
+  // the import leaves the reader's own out) is imported read-only, AFTER the commit above so the
+  // finding comments are already re-attributed to their poster. DB-only. ⚠ NON-FATAL: a failure
+  // here must never fail the walk.
+  if (persistedPrId != null && pr.reviews.nodes.some((r) => hasLimnReviewMarker(r.body))) {
+    try {
+      await importTeammateReviews(accountId, persistedPrId);
+    } catch {
+      /* the next walk tries again */
+    }
+  }
 }
 
 /** The PR columns the Pending board, the timeline bar and the PR header render — the ONLY

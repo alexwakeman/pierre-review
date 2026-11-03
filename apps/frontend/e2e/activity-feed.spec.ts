@@ -125,7 +125,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(tabs(page)).toHaveCount(0);
   });
 
-  test('This Sprint is a sidebar destination, opening on Theme, with Critical path, People and Merged so far', async ({ page }) => {
+  test('This Sprint is a sidebar destination, opening on Theme, with Critical path and People', async ({ page }) => {
     await gotoActivity(page);
     await railButton(page, 'This Sprint').click();
     const view = page.getByTestId('sprint-tab-view');
@@ -137,16 +137,31 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // A card shows its story in place (its corner arrow opens the story view).
     await expect(view.getByRole('button', { name: /^ACME-1: Export a report as CSV/ })).toBeVisible();
 
-    await view.getByRole('tab', { name: 'Merged so far' }).click();
-    await expect(view.getByRole('tab', { name: 'Merged so far' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(/sprintTab=merged/);
+    // "Merged so far" moved to Open PRs → Merged.
+    await expect(view.getByRole('tab', { name: 'Merged so far' })).toHaveCount(0);
+  });
+
+  test('Open PRs has a Merged tab listing the merged PRs, with its period as the heading', async ({ page }) => {
+    await gotoActivity(page);
+    await railButton(page, 'Open PRs').click();
+    const view = page.getByTestId('open-prs-view');
+    await view.getByRole('tab', { name: 'Merged' }).click();
+    await expect(view.getByRole('tab', { name: 'Merged' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/openPrsTab=merged/);
+    await expect(view.getByTestId('merged-prs-view')).toBeVisible();
+  });
+
+  test('a legacy ?sprintTab=merged link lands on Open PRs → Merged', async ({ page }) => {
+    await installMockApi(page);
+    await page.goto('/app/?view=sprint&sprintTab=merged');
+    await expect(page.getByTestId('open-prs-view').getByRole('tab', { name: 'Merged' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).not.toHaveURL(/sprintTab=/);
   });
 
   for (const [query, tab] of [
     ['?activityRepo=sprint', 'Theme'],
     ['?activityRepo=sprint&sprintTab=people', 'People'],
     ['?activityRepo=insights&insightsTab=sprint', 'Theme'],
-    ['?activityRepo=insights&insightsTab=merged', 'Merged so far'],
   ] as const) {
     test(`a legacy ${query} link lands on the This Sprint tab → ${tab}`, async ({ page }) => {
       await installMockApi(page);

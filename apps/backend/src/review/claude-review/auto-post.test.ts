@@ -1,7 +1,8 @@
 // AUTO-POSTING A PR REVIEW, over the REAL core client and a FAKE GitHub (nothing reaches GitHub —
 // `ctx.review.postReview` / `postFinding` and the live-PR read are recorded stubs). What is pinned:
 //
-//   1. OFF ⇒ nothing posted and nothing recorded; a MANUAL run is never auto-posted.
+//   1. OFF ⇒ nothing posted and nothing recorded; a MANUAL run is never auto-posted — unless the
+//      reader started it with "Review and post" (posted under the same rules, switch or no switch).
 //   2. WHICH PRs: scope 'mine' posts on your own PR and on one you are (or were — request history)
 //      asked to review, and skips someone else's; scope 'all' posts there; merged, closed, draft and
 //      bot-authored PRs are never posted on (synced AND live).
@@ -92,11 +93,15 @@ interface F {
 async function run(
   prId: number,
   findings: F[],
-  trigger: 'auto' | 'manual' = 'auto',
+  // 'pressed' = a MANUAL run started with "Review and post" (`post_on_finish`).
+  trigger: 'auto' | 'manual' | 'pressed' = 'auto',
   verdict: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES' = 'COMMENT',
   followUp: any = null,
 ): Promise<number> {
-  const id = await persist.insertQueuedReview(ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], trigger);
+  const id = await persist.insertQueuedReview(
+    ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], trigger === 'pressed' ? 'manual' : trigger,
+    undefined, false, null, null, trigger === 'pressed',
+  );
   await persist.saveReviewSuccess(ctx, id, {
     scope: 'diff_only',
     summary: 'Two problems in the parser.\n\n- a null check\n- a race',
@@ -322,6 +327,72 @@ describe('off, manual, and which PRs', () => {
     }
     expect(postReview).not.toHaveBeenCalled();
     expect(postFinding).not.toHaveBeenCalled();
+  });
+});
+
+// "REVIEW AND POST": a MANUAL run the reader started with the split button's post choice posts under
+// the same rules (one review, the workspace's kinds and verdict rules, the claim) — the press is the
+// consent, so the switch need not be on and the scope does not apply. "Review only" never posts.
+describe('a manual "Review and post" run', () => {
+  it('posts ONCE through the claim, with the switch OFF and on a PR outside the scope', async () => {
+    await setPost(false, { scope: 'mine' });
+    const pr = await makePr({ author: 'alice' });
+    const id = await run(pr, [{ severity: 'blocker', title: 'Null deref' }, { severity: 'nit', title: 'Name' }], 'pressed');
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.postOnFinish).toBe(true);
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(out.kind).toBe('done');
+    expect(postReview).toHaveBeenCalledTimes(1);
+    const sent = postReview.mock.calls[0]![0];
+    expect(sent.verdict).toBe('COMMENT');
+    // The workspace's kinds: nits stay off.
+    expect(sent.includedFindings.map((f: any) => f.severity)).toEqual(['blocker']);
+    // How it ran, in the hidden marker: a manual run.
+    expect(sent.limnMeta).toMatchObject({ run: 'manual' });
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.status).toBe('posted');
+    // NEVER TWICE: the record is claimed.
+    expect((await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps())).kind).toBe('already_claimed');
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the workspace's verdict rules: REQUEST_CHANGES on a blocker with the auto verdict on", async () => {
+    await setPost(false, { scope: 'mine', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    try {
+      const id = await run(pr, [{ severity: 'blocker', title: 'Race' }], 'pressed', 'REQUEST_CHANGES');
+      await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+      expect(postReview.mock.calls[0]![0].verdict).toBe('REQUEST_CHANGES');
+    } finally {
+      await setPost(true, { autoVerdict: false });
+    }
+  });
+
+  it('still never posts on a draft or closed PR', async () => {
+    for (const [o, reason] of [
+      [{ author: 'alice', draft: true }, 'draft'],
+      [{ author: 'alice', state: 'closed' }, 'not_open'],
+    ] as const) {
+      const pr = await makePr(o);
+      const id = await run(pr, [{ severity: 'blocker', title: 'x' }], 'pressed');
+      expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps())).toEqual({ kind: 'skipped', reason });
+    }
+    expect(postReview).not.toHaveBeenCalled();
+  });
+
+  it('"Review only" never posts, with the switch on or off', async () => {
+    for (const on of [true, false]) {
+      await setPost(on, { scope: 'all' });
+      const pr = await makePr({ author: 'me' });
+      const id = await run(pr, [{ severity: 'blocker', title: 'Kept' }], 'manual');
+      expect((await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps())).kind).toBe('off');
+      expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost).toBeNull();
+    }
+    expect(postReview).not.toHaveBeenCalled();
+  });
+
+  it('only a manual run is stored as "Review and post"', async () => {
+    const pr = await makePr({ author: 'me' });
+    const id = await persist.insertQueuedReview(ctx, pr, 'HEAD', 'claude-opus-5-5' as any, 1, [], 'auto', undefined, false, null, null, true);
+    expect((await persist.getClaudeReviewById(ctx, id, 1))?.postOnFinish).toBeUndefined();
   });
 });
 

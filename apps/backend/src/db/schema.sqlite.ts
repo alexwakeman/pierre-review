@@ -31,6 +31,7 @@ import type {
   ClaudeTeamClaimRecord,
   ClaudeReviewPairConsolidation,
   ClaudeNotApproved,
+  TeammateReviewRecord,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   SonarIssue,
@@ -1087,10 +1088,19 @@ export const dependencyAutomationActions = sqliteTable(
     // No single-column FK: the COMPOSITE declaration below (tenancy as a constraint).
     prId: integer('pr_id').notNull(),
     headSha: text('head_sha').notNull(),
-    action: text('action', { enum: ['approve', 'rebase_request', 'ai_resolve'] }).notNull(),
-    state: text('state', { enum: ['running', 'done', 'failed'] }).notNull(),
+    // 0162 added 'ai_fix', 'arm_merge', 'merge_landed' (plain text, no CHECK).
+    action: text('action', {
+      enum: ['approve', 'rebase_request', 'ai_resolve', 'ai_fix', 'arm_merge', 'merge_landed'],
+    }).notNull(),
+    // 0162 added 'skipped': a teammate's Limn holds the head (`limn/deps`). Not an attempt — a later
+    // claim at the same head TAKES the row over (`claimAction`).
+    state: text('state', { enum: ['running', 'done', 'failed', 'skipped'] }).notNull(),
     detail: text('detail'),
     resultSha: text('result_sha'),
+    // 'skipped' rows (migration 0162): the teammate's GitHub login, and whether their line said they
+    // HANDLED this head (a finished action) rather than are handling it now.
+    teammateLogin: text('teammate_login'),
+    teammateHandled: integer('teammate_handled', { mode: 'boolean' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -1389,6 +1399,10 @@ export const claudeReviews = sqliteTable(
     // A FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review — no follow-up, no
     // settled list, no carried thread judgements. true on such a run; NULL otherwise (migration 0133).
     fresh: integer('fresh', { mode: 'boolean' }),
+    // "REVIEW AND POST" (migration 0161): a MANUAL run the reader started with "Review and post" —
+    // posted under the auto-post rules when it (a pair: both halves) ends. true on such a run (both
+    // halves of a pair); NULL otherwise ("Review only", every auto run).
+    postOnFinish: integer('post_on_finish', { mode: 'boolean' }),
     // WHAT THE TEAM CLAIM DID FOR THIS RUN (migration 0134; review/claude-review/team-claim.ts): the
     // GitHub status line it posted ("Marked on GitHub"), or why it ran without one. NULL = no claim
     // was attempted (a manual run, or "Mark auto reviews on GitHub" off).
@@ -1408,12 +1422,21 @@ export const claudeReviews = sqliteTable(
     // A REPLIES PASS (review/claude-review/replies-check.ts): 'replies' on a run that judged only
     // people's replies on Limn's own posted findings; NULL on every full review (migration 0136).
     // ⚠ Every "the latest review" / "a run at this head" reader filters `kind IS NULL`.
-    kind: text('kind', { enum: ['replies'] }),
+    // 'teammate' (migration 0160; db/teammate-reviews.ts): a review a TEAMMATE'S Limn posted to GitHub,
+    // imported read-only. Never a run of the reader's: every own-runs reader excludes it.
+    kind: text('kind', { enum: ['replies', 'teammate'] }),
     // A REPLIES PASS's not-approved reason (migration 0145; review/claude-review/replies-outcome.ts):
     // `{heldReason, text}`, written when the pass ends while the workspace's auto verdict is on and
     // the outcome is not an approval. NULL on every full review (its reason rides `auto_post`, or is
     // computed on read).
     verdictReason: text('verdict_reason', { mode: 'json' }).$type<ClaudeNotApproved>(),
+    // A TEAMMATE'S POSTED REVIEW (`kind = 'teammate'`, migration 0160; db/teammate-reviews.ts): the
+    // teammate who posted it, the GitHub review's node id (the import's key; a partial unique index on
+    // (account_id, pr_id, source_review_node_id) in the .sql), and what its hidden marker said. NULL on
+    // every run of the reader's own.
+    sourceUserId: integer('source_user_id').references(() => users.id),
+    sourceReviewNodeId: text('source_review_node_id'),
+    teammate: text('teammate', { mode: 'json' }).$type<TeammateReviewRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -1515,6 +1538,9 @@ export const claudeReviewFindings = sqliteTable(
     // but is NEVER shown, posted, counted in a verdict or sent to AI Fix; the next follow-up of its
     // provider follows up the kept one instead. NULL on every other finding.
     mergedInto: integer('merged_into'),
+    // A TEAMMATE'S POSTED FINDING (migration 0160): the GitHub comment's node id it was rebuilt from —
+    // the import's key (partial unique (review_id, source_comment_node_id) in the .sql). NULL otherwise.
+    sourceCommentNodeId: text('source_comment_node_id'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );
@@ -2180,6 +2206,10 @@ export const workspaces = sqliteTable(
     // every ecosystem. The ONE writer is `setDependencyAutomation` (merge/dependency-automation.ts).
     dependencyAutoApprove: integer('dependency_auto_approve', { mode: 'boolean' }),
     dependencyAutoResolve: integer('dependency_auto_resolve', { mode: 'boolean' }),
+    // "Fix dependency PRs with AI" (migration 0162), NULL/false = OFF: an unattended AI Fix on a
+    // TRUSTED bot's PR whose CI failed (proven live), pushed to its branch; also runs the conflict
+    // steps of `dependencyAutoResolve`. merge/dependency-automation.ts.
+    dependencyAutoFix: integer('dependency_auto_fix', { mode: 'boolean' }),
     dependencyMaxLevel: text('dependency_max_level'),
     dependencySecurityOnly: integer('dependency_security_only', { mode: 'boolean' }),
     dependencyEcosystems: text('dependency_ecosystems', { mode: 'json' }).$type<string[]>(),

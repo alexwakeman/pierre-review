@@ -71,6 +71,7 @@ import type {
   CiRerunResult,
   GenerateFixBody,
   GenerateReviewBody,
+  ReviewPostMode,
   ClaudeReview,
   ClaudeReviewListResponse,
   AiPickerModel,
@@ -1012,7 +1013,7 @@ export const api = {
   // response, one scope, one window; it also echoes the resolved `workspaceId`.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
-  // This Sprint → "Merged so far" — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
+  // Open PRs → Merged — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
   // card rows. One scope, one window, echoed.
   mergedPrs: (workspaceId: number) =>
     get<MergedPrsResponse>(withQuery('/api/merged-prs', workspaceParam(workspaceId))),
@@ -1428,13 +1429,20 @@ export const api = {
   // (`startTicketReview`), a separate run.
   // `provider`: the per-run picker's choice. Absent ⇒ the server's default provider (Settings → AI).
   // `pair`: Claude + Codex (both signed in): Claude first, then Codex; `model` / `provider` ignored.
-  generateClaudeReview: (prId: number, model: AiPickerModel, provider?: AiProviderId, pair?: boolean) =>
+  // `postMode`: the split button's choice ('post' ⇒ "Review and post"); omitted ⇒ kept in Limn.
+  generateClaudeReview: (
+    prId: number,
+    model: AiPickerModel,
+    provider?: AiProviderId,
+    pair?: boolean,
+    postMode?: ReviewPostMode,
+  ) =>
     fetch(
       `/api/prs/${prId}/claude-review`,
-      jsonBody(
-        'POST',
-        (pair ? { pair: true } : provider ? { model, provider } : { model }) satisfies GenerateReviewBody,
-      ),
+      jsonBody('POST', {
+        ...(pair ? { pair: true } : provider ? { model, provider } : { model }),
+        ...(postMode === 'post' ? { postMode } : {}),
+      } satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
   // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
   // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).

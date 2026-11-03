@@ -119,7 +119,7 @@ export async function postFollowUpReply(
   const status = item.status;
   const text = (item.response ?? '').trim();
   if (!text) return conflict('NothingToPost', 'There is no reply to post.');
-  const owners = await loadThreadOwners(ctx, accountId, review.prId, [priorFindingId]);
+  const owners = await loadThreadOwners(ctx, accountId, review.prId, [priorFindingId], { ownOnly: true });
   const owner = owners.get(priorFindingId);
   if (!owner) return conflict('NoThread', 'This comment has no thread on GitHub.');
   // ⚠ SYNCHRONOUS claim of the process slot — no await between the check and the add.

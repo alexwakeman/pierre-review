@@ -19,6 +19,7 @@ import { storyBuildTabLabels } from '../../lib/storyBuildTab.js';
 import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
+import { groupTabsByAuthor } from '../../lib/sidebarTabGroups.js';
 import { TabContextMenu, useTabChip } from '../PinnedTabsBar.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useShell } from '../../store/shell.js';
@@ -31,6 +32,7 @@ import {
   ChartIcon,
   ChevronIcon,
   CloseIcon,
+  PeopleIcon,
   FeedIcon,
   KeyboardIcon,
   MagnifierIcon,
@@ -349,13 +351,27 @@ function SidebarTabRow({
 }
 
 /** Every open tab, under Repositories, at every width. Activate, ✕ to close, right-click for
- *  Close this / Close other tabs / Close all tabs (the strip's own menu), "Close all" for touch. */
+ *  Close this / Close other tabs / Close all tabs (the strip's own menu), "Close all" for touch.
+ *  "Group by author" (remembered, `useShell.tabsByAuthor`) puts each PR tab under its author's name:
+ *  the reader's own first, then A–Z, then "Other" (`lib/sidebarTabGroups.ts`). This list has no drag
+ *  reorder; the top bar's strip keeps its own, ungrouped. */
 function OpenTabs(): JSX.Element | null {
   const tabs = usePinnedTabs((s) => s.tabs);
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const closeAllTabs = usePinnedTabs((s) => s.closeAllTabs);
+  const byAuthor = useShell((s) => s.tabsByAuthor);
+  const setByAuthor = useShell((s) => s.setTabsByAuthor);
+  // The reader's login — the key the palette and the account menu already hold (no new fetch).
+  const myLogin = useMe().data?.user?.login ?? null;
+  const groups = useMemo(() => (byAuthor ? groupTabsByAuthor(tabs, myLogin) : null), [byAuthor, tabs, myLogin]);
   const [menu, setMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null);
   if (tabs.length === 0) return null;
+  const openMenu = (e: React.MouseEvent, key: string): void => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, tabKey: key });
+  };
+  const rows = (list: readonly Tab[]): JSX.Element[] =>
+    list.map((t) => <SidebarTabRow key={t.key} tab={t} active={activeTab === t.key} onOpenMenu={openMenu} />);
   return (
     <div data-testid="sidebar-open-tabs">
       <div className="mb-1 mt-4 flex items-center pl-2 pr-1">
@@ -364,25 +380,51 @@ function OpenTabs(): JSX.Element | null {
         </p>
         <button
           type="button"
+          onClick={() => setByAuthor(!byAuthor)}
+          aria-pressed={byAuthor}
+          aria-label="Group by author"
+          title={byAuthor ? 'Stop grouping by author' : 'Group by author'}
+          data-testid="sidebar-tabs-by-author"
+          className={cx(
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-ui hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10',
+            byAuthor ? 'bg-ui-sel text-ui-ink' : 'text-ui-faint',
+            FOCUS_RING,
+          )}
+        >
+          <PeopleIcon size={14} />
+        </button>
+        <button
+          type="button"
           onClick={closeAllTabs}
           className={cx('h-7 shrink-0 rounded-ui px-2 text-meta text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-10', FOCUS_RING)}
         >
           Close all
         </button>
       </div>
-      <ul role="tablist" aria-orientation="vertical" aria-label="Open tabs" data-testid="sidebar-tabs" className="m-0 flex list-none flex-col gap-px p-0">
-        {tabs.map((t) => (
-          <SidebarTabRow
-            key={t.key}
-            tab={t}
-            active={activeTab === t.key}
-            onOpenMenu={(e, key) => {
-              e.preventDefault();
-              setMenu({ x: e.clientX, y: e.clientY, tabKey: key });
-            }}
-          />
-        ))}
-      </ul>
+      {groups == null ? (
+        <ul role="tablist" aria-orientation="vertical" aria-label="Open tabs" data-testid="sidebar-tabs" className="m-0 flex list-none flex-col gap-px p-0">
+          {rows(tabs)}
+        </ul>
+      ) : (
+        // One tablist per author, labelled by the heading above it.
+        <div data-testid="sidebar-tabs" className="flex flex-col gap-2">
+          {groups.map((g) => (
+            <div key={g.key} data-testid="sidebar-tab-group">
+              <p id={`sidebar-tab-group-${g.key}`} className="truncate px-2 pb-0.5 pt-1 text-meta font-medium text-ui-mute" title={g.label}>
+                {g.label}
+              </p>
+              <ul
+                role="tablist"
+                aria-orientation="vertical"
+                aria-labelledby={`sidebar-tab-group-${g.key}`}
+                className="m-0 flex list-none flex-col gap-px p-0"
+              >
+                {rows(g.tabs)}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
       {menu != null && (
         <TabContextMenu x={menu.x} y={menu.y} tabKey={menu.tabKey} tabCount={tabs.length} onClose={() => setMenu(null)} />
       )}

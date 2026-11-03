@@ -48,10 +48,11 @@ describe('tab', () => {
     expect(effectiveInsightsTab('merged')).toBe('overview');
   });
 
-  it('This Sprint opens on Theme; Critical path, People and Merged so far follow; anything else derives to Theme', () => {
-    expect(SPRINT_INNER_TABS).toEqual(['themes', 'paths', 'people', 'merged']);
-    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Theme', 'Critical path', 'People', 'Merged so far']);
-    expect(effectiveSprintTab('merged')).toBe('merged');
+  // "Merged so far" LEFT This Sprint for Open PRs → Merged (2026-11-03).
+  it('This Sprint opens on Theme; Critical path and People follow; anything else derives to Theme', () => {
+    expect(SPRINT_INNER_TABS).toEqual(['themes', 'paths', 'people']);
+    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Theme', 'Critical path', 'People']);
+    expect(effectiveSprintTab('merged')).toBe('themes');
     expect(effectiveSprintTab('paths')).toBe('paths');
     expect(effectiveSprintTab('people')).toBe('people');
     // The retired force graph, a hand-edited value and nothing at all: the landing view.
@@ -63,7 +64,8 @@ describe('tab', () => {
   it('?sprintTab= seats a member as itself and the retired graph as Theme; anything else seats nothing', () => {
     expect(sprintTabFromUrl('people')).toBe('people');
     expect(sprintTabFromUrl('themes')).toBe('themes');
-    expect(sprintTabFromUrl('merged')).toBe('merged');
+    // A legacy `merged` is useUrlState's to map (onto Open PRs → Merged), never a sprint tab.
+    expect(sprintTabFromUrl('merged')).toBeNull();
     expect(sprintTabFromUrl('paths')).toBe('paths');
     expect(sprintTabFromUrl('graph')).toBe('themes');
     expect(sprintTabFromUrl('nonsense')).toBeNull();

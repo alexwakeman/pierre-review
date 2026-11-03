@@ -1,23 +1,18 @@
 import { useId, useState } from 'react';
-import type { DependencyAutomationLogItem } from '@pierre-review/shared';
 import { useDependencyAutomationLog } from '../../hooks/useDependencyMergeAll.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { relativeTime } from '../../lib/ui.js';
 import { ChevronIcon } from '../Icons.js';
+import { automationDetail, automationVerb } from '../../lib/dependencyAutomationLog.js';
 
 // ── PENDING → DEPENDENCIES: "WHAT AUTOMATION DID" ───────────────────────────────────────────────
 //
 // The dependency automation's own record (Settings → Dependencies; merge/dependency-automation.ts):
-// every approval, rebase request and AI conflict run it TOOK in this workspace in the last two
-// weeks, newest first, failures with GitHub's words. A disclosure: ⚠ it fetches only once OPENED —
-// nothing on the Pending board may fetch on mount. Merges it armed show on the cards themselves
-// ("Armed automatically").
-
-const VERB: Record<DependencyAutomationLogItem['action'], { done: string; failed: string; running: string }> = {
-  approve: { done: 'Approved', failed: 'Couldn’t approve', running: 'Approving' },
-  rebase_request: { done: 'Asked to rebase', failed: 'Couldn’t ask to rebase', running: 'Asking to rebase' },
-  ai_resolve: { done: 'Resolved conflicts', failed: 'Couldn’t resolve conflicts', running: 'Resolving conflicts' },
-};
+// every approval, rebase request, AI conflict run, AI CI fix and merge it armed in this workspace in
+// the last two weeks, newest first, failures with GitHub's words. "Merged" appears only once the
+// merge LANDED (the watcher's outcome), never on arming. A teammate's Limn holding the PR
+// (`limn/deps`) is a skip, not a failure: "Robin Dunn is handling this". A disclosure: ⚠ it fetches
+// only once OPENED — nothing on the Pending board may fetch on mount.
 
 export function DependencyAutomationLog({ workspaceId }: { workspaceId: number | null }): JSX.Element | null {
   const [open, setOpen] = useState(false);
@@ -54,8 +49,16 @@ export function DependencyAutomationLog({ workspaceId }: { workspaceId: number |
             <ul className="space-y-1">
               {items.map((i) => (
                 <li key={i.id} className="flex items-baseline gap-2 text-body">
-                  <span className={i.state === 'failed' ? 'shrink-0 text-ui-danger' : 'shrink-0 text-ui-ink'}>
-                    {VERB[i.action]?.[i.state] ?? i.action}
+                  <span
+                    className={
+                      i.state === 'failed'
+                        ? 'shrink-0 text-ui-danger'
+                        : i.state === 'skipped'
+                          ? 'shrink-0 text-ui-mute'
+                          : 'shrink-0 text-ui-ink'
+                    }
+                  >
+                    {automationVerb(i)}
                   </span>
                   <button
                     type="button"
@@ -77,7 +80,9 @@ export function DependencyAutomationLog({ workspaceId }: { workspaceId: number |
                   >
                     {i.repoFullName} #{i.prNumber} {i.prTitle}
                   </button>
-                  {i.detail && <span className="min-w-0 truncate text-meta text-ui-mute">{i.detail}</span>}
+                  {automationDetail(i) && (
+                    <span className="min-w-0 truncate text-meta text-ui-mute">{automationDetail(i)}</span>
+                  )}
                   <span className="ml-auto shrink-0 text-meta text-ui-faint">{relativeTime(i.at)}</span>
                 </li>
               ))}

@@ -11,8 +11,9 @@ import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { OpenPrsCards, OpenPrsViewToggle } from './OpenPrsCards.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
 
-// This Sprint → "Merged so far" — the Open PRs page over the work that LANDED: every PR merged in the
-// workspace's REPORTING WINDOW (this sprint so far, else the trailing 14 days), from
+// Open PRs → Merged (it was This Sprint → "Merged so far") — the Open PRs page over the work that
+// LANDED: every PR merged in the workspace's REPORTING WINDOW (this sprint so far, else the trailing
+// 14 days), from
 // GET /api/merged-prs. The SAME cards and ticket stacks (`OpenPrsCards variant="merged"`), so a
 // lead can see what got done per ticket — plus a "No ticket" stack — in this sprint.
 //
@@ -71,7 +72,7 @@ export function MergedPrsView(): JSX.Element {
     <div data-testid="merged-prs-view" className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-body font-semibold text-ui-ink">
-          {w != null ? reportingWindowCaption(w) : 'Merged so far'}
+          {w != null ? reportingWindowCaption(w) : 'Merged'}
         </h3>
         {w != null && (
           <span className="text-meta text-ui-mute">

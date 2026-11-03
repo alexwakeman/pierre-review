@@ -40,6 +40,7 @@ import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { globalAutomationUserIds } from './automation-ids.js';
 import { trueAuthorId } from './limn-bots.js';
+import { ownRunsOnly } from './teammate-reviews.js';
 
 const LIMN_MARKER = /<!--\s*pierre:claude-review/i;
 
@@ -102,7 +103,8 @@ export async function ownPostedCommentsForPrs(
     })
     .from(crf)
     .innerJoin(cr, eq(cr.id, crf.reviewId))
-    .where(and(eq(cr.accountId, accountId), inArray(cr.prId, [...prIds]), isNotNull(crf.postedAt)))
+    // The reader's OWN posted findings (a teammate's imported ones are their posts, not ours).
+    .where(and(eq(cr.accountId, accountId), inArray(cr.prId, [...prIds]), isNotNull(crf.postedAt), ownRunsOnly(cr.kind)))
     .execute();
   for (const r of rows) {
     let o = out.get(r.prId);

@@ -370,7 +370,7 @@ export function FeedView({
       const ok = window.confirm(
         `Stop treating ${label} as an automated reviewer in this Workspace?\n\n` +
           'This applies to every repo in the Workspace — not just this PR’s repo. ' +
-          'It keeps the vendor name, and you can undo it from Bots Monitoring › Classification.',
+          'It keeps the vendor name, and you can undo it from Settings › Bots.',
       );
       if (!ok) return;
       judgementMutate({ userId, body: { workspaceId, automated: false } });

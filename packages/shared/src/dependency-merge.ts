@@ -75,8 +75,8 @@ export interface WorkspaceDependencyAutoMergeResponse {
 // ── DEPENDENCY AUTOMATION (the Settings → Dependencies panel) ───────────────────────────────────
 //
 // docs/MERGE-CI-TRUNK.md § Dependency automation. Three per-workspace switches, every one OFF by
-// default — merge (the setting above), APPROVE, and RESOLVE CONFLICTS (ask the bot to rebase, then
-// an AI run through the in-app resolver) — and ONE policy that gates all three: how big an update
+// default — merge (the setting above), APPROVE, RESOLVE CONFLICTS (ask the bot to rebase, then
+// an AI run through the in-app resolver) and FIX WITH AI (failing CI) — and ONE policy that gates them: how big an update
 // may be, security fixes only, which ecosystems. Approval and conflict resolution act only on PRs
 // opened by a bot the reader TRUSTS (`trustedBotIds`, a mark on the workspace's bot row).
 //   GET / PUT /api/workspaces/:id/dependency-automation   the panel (DB only)
@@ -138,8 +138,16 @@ export interface DependencyAutomationSettings {
   autoApprove: boolean;
   /** Conflicts: ask the bot to rebase; if it can't, resolve them with AI. Trusted bots only. */
   autoResolveConflicts: boolean;
+  /** "Fix dependency PRs with AI" (`dependency_auto_fix`, migration 0162): an unattended AI Fix
+   *  pushed to the bot's branch when CI fails (proven live), and the conflict steps above. Trusted
+   *  bots only; at most DEPENDENCY_AI_FIX_DAILY_CAP AI runs per PR per 24 hours. */
+  autoFix: boolean;
   policy: DependencyAutomationPolicy;
 }
+
+/** AI runs (CI fixes and conflict resolutions together) the automation may start on one PR in any
+ *  rolling 24 hours. */
+export const DEPENDENCY_AI_FIX_DAILY_CAP = 2;
 
 /** One dependency bot of the workspace (stored role `dependency`) and whether the reader trusts it. */
 export interface DependencyBot {
@@ -165,6 +173,7 @@ export interface DependencyAutomationPatch {
   autoMerge?: boolean;
   autoApprove?: boolean;
   autoResolveConflicts?: boolean;
+  autoFix?: boolean;
   maxLevel?: DependencyUpdateLevel;
   securityOnly?: boolean;
   ecosystems?: DependencyEcosystem[] | null;
@@ -172,9 +181,23 @@ export interface DependencyAutomationPatch {
   trustedBotIds?: number[];
 }
 
-/** What the automation did to one PR. */
-export type DependencyAutomationActionKind = 'approve' | 'rebase_request' | 'ai_resolve';
-export type DependencyAutomationActionState = 'running' | 'done' | 'failed';
+/** What the automation did to one PR. `arm_merge`: the merge setting armed it ("merges when
+ *  checks pass"); `merge_landed`: the watcher's merge of a policy intent LANDED (recorded only from
+ *  the merge outcome, never inferred from arming); `ai_fix`: an unattended AI Fix for failing CI. */
+export type DependencyAutomationActionKind =
+  | 'approve'
+  | 'rebase_request'
+  | 'ai_resolve'
+  | 'ai_fix'
+  | 'arm_merge'
+  | 'merge_landed';
+/** `skipped`: a teammate's Limn holds this PR's head (the `limn/deps` line) — not a failure, and it
+ *  never counts as an attempt. */
+export type DependencyAutomationActionState = 'running' | 'done' | 'failed' | 'skipped';
+
+/** GitHub's commit-status context the dependency automation's TEAM CLAIM uses
+ *  (docs/MERGE-CI-TRUNK.md § Team claims for dependency work). Never CI (`isLimnStatusContext`). */
+export const DEPENDENCY_CLAIM_CONTEXT = 'limn/deps';
 
 export interface DependencyAutomationLogItem {
   id: number;
@@ -186,6 +209,8 @@ export interface DependencyAutomationLogItem {
   state: DependencyAutomationActionState;
   /** The bot asked to rebase, the commit pushed, or why it failed — one plain sentence. */
   detail: string | null;
+  /** `skipped` rows: the teammate whose Limn holds the head (`name` from the synced users table). */
+  teammate: { login: string; name: string | null; handled: boolean } | null;
   /** ISO-8601. */
   at: string;
 }

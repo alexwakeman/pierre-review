@@ -388,7 +388,7 @@ export function OpenPrsCards({
   /** The reader picked "Group by ticket". Honoured only where the workspace has a tracker, once
    *  its tickets are known (see below). */
   grouped?: boolean;
-  /** 'merged' = Reports → "Merged so far": the same cards and stacks over MERGED PRs. It drops
+  /** 'merged' = Open PRs → Merged: the same cards and stacks over MERGED PRs. It drops
    *  what means nothing once a PR has landed — the CI and merge-readiness chips, the stack
    *  roll-up, the Claude Review panel and the CI review (and their batched requests), and the
    *  stack's own "Merged (n)" panel (the stack IS the merged work) — and the default order is
@@ -1345,7 +1345,7 @@ function TicketStack({
   /** The PR view's Story tab: no card tone while the story rail is drawn (the rail sits beside the
    *  whole story, as the AI Review tab's does); the card stays in one column. */
   embedded?: boolean;
-  /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
+  /** false on Open PRs → Merged: failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
   merged: readonly TicketMergedPr[];

@@ -22,6 +22,8 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 //   • approve them once CI passes — trusted bots only;
 //   • resolve their conflicts — ask the bot to rebase, then (where AI runs) an AI run — trusted bots
 //     only;
+//   • fix them with AI — an unattended AI Fix pushed to the bot's branch when CI fails, and the same
+//     conflict steps — trusted bots only, where AI runs (hidden otherwise);
 //   • ONE policy over all three: the largest update, security fixes only, which ecosystems;
 //   • which of the workspace's dependency bots the reader TRUSTS (a mark on the bot's row).
 //
@@ -33,6 +35,7 @@ interface Draft {
   autoMerge: boolean;
   autoApprove: boolean;
   autoResolveConflicts: boolean;
+  autoFix: boolean;
   maxLevel: DependencyUpdateLevel;
   securityOnly: boolean;
   /** null = every ecosystem. */
@@ -45,6 +48,8 @@ function draftOf(r: WorkspaceDependencyAutomationResponse): Draft {
     autoMerge: r.settings.autoMerge,
     autoApprove: r.settings.autoApprove,
     autoResolveConflicts: r.settings.autoResolveConflicts,
+    // `=== true`: a server older than this field reads OFF.
+    autoFix: r.settings.autoFix === true,
     maxLevel: r.settings.policy.maxLevel,
     securityOnly: r.settings.policy.securityOnly,
     ecosystems: r.settings.policy.ecosystems,
@@ -61,6 +66,7 @@ function patchOf(stored: Draft, d: Draft): DependencyAutomationPatch {
   if (d.autoMerge !== stored.autoMerge) p.autoMerge = d.autoMerge;
   if (d.autoApprove !== stored.autoApprove) p.autoApprove = d.autoApprove;
   if (d.autoResolveConflicts !== stored.autoResolveConflicts) p.autoResolveConflicts = d.autoResolveConflicts;
+  if (d.autoFix !== stored.autoFix) p.autoFix = d.autoFix;
   if (d.maxLevel !== stored.maxLevel) p.maxLevel = d.maxLevel;
   if (d.securityOnly !== stored.securityOnly) p.securityOnly = d.securityOnly;
   if (!sameList(d.ecosystems, stored.ecosystems)) p.ecosystems = d.ecosystems;
@@ -141,7 +147,7 @@ export function DependencyAutomationSection(): JSX.Element {
     else cur.delete(id);
     set({ trusted: [...cur].sort((a, b) => a - b) });
   };
-  const trustedNeeded = draft.autoApprove || draft.autoResolveConflicts;
+  const trustedNeeded = draft.autoApprove || draft.autoResolveConflicts || draft.autoFix;
   // "Only these" with nothing ticked would admit nothing at all — never saved that way.
   const noEcosystem = draft.ecosystems != null && draft.ecosystems.length === 0;
 
@@ -164,6 +170,19 @@ export function DependencyAutomationSection(): JSX.Element {
             {aiEnabled
               ? ' If the branch still conflicts 30 minutes later, or the bot can’t be asked, AI resolves the conflicts and pushes a merge commit to the branch. It pushes only when it decided every conflict and was sure of each, and stops while you are over your AI spend limit. CI must pass again before Limn approves or merges.'
               : ' AI conflict resolution is off on this machine.'}
+          </p>
+          {aiEnabled && (
+            <p className="mt-2">
+              With “Fix them with AI”, when CI fails on a trusted bot’s pull request, AI fixes the branch and pushes the
+              change: for example a companion package or lock file that was not updated. It runs once per commit, at
+              most twice a day per pull request, and never while you are over your AI spend limit. CI must pass again
+              before Limn approves or merges. It also handles conflicts the same way as “Resolve their conflicts”.
+            </p>
+          )}
+          <p className="mt-2">
+            When a teammate also runs Limn, each action first puts a “limn/deps” status on the commit, such as “alex
+            handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already did.
+            The “Mark auto reviews on GitHub” setting turns these statuses off too.
           </p>
           <p className="mt-2">
             Update size is read from the version numbers in the pull request. When Limn can’t read it, only “All updates”
@@ -195,6 +214,14 @@ export function DependencyAutomationSection(): JSX.Element {
               : 'Asks the bot to rebase. Trusted bots only.'
           }
         />
+        {aiEnabled && (
+          <SwitchRow
+            checked={draft.autoFix}
+            onChange={(v) => set({ autoFix: v })}
+            label="Fix them with AI"
+            hint="When CI fails, AI fixes the branch and pushes. Trusted bots only."
+          />
+        )}
       </div>
 
       <fieldset className="space-y-1.5">
@@ -271,7 +298,7 @@ export function DependencyAutomationSection(): JSX.Element {
           ))
         )}
         {trustedNeeded && draft.trusted.length === 0 && data.bots.length > 0 && (
-          <p className="text-meta text-ui-mute">Approving and resolving conflicts do nothing until you trust a bot.</p>
+          <p className="text-meta text-ui-mute">Approving, resolving and fixing do nothing until you trust a bot.</p>
         )}
       </fieldset>
 

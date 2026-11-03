@@ -334,6 +334,12 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
   const out: Record<string, unknown> = {};
 
   await applyDiffs(c);
+  // The diffs moved every thread onto a line the diff adds: re-import the teammates' posted reviews
+  // (seed-demo.ts) so their findings read the same lines (the import is idempotent).
+  {
+    const { importTeammateReviews } = await import('../src/db/teammate-reviews-import.js');
+    for (const prId of [114, 111]) await importTeammateReviews(1, prId);
+  }
 
   // The hand-written review the seeder used to ship is replaced by real runs.
   await db.delete(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, 1)).execute();
@@ -472,7 +478,31 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     outputTokens: 1_700,
     numTurns: 5,
   });
-  await db.update(schema.claudeReviews).set({ createdAt: at(5.2), finishedAt: at(5) }).where(eq(schema.claudeReviews.id, run114)).execute();
+  // Morgan pressed "Review and post" (the split button): the run posted itself when it ended, under
+  // the auto-post rules — the blocker went to GitHub, the nit stayed (the workspace leaves nits out).
+  {
+    const rows114 = (await db.select({ id: schema.claudeReviewFindings.id, severity: schema.claudeReviewFindings.severity }).from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, run114)).execute()) as Array<{ id: number; severity: string }>;
+    const posted114 = rows114.filter((f) => f.severity !== 'nit').map((f) => f.id);
+    for (const id of posted114) {
+      await db
+        .update(schema.claudeReviewFindings)
+        .set({ included: true, postedAt: at(4.95), postedAuto: true, githubCommentId: String(882_000 + id), postedCommentKind: 'inline' })
+        .where(eq(schema.claudeReviewFindings.id, id))
+        .execute();
+    }
+    await db
+      .update(schema.claudeReviews)
+      .set({
+        createdAt: at(5.2),
+        finishedAt: at(5),
+        postOnFinish: true,
+        postedReviewId: 'PRR_demo114',
+        postedAt: at(4.95),
+        autoPost: { status: 'posted', at: at(4.95).toISOString(), reason: null, error: null, findingIds: posted114, postedFindingIds: posted114, githubReviewId: 'PRR_demo114' },
+      })
+      .where(eq(schema.claudeReviews.id, run114))
+      .execute();
+  }
 
   const run116 = await runClaudeReview(base, c, {
     prId: 116,
@@ -526,7 +556,30 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     ranOn: CODEX_DEEP_HIGH,
   });
   await db.update(schema.claudeReviews).set({ createdAt: at(18), finishedAt: at(17.7) }).where(eq(schema.claudeReviews.id, run105Codex)).execute();
-  out.reviews = { run114, run116, run105, run105Codex };
+  // ---- #111: Sam's Limn reviewed his own PR at its first commit (seed-demo.ts REVIEWS #28, imported
+  // as a teammate review). Morgan's run FOLLOWS UP on it (teammate-anchor.ts): the stream now stops
+  // when the browser goes away; the stream still sends no last frame, so that blocker is raised again.
+  const run111 = await runClaudeReview(base, c, {
+    prId: 111,
+    summary:
+      'The stream now stops when the browser closes it. One blocker from Sam’s review is still open: nothing sends a last frame when the sync ends, so the progress bar stays where it was. Throttle the frames while you are there.',
+    verdict: 'REQUEST_CHANGES',
+    followUp: [
+      // The follow-up lists the earlier findings most severe first: P1 the blocker, P2 the warning.
+      { ref: 'P1', status: 'not_addressed', explanation: 'The walk still ends without a last frame; the browser keeps the last count it saw.' },
+      { ref: 'P2', status: 'addressed', explanation: 'The route listens for `close` on the reply socket and unsubscribes and clears the heartbeat there.' },
+    ],
+    findings: [
+      { path: 'src/sync/sync-manager.ts', line: 203, side: 'RIGHT', severity: 'blocker', priorRef: 'P1', title: 'No frame when the sync ends', body: 'After the walk, nothing calls `emitSyncProgress` with a finished phase, so the browser shows the last page count until the next sync. Send one `done` frame after the loop.' },
+      { path: 'src/sync/sync-manager.ts', line: 205, side: 'RIGHT', severity: 'warning', title: 'One frame per page', body: 'A 90-day backfill sends a frame for every page. Send at most one a second; the bar does not need more.' },
+    ],
+    costUsd: 0.38,
+    inputTokens: 19_400,
+    outputTokens: 1_500,
+    numTurns: 5,
+  });
+  await db.update(schema.claudeReviews).set({ createdAt: at(1.5), finishedAt: at(1.4) }).where(eq(schema.claudeReviews.id, run111)).execute();
+  out.reviews = { run114, run116, run105, run105Codex, run111 };
 
   // ---- the review chat on #113's latest run ----
   const bFindings = (await db.select({ id: schema.claudeReviewFindings.id, title: schema.claudeReviewFindings.title }).from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, runB)).execute()) as Array<{ id: number; title: string }>;

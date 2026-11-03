@@ -418,7 +418,7 @@ export function AutoReviewSection(): JSX.Element {
               <span>
                 Post to GitHub
                 <span className="mt-0.5 block text-meta text-ui-mute">
-                  As soon as it finishes. Reviews you start yourself keep the Post button.
+                  As soon as it finishes. Reviews you start yourself post only with “Review and post”.
                 </span>
               </span>
             </label>

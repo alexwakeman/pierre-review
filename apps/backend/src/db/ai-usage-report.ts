@@ -24,6 +24,7 @@ import {
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
+import { ownRunsOnly } from './teammate-reviews.js';
 import type { BotScope } from './queries.js';
 import { measuredTo, reportingWindowInfo, type ReportingWindow } from './reporting-window.js';
 
@@ -631,6 +632,8 @@ export async function getAiUsageReport(
               inArray(pr.repoId, scope.repoIds),
               gte(cr.createdAt, new Date(fromMs)),
               lt(cr.createdAt, new Date(toMs)),
+              // This machine's runs only: a teammate's imported review cost the reader nothing.
+              ownRunsOnly(cr.kind),
             ),
           )
           .execute();
@@ -638,7 +641,7 @@ export async function getAiUsageReport(
     prId: r.prId,
     status: r.status,
     trigger: r.trigger,
-    kind: r.kind ?? null,
+    kind: r.kind === 'replies' ? 'replies' : null, // 'teammate' rows are filtered out above
     provider: r.provider,
     model: r.model,
     cost: toCost(r.provider, r.costUsd),

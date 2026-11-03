@@ -28,6 +28,8 @@ import {
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { useProSettings } from '../../hooks/useProSettings.js';
 import { useFilters } from '../../store/filters.js';
+import { useSettingsModal } from '../../store/settingsModal.js';
+import { TEXT_LINK } from '../ui/cx.js';
 import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
 import {
   automatedReviewerMeta,
@@ -649,7 +651,7 @@ function MlTotalsStrip({
  * apply, and showing a greyed-out verdict column would invite reading one anyway. The counts are
  * NOT in `totals` either, so the summary line above stays a review-bot number.
  *
- * A bot re-roled to `quality_check` drops out of `vendors`; Bots Monitoring → Classification also lists
+ * A bot re-roled to `quality_check` drops out of `vendors`; Settings → Bots also lists
  * it under "Other automation", so the re-role stays visible from where it was made.
  *
  * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
@@ -1164,7 +1166,7 @@ function VendorTable({
                 // the two figures differ only by the stretch each was measured over — which both
                 // surfaces state. Benchmark measures the reviewer's whole observed span; this
                 // measures the window in the picker, so a bot busier lately reads cheaper here.
-                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots Monitoring → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots Monitoring → Classification. Another Workspace may hold a different figure for the same bot; the two are never added together."
+                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots Monitoring → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Settings → Bots. Another Workspace may hold a different figure for the same bot; the two are never added together."
               >
                 $ per used thread
               </th>
@@ -1420,8 +1422,8 @@ function VendorTable({
                           // holds $X for this login, but nothing reads it any more — including
                           // when the user deliberately CLEARED the price, which is indistinguishable
                           // from "never migrated" on this row. So it is offered, not charged.
-                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Bots Monitoring → Classification to use it.`
-                        : 'No price set for this bot in this Workspace — set one in Bots Monitoring → Classification.'
+                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Settings → Bots to use it.`
+                        : 'No price set for this bot in this Workspace — set one in Settings → Bots.'
                       : // `costMonthlyUsd` arrives EFFECTIVE (the server already multiplied a
                         // per-seat unit by the Workspace's derived seat count on read), so the
                         // per-seat case only ANNOTATES the figure — nothing here multiplies.
@@ -1666,7 +1668,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // for doing exactly its job.
   //
   // ⚠ THEY MUST STILL BE SHOWN SOMEWHERE. Without this section, marking a bot as a quality check
-  // in Bots Monitoring → Classification makes it silently VANISH from the only screen that lists review bots —
+  // in Settings → Bots makes it silently VANISH from the only screen that lists review bots —
   // indistinguishable from "we stopped detecting it", and there is no way to notice a MIS-role.
   // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
   // that were deliberately withheld.
@@ -1924,8 +1926,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <div className="text-meta text-ui-mute">
           {showCost ? (
             <>
-              Set a bot’s monthly price in <span className="font-medium">Bots Monitoring → Classification</span> to
-              see $ per used thread.
+              Set a bot’s monthly price in <SettingsBotsLink /> to see $ per used thread.
             </>
           ) : (
             <>
@@ -1942,5 +1943,16 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
       {header}
       {body}
     </div>
+  );
+}
+
+/** "Settings → Bots" as a link: it opens Settings on the Bots tab, where each bot's category and
+ *  price are set (it was Bots Monitoring → Classification). */
+function SettingsBotsLink(): JSX.Element {
+  const openSettings = useSettingsModal((st) => st.openSettings);
+  return (
+    <button type="button" onClick={() => openSettings('bots')} className={`${TEXT_LINK} font-medium text-ui-ink`}>
+      Settings → Bots
+    </button>
   );
 }

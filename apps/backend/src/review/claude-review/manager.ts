@@ -48,7 +48,9 @@ import {
   selectPriorFindings,
   SINCE_PATCH_CHARS,
   type FollowUpPlan,
+  type PriorReviewForFollowUp,
 } from './follow-up.js';
+import { loadAuthorReviewAnchor, mergeAuthorAnchor } from './teammate-anchor.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
@@ -133,6 +135,10 @@ interface QueueItem {
   // A FROM-SCRATCH run (`GenerateReviewBody.fresh`, manual only): it reads NO earlier review — no
   // follow-up chain, no settled list, no carried thread judgements. Never set on an auto run.
   fresh?: boolean;
+  // "REVIEW AND POST" (`GenerateReviewBody.postMode: 'post'`, manual only; stored as
+  // `claude_reviews.post_on_finish` on both halves of a pair): when the run (or its whole pair)
+  // succeeds, auto-post.ts posts it under the auto-post rules. Never set on an auto run.
+  postOnFinish?: boolean;
   // TEAM CLAIMS (team-claim.ts): the GitHub status line this AUTO run holds (or why it has none).
   // Renewed while the run goes; its final line is posted when the run ends. Never on a manual run.
   teamClaim?: TeamClaimHandle;
@@ -347,12 +353,14 @@ export async function startReview(
   // TRAILING: `fresh` ⇒ a from-scratch run (QueueItem.fresh). `pair` ⇒ a CLAUDE + CODEX PAIR: Claude
   // first, then Codex (`provider` is ignored); with only one of them able to review, just that one
   // runs (the route refuses a pair it cannot run). Absent ⇒ an ordinary run.
-  opts: { fresh?: boolean; pair?: boolean } = {},
+  // `postOnFinish` ⇒ "Review and post": post the run (a pair: its one review) when it succeeds.
+  opts: { fresh?: boolean; pair?: boolean; postOnFinish?: boolean } = {},
 ): Promise<StartReviewResult> {
   // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
   const fresh = opts.fresh === true;
+  const postOnFinish = opts.postOnFinish === true;
   // ⚠ Checked BEFORE `claimed`: a running auto run is also in
   // `claimed`, and must answer the auto lock, not 'already_running'.
   const hold = autoReviewHold(prId, accountId);
@@ -392,6 +400,8 @@ export async function startReview(
       provider,
       fresh,
       pair ? { role: 'first' } : null,
+      null,
+      postOnFinish,
     );
     if (pair) pair.pairId = reviewId;
   } catch (err) {
@@ -410,6 +420,7 @@ export async function startReview(
     prCtx,
     trigger: 'manual',
     ...(fresh ? { fresh: true } : {}),
+    ...(postOnFinish ? { postOnFinish: true } : {}),
     ...(pair ? { pair } : {}),
   };
   reviewIdByPr.set(prId, reviewId);
@@ -808,7 +819,7 @@ interface RunEnd {
 }
 
 /** What `runEnded` reads off the run: a live queue item, or a pair ended at boot (`finishInterruptedPairs`). */
-type RunEndedItem = Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'trigger' | 'headSha'>;
+type RunEndedItem = Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'trigger' | 'headSha' | 'postOnFinish'>;
 
 /** After a run (or a whole pair): the Slack signal, diagrams and the auto hooks — ONCE per pair.
  *  Returns the auto-post it started (null when none), which the team claim's final line waits for.
@@ -849,6 +860,24 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
   // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
   // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
   // never thrown into the review: a fix that fails to start costs the fix only.
+  // "REVIEW AND POST": a MANUAL run the reader started with the split button's "Review and post"
+  // posts through the SAME auto-post path (the press stands in for the workspace switch; the run's
+  // stored `post_on_finish` is re-read there). Nothing else of the auto hooks runs for it.
+  if (succeeded && item.trigger !== 'auto' && item.postOnFinish === true) {
+    autoPosted = import('./auto-post.js')
+      .then((m) =>
+        m.maybeAutoPostReview(ctx, {
+          accountId: item.accountId,
+          prId,
+          reviewId,
+          ...(end.pairFirstReviewId != null ? { pairFirstReviewId: end.pairFirstReviewId } : {}),
+        }),
+      )
+      .catch((err) => {
+        ctx.log.warn(`review and post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+  }
   if (succeeded && item.trigger === 'auto') {
     // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
     // (./auto-post.ts decides; it never throws and never retries). Independent of the fix. A pair
@@ -984,6 +1013,8 @@ async function startPairSecond(first: QueueItem): Promise<void> {
       provider,
       first.fresh === true,
       { role: 'second', pairId: pair.pairId },
+      null,
+      first.postOnFinish === true,
     );
     if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record, teamClaim).catch(() => {});
     const second: QueueItem = {
@@ -997,6 +1028,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
       prCtx: first.prCtx,
       trigger: first.trigger,
       ...(first.fresh ? { fresh: true } : {}),
+      ...(first.postOnFinish ? { postOnFinish: true } : {}),
       ...(teamClaim ? { teamClaim } : {}),
       pair: { role: 'second', pairId: pair.pairId, first },
     };
@@ -1096,9 +1128,25 @@ async function runPipeline(
   const fresh = item.fresh === true;
   const settled = fresh ? [] : await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
   const settledIds = new Set(settled.map((f) => f.id));
-  const prior = fresh
+  const ownPrior = fresh
     ? null
     : await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds, item.provider, item.pair != null);
+  // THE PR AUTHOR'S OWN POSTED REVIEW (teammate-anchor.ts): when it is the latest full review at or
+  // before this head, the follow-up anchors on it and the reader's own previous review is carried.
+  // A failure here costs the anchor only: the run follows up on its own chain, as before.
+  let authorAnchor: Awaited<ReturnType<typeof loadAuthorReviewAnchor>> = null;
+  if (!fresh) {
+    try {
+      authorAnchor = await loadAuthorReviewAnchor(ctx, item.prId, item.accountId, item.headSha, reviewId);
+    } catch (err) {
+      ctx.log.warn(
+        `claude review pr ${item.prId}: author's review not read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const prior: PriorReviewForFollowUp | null =
+    authorAnchor && authorAnchor.findings.length > 0 ? mergeAuthorAnchor(authorAnchor, ownPrior, settledIds) : ownPrior;
+  const teammateAnchor = authorAnchor && prior !== ownPrior ? authorAnchor.teammate : null;
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
   // person's reply are kept (below), so they are judged once like any other.
@@ -1346,6 +1394,8 @@ async function runPipeline(
               items,
               // The previous review's own findings NOT followed up, each named with why.
               ...(prior?.leftOut && prior.leftOut.length > 0 ? { leftOut: prior.leftOut } : {}),
+              // The previous review was the PR author's own (teammate-anchor.ts).
+              ...(teammateAnchor ? { teammate: teammateAnchor } : {}),
             }
           : null,
       threadAssessments,
@@ -1842,7 +1892,15 @@ export async function finishInterruptedPairs(
       } finally {
         markPairBusy(pairId, false);
       }
-      const item: RunEndedItem = { ctx, accountId: r.accountId, prId: r.prId, trigger: first.trigger === 'auto' ? 'auto' : 'manual', headSha: first.headSha };
+      const item: RunEndedItem = {
+        ctx,
+        accountId: r.accountId,
+        prId: r.prId,
+        trigger: first.trigger === 'auto' ? 'auto' : 'manual',
+        headSha: first.headSha,
+        // A "Review and post" pair still posts when the boot ends it.
+        ...(first.postOnFinish === true ? { postOnFinish: true } : {}),
+      };
       await runEnded(item, { reviewId: survivor.id, succeeded: true }, { slackSignal: false });
       ended.push(pairId);
       ctx.log.info(`claude review pr ${r.prId}: ended pair ${pairId} interrupted by a restart`);

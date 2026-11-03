@@ -8,6 +8,7 @@ import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
+import { BotClassificationSection } from './BotClassificationSection.js';
 import { FeaturesSection } from './FeaturesSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
@@ -73,7 +74,7 @@ import { useSettingsModal, type SettingsFocus } from '../../store/settingsModal.
 // auth line, so a form here could only offer a third, worse one. The routes are gone too.
 //
 // "Review bots (account-wide)" — an explainer plus one toggle. The explainer pointed at
-// Activity → Bots Monitoring → Classification, which is where a bot's judgement, identity and price actually live
+// Settings → Bots (once Bots Monitoring → Classification), which is where a bot's judgement, identity and price actually live
 // (one CORE/free `workspace_reviewers` row each), and the toggle — the Slack bot digest — became a
 // property of the DELIVERY in plugin migration 0033 and is now a checkbox inside the Slack section
 // under the schedule it modifies. An empty section pointing elsewhere is a signpost, not a setting.
@@ -99,6 +100,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   SonarSection,
   SlackSection,
   BotScoringSection,
+  BotClassificationSection,
   DependencyAutomationSection,
 };
 

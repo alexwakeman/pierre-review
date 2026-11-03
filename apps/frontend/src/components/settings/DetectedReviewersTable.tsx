@@ -89,7 +89,7 @@ type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
 
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// The bot classification surface — Bots Monitoring → Classification: classifying a reviewer, naming its
+// The bot classification surface — Settings → Bots: classifying a reviewer, naming its
 // vendor, setting its role and its PRICE (the editor on each card and the workspace total).
 //
 // ── ONE CARD PER BOT, IN A GRID ─────────────────────────────────────────────────────────────
@@ -437,9 +437,10 @@ function ReviewerList({
         </h4>
         <span className="text-meta text-ui-mute">{note}</span>
       </div>
-      {/* A responsive GRID of distinct cards: one column at phone width, two from `md`, three on a
-          wide screen. `items-start` keeps a short card from stretching to its row-mate's height. */}
-      <ul className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      {/* A GRID of distinct cards, as many ~26rem columns as the CONTAINER holds (it lives in the
+          Settings modal now, so the viewport says nothing about its width): one in the modal, more
+          where there is room. `items-start` keeps a short card from stretching to its row-mate's height. */}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,26rem),1fr))] items-start gap-3">
         {reviewers.map((r) => (
           <ReviewerCard
             key={r.userId}

@@ -462,9 +462,17 @@ describe('the auto-merge watcher', () => {
     await q.armAutoMerge(A, prC, { ...armArgs('uuu'), armedByPolicy: true });
     gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'uuu', mergeableState: 'unstable' }));
     gh.mergePullRequest.mockResolvedValue({ ok: true, sha: 'landed_p' });
+    await db.delete(schema.dependencyAutomationActions).execute();
     await runner.runAutoMergeTick(log);
     expect(gh.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(await rowFor(prC)).toMatchObject({ state: 'merged', armedByPolicy: true });
+    // The dependency log's "Merged" is written from THIS outcome (a landed POLICY intent) — once.
+    await vi.waitFor(async () => {
+      const landed = (await db.select().from(schema.dependencyAutomationActions).execute()).filter(
+        (r: any) => r.prId === prC && r.action === 'merge_landed',
+      );
+      expect(landed).toMatchObject([{ headSha: 'uuu', state: 'done' }]);
+    });
 
     // The same 'unstable' head armed by a click merges too.
     await db
@@ -472,18 +480,24 @@ describe('the auto-merge watcher', () => {
       .set({ state: 'open' })
       .where((await import('drizzle-orm')).eq(schema.pullRequests.id, prC))
       .execute();
+    await db.delete(schema.dependencyAutomationActions).execute();
     await q.armAutoMerge(A, prC, armArgs('uuu'));
     await runner.runAutoMergeTick(log);
     expect((await rowFor(prC)).state).toBe('merged');
     expect((await rowFor(prC)).armedByPolicy).toBe(false);
+    // A person's click is not the dependency automation: nothing in its log.
+    expect(await db.select().from(schema.dependencyAutomationActions).execute()).toEqual([]);
   });
 
   it("never merges a POLICY intent that is 'blocked' (a REQUIRED check or review is missing)", async () => {
     await q.armAutoMerge(A, prC, { ...armArgs('bbb'), armedByPolicy: true });
     gh.fetchPrMergeSnapshot.mockResolvedValue(snapshot({ headSha: 'bbb', mergeableState: 'blocked' }));
+    await db.delete(schema.dependencyAutomationActions).execute();
     await runner.runAutoMergeTick(log);
     expect(gh.mergePullRequest).not.toHaveBeenCalled();
     expect((await rowFor(prC)).state).toBe('armed');
+    // Armed but not landed: never "Merged".
+    expect(await db.select().from(schema.dependencyAutomationActions).execute()).toEqual([]);
   });
 
   it('says "merging" while the merge call is in flight (the row is never blank at success)', async () => {

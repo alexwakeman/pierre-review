@@ -4,7 +4,6 @@ import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner, TuningSuggestions } from './BotRoiPanel.js';
 import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
-import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { effectiveBotsTab } from './benchmarkModel.js';
 import { BotIcon } from '../Icons.js';
@@ -17,8 +16,8 @@ import type { BotWindowKind } from '@pierre-review/shared';
 // The Bots rail view — "the calm layer above your review bots". It composes:
 //   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts).
 //     (Bot ACTIVITY is not here: it is the Feed's "Bots" side — one Feed, two sides.)
-//   • Classification (BotSettingsPanel): who counts as a bot in this Workspace, its role, vendor
-//     and price. It was the Feed's "Bot classification" sub-tab; the Feed is a stream only now.
+//   (Classification — who counts as a bot in this Workspace, its role, vendor and price — is
+//   Settings → Bots, `settings/BotClassificationSection.tsx`. It was a tab here until 2026-11-03.)
 // (The Bot Tuning Advisor tab is REMOVED, UI and backend; its advisor_* tables stay dormant.)
 //
 // ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
@@ -52,13 +51,11 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
 
-  // Classification is the WORKSPACE's bot list with no repo narrowing — cross-repo rail only.
   // Themes is genuinely per-repo (the panel takes `repoScope`), so it shows on both mounts.
-  const showClassification = repoId == null;
   // DERIVE the visible tab; never write a correction back to the store (`benchmarkModel.ts`).
   // Themes is written by a model, so it shows only while AI is on.
   const showThemes = useAiCapabilities().enabled;
-  const effectiveTab = effectiveBotsTab(innerTab, { showClassification, showThemes });
+  const effectiveTab = effectiveBotsTab(innerTab, { showThemes });
 
   // ⌘K while Bots Monitoring is showing: the window, and the two lists behind the callouts.
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
@@ -93,7 +90,6 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
     // second in the strip is what preserves its prominence.
     { id: 'themes', label: 'Themes', hidden: !showThemes },
     { id: 'benchmark', label: 'Benchmark' },
-    { id: 'classification', label: 'Classification', hidden: !showClassification },
   ];
 
   return (
@@ -116,11 +112,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         </header>
       )}
 
-      {effectiveTab === 'classification' ? (
-        // Who counts as a bot in this Workspace, plus each bot's price. The Feed's and the
-        // Timeline's bot hiding read it.
-        <BotSettingsPanel />
-      ) : effectiveTab === 'themes' ? (
+      {effectiveTab === 'themes' ? (
         /* "What they're flagging" — the workspace-grain qualitative report: every deterministic
            figure (per-bot volume + acted-on, area split, per-theme comment counts, coverage) is the
            build fold's, the themes and narrative are the model's read (labelled approximate).

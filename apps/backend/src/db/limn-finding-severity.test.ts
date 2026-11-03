@@ -134,6 +134,25 @@ beforeAll(async () => {
       finding({ path: 'd.ts', line: 2, severity: 'blocker', body: 'Looks fine.', postedAt: null }),
     ])
     .execute();
+  // A teammate's imported review (`kind = 'teammate'`): one comment led with a severity, one legacy
+  // post with no lead (stored 'warning' only because the column is NOT NULL, named unlabelled).
+  await thread('tmLabelled', 'f.ts', 5, [{ db: '6001', author: bob.id, body: `**Blocker**\n\nLeak.\n\n${MARKER}`, at: t0 }]);
+  await thread('tmUnlabelled', 'g.ts', 6, [{ db: '6002', author: bob.id, body: `Old style.\n\n${MARKER}`, at: t0 }]);
+  const [tm] = await db
+    .insert(claudeReviews)
+    .values({
+      accountId: 1, prId, headSha: 'H1', model: 'm', status: 'succeeded', kind: 'teammate', sourceUserId: bob.id,
+      sourceReviewNodeId: 'RV_bob', teammate: { unlabelled: ['C_tm_2'] },
+    })
+    .returning()
+    .execute();
+  await db
+    .insert(claudeReviewFindings)
+    .values([
+      { reviewId: tm.id, side: 'RIGHT', title: 't', included: false, path: 'f.ts', line: 5, severity: 'blocker', body: 'Leak.', postedAt: posted, githubCommentId: '6001', postedCommentKind: 'inline', sourceCommentNodeId: 'C_tm_1' },
+      { reviewId: tm.id, side: 'RIGHT', title: 't', included: false, path: 'g.ts', line: 6, severity: 'warning', body: 'Old style.', postedAt: posted, githubCommentId: '6002', postedCommentKind: 'inline', sourceCommentNodeId: 'C_tm_2' },
+    ])
+    .execute();
   // Another account's run on the same PR id: its findings are never read.
   await db.insert(accounts).values({ id: 2, githubUserId: 'U_stranger', githubLogin: 'stranger', isLocal: false }).onConflictDoNothing().execute();
   const [foreign] = await db.insert(claudeReviews).values({ accountId: 2, prId, headSha: 'H1', model: 'm', status: 'succeeded' }).returning().execute();
@@ -157,6 +176,9 @@ describe('limnSeverity on the PR detail payload', () => {
     expect(byThread.get(threadIds.replyOnly!)).toBeNull();
     expect(byThread.get(threadIds.other!)).toBeNull();
     expect(byThread.get(threadIds.praise!)).toBeNull();
+    // A teammate's labelled post keeps its chip; an UNLABELLED one shows none (GitHub shows no label).
+    expect(byThread.get(threadIds.tmLabelled!)).toBe('blocker');
+    expect(byThread.get(threadIds.tmUnlabelled!)).toBeNull();
     const byComment = new Map(d.comments.map((c) => [c.id, c.limnSeverity ?? null]));
     expect(byComment.get(prCommentIds.finding!)).toBe('question');
     expect(byComment.get(prCommentIds.reminder!)).toBe('blocker');

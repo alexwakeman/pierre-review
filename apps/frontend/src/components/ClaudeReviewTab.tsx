@@ -10,6 +10,7 @@ import type {
   ClaudeReview,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
+  ReviewPostMode,
   PostReviewPreview,
   PostReviewResult,
   PrDetail,
@@ -52,7 +53,16 @@ import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities
 import { aiCredentialWords, reviewPeerReadLabel } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
-import { cx, FOCUS_RING, Select } from './ui/index.js';
+import { cx, FOCUS_RING, Menu, Select } from './ui/index.js';
+import {
+  nextSummaryPrefill,
+  pressedPostLine,
+  readReviewPostMode,
+  REVIEW_POST_MODE_LABEL,
+  reviewRunButtonLabel,
+  summaryPrefillOf,
+  writeReviewPostMode,
+} from '../lib/reviewPostMode.js';
 import { ReviewHistoryList } from './ReviewHistoryList.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
@@ -80,6 +90,7 @@ import { ReviewChatSection, SendToChatButton } from './ClaudeReviewChat.js';
 import { InfoButton } from './InfoModal.js';
 import {
   ArrowIcon,
+  CaretIcon,
   CheckIcon,
   ChevronIcon,
   ExternalLinkIcon,
@@ -102,6 +113,7 @@ import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
+import { TeammateReviews } from './TeammateReviews.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
@@ -1867,6 +1879,11 @@ export function ClaudeReviewTab({
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
 
+  // THE SPLIT BUTTON (lib/reviewPostMode.ts): the main part runs the reader's last choice, "Review
+  // only" or "Review and post"; the caret picks the other. The re-run confirm runs the one picked.
+  const [postMode, setPostMode] = useState<ReviewPostMode>(() => readReviewPostMode());
+  const [rerunMode, setRerunMode] = useState<ReviewPostMode>('review_only');
+
   // Authored draft (Section B) — seeded from the latest review, local until saved.
   const [userBody, setUserBody] = useState('');
   const [userVerdict, setUserVerdict] = useState<ClaudeReviewVerdict>('COMMENT');
@@ -1919,6 +1936,21 @@ export function ClaudeReviewTab({
     setConfirmPost(false);
   }, [review]);
 
+  // THE PRE-FILL ("Review only"; after the re-seed above, so it fills the seeded box): once the
+  // latest run succeeds, its summary goes into an empty box, or one still holding the earlier
+  // pre-fill — never over text the reader typed.
+  const lastPrefill = useRef<string | null>(null);
+  const prefill = summaryPrefillOf(review);
+  useEffect(() => {
+    if (prefill == null) return;
+    setUserBody((box) => {
+      const next = nextSummaryPrefill({ box, lastPrefill: lastPrefill.current, prefill });
+      if (next == null) return box;
+      lastPrefill.current = next;
+      return next;
+    });
+  }, [review?.id, prefill]);
+
   // Re-pick the shown run on every read of the latest run and the history (see `nextShownReviewId`).
   const history = data?.history;
   useEffect(() => {
@@ -1969,7 +2001,7 @@ export function ClaudeReviewTab({
   const latestCurrency = review?.status === 'succeeded' ? currencyOf(review, pr.headSha) : null;
   const latestOutdated = latestCurrency?.tone === 'behind' ? latestCurrency.label : null;
 
-  const runGenerate = (): void => {
+  const runGenerate = (mode: ReviewPostMode): void => {
     // Create/resume the AudioContext now, during this user gesture, so the
     // completion chime can play later without one (browsers gate WebAudio behind
     // a gesture). No-op / swallowed if WebAudio is unavailable.
@@ -1980,20 +2012,29 @@ export function ClaudeReviewTab({
     // No story: the PR review looks at the code. Stories are the Story check section below.
     // The run goes to the provider the menu picked (the server validates the pair). "Claude + Codex"
     // starts a pair: Claude first, then Codex.
-    generate.mutate(
-      modelPick.pair
+    // "Review and post" posts the run when it ends, under the auto-post rules (the press is consent).
+    generate.mutate({
+      ...(modelPick.pair
         ? { model: modelPick.chosen.model, pair: true }
-        : { model: modelPick.chosen.model, provider: modelPick.chosen.provider },
-    );
+        : { model: modelPick.chosen.model, provider: modelPick.chosen.provider }),
+      ...(mode === 'post' ? { postMode: 'post' as const } : {}),
+    });
   };
 
-  const onRunClick = (): void => {
+  const onRunClick = (mode: ReviewPostMode): void => {
+    if (mode !== postMode) {
+      setPostMode(mode);
+      writeReviewPostMode(mode);
+    }
     if (alreadyReviewed) {
+      setRerunMode(mode);
       setConfirmRerun(true);
     } else {
-      runGenerate();
+      runGenerate(mode);
     }
   };
+  const runDisabled = isRunning || starting || autoHold != null;
+  const runPrimary = review == null || latestOutdated != null;
 
   const shownReview: ClaudeReview | null = viewingLatest
     ? review
@@ -2076,27 +2117,73 @@ export function ClaudeReviewTab({
           <div className="flex flex-wrap items-center gap-2">
             <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={isRunning || starting} />
             <AiRunGate kind="review" auth={data?.auth} anyProvider provider={modelPick.chosen.provider} lockProviders={modelPick.pair ? ['claude', 'codex'] : [modelPick.chosen.provider]}>
+            {/* THE SPLIT BUTTON: the main part runs the last choice; the caret opens both. */}
+            <span className="inline-flex items-stretch">
             <button
               type="button"
-              onClick={onRunClick}
-              disabled={isRunning || starting || autoHold != null}
+              onClick={() => onRunClick(postMode)}
+              disabled={runDisabled}
               // The tab's ONE primary action while there is no review or it is behind the head;
               // a quiet secondary otherwise (a re-run of a current review is rarely the point).
               className={cx(
-                'inline-flex h-8 items-center rounded-ui px-3 text-body font-medium touch:h-11 touch:px-4 disabled:cursor-not-allowed disabled:opacity-50',
-                review == null || latestOutdated != null
+                'inline-flex h-8 items-center rounded-l-ui px-3 text-body font-medium touch:h-11 touch:px-4 disabled:cursor-not-allowed disabled:opacity-50',
+                runPrimary
                   ? 'bg-ui-accent-fill text-ui-on-accent hover:brightness-110'
                   : 'bg-ui-raise text-ui-ink hover:bg-ui-hover',
                 FOCUS_RING,
               )}
             >
-              {review == null ? 'Run review' : 'Re-review'}
+              {reviewRunButtonLabel(postMode, review != null)}
             </button>
+            <Menu
+              label="Review choices"
+              align="end"
+              items={(['review_only', 'post'] as const).map((m) => ({
+                id: m,
+                label: REVIEW_POST_MODE_LABEL[m],
+                hint: m === 'post' ? 'Posts when done' : 'Kept in Limn',
+                icon: m === postMode ? <CheckIcon size={12} /> : <span className="inline-block w-3" />,
+                disabled: runDisabled,
+                onSelect: () => onRunClick(m),
+              }))}
+              trigger={(p) => (
+                <button
+                  {...p}
+                  type="button"
+                  disabled={runDisabled}
+                  aria-label="Choose how to review"
+                  className={cx(
+                    'inline-flex h-8 items-center rounded-r-ui border-l px-2 touch:h-11 touch:px-3 disabled:cursor-not-allowed disabled:opacity-50',
+                    runPrimary
+                      ? 'border-ui-on-accent/30 bg-ui-accent-fill text-ui-on-accent hover:brightness-110'
+                      : 'border-ui-line bg-ui-raise text-ui-ink hover:bg-ui-hover',
+                    FOCUS_RING,
+                  )}
+                >
+                  <CaretIcon />
+                </button>
+              )}
+            />
+            </span>
             </AiRunGate>
+            <InfoButton title="Review only, or review and post">
+              <p>
+                <strong>Review only</strong> keeps the review in Limn. Its summary goes into the summary box, ready
+                to edit and post.
+              </p>
+              <p>
+                <strong>Review and post</strong> posts the review to GitHub when it is done, under your
+                account, the same way an auto review posts: one review, your workspace’s comment kinds and
+                verdict rules. The workspace’s auto-post switch does not need to be on.
+              </p>
+            </InfoButton>
             {autoHold != null && (
               <span className="text-meta text-ui-mute">
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
               </span>
+            )}
+            {isRunning && pressedPostLine(review) != null && (
+              <span className="text-meta text-ui-mute">{pressedPostLine(review)}</span>
             )}
             {autoHold == null && data?.autoReviewWaiting != null && (
               <span className="text-meta text-ui-mute">
@@ -2111,7 +2198,7 @@ export function ClaudeReviewTab({
               <span>This commit is already reviewed.</span>
               <button
                 type="button"
-                onClick={runGenerate}
+                onClick={() => runGenerate(rerunMode)}
                 disabled={autoHold != null}
                 className={cx('inline-flex h-7 items-center rounded-ui bg-ui-raise px-2 text-meta font-medium hover:bg-ui-hover disabled:opacity-50 touch:h-10', FOCUS_RING)}
               >
@@ -2288,6 +2375,9 @@ export function ClaudeReviewTab({
           }}
         />
       )}
+
+      {/* Reviews a TEAMMATE'S Limn posted to GitHub — read-only, theirs (TeammateReviews.tsx). */}
+      <TeammateReviews reviews={data?.teammateReviews} onOpenThread={onOpenThread} />
       </ReviewSection>
       </RailPiece>
 
@@ -2384,6 +2474,9 @@ export function ClaudeReviewTab({
           )}
           {autoPostSkipLine(review.autoPost) != null && (
             <p className="text-meta text-ui-mute">{autoPostSkipLine(review.autoPost)}</p>
+          )}
+          {pressedPostLine(review) != null && (
+            <p className="text-meta text-ui-mute">{pressedPostLine(review)}</p>
           )}
           {autoVerdictLine(review.autoPost, reviewByName(review)) != null && (
             <p className="text-meta text-ui-mute">{autoVerdictLine(review.autoPost, reviewByName(review))}</p>

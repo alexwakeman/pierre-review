@@ -1432,6 +1432,39 @@ Review tab. No FK on `pr_id`: both delete paths delete its rows inside `deleteSe
 the erasure deletes it and `accountScopedTables()` lists it. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team
 claims → THE TEAMMATE'S LINE ON THE TAB. Journal `idx` 159, `when` sqlite `1792224062016`.
 
+### `0160_teammate_reviews` — teammates' posted reviews, imported read-only
+THREE columns on `claude_reviews` — `source_user_id` (integer, FK `users.id`), `source_review_node_id`
+(text) and `teammate` (JSON `TeammateReviewRecord`) — and ONE on `claude_review_findings`,
+`source_comment_node_id` (text); two PARTIAL unique indexes in the `.sql` (drizzle's are inert):
+`cr_account_pr_source_review (account_id, pr_id, source_review_node_id) WHERE … IS NOT NULL` and
+`crf_review_source_comment (review_id, source_comment_node_id) WHERE … IS NOT NULL`. A teammate's
+review is a `claude_reviews` row with `kind = 'teammate'` (the column is plain text, no CHECK; the
+schema's TS enum gains the member). Additive, no backfill: the next walk of a PR imports what is on
+GitHub. No new table, so `accountScopedTables()`, the erasure and both delete paths already cover it.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Teammates' reviews. Journal `idx` 160, `when` sqlite
+`1792224066016` — ⚠ ABOVE 0162's: a dev DB had applied 0162 (written concurrently) before 0160/0161
+existed, and drizzle skips an entry whose `when` is at or below the newest APPLIED one. A fresh DB
+runs the three in journal order; all three are independent and additive. The next migration's `when`
+must sort above `1792224067016`.
+
+### `0161_review_post_on_finish` — "Review and post" on a manual run
+ONE column, `claude_reviews.post_on_finish` (integer boolean; true = a MANUAL run started with the
+split button's "Review and post", on both halves of a pair; NULL on every other row). Read when the run
+or its pair ends (`runEnded`, and `finishInterruptedPairs` at boot) to post it under the auto-post rules.
+Additive, no backfill, no index. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting → "Review and
+post". Journal `idx` 161, `when` sqlite `1792224067016` (above 0162's — see 0160).
+
+### `0162_dependency_ai_fix` — dependency automation for teams + "Fix them with AI"
+
+Additive, no backfill. `workspaces.dependency_auto_fix` (NULL/false = OFF, the default: Settings →
+Dependencies → "Fix them with AI"), and two columns on `dependency_automation_actions`:
+`teammate_login` (text) and `teammate_handled` (integer boolean) for the new `skipped` rows (a
+teammate's `limn/deps` line held the head). The new `action` values (`ai_fix`, `arm_merge`,
+`merge_landed`) and `state` value (`skipped`) need no DDL: both columns are plain text with no CHECK.
+No new index — the AI-run cap reads the PR's rows through the existing unique index's
+`(account_id, pr_id, …)` prefix. See [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Dependency automation.
+Journal `idx` 162, `when` sqlite `1792224065016` — the LOWEST of 0160–0162 (see 0160 for why).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

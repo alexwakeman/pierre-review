@@ -137,6 +137,7 @@ import {
 // is acknowledged by GitHub before GitHub has finished with it, and none of the aftermath bumps a
 // PR's `updatedAt`. The settle ladder re-reads the PR; a landing re-reads the repo's other PRs.
 import { asSyncLogger } from '../sync/resync-after-write.js';
+import { recordDependencyMergeLanded } from './dependency-automation.js';
 import { schedulePrSettle } from '../sync/pr-settle.js';
 import { noteMergeLanded } from '../sync/unsettled-prs.js';
 import { stampPrMergeQueueState } from '../db/pr-merge-queue-stamp.js';
@@ -447,6 +448,16 @@ async function isOurUpdateMerge(
 }
 
 /**
+ * A POLICY intent (the dependency merge setting) LANDED: Pending → Dependencies' log says "Merged".
+ * Called ONLY beside the three `state: 'merged'` writes — GitHub accepted the merge, or the queue
+ * merged OUR entry — never on arming. Fire-and-forget, never throws.
+ */
+function noteDependencyLanding(work: ArmedMergeWork): void {
+  if (!work.armedByPolicy) return;
+  void recordDependencyMergeLanded(work.accountId, work.prId, work.expectedHeadOid);
+}
+
+/**
  * Write a live merge-queue observation onto the PR row (`pull_requests.in_merge_queue` +
  * `merge_queue_entry_state`) — the columns every screen reads, including the Pending board, which
  * may not fetch. Without this the runner's own enqueue stayed invisible to them until the next
@@ -505,6 +516,7 @@ async function settleQueuedIntent(
       const viewerUserId = await getAccountUserId(work.accountId);
       await markPrMergedLocally(work.prId, work.accountId, viewerUserId);
       await updateAutoMergeState(work.id, { state: 'merged', lastReason: null, phase: null });
+      noteDependencyLanding(work);
       log.info(
         { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
         'auto-merge landed via the merge queue',
@@ -744,6 +756,7 @@ async function processOne(
     if (work.prState === 'merged') clearSiblingFreshenMarks(slot);
     if (work.prState === 'merged' && work.viaMergeQueue && work.enqueuedAt != null) {
       await resolve(work.id, 'merged', null);
+      noteDependencyLanding(work);
       log.info(
         { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
         'auto-merge landed via the merge queue',
@@ -1190,6 +1203,7 @@ async function processOne(
     const viewerUserId = await getAccountUserId(work.accountId);
     await markPrMergedLocally(work.prId, work.accountId, viewerUserId);
     await updateAutoMergeState(work.id, { state: 'merged', lastReason: null, phase: null });
+    noteDependencyLanding(work);
     log.info(
       { prId: work.prId, repo: `${work.owner}/${work.name}`, number: work.number },
       'auto-merge landed',

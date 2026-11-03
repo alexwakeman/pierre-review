@@ -74,6 +74,61 @@ const openSettingsTab = (tab) => async (page) => {
  */
 const VIEWS = [
   ['open-prs', '?view=activity', 'open-prs'],
+  // Open PRs → Merged (it was This Sprint's "Merged so far"; the old link lands here).
+  [
+    'open-prs:merged',
+    '?view=activity&openPrsTab=merged',
+    'open-prs-merged',
+    { act: async (page) => page.getByTestId('merged-prs-view').first().waitFor({ timeout: 10_000 }) },
+  ],
+  ['open-prs:merged-legacy-link', '?view=sprint&sprintTab=merged', null, { act: async (page) => page.getByTestId('merged-prs-view').first().waitFor({ timeout: 10_000 }) }],
+  // A row pressed docks the drawer; the rows beside it go to two lines (title, then repo · author · age).
+  [
+    'open-prs:drawer',
+    '?view=activity',
+    'open-prs-drawer',
+    {
+      act: async (page) => {
+        await page.locator('main [role="option"]').first().click();
+        await page.getByTestId('open-prs-row-two-line').first().waitFor({ timeout: 10_000 });
+      },
+    },
+  ],
+  // The header's daily auto-review limit toast: Platform's limit is today's count
+  // (seed-demo-platform.ts), so it reads "reached" with "Change limit".
+  [
+    'auto-review-cap',
+    '?view=activity',
+    'auto-review-cap',
+    {
+      act: async (page) => {
+        await page.getByTestId('header-toast-cluster').click();
+        await page.getByTestId('auto-review-cap-toast-panel').waitFor({ timeout: 10_000 });
+      },
+      expect: ['Change limit'],
+    },
+  ],
+  // The sidebar's open tabs grouped by author: the reader's own PR (#106) first, then Priya, then Sam.
+  [
+    'sidebar:tabs-by-author',
+    '?view=pr-detail:106&prTab=overview',
+    'sidebar-tabs-by-author',
+    {
+      act: async (page) => {
+        for (const id of [113, 111]) {
+          await page.goto(new URL(`?view=pr-detail:${id}&prTab=overview`, page.url()).href);
+          await page.getByTestId('pinned-pr-overlay').first().waitFor({ timeout: 15_000 }).catch(() => {});
+        }
+        if (PHONE) await page.locator('[data-testid=topbar-menu]').click();
+        await page.getByTestId('sidebar-tabs-by-author').first().click();
+        const groups = await page.getByTestId('sidebar-tab-group').allTextContents();
+        const want = ['Morgan Diaz', 'Priya Nair', 'Sam Carter'];
+        if (groups.length < 3 || !want.every((w, i) => (groups[i] ?? '').startsWith(w))) {
+          throw new Error(`tab groups: ${JSON.stringify(groups)} (want ${JSON.stringify(want)} first)`);
+        }
+      },
+    },
+  ],
   // A repo's own view: the status panel spells out its sidebar dots — red (a review waiting for you,
   // merge conflicts) and blue (new since you last opened #111 and #113; seed-demo.ts pr_views).
   [
@@ -84,7 +139,8 @@ const VIEWS = [
   ],
   ...['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'].map((t) => [`pending:${t}`, `?view=activity&activityRepo=attention&attnTab=${t}`, t === 'my_turn' ? 'pending' : t === 'deps' ? 'pending-deps' : null]),
   ['feed', '?view=activity&activityRepo=feed', 'feed'],
-  ...['roi', 'themes', 'benchmark', 'classification'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : t === 'classification' ? 'bot-classification' : null]),
+  // Bots Monitoring's classification is Settings → Bots now (`settings:bots` below).
+  ...['roi', 'themes', 'benchmark'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : null]),
   ['bot-detail:8', '?view=bot-detail:8', null],
   // A Limn finding is a bot comment, one bot per poster (docs/CLAUDE-REVIEW.md § Limn findings are bots).
   ['bots:roi:limn', '?view=activity&activityRepo=bots&botsTab=roi', null, { expect: ['Limn · morgan-diaz', 'Limn · priya-nair'] }],
@@ -431,6 +487,41 @@ const VIEWS = [
     'pr-113-story',
     { expect: ['Open ticket tab', 'PLAT-292', 'Write each pull request in one transaction during sync'] },
   ],
+  // TEAMMATES' POSTED REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews): Priya's Limn review of #114,
+  // read-only, labelled with what ran; #114's own run was "Review and post" (posted itself).
+  [
+    'pr:114:teammate-review',
+    '?view=pr-detail:114&prTab=ai_review',
+    'pr-114-teammate-review',
+    {
+      act: async (page) => {
+        await page.getByTestId('teammate-review').first().getByRole('button', { expanded: false }).first().click();
+      },
+      expect: ['Teammates’ reviews', 'max_size', 'worker_max_nodes'],
+    },
+  ],
+  // A legacy post (the bare marker): no model, the head inferred.
+  ['pr:141:teammate-review-legacy', '?view=pr-detail:141&prTab=ai_review', null, { expect: ['Teammates’ reviews'] }],
+  // #111: Sam reviewed his own PR with Limn; Morgan's run follows up on it, under his name, with no
+  // Post reply or Resolve on his threads.
+  [
+    'pr:111:author-review-follow-up',
+    '?view=pr-detail:111&prTab=ai_review',
+    'pr-111-ai_review',
+    { expect: ['@sam-carter’s review', 'Teammates’ reviews', 'No frame when the sync ends'] },
+  ],
+  // The split button's menu: Review only / Review and post.
+  [
+    'pr:113:review-split-menu',
+    '?view=pr-detail:113&prTab=ai_review',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'Choose how to review' }).first().click();
+      },
+      expect: ['Review only', 'Review and post'],
+    },
+  ],
   ['pr:113:claude_review-alias', '?view=pr-detail:113&prTab=claude_review', null, { expect: ['Run a review'] }],
   // AI Fix "Run tests": #114's fix ran the project's checks in the sandbox (results + the commit
   // hook), and "New fix" → "Run tests" lists what the head declares, one refused by the deny scan.
@@ -500,6 +591,19 @@ const VIEWS = [
       expect: ['Default: Codex.'],
     },
   ],
+  // Settings → Bots: every bot with its category (it was Bots Monitoring → Classification).
+  [
+    'settings:bots',
+    '?view=activity',
+    'settings-bots',
+    {
+      act: async (page) => {
+        await openSettingsTab('Bots')(page);
+        await page.getByTestId('bot-classification-card').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['CodeRabbit'],
+    },
+  ],
   // Settings → Features: every destination switched on (the demo is an existing install).
   [
     'settings:features',
@@ -514,7 +618,7 @@ const VIEWS = [
     'settings-dependencies',
     {
       act: openSettingsTab('Dependencies'),
-      expect: ['Dependency updates', 'Approve them automatically', 'Resolve their conflicts', 'Patch and minor updates', 'Trusted bots', 'Dependabot'],
+      expect: ['Dependency updates', 'Approve them automatically', 'Resolve their conflicts', 'Fix them with AI', 'Patch and minor updates', 'Trusted bots', 'Dependabot'],
     },
   ],
   // Pending → Dependencies → "What automation did": the seeded approval, rebase request and AI run.
@@ -526,7 +630,7 @@ const VIEWS = [
       act: async (page) => {
         await page.getByRole('button', { name: 'What automation did' }).first().click();
       },
-      expect: ['Approved', 'Asked to rebase', 'Resolved conflicts'],
+      expect: ['Approved', 'Asked to rebase', 'Resolved conflicts', 'Fixed CI with AI', 'Couldn’t fix CI', 'Fixing CI with AI', 'Armed to merge', 'Merged', 'Priya Nair is handling this', 'Wei Zhang handled this'],
     },
   ],
   // Settings → AI review → Related repos: the seeded pair (acme/api with acme/infrastructure).

@@ -51,7 +51,6 @@ const SPRINT_TABS = [
   ['themes', 'Theme'],
   ['paths', 'Critical path'],
   ['people', 'People'],
-  ['merged', 'Merged so far'],
 ] as const;
 const REPORT_TABS = [
   ['overview', 'Overview'],
@@ -62,7 +61,6 @@ const BOT_TABS = [
   ['roi', 'ROI'],
   ['themes', 'Themes'],
   ['benchmark', 'Benchmark'],
-  ['classification', 'Classification'],
 ] as const;
 
 export function useShellCommands({
@@ -89,7 +87,30 @@ export function useShellCommands({
       t().showActivity();
     };
     const out: Command[] = [
-      { id: 'open-prs', group: 'Go to', title: 'Open pull requests', icon: <PullRequestIcon size={14} />, keywords: ['prs', 'activity'], run: activity('open-prs') },
+      {
+        id: 'open-prs',
+        group: 'Go to',
+        title: 'Open pull requests',
+        icon: <PullRequestIcon size={14} />,
+        keywords: ['prs', 'activity'],
+        run: (): void => {
+          f().setActivityRepo('open-prs');
+          f().setOpenPrsTab('open');
+          t().showActivity();
+        },
+      },
+      {
+        id: 'open-prs:merged',
+        group: 'Go to',
+        title: 'Open pull requests: Merged',
+        icon: <MergeIcon size={14} />,
+        keywords: ['merged so far', 'landed', 'sprint'],
+        run: (): void => {
+          f().setActivityRepo('open-prs');
+          f().setOpenPrsTab('merged');
+          t().showActivity();
+        },
+      },
       { id: 'pending', group: 'Go to', title: 'Pending', icon: <PendingBallIcon size={14} />, keywords: ['my turn', 'inbox', 'attention'], run: activity('attention') },
       // Numbered over the tabs the strip SHOWS (AI reviews is hidden with AI off), so the key printed
       // here is the key that picks it — see AttentionView's `shownTabs`.

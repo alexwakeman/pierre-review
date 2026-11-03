@@ -17,7 +17,9 @@ import {
   type ClaudeFindingReminder,
   type ClaudeFindingSeverity,
   type LimnSeverity,
+  type TeammateReviewRecord,
 } from '@pierre-review/shared';
+import { TEAMMATE_KIND } from './teammate-reviews.js';
 import { db, schema } from './client.js';
 import { findFindingThread, type ThreadComment } from '../review/claude-review/finding-thread.js';
 import { accountGithubLogin } from './review-threads-for-review.js';
@@ -98,6 +100,16 @@ export function limnSeverityTargets(input: {
 const posterOf = (c: { authorId: number | null; limnPostedByUserId?: number | null }): number | null =>
   c.limnPostedByUserId ?? c.authorId;
 
+/** A teammate's imported finding whose comment carried no severity lead (`teammate.unlabelled`). */
+export function isUnlabelledTeammateFinding(f: {
+  runKind: string | null;
+  teammate: TeammateReviewRecord | null;
+  sourceNodeId: string | null;
+}): boolean {
+  if (f.runKind !== TEAMMATE_KIND || f.sourceNodeId == null) return false;
+  return (f.teammate?.unlabelled ?? []).includes(f.sourceNodeId);
+}
+
 /**
  * Load this PR's posted findings and fold them over the thread / comment rows getPrDetail already
  * read. One indexed query when nothing of Limn's is posted; the account login and the comment
@@ -132,11 +144,18 @@ export async function loadLimnSeverityTargets(
       githubCommentId: crf.githubCommentId,
       postedCommentKind: crf.postedCommentKind,
       reminder: crf.reminder,
+      runKind: cr.kind,
+      teammate: cr.teammate,
+      sourceNodeId: crf.sourceCommentNodeId,
     })
     .from(crf)
     .innerJoin(cr, eq(cr.id, crf.reviewId))
     .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), isNotNull(crf.postedAt)))
-    .execute()) as PostedFindingSeverityRow[];
+    .execute())
+    // A teammate's UNLABELLED post (a legacy comment with no severity lead) is stored as 'warning'
+    // only because the column is NOT NULL: GitHub shows no label, so neither does the chip.
+    .filter((f) => !isUnlabelledTeammateFinding(f))
+    .map(({ runKind: _k, teammate: _t, sourceNodeId: _n, ...f }) => f) as PostedFindingSeverityRow[];
   if (findings.length === 0) return { byThreadId: new Map(), byPrCommentId: new Map() };
 
   const needsMatcher = findings.some((f) => f.githubCommentId == null && f.postedCommentKind !== 'pr_comment');

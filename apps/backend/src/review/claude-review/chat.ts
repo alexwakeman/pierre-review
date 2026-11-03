@@ -47,6 +47,7 @@ import { providerName } from '../../ai/prompt-tools.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { ownRunsOnly } from '../../db/teammate-reviews.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -786,7 +787,8 @@ export async function listChatHistoryForPr(
       pairId: cr.pairId,
     })
     .from(cr)
-    .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId)))
+    // The reader's own runs: a teammate's posted review has no chat here.
+    .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), ownRunsOnly(cr.kind)))
     .orderBy(desc(cr.id))
     .execute()) as Array<{
     id: number;

@@ -53,7 +53,16 @@ import {
 import { asSyncLogger } from '../sync/resync-after-write.js';
 import { noteMergeLanded } from '../sync/unsettled-prs.js';
 import { armIntentLive, defaultMergeMethod } from './arm-intent.js';
-import { aiPushedHeads, policyAdmits, policyFromColumns, prPolicyFacts } from './dependency-automation.js';
+import { depsHeldNow } from './deps-claim.js';
+import {
+  aiPushedHeads,
+  beginDependencyAction,
+  finishDependencyAction,
+  giveBackDependencyAction,
+  policyAdmits,
+  policyFromColumns,
+  prPolicyFacts,
+} from './dependency-automation.js';
 
 const { autoMergePolicySkips, autoMergeRequests, pullRequests, repos, users, workspaces } = schema;
 
@@ -413,6 +422,7 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
         maxLevel: workspaces.dependencyMaxLevel,
         securityOnly: workspaces.dependencySecurityOnly,
         ecosystems: workspaces.dependencyEcosystems,
+        teamClaims: workspaces.teamClaimsEnabled,
       })
       .from(workspaces)
       .where(eq(workspaces.dependencyAutoMerge, true))
@@ -468,15 +478,34 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
         for (const pr of due) {
           if (budget <= 0) break;
           if (pushed.has(`${pr.id}:${pr.headSha}`) && pr.ciStatus !== 'success') continue;
+          // A remembered hold (a teammate armed this head, or an AI-pushed head still waiting for
+          // green CI) costs no GitHub read and none of the tick's budget.
+          if (depsHeldNow(ws.accountId, pr.id, pr.headSha!, 'merge')) continue;
           const f = facts.get(pr.id);
           if (!f || !(await policyAdmits(policy, f, pr, { token })).ok) continue;
           budget -= 1;
+          // TEAM CLAIM (`limn/deps`): a teammate's Limn arming or holding this head ⇒ skipped and
+          // recorded; otherwise the claim row + our pending line BEFORE the arm. Nothing armed ⇒ the
+          // claim is given back (the row goes; the line says free), so the next sweep may try again.
+          const claim = await beginDependencyAction(
+            { claimsOn: ws.teamClaims !== false, log },
+            { id: pr.id, accountId: ws.accountId, owner: pr.owner, name: pr.name, headSha: pr.headSha! },
+            'arm_merge',
+            Date.now(),
+            // An AI-pushed head — this machine's (`pushed` above) or a teammate's, read from its
+            // `limn/deps` line — is armed only once its CI is green.
+            { ciGreen: pr.ciStatus === 'success' },
+          );
+          if (claim == null) continue;
           try {
             if (!methodByRepo.has(pr.repoId)) {
               methodByRepo.set(pr.repoId, await defaultMergeMethod(token, pr.owner, pr.name));
             }
             const method = methodByRepo.get(pr.repoId) ?? null;
-            if (method == null) continue;
+            if (method == null) {
+              await giveBackDependencyAction(claim, 'no merge method allowed', log);
+              continue;
+            }
             const out = await armIntentLive({
               accountId: ws.accountId,
               prId: pr.id,
@@ -493,12 +522,18 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
               log,
             });
             if (out.ok) {
+              // "Armed", not "merged": the landing is recorded only when the watcher's merge lands
+              // (`recordDependencyMergeLanded`, auto-merge-runner.ts).
+              await finishDependencyAction(claim, 'done', null, log);
               log.info(
                 { prId: pr.id, repo: `${pr.owner}/${pr.name}`, number: pr.number },
                 'dependency auto-merge: armed',
               );
+            } else {
+              await giveBackDependencyAction(claim, "didn't arm", log);
             }
           } catch (err) {
+            await giveBackDependencyAction(claim, "didn't arm", log);
             log.warn({ err, prId: pr.id }, 'dependency auto-merge: could not arm');
           }
         }

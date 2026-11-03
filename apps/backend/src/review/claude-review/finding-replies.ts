@@ -105,8 +105,9 @@ function clip(s: string, max: number): string {
 /**
  * The conversation in ONE thread after its root (comments oldest first; the first is the root,
  * never a reply): not automation, with text. Limn-posted replies (the account's login + marker —
- * a reply posted from the Claude Review tab, or an earlier auto reply) are KEPT as context and
- * flagged `fromLimn`; only the others can be judged (`judgeableReplies`). The last REPLIES_MAX,
+ * a reply posted from the Claude Review tab, or an earlier auto reply — or a teammate's Limn reply,
+ * any login + marker) are KEPT as context and flagged `fromLimn`; only the others can be judged
+ * (`judgeableReplies`). The last REPLIES_MAX,
  * each clipped to REPLY_CHARS.
  */
 export function humanReplies(
@@ -116,7 +117,9 @@ export function humanReplies(
   const out: FindingReply[] = [];
   for (const c of commentsOldestFirst.slice(1)) {
     if (!c.authorLogin || c.authorIsAutomation) continue;
-    const fromLimn = isLimnMarked(c, accountLogin);
+    // A Limn-marked comment by ANOTHER login is a teammate's Limn (on the PR author's own thread, when
+    // a follow-up anchors on their review — teammate-anchor.ts): its words, never a person's answer.
+    const fromLimn = isLimnMarked(c, accountLogin) || LIMN_MARKER.test(c.body ?? '');
     // Strip the hidden marker / footer comment from a Limn reply: it is noise to the model.
     const body = norm((c.body ?? '').replace(/<!--[\s\S]*?-->/g, ''));
     if (!body) continue;
@@ -152,16 +155,22 @@ export interface ThreadOwnerRow {
  * owned by this account and PR. A follow-up names the LATEST raise of an issue, and a re-raise over
  * an already-posted comment is never posted itself, so the thread on GitHub belongs to an ANCESTOR.
  * Cycle-guarded; an id with no such ancestor is absent.
+ * ⚠ `ownOnly` — EVERY WRITER passes it (auto resolve, the pushback, "Post reply"): a teammate's
+ * imported finding (`kind = 'teammate'`, e.g. the PR author's own review a follow-up anchored on) is
+ * never an owner, so Limn never replies on or resolves a teammate's thread. The read side (the
+ * replies a run judges) leaves it off.
  */
 export async function loadThreadOwners(
   ctx: AgentContext,
   accountId: number,
   prId: number,
   ids: readonly number[],
+  opts: { ownOnly?: boolean } = {},
 ): Promise<Map<number, ThreadOwnerRow>> {
   const t = sch(ctx);
   const cr = t.claudeReviews;
   const crf = t.claudeReviewFindings;
+  const ownOnly = opts.ownOnly === true && cr.kind != null ? sql`coalesce(${cr.kind}, '') <> 'teammate'` : undefined;
   const loadRows = async (want: number[]): Promise<ThreadOwnerRow[]> =>
     want.length === 0
       ? []
@@ -180,7 +189,7 @@ export async function loadThreadOwners(
           })
           .from(crf)
           .innerJoin(cr, eq(cr.id, crf.reviewId))
-          .where(and(inArray(crf.id, want), eq(cr.accountId, accountId), eq(cr.prId, prId)))
+          .where(and(inArray(crf.id, want), eq(cr.accountId, accountId), eq(cr.prId, prId), ownOnly))
           .execute()) as ThreadOwnerRow[]);
   const isInlinePosted = (f: ThreadOwnerRow): boolean => f.postedAt != null && f.postedCommentKind === 'inline';
   const byId = new Map<number, ThreadOwnerRow>();

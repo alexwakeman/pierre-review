@@ -7005,6 +7005,11 @@ export interface ClaudeReviewFollowUpRecord {
   // silently). Absent on records stored before 2026-10-27, and when nothing was left out. Praise is
   // never listed (it is not a shown finding).
   leftOut?: ClaudeFollowUpLeftOutRecord[];
+  // Set when the previous review was the PR AUTHOR'S own Limn review, posted to GitHub and imported
+  // (`kind = 'teammate'`; docs/CLAUDE-REVIEW.md § The author's own review): `priorReviewId` is that
+  // row. Its threads are the author's: this run never replies on or resolves them. Absent ⇒ the
+  // reader's own previous review.
+  teammate?: { userId: number; login: string };
 }
 
 // Why a previous review's finding was left out of the follow-up:
@@ -7229,6 +7234,10 @@ export interface ClaudeReview {
   trigger?: ClaudeReviewTrigger;
   // true ⇒ a FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review. Absent otherwise.
   fresh?: boolean;
+  // true ⇒ a MANUAL run started with "Review and post" (`GenerateReviewBody.postMode: 'post'`,
+  // migration 0161): it posts itself under the auto-post rules when it (a pair: both halves) ends;
+  // what happened is on `autoPost`. Absent ⇒ "Review only" (or an auto run).
+  postOnFinish?: boolean;
   // 'replies' ⇒ a REPLIES PASS (migration 0136): it judged only people's replies on Limn's own posted
   // findings (docs/CLAUDE-REVIEW.md § The replies pass) — no findings, its `followUp` holds the
   // judgements, its `verdict` is the outcome the replies point to. Absent ⇒ a full review.
@@ -7344,6 +7353,60 @@ export type ClaudeReviewTrigger = 'manual' | 'auto';
 // What kind of run a `claude_reviews` row is beyond a full review: 'replies' = a REPLIES PASS, which
 // judged only people's replies on Limn's own posted findings (`claude_reviews.kind`, migration 0136).
 export type ClaudeReviewKind = 'replies';
+
+// ---- TEAMMATES' POSTED REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews) ----
+// A review a TEAMMATE'S Limn posted to GitHub (summary + finding comments), imported at sync as a
+// read-only `claude_reviews` row (`kind = 'teammate'`, migration 0160). A review a teammate kept in
+// their own Limn never reaches GitHub, so it is never seen here.
+
+/** `claude_reviews.teammate` (JSON): what the summary marker said (shared `parseLimnReviewMarker`). */
+export interface TeammateReviewRecord {
+  // The GitHub review's numeric id (the `#pullrequestreview-<id>` link). null when not synced.
+  githubReviewId: string | null;
+  // How the review ran: 'auto' | 'manual'; null on a legacy post (no metadata).
+  run: 'auto' | 'manual' | null;
+  pair: boolean;
+  // The run(s) behind it, in half order; [] on a legacy post.
+  runs: Array<{ provider: AiProviderId | null; model: string | null; effort: string | null }>;
+  limnVersion: string | null;
+  // true = the post carried no head SHA, so the head is the PR's newest commit at the post time.
+  headInferred: boolean;
+  // The finding comments posted with no severity lead (their stored severity is a placeholder).
+  unlabelled?: string[];
+}
+
+/** One finding of a teammate's posted review, rebuilt from its GitHub comment. */
+export interface ClaudeTeammateFinding {
+  id: number;
+  path: string;
+  line: number | null;
+  // null = posted without a severity lead.
+  severity: Exclude<ClaudeFindingSeverity, 'praise'> | null;
+  title: string;
+  body: string;
+  kind: 'inline' | 'pr_comment';
+  // The comment on GitHub (`safeExternalUrl` before use). null when its id was not synced.
+  githubUrl: string | null;
+  // The synced review thread it opens (inline only), for "Open in Changes". null otherwise.
+  threadId: number | null;
+}
+
+/** `ClaudeReviewResponse.teammateReviews[]` — read-only. */
+export interface ClaudeTeammateReview {
+  reviewId: number;
+  poster: { userId: number; login: string; displayName: string | null; avatarUrl: string | null };
+  headSha: string;
+  headInferred: boolean;
+  postedAt: string;
+  githubUrl: string | null;
+  summary: string;
+  verdict: ClaudeReviewVerdict | null;
+  run: 'auto' | 'manual' | null;
+  pair: boolean;
+  runs: Array<{ provider: AiProviderId | null; model: string | null; effort: string | null }>;
+  limnVersion: string | null;
+  findings: ClaudeTeammateFinding[];
+}
 
 // THE REPLIES PASS on the AI Review tab (`ClaudeReviewResponse.repliesCheck`). DB-only + in memory.
 export interface ClaudeRepliesCheckState {
@@ -7482,6 +7545,9 @@ export interface ClaudeReviewResponse {
   currentThreadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
   // The PR's newest Check threads run (any status). null/absent = never run.
   threadCheck?: ThreadCheckRun | null;
+  // REVIEWS TEAMMATES' LIMN POSTED TO GITHUB (newest first), read-only. Absent on an older server;
+  // [] when none. Never in `review` / `history`, which stay the reader's own runs.
+  teammateReviews?: ClaudeTeammateReview[];
   // THE REPLIES PASS: unjudged replies on Limn's own findings and the newest pass. ⚠ `review` above
   // is the latest FULL review; a replies pass is listed in `history` (kind 'replies'). Absent = an
   // older server.
@@ -7725,10 +7791,19 @@ export interface GenerateReviewBody {
   // the same depth) with Claude's findings as already raised. Both must be signed in and able to
   // review, else a 400. `model` and `provider` are ignored. Boolean only.
   pair?: boolean;
+  // THE SPLIT BUTTON'S CHOICE. 'post' ⇒ "Review and post": when the run (a pair: both halves)
+  // succeeds it posts ONE review exactly as auto-posting does (the workspace's kinds and verdict
+  // rules, the claim before any write, never retried) — the press is the consent, so the workspace's
+  // auto-post switch need not be on. 'review_only' (or omitted) ⇒ kept in Limn. Anything else is a 400.
+  postMode?: ReviewPostMode;
   // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
   // (No stories either: a PR review checks none — the ticket review does, StartTicketReviewBody.
   // A stale `ticket`/`tickets` key is stripped by the route schema.)
 }
+
+/** The manual review button's two choices (`GenerateReviewBody.postMode`). */
+export const REVIEW_POST_MODES = ['review_only', 'post'] as const;
+export type ReviewPostMode = (typeof REVIEW_POST_MODES)[number];
 
 // Saves the user's authored draft; never mutates Claude's summary/verdict.
 export interface UpdateReviewBody {

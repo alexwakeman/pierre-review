@@ -8,6 +8,7 @@ import type {
   BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
+  LimnReviewMeta,
   ClaudeFindingSide,
   ClaudeReviewModel,
   ClaudeFindingLens,
@@ -554,6 +555,10 @@ export interface PostReviewArgs {
   // that ships.
   pierreMarker?: boolean; // append a hidden `<!-- pierre:claude-review v=1 -->` marker
   pierreFooter?: boolean; // RETIRED: once appended a visible footer to the posted review body
+  // THE HIDDEN METADATA in the summary marker (shared `limnReviewMarker`, docs/CLAUDE-REVIEW.md
+  // § Teammates' reviews): how the review ran, so a teammate's Limn can show it. The seam fills the
+  // head (`reviewHeadSha`), the verdict and the Limn version itself. OPTIONAL: absent ⇒ the bare marker.
+  limnMeta?: Pick<LimnReviewMeta, 'run' | 'pair' | 'runs'> | null;
 }
 
 export type PostReviewOutcome =

@@ -31,7 +31,7 @@ export function useWorkspaceMetrics(workspaceId: number | null) {
   });
 }
 
-// This Sprint → "Merged so far": every PR merged in the workspace's reporting window. Same
+// Open PRs → Merged: every PR merged in the workspace's reporting window. Same
 // `ws:<id>` key discipline and `skipToken` hold as `useWorkspaceMetrics`.
 export function useMergedPrs(workspaceId: number | null) {
   const id = workspaceId;

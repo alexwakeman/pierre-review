@@ -184,6 +184,7 @@ describe('the panel', () => {
       autoMerge: false,
       autoApprove: false,
       autoResolveConflicts: false,
+      autoFix: false,
       policy: { maxLevel: 'major', securityOnly: false, ecosystems: null },
     });
     expect(got.bots.map((b: any) => [b.login, b.trusted, b.canRebase])).toEqual([

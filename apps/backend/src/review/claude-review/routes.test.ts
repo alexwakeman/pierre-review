@@ -150,6 +150,36 @@ describe('a from-scratch review (`fresh`)', () => {
   });
 });
 
+// THE SPLIT BUTTON (`postMode`): 'post' asks the manager to post the run when it ends; 'review_only'
+// or none keeps it in Limn. Anything else is a 400 and starts nothing.
+describe('the post mode (`postMode`)', () => {
+  const opts = (): unknown => (startReview.mock.calls[0] as unknown[])[5];
+
+  it("'post' ⇒ 202 and the run posts when it ends", async () => {
+    const { app } = await build();
+    expect((await post(app, { postMode: 'post' })).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: false, postOnFinish: true });
+  });
+
+  it("'review_only' or absent ⇒ kept in Limn", async () => {
+    const { app } = await build();
+    expect((await post(app, { postMode: 'review_only' })).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: false });
+    startReview.mockClear();
+    expect((await post(app, {})).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: false });
+  });
+
+  it('anything else ⇒ 400, no run', async () => {
+    const { app } = await build();
+    for (const postMode of ['POST', 'auto', '', 1, true, null, ['post'], {}]) {
+      const res = await post(app, { postMode });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(startReview).not.toHaveBeenCalled();
+  });
+});
+
 describe('the auto-review lock', () => {
   it('an auto review queued or running ⇒ 409 AutoReviewInProgress', async () => {
     const { app } = await build();

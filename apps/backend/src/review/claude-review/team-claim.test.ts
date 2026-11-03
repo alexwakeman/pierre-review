@@ -134,6 +134,23 @@ describe('decideTeamClaim (the one fold)', () => {
   it('a failure or error line (never Limn’s own) is free', () => {
     expect(decideTeamClaim([line('bob', 'error', NOW - MIN)], 'me', NOW).kind).toBe('free');
   });
+  it("the PR AUTHOR's own lines never hold the head (reviewed or reviewing); a non-author teammate's still do", () => {
+    const authorDone = [line('carol', 'success', NOW - 5 * MIN, 'carol reviewed · 2 comments')];
+    const authorLive = [line('carol', 'pending', NOW - 5 * MIN)];
+    expect(decideTeamClaim(authorDone, 'me', NOW).kind).toBe('reviewed'); // the contrast: no author known
+    expect(decideTeamClaim(authorDone, 'me', NOW, 'carol')).toEqual({ kind: 'free' });
+    expect(decideTeamClaim(authorLive, 'me', NOW, 'Carol')).toEqual({ kind: 'free' });
+    // A non-author teammate's review behind the author's newer line still holds.
+    expect(decideTeamClaim([line('bob', 'success', NOW - 9 * MIN, 'bob reviewed · 1 comment'), ...authorDone], 'me', NOW, 'carol')).toMatchObject({
+      kind: 'reviewed',
+      login: 'bob',
+    });
+    expect(decideTeamClaim([line('bob', 'pending', NOW - 2 * MIN), ...authorLive], 'me', NOW, 'carol')).toMatchObject({ kind: 'reviewing', login: 'bob' });
+    // The reader IS the author: nothing is left out (their own lines are the race they are in).
+    expect(decideTeamClaim([line('me', 'pending', NOW - 3 * MIN), line('bob', 'pending', NOW - 2 * MIN)], 'me', NOW, 'me').kind).toBe('mine');
+    // staleTeammateLine never releases the author's LIVE line.
+    expect(staleTeammateLine(authorLive, 'me', NOW)).toBeNull();
+  });
 });
 
 // ---- the lifecycle, over a real DB ----
@@ -306,6 +323,34 @@ describe('claimBeforeAutoRun', () => {
     f.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(r).toMatchObject({ kind: 'skip', skip: { kind: 'reviewed', login: 'bob' } });
+  });
+
+  it("the PR author's own line ⇒ runs and claims (their own review never holds a head)", async () => {
+    const f = fakeGh();
+    f.seed('limn/review-claude', line('carol', 'success', NOW - 5 * MIN, 'carol reviewed · 3 comments'));
+    const r = await tc.claimBeforeAutoRun(ctx, { ...target(), authorLogin: 'carol' }, { nowMs: () => NOW }, f.gh);
+    expect(r.kind).toBe('run');
+    expect(f.posts.map((p) => p.description)).toEqual(['me is reviewing with Claude']);
+    expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
+    // A non-author teammate's finished review still holds.
+    const g = fakeGh();
+    g.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
+    expect((await tc.claimBeforeAutoRun(ctx, { ...target(), authorLogin: 'carol' }, { nowMs: () => NOW }, g.gh)).kind).toBe('skip');
+  });
+
+  it('reads the PR author from the synced PR when the target does not name one', async () => {
+    const { eq } = await import('drizzle-orm');
+    const [u] = await db.insert(schema.users).values({ githubLogin: 'carol-tc', githubNodeId: 'U_carol_tc' }).returning().execute();
+    await db.update(schema.pullRequests).set({ authorId: u.id }).where(eq(schema.pullRequests.id, prId)).execute();
+    try {
+      expect(await tc.prAuthorLogin(ctx, 1, prId)).toBe('carol-tc');
+      expect(await tc.prAuthorLogin(ctx, 2, prId)).toBeNull(); // another account's PR
+      const f = fakeGh();
+      f.seed('limn/review-claude', line('carol-tc', 'pending', NOW - 2 * MIN));
+      expect((await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh)).kind).toBe('run');
+    } finally {
+      await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, prId)).execute();
+    }
   });
 
   it('lost race ⇒ stand down and re-post the winner’s line', async () => {

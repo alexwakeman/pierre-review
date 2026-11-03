@@ -41,6 +41,7 @@ import {
   expiredReviewingSkips,
   forgetTeamClaimSkip,
   newestLine,
+  prAuthorLogin,
   releasedLine,
   sameGithubLogin,
   staleTeammateLine,
@@ -305,7 +306,7 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       if (!stale) {
         // Settled (or claimed again): nothing to release. The tab's durable line follows what the head
         // says now: their review ⇒ "reviewed" with their line; a free line ⇒ none.
-        const now = decideTeamClaim(lines, me, nowMs);
+        const now = decideTeamClaim(lines, me, nowMs, await prAuthorLogin(ctx, accountId, prId));
         if (now.kind === 'reviewed' || now.kind === 'reviewing') {
           await recordTeammateLine(ctx, accountId, prId, {
             provider: skip.provider,

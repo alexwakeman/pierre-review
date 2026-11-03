@@ -26,6 +26,9 @@
 //   team-claim-ledger.ts) BEFORE its pending line is posted, and moved on after every write. The
 //   reconciler (team-claim-release.ts, at boot and on every auto-review tick) releases any open row
 //   whose run is not queued or running in this process — a restart, a dropped run, a failed final write.
+// ⚠ THE PR AUTHOR'S OWN LINES ARE LEFT OUT (2026-11-03): the author cannot approve their own PR, so
+//   their Limn reviewing it holds nothing and the reader's Limn still reviews (a follow-up on the
+//   author's posted review). Only when the reader is not the author.
 // ⚠ ONE PURE FOLD decides (`decideTeamClaim`): the newest line settles it — a success by someone else
 //   is "already reviewed" (a Clear is free), a failure/error is free; under a pending line, the
 //   claimants since the last settling line race: among those whose newest line is inside the lease,
@@ -145,8 +148,20 @@ export type TeamClaimDecision =
 
 /**
  * THE ONE FOLD over one context's history (any order). Pure. `me` is the reader's GitHub login.
+ *
+ * `author`: the PR author's GitHub login. ⚠ THE AUTHOR'S OWN REVIEW NEVER HOLDS A HEAD (2026-11-03):
+ * the author cannot approve their own PR, so their Limn's lines (pending or done) are left out of the
+ * fold and the reader's Limn still reviews — a follow-up on the author's posted review (manager.ts,
+ * teammate-anchor.ts). A non-author teammate's lines hold exactly as before. When the READER is the
+ * author, nothing is left out (their own lines are the race they are in).
  */
-export function decideTeamClaim(lines: readonly TeamClaimLine[], me: string | null, nowMs: number): TeamClaimDecision {
+export function decideTeamClaim(
+  lines: readonly TeamClaimLine[],
+  me: string | null,
+  nowMs: number,
+  author: string | null = null,
+): TeamClaimDecision {
+  if (author != null && !sameLogin(author, me)) lines = lines.filter((l) => !sameLogin(l.login, author));
   if (lines.length === 0) return { kind: 'free' };
   const sorted = [...lines].sort(order);
   const last = sorted[sorted.length - 1]!;
@@ -426,6 +441,27 @@ export interface TeamClaimTarget {
   number: number;
   headSha: string;
   provider: AiProviderId;
+  // The PR author's GitHub login (their own Limn's lines never hold the head). Absent ⇒ read from
+  // the synced PR (`prAuthorLogin`); null ⇒ unknown, nothing is left out.
+  authorLogin?: string | null;
+}
+
+/** The PR author's GitHub login, from the synced PR (account-scoped). null when unknown. Never throws. */
+export async function prAuthorLogin(ctx: AgentContext, accountId: number, prId: number): Promise<string | null> {
+  try {
+    const { pullRequests: prs, users } = ctx.schema;
+    if (!prs?.authorId || !users?.githubLogin) return null;
+    const rows = (await ctx.db
+      .select({ login: users.githubLogin })
+      .from(prs)
+      .innerJoin(users, eq(users.id, prs.authorId))
+      .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
+      .limit(1)
+      .execute()) as Array<{ login: string | null }>;
+    return rows[0]?.login ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** A claim this run holds (or a run that went ahead without one: `record.state === 'unmarked'`). */
@@ -555,7 +591,9 @@ export async function claimBeforeAutoRun(
     ctx.log.warn(`team claim pr ${prId}: statuses unreadable (${errText(err)}); reviewing without a line`);
     return unmarked(login, unmarkedReason(err, accountId));
   }
-  const first = decideTeamClaim(lines, login, now());
+  // The PR author's own lines never hold the head (`decideTeamClaim`).
+  const author = target.authorLogin !== undefined ? target.authorLogin : await prAuthorLogin(ctx, accountId, prId);
+  const first = decideTeamClaim(lines, login, now(), author);
   const skipOf = (d: Extract<TeamClaimDecision, { kind: 'reviewed' | 'reviewing' }>): TeamClaimStart => {
     const skip: ClaudeTeamClaimSkip = {
       provider,
@@ -631,7 +669,7 @@ export async function claimBeforeAutoRun(
   } catch {
     return marked(); // our line is up; nothing says anyone else's is earlier
   }
-  const second = decideTeamClaim(after, login, now());
+  const second = decideTeamClaim(after, login, now(), author);
   if (second.kind !== 'reviewing' && second.kind !== 'reviewed') return marked();
   // We lost: stand down. Under a pending race, re-post the winner's line so GitHub's displayed
   // latest line names them (a success that landed after ours is already the latest line). Our row is

@@ -186,7 +186,9 @@ describe('a failed review POST that landed anyway', () => {
     ]);
     fetchReviewComments.mockImplementationOnce(async () => [{ id: 600, path: 'src/foo.ts', line: 11, side: 'RIGHT', body: '' }]);
     const out = await seam.postReview(args);
-    expect(sent).toMatch(/^Lead\.\n\n<!-- pierre:claude-review v=1 a=[0-9a-f]{12} -->$/);
+    // The summary marker keeps its `v=1 a=<nonce>` prefix; the hidden metadata (head, verdict, Limn
+    // version) follows (shared limn-review-meta.ts).
+    expect(sent).toMatch(/^Lead\.\n\n<!-- pierre:claude-review v=1 a=[0-9a-f]{12} h=HEAD d=COMMENT( lv=[0-9.]+)? -->$/);
     expect(out).toMatchObject({ postedReviewId: '13', inlineFindingIds: [7] });
     expect(fetchReviewComments.mock.calls.at(-1)).toEqual(['acme', 'api', 1, '13']);
   });
@@ -222,5 +224,31 @@ describe('a failed review POST that landed anyway', () => {
     fetchPrReviews.mockRejectedValueOnce(new Error('502')).mockResolvedValueOnce([]);
     await expect(seam.postReview(args)).rejects.toThrow(/internal error/);
     expect(fetchPrReviews).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the summary marker carries how the review ran', () => {
+  it('stamps limnMeta, the head, the verdict; a teammate parses it back', async () => {
+    const { postReview } = await import('./post-seam.js');
+    const { parseLimnReviewMarker } = await import('@pierre-review/shared');
+    const out = await postReview({
+      owner: 'acme',
+      name: 'api',
+      prNumber: 1,
+      reviewHeadSha: 'HEAD',
+      body: 'Lead.',
+      verdict: 'REQUEST_CHANGES',
+      includedFindings: [],
+      dryRun: true,
+      limnMeta: { run: 'auto', pair: false, runs: [{ provider: 'codex', model: 'gpt-5.5', effort: 'high' }] },
+    });
+    const body = (out as { preview: { body: string } }).preview.body;
+    expect(body.startsWith('Lead.\n\n<!-- pierre:claude-review v=1 a=')).toBe(true);
+    expect(parseLimnReviewMarker(body)).toMatchObject({
+      legacy: false,
+      run: 'auto',
+      verdict: 'REQUEST_CHANGES',
+      runs: [{ provider: 'codex', model: 'gpt-5.5', effort: 'high' }],
+    });
   });
 });

@@ -76,7 +76,7 @@ import { useFillToPaneBottom } from '../ui/stickyFill.js';
 // THE OPEN PRs ROWS — Activity → Open PRs in the redesign (docs/redesign/DESIGN.md): one LINE per
 // pull request, the detail in a SidePanel. OpenPrsCards still owns every read (one batched request
 // per kind, the ticket gate, the sort, the stacks, the merged panels) and hands the folded answers
-// here; this file only draws them. The story view and Reports → "Merged so far" keep the cards.
+// here; this file only draws them. The story view and Open PRs → Merged keep the cards.
 //
 // THE ROW, left to right, most important first:
 //   lead: can it land? (mergeVerdict — red conflicts/blocked, green ready, grey otherwise, Draft)
@@ -214,9 +214,10 @@ const COLUMNS: readonly OpenPrsColumn[] = [
   { key: 'age', label: 'Updated', title: 'Time since the last activity', width: 60, align: 'right', hideBelow: null },
 ];
 
-/** The columns a row draws: AI review only where AI runs; size and author give way to the docked panel. */
+/** The columns a row draws: AI review only where AI runs. With the drawer docked, size goes and the
+ *  author and age move onto the row's second line (`compact`), so neither is cut off. */
 export function openPrsColumns({ claudeOn, compact }: { claudeOn: boolean; compact: boolean }): OpenPrsColumn[] {
-  return COLUMNS.filter((c) => (c.key !== 'ai' || claudeOn) && (!compact || (c.key !== 'size' && c.key !== 'author')));
+  return COLUMNS.filter((c) => (c.key !== 'ai' || claudeOn) && (!compact || (c.key !== 'size' && c.key !== 'author' && c.key !== 'age')));
 }
 
 const HIDE_BELOW: Record<'sm' | 'md' | 'lg', string> = { sm: 'max-sm:hidden', md: 'max-md:hidden', lg: 'max-lg:hidden' };
@@ -674,8 +675,8 @@ function PrRow({
   selected: boolean;
   data: OpenPrsRowsData;
   showTicket: boolean;
-  /** The docked panel is open beside the list: the size and author columns (both in the panel) go,
-   *  so the title keeps its room. */
+  /** The docked panel is open beside the list: the size column goes, and the repo, author and age
+   *  drop onto a second line under the title, so the title keeps its room and nothing is cut off. */
   compact: boolean;
   onSelect: (i: number) => void;
   onDoubleOpen: () => void;
@@ -694,11 +695,34 @@ function PrRow({
   const activity = pr.updatedAt ?? pr.openedAt;
   const columns = openPrsColumns({ claudeOn: data.claudeOn, compact });
   return (
-    <Row listId={listId} index={index} selected={selected} onSelect={onSelect} className="select-none">
+    <Row listId={listId} index={index} selected={selected} onSelect={onSelect} className={cx('select-none', compact && '!h-auto min-h-row py-1.5')}>
       <span className="contents" onDoubleClick={onDoubleOpen}>
         <RowLead>
           <StatusIcon tone={lead.tone} icon={lead.icon} label={lead.label} iconOnly title={lead.detail != null ? `${lead.label}: ${lead.detail}` : lead.label} />
         </RowLead>
+        {compact ? (
+          // Two lines: the title, then repo#N · author · age (the columns those had are gone).
+          <span data-testid="open-prs-row-two-line" className="flex min-w-0 flex-1 flex-col">
+            <span className={cx('min-w-0 truncate', pr.isDraft ? 'text-ui-mute' : 'text-ui-ink')} title={pr.title}>
+              {pr.title}
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5 text-meta text-ui-faint">
+              <span className="min-w-0 shrink-[4] truncate" title={`${repo}#${pr.number}`}>
+                {pr.isDraft && 'Draft · '}
+                {repoShort(repo)}#{pr.number}
+                {tickets[0] != null && ` · ${tickets[0].key}${tickets.length > 1 ? ` +${tickets.length - 1}` : ''}`}
+              </span>
+              <span aria-hidden>·</span>
+              <Avatar user={author} size={12} />
+              {/* The author and age keep their room; the repo label gives way first. */}
+              <span className="max-w-[12rem] shrink-0 truncate text-ui-mute">{userLabel(author, pr.authorId)}</span>
+              <span aria-hidden>·</span>
+              <span className="shrink-0 tabular-nums" title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>
+                {shortAge(activity)}
+              </span>
+            </span>
+          </span>
+        ) : (
         <span className="flex min-w-0 flex-1 items-baseline gap-2">
           <span className={cx('min-w-0 truncate', pr.isDraft ? 'text-ui-mute' : 'text-ui-ink')} title={pr.title}>
             {pr.title}
@@ -715,6 +739,7 @@ function PrRow({
             </span>
           )}
         </span>
+        )}
         {columns.map((col) => {
           switch (col.key) {
             case 'ci':

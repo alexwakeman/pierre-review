@@ -1,6 +1,5 @@
 import { useRememberedScroll } from '../../hooks/useRememberedScroll.js';
 import { useFilters } from '../../store/filters.js';
-import { MergedPrsView } from '../Activity/MergedPrsView.js';
 import { SprintView } from '../Activity/SprintView.js';
 import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../Activity/sprintRailModel.js';
 import { panelId, tabId, Tabs, type TabItem } from '../ui/Tabs.js';
@@ -12,7 +11,7 @@ const TABS: ReadonlyArray<TabItem<SprintInnerTab>> = SPRINT_RAIL_TABS.map((t) =>
 // The **This Sprint** TAB (`activeTab === 'sprint'`, `?view=sprint`) — a FIXED tab beside Activity
 // (strip order Activity · This Sprint · Timeline). It was an Activity rail line under Pending until
 // it was promoted; a legacy `?activityRepo=sprint` lands here, as do the older Reports links
-// `?insightsTab=sprint|merged` (useUrlState's landingTabFromUrl):
+// `?insightsTab=sprint` (useUrlState's landingTabFromUrl):
 //   • Theme · Critical path · People — three independent views of the tracker's current sprint, each
 //     a lane board over the same status-bucket columns (SprintView → SprintBoards, GET
 //     /api/sprint-graph). Theme is the landing panel. The scroll position is remembered per tab
@@ -20,10 +19,10 @@ const TABS: ReadonlyArray<TabItem<SprintInnerTab>> = SPRINT_RAIL_TABS.map((t) =>
 //     the worker read the sprint at all. "Ask Claude" inside is agentic and LOCAL-ONLY, gated on
 //     `me.ai` (useSprintAiOn). A ticket shows its story in the tray beside
 //     the board (Sprint/SprintStoryTray.tsx, `?sprintStory=`).
-//   • Merged so far — every PR merged in the reporting window (MergedPrsView, GET /api/merged-prs).
-//     It needs no tracker.
+// (What has merged in the sprint is Open PRs → Merged — MergedPrsView; a legacy
+// `?sprintTab=merged` lands there.)
 // ⚠ NO TRACKER ⇒ THE THREE BOARDS SHOW THE SETUP LINE (`SprintTrackerSetup`, drawn by SprintView on
-// the graph's own `trackerOn: false`, the server's one liveness test). Merged so far needs no tracker.
+// the graph's own `trackerOn: false`, the server's one liveness test).
 // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK (`effectiveSprintTab`).
 export function SprintTabView(): JSX.Element {
   const raw = useFilters((s) => s.sprintInnerTab);
@@ -32,7 +31,7 @@ export function SprintTabView(): JSX.Element {
   // Back, or re-opening the tab, returns to where the reader was on THIS sub-tab (per session).
   const scrollRef = useRememberedScroll<HTMLDivElement>(`sprint:${tab}`);
   // THE PAGE HEADER (docs/redesign/DESIGN.md § 1): the page title once, then the page's own tabs —
-  // the shared `Tabs`, which give 1–4 from anywhere on the page (`numberKeys`). The panel below is
+  // the shared `Tabs`, which give 1–3 from anywhere on the page (`numberKeys`). The panel below is
   // labelled by its tab.
   return (
     <div ref={scrollRef} className="pb-10" data-testid="sprint-tab-view">
@@ -40,7 +39,7 @@ export function SprintTabView(): JSX.Element {
         <Tabs tabs={TABS} value={tab} onChange={setTab} label="This Sprint views" numberKeys idPrefix="sprint" className="-mx-1 mt-3" />
       </PageHeader>
       <div role="tabpanel" id={panelId('sprint', tab)} aria-labelledby={tabId('sprint', tab)} className={`pt-1 ${PAGE_GUTTER}`}>
-        {tab === 'merged' ? <MergedPrsView /> : <SprintView view={tab} />}
+        <SprintView view={tab} />
       </div>
     </div>
   );

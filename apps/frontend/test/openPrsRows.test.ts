@@ -9,7 +9,8 @@
 //   3. Every fact the card carried is reachable: the side panel names checks, reviews, threads, the
 //      tickets (story view / tracker / "Also in"), author, opened, updated, size, large-PR flag, reach
 //      and the AI review panel; its footer opens the PR, the AI review and GitHub.
-//   4. Open PRs mounts the rows; the story view and "Merged so far" keep the cards.
+//   4. Open PRs mounts the rows; the story view and Open PRs → Merged keep the cards.
+//   6. Open PRs has two tabs, Open | Merged; Merged is the old This Sprint → "Merged so far".
 //   5. The Feed's My Turn marker is the accent bar + the words (it was a yellow border).
 //
 // Run from the workspace that HAS vitest:
@@ -76,6 +77,16 @@ describe('the wiring', () => {
     expect(src('components/Activity/MergedPrsView.tsx')).not.toMatch(/layout="rows"/);
   });
 
+  it('Open PRs has an Open | Merged strip; Merged mounts MergedPrsView and This Sprint no longer does', () => {
+    const detail = src('components/Activity/OpenPrsDetail.tsx');
+    expect(detail).toMatch(/\{ id: 'open', label: 'Open' \}/);
+    expect(detail).toMatch(/\{ id: 'merged', label: 'Merged' \}/);
+    expect(detail).toMatch(/tab === 'merged' \? \([\s\S]*<MergedPrsView \/>/);
+    expect(src('components/Sprint/SprintTabView.tsx')).not.toMatch(/<MergedPrsView|import \{ MergedPrsView/);
+    // The window heading is the server's, through the shared spelling (this sprint so far / last 14 days).
+    expect(src('components/Activity/MergedPrsView.tsx')).toMatch(/reportingWindowCaption\(w\)/);
+  });
+
   it('the rows read nothing of their own: every batched request stays in OpenPrsCards', () => {
     expect(rows).not.toMatch(/useClaudeReviewStates|useCiReviewStates|useTicketReviewStates|useTicketLinks|useTicketMergedPrs\(|useQuery\(/);
     expect(cards.match(/useClaudeReviewStates\(/g)).toHaveLength(1);
@@ -131,13 +142,15 @@ describe('the wiring', () => {
       expect(c.width).toBeGreaterThanOrEqual(36);
       expect(c.title.length).toBeGreaterThan(0);
     }
-    // No AI column where AI does not run; the docked panel takes size and author.
+    // No AI column where AI does not run; the docked panel takes size, author and age columns.
     expect(openPrsColumns({ claudeOn: false, compact: false }).map((c) => c.key)).not.toContain('ai');
-    expect(openPrsColumns({ claudeOn: true, compact: true }).map((c) => c.key)).toEqual(['review', 'ci', 'threads', 'ai', 'age']);
+    expect(openPrsColumns({ claudeOn: true, compact: true }).map((c) => c.key)).toEqual(['review', 'ci', 'threads', 'ai']);
     // The row and the heading draw the same cells from the same spec.
     const row = rows.slice(rows.indexOf('function PrRow('), rows.indexOf('function TicketGroup('));
     expect(row).toMatch(/openPrsColumns\(\{ claudeOn: data\.claudeOn, compact \}\)/);
     expect(row).toMatch(/<ColCell key=\{col\.key\} col=\{col\}/);
+    // ...and the author and age move onto the row's second line, so neither is cut off.
+    expect(row).toMatch(/data-testid="open-prs-row-two-line"/);
     expect(rows).toMatch(/<ColumnHeadings columns=\{openPrsColumns\(\{ claudeOn: props\.claudeOn, compact: compactRows \}\)\}/);
   });
 

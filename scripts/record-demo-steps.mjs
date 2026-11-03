@@ -90,6 +90,42 @@ export const STEPS = [
       await explore(h, { max: 12 });
     },
   },
+  // Open PRs → Merged (`?openPrsTab=merged`; it was This Sprint's "Merged so far").
+  {
+    name: 'open-prs:merged',
+    run: async (h) => {
+      await h.go('?view=activity&openPrsTab=merged');
+      await explore(h, { max: 6, scope: 'main' });
+    },
+  },
+  // A row pressed docks the drawer (two-line rows beside it) — what it reads on open.
+  {
+    name: 'open-prs:drawer',
+    run: async (h) => {
+      await h.go('?view=activity');
+      const rows = h.page.locator('main [role="option"]');
+      const n = Math.min(3, await rows.count());
+      for (let i = 0; i < n; i++) await h.click(rows.nth(i));
+    },
+  },
+  // The header's daily auto-review limit toast reads the auto-review GET's `usage`
+  // (seed-demo-platform.ts sets Platform's limit to today's count).
+  {
+    name: 'auto-review-cap',
+    run: async (h) => {
+      await h.go('?view=activity');
+      await h.fetchGet('/api/workspaces/1/auto-review');
+      await h.fetchGet('/api/workspaces/2/auto-review');
+    },
+  },
+  // The sidebar's open tabs grouped by author: PR tabs of three authors, the reader's own (#106) first.
+  {
+    name: 'open-tabs:by-author',
+    run: async (h) => {
+      for (const id of [106, 113, 111]) await h.go(`?view=pr-detail:${id}&prTab=overview`);
+      await h.click(h.page.getByTestId('sidebar-tabs-by-author').first());
+    },
+  },
   // acme/api: its status panel (red + blue, seed-demo.ts pr_views) reads only /api/activity and
   // /api/branch-status, which the boot already records.
   { name: 'repo-console', run: (h) => h.go('?view=activity&activityRepo=2') },
@@ -148,8 +184,8 @@ export const STEPS = [
   },
   { name: 'feed:isolated', run: (h) => h.go('?view=activity&activityRepo=feed&feedPr=113') },
 
-  // ── Bots Monitoring ──
-  ...['roi', 'themes', 'benchmark', 'classification'].map((t) => ({
+  // ── Bots Monitoring (its classification moved to Settings → Bots, visited by `settings`) ──
+  ...['roi', 'themes', 'benchmark'].map((t) => ({
     name: `bots:${t}`,
     run: async (h) => {
       await h.go(`?view=activity&activityRepo=bots&botsTab=${t}`);
@@ -280,7 +316,8 @@ export const STEPS = [
   },
 
   // ── This Sprint ──
-  ...['themes', 'paths', 'people', 'merged'].map((t) => ({
+  // (`merged` moved to Open PRs → Merged: the `open-prs:merged` step.)
+  ...['themes', 'paths', 'people'].map((t) => ({
     name: `sprint:${t}`,
     run: async (h) => {
       await h.go(`?view=sprint&sprintTab=${t}`);
@@ -438,6 +475,9 @@ export const STEPS = [
       await h.openSettings();
       await h.scrollModal();
       await h.escape();
+      // Settings → Bots (every bot with its category; it was Bots Monitoring → Classification).
+      await h.fetchGet('/api/bot-reviewers?workspace=1');
+      await h.fetchGet('/api/bot-reviewers?workspace=2');
       // Settings → Features reads only /api/me (its `features`; the demo DB is an existing install, so
       // every destination shows) and its write is simulated (demo/routes.ts): nothing to fetch here.
       // Settings → Dependencies, both workspaces (scrollModal visits the tab; these make sure).
@@ -466,7 +506,7 @@ export const STEPS = [
       for (const userId of [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16]) await h.fetchGet(`/api/users/${userId}/stats`);
       // Every stored review run and its chat — Claude's and Codex's (#105 holds one of each on the
       // same head), so picking any run in a PR's history answers.
-      for (let id = 1; id <= 14; id++) {
+      for (let id = 1; id <= 20; id++) {
         await h.fetchGet(`/api/claude-reviews/${id}`);
         await h.fetchGet(`/api/claude-reviews/${id}/chat`);
       }
@@ -591,7 +631,7 @@ export const NO_RECORD_PATHS = [
 export const COVERAGE = [
   {
     files: ['apps/frontend/src/components/Activity/{OpenPrs*,RepoOpenPrList,RepoFeedHeader,RepoStats,ClaudeReviewCell,BranchStatus*,DefaultBranchesSlot,PrCardShell,LargePrFlag,BlastRadiusChip}.tsx'],
-    steps: ['open-prs', 'repo-console', 'ws2:open-prs', 'popovers'],
+    steps: ['open-prs', 'open-prs:*', 'repo-console', 'ws2:open-prs', 'popovers'],
   },
   {
     files: ['apps/frontend/src/components/Activity/{Attention*,Pending*,pending*,MyTurnDismissedList,DependencyMergeAll,DependencyAutomationLog}.{ts,tsx}'],

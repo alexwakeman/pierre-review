@@ -274,7 +274,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   Legacy `?team=<int>` with no `?workspace` IS the workspace id.
 - **The repo picker is Timeline-ONLY.** Activity, Feed, Bots and Reports cover the whole workspace.
 - **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels, Pending items or
-  sub-tabs (bot classification is a Bots Monitoring tab). A default flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
+  sub-tabs (bot classification is Settings → Bots). A default flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
   steps CHAIN).
 - **REPORTS IS TIED TO ONE REPORTING WINDOW** — resolved ONCE per request by core
   `db/reporting-window.ts` `getReportingWindow`; never a second resolver. Exceptions are LABELLED
@@ -350,9 +350,10 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   blocks. Every arm goes through `armIntentLive`. Queue repos: freshen BEFORE the first enqueue,
   never while queued.
 - **Dependency automation** (Settings → Dependencies): all OFF; ONE policy gates merge, approve,
-  resolve; the last two only for a TRUSTED bot (stored row + reader's mark). Resolve = ask the bot
-  to rebase, then an unattended AI run. ⚠ Claim before write, never retry; an AI-pushed head must go
-  green again; a person's cancel wins; red CI backs off after ONE live-proven failure.
+  resolve, AI fix; the last three only for a TRUSTED bot (stored row + the mark). ⚠ Claim
+  (DB + `limn/deps` line) before write, never retry; ≤ 2 AI runs/PR/day; AI-pushed heads go green
+  again; a person's cancel wins; red CI backs off after ONE live-proven failure; "Merged" only
+  on a landing.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
 - **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`; read the doc's
@@ -431,11 +432,11 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `WORKTREE_RULES` and the tool list change together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under
-  the reader's account, ONE review, `COMMENT` unless the OFF-by-default `autoVerdict` allows
-  stricter (then a run not approved says why — alone, ONCE per (PR, head), if nothing else posts);
-  ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
-  failure is recorded and NEVER retried. Every posted body carries the hidden marker so
+  auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO runs plus a
+  manual "Review and post" press (no switch), under the reader's account, ONE review,
+  `COMMENT` unless the OFF-by-default `autoVerdict` allows stricter (a run not approved says why,
+  ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
+  write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
 - ⚠ **A Limn FINDING comment is a BOT** (`limn:<login>`); the poster is `limn_posted_by_user_id`,
   and own-post checks read `trueAuthorId`.

@@ -421,6 +421,9 @@ async function postOutcome(
         verdict: event,
         includedFindings: [],
         dryRun: false,
+        // A replies-pass outcome, not a review: `k=replies` keeps a teammate's Limn from importing it
+        // as one (docs/CLAUDE-REVIEW.md § Teammates' reviews).
+        limnMeta: { run: 'replies', pair: false, runs: [] },
       });
       if (posted.headMoved) {
         reviewFailed = true;

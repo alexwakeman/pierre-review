@@ -59,6 +59,20 @@ describe('humanReplies', () => {
     expect(judgeableReplies(out).map((r) => r.body)).toEqual(['Intentional: the caller checks it.', 'I agree with Alice.']);
   });
 
+  it("a teammate's Limn reply (another login, Limn's marker) is Limn context, never a person's answer", () => {
+    const t = [
+      { authorLogin: 'carol', body: `Null deref.${MARK}` },
+      { authorLogin: 'carol', body: `Please fix it here.\n\n${PUSHBACK_MARKER}` }, // carol's Limn pushback
+      { authorLogin: 'carol', body: 'Will do in the next PR.' }, // carol herself
+    ].map(c);
+    const out = humanReplies(t, 'me');
+    expect(out.map((r) => [r.body, !!r.fromLimn])).toEqual([
+      ['Please fix it here.', true],
+      ['Will do in the next PR.', false],
+    ]);
+    expect(judgeableReplies(out).map((r) => r.body)).toEqual(['Will do in the next PR.']);
+  });
+
   it('keeps the last five, each clipped', () => {
     const many = [{ authorLogin: 'me', body: 'root' }, ...[1, 2, 3, 4, 5, 6].map((n) => ({ authorLogin: 'alice', body: `${n}`.repeat(2_000) }))].map(c);
     const out = humanReplies(many, 'me');

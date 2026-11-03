@@ -28,6 +28,7 @@ import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { HeaderToastStrip } from './components/HeaderToasts.js';
 import { AiBudgetToast } from './components/AiBudget.js';
+import { AutoReviewCapToast } from './components/AutoReviewCapToast.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
 import { useSettingsModal } from './store/settingsModal.js';
@@ -273,6 +274,8 @@ export default function App(): JSX.Element {
       <AiFixBanner />
       {/* Automatic Claude runs paused by the reader's spend budget. */}
       <AiBudgetToast />
+      {/* Auto reviews near, or at, the workspace's daily limit. */}
+      <AutoReviewCapToast />
       {/* The way back into a conflict resolver the reader closed with decisions still in the store.
           The resolver has no URL and no history entry, so this card is the ONLY route back. */}
       <ClosedResolverToast />

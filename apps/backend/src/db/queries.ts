@@ -273,6 +273,7 @@ import { dormantBotUserIds } from './bot-dormancy.js';
 import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
 import { limnBotUserIdForUser, limnBotUserIds } from './limn-bots.js';
+import { ownRunsOnly } from './teammate-reviews.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -9757,7 +9758,8 @@ export async function listClaudeReviewsByRepo(
     })
     .from(claudeReviews)
     .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
-    .where(and(eq(claudeReviews.accountId, accountId), eq(pullRequests.repoId, repoId)))
+    // The reader's own runs: a teammate's posted review shows only on its PR's AI Review tab.
+    .where(and(eq(claudeReviews.accountId, accountId), eq(pullRequests.repoId, repoId), ownRunsOnly(claudeReviews.kind)))
     .orderBy(desc(claudeReviews.id))
     .execute();
 

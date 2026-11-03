@@ -12,6 +12,7 @@ import type {
   ClaudeReviewListResponse,
   AiPickerModel,
   AiProviderId,
+  ReviewPostMode,
   ClaudeReviewResponse,
   ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
@@ -247,8 +248,9 @@ export function useGenerateReview(prId: number) {
     // (hooks/useTicketReview.ts), a separate run.
     // `provider`: the per-run picker's choice (absent ⇒ the server's default provider).
     // `pair`: Claude + Codex (lib/modelPick.ts `PAIR_PICK_VALUE`).
-    mutationFn: (vars: { model: AiPickerModel; provider?: AiProviderId; pair?: boolean }) =>
-      api.generateClaudeReview(prId, vars.model, vars.provider, vars.pair),
+    // `postMode`: the split button's choice ("Review and post" posts the run when it ends).
+    mutationFn: (vars: { model: AiPickerModel; provider?: AiProviderId; pair?: boolean; postMode?: ReviewPostMode }) =>
+      api.generateClaudeReview(prId, vars.model, vars.provider, vars.pair, vars.postMode),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
     // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise

@@ -154,7 +154,13 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
   rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
   ⓘ), **Open tabs** (EVERY open tab at every width — `useTabChip`'s icon + words, a ✕, the strip's
-  right-click menu, "Close all"; the active row scrolls into view; `data-testid="sidebar-tabs"`), and the
+  right-click menu, "Close all"; the active row scrolls into view; `data-testid="sidebar-tabs"`; a
+  **Group by author** icon toggle (`PeopleIcon`, `aria-pressed`, remembered in `localStorage`
+  `limn:sidebarTabsByAuthor` via `useShell.tabsByAuthor`, try/catch) puts each PR tab under its
+  author's name — the reader's own first, then A–Z, then "Other" for tabs with no author
+  (`lib/sidebarTabGroups.ts`, test/sidebarTabGroups.test.ts). The author is the tab's own
+  `TabMeta.authorLogin/authorDisplayName`, never a fetch. The list has no drag reorder; the top
+  bar's strip keeps its own, ungrouped), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
   the bell, Help, the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
   ⚠ **RENDERED ONCE, NEVER UNMOUNTED**: below `lg` the closed drawer is `display: none`, because
@@ -366,8 +372,17 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
   session, never stored) whose line is the chevron, the ticket key + story name (→ the story view) and
   the PR count ONLY — status, assignee, criteria met, Re-check and the roll-up are in the story view
-  (2026-11-02). Drawing pages are 60
-  rows. The story view and Reports → "Merged so far" keep the CARDS described below. The Feed keeps
+  (2026-11-02). **With the drawer docked open (`compact`) the row goes TWO LINES** (2026-11-03): the
+  Size, Author and Updated columns go and the title's second line reads `repo#N · avatar author ·
+  age` (`data-testid="open-prs-row-two-line"`; the repo label gives way first, the author and age
+  never truncate away) — before, the author column was dropped and the age clipped at 1280px.
+  Drawing pages are 60
+  rows. The story view and Open PRs → Merged keep the CARDS described below.
+  **Open PRs has TWO TABS, Open | Merged** (`filters.openPrsTab`, `?openPrsTab=merged`, emitted
+  only on Open PRs, the `'open'` default omitted; transient, no `FILTER_STORAGE_VERSION` bump).
+  Merged mounts `MergedPrsView` (below, § This Sprint's former "Merged so far"); the default
+  branches, auto-review line and toolbar belong to Open and show there only. ⌘K: "Open pull
+  requests: Merged". The Feed keeps
   its stream but in the row language (no borders, grey category icons, My Turn = accent bar + words,
   `data-my-turn`). Both register their switches in ⌘K. Pinned in `test/openPrsRows.test.ts`.
   **Open PRs is Activity's FIRST RAIL LINE AND THE DEFAULT** (`activityRepoId: 'open-prs'`, the
@@ -847,6 +862,18 @@ level with the ticket's header, as the AI Review tab's does — the story tab's 
 section, below the page header), and while the rail is drawn the story has NO card tone and the header
 no top inset (a surface card under a rail that starts beside it, with the design breaking out across
 the rail, read as an L-shaped slab). One column (the drawer, a laptop) keeps the card.
+
+**THE MANUAL REVIEW SPLIT BUTTON** (2026-11-03; `ClaudeReviewTab.tsx`, `lib/reviewPostMode.ts`,
+`test/reviewPostMode.test.ts`). The run button is a split button inside the ONE `AiRunGate kind="review"`,
+beside the unchanged `ModelPicker`: the main part runs the reader's LAST choice — "Review only" /
+"Review and post" ("Re-review only" / "Re-review and post" once a review exists), remembered in
+localStorage (`limn.reviewPostMode`, every read and write in try/catch, default "Review only") — and the
+caret (`CaretIcon`, `ui/Menu`) lists both; picking one runs it and becomes the new default. An ⓘ explains
+the two. "Review and post" sends `postMode: 'post'` and the tab says "Posts to GitHub when done." while
+it runs (`pressedPostLine`). "Review only" PRE-FILLS the summary box with the finished run's summary
+(`summaryPrefillOf` → `nextSummaryPrefill`): only an empty box or one still holding the earlier pre-fill
+unchanged — ⚠ never text the reader typed; the effect runs AFTER the per-run re-seed so it fills the
+seeded box. docs/CLAUDE-REVIEW.md § Auto-posting → "Review and post".
 
 **THE AI REVIEW TAB'S WIDE LAYOUT** (2026-10-31; `ClaudeReviewTab.tsx` `REVIEW_RAIL`, the shared
 `components/RailLayout.tsx` — the story view's mechanism, generalised; `test/prTabWire.test.ts`). The tab
@@ -1819,6 +1846,12 @@ reappears.
   in another repo, and a bare "repo#N" resolves server-side only when exactly ONE of the account's
   repos has that name. Unresolved refs, refs inside links or code, and the viewed PR itself stay plain
   text. Markdown gets it via the `rehypeReviewPrRefs` plugin, which runs AFTER the sanitizer.
+- **Teammates' reviews** (`components/TeammateReviews.tsx`, words in `lib/teammateReviews.ts`, docs/CLAUDE-REVIEW.md
+  § Teammates' reviews): under the history select, one collapsed card per review a teammate's Limn POSTED
+  (`ClaudeReviewResponse.teammateReviews`): avatar, "Robin's review", the verdict pill, "Posted on GitHub ·
+  abc1234 · Auto review · <aiRunLabel>", "On GitHub". Opened: the summary and each finding (severity, text,
+  `path:line` → `onOpenThread`, "On GitHub"). READ-ONLY: never in the history select, no Post / Re-post /
+  Delete / auto-post control, no chat.
 - **When did the review run? ONE component, `ReviewedAgo` (`components/ReviewedAgo.tsx`)** over
   `reviewedAgoLabel()` (`lib/claudeReviewColumn.ts`): muted "reviewed 2 days ago" (past a month,
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
@@ -2019,14 +2052,14 @@ but broken deep links).
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads only view uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
-- **Bots view is `ROI ('roi' = Measure) | Themes | Benchmark | Classification`** (`'settings'` LEFT
+- **Bots view is `ROI ('roi' = Measure) | Themes | Benchmark`** (`'settings'` LEFT
   the union long ago; `'advisor'` LEFT 2026-10-26 with the Bot Tuning Advisor; `'classification'`
-  JOINED 2026-10-26 from the Feed, bullet below)
+  JOINED 2026-10-26 from the Feed and LEFT 2026-11-03 for Settings → Bots, bullet below)
   (`botsInnerTab` lost `'behaviour'` — transient + URL-silent, so member removal is safe — gained
   `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). `'themes'`
-  is LISTED only while `me.ai.enabled` and `'classification'` only on the rail (`repoId == null`);
-  both degrade to `'roi'` in `effectiveBotsTab` (render-only, never written back), and so does any
-  value outside `BOTS_INNER_TABS` (a stale `'advisor'`). Inside `BotRoiPanel`:
+  is LISTED only while `me.ai.enabled` and degrades to `'roi'` in `effectiveBotsTab` (render-only,
+  never written back), and so does any value outside `BOTS_INNER_TABS` (a stale `'advisor'` or
+  `'classification'`). Inside `BotRoiPanel`:
   the vendor table, its keep / tune / rarely used verdicts (the label for the `noisy` verdict id),
   the **Inflation column** (the weekly sparkline stays separately conditional on
   `mlInflation.weekly`, an extra scan width — as does `InflationHistoryChart`, the enlarged twin of
@@ -2048,15 +2081,17 @@ but broken deep links).
   `<th>`, the `<td>` and the "set a monthly price" clause, and gets a REPLACEMENT sentence naming
   the reason and pointing at the rail — an elision alone reads as a bug or a permissions glitch,
   and invites the next reader to "restore" the column. ⚠ **Do NOT simplify `showCost` to `true`.**
-- **Bot classification is a BOTS MONITORING tab** (`?activityRepo=bots&botsTab=classification`,
-  rail only). It was the Feed's "Bot classification" sub-tab until 2026-10-26; the Feed has no
-  sub-tabs now (`feedInnerTab`, `FEED_INNER_TABS` and `Activity/feedTabsModel.ts` are deleted). ⚠
-  Two legacy URLs land here, both mapped by `readFromUrl`: `?activityRepo=feed&feedTab=classification`
-  (→ `activityRepo='bots'` + `botsInnerTab='classification'`) and `?activityRepo=bots&botsTab=settings`.
+- **Bot classification is SETTINGS → BOTS** (2026-11-03; a WORKSPACE section,
+  `settings/BotClassificationSection.tsx`, under the tab's global "Bot comment scoring";
+  `openSettings('bots')` opens it — the ROI panel's "Set a bot's monthly price in Settings → Bots" is
+  that link). It was Bots Monitoring → Classification (2026-10-26 → 11-03), the Feed's "Bot
+  classification" sub-tab before that, and Bots → Settings before that. The Settings modal has no URL,
+  so the legacy links cannot reopen it: `?botsTab=classification|settings` seat nothing (Bots
+  Monitoring opens on ROI) and `?activityRepo=feed&feedTab=classification` lands on Bots Monitoring.
   `feedTab` stays in `NAV_KEYS` (parsed, never emitted), like `attnPersonal`. It mounts
-  `BotSettingsPanel` →
-  `DetectedReviewersTable`: one CARD per bot in a responsive grid (1 column on a phone, 2 from `md`,
-  3 at `2xl`) — the account's own GitHub avatar (an App bot's avatar IS its vendor logo; `... on Bot
+  `DetectedReviewersTable` (`BotSettingsPanel` is DELETED): one CARD per bot in a grid of as many
+  ~26rem columns as the CONTAINER holds (`grid-cols-[repeat(auto-fill,minmax(min(100%,26rem),1fr))]`
+  — one in the modal; it was viewport breakpoints, which overflowed inside the modal) — the account's own GitHub avatar (an App bot's avatar IS its vendor logo; `... on Bot
   { avatarUrl }` is selected by the sync queries for this), else a monogram tile on the vendor colour
   whose text colour is picked by contrast (`lib/botAvatar.ts`); name + login; Role and vendor chips;
   the vendor colour as a thin LEFT accent (non-text use only); a person-judged row drawn muted. Then
@@ -2096,7 +2131,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     `benchmark-no-live-reviewers` (`rollup === []` — the fold RAN and no reviewer has commented
     yet). ⚠ A `?? []` collapsing the last two told a reader whose bots simply had not commented that
     their BUILD was deficient — the ordinary state right after classifying a reviewer in
-    Bots Monitoring → Classification.
+    Settings → Bots.
   - The truncation note's remedy clause ("open a repository's own Bots tab", plus the sentence
     saying money is withheld while counters and spread still render) is **rail-only**; on the
     repository tab that advice is a no-op, and it shipped unconditional.
@@ -2472,23 +2507,26 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   which on a cold cache can take seconds, so the modal WAITS for the heading (a `MutationObserver`, for
   as long as it is open) and gives up the moment the reader scrolls, clicks or types — a late jump must
   never yank them mid-scroll. ⚠ A fixed frame budget (the first cut: ~60 frames) silently did nothing
-  on a slow server. The explanation sits behind the ⓘ. **Merged so far needs no
+  on a slow server. The explanation sits behind the ⓘ. **Open PRs → Merged needs no
   tracker** and is unaffected.
 - **The scroll position is REMEMBERED per tab** for the session (`hooks/useRememberedScroll.ts`, keyed
   `sprint:<tab>`): the tab's overlay is one scroll box shared by its sub-tabs and the board unmounts
   when another screen shows, so Back or re-opening the tab used to land at the top. It
   restores once the box is tall enough (the board arrives after mount) and stops the moment the reader
   scrolls, or after 4s. Module memory only — not persisted, not in the URL.
-- **Four tabs, DERIVED, never written back**: Theme (the landing tab, since 2026-10-18) · Critical path · People · Merged
-  so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
-  `?sprintTab=paths|people|merged` (the `'themes'` default omitted, the key emitted ONLY beside
+- **Three tabs, DERIVED, never written back**: Theme (the landing tab, since 2026-10-18) · Critical path · People.
+  ("Merged so far" LEFT 2026-11-03 for Open PRs → Merged.) The store's `sprintInnerTab` (`'paths' | 'themes' | 'people'`) is mirrored to
+  `?sprintTab=paths|people` (the `'themes'` default omitted, the key emitted ONLY beside
   `view=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
   `botsInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
 - ⚠ **Legacy links still land ON THE TAB** (`landingTabFromUrl`, test/landingTab.test.ts +
   test/urlHistory.test.ts): the rail line's `?activityRepo=sprint` (with `view=activity` or no view;
-  its `sprintTab` kept), and the older Reports tabs' `?insightsTab=sprint|merged` (only when the link
-  names Reports or no rail) → Theme / Merged so far. The retired force graph's `?sprintTab=graph` reads
-  as Theme (`sprintTabFromUrl`, store/filters.ts). None is written back.
+  its `sprintTab` kept), and the older Reports tab `?insightsTab=sprint` (only when the link
+  names Reports or no rail) → Theme. The retired force graph's `?sprintTab=graph` reads
+  as Theme (`sprintTabFromUrl`, store/filters.ts). None is written back. ⚠ Every legacy "Merged so
+  far" link — `?view=sprint&sprintTab=merged`, `?activityRepo=sprint&sprintTab=merged`,
+  `?insightsTab=merged` (Reports or no rail named) — lands on ACTIVITY → Open PRs → Merged
+  (`isLegacyMergedLink`, useUrlState).
 
 - **THE FORCE GRAPH IS DELETED (2026-10-18)** — `SprintGraph.tsx`, `sprintGraphModel.ts`,
   `SprintPathsStrip.tsx`, `sprintReferences.ts`, the `.sprint-canvas` CSS and their tests, with the
@@ -2691,8 +2729,8 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   `SprintTicketReview`, `SprintUpdatePanel`, `SprintChecksPanel`, `SprintDiffText`, `useTicketDraft`,
   `lib/ticketDraft.ts`, `lib/storyHighlights.ts`, `lib/wordDiff.ts` and the `.story-mark` / `.story-rev`
   CSS.
-- **Merged so far** (`?view=sprint&sprintTab=merged`, `MergedPrsView.tsx`) — the Open PRs
-  page over the work that LANDED: every PR merged in the
+- **Open PRs → Merged** (`?openPrsTab=merged`, `MergedPrsView.tsx`; This Sprint → "Merged so far"
+  until 2026-11-03) — the Open PRs page over the work that LANDED: every PR merged in the
   REPORTING WINDOW from `GET /api/merged-prs` (`useMergedPrs`, `ws:<id>` key, no capability gate), header named through `reportingWindowText.ts` + "N pull requests merged".
   ⚠ **It REUSES `OpenPrsCards` with `variant="merged"`, never a fork** — that prop drops the CI and
   merge-readiness chips (a "Merged" chip and "merged X ago" instead), the stack roll-up, the Claude
@@ -2711,7 +2749,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 
 `InsightsView` is a THREE-TAB pane (Overview · Chronology · Stories — Stories sits to the RIGHT of
 Chronology since 2026-10-26; **AI usage** joins last while `me.ai.enabled`; This Sprint and Merged so far
-left for their own rail line, above). **Overview** is the pane as it was — Flow metrics above the Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
+left for their own rail line, above — Merged so far is Open PRs → Merged since 2026-11-03). **Overview** is the pane as it was — Flow metrics above the Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
 convention this file has to remember.
@@ -4302,7 +4340,8 @@ the source.
   `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
   Activity → Bots → Settings plus one toggle, which became a per-delivery field inside
   `SlackSection`). ⚠ `data-testid="bot-settings-section"` died with the latter — `pnpm shots`' 7d
-  targets `bot-settings-panel` on Bots Monitoring → Classification instead.
+  targeted `bot-settings-panel` on Bots Monitoring → Classification, which is Settings → Bots since
+  2026-11-03 (`BotSettingsPanel` deleted; the capture needs re-pointing).
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
@@ -4943,13 +4982,23 @@ each other) is GONE: every toast is now a circle in ONE cluster at the top right
 controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
 foot). App.tsx mounts, left to right: `UndoToast` (FIRST — it lives seconds and must be reachable
 now; last, a merge pill pushed it past the bar's clipped edge at 768px), the Claude reviews frame,
-`AiFixBanner`, `AiBudgetToast`, `ClosedResolverToast`, `DependencyMergeToast`, `AutoMergeBanner`,
-`GlobalLoadingBar`. ⚠ A `SidePanel` SHEET starts BELOW the top bar (`[data-shell-topbar]`), never over
+`AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`, `DependencyMergeToast`,
+`AutoMergeBanner`, `GlobalLoadingBar`. ⚠ A `SidePanel` SHEET starts BELOW the top bar (`[data-shell-topbar]`), never over
 it, so the Undo for an action taken in the sheet stays on screen; an expanded card is `z-[60]`.
 On lg+ a page with its own header seats the strip there and the empty top bar hides: `PageHeader`
 (the story tab) and the full-screen PR detail tab, both through `PageToastSlot`. The bottom PR pane on
 the Timeline never hosts it.
 
+- **THE DAILY AUTO-REVIEW LIMIT** (`AutoReviewCapToast`, pure half `lib/autoReviewCap.ts`): reads the
+  auto-review GET's `usage` (`useWorkspaceAutoReview`, the Open PRs counter's query; re-read once a
+  minute while auto review is on). `autoReviewCapState` folds it: **near** at ≥ 80% of the cap AND
+  ≥ 2 used ("Auto reviews · 16 of 20 used today."), **reached** at `used >= cap` ("Auto reviews
+  stopped for today · The daily limit of 20 is used. They start again at <local time of the next
+  00:00 UTC>.", with "Change limit" → Settings at `auto-review`). Shown only with `me.ai.enabled`
+  and auto review ON for the workspace; tone `ai`, never `alert` (it is news, not a failure). A
+  dismissal holds for ONE `<workspaceId>:<UTC day>:<state>` (`autoReviewCapDismissKey`; a dismissed
+  near still shows reached; other days' keys are pruned), kept in `localStorage` (try/catch; a blocked
+  store keeps it for the session only).
 - **A CLUSTER OF CIRCLES, ONE PER ACTIVE JOB** (2026-11-02; it replaced the row of one-line cards).
   Each job component still renders ONE `HeaderToast`, which PORTALS a 28px circle into the cluster
   button and, while the panel is open, its section into the panel. A circle is the job's icon, a
@@ -5545,7 +5594,7 @@ shorter form of each rule; this is the full wording.
 
 - **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels. It has no My Turn /
   Needs review / Claude / CI-failure items (Pending owns them). It has no sub-tabs: bot CLASSIFICATION is
-  Bots Monitoring → Classification (since 2026-10-26). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
+  Settings → Bots (since 2026-11-03). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
   all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
 

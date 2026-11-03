@@ -10,7 +10,9 @@ import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
 import { ArrowIcon, PullRequestIcon, RefreshIcon, RepoIcon, TicketIcon } from '../Icons.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { PageHeader, useRegisterCommands, type Command } from '../ui/index.js';
+import { PageHeader, Tabs, panelId, tabId, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
+import type { OpenPrsTab } from '../../store/filters.js';
+import { MergedPrsView } from './MergedPrsView.js';
 import { effectiveSort, pickSort, reverseSort, sortOptionsFor } from '../../lib/openPrsSort.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -29,6 +31,11 @@ import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 // page is the list. The header's count is distinct PRs: a PR shown in two ticket stacks is one PR.
 // The cards are DRAWN ten at a time (the next ten when the reader nears the bottom); the data, the
 // counts, the sort and the repo filter are always the whole list.
+//
+// TWO TABS, Open | Merged (`filters.openPrsTab`, `?openPrsTab=merged`): Merged is every PR merged in
+// the workspace's reporting window — this sprint so far, else the last 14 days (MergedPrsView over
+// GET /api/merged-prs; it was This Sprint → "Merged so far"). The header's toolbar, default branches
+// and auto-review line belong to the open list and show on Open only.
 
 export function OpenPrsDetail(): JSX.Element {
   // ALWAYS the workspace-wide key: byte-identical to `useWorkspaceOpenPrs` (the tab chip's count,
@@ -46,6 +53,8 @@ export function OpenPrsDetail(): JSX.Element {
   );
 
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
+  const tab = useFilters((s) => s.openPrsTab);
+  const setTab = useFilters((s) => s.setOpenPrsTab);
 
   const prs = useMemo(() => data?.prs ?? [], [data]);
   // null = the default activity order.
@@ -175,42 +184,60 @@ export function OpenPrsDetail(): JSX.Element {
           </>
         }
       >
-        <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-1">
-          {/* The workspace's default branches — informational, never a count. */}
-          <div className="min-w-0 flex-1 basis-64">{!emptyWorkspace && <DefaultBranchesSlot />}</div>
-          {/* Today's auto reviews against the cap, and one sweep now — only while auto review is on. */}
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
-            <AutoReviewUsageLine />
-            <RunAutoReviewsButton />
-          </div>
-        </div>
-        <div role="toolbar" aria-label="Open PRs view" className="mt-2 flex flex-wrap items-center gap-1.5">
-          {ticketsOn && <OpenPrsViewToggle />}
-          <OpenPrsSortMenu sort={sort} onChange={setSort} />
-          <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
-        </div>
+        <Tabs tabs={OPEN_PRS_TAB_ITEMS} value={tab} onChange={setTab} label="Open pull requests views" idPrefix="open-prs" className="-mx-1 mt-2" />
+        {tab === 'open' && (
+          <>
+            <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-1">
+              {/* The workspace's default branches — informational, never a count. */}
+              <div className="min-w-0 flex-1 basis-64">{!emptyWorkspace && <DefaultBranchesSlot />}</div>
+              {/* Today's auto reviews against the cap, and one sweep now — only while auto review is on. */}
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
+                <AutoReviewUsageLine />
+                <RunAutoReviewsButton />
+              </div>
+            </div>
+            <div role="toolbar" aria-label="Open PRs view" className="mt-2 flex flex-wrap items-center gap-1.5">
+              {ticketsOn && <OpenPrsViewToggle />}
+              <OpenPrsSortMenu sort={sort} onChange={setSort} />
+              <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
+            </div>
+          </>
+        )}
       </PageHeader>
 
-      <OpenPrsCards
-        layout="rows"
-        prs={rows}
-        isLoading={isLoading}
-        answered={data != null}
-        isError={isError}
-        sort={sort}
-        grouped={view === 'grouped'}
-        onOpenPr={openTab}
-        // The workspace and the repo filter are this list's identity: either changing starts the
-        // drawn window (and the selection) again.
-        windowScope={windowScope}
-        emptyLabel={
-          emptyWorkspace
-            ? 'No repos in this workspace yet. Open "Manage repos & workspaces" from the workspace menu in the sidebar to move some in.'
-            : repoSel != null && prs.length > 0
-              ? 'No open PRs for the selected repos — adjust the repo filter.'
-              : undefined
-        }
-      />
+      {tab === 'merged' ? (
+        <div role="tabpanel" id={panelId('open-prs', 'merged')} aria-labelledby={tabId('open-prs', 'merged')} className="pt-1">
+          <MergedPrsView />
+        </div>
+      ) : (
+        <div role="tabpanel" id={panelId('open-prs', 'open')} aria-labelledby={tabId('open-prs', 'open')}>
+          <OpenPrsCards
+            layout="rows"
+            prs={rows}
+            isLoading={isLoading}
+            answered={data != null}
+            isError={isError}
+            sort={sort}
+            grouped={view === 'grouped'}
+            onOpenPr={openTab}
+            // The workspace and the repo filter are this list's identity: either changing starts the
+            // drawn window (and the selection) again.
+            windowScope={windowScope}
+            emptyLabel={
+              emptyWorkspace
+                ? 'No repos in this workspace yet. Open "Manage repos & workspaces" from the workspace menu in the sidebar to move some in.'
+                : repoSel != null && prs.length > 0
+                  ? 'No open PRs for the selected repos — adjust the repo filter.'
+                  : undefined
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }
+
+const OPEN_PRS_TAB_ITEMS: ReadonlyArray<TabItem<OpenPrsTab>> = [
+  { id: 'open', label: 'Open' },
+  { id: 'merged', label: 'Merged' },
+];

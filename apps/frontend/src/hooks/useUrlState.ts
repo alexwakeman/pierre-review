@@ -10,6 +10,7 @@ import {
   DEFAULT_REVIEW_STATES,
   BOTS_INNER_TABS,
   INSIGHTS_INNER_TABS,
+  OPEN_PRS_TABS,
   sprintStoryFromUrl,
   sprintTabFromUrl,
   PR_DETAIL_TABS,
@@ -24,6 +25,7 @@ import {
   type DocsSearchState,
   type FilterState,
   type InsightsInnerTab,
+  type OpenPrsTab,
   type PrDetailTab,
   type RangePreset,
 } from '../store/filters.js';
@@ -144,15 +146,16 @@ const NAV_KEYS = [
   'attnBy',
   'feedPr',
   // RETIRED BUT STILL LISTED, like `attnPersonal`: the Feed has no sub-tabs now, and a legacy
-  // `?feedTab=classification` is parsed onto Bots Monitoring → Classification, never emitted.
+  // `?feedTab=classification` is parsed onto Bots Monitoring, never emitted.
   'feedTab',
   'botsTab',
   // The Reports pane's Overview | Bottlenecks strip. A sub-tab switch is a navigation for the
   // same reason its two siblings above are: it changes what the pane IS, not how it is filtered.
   'insightsTab',
-  // The This Sprint tab's Theme | Critical path | People | Merged so far strip — same reason as its
-  // siblings.
+  // The This Sprint tab's Theme | Critical path | People strip — same reason as its siblings.
   'sprintTab',
+  // Open PRs' Open | Merged strip — same reason.
+  'openPrsTab',
   // The This Sprint story TRAY (`sprintStoryIdent`): opening a ticket over the board is a
   // navigation, so Back closes it.
   'sprintStory',
@@ -204,6 +207,24 @@ function readWorkspaceFromUrl(p: URLSearchParams): number | null {
 function namesId(p: URLSearchParams, key: string): boolean {
   const raw = p.get(key);
   return !!raw && Number.isFinite(Number.parseInt(raw, 10));
+}
+
+/**
+ * A legacy "Merged so far" link: This Sprint's `?sprintTab=merged` (with `view=sprint`, or the older
+ * `activityRepo=sprint` rail line), or the Reports-era `?insightsTab=merged` naming Reports or no
+ * rail at all. All of them mean Open PRs → Merged now. Pure.
+ */
+export function isLegacyMergedLink(p: URLSearchParams): boolean {
+  const view = p.get('view');
+  const activityRepo = p.get('activityRepo');
+  if (p.get('sprintTab') === 'merged' && (view === 'sprint' || ((view == null || view === 'activity') && activityRepo === 'sprint'))) {
+    return true;
+  }
+  return (
+    (view == null || view === 'activity') &&
+    p.get('insightsTab') === 'merged' &&
+    (activityRepo == null || activityRepo === 'insights')
+  );
 }
 
 /**
@@ -263,6 +284,10 @@ export function landingTabFromUrl(search: string): ActiveTab {
   const p = new URLSearchParams(search);
   const view = p.get('view');
   if (view === 'timeline') return 'timeline';
+  // ⚠ LEGACY: "Merged so far" was a This Sprint sub-tab (`?view=sprint&sprintTab=merged`, emitted
+  // until 2026-11-03). It is Open PRs → Merged now, so the old link lands on Activity (readFromUrl
+  // seats the rail and the tab).
+  if (isLegacyMergedLink(p)) return 'activity';
   if (view === 'sprint') return 'sprint';
   if (view == null || view === 'activity') {
     // ⚠ LEGACY: This Sprint was an Activity rail line (`?view=activity&activityRepo=sprint`, which
@@ -272,10 +297,7 @@ export function landingTabFromUrl(search: string): ActiveTab {
     const activityRepo = p.get('activityRepo');
     if (activityRepo === 'sprint') return 'sprint';
     const insightsTab = p.get('insightsTab');
-    if (
-      (insightsTab === 'sprint' || insightsTab === 'merged') &&
-      (activityRepo == null || activityRepo === 'insights')
-    ) {
+    if (insightsTab === 'sprint' && (activityRepo == null || activityRepo === 'insights')) {
       return 'sprint';
     }
   }
@@ -482,17 +504,14 @@ export function readFromUrl(): Partial<FilterState> {
   if ((BOTS_INNER_TABS as readonly string[]).includes(botsTab ?? '')) {
     out.botsInnerTab = botsTab as BotsInnerTab;
   }
-  // ⚠ LEGACY: `?activityRepo=bots&botsTab=settings` was Bots Monitoring → Settings, the bot
-  // classification screen, and `?activityRepo=feed&feedTab=classification` was the Feed's "Bot
-  // classification" sub-tab after that. Classification is a Bots Monitoring tab now, so both
-  // bookmarks (and the history entries Back replays) land on Bots Monitoring → Classification.
+  // ⚠ LEGACY: bot classification was Bots Monitoring → Settings (`?botsTab=settings`), then the
+  // Feed's "Bot classification" sub-tab (`?activityRepo=feed&feedTab=classification`), then Bots
+  // Monitoring → Classification (`?botsTab=classification`). It is Settings → Bots now, which has no
+  // URL (the modal is never restored by a link). So the old bots links seat no tab (the rail opens
+  // on ROI) and the old Feed link lands on Bots Monitoring, the nearest page that still exists.
   // (Any other `feedTab` value is ignored: the Feed has no sub-tabs.)
-  else if (botsTab === 'settings' && activityRepo === 'bots') {
-    out.botsInnerTab = 'classification';
-  }
   if (p.get('feedTab') === 'classification' && activityRepo === 'feed') {
     out.activityRepoId = 'bots';
-    out.botsInnerTab = 'classification';
   }
   // The Reports pane's strip. Same raw-seat rule: InsightsView derives what it renders (a value
   // outside the union normalises to 'overview' FOR THE RENDER), so an unknown literal here would
@@ -502,15 +521,21 @@ export function readFromUrl(): Partial<FilterState> {
   if ((INSIGHTS_INNER_TABS as readonly string[]).includes(insightsTab ?? '')) {
     out.insightsInnerTab = insightsTab as InsightsInnerTab;
   }
-  // ⚠ LEGACY: `?insightsTab=sprint` / `?insightsTab=merged` were Reports → This sprint / Merged so
-  // far. Both moved to the FREE This Sprint TAB (landingTabFromUrl seats the tab), and the old links
-  // sit in bookmarks and in history entries Back replays, so they seat the matching SUB-TAB here —
-  // never a Reports tab that no longer exists. Same condition as the landing rule. Never emitted again.
-  else if (
-    (insightsTab === 'sprint' || insightsTab === 'merged') &&
-    (activityRepo == null || activityRepo === 'insights')
-  ) {
-    out.sprintInnerTab = insightsTab === 'merged' ? 'merged' : 'themes';
+  // ⚠ LEGACY: `?insightsTab=sprint` was Reports → This sprint. It moved to the FREE This Sprint TAB
+  // (landingTabFromUrl seats the tab), and the old links sit in bookmarks and in history entries
+  // Back replays, so it seats the Theme sub-tab here — never a Reports tab that no longer exists.
+  // (`?insightsTab=merged` is a legacy "Merged so far" link: see `isLegacyMergedLink` below.)
+  else if (insightsTab === 'sprint' && (activityRepo == null || activityRepo === 'insights')) {
+    out.sprintInnerTab = 'themes';
+  }
+  // Open PRs' strip. Only a member seats it.
+  const openPrsTab = p.get('openPrsTab');
+  if ((OPEN_PRS_TABS as readonly string[]).includes(openPrsTab ?? '')) out.openPrsTab = openPrsTab as OpenPrsTab;
+  // ⚠ LEGACY "Merged so far" (This Sprint's `sprintTab=merged`, Reports' `insightsTab=merged`): it
+  // is Open PRs → Merged now. landingTabFromUrl lands on Activity; this seats the rail and the tab.
+  if (isLegacyMergedLink(p)) {
+    out.activityRepoId = 'open-prs';
+    out.openPrsTab = 'merged';
   }
   // The This Sprint strip. Same raw-seat rule as `insightsTab`.
   // The retired `graph` (the force graph) lands on the Theme view, the landing view (`sprintTabFromUrl`).
@@ -696,8 +721,8 @@ export function writeToUrl(s: FilterState): void {
     // The tab's sub-tab. ⚠ THE OMITTED VALUE IS THE CURRENT DEFAULT ('themes') — a bare
     // `?view=sprint` means it.
     if (s.sprintInnerTab !== 'themes') p.set('sprintTab', s.sprintInnerTab);
-    // The story tray, on the three boards only ("Merged so far" draws none).
-    if (s.sprintStoryIdent != null && s.sprintInnerTab !== 'merged') p.set('sprintStory', s.sprintStoryIdent);
+    // The story tray, over the boards.
+    if (s.sprintStoryIdent != null) p.set('sprintStory', s.sprintStoryIdent);
   } else if (activeTab === 'activity') {
     p.set('view', 'activity');
     // The board's own narrowings, each emitted ONLY on the rail entry that renders it — a lens
@@ -772,7 +797,11 @@ export function writeToUrl(s: FilterState): void {
       if (s.insightsReportGrain !== 'sprint') p.set('reportGrain', s.insightsReportGrain);
       if (s.insightsReportKey) p.set('report', s.insightsReportKey);
     }
-    // 'open-prs' (and null) stay out: a link naming no console means Open PRs.
+    // 'open-prs' (and null) stay out: a link naming no console means Open PRs. Its tab rides
+    // alone ('open', the default, omitted).
+    else if ((s.activityRepoId === 'open-prs' || s.activityRepoId == null) && s.openPrsTab !== 'open') {
+      p.set('openPrsTab', s.openPrsTab);
+    }
   } else if (
     parseTabKey(activeTab) != null ||
     parseUserActivityKey(activeTab) != null ||

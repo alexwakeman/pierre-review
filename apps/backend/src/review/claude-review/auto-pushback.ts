@@ -87,7 +87,7 @@ async function autoPushback(
   const facts = await readAutoPostPrFacts(ctx, postDeps, accountId, ws.workspaceId, prId);
   if (!facts || autoPostEligibility(facts, ws.settings.scope) != null) return null;
 
-  const owners = await loadThreadOwners(ctx, accountId, prId, [...wanted.keys()]);
+  const owners = await loadThreadOwners(ctx, accountId, prId, [...wanted.keys()], { ownOnly: true });
   const target = new Map<number, string>(); // owner id → pushback text (first wins)
   const ownerRows = new Map<number, ThreadOwnerRow>();
   for (const [wantedId, text] of wanted) {

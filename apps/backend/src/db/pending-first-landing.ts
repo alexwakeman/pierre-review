@@ -36,6 +36,7 @@ import {
 } from '@pierre-review/shared';
 import { and, count, desc, eq, inArray, isNotNull, min, sql } from 'drizzle-orm';
 import { db, schema } from './client.js';
+import { ownRunsOnly } from './teammate-reviews.js';
 import { config } from '../config.js';
 import { getAccountUserId } from '../auth/account.js';
 import type { BotScope } from './queries.js';
@@ -173,7 +174,8 @@ async function reviewSuggestion(
   const ran = await db
     .select({ id: schema.claudeReviews.id })
     .from(schema.claudeReviews)
-    .where(eq(schema.claudeReviews.accountId, accountId))
+    // The reader's own run: a teammate's imported review is not "a review ran here".
+    .where(and(eq(schema.claudeReviews.accountId, accountId), ownRunsOnly(schema.claudeReviews.kind)))
     .limit(1)
     .execute();
   if (

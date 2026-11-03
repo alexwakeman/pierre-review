@@ -44,6 +44,7 @@ import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/sh
 import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../platform/contract.js';
 import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
+import { TEAMMATE_KIND, ownFindingsOnly, ownRunsOnly } from '../../db/teammate-reviews.js';
 import { ticketEntriesOf } from './ticket.js';
 import { overlayFollowUpItems } from './replies-pass.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
@@ -177,6 +178,8 @@ interface ReviewRow {
   trigger?: string | null;
   // A from-scratch run (migration 0133). NULL on every other row.
   fresh?: boolean | null;
+  // "Review and post" (migration 0161): post when the run ends. NULL on every other row.
+  postOnFinish?: boolean | null;
   // 'replies' on a replies pass (migration 0136). NULL on every full review.
   kind?: string | null;
   // Other reviewers' open threads, judged (migration 0076 / pg 0063). null on older rows.
@@ -403,6 +406,7 @@ function mapReview(
     followUp: mapFollowUp(r.followUp, findings),
     trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     ...(r.fresh === true ? { fresh: true } : {}),
+    ...(r.postOnFinish === true ? { postOnFinish: true } : {}),
     ...(r.kind === 'replies' ? { kind: 'replies' as const } : {}),
     // null = this run did not assess threads (older row, skip, not succeeded) — never [].
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
@@ -614,12 +618,17 @@ async function reconcilePostedState(
   if (row.status !== 'succeeded' || (!findings.some((f) => f.postedAt == null) && !failedAutoPost)) return new Map();
   const { cr, crf } = tables(ctx);
   const { reviewThreads: rt, reviewComments: rc, prComments: pc, users, accounts } = ctx.schema as any;
-  const runs = (await ctx.db
-    .select({ id: cr.id, createdAt: cr.createdAt })
+  const allRuns = (await ctx.db
+    .select({ id: cr.id, createdAt: cr.createdAt, kind: cr.kind })
     .from(cr)
     .where(and(eq(cr.prId, row.prId), eq(cr.accountId, accountId)))
-    .execute()) as Array<{ id: number; createdAt: unknown }>;
-  const runIds = runs.map((r) => r.id);
+    .execute()) as Array<{ id: number; createdAt: unknown; kind: string | null }>;
+  // The reader's own runs: a teammate's imported review is their post, never one of ours, so it is
+  // never STAMPED (no `runStartedAt`). Its POSTED findings still join `findings`: a follow-up that
+  // anchored on the teammate's review re-raises their point with `priorFindingId` on it, and that
+  // chain must reach the teammate's comment, or a manual Post puts the same point up twice.
+  const runs = allRuns.filter((r) => r.kind !== TEAMMATE_KIND);
+  const runIds = allRuns.map((r) => r.id);
   const all = (await ctx.db
     .select({
       id: crf.id,
@@ -937,7 +946,9 @@ export async function listClaudeReviewHistory(
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId)))
+    // The reader's own runs (replies passes included). Teammates' posted reviews are listed apart
+    // (`ClaudeReviewResponse.teammateReviews`, db/teammate-reviews.ts).
+    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), ownRunsOnly(cr.kind)))
     .orderBy(desc(cr.id))
     .execute()) as Array<{ review: ReviewRow }>;
   // Each run's finding count, for the history list — ONE grouped read over the runs just listed.
@@ -1089,7 +1100,8 @@ export async function getLatestReviewStates(
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(inArray(cr.prId, [...prIds]), eq(repos.accountId, accountId)))
+    // The reader's own runs: a teammate's posted review is not this Limn's review state.
+    .where(and(inArray(cr.prId, [...prIds]), eq(repos.accountId, accountId), ownRunsOnly(cr.kind)))
     .orderBy(desc(cr.id))
     .execute()) as Array<{
     reviewId: number;
@@ -1441,7 +1453,8 @@ export async function getReviewPostContext(
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.id, reviewId), eq(repos.accountId, accountId)))
+    // A teammate's posted review is READ-ONLY: it never posts (404 like a missing run).
+    .where(and(eq(cr.id, reviewId), eq(repos.accountId, accountId), ownRunsOnly(cr.kind)))
     .limit(1)
     .execute()) as Array<{
     headSha: string;
@@ -1487,7 +1500,8 @@ export async function getFindingPostContext(
     .innerJoin(cr, eq(cr.id, crf.reviewId))
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(crf.id, findingId), eq(repos.accountId, accountId)))
+    // A teammate's posted finding is READ-ONLY: it never posts (404 like a missing finding).
+    .where(and(eq(crf.id, findingId), eq(repos.accountId, accountId), ownRunsOnly(cr.kind)))
     .limit(1)
     .execute()) as Array<{
     finding: FindingRow;
@@ -1891,6 +1905,8 @@ async function loadEarlierRuns(
     eq(repos.accountId, accountId),
     eq(cr.status, 'succeeded'),
     lt(cr.id, beforeReviewId),
+    // The reader's own chain: a teammate's posted review is not an earlier run of ours.
+    ownRunsOnly(cr.kind),
   );
   const [rows, followUpRows] = await Promise.all([
     // Only what eligibility and the chain need — this runs on every review read.
@@ -2026,6 +2042,8 @@ export async function insertQueuedReview(
   pair: { role: 'first' } | { role: 'second'; pairId: number } | null = null,
   // TRAILING: a REPLIES PASS (replies-check.ts). Stored 'replies'; otherwise NULL (a full review).
   kind: 'replies' | null = null,
+  // TRAILING: "Review and post" (a MANUAL run's press; both halves of its pair). Stored true; otherwise NULL.
+  postOnFinish = false,
 ): Promise<number> {
   const { cr } = tables(ctx);
   // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
@@ -2043,6 +2061,7 @@ export async function insertQueuedReview(
       ticket: tickets.length > 0 ? [...tickets] : null,
       trigger,
       ...(fresh ? { fresh: true } : {}),
+      ...(postOnFinish && trigger === 'manual' ? { postOnFinish: true } : {}),
       ...(pair ? { pairRole: pair.role, pairId: pair.role === 'second' ? pair.pairId : null } : {}),
       ...(kind ? { kind } : {}),
     })
@@ -2276,7 +2295,8 @@ export async function updateReviewDraft(
   const changed = (await ctx.db
     .update(cr)
     .set(set)
-    .where(eq(cr.id, id))
+    // A teammate's posted review is read-only.
+    .where(and(eq(cr.id, id), ownRunsOnly(cr.kind)))
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
   return changed.length > 0;
@@ -2298,7 +2318,8 @@ export async function updateFinding(
   const changed = (await ctx.db
     .update(crf)
     .set(set)
-    .where(eq(crf.id, findingId))
+    // A teammate's posted finding is read-only.
+    .where(and(eq(crf.id, findingId), ownFindingsOnly(crf.reviewId)))
     .returning({ id: crf.id })
     .execute()) as Array<{ id: number }>;
   return changed.length > 0;
@@ -2432,7 +2453,8 @@ export async function failedRunsSinceLastSuccess(
   const rows = (await ctx.db
     .select({ provider: cr.provider, status: cr.status, error: cr.error, finishedAt: cr.finishedAt })
     .from(cr)
-    .where(and(inArray(cr.status, ['failed', 'succeeded']), gte(cr.finishedAt, new Date(sinceMs))))
+    // A teammate's imported review is no run of this machine's: it says nothing about a usage limit.
+    .where(and(inArray(cr.status, ['failed', 'succeeded']), gte(cr.finishedAt, new Date(sinceMs)), ownRunsOnly(cr.kind)))
     .orderBy(desc(cr.finishedAt), desc(cr.id))
     .limit(200)
     .execute()) as Array<{ provider: string | null; status: string; error: string | null; finishedAt: Date | null }>;

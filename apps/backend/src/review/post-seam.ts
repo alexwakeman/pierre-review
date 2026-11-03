@@ -28,6 +28,8 @@ import {
   submitGithubReview,
 } from './post-review.js';
 import { randomBytes } from 'node:crypto';
+import { limnReviewMarker } from '@pierre-review/shared';
+import { limnVersion } from '../version.js';
 
 // The GitHub-write half of the ctx.review seam. Security-sensitive (per-account gh token +
 // line-anchoring), so it stays CORE — the plugin hands over the user's ticked findings (read
@@ -104,7 +106,18 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   // ever adopt THIS attempt's review: without it an earlier review with the same body on the same head
   // (every summary-less review is the bare marker) would be adopted, and its findings stamped posted
   // although GitHub never received them. Every reader of the marker matches the PREFIX only.
-  const finalBody = args.body + `\n\n<!-- pierre:claude-review v=1 a=${randomBytes(6).toString('hex')} -->`;
+  // THE HIDDEN METADATA (shared `limnReviewMarker`, docs/CLAUDE-REVIEW.md § Teammates' reviews): the
+  // head, how the review ran, the verdict and the Limn version — what a teammate's Limn reads to show
+  // this review. Same `v=1 a=` prefix, so every prefix reader is unchanged.
+  const marker = limnReviewMarker(randomBytes(6).toString('hex'), {
+    headSha: args.reviewHeadSha,
+    verdict: args.verdict,
+    limnVersion: limnVersion(),
+    run: args.limnMeta?.run ?? null,
+    pair: args.limnMeta?.pair ?? false,
+    runs: args.limnMeta?.runs ?? [],
+  });
+  const finalBody = args.body + `\n\n${marker}`;
 
   const preview: PostReviewPreview = {
     commitId: args.reviewHeadSha,

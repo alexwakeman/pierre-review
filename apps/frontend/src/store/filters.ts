@@ -81,14 +81,21 @@ export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks' | 'ai-usag
 export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks', 'stories', 'ai-usage'];
 // The This Sprint tab's sub-tab strip (FREE on every tier): three independent views of the
 // sprint on one lane board — `'themes'` (Theme, the landing panel), `'paths'` (Critical path) and
-// `'people'` (People) — then `'merged'` ("Merged so far", MergedPrsView — every PR merged in the
-// reporting window). URL: `?sprintTab=paths|people|merged`, the `'themes'` default omitted, emitted
+// `'people'` (People). URL: `?sprintTab=paths|people`, the `'themes'` default omitted, emitted
 // ONLY alongside `view=sprint`. ⚠ The retired `?sprintTab=graph` (the force graph, deleted
 // 2026-10-18) still sits in bookmarks and history: `sprintTabFromUrl` reads it as `'themes'`. The
 // visible tab is DERIVED (`effectiveSprintTab`), never written back. Transient like its siblings — no
 // FILTER_STORAGE_VERSION bump is owed.
-export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'merged';
-export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people', 'merged'];
+// ⚠ `'merged'` LEFT THIS UNION (2026-11-03): "Merged so far" is Open PRs → Merged now
+// (`OpenPrsTab`). A legacy `?sprintTab=merged` is read by useUrlState onto that tab, never emitted.
+export type SprintInnerTab = 'paths' | 'themes' | 'people';
+export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people'];
+// Open PRs' own tab strip: `'open'` (the open pull requests, the default) and `'merged'` (every PR
+// merged in the reporting window — this sprint so far, else the last 14 days; MergedPrsView over
+// GET /api/merged-prs). URL: `?openPrsTab=merged`, the default omitted, emitted ONLY on Open PRs.
+// Transient — never persisted, so no FILTER_STORAGE_VERSION bump is owed.
+export type OpenPrsTab = 'open' | 'merged';
+export const OPEN_PRS_TABS: readonly OpenPrsTab[] = ['open', 'merged'];
 /** The `?sprintTab=` value a link carries, as a tab to SEAT: a member as itself, the retired `graph`
  *  as the Theme view, anything else nothing (the store keeps what it has). Pure. */
 /** The `?sprintStory=` value a link carries, as the tray's ticket ident: any non-blank string up to
@@ -103,19 +110,17 @@ export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab
   if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
 }
-// The Bots rail's sub-tab strip. `'classification'` ("Classification": who counts as a bot in this
-// Workspace, its role, vendor and price) is workspace-grain and LISTED only on the cross-repo rail;
-// BotsView's `effectiveBotsTab` degrades it to `'roi'` on the per-repo console. Every other member
-// shows on both mounts.
-// ⚠ LEGACY URLS, mapped by useUrlState's read: `?botsTab=settings` (the old Bots → Settings) and
-// `?activityRepo=feed&feedTab=classification` (the Feed's old "Bot classification" sub-tab) both
-// land on `'classification'`; `?botsTab=advisor` (the Bot Tuning Advisor, REMOVED 2026-10-26) is no
-// longer a member, so it lands on the default.
+// The Bots rail's sub-tab strip. Every member shows on both mounts (Themes only while AI is on).
+// ⚠ `'classification'` LEFT THIS UNION (2026-11-03): who counts as a bot, its role, vendor and
+// price is Settings → Bots now (`BotClassificationSection`). LEGACY URLS — `?botsTab=classification`,
+// `?botsTab=settings` (the old Bots → Settings), `?botsTab=advisor` (the Bot Tuning Advisor, REMOVED
+// 2026-10-26) — are no longer members, so they land on the default; `?activityRepo=feed&feedTab=
+// classification` (the Feed's old sub-tab) lands on Bots Monitoring.
 // The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
 // a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
 // that shares this one scalar (the per-repo console's Bots tab).
-export type BotsInnerTab = 'roi' | 'themes' | 'benchmark' | 'classification';
-export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'benchmark', 'classification'];
+export type BotsInnerTab = 'roi' | 'themes' | 'benchmark';
+export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'benchmark'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and its other tabs like every other view. Which member is
@@ -514,15 +519,14 @@ export interface FilterState {
   // (like feedAuthors) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — the ROI panel),
-  // 'themes' (the "What they're flagging" AI report), 'benchmark' (the peer-cohort placement) and
-  // 'classification' (who counts as a bot in this Workspace, its role, vendor and price — moved
-  // here from the Feed, which is now a stream only). ('advisor' — the Bot Tuning Advisor — is
-  // REMOVED; 'behaviour' went in plan P1.1/C1.) A single scalar shared by the cross-repo rail Bots
-  // view and the per-repo console Bots tab (one BotsView). BotsView DERIVES the visible tab
-  // ('classification' is rail-only). Transient (never persisted), so dropping a member needs no
-  // migration — but NOT URL-silent; see the next paragraph.
+  // 'themes' (the "What they're flagging" AI report) and 'benchmark' (the peer-cohort placement).
+  // ('classification' moved to Settings → Bots; 'advisor' — the Bot Tuning Advisor — is REMOVED;
+  // 'behaviour' went in plan P1.1/C1.) A single scalar shared by the cross-repo rail Bots
+  // view and the per-repo console Bots tab (one BotsView). BotsView DERIVES the visible tab.
+  // Transient (never persisted), so dropping a member needs no migration — but NOT URL-silent;
+  // see the next paragraph.
   //
-  // ⚠ URL-SERIALIZED (`?botsTab=themes|benchmark|classification`, the 'roi' default omitted) and a
+  // ⚠ URL-SERIALIZED (`?botsTab=themes|benchmark`, the 'roi' default omitted) and a
   // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
   // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
   // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.
@@ -530,7 +534,7 @@ export interface FilterState {
   // (There is no `botSettingsTeamId` / per-repo judgement picker. The judgement is keyed by the
   // active WORKSPACE, so the panel just reads `workspaceId` like every other Bots panel.)
   // (No `feedInnerTab`: the Feed is a stream and has no sub-tabs. A legacy
-  // `?feedTab=classification` lands on Bots Monitoring → Classification.)
+  // `?feedTab=classification` lands on Bots Monitoring.)
   // Which inner sub-tab the Reports pane shows: 'overview' (Flow metrics + Period reports) or
   // 'bottlenecks' — labelled "Chronology" on screen, the court ledger. See InsightsInnerTab for why
   // the literal and the label differ.
@@ -547,6 +551,8 @@ export interface FilterState {
   // Which inner sub-tab the This Sprint tab shows (see SprintInnerTab). Transient,
   // URL-serialized (`?sprintTab=paths`) only alongside `view=sprint`.
   sprintInnerTab: SprintInnerTab;
+  // Open PRs' tab (see OpenPrsTab). Transient, URL-serialized (`?openPrsTab=merged`) only on Open PRs.
+  openPrsTab: OpenPrsTab;
   // The ticket whose story the This Sprint TRAY shows over the board (Sprint/SprintStoryTray.tsx),
   // as shared `trackerTicketIdent`; null = no tray. Transient (freshDefaults only, never in
   // FilterDefaults — "Clear filters" must not close it, persistence must not reopen it), and a
@@ -958,13 +964,15 @@ export interface FilterState {
   markFeedNewCohortsSeen: (scopeKey: string) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
-  // Switch the Bots view's inner sub-tab (ROI / Themes / Benchmark / Classification).
+  // Switch the Bots view's inner sub-tab (ROI / Themes / Benchmark).
   setBotsInnerTab: (v: BotsInnerTab) => void;
   // Switch the Reports pane's inner sub-tab (Overview / Bottlenecks). Seats the CHOICE; the pane
   // derives what it renders from it.
   setInsightsInnerTab: (v: InsightsInnerTab) => void;
-  // Switch the This Sprint rail line's sub-tab (graph / Merged so far). Seats the CHOICE.
+  // Switch the This Sprint tab's sub-tab (Theme / Critical path / People). Seats the CHOICE.
   setSprintInnerTab: (v: SprintInnerTab) => void;
+  // Switch Open PRs between the open list and Merged.
+  setOpenPrsTab: (v: OpenPrsTab) => void;
   setSprintStory: (ident: string | null) => void;
   /**
    * Seat PrDetail's inner tab FOR ONE PR (see prDetailTab). Always call it with the prId the
@@ -1399,6 +1407,7 @@ function freshDefaults(): FilterData {
     insightsInnerTab: 'overview',
     // The This Sprint rail line opens on the graph.
     sprintInnerTab: 'themes',
+    openPrsTab: 'open',
     sprintStoryIdent: null,
     prDetailTab: null,
     selectedPrId: null,
@@ -1487,6 +1496,7 @@ export type UrlOwnedState = Pick<
   | 'botsInnerTab'
   | 'insightsInnerTab'
   | 'sprintInnerTab'
+  | 'openPrsTab'
   | 'sprintStoryIdent'
 >;
 
@@ -1509,6 +1519,7 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     botsInnerTab: d.botsInnerTab,
     insightsInnerTab: d.insightsInnerTab,
     sprintInnerTab: d.sprintInnerTab,
+    openPrsTab: d.openPrsTab,
     sprintStoryIdent: d.sprintStoryIdent,
   };
 }
@@ -1660,6 +1671,7 @@ export const useFilters = create<FilterState>((set, get) => ({
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
   setInsightsInnerTab: (v) => set({ insightsInnerTab: v }),
   setSprintInnerTab: (v) => set({ sprintInnerTab: v }),
+  setOpenPrsTab: (v) => set({ openPrsTab: v }),
   setSprintStory: (ident) => set((s) => (s.sprintStoryIdent === ident ? {} : { sprintStoryIdent: ident })),
   setPrDetailTab: (prId, tab) =>
     set((s) =>

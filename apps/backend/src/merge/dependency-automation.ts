@@ -1,14 +1,14 @@
-// ── DEPENDENCY AUTOMATION: APPROVE + RESOLVE CONFLICTS (CORE, free) ─────────────────────────────
+// ── DEPENDENCY AUTOMATION: APPROVE, RESOLVE CONFLICTS, FIX WITH AI (CORE, free) ─────────────────
 //
 // docs/MERGE-CI-TRUNK.md § Dependency automation. Settings → Dependencies holds, per workspace and
-// every one OFF by default: "merge" (merge/dependency-policy.ts, the older switch), "approve" and
-// "resolve conflicts" (this file), and ONE policy (size, security-only, ecosystems) that gates all
-// three. The decisions are pure and tested in merge/dependency-rules.ts; this file gathers values,
-// claims, writes and records.
+// every one OFF by default: "merge" (merge/dependency-policy.ts, the older switch), "approve",
+// "resolve conflicts" and "fix with AI" (this file), and ONE policy (size, security-only,
+// ecosystems) that gates them all. The decisions are pure and tested in merge/dependency-rules.ts;
+// this file gathers values, claims, writes and records.
 //
-// WHO: approval and conflict resolution act ONLY on PRs opened by a bot the reader TRUSTS — its
-// STORED row in this workspace says automated, role `dependency`, and `dependency_trusted`
-// (`isTrustedDependencyBot`). Never a login guess: a person can open a fork PR under any login.
+// WHO: approval, conflict resolution and the AI fix act ONLY on PRs opened by a bot the reader
+// TRUSTS — its STORED row in this workspace says automated, role `dependency`, and
+// `dependency_trusted` (`isTrustedDependencyBot`). Never a login guess.
 //
 // APPROVE (`runDependencyAutomationTick`, on the auto-merge watcher's cron just before the merge
 // sweep): an open, non-draft, same-repo PR whose SYNCED CI is `success` (green, not merely not red)
@@ -16,28 +16,35 @@
 // LIVE first (one GET): the head must be the synced one (the approval is pinned to it with
 // `commit_id`), it must not be a fork, and its title + body are what the policy measures.
 //
-// RESOLVE CONFLICTS: first ask the bot to rebase — Dependabot by the `@dependabot rebase` comment,
-// Renovate by ticking its rebase checkbox in the PR body — once per head, and wait REBASE_WAIT_MS
-// (a rebase is a new head, so a successful one ends the story). If the bot can't be asked, the ask
-// failed, or the wait ran out: an AI run through the in-app resolver ("Resolve with Claude" / Codex,
-// the provider seam), behind the AUTOMATIC-RUN budget gate (`automaticRunAllowed`; skipped, never
-// queued). Its answer is committed and pushed UNATTENDED only when every conflicted file is
-// supported and every decidable region carries a choice the model was sure of
-// (`aiResolutionCommit`); merge strategy onto the PR's own branch, never a rebase. The pushed head
-// (`resultSha`) must then be GREEN again before it is approved or armed.
+// RESOLVE CONFLICTS (also run by "fix with AI" — one path): first ask the bot to rebase, once per
+// head, and wait REBASE_WAIT_MS. Then an AI run through the in-app resolver, behind the
+// AUTOMATIC-RUN budget gate, committed UNATTENDED only when `aiResolutionCommit` passes; merge
+// strategy onto the PR's own branch, never a rebase.
 //
+// FIX WITH AI: a red PR whose failure is proven LIVE gets ONE unattended AI Fix (plain seed: the
+// failing checks' log excerpts), pushed through AI Fix's own Push. ≤ DEPENDENCY_AI_FIX_DAILY_CAP AI
+// runs (fixes + conflict runs) per PR per 24 h. Every pushed head (`resultSha`) must be GREEN again
+// before it is approved or armed.
+//
+// ⚠ TEAMS (merge/deps-claim.ts): before ANY action, the head's `limn/deps` commit status is read
+// and claimed; a teammate's live claim or finished action of the same family ⇒ a SKIPPED row
+// ("robin is handling this"), never a failure.
 // ⚠ CLAIM BEFORE WRITE, NEVER RETRY: every action inserts its (account, PR, head, action) row as
 // `running` BEFORE the GitHub write (`claimAction`, a unique index); no row inserted → somebody
 // already did it. A failure is recorded with GitHub's words and never retried at that head.
+// ⚠ THE LOG IS A TRUE RECORD: a row says `done` only after GitHub accepted the write; "Merged"
+// (`merge_landed`) only from the auto-merge watcher's merged outcome, never from arming.
 // ⚠ EVERY WRITE STAMPS OR SETTLES, THEN CASCADES: the approval stamps the review + clears the
 // request + re-reads + schedules the settle ladder; the rebase comment stamps the comment; the body
-// edit re-reads; the AI push lands through the resolver's own path (which settles).
-// ⚠ A PERSON'S CANCEL WINS: a PR in `auto_merge_policy_skips` is left alone by all three switches.
+// edit re-reads; the AI pushes land through the resolver's / AI Fix's own paths (which settle).
+// ⚠ A PERSON'S CANCEL WINS: a PR in `auto_merge_policy_skips` is left alone by every switch, and a
+// person cancelling the AI fix in its tab ends it (recorded, never retried).
 import type { FastifyBaseLogger } from 'fastify';
-import { and, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import {
   DEFAULT_AI_FIX_MODEL,
   DEFAULT_DEPENDENCY_POLICY,
+  DEPENDENCY_AI_FIX_DAILY_CAP,
   DEPENDENCY_ECOSYSTEMS,
   type DependencyAutomationActionKind,
   type DependencyAutomationActionState,
@@ -73,8 +80,11 @@ import type { AgentContext } from '../review/agent-context.js';
 import { automaticRunAllowed } from '../review/budget-gate.js';
 import {
   AI_COMMIT_REFUSAL_TEXT,
+  AI_RUN_WINDOW_MS,
+  aiFixEligibility,
   aiResolutionCommit,
   botCanRebase,
+  dependencyFixInstruction,
   classifyDependencyUpdate,
   conflictStep,
   isTrustedDependencyBot,
@@ -86,6 +96,21 @@ import {
   type PolicyRefusal,
 } from './dependency-rules.js';
 import { setDependencyAutoMerge } from './dependency-policy.js';
+import {
+  depsHeldNow,
+  endDepsClaim,
+  familyOfAction,
+  markAiPushedHead,
+  postDepsClaim,
+  readDepsClaim,
+  rememberDepsAwaitingCi,
+  rememberDepsHold,
+  renewDepsClaim,
+  type ClaimAction,
+  type DepsClaimEnd,
+  type DepsClaimHandle,
+  type DepsHold,
+} from './deps-claim.js';
 
 const {
   autoMergePolicySkips,
@@ -101,6 +126,8 @@ const {
 const ACTIONS_PER_TICK = 6;
 /** How long an AI conflict run may take before it is given up on. */
 const AI_RUN_TIMEOUT_MS = 45 * 60_000;
+/** How long an AI fix may take (queued behind the one fix slot, then run) before it is given up on. */
+const AI_FIX_TIMEOUT_MS = 90 * 60_000;
 /** The automation log's window and length. */
 const LOG_DAYS = 14;
 const LOG_MAX = 40;
@@ -132,6 +159,7 @@ const settingsColumns = {
   autoMerge: workspaces.dependencyAutoMerge,
   autoApprove: workspaces.dependencyAutoApprove,
   autoResolve: workspaces.dependencyAutoResolve,
+  autoFix: workspaces.dependencyAutoFix,
   maxLevel: workspaces.dependencyMaxLevel,
   securityOnly: workspaces.dependencySecurityOnly,
   ecosystems: workspaces.dependencyEcosystems,
@@ -141,6 +169,7 @@ type SettingsRow = {
   autoMerge: boolean | null;
   autoApprove: boolean | null;
   autoResolve: boolean | null;
+  autoFix: boolean | null;
   maxLevel: string | null;
   securityOnly: boolean | null;
   ecosystems: string[] | null;
@@ -151,6 +180,7 @@ function settingsOf(row: SettingsRow): DependencyAutomationSettings {
     autoMerge: row.autoMerge === true,
     autoApprove: row.autoApprove === true,
     autoResolveConflicts: row.autoResolve === true,
+    autoFix: row.autoFix === true,
     policy: policyFromColumns(row),
   };
 }
@@ -233,6 +263,7 @@ export async function setDependencyAutomation(
   if (patch.autoResolveConflicts !== undefined) {
     set.dependencyAutoResolve = patch.autoResolveConflicts ? true : null;
   }
+  if (patch.autoFix !== undefined) set.dependencyAutoFix = patch.autoFix ? true : null;
   if (patch.maxLevel !== undefined) {
     set.dependencyMaxLevel = patch.maxLevel === DEFAULT_DEPENDENCY_POLICY.maxLevel ? null : patch.maxLevel;
   }
@@ -274,6 +305,9 @@ export async function setDependencyAutomation(
   if (patch.autoResolveConflicts !== undefined && patch.autoResolveConflicts !== before.autoResolveConflicts) {
     lines.push(`Dependency conflict resolution ${onOff(patch.autoResolveConflicts)}`);
   }
+  if (patch.autoFix !== undefined && patch.autoFix !== before.autoFix) {
+    lines.push(`Dependency AI fixes ${onOff(patch.autoFix)}`);
+  }
   for (const line of lines) {
     await recordWorkspaceSettingEvent(accountId, workspaceId, 'dependency_automation', line);
   }
@@ -298,6 +332,8 @@ export async function listDependencyAutomationLog(
       action: daa.action,
       state: daa.state,
       detail: daa.detail,
+      teammateLogin: daa.teammateLogin,
+      teammateHandled: daa.teammateHandled,
       updatedAt: daa.updatedAt,
       owner: repos.owner,
       name: repos.name,
@@ -318,6 +354,17 @@ export async function listDependencyAutomationLog(
     .orderBy(desc(daa.updatedAt), desc(daa.id))
     .limit(LOG_MAX)
     .execute();
+  // A skipped row names the teammate whose Limn holds the head; their name from the synced users.
+  const logins = [...new Set(rows.map((r) => r.teammateLogin).filter((l): l is string => l != null))];
+  const names = new Map<string, string | null>();
+  if (logins.length > 0) {
+    const us = await db
+      .select({ login: users.githubLogin, name: users.displayName })
+      .from(users)
+      .where(inArray(sql`lower(${users.githubLogin})`, logins.map((l) => l.toLowerCase())))
+      .execute();
+    for (const u of us) names.set(u.login.toLowerCase(), u.name ?? null);
+  }
   return rows.map((r) => ({
     id: r.id,
     prId: r.prId,
@@ -327,23 +374,51 @@ export async function listDependencyAutomationLog(
     action: r.action as DependencyAutomationActionKind,
     state: r.state as DependencyAutomationActionState,
     detail: r.detail ?? null,
+    teammate:
+      r.state === 'skipped' && r.teammateLogin
+        ? {
+            login: r.teammateLogin,
+            name: names.get(r.teammateLogin.toLowerCase()) ?? null,
+            handled: r.teammateHandled === true,
+          }
+        : null,
     at: r.updatedAt.toISOString(),
   }));
 }
 
 // ── Claims ───────────────────────────────────────────────────────────────────────────────────
 
-/** Claim one action at one head. The row id, or null when it was already taken (by anyone, ever). */
+/**
+ * Claim one action at one head. The row id, or null when it was already taken (by anyone, ever). A
+ * `skipped` row (a teammate held the head) is not an attempt: a later claim TAKES IT OVER (and an
+ * `arm_merge` row that is not running, below).
+ */
 export async function claimAction(
   accountId: number,
   prId: number,
   headSha: string,
   action: DependencyAutomationActionKind,
 ): Promise<number | null> {
+  const now = new Date();
   const rows = await db
     .insert(daa)
     .values({ accountId, prId, headSha, action, state: 'running' })
-    .onConflictDoNothing({ target: [daa.accountId, daa.prId, daa.headSha, daa.action] })
+    .onConflictDoUpdate({
+      target: [daa.accountId, daa.prId, daa.headSha, daa.action],
+      set: {
+        state: 'running',
+        detail: null,
+        resultSha: null,
+        teammateLogin: null,
+        teammateHandled: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      // A merge ARM is local state, not a GitHub write: the sweep's own `due` rule (no live intent,
+      // never the head an intent ENDED on) decides when it may arm again, so only a running arm
+      // blocks it. Every other action: only a skip is taken over — done or failed is for ever.
+      setWhere: action === 'arm_merge' ? ne(daa.state, 'running') : eq(daa.state, 'skipped'),
+    })
     .returning({ id: daa.id })
     .execute();
   return rows[0]?.id ?? null;
@@ -367,6 +442,63 @@ async function releaseClaim(id: number): Promise<void> {
   await db.delete(daa).where(and(eq(daa.id, id), eq(daa.state, 'running'))).execute();
 }
 
+/** The log's words for a teammate's hold. */
+function holdDetail(hold: DepsHold): string {
+  return hold.kind === 'handling' ? `${hold.login} is handling this` : `${hold.login} handled this`;
+}
+
+/**
+ * A teammate's Limn holds this head (`limn/deps`): record it as SKIPPED — never a failure, never an
+ * attempt. Written once per (PR, head, action) and refreshed only when the teammate or the kind of
+ * hold changes, so the log does not churn. A real row (running / done / failed) is never touched.
+ */
+export async function recordTeammateSkip(
+  accountId: number,
+  prId: number,
+  headSha: string,
+  action: DependencyAutomationActionKind,
+  hold: DepsHold,
+): Promise<void> {
+  const handled = hold.kind === 'handled';
+  const now = new Date();
+  await db
+    .insert(daa)
+    .values({
+      accountId,
+      prId,
+      headSha,
+      action,
+      state: 'skipped',
+      detail: holdDetail(hold),
+      teammateLogin: hold.login,
+      teammateHandled: handled,
+    })
+    .onConflictDoUpdate({
+      target: [daa.accountId, daa.prId, daa.headSha, daa.action],
+      set: { detail: holdDetail(hold), teammateLogin: hold.login, teammateHandled: handled, updatedAt: now },
+      setWhere: and(
+        eq(daa.state, 'skipped'),
+        sql`(${daa.teammateLogin} IS NOT ${hold.login} OR ${daa.teammateHandled} IS NOT ${handled ? 1 : 0})`,
+      ),
+    })
+    .execute();
+}
+
+/** A claimed row lost the GitHub race after all: it becomes the teammate's skip. */
+async function claimBecameSkip(id: number, hold: DepsHold): Promise<void> {
+  await db
+    .update(daa)
+    .set({
+      state: 'skipped',
+      detail: holdDetail(hold),
+      teammateLogin: hold.login,
+      teammateHandled: hold.kind === 'handled',
+      updatedAt: new Date(),
+    })
+    .where(and(eq(daa.id, id), eq(daa.state, 'running')))
+    .execute();
+}
+
 const firstLine = (err: unknown): string =>
   (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
 
@@ -379,16 +511,131 @@ export async function reconcileDependencyActionsOnStartup(): Promise<void> {
     .execute();
 }
 
-/** The heads Limn's AI run pushed — each must be GREEN (not merely not red) before it is approved
- *  or armed. Keyed `${prId}:${sha}`. */
+/** The heads Limn's AI runs pushed (a conflict resolution or a CI fix) — each must be GREEN (not
+ *  merely not red) before it is approved or armed. Keyed `${prId}:${sha}`. */
 export async function aiPushedHeads(accountId: number, prIds: number[]): Promise<Set<string>> {
   if (prIds.length === 0) return new Set();
   const rows = await db
     .select({ prId: daa.prId, sha: daa.resultSha })
     .from(daa)
-    .where(and(eq(daa.accountId, accountId), inArray(daa.prId, prIds), eq(daa.action, 'ai_resolve'), eq(daa.state, 'done')))
+    .where(
+      and(
+        eq(daa.accountId, accountId),
+        inArray(daa.prId, prIds),
+        inArray(daa.action, ['ai_resolve', 'ai_fix']),
+        eq(daa.state, 'done'),
+      ),
+    )
     .execute();
   return new Set(rows.filter((r) => r.sha != null).map((r) => `${r.prId}:${r.sha}`));
+}
+
+// ── One action's claim: the team line, then the DB row ──────────────────────────────────────
+
+/** What every action carries into its claim. */
+export interface ClaimCtx {
+  /** The workspace's team-claims switch (`team_claims_enabled`, ON unless a stored false). */
+  claimsOn: boolean;
+  log: FastifyBaseLogger;
+}
+
+/** A claimed action: its DB row and its `limn/deps` line (unmarked when no line went up). */
+export interface ActionClaim {
+  id: number;
+  line: DepsClaimHandle;
+}
+
+/**
+ * CLAIM BEFORE WRITE, for teams: (1) read the head's `limn/deps` lines — a teammate holding it ⇒
+ * a SKIPPED row ("Robin is handling this"), nothing else; (2) the DB claim (compare-and-set; null ⇒
+ * done before, never again); (3) post our pending line and re-read — a teammate who won the race ⇒
+ * our claim becomes their skip. null ⇒ do nothing. Never throws for GitHub (it acts unmarked).
+ */
+export async function beginDependencyAction(
+  c: ClaimCtx,
+  pr: { id: number; accountId: number; owner: string; name: string; headSha: string },
+  action: ClaimAction,
+  now: number = Date.now(),
+  opts: { ciGreen?: boolean } = {},
+): Promise<ActionClaim | null> {
+  if (depsHeldNow(pr.accountId, pr.id, pr.headSha, familyOfAction(action), now)) return null;
+  const target = { accountId: pr.accountId, prId: pr.id, owner: pr.owner, name: pr.name, headSha: pr.headSha, action };
+  const read = await readDepsClaim(target, c.claimsOn, c.log, now, opts);
+  if (read.awaitingCi) {
+    // An AI-pushed head (any machine's) whose CI is not green: not armed yet, no skip row.
+    rememberDepsAwaitingCi(target, now);
+    return null;
+  }
+  if (read.hold) {
+    rememberDepsHold(target, read.hold, now);
+    await recordTeammateSkip(pr.accountId, pr.id, pr.headSha, action, read.hold);
+    c.log.info({ prId: pr.id, action, teammate: read.hold.login }, 'dependency automation: a teammate holds this PR');
+    return null;
+  }
+  const id = await claimAction(pr.accountId, pr.id, pr.headSha, action);
+  if (id == null) return null;
+  const posted = await postDepsClaim(read.login, target, c.log);
+  if (posted.hold) {
+    rememberDepsHold(target, posted.hold);
+    await claimBecameSkip(id, posted.hold);
+    return null;
+  }
+  return { id, line: posted.handle };
+}
+
+/** Settle the DB row and post the final line together. Never throws. */
+async function finishAction(
+  claim: ActionClaim,
+  state: 'done' | 'failed',
+  detail: string | null,
+  log: FastifyBaseLogger,
+  resultSha: string | null = null,
+): Promise<void> {
+  await settleAction(claim.id, state, detail, resultSha).catch((err) =>
+    log.warn({ err, claimId: claim.id }, 'dependency automation: could not record the outcome'),
+  );
+  const end: DepsClaimEnd = state === 'done' ? { outcome: 'done', pushedSha: resultSha } : { outcome: 'failed' };
+  await endDepsClaim(claim.line, end, log);
+  // The pushed commit carries its own line, so EVERY machine waits for its CI before arming it.
+  if (state === 'done' && resultSha != null) await markAiPushedHead(claim.line, resultSha, log);
+}
+
+/** For the merge sweep (dependency-policy.ts): the arm's outcome, recorded with its line. */
+export async function finishDependencyAction(
+  claim: ActionClaim,
+  state: 'done' | 'failed',
+  detail: string | null,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  await finishAction(claim, state, detail, log);
+}
+
+/** For the merge sweep: nothing was armed — the claim is given back. */
+export async function giveBackDependencyAction(claim: ActionClaim, why: string, log: FastifyBaseLogger): Promise<void> {
+  await giveBack(claim, why, log);
+}
+
+/** Give the claim back: nothing was written. The row goes, and the line says it is free. */
+async function giveBack(claim: ActionClaim, why: string, log: FastifyBaseLogger): Promise<void> {
+  await releaseClaim(claim.id).catch(() => {});
+  await endDepsClaim(claim.line, { outcome: 'released', why }, log);
+}
+
+/**
+ * THE MERGE LANDED (the auto-merge watcher's 'merged' outcome — GitHub accepted the merge, or the
+ * queue merged OUR entry — never inferred from arming): record it for a POLICY intent, so the log
+ * says "Merged". Idempotent per (PR, head). Never throws.
+ */
+export async function recordDependencyMergeLanded(accountId: number, prId: number, headSha: string): Promise<void> {
+  try {
+    await db
+      .insert(daa)
+      .values({ accountId, prId, headSha, action: 'merge_landed', state: 'done', detail: null })
+      .onConflictDoNothing({ target: [daa.accountId, daa.prId, daa.headSha, daa.action] })
+      .execute();
+  } catch {
+    /* the log is a record, never a reason to fail a landing */
+  }
 }
 
 // ── The policy, applied ──────────────────────────────────────────────────────────────────────
@@ -499,26 +746,29 @@ export async function policyAdmits(
   }
 }
 
-// ── The AI fallback's context (bound at boot where agentic AI runs) ─────────────────────────
+// ── The AI context (bound at boot where agentic AI runs) ────────────────────────────────────
 
 let aiCtx: AgentContext | null = null;
 
-/** Called by `startAgenticBackground` (review/agentic.ts): without it the AI fallback never runs. */
+/** Called by `startAgenticBackground` (review/agentic.ts): without it no AI run (conflicts or CI
+ *  fixes) ever starts. */
 export function bindDependencyAutomationAi(ctx: AgentContext): void {
   aiCtx = ctx;
 }
 
-/** AI runs this process is watching, by PR id. */
+/** AI runs this process is watching, by PR id (a conflict run or a CI fix). */
 const aiWatching = new Set<number>();
 
 // ── The tick ─────────────────────────────────────────────────────────────────────────────────
 
 interface Candidate {
   id: number;
+  accountId: number;
   repoId: number;
   owner: string;
   name: string;
   number: number;
+  title: string;
   isDraft: boolean;
   headSha: string;
   ciStatus: string | null;
@@ -533,9 +783,10 @@ interface Candidate {
 let ticking = false;
 
 /**
- * Approve and resolve conflicts on the trusted dependency bots' PRs of every workspace with either
- * switch on. Runs on the auto-merge watcher's cron, before the merge sweep (an approval may be what
- * lets that PR land). Bounded (`ACTIONS_PER_TICK`), per-workspace try/catch, never throws.
+ * Approve, resolve conflicts and fix CI on the trusted dependency bots' PRs of every workspace with
+ * any of those switches on. Runs on the auto-merge watcher's cron, before the merge sweep (an
+ * approval may be what lets that PR land). Bounded (`ACTIONS_PER_TICK`), per-workspace try/catch,
+ * never throws.
  */
 export async function runDependencyAutomationTick(log: FastifyBaseLogger, now: number = Date.now()): Promise<void> {
   if (ticking) return;
@@ -543,15 +794,21 @@ export async function runDependencyAutomationTick(log: FastifyBaseLogger, now: n
   const budget = { left: ACTIONS_PER_TICK };
   try {
     const roster = await db
-      .select({ accountId: workspaces.accountId, workspaceId: workspaces.id, ...settingsColumns })
+      .select({
+        accountId: workspaces.accountId,
+        workspaceId: workspaces.id,
+        teamClaims: workspaces.teamClaimsEnabled,
+        ...settingsColumns,
+      })
       .from(workspaces)
       .execute();
     for (const ws of roster) {
       if (budget.left <= 0) break;
       const settings = settingsOf(ws as SettingsRow);
-      if (!settings.autoApprove && !settings.autoResolveConflicts) continue;
+      if (!settings.autoApprove && !settings.autoResolveConflicts && !settings.autoFix) continue;
       try {
-        await tickWorkspace(ws.accountId, ws.workspaceId, settings, budget, log, now);
+        const c: ClaimCtx = { claimsOn: ws.teamClaims !== false, log };
+        await tickWorkspace(ws.accountId, ws.workspaceId, settings, budget, c, now);
       } catch (err) {
         log.warn({ err, accountId: ws.accountId, workspaceId: ws.workspaceId }, 'dependency automation: workspace failed');
       }
@@ -568,9 +825,10 @@ async function tickWorkspace(
   workspaceId: number,
   settings: DependencyAutomationSettings,
   budget: { left: number },
-  log: FastifyBaseLogger,
+  c: ClaimCtx,
   now: number,
 ): Promise<void> {
+  const log = c.log;
   // WHO: the TRUSTED bots' stored rows. No trusted bot → nothing to do, no PR read at all.
   const botRows = await db
     .select({
@@ -599,6 +857,7 @@ async function tickWorkspace(
       owner: repos.owner,
       name: repos.name,
       number: pullRequests.number,
+      title: pullRequests.title,
       isDraft: pullRequests.isDraft,
       headSha: pullRequests.headSha,
       ciStatus: pullRequests.ciStatus,
@@ -621,10 +880,12 @@ async function tickWorkspace(
       ),
     )
     .execute();
-  const prs = rows.filter(
-    (r): r is typeof r & { headSha: string; authorId: number } =>
-      r.headSha != null && r.authorId != null && !r.isDraft && WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
-  ) as Candidate[];
+  const prs = rows
+    .filter(
+      (r): r is typeof r & { headSha: string; authorId: number } =>
+        r.headSha != null && r.authorId != null && !r.isDraft && WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
+    )
+    .map((r) => ({ ...r, accountId })) as Candidate[];
   if (prs.length === 0) return;
   const ids = prs.map((p) => p.id);
   const [skipRows, actionRows, facts] = await Promise.all([
@@ -636,13 +897,23 @@ async function tickWorkspace(
     db
       .select({ prId: daa.prId, headSha: daa.headSha, action: daa.action, state: daa.state, createdAt: daa.createdAt })
       .from(daa)
-      .where(and(eq(daa.accountId, accountId), inArray(daa.prId, ids)))
+      // A SKIPPED row (a teammate held the head) is not an attempt: invisible to every step below.
+      .where(and(eq(daa.accountId, accountId), inArray(daa.prId, ids), ne(daa.state, 'skipped')))
       .execute(),
     prPolicyFacts(accountId, ids),
   ]);
   const cancelled = new Set(skipRows.map((r) => r.prId));
   const actionAt = (prId: number, head: string, action: DependencyAutomationActionKind) =>
     actionRows.find((a) => a.prId === prId && a.headSha === head && a.action === action) ?? null;
+  // THE AI-RUN CAP: CI fixes and conflict runs together, per PR, rolling 24 hours.
+  const aiRunsInWindow = (prId: number): number =>
+    actionRows.filter(
+      (a) => a.prId === prId && (a.action === 'ai_fix' || a.action === 'ai_resolve') && a.createdAt.getTime() >= now - AI_RUN_WINDOW_MS,
+    ).length;
+  // "Fix with AI" covers conflicts too — through the SAME conflict steps, never a second path.
+  // Only while the AI can run: a stored "Fix them with AI" whose switch is hidden (AI off) must not
+  // keep asking bots to rebase with "Resolve their conflicts" off.
+  const conflictsOn = settings.autoResolveConflicts || (settings.autoFix && aiCtx != null);
 
   let token: string | null = null;
   const viewerUserId = await getAccountUserId(accountId);
@@ -650,25 +921,30 @@ async function tickWorkspace(
   for (const pr of prs) {
     if (budget.left <= 0) return;
     if (cancelled.has(pr.id)) continue; // a person's cancel wins, for every switch
+    // A teammate's Limn holds this head (remembered): no GitHub read until it can have changed.
+    if (depsHeldNow(accountId, pr.id, pr.headSha, null, now)) continue;
     const f = facts.get(pr.id);
     if (!f) continue;
     const conflicting = isConflicting(pr);
+    const kind = trusted.get(pr.authorId) ?? null;
 
     if (conflicting) {
-      if (!settings.autoResolveConflicts) continue;
+      if (!conflictsOn) continue;
       const rebase = actionAt(pr.id, pr.headSha, 'rebase_request');
       const ai = actionAt(pr.id, pr.headSha, 'ai_resolve');
-      const kind = trusted.get(pr.authorId) ?? null;
       const step = conflictStep(
         {
-          rebase: rebase ? { state: rebase.state, at: rebase.createdAt.getTime() } : null,
-          ai: ai ? { state: ai.state } : null,
+          rebase: rebase ? { state: rebase.state as 'running' | 'done' | 'failed', at: rebase.createdAt.getTime() } : null,
+          ai: ai ? { state: ai.state as 'running' | 'done' | 'failed' } : null,
         },
         botCanRebase(kind),
         now,
       );
       if (step === 'none' || step === 'wait') continue;
-      if (step === 'ai' && (aiCtx == null || aiWatching.has(pr.id))) continue;
+      const aiBlocked = aiCtx == null || aiWatching.has(pr.id) || aiRunsInWindow(pr.id) >= DEPENDENCY_AI_FIX_DAILY_CAP;
+      if (step === 'ai' && aiBlocked) continue;
+      // A teammate's remembered hold on this action costs no GitHub read and no budget.
+      if (depsHeldNow(accountId, pr.id, pr.headSha, 'conflicts', now)) continue;
       token ??= await getAccessToken(accountId);
       const live = await fetchPrForAutomation(token, pr.owner, pr.name, pr.number).catch(() => null);
       if (!live || live.state !== 'open' || live.isDraft || live.headSha !== pr.headSha || live.isFork) continue;
@@ -677,13 +953,41 @@ async function tickWorkspace(
       if (step === 'ask_bot') {
         const req = rebaseRequestFor(kind, live.body);
         if (req) {
-          await askBotToRebase(accountId, pr, kind, req, token, viewerUserId, log);
+          await askBotToRebase(c, pr, kind, req, token, viewerUserId);
           continue;
         }
         // Renovate without its checkbox: nothing to ask — straight to the AI, if it can run.
-        if (aiCtx == null) continue;
+        if (aiBlocked) continue;
       }
-      await startAiFallback(aiCtx!, accountId, pr, log);
+      await startAiFallback(aiCtx!, c, pr);
+      continue;
+    }
+
+    // ── FIX CI WITH AI ──
+    const red = pr.ciStatus === 'failure' || pr.ciStatus === 'error';
+    if (red) {
+      const ok = aiFixEligibility(
+        {
+          settingOn: settings.autoFix,
+          trusted: true, // the PR list is the trusted bots' PRs only
+          cancelled: false, // checked above
+          aiAvailable: aiCtx != null,
+          ciStatus: pr.ciStatus,
+          conflicting,
+          triedAtHead: actionAt(pr.id, pr.headSha, 'ai_fix') != null,
+          aiRunsInWindow: aiRunsInWindow(pr.id),
+          fixRunning: aiWatching.has(pr.id) || (aiCtx != null && (await aiFixDeps.isFixRunning(pr.id))),
+        },
+        DEPENDENCY_AI_FIX_DAILY_CAP,
+      );
+      if (!ok.ok) continue;
+      if (depsHeldNow(accountId, pr.id, pr.headSha, 'ai_fix', now)) continue;
+      token ??= await getAccessToken(accountId);
+      const live = await fetchPrForAutomation(token, pr.owner, pr.name, pr.number).catch(() => null);
+      if (!live || live.state !== 'open' || live.isDraft || live.headSha !== pr.headSha || live.isFork) continue;
+      if (!(await policyAdmits(settings.policy, f, pr, { live })).ok) continue;
+      budget.left -= 1;
+      await startAiFix(aiCtx!, c, pr, kind);
       continue;
     }
 
@@ -693,6 +997,7 @@ async function tickWorkspace(
     if (pr.ciStatus !== 'success') continue; // green, not merely not red (pushed heads included)
     if (viewerUserId == null || viewerUserId === pr.authorId) continue;
     if (actionAt(pr.id, pr.headSha, 'approve')) continue;
+    if (depsHeldNow(accountId, pr.id, pr.headSha, 'approve', now)) continue;
     // Synced facts first: a PR the policy refuses on what we already know costs no GitHub call.
     const synced = await policyAdmits(settings.policy, f, pr);
     if (!synced.ok && synced.final) continue;
@@ -702,7 +1007,7 @@ async function tickWorkspace(
     if (!live || live.state !== 'open' || live.isDraft || live.headSha !== pr.headSha || live.isFork) continue;
     if (!(await policyAdmits(settings.policy, f, pr, { live })).ok) continue;
     budget.left -= 1;
-    await approve(accountId, pr, viewerUserId, classifyFrom(f, live), f.securityFix, token, log);
+    await approve(c, pr, viewerUserId, classifyFrom(f, live), f.securityFix, token);
   }
 }
 
@@ -712,78 +1017,83 @@ function updateWords(cls: DependencyUpdateClass, securityFix: boolean): string {
 }
 
 async function approve(
-  accountId: number,
+  c: ClaimCtx,
   pr: Candidate,
   viewerUserId: number,
   cls: DependencyUpdateClass,
   securityFix: boolean,
   token: string,
-  log: FastifyBaseLogger,
 ): Promise<void> {
-  const claim = await claimAction(accountId, pr.id, pr.headSha, 'approve');
+  const { log } = c;
+  const claim = await beginDependencyAction(c, pr, 'approve');
   if (claim == null) return;
+  let gh: Awaited<ReturnType<typeof submitPrReview>>;
   try {
-    const gh = await submitPrReview(token, pr.owner, pr.name, pr.number, {
+    gh = await submitPrReview(token, pr.owner, pr.name, pr.number, {
       event: 'APPROVE',
       // Pinned to the head we checked: a push since makes GitHub refuse it.
       commitId: pr.headSha,
       body: `Approved automatically: ${updateWords(cls, securityFix)} from a trusted bot, with CI green.\n\n${LIMN_MARKER}`,
     });
-    await settleAction(claim, 'done', updateWords(cls, securityFix));
+  } catch (err) {
+    await finishAction(claim, 'failed', firstLine(err), log);
+    log.warn({ err, prId: pr.id }, 'dependency automation: approval failed');
+    return;
+  }
+  // "Approved" is recorded only now: GitHub ACCEPTED the review.
+  await finishAction(claim, 'done', updateWords(cls, securityFix), log);
+  try {
     // STAMP, then SETTLE, then CASCADE — the approve route's own tail.
     await upsertLocalReview(pr.id, viewerUserId, gh);
-    await clearOwnReviewRequest(pr.id, accountId, viewerUserId);
-    await resyncPrAfterWrite({ prId: pr.id, accountId, log });
-    schedulePrSettle(accountId, pr.id, asSyncLogger(log), { mergeStateNot: 'blocked' });
-    await notePrChangedForPr(accountId, pr.id);
-    log.info({ prId: pr.id, repo: `${pr.owner}/${pr.name}`, number: pr.number }, 'dependency automation: approved');
+    await clearOwnReviewRequest(pr.id, pr.accountId, viewerUserId);
+    await resyncPrAfterWrite({ prId: pr.id, accountId: pr.accountId, log });
+    schedulePrSettle(pr.accountId, pr.id, asSyncLogger(log), { mergeStateNot: 'blocked' });
+    await notePrChangedForPr(pr.accountId, pr.id);
   } catch (err) {
-    await settleAction(claim, 'failed', firstLine(err));
-    log.warn({ err, prId: pr.id }, 'dependency automation: approval failed');
+    log.warn({ err, prId: pr.id }, 'dependency automation: approved; the local stamp failed');
   }
+  log.info({ prId: pr.id, repo: `${pr.owner}/${pr.name}`, number: pr.number }, 'dependency automation: approved');
 }
 
 async function askBotToRebase(
-  accountId: number,
+  c: ClaimCtx,
   pr: Candidate,
   kind: string | null,
   req: NonNullable<ReturnType<typeof rebaseRequestFor>>,
   token: string,
   viewerUserId: number | null,
-  log: FastifyBaseLogger,
 ): Promise<void> {
-  const claim = await claimAction(accountId, pr.id, pr.headSha, 'rebase_request');
+  const { log } = c;
+  const claim = await beginDependencyAction(c, pr, 'rebase_request');
   if (claim == null) return;
   const bot = BOT_BRAND[kind ?? ''] ?? 'the bot';
   try {
     if (req.method === 'comment') {
       const gh = await addIssueComment(token, pr.owner, pr.name, pr.number, req.body);
-      await settleAction(claim, 'done', `Asked ${bot} to rebase`);
+      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log);
       await upsertLocalPrComment(pr.id, viewerUserId, gh);
     } else {
       const out = await updatePullRequestBody(token, pr.owner, pr.name, pr.number, req.body);
       if (!out.ok) {
-        await settleAction(claim, 'failed', out.message);
+        await finishAction(claim, 'failed', out.message, log);
         return;
       }
-      await settleAction(claim, 'done', `Asked ${bot} to rebase`);
-      await resyncPrAfterWrite({ prId: pr.id, accountId, log });
+      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log);
+      await resyncPrAfterWrite({ prId: pr.id, accountId: pr.accountId, log });
     }
-    await notePrChangedForPr(accountId, pr.id);
+    await notePrChangedForPr(pr.accountId, pr.id);
   } catch (err) {
-    await settleAction(claim, 'failed', firstLine(err));
+    // A throw AFTER the write was recorded leaves the row 'done' (settleAction only touches its row).
+    const row = (await db.select({ state: daa.state }).from(daa).where(eq(daa.id, claim.id)).limit(1).execute())[0];
+    if (row?.state === 'running') await finishAction(claim, 'failed', firstLine(err), log);
     log.warn({ err, prId: pr.id }, 'dependency automation: rebase request failed');
   }
 }
 
-async function startAiFallback(
-  ctx: AgentContext,
-  accountId: number,
-  pr: Candidate,
-  log: FastifyBaseLogger,
-): Promise<void> {
+async function startAiFallback(ctx: AgentContext, c: ClaimCtx, pr: Candidate): Promise<void> {
+  const { log } = c;
   // THE AUTOMATIC-RUN BUDGET GATE: over budget → skipped, never queued (the next tick re-derives).
-  if (!(await automaticRunAllowed(ctx, accountId, 'dependency conflicts'))) return;
+  if (!(await automaticRunAllowed(ctx, pr.accountId, 'dependency conflicts'))) return;
   const [{ startAiResolve }, { runOpen }, { peekSession }] = await Promise.all([
     import('../coding/ai-resolve/run.js'),
     import('../api/routes/conflicts.js'),
@@ -792,12 +1102,12 @@ async function startAiFallback(
   // ⚠ NEVER TAKE OVER A READER'S RESOLVER: a session someone has open, or an AI run a reader
   // started, is theirs — committing it unattended would land decisions they are still making.
   // Skipped without a claim; a later tick looks again once they have left.
-  const open = peekSession(accountId, pr.id);
+  const open = peekSession(pr.accountId, pr.id);
   if (open != null && (open.aiRunning || open.subscribers.size > 0)) return;
-  const claim = await claimAction(accountId, pr.id, pr.headSha, 'ai_resolve');
+  const claim = await beginDependencyAction(c, pr, 'ai_resolve');
   if (claim == null) return;
   const res = await startAiResolve(ctx, {
-    accountId,
+    accountId: pr.accountId,
     prId: pr.id,
     model: DEFAULT_AI_FIX_MODEL,
     headSha: pr.headSha,
@@ -809,22 +1119,24 @@ async function startAiFallback(
   });
   // Only a run THIS call started is ours to land ('running' is somebody else's, raced in since).
   if (res == null || res.status !== 'started') {
-    // Nothing was written and no model ran: give the claim back so a later tick may try.
     if (res?.status === 'no_conflicts' || res?.status === 'no_auth') {
-      await settleAction(claim, 'failed', res.status === 'no_auth' ? 'No AI sign-in.' : 'No longer conflicts.');
+      await finishAction(claim, 'failed', res.status === 'no_auth' ? 'No AI sign-in.' : 'No longer conflicts.', log);
     } else {
-      await releaseClaim(claim);
+      // Nothing was written and no model ran: give the claim back so a later tick may try.
+      await giveBack(claim, "didn't start", log);
     }
     return;
   }
+  renewDepsClaim(claim.line, log);
   aiWatching.add(pr.id);
-  void watchAndLand(claim, accountId, pr, log).finally(() => aiWatching.delete(pr.id));
+  void watchAndLand(claim, pr, log).finally(() => aiWatching.delete(pr.id));
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Wait for the AI run, then commit its answer UNATTENDED when it is complete. NEVER REJECTS. */
-async function watchAndLand(claim: number, accountId: number, pr: Candidate, log: FastifyBaseLogger): Promise<void> {
+async function watchAndLand(claim: ActionClaim, pr: Candidate, log: FastifyBaseLogger): Promise<void> {
+  const accountId = pr.accountId;
   try {
     const { peekSession } = await import('../conflict/session.js');
     const { getAiResolution } = await import('../coding/ai-resolve/run.js');
@@ -832,7 +1144,7 @@ async function watchAndLand(claim: number, accountId: number, pr: Candidate, log
     const deadline = Date.now() + AI_RUN_TIMEOUT_MS;
     while (peekSession(accountId, pr.id)?.aiRunning === true) {
       if (Date.now() > deadline) {
-        await settleAction(claim, 'failed', 'The AI run took too long.');
+        await finishAction(claim, 'failed', 'The AI run took too long.', log);
         return;
       }
       await sleep(3_000);
@@ -840,21 +1152,21 @@ async function watchAndLand(claim: number, accountId: number, pr: Candidate, log
     const view = getAiResolution(accountId, pr.id);
     const rec = peekSession(accountId, pr.id);
     if (!view || !rec || view.status !== 'succeeded') {
-      await settleAction(claim, 'failed', view?.error ?? 'The AI run didn’t finish.');
+      await finishAction(claim, 'failed', view?.error ?? 'The AI run didn’t finish.', log);
       return;
     }
     const model = rec.model;
     if (!model || model.headSha !== pr.headSha || rec.sessionId !== view.sessionId) {
-      await settleAction(claim, 'failed', 'The branch moved during the AI run.');
+      await finishAction(claim, 'failed', 'The branch moved during the AI run.', log);
       return;
     }
     if (!model.prBranchPushable) {
-      await settleAction(claim, 'failed', model.prBranchUnavailableReason ?? 'The branch can’t be pushed to.');
+      await finishAction(claim, 'failed', model.prBranchUnavailableReason ?? 'The branch can’t be pushed to.', log);
       return;
     }
     const plan = aiResolutionCommit(model.files, view.choices);
     if (!plan.ok) {
-      await settleAction(claim, 'failed', `Not pushed: ${AI_COMMIT_REFUSAL_TEXT[plan.refusal]}.`);
+      await finishAction(claim, 'failed', `Not pushed: ${AI_COMMIT_REFUSAL_TEXT[plan.refusal]}.`, log);
       return;
     }
     const out = await landSessionResolution(
@@ -872,20 +1184,189 @@ async function watchAndLand(claim: number, accountId: number, pr: Candidate, log
       log,
     );
     if (!out.ok) {
-      await settleAction(claim, 'failed', out.message);
+      await finishAction(claim, 'failed', out.message, log);
       return;
     }
-    await settleAction(
+    await finishAction(
       claim,
       'done',
       `Resolved with ${view.provider === 'codex' ? 'Codex' : 'Claude'} and pushed ${out.result.commitSha.slice(0, 7)}`,
+      log,
       out.result.commitSha,
     );
     await notePrChangedForPr(accountId, pr.id);
     log.info({ prId: pr.id, sha: out.result.commitSha }, 'dependency automation: conflicts resolved');
   } catch (err) {
     log.warn({ err, prId: pr.id }, 'dependency automation: AI conflict run failed');
-    await settleAction(claim, 'failed', firstLine(err)).catch(() => {});
+    await finishAction(claim, 'failed', firstLine(err), log).catch(() => {});
+  }
+}
+
+// ── FIX CI WITH AI ───────────────────────────────────────────────────────────────────────────
+
+/** The seams the AI fix uses — replaceable in tests. */
+export interface AiFixDeps {
+  allowed: (ctx: AgentContext, accountId: number) => Promise<boolean>;
+  /** The head's failing checks, read LIVE, with log excerpts. null = not proven failing (or unreadable). */
+  readFailures: (
+    ctx: AgentContext,
+    pr: Candidate,
+  ) => Promise<{ failures: Array<{ checkName: string; step: string | null; excerpt: string }>; otherFailing: string[] } | null>;
+  startFix: (
+    ctx: AgentContext,
+    input: { accountId: number; prId: number; instruction: string },
+  ) => Promise<{ status: string; fixId?: number; message?: string }>;
+  fixState: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ status: string; patch: string | null; error: string | null; provider: string | null } | null>;
+  push: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ ok: true; sha: string } | { ok: false; message: string }>;
+  /** Is an AI Fix (anyone's — a reader's click or an earlier automatic one) queued or running? */
+  isFixRunning: (prId: number) => Promise<boolean>;
+  pollMs: number;
+}
+
+const defaultAiFixDeps: AiFixDeps = {
+  allowed: (ctx, accountId) => automaticRunAllowed(ctx, accountId, 'dependency CI fix'),
+  async readFailures(ctx, pr) {
+    const { readCiInputs } = await import('../review/ci-review/prepare.js');
+    const inputs = await readCiInputs(ctx, {
+      accountId: pr.accountId,
+      prId: pr.id,
+      owner: pr.owner,
+      name: pr.name,
+      headSha: pr.headSha,
+      prior: null,
+    });
+    // LIVE PROOF: the head's checks, read now, show a failure. Nothing failing (it went green, or
+    // was re-run) or unreadable ⇒ not proven: no claim, no run.
+    if (inputs.ok) {
+      const sent = inputs.plan.sent.map((x) => ({ checkName: x.check.checkName, step: x.step, excerpt: x.excerpt.text }));
+      const shown = new Set(sent.map((x) => x.checkName));
+      return { failures: sent, otherFailing: inputs.failingChecks.filter((n) => !shown.has(n)) };
+    }
+    if (inputs.failingChecks && inputs.failingChecks.length > 0) {
+      return { failures: [], otherFailing: inputs.failingChecks };
+    }
+    return null;
+  },
+  async startFix(ctx, input) {
+    const { startFix } = await import('../coding/ai-fix/manager.js');
+    return startFix(ctx, {
+      accountId: input.accountId,
+      prId: input.prId,
+      model: DEFAULT_AI_FIX_MODEL,
+      seed: 'plain',
+      instruction: input.instruction,
+      // An automatic fix: the default provider, no picker. auto-push.ts never pushes it (not the
+      // reader's own PR) — this file pushes it below, under its own rules.
+      trigger: 'auto',
+    });
+  },
+  async fixState(ctx, accountId, fixId) {
+    const { getFixById } = await import('../coding/ai-fix/persist.js');
+    const row = await getFixById(ctx, accountId, fixId);
+    if (!row) return null;
+    const r = row as { status: string; patch?: string | null; error?: string | null; provider?: string | null };
+    return { status: r.status, patch: r.patch ?? null, error: r.error ?? null, provider: r.provider ?? null };
+  },
+  async push(ctx, accountId, fixId) {
+    const { pushFix } = await import('../coding/ai-fix/push.js');
+    // The Push button's own path: write access re-checked, the branch must still be the fix's base
+    // (never forced), the PR settled after the write.
+    const out = await pushFix(ctx, { accountId, fixId, target: 'existing' });
+    return out.ok ? { ok: true, sha: out.result.commitSha } : { ok: false, message: out.message };
+  },
+  async isFixRunning(prId) {
+    const { isFixRunning } = await import('../coding/ai-fix/manager.js');
+    return isFixRunning(prId);
+  },
+  pollMs: 5_000,
+};
+
+let aiFixDeps: AiFixDeps = defaultAiFixDeps;
+
+/**
+ * An UNATTENDED AI Fix for a trusted bot's PR whose CI failed: the spend gate first (over ⇒ skipped,
+ * never queued), the failure proven LIVE, then the claim (DB + `limn/deps`), then AI Fix's own run
+ * (plain seed: the failing checks and their log excerpts; the no-shell tools and the path guard),
+ * then AI Fix's own Push onto the bot's branch. The pushed head must go GREEN again before anything
+ * approves or arms it (`aiPushedHeads`). Never retried at a head; a person's cancel of the fix wins.
+ */
+async function startAiFix(ctx: AgentContext, c: ClaimCtx, pr: Candidate, kind: string | null): Promise<void> {
+  const { log } = c;
+  const deps = aiFixDeps;
+  if (!(await deps.allowed(ctx, pr.accountId))) return;
+  const ci = await deps.readFailures(ctx, pr).catch(() => null);
+  if (ci == null || (ci.failures.length === 0 && ci.otherFailing.length === 0)) return;
+  const claim = await beginDependencyAction(c, pr, 'ai_fix');
+  if (claim == null) return;
+  const instruction = dependencyFixInstruction({
+    title: pr.title,
+    bot: BOT_BRAND[kind ?? ''] ?? 'a dependency bot',
+    failures: ci.failures,
+    otherFailing: ci.otherFailing,
+  });
+  const res = await deps.startFix(ctx, { accountId: pr.accountId, prId: pr.id, instruction }).catch((err) => {
+    log.warn({ err, prId: pr.id }, 'dependency automation: AI fix did not start');
+    return null;
+  });
+  if (res == null || res.status !== 'queued' || res.fixId == null) {
+    if (res?.status === 'no_auth') await finishAction(claim, 'failed', 'No AI sign-in.', log);
+    else await giveBack(claim, "didn't start", log);
+    return;
+  }
+  renewDepsClaim(claim.line, log);
+  aiWatching.add(pr.id);
+  void watchFixAndPush(ctx, claim, pr, res.fixId, deps, log).finally(() => aiWatching.delete(pr.id));
+}
+
+/** Wait for the fix, then push it. Records the TRUE outcome. NEVER REJECTS. */
+async function watchFixAndPush(
+  ctx: AgentContext,
+  claim: ActionClaim,
+  pr: Candidate,
+  fixId: number,
+  deps: AiFixDeps,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  try {
+    const deadline = Date.now() + AI_FIX_TIMEOUT_MS;
+    let state = await deps.fixState(ctx, pr.accountId, fixId);
+    while (state != null && (state.status === 'queued' || state.status === 'running')) {
+      if (Date.now() > deadline) {
+        await finishAction(claim, 'failed', 'The AI fix took too long.', log);
+        return;
+      }
+      await sleep(deps.pollMs);
+      state = await deps.fixState(ctx, pr.accountId, fixId);
+    }
+    if (state == null) {
+      await finishAction(claim, 'failed', 'The AI fix disappeared.', log);
+      return;
+    }
+    if (state.status === 'cancelled') {
+      // A person's cancel wins: recorded, never retried at this head.
+      await finishAction(claim, 'failed', 'Cancelled.', log);
+      return;
+    }
+    if (state.status !== 'succeeded') {
+      await finishAction(claim, 'failed', state.error ? firstLine(state.error) : 'The AI fix failed.', log);
+      return;
+    }
+    if (!(state.patch ?? '').trim()) {
+      await finishAction(claim, 'failed', 'The AI changed nothing.', log);
+      return;
+    }
+    const out = await deps.push(ctx, pr.accountId, fixId);
+    if (!out.ok) {
+      await finishAction(claim, 'failed', `Not pushed: ${out.message}`, log);
+      return;
+    }
+    const by = state.provider === 'codex' ? 'Codex' : 'Claude';
+    await finishAction(claim, 'done', `Fixed with ${by} and pushed ${out.sha.slice(0, 7)}`, log, out.sha);
+    await notePrChangedForPr(pr.accountId, pr.id).catch(() => {});
+    log.info({ prId: pr.id, sha: out.sha }, 'dependency automation: CI fixed');
+  } catch (err) {
+    log.warn({ err, prId: pr.id }, 'dependency automation: AI fix failed');
+    await finishAction(claim, 'failed', firstLine(err), log).catch(() => {});
   }
 }
 
@@ -896,5 +1377,14 @@ export const __testing = {
     aiCtx = null;
     aiWatching.clear();
     liveClassCache.clear();
+    aiFixDeps = defaultAiFixDeps;
+  },
+  setAiFixDeps(d: Partial<AiFixDeps>): void {
+    aiFixDeps = { ...defaultAiFixDeps, ...d };
+  },
+  /** Resolves once no AI run is being watched (bounded). */
+  async settle(maxMs = 2_000): Promise<void> {
+    const end = Date.now() + maxMs;
+    while (aiWatching.size > 0 && Date.now() < end) await sleep(5);
   },
 };

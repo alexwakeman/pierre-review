@@ -33,6 +33,21 @@ describe('every section lives in exactly one tab', () => {
   });
 });
 
+// Bot classification moved here from Bots Monitoring (2026-11-03): Settings → Bots lists every bot
+// with its category, and keeps "Add a review bot", by mounting the one existing table.
+describe('Settings → Bots holds bot classification', () => {
+  it('lists the classification section in the Bots tab, as a workspace section', () => {
+    const bots = SETTINGS_TABS.find((t) => t.id === 'bots')!;
+    expect(bots.workspace).toContain('BotClassificationSection');
+    expect(readFileSync(`${dir}BotClassificationSection.tsx`, 'utf8')).toMatch(/<DetectedReviewersTable workspaceId=\{workspaceId\} \/>/);
+    expect(readFileSync(`${dir}DetectedReviewersTable.tsx`, 'utf8')).toMatch(/Add a review bot/);
+  });
+  it('Bots Monitoring no longer has a Classification tab', () => {
+    const view = readFileSync(fileURLToPath(new URL('../src/components/Activity/BotsView.tsx', import.meta.url)), 'utf8');
+    expect(view).not.toMatch(/id: 'classification'|BotSettingsPanel|DetectedReviewersTable/);
+  });
+});
+
 describe('opening at a section opens its tab', () => {
   it('each focus names the tab that holds its section', () => {
     const holder: Record<string, string> = {
@@ -41,6 +56,7 @@ describe('opening at a section opens its tab', () => {
       'claude-spend': 'ClaudeSpendSection',
       'auto-review': 'AutoReviewSection',
       'ai-effort': 'AiProviderSection',
+      bots: 'BotClassificationSection',
     };
     for (const [focus, tabId] of Object.entries(SETTINGS_FOCUS_TAB)) {
       const tab = SETTINGS_TABS.find((t) => t.id === tabId)!;

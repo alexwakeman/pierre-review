@@ -62,10 +62,13 @@
 //
 // ⚠ ONCE GITHUB 201s THERE IS NO RETRY, EVER. A failure is RECORDED (the Claude Review tab prints
 // "Couldn't post automatically: …" and keeps the Post button), never swallowed and never retried.
-// ⚠ Manual runs are never auto-posted: a review you start yourself keeps the Post button.
+// ⚠ A manual run is posted here ONLY when the reader started it with "Review and post"
+// (`post_on_finish`, `isPressedPost`): the press stands in for step 0 and for the scope of step 1
+// (open and not a draft still apply); steps 2-8 are the same. Auto resolve and auto pushback stay
+// AUTO-only. "Review only" (and every older manual run) keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
 import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
-import { clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
+import { aiRunProvider, clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
   type AutoApproveImpact,
   type AutoPostKinds,
@@ -112,6 +115,8 @@ import {
   type AiProviderName,
 } from '@pierre-review/shared';
 import { pairRaisedByLead, pairReviewBody } from './pair.js';
+import { limnMetaForReview } from './post-meta.js';
+import { TEAMMATE_KIND, ownRunsOnly } from '../../db/teammate-reviews.js';
 
 // A pair's body names both when it falls back to a count ("3 comments from Claude and Codex.").
 const PAIR_BODY_BY = 'Claude and Codex';
@@ -142,6 +147,18 @@ export function autoPostEligibility(f: AutoPostPrFacts, scope: AutoPostScope): A
   if (f.isDraft) return 'draft';
   if (f.authorIsBot) return 'bot_author';
   if (scope === 'mine' && !f.authorIsMe && !f.requestedOfMe && f.participatedByMe !== true) return 'not_yours';
+  return null;
+}
+
+/** A MANUAL run the reader started with "Review and post" (`claude_reviews.post_on_finish`). */
+export function isPressedPost(r: Pick<ClaudeReview, 'trigger' | 'postOnFinish'>): boolean {
+  return r.trigger === 'manual' && r.postOnFinish === true;
+}
+
+/** "Review and post" posts on any open PR that is not a draft: the press stands in for the scope. */
+export function pressedPostEligibility(f: Pick<AutoPostPrFacts, 'state' | 'isDraft'>): AutoPostSkipReason | null {
+  if (f.state !== 'open') return 'not_open';
+  if (f.isDraft) return 'draft';
   return null;
 }
 
@@ -665,7 +682,12 @@ export async function readAutoPostPrFacts(
   return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, openRequestOfMe, participatedByMe };
 }
 
-/** Every earlier run's findings of this PR (account-scoped), as the dedupe reads them. */
+/**
+ * Every earlier run's findings of this PR (account-scoped), as the dedupe reads them — plus every
+ * TEAMMATE'S imported posted finding (`kind = 'teammate'`, any id: it may be imported after the run
+ * started). Those ARE on GitHub, so a re-raise of one (a follow-up on the PR author's own review,
+ * teammate-anchor.ts) or the same point found again is never posted a second time.
+ */
 export async function loadEarlierFindings(
   ctx: AgentContext,
   accountId: number,
@@ -678,7 +700,14 @@ export async function loadEarlierFindings(
   const runs = (await ctx.db
     .select({ id: cr.id, autoPost: cr.autoPost })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), lt(cr.id, beforeReviewId)))
+    // The reader's own earlier runs, and every teammate's imported review (already on GitHub).
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(cr.accountId, accountId),
+        or(and(lt(cr.id, beforeReviewId), ownRunsOnly(cr.kind)), eq(cr.kind, TEAMMATE_KIND)),
+      ),
+    )
     .orderBy(desc(cr.id))
     .execute()) as Array<{ id: number; autoPost: ClaudeAutoPostRecord | null }>;
   if (runs.length === 0) return [];
@@ -806,11 +835,15 @@ async function autoPostReview(
   deps: AutoPostDeps,
 ): Promise<AutoPostOutcome> {
   const ws = await readWorkspaceAutoPostForPr(ctx, accountId, prId);
-  if (!ws || !ws.settings.enabled) return { kind: 'off' };
+  if (!ws) return { kind: 'off' };
   const review: ClaudeReview | null = await getClaudeReviewById(ctx, reviewId, accountId);
   if (!review || review.prId !== prId || review.status !== 'succeeded') return { kind: 'not_found' };
-  // AUTO runs only — a review a person started keeps the Post button.
-  if (review.trigger !== 'auto') return { kind: 'off' };
+  // AUTO runs — or a MANUAL run the reader started with "Review and post" (`postOnFinish`, stored on
+  // the row): THE PRESS IS THE CONSENT, so it needs no workspace switch and no PR scope. Every other
+  // manual run keeps the Post button.
+  const pressed = isPressedPost(review);
+  if (review.trigger !== 'auto' && !pressed) return { kind: 'off' };
+  if (!pressed && !ws.settings.enabled) return { kind: 'off' };
   if (review.autoPost != null) return { kind: 'already_claimed' };
   // THE PAIR'S FIRST HALF, when it is usable: the same PR and head, an auto run that succeeded and
   // that nothing has claimed. Otherwise this run posts alone.
@@ -822,7 +855,8 @@ async function autoPostReview(
       f.prId === prId &&
       f.headSha === review.headSha &&
       f.status === 'succeeded' &&
-      f.trigger === 'auto' &&
+      f.trigger === review.trigger &&
+      isPressedPost(f) === pressed &&
       f.autoPost == null
     ) {
       first = f;
@@ -874,7 +908,8 @@ async function autoPostReview(
 
   const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
   if (!facts) return { kind: 'not_found' };
-  const notEligible = autoPostEligibility(facts, ws.settings.scope);
+  // A press posts on any open, ready PR (the scope and the bot-author rule are the switch's).
+  const notEligible = pressed ? pressedPostEligibility(facts) : autoPostEligibility(facts, ws.settings.scope);
   if (notEligible) return skip(notEligible);
 
   // A pair's earlier findings are those before its FIRST half (the second's repeats of the first were
@@ -1055,6 +1090,19 @@ async function autoPostReview(
       body: bodyOf(ev === 'APPROVE' ? null : reasonNow()),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
+      // How the review ran, in the summary marker (a teammate's Limn shows it from there).
+      limnMeta:
+        pairFirst != null
+          ? {
+              run: pressed ? 'manual' : 'auto',
+              pair: true,
+              runs: [pairFirst, review].map((r) => ({
+                provider: aiRunProvider(r.provider, r.model),
+                model: r.model || null,
+                effort: r.effort ?? null,
+              })),
+            }
+          : limnMetaForReview(review),
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
       // comment carries its own provider's footer and names who raised it.
       includedFindings: picked.toPost.map((f) => toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), tagOf(f))),

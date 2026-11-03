@@ -93,9 +93,10 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'bots',
-    label: 'Bots', summary: 'Bot comment scoring',
+    label: 'Bots', summary: 'Which reviewers are bots, their category and price; bot comment scoring',
     global: ['BotScoringSection'],
-    workspace: [],
+    // Every bot in the workspace with its category (it was Bots Monitoring → Classification).
+    workspace: ['BotClassificationSection'],
   },
 ];
 
@@ -111,6 +112,7 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   'claude-spend': 'ai',
   'auto-review': 'ai-review',
   'ai-effort': 'ai',
+  bots: 'bots',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

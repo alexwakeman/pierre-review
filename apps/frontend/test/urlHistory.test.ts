@@ -821,34 +821,21 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
-  // Bot classification is a Bots Monitoring tab: it pushes, is emitted only beside the Bots rail
-  // entry, and round-trips.
-  it('switching to Bots Monitoring → Classification pushes and round-trips', () => {
-    gesture(() => useFilters.getState().setActivityRepo('bots'));
-    const before = entries.length;
-    gesture(() => useFilters.getState().setBotsInnerTab('classification'));
-    expect(location.search).toContain('botsTab=classification');
-    expect(entries).toHaveLength(before + 1);
-
-    back();
-    expect(useFilters.getState().botsInnerTab).toBe('roi');
-    expect(location.search).not.toContain('botsTab');
-  });
-
-  // ⚠ LEGACY: the classification screen was Bots Monitoring → Settings, then the Feed's "Bot
-  // classification" sub-tab. Old bookmarks (and history entries Back replays) land on its new home.
-  it('maps a legacy ?botsTab=settings link to Bots Monitoring → Classification', () => {
-    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=settings');
+  // ⚠ LEGACY: bot classification was Bots Monitoring → Settings, then the Feed's "Bot
+  // classification" sub-tab, then Bots Monitoring → Classification. It is Settings → Bots now (a
+  // modal, never restored by a link), so the old bookmarks land on Bots Monitoring's default.
+  it.each(['settings', 'classification'])('lands a legacy ?botsTab=%s link on the Bots default', (legacy) => {
+    seat(`/app/?workspace=5&view=activity&activityRepo=bots&botsTab=${legacy}`);
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().activityRepoId).toBe('bots');
-    expect(useFilters.getState().botsInnerTab).toBe('classification');
+    expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
-  it('maps a legacy ?feedTab=classification link to Bots Monitoring → Classification', () => {
+  it('maps a legacy ?feedTab=classification link to Bots Monitoring', () => {
     seat('/app/?workspace=5&view=activity&activityRepo=feed&feedTab=classification');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().activityRepoId).toBe('bots');
-    expect(useFilters.getState().botsInnerTab).toBe('classification');
+    expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
   // The Bot Tuning Advisor is REMOVED: its old bookmark seats nothing, so the rail opens on ROI.
@@ -888,19 +875,51 @@ describe('the Activity sub-tab strips', () => {
 
   // This Sprint is a FIXED TAB (`view=sprint`), its sub-tab its own key (`sprintTab`), the Theme
   // default omitted, and a Back / reload of its link lands back on it.
-  it('round-trips This Sprint and its Merged so far tab through ?view=sprint&sprintTab=merged', () => {
+  it('round-trips This Sprint and its People tab through ?view=sprint&sprintTab=people', () => {
     gesture(() => usePinnedTabs.getState().showSprint());
     expect(location.search).toContain('view=sprint');
     expect(location.search).not.toContain('activityRepo=sprint');
     expect(location.search).not.toContain('sprintTab');
-    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
-    expect(location.search).toContain('sprintTab=merged');
+    gesture(() => useFilters.getState().setSprintInnerTab('people'));
+    expect(location.search).toContain('sprintTab=people');
     expect(location.search).not.toContain('insightsTab');
     useFilters.getState().setSprintInnerTab('paths');
     usePinnedTabs.getState().showActivity();
     applyUrlToStores({ fromPop: true });
     expect(usePinnedTabs.getState().activeTab).toBe('sprint');
-    expect(useFilters.getState().sprintInnerTab).toBe('merged');
+    expect(useFilters.getState().sprintInnerTab).toBe('people');
+  });
+
+  // Open PRs → Merged (it was This Sprint → "Merged so far"): `?openPrsTab=merged`, a navigation,
+  // emitted only on Open PRs.
+  it('round-trips Open PRs → Merged through ?openPrsTab=merged; Back returns to Open', () => {
+    gesture(() => usePinnedTabs.getState().showActivity());
+    gesture(() => useFilters.getState().setActivityRepo('open-prs'));
+    const before = entries.length;
+    gesture(() => useFilters.getState().setOpenPrsTab('merged'));
+    expect(entries).toHaveLength(before + 1);
+    expect(location.search).toContain('openPrsTab=merged');
+    back();
+    expect(useFilters.getState().openPrsTab).toBe('open');
+    expect(location.search).not.toContain('openPrsTab');
+    forward();
+    expect(useFilters.getState().openPrsTab).toBe('merged');
+    // Not emitted from another rail entry.
+    gesture(() => useFilters.getState().setActivityRepo('feed'));
+    expect(location.search).not.toContain('openPrsTab');
+  });
+
+  it.each([
+    '/app/?workspace=5&view=sprint&sprintTab=merged',
+    '/app/?workspace=5&view=activity&activityRepo=sprint&sprintTab=merged',
+    '/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=merged',
+    '/app/?workspace=5&view=activity&insightsTab=merged',
+  ])('a legacy Merged so far link (%s) lands on Open PRs → Merged', (url) => {
+    seat(url);
+    applyUrlToStores({ fromPop: true });
+    expect(usePinnedTabs.getState().activeTab).toBe('activity');
+    expect(useFilters.getState().activityRepoId).toBe('open-prs');
+    expect(useFilters.getState().openPrsTab).toBe('merged');
   });
 
   it('switching to the This Sprint tab is a navigation: Back returns to Activity', () => {
@@ -923,10 +942,7 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().activityRepoId).not.toBe('sprint');
   });
 
-  it.each([
-    ['sprint', 'themes'],
-    ['merged', 'merged'],
-  ] as const)('a legacy ?insightsTab=%s link lands on This Sprint → %s', (legacy, tab) => {
+  it.each([['sprint', 'themes']] as const)('a legacy ?insightsTab=%s link lands on This Sprint → %s', (legacy, tab) => {
     seat(`/app/?workspace=5&view=activity&activityRepo=insights&insightsTab=${legacy}`);
     applyUrlToStores({ fromPop: true });
     expect(usePinnedTabs.getState().activeTab).toBe('sprint');
@@ -943,13 +959,6 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().activityRepoId).toBe('insights');
     expect(useFilters.getState().insightsInnerTab).toBe('overview');
     expect(usePinnedTabs.getState().activeTab).not.toBe('people-report');
-  });
-
-  it('a legacy ?insightsTab=merged link with no rail named lands on This Sprint too', () => {
-    seat('/app/?workspace=5&view=activity&insightsTab=merged');
-    applyUrlToStores({ fromPop: true });
-    expect(usePinnedTabs.getState().activeTab).toBe('sprint');
-    expect(useFilters.getState().sprintInnerTab).toBe('merged');
   });
 
   // The three views each have a link; the retired force graph's `?sprintTab=graph` lands on Theme.
@@ -980,12 +989,9 @@ describe('the Activity sub-tab strips', () => {
     expect(usePinnedTabs.getState().activeTab).toBe('sprint');
   });
 
-  it('does not emit sprintStory off This Sprint or on Merged so far, and a workspace switch closes it', () => {
+  it('does not emit sprintStory off This Sprint, and a workspace switch closes it', () => {
     gesture(() => usePinnedTabs.getState().showSprint());
     gesture(() => useFilters.getState().setSprintStory('jira:R#ABC-12'));
-    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
-    expect(location.search).not.toContain('sprintStory');
-    gesture(() => useFilters.getState().setSprintInnerTab('themes'));
     expect(location.search).toContain('sprintStory=');
     gesture(() => usePinnedTabs.getState().showActivity());
     expect(location.search).not.toContain('sprintStory');
@@ -1018,10 +1024,10 @@ describe('the Activity sub-tab strips', () => {
   });
 
   it('does not emit sprintTab from a rail entry that has no This Sprint strip', () => {
-    gesture(() => useFilters.getState().setSprintInnerTab('merged'));
+    gesture(() => useFilters.getState().setSprintInnerTab('people'));
     gesture(() => useFilters.getState().setActivityRepo('feed'));
     expect(location.search).not.toContain('sprintTab');
-    expect(useFilters.getState().sprintInnerTab).toBe('merged');
+    expect(useFilters.getState().sprintInnerTab).toBe('people');
   });
 
   // "Stories" too: its link reloads onto it, between Overview and Chronology.

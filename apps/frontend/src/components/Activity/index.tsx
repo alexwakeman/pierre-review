@@ -197,7 +197,7 @@ export function ActivityView(): JSX.Element {
         </div>
       ) : showingFeed ? (
         // The workspace Feed — a STREAM and nothing else, with no sub-tabs (bot classification is
-        // Bots Monitoring → Classification). ⚠ No survey panel may come back above it.
+        // Settings → Bots). ⚠ No survey panel may come back above it.
         <FeedView />
       ) : isLoading && data == null ? (
         // Skeletons at the real card height while the first aggregate loads.

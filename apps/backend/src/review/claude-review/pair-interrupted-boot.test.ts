@@ -88,8 +88,17 @@ async function makePr(): Promise<number> {
 }
 
 type HalfEnd = 'succeeded' | 'failed' | 'running';
-async function half(prId: number, provider: 'claude' | 'codex', pair: { role: 'first' } | { role: 'second'; pairId: number }, end: HalfEnd): Promise<number> {
-  const id = await persist.insertQueuedReview(ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], 'auto', provider, false, pair);
+async function half(
+  prId: number,
+  provider: 'claude' | 'codex',
+  pair: { role: 'first' } | { role: 'second'; pairId: number },
+  end: HalfEnd,
+  // A MANUAL pair (`trigger: 'manual'`), started with "Review and post" (`postOnFinish`) or not.
+  o: { trigger?: 'auto' | 'manual'; postOnFinish?: boolean } = {},
+): Promise<number> {
+  const id = await persist.insertQueuedReview(
+    ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], o.trigger ?? 'auto', provider, false, pair, null, o.postOnFinish === true,
+  );
   if (provider === 'codex') await persist.markReviewRanOn(ctx, id, { provider: 'codex', model: 'gpt-6.1-sol' });
   if (end === 'succeeded') {
     await persist.saveReviewSuccess(ctx, id, {
@@ -227,5 +236,46 @@ describe('a pair a restart interrupted', () => {
     expect((await rowOf(first)).status).toBe('failed');
     expect(rec.autoPost).toEqual([]);
     expect(postReview).not.toHaveBeenCalled();
+  });
+});
+
+// "REVIEW AND POST" (a MANUAL pair the reader started with the split button's post choice): stored on
+// both halves, so a pair a restart interrupted still posts when the boot ends it — once — and none of
+// the AUTO-only hooks (Sonar's comment, auto fix) run. A "Review only" pair posts nothing.
+describe('a manual pair a restart interrupted', () => {
+  it('"Review and post": posted ONCE at boot, with the workspace switch OFF; no Sonar, no auto fix', async () => {
+    const settings = await import('./auto-settings.js');
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } as any });
+    try {
+      const prId = await makePr();
+      const pressed = { trigger: 'manual' as const, postOnFinish: true };
+      const first = await half(prId, 'claude', { role: 'first' }, 'succeeded', pressed);
+      const second = await half(prId, 'codex', { role: 'second', pairId: first }, 'running', pressed);
+      expect((await rowOf(second)).postOnFinish).toBe(true);
+
+      expect(await boot()).toEqual([first]);
+      expect(rec.autoPost).toEqual([{ accountId: 1, prId, reviewId: first }]);
+      expect(postReview).toHaveBeenCalledTimes(1);
+      expect((postReview.mock.calls[0] as any[])[0].verdict).toBe('COMMENT');
+      expect((await rowOf(first)).autoPost).toMatchObject({ status: 'posted', githubReviewId: 'R1' });
+      expect(rec.sonar).toEqual([]);
+      expect(rec.fix).toEqual([]);
+
+      // Ending it again posts nothing more: the claim.
+      await manager.finishInterruptedPairs(ctx, [{ id: second, accountId: 1, prId, pairId: first, pairRole: 'second' }]);
+      expect(postReview).toHaveBeenCalledTimes(1);
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: true } as any });
+    }
+  });
+
+  it('"Review only": nothing is posted', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', { role: 'first' }, 'succeeded', { trigger: 'manual' });
+    await half(prId, 'codex', { role: 'second', pairId: first }, 'running', { trigger: 'manual' });
+    expect(await boot()).toEqual([first]);
+    expect(rec.autoPost).toEqual([]);
+    expect(postReview).not.toHaveBeenCalled();
+    expect((await rowOf(first)).autoPost).toBeNull();
   });
 });

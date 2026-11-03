@@ -1272,6 +1272,47 @@ reviews as if it were the first run on the PR (manager.ts `QueueItem.fresh`).
 - `fresh` is validated on the RAW body: only a JSON boolean (`"true"`, `1`, `null` → 400), because
   Fastify's validator coerces types.
 
+### The author's own review (2026-11-03)
+
+When the PR AUTHOR'S Limn reviewed their own PR and posted it (imported as a `kind = 'teammate'` row,
+§ Teammates' reviews), the reader's run follows up on THAT review. The author cannot approve their own
+PR, so the reader's Limn checks each of the author's findings is dealt with, raises anything new, and
+may still approve under the workspace's auto verdict. Code: `review/claude-review/teammate-anchor.ts`,
+wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor-pipeline.test.ts`.
+
+- **When.** A non-fresh run (auto or manual) whose latest full review at or before its head
+  (`latestFullReviewAtOrBefore`, `beforeReviewId` = this run) is a teammate row whose poster
+  (`source_user_id`) is the PR's `author_id`, with at least one eligible finding
+  (`isFollowUpEligible`: an imported finding is POSTED). A newer review of the reader's own anchors as
+  before. A NON-author teammate's posted review never anchors (it holds the head: § Team claims). A
+  kept-in-Limn review posted nothing, so there is nothing to import: a normal review.
+- **What is sent.** The author's findings as the previous review's own (head = their review's head),
+  then the reader's own previous review (`loadPriorReviewForFollowUp`, with its carries) as CARRIED, once
+  per id; settled ids are out of both (`mergeAuthorAnchor`). On the same head every author finding is
+  locked `not_addressed` like any previous review's.
+- **The prompt is unchanged**: the same "Previous review" section and wording. A run that does not
+  anchor here builds the same bytes as before (prompts.ts untouched; `prompt-golden.json`).
+- **The record**: `follow_up.priorReviewId` = the teammate row, plus `follow_up.teammate {userId,
+  login}`. The tab heads the section "@carol-dev’s review" (`followUpSectionTitle`) and offers no
+  Post reply / Resolve on it.
+- ⚠ **NEVER A WRITE ON THE AUTHOR'S THREADS.** Auto resolve, the automatic pushback and "Post reply"
+  find a thread's owner through `loadThreadOwners(…, { ownOnly: true })`, which never returns a
+  teammate row: Limn does not reply on or resolve a teammate's thread (the author's Limn resolves its
+  own). The judgements show on the reader's tab; the verdict counts them (a re-raise the server left
+  out because the comment is already on GitHub still counts).
+- **No duplicate comments**: auto-post's dedupe reads the teammate's findings as on GitHub (§
+  Teammates' reviews), and so does the MANUAL post's `earlierPost` (`reconcilePostedState` loads the
+  teammate rows' posted findings into the chain walk; only the reader's own runs are ever stamped).
+- **Writes are decided PER ITEM** (`followUpItemWritable`): the author's items show no Post reply /
+  Resolve; the reader's own CARRIED items keep them.
+- **The severity chip** (`limn-finding-severity.ts`) reads a teammate's labelled findings; an
+  UNLABELLED one (`teammate.unlabelled`) gets no chip — GitHub shows no label.
+- **Replies on the author's threads** are judged as on the reader's own (`attachFindingThreads`); a
+  Limn-marked reply by any login (the author's Limn pushback) is Limn context, never a person's answer
+  (`humanReplies`).
+- **The next run** follows up the reader's run as usual: its items carry the author's findings
+  forward by id (they share one id space).
+
 ### Replies to Limn's findings (accept, or push back once)
 
 When someone REPLIES on the GitHub thread of one of Limn's own posted findings — whether the
@@ -2501,6 +2542,11 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
   First reviews and re-reviews share it (one busy PR's pushes can use most of it). A Claude + Codex
   PAIR counts ONCE (its second half's row, `pair_role = 'second'`, is not counted). Past it, PRs wait for the next day.
+  The SPA warns in the header toast cluster (`AutoReviewCapToast`, docs/FRONTEND.md § header toast
+  strip): near at ≥ 80% of the cap (≥ 2 used), reached at the cap, from the auto-review GET's
+  `usage` — the sweeper's own count (`getAutoReviewCandidates(...).autoToday`), so the toast and the
+  sweeper never disagree. ⚠ The count must stay the reader's OWN auto runs: a review row imported
+  from a teammate must be filtered out of `autoToday` (it would spend the reader's cap).
 - ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled`; under
   LIMN_AI_DISABLED neither the job nor the auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
@@ -2560,6 +2606,13 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   line, the claimants since the last settling line race: those whose NEWEST line is inside the
   25-minute lease are live, and the one whose FIRST line is earliest (created_at, then id) holds the
   head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).
+  ⚠ **THE PR AUTHOR'S OWN LINES ARE LEFT OUT OF THE FOLD** (2026-11-03; `decideTeamClaim`'s `author`,
+  read from the synced PR by `prAuthorLogin` unless the target names it): the author cannot approve
+  their own PR, so their Limn reviewing it — pending or done — never holds the head; the reader's run
+  follows up on the author's posted review (§ Follow-up on the previous review → The author's own
+  review). A non-author teammate's lines hold as before. When the reader IS the author nothing is left
+  out. `staleTeammateLine` still sees the author's live line (it is never released as expired), and the
+  reconciler's tab refresh folds with the author too, so no "Carol reviewed this commit" row is kept.
 - **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
   re-posts the winner's description, so GitHub's displayed latest line names the winner.
 - **THE TEAMMATE'S LINE ON THE TAB** (2026-11-02, migration 0159, `team-claim-seen.ts`). Real: PR
@@ -2647,6 +2700,11 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     (past the lease, or an older Limn's pending "free to claim" — `staleTeammateLine`), post success
     "Cleared by alex: bob's claim expired" once and record it (a refusal is recorded too, never retried). A
     Limn about to claim the head itself needs none of this: its own pending line replaces bob's.
+- **DEPENDENCY WORK HAS ITS OWN LINE** (2026-11-03): `limn/deps`, posted before every dependency
+  automation action (approve, rebase ask, AI conflict run, AI fix, arming a merge) under the SAME
+  workspace switch; its own fold (`merge/deps-claim.ts` `decideDepsClaim`: a 30-minute TTL, a
+  teammate's finished action holds its family only, no ledger). docs/MERGE-CI-TRUNK.md § Dependency
+  automation → Team claims for dependency work.
 - ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge
@@ -2716,8 +2774,35 @@ auto-posting: claim before any GitHub write, never retried.
   when an AUTO PR review SUCCEEDS, beside (not instead of) the auto fix; `ticket-review/manager.ts`
   calls `maybeAutoPostTicketReview` after an AUTOMATIC ticket review (`trigger` `auto` / `cascade`).
   No hold window. A run a person started is never auto-posted — it keeps the Post button (the
-  Settings copy says so). The switch only matters while auto review is on, and is stored
-  independently of it.
+  Settings copy says so) — UNLESS they started it with "Review and post" (below). The switch only
+  matters while auto review is on, and is stored independently of it.
+- **"REVIEW AND POST" — THE MANUAL SPLIT BUTTON (2026-11-03).** The AI Review tab's run button is a
+  split button: the main part runs the reader's LAST choice (remembered in this browser,
+  `lib/reviewPostMode.ts`, localStorage wrapped in try/catch, default "Review only"); the caret
+  (`CaretIcon`, the `ui/Menu`) offers both. The ModelPicker, the ONE `AiRunGate kind="review"` and
+  `useRunCostText` are unchanged.
+  - **"Review and post"** sends `postMode: 'post'` on `POST /api/prs/:id/claude-review` (raw-checked:
+    exactly `"review_only"` or `"post"`, else 400). The run row stores `post_on_finish = true`
+    (migration `0161`; both halves of a pair; only ever on a `manual` row). When the run — or the
+    pair's END, both halves — SUCCEEDS, `runEnded` calls `maybeAutoPostReview` exactly as for an auto
+    run: steps 1-8 of the rule below (the workspace's kinds, the verdict rules with `autoVerdict`, the
+    not-approved reason, the dedupe, the hidden marker with `k=manual`, ⚠ the CLAIM before any
+    write, a failure recorded and NEVER retried). ⚠ THE PRESS IS THE CONSENT: step 0 (the
+    workspace switch) and the scope / bot-author part of step 1 are skipped
+    (`isPressedPost` / `pressedPostEligibility`); open and not a draft still apply, synced and live.
+    Auto resolve, auto pushback, Sonar's comment and auto fix stay AUTO-only. A pair a restart
+    interrupted still posts when the boot ends it (`finishInterruptedPairs` reads `postOnFinish` off
+    the first half); a single run a restart interrupted fails, like an auto run. The footer is the
+    auto footer ("Posted automatically by Limn's … review"). Its REQUEST_CHANGES is recorded in
+    `auto_post`, so a later auto run may LIFT it like any of Limn's automatic blocks (decided: the
+    verdict was Limn's rule, not the reader's own judgement). The tab says "Posts to GitHub when
+    done." while it runs, and "Nothing new to post." (or why not) when it skipped.
+  - **"Review only"** is the old behaviour, kept in Limn. When such a run SUCCEEDS its summary
+    PRE-FILLS the summary box (`summaryPrefillOf` → `nextSummaryPrefill`), only when the box is empty
+    or still holds the earlier pre-fill unchanged — ⚠ never over text the reader typed, and never on a
+    run whose draft (`userBody`) was saved — an EMPTY saved draft included (the reader cleared the
+    summary on purpose) — or that was posted. The box is saved before Preview / Post as before, so the
+    manual Post sends what is shown.
 - **WHICH PRs** (`autoPostEligibility`, pure): open, not a draft, not bot-authored (the workspace's
   bot union, `isWorkspaceAutomationUser` over `hiddenBotUserIds`; an unmapped author counts as a bot),
   and under the DEFAULT scope `'mine'` the PR is the reader's own OR the reader is — or WAS — a
@@ -3030,6 +3115,67 @@ activity.
   "Limn · alice" and its card names the poster. The severity badge on a Limn label says "From
   Limn's review." with no confidence. The old single `'pierre'` row in Bots Monitoring is gone (the
   vendor drill-down routes answer 400 for it).
+
+## Teammates' reviews (2026-11-03)
+
+The reader and a teammate both run Limn on the same repos. A review the TEAMMATE'S Limn **posted to
+GitHub** (summary + finding comments) shows in the reader's AI Review tab, read-only, under
+"Teammates' reviews": "Robin's review", the verdict, "Posted on GitHub · abc1234 · Auto review ·
+Claude Opus 5.5 · medium", a link to the review, and each finding with a link to its thread. A review
+a teammate kept in their own Limn never reaches GitHub, so it is never shown.
+
+- **The hidden metadata** (shared `packages/shared/src/limn-review-meta.ts`): every posted review
+  summary ends in ONE marker, `<!-- pierre:claude-review v=1 a=<nonce> h=<head> k=auto|manual|replies
+  [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Limn version> -->`.
+  Built ONLY by `limnReviewMarker` in `review/post-seam.ts` (head, verdict and version filled there;
+  `PostReviewArgs.limnMeta` carries run kind, pair and runs — `review/claude-review/post-meta.ts`
+  `limnMetaForReview` for the manual Post and auto-posting; a replies-pass outcome sends `k=replies`).
+  Read ONLY by `parseLimnReviewMarker`, which tolerates a legacy post (no keys beyond `v`/`a`: every
+  field null). Values are reduced to `[A-Za-z0-9._:@+/-]`, no `--`, ≤ 80 characters. No secrets, no
+  paths, no names. `k` is how the RUN started (an auto run posted by hand is still `auto`).
+- **The import** (`db/teammate-reviews-import.ts` `importTeammateReviews`, called at the end of
+  `sync/upsert.ts` `persistPr` AFTER its transaction, when a review body carries the summary marker;
+  non-fatal): a GitHub review with the summary marker whose author is NOT the account's own login (and
+  not `k=replies`) becomes a `claude_reviews` row with **`kind = 'teammate'`** (migration `0160`):
+  status `succeeded`, `trigger` always `'manual'`, cost and tokens NULL, `posted_review_id` NULL (the
+  provenance readers key on it), `posted_at` = submitted time, `source_user_id` = the teammate,
+  `source_review_node_id` = the GitHub review (the idempotency key; partial unique index), `teammate`
+  JSON (`TeammateReviewRecord`: run kind, pair, runs, Limn version, the GitHub review id,
+  `headInferred`, `unlabelled`). Summary = body without the marker; verdict = `d=`, else the review
+  state; provider/model/effort from the first run (`model` `''` on a legacy post). Its findings are
+  the teammate's Limn FINDING comments (`limn_posted_by_user_id` = the teammate, a thread root or a
+  PR-level comment, never a reminder or a reply), keyed on the comment node id: severity from the
+  lead (none ⇒ stored `warning`, named in `teammate.unlabelled`, served as null), path/line from the
+  thread (inline) or the lead's reference (PR-level), body without lead, notes, footer and marker
+  (`parsePostedLimnFinding`), `included` false, `posted_at` / `github_comment_id` /
+  `posted_comment_kind` from the comment. A comment belongs to the poster's Limn review submitted at or
+  just before it (+60 s); a comment no longer there leaves the review. The head is `h=`; on a legacy
+  post, the PR's newest synced commit at the post time (`headInferred`). A legacy post with no text
+  and no finding is skipped.
+- ⚠ **Every reader that means "the reader's own runs" leaves these rows out.** `kind IS NULL`
+  already does (latest review, latest succeeded, listAll, hasReviewAtHead, settle/retry/failed-auto
+  at head, carry, follow-up `loadPriorReviewForFollowUp`, replies anchor, team-claim record,
+  getUnactionedClaudeReviews, the auto sweeper's daily cap and runs). A reader with no kind filter
+  uses `db/teammate-reviews.ts` `ownRunsOnly(cr.kind)` / `ownFindingsOnly(crf.reviewId)`: the tab's
+  `history`, Open PRs states (`getLatestReviewStates`), posted-state reconcile, earlier-runs chain
+  (`loadEarlierRuns`), usage-lockout boot read (`failedRunsSinceLastSuccess`), post contexts (→ 404),
+  draft and finding writes (no-op), chat history, the AI usage
+  report, the first-landing "a review ran" check, `listClaudeReviewsByRepo`, and the own posted
+  findings of `isLimnPostedComment`. Readers left as they are, on purpose: by-id reads (a teammate row
+  read by id is a normal view), `auto_post`/`team_claim`/`ticket`/`follow_up`/`thread_assessments`
+  readers (all NULL on a teammate row), the severity chip (`limn-finding-severity.ts`: the lead's
+  word, same either way), delete paths and account erase (they must include them).
+- **The follow-up anchor** (`db/teammate-reviews.ts` `latestFullReviewAtOrBefore`): the latest
+  succeeded full review, the reader's OWN or a TEAMMATE'S, that read the given head or a commit of
+  the PR committed no later (by synced commit times). The own-only chain stays
+  `loadPriorReviewForFollowUp`. Wired for ONE case only, the PR AUTHOR'S own review (§ Follow-up on
+  the previous review → The author's own review); the writers never act on a teammate's thread there.
+- **The auto-post dedupe** (`auto-post.ts` `loadEarlierFindings`) reads every teammate's imported
+  finding as ON GITHUB (any id: a row may be imported after the run started), so a re-raise of one,
+  or the same point found again, is never posted a second time.
+- **The wire**: `ClaudeReviewResponse.teammateReviews: ClaudeTeammateReview[]` (newest first;
+  `db/teammate-reviews.ts` `listTeammateReviews`). Never in `review` / `history`. The SPA's
+  `components/TeammateReviews.tsx` has no Post, Re-post, Delete or auto-post control.
 
 ## Chat about a review
 
