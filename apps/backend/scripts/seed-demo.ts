@@ -258,6 +258,11 @@ interface PrSeed {
   // seeded runs (#113 is small enough to route diff_only); everything else gets a
   // deterministic id-derived fallback so nothing reads "0 files · 0 lines".
   size?: [number, number, number];
+  // The branch it targets (default 'main'). A base that is another open PR's head makes a STACK
+  // (docs/FRONTEND.md § PR chips) — #150–#152 below.
+  base?: string;
+  // Store a per-file breakdown matching `size`, so the code-line count (and the "Large" chip) is known.
+  withFiles?: string[];
 }
 
 const PRS: PrSeed[] = [
@@ -318,6 +323,14 @@ const PRS: PrSeed[] = [
   // triage cascade lands on reasonTag 'stalled' (OpenPrsStrip "N stalled" > 0).
   { id: 140, repoId: WEB, authorId: 4, title: 'Rework the timeline clustering thresholds', state: 'open', openedDaysAgo: 20, ci: 'success', mergeable: 'mergeable', mss: 'clean', labels: [{ name: 'ui', color: '1f6feb' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'e2e', state: 'success', url: null }] },
   { id: 141, repoId: API, authorId: 5, title: 'Migrate the sync scheduler to a job queue', state: 'open', openedDaysAgo: 25, ci: 'success', mergeable: 'mergeable', mss: 'clean', labels: [{ name: 'sync', color: 'fbca04' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'test', state: 'success', url: null }] },
+  // ---- PR CHIPS (docs/FRONTEND.md § PR chips) ---------------------------------
+  // A 3-PR STACK on acme/api: #151 targets #150's branch, #152 targets #151's. Only #150 can merge
+  // (into main); #151 and #152 read "Lands after #150" / "#151" and show no Merge.
+  { id: 150, repoId: API, authorId: 2, title: 'Sync cursors: add the cursor table', state: 'open', openedDaysAgo: 3, ci: 'success', mergeable: 'mergeable', mss: 'clean', head: 'sync-cursors-1-table', size: [88, 4, 3], checks: [{ name: 'build', state: 'success', url: null }, { name: 'test', state: 'success', url: null }] },
+  { id: 151, repoId: API, authorId: 2, title: 'Sync cursors: write a cursor after each page', state: 'open', openedDaysAgo: 3, ci: 'success', mergeable: 'mergeable', mss: 'clean', head: 'sync-cursors-2-writer', base: 'sync-cursors-1-table', size: [142, 31, 4], checks: [{ name: 'build', state: 'success', url: null }, { name: 'test', state: 'success', url: null }] },
+  { id: 152, repoId: API, authorId: 2, title: 'Sync cursors: resume a walk from its cursor', state: 'open', openedDaysAgo: 2, ci: 'pending', mergeable: 'mergeable', mss: 'blocked', head: 'sync-cursors-3-resume', base: 'sync-cursors-2-writer', size: [97, 22, 3], checks: [{ name: 'build', state: 'success', url: null }, { name: 'test', state: 'pending', url: null }] },
+  // A LARGE PR on acme/web-app: 1,630 code lines, over the default limit of 1,500.
+  { id: 153, repoId: WEB, authorId: 3, title: 'Rewrite the filter bar as one state machine', state: 'open', openedDaysAgo: 4, ci: 'success', mergeable: 'mergeable', mss: 'blocked', head: 'filter-bar-state-machine', size: [1240, 390, 8], withFiles: ['src/components/FilterBar.tsx', 'src/store/filters.ts', 'src/store/filterMachine.ts', 'src/hooks/useUrlState.ts', 'src/components/FilterChips.tsx', 'src/components/RepoPicker.tsx', 'src/lib/filterUrl.ts', 'test/filterMachine.test.ts'], checks: [{ name: 'build', state: 'success', url: null }, { name: 'e2e', state: 'success', url: null }] },
   { id: 142, repoId: INFRA, authorId: 6, title: 'Terraform: migrate remote state to S3 + DynamoDB', state: 'open', openedDaysAgo: 28, ci: 'success', mergeable: 'mergeable', mss: 'clean', head: 'INFRA-260-remote-state-migration', labels: [{ name: 'terraform', color: '5319e7' }], checks: [{ name: 'terraform plan', state: 'success', url: null }, { name: 'tflint', state: 'success', url: null }] },
 ];
 
@@ -361,8 +374,20 @@ const prRows = PRS.map((p) => {
     body: `Demo PR — ${p.title}.`,
     authorId: p.authorId,
     mergedById: p.state === 'merged' ? (p.mergedById ?? p.authorId) : null,
-    baseRefName: 'main',
+    baseRefName: p.base ?? 'main',
     headRefName: p.head ?? null,
+    // Seeded PRs are never forks (a fork's branch is never a stack's parent).
+    isCrossRepository: false,
+    // Split evenly across the named files (the last takes the remainder), so the stored breakdown
+    // sums to the size columns.
+    files:
+      p.withFiles != null
+        ? p.withFiles.map((path, i, all) => {
+            const share = (n: number): number =>
+              i === all.length - 1 ? n - Math.floor(n / all.length) * (all.length - 1) : Math.floor(n / all.length);
+            return { path, additions: share(additions), deletions: share(deletions) };
+          })
+        : null,
     state: p.state,
     isDraft: false,
     openedAt: opened,

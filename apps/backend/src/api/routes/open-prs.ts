@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { OpenPrsResponse } from '@pierre-review/shared';
 import { getOpenPrs, resolveWorkspaceScope } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { attachPrChips } from '../../db/pr-chips.js';
 
 // `repoIds` → the `narrow` argument of `resolveWorkspaceScope`, never a scope in its own right.
 // Empty/absent → null = no narrowing (every repo in the workspace).
@@ -32,6 +33,8 @@ export async function openPrsRoutes(app: FastifyInstance): Promise<void> {
       repoIds: scope.repoIds,
       userIds: parseIntList(q.userIds),
     });
+    // PR CHIPS (db/pr-chips.ts): the stack and the criteria — on this list only, never the timeline.
+    await attachPrChips(accountId, prs, (p) => p.id);
     return { prs };
   });
 }

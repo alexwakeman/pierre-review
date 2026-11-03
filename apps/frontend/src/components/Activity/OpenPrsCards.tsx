@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
+import { landsAfterOf } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
@@ -86,6 +87,7 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { PrChips } from './PrChips.js';
 import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
 import { PageHeader } from '../ui/PageHeader.js';
 import { InRail, useInRail } from '../Ticket/StoryLayout.js';
@@ -208,7 +210,7 @@ function ThreadsChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
 }
 
 function MergeChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
-  const input = { mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft };
+  const input = { mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft, landsAfter: landsAfterOf(pr.branchStack) };
   // A draft says "draft" on the title line; only a branch fact (conflicts, behind) survives it.
   const v = pr.isDraft ? mergeVerdictWarning(input) : mergeVerdict(input);
   if (v == null || v.verdict === 'unknown' || v.verdict === 'draft') return null;
@@ -1871,6 +1873,7 @@ function OpenPrCard({
             <LineDelta additions={pr.additions} deletions={pr.deletions} />
             <LargePrFlag pr={pr} />
             <BlastRadiusChip pr={pr} />
+            <PrChips pr={pr} />
           </>
         }
       />

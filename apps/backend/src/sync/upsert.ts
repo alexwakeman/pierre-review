@@ -851,6 +851,10 @@ export async function persistPr(
               ? mergeQueueEntryStateFrom(pr.mergeQueueEntry?.state)
               : null,
           };
+    // FORK OR NOT — the same three-state rule: GitHub types it Boolean!, so only a boolean is an
+    // answer; null / undefined learn nothing and leave the column alone (spread, never assigned).
+    const forkObserved: { isCrossRepository?: boolean } =
+      typeof pr.isCrossRepository === 'boolean' ? { isCrossRepository: pr.isCrossRepository } : {};
     const labels = (pr.labels?.nodes ?? []).map((l) => ({
       name: l.name,
       color: l.color,
@@ -927,6 +931,7 @@ export async function persistPr(
         mergedById,
         baseRefName: pr.baseRefName ?? null,
         headRefName: pr.headRefName ?? null,
+        ...forkObserved,
         state: prState(pr.state),
         isDraft: pr.isDraft,
         openedAt,
@@ -962,6 +967,7 @@ export async function persistPr(
           mergedById,
           baseRefName: pr.baseRefName ?? null,
           headRefName: pr.headRefName ?? null,
+          ...forkObserved,
           state: prState(pr.state),
           isDraft: pr.isDraft,
           firstReviewAt,

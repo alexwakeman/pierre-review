@@ -116,6 +116,10 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   url
   baseRefName
   headRefName
+  # True when the head branch lives in a FORK. A stacked PR (docs/FRONTEND.md § Stacked PRs) targets
+  # another open PR's head branch in THIS repo, and a fork's branch name says nothing about a branch
+  # here — so a parent must be proven same-repo. A Boolean! scalar on a node already fetched.
+  isCrossRepository
   mergeable
   mergeStateStatus
   # ---- merge verdict (cluster A: the merge surface) ------------------------------------
@@ -902,6 +906,9 @@ export interface GqlPullRequest {
   url: string;
   baseRefName: string;
   headRefName: string;
+  // GitHub types it Boolean!; OPTIONAL here so hand-built fixtures predating it still typecheck.
+  // null / undefined = not received (learn nothing), see sync/upsert.ts.
+  isCrossRepository?: boolean | null;
   mergeable: string | null;
   mergeStateStatus: string | null;
   // GraphQL PullRequestReviewDecision (APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED) or

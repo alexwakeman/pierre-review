@@ -287,6 +287,7 @@ import {
   isRedCiStatus,
   RED_CI_STATUSES,
 } from './pending-classify.js';
+import { prIdsLandingAfter } from './pr-stacks.js';
 import {
   authorAutomationFor,
   dependencyPrState,
@@ -6040,6 +6041,10 @@ export async function getWorkspaceInsights(
   {
     const mergeSeeds: { card: MergeReadyCard | UpdateBranchCard; sortAt: number }[] = [];
     const candidates: { p: (typeof openPrs)[number]; kind: 'merge' | 'update_branch' }[] = [];
+    // STACKED PRs (db/pr-stacks.ts): a PR whose base is another OPEN PR's head branch would merge
+    // into that branch, not the trunk, so it is never a "merge" card (mergeVerdict's "lands after
+    // #N" says the same on every other surface). Updating it from its base is still fine.
+    const landsAfter = await prIdsLandingAfter(accountId, scope.repoIds);
     for (const p of openPrs) {
       // A dependency PR carries its merge actions on its Dependencies card instead; a PR the
       // reader promoted into My Turn ("Your PRs ready to land") carries them on its my_turn card.
@@ -6051,7 +6056,8 @@ export async function getWorkspaceInsights(
       // `forwardKindOf`, the same test My Turn's `own_ready` promotion classifies with.
       const kind = forwardKindOf(
         p,
-        p.mergeStateStatus != null &&
+        !landsAfter.has(p.id) &&
+          p.mergeStateStatus != null &&
           READY_MERGE_STATES.has(p.mergeStateStatus as MergeStateStatus),
       );
       if (kind != null) candidates.push({ p, kind });
@@ -7975,11 +7981,18 @@ export async function getMyTurn(
           baseRefName: p.baseRefName ?? null,
         }))
     : [];
+  // STACKED PRs (db/pr-stacks.ts): an own PR that lands after another open PR is not "ready to
+  // land": merging it would land it in that PR's branch. Read only when there is an own PR.
+  const ownLandsAfter =
+    show.own_ready && own.length > 0
+      ? await prIdsLandingAfter(accountId, [...new Set(own.map((p) => p.repoId))])
+      : new Set<number>();
   const ownReadyAll: OwnReadyItem[] = show.own_ready
     ? own.flatMap((p) => {
         const forward = forwardKindOf(
           p,
-          p.mergeStateStatus != null &&
+          !ownLandsAfter.has(p.id) &&
+            p.mergeStateStatus != null &&
             READY_MERGE_STATES.has(p.mergeStateStatus as MergeStateStatus),
         );
         if (forward == null) return [];

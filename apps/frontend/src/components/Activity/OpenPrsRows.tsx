@@ -9,6 +9,7 @@ import type {
   TimelinePr,
   User,
 } from '@pierre-review/shared';
+import { landsAfterOf } from '@pierre-review/shared';
 import { useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
 import { useMergedPanelOpen } from '../../hooks/useTicketMergedPrs.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
@@ -69,6 +70,7 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 import { DrawerAiReview, Fact } from './OpenPrsAiReview.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { PrChips } from './PrChips.js';
 import { filesLabel } from './PrCardShell.js';
 import { TicketKeyButton, threadChipLabel } from './OpenPrsCards.js';
 import { useFillToPaneBottom } from '../ui/stickyFill.js';
@@ -138,7 +140,7 @@ interface Entry {
 /** The lead: can it land? Red blocks, green ready, grey otherwise. */
 export function leadStatus(pr: TimelinePr): { tone: StatusTone; label: string; detail: string | null; icon: ReactNode } {
   // The same input as the card's merge chip had (OpenPrsCards MergeChip).
-  const input = { mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft };
+  const input = { mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft, landsAfter: landsAfterOf(pr.branchStack) };
   const v: ReturnType<typeof mergeVerdict> | null = pr.isDraft ? mergeVerdictWarning(input) : mergeVerdict(input);
   if (pr.isDraft && (v == null || v.verdict === 'draft' || v.verdict === 'unknown')) {
     return { tone: 'quiet', label: 'Draft', detail: 'mark it ready for review to merge', icon: <PullRequestIcon size={14} /> };
@@ -716,6 +718,8 @@ function PrRow({
             <span className="shrink-0 tabular-nums" title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>
               {shortAge(activity)}
             </span>
+            {/* PR chips as text: the row is the control, so no nested button (the drawer has them). */}
+            <PrChips pr={pr} interactive={false} className="shrink-0" />
           </span>
         </span>
         {columns.map((col) => {
@@ -1034,6 +1038,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
             <BlastRadiusChip pr={pr} expandable />
           </Fact>
         </dl>
+        <PrChips pr={pr} className="mt-1.5" />
       </section>
 
       {data.claudeOn && (

@@ -57,6 +57,7 @@ import {
 import { scoreCards, type ScoredCard } from './work-plan.js';
 import { getMyTurnSettings, rankRulesOf } from './my-turn-settings.js';
 import { getPendingFirstLanding } from './pending-first-landing.js';
+import { attachPrChips } from './pr-chips.js';
 
 export interface PendingBoard {
   tabs: PendingTab[];
@@ -315,6 +316,18 @@ export async function buildPendingBoard(
   const firstLanding = live
     ? await getPendingFirstLanding(accountId, scope, board.tabs, opts.now ?? Date.now())
     : null;
+  // PR CHIPS (db/pr-chips.ts) — the stack and the criteria, on the LISTED PR cards, live only (the
+  // Slack snapshot shows neither). DB only; the board still may not fetch.
+  if (live) {
+    await attachPrChips(
+      accountId,
+      board.cards.filter((c): c is typeof c & { repoId: number } => typeof (c as { repoId?: unknown }).repoId === 'number'),
+      (c) => {
+        const id = (c as { prId?: unknown }).prId;
+        return typeof id === 'number' ? id : null;
+      },
+    );
+  }
   return {
     ...(firstLanding ?? {}),
     workspaceId: scope.workspaceId,

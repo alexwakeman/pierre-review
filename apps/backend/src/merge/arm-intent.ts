@@ -12,6 +12,7 @@
 import { config } from '../config.js';
 import type { ArmedMergeRequest, MergeMethod } from '@pierre-review/shared';
 import { armAutoMerge, getSyncedBaseRef } from '../db/queries.js';
+import { openStackParentFor } from '../db/pr-stacks.js';
 import { stampPrMergeQueueStateNonFatal, type MergeQueueStampLog } from '../db/pr-merge-queue-stamp.js';
 import {
   fetchMergeQueueState,
@@ -27,7 +28,7 @@ export type ArmIntentResult =
   | { ok: true; armed: ArmedMergeRequest }
   | {
       ok: false;
-      code: 'StaleBase' | 'AlreadyQueued' | 'HeadUnchanged';
+      code: 'StaleBase' | 'AlreadyQueued' | 'HeadUnchanged' | 'LandsAfter';
       message: string;
     };
 
@@ -63,6 +64,17 @@ export async function armIntentLive(a: ArmIntentArgs): Promise<ArmIntentResult> 
       ok: false,
       code: 'StaleBase',
       message: `This PR now targets ${info.baseRef}; Limn last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
+    };
+  }
+  // STACKED (db/pr-stacks.ts): the live base is another OPEN PR's head branch, so the watcher would
+  // land this PR in that branch, not the trunk — and when that PR merges GitHub retargets this one,
+  // which disarms the intent anyway (the retarget guard). Refuse, and say when it can be armed.
+  const parent = await openStackParentFor(a.accountId, a.prId, info.baseRef);
+  if (parent != null) {
+    return {
+      ok: false,
+      code: 'LandsAfter',
+      message: `This PR targets the branch of #${parent.number}, which is still open. It lands after #${parent.number}: arm it once #${parent.number} has merged.`,
     };
   }
   // Best-effort: an older GHES or a token that can't run the query arms a direct-merge intent.

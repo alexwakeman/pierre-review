@@ -1,6 +1,7 @@
 import type { NotionTrackerMapping } from './notion-tracker.js';
 import type { TicketComment } from './ticket-comments.js';
 import type { CiFlakySummary, FlakyCheck } from './flaky-checks.js';
+import type { PrBranchStack, PrCriteriaCheck } from './pr-chips.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
@@ -2986,6 +2987,10 @@ export type MergeBlockerKind =
   | 'checks_red'
   | 'checks_pending'
   | 'unresolved_threads'
+  // STACKED: the PR's base branch is another OPEN PR's head branch, so merging it lands it in that
+  // branch, not the trunk. Inferred (a fact of the synced rows; GitHub would merge it). It leads the
+  // list and is emitted for ANY merge state, which makes the verdict `blocked` (`mergeVerdict`).
+  | 'lands_after'
   // The terminal entry, emitted only when nothing above fired. GitHub says a rule is unmet and
   // nothing we hold explains which — the honest answer for the approved-and-still-blocked case.
   | 'unexplained';
@@ -3040,6 +3045,9 @@ export interface MergeBlockFacts {
    * answers null when the base branch has no review requirement).
    */
   requestedReviewers?: number;
+  /** STACKED PRs: the number of the open PR whose head branch this PR targets (shared
+   *  `landsAfterOf`). Set → `mergeVerdict` says "lands after #N" and offers no merge. */
+  landsAfter?: number | null;
 }
 
 // The rendered form of a verdict: one label, one tone, one sentence of WHY, and whether a
@@ -5205,6 +5213,11 @@ export interface TimelinePr {
   // How far this change can REACH — orthogonal to how big it is. ⚠ null/absent = UNKNOWN, never
   // "low". The level itself is decided by the ONE `blastRadius()` resolver, never here.
   blast?: BlastSignals | null;
+  // ---- PR CHIPS (pr-chips.ts) — set by GET /api/open-prs only; never on the lean /api/timeline ----
+  /** The stack this PR is in, or null when it is in none. Absent = not asked. */
+  branchStack?: PrBranchStack | null;
+  /** Per ticket, the latest acceptance-criteria judgement covering this PR. [] = never checked. */
+  criteria?: PrCriteriaCheck[];
 }
 
 export interface OpenPrsResponse {
@@ -5698,6 +5711,10 @@ export interface PrDetail {
    *  targets. Null = not synced yet; the Overview's Branch row is then omitted. */
   headRefName: string | null;
   baseRefName: string | null;
+  /** PR CHIPS (pr-chips.ts): the stack this PR is in (null = none; open PRs only). Absent = an older server. */
+  branchStack?: PrBranchStack | null;
+  /** PR CHIPS: per ticket, the latest acceptance-criteria judgement covering this PR. [] = never checked. */
+  criteria?: PrCriteriaCheck[];
   authorId: number | null;
   state: PrState;
   isDraft: boolean;
@@ -10023,6 +10040,11 @@ export interface InsightPrRef {
   // the signals ride the card, folded server-side from columns already on the row.
   // ⚠ Absent = UNKNOWN, never "low". Trailing optional for the same reason as `codeLoc` above.
   blast?: BlastSignals | null;
+  // ---- PR CHIPS (pr-chips.ts) — set on the LISTED cards by GET /api/attention only (live) ----
+  /** The stack this PR is in, or null when it is in none. Absent = not asked. */
+  branchStack?: PrBranchStack | null;
+  /** Per ticket, the latest acceptance-criteria judgement covering this PR. [] = never checked. */
+  criteria?: PrCriteriaCheck[];
   // ── WHICH CHECKS ARE FAILING — set only while `ciStatus` is red ────────────────────────────
   //
   // The newest `ci_status_events` row for the PR's CURRENT head, when that row is red. BARE check

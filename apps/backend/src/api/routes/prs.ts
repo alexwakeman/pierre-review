@@ -129,6 +129,7 @@ import {
 import { noteMergeLanded } from '../../sync/unsettled-prs.js';
 import { resolveThreadsOnGitHub } from '../../bot-triage/resolve.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { prChipsFor } from '../../db/pr-chips.js';
 
 // GitHub anchors a file in the PR "Files changed" diff by the SHA-256 of its
 // path (matches db/queries.ts + hydrate-detail.ts's diffAnchorId).
@@ -432,6 +433,12 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // The FLAKY failing checks at the synced head (db/flaky-checks.ts) — stored rows only, so the
     // Checks row needs no fetch of its own. [] when none (or the head is not red).
     pr.flakyChecks = (await prFlakyChecks(accountId, [pr])).get(pr.id)?.checks ?? [];
+    // PR CHIPS (db/pr-chips.ts): the stack (open PRs only) and the criteria, DB only.
+    const chips = (await prChipsFor(accountId, [{ id: pr.id, repoId: pr.repoId }])).get(pr.id);
+    if (chips != null) {
+      pr.branchStack = pr.state === 'open' ? chips.branchStack : null;
+      pr.criteria = chips.criteria;
+    }
     return hydratePrDetail(pr, accountId);
   });
 

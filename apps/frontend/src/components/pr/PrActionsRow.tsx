@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import type { MergeBlockFacts, PrDetail as PrDetailT } from '@pierre-review/shared';
+import { landsAfterOf } from '@pierre-review/shared';
 import { mergePrMutationKey, updateBranchMutationKey } from '../../hooks/usePrWrites.js';
 import { ChevronIcon } from '../Icons.js';
 import { useQueryDataUpdatedAt } from '../../hooks/useMergeQueueStatus.js';
@@ -41,6 +42,8 @@ export function prBlockFacts(pr: PrDetailT): MergeBlockFacts {
       (t) => !t.isResolved && t.derivedState === 'likely_addressed',
     ).length,
     requestedReviewers: pr.requestedReviewers.length,
+    // STACKED PRs: an open PR on another open PR's branch lands after it (mergeVerdict).
+    landsAfter: pr.state === 'open' ? landsAfterOf(pr.branchStack) : null,
   };
 }
 

@@ -850,6 +850,10 @@ export interface MergeVerdictInput {
   autoMergeArmed?: boolean;
   // Commits behind the base, when known — turns "behind" into "3 commits behind".
   behindBy?: number;
+  // STACKED PRs: the number of the open PR whose head branch this PR targets (shared
+  // `landsAfterOf(pr.branchStack)`). Also read from `blockFacts.landsAfter`, so every PR-detail
+  // surface fed `prBlockFacts` carries it without a second prop.
+  landsAfter?: number | null;
 }
 
 // The sentence a blocked PR gets when the caller supplied no facts to reason from (every
@@ -1031,6 +1035,28 @@ export function mergeVerdict(pr: MergeVerdictInput): MergeVerdictInfo {
       tone: 'bad',
       canMerge: false,
       detail: 'resolve the conflicts with the base branch',
+    };
+  }
+  // ⚠ STACKED: LANDS AFTER ITS PARENT. Its base is another OPEN PR's head branch, so a merge now
+  // would land it in that branch, not the trunk. GitHub would merge it, so this is INFERRED, and it
+  // sits above `armed` because the auto-merge watcher will not land it either (it waits, and the
+  // arm route refuses). Below conflicts (those still need resolving) and the queue (GitHub owns it).
+  const landsAfter = pr.landsAfter ?? pr.blockFacts?.landsAfter ?? null;
+  if (landsAfter != null) {
+    const lands: MergeBlocker = {
+      kind: 'lands_after',
+      certainty: 'inferred',
+      text: `lands after #${landsAfter}`,
+      count: landsAfter,
+    };
+    const rest = mss === 'blocked' && pr.blockFacts ? deriveMergeBlockers(pr.blockFacts) : [];
+    return {
+      verdict: 'blocked',
+      label: `lands after #${landsAfter}`,
+      tone: 'warn',
+      canMerge: false,
+      detail: `#${landsAfter} is still open, and this PR targets its branch`,
+      blockers: [lands, ...rest],
     };
   }
   if (pr.autoMergeArmed) {
@@ -1263,7 +1289,7 @@ export interface LargePrFlagInfo {
   /** Full sentence for a `title=` / accessible label — carries the number AND the threshold,
    *  because "large" without a magnitude is not reviewable information. */
   label: string;
-  /** Compact visible text beside the icon, e.g. `2,340 code lines` / `2,340+ code lines`. */
+  /** Compact visible text beside the icon: `Large` (the figure is in `label`). */
   short: string;
 }
 
@@ -1293,10 +1319,11 @@ export function largePrFlag(
   return {
     codeLoc,
     isLowerBound,
+    // The chip says "Large"; the figure and the limit are the title (docs/FRONTEND.md § PR chips).
     label: isLowerBound
-      ? `At least ${n} code lines changed — above your ${t} threshold. GitHub truncated the file list, so the real figure is higher.`
-      : `${n} code lines changed — above your ${t} threshold.`,
-    short: isLowerBound ? `${n}+ code lines` : `${n} code lines`,
+      ? `At least ${n} code lines changed; the limit is ${t}. GitHub listed only part of the files, so the real figure is higher.`
+      : `${n} code lines changed; the limit is ${t}.`,
+    short: 'Large',
   };
 }
 
@@ -1391,12 +1418,15 @@ export function mergeWhenReadyEligible(input: {
   allowedByRepo: boolean;
   methodCount: number;
   alreadyArmed: boolean;
-  verdict: Pick<MergeVerdictInfo, 'verdict' | 'canMerge'>;
+  verdict: Pick<MergeVerdictInfo, 'verdict' | 'canMerge' | 'blockers'>;
   behindBy: number;
 }): boolean {
   if (!input.allowedByRepo || input.methodCount === 0 || input.alreadyArmed) {
     return false;
   }
+  // A stacked PR is not armable: the watcher would land it in its parent's branch (the arm route
+  // refuses it, `merge/arm-intent.ts`).
+  if (input.verdict.blockers?.[0]?.kind === 'lands_after') return false;
   if (ARM_WAIT_VERDICTS.has(input.verdict.verdict)) return true;
   return input.verdict.canMerge && input.behindBy > 0;
 }

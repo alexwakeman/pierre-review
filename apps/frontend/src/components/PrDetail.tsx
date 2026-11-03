@@ -95,6 +95,7 @@ import { ThreadList } from './ThreadList/index.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
+import { PrChips } from './Activity/PrChips.js';
 import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
 import { ChecksTab } from './ChecksTab.js';
 import type { LimnSeverity, MlSeverity } from '@pierre-review/shared';
@@ -1779,6 +1780,8 @@ export function PrDetail({
               `codeLoc` the flag beside it reads, so the two can never quote different line counts
               for one pull request. */}
           <BlastRadiusChip pr={{ ...blastFields, ...codeLocFields }} expandable />
+          {/* PR CHIPS — the stack and the criteria (PrChips.tsx), from this PR's own payload. */}
+          <PrChips pr={pr} />
           </span>
           {pr.isStalled && (
             <span

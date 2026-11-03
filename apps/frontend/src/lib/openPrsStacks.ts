@@ -1,5 +1,5 @@
 import type { TicketMergedPr, TicketMergedPrsResponse, TimelinePr } from '@pierre-review/shared';
-import { canonicalTicketKey } from '@pierre-review/shared';
+import { canonicalTicketKey, landsAfterOf } from '@pierre-review/shared';
 import type { CardTicket } from './cardTickets.js';
 import { mergeVerdict } from './ui.js';
 
@@ -254,7 +254,7 @@ export function stackRollup(rows: readonly StackRow[]): StackRollup {
     if (pr.ciStatus === 'failure' || pr.ciStatus === 'error') ciFailing += 1;
     if (pr.isChangesRequested) changesRequested += 1;
     if (!pr.isDraft) {
-      const v = mergeVerdict({ mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft });
+      const v = mergeVerdict({ mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, isDraft: pr.isDraft, landsAfter: landsAfterOf(pr.branchStack) });
       if (v.canMerge) readyToMerge += 1;
     }
   }

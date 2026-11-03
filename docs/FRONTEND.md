@@ -3398,6 +3398,37 @@ owns the frame and the type, never the content, and fetches nothing.
 - ⚠ **Claude on Pending is ONE batched `useClaudeReviewStates` for the board's PR cards**, gated on
   `me.ai.enabled` like Open PRs — never one request per card (`test/prCardShell.test.ts`).
 
+### PR chips — stack, criteria, Large (`Activity/PrChips.tsx`, shared `pr-chips.ts`)
+
+Three small facts about an open PR, drawn on the Open PRs rows (as text: the row is the control),
+its drawer and cards, the Pending card (side panel, under the fact line) and the PR detail header.
+They ride the payload that mounted them — ⚠ NOTHING FETCHES; absent fields draw nothing (unknown is
+never zero). Set by ONE enrichment, `db/pr-chips.ts` (`prChipsFor` / `attachPrChips`), on
+`GET /api/open-prs`, the LISTED cards of `GET /api/attention` (live only, never the Slack snapshot)
+and `GET /api/prs/:id` — ⚠ never on the lean `/api/timeline`.
+
+- **"2 of 3 in stack"** (`branchStack: PrBranchStack | null`): a PR whose base branch is another
+  OPEN PR's head branch in the same repo is stacked on it (`db/pr-stacks.ts`, derived on read: same
+  repo, parent not a fork — `is_cross_repository`, NULL accepted — parent's head not the default
+  branch, exactly one candidate, no cycles). `chain` is bottom → this PR → up while exactly one PR
+  targets the branch above; at a branch point the chain stops and the others are `children` (label
+  "N stacked on this" when nothing is below). The chip opens a menu of the stack's PRs (each opens
+  its PR tab); the title says "Lands after #12 (title). #14 lands after this." ⚠ A stacked PR never
+  shows Merge: `mergeVerdict`'s `landsAfter` (docs/MERGE-CI-TRUNK.md), and the server keeps it off
+  the "merge" cards, My Turn's ready-to-land and auto-merge.
+- **"Criteria 3/4"** (`criteria: PrCriteriaCheck[]`, one per ticket): the latest SUCCEEDED ticket
+  review of the ticket that had this PR as a member (`db/pr-criteria.ts`, three batched queries, no
+  AI, no tracker call). ⚠ **"Met" is `status === 'met'` ONLY** — `partly_met`, `not_met`, `unclear`,
+  `not_checked` are not met. Tone (`criteriaCheckTone`): all met → green; any `not_met` → red; else
+  amber. "· older commit" when the run read a head other than the PR's current one. A check with no
+  criteria, or none at all, draws nothing. Several tickets → one chip each, keyed ("BMD-7 criteria
+  3/4"). Click → `useOpenStory()` (a pasted `manual:` story has no tab: plain text).
+- **"Large"** is the existing large-PR flag (`LargePrFlag`, `largePrFlag()` in `lib/ui.ts`): its
+  visible text is "Large", the figure and the limit are its title ("1,630 code lines changed; the
+  limit is 1,500."). The threshold stays the ACCOUNT's (Settings → Large PRs, default
+  `LARGE_PR_CODE_LOC_DEFAULT`), compared at render time over `codeLoc` (`db/code-loc.ts`, the noise /
+  lockfile / non-code classifiers) — deliberately NOT a second constant in `pending-rules.ts`.
+
 ### The Pending card — layout B, event first (`lib/pendingHeadings.ts`, `PendingCard`)
 
 Every Pending card, on all seven tabs, reads top to bottom in one order, everything LEFT-aligned:

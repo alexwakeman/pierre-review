@@ -51,6 +51,17 @@ answer; absent (the lean timeline PR doesn't carry it) the reason stays generic,
   what draft means, and unstable's "GitHub will still merge it" is a lie about a draft).
   `MergeControl` deliberately does NOT pass `autoMergeArmed`: the `armed` verdict reports
   `canMerge: true`, which on that surface would enable a Merge button for a blocked PR.
+- **A STACKED PR LANDS AFTER ITS PARENT** (`landsAfter`, [FRONTEND.md](FRONTEND.md) § PR chips): when
+  the PR's base is another OPEN PR's head branch in the same repo (`db/pr-stacks.ts`, shared
+  `landsAfterOf(pr.branchStack)`), `mergeVerdict` returns `blocked` / "lands after #N" / `canMerge:
+  false` with a leading `lands_after` blocker (INFERRED — GitHub would merge it, into the parent's
+  branch), for ANY merge state. Order: queue → conflicts → **lands after** → armed → draft → … Read
+  from the top-level `landsAfter` or `blockFacts.landsAfter` (`prBlockFacts` sets it, so every PR-detail
+  control carries it). `mergeWhenReadyEligible` refuses it. It agrees with the server everywhere:
+  `getWorkspaceInsights` passes `readyToMerge: false` to `forwardKindOf` for a stacked PR (no "merge"
+  card; "update branch" still allowed), so does My Turn's `own_ready`, the arm route refuses it
+  (`armIntentLive` → 409 `LandsAfter`, "arm it once #N has merged") and the watcher waits on it
+  (rule 4b below).
 - `PrMergeOptions.mergeStateStatus` is GitHub's LIVE REST string (it can return values the enum
   doesn't model, `draft` among them), so the live path narrows through **`toMergeStateStatus()`**
   rather than casting — anything unrecognised becomes `unknown`.
@@ -657,6 +668,11 @@ calls/hour at 25 intents. The gates it feeds:
 4. **Retarget guard** — a `PATCH pulls/{n}` base change leaves `head.sha` alone, so the head pin
    is blind to it, so the runner compares the live base against the branch the user consented to
    and disarms on a mismatch (waiting, not merging, when it can't tell).
+4b. **Stacked guard** — after the retarget check, a LIVE base that is another OPEN PR's head branch
+   (`openStackParentFor`, the same parent rule as the fold) keeps the intent WAITING with
+   "waiting: lands after #N, which is still open" — never a merge into the parent's branch. The arm
+   route refuses such a PR, so this only meets an intent armed before its base became an open PR's
+   branch; when the parent merges GitHub retargets the PR and rule 4 disarms it.
    ⚠ **That branch is `expected_base_ref`, PINNED AT ARM TIME** (same migration). It used to be
    the SYNCED `pull_requests.base_ref_name`, re-read every tick — a column the sync owns and may
    rewrite at any moment, so a walk that corrected it reported a retarget nobody performed. Rows

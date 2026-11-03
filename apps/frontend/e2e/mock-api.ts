@@ -258,7 +258,38 @@ const MARKER_EVENTS: TimelineEvent[] = [
 ];
 
 const TIMELINE: TimelineResponse = { prs: PRS, events: [...EVENTS, ...MARKER_EVENTS] };
-const OPEN_PRS: OpenPrsResponse = { prs: PRS };
+// PR CHIPS (docs/FRONTEND.md § PR chips): only /api/open-prs carries them. #105 lands after #104
+// (a stack of two), and #101 has one ticket check (3 of 4 criteria met, at an older commit).
+const OPEN_PRS: OpenPrsResponse = {
+  prs: PRS.map((p) => {
+    const m104 = { prId: 104, number: 104, title: 'Watched repo PR by bob' };
+    const m105 = { prId: 105, number: 105, title: 'Other: docs pass' };
+    if (p.id === 104) return { ...p, branchStack: { position: 1, chain: [m104, m105], parent: null, children: [m105] }, criteria: [] };
+    if (p.id === 105) return { ...p, branchStack: { position: 2, chain: [m104, m105], parent: m104, children: [] }, criteria: [] };
+    if (p.id === 101) {
+      return {
+        ...p,
+        branchStack: null,
+        criteria: [
+          {
+            ident: 'jira:https://acme.atlassian.net#ACME-7',
+            key: 'ACME-7',
+            title: 'Login form',
+            reviewId: 1,
+            met: 3,
+            partlyMet: 0,
+            notMet: 1,
+            unsettled: 0,
+            total: 4,
+            checkedAt: iso(1),
+            olderHead: true,
+          },
+        ],
+      };
+    }
+    return { ...p, branchStack: null, criteria: [] };
+  }),
+};
 // The Open PRs Claude Review strip's ONE batched read. Never requested while `ai.enabled` is false
 // (below); typed and served so a spec that flips it gets the real shape, not the `{}` catch-all.
 const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
@@ -1225,6 +1256,8 @@ export function prDetailFor(id: number): PrDetail {
     tickets: [],
     headRefName: 'feature/e2e-branch',
     baseRefName: 'main',
+    branchStack: null,
+    criteria: [],
     inMergeQueue: null,
     mergeQueueEntryState: null,
     viewerCanApprove: false,

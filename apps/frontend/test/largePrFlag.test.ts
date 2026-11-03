@@ -39,7 +39,7 @@ describe('largePrFlag — TRAP 2: a lower bound reads ASYMMETRICALLY', () => {
     expect(flag).not.toBeNull();
     expect(flag?.isLowerBound).toBe(true);
     expect(flag?.label).toContain('At least 2,340');
-    expect(flag?.short).toBe('2,340+ code lines');
+    expect(flag?.short).toBe('Large');
   });
 
   it('makes NO claim when a truncated count is under the threshold', () => {
@@ -51,7 +51,7 @@ describe('largePrFlag — TRAP 2: a lower bound reads ASYMMETRICALLY', () => {
     const flag = largePrFlag({ codeLoc: 2340, codeLocIsLowerBound: false }, 1500);
     expect(flag?.isLowerBound).toBe(false);
     expect(flag?.label).not.toContain('At least');
-    expect(flag?.short).toBe('2,340 code lines');
+    expect(flag?.short).toBe('Large');
   });
 });
 
@@ -75,7 +75,7 @@ describe('largePrFlag — TRAP 3: under the threshold, silence', () => {
 describe('largePrFlag — the copy carries the magnitude', () => {
   it('names both the count and the threshold, so "large" is reviewable information', () => {
     const flag = largePrFlag({ codeLoc: 12345 }, 800);
-    expect(flag?.label).toBe('12,345 code lines changed — above your 800 threshold.');
+    expect(flag?.label).toBe('12,345 code lines changed; the limit is 800.');
   });
 
   it('tracks a changed threshold with no cache invalidation — the wire carries a NUMBER', () => {

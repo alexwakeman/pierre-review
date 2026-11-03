@@ -36,6 +36,7 @@ import type {
   MergeVerdictInfo,
   MyTurnDismissTarget,
 } from '@pierre-review/shared';
+import { landsAfterOf } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 import { useLargePrThreshold } from '../../hooks/useLargePr.js';
@@ -129,6 +130,7 @@ import {
   useConflictResolverEntry,
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { PrChips } from './PrChips.js';
 import {
   Button,
   IconButton,
@@ -1490,6 +1492,9 @@ export function pendingMergeGate(
     // would offer a Merge button GitHub refuses. `mergeVerdict`'s queue branch runs FIRST, which is
     // what makes `canMerge` false and, through it, drops `action` to null on BOTH kinds below.
     inMergeQueue: queued,
+    // STACKED PRs: a PR on another open PR's branch lands after it — no Merge (the server already
+    // keeps it off the merge cards; a Dependencies card still asks).
+    landsAfter: landsAfterOf(card.branchStack),
   });
   // HIDDEN, not disabled. `viewerCanPush` is the synced `repos.viewerPermission` and a VISIBILITY
   // gate only; every route re-checks permission, the head oid and the live merge state before
@@ -3172,6 +3177,8 @@ function PendingCard({
             }
           />
         )}
+        {/* PR CHIPS — "2 of 3 in stack", "Criteria 3/4" (PrChips.tsx); ride the card, never fetched. */}
+        {prRef != null && <PrChips pr={prRef as InsightPrRef} />}
         {claudeLine}
         {hasDetails && (
           <div>

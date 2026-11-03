@@ -1465,6 +1465,17 @@ No new index — the AI-run cap reads the PR's rows through the existing unique 
 `(account_id, pr_id, …)` prefix. See [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Dependency automation.
 Journal `idx` 162, `when` sqlite `1792224065016` — the LOWEST of 0160–0162 (see 0160 for why).
 
+### `0163_pr_cross_repository` — stacked PRs need to know a fork
+
+ONE column, `pull_requests.is_cross_repository` (integer boolean, GraphQL `isCrossRepository`): the
+head branch lives in a fork. Read by the stacked-PR fold (`db/pr-stacks.ts`; [FRONTEND.md](FRONTEND.md)
+§ PR chips): a fork's `feature-x` is not this repo's `feature-x`, so a fork PR is never a stack's
+parent. Written by `persistPr` from a RECEIVED boolean only (`forkObserved`, the `queueObserved`
+three-state rule) — NULL is "not observed" and is never cleared by a response that lacks the field.
+Additive, no backfill: the next walk of each PR fills it; until then the fold accepts NULL, and its
+"never the default branch" clause removes the common case (a fork PR from its own `main`). Journal
+`idx` 163, `when` sqlite `1792224069016` (above every earlier entry).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

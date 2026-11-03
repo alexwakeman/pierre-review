@@ -45,3 +45,4 @@ export * from './story-build.js';
 export * from './repo-status.js';
 export * from './features.js';
 export * from './flaky-checks.js';
+export * from './pr-chips.js';

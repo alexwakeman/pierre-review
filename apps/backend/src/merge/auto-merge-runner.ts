@@ -102,6 +102,7 @@
 // turning one tick into an unbounded burst of GitHub traffic.
 // ---------------------------------------------------------------------------------------
 
+import { openStackParentFor } from '../db/pr-stacks.js';
 import type { FastifyBaseLogger } from 'fastify';
 import { config } from '../config.js';
 import { getAccessToken, getAccountUserId } from '../auth/account.js';
@@ -863,6 +864,19 @@ async function processOne(
       'disarmed_blocked',
       `the PR was retargeted (${consentedBaseRef} → ${m.baseRef}) — re-arm to merge into the new base`,
     );
+    return;
+  }
+
+  // STACKED (rule 4b, db/pr-stacks.ts): the base is another OPEN PR's head branch, so a merge now
+  // would land this PR in that branch, not the trunk. Keep waiting, never merge: the arm route
+  // refuses such a PR, so this is an intent armed before its base became an open PR's branch.
+  // (When that PR merges, GitHub retargets this one and rule 4 above disarms it.)
+  const stackParent = await openStackParentFor(work.accountId, work.prId, m.baseRef);
+  if (stackParent != null) {
+    await updateAutoMergeState(work.id, {
+      lastReason: `waiting: lands after #${stackParent.number}, which is still open`,
+      phase: null,
+    });
     return;
   }
 

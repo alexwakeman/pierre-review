@@ -645,6 +645,14 @@ a join inside `getMyTurn`.
   `ml_comment_labels` and `search_index`. (Recorded here because `branchCommits`' absence from
   that export was an omission nobody wrote down; this one is a choice.)
 
+## `pull_requests` — branches and stacks (CORE)
+
+`head_ref_name` / `base_ref_name` are synced on every walk (GraphQL `String!`). `is_cross_repository`
+(migration `0163`) is NULL until a walk RECEIVES it (never cleared by a response without it). Together
+with `repos.default_branch` they derive STACKS on read (`db/pr-stacks.ts`, nothing stored): a PR whose
+base is another OPEN, same-repo, non-fork PR's head — never the default branch, exactly one such PR,
+no cycles — lands after it. [FRONTEND.md](FRONTEND.md) § PR chips.
+
 ## `pull_requests` — dependency + security signals (CORE)
 
 Four small DERIVED columns (migration `0067`), read at sync by

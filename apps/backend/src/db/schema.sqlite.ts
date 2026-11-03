@@ -337,6 +337,11 @@ export const pullRequests = sqliteTable(
     // carrier of a Jira/Linear ticket key — read by the Pro ticket-link enricher (compute-on-read).
     // Null until a sync backfills it on already-synced PRs.
     headRefName: text('head_ref_name'),
+    // The head branch lives in a FORK (GraphQL `isCrossRepository`, migration 0163). Read by the
+    // stacked-PR fold (db/pr-stacks.ts): a fork's branch name is not a branch of THIS repo, so a PR
+    // from a fork is never the parent of a stack. NULL = not observed yet (a row synced before the
+    // column, or a response that did not carry it) — written only from a received boolean.
+    isCrossRepository: integer('is_cross_repository', { mode: 'boolean' }),
     state: text('state', { enum: ['open', 'merged', 'closed'] }).notNull(),
     isDraft: integer('is_draft', { mode: 'boolean' }).notNull().default(false),
     openedAt: integer('opened_at', { mode: 'timestamp' }).notNull(),
