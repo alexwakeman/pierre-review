@@ -52,8 +52,8 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — automated code review, story and docs alignment, on your machine`,
-    description: `${SITE_NAME} reviews each pull request against its story and your docs on your own AI agent (Claude Code or Codex), posts the review to GitHub automatically, and AI Fix fixes the findings and failing CI. Free for up to ${FREE_TEAM_SIZE} people, it runs on your machine: npx ${NPM_PACKAGE}.`,
+    title: `${SITE_NAME} — your team writes more code than it can review`,
+    description: `${SITE_NAME} reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to ${FREE_TEAM_SIZE} people, on your machine: npx ${NPM_PACKAGE}.`,
   },
   '/getting-started': {
     title: `Getting started — install, run and connect · ${SITE_NAME}`,

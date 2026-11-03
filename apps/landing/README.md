@@ -6,9 +6,9 @@ runtime code with the timeline SPA — and served at `/` by the small site servi
 contact form's API.
 
 **Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
-so the site's calls to action are **Try the demo** (`/demo/`, a static build of the app on
-sample data) and the npm command (`npx limn-review`). The one limit — free for individuals and for
-organisations where no more than three people use it; more users than that need a licence — is stated in the hero, in the closing
+so the site's call to action is the npm command (`npx limn-review`). The demo (`/demo/`, a static
+build of the app on sample data) is linked once, from the footer. The one limit — free for individuals and for
+organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
 `src/lib/site.ts` (which mirrors the Limn License at the repository root).
 
@@ -19,7 +19,7 @@ plus the three legal ones:
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Plan your day": the hero, Gather / Check / Act, velocity, bots, cost, the licence table, the FAQ and the closing call to action |
+| `/` | `pages/Home.tsx` | "Your team writes more code than it can review": the hero (with the Pending board), works with, the proof figures, the Review / Fix / Ship / See chapters, Why Limn, every feature free, questions and the close |
 | `/getting-started` | `pages/GettingStarted.tsx` | Install and run, turn on Claude, add the scoring model, add repositories, connect Jira or Linear, connect Slack |
 | `/reporting` | `pages/Reporting.tsx` | Reporting and metrics: the one window, period reports, Chronology, 26 weeks, where the work is happening, what bots are worth, This Sprint |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
@@ -34,9 +34,18 @@ with `useReveal` (`components/board/useReveal.ts`, which lifts `.rise` tiles in 
 scroll into view and leaves everything visible without JS) and keeps its own rules in a
 page-scoped file under that root: `pages/getting-started.css`, `reporting.css`,
 `how-we-measure.css`, `contact.css`, `legal.css`, and `components/chrome.css` for the 404, the
-cookie banner and the lightbox. The home page's sections are `components/board/*`. Images
-are bundled from `src/assets/` (`board/` for the home page, `pages/` for the screenshots on
-Getting started and Reporting and metrics).
+cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
+`pages/home.css`).
+
+**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on the home page, Reporting and metrics
+and How we measure. They are built from one kit, `components/mock/` (`kit.tsx`: MockFrame,
+PrRow, Chip, FindingRow, CheckRow, CourtBar, MiniTable, Diff, Log, Swap; `home.tsx` and
+`reports.tsx` the mocks themselves; `mock.css`), and every word and number comes from ONE file,
+`src/mock/acme.ts` (the fictional Acme team: PAY-142, #612, acme/payments …). Each mock is real
+text with an `aria-label` summary, restacks under 961px, and has at most one CSS-only change
+(`<Swap>`), whose markup state is the final one. Chip and button words are the app's own
+labels; keep them in step with the app. The only screenshots left are Getting started's
+`src/assets/pages/gs-*.jpg`: they are instructions, so the reader must match the real screen.
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. The two role pages
@@ -101,8 +110,8 @@ for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s
 
 ## Screenshots and the walkthrough clip
 
-The pages no longer use `public/shots/` or `public/media/`. Their screenshots are cropped
-JPEGs bundled from `src/assets/`. The two public folders stay because other things still
+The pages no longer use `public/shots/` or `public/media/`. Getting started's screenshots are
+cropped JPEGs bundled from `src/assets/pages/`. The two public folders stay because other things still
 write or read them: `pnpm shots` (`scripts/capture-shots.mjs`, `scripts/demo-stack.mjs`)
 writes `public/shots/`, the repository README embeds three of those shots, and
 `pnpm demo:video --publish` (`scripts/capture-demo-video.mjs`) writes the walkthrough clip

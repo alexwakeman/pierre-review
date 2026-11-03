@@ -2,45 +2,44 @@ import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { useReveal } from '../components/board/useReveal';
 import { Hero } from '../components/board/Hero';
-import { GatherCheckAct } from '../components/board/GatherCheckAct';
-import { Gather } from '../components/board/Gather';
-import { Check } from '../components/board/Check';
-import { SavesTime } from '../components/board/SavesTime';
-import { Act } from '../components/board/Act';
-import { Velocity } from '../components/board/Velocity';
-import { Cost } from '../components/board/Cost';
-import { Licence } from '../components/board/Licence';
+import { WorksWith } from '../components/board/WorksWith';
+import { Proof } from '../components/board/Proof';
+import { Fix, Review, See, Ship } from '../components/board/Chapters';
+import { WhyLimn } from '../components/board/WhyLimn';
+import { Tiers } from '../components/board/Tiers';
 import { Faq } from '../components/board/Faq';
 import { Close } from '../components/board/Close';
+import './home.css';
 
 // ---------------------------------------------------------------------------
-// The home page: the board design (spec: .taste-skill/mockup/index.html).
+// The home page. Copy and structure: the approved mockup (limn-landing-mockup.html),
+// word for word, in the board design (src/board.css).
 //
-// Every style lives under the `.lb` root (src/board.css), so the other pages keep
-// their own look. The root breaks out of App's 1280px canvas to full bleed.
+// Every product picture is an HTML mock (components/mock/, data in src/mock/acme.ts),
+// not a screenshot: real text, crawlable, restacked on phones.
 //
 // useReveal puts `js-rise` on the root from an effect and reveals each `.rise`
 // element as it scrolls in. Without JS, or with reduced motion, nothing is hidden,
 // so the prerendered HTML shows every word.
 //
-// Running order: hero · Gather. Check. Act. · Gather · Check · time saved · Act · velocity ·
-// cost · licence · questions · run it.
+// Running order: hero · works with · proof figures · Review · Fix · Ship · See ·
+// Why Limn · every feature, free · questions · run it.
 // ---------------------------------------------------------------------------
 
 export default function Home(): JSX.Element {
   useSeo(seoFor('/'));
   const ref = useReveal<HTMLDivElement>();
   return (
-    <div className="lb" ref={ref}>
+    <div className="lb home" ref={ref}>
       <Hero />
-      <GatherCheckAct />
-      <Gather />
-      <Check />
-      <SavesTime />
-      <Act />
-      <Velocity />
-      <Cost />
-      <Licence />
+      <WorksWith />
+      <Proof />
+      <Review />
+      <Fix />
+      <Ship />
+      <See />
+      <WhyLimn />
+      <Tiers />
       <Faq />
       <Close />
     </div>

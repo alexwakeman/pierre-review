@@ -1,76 +1,41 @@
-import { useEffect, useRef, useState } from 'react';
 import hilliard from '../../assets/board/img/hilliard.jpg';
-import { HeroDots } from './HeroDots';
-import { copyText } from './copyText';
-import { DEMO_PATH } from '../../lib/site';
+import { INSTALL_COMMAND } from '../../lib/site';
+import { CopyCommand } from './CopyCommand';
+import { PendingBoardMock } from '../mock/home';
 
 // ---------------------------------------------------------------------------
-// The hero board: the name and Hilliard's line on limning, his miniature, the
-// statement, the dots and the gold "Free. Local. No extra seat." tile with its
-// copy button.
+// The hero: the claim, the command, and the Pending board as the picture. Under
+// the claim, Hilliard's miniature and his line on limning, which named the app.
 // ---------------------------------------------------------------------------
 
-const COMMAND = 'npx limn-review';
-
-function CopyCommand() {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  const copy = () => {
-    void copyText(COMMAND).then((ok) => {
-      if (!ok) return; // The command stays readable beside the button.
-      setCopied(true);
-      window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setCopied(false), 1600);
-    });
-  };
-
-  return (
-    <button className="btn" type="button" onClick={copy}>
-      <span aria-live="polite">{copied ? 'Copied' : 'Copy the command'}</span>
-    </button>
-  );
-}
-
-export function Hero() {
+export function Hero(): JSX.Element {
   return (
     <section className="board hero" aria-label="Limn">
-      <div className="tile name">
-        <h1>
-          Limn<span className="vh"> — automated, local code review</span>
-        </h1>
-        <figure className="motto">
-          <blockquote>
-            <p>
-              “The line without shadow showeth all to good judgment; but the shadow without line
-              showeth nothing.”
-            </p>
-          </blockquote>
-          <figcaption>
-            Nicholas Hilliard, <cite>The Arte of Limning</cite>, c.1600
-          </figcaption>
-        </figure>
+      <div className="tile say">
+        <p className="kick">Limn · code review on your machine</p>
+        <h1>Your team writes more code than it can review.</h1>
+        <p className="lead">
+          Limn reviews every pull request against its story and your docs on your own Claude or Codex, shows each
+          person what needs them next, and fixes what it finds. Free, on your machine.
+        </p>
+        <div className="cmd">
+          <CopyCommand />
+          <code>{INSTALL_COMMAND}</code>
+        </div>
       </div>
       <div className="tile ph p1">
         <img src={hilliard} width={1280} height={1283} alt="Nicholas Hilliard's self-portrait miniature, 1577" />
       </div>
-      <div className="tile lapis say">
-        <p>Code review, story alignment, docs alignment. Automated, on your machine.</p>
-      </div>
-      <div className="tile anim" aria-hidden="true">
-        <HeroDots />
-      </div>
-      <div className="tile gold free">
-        <p>Free. Local. No extra seat.</p>
-        <p>
-          <span className="btns">
-            <CopyCommand />
-            <a className="btn alt" href={DEMO_PATH}>Quick demo</a>
-          </span>
-          <code>{COMMAND}</code>
-        </p>
+      <figure className="tile motto">
+        <blockquote>
+          <p>“The line without shadow showeth all to good judgment.”</p>
+        </blockquote>
+        <figcaption>
+          Nicholas Hilliard, <cite>The Arte of Limning</cite>, c.1600
+        </figcaption>
+      </figure>
+      <div className="tile pic rise">
+        <PendingBoardMock />
       </div>
     </section>
   );

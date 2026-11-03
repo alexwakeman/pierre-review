@@ -1,0 +1,468 @@
+/* ===========================================================================
+   THE HOME PAGE (pages/Home.tsx, components/board/*). Layout only; tokens,
+   tiles, pigments and buttons come from src/board.css, the product mocks from
+   components/mock/mock.css. Every rule is scoped under `.lb.home`.
+
+   CLASSES
+     shared     .k (small label) · .cmd (copy button + code) · .section.chapter
+     hero       .hero > .say (.kick, h1, .lead, .cmd) · .ph.p1 · figure.motto · .pic (mock)
+     strip      .strip > .ww-say (h2, p) · ul.ww-tools > li (.ww-mk > .logo-mk, .ww-nm > small)
+     proof      .proof > .board > .tile (.n > s, p) · p.src
+     chapters   .chap (h2 > .tag, p) · .board.feat(.two) > .tile (.k, h3, .say, .m)
+     why        .board.why4 > .tile (h3, p, p.more)
+     tiers      .board.tiers > .tile.gold | .tile.lapis (.k, h3, ul, .cmd)
+     faq        .board.faq > .tile (h3, p)
+     close      .board.close > .tile.gold.mid (h2, .cmd) · .tile.lapis.side
+   Under 961px everything restacks to one column.
+   =========================================================================== */
+
+/* ---- shared ----------------------------------------------------------- */
+.lb.home .k {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lb.home .gold .k {
+  color: #4a3a18;
+}
+.lb.home .lapis .k {
+  color: #d3ddef;
+}
+.lb.home .cmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.lb.home .cmd code {
+  background: var(--surface-2);
+  padding: 13px 14px;
+  font-size: 15px;
+}
+.lb.home .gold .cmd code {
+  background: rgba(18, 17, 16, 0.12);
+}
+.lb.home .section.chapter {
+  margin-top: clamp(80px, 9vw, 130px);
+}
+
+/* ---- hero ------------------------------------------------------------- */
+.lb.home .hero {
+  grid-template-rows: auto minmax(150px, auto);
+}
+.lb.home .hero .say {
+  grid-column: 1 / 8;
+  grid-row: 1;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: clamp(24px, 3vw, 40px);
+}
+.lb.home .hero .kick {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+.lb.home .hero h1 {
+  font-size: clamp(44px, 5.6vw, 84px);
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  max-width: 12ch;
+}
+.lb.home .hero .lead {
+  font-size: clamp(18px, 1.5vw, 21px);
+  line-height: 1.4;
+  margin: 24px 0 28px;
+  max-width: 40ch;
+  color: #dcdad5;
+}
+.lb.home .hero .cmd .btn {
+  background: var(--gold) var(--g-gold);
+  color: var(--dark);
+}
+.lb.home .hero .p1 {
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+.lb.home .hero .p1 img {
+  object-position: center 30%;
+}
+.lb.home .hero .motto {
+  grid-column: 3 / 8;
+  grid-row: 2;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.lb.home .hero .motto blockquote {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+.lb.home .hero .motto figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.lb.home .hero .motto figcaption::before {
+  content: '— ';
+}
+.lb.home .hero .pic {
+  grid-column: 8 / 13;
+  grid-row: 1 / 3;
+  background: var(--surface-2);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ---- works with ---------------------------------------------------------- */
+.lb.home .strip {
+  margin-top: var(--gap);
+}
+.lb.home .strip .ww-say {
+  grid-column: 1 / 4;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.lb.home .strip h2 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.lb.home .strip .ww-say p {
+  font-size: 15px;
+  line-height: 1.4;
+  color: #e3e9f4;
+}
+.lb.home .ww-tools {
+  grid-column: 4 / 13;
+  list-style: none;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px 20px;
+  align-items: start;
+}
+.lb.home .ww-tools li {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lb.home .ww-mk {
+  display: flex;
+  gap: 8px;
+  min-height: 24px;
+}
+.lb.home .logo-mk {
+  width: 24px;
+  height: 24px;
+  background: #e9e7e2;
+  -webkit-mask: var(--src) center / contain no-repeat;
+  mask: var(--src) center / contain no-repeat;
+}
+.lb.home .ww-nm {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.3;
+  color: #e3e1db;
+}
+.lb.home .ww-nm small {
+  display: block;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- proof figures -------------------------------------------------------- */
+.lb.home .proof {
+  margin-top: var(--gap);
+}
+.lb.home .proof .tile {
+  grid-column: span 4;
+  padding: 28px;
+}
+.lb.home .proof .n {
+  font-size: clamp(42px, 4.6vw, 68px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.lb.home .proof .n s {
+  font-size: 0.45em;
+  font-weight: 500;
+  color: rgba(241, 241, 239, 0.72);
+  text-decoration: none;
+  margin-right: 10px;
+}
+.lb.home .proof .tile p + p {
+  margin-top: 12px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: #eeece7;
+}
+.lb.home .proof .src {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 12px 6px 0;
+}
+
+/* ---- chapter header -------------------------------------------------------- */
+.lb.home .chap {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--gap);
+  align-items: end;
+  margin-bottom: var(--gap);
+  padding: 0 6px;
+}
+.lb.home .chap h2 {
+  grid-column: 1 / 6;
+  font-size: clamp(46px, 6vw, 96px);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 6px;
+}
+.lb.home .chap p {
+  grid-column: 6 / 13;
+  font-size: clamp(19px, 1.75vw, 25px);
+  line-height: 1.3;
+  color: #dcdad5;
+  max-width: 40ch;
+  padding-bottom: 12px;
+}
+/* Why Limn, Every feature free, Questions: longer headings, a size down. */
+.lb.home .chap.minor h2 {
+  grid-column: 1 / 7;
+  font-size: clamp(40px, 4.6vw, 68px);
+}
+.lb.home .chap.minor p {
+  grid-column: 7 / 13;
+}
+.lb.home .chap .tag {
+  flex: none;
+  width: 0.24em;
+  height: 0.24em;
+  display: inline-block;
+}
+
+/* ---- features: a heading, a sentence, a mock --------------------------- */
+.lb.home .feat > .tile {
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+}
+.lb.home .feat.two > .tile:first-child {
+  grid-column: span 7;
+}
+.lb.home .feat.two > .tile:last-child {
+  grid-column: span 5;
+}
+.lb.home .feat h3 {
+  font-size: clamp(22px, 1.9vw, 27px);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.lb.home .feat .say {
+  font-size: 16px;
+  line-height: 1.45;
+  color: #dcdad5;
+  margin-bottom: 8px;
+}
+.lb.home .feat .m {
+  margin-top: auto;
+}
+
+/* ---- why ------------------------------------------------------------------- */
+.lb.home .why4 > .tile {
+  grid-column: span 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px;
+}
+.lb.home .why4 h3 {
+  font-size: 22px;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.lb.home .why4 p {
+  font-size: 16px;
+  line-height: 1.45;
+  color: #dcdad5;
+}
+.lb.home .why4 .more {
+  margin-top: auto;
+  padding-top: 8px;
+}
+.lb.home .why4 .more a {
+  color: var(--gold);
+  text-decoration: none;
+}
+.lb.home .why4 .more a:hover {
+  text-decoration: underline;
+}
+
+/* ---- tiers ------------------------------------------------------------------ */
+.lb.home .tiers > .tile {
+  grid-column: span 6;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+}
+.lb.home .tiers h3 {
+  font-size: clamp(34px, 3vw, 44px);
+  margin: 10px 0 14px;
+}
+.lb.home .tiers ul {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+}
+.lb.home .tiers li {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 16px;
+}
+.lb.home .tiers .gold li {
+  border-color: rgba(18, 17, 16, 0.18);
+}
+.lb.home .tiers .cmd {
+  margin-top: auto;
+}
+.lb.home .lapis .btn.alt {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.lb.home .lapis .btn.alt:hover {
+  background: rgba(241, 241, 239, 0.1);
+}
+
+/* ---- questions --------------------------------------------------------------- */
+.lb.home .faq > .tile {
+  grid-column: span 4;
+  padding: 28px;
+}
+.lb.home .faq h3 {
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+.lb.home .faq p {
+  font-size: 16px;
+  line-height: 1.45;
+  color: #dcdad5;
+}
+
+/* ---- close -------------------------------------------------------------------- */
+.lb.home .close .mid {
+  grid-column: 1 / 9;
+  padding: clamp(28px, 3.4vw, 48px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 28px;
+  min-height: 340px;
+}
+.lb.home .close h2 {
+  font-size: clamp(40px, 4.6vw, 68px);
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  max-width: 16ch;
+}
+.lb.home .close .side {
+  grid-column: 9 / 13;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 18px;
+  font-size: 20px;
+  line-height: 1.35;
+}
+.lb.home .close .side a {
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+
+/* ---- under 961px: everything restacks ------------------------------------------ */
+@media (max-width: 960px) {
+  .lb.home .hero {
+    grid-template-rows: none;
+  }
+  .lb.home .hero .say,
+  .lb.home .hero .pic,
+  .lb.home .strip .ww-say,
+  .lb.home .ww-tools,
+  .lb.home .proof .tile,
+  .lb.home .chap h2,
+  .lb.home .chap p,
+  .lb.home .chap.minor h2,
+  .lb.home .chap.minor p,
+  .lb.home .feat > .tile,
+  .lb.home .feat.two > .tile:first-child,
+  .lb.home .feat.two > .tile:last-child,
+  .lb.home .tiers > .tile,
+  .lb.home .faq > .tile,
+  .lb.home .close .mid,
+  .lb.home .close .side {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .lb.home .hero .p1 {
+    grid-column: 1 / 5;
+    grid-row: auto;
+    aspect-ratio: 1;
+  }
+  .lb.home .hero .motto {
+    grid-column: 5 / -1;
+    grid-row: auto;
+  }
+  .lb.home .hero .pic {
+    padding: 10px;
+  }
+  .lb.home .why4 > .tile {
+    grid-column: span 6;
+  }
+  .lb.home .ww-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lb.home .chap p {
+    padding-bottom: 0;
+  }
+  .lb.home .close .mid {
+    min-height: 0;
+  }
+}
+@media (max-width: 760px) {
+  .lb.home .why4 > .tile {
+    grid-column: 1 / -1;
+  }
+  .lb.home .hero .motto {
+    padding: 16px;
+  }
+  .lb.home .hero .motto blockquote {
+    font-size: 16px;
+  }
+  .lb.home .feat > .tile {
+    padding: 16px;
+  }
+  .lb.home .hero .pic {
+    padding: 6px;
+  }
+}

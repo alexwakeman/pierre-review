@@ -3,7 +3,6 @@ import { Link, useRoute } from './router';
 import { initAnalytics, trackPageView } from './lib/analytics';
 import { useSeo } from './lib/seo';
 import { NOT_FOUND_SEO } from './lib/routes';
-import { DEMO_PATH } from './lib/site';
 import Nav from './components/Nav';
 import Footer from './components/Footer';
 import CookieBanner from './components/CookieBanner';
@@ -65,9 +64,6 @@ function NotFound(): JSX.Element {
             <Link className="btn" to="/">
               Back to home
             </Link>
-            <a className="btn alt" href={DEMO_PATH}>
-              Quick demo
-            </a>
           </div>
         </div>
       </section>

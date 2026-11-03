@@ -4,7 +4,7 @@
    `.lb.hwm`, so nothing here reaches another page.
 
    CLASSES
-     shared   .hwm-shot (screenshot tile: <figure>, image at its own ratio)
+     shared   .hwm-shot (a quiet tile holding an HTML mock from components/mock)
               · .hwm-txt (h3 + paragraphs) · .hwm-list (square-marked ul)
               · .hwm-word (a model's name, large) · .hwm-big (a stand-out line)
      header   .hwm-head > .hwm-name (h1, .hwm-lead) · .ph.hwm-pic · .verdigris.hwm-say
@@ -19,19 +19,11 @@
 
 /* ---- shared ----------------------------------------------------------- */
 .lb.hwm .hwm-shot {
-  margin: 0;
   padding: 10px;
   background: var(--surface-2);
   display: flex;
-  align-items: center;
-}
-.lb.hwm .hwm-shot a {
-  display: block;
-  width: 100%;
-}
-.lb.hwm .hwm-shot img {
-  height: auto;
-  object-fit: initial;
+  flex-direction: column;
+  justify-content: center;
 }
 .lb.hwm h2 {
   font-size: clamp(34px, 3.6vw, 56px);

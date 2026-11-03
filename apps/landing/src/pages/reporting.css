@@ -4,12 +4,12 @@
    under `.lb.rep`, so nothing here reaches the home page.
 
    CLASSES
-     shared     .shot (screenshot tile: <figure>, image at its own ratio, no crop)
+     shared     .shot (a quiet tile holding an HTML mock from components/mock)
                 · .r-chap (h2 + p over a section) · .r-txt (heading + copy tile)
      header     .r-head > .r-name (h1, .r-lead) · .ph.r-pic · .r-say · .r-say2
      split      .r-split > .r-txt + .shot.r-wide  (.r-flip puts the shot first)
      period     .r-period > .r-chap + .board > .r-full · .r-fact×3 · .r-sumtxt · .r-sum
-     chronology .r-chron > .r-txt (ul.r-courts) · .r-wide · .r-big (.r-fig > span) · .r-proof
+     chronology .r-chron > .r-txt · .r-wide · .r-big (.r-fig > span) · .r-proof
                 · .r-usd (h3 + p)
      bots       .r-bots > .r-bclaim · .r-bshot · .r-btxt · .r-bshot2
      close      .r-close > .r-flank · .gold.r-mid · .r-flank
@@ -17,19 +17,11 @@
 
 /* ---- shared ----------------------------------------------------------- */
 .lb.rep .shot {
-  margin: 0;
   padding: 10px;
   background: var(--surface-2);
   display: flex;
-  align-items: center;
-}
-.lb.rep .shot a {
-  display: block;
-  width: 100%;
-}
-.lb.rep .shot img {
-  height: auto;
-  object-fit: initial;
+  flex-direction: column;
+  justify-content: center;
 }
 .lb.rep h2 {
   font-size: clamp(34px, 3.6vw, 56px);
@@ -167,25 +159,6 @@
 }
 .lb.rep .r-chron .r-wide {
   grid-column: 5 / 13;
-}
-.lb.rep .r-courts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 17px;
-}
-.lb.rep .r-courts li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.lb.rep .r-courts .sw {
-  flex: none;
-  width: 12px;
-  height: 12px;
 }
 .lb.rep .r-big {
   grid-column: 1 / 6;

@@ -47,9 +47,10 @@ export default function Footer(): JSX.Element {
 
       <div className="flinks">
         <div>
-          <Link to="/#gather">Gather</Link>
-          <Link to="/#check">Check</Link>
-          <Link to="/#act">Act</Link>
+          <Link to="/#review">Review</Link>
+          <Link to="/#fix">Fix</Link>
+          <Link to="/#ship">Ship</Link>
+          <Link to="/#see">See</Link>
         </div>
         <div>
           <Link to="/getting-started">Getting started</Link>
@@ -79,7 +80,7 @@ export default function Footer(): JSX.Element {
         <p className="c muted">
           Pictures: Nicholas Hilliard, self-portrait, 1577; a leaf from a Book of Hours, around 1500
           (The Met); Jacques de Guyse at his desk, Master of Antoine Rolin, around 1500; illuminated
-          initials H and N (Art Institute of Chicago, CC0). Public domain or CC0.
+          initial H (Art Institute of Chicago, CC0). Public domain or CC0.
         </p>
       </div>
 

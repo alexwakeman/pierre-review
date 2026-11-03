@@ -2,11 +2,11 @@ import type { ReactNode } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
+import { CopyCommand } from '../components/board/CopyCommand';
 import { useReveal } from '../components/board/useReveal';
 import hoursLeaf from '../assets/board/img/hours-leaf.jpg';
-import botsSeverity from '../assets/pages/rep-bots-severity.jpg';
-import botsCost from '../assets/pages/rep-bots-cost.jpg';
+import { BenchmarkMock, BotsSeverityMock } from '../components/mock/reports';
 import './how-we-measure.css';
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ import './how-we-measure.css';
 // (since deleted) in board markup. ⚠ The team size comes from
 // `FREE_TEAM_SIZE`; never type the number here.
 //
-// Screenshots are the demo's Acme sample data (the same captures as Reporting).
+// The pictures are HTML mocks on the fictional Acme data (the same mocks as Reporting).
 // ---------------------------------------------------------------------------
 
 const GRADER_USES = [
@@ -57,17 +57,9 @@ const BENCHMARK_USES = [
   'A written refusal wherever the comparison would not be honest.',
 ];
 
-type ShotProps = { src: string; w: number; h: number; alt: string; className?: string };
-
-/** A product screenshot on a quiet tile, at its own ratio. A tap opens it full size. */
-function Shot({ src, w, h, alt, className = '' }: ShotProps): JSX.Element {
-  return (
-    <figure className={`tile hwm-shot rise ${className}`.trim()}>
-      <a href={src}>
-        <img src={src} width={w} height={h} alt={alt} loading="lazy" />
-      </a>
-    </figure>
-  );
+/** A product mock on a quiet tile. */
+function Shot({ className = '', children }: { className?: string; children: ReactNode }): JSX.Element {
+  return <div className={`tile hwm-shot rise ${className}`.trim()}>{children}</div>;
 }
 
 /** A square-marked list on a tile. */
@@ -128,10 +120,7 @@ export default function HowWeMeasure(): JSX.Element {
         </div>
         <div className="tile gold hwm-go">
           <p className="btns">
-            <a className="btn" href={DEMO_PATH}>
-              Try the demo
-            </a>
-            <Link className="btn alt" to="/reporting">
+            <Link className="btn" to="/reporting">
               See what it produces →
             </Link>
           </p>
@@ -161,13 +150,9 @@ export default function HowWeMeasure(): JSX.Element {
             </div>
           </div>
 
-          <Shot
-            className="hwm-wide"
-            src={botsSeverity}
-            w={1140}
-            h={587}
-            alt="Bots Monitoring: what the bots are flagging, and a table with a row per bot: threads, share used, not addressed and severity mix"
-          />
+          <Shot className="hwm-wide">
+            <BotsSeverityMock />
+          </Shot>
           <div className="tile hwm-txt hwm-side rise">
             <h3>How it was built</h3>
             <p>
@@ -253,13 +238,9 @@ export default function HowWeMeasure(): JSX.Element {
               rebuilt as the corpus grows, and the page tells you how old the current one is.
             </p>
           </div>
-          <Shot
-            className="hwm-wide-r"
-            src={botsCost}
-            w={1140}
-            h={574}
-            alt="CodeRabbit's benchmark card: monthly cost, cost per merged pull request and per comment used, and how it compares with teams with similar repositories"
-          />
+          <Shot className="hwm-wide-r">
+            <BenchmarkMock />
+          </Shot>
 
           <div className="tile madder hwm-txt hwm-refuse rise">
             <h3>How we know it works</h3>
@@ -336,9 +317,7 @@ export default function HowWeMeasure(): JSX.Element {
           </p>
           <code className="hwm-cmd">{INSTALL_COMMAND}</code>
           <p className="btns">
-            <a className="btn" href={DEMO_PATH}>
-              Try the demo
-            </a>
+            <CopyCommand label={`Copy ${INSTALL_COMMAND}`} />
             <Link className="btn alt" to="/contact?topic=licence">
               More than {FREE_TEAM_SIZE} users in your organisation? →
             </Link>
@@ -358,7 +337,6 @@ export default function HowWeMeasure(): JSX.Element {
                 people use it. More users than that need a licence —{' '}
                 <Link to="/contact?topic=licence">ask through the contact form</Link>.
               </>,
-              'The demo runs in your browser on sample data. No install, no sign-in.',
             ]}
           />
         </div>

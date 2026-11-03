@@ -1,6 +1,6 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
+import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { ContactForm } from '../components/ContactForm';
 import initialH from '../assets/board/img/initial-h.jpg';
@@ -43,10 +43,7 @@ export default function Contact(): JSX.Element {
             reports are welcome here too.
           </p>
           <p className="btns">
-            <a className="btn" href={DEMO_PATH}>
-              Try the demo first →
-            </a>
-            <a className="btn alt" href={LICENSE_URL}>
+            <a className="btn" href={LICENSE_URL}>
               Read the licence →
             </a>
           </p>
@@ -139,10 +136,7 @@ export default function Contact(): JSX.Element {
             <code>{INSTALL_COMMAND}</code>
           </p>
           <p className="btns">
-            <a className="btn" href={DEMO_PATH}>
-              Try the demo
-            </a>
-            <a className="btn alt" href="/contact?topic=licence">
+            <a className="btn" href="/contact?topic=licence">
               More than {FREE_TEAM_SIZE} users in your organisation? →
             </a>
           </p>
@@ -164,7 +158,6 @@ export default function Contact(): JSX.Element {
               people use it. More users than that need a licence —{' '}
               <a href="/contact?topic=licence">ask through the contact form</a>.
             </li>
-            <li>The demo runs in your browser on sample data. No install, no sign-in.</li>
           </ul>
         </div>
       </section>

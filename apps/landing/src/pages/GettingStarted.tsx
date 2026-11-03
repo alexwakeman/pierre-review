@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
-import { DEMO_PATH, INSTALL_COMMAND, NPM_PACKAGE } from '../lib/site';
+import { INSTALL_COMMAND, NPM_PACKAGE } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { copyText } from '../components/board/copyText';
 import { useLightbox } from '../components/Lightbox';
@@ -145,7 +145,7 @@ function CloseCopy(): JSX.Element {
   };
 
   return (
-    <button className="btn alt" type="button" onClick={copy}>
+    <button className="btn" type="button" onClick={copy}>
       <span aria-live="polite">{copied ? 'Copied' : `Copy ${INSTALL_COMMAND}`}</span>
     </button>
   );
@@ -476,12 +476,9 @@ export default function GettingStarted(): JSX.Element {
 
       <section className="section board gs-close" aria-labelledby="gs-close-h">
         <div className="tile gold gs-close-mid rise">
-          <h2 id="gs-close-h">See it first</h2>
-          <p>The quick demo runs in your browser on sample data. Nothing to install.</p>
+          <h2 id="gs-close-h">Run it now</h2>
+          <p>One command. No account.</p>
           <p className="btns">
-            <a className="btn" href={DEMO_PATH}>
-              Quick demo
-            </a>
             <CloseCopy />
           </p>
         </div>
