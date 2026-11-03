@@ -715,6 +715,8 @@ await db
 const CLAUDE_113_SUMMARY =
   'The transaction refactor is mostly solid. Two issues worth addressing before merge: the per-row inserts in `upsert.ts` should be batched, and a follow-up write escapes the transaction so a mid-run crash can half-persist a PR. The rest are nits and a question about indexing.';
 interface ReviewSeed { id: number; prId: number; author: number; state: 'approved' | 'changes_requested' | 'commented'; daysAgo: number; body?: string; databaseId?: string }
+// Priya's posted Limn review of #114: 3h ago, after Morgan's own run (5h ago).
+const PRIYA_114_DAYS = 3 / 24;
 const REVIEWS: ReviewSeed[] = [
   { id: 1, prId: 102, author: 4, state: 'approved', daysAgo: 3, body: 'LGTM — clean extraction.' },
   { id: 2, prId: 104, author: 1, state: 'approved', daysAgo: 4, body: 'Nice, the cache is a big win.' },
@@ -764,8 +766,11 @@ const REVIEWS: ReviewSeed[] = [
   // TEAMMATES' POSTED LIMN REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews). Each body ends in the
   // hidden summary marker; their finding comments are in the Limn findings block below, and the
   // product's own import (`importTeammateReviews`) turns each into a read-only review in AI Review.
-  //  • #114: Priya's Limn posted an auto review of Wei's change (metadata marker, REQUEST_CHANGES).
-  { id: 27, prId: 114, author: 2, state: 'changes_requested', daysAgo: 1.2, databaseId: 'PRR_demo114priya', body: [
+  //  • #114: Priya's Limn posted an auto review of Wei's change (metadata marker, REQUEST_CHANGES),
+  //    AFTER Morgan's own run (5h ago, seed-demo-agentic.ts), so hers is the newest and LEADS the one
+  //    merged review (team-view.ts). Two of her points are Morgan's too ("You and Priya"), two are hers
+  //    alone (one with no severity), and one she resolved (it must not show).
+  { id: 27, prId: 114, author: 2, state: 'changes_requested', daysAgo: PRIYA_114_DAYS, databaseId: 'PRR_demo114priya', body: [
     'The node group cannot scale as written: `max_size` is below `min_size`, so `terraform plan` fails. The new variable is also never read.',
     '',
     limnReviewMarker('demo114p', { headSha: hexSha('114head'), run: 'auto', pair: false, runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' }], verdict: 'REQUEST_CHANGES', limnVersion: '0.1.173' }),
@@ -874,7 +879,7 @@ ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
 {
   const { findingCommentBody, prLevelFindingBody, FINDING_COMMENT_MARKER } = await import('../src/review/post-review.js');
   const LIMN_THREADS: Array<{
-    id: number; prId: number; path: string; line: number; poster: number; daysAgo: number; body: string;
+    id: number; prId: number; path: string; line: number; poster: number; daysAgo: number; body: string; resolved?: boolean;
   }> = [
     { id: 60, prId: 105, path: 'src/api/routes/webhooks.ts', line: 41, poster: ME, daysAgo: 1.6,
       body: findingCommentBody({ severity: 'warning', body: 'The signature check compares strings with `===`, so its timing leaks how many bytes matched. Use `crypto.timingSafeEqual` on the two buffers.', editedBody: null, suggestion: null }) },
@@ -888,19 +893,29 @@ ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
         'Each progress frame is written without a back-pressure check, so a slow client buffers the whole sync in memory.',
         FINDING_COMMENT_MARKER,
       ].join('\n\n') },
-    // Priya's posted review of #114 (REVIEWS #27): an inline warning (a thread root).
-    { id: 64, prId: 114, path: 'terraform/eks/node-groups.tf', line: 20, poster: 2, daysAgo: 1.2,
-      body: findingCommentBody({ severity: 'warning', body: '`max_size` (4) is below `min_size` (6). EKS rejects the scaling config, which is the error the plan reports. INFRA-231 asks for 2 to 8.', editedBody: null, suggestion: null }) },
+    // Priya's posted review of #114 (REVIEWS #27): inline findings (thread roots). The first line is
+    // the title the import reads, so Morgan's twin of it ("max_size is below min_size") matches.
+    { id: 64, prId: 114, path: 'terraform/eks/node-groups.tf', line: 20, poster: 2, daysAgo: PRIYA_114_DAYS,
+      body: findingCommentBody({ severity: 'warning', body: '`max_size` is below `min_size`.\n\n`max_size` (4) is below `min_size` (6). EKS rejects the scaling config, which is the error the plan reports. INFRA-231 asks for 2 to 8.', editedBody: null, suggestion: null }) },
     // Sam's posted review of his own #111 at its first commit (REVIEWS #28): an inline warning.
     { id: 65, prId: 111, path: 'src/api/routes/sync-activity.ts', line: 56, poster: 5, daysAgo: 3.5,
       body: findingCommentBody({ severity: 'warning', body: 'Nothing unsubscribes when the browser closes the stream, so every closed tab keeps its listener and heartbeat. Listen for `close` on the reply socket.', editedBody: null, suggestion: null }) },
+    // Priya's #114 again (appended, so the comment ids above keep their numbers). Hers alone, still open.
+    { id: 66, prId: 114, path: 'terraform/eks/node-groups.tf', line: 21, poster: 2, daysAgo: PRIYA_114_DAYS,
+      body: findingCommentBody({ severity: 'warning', body: '`desired_size` is reset on every apply.\n\nThe autoscaler changes the node count, and the next `terraform apply` puts it back to 4. Add `ignore_changes = [scaling_config[0].desired_size]` to a `lifecycle` block.', editedBody: null, suggestion: null }) },
+    // Hers alone, posted with no severity lead (read as "no severity").
+    { id: 67, prId: 114, path: 'terraform/eks/node-groups.tf', line: 25, poster: 2, daysAgo: PRIYA_114_DAYS,
+      body: ['The `workload` label does not keep other pods off this group.', 'Add a matching taint, or the sync workers share their nodes with everything else.', FINDING_COMMENT_MARKER].join('\n\n') },
+    // Hers, RESOLVED on GitHub since: it is not in the merged review.
+    { id: 68, prId: 114, path: 'terraform/eks/variables.tf', line: 35, poster: 2, daysAgo: PRIYA_114_DAYS, resolved: true,
+      body: findingCommentBody({ severity: 'nit', body: 'Say "nodes" in the description.\n\n"Upper bound for the worker node group autoscaler" does not say what is counted.', editedBody: null, suggestion: null }) },
   ];
   await db
     .insert(schema.reviewThreads)
     .values(
       LIMN_THREADS.map((t) => ({
         id: t.id, githubNodeId: `RT_${t.id}`, prId: t.prId, path: t.path, line: t.line,
-        isResolved: false, isOutdated: false, derivedState: 'untouched' as const,
+        isResolved: t.resolved === true, isOutdated: false, derivedState: t.resolved === true ? ('resolved' as const) : ('untouched' as const),
         originalCommenterId: t.poster, createdAt: day(t.daysAgo),
       })),
     )
@@ -923,8 +938,8 @@ ev(INFRA, 1, 114, 'pr_comment', day(0.9), 'pr_comments', 3);
   // The PR-level blockers of the two teammates' posted reviews (REVIEWS #27 and #28), a few seconds
   // after each summary, as GitHub stamps them.
   const teammatePrLevel = [
-    { id: 61, prId: 114, poster: 2, daysAgo: 1.2 - 5 / 86_400,
-      body: prLevelFindingBody({ severity: 'blocker', path: 'terraform/eks/variables.tf', line: 33, body: '`worker_max_nodes` is declared but `node-groups.tf` still hard-codes the bound, so changing the variable does nothing.', editedBody: null, suggestion: null }) },
+    { id: 61, prId: 114, poster: 2, daysAgo: PRIYA_114_DAYS - 5 / 86_400,
+      body: prLevelFindingBody({ severity: 'blocker', path: 'terraform/eks/variables.tf', line: 33, body: '`worker_max_nodes` is not used.\n\nIt is declared, but `node-groups.tf` still hard-codes the bound, so changing the variable does nothing.', editedBody: null, suggestion: null }) },
     { id: 62, prId: 111, poster: 5, daysAgo: 3.5 - 5 / 86_400,
       body: prLevelFindingBody({ severity: 'blocker', path: 'src/sync/sync-manager.ts', line: 210, body: 'Nothing sends a last frame when the sync ends, so the progress bar stays at its last value. Send a `done` event after the walk.', editedBody: null, suggestion: null }) },
   ];

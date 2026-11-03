@@ -1,15 +1,22 @@
-import { useState } from 'react';
-import type { ClaudeReviewVerdict, ClaudeTeammateFinding, ClaudeTeammateReview } from '@pierre-review/shared';
+import type { ReactNode } from 'react';
+import type { ClaudeReviewVerdict, ClaudeTeamFinding, ClaudeTeammatePoster, ClaudeTeammateReview } from '@pierre-review/shared';
 import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { SEVERITY_CLASS, VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
-import { REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
-import { teammateReviewMeta, teammateReviewTitle } from '../lib/teammateReviews.js';
+import { REVIEW_ITEM_CARD, REVIEW_META } from '../lib/reviewStyles.js';
+import { teamFindingByLabel, teammateReviewTitle } from '../lib/teammateReviews.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { Monogram } from './CommentCard.js';
-import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
-import { InfoButton } from './InfoModal.js';
+import { ExternalLinkIcon } from './Icons.js';
 import { Markdown } from './Markdown.js';
+import { RailPiece, useRailWide } from './RailLayout.js';
+import { ReviewSection } from './ReviewSection.js';
 import { VerdictIcon } from './VerdictIcon.js';
+
+// TEAMMATES' POSTED REVIEWS IN THE ONE REVIEW (docs/CLAUDE-REVIEW.md § Teammates' reviews → One
+// review). The server folds them with the reader's own (`ClaudeReviewResponse.teamView`); these are
+// the read-only pieces: the summary when a teammate's review is the newest, and a teammate's still-open
+// finding in the Findings list. No Post, Re-post, Reword or Ignore: the finding is theirs, on GitHub.
+// Reply and Resolve are on its thread (the path opens it in Changes).
 
 const VERDICT_WORD: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',
@@ -19,132 +26,124 @@ const VERDICT_WORD: Record<ClaudeReviewVerdict, string> = {
 
 const LINK = 'inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink hover:underline';
 
-/**
- * TEAMMATES' POSTED REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews): reviews a teammate's Limn
- * posted to GitHub, shown READ-ONLY beside the reader's own — whose they are, that they are on GitHub,
- * what ran them. No Post, Re-post, Delete or auto-post control: the findings link to their threads.
- * Renders nothing when there are none.
- */
-export function TeammateReviews({
-  reviews,
-  onOpenThread,
-}: {
-  reviews: readonly ClaudeTeammateReview[] | undefined;
-  onOpenThread?: (threadId: number) => void;
-}): JSX.Element | null {
-  if (reviews == null || reviews.length === 0) return null;
+function TeammateVerdict({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Element {
   return (
-    <section aria-label="Teammates’ reviews" className="mt-4 space-y-2">
-      <div className="flex items-center gap-1">
-        <h3 className="text-meta font-semibold text-ui-ink">Teammates’ reviews</h3>
-        <InfoButton title="Teammates’ reviews">
-          <p>
-            Reviews a teammate’s Limn posted on this pull request. They are read from GitHub and can’t be
-            changed or posted here. A review a teammate kept in their own Limn isn’t shown.
-          </p>
-        </InfoButton>
-      </div>
-      <ul className={REVIEW_ITEM_GROUP}>
-        {reviews.map((r) => (
-          <TeammateReviewCard key={r.reviewId} review={r} onOpenThread={onOpenThread} />
-        ))}
-      </ul>
-    </section>
+    <span className={`${VERDICT_PILL} ${VERDICT_CLASS[verdict]}`}>
+      <VerdictIcon verdict={verdict} size={12} />
+      {VERDICT_WORD[verdict]}
+    </span>
   );
 }
 
-function TeammateReviewCard({
-  review: r,
-  onOpenThread,
+/** A teammate's avatar (their initials without one). */
+export function TeammateAvatar({ poster, size = 16 }: { poster: ClaudeTeammatePoster; size?: number }): JSX.Element {
+  return poster.avatarUrl ? (
+    <img
+      src={safeExternalUrl(poster.avatarUrl)}
+      alt=""
+      width={size}
+      height={size}
+      className="shrink-0 rounded-full"
+      style={{ width: size, height: size }}
+    />
+  ) : (
+    <Monogram label={poster.displayName || poster.login} size={size} />
+  );
+}
+
+/** "Robin" with their avatar: who raised a finding. */
+export function TeammateChip({
+  by,
+  label,
+  title,
 }: {
-  review: ClaudeTeammateReview;
-  onOpenThread?: (threadId: number) => void;
+  by: readonly ClaudeTeammatePoster[];
+  label: string;
+  title: string;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-ink"
+      title={title}
+      data-testid="teammate-chip"
+    >
+      {by[0] != null && <TeammateAvatar poster={by[0]} size={14} />}
+      {label}
+    </span>
+  );
+}
+
+/**
+ * THE SUMMARY WHEN A TEAMMATE'S REVIEW IS THE NEWEST: "Robin's review", its verdict, posted on
+ * GitHub, its summary. The reader's own older review stays in the history list.
+ */
+export function TeammateLeadSection({ review: r }: { review: ClaudeTeammateReview }): JSX.Element {
+  const inRail = useRailWide('review');
   const title = teammateReviewTitle(r);
   const url = safeExternalUrl(r.githubUrl);
-  const count = r.findings.length;
+  const posted: ReactNode = (
+    <>
+      <span title={new Date(r.postedAt).toLocaleString()}>Posted on GitHub {relativeTime(r.postedAt)}</span>
+      {url && (
+        <a href={url} target="_blank" rel="noreferrer" className={LINK}>
+          Open
+          <ExternalLinkIcon size={11} aria-hidden />
+        </a>
+      )}
+    </>
+  );
   return (
-    <li className={REVIEW_ITEM_CARD} data-testid="teammate-review">
-      <div className="flex items-start gap-2">
-        {r.poster.avatarUrl ? (
-          <img
-            src={safeExternalUrl(r.poster.avatarUrl)}
-            alt=""
-            width={20}
-            height={20}
-            className="mt-0.5 shrink-0 rounded-full"
-            style={{ width: 20, height: 20 }}
-          />
-        ) : (
-          <Monogram label={r.poster.displayName || r.poster.login} size={20} />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className={`hit inline-flex items-center gap-1 ${REVIEW_ITEM_TITLE} hover:underline`}
-            >
-              <ChevronIcon dir={open ? 'down' : 'right'} size={11} aria-hidden />
-              {title}
-            </button>
-            {r.verdict != null && (
-              <span className={`${VERDICT_PILL} ${VERDICT_CLASS[r.verdict]}`}>
-                <VerdictIcon verdict={r.verdict} size={12} />
-                {VERDICT_WORD[r.verdict]}
-              </span>
-            )}
-            <span className={REVIEW_META}>
-              {count === 0 ? 'No comments' : `${count} ${count === 1 ? 'comment' : 'comments'}`}
-            </span>
-          </div>
-          <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 ${REVIEW_META}`}>
-            <span title={r.headInferred ? 'The commit is the newest one when it was posted.' : undefined}>
-              {teammateReviewMeta(r)}
-            </span>
-            <span>{relativeTime(r.postedAt)}</span>
-            {url && (
-              <a href={url} target="_blank" rel="noreferrer" className={LINK}>
-                On GitHub
-                <ExternalLinkIcon size={11} aria-hidden />
-              </a>
-            )}
-          </div>
-        </div>
-      </div>
-      {open && (
-        <div className="mt-2 space-y-2">
-          {r.summary.trim() !== '' && (
-            <div className="text-body">
-              <Markdown>{r.summary}</Markdown>
+    <>
+      <RailPiece slot="status">
+        <div className="space-y-1.5" data-testid="review-rail-status">
+          <p className="text-meta text-ui-mute">{title}</p>
+          {r.verdict != null && (
+            <div className="flex flex-wrap items-center gap-2">
+              <TeammateVerdict verdict={r.verdict} />
             </div>
           )}
-          {count > 0 && (
-            <ul className={REVIEW_ITEM_GROUP}>
-              {r.findings.map((f) => (
-                <TeammateFindingRow key={f.id} finding={f} onOpenThread={onOpenThread} />
-              ))}
-            </ul>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">{posted}</div>
+        </div>
+      </RailPiece>
+      <ReviewSection
+        title={title}
+        section="review"
+        pills={
+          inRail ? null : (
+            <>
+              {r.verdict != null && <TeammateVerdict verdict={r.verdict} />}
+              <span className={`flex flex-wrap items-center gap-x-2 ${REVIEW_META}`}>{posted}</span>
+            </>
+          )
+        }
+      >
+        <div data-testid="teammate-lead">
+          {r.summary.trim() !== '' ? (
+            <div className={inRail ? 'reading-measure' : undefined}>
+              <Markdown prRefs>{r.summary}</Markdown>
+            </div>
+          ) : (
+            <div className="text-meta text-ui-mute">No summary.</div>
           )}
         </div>
-      )}
-    </li>
+      </ReviewSection>
+    </>
   );
 }
 
-function TeammateFindingRow({
+/** A teammate's still-open finding in the one Findings list. Read-only. */
+export function TeamFindingRow({
   finding: f,
   onOpenThread,
 }: {
-  finding: ClaudeTeammateFinding;
+  finding: ClaudeTeamFinding;
   onOpenThread?: (threadId: number) => void;
 }): JSX.Element {
   const url = safeExternalUrl(f.githubUrl);
   const where = f.path !== '' ? (f.line != null ? `${f.path}:${f.line}` : f.path) : null;
+  const names = teamFindingByLabel(f.by);
   return (
-    <li className={REVIEW_ITEM_CARD}>
+    <li className={REVIEW_ITEM_CARD} data-testid="team-finding">
       <div className="flex items-start gap-2">
         {f.severity != null && (
           <span
@@ -154,6 +153,10 @@ function TeammateFindingRow({
           </span>
         )}
         <div className="min-w-0 flex-1 space-y-1">
+          {/* The title is the text's first line (as posted), so the text alone says it. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <TeammateChip by={f.by} label={names} title={`From ${names}’s review, on GitHub`} />
+          </div>
           <div className="text-body">
             <Markdown>{f.body}</Markdown>
           </div>

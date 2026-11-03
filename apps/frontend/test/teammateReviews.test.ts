@@ -1,7 +1,12 @@
 // TEAMMATES' POSTED REVIEWS on the AI Review tab: the words (lib/teammateReviews.ts).
 import { describe, expect, it } from 'vitest';
 import {
+  alsoRaisedByFinding,
+  alsoRaisedLabel,
   followUpItemWritable,
+  leadingTeammateReview,
+  reviewCountLine,
+  teamFindingByLabel,
   followUpSectionTitle,
   followUpThreadsWritable,
   teammateReviewMeta,
@@ -52,5 +57,41 @@ describe("a follow-up on the PR author's own review", () => {
     // An ordinary follow-up: every item writable.
     expect(followUpItemWritable({}, { carried: false })).toBe(true);
     expect(followUpItemWritable(null, { carried: true })).toBe(true);
+  });
+});
+
+describe('the one review: teammates named in the findings list', () => {
+  const robin = { userId: 2, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
+  const sam = { userId: 3, login: 'sam-dev', displayName: null, avatarUrl: null };
+
+  it('names who raised a point, and the reader with them', () => {
+    expect(teamFindingByLabel([robin])).toBe('Robin');
+    expect(teamFindingByLabel([robin, sam])).toBe('Robin and @sam-dev');
+    expect(alsoRaisedLabel([robin])).toBe('You and Robin');
+    expect(alsoRaisedLabel([robin, sam])).toBe('You, Robin and @sam-dev');
+  });
+
+  it('the newest review leads only when the server says it is a teammate’s', () => {
+    const reviews = [{ ...base, reviewId: 9 }] as unknown as Parameters<typeof leadingTeammateReview>[1];
+    expect(leadingTeammateReview({ lead: 'teammate', teammateReviewId: 9 }, reviews)?.reviewId).toBe(9);
+    expect(leadingTeammateReview({ lead: 'own', teammateReviewId: null }, reviews)).toBeNull();
+    expect(leadingTeammateReview(undefined, reviews)).toBeNull();
+    expect(alsoRaisedByFinding({ alsoRaisedBy: [{ findingId: 4, by: [robin] }] }).get(4)).toEqual([robin]);
+  });
+});
+
+describe('the review count line', () => {
+  const robin = { userId: 2, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
+  const sam = { userId: 3, login: 'sam-dev', displayName: null, avatarUrl: null };
+  it('names the total and each teammate', () => {
+    expect(reviewCountLine({ total: 4, byTeammate: [{ poster: robin, count: 1 }] })).toBe('4 Limn reviews so far · 1 by Robin');
+    expect(reviewCountLine({ total: 5, byTeammate: [{ poster: robin, count: 2 }, { poster: sam, count: 1 }] })).toBe(
+      '5 Limn reviews so far · 2 by Robin, 1 by @sam-dev',
+    );
+  });
+  it('one review reads singular; none (or an older server) is no line', () => {
+    expect(reviewCountLine({ total: 1, byTeammate: [] })).toBe('1 Limn review so far');
+    expect(reviewCountLine({ total: 0, byTeammate: [] })).toBeNull();
+    expect(reviewCountLine(undefined)).toBeNull();
   });
 });

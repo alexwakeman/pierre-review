@@ -1027,9 +1027,11 @@ const TICKET_SCRIPTS: TicketScript[] = [
     alignment: 'partly_aligned',
     summary: 'PR1 added DynamoDB locking; PR2 moves state to S3 but has not archived the old files.\n- The old local state files are deleted by PR2 instead of archived.',
     criteria: [
-      { status: 'partly_met', explanation: 'Three of the four stacks point at the versioned bucket; `stacks/legacy` still uses local state.', pr: 'PR2' },
+      { status: 'partly_met', explanation: 'Three of the four stacks point at the versioned bucket; `stacks/legacy` still uses local state.', pr: 'PR2', path: 'stacks/legacy/backend.tf', line: 3 },
       { status: 'met', explanation: 'The DynamoDB lock table from PR1 is configured on every migrated stack.', pr: 'PR1' },
-      { status: 'not_met', explanation: 'PR2 deletes `terraform.tfstate.backup` files rather than moving them to the archive prefix.', pr: 'PR2' },
+      // Unmet, with its code in PR2: from PR1 (or the story view) the AC label's popover names PR2
+      // under "Code in" (TicketReviewParts `evidenceElsewhere`).
+      { status: 'not_met', explanation: 'PR2 deletes `terraform.tfstate.backup` files rather than moving them to the archive prefix.', pr: 'PR2', path: 'scripts/migrate-state.sh', line: 41 },
     ],
     hoursAgo: 49,
   },

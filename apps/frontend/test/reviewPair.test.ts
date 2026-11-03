@@ -119,6 +119,17 @@ describe('the history select', () => {
     expect(historyOptionIdFor(opts, 9)).toBe(9);
   });
 
+  it('compact (the wide tab\'s right-hand column): no commit and no model, the provider only', () => {
+    const opts = reviewHistoryOptions(history, 12, when, true);
+    expect(opts.map((o) => o.label)).toEqual([
+      'Replies checked · 2026-10-27',
+      'Claude · 2026-10-27 (latest)',
+      'Claude + Codex · 2026-10-27',
+      expect.stringMatching(/^(Claude|Codex) · 2026-10-27/),
+    ]);
+    for (const o of opts) expect(o.label).not.toMatch(/abcdef1|Opus|GPT/);
+  });
+
   it('a pair in flight reads as running; a pair with no second half yet is still one option', () => {
     const running = reviewHistoryOptions([run(21, { status: 'running', pair: { pairId: 20, role: 'second', otherReviewId: 20 } }), run(20, { pair: { pairId: 20, role: 'first', otherReviewId: 21 } })], null, when);
     expect(running).toEqual([{ id: 21, runIds: [21, 20], label: 'Claude + Codex · abcdef1 · 2026-10-27 · Running' }]);

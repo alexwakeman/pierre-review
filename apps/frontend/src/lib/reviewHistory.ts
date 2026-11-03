@@ -5,7 +5,7 @@
 // exception, a run the reader just started (a MANUAL run that became the latest while the pane was
 // open), which becomes the shown run so its progress and result are what the pane is about.
 import type { ClaudeReviewStatus, ClaudeReviewSummary, ClaudeReviewTrigger } from '@pierre-review/shared';
-import { aiRunLabel, PAIR_RUN_LABEL } from '@pierre-review/shared';
+import { aiRunLabel, aiRunProviderName, PAIR_RUN_LABEL } from '@pierre-review/shared';
 import { AUTO_REVIEW_LABEL as AUTO_WORD } from '../components/Activity/pendingLabels.js';
 import { REPLIES_CHECK_LABEL as REPLIES_WORD } from './repliesCheck.js';
 
@@ -92,13 +92,16 @@ function pairStatus(halves: readonly Pick<ClaudeReviewSummary, 'status'>[]): Cla
 
 /**
  * The history select's options, newest first. `latestId` marks the latest review "(latest)"; `when`
- * formats a time (`reviewRunWhen`).
+ * formats a time (`reviewRunWhen`). `compact` (the wide tab's right-hand column): no commit and no
+ * model — the provider ("Claude", "Codex", "Claude + Codex"), when, and the status.
  */
 export function reviewHistoryOptions(
   history: readonly ClaudeReviewSummary[],
   latestId: number | null,
   when: (iso: string) => string,
+  compact = false,
 ): ReviewHistoryOption[] {
+  const head = (sha: string | null | undefined): string[] => (compact ? [] : [shortHead(sha)]);
   const out: ReviewHistoryOption[] = [];
   const pairs = new Map<number, ClaudeReviewSummary[]>();
   for (const h of history) {
@@ -116,7 +119,7 @@ export function reviewHistoryOptions(
       const halves = pairs.get(h.pair.pairId) ?? [h];
       const latest = halves[0]!;
       const status = pairStatus(halves);
-      const parts = [PAIR_RUN_LABEL, shortHead(latest.headSha), when(latest.finishedAt ?? latest.createdAt)];
+      const parts = [PAIR_RUN_LABEL, ...head(latest.headSha), when(latest.finishedAt ?? latest.createdAt)];
       if (status !== 'succeeded') parts.push(reviewStatusWord(status));
       if (latest.trigger === 'auto') parts.push(AUTO_WORD);
       const ids = halves.map((x) => x.id);
@@ -124,8 +127,14 @@ export function reviewHistoryOptions(
       continue;
     }
     const what =
-      h.kind === 'replies' ? REPLIES_WORD : h.reviewMode === 'skip' ? 'Skipped (nothing to review)' : aiRunLabel(h.provider, h.model, h.effort);
-    const parts = [what, shortHead(h.headSha), when(h.finishedAt ?? h.createdAt)];
+      h.kind === 'replies'
+        ? REPLIES_WORD
+        : h.reviewMode === 'skip'
+          ? 'Skipped (nothing to review)'
+          : compact
+            ? aiRunProviderName(h)
+            : aiRunLabel(h.provider, h.model, h.effort);
+    const parts = [what, ...head(h.headSha), when(h.finishedAt ?? h.createdAt)];
     if (h.status !== 'succeeded') parts.push(reviewStatusWord(h.status));
     if (h.trigger === 'auto') parts.push(AUTO_WORD);
     out.push({ id: h.id, runIds: [h.id], label: parts.join(' · ') + (h.id === latestId ? ' (latest)' : '') });

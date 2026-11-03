@@ -27,11 +27,23 @@ describe('reviewTabPill', () => {
     expect(reviewTabPill({ ...run('succeeded', 'APPROVE'), autoReview: 'queued' }, false)?.kind).toBe('queued');
     expect(reviewTabPill({ review: null, autoReview: 'running' }, false)?.kind).toBe('running');
   });
+  it('a teammate review that leads names ITS verdict; a run of the reader’s in flight still wins', () => {
+    const team = {
+      ...run('succeeded', 'APPROVE'),
+      teamView: { lead: 'teammate' as const, teammateReviewId: 7 },
+      teammateReviews: [{ reviewId: 7, verdict: 'COMMENT' as const }],
+    };
+    expect(reviewTabPill(team, false)).toEqual({ kind: 'verdict', verdict: 'COMMENT', label: 'Comment' });
+    expect(reviewTabPill({ ...team, teamView: { lead: 'own', teammateReviewId: null } }, false)?.label).toBe('Approve');
+    expect(reviewTabPill({ ...team, autoReview: 'running' }, false)?.kind).toBe('running');
+    expect(reviewTabPill({ ...team, review: null }, false)?.label).toBe('Comment');
+  });
   it('a failed run', () => {
     expect(reviewTabPill(run('failed'), false)).toEqual({ kind: 'failed', label: 'Failed' });
   });
-  it('is mounted on the PR pane tab strip, from the tab’s own query', () => {
-    expect(src('components/PrDetail.tsx')).toMatch(/t === 'claude_review' && reviewPill != null/);
+  it('its read stays mounted on the PR pane (for the Overview card), but the tab label draws no pill', () => {
+    expect(src('components/PrDetail.tsx')).toMatch(/useClaudeReviewTabPill\(prId, claudeReviewEnabled\)/);
+    expect(src('components/PrDetail.tsx')).not.toMatch(/reviewPill != null/);
     expect(src('hooks/useClaudeReview.ts')).toMatch(/useClaudeReviewTabPill[\s\S]*queryKey: \['claude-review', prId\]/);
   });
 });

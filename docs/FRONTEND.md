@@ -363,19 +363,21 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   `OpenPrsCards` still owns EVERY read (the ticket gate, the ONE batched Claude / CI / ticket-review /
   merged-PR requests, the sort, the stacks) and hands the folded answers down; the rows file asks for
   nothing (nothing fetches on selection). The row: lead = `mergeVerdict` (red conflicts/blocked,
-  green ready, grey otherwise) · title · repo#N · CI icon · review standing · open threads · ONE AI
-  marker · +A −D · author · age; every old chip is in words in the panel (+ the unchanged
+  green ready, grey otherwise) · title · CI icon · review standing · open threads · ONE AI
+  marker; the second line is repo#N · author · age; every old chip is in words in the panel (+ the unchanged
   `ClaudeReviewPanel`). Keys: j/k, ↵ panel then PR, `o` GitHub, `r` AI review; double-click opens the
   PR; selection, panel state and the drawn window survive Back (session memo). The icon columns sit
-  under a HEADING ROW (Review · CI · Threads · AI review · Size · Author · Updated, each with a
+  under a HEADING ROW (Review · CI · Threads · AI review, each with a
   tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so
   a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
   session, never stored) whose line is the chevron, the ticket key + story name (→ the story view) and
   the PR count ONLY — status, assignee, criteria met, Re-check and the roll-up are in the story view
-  (2026-11-02). **With the drawer docked open (`compact`) the row goes TWO LINES** (2026-11-03): the
-  Size, Author and Updated columns go and the title's second line reads `repo#N · avatar author ·
-  age` (`data-testid="open-prs-row-two-line"`; the repo label gives way first, the author and age
-  never truncate away) — before, the author column was dropped and the age clipped at 1280px.
+  (2026-11-02). **A row is ALWAYS TWO LINES, drawer open or closed** (2026-11-03): the title,
+  then `repo#N · avatar author · age` (`data-testid="open-prs-row-two-line"`; the repo label gives
+  way first, the author and age never truncate away). The size is in the drawer. There is no
+  closed-drawer layout. **Docked, the drawer's column is ALWAYS reserved**: with no PR open it holds one
+  quiet line (`data-testid="open-prs-panel-reserved"`, `w-panel`), so opening or closing the drawer
+  never moves the list's columns.
   Drawing pages are 60
   rows. The story view and Open PRs → Merged keep the CARDS described below.
   **Open PRs has TWO TABS, Open | Merged** (`filters.openPrsTab`, `?openPrsTab=merged`, emitted
@@ -801,6 +803,16 @@ only, bare, no fork owner) on its own row under it, only when the head has synce
 `break-all`. The full-screen PR detail's top spacing matches the story tab's (§ ONE header toast strip:
 it hosts the strip through `PageToastSlot`). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
 
+**Overview opens with THE AI REVIEW** (2026-11-03; `pr/AiReviewOverview.tsx`, words in
+`lib/aiReviewOverview.ts`, `test/aiReviewOverview.test.ts`): the newest Limn review — the reader's
+own, or a teammate's named "Robin’s review" (`teamView.lead`; an older server: the newer of the two) —
+its verdict, when, the OPEN findings by severity (the reader's latest succeeded run + `teamView.findings`;
+praise is never one; a teammate's unlabelled ones read "N other"), three lines of its summary as plain
+text, and "Open AI Review". ⚠ **It fetches nothing**: it observes `['claude-review', prId]`, the read
+PrDetail keeps mounted on load (`useClaudeReviewTabPill`, no longer drawn), with `staleTime: Infinity`.
+Hidden with `me.ai.enabled` off or no finished review. **The AI Review tab label has NO verdict
+pill** (the verdict is on the tab's page and this card); it keeps its sparkle like every tab's icon.
+
 **Tabs: Overview · Comments · Threads · Changes** (+ the gated ones below). ⚠ **Activity is NOT a tab
 any more** — it is the collapsed **Activity** section at the foot of Overview (`ActivitySection`, a
 compact one-line-per-event list of the same rows: opened, commits, reviews, comments, merged/closed,
@@ -883,19 +895,29 @@ goes to two), and ALWAYS in the PR drawer (`placement === 'pane'` passes `oneCol
 under the timeline gives a sticky rail no height), it is today's single column, capped at 64rem, in
 today's order. Wide: the reading column holds the CONTENT — the summary (paragraphs at a reading measure,
 `.reading-measure`), Previous review, Review threads, Findings, Story check, CI check, SonarCloud,
-Reference docs, the Design and the chat — and a RIGHT RAIL ("Review facts and actions", part of the page: it scrolls with it) holds the
-META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` stays exactly where it was:
-  - `status` (rail only, `ReviewRailStatus`): who reviewed, the verdict, the commit it read
-    (`CurrencyPill`), when, auto / fresh / replies / depth, and the ONE run label (`aiRunLabel`) + cost
-    (`useRunCostText`, the one formatter) — the review header drops its pills and meta line then;
+Reference docs, the Design and the chat — and a RIGHT RAIL ("Review facts and actions") holds the
+META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` stays exactly where it was.
+**The rail STICKS** (2026-11-03, `REVIEW_RAIL.sticky`; `RailLayout.tsx` `stickyRailTop`, pinned by
+`test/railSticky.test.ts`): 8px under the top of the tab's scroll pane (the tab bar sits above the
+pane), its top level with the reading column at rest. Taller than the pane, it scrolls with the page
+until its end is 8px above the pane's bottom, then holds. ⚠ Never its own scroll box: `overflow-y`
+would clip the agent log that widens LEFTWARDS out of the `run` piece (`RailWideLeft`). Before, it
+flowed with the page and left an empty column beside the findings once scrolled past. The story view's
+rail still flows (no `sticky`). The slots:
+  - `status` (rail only, `ReviewRailStatus`): who reviewed, the verdict, "On latest commit" / "N newer
+    commits" (`CurrencyPill showSha={false}`), when, auto / fresh / replies / depth, and the run's cost
+    (`useRunCostText`, the one formatter) — NO commit hash and NO model (2026-11-03); the review header
+    drops its pills and meta line then (narrow keeps the meta line);
   - `run` (in place when narrow): the whole "Run a review" section — model picker, Run / Re-review in
     its `AiRunGate`, the same-commit confirm, auto-review holds, team claims, live progress + Stop,
-    failures, the replies pass, the history select;
+    failures, the replies pass, THE REVIEW COUNT ("4 Limn reviews so far · 1 by Robin",
+    `reviewCountLine` over `teamView.reviewCount`, docs/CLAUDE-REVIEW.md § Teammates' reviews), the
+    history select — in the rail its options name the provider, when and status only
+    (`reviewHistoryOptions(…, compact)`, read through `useRailWide('review')` in `ReviewHistoryList`);
   - `counts` (rail only, `ReviewRailCounts`): findings by severity (zeros left out), "Under Story check",
     "Threads to fix" (`validUnaddressed`) — each row scrolls to its section;
-  - `nav` (rail only): "On this page" over the sections present (`data-review-section`, set through
-    `ReviewSection`'s `section` prop: review, previous, threads, findings, stories, ci, sonar, refs,
-    design, chat);
+  - NO "On this page" (removed 2026-11-03; the sections still carry `data-review-section` for the
+    counts' scroll);
   - `actions` (in place when narrow): Reviews and actions + "Generate fix from this review";
   - `post` (in place when narrow): Post to GitHub (summary, verdict, Preview, Post + confirm, results).
   The Design section sits in `<RailWide>` (the story view's rule, below): in the reading column,
@@ -1673,8 +1695,12 @@ reappears.
   § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,
   title, "N of M met", the server's currency pill ("2 PRs changed since"), Check / Re-check behind
   `AiRunGate`, criteria (each ref — "AC1" — opens a popover: "Done in" web#412 … / "Belongs in api#88";
-  the PRs are not listed under the criteria any more, 2026-11-01; a met row keeps its tick beside the
-  ref on the first line), and ONE Post button per unmet
+  the PRs are not listed under the criteria any more, 2026-11-01; an UNMET row's evidence in other
+  PRs moved into the same popover as "Code in" web#412 + its `path:line`s, `evidenceElsewhere`,
+  2026-11-03 — only the viewed PR's own files stay under the row, as jumps into Changes. ⚠ The server
+  puts every evidence PR in `deliveredBy`, so a NOT MET row drops its evidence PRs from "Done in"
+  (`criterionDoneIn`), or "Code in" would never show; a met row
+  keeps its tick beside the ref on the first line), and ONE Post button per unmet
   item (target named on the button; once posted, never offered again; `visible:false` = "It will
   show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
   is a line above it; each block's header says how long ago the shown run finished (`ReviewedAgo` on
@@ -1810,7 +1836,8 @@ reappears.
 - **The verdict LEADS the Claude's review header** (`VerdictBadge`, the Open PRs panel's exported
   `VERDICT_PILL` size), then currency, "reviewed X ago", auto mark, mode. The PR pane's **tab label**
   carries the same outcome ("Claude Review [Approve]", `VERDICT_CLASS`; "Reviewing…" / "Queued" /
-  "Failed"; nothing with no run) — `useClaudeReviewTabPill` OBSERVES the tab's own
+  "Failed"; nothing with no run; a teammate's verdict when their posted review leads, `teamView.lead`)
+  — `useClaudeReviewTabPill` OBSERVES the tab's own
   `['claude-review', prId]` query (DB-only, no second request when the tab opens) and alone re-reads
   every 5s while a run is in flight, because a shut tab has no SSE stream; pure half `reviewTabPill`.
   ⚠ **A run started or finished ELSEWHERE reaches it through the ACTIVE LIST** (auto review, the
@@ -1846,12 +1873,19 @@ reappears.
   in another repo, and a bare "repo#N" resolves server-side only when exactly ONE of the account's
   repos has that name. Unresolved refs, refs inside links or code, and the viewed PR itself stay plain
   text. Markdown gets it via the `rehypeReviewPrRefs` plugin, which runs AFTER the sanitizer.
-- **Teammates' reviews** (`components/TeammateReviews.tsx`, words in `lib/teammateReviews.ts`, docs/CLAUDE-REVIEW.md
-  § Teammates' reviews): under the history select, one collapsed card per review a teammate's Limn POSTED
-  (`ClaudeReviewResponse.teammateReviews`): avatar, "Robin's review", the verdict pill, "Posted on GitHub ·
-  abc1234 · Auto review · <aiRunLabel>", "On GitHub". Opened: the summary and each finding (severity, text,
-  `path:line` → `onOpenThread`, "On GitHub"). READ-ONLY: never in the history select, no Post / Re-post /
-  Delete / auto-post control, no chat.
+- **Teammates' reviews are part of THE ONE REVIEW** (`components/TeammateReviews.tsx`, words in
+  `lib/teammateReviews.ts`, docs/CLAUDE-REVIEW.md § Teammates' reviews → One review). The tab reads the
+  server's fold, `ClaudeReviewResponse.teamView`, on the LATEST run only (a past run from the history
+  select shows what it said then). The NEWEST review leads: when it is a teammate's,
+  `TeammateLeadSection` replaces the run's summary section (and the rail's status block) with
+  "Robin's review", the verdict, "Posted on GitHub <ago>" + Open, and their summary. Teammates' still-open
+  findings (`teamView.findings`) list in the same Findings section, after the reader's, as read-only
+  `TeamFindingRow`s: a chip with the avatar and name(s) ("Robin", "Robin and Sam"), the text,
+  `path:line` → `onOpenThread` (Reply / Resolve live on the thread), "On GitHub". No Post, Re-post,
+  Reword or Ignore. One of the reader's findings a teammate raised too carries the chip "You and Robin"
+  (`FindingRow` `alsoRaisedBy`). The section count and the rail counts include them. With no succeeded
+  run of the reader's, `TeamOnlyReview` shows the teammate lead and their findings alone. There is no
+  separate teammates' card list.
 - **When did the review run? ONE component, `ReviewedAgo` (`components/ReviewedAgo.tsx`)** over
   `reviewedAgoLabel()` (`lib/claudeReviewColumn.ts`): muted "reviewed 2 days ago" (past a month,
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the

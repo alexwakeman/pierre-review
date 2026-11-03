@@ -322,6 +322,18 @@ const VIEWS = [
   ],
   // The story view's Ticket design: one data flow across both pull requests.
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null, { expect: ['Terraform state moves to S3, guarded by a lock', 'a new state version'] }],
+  // An unmet criterion's code in a member PR sits behind its label ("Code in"), not under the row.
+  [
+    'ticket:INFRA-260:unmet-code-in',
+    `?view=${ident('INFRA-260')}`,
+    null,
+    {
+      act: async (page) => {
+        await page.locator('[data-criterion-ref] button', { hasText: /^AC3$/ }).first().click();
+      },
+      expect: ['Code in', 'scripts/migrate-state.sh:41'],
+    },
+  ],
   // "Implement story" (docs/STORY-BUILD.md § Entry points): the STORY VIEW's action — Implement on a
   // not-started ticket with no session, Fill gaps on a started one whose story check found gaps, Open
   // build on the two with a session — in This Sprint's tray (the board's cards carry only the build
@@ -448,13 +460,13 @@ const VIEWS = [
               await page.getByRole('option', { name: /^Codex · GPT-6\.1 Sol/ }).first().click();
               const history = page.getByLabel('Showing').first();
               await history.waitFor({ timeout: 10_000 });
-              // Read the history's labels with it open. Both ran at Effort = High, and each label
-              // says so.
+              // Read the history's labels with it open. In the wide tab's right-hand column they
+              // name the provider only (no commit, no model); on a phone, the full run label.
               await history.click();
               const listId = await history.getAttribute('aria-controls');
               const labels = await page.locator(`[id="${listId}"] [role="option"]`).allTextContents();
               await page.keyboard.press('Escape');
-              const want = ['Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high'];
+              const want = ['Codex', 'Claude'];
               const absent = want.filter((w) => !labels.some((l) => l.includes(w)));
               if (labels.length !== 2 || absent.length > 0) {
                 throw new Error(`history select: ${JSON.stringify(labels)} (want 2 options with ${JSON.stringify(want)})`);
@@ -467,7 +479,6 @@ const VIEWS = [
           id === 113 && t === 'ai_review'
           ? {
               expect: [
-                'Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries',
                 'Sync writes one pull request per transaction',
                 'PR, threads and events in one transaction',
                 'Write: heavy line, where data is kept',
@@ -487,28 +498,27 @@ const VIEWS = [
     'pr-113-story',
     { expect: ['Open ticket tab', 'PLAT-292', 'Write each pull request in one transaction during sync'] },
   ],
-  // TEAMMATES' POSTED REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews): Priya's Limn review of #114,
-  // read-only, labelled with what ran; #114's own run was "Review and post" (posted itself).
+  // TEAMMATES' POSTED REVIEWS (docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): Priya's Limn
+  // review of #114 joins the one review — her still-open findings in Findings, named "Priya".
   [
     'pr:114:teammate-review',
     '?view=pr-detail:114&prTab=ai_review',
     'pr-114-teammate-review',
-    {
-      act: async (page) => {
-        await page.getByTestId('teammate-review').first().getByRole('button', { expanded: false }).first().click();
-      },
-      expect: ['Teammates’ reviews', 'max_size', 'worker_max_nodes'],
-    },
+    { expect: ['Priya', 'max_size', 'worker_max_nodes', '2 Limn reviews so far · 1 by Priya', 'desired_size'] },
   ],
-  // A legacy post (the bare marker): no model, the head inferred.
-  ['pr:141:teammate-review-legacy', '?view=pr-detail:141&prTab=ai_review', null, { expect: ['Teammates’ reviews'] }],
+  // THE AI REVIEW ON THE PR OVERVIEW: #114's newest review is Priya's (posted after Morgan's run), so the
+  // card names her; one of her open findings has no severity ("other"). #113's is Morgan's own.
+  ['pr:114:overview-ai-review', '?view=pr-detail:114&prTab=overview', null, { expect: ['Priya’s review', 'Open AI Review', '1 other'] }],
+  ['pr:113:overview-ai-review', '?view=pr-detail:113&prTab=overview', null, { expect: ['AI review', 'Open AI Review', '1 blocker'] }],
+  // A legacy post (the bare marker): no model, the head inferred. Named "Lena".
+  ['pr:141:teammate-review-legacy', '?view=pr-detail:141&prTab=ai_review', null, { expect: ['Lena'] }],
   // #111: Sam reviewed his own PR with Limn; Morgan's run follows up on it, under his name, with no
   // Post reply or Resolve on his threads.
   [
     'pr:111:author-review-follow-up',
     '?view=pr-detail:111&prTab=ai_review',
     'pr-111-ai_review',
-    { expect: ['@sam-carter’s review', 'Teammates’ reviews', 'No frame when the sync ends'] },
+    { expect: ['@sam-carter’s review', 'No frame when the sync ends'] },
   ],
   // The split button's menu: Review only / Review and post.
   [

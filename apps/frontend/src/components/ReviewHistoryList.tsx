@@ -1,5 +1,6 @@
 import type { ClaudeReviewSummary } from '@pierre-review/shared';
 import { Select } from './ui/index.js';
+import { useRailWide } from './RailLayout.js';
 import { reviewRunWhen } from '../lib/claudeReviewColumn.js';
 import { historyOptionIdFor, reviewHistoryOptions } from '../lib/reviewHistory.js';
 
@@ -22,7 +23,9 @@ export function ReviewHistoryList({
   latestId: number | null;
   onShow: (id: number) => void;
 }): JSX.Element | null {
-  const options = reviewHistoryOptions(history, latestId, reviewRunWhen);
+  // In the wide tab's right-hand column the options name no commit and no model.
+  const compact = useRailWide('review');
+  const options = reviewHistoryOptions(history, latestId, reviewRunWhen, compact);
   if (options.length < 2) return null;
   const value = historyOptionIdFor(options, shownId ?? latestId) ?? options[0]!.id;
   // The redesign's custom Select (a bottom sheet on a phone): scripts open it and pick an option by

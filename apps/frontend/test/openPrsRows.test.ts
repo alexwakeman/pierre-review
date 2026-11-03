@@ -136,22 +136,36 @@ describe('the wiring', () => {
   });
 
   it('the icon columns: ONE spec for the heading row and every row, fixed widths, plain labels', () => {
-    const all = openPrsColumns({ claudeOn: true, compact: false });
-    expect(all.map((c) => c.label)).toEqual(['Review', 'CI', 'Threads', 'AI review', 'Size', 'Author', 'Updated']);
+    const all = openPrsColumns({ claudeOn: true });
+    expect(all.map((c) => c.label)).toEqual(['Review', 'CI', 'Threads', 'AI review']);
     for (const c of all) {
       expect(c.width).toBeGreaterThanOrEqual(36);
       expect(c.title.length).toBeGreaterThan(0);
     }
-    // No AI column where AI does not run; the docked panel takes size, author and age columns.
-    expect(openPrsColumns({ claudeOn: false, compact: false }).map((c) => c.key)).not.toContain('ai');
-    expect(openPrsColumns({ claudeOn: true, compact: true }).map((c) => c.key)).toEqual(['review', 'ci', 'threads', 'ai']);
+    // No AI column where AI does not run.
+    expect(openPrsColumns({ claudeOn: false }).map((c) => c.key)).not.toContain('ai');
     // The row and the heading draw the same cells from the same spec.
     const row = rows.slice(rows.indexOf('function PrRow('), rows.indexOf('function TicketGroup('));
-    expect(row).toMatch(/openPrsColumns\(\{ claudeOn: data\.claudeOn, compact \}\)/);
+    expect(row).toMatch(/openPrsColumns\(\{ claudeOn: data\.claudeOn \}\)/);
     expect(row).toMatch(/<ColCell key=\{col\.key\} col=\{col\}/);
-    // ...and the author and age move onto the row's second line, so neither is cut off.
+    expect(rows).toMatch(/<ColumnHeadings columns=\{openPrsColumns\(\{ claudeOn: props\.claudeOn \}\)\}/);
+  });
+
+  it('a row is the same with the drawer open or closed: always two lines, author and age on the second', () => {
+    const row = rows.slice(rows.indexOf('function PrRow('), rows.indexOf('function TicketGroup('));
     expect(row).toMatch(/data-testid="open-prs-row-two-line"/);
-    expect(rows).toMatch(/<ColumnHeadings columns=\{openPrsColumns\(\{ claudeOn: props\.claudeOn, compact: compactRows \}\)\}/);
+    // Nothing in the row or the column spec reads the drawer.
+    expect(row).not.toMatch(/compact|panelOpen|docked/);
+    expect(rows).not.toMatch(/compactRows/);
+    expect(rows.slice(rows.indexOf('export function openPrsColumns('), rows.indexOf('const HIDE_BELOW'))).not.toMatch(/compact/);
+  });
+
+  it('docked, the drawer column is always there, so the list keeps one width open or closed', () => {
+    // The placeholder takes the drawer's width exactly when the drawer is not drawn.
+    expect(rows).toMatch(/\{docked && !\(panelOpen && selected != null\) && \(\s*<div\s+data-testid="open-prs-panel-reserved"/);
+    expect(rows).toMatch(/open=\{panelOpen && selected != null\}/);
+    const reserved = rows.slice(rows.indexOf('data-testid="open-prs-panel-reserved"'));
+    expect(reserved.slice(0, 300)).toMatch(/w-panel shrink-0/);
   });
 
   it('the Feed marks My Turn with the accent bar and the words, not a yellow border', () => {

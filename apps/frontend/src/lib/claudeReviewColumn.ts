@@ -292,7 +292,8 @@ export function reviewRunWhen(iso: string): string {
 
 /**
  * The outcome pill on the PR pane's "Claude Review" TAB LABEL, from the tab's own cached read
- * (`['claude-review', prId]`, DB-only). The latest run's verdict once it succeeded; "Reviewing…" /
+ * (`['claude-review', prId]`, DB-only). The latest run's verdict once it succeeded (a teammate's when
+ * their posted review leads, `teamView.lead`); "Reviewing…" /
  * "Queued" while one is in flight (a start from any surface counts); "Failed" when the latest run
  * failed. null = say nothing (never reviewed, cancelled, a finished run with no verdict, or the
  * read not back yet).
@@ -302,13 +303,26 @@ export type ReviewTabPill =
   | { kind: 'running' | 'queued' | 'failed'; label: string };
 
 export function reviewTabPill(
-  data: { review: { status: string; verdict: ClaudeReviewVerdict | null } | null; autoReview?: 'queued' | 'running' | null } | undefined,
+  data:
+    | {
+        review: { status: string; verdict: ClaudeReviewVerdict | null } | null;
+        autoReview?: 'queued' | 'running' | null;
+        teamView?: { lead: 'own' | 'teammate' | null; teammateReviewId: number | null };
+        teammateReviews?: ReadonlyArray<{ reviewId: number; verdict: ClaudeReviewVerdict | null }>;
+      }
+    | undefined,
   starting: boolean,
 ): ReviewTabPill | null {
   if (data == null) return null;
   const r = data.review;
   if (r?.status === 'running' || data.autoReview === 'running') return { kind: 'running', label: 'Reviewing…' };
   if (starting || r?.status === 'queued' || data.autoReview === 'queued') return { kind: 'queued', label: 'Queued' };
+  // ONE REVIEW (docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): when a teammate's posted
+  // review is the newest, it heads the tab, so the pill says its verdict, not the reader's older one.
+  if (data.teamView?.lead === 'teammate') {
+    const mate = data.teammateReviews?.find((t) => t.reviewId === data.teamView?.teammateReviewId);
+    if (mate?.verdict != null) return { kind: 'verdict', verdict: mate.verdict, label: CLAUDE_VERDICT_LABEL[mate.verdict] };
+  }
   if (r == null) return null;
   if (r.status === 'failed') return { kind: 'failed', label: 'Failed' };
   if (r.status === 'succeeded' && r.verdict != null) {

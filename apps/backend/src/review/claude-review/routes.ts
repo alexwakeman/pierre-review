@@ -72,6 +72,7 @@ import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
 import { limnMetaForReview } from './post-meta.js';
 import { listTeammateReviews } from '../../db/teammate-reviews.js';
+import { loadTeamReviewView } from './team-view.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -240,6 +241,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const teamClaimPending = await teamClaimPendingFor(ctx, accountId, id, syncedHead, autoReview != null).catch(() => null);
     // The teammate lines this Limn stood down for at the head — durable (team-claim-seen.ts).
     const teamClaimTeammates = await teammateLinesAtHead(ctx, accountId, id, syncedHead).catch(() => []);
+    // Reviews teammates' Limn POSTED to GitHub, imported at sync (db/teammate-reviews.ts). Read-only.
+    const teammateReviews = await listTeammateReviews(ctx.db, accountId, id).catch(() => []);
+    // THE MERGED REVIEW (team-view.ts): the newest review leads, teammates' open findings join.
+    const teamView = await loadTeamReviewView(ctx.db, accountId, id, latest, teammateReviews, current).catch(() => undefined);
     return {
       enabled: true,
       auth: auth.status,
@@ -261,8 +266,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
-      // Reviews teammates' Limn POSTED to GitHub, imported at sync (db/teammate-reviews.ts). Read-only.
-      teammateReviews: await listTeammateReviews(ctx.db, accountId, id).catch(() => []),
+      teammateReviews,
+      ...(teamView != null ? { teamView } : {}),
       teamClaimSkip,
       ...(teamClaimTeammates.length > 0 ? { teamClaimTeammates } : {}),
       teamClaimPending,

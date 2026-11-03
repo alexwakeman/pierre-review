@@ -7408,6 +7408,51 @@ export interface ClaudeTeammateReview {
   findings: ClaudeTeammateFinding[];
 }
 
+/** The teammate who posted a review (`ClaudeTeammateReview.poster`). */
+export type ClaudeTeammatePoster = ClaudeTeammateReview['poster'];
+
+/** A teammate's finding that is still open, in the ONE findings list (`ClaudeTeamReviewView`). */
+export interface ClaudeTeamFinding extends ClaudeTeammateFinding {
+  // The teammate review it came from (the oldest, when two teammates raised the same point).
+  reviewId: number;
+  postedAt: string;
+  // Every teammate who raised it, first poster first (≥ 1).
+  by: ClaudeTeammatePoster[];
+}
+
+/**
+ * THE MERGED REVIEW (docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): the reader's latest
+ * review and teammates' posted reviews read as ONE. Server-folded ONCE
+ * (`review/claude-review/team-view.ts`); the AI Review tab, the PR overview and the review count read
+ * it.
+ */
+export interface ClaudeTeamReviewView {
+  // The NEWEST review heads the tab: the reader's own latest run ('own'), or a teammate's posted
+  // review (`teammateReviewId`, one of `ClaudeReviewResponse.teammateReviews`). null = no review.
+  lead: 'own' | 'teammate' | null;
+  teammateReviewId: number | null;
+  // Teammates' findings still open — their GitHub thread is not resolved and no later review judged
+  // them addressed — that are NOT also in the reader's latest review. Newest review first.
+  findings: ClaudeTeamFinding[];
+  // The reader's latest-review findings a teammate ALSO raised (still open): shown once, naming both.
+  alsoRaisedBy: Array<{ findingId: number; by: ClaudeTeammatePoster[] }>;
+  // How many Limn reviews have run on the PR so far (docs/CLAUDE-REVIEW.md § Teammates' reviews →
+  // The review count). Absent on an older server.
+  reviewCount?: ClaudeTeamReviewCount;
+}
+
+/**
+ * FULL reviews only: the reader's own SUCCEEDED runs (`kind IS NULL`, a skipped run left out, a
+ * Claude + Codex pair counted ONCE) plus every teammate review imported (`kind = 'teammate'`). A
+ * replies pass never counts.
+ */
+export interface ClaudeTeamReviewCount {
+  // Own + teammates'.
+  total: number;
+  // Each teammate's share, most first (then by login). Empty when only the reader's runs count.
+  byTeammate: Array<{ poster: ClaudeTeammatePoster; count: number }>;
+}
+
 // THE REPLIES PASS on the AI Review tab (`ClaudeReviewResponse.repliesCheck`). DB-only + in memory.
 export interface ClaudeRepliesCheckState {
   // How many of Limn's posted findings have a person's reply that no run has judged yet — what
@@ -7548,6 +7593,9 @@ export interface ClaudeReviewResponse {
   // REVIEWS TEAMMATES' LIMN POSTED TO GITHUB (newest first), read-only. Absent on an older server;
   // [] when none. Never in `review` / `history`, which stay the reader's own runs.
   teammateReviews?: ClaudeTeammateReview[];
+  // THE MERGED REVIEW: the newest review leads; teammates' still-open findings join the reader's
+  // (`ClaudeTeamReviewView`). Absent on an older server.
+  teamView?: ClaudeTeamReviewView;
   // THE REPLIES PASS: unjudged replies on Limn's own findings and the newest pass. ⚠ `review` above
   // is the latest FULL review; a replies pass is listed in `history` (kind 'replies'). Absent = an
   // older server.

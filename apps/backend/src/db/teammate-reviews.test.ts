@@ -293,4 +293,80 @@ describe("teammates' posted reviews", () => {
     expect(await teammate.latestFullReviewAtOrBefore(1, prId, HEAD, db)).toMatchObject({ reviewId: tm.id, origin: 'teammate', headSha: HEAD });
     expect(await teammate.latestFullReviewAtOrBefore(1, prId, OLD, db)).toMatchObject({ reviewId: own.id, origin: 'own' });
   });
+
+  it('the one review (team-view.ts): the newer teammate review leads; resolved or addressed findings drop', async () => {
+    const { loadTeamReviewView } = await import('../review/claude-review/team-view.js');
+    const persistMod = await import('../review/claude-review/persist.js');
+    const { eq } = await import('drizzle-orm');
+    const ctx = { db, schema } as any;
+    const prId = await prIdOf(1);
+    const reviews = await teammate.listTeammateReviews(db, 1, prId);
+    const [inline, prLevel] = reviews[0]!.findings;
+    const view = async () =>
+      loadTeamReviewView(db, 1, prId, await persistMod.getLatestClaudeReview(ctx, prId, 1), reviews, null);
+    // The reader's own run finished before Robin posted: Robin's review leads, both findings list.
+    expect(await view()).toMatchObject({ lead: 'teammate', teammateReviewId: reviews[0]!.reviewId });
+    expect((await view()).findings.map((f) => f.id)).toEqual([inline!.id, prLevel!.id]);
+    // Resolved on GitHub: the inline one drops.
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, inline!.threadId)).execute();
+    expect((await view()).findings.map((f) => f.id)).toEqual([prLevel!.id]);
+    // A later own review judged the PR-level one addressed: it drops, and that review leads.
+    await db
+      .insert(schema.claudeReviews)
+      .values({
+        accountId: 1,
+        prId,
+        headSha: HEAD,
+        status: 'succeeded',
+        model: 'claude-opus-5-5',
+        createdAt: new Date('2026-10-05T10:00:00Z'),
+        finishedAt: new Date('2026-10-05T10:05:00Z'),
+        followUp: { items: [{ priorFindingId: prLevel!.id, status: 'addressed' }] },
+      })
+      .execute();
+    expect(await view()).toMatchObject({ lead: 'own', teammateReviewId: null, findings: [] });
+  });
+
+  it('the review count: own succeeded full reviews (a pair once, no skip, no replies pass) plus teammates', async () => {
+    const { loadTeamReviewView } = await import('../review/claude-review/team-view.js');
+    await persist(gqlPr(9));
+    const prId = await prIdOf(9);
+    const row = (over: Record<string, unknown>) => ({
+      accountId: 1,
+      prId,
+      headSha: HEAD,
+      status: 'succeeded',
+      model: 'claude-opus-5-5',
+      createdAt: new Date('2026-10-05T10:00:00Z'),
+      finishedAt: new Date('2026-10-05T10:05:00Z'),
+      ...over,
+    });
+    const [first] = await db.insert(schema.claudeReviews).values(row({})).returning().execute();
+    await db.insert(schema.claudeReviews).values(row({ pairRole: 'first', pairId: first.id + 100 })).execute();
+    await db.insert(schema.claudeReviews).values(row({ pairRole: 'second', pairId: first.id + 100 })).execute();
+    await db.insert(schema.claudeReviews).values(row({ kind: 'replies' })).execute();
+    await db.insert(schema.claudeReviews).values(row({ reviewMode: 'skip' })).execute();
+    await db.insert(schema.claudeReviews).values(row({ status: 'failed' })).execute();
+    // One plain run + one pair = 2; the replies pass, the skip and the failed run do not count.
+    const noTeam = await loadTeamReviewView(db, 1, prId, null, [], null);
+    expect(noTeam.reviewCount).toEqual({ total: 2, byTeammate: [] });
+    const poster = { userId: 77, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
+    const tm = (reviewId: number) => ({
+      reviewId,
+      poster,
+      headSha: HEAD,
+      headInferred: false,
+      postedAt: '2026-10-04T10:00:00Z',
+      githubUrl: null,
+      summary: '',
+      verdict: null,
+      run: null,
+      pair: false,
+      runs: [],
+      limnVersion: null,
+      findings: [],
+    });
+    const withTeam = await loadTeamReviewView(db, 1, prId, null, [tm(901), tm(902)], null);
+    expect(withTeam.reviewCount).toEqual({ total: 4, byTeammate: [{ poster, count: 2 }] });
+  });
 });

@@ -10,7 +10,11 @@
 //   NARROW   (container < TWO_COLUMN_MIN_PX) one column, capped at the config's `narrowClassName` — the
 //            view as it always was. Everything a rail would hold renders in place.
 //   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem) that flows with the page
-//            (part of it, never sticky; decided 2026-11-01). The rail's pieces render
+//            (part of it; decided 2026-11-01) — unless the config sets `sticky` (the AI Review tab,
+//            2026-11-03): then the rail STICKS just under the top of its scroll pane (the tab bar sits
+//            above the pane), and a rail taller than the pane scrolls with the page until its end
+//            shows, then holds there. Never a scroll box of its own: that would clip the agent log a
+//            rail piece widens leftwards (RailWideLeft). The rail's pieces render
 //            through <RailPiece slot=…> (a portal, so React context still reaches them). Narrow, the
 //            same piece renders its children in place (`inline`) or nothing (a rail-only extra).
 //
@@ -61,6 +65,29 @@ export interface RailLayoutConfig {
   narrowClassName: string;
   /** The wide block's paint while it is expanded over the rail (it sits over the rail's column). */
   wideClassName: string;
+  /** The rail sticks under the top of its scroll pane (see the header). Default: it flows. */
+  sticky?: boolean;
+}
+
+/** The sticky rail's gap from the scroll pane's top (and bottom, when it is taller than the pane). */
+const STICK_GAP_PX = 8;
+
+/**
+ * The sticky rail's `top`: the gap when it fits the pane; else negative, so it scrolls with the page
+ * until its end is STICK_GAP_PX above the pane's bottom, then holds. Pure.
+ */
+export function stickyRailTop(railHeight: number, paneHeight: number): number {
+  const room = paneHeight - 2 * STICK_GAP_PX;
+  return railHeight <= room ? STICK_GAP_PX : paneHeight - STICK_GAP_PX - railHeight;
+}
+
+/** The nearest ancestor that scrolls vertically, or null (the window scrolls). */
+function scrollPaneOf(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node != null; node = node.parentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if (oy === 'auto' || oy === 'scroll') return node;
+  }
+  return null;
 }
 
 interface RailLayoutValue {
@@ -99,7 +126,27 @@ export function RailLayout({
   const [sections, setSections] = useState<readonly string[]>([]);
   const [slots, setSlots] = useState<Partial<Record<string, HTMLElement>>>({});
   const wide = !oneColumn && storyTwoColumn(width);
-  const { slots: slotNames, sections: sectionDefs, sectionAttr, startSection } = config;
+  const { slots: slotNames, sections: sectionDefs, sectionAttr, startSection, sticky = false } = config;
+  // The sticky rail (config `sticky`): its box and its `top`, re-read when it or its pane resizes.
+  const [railEl, setRailEl] = useState<HTMLDivElement | null>(null);
+  const [stickTop, setStickTop] = useState(STICK_GAP_PX);
+  useIsoLayoutEffect(() => {
+    if (!wide || !sticky || railEl == null) return;
+    const pane = scrollPaneOf(railEl);
+    const read = (): void => {
+      const next = stickyRailTop(railEl.offsetHeight, pane != null ? pane.clientHeight : window.innerHeight);
+      setStickTop((prev) => (prev === next ? prev : next));
+    };
+    read();
+    window.addEventListener('resize', read);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    ro?.observe(railEl);
+    if (pane != null) ro?.observe(pane);
+    return () => {
+      window.removeEventListener('resize', read);
+      ro?.disconnect();
+    };
+  }, [wide, sticky, railEl]);
 
   // The container's width (the tab's pane, the tray, the PR drawer).
   useIsoLayoutEffect(() => {
@@ -165,9 +212,15 @@ export function RailLayout({
           </div>
           {wide && (
             // The rail is PART OF THE PAGE (2026-11-01): it flows and scrolls with the content, never
-            // sticky in its own scroll box.
+            // in its own scroll box. A `sticky` config holds it under the pane's top (see the header).
             <aside aria-label={config.railLabel} className="min-w-0" data-testid={`${n}-rail`} style={{ paddingTop: railTop }}>
-              <div className="flex flex-col gap-5" data-testid={`${n}-rail-top`}>
+              <div
+                ref={setRailEl}
+                className="flex flex-col gap-5"
+                data-testid={`${n}-rail-top`}
+                data-sticky={sticky ? 'true' : undefined}
+                style={sticky ? { position: 'sticky', top: stickTop } : undefined}
+              >
                 {slotNames.map((s) => (
                   <div key={s} ref={refs[s]} data-rail-slot={s} className="empty:hidden" />
                 ))}

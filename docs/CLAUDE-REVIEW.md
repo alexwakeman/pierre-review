@@ -939,8 +939,8 @@ the partner) to toggle the DRAFT. An `aria-hidden` SVG draws a
   other people's text and never sits in a heading — and one added rule: a default branch is the
   repository as it stands, read only to see what this PR calls or is called by.
 - **What was read** (`claude_reviews.peers_read`, `RunReviewResult.peersCheckedOut`): only the peers
-  that checked out; served as `ClaudeReview.alsoRead` and shown under the run's meta line, "Also read:
-  acme/api#21, acme/infra @ bmd-1048-…" (`reviewPeerReadLabel`).
+  that checked out; served as `ClaudeReview.alsoRead` (2026-11-03: no longer shown on the AI Review
+  tab; `reviewPeerReadLabel` still words it, "acme/api#21, acme/infra @ bmd-1048-…").
 - **The replies pass reads them too** (2026-10-29): the SAME `reviewPeersFor` peers, checked out the
   same way, as read roots on both providers, under "## Related code in other repositories" (the same
   per-peer blocks, `pushRelatedPeerBlocks`; its own short intro, so the PR-review goldens are
@@ -3119,10 +3119,43 @@ activity.
 ## Teammates' reviews (2026-11-03)
 
 The reader and a teammate both run Limn on the same repos. A review the TEAMMATE'S Limn **posted to
-GitHub** (summary + finding comments) shows in the reader's AI Review tab, read-only, under
-"Teammates' reviews": "Robin's review", the verdict, "Posted on GitHub · abc1234 · Auto review ·
-Claude Opus 5.5 · medium", a link to the review, and each finding with a link to its thread. A review
-a teammate kept in their own Limn never reaches GitHub, so it is never shown.
+GitHub** (summary + finding comments) joins the reader's AI Review tab as part of ONE review (below,
+§ One review). A review a teammate kept in their own Limn never reaches GitHub, so it is never shown.
+
+- **One review** (`review/claude-review/team-view.ts`: `foldTeamReview`, pure; `loadTeamReviewView`
+  reads its inputs; wire `ClaudeReviewResponse.teamView`). The reader's latest review and every
+  teammate's posted review read as ONE until their findings are settled:
+  - **The newest review leads.** A teammate review posted after the reader's latest run finished (or
+    with no run of the reader's) heads the tab: "Robin's review", its verdict, "Posted on GitHub", its
+    summary (without Limn's "_Posted automatically by Limn’s … review._" footer,
+    `withoutAutoPostFooter`). The PR tab label carries no verdict pill. A run of the reader's that is queued or running is the newest work. A FAILED run or a
+    skip (`review_mode = 'skip'`) reviewed nothing, so any teammate review leads over it — the tab
+    and the Overview card agree, and so does the review count. The reader's older review stays in
+    the history list.
+  - **A teammate's finding is in the one Findings list** while its GitHub thread is UNRESOLVED and no
+    later review judged it settled: the LATEST follow-up item naming it (directly, or through the
+    reader's re-raise chain along `prior_finding_id`, or — for a twin matched only by spot — the
+    reader's OWN finding at the same spot the item judged, when the teammate posted before that
+    review ran) is not `addressed` / `no_longer_applies` / `reply_accepted`; with no such item, the
+    reader's current thread judgement of its thread is not `addressed`. ⚠ A finding with NO thread
+    (PR-level, or a comment that mapped to no thread) also drops out when the reader's latest
+    SUCCEEDED, non-skip review ran after it, at a DIFFERENT head, and does not raise it again —
+    otherwise a non-author teammate's PR-level point (never in the follow-up's prior set) could
+    never leave. The same head means the reader's Limn only disagreed: the point stands. Each is
+    labelled with the teammate's name and avatar.
+  - **The same point shows once, naming both**: one of the reader's latest-review findings that
+    re-raises it (`prior_finding_id` chain), or sits on the same path within 3 lines with a similar
+    title (`similarTitles`, the auto-post dedupe's fingerprint; two PR-level points match on the
+    title alone), carries "You and Robin"
+    (`alsoRaisedBy`); two teammates on the same thread or spot fold into one entry naming both.
+  - ⚠ A VIEW ONLY. Own-only readers (caps, budget, posting, the follow-up chain) never read it.
+    Teammate findings stay read-only: no Post, Re-post, Reword or Ignore; Reply / Resolve are on the
+    GitHub thread (the path opens it in Changes).
+  - **The review count** (`teamReviewCount`, pure; `teamView.reviewCount`): ONE line in the run
+    section (the right-hand column when wide), "4 Limn reviews so far · 1 by Robin". FULL reviews
+    only: the reader's own SUCCEEDED runs (`kind IS NULL`; a skip ran no review and is left out; a
+    Claude + Codex pair counts ONCE, by `pair_id`) plus every imported teammate review, per poster.
+    A replies pass never counts; a run in flight or failed does not either.
 
 - **The hidden metadata** (shared `packages/shared/src/limn-review-meta.ts`): every posted review
   summary ends in ONE marker, `<!-- pierre:claude-review v=1 a=<nonce> h=<head> k=auto|manual|replies
@@ -3174,8 +3207,9 @@ a teammate kept in their own Limn never reaches GitHub, so it is never shown.
   finding as ON GITHUB (any id: a row may be imported after the run started), so a re-raise of one,
   or the same point found again, is never posted a second time.
 - **The wire**: `ClaudeReviewResponse.teammateReviews: ClaudeTeammateReview[]` (newest first;
-  `db/teammate-reviews.ts` `listTeammateReviews`). Never in `review` / `history`. The SPA's
-  `components/TeammateReviews.tsx` has no Post, Re-post, Delete or auto-post control.
+  `db/teammate-reviews.ts` `listTeammateReviews`) and the fold over it, `teamView` (§ One review, above).
+  Never in `review` / `history`. The SPA's `components/TeammateReviews.tsx` (the lead summary, the
+  read-only finding row) has no Post, Re-post, Delete or auto-post control.
 
 ## Chat about a review
 

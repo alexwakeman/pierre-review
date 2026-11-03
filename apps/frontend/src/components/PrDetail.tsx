@@ -1,4 +1,5 @@
 import { PrStoryTab } from './pr/PrStoryTab.js';
+import { AiReviewOverview } from './pr/AiReviewOverview.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invalidateSeenState } from '../hooks/useMarkRepoSeen.js';
@@ -19,8 +20,6 @@ import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe } from '../hooks/useTriage.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useClaudeReviewTabPill } from '../hooks/useClaudeReview.js';
-import { SEVERITY_CLASS, VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
-import type { ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
@@ -92,7 +91,6 @@ import {
   WarningIcon,
   WrenchIcon,
 } from './Icons.js';
-import { VerdictIcon } from './VerdictIcon.js';
 import { ThreadList } from './ThreadList/index.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { BotTriageCard } from './BotTriageCard.js';
@@ -169,7 +167,8 @@ const TAB_LABELS: Record<Tab, string> = {
 
 // Every tab carries an icon, so the strip reads as a row of buttons (a new reader took the bare
 // words for a heading). The two agentic tabs draw theirs in the AI signal colour, as every other AI
-// surface does. 14 is the call-site size (it renders at ICON_SCALE).
+// surface does. 14 is the call-site size (it renders at ICON_SCALE). The AI Review label carries NO
+// verdict pill: the verdict lives on the tab's own page and the Overview card (2026-11-03).
 const TAB_ICONS: Record<Tab, JSX.Element> = {
   overview: <OverviewIcon size={14} />,
   comments: <CommentIcon size={14} />,
@@ -180,30 +179,6 @@ const TAB_ICONS: Record<Tab, JSX.Element> = {
   ai_fix: <WrenchIcon size={14} className="text-ai-signal" />,
   story: <TicketIcon size={14} />,
 };
-
-// The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
-// in flight / failed. 11px, the label floor.
-const TAB_PILL = 'ml-1.5 inline-flex items-center gap-1 rounded-ui px-1.5 py-px text-meta font-medium';
-function ReviewTabOutcome({ pill }: { pill: ReviewTabPill }): JSX.Element {
-  const tone =
-    pill.kind === 'verdict'
-      ? VERDICT_CLASS[pill.verdict]
-      : pill.kind === 'failed'
-        ? SEVERITY_CLASS.blocker
-        : pill.kind === 'running'
-          ? 'bg-ai-signal/10 text-ai-signal'
-          : 'bg-ui-raise text-ui-mute';
-  return (
-    <span className={`${TAB_PILL} ${tone}`}>
-      {pill.kind === 'running' && (
-        <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
-      )}
-      {pill.kind === 'verdict' && <VerdictIcon verdict={pill.verdict} size={11} />}
-      {pill.kind === 'failed' && <WarningIcon size={11} aria-hidden />}
-      {pill.label}
-    </span>
-  );
-}
 
 interface ActivityRow {
   key: string;
@@ -818,8 +793,9 @@ export function PrDetail({
   // always list; a missing runtime or credential is handled INSIDE the tab, in place of Run.
   const aiEnabled = useAiCapabilities().enabled;
   const claudeReviewEnabled = aiEnabled;
-  // The review's outcome on the tab label ("Claude Review [Approve]"): the tab's own cached read.
-  const reviewPill = useClaudeReviewTabPill(prId, claudeReviewEnabled);
+  // Keeps the PR's ['claude-review', prId] read alive (and polling while a run is in flight) for
+  // the Overview's AI review card, which reads that cache and fetches nothing itself.
+  useClaudeReviewTabPill(prId, claudeReviewEnabled);
   const aiFixTabEnabled = aiEnabled;
   // The inner tab is STORE state, paired with the PR it belongs to (see `prDetailTab`), so the
   // URL can name it. Read through the pair — a tab seated for ANOTHER PR is not ours, exactly
@@ -1563,7 +1539,6 @@ export function PrDetail({
             <span className="sr-only">, {failingChecks} failing</span>
           </span>
         )}
-        {t === 'claude_review' && reviewPill != null && <ReviewTabOutcome pill={reviewPill} />}
         {t === 'bot_activity' && botTtfrAnomalies > 0 && (
           <span
             className="ml-1 inline-flex text-ui-danger"
@@ -1884,6 +1859,9 @@ export function PrDetail({
         >
         {effectiveTab === 'overview' ? (
           <div>
+            {/* The newest AI review (own or a teammate's), from the query the tab pill already
+                holds — no request of its own (pr/AiReviewOverview.tsx). */}
+            <AiReviewOverview prId={pr.id} enabled={claudeReviewEnabled} onOpen={() => goToTab('claude_review')} />
             {/* P3.2: the per-PR bot triage card, compact, in the Overview attention area —
                 renders nothing (and fetches nothing) below its bot-comment threshold. */}
             <BotTriageCard

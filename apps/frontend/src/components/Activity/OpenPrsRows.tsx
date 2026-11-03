@@ -169,11 +169,6 @@ export function reviewStanding(pr: TimelinePr): { tone: StatusTone; label: strin
   return null;
 }
 
-/** "+13 −3" — the size, for the row. */
-function sizeText(pr: TimelinePr): string {
-  return `+${pr.additions} −${pr.deletions}`;
-}
-
 /** The short age of the last activity ("2d"), the full date in the tooltip. */
 function shortAge(iso: string): string {
   const ms = Date.now() - Date.parse(iso);
@@ -189,7 +184,7 @@ function shortAge(iso: string): string {
 
 // ---- the icon columns: ONE spec shared by the heading row and every PR row ----
 
-export type OpenPrsColumnKey = 'ci' | 'review' | 'threads' | 'ai' | 'size' | 'author' | 'age';
+export type OpenPrsColumnKey = 'ci' | 'review' | 'threads' | 'ai';
 
 export interface OpenPrsColumn {
   key: OpenPrsColumnKey;
@@ -209,15 +204,13 @@ const COLUMNS: readonly OpenPrsColumn[] = [
   { key: 'ci', label: 'CI', title: 'Checks failing (red cross), passing (tick) or running (ring)', width: 36, align: 'center', hideBelow: 'sm' },
   { key: 'threads', label: 'Threads', title: 'Open review threads; a red dot means one has no reply', width: 56, align: 'center', hideBelow: 'md' },
   { key: 'ai', label: 'AI review', title: 'The AI review’s verdict; it pulses while a run works', width: 64, align: 'center', hideBelow: 'sm' },
-  { key: 'size', label: 'Size', title: 'Lines added and removed', width: 100, align: 'right', hideBelow: 'lg' },
-  { key: 'author', label: 'Author', title: 'Who opened the pull request', width: 108, align: 'left', hideBelow: 'md' },
-  { key: 'age', label: 'Updated', title: 'Time since the last activity', width: 60, align: 'right', hideBelow: null },
 ];
 
-/** The columns a row draws: AI review only where AI runs. With the drawer docked, size goes and the
- *  author and age move onto the row's second line (`compact`), so neither is cut off. */
-export function openPrsColumns({ claudeOn, compact }: { claudeOn: boolean; compact: boolean }): OpenPrsColumn[] {
-  return COLUMNS.filter((c) => (c.key !== 'ai' || claudeOn) && (!compact || (c.key !== 'size' && c.key !== 'author' && c.key !== 'age')));
+/** The columns a row draws: AI review only where AI runs. The author and age sit on the row's second
+ *  line and the size is in the drawer, so a row is the SAME with the drawer open or closed (nothing
+ *  reflows when it opens). */
+export function openPrsColumns({ claudeOn }: { claudeOn: boolean }): OpenPrsColumn[] {
+  return COLUMNS.filter((c) => c.key !== 'ai' || claudeOn);
 }
 
 const HIDE_BELOW: Record<'sm' | 'md' | 'lg', string> = { sm: 'max-sm:hidden', md: 'max-md:hidden', lg: 'max-lg:hidden' };
@@ -320,8 +313,6 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const [panelEl, setPanelEl] = useState<HTMLElement | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const panelHeight = useFillToPaneBottom(panelEl, docked && panelOpen);
-  // The docked panel takes the width the size and author columns had (it shows both).
-  const compactRows = docked && panelOpen;
   const [foldTick, bumpFold] = useState(0);
   useEffect(() => {
     if (rowsMemo?.key !== windowKey) {
@@ -499,7 +490,6 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
       selected={sel === i}
       data={props}
       showTicket={stacks == null}
-      compact={compactRows}
       onSelect={(idx) => {
         select(idx);
         setPanelOpen(true);
@@ -600,7 +590,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
     <div className="flex min-w-0 items-start gap-4">
       <div className="min-w-0 flex-1">
         {props.offer}
-        {(stacks != null ? stacks.length > 0 : drawn.length > 0) && <ColumnHeadings columns={openPrsColumns({ claudeOn: props.claudeOn, compact: compactRows })} />}
+        {(stacks != null ? stacks.length > 0 : drawn.length > 0) && <ColumnHeadings columns={openPrsColumns({ claudeOn: props.claudeOn })} />}
         <List
           id={listId}
           label="Open pull requests"
@@ -623,6 +613,16 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
         )}
       </div>
       {panel}
+      {/* Docked, the drawer's column is ALWAYS there (2026-11-03): with no PR open it holds one quiet
+          line, so opening or closing the drawer never moves the list's columns. */}
+      {docked && !(panelOpen && selected != null) && (
+        <div
+          data-testid="open-prs-panel-reserved"
+          className="sticky top-0 w-panel shrink-0 self-start rounded-ui border border-dashed border-ui-line px-5 py-4 text-meta text-ui-faint"
+        >
+          Select a pull request to see it here.
+        </div>
+      )}
     </div>
   );
 }
@@ -665,7 +665,6 @@ function PrRow({
   selected,
   data,
   showTicket,
-  compact,
   onSelect,
   onDoubleOpen,
 }: {
@@ -675,9 +674,6 @@ function PrRow({
   selected: boolean;
   data: OpenPrsRowsData;
   showTicket: boolean;
-  /** The docked panel is open beside the list: the size column goes, and the repo, author and age
-   *  drop onto a second line under the title, so the title keeps its room and nothing is cut off. */
-  compact: boolean;
   onSelect: (i: number) => void;
   onDoubleOpen: () => void;
 }): JSX.Element {
@@ -693,53 +689,34 @@ function PrRow({
   const ticketRunning =
     data.ticketReviewOn && data.ticketsOf(pr).some((t) => t.ident != null && data.ticketStates.get(t.ident)?.status === 'running');
   const activity = pr.updatedAt ?? pr.openedAt;
-  const columns = openPrsColumns({ claudeOn: data.claudeOn, compact });
+  const columns = openPrsColumns({ claudeOn: data.claudeOn });
   return (
-    <Row listId={listId} index={index} selected={selected} onSelect={onSelect} className={cx('select-none', compact && '!h-auto min-h-row py-1.5')}>
+    <Row listId={listId} index={index} selected={selected} onSelect={onSelect} className="select-none !h-auto min-h-row py-1.5">
       <span className="contents" onDoubleClick={onDoubleOpen}>
         <RowLead>
           <StatusIcon tone={lead.tone} icon={lead.icon} label={lead.label} iconOnly title={lead.detail != null ? `${lead.label}: ${lead.detail}` : lead.label} />
         </RowLead>
-        {compact ? (
-          // Two lines: the title, then repo#N · author · age (the columns those had are gone).
-          <span data-testid="open-prs-row-two-line" className="flex min-w-0 flex-1 flex-col">
-            <span className={cx('min-w-0 truncate', pr.isDraft ? 'text-ui-mute' : 'text-ui-ink')} title={pr.title}>
-              {pr.title}
-            </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-meta text-ui-faint">
-              <span className="min-w-0 shrink-[4] truncate" title={`${repo}#${pr.number}`}>
-                {pr.isDraft && 'Draft · '}
-                {repoShort(repo)}#{pr.number}
-                {tickets[0] != null && ` · ${tickets[0].key}${tickets.length > 1 ? ` +${tickets.length - 1}` : ''}`}
-              </span>
-              <span aria-hidden>·</span>
-              <Avatar user={author} size={12} />
-              {/* The author and age keep their room; the repo label gives way first. */}
-              <span className="max-w-[12rem] shrink-0 truncate text-ui-mute">{userLabel(author, pr.authorId)}</span>
-              <span aria-hidden>·</span>
-              <span className="shrink-0 tabular-nums" title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>
-                {shortAge(activity)}
-              </span>
-            </span>
-          </span>
-        ) : (
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        {/* Two lines, drawer open or closed: the title, then repo#N · author · age. */}
+        <span data-testid="open-prs-row-two-line" className="flex min-w-0 flex-1 flex-col">
           <span className={cx('min-w-0 truncate', pr.isDraft ? 'text-ui-mute' : 'text-ui-ink')} title={pr.title}>
             {pr.title}
           </span>
-          {/* The repo label gives way before the title does (it shrinks first, to a floor). */}
-          <span className="min-w-[4rem] shrink-[4] truncate text-meta text-ui-faint max-sm:hidden" title={`${repo}#${pr.number}`}>
-            {pr.isDraft && 'Draft · '}
-            {repoShort(repo)}#{pr.number}
-          </span>
-          {tickets[0] != null && (
-            <span className="shrink-0 font-mono text-meta text-ui-faint max-md:hidden" title={cardTicketLabel(tickets[0])}>
-              {tickets[0].key}
-              {tickets.length > 1 && ` +${tickets.length - 1}`}
+          <span className="flex min-w-0 items-center gap-1.5 text-meta text-ui-faint">
+            <span className="min-w-0 shrink-[4] truncate" title={`${repo}#${pr.number}`}>
+              {pr.isDraft && 'Draft · '}
+              {repoShort(repo)}#{pr.number}
+              {tickets[0] != null && ` · ${tickets[0].key}${tickets.length > 1 ? ` +${tickets.length - 1}` : ''}`}
             </span>
-          )}
+            <span aria-hidden>·</span>
+            <Avatar user={author} size={12} />
+            {/* The author and age keep their room; the repo label gives way first. */}
+            <span className="max-w-[12rem] shrink-0 truncate text-ui-mute">{userLabel(author, pr.authorId)}</span>
+            <span aria-hidden>·</span>
+            <span className="shrink-0 tabular-nums" title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>
+              {shortAge(activity)}
+            </span>
+          </span>
         </span>
-        )}
         {columns.map((col) => {
           switch (col.key) {
             case 'ci':
@@ -774,25 +751,6 @@ function PrRow({
                     ciRunning={data.ciStates.get(pr.id)?.status === 'running'}
                     ticketRunning={ticketRunning}
                   />
-                </ColCell>
-              );
-            case 'size':
-              return (
-                <ColCell key={col.key} col={col} className="font-mono text-meta tabular-nums text-ui-faint">
-                  <span className="truncate" title={`${filesLabel(pr.changedFiles)} · ${pr.additions} added, ${pr.deletions} removed`}>{sizeText(pr)}</span>
-                </ColCell>
-              );
-            case 'author':
-              return (
-                <ColCell key={col.key} col={col} className="gap-1.5 text-meta text-ui-mute">
-                  <Avatar user={author} size={14} />
-                  <span className="min-w-0 truncate">{userLabel(author, pr.authorId)}</span>
-                </ColCell>
-              );
-            case 'age':
-              return (
-                <ColCell key={col.key} col={col} className="text-meta tabular-nums text-ui-faint">
-                  <span title={`Updated ${dateTime(activity)} · opened ${dateTime(pr.openedAt)}`}>{shortAge(activity)}</span>
                 </ColCell>
               );
           }

@@ -284,12 +284,17 @@ export function CriterionRow({
     /** The story docs check's note on this criterion (Story section only); absent ⇒ nothing drawn. */
     docs?: StoryDocsCriterionItem;
   }): JSX.Element {
-  const doneIn = deliveredByMembers(c, review.members);
+  // ⚠ The server adds every evidence PR to `deliveredBy` (ticket-review/reconcile.ts). On a NOT MET
+  // row that PR delivered nothing: it is named under "Code in" (with its files), never "Done in".
+  const doneIn = criterionDoneIn(c, review.members);
   const belongs = expectedInLabel(c.expectedIn, review.members);
   const refProps = { viewedPrId, members: review.members, changedPaths, onOpenInChanges };
   // The criterion's ref ("AC1") opens the PRs that deliver it, or where it belongs (2026-11-01: listed
-  // under every criterion they were clutter).
-  const ref = <CriterionRef label={c.ref} doneIn={doneIn} belongs={belongs} />;
+  // under every criterion they were clutter). An unmet row's code in OTHER PRs joins that popover too
+  // (2026-11-03): only the viewed PR's own files stay under the row, as jumps into Changes.
+  const codeIn = c.status === 'met' ? [] : evidenceElsewhere(c, review.members, viewedPrId, doneIn);
+  const ownEvidence = c.evidence.filter((ev) => viewedPrId != null && ev.prId === viewedPrId);
+  const ref = <CriterionRef label={c.ref} doneIn={doneIn} codeIn={codeIn} belongs={belongs} />;
   // MET is one compact line: tick, ref, criterion, who delivered it.
   if (c.status === 'met') {
     const line = (
@@ -328,9 +333,9 @@ export function CriterionRow({
           <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
         </span>
       </div>
-      {c.evidence.length > 0 && (
+      {ownEvidence.length > 0 && (
         <div className="mt-0.5 flex flex-wrap gap-x-3">
-          {c.evidence.map((ev, i) => (
+          {ownEvidence.map((ev, i) => (
             <EvidenceRef key={i} ev={ev} {...refProps} />
           ))}
         </div>
@@ -352,17 +357,63 @@ function deliveredByMembers(c: Pick<TicketCriterion, 'deliveredBy'>, members: re
   return c.deliveredBy.map((id) => byId.get(id)).filter((m): m is TicketReviewMember => m != null);
 }
 
+/** The "Done in" PRs of a criterion: its `deliveredBy`, less its evidence PRs when it is not met. */
+export function criterionDoneIn(
+  c: Pick<TicketCriterion, 'deliveredBy' | 'evidence' | 'status'>,
+  members: readonly TicketReviewMember[],
+): TicketReviewMember[] {
+  const all = deliveredByMembers(c, members);
+  if (c.status !== 'not_met') return all;
+  const evidenced = new Set(c.evidence.map((ev) => ev.prId));
+  return all.filter((m) => !evidenced.has(m.prId));
+}
+
+/** One member PR an unmet criterion's evidence points into, with the files it names there. */
+export interface CriterionCodeIn {
+  member: TicketReviewMember;
+  paths: string[];
+}
+
+/**
+ * The member PRs (other than the viewed one, and other than those already "Done in") that an unmet
+ * criterion's evidence points into, in evidence order, each with its `path:line` labels. Evidence in
+ * a PR the run does not know is dropped (there is nothing to link).
+ */
+export function evidenceElsewhere(
+  c: Pick<TicketCriterion, 'evidence'>,
+  members: readonly TicketReviewMember[],
+  viewedPrId: number | null,
+  doneIn: readonly TicketReviewMember[] = [],
+): CriterionCodeIn[] {
+  const byId = new Map(members.map((m) => [m.prId, m]));
+  const skip = new Set(doneIn.map((m) => m.prId));
+  const out = new Map<number, CriterionCodeIn>();
+  for (const ev of c.evidence) {
+    if (ev.prId === viewedPrId || skip.has(ev.prId)) continue;
+    const m = byId.get(ev.prId);
+    if (m == null) continue;
+    const entry = out.get(m.prId) ?? { member: m, paths: [] };
+    const label = anchorLabel(ev.path, ev.line);
+    if (!entry.paths.includes(label)) entry.paths.push(label);
+    out.set(m.prId, entry);
+  }
+  return [...out.values()];
+}
+
 /**
  * A criterion's ref. With PRs to name, a button that opens them in a small popover: "Done in" (one per
- * line, each opening the PR) and "Belongs in …". Without, plain text.
+ * line, each opening the PR), "Code in" (an unmet criterion's code in other PRs, with its files) and
+ * "Belongs in …". Without, plain text.
  */
 function CriterionRef({
   label,
   doneIn,
+  codeIn = [],
   belongs,
 }: {
   label: string;
   doneIn: readonly TicketReviewMember[];
+  codeIn?: readonly CriterionCodeIn[];
   belongs: string | null;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -380,7 +431,7 @@ function CriterionRef({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
-  if (doneIn.length === 0 && belongs == null) return <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{label}</span>;
+  if (doneIn.length === 0 && codeIn.length === 0 && belongs == null) return <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{label}</span>;
   return (
     <span ref={rootRef} className="shrink-0" data-criterion-ref>
       <button
@@ -388,7 +439,7 @@ function CriterionRef({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        title={doneIn.length > 0 ? 'The pull requests that do this' : 'Where this belongs'}
+        title={doneIn.length > 0 ? 'The pull requests that do this' : codeIn.length > 0 ? 'The pull requests with code for this' : 'Where this belongs'}
         className={`hit rounded-ui font-mono text-meta ${MUTED} underline decoration-dotted underline-offset-2 hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent`}
       >
         {label}
@@ -413,8 +464,25 @@ function CriterionRef({
               </ul>
             </>
           )}
+          {codeIn.length > 0 && (
+            <div className={doneIn.length > 0 ? 'mt-1.5' : ''}>
+              <p className={`mb-1 ${MUTED}`}>Code in</p>
+              <ul className="space-y-1">
+                {codeIn.map(({ member: m, paths }) => (
+                  <li key={m.prId} className="min-w-0">
+                    <MemberPrLink member={{ repo: m.repo, number: m.number, label: memberLabel(m) }} />
+                    {paths.map((p) => (
+                      <span key={p} className={`block break-all font-mono ${MUTED}`}>
+                        {p}
+                      </span>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {belongs != null && (
-            <p className={doneIn.length > 0 ? 'mt-1.5' : ''}>
+            <p className={doneIn.length > 0 || codeIn.length > 0 ? 'mt-1.5' : ''}>
               <PrRefText text={belongs} />
             </p>
           )}

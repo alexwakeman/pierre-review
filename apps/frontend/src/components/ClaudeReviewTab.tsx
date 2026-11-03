@@ -5,6 +5,9 @@ import type {
   ClaudeFinding,
   ClaudeThreadAssessment,
   ClaudeThreadAssessmentCounts,
+  ClaudeTeammatePoster,
+  ClaudeTeammateReview,
+  ClaudeTeamReviewView,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeReview,
@@ -50,7 +53,7 @@ import {
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
-import { aiCredentialWords, reviewPeerReadLabel } from '@pierre-review/shared';
+import { aiCredentialWords } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
 import { cx, FOCUS_RING, Menu, Select } from './ui/index.js';
@@ -113,11 +116,12 @@ import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
-import { TeammateReviews } from './TeammateReviews.js';
+import { TeammateChip, TeammateLeadSection, TeamFindingRow } from './TeammateReviews.js';
+import { alsoRaisedByFinding, alsoRaisedLabel, leadingTeammateReview, reviewCountLine, teamFindingByLabel } from '../lib/teammateReviews.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
-import { RailLayout, RailPiece, RailSectionNav, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
+import { RailLayout, RailPiece, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
@@ -228,6 +232,25 @@ function metaLine(
   return parts.join(' · ');
 }
 
+// The rail's run line: the run's cost only — no commit, no model (the right-hand column names neither).
+// A pair: each half's cost in its own provider's terms, never summed. null when nothing is known.
+function railCostLine(
+  review: ClaudeReview,
+  costText: (usd: number | null | undefined, provider?: AiProviderId | null) => string | null,
+): string | null {
+  const halves = review.pair?.halves;
+  if (halves != null && halves.length > 0) {
+    const parts = halves
+      .map((h) => {
+        const c = costText(h.costUsd, h.provider);
+        return c != null ? `${aiProviderName(h.provider)} ${c}` : null;
+      })
+      .filter((x): x is string => x != null);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  return costText(review.costUsd, aiRunProvider(review.provider, review.model));
+}
+
 // The reviewed commit against the PR's synced head — the ONE helper the Open PRs card reads too.
 // The server's `head` reading wins; an older server (no `head`) falls back to the PR's head.
 function currencyOf(review: ClaudeReview, prHeadSha: string | null): ReviewCurrency | null {
@@ -239,7 +262,7 @@ function currencyOf(review: ClaudeReview, prHeadSha: string | null): ReviewCurre
 }
 
 // The header fact: "On latest commit · abc1234", or "2 newer commits" / "Branch changed" (warn glyph).
-function CurrencyPill({ currency }: { currency: ReviewCurrency }): JSX.Element {
+function CurrencyPill({ currency, showSha = true }: { currency: ReviewCurrency; showSha?: boolean }): JSX.Element {
   return (
     // Icon + grey words (a fact about the run, not a status that blocks or is ready): only the
     // stale case's warning glyph carries the warn ink.
@@ -253,7 +276,7 @@ function CurrencyPill({ currency }: { currency: ReviewCurrency }): JSX.Element {
         <WarningIcon size={12} className="text-ui-warn" />
       )}
       {currency.label}
-      {currency.tone === 'current' && <span className="font-mono">· {currency.sha}</span>}
+      {showSha && currency.tone === 'current' && <span className="font-mono">· {currency.sha}</span>}
     </span>
   );
 }
@@ -656,9 +679,12 @@ export function FindingRow({
   selection = null,
   docReferences = null,
   authorName = 'Claude',
+  alsoRaisedBy = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
+  /** Teammates whose posted review raised this point too (`teamView.alsoRaisedBy`). null ⇒ none. */
+  alsoRaisedBy?: readonly ClaudeTeammatePoster[] | null;
   /** Who wrote the finding: the provider that ran its review ('Claude' | 'Codex'). */
   authorName?: string;
   editable: boolean;
@@ -906,6 +932,14 @@ export function FindingRow({
               <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta text-ui-accent">
                 {storyLabel}
               </span>
+            )}
+            {/* The same point in a teammate's posted review: shown once, naming both. */}
+            {alsoRaisedBy != null && alsoRaisedBy.length > 0 && (
+              <TeammateChip
+                by={alsoRaisedBy}
+                label={alsoRaisedLabel(alsoRaisedBy)}
+                title={`${teamFindingByLabel(alsoRaisedBy)} raised this too, on GitHub`}
+              />
             )}
             {priorStatus != null && (
               <span
@@ -1266,7 +1300,10 @@ export function ClaudesReview({
   ciCheck,
   currentThreads = null,
   checkThreadsPrId = null,
+  team = null,
 }: {
+  /** The merged view with teammates' posted reviews (the latest run only). null ⇒ this run alone. */
+  team?: { view: ClaudeTeamReviewView; reviews: readonly ClaudeTeammateReview[] } | null;
   review: ClaudeReview;
   editable: boolean;
   /** The server's current thread judgements; null ⇒ read the run's own. */
@@ -1346,6 +1383,11 @@ export function ClaudesReview({
   const storyIds = placement.ids;
   // THE WIDE LAYOUT (REVIEW_RAIL): the run's facts move from the section header to the rail.
   const inRail = useRailWide('review');
+  // THE ONE REVIEW (latest run only): a teammate's newer posted review leads, their still-open
+  // findings join the list, and a point both raised shows once (`teamView`, server-folded).
+  const leadTeammate = leadingTeammateReview(team?.view, team?.reviews);
+  const teamFindings = team?.view.findings ?? [];
+  const alsoRaised = alsoRaisedByFinding(team?.view);
 
   // THE ONE FINDING CARD, for the Findings list and the Story check's older stories alike. `storyLabel`
   // is the chip naming the story item (null for an ordinary finding).
@@ -1353,6 +1395,7 @@ export function ClaudesReview({
     <FindingRow
       // A pair's finding: its own text is the half's that raised it.
       authorName={findingAuthorName(storedReview, f)}
+      alsoRaisedBy={alsoRaised.get(f.id) ?? null}
       key={f.id}
       prId={review.prId}
       finding={f}
@@ -1381,17 +1424,20 @@ export function ClaudesReview({
 
   return (
     <>
-      <RailPiece slot="status">
-        <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} meta={metaLine(review, costText)} />
-      </RailPiece>
+      {leadTeammate == null && (
+        <RailPiece slot="status">
+          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} cost={railCostLine(review, costText)} />
+        </RailPiece>
+      )}
       <RailPiece slot="counts">
         <ReviewRailCounts
-          findings={findings}
+          findings={[...findings, ...teamFindings]}
           storyFindings={placement.placed.size}
           threads={(currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts) ?? null}
         />
       </RailPiece>
-      <ReviewSection
+      {/* THE NEWEST REVIEW LEADS: a teammate's posted review newer than this one heads the tab. */}
+      {leadTeammate != null ? <TeammateLeadSection review={leadTeammate} /> : <ReviewSection
         title={storedReview.pair != null ? `${by} review` : `${by}'s review`}
         section="review"
         pills={
@@ -1454,11 +1500,6 @@ export function ClaudesReview({
             {pairHalfFailedLine(review.pair.failedHalf)}
           </div>
         )}
-        {review.alsoRead != null && review.alsoRead.length > 0 && (
-          <div className="text-meta text-ui-mute">
-            Also read: {review.alsoRead.map(reviewPeerReadLabel).join(', ')}
-          </div>
-        )}
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {/* Wide: prose at a reading measure (`.reading-measure`: paragraphs ≤ 75ch). */}
         {review.summary != null && review.summary !== '' && (
@@ -1466,7 +1507,7 @@ export function ClaudesReview({
             <Markdown prRefs>{review.summary}</Markdown>
           </div>
         )}
-      </ReviewSection>
+      </ReviewSection>}
       {(review.followUp != null || settledEarlier.length > 0) && (
         <ClaudeReviewFollowUpSection
           followUp={review.followUp ?? null}
@@ -1493,7 +1534,7 @@ export function ClaudesReview({
         section="findings"
         pills={
           <>
-            <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
+            <SectionCount>{plural(findings.length + teamFindings.length, 'finding', 'findings')}</SectionCount>
             <CopyAllFindingsButton findings={findings} editable={editable} />
             {placement.placed.size > 0 && (
               <span className="text-meta text-ui-mute">
@@ -1503,11 +1544,15 @@ export function ClaudesReview({
           </>
         }
       >
-        {findings.length > 0 ? (
+        {findings.length + teamFindings.length > 0 ? (
           <ul className={REVIEW_ITEM_GROUP}>
             {findings.map((f) =>
               findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null),
             )}
+            {/* Teammates' still-open findings, read-only, each naming who raised it. */}
+            {teamFindings.map((f) => (
+              <TeamFindingRow key={`team-${f.id}`} finding={f} onOpenThread={onOpenThread} />
+            ))}
           </ul>
         ) : (
           <div className="text-meta text-ui-mute">
@@ -1560,10 +1605,11 @@ export function ClaudesReview({
 // layout (RailLayout.tsx, the story view's mechanism) with the review's slots. CONTENT — the summary,
 // previous review, threads, findings, Story check, CI check, SonarCloud, reference docs, the design (it
 // spans the rail) and the chat — stays in the reading column; FACTS AND ACTIONS go to the rail: the
-// run's status (`status`), the run controls (`run`), the counts (`counts`), "On this page" (`nav`),
-// Reviews and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). Narrow (the PR
+// run's status (`status`), the run controls + the review count (`run`), the counts (`counts`), Reviews
+// and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). The rail STICKS under
+// the tab bar (`sticky`); taller than the pane, it scrolls with the page until its end shows. Narrow (the PR
 // drawer, a laptop, a phone) every piece renders in place, in today's order; rail-only extras vanish.
-export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'nav', 'actions', 'post'] as const;
+export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'actions', 'post'] as const;
 export const REVIEW_SECTIONS = [
   { id: 'review', label: 'Summary' },
   { id: 'previous', label: 'Previous review' },
@@ -1580,6 +1626,7 @@ const REVIEW_RAIL: RailLayoutConfig = {
   name: 'review',
   slots: REVIEW_RAIL_SLOTS,
   sections: REVIEW_SECTIONS,
+  sticky: true,
   sectionAttr: 'data-review-section',
   startSection: null,
   railLabel: 'Review facts and actions',
@@ -1588,24 +1635,61 @@ const REVIEW_RAIL: RailLayoutConfig = {
   wideClassName: 'relative z-10 bg-ui-bg',
 };
 
-/** The rail's first block: who reviewed, the verdict, the commit it read, when, and the run label + cost. */
+/**
+ * THE ONE REVIEW WITHOUT A RUN OF THE READER'S (none yet, or the latest failed): a teammate's newer
+ * posted review leads and their still-open findings list, read-only. Nothing when there are none.
+ */
+function TeamOnlyReview({
+  data,
+  onOpenThread,
+}: {
+  data: { teamView?: ClaudeTeamReviewView; teammateReviews?: ClaudeTeammateReview[] } | undefined;
+  onOpenThread?: (threadId: number) => void;
+}): JSX.Element | null {
+  const lead = leadingTeammateReview(data?.teamView, data?.teammateReviews);
+  const findings = data?.teamView?.findings ?? [];
+  if (lead == null && findings.length === 0) return null;
+  return (
+    <>
+      {lead != null && <TeammateLeadSection review={lead} />}
+      <ReviewSection
+        title="Findings"
+        section="findings"
+        pills={<SectionCount>{`${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}`}</SectionCount>}
+      >
+        {findings.length > 0 ? (
+          <ul className={REVIEW_ITEM_GROUP}>
+            {findings.map((f) => (
+              <TeamFindingRow key={`team-${f.id}`} finding={f} onOpenThread={onOpenThread} />
+            ))}
+          </ul>
+        ) : (
+          <div className="text-meta text-ui-mute">No line-level findings.</div>
+        )}
+      </ReviewSection>
+    </>
+  );
+}
+
+/** The rail's first block: who reviewed, the verdict, whether it read the latest commit, when, and
+ *  the cost. No commit hash and no model here (the history select and the narrow header name them). */
 function ReviewRailStatus({
   review,
   title,
   currency,
-  meta,
+  cost,
 }: {
   review: ClaudeReview;
   title: string;
   currency: ReviewCurrency | null;
-  meta: string;
+  cost: string | null;
 }): JSX.Element {
   return (
     <div className="space-y-1.5" data-testid="review-rail-status">
       <p className="text-meta text-ui-mute">{title}</p>
       <div className="flex flex-wrap items-center gap-2">
         {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
-        {currency != null && <CurrencyPill currency={currency} />}
+        {currency != null && <CurrencyPill currency={currency} showSha={false} />}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">
         <ReviewedAgo at={review.finishedAt} />
@@ -1614,7 +1698,7 @@ function ReviewRailStatus({
         {review.kind === 'replies' && <span>{REPLIES_CHECK_LABEL}</span>}
         {review.reviewMode != null && <span>{REVIEW_MODE_LABEL[review.reviewMode]} review</span>}
       </div>
-      <p className="break-words text-meta text-ui-mute">{meta}</p>
+      {cost != null && <p className="break-words text-meta text-ui-mute">{cost}</p>}
     </div>
   );
 }
@@ -1634,7 +1718,8 @@ function ReviewRailCounts({
   storyFindings,
   threads,
 }: {
-  findings: readonly ClaudeFinding[];
+  // The reader's findings and teammates' still-open ones (a teammate's may carry no severity).
+  findings: ReadonlyArray<{ severity: ClaudeFindingSeverity | null }>;
   storyFindings: number;
   threads: ClaudeThreadAssessmentCounts | null;
 }): JSX.Element {
@@ -2102,10 +2187,6 @@ export function ClaudeReviewTab({
       <RailPiece slot="actions" inline>
         <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       </RailPiece>
-      {/* "On this page" — the rail's section nav (rail only). */}
-      <RailPiece slot="nav">
-        <RailSectionNav />
-      </RailPiece>
       <RailPiece slot="run" inline>
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
@@ -2361,8 +2442,17 @@ export function ClaudeReviewTab({
         />
       )}
 
+      {/* THE REVIEW COUNT: full Limn reviews on the PR so far, teammates' included (the server's
+          `teamView.reviewCount`; a pair once, a replies pass never). */}
+      {reviewCountLine(data?.teamView?.reviewCount) != null && (
+        <div className="text-meta text-ui-mute" data-testid="review-count">
+          {reviewCountLine(data?.teamView?.reviewCount)}
+        </div>
+      )}
+
       {/* EVERY review of the PR, one option each, in a drop-down (all providers, all heads, newest
-          first; a Claude + Codex pair is one option). */}
+          first; a Claude + Codex pair is one option). In the rail its options name no commit and no
+          model. */}
       {data != null && data.history.length > 1 && (
         <ReviewHistoryList
           history={data.history}
@@ -2376,8 +2466,6 @@ export function ClaudeReviewTab({
         />
       )}
 
-      {/* Reviews a TEAMMATE'S Limn posted to GitHub — read-only, theirs (TeammateReviews.tsx). */}
-      <TeammateReviews reviews={data?.teammateReviews} onOpenThread={onOpenThread} />
       </ReviewSection>
       </RailPiece>
 
@@ -2397,6 +2485,8 @@ export function ClaudeReviewTab({
               : null
           }
           checkThreadsPrId={canEdit ? pr.id : null}
+          // THE ONE REVIEW: teammates' posted reviews folded in (latest run only; `teamView`).
+          team={canEdit && data?.teamView != null ? { view: data.teamView, reviews: data.teammateReviews ?? [] } : null}
           prUrl={pr.githubUrl}
           repoFullName={pr.repoFullName}
           prHeadSha={pr.headSha}
@@ -2438,6 +2528,9 @@ export function ClaudeReviewTab({
       )}
       {!(shownReview != null && shownReview.status === 'succeeded') && (
         <>
+          {/* No succeeded run of the reader's to show: a teammate's posted review still leads and
+              their still-open findings still list (read-only). */}
+          {viewingLatest && <TeamOnlyReview data={data} onOpenThread={onOpenThread} />}
           <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
           <CiCheckSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
         </>

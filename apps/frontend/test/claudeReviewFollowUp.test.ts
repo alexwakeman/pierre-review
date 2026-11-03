@@ -556,6 +556,8 @@ describe('source guards', () => {
       [
         'CI check',
         'Findings',
+        // The same Findings section with no run of the reader's: teammates' open findings only.
+        'Findings',
         'Post to GitHub',
         'Review chat',
         'Review threads',
