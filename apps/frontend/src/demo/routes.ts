@@ -280,13 +280,125 @@ function prDetail(srv: DemoServer, prId: number): Record<string, unknown> | null
 
 function patchPrDetail(srv: DemoServer, prId: number, pr: Record<string, unknown>): Record<string, unknown> {
   const o = srv.overlay;
-  const out: Record<string, unknown> = { ...pr, ...(o.prFields.get(prId) ?? {}) };
+  const out: Record<string, unknown> = withDemoRequestedReviewers(srv, prId, { ...pr, ...(o.prFields.get(prId) ?? {}) });
   if (Array.isArray(out.threads)) out.threads = out.threads.map((t) => (isRecord(t) ? patchThread(srv, t) : t));
   const reviews = o.addedReviews.get(prId);
   if (reviews && Array.isArray(out.reviews)) out.reviews = [...out.reviews, ...reviews];
   const comments = o.addedComments.get(prId);
   if (comments && Array.isArray(out.comments)) out.comments = [...out.comments, ...comments];
   return out;
+}
+
+// ── review requests: Assign, "Nudge" and "Ask someone else" (POST …/request-reviewers) ──────────
+// Each request is kept per PR; the PR's "Requested" row gains a new reviewer, and the waits
+// (`GET …/review-waits`) restart from now for whoever was asked, the way a new request event does.
+
+interface DemoReviewRequest {
+  userId: number | null;
+  teamName: string | null;
+  at: string;
+}
+
+const reviewRequestsKey = (prId: number): string => `demo:review-requests:${prId}`;
+
+function demoReviewRequests(srv: DemoServer, prId: number): DemoReviewRequest[] {
+  const v = srv.overlay.stored.get(reviewRequestsKey(prId));
+  return Array.isArray(v) ? (v as DemoReviewRequest[]) : [];
+}
+
+function recordedUsers(srv: DemoServer): Record<string, unknown>[] {
+  const users = srv.recorded('GET', '/api/users');
+  return Array.isArray(users) ? users.filter(isRecord) : [];
+}
+
+function requestReviewers(srv: DemoServer, prId: number, body: Record<string, unknown>): DemoReply {
+  const pr = srv.recorded('GET', `/api/prs/${prId}`);
+  const authorId = isRecord(pr) && typeof pr.authorId === 'number' ? pr.authorId : null;
+  const users = recordedUsers(srv);
+  const at = srv.nowIso();
+  const added: DemoReviewRequest[] = [];
+  const logins: string[] = [];
+  for (const id of numberList(body.userIds)) {
+    if (id === authorId) continue;
+    const u = users.find((x) => x.id === id && x.isBot !== true);
+    if (!u || typeof u.githubLogin !== 'string') continue;
+    added.push({ userId: id, teamName: null, at });
+    logins.push(u.githubLogin);
+  }
+  for (const login of Array.isArray(body.logins) ? body.logins.filter((x): x is string => typeof x === 'string') : []) {
+    const u = users.find((x) => x.githubLogin === login);
+    added.push({ userId: typeof u?.id === 'number' ? u.id : null, teamName: null, at });
+    logins.push(login);
+  }
+  const teams = Array.isArray(body.teamSlugs) ? body.teamSlugs.filter((x): x is string => typeof x === 'string') : [];
+  for (const slug of teams) added.push({ userId: null, teamName: slug, at });
+  if (added.length === 0) {
+    return { status: 400, body: { error: 'NoReviewers', message: 'None of the selected users or teams can be requested as reviewers.' } };
+  }
+  const same = (a: DemoReviewRequest, b: DemoReviewRequest): boolean =>
+    a.userId != null ? a.userId === b.userId : a.teamName === b.teamName && b.userId == null;
+  const kept = demoReviewRequests(srv, prId).filter((r) => !added.some((a) => same(a, r)));
+  srv.overlay.stored.set(reviewRequestsKey(prId), [...kept, ...added]);
+  return OK({ status: 'ok', requestedLogins: [...new Set(logins)] });
+}
+
+/** The PR's "Requested" row: a reviewer asked here joins it. */
+function withDemoRequestedReviewers(srv: DemoServer, prId: number, pr: Record<string, unknown>): Record<string, unknown> {
+  const asked = demoReviewRequests(srv, prId);
+  if (asked.length === 0 || !Array.isArray(pr.requestedReviewers)) return pr;
+  const current = pr.requestedReviewers.filter(isRecord);
+  const extra = asked
+    .filter((a) => !current.some((r) => (a.userId != null ? r.userId === a.userId : r.userId == null && r.teamName === a.teamName)))
+    .map((a) => ({ userId: a.userId, teamName: a.teamName }));
+  if (extra.length === 0) return pr;
+  // The pane names a reviewer from the PR's own `users`: carry the newly asked person there too.
+  const users = Array.isArray(pr.users) ? pr.users.filter(isRecord) : [];
+  const known = new Set(users.map((u) => u.id));
+  const more = recordedUsers(srv).filter((u) => extra.some((e) => e.userId === u.id) && !known.has(u.id));
+  return { ...pr, requestedReviewers: [...current, ...extra], users: [...users, ...more] };
+}
+
+/** `GET …/review-waits`: a reviewer asked here waits from now. */
+function patchReviewWaits(srv: DemoServer, prId: number, body: Record<string, unknown>): Record<string, unknown> {
+  const asked = demoReviewRequests(srv, prId);
+  if (asked.length === 0 || !Array.isArray(body.waits)) return body;
+  const waits = body.waits.filter(isRecord).map((w) => {
+    const a = asked.find((r) => (r.userId != null ? w.userId === r.userId : w.userId == null && w.teamName === r.teamName));
+    return a ? { ...w, since: a.at, workHours: 0 } : w;
+  });
+  for (const a of asked) {
+    if (!waits.some((w) => (a.userId != null ? w.userId === a.userId : w.userId == null && w.teamName === a.teamName))) {
+      waits.push({ userId: a.userId, teamName: a.teamName, since: a.at, workHours: 0 });
+    }
+  }
+  waits.sort((x, y) => Number(y.workHours ?? 0) - Number(x.workHours ?? 0));
+  return { ...body, waits };
+}
+
+/** "Ask someone else" on a PR the recorder never asked about: a suggested reviewer the PR lists, else
+ *  a teammate — never the author, the reader, a bot or someone already asked. */
+function demoReviewerCandidate(srv: DemoServer, prId: number): DemoReply {
+  const pr = srv.recorded('GET', `/api/prs/${prId}`);
+  if (!isRecord(pr)) return notInDemo();
+  const me = meUserId(srv);
+  const asked = new Set<number>();
+  for (const r of Array.isArray(pr.requestedReviewers) ? pr.requestedReviewers.filter(isRecord) : []) {
+    if (typeof r.userId === 'number') asked.add(r.userId);
+  }
+  for (const r of demoReviewRequests(srv, prId)) if (r.userId != null) asked.add(r.userId);
+  const users = recordedUsers(srv).filter(
+    (u) => typeof u.id === 'number' && typeof u.githubLogin === 'string' && u.isBot !== true && u.id !== pr.authorId && u.id !== me && !asked.has(u.id),
+  );
+  const suggested = srv.recorded('GET', `/api/prs/${prId}/suggested-reviewers`);
+  const suggestions =
+    isRecord(suggested) && Array.isArray(suggested.suggestedReviewers) ? suggested.suggestedReviewers.filter(isRecord) : [];
+  const pick = users.find((u) => suggestions.some((s) => s.userId === u.id)) ?? users[0];
+  if (!pick) return OK({ candidate: null, users: [] });
+  const why = suggestions.find((s) => s.userId === pick.id)?.reason;
+  return OK({
+    candidate: { userId: pick.id, login: pick.githubLogin, reason: typeof why === 'string' ? why : 'recently changed src/', pendingReviews: 0 },
+    users: [pick],
+  });
 }
 
 function patchThread(srv: DemoServer, t: Record<string, unknown>): Record<string, unknown> {
@@ -881,7 +993,7 @@ export const ROUTES: DemoRoute[] = [
       return { status: 204 };
     },
   },
-  { method: 'POST', re: /^\/api\/prs\/\d+\/request-reviewers$/, run: (req) => OK({ status: 'ok', requestedLogins: Array.isArray(bodyRecord(req).logins) ? bodyRecord(req).logins : [] }) },
+  { method: 'POST', re: /^\/api\/prs\/(\d+)\/request-reviewers$/, run: (req, m, srv) => requestReviewers(srv, Number(m[1]), bodyRecord(req)) },
   {
     method: 'POST',
     re: /^\/api\/prs\/\d+\/ci\/rerun$/,
@@ -1446,6 +1558,8 @@ export const GET_FALLBACKS: DemoRoute[] = [
   { method: 'GET', re: /^\/api\/story-builds\/\d+\/repos\/\d+\/checks$/, run: () => OK(DEMO_CHECKS_PREVIEW) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/mention-candidates$/, run: (_r, _m, srv) => OK(srv.recorded('GET', '/api/users') ?? []) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/suggested-reviewers$/, run: () => OK({ suggestedReviewers: [], users: [] }) },
+  // "Ask someone else" on a PR the recorder never asked about (it asks for #118's): a plausible teammate.
+  { method: 'GET', re: /^\/api\/prs\/(\d+)\/reviewer-candidate$/, run: (_r, m, srv) => demoReviewerCandidate(srv, Number(m[1])) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/ml-labels$/, run: (_r, m, srv) => OK({ prId: Number(m[1]), labels: [], generatedAt: srv.nowIso() }) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/sonar$/, run: (_r, m) => OK({ prId: Number(m[1]), configured: false, snapshot: null }) },
   { method: 'GET', re: /^\/api\/auto-merge$/, run: (req, _m, srv) => OK(patchRecordedGet(req, { requests: [] }, srv)) },
@@ -1470,6 +1584,7 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
   let m: RegExpMatchArray | null;
   if ((m = p.match(/^\/api\/prs\/(\d+)$/)) && isRecord(body)) return patchPrDetail(srv, Number(m[1]), body);
   if (/^\/api\/threads\/\d+$/.test(p) && isRecord(body)) return patchThread(srv, body);
+  if ((m = p.match(/^\/api\/prs\/(\d+)\/review-waits$/)) && isRecord(body)) return patchReviewWaits(srv, Number(m[1]), body);
 
   if ((p === '/api/open-prs' || p === '/api/timeline') && isRecord(body) && Array.isArray(body.prs)) {
     const gone = o.closedPrIds();

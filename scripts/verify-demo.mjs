@@ -734,6 +734,95 @@ const VIEWS = [
     },
   ],
   ['ws2:chronology', '?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks', null],
+
+  // ── Flaky checks (Web, #117: one check passed then failed on the same head) ──
+  // The Pending card says "Flaky" and offers "Re-run failed jobs"; pressing it reads the PR's checks
+  // and asks GitHub (simulated) to re-run the failed jobs.
+  [
+    'pending:flaky',
+    '?view=activity&activityRepo=attention&attnTab=fixing&workspace=2',
+    'pending-flaky',
+    {
+      act: async (page) => {
+        await page.getByRole('option').filter({ hasText: 'web-app#117' }).first().click();
+        await page.getByTestId('flaky-chip').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Flaky', 'e2e (playwright)', 'Re-run failed jobs'],
+    },
+  ],
+  [
+    'pending:flaky-rerun',
+    '?view=activity&activityRepo=attention&attnTab=fixing&workspace=2',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('option').filter({ hasText: 'web-app#117' }).first().click();
+        await page.getByTestId('pending-panel').getByRole('button', { name: 'Re-run failed jobs' }).first().click();
+        await page.getByText('Re-run requested.').first().waitFor({ timeout: 10_000 });
+      },
+    },
+  ],
+  ['pr:117:flaky', '?view=pr-detail:117&prTab=overview&workspace=2', 'pr-117-flaky', { expect: ['1 flaky'] }],
+
+  // ── PR chips: a 3-PR stack on acme/api (#150 → #151 → #152), "Criteria n/m", "Large" (#153) ──
+  ['open-prs:chips', '?view=activity', null, { expect: ['Criteria 3/3', 'Criteria 0/3'] }],
+  ['pr:151:stack', '?view=pr-detail:151&prTab=overview', 'pr-151-stack', { expect: ['2 of 3 in stack', 'lands after #150'] }],
+  ['pr:116:criteria', '?view=pr-detail:116&prTab=overview', null, { expect: ['Criteria 3/3'] }],
+  ['pr:153:large', '?view=pr-detail:153&prTab=overview&workspace=2', 'pr-153-large', { expect: ['Large'] }],
+
+  // ── Waiting on others (#118: Morgan's own PR, waiting on Wei and the platform team) ──
+  [
+    'pending:waiting',
+    '?view=activity&activityRepo=attention&attnTab=waiting',
+    'pending-waiting',
+    {
+      act: async (page) => {
+        await page.getByRole('option').filter({ hasText: 'api#118' }).first().click();
+        await page.getByTestId('pending-panel').getByRole('button', { name: 'Ask someone else' }).first().click();
+        await page.getByTestId('ask-someone-else').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Waiting on others', 'Over the 4h review target', 'Nudge', 'Ask @'],
+    },
+  ],
+  // Nudge and "Ask someone else" each land: the button says so, and the PR's waits restart.
+  [
+    'pending:waiting-nudge',
+    '?view=activity&activityRepo=attention&attnTab=waiting',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('option').filter({ hasText: 'api#118' }).first().click();
+        await page.getByTestId('pending-panel').getByRole('button', { name: /^Nudge / }).first().click();
+        await page.getByText('Nudged').first().waitFor({ timeout: 10_000 });
+      },
+    },
+  ],
+  [
+    'pr:118:ask-someone-else',
+    '?view=pr-detail:118&prTab=overview',
+    'pr-118-requested',
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'Ask someone else' }).first().click();
+        const ask = page.getByTestId('ask-someone-else').first();
+        await ask.waitFor({ timeout: 10_000 });
+        await ask.getByRole('button', { name: /^Ask @/ }).click();
+        await page.getByText(/Asked @/).first().waitFor({ timeout: 10_000 });
+      },
+      // The person asked joins the Requested row by name, their wait starting now.
+      expect: ['Over the 4h review target', 'Nudge', 'Sam Carter'],
+    },
+  ],
+  [
+    'pending:my-turn-review-target',
+    '?view=activity&activityRepo=attention&attnTab=my_turn',
+    null,
+    {
+      act: async (page) => page.getByRole('option').filter({ hasText: 'api#111' }).first().click(),
+      expect: ['review target'],
+    },
+  ],
+  ['reports:review-target', '?view=activity&activityRepo=insights&insightsTab=bottlenecks', 'chronology-review-target', { expect: ['Review target', 'of first reviews arrived within 4 working hours'] }],
 ];
 
 async function main() {

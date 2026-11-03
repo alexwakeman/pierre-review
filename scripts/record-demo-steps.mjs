@@ -13,7 +13,7 @@
 // recording is a row the seeder wrote.
 
 import { createRequire } from 'node:module';
-const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'];
+const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps', 'waiting'];
 // Activity is a collapsed section of Overview now (opened below); Comments is its own tab.
 // `ai_review` is the AI Review tab on the wire (`claude_review` is only an old-link alias); `story` is
 // the PR's linked story, the story view inside the PR (a PR naming none shows Overview).
@@ -167,6 +167,27 @@ export const STEPS = [
           { max: 2, after: () => h.escape() },
         );
       }
+    },
+  },
+
+  // Pending → Waiting on others: #118's panel (each wait against the review target, Nudge) and
+  // "Ask someone else", whose candidate is fetched only on that click (it reads CODEOWNERS).
+  {
+    name: 'pending:waiting-panel',
+    run: async (h) => {
+      await h.go('?view=activity&activityRepo=attention&attnTab=waiting');
+      await h.click(h.page.getByRole('option').filter({ hasText: 'api#118' }).first());
+      await h.click(h.page.getByTestId('pending-panel').getByRole('button', { name: 'Ask someone else' }).first());
+      await h.fetchGet('/api/prs/118/review-waits');
+      await h.fetchGet('/api/prs/118/reviewer-candidate');
+    },
+  },
+  // My turn's review request on #111: its panel carries "Over the 4h review target".
+  {
+    name: 'pending:my-turn-panel',
+    run: async (h) => {
+      await h.go('?view=activity&activityRepo=attention&attnTab=my_turn');
+      await h.click(h.page.getByRole('option').filter({ hasText: 'api#111' }).first());
     },
   },
 
@@ -536,6 +557,32 @@ export const STEPS = [
     name: `ws2:${r}`,
     run: (h) => h.go(`?view=activity&workspace=2&activityRepo=${r}`),
   })),
+  // Web's red build (#117, flaky): the Pending card's Flaky line and "Re-run failed jobs" (the click
+  // reads the PR's checks), and the PR's Checks row ("1 flaky") with its logs.
+  {
+    name: 'ws2:pending:flaky',
+    run: async (h) => {
+      await h.go('?view=activity&activityRepo=attention&attnTab=fixing&workspace=2');
+      await h.click(h.page.getByRole('option').filter({ hasText: 'web-app#117' }).first());
+      await h.fetchGet('/api/prs/117');
+    },
+  },
+  {
+    name: 'ws2:pr:117:checks',
+    run: async (h) => {
+      await h.go('?view=pr-detail:117&prTab=overview&workspace=2');
+      await h.clickAll(h.page.locator('[data-testid="pr-checks-summary"] > button'), { max: 1 });
+      await h.clickAll(h.page.getByRole('button', { name: /View log|Show log/ }), { max: 2 });
+    },
+  },
+  // #118's "Requested" row: the waits, Nudge, and "Ask someone else" pressed.
+  {
+    name: 'pr:118:requested',
+    run: async (h) => {
+      await h.go('?view=pr-detail:118&prTab=overview');
+      await h.click(h.page.getByRole('button', { name: 'Ask someone else' }).first());
+    },
+  },
   { name: 'ws2:sprint', run: (h) => h.go('?view=sprint&workspace=2') },
   { name: 'ws2:chronology', run: (h) => h.go('?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks') },
   // ── The third workspace, "Admin": GitHub Issues by default, its sprint a GitHub Projects ITERATION
@@ -630,12 +677,12 @@ export const NO_RECORD_PATHS = [
 /** Frontend file → the steps that visit it. `steps` are step-name globs. */
 export const COVERAGE = [
   {
-    files: ['apps/frontend/src/components/Activity/{OpenPrs*,RepoOpenPrList,RepoFeedHeader,RepoStats,ClaudeReviewCell,BranchStatus*,DefaultBranchesSlot,PrCardShell,LargePrFlag,BlastRadiusChip}.tsx'],
+    files: ['apps/frontend/src/components/Activity/{OpenPrs*,RepoOpenPrList,RepoFeedHeader,RepoStats,ClaudeReviewCell,BranchStatus*,DefaultBranchesSlot,PrCardShell,LargePrFlag,BlastRadiusChip,PrChips}.tsx'],
     steps: ['open-prs', 'open-prs:*', 'repo-console', 'ws2:open-prs', 'popovers'],
   },
   {
     files: ['apps/frontend/src/components/Activity/{Attention*,Pending*,pending*,MyTurnDismissedList,DependencyMergeAll,DependencyAutomationLog}.{ts,tsx}'],
-    steps: ['pending:*', 'ws2:attention'],
+    steps: ['pending:*', 'ws2:attention', 'ws2:pending:*'],
   },
   { files: ['apps/frontend/src/components/Activity/{FeedView,FeedIsolationBanner,BotCommentCard}.tsx'], steps: ['feed', 'feed:*', 'ws2:feed'] },
   {
@@ -671,10 +718,10 @@ export const COVERAGE = [
   {
     // PR detail and everything it hosts: every pr:* step, the Timeline's per-PR overviews and #113's popovers.
     files: [
-      'apps/frontend/src/components/{PrDetail,DetailPane,ChangesTab,ChecksTab,CheckList,CiCheckSection,PrBotBehaviourTab,PrCommentComposer,CommentCard,ReviewSection,ReviewsRow,ReactionBar,MergeControl,MergeWhenReadyControl,ApproveControl,ClosePrControl,ReopenPrControl,AutoMergeBanner,TeamClaimLine,StateBadge,MlSeverityBadge,LimnSeverityChip,ConfidenceBadge,DiffHunk,ReviewedAgo,ReviewHistoryList,ReviewPrRefs,RepliesCheckLine,CheckThreadsButton,EventSelectPanel}.tsx',
+      'apps/frontend/src/components/{PrDetail,DetailPane,ChangesTab,ChecksTab,CheckList,CiCheckSection,PrBotBehaviourTab,PrCommentComposer,CommentCard,ReviewSection,ReviewsRow,ReactionBar,MergeControl,MergeWhenReadyControl,ApproveControl,ClosePrControl,ReopenPrControl,AutoMergeBanner,TeamClaimLine,StateBadge,MlSeverityBadge,LimnSeverityChip,ConfidenceBadge,DiffHunk,ReviewedAgo,ReviewHistoryList,ReviewPrRefs,RepliesCheckLine,CheckThreadsButton,EventSelectPanel,FlakyChecks,ReviewWaitActions}.tsx',
       'apps/frontend/src/components/{ClaudeReview*,AiFix*,AiRunLabel,ModelPicker,DesignGrid}.tsx',
       'apps/frontend/src/components/{pr,diff,conflicts,AiFix,ThreadList,ThreadView}/**',
     ],
-    steps: ['pr:*', 'timeline:open-details:*', 'timeline:focus', 'feed:isolated', 'popovers'],
+    steps: ['pr:*', 'ws2:pr:*', 'timeline:open-details:*', 'timeline:focus', 'feed:isolated', 'popovers'],
   },
 ];

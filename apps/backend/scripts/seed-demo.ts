@@ -249,7 +249,8 @@ interface PrSeed {
   mergeable?: 'mergeable' | 'conflicting' | 'unknown';
   mss?: 'clean' | 'dirty' | 'blocked' | 'unstable';
   labels?: { name: string; color: string }[];
-  checks?: { name: string; state: 'success' | 'failure' | 'pending' | 'neutral' | 'skipped' | 'error' | 'unknown'; url: string | null }[];
+  // runId/jobId: a GitHub Actions check (its `url` the job page), so the pane offers re-run and View log.
+  checks?: { name: string; state: 'success' | 'failure' | 'pending' | 'neutral' | 'skipped' | 'error' | 'unknown'; url: string | null; runId?: number; jobId?: number }[];
   // Source branch (headRefName). Ticket-key-shaped names (PLAT-292-…, INFRA-231-…)
   // light up the Pro Jira/Linear ticket-link detection in PR detail.
   head?: string;
@@ -271,8 +272,9 @@ const PRS: PrSeed[] = [
   { id: 110, repoId: WEB, authorId: 2, title: 'Persist detail-pane height to localStorage', state: 'merged', openedDaysAgo: 7, closedDaysAgo: 5, mergedById: 1 },
   // FLAKY (docs/MERGE-CI-TRUNK.md § Flaky checks): Morgan's own PR, red on ONE check that passed and
   // then failed on the same head (the CI log rows below) — the Pending board's ci_failing card shows
-  // "Flaky" and "Re-run failed jobs"; the PR's Checks row shows "1 flaky".
-  { id: 117, repoId: WEB, authorId: 1, title: 'Retry the timeline fetch on a dropped connection', state: 'open', openedDaysAgo: 1, ci: 'failure', mergeable: 'mergeable', mss: 'blocked', size: [38, 6, 2], labels: [{ name: 'ui', color: '1f6feb' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'lint', state: 'success', url: null }, { name: 'e2e (playwright)', state: 'failure', url: null }] },
+  // "Flaky" and "Re-run failed jobs"; the PR's Checks row shows "1 flaky". Its checks are GitHub
+  // Actions jobs (run ids), so the re-run has a run to ask for.
+  { id: 117, repoId: WEB, authorId: 1, title: 'Retry the timeline fetch on a dropped connection', state: 'open', openedDaysAgo: 1, ci: 'failure', mergeable: 'mergeable', mss: 'blocked', size: [38, 6, 2], labels: [{ name: 'ui', color: '1f6feb' }], checks: [{ name: 'build', state: 'success', url: 'https://github.com/acme/web-app/actions/runs/1187330017/job/28712000101', runId: 1_187_330_017, jobId: 28_712_000_101 }, { name: 'lint', state: 'success', url: 'https://github.com/acme/web-app/actions/runs/1187330017/job/28712000102', runId: 1_187_330_017, jobId: 28_712_000_102 }, { name: 'e2e (playwright)', state: 'failure', url: 'https://github.com/acme/web-app/actions/runs/1187330017/job/28712000103', runId: 1_187_330_017, jobId: 28_712_000_103 }] },
   { id: 112, repoId: WEB, authorId: 3, title: 'Keyboard nav for the open-PR strip', state: 'open', openedDaysAgo: 5, ci: 'pending', mergeable: 'mergeable', mss: 'blocked', labels: [{ name: 'a11y', color: '0e8a16' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'e2e', state: 'pending', url: null }] },
   { id: 103, repoId: WEB, authorId: 7, title: 'Bump vite from 5.4.2 to 5.4.8', state: 'merged', openedDaysAgo: 2, closedDaysAgo: 2, mergedById: 1, labels: [{ name: 'dependencies', color: '0366d6' }] },
   { id: 104, repoId: API, authorId: 6, title: 'Cache changed-file paths per commit', state: 'merged', openedDaysAgo: 6, closedDaysAgo: 4, mergedById: 1, labels: [{ name: 'perf', color: 'd93f0b' }] },
@@ -409,9 +411,9 @@ const prRows = PRS.map((p) => {
     mergeStateStatus: p.mss ?? null,
     labels: p.labels ?? null,
     // runId/jobId are only set for real GitHub Actions checks (parsed from the
-    // detailsUrl during sync); the demo's synthetic checks aren't loggable.
+    // detailsUrl during sync); most of the demo's synthetic checks aren't loggable.
     checkRuns: p.checks
-      ? p.checks.map((c) => ({ ...c, runId: null, jobId: null }))
+      ? p.checks.map((c) => ({ ...c, runId: c.runId ?? null, jobId: c.jobId ?? null }))
       : null,
   };
 });
