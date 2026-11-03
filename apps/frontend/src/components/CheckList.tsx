@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import type { CheckRun, CiRerunMode } from '@pierre-review/shared';
+import { isLimnStatusContext, type CheckRun, type CiRerunMode, type FlakyCheck } from '@pierre-review/shared';
 import { CHECK_STATE_META, safeExternalUrl } from '../lib/ui.js';
 import { useRerunCi, type RerunOutcome } from '../hooks/useCiRerun.js';
 import {
@@ -8,6 +8,7 @@ import {
   useCheckLogs,
 } from '../hooks/useCheckLogs.js';
 import { ArrowIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
+import { FlakyChip, flakyByName } from './FlakyChecks.js';
 
 // A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId>. The
 // backend parses jobId/runId into fields, but we ALSO derive them from the url here so
@@ -67,10 +68,14 @@ export function CheckRow({
   prId,
   prGithubUrl,
   check,
+  flaky,
 }: {
   prId: number;
   prGithubUrl: string;
   check: CheckRun;
+  /** Set only on a FAILING row whose check is flaky (`PrDetail.flakyChecks`) — a chip, nothing else:
+   *  the row stays a failure. */
+  flaky?: FlakyCheck;
 }): JSX.Element {
   const m = CHECK_STATE_META[check.state];
   const link = checkHref(check, prGithubUrl);
@@ -173,6 +178,7 @@ export function CheckRow({
         >
           {dot}
           <span className="min-w-0 truncate">{check.name}</span>
+          {flaky != null && <FlakyChip reasons={flaky.reasons} />}
           {/* Limn's own team-claim line (a status Limn posted): listed, never counted as CI. */}
           {check.limnOwned && (
             <span
@@ -211,6 +217,7 @@ export function CheckRow({
         >
           {check.name}
         </a>
+        {flaky != null && <FlakyChip reasons={flaky.reasons} />}
         <button
           type="button"
           onClick={toggle}
@@ -293,25 +300,41 @@ export function ChecksList({
   prId,
   prGithubUrl,
   checks,
+  flakyChecks,
 }: {
   prId: number;
   prGithubUrl: string;
   checks: CheckRun[];
+  /** `PrDetail.flakyChecks` — the server's verdict, matched to a row by name, failing rows only. */
+  flakyChecks?: readonly FlakyCheck[];
 }): JSX.Element {
+  const flaky = flakyByName(flakyChecks);
   return (
     <ul className="space-y-1">
       {checks.map((c, i) => (
-        <CheckRow key={`${c.name}-${i}`} prId={prId} prGithubUrl={prGithubUrl} check={c} />
+        <CheckRow
+          key={`${c.name}-${i}`}
+          prId={prId}
+          prGithubUrl={prGithubUrl}
+          check={c}
+          flaky={isFailingCi(c) ? flaky.get(c.name) : undefined}
+        />
       ))}
     </ul>
   );
 }
 
-// Distinct Actions run ids among a set of checks (optionally only the failed ones).
-function distinctRunIds(checks: CheckRun[], failedOnly: boolean): number[] {
+/** A failing CI check: failure or error, never one of Limn's own status lines (never CI). */
+export function isFailingCi(c: Pick<CheckRun, 'state' | 'name' | 'limnOwned'>): boolean {
+  return (c.state === 'failure' || c.state === 'error') && c.limnOwned !== true && !isLimnStatusContext(c.name);
+}
+
+// Distinct Actions run ids among a set of checks (optionally only the failed ones). Exported for the
+// Pending card's flaky re-run, which reads the same checks on a click (FlakyChecks.tsx).
+export function distinctRunIds(checks: readonly CheckRun[], failedOnly: boolean): number[] {
   const ids = new Set<number>();
   for (const c of checks) {
-    if (failedOnly && c.state !== 'failure' && c.state !== 'error') continue;
+    if (failedOnly && !isFailingCi(c)) continue;
     const runId = runIdOf(c);
     if (runId != null) ids.add(runId);
   }

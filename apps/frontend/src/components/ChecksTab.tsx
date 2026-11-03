@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
+  FlakyCheck,
   MergeBlockFacts,
   PrDetail as PrDetailT,
   RequestReviewersBody,
@@ -37,6 +38,7 @@ import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
 import { PrActionControls, prActionsVisible, prBlockFacts } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
 import { ChecksList, CiRerunControl } from './CheckList.js';
+import { FLAKY_CHIP_CLASS, flakyByName, flakyTitle } from './FlakyChecks.js';
 import { useRequestReviewers } from '../hooks/usePrWrites.js';
 import { TERMINAL_LABEL } from './AutoMergeBanner.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
@@ -139,6 +141,22 @@ export function checksSummaryCounts(checks: readonly { state: string; limnOwned?
   return { passed, failing, running, total };
 }
 
+/** How many FAILING rows the server called flaky (matched by name), and the tooltip naming them.
+ *  Still failures: `checksSummaryCounts` is unchanged by this. */
+export function flakyFailingCount(
+  checks: readonly { name?: string; state: string; limnOwned?: true }[],
+  flakyChecks: readonly FlakyCheck[] | undefined,
+): { count: number; title: string } {
+  const byName = flakyByName(flakyChecks);
+  const lines: string[] = [];
+  for (const c of checks) {
+    if (c.limnOwned || (c.state !== 'failure' && c.state !== 'error') || c.name == null) continue;
+    const f = byName.get(c.name);
+    if (f != null) lines.push(`${c.name}: ${flakyTitle(f.reasons)}`);
+  }
+  return { count: lines.length, title: lines.join('\n') };
+}
+
 /** The Checks row: ONE summary line (chevron + pills + "N checks"), the whole line the toggle,
  *  COLLAPSED on every mount — the Default branches strip's pattern, red or not. Expanding shows
  *  the per-check list (children). Per-mount state on purpose: a "let me look" toggle, never a
@@ -147,13 +165,17 @@ export function ChecksSummary({
   checks,
   children,
   defaultOpen = false,
+  flakyChecks,
 }: {
-  checks: readonly { state: string; limnOwned?: true }[];
+  checks: readonly { name?: string; state: string; limnOwned?: true }[];
   children?: React.ReactNode;
   defaultOpen?: boolean;
+  /** `PrDetail.flakyChecks` — adds an "N flaky" pill beside "N failing". Counts nothing else. */
+  flakyChecks?: readonly FlakyCheck[];
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   const { passed, failing, running, total } = checksSummaryCounts(checks);
+  const flaky = flakyFailingCount(checks, flakyChecks);
   const allPassed = passed === total;
   return (
     <div data-testid="pr-checks-summary">
@@ -178,6 +200,11 @@ export function ChecksSummary({
             title="Checks that failed"
           >
             {failing} failing
+          </span>
+        )}
+        {flaky.count > 0 && (
+          <span className={FLAKY_CHIP_CLASS} title={flaky.title} data-testid="flaky-chip">
+            {flaky.count} flaky
           </span>
         )}
         {running > 0 && (
@@ -1047,8 +1074,13 @@ export function ChecksTab({
           lists the checks — COLLAPSED to one summary line until the reader opens it. */}
       {checks.length > 0 && (
         <Row label="Checks">
-          <ChecksSummary checks={checks}>
-            <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
+          <ChecksSummary checks={checks} flakyChecks={pr.flakyChecks}>
+            <ChecksList
+              prId={pr.id}
+              prGithubUrl={pr.githubUrl}
+              checks={checks}
+              flakyChecks={pr.flakyChecks}
+            />
             <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
           </ChecksSummary>
         </Row>

@@ -41,6 +41,7 @@ import { REQUEST_CHANGES_DEFAULT_BODY, WITHDRAW_APPROVAL_MESSAGE, mergeStateWith
 import { accountGithubLogin } from '../../db/review-threads-for-review.js';
 import { config } from '../../config.js';
 import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js';
+import { prFlakyChecks } from '../../db/flaky-checks.js';
 import { getAccessToken, getAccountUserId } from '../../auth/account.js';
 import { fetchActionsJobLog } from '../../github/actions-logs.js';
 import {
@@ -428,6 +429,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     // caches the result in IndexedDB keyed by updatedAt so unchanged PRs don't refetch.
     // (Suggested reviewers are NOT here — they're a separate live query, see below — so the
     // cached detail never freezes a stale suggestion.)
+    // The FLAKY failing checks at the synced head (db/flaky-checks.ts) — stored rows only, so the
+    // Checks row needs no fetch of its own. [] when none (or the head is not red).
+    pr.flakyChecks = (await prFlakyChecks(accountId, [pr])).get(pr.id)?.checks ?? [];
     return hydratePrDetail(pr, accountId);
   });
 

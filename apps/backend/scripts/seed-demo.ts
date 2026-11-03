@@ -264,6 +264,10 @@ const PRS: PrSeed[] = [
   { id: 101, repoId: WEB, authorId: 4, title: 'Fix layout shift on the open-PR strip', state: 'open', openedDaysAgo: 6, ci: 'success', mergeable: 'mergeable', mss: 'clean', labels: [{ name: 'ui', color: '1f6feb' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'lint', state: 'success', url: null }, { name: 'e2e', state: 'success', url: null }] },
   { id: 102, repoId: WEB, authorId: 1, title: 'Extract the timeline lane packer', state: 'merged', openedDaysAgo: 8, closedDaysAgo: 3, mergedById: 4, labels: [{ name: 'refactor', color: 'a371f7' }] },
   { id: 110, repoId: WEB, authorId: 2, title: 'Persist detail-pane height to localStorage', state: 'merged', openedDaysAgo: 7, closedDaysAgo: 5, mergedById: 1 },
+  // FLAKY (docs/MERGE-CI-TRUNK.md § Flaky checks): Morgan's own PR, red on ONE check that passed and
+  // then failed on the same head (the CI log rows below) — the Pending board's ci_failing card shows
+  // "Flaky" and "Re-run failed jobs"; the PR's Checks row shows "1 flaky".
+  { id: 117, repoId: WEB, authorId: 1, title: 'Retry the timeline fetch on a dropped connection', state: 'open', openedDaysAgo: 1, ci: 'failure', mergeable: 'mergeable', mss: 'blocked', size: [38, 6, 2], labels: [{ name: 'ui', color: '1f6feb' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'lint', state: 'success', url: null }, { name: 'e2e (playwright)', state: 'failure', url: null }] },
   { id: 112, repoId: WEB, authorId: 3, title: 'Keyboard nav for the open-PR strip', state: 'open', openedDaysAgo: 5, ci: 'pending', mergeable: 'mergeable', mss: 'blocked', labels: [{ name: 'a11y', color: '0e8a16' }], checks: [{ name: 'build', state: 'success', url: null }, { name: 'e2e', state: 'pending', url: null }] },
   { id: 103, repoId: WEB, authorId: 7, title: 'Bump vite from 5.4.2 to 5.4.8', state: 'merged', openedDaysAgo: 2, closedDaysAgo: 2, mergedById: 1, labels: [{ name: 'dependencies', color: '0366d6' }] },
   { id: 104, repoId: API, authorId: 6, title: 'Cache changed-file paths per commit', state: 'merged', openedDaysAgo: 6, closedDaysAgo: 4, mergedById: 1, labels: [{ name: 'perf', color: 'd93f0b' }] },
@@ -1728,6 +1732,16 @@ for (const c of [...RECENT_CYCLES, ...OLD_CYCLES]) {
       status: 'success', failingChecks: null, observedAt: hAgo(c.successHrsAgo),
     });
   }
+}
+// #117 — FLAKY: the same head went green, then `e2e (playwright)` failed on it (a re-run). The
+// flaky rule (db/flaky-checks.ts) reads exactly this: a `success` row and a red row at ONE head.
+if (repoOfPr.has(117)) {
+  const headSha = hexSha('117head');
+  ciStatusEventRows.push(
+    { id: cseId++, accountId: 1, repoId: repoOfPr.get(117)!, prId: 117, headSha, status: 'failure', failingChecks: ['e2e (playwright)'], observedAt: hAgo(5) },
+    { id: cseId++, accountId: 1, repoId: repoOfPr.get(117)!, prId: 117, headSha, status: 'success', failingChecks: null, observedAt: hAgo(4) },
+    { id: cseId++, accountId: 1, repoId: repoOfPr.get(117)!, prId: 117, headSha, status: 'failure', failingChecks: ['e2e (playwright)'], observedAt: hAgo(2) },
+  );
 }
 await db.insert(schema.ciStatusEvents).values(ciStatusEventRows).execute();
 

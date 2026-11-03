@@ -1209,6 +1209,8 @@ export function prDetailFor(id: number): PrDetail {
     mergeStateStatus: 'clean',
     labels: [],
     checkRuns: [],
+    // Green head: no failing check, so none is flaky (db/flaky-checks.ts).
+    flakyChecks: [],
     additions: 1,
     deletions: 0,
     changedFilesCount: 1,

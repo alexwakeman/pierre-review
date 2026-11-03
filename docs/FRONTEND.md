@@ -1030,7 +1030,9 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   pills — "N passed" / "N failing" (failure + error) / "N running", one per state that exists, "all
   N passed" when every check did — and "N checks" on the right; the whole line toggles, per mount,
   collapsed even when red). Expanded it lists the checks + re-run control; it renders only when
-  there are checks to list
+  there are checks to list. A FLAKY failing check (`PrDetail.flakyChecks`, MERGE-CI-TRUNK.md §
+  Flaky checks) adds an "N flaky" pill beside "N failing" and a "Flaky" chip on its row; the
+  failing count is unchanged
   (`checksRowVisible` is DELETED with the old `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
 - **There is NO Threads tab** (removed 2026-10-26; a legacy `?prTab=threads` reads as `changes`).
@@ -4948,6 +4950,14 @@ now). Server contract + the two things it deliberately does NOT compute:
   Names are bare check/job names, never workflow-prefixed, unlike `BranchStatusPanel`'s
   `checkLabel` ("workflow / name"): the PR side stores no workflow name, so the cards keep one
   vocabulary. Shared rendering with the meta row: see *Every PR card names who opened it* above.
+- **It marks FLAKY checks** (`your_pr` arm, and the promoted `own_ci_red` card): `PendingFlakyLine`
+  ("Flaky" / "N flaky" + names, the reason in the tooltip) from the card's `ciFlaky`, and
+  `PendingFlakyRerun` ("Re-run failed jobs") ONLY when `ciFlaky.allFailing && viewerCanPush`
+  (`flakyRerunOffered`) — hidden otherwise; the card's other buttons stay. Nothing fetches on mount:
+  the click reads `['pr', id]` for the Actions run ids, then calls `useRerunCi`. The PR pane's
+  Checks row shows the same verdict from `PrDetail.flakyChecks` (a chip per failing row, "N flaky"
+  on `ChecksSummary`). A flaky check is still a failure — no count moves.
+  [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Flaky checks.
 
 ⚠ **TWO OF THE THREE CLIENT TOUCH POINTS ARE SILENT — only `KIND_LABEL` is compiler-enforced:**
 

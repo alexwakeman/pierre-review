@@ -103,6 +103,9 @@ export function useCiReviewStream(
         if (e.type === 'done') {
           setState({ status: e.status, progress: null });
           void refreshAfter(qc, e.prId);
+          // The PR detail carries `flakyChecks`, which a finished run can change (a failure it
+          // calls network or infrastructure) — re-read it so the Checks row's chip follows.
+          void qc.invalidateQueries({ queryKey: ['pr', e.prId] });
         } else {
           setState({ status: e.status, progress: e.progress });
         }

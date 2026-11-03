@@ -23,6 +23,7 @@ import type {
   ApprovedPrItem,
   CheckRun,
   CiFailingCard,
+  CiFlakySummary,
   ChangeShape,
   CiStatus,
   CommitDetail,
@@ -308,6 +309,7 @@ import {
   type FailingChecksSummary,
   type PrFailingChecks,
 } from './failing-checks.js';
+import { prFlakyChecks, type FlakyVerdict } from './flaky-checks.js';
 import {
   addressedCommitAuthors,
   mentionFacts as mentionCommentFacts,
@@ -4604,6 +4606,8 @@ export async function getWorkspaceInsights(
   // caller asked (`withFailingChecks`); read by `prRef` only while the row's head is the one the
   // names were read at.
   const failingByPr = new Map<number, PrFailingChecks>();
+  // WHICH OF THEM ARE FLAKY (db/flaky-checks.ts) — same fold, same flag, same head rule. Display only.
+  const flakyByPr = new Map<number, FlakyVerdict & { headSha: string }>();
   const foldPrFacts = async (
     prs: readonly { id: number; headSha: string | null; ciStatus: CiStatus | null }[],
   ): Promise<void> => {
@@ -4611,6 +4615,23 @@ export async function getWorkspaceInsights(
       standingsByPr.set(id, v);
     if (withFailingChecks)
       for (const [id, v] of await prFailingChecks(accountId, prs)) failingByPr.set(id, v);
+    if (withFailingChecks)
+      for (const [id, v] of await prFlakyChecks(accountId, prs)) flakyByPr.set(id, v);
+  };
+  // A red row's flaky checks (`CiFailingCard.ciFlaky`), only while the row is red at THAT head —
+  // `failingFor`'s rule. Spread ONLY by the two red-build cards (ci_failing 'your_pr', my_turn
+  // `own_ci_red`); `viewerCanPush` is the ONE write set, `writableRepoIds`.
+  const flakyFor = (p: {
+    id: number;
+    repoId: number;
+    headSha: string | null;
+    ciStatus: CiStatus | null;
+  }): { ciFlaky?: CiFlakySummary } => {
+    if (!isRedCiStatus(p.ciStatus)) return {};
+    const f = flakyByPr.get(p.id);
+    return f != null && f.headSha === p.headSha
+      ? { ciFlaky: { checks: f.checks, allFailing: f.allFailing, viewerCanPush: writableRepoIds.has(p.repoId) } }
+      : {};
   };
   // A red row's names, or nothing. ⚠ Only the two fields — never the `headSha` they were read at —
   // and only while THIS row is red at THAT head: a PR whose head moved between the fold and the
@@ -5541,6 +5562,8 @@ export async function getWorkspaceInsights(
           own: s.own,
           // Only `claude_review` rows set it — see `MyTurnCard.trigger`.
           trigger: s.trigger,
+          // Only a promoted red build carries it — see `MyTurnCard.ciFlaky`. DISPLAY ONLY.
+          ...(s.reason === 'own_ci_red' ? flakyFor(p) : {}),
           // Only the reply-type rows set it — see `MyTurnCard.reply`. DISPLAY ONLY.
           reply: s.reply,
           threadId: s.threadId,
@@ -5870,6 +5893,8 @@ export async function getWorkspaceInsights(
             githubUrl: ghUrl(p.repoId, p.number),
             // `openPrs` was folded above (`foldPrFacts`). Display only — never in `detail`.
             ...failingChecksFields(failingFor(p)),
+            // Which of them are flaky — display only, like the names (db/flaky-checks.ts).
+            ...flakyFor(p),
           },
         });
       }

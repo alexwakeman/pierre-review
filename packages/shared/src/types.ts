@@ -1,5 +1,6 @@
 import type { NotionTrackerMapping } from './notion-tracker.js';
 import type { TicketComment } from './ticket-comments.js';
+import type { CiFlakySummary, FlakyCheck } from './flaky-checks.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
@@ -5766,6 +5767,10 @@ export interface PrDetail {
   mergeQueueEntryState: MergeQueueEntryState | null;
   labels: Label[];
   checkRuns: CheckRun[];
+  /** The failing checks at the synced head that are FLAKY, with why (db/flaky-checks.ts). Read
+   *  from stored rows only. Absent on an older server; [] when none. A flaky check is still a
+   *  failure: it changes no count and no verdict. */
+  flakyChecks?: FlakyCheck[];
   // Diff size summary (from GitHub's pullRequest.additions/deletions/changedFiles).
   // `changedFilesCount` is the true file count, which may exceed `files.length` when
   // a PR touches more files than the synced page (files is capped at 100).
@@ -10186,6 +10191,9 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  existed (filled by a one-time re-read), a ghost actor, a history at its 25-event cap (the
    *  newest request may be past it), or a self-request. */
   requesterId?: number;
+  /** `own_ci_red` only, and only on `GET /api/attention`: the promoted red build's FLAKY checks —
+   *  the same field as `CiFailingCard.ciFlaky`, so the card keeps its controls when it moves. */
+  ciFlaky?: CiFlakySummary;
 }
 
 /** The home-kind facts a promoted My Turn card carries — see `MyTurnCard.own`. */
@@ -10335,6 +10343,9 @@ export interface CiFailingCard extends InsightCardBase {
    *  (`MAX_FAILING_CHECKS_PER_COMMIT`) and a PR's sync reads at most 100 contexts, so a total AT a
    *  bound is a floor. */
   failingCheckTotal: number | null;
+  /** 'your_pr' only, and only on `GET /api/attention`: the failing checks that are FLAKY
+   *  (db/flaky-checks.ts). Absent when none is. Display only, like `failingChecks`. */
+  ciFlaky?: CiFlakySummary;
 }
 
 export interface StalledReviewCard extends InsightCardBase, InsightPrRef {

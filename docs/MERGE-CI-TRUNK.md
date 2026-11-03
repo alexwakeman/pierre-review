@@ -1207,6 +1207,50 @@ means earlier, `LOG_PAGE_BYTES` 128 KiB); the prepend is anchored by **distance 
 which is what stays constant when content is added above, and the "Load earlier" control lives
 OUTSIDE the `<pre>` so it can't change the scroller's `scrollHeight` mid-anchor.
 
+### Flaky checks (`db/flaky-checks.ts`, CORE, no AI)
+
+A failing check is **FLAKY** when either holds, decided by ONE pure function, `classifyFlakyChecks`:
+
+- **`passed_and_failed`** ("Passed and failed on this commit") — the PR's CI log (`ci_status_events`)
+  holds a `success` row AT the PR's current head, and the check fails on that head now. ⚠ The log
+  stores FAILING names only, never per-check passes, so a `success` row (every check passed) is the
+  only stored proof a check passed. A red row that merely omits a name is NOT one: the check may be
+  re-running or cancelled. A success at another head is another commit.
+- **`ci_review_infra`** ("The CI review says: network or infrastructure") — the latest SUCCEEDED CI
+  review AT the current head diagnosed the check `flaky_or_infra` (`ci_review_items.status =
+  'diagnosed'`). An older head's review, a failed run and a `not_checked` item never count.
+
+The failing set is the NEWEST log row at the head, only while it is red — the same row
+`prFailingChecks` names. `limn/` statuses are never CI (`isLimnStatusContext`): never failing, never
+flaky. The loader `prFlakyChecks` reads stored rows only (three account-scoped reads for the whole
+board, keyed on the (PR, head) PAIR because the `IN × IN` predicates over-match). Nothing fetches on
+read; nothing is stored.
+
+⚠ **A FLAKY CHECK IS STILL A FAILURE.** No count, CI label, card, Pending tab or `mergeVerdict`
+changes. The verdict is DISPLAY ONLY — never in a card `detail`, a work-plan fact, a hash or a
+model payload.
+
+- **Wire:** `PrDetail.flakyChecks?: FlakyCheck[]` (`GET /api/prs/:id`, `[]` when none); on `GET
+  /api/attention` only (`withFailingChecks`), `CiFailingCard.ciFlaky?` (the `your_pr` arm) and
+  `MyTurnCard.ciFlaky?` (`own_ci_red`, the promoted red build) — `CiFlakySummary {checks,
+  allFailing, viewerCanPush}`, absent when nothing is flaky. `viewerCanPush` is `writableRepoIds`.
+  Types in `packages/shared/src/flaky-checks.ts`.
+- **SPA:** a "Flaky" chip (`FlakyChip`, `components/FlakyChecks.tsx`, `bg-ui-warn/10
+  text-ui-warn`) on each failing Checks row it applies to, an "N flaky" pill beside "N failing" on
+  the Checks summary, and on the Pending card the line "Flaky" / "N flaky" + names
+  (`Activity/PendingFlaky.tsx`). The tooltip names each reason.
+- **The card's re-run** ("Re-run failed jobs", `PendingFlakyRerun`) shows ONLY when EVERY failing
+  check is flaky (`allFailing`) and the reader can push — HIDDEN otherwise, never disabled; the
+  card's other actions (Open checks, AI Fix) stay either way. It is the Checks tab's re-run: the
+  same `useRerunCi` mutation and `POST /api/prs/:id/ci/rerun` (WRITE+ re-checked, settle ladder
+  with `ciNot`, tier `githubWrite`, `invalidateAfterPrWrite`). The card holds names, not Actions
+  run ids, so the CLICK reads the PR's checks first (`['pr', id]`, fresh) and re-runs the failed
+  jobs of each failing run; a failing check outside GitHub Actions is reported, nothing sent.
+- A finished CI review run re-reads the open PR's detail (`useCiReviewStream`), so a new
+  `ci_review_infra` verdict reaches the Checks row.
+- Not covered: the trunk arm (`branch_commits` is upserted in place — no per-head history) and
+  any other card kind.
+
 ### Default-branch ("trunk") status
 
 `GET /api/branch-status` over `repos`' four head columns + `branch_commits` (written by the sync

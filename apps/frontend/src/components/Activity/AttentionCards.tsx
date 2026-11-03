@@ -183,6 +183,8 @@ import {
   ClaudeReviewLine,
   PENDING_AI_BUTTON,
 } from './PendingClaude.js';
+import { PendingFlakyLine, PendingFlakyRerun } from './PendingFlaky.js';
+import { flakyRerunOffered } from '../FlakyChecks.js';
 import {
   CARD_CHIP,
   CARD_NEUTRAL_CHIP,
@@ -2791,6 +2793,9 @@ function PendingCard({
         );
       }
       if (card.reason === 'own_ci_red') content.push(<MoreFailingChecks key="ci" card={card} />);
+      if (card.reason === 'own_ci_red' && card.ciFlaky != null) {
+        content.push(<PendingFlakyLine key="flaky" flaky={card.ciFlaky} />);
+      }
       switch (card.reason) {
         case 'thread':
           primary(isLikelyAddressed(card) ? 'Open thread' : 'Reply', threadOpen);
@@ -2817,6 +2822,11 @@ function PendingCard({
           const checks = checksPageHref(card.githubUrl);
           if (checks != null) primaryLink('Open checks', checks);
           else primary('Open PR', () => board.openPr(card, 'overview'));
+          // Every failing check is flaky and the reader can push: one click re-runs them. HIDDEN
+          // otherwise (PendingFlaky.tsx).
+          if (flakyRerunOffered(card.ciFlaky)) {
+            buttons.push(<PendingFlakyRerun key="flaky-rerun" prId={card.prId} className={CARD_SECONDARY_BUTTON} />);
+          }
           break;
         }
         case 'claude_review':
@@ -2966,6 +2976,12 @@ function PendingCard({
       const checks = checksPageHref(trunk.githubUrl);
       if (checks != null) primaryLink('Open checks', checks);
       else primary('Open PR', () => board.openMeta(landing, card.id));
+      // FLAKY CHECKS (PendingFlaky.tsx): the line whenever one is; the re-run only when EVERY failing
+      // check is flaky and the reader can push — hidden, never disabled. The other actions stay.
+      if (trunk.ciFlaky != null) content.push(<PendingFlakyLine key="flaky" flaky={trunk.ciFlaky} />);
+      if (trunk.prId != null && flakyRerunOffered(trunk.ciFlaky)) {
+        buttons.push(<PendingFlakyRerun key="flaky-rerun" prId={trunk.prId} className={CARD_SECONDARY_BUTTON} />);
+      }
       // ⚠ AGENTIC, SO GATED ON `me.ai` (`board.claudeOn`) like every other Claude control: in cloud
       // or with LIMN_AI_DISABLED the AI Fix routes do not exist.
       if (board.claudeOn) {

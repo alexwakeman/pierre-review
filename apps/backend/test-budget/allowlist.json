@@ -34,6 +34,11 @@
       "fileMs": 10000,
       "reason": "The first case folds the whole Pending board over the shared fixture. Measured 2.8s for it, 4.1s for the file."
     },
+    "src/db/flaky-checks.test.ts": {
+      "testMs": 6000,
+      "fileMs": 10000,
+      "reason": "One case folds the default (non-board) Pending fold to prove it carries no flaky verdict; the board fold is shared by the rest. Measured 2.0s for it, 4.2s for the file."
+    },
     "src/db/failing-checks.test.ts": {
       "testMs": 6000,
       "fileMs": 10000,
