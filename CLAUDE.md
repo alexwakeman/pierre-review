@@ -36,11 +36,11 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the work plan, Slack |
+| [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the work plan, Slack |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
-| [`apps/site/README.md`](apps/site/README.md) · [`apps/frontend/src/demo/README.md`](apps/frontend/src/demo/README.md) | the website service + contact form · the static demo and its recording format |
+| [`apps/site/README.md`](apps/site/README.md) · [`apps/landing/README.md`](apps/landing/README.md) | the website service + contact form · the landing and its HTML mocks |
 
 ---
 
@@ -112,9 +112,9 @@ pierre-review/
 │  │             conflict/ · review/ · coding/ · tracker/ · sonar/ · reference-docs/ · ml/ ·
 │  │             platform/ · api/{routes,plugins}/
 │  ├─ frontend/  the SPA (base `/app/`): App.tsx · store/ · hooks/ · api/client.ts · components/ ·
-│  │             lib/ui.ts · src/demo/ (the static demo runtime, `--mode demo` only)
+│  │             lib/ui.ts
 │  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
-│  └─ site/      the website service: landing + /demo/ + /api/contact (node:http, no runtime deps)
+│  └─ site/      the website service: landing + /api/contact (node:http, no runtime deps)
 └─ packages/
    ├─ shared/    the contract between the apps (types + the few shared folds)
    └─ ml/        pierre-ml submodule: model assets + the Python severity-api. NOT a pnpm workspace.
@@ -135,9 +135,7 @@ All from the repo root unless noted.
 | `pnpm sync:once owner/repo` | one-off sync of one repo without the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
 | `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` reuses the DB |
-| `pnpm shots` · `pnpm demo:video` | landing screenshots · the walkthrough clip (`--publish` writes `apps/landing/public/media/`) |
-| `pnpm demo:record` · `demo:verify` | record the demo (`--changed`/`--only=`: just those steps) · check every demo view ([docs/DEMO.md](docs/DEMO.md)) |
-| `pnpm --filter @pierre-review/frontend build:demo` · `dev:demo` | the static demo → `apps/frontend/dist-demo/` (base `/demo/`) · same on Vite |
+| `pnpm shots` | the README's screenshots (`apps/landing/public/shots/`) |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
 
@@ -600,8 +598,7 @@ on `/app/`. New id-routes: `verify:isolation`.
 not typechecked — run it by hand: `./apps/backend/node_modules/.bin/vitest run --root
 apps/frontend`. ⚠ **The E2E fixtures (`apps/frontend/e2e/mock-api.ts`) are a typechecked wire
 contract** (`tsconfig.e2e.json`), but an unhandled route falls through to an untyped `{}`, and a
-gap shows as a BLANK PAGE (no error boundary). Add a fixture with every boot-time route. The
-demo's sample recording is generated from the same fixtures.
+gap shows as a BLANK PAGE (no error boundary). Add a fixture with every boot-time route.
 
 ## Packaging & publishing
 
@@ -622,22 +619,17 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   ⚠ zod comes from the SAME install as the SDK, by its ESM entry.
 - **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating the lockfile.
 
-## The website (`apps/site`) and the demo
+## The website (`apps/site`) and the landing
 
-- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/` and the contact form
+- **`apps/site`** serves limn-review.com: the prerendered landing and the contact form (`/demo/` 302s to `/`)
   (the commercial-licence path; [apps/site/README.md](apps/site/README.md)). ⚠ Its rate limit reads
   `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). GA lives in the landing only, never the SPA.
 - The landing's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in
   `apps/landing/index.html` are load-bearing (the prerenderer throws without them).
-- **The static demo** (`apps/frontend/src/demo/`, `build:demo`, base `/demo/`) is the real SPA with
-  `window.fetch` answered from a RECORDING ([its README](apps/frontend/src/demo/README.md)). ⚠ A
-  normal `vite build` must stay byte-for-byte free of it, and it must hold the site's CSP.
-- ⚠ **EVERY USER-VISIBLE CHANGE MUST REACH THE DEMO, IN THE SAME COMMIT.** UI ships there by
-  itself; DATA does not. A new route/view/tab/field, a changed shape or an unseeded feature: seed it
-  (`seed-demo*.ts`, fictional Acme), visit it in `scripts/record-demo-steps.mjs` + `verify-demo.mjs`
-  `VIEWS`, `pnpm demo:record`, `build:demo` + `pnpm demo:verify`, commit `recording*.json`
-  ([docs/DEMO.md](docs/DEMO.md) § Keeping it current). PR CI and `deploy-site.yml` run
-  verify-demo (a failure blocks the deploy), but it sees only MISSING answers, never a stale shape.
+- **There is NO static demo** (dropped 2026-11-04). Every picture of the app on the landing is a
+  CLICKABLE HTML mock (`apps/landing/src/components/mock/`, data in `src/mock/acme.ts`) — no product
+  screenshots. ⚠ **A user-visible change a mock mirrors updates that mock IN THE SAME COMMIT**
+  (mock → component table: [apps/landing/README.md](apps/landing/README.md)).
 
 ## Migrations
 
