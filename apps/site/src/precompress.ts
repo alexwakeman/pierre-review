@@ -4,7 +4,7 @@
 //
 //   node dist/precompress.js <dir> [<dir> ...]
 //
-// Run by the Dockerfile over the assembled landing and demo folders. Uses the same
+// Run by the Dockerfile over the assembled landing folder. Uses the same
 // COMPRESSIBLE list and size floor as the server, so the two cannot disagree about which
 // files get a sidecar. A sidecar no smaller than its file is not written; the server then
 // compresses that file on demand, which is the same answer.

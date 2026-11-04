@@ -7,9 +7,6 @@ import { Monogram } from './CommentCard.js';
 // The account menu at the foot of the sidebar: who is signed in (avatar + name, "@login" in the
 // trigger's title), Settings, and the GitHub profile. Built on the shared `Menu` (one popover at a
 // time, type-ahead, its own Escape, a bottom sheet on a phone); it opens UPWARD from the foot.
-//
-// ⚠ The trigger's `title` starts "Signed in as" and the item is named "Settings": scripts/
-// verify-demo.mjs and record-demo.mjs open Settings through exactly those two.
 export function UserMenu({
   user,
   onOpenSettings,

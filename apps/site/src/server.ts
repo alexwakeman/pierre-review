@@ -4,7 +4,6 @@
 //   PORT                       listen port (Railway injects it). Default 4300.
 //   HOST                       bind address. Default 0.0.0.0.
 //   LANDING_DIR                built landing site. Default ../landing/dist.
-//   DEMO_DIR                   built demo app. Default ../frontend/dist-demo.
 //   CONTACT_SLACK_WEBHOOK_URL  Slack incoming webhook for the contact form. Unset ⇒ the
 //                              form says it is unavailable.
 //   CONTACT_TICKET_SECRET      signs the form's fill-time ticket. Unset ⇒ a random key
@@ -40,12 +39,10 @@ const logger: Logger = {
 };
 
 const landingDir = resolve(process.env.LANDING_DIR ?? join(siteRoot, '..', 'landing', 'dist'));
-const demoDir = resolve(process.env.DEMO_DIR ?? join(siteRoot, '..', 'frontend', 'dist-demo'));
 const canonical = (process.env.SITE_URL ?? '').trim().replace(/\/$/, '');
 
 const handler = createSiteHandler({
   landingDir,
-  demoDir,
   contactWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
   ticketSecret: process.env.CONTACT_TICKET_SECRET || null,
   canonicalOrigin: canonical || null,
@@ -78,8 +75,6 @@ server.listen(port, host, () => {
       host,
       landingDir,
       landing: hasIndex(landingDir),
-      demoDir,
-      demo: hasIndex(demoDir),
       contact: Boolean(process.env.CONTACT_SLACK_WEBHOOK_URL),
     },
     'site listening',

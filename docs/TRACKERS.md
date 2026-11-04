@@ -472,8 +472,7 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
   next pick. The log carries account, workspace, code and HTTP status — never Jira's body.
 - **Rate tier** `[search, read]` on both (they spend the customer's Jira quota). `verify:isolation`
   pins the settle (a key both accounts hold moves only the caller's rows) and the gate (a ticket only
-  the other account holds → 404). The demo answers a fixed workflow and keeps the pick in its overlay
-  (`ticketStatuses`), folded into the story view's reads and the sprint graph.
+  the other account holds → 404).
 
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 

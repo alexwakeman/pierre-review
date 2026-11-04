@@ -28,7 +28,7 @@ describe('mostRecentCheck / mostRecentSync', () => {
     expect(mostRecentCheck(repos)).toBe('2026-10-28T12:59:40.000Z');
   });
 
-  it('a repo with no check (a restarted server, the static demo) gives null, not a guess', () => {
+  it('a repo with no check (a restarted server) gives null, not a guess', () => {
     expect(mostRecentCheck([repo({ lastIncrementalSyncAt: '2026-10-28T10:00:00.000Z' })])).toBeNull();
   });
 });

@@ -13,7 +13,7 @@
 //     both providers, tied to the Platform workspace's pull requests (sprint view, docs and summaries
 //     tied to none: machine-wide, as the product records them).
 //
-// Deterministic (a fixed LCG), so `pnpm demo:record` produces the same recording twice. Fictional.
+// Deterministic (a fixed LCG), so two seeds produce the same data. Fictional.
 import { and, eq, inArray } from 'drizzle-orm';
 
 const DAY = 86_400_000;

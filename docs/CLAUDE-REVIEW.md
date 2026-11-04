@@ -268,7 +268,7 @@ The credential route picks the mode (`decideAiBudget`, pure):
   only percentages, the subscription, `reviewsPerDay`, the window kinds and the resets (a test
   asserts no dollar field); US$ is for the API key alone. No "pause at N% of Claude's own figure":
   Claude's usage NEVER blocks. The pure rules (`decideAiBudget`, `aiUsageView`, `rollingSpend`)
-  live in packages/shared so the static demo runs the same ones; `ai/budget.ts` gathers the inputs.
+  live in packages/shared; `ai/budget.ts` gathers the inputs.
 - **Which subscription** — ONE rule, shared `resolveAiSubscription`: Claude's report of `pro` /
   `team` is used directly (a pick does not override it); `max` needs the reader to pick Max 5x or
   Max 20x (the picker offers only the pair, one line asks which); `enterprise` / anything else /
@@ -318,7 +318,7 @@ The credential route picks the mode (`decideAiBudget`, pure):
   allowance ÷ 5 ÷ cycle)`, cycle = the mean `claude_review` cost over 28 days (fallback $0.42) + the
   mean `sequence_diagram` cost (fallback $0.22) when ANY of the account's workspaces has
   `auto_diagrams_enabled`. Null when the subscription is unknown; never NaN / Infinity / negative
-  (shared `reviewsPerDayFor` / `cycleCostUsd`, which the demo reuses).
+  (shared `reviewsPerDayFor` / `cycleCostUsd`).
 - **API key.** A US$ budget per rolling 7 days (`weeklyUsd`, default 25); `status.apiKey {weeklyUsd,
   usedUsd}`. `resumesAt` = when enough recorded spend rolls out. (The daily budget is gone.)
 
@@ -2533,8 +2533,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   on the default provider. ⚠ NEVER TWO SWEEPS AT ONCE: the sweeper's own `sweeping` guard answers a
   press during a tick `busy`. A press never prunes the in-memory settle clocks (it is not a full
   pass). The answer is one plain line (`autoSweepResultLine`): "Queued 3 reviews." / "Nothing to
-  review." / "Daily limit reached — 0 queued." / "Retry queued.". The demo answers the route with
-  nothing due.
+  review." / "Daily limit reached — 0 queued." / "Retry queued.".
 - **THE COST GUARD**: a daily cap of auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. The cap is SET PER WORKSPACE in Settings
   ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085):

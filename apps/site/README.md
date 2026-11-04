@@ -7,7 +7,7 @@ nothing else:
 | Path | What |
 |---|---|
 | `/` and every landing route | the prerendered landing (`apps/landing/dist`); unknown paths get `404.html` with a 404 |
-| `/demo/` | the static demo build (an SPA: paths without a file extension fall back to its `index.html`). With no build present, a short "coming soon" page. `/demo` → 301 `/demo/` |
+| `/demo`, `/demo/…` | 302 to `/`. The static demo was removed (2026-11); old links land on the home page |
 | `/api/health` | `{ "ok": true }` — Railway's health check |
 | `GET /api/contact/ticket` · `POST /api/contact` | the contact form, delivered to a Slack incoming webhook |
 
@@ -30,14 +30,13 @@ ignored.
 
 ## Headers
 
-`src/security.ts`: a strict CSP per surface (landing, demo, API), HSTS (`HSTS_MAX_AGE`), the
+`src/security.ts`: a strict CSP per surface (landing, API), HSTS (`HSTS_MAX_AGE`), the
 www → apex 301 (`SITE_URL`), nosniff, frame denial, a referrer policy, a permissions policy
-and COOP. Hashed assets under `/assets/` and `/demo/assets/` are cached for a year; HTML is
-`no-cache`; text is sent brotli/gzip; byte ranges are honoured so the walkthrough video can
-seek.
+and COOP. Hashed assets under `/assets/` are cached for a year; HTML is `no-cache`; text is sent
+brotli/gzip; byte ranges are honoured so media can seek.
 
 Compression is done at BUILD time: the Dockerfile runs `node dist/precompress.js` over the
-landing and demo folders, writing `<file>.br` and `<file>.gz` at maximum quality, and the
+landing folder, writing `<file>.br` and `<file>.gz` at maximum quality, and the
 server streams those. A file without a sidecar (a local build) is compressed on demand,
 asynchronously, at a modest quality, once per file per encoding. ⚠ Never synchronous zlib
 on the request path — it blocks every other request.
@@ -52,7 +51,6 @@ pool), `headersTimeout` is 75 s, and `requestTimeout` (30 s) is the slow-loris g
 | `PORT` | 4300 | listen port (Railway injects it) |
 | `HOST` | 0.0.0.0 | bind address |
 | `LANDING_DIR` | `../landing/dist` | the built landing |
-| `DEMO_DIR` | `../frontend/dist-demo` | the built demo |
 | `CONTACT_SLACK_WEBHOOK_URL` | — | where contact messages go; unset = form unavailable |
 | `CONTACT_TICKET_SECRET` | random per process | signs the fill-time ticket |
 | `SITE_URL` | none | canonical origin for the www redirect |
@@ -64,7 +62,6 @@ pool), `headersTimeout` is 75 s, and `requestTimeout` (30 s) is the slow-loris g
 
 ```sh
 pnpm --filter @pierre-review/landing build   # the pages it serves
-pnpm --filter @pierre-review/frontend build:demo   # the demo → apps/frontend/dist-demo
 pnpm --filter @pierre-review/site dev        # tsx watch, on :4300
 pnpm --filter @pierre-review/site test       # vitest
 pnpm --filter @pierre-review/site build      # → dist/, run with `node dist/server.js`
@@ -80,7 +77,7 @@ shorter form of each rule; this is the full wording.
 
 ### `apps/site`
 
-- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/`, `/api/health` and
+- **`apps/site`** serves limn-review.com: the prerendered landing, `/api/health` and
   the contact form (`/api/contact`, Slack webhook; honeypot + signed fill time + 5/hour per IP).
   Deployed by the root `Dockerfile` / `railway.json` via `.github/workflows/deploy-site.yml`. ⚠ Its
   rate limit reads `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). The contact form is the

@@ -39,9 +39,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # ---- Which browser checks can this PR affect? (docs/TESTING.md) ----
-      # The E2E suite answers every /api request from fixtures, and the demo check serves the
-      # built SPA through apps/site — so neither reads a line of the backend. A PR that touches
-      # none of the paths below cannot change their result, and skips them (~3 minutes). The
+      # The E2E suite answers every /api request from fixtures, so it reads no line of the
+      # backend. A PR that touches none of the paths below cannot change its result, and skips
+      # it (~3 minutes). The
       # nightly and manual runs always take them; so does any PR that touches a manifest, the
       # lockfile or a workflow.
       - name: Paths this PR touches
@@ -52,7 +52,7 @@ jobs:
           fi
           changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(apps/frontend/|apps/site/|packages/shared/|scripts/(verify-demo|record-demo)|playwright\.config\.ts$|pnpm-lock\.yaml$|(.*/)?package\.json$|\.github/workflows/)'; then
+          if printf '%s\n' "$changed" | grep -qE '^(apps/frontend/|packages/shared/|playwright\.config\.ts$|pnpm-lock\.yaml$|(.*/)?package\.json$|\.github/workflows/)'; then
             echo "browser=true" >> "$GITHUB_OUTPUT"
           else
             echo "browser=false" >> "$GITHUB_OUTPUT"
@@ -134,15 +134,6 @@ jobs:
       - name: E2E regression tests (My Turn / Feed / Focus)
         if: steps.paths.outputs.browser == 'true'
         run: pnpm test:e2e
-
-      # The static demo (limn-review.com/demo/) must answer every request the SPA in THIS PR makes.
-      # A failure lists the missing requests: extend the seed + recorder steps and run
-      # `pnpm demo:record` (CLAUDE.md § The website and the demo).
-      - name: Demo answers every view
-        if: steps.paths.outputs.browser == 'true'
-        run: |
-          pnpm --filter @pierre-review/frontend build:demo
-          node scripts/verify-demo.mjs
 
       - name: Upload Playwright report on failure
         if: failure()

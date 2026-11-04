@@ -1,5 +1,5 @@
 // The site handler end to end, over a real HTTP server on an ephemeral port, against
-// throwaway landing and demo folders.
+// a throwaway landing folder.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -8,19 +8,17 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CONTACT_LIMIT, TICKET_LIMIT, createSiteHandler, type Logger, type SiteOptions } from './app.js';
 import { MIN_FILL_MS } from './contact.js';
-import { DEMO_CSP, LANDING_CSP } from './security.js';
+import { LANDING_CSP } from './security.js';
 
 const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 const WEBHOOK = 'https://hooks.slack.com/services/T1/B2/secret';
 
 let root: string;
 let landing: string;
-let demo: string;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'limn-site-'));
   landing = join(root, 'landing');
-  demo = join(root, 'demo');
   mkdirSync(join(landing, 'contact'), { recursive: true });
   mkdirSync(join(landing, 'assets'), { recursive: true });
   mkdirSync(join(landing, 'media'), { recursive: true });
@@ -29,9 +27,6 @@ beforeAll(() => {
   writeFileSync(join(landing, '404.html'), '<!doctype html><title>not found</title>');
   writeFileSync(join(landing, 'assets', 'index-abc123.js'), `console.log(1);${' '.repeat(3000)}`);
   writeFileSync(join(landing, 'media', 'clip.mp4'), Buffer.from('0123456789'));
-  mkdirSync(join(demo, 'assets'), { recursive: true });
-  writeFileSync(join(demo, 'index.html'), '<!doctype html><title>demo</title>');
-  writeFileSync(join(demo, 'assets', 'app-1.js'), 'demo();');
 });
 
 afterAll(() => {
@@ -55,7 +50,6 @@ async function start(over: Partial<SiteOptions> = {}): Promise<Running> {
   const server = createServer(
     createSiteHandler({
       landingDir: landing,
-      demoDir: demo,
       contactWebhookUrl: WEBHOOK,
       ticketSecret: 'secret',
       canonicalOrigin: 'https://limn-review.com',
@@ -189,11 +183,9 @@ describe('the security headers', () => {
     expect(LANDING_CSP).not.toMatch(/script-src[^;]*'unsafe-inline'/);
   });
 
-  it('sends the demo CSP under /demo/ and no-store JSON under /api', async () => {
+  it('sends no-store JSON under /api', async () => {
     const r = await start();
     try {
-      const d = await fetch(`${r.base}/demo/`);
-      expect(d.headers.get('content-security-policy')).toBe(DEMO_CSP);
       const h = await fetch(`${r.base}/api/health`);
       expect(h.headers.get('content-security-policy')).toContain("default-src 'none'");
       expect(h.headers.get('cache-control')).toBe('no-store');
@@ -247,42 +239,27 @@ describe('the security headers', () => {
   });
 });
 
-describe('the demo', () => {
-  it('redirects /demo to /demo/ and serves its files', async () => {
+describe('the old demo path', () => {
+  it('302s /demo and anything under it to the home page', async () => {
     const r = await start();
     try {
-      const bare = await fetch(`${r.base}/demo?x=1`, { redirect: 'manual' });
-      expect(bare.status).toBe(301);
-      expect(bare.headers.get('location')).toBe('/demo/?x=1');
-
-      const index = await fetch(`${r.base}/demo/`);
-      expect(await index.text()).toContain('<title>demo</title>');
-      const asset = await fetch(`${r.base}/demo/assets/app-1.js`);
-      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      for (const path of ['/demo', '/demo?x=1', '/demo/', '/demo/pr/42', '/demo/assets/app-1.js']) {
+        const res = await fetch(`${r.base}${path}`, { redirect: 'manual' });
+        expect(res.status, path).toBe(302);
+        expect(res.headers.get('location'), path).toBe('/');
+      }
+      const head = await fetch(`${r.base}/demo/`, { method: 'HEAD', redirect: 'manual' });
+      expect(head.status).toBe(302);
     } finally {
       await stop(r);
     }
   });
 
-  it('falls back to its index.html for app routes, but 404s a missing file', async () => {
+  it('leaves a landing path that merely starts with "demo" alone', async () => {
     const r = await start();
     try {
-      const route = await fetch(`${r.base}/demo/pr/42`);
-      expect(route.status).toBe(200);
-      expect(await route.text()).toContain('<title>demo</title>');
-      const missing = await fetch(`${r.base}/demo/assets/nope.js`);
-      expect(missing.status).toBe(404);
-    } finally {
-      await stop(r);
-    }
-  });
-
-  it('shows a coming-soon page when no demo has been built', async () => {
-    const r = await start({ demoDir: join(root, 'no-demo-here') });
-    try {
-      const res = await fetch(`${r.base}/demo/`);
-      expect(res.status).toBe(200);
-      expect(await res.text()).toContain('coming soon');
+      const res = await fetch(`${r.base}/demonstration`, { redirect: 'manual' });
+      expect(res.status).toBe(404);
     } finally {
       await stop(r);
     }

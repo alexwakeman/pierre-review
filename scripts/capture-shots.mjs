@@ -23,9 +23,8 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-// ⚠ The viewport, the theme, the reduced-motion setting and the localStorage seed
-// live in ONE place so the stills and the demo video can never drift apart.
-// See scripts/lib/demo-browser.mjs.
+// The viewport, the theme, the reduced-motion setting and the localStorage seed
+// live in scripts/lib/demo-browser.mjs.
 import { ctx as demoCtx, launch, open as demoOpen } from './lib/demo-browser.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -39,10 +38,6 @@ const results = [];
 
 const browser = await launch();
 
-// ⚠ `ctx()` and `open()` MOVED to scripts/lib/demo-browser.mjs — the video capture
-// needs exactly the same four decisions (1180px viewport, dark, reduced motion,
-// the onboarding localStorage seed) and a second copy of them would silently let
-// the stills and the clip become pictures of two different products.
 const ctx = (opts) => demoCtx(browser, opts);
 const open = (page, query, ready) => demoOpen(page, query, ready);
 

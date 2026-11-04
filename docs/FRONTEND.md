@@ -587,7 +587,7 @@ everything.
 - ⚠ **VISIBILITY ONLY.** A deep link (`?activityRepo=bots`, `?view=sprint` …) and the `g` keys still
   land on a hidden destination (`currentLocation` never reads the gate); no sync, tracker read or ML
   scoring changes with a switch.
-- **The defaults** (shared `resolveFeatures`, one resolver for the server, the demo and the tests): a
+- **The defaults** (shared `resolveFeatures`, one resolver for the server and the tests): a
   stored switch wins; else an EXISTING install (`accounts.features_existing_install`, stamped by migration
   `0153` for an account that already had repos) shows everything; a NEW install starts with Feed and
   Bots Monitoring hidden, shows Reports once a repository's 90-day backfill has finished
@@ -605,8 +605,7 @@ everything.
   `nextFeatureSettings`): a switch moved back to what the default says is dropped, so it follows the
   default again (Reports switched back on keeps waiting for its backfill). The response's resolved
   `features` is seated on `['me']` at once (`useSetFeatureSettings`).
-- **The demo** is an existing install (`seed-demo.ts`), so every destination shows; the write is
-  simulated in `demo/routes.ts`.
+- **The demo stack** (`pnpm demo`) is an existing install (`seed-demo.ts`), so every destination shows.
 
 ### The timeline (`components/Timeline/`)
 
@@ -2852,8 +2851,7 @@ convention this file has to remember.
   facts). ⚠ The tab is in the strip only while `me.ai.enabled`, and that condition lives in the PANE:
   `effectiveInsightsTab` keeps `'ai-usage'`, so a bookmark still seats it and the pane says AI is
   off. ⚠ Every cost goes through `usageCostText`; the wire carries no US$ on a subscription. The
-  sidebar AI usage popover's "Usage report" opens this tab. The static demo serves the RECORDED report
-  re-worded by its own simulated subscription (`src/demo/aiBudget.ts` `getAiUsageReport`).
+  sidebar AI usage popover's "Usage report" opens this tab.
 - ⚠ **`BottlenecksPanel` holds NO gate of its own**, which is what keeps its
   "Measuring…" / "Could not load this workspace's flow." branch a two-state question about the
   REQUEST. `useFlowFindings` gates its own `enabled`
@@ -4095,8 +4093,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   `e2e/story-build.spec.ts` (the tray, the story tab and the PR Story tab; ACME-2 is the Fill gaps
   ticket). Demo: `seed-demo-agentic.ts seedStoryBuilds` (PLAT-310 finished, PLAT-312 plan ready;
   PLAT-301's story check from `seedTicketReviews` makes it the Fill gaps ticket; PLAT-318 offers
-  Implement), `demo/routes.ts` (writes inert), recorder + verify steps (`sprint:implement`,
-  `sprint:fill-gaps`, `sprint:open-build`, `ticket:PLAT-312:open-build`, `ticket:PLAT-318:implement`).
+  Implement).
 
 ## The merge-conflict resolver (`components/conflicts/`, CORE)
 
@@ -4343,8 +4340,7 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
 
 - ⚠ **EVERY PANEL STAYS MOUNTED; only the selected one is shown (`hidden`).** A half-typed form
   must survive a look at another tab (each section re-seeds only when its STORED value changes), and
-  every section's GET still fires on open, as the single panel did — so the demo recording answers
-  every tab. One scroller serves all panels and resets to the top on a tab switch.
+  every section's GET still fires on open, as the single panel did. One scroller serves all panels and resets to the top on a tab switch.
 - **Tabs are a real tablist**: `role=tablist/tab/tabpanel`, `aria-selected`, `aria-controls` /
   `aria-labelledby`, roving `tabIndex`, automatic activation. Arrow keys move in BOTH orientations
   (Up/Left back, Down/Right forward, wrapping), Home/End jump (`tabForKey`). With no section to land
@@ -4353,9 +4349,8 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
   `issue-tracker` → Integrations, `claude-spend` → AI), else the tab last shown in this page load
   (`lastTab` in `store/settingsModal.ts`, memory only), else Pull requests — never a tab that is
   not on screen (`initialSettingsTab`). Not in the URL.
-- **The demo scripts click tabs**: `verify-demo.mjs`'s `openSettingsTab(name)` and
-  `record-demo.mjs`'s `scrollModal` (visits every tab). A hidden panel's text is not in
-  `innerText`, so an `expect` on Settings text must open the right tab first.
+- **Scripts that read Settings text must open the right tab first**: a hidden panel's text is not
+  in `innerText`.
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team
@@ -5311,8 +5306,7 @@ branch)` — the dot and the panel cannot disagree.
   `me.ai.enabled` (the offers exist only there). docs/REFERENCE-DOCS.md § A repository whose files
   can't be read. Demo: acme/infrastructure is seeded in that state.
 - The explanation lives behind the ⓘ ("What the dots mean"); the sidebar's Repositories ⓘ says the
-  same in two lines. Demo: `seed-demo.ts` seeds `pr_views` so acme/api reads both colours
-  (`verify-demo.mjs` view `repo:api`). Tests: `db/repo-status-fold.test.ts` (the fold),
+  same in two lines. Demo: `seed-demo.ts` seeds `pr_views` so acme/api reads both colours. Tests: `db/repo-status-fold.test.ts` (the fold),
   `db/activity-unread.test.ts` (the blue on a real DB).
 
 ## Text links — `TEXT_LINK` / `TEXT_LINK_PHONE`
@@ -5684,34 +5678,6 @@ the server header (the leading H1 + the blockquote after it), and asks `lib/docQ
 - Scrolls the viewer's OWN box (the passage a third of the way down; `.md-table-scroll` sideways too) —
   never `scrollIntoView`. Not found ⇒ the anchor as before, plus the strip's not-found line.
 - ⚠ No RegExp over the document's text: the fold is a character walk, the search `indexOf`.
-
-## The static demo runtime (`src/demo/`)
-
-The website's `/demo/` is THIS SPA, built from a different entry with every `/api/*` request
-answered in the browser from a recording. End to end (seed → record → build → serve):
-[DEMO.md](DEMO.md); the format and matching rules: `apps/frontend/src/demo/README.md`.
-
-- `vite build --mode demo` (`pnpm --filter @pierre-review/frontend build:demo`, or `dev:demo` on the
-  Vite dev server) — `vite.config.ts` `limnDemo()` sets `base: '/demo/'`, writes `dist-demo/`,
-  defines `import.meta.env.VITE_LIMN_DEMO = '1'` and rewrites `index.html` to load
-  `src/demo/entry.ts` instead of `src/main.tsx`. ⚠ **The normal build is byte-for-byte unchanged**:
-  the demo is a separate entry and a plugin enabled only in `--mode demo`, so no app module may
-  import from `src/demo/`, and no app module needs to know it is in a demo.
-- `entry.ts` loads the recording (`virtual:limn-demo-recording` → `data/recording.json` when it
-  exists, else `data/sample-recording.json`), wraps `window.fetch` (`install.ts`), CLEARS the
-  persisted query cache (`pierre-query-cache` in IndexedDB — a reload must start from the recording
-  again), mounts the notice bar ("Demo: sample data, nothing is sent." — `banner.ts`, `demo.css`) and
-  only then imports `../main.tsx`.
-- ⚠ **The SPA's own URLs must follow `import.meta.env.BASE_URL`**, never a literal `/app/` — that
-  is what lets routing work under `/demo/`.
-- ⚠ **No inline script, no `eval`**: the site's demo CSP (`apps/site/src/security.ts`) holds the
-  demo to the same `script-src 'self'` as the app.
-- Writes are simulated into an in-memory overlay (`overlay.ts`, `routes.ts`); agentic starts replay a
-  recorded finished run of the same kind (`runs.ts`, `sse.ts`). `window.__limnDemo.log` lists every
-  request and which stage answered it.
-- ⚠ **A route the SPA calls at boot needs a recorded answer or a `GET_FALLBACKS` entry**, exactly
-  like the e2e fixtures (`e2e/mock-api.ts`, from which the sample recording is generated): an
-  unrecorded GET answers `404 NotInDemo`, and an unguarded `.map` over a missing array blanks the app.
 
 ## Moved from CLAUDE.md (2026-10-26)
 

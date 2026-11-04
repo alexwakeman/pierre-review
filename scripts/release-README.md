@@ -12,9 +12,6 @@ into a local SQLite file, and serves the dashboard from a single local process.
 **100% free.** Every feature, no paid tier, no sign-up (see [License](#license)
 for the one limit, on large organisations).
 
-**Try it first:** the [live demo](https://limn-review.com/demo/) is the real
-app on sample data, in your browser. No install, no sign-in.
-
 > **Renamed.** This package used to be `pierre-review`. The command is now `limn`
 > (the `pierre-review` package now only forwards to this one, and says so). On first start, an existing
 > `~/.pierre-review` is moved to `~/.limn` — your database, settings and clones

@@ -11,10 +11,9 @@
 //     quality), and those are streamed as they are. A file with no such sidecar is
 //     compressed on demand — ASYNCHRONOUSLY, at a modest quality, once per file per
 //     encoding (concurrent first requests share the one job) and kept in memory.
-//     ⚠ Never synchronous zlib here: brotli at a high quality on a multi-megabyte demo
+//     ⚠ Never synchronous zlib here: brotli at a high quality on a multi-megabyte
 //     bundle blocks the event loop for seconds, and every other request waits on it.
-//   · RANGES. The walkthrough video is seeked by chapter, and a player can only seek
-//     when the server answers `Range` with 206. Ranges are served for uncompressed
+//   · RANGES. A media player can only seek when the server answers `Range` with 206. Ranges are served for uncompressed
 //     responses only, which is every binary type here.
 import { createReadStream, statSync, type Stats } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -105,8 +104,8 @@ const CACHE_HEADER: Record<CachePolicy, string> = {
 /** Pick the cache policy from where the file lives and what it is. */
 export function cachePolicyFor(urlPath: string, file: string): CachePolicy {
   if (extname(file).toLowerCase() === '.html') return 'html';
-  // Vite's content-hashed output, for the landing and for the demo build.
-  if (urlPath.startsWith('/assets/') || urlPath.startsWith('/demo/assets/')) return 'immutable';
+  // Vite's content-hashed output.
+  if (urlPath.startsWith('/assets/')) return 'immutable';
   return 'short';
 }
 

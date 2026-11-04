@@ -12,7 +12,7 @@
 // this file walks the manager's own steps with its exported pieces (plan, reconcile, validate,
 // persist), in the same order. Nothing leaves the process: no GitHub, no model.
 //
-// The code the runs talk about is scripts/lib/demo-diffs.mjs, shared with the recorder.
+// The code the runs talk about is scripts/lib/demo-diffs.mjs.
 //
 // TWO PROVIDERS. The reader switched Settings → AI to Codex for a while and back, so the stored runs
 // are a mix, each labelled by what ran: #105 holds a Claude Opus review AND a Codex GPT-6.1 Sol review
@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WikiScope } from '@pierre-review/shared';
-// @ts-expect-error — a plain ESM module shared with the recorder (scripts/lib), no types.
+// @ts-expect-error — a plain ESM module (scripts/lib), no types.
 import { DEMO_DIFFS, TERRAFORM_PLAN_JOB_ID, TERRAFORM_PLAN_LOG, addedLines, fileStats, unifiedDiff } from '../../../scripts/lib/demo-diffs.mjs';
 import { ticketIdent } from './seed-demo-tracker.js';
 
@@ -1720,7 +1720,7 @@ async function seedStoryDocs(base: any, c: AgenticSeedCtx): Promise<string> {
 //   PLAT-318  no session: its card shows the Implement button.
 //   PLAT-301  no session, IN PROGRESS with a PR: its story check below (TICKET_SCRIPTS — current, one
 //             criterion not met, one partly met) makes its card offer "Fill gaps", and the build tab lists
-//             those gaps (the recorder opens it). Keep that check current and gapped.
+//             those gaps. Keep that check current and gapped.
 // No model ran: these rows are the answers the passes would have stored. The pushed draft is not linked to
 // the ticket (the tracker seed lists PLAT-310 with no PR), so the sprint card keeps its build mark.
 

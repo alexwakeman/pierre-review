@@ -1,8 +1,8 @@
 name: Deploy site
 
-# Builds the image behind limn-review.com — the landing pages, the static demo at
-# /demo/ and the contact form, served by apps/site — pushes it to GitHub Container
-# Registry, and asks Railway to redeploy it.
+# Builds the image behind limn-review.com — the landing pages and the contact form,
+# served by apps/site — pushes it to GitHub Container Registry, and asks Railway to
+# redeploy it.
 #
 # Limn itself is local-only (`npx limn-review`), so there is no app server, no database
 # and no private code in this image. It replaced deploy-cloud.yml, which built the old
@@ -11,8 +11,8 @@ name: Deploy site
 # Runs on pushes to main that touch the site (see `paths`) and on manual dispatch.
 #
 # Repo secrets (all optional):
-#   VITE_GA_ID       build-time Google Analytics id, inlined into the landing and demo
-#                    bundles. Unset = no analytics.
+#   VITE_GA_ID       build-time Google Analytics id, inlined into the landing bundles.
+#                    Unset = no analytics.
 #   RAILWAY_TOKEN    a Railway token, to redeploy after the image is pushed (else turn on
 #                    Railway's own "redeploy on image change").
 #   RAILWAY_SERVICE  the service name; set alongside a PROJECT-scoped RAILWAY_TOKEN.
@@ -38,9 +38,6 @@ on:
     paths:
       - 'apps/landing/**'
       - 'apps/site/**'
-      - 'apps/frontend/**'
-      - 'packages/shared/**'
-      - 'scripts/verify-demo.mjs'
       - 'Dockerfile'
       - '.dockerignore'
       - 'railway.json'
@@ -77,30 +74,8 @@ jobs:
       - name: Landing build (prerender guardrails)
         run: pnpm --filter @pierre-review/landing build
 
-  # The static demo must answer every request the CURRENT SPA makes, on every view, with no page error
-  # and no blank page. A UI change that calls a route the recording lacks fails here, before the image
-  # ships. Fix: extend the seed/steps and re-record (`pnpm demo:record`), see CLAUDE.md § the demo.
-  demo:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
-      - name: Build the demo
-        run: pnpm --filter @pierre-review/frontend build:demo
-      - name: Every demo view answers (now, and as if opened 40 days later)
-        run: |
-          node scripts/verify-demo.mjs
-          node scripts/verify-demo.mjs --later=40
-
   build-and-push:
-    needs: [test, demo]
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

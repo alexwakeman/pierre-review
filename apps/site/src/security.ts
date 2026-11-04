@@ -1,6 +1,6 @@
 // Security headers for limn-review.com. Ported from the cloud branch of the old
 // backend plugin (apps/backend/src/api/plugins/security.ts): the same CSP for the
-// landing, a CSP for the demo app, a locked-down one for /api, HSTS and the
+// landing, a locked-down one for /api, HSTS and the
 // www → apex redirect. Everything is computed once; the per-request work is a few
 // string comparisons.
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -37,28 +37,6 @@ export const LANDING_CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 
-/**
- * The demo at /demo/: a static build of the real app, so it gets the app's policy —
- * `img-src https:` because sample avatars and markdown bodies embed remote images,
- * `blob:` workers, and inline styles (vis-timeline positions every item by writing
- * element.style). Still no 'unsafe-inline' / 'unsafe-eval' for scripts.
- */
-export const DEMO_CSP = [
-  "default-src 'self'",
-  `script-src 'self' ${GA_SCRIPT}`,
-  "style-src 'self' 'unsafe-inline'",
-  "font-src 'self'",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' https:",
-  `connect-src 'self' ${GA_CONNECT}`,
-  "worker-src 'self' blob:",
-  "frame-src 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
-
 /** API responses are JSON, never a document: nothing in one may load or run. */
 export const API_CSP = [
   "default-src 'none'",
@@ -85,7 +63,6 @@ const PERMISSIONS_POLICY = [
 
 export function cspFor(path: string): string {
   if (path === '/api' || path.startsWith('/api/')) return API_CSP;
-  if (path === '/demo' || path.startsWith('/demo/')) return DEMO_CSP;
   return LANDING_CSP;
 }
 

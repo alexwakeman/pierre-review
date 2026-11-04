@@ -24,7 +24,7 @@ export function mostRecentSync(repos: readonly Repo[]): string | null {
   return newest(repos, (r) => r.lastIncrementalSyncAt ?? r.lastFullSyncAt);
 }
 
-/** The newest time GitHub answered for any repo, or null (a restarted server, the demo). */
+/** The newest time GitHub answered for any repo, or null (a restarted server). */
 export function mostRecentCheck(repos: readonly Repo[]): string | null {
   return newest(repos, (r) => r.lastCheckedAt);
 }

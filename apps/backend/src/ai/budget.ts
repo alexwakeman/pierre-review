@@ -21,8 +21,8 @@
 // subscription's estimated weekly allowance (SUBSCRIPTION_ESTIMATES); likewise of the 5-hour session
 // (the setting follows the weekly share unless the reader set its own). Over when EITHER share reaches
 // its setting. Each window is [reset − length, reset) when Claude's reset has been read and is still
-// ahead, otherwise rolling. The pure rules live in packages/shared (`decideAiBudget`, `aiUsageView`)
-// so the static demo runs the same ones; the status carries percentages only.
+// ahead, otherwise rolling. The pure rules live in packages/shared (`decideAiBudget`, `aiUsageView`);
+// the status carries percentages only.
 //
 // THE USAGE READING (login route only) gives the subscription type, the reset times and the header's
 // account-wide figures — it never blocks. Two sources fold into ONE latest reading, kept in memory and
@@ -87,7 +87,7 @@ export const CYCLE_COST_WINDOW_MS = 28 * DAY_MS;
 /** The usage probe runs at most this often (the header polls every ~2 minutes while visible). */
 export const PROBE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
-// ---- the pure decision (packages/shared ai-budget.ts, so the static demo runs the same rules) ----
+// ---- the pure decision (packages/shared ai-budget.ts) ----
 
 /** Re-exported under the names this module always had. */
 export type LedgerRow = AiLedgerRow;

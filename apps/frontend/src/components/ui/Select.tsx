@@ -14,7 +14,7 @@ import { useIsPhone } from './media.js';
 // while open. On a phone the list opens as a bottom sheet with 44px options.
 //
 // ⚠ It is NOT a native <select>: `page.selectOption()` in a script does not work on it. When you
-// swap a native select pinned by scripts/verify-demo.mjs or e2e (the "Model" picker, `#ai-effort`),
+// swap a native select pinned by e2e (the "Model" picker, `#ai-effort`),
 // update the script in the same commit to click the button, then the option by name.
 
 export interface SelectOption<T extends string> {

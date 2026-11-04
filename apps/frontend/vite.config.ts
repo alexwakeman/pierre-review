@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { defineConfig, type BuildOptions, type Plugin } from 'vite';
+import { defineConfig, type BuildOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const BACKEND_PORT = process.env.BACKEND_PORT ?? '4000';
@@ -32,42 +30,12 @@ const BUILD: BuildOptions = {
   },
 };
 
-// THE STATIC DEMO (`vite build --mode demo`, `pnpm build:demo`): the same app under /demo/, built
-// from src/demo/entry.ts instead of src/main.tsx. That entry answers every /api request in the
-// browser from a recording (src/demo/README.md). Every difference from the normal build lives in
-// this function, so `vite build` without the mode is untouched by the demo.
-const DEMO_RECORDING_ID = 'virtual:limn-demo-recording';
-function limnDemo(): Plugin {
-  const data = (name: string): string => fileURLToPath(new URL(`./src/demo/data/${name}`, import.meta.url));
-  return {
-    name: 'limn-demo',
-    // The real recording when it has been made, else the hand-written sample.
-    resolveId(id) {
-      if (id !== DEMO_RECORDING_ID) return null;
-      const real = data('recording.json');
-      return existsSync(real) ? real : data('sample-recording.json');
-    },
-    transformIndexHtml: {
-      order: 'pre',
-      handler: (html) =>
-        html
-          .replace('src="/src/main.tsx"', 'src="/src/demo/entry.ts"')
-          .replace('<title>Limn</title>', '<title>Limn demo</title>'),
-    },
-  };
-}
-
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   // In production the SPA is served under /app; the API stays at the origin
   // root /api. `base` doesn't affect the dev `/api` proxy below.
-  ...(mode === 'demo'
-    ? {
-        base: '/demo/',
-        build: { ...BUILD, outDir: 'dist-demo' },
-        define: { 'import.meta.env.VITE_LIMN_DEMO': JSON.stringify('1') },
-      }
-    : { base: '/app/', build: BUILD }),
-  plugins: mode === 'demo' ? [react(), limnDemo()] : [react()],
+  base: '/app/',
+  build: BUILD,
+  plugins: [react()],
   // Force a SINGLE copy of react-query / query-core across the app and the
   // persist-client + persister packages. Without this, Vite can pre-bundle a
   // second copy (e.g. nested inside react-query-persist-client) → a second React
@@ -93,4 +61,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}));
+});

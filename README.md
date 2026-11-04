@@ -25,9 +25,6 @@ no hosted backend. `npx limn-review` opens straight to the app. Every feature is
 free (see [License](#license)). (The package was `pierre-review`; that name is
 deprecated, and `~/.pierre-review` moves to `~/.limn` once, on first boot.)
 
-> **Try the demo — [limn-review.com/demo/](https://limn-review.com/demo/)**
-> The real app in your browser, on sample data. Nothing is sent anywhere.
-
 ## Screenshots
 
 Pending — everything waiting on you or your workspace, across every repository, in
@@ -176,22 +173,18 @@ From a checkout, `pnpm dev` reads the model from the `packages/ml` submodule.
 `LIMN_ML_DISABLED=true` turns scoring off. Full setup, tuning and caveats:
 [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md).
 
-## Demo and website
+## Website
 
-- `pnpm --filter @pierre-review/frontend build:demo` builds the static demo — the real
-  app on recorded sample data — into `apps/frontend/dist-demo/`, served at `/demo/`.
-  See [apps/frontend/src/demo/README.md](apps/frontend/src/demo/README.md).
-- `apps/site` is the small service behind limn-review.com: the landing pages, the
-  demo and the contact form. See [apps/site/README.md](apps/site/README.md).
+- `apps/site` is the small service behind limn-review.com: the landing pages and the
+  contact form. See [apps/site/README.md](apps/site/README.md).
 
 ## Layout
 
 - `apps/backend` — Fastify API, Drizzle + SQLite, the GitHub sync engine; reporting,
   Bots Monitoring and Slack live in `src/platform/`
-- `apps/frontend` — React + Vite + Tailwind + vis-timeline dashboard (served at `/app`),
-  plus the static demo runtime in `src/demo/`
+- `apps/frontend` — React + Vite + Tailwind + vis-timeline dashboard (served at `/app`)
 - `apps/landing` — the marketing pages (prerendered; served by `apps/site`)
-- `apps/site` — the website service (landing, `/demo/`, contact form)
+- `apps/site` — the website service (landing, contact form)
 - `packages/shared` — the contract shared by both sides
 - `packages/ml` — the bot-comment severity model (submodule)
 

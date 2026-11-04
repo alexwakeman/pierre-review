@@ -30,8 +30,7 @@
 // when the window reaches 5% with Limn as all of it. Unknown account tokens take the whole
 // `usedPercent` as Limn's (the cautious reading). An API key is the weekly US$ budget, as for Claude.
 //
-// The PURE decision (`decideAiBudget`) and the header's usage view (`aiUsageView`) live HERE so the
-// backend and the static demo run the same rules; the backend (ai/budget.ts) gathers their inputs.
+// The PURE decision (`decideAiBudget`) and the header's usage view (`aiUsageView`) live HERE; the backend (ai/budget.ts) gathers their inputs.
 
 /** The Claude subscriptions the budget knows. Names appear only as option labels. */
 export type AiSubscriptionKind = 'pro' | 'max5x' | 'max20x' | 'team';
@@ -520,7 +519,7 @@ export function formatSharePct(pct: number): string {
   return `${Math.round(pct)}%`;
 }
 
-// ---- the pure decision (shared by the backend and the static demo) ------------------------------
+// ---- the pure decision ---------------------------------------------------------------------------
 
 export const AI_BUDGET_HOUR_MS = 60 * 60 * 1000;
 export const AI_BUDGET_DAY_MS = 24 * AI_BUDGET_HOUR_MS;

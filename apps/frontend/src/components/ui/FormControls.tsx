@@ -6,7 +6,7 @@ import { cx, FOCUS_RING } from './cx.js';
 //
 // ⚠ EACH IS A REAL <input>, RESTYLED (`appearance-none`), never a div pretending. So a <form>,
 // `name`/`value`, `checked`, a <label>, the browser's own keyboard handling and every existing
-// selector keep working — scripts/verify-demo.mjs clicks `input[name=ai-provider][value=codex]`, and
+// selector keep working, and
 // Playwright can only click what is a real, visible input. The mark (✓, the dot, the thumb) is
 // drawn by CSS or an Icons.tsx glyph laid over the box with `pointer-events-none`.
 //

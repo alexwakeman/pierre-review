@@ -1,16 +1,14 @@
 // The request handler for limn-review.com.
 //
 //   /                  the prerendered landing (apps/landing/dist)
-//   /demo/             the static demo build — an SPA, so unknown paths without a file
-//                      extension fall back to its index.html. When no demo has been
-//                      built, a short "coming soon" page.
+//   /demo, /demo/...   302 to / (the static demo is gone; old links land on the home page)
 //   /api/health        liveness, for Railway's health check
 //   /api/contact/...   the contact form (contact.ts)
 //
-// Plain node:http, no framework: the whole surface is three routes and two folders.
+// Plain node:http, no framework: the whole surface is three routes and one folder.
 import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { extname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   TicketSigner,
   buildContactMessage,
@@ -31,8 +29,6 @@ export interface Logger {
 export interface SiteOptions {
   /** The built landing site (dist of apps/landing). */
   landingDir: string;
-  /** The built demo app. Absent or empty ⇒ the "coming soon" page. */
-  demoDir: string;
   /** CONTACT_SLACK_WEBHOOK_URL. Empty ⇒ the form reports itself unavailable. */
   contactWebhookUrl: string;
   /** CONTACT_TICKET_SECRET. Null ⇒ a per-process random key. */
@@ -62,32 +58,6 @@ export const TICKET_LIMIT = 60;
 const HOUR = 60 * 60 * 1000;
 /** A contact message is at most a few kB; anything larger is not one. */
 const MAX_BODY_BYTES = 16 * 1024;
-
-const COMING_SOON = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="noindex" />
-<title>Limn demo — coming soon</title>
-<style>
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: #fafaf8; color: #16161a; font: 17px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
-  main { max-width: 34rem; padding: 2rem; }
-  h1 { font-size: 1.6rem; margin: 0 0 1rem; letter-spacing: -0.02em; }
-  code { font: 15px ui-monospace, Menlo, monospace; }
-  a { color: inherit; text-decoration-color: #e2492c; }
-</style>
-</head>
-<body>
-<main>
-  <h1>The demo is coming soon.</h1>
-  <p>Limn is free and runs on your machine. Try it now with <code>npx limn-review</code>.</p>
-  <p><a href="/">Back to the home page</a></p>
-</main>
-</body>
-</html>
-`;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const out = JSON.stringify(body);
@@ -305,31 +275,6 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
     sendText(res, 404, 'Not found');
   }
 
-  async function serveDemo(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
-    const indexFile = join(opts.demoDir, 'index.html');
-    const index = fileAt(indexFile);
-    if (!index) {
-      res.setHeader('Cache-Control', 'no-cache');
-      sendText(res, 200, req.method === 'HEAD' ? '' : COMING_SOON, 'text/html; charset=utf-8');
-      return;
-    }
-    const rel = path.slice('/demo'.length) || '/';
-    const file = safeJoin(opts.demoDir, rel);
-    const st = fileAt(file);
-    if (file && st) {
-      await sendFile(req, res, file, st, { cache: cachePolicyFor(path, file) });
-      return;
-    }
-    // SPA fallback for app routes. A missing FILE (a path with an extension) is a real
-    // 404 — answering it with HTML would hand a script tag an HTML page.
-    const last = rel.split('/').pop() ?? '';
-    if (extname(last) !== '') {
-      sendText(res, 404, 'Not found');
-      return;
-    }
-    await sendFile(req, res, indexFile, index, { cache: 'html' });
-  }
-
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? '/';
     const path = url.split('?')[0] ?? '/';
@@ -348,16 +293,12 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
       return;
     }
 
-    if (path === '/demo') {
-      // The demo's assets are relative to /demo/, so the slash is not optional.
-      const query = url.slice(path.length);
-      res.statusCode = 301;
-      res.setHeader('Location', `/demo/${query}`);
+    if (path === '/demo' || path.startsWith('/demo/')) {
+      // The static demo was removed. A 302, not a 301: browsers cache a 301 forever, and
+      // the path may be used again.
+      res.statusCode = 302;
+      res.setHeader('Location', '/');
       res.end();
-      return;
-    }
-    if (path.startsWith('/demo/')) {
-      await serveDemo(req, res, path);
       return;
     }
     await serveLanding(req, res, path);

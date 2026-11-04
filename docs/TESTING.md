@@ -95,17 +95,16 @@ A `--reporter` on the command line replaces the configured reporters, the budget
 
 ## What CI runs
 
-| Event | Fast | Slow | E2E + demo check |
+| Event | Fast | Slow | E2E |
 |---|---|---|---|
-| Pull request (`ci.yml`) | all, with the time budget ENFORCED on the test files the PR touches | the slow files whose IMPORT GRAPH holds a changed file: `vitest run --project slow --changed origin/<base>` | only when the PR touches `apps/frontend/`, `apps/site/`, `packages/shared/`, the demo scripts, `playwright.config.ts`, a `package.json`, the lockfile or a workflow |
-| Push to main (`release.yml`, before publishing) | all (budget warns) | all (`pnpm test:all`) | E2E always (`deploy-site.yml` runs the demo check) |
+| Pull request (`ci.yml`) | all, with the time budget ENFORCED on the test files the PR touches | the slow files whose IMPORT GRAPH holds a changed file: `vitest run --project slow --changed origin/<base>` | only when the PR touches `apps/frontend/`, `packages/shared/`, `playwright.config.ts`, a `package.json`, the lockfile or a workflow |
+| Push to main (`release.yml`, before publishing) | all (budget warns) | all (`pnpm test:all`) | E2E always |
 | Nightly 03:17 UTC and manual (`ci.yml` `schedule` / `workflow_dispatch`) | all (budget warns) | all | always |
 
 No run in CI takes the `live` project.
 
-The browser checks can skip a backend-only PR because neither reads the backend: the E2E specs
-answer every `/api` request from `apps/frontend/e2e/mock-api.ts`, and the demo check serves the
-built SPA and its committed recording through `apps/site`.
+The browser checks can skip a backend-only PR because they do not read the backend: the E2E specs
+answer every `/api` request from `apps/frontend/e2e/mock-api.ts`.
 
 `--changed` walks static AND dynamic imports (`await import()` in a `beforeAll` counts), so a PR
 that edits `conflict/model.ts` runs the conflict suites and `codex-fix`, and one that edits
@@ -153,7 +152,6 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 | `isRetryableGithubError` keeps 403/429 out | `github/client.test.ts` | fast |
 | Derived thread state | `sync/derive-thread-state.test.ts` + `sync/__fixtures__/threads/` | fast |
 | zod from the SDK's own install | `ai/runtime.test.ts` | fast |
-| The demo answers every view | `scripts/verify-demo.mjs` (`pnpm demo:verify`, in PR CI and `deploy-site.yml`), `apps/frontend/test/demoRuntime.test.ts` | CI step / frontend |
 
 ## Measured, 2026-10-30
 
@@ -173,8 +171,6 @@ Before, `conflict/land.test.ts` (713s) and `conflict/model.test.ts` (465s) were 
 time, and one file runs in one worker, so no run could finish before land.test.ts did. Split into
 five files they run side by side; the longest is now 315s under the same load. The fast project's
 own time is mostly loading modules (93s of "collect" across 400 files) rather than tests (99s).
-The demo check (`pnpm demo:verify`) was not measured here: it uses ports shared with other work
-on the machine.
 
 Why spawning dominates: inside a vitest worker on macOS, `git --version` measured 150–550 ms
 against ~20 ms from plain node (`/usr/bin/true` stays ~6 ms). A conflict case shells out ~60 times

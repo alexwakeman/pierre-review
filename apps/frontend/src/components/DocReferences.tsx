@@ -33,7 +33,7 @@ const VERDICT_TONE: Record<ReviewDocVerdict, string> = {
   context: 'bg-ui-raise text-ui-ink',
 };
 
-// The SPA's base path: '/app/' in the app, '/demo/' in the static demo.
+// The SPA's base path ('/app/').
 const SPA_BASE = import.meta.env.BASE_URL;
 
 /**

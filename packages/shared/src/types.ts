@@ -2481,7 +2481,7 @@ export interface Repo {
   lastPrChangeAt?: string;
   // Server-side time (ISO) GitHub last answered for this repo — a free change probe, a scheduled
   // walk or a settle read. Walks run only on change, so this, not lastIncrementalSyncAt, says
-  // how fresh a quiet repo is. In-memory, so absent after a restart (and in the static demo).
+  // how fresh a quiet repo is. In-memory, so absent after a restart.
   lastCheckedAt?: string;
 }
 

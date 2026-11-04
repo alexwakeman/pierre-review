@@ -30,8 +30,7 @@
 // the Haiku-backed feature is filmable on a stack with no API key. See
 // scripts/seed-addressed-check.ts; it says so at length.
 //
-// THE STATIC DEMO (apps/frontend/src/demo, recorded by scripts/record-demo.mjs) needs every surface
-// populated, so three siblings run at the end, each through the product's own code:
+// The demo stack (`pnpm demo`) needs every surface populated, so three siblings run at the end, each through the product's own code:
 //   • seed-demo-tracker.ts   a fictional Jira site (acme.atlassian.net) behind Platform: the PR
 //                            ticket worker, the sprint read, briefs, themes and critical paths.
 //   • seed-demo-agentic.ts   the code behind the main PRs (scripts/lib/demo-diffs.mjs), finished
@@ -343,11 +342,11 @@ const PRS: PrSeed[] = [
 // ⚠ THE CURRENT REPORTING WEEK ALWAYS HOLDS A MERGE. Chronology → Over time reads the Platform
 // workspace's weeks (Monday 00:00 in its zone, set by seed-demo-platform.ts) and its last marker
 // ("acme/api joined", the seed's own moment) says "N merged so far · Not counted until the week ends"
-// — `verify-demo`'s `reports:chronology-event`. Whole-day dating (`day(n)`) leaves that week empty
+// Whole-day dating (`day(n)`) leaves that week empty
 // early in the week (#106, the newest measured merge, lands 2 days back: Sunday, seen from a Monday),
 // and the popover then reads "Nothing merged that week". So when #106's usual moment falls before the
 // week began, it lands inside the week instead: at max(week start + 5 min, now − 2 h), never after
-// now. From Wednesday on (and later on Tuesday) nothing moves, so no other recorded view changes.
+// now. From Wednesday on (and later on Tuesday) nothing moves.
 const { localWeeksEndingAt } = await import('../src/db/working-hours.js');
 const PLATFORM_FLOW_TZ = 'Europe/London'; // seed-demo-platform.ts's flow-settings timeZone
 const reportingWeekStart = localWeeksEndingAt(now.getTime(), PLATFORM_FLOW_TZ, 1)[0]!.startMs;

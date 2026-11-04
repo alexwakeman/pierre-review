@@ -24,7 +24,7 @@ from here**; let CI (or the user) do it.
 the dev tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the **single**
 `setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` → JSON 404; `/app*` → SPA;
 `/` + anything else → 302 `/app/`. SPA built `base:'/app/'`. **The npm package ships the app
-only** — the marketing site (landing, contact form, the static demo) is a separate service,
+only** — the marketing site (landing, contact form) is a separate service,
 `apps/site`, deployed on its own (below and [RELEASE.md](RELEASE.md) § The website).
 
 **The landing is PRERENDERED at build time** (`apps/landing/prerender.mjs`, chained after

@@ -1,13 +1,12 @@
 # Build context excludes — keep the image small and never ship local state/secrets.
 #
-# The image is the website only (apps/site + the landing + the demo build), so the
+# The image is the website only (apps/site + the landing), so the
 # submodules are never needed: packages/ml carries ~300 MB of Git-LFS model weights and
 # packages/pro is private. Both stay out of the context.
 packages/ml
 packages/pro
 **/node_modules
 **/dist
-**/dist-demo
 **/.ssr-build
 **/.turbo
 release

@@ -2,11 +2,9 @@
 //
 // GitHub is not reachable from the demo stack, so the Changes tab's file list (`GET
 // /api/prs/:id/files`, a live GitHub read in the product) has nothing to show. This module is the
-// ONE place those diffs live, read by both halves of the demo:
-//   • the seeder (apps/backend/scripts/seed-demo-agentic.ts) stores each PR's file list and sizes,
-//     re-anchors the seeded review threads and Claude findings onto lines these hunks really add,
-//     and hands the diff to the Claude Review run it fakes;
-//   • the recorder (scripts/record-demo.mjs) answers the Changes tab's request with these files.
+// ONE place those diffs live. The seeder (apps/backend/scripts/seed-demo-agentic.ts) stores each
+// PR's file list and sizes, re-anchors the seeded review threads and Claude findings onto lines
+// these hunks really add, and hands the diff to the Claude Review run it fakes.
 // Everything is fictional code for a fictional team.
 
 /** One file: its path, status and hunks. A hunk is { oldStart, newStart, header, lines } where every
