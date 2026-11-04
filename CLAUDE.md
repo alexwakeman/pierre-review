@@ -322,8 +322,10 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   `AiRunGate kind=…`** (`components/AiSetup.tsx`), agentic and one-shot alike. Never credits: on an
   API key a run shows US$; on a subscription its share of the week, never US$ — always through ONE
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
-- **Sync-round state has ONE driver, `SyncStatus`; there is ONE header toast strip,
-  `HeaderToasts`** (never a second strip or a `fixed` toast). Both: docs/FRONTEND.md.
+- **Sync-round state has ONE driver, `SyncStatus`; there is ONE toast cluster,
+  `HeaderToasts`, FIXED at the bottom right** (never a second one; its panel opens up and left).
+  **Every page title goes through `PageHeader`** (`PAGE_GUTTER` + `PAGE_HEADER_TOP`, pinned by
+  `e2e/header-geometry.spec.ts`); the top bar is `lg:hidden` everywhere. Both: docs/FRONTEND.md.
 - **Reactions are fetched ON DEMAND (batched), NEVER STORED.**
 
 ---
