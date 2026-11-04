@@ -71,7 +71,8 @@ export function PageToastSlot({ className }: { className?: string } = {}): JSX.E
     };
   }, [el]);
   // Desktop only: below lg the strip stays in the top bar. Empty, it takes no room.
-  return <div ref={setEl} data-page-toasts className={cx('hidden min-w-0 max-w-[min(34rem,45%)] shrink justify-end self-start lg:flex', className)} />;
+  // `ml-auto`: the seat is always at the RIGHT, even when its row wraps under a long title.
+  return <div ref={setEl} data-page-toasts className={cx('ml-auto hidden min-w-0 max-w-[min(34rem,45%)] shrink justify-end self-start lg:flex', className)} />;
 }
 
 export function PageHeader({

@@ -105,7 +105,9 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
       <div className="hidden min-w-0 flex-1 md:flex lg:hidden">
         <PinnedTabsBar />
       </div>
-      <div className="flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-auto md:justify-start">
+      {/* ⚠ `ml-auto`: at lg+ on a page with no toast seat of its own (Implement story) every other
+          child of the bar is hidden, and without it the cluster sat at the LEFT. Always right. */}
+      <div className="ml-auto flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-auto">
         {toasts}
       </div>
     </header>

@@ -25,7 +25,7 @@ import {
   safeExternalUrl,
   userLabel,
 } from '../../lib/ui.js';
-import { prCountLabel, type OpenPrsStack } from '../../lib/openPrsStacks.js';
+import type { OpenPrsStack } from '../../lib/openPrsStacks.js';
 import { githubPrUrl } from '../../lib/prLink.js';
 import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { Avatar } from '../CommentCard.js';
@@ -796,7 +796,7 @@ function TicketGroup({
         tabIndex={-1}
         className="scroll-mt-4 rounded-ui outline-none"
       >
-        {/* ONE line at every width: chevron · key + story name (→ the story view) … PR count. The
+        {/* ONE line at every width: chevron · key + story name (→ the story view). No PR count. The
             ticket's status, assignee, criteria met and Re-check live in the story view, one click away. */}
         <div role="presentation" className="flex min-w-0 items-center gap-3 rounded-ui px-1 py-1.5">
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -840,7 +840,6 @@ function TicketGroup({
               )}
             </h3>
           </div>
-          <span className="shrink-0 text-meta tabular-nums text-ui-faint">{prCountLabel(stack.rows.length)}</span>
         </div>
         {/* The group's rows sit INSIDE the ticket: inset so a row's status icon lines up with the
             ticket icon (12px on a phone), with a quiet guide line under the chevron. Every row of

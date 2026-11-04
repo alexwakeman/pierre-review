@@ -534,8 +534,8 @@ const VIEWS = [
   ],
   // THE AI REVIEW ON THE PR OVERVIEW: #114's newest review is Priya's (posted after Morgan's run), so the
   // card names her; one of her open findings has no severity ("other"). #113's is Morgan's own.
-  ['pr:114:overview-ai-review', '?view=pr-detail:114&prTab=overview', null, { expect: ['Priya’s review', 'Open AI Review', '1 other'] }],
-  ['pr:113:overview-ai-review', '?view=pr-detail:113&prTab=overview', null, { expect: ['AI review', 'Open AI Review', '1 blocker'] }],
+  ['pr:114:overview-ai-review', '?view=pr-detail:114&prTab=overview', null, { expect: ['AI review', 'Priya', 'Open review'] }],
+  ['pr:113:overview-ai-review', '?view=pr-detail:113&prTab=overview', null, { expect: ['AI review', 'Open review', '1 blocker'] }],
   // A legacy post (the bare marker): no model, the head inferred. Named "Lena".
   ['pr:141:teammate-review-legacy', '?view=pr-detail:141&prTab=ai_review', null, { expect: ['Lena'] }],
   // #111: Sam reviewed his own PR with Limn; Morgan's run follows up on it, under his name, with no

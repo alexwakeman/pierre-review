@@ -1463,7 +1463,8 @@ function TicketStack({
               ))}
             </span>
           )}
-          {(!single || stack.rows.length > 0) && (
+          {/* The story view keeps its count; the Open PRs groups carry none (their rows are the count). */}
+          {single && stack.rows.length > 0 && (
             <span className="whitespace-nowrap rounded-full bg-ui-surface px-2 py-px text-meta font-medium text-ui-mute ring-1 ring-ui-line">
               {prCountLabel(stack.rows.length)}
             </span>

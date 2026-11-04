@@ -574,8 +574,11 @@ export function ChecksTab({
   onOpenThreads,
   statusFocus,
   onStatusFocusConsumed,
+  aiReview,
 }: {
   pr: PrDetailT;
+  /** The Overview's AI review facts (pr/PrOverviewAiReview.tsx), drawn just above the Checks row. */
+  aiReview?: React.ReactNode;
   usersById: Map<number, User>;
   // Set (by PrDetail) only when this PR has automated-reviewer activity — enables the per-PR
   // bot-behaviour fetch + the "slower than typical" Overview badge that opens the Bot activity tab.
@@ -1152,6 +1155,8 @@ export function ChecksTab({
       )}
 
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
+
+      {aiReview}
 
       {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
           lists the checks — COLLAPSED to one summary line until the reader opens it. */}

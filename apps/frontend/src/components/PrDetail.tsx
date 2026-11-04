@@ -1,5 +1,5 @@
 import { PrStoryTab } from './pr/PrStoryTab.js';
-import { AiReviewOverview } from './pr/AiReviewOverview.js';
+import { PrOverviewAiReview } from './pr/PrOverviewAiReview.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invalidateSeenState } from '../hooks/useMarkRepoSeen.js';
@@ -1862,9 +1862,6 @@ export function PrDetail({
         >
         {effectiveTab === 'overview' ? (
           <div>
-            {/* The newest AI review (own or a teammate's), from the query the tab pill already
-                holds — no request of its own (pr/AiReviewOverview.tsx). */}
-            <AiReviewOverview prId={pr.id} enabled={claudeReviewEnabled} onOpen={() => goToTab('claude_review')} />
             {/* P3.2: the per-PR bot triage card, compact, in the Overview attention area —
                 renders nothing (and fetches nothing) below its bot-comment threshold. */}
             <BotTriageCard
@@ -1880,6 +1877,15 @@ export function PrDetail({
               onOpenThreads={openThreadsView}
               statusFocus={statusFocus}
               onStatusFocusConsumed={() => setStatusFocus(null)}
+              aiReview={
+                // The Open PRs side panel's AI review facts, above the Checks row.
+                <PrOverviewAiReview
+                  prId={pr.id}
+                  enabled={claudeReviewEnabled}
+                  onOpenReview={() => goToTab('claude_review')}
+                  onOpenFix={() => goToTab(aiFixTabEnabled ? 'ai_fix' : 'claude_review')}
+                />
+              }
             />
             {/* The PR's Activity, collapsed at the foot of Overview (it was a tab). */}
             <ActivitySection

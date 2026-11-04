@@ -124,11 +124,11 @@ describe('the wiring', () => {
     expect(ai).not.toMatch(/PILL|rounded-ui bg-|bg-ai-surface|ring-1/);
   });
 
-  it('a ticket group folds (per session, never stored); its line is the key, the story name and the PR count only', () => {
+  it('a ticket group folds (per session, never stored); its line is the key and the story name only, no PR count', () => {
     const group = rows.slice(rows.indexOf('function TicketGroup('), rows.indexOf('function MergedRows('));
     expect(group).toMatch(/aria-expanded=\{!folded\}/);
     expect(group).toMatch(/<TicketKeyButton/);
-    expect(group).toMatch(/prCountLabel\(stack\.rows\.length\)/);
+    expect(group).not.toMatch(/prCountLabel/);
     // Status, type, assignee, criteria met, Re-check, "changed since", "reviewed ago" and the roll-up
     // live in the story view, not on the group line.
     expect(group).not.toMatch(/TicketFacts|GroupCoverage|stackRollup|<ReviewedAgo|useStartTicketReview|t\.assignee|t\.issueType|t\.status/);

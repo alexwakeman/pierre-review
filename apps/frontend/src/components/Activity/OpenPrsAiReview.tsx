@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, type ReactNode } from 'react';
 import type { CiReviewState, ClaudeReviewPrState, ClaudeReviewVerdict, ClaudeTeamClaimSkip } from '@pierre-review/shared';
 import { pairModelsLabel } from '@pierre-review/shared';
 import { isAutoReviewHoldError, useClaudeReviewStarting, useStartReviewFromList } from '../../hooks/useClaudeReview.js';
@@ -33,8 +33,23 @@ import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 // the server's `summary` (a finished run only) — nothing here prints a zero it does not know, and
 // nothing fetches on mount: the only requests follow a click.
 
+/** Where the facts are drawn: the Open PRs side panel ('drawer'), or the PR's Overview tab
+ *  ('overview'), whose rows have their own gutters and a wider label column (ChecksTab `Row`). */
+export type AiReviewLayout = 'drawer' | 'overview';
+const LayoutContext = createContext<AiReviewLayout>('drawer');
+
 /** One fact: label column + value column (the panel's own row, shared with OpenPrsRows). */
 export function Fact({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  const layout = useContext(LayoutContext);
+  if (layout === 'overview') {
+    // The Overview's row: label above the value on a phone, beside it from sm up (ChecksTab `Row`).
+    return (
+      <div className="flex flex-col gap-0.5 px-4 py-1.5 text-body sm:flex-row sm:gap-3 md:px-5">
+        <dt className="shrink-0 text-meta text-ui-faint sm:w-28 sm:pt-0.5">{label}</dt>
+        <dd className="m-0 min-w-0 flex-1 text-body text-ui-ink">{children}</dd>
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-7 items-start gap-3 py-1">
       <dt className="w-24 shrink-0 pt-px text-meta text-ui-faint">{label}</dt>
@@ -79,7 +94,9 @@ export function DrawerAiReview({
   ticketPills,
   onOpenReview,
   onOpenFix,
+  layout = 'drawer',
 }: {
+  layout?: AiReviewLayout;
   prId: number;
   state: ClaudeReviewPrState | undefined;
   ciState: CiReviewState | undefined;
@@ -187,8 +204,14 @@ export function DrawerAiReview({
   };
 
   return (
-    <section role="group" aria-label="AI review" data-testid="open-prs-panel-ai-review">
-      <h3 className="mb-1 text-meta text-ui-faint">AI review</h3>
+    <LayoutContext.Provider value={layout}>
+    <section
+      role="group"
+      aria-label="AI review"
+      data-testid={layout === 'overview' ? 'pr-ai-review-overview' : 'open-prs-panel-ai-review'}
+      className={layout === 'overview' ? 'py-1' : undefined}
+    >
+      <h3 className={cx('mb-1 text-meta text-ui-faint', layout === 'overview' && 'px-4 pt-1 font-medium md:px-5')}>AI review</h3>
       <dl className="m-0">
         <Fact label={cell.kind === 'done' ? 'Verdict' : 'Status'}>{status}</Fact>
 
@@ -334,8 +357,8 @@ export function DrawerAiReview({
       </dl>
 
       {/* The action sits in the value column, under the facts it acts on. */}
-      <div className="mt-1.5 flex gap-3">
-        <span aria-hidden className="w-24 shrink-0" />
+      <div className={cx('mt-1.5 flex gap-3', layout === 'overview' && 'px-4 md:px-5')}>
+        <span aria-hidden className={cx('shrink-0', layout === 'overview' ? 'max-sm:hidden sm:w-28' : 'w-24')} />
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5">
           {canStart ? (
             <AiRunGate kind="review">
@@ -352,5 +375,6 @@ export function DrawerAiReview({
         </div>
       </div>
     </section>
+    </LayoutContext.Provider>
   );
 }

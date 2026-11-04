@@ -370,8 +370,8 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   under a HEADING ROW (Review · CI · Threads · AI review, each with a
   tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so
   a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
-  session, never stored) whose line is the chevron, the ticket key + story name (→ the story view) and
-  the PR count ONLY — status, assignee, criteria met, Re-check and the roll-up are in the story view
+  session, never stored) whose line is the chevron and the ticket key + story name (→ the story view) ONLY — NO PR
+  count (2026-11-04; the story view keeps its count) — status, assignee, criteria met, Re-check and the roll-up are in the story view
   (2026-11-02). **A row is ALWAYS TWO LINES, drawer open or closed** (2026-11-03): the title,
   then `repo#N · avatar author · age` (`data-testid="open-prs-row-two-line"`; the repo label gives
   way first, the author and age never truncate away). The size is in the drawer. There is no
@@ -803,15 +803,15 @@ only, bare, no fork owner) on its own row under it, only when the head has synce
 `break-all`. The full-screen PR detail's top spacing matches the story tab's (§ ONE header toast strip:
 it hosts the strip through `PageToastSlot`). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
 
-**Overview opens with THE AI REVIEW** (2026-11-03; `pr/AiReviewOverview.tsx`, words in
-`lib/aiReviewOverview.ts`, `test/aiReviewOverview.test.ts`): the newest Limn review — the reader's
-own, or a teammate's named "Robin’s review" (`teamView.lead`; an older server: the newer of the two) —
-its verdict, when, the OPEN findings by severity (the reader's latest succeeded run + `teamView.findings`;
-praise is never one; a teammate's unlabelled ones read "N other"), three lines of its summary as plain
-text, and "Open AI Review". ⚠ **It fetches nothing**: it observes `['claude-review', prId]`, the read
-PrDetail keeps mounted on load (`useClaudeReviewTabPill`, no longer drawn), with `staleTime: Infinity`.
-Hidden with `me.ai.enabled` off or no finished review. **The AI Review tab label has NO verdict
-pill** (the verdict is on the tab's page and this card); it keeps its sparkle like every tab's icon.
+**The Overview's AI REVIEW sits just above the Checks row** (2026-11-04; `pr/PrOverviewAiReview.tsx`,
+passed to `ChecksTab` as `aiReview`): the SAME facts as the Open PRs side panel — it renders
+`DrawerAiReview` (`Activity/OpenPrsAiReview.tsx`) with `layout="overview"`, which draws each `Fact` in
+the Overview's row (label column `sm:w-28`, the page gutters) instead of the panel's. Verdict and its
+commit, findings, the earlier review, CI, what was posted, when it ran, and the one action (Review /
+Re-review / Open review). It reads the batched `useClaudeReviewStates` / `useCiReviewStates` for this
+one PR, so the panel and the Overview never disagree. The panel's Story check line is left out (the
+header's criteria chips and the Ticket row carry the story). Hidden with `me.ai.enabled` off. **The AI
+Review tab label has NO verdict pill**; it keeps its sparkle like every tab's icon.
 
 **Tabs: Overview · Comments · Threads · Changes** (+ the gated ones below). ⚠ **Activity is NOT a tab
 any more** — it is the collapsed **Activity** section at the foot of Overview (`ActivitySection`, a
@@ -5135,6 +5135,9 @@ the Timeline never hosts it.
   announces a circle appearing; `undo-toast` etc. test ids sit on the circle, the section is
   `<testId>-panel`). ⚠ **The cluster's click is a NATIVE listener**: a React `onClick` on the button
   never fires for a click on a portalled circle (React bubbles through the job's own tree).
+- **THE CLUSTER IS ALWAYS AT THE RIGHT.** The top bar's toast box is `ml-auto` and so is
+  `PageToastSlot`: at lg+ on a page with no toast seat of its own (Implement story) every other child
+  of the bar is hidden, and without it the cluster sat at the LEFT of the content.
 - **THE TOP BAR HAS A FIXED HEIGHT** (`h-11`, no vertical padding, `TopBar`); the cluster is 32px
   inside it and an empty cluster is `hidden`, never unmounted (the circles portal into it), so a job
   appearing never moves the page.
