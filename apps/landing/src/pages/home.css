@@ -203,7 +203,15 @@
   font-weight: 500;
   color: rgba(241, 241, 239, 0.72);
   text-decoration: none;
-  margin-right: 10px;
+}
+/* The arrow from the old figure to the outcome. */
+.lb.home .proof .n .arrow {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.28em;
+  margin: 0 0.2em 0 0.24em;
+  vertical-align: 0.14em;
+  color: rgba(241, 241, 239, 0.72);
 }
 .lb.home .proof .tile p + p {
   margin-top: 12px;

@@ -149,7 +149,7 @@ export default function Reporting(): JSX.Element {
         </Shot>
         <div className="tile lapis r-big rise">
           <p className="r-fig">
-            42 min<span> to merge half of pull requests in the week of 19 Oct, from about 7 h in September</span>
+            42 min<span> to merge half of pull requests in October, from about 7 h in September</span>
           </p>
         </div>
         <div className="tile r-proof rise">
@@ -159,8 +159,8 @@ export default function Reporting(): JSX.Element {
             within an hour of working time, and twice as many land each week. It cost them nothing extra.
           </p>
           <p className="src">
-            Measured by Limn's Chronology report: merged pull requests by people, working hours, September vs the week of 19
-            October 2026.
+            Measured by Limn's Chronology report: merged pull requests by people, working hours, September vs October 2026 after
+            Limn auto-review introduced.
           </p>
         </div>
         <div className="tile madder r-usd rise">
