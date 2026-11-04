@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { TicketReviewItem, TicketReviewMember } from '@pierre-review/shared';
 import {
+  approvalWithdrawLines,
   autoLiftLine,
   autoPostFailureLine,
   autoPostSkipLine,
@@ -236,5 +237,48 @@ describe('Post reminder (a finding already on GitHub)', () => {
     expect(tab).toContain('canPostReminder(post, editable)');
     expect(tab).toContain('reminderChipLabel(finding.reminder)');
     expect(tab).toContain("onPostFinding(f.id, { reminder: true })");
+  });
+});
+
+describe("withdrawing Limn's own approval", () => {
+  it('on the approving run: the message GitHub got, or why it failed; nothing while claimed', () => {
+    const w = (status: 'withdrawing' | 'withdrawn' | 'failed', error: string | null = null) => ({
+      approvalWithdrawal: {
+        status,
+        at: '2026-11-04T12:00:00Z',
+        why: 'push' as const,
+        headSha: '91482c8aaaa',
+        message: 'Limn withdrew its approval: new commits since it approved (91482c8).',
+        error,
+      },
+    });
+    expect(approvalWithdrawLines(w('withdrawn'))).toEqual([
+      { text: 'Limn withdrew its approval: new commits since it approved (91482c8).', failed: false },
+    ]);
+    expect(approvalWithdrawLines(w('failed', 'Must have admin rights.'))).toEqual([
+      { text: 'Couldn’t withdraw this approval: Must have admin rights.', failed: true },
+    ]);
+    expect(approvalWithdrawLines(w('withdrawing'))).toEqual([]);
+    expect(approvalWithdrawLines(null)).toEqual([]);
+  });
+
+  it('on the later run: one line, and a failed withdrawal-only run is not also a "Couldn’t post" line', () => {
+    const d = (how: 'withdrawn' | 'withdraw_failed', error: string | null = null) => ({
+      withdrewApproval: { reviewId: 'R1', how, message: 'm', error },
+    });
+    expect(approvalWithdrawLines(d('withdrawn'))).toEqual([{ text: 'Withdrew Limn’s earlier approval.', failed: false }]);
+    expect(approvalWithdrawLines(d('withdraw_failed', 'Nope.'))).toEqual([
+      { text: 'Couldn’t withdraw Limn’s earlier approval: Nope.', failed: true },
+    ]);
+    expect(autoPostFailureLine({ status: 'failed', error: 'Nope.', ...d('withdraw_failed', 'Nope.') })).toBeNull();
+  });
+
+  it('is mounted in the Claude Review tab, and the Settings switch is there', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const tab = readFileSync(join(here, '../src/components/ClaudeReviewTab.tsx'), 'utf8');
+    expect(tab).toContain('approvalWithdrawLines(review.autoPost)');
+    const section = readFileSync(join(here, '../src/components/settings/AutoReviewSection.tsx'), 'utf8');
+    expect(section).toContain('Withdraw Limn’s approval when new commits are pushed');
+    expect(section).toContain('withdrawApprovalOnPush: withdrawOn');
   });
 });

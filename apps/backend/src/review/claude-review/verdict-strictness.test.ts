@@ -15,6 +15,7 @@
 //      settings history, and the route refuses anything else.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/verdict-strictness
+import { pairCodeVerdict } from './pair-view.js';
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -73,6 +74,19 @@ describe('the rules, pure', () => {
     expect(findingsNotApproved(runs('APPROVE', 'COMMENT'), [], STRICT)).toEqual({ heldReason: 'pair_strict', text: CODEX_REASON });
     expect(autoVerdictFor(pairVerdict('APPROVE', 'COMMENT', 'relaxed'), [])).toBe('APPROVE');
     expect(findingsNotApproved(runs('APPROVE', 'COMMENT'), [], RELAXED)).toBeNull();
+  });
+
+  it('relaxed: a warning from either model ⇒ COMMENT, never APPROVE; a blocker ⇒ REQUEST_CHANGES', () => {
+    // One model approved, the other commented with a warning (the #591 follow-up shape).
+    expect(pairCodeVerdict('APPROVE', 'COMMENT', [f('warning')], RELAXED)).toBe('COMMENT');
+    expect(pairCodeVerdict('APPROVE', 'COMMENT', [f('nit'), f('warning')], RELAXED)).toBe('COMMENT');
+    // A warning with a Request changes from one half: still COMMENT (no blocker).
+    expect(pairCodeVerdict('COMMENT', 'REQUEST_CHANGES', [f('warning')], RELAXED)).toBe('COMMENT');
+    // A blocker wins whatever the models said.
+    expect(pairCodeVerdict('APPROVE', 'APPROVE', [f('blocker')], RELAXED)).toBe('REQUEST_CHANGES');
+    expect(pairCodeVerdict('APPROVE', 'COMMENT', [f('warning'), f('blocker')], RELAXED)).toBe('REQUEST_CHANGES');
+    // Only nits/questions left: relaxed may approve.
+    expect(pairCodeVerdict('APPROVE', 'COMMENT', [f('nit')], RELAXED)).toBe('APPROVE');
   });
 
   it('relaxed, but one half asked for changes ⇒ not approved, naming it', () => {

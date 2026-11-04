@@ -54,6 +54,7 @@ import { findingAuthorName, reviewByName, threadsByName } from '../lib/reviewAut
 import { pairRunningLabel } from '../lib/modelPick.js';
 import {
   autoLiftLine,
+  approvalWithdrawLines,
   teammateLiftLines,
   autoPostFailureLine,
   autoPostSkipLine,
@@ -2722,6 +2723,11 @@ export function ClaudeReviewTab({
             </p>
           )}
           {teammateLiftLines(review.autoPost).map((l) => (
+            <p key={l.text} className={l.failed ? 'text-meta text-ui-warn' : 'text-meta text-ui-mute'}>
+              {l.text}
+            </p>
+          ))}
+          {approvalWithdrawLines(review.autoPost).map((l) => (
             <p key={l.text} className={l.failed ? 'text-meta text-ui-warn' : 'text-meta text-ui-mute'}>
               {l.text}
             </p>

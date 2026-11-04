@@ -57,11 +57,21 @@ export function effectivePost(
  * A skip says nothing: nothing was meant to be posted.
  */
 export function autoPostFailureLine(
-  a: { status: AutoPostStatus; error: string | null; liftedBlock?: ClaudeAutoLiftRecord | null } | null | undefined,
+  a:
+    | {
+        status: AutoPostStatus;
+        error: string | null;
+        liftedBlock?: ClaudeAutoLiftRecord | null;
+        withdrewApproval?: ClaudeAutoPostWire['withdrewApproval'];
+      }
+    | null
+    | undefined,
 ): string | null {
   if (a == null) return null;
-  // A run whose only write was lifting Claude's earlier block: `autoLiftLine` says what failed.
+  // A run whose only write was lifting Claude's earlier block (or withdrawing Limn's approval):
+  // `autoLiftLine` / `approvalWithdrawLines` says what failed.
   if (a.status === 'failed' && a.liftedBlock?.how === 'dismiss_failed') return null;
+  if (a.status === 'failed' && a.withdrewApproval?.how === 'withdraw_failed') return null;
   const why = a.error != null && a.error.trim() !== '' ? a.error.trim() : 'GitHub did not accept it.';
   if (a.status === 'failed') return `Couldn’t post automatically: ${why}`;
   if (a.status === 'partial') return `Couldn’t post all of it automatically: ${why}`;
@@ -168,6 +178,29 @@ export function teammateLiftLines(
     const why = l.error != null && l.error.trim() !== '' ? l.error.trim() : 'GitHub did not accept it.';
     return { text: `Couldn’t dismiss ${l.login}’s request for changes: ${why}`, failed: true };
   });
+}
+
+/** Limn withdrawing its OWN automatic approval (docs/CLAUDE-REVIEW.md § Withdrawing Limn's approval):
+ *  on the approving run, what became of it; on a later run, that it withdrew it first. [] otherwise. */
+export function approvalWithdrawLines(
+  a: Pick<ClaudeAutoPostWire, 'approvalWithdrawal' | 'withdrewApproval'> | null | undefined,
+): Array<{ text: string; failed: boolean }> {
+  const out: Array<{ text: string; failed: boolean }> = [];
+  const why = (e: string | null | undefined) => (e != null && e.trim() !== '' ? e.trim() : 'GitHub did not accept it.');
+  const w = a?.approvalWithdrawal;
+  if (w != null) {
+    if (w.status === 'withdrawn') out.push({ text: w.message, failed: false });
+    else if (w.status === 'failed') out.push({ text: `Couldn’t withdraw this approval: ${why(w.error)}`, failed: true });
+  }
+  const d = a?.withdrewApproval;
+  if (d != null) {
+    out.push(
+      d.how === 'withdrawn'
+        ? { text: 'Withdrew Limn’s earlier approval.', failed: false }
+        : { text: `Couldn’t withdraw Limn’s earlier approval: ${why(d.error)}`, failed: true },
+    );
+  }
+  return out;
 }
 
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */

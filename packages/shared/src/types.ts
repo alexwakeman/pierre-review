@@ -4412,6 +4412,8 @@ export interface SetWorkspaceAutoReviewBody {
   dailyCap?: number;
   // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
   teamClaimsEnabled?: boolean;
+  // `WorkspaceAutoReviewSettings.withdrawApprovalOnPush`.
+  withdrawApprovalOnPush?: boolean;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
   // keeps its stored value.
   autoPost?: {
@@ -4484,6 +4486,11 @@ export interface WorkspaceAutoReviewSettings {
   // so teammates' Limn skips a commit someone is already reviewing with the same provider. OFF by
   // default (only a stored true is on). Needs write access to the repo. Absent on older servers.
   teamClaimsEnabled?: boolean;
+  // "Withdraw Limn's approval when new commits are pushed" (`workspaces.withdraw_approval_on_push`,
+  // migration 0165). When a PR's head moves off the commit Limn's OWN automatic approval was given
+  // on, Limn dismisses that approval (never a person's approval, never one posted by hand). ON by
+  // default (only a stored false is off). Absent on older servers.
+  withdrawApprovalOnPush?: boolean;
 }
 
 // Who runs a workspace's auto reviews: the default provider, or Claude then Codex as one pair.
@@ -4747,6 +4754,33 @@ export interface ClaudeAutoPostRecord {
   // record (or an earlier one's) already carries `reasonPosted` posts nothing more.
   reasonPosted?: string | null;
   reasonOnly?: boolean;
+  // Set on the run whose AUTOMATIC APPROVE this is, once Limn withdrew it (docs/CLAUDE-REVIEW.md §
+  // Withdrawing Limn's approval). It is also THE CLAIM: written (compare-and-set from absent) with
+  // status 'withdrawing' BEFORE the dismissal, so a push and a later run never both dismiss it.
+  approvalWithdrawal?: ClaudeApprovalWithdrawal | null;
+  // Set on a LATER run that withdrew Limn's own automatic approval before posting (absent otherwise).
+  withdrewApproval?: ClaudeWithdrewApprovalRecord | null;
+}
+// Limn withdrawing its OWN earlier automatic APPROVE (matched by that run's `githubReviewId`, never by
+// marker): 'push' = new commits since it approved; 'run' = a later run at a new head did not approve.
+// 'failed' carries GitHub's words in `error`; never retried. A 'withdrawing' left by a crash stays.
+export interface ClaudeApprovalWithdrawal {
+  status: 'withdrawing' | 'withdrawn' | 'failed';
+  at: string; // ISO-8601
+  why: 'push' | 'run';
+  // The head that made Limn withdraw it.
+  headSha: string;
+  // The dismissal message sent to GitHub.
+  message: string;
+  // why 'run': the run that withdrew it.
+  byReviewId?: number | null;
+  error: string | null;
+}
+export interface ClaudeWithdrewApprovalRecord {
+  reviewId: string;
+  how: 'withdrawn' | 'withdraw_failed';
+  message: string;
+  error: string | null;
 }
 // Limn lifting its own earlier AUTOMATIC request for changes (matched by an earlier run's
 // `githubReviewId`, never by marker) on a run with no blocker: 'superseded' (this run's APPROVE
@@ -4786,6 +4820,10 @@ export interface ClaudeAutoPostWire {
   // The not-approved reason went to GitHub (ClaudeAutoPostRecord.reasonPosted / .reasonOnly).
   reasonPosted?: boolean;
   reasonOnly?: boolean;
+  // Limn withdrew THIS run's automatic approval (ClaudeAutoPostRecord.approvalWithdrawal).
+  approvalWithdrawal?: ClaudeApprovalWithdrawal | null;
+  // This run withdrew Limn's earlier automatic approval (ClaudeAutoPostRecord.withdrewApproval).
+  withdrewApproval?: ClaudeWithdrewApprovalRecord | null;
 }
 
 // What CI auto-posting did with ONE auto CI review run (`ci_reviews.auto_post`, migration 0091 /

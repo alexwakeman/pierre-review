@@ -67,6 +67,15 @@ type VerdictFinding = Pick<ClaudeFinding, 'severity' | 'included' | 'story'> &
 const countedOf = <F extends VerdictFinding>(findings: readonly F[]): F[] =>
   findings.filter((f) => f.story == null && !isReaderIgnoredFinding(f));
 
+/** How many blockers and warnings a run's verdict counts (the same findings `autoVerdictFor` reads). */
+export function blockerWarningCounts(findings: readonly VerdictFinding[]): { blockers: number; warnings: number } {
+  const counted = countedOf(findings);
+  return {
+    blockers: counted.filter((f) => f.severity === 'blocker').length,
+    warnings: counted.filter((f) => f.severity === 'warning').length,
+  };
+}
+
 /**
  * The verdict an auto post wants — the model's, made STRICTER. Counts the run's non-story findings a
  * reader did not ignore (whatever the kind toggles say): any blocker ⇒ REQUEST_CHANGES; APPROVE only

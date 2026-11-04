@@ -37,6 +37,12 @@
 //      (`unsettledEarlierBlockers`) and none of the blocking run's own blockers that never reached
 //      GitHub (`loadUnpostedBlockersOfBlock` — never followed up, so never judged). Otherwise no
 //      dismissal, and an APPROVE over the block is held as 'already_requested';
+//   3b'. THE WITHDRAWAL (./approval-withdraw.ts, always on): a run at a NEW head that does not approve
+//      while Limn's OWN earlier AUTOMATIC APPROVE still stands (an earlier run's `githubReviewId` —
+//      never the marker) DISMISSES it before the post ("Limn withdrew its approval: 3 warnings found
+//      at 91482c8."), claimed on the approving run's record (`approvalWithdrawal`) so the push path
+//      and this never both dismiss; recorded as `withdrewApproval`, never retried. Its REQUEST_CHANGES
+//      then goes out (the gate's 'LIMN_AUTO_APPROVED' is not the reader's verdict);
 //   3c. THE REASON (only with `autoVerdict` on): a run that does not end in an APPROVE gets ONE
 //      plain-English "Not approved: …" line (`findingsNotApproved` + the gate's `heldReason`,
 //      ./auto-verdict.ts), stored on the verdict record (`reasonText`). Posted findings carry it as the
@@ -97,7 +103,14 @@ import {
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
 import {
+  loadLimnAutoApprovals,
+  withdrawApproval,
+  withdrawMessageForRun,
+  type LimnAutoApproval,
+} from './approval-withdraw.js';
+import {
   autoVerdictFor,
+  blockerWarningCounts,
   findingsNotApproved,
   pairVerdict,
   reasonMayPost,
@@ -275,8 +288,16 @@ export { autoVerdictFor } from './auto-verdict.js';
  * 'LIMN_AUTO_CHANGES_REQUESTED' = the standing review is Limn's OWN earlier AUTOMATIC request for
  * changes — matched by a stored `auto_post.githubReviewId`, never by marker or body (a manual Post
  * carries the same marker and is the reader's own judgement).
+ * 'LIMN_AUTO_APPROVED' = the standing review is Limn's OWN earlier AUTOMATIC approval, matched the same
+ * way (./approval-withdraw.ts). A hand approval, or one posted with the Post button, stays 'APPROVED'.
  */
-export type OwnLatestReview = 'none' | 'APPROVED' | 'CHANGES_REQUESTED' | 'LIMN_AUTO_CHANGES_REQUESTED' | 'unreadable';
+export type OwnLatestReview =
+  | 'none'
+  | 'APPROVED'
+  | 'CHANGES_REQUESTED'
+  | 'LIMN_AUTO_CHANGES_REQUESTED'
+  | 'LIMN_AUTO_APPROVED'
+  | 'unreadable';
 
 /** A PR's impact level as the auto-approve gate reads it: null (the resolver drew nothing) → 'unknown'. */
 export type ImpactLevel = 'high' | 'medium' | 'low' | 'unknown';
@@ -308,6 +329,9 @@ export function verdictGate(
       ? { wanted, submitted: wanted, heldReason: null }
       : { wanted, submitted: 'COMMENT', heldReason: 'already_requested' };
   }
+  // Limn's OWN automatic approval is not the reader's: a new APPROVE supersedes it, and a request for
+  // changes goes out (auto-post withdraws the approval first when the head moved).
+  if (g.ownLatest === 'LIMN_AUTO_APPROVED') return { wanted, submitted: wanted, heldReason: null };
   if (g.ownLatest !== 'none') return { wanted, submitted: 'COMMENT', heldReason: 'prior_review' };
   return { wanted, submitted: wanted, heldReason: null };
 }
@@ -325,12 +349,14 @@ export interface LiveReview {
  * The reader's standing verdict in a live GitHub list (oldest first): the latest of their DECISIVE
  * reviews — COMMENTED and PENDING are skipped, because neither supersedes a standing APPROVED or
  * CHANGES_REQUESTED on GitHub; a latest DISMISSED stands for nothing. `limnAutoBlockIds` = the ids of
- * Limn's own earlier AUTOMATIC REQUEST_CHANGES reviews on this PR (`loadLimnAutoBlockIds`).
+ * Limn's own earlier AUTOMATIC REQUEST_CHANGES reviews on this PR (`loadLimnAutoBlockIds`);
+ * `limnAutoApproveIds` = those of its own automatic APPROVEs (`loadLimnAutoApprovals`).
  */
 export function ownStandingReview(
   reviews: readonly LiveReview[],
   login: string | null,
   limnAutoBlockIds: ReadonlySet<string> = new Set(),
+  limnAutoApproveIds: ReadonlySet<string> = new Set(),
 ): { state: OwnLatestReview; reviewId: string | null } {
   if (!login) return { state: 'unreadable', reviewId: null };
   const me = login.toLowerCase();
@@ -343,7 +369,7 @@ export function ownStandingReview(
       case 'DISMISSED':
         return { state: 'none', reviewId: null };
       case 'APPROVED':
-        return { state: 'APPROVED', reviewId };
+        return { state: reviewId != null && limnAutoApproveIds.has(reviewId) ? 'LIMN_AUTO_APPROVED' : 'APPROVED', reviewId };
       case 'CHANGES_REQUESTED':
         return {
           state: reviewId != null && limnAutoBlockIds.has(reviewId) ? 'LIMN_AUTO_CHANGES_REQUESTED' : 'CHANGES_REQUESTED',
@@ -961,6 +987,15 @@ async function autoPostReview(
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
   const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
+  // WITHDRAWING LIMN'S OWN APPROVAL (./approval-withdraw.ts): a run at a NEW head that does not
+  // approve (whatever the auto-verdict switch says now) dismisses Limn's earlier AUTOMATIC approval
+  // that still stands, BEFORE it posts. A DB pre-check first, so an ordinary run reads nothing more.
+  const runApproves = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers) === 'APPROVE';
+  const limnApprovals = !facts.authorIsMe
+    ? await loadLimnAutoApprovals(ctx, accountId, prId, reviewId)
+    : new Map<string, LimnAutoApproval>();
+  const mayWithdraw =
+    !runApproves && [...limnApprovals.values()].some((x) => x.headSha !== review.headSha && x.withdrawal == null);
   // LIFTING A TEAMMATE'S LIMN BLOCK (./teammate-lift.ts): the DB pre-check first (both opt-ins, every
   // point behind the block settled), so an ordinary run costs no extra GitHub read.
   let readerLogin: string | null = null;
@@ -990,6 +1025,7 @@ async function autoPostReview(
     (wanted == null || wanted === 'COMMENT') &&
     !mayLift &&
     !mayLiftTeammate &&
+    !mayWithdraw &&
     !commentReasonToPost
   ) {
     return skip(...nothingReason());
@@ -1022,14 +1058,14 @@ async function autoPostReview(
   let standing: { state: OwnLatestReview; reviewId: string | null } = { state: 'unreadable', reviewId: null };
   // A teammate block still standing LIVE, with Limn's marker and the consent in its live body.
   let teammateLifts: TeammateLiftCandidate[] = [];
-  if (!facts.authorIsMe && ((wantsVerdict && !impactHeld) || mayLift || mayLiftTeammate)) {
+  if (!facts.authorIsMe && ((wantsVerdict && !impactHeld) || mayLift || mayLiftTeammate || mayWithdraw)) {
     try {
       const [login, reviews] = await Promise.all([
         deps.accountLogin(accountId),
         deps.liveReviews(pctx.owner, pctx.name, pctx.prNumber),
       ]);
       readerLogin = login;
-      standing = ownStandingReview(reviews, login, limnBlockIds);
+      standing = ownStandingReview(reviews, login, limnBlockIds, new Set(limnApprovals.keys()));
       teammateLifts = teammateCandidates.filter((c) => liveLiftCheck(reviews, c, login) == null);
     } catch (err) {
       ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
@@ -1070,10 +1106,19 @@ async function autoPostReview(
   // Limn's own automatic request for changes still stands, this run has no blocker and none behind
   // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
   const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
+  // Limn's own automatic approval of an OLDER head still stands and this run does not approve:
+  // withdraw it — unless the push path (or an earlier attempt) already claimed it.
+  const standingApproval =
+    standing.state === 'LIMN_AUTO_APPROVED' && standing.reviewId != null ? limnApprovals.get(standing.reviewId) : undefined;
+  const withdrawFrom: LimnAutoApproval | null =
+    !runApproves && standingApproval != null && standingApproval.headSha !== review.headSha && standingApproval.withdrawal == null
+      ? standingApproval
+      : null;
   if (
     picked.toPost.length === 0 &&
     (verdict?.submitted ?? 'COMMENT') === 'COMMENT' &&
     liftId == null &&
+    withdrawFrom == null &&
     !reasonOnly &&
     teammateLifts.length === 0
   ) {
@@ -1117,6 +1162,30 @@ async function autoPostReview(
     first = null;
   }
   const pairFirst: ClaudeReview | null = first;
+  // WITHDRAW LIMN'S OWN APPROVAL FIRST (claimed on the approving run, then dismissed, never retried),
+  // so the review below never sits under a stale approval.
+  let withdrew = false;
+  if (withdrawFrom != null) {
+    const message = withdrawMessageForRun(blockerWarningCounts(allFindings), review.headSha);
+    const w = await withdrawApproval(
+      ctx,
+      { accountId, prId, approval: withdrawFrom, why: 'run', headSha: review.headSha, message, byReviewId: reviewId },
+      (id, msg) =>
+        deps.dismissReview
+          ? deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, id, msg)
+          : Promise.resolve({ ok: false as const, message: 'Dismissing is not available.' }),
+    );
+    // null = the push path (or an earlier attempt) has it: nothing more to do here.
+    if (w != null) {
+      withdrew = w.status === 'withdrawn';
+      record.withdrewApproval = {
+        reviewId: withdrawFrom.githubReviewId,
+        how: withdrew ? 'withdrawn' : 'withdraw_failed',
+        message,
+        error: w.error,
+      };
+    }
+  }
   // The earlier Limn findings on GitHub this review judged, for the marker's `j=` (DB only, never throws).
   const judged = await loadJudgedForPost(ctx, accountId, prId, pairFirst != null ? [pairFirst, review] : [review]);
   // THE PAIR'S ONE REVIEW (pair-consolidate.ts): its summary, and who raised each kept finding. A pair
@@ -1304,21 +1373,31 @@ async function autoPostReview(
     if (lifted.length > 0) record.liftedTeammateBlocks = lifted;
   }
 
-  // A run whose only write was the lift: posted when it took, failed (GitHub's words) when not.
+  // A run whose only write was the lift or the withdrawal: posted when it took, failed (GitHub's
+  // words) when not. A withdrawal the push path had already claimed left nothing to do: skipped.
   const liftOnly = !sendsReview;
+  const otherWriteOk = dismissed || withdrew;
+  const nothingDone = liftOnly && liftId == null && record.withdrewApproval == null && teammateLifts.length === 0;
   const final: ClaudeAutoPostRecord = {
     ...record,
-    status: liftOnly
-      ? dismissed
-        ? 'posted'
-        : 'failed'
-      : !landed
-        ? 'failed'
-        : errors.length > 0
-          ? 'partial'
-          : 'posted',
+    status: nothingDone
+      ? 'skipped'
+      : liftOnly
+        ? otherWriteOk
+          ? 'posted'
+          : 'failed'
+        : !landed
+          ? 'failed'
+          : errors.length > 0
+            ? 'partial'
+            : 'posted',
+    ...(nothingDone ? { reason: nothingReason()[0] } : {}),
     at: nowIso(),
-    error: liftOnly ? (dismissed ? null : (record.liftedBlock?.error ?? null)) : (errors[0] ?? null),
+    error: liftOnly
+      ? otherWriteOk || nothingDone
+        ? null
+        : (record.liftedBlock?.error ?? record.withdrewApproval?.error ?? null)
+      : (errors[0] ?? null),
     postedFindingIds: [...posted],
   };
   await writeRecord(ctx, reviewId, final).catch((err) =>
@@ -1329,7 +1408,7 @@ async function autoPostReview(
       ctx.log.warn(`auto post review ${pairFirst.id}: could not record the result: ${errText(err)}`),
     );
   }
-  if (landed || dismissed) {
+  if (landed || dismissed || withdrew) {
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return { kind: 'done', record: final };

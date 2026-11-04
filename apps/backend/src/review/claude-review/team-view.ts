@@ -84,10 +84,24 @@ export interface TeamFoldInput {
   // Synced review threads marked resolved on GitHub.
   resolvedThreads: ReadonlySet<number>;
   // The reader's thread judgements as they stand now (latest review + later Check threads).
-  threadJudgements: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed }> | null;
+  threadJudgements: ReadonlyArray<TeamThreadJudgement> | null;
 }
 
 const ms = (iso: string): number => new Date(iso).getTime();
+
+/**
+ * One of the reader's thread judgements as the fold reads it. `at` (ms) is when THAT judgement was
+ * made (a later Check threads run's, else the review's) and `reviewId` the review it stands on —
+ * both absent ⇒ the all-findings fold falls back to `threadJudgedBy`. ⚠ Limn finding threads are
+ * INCLUDED: they are hidden from the displayed threads list (thread-judgements.ts
+ * `shownThreadAssessments`), and THIS is where their judgement shows — on the finding.
+ */
+export interface TeamThreadJudgement {
+  threadId: number;
+  addressed: ClaudeThreadAddressed;
+  at?: number;
+  reviewId?: number;
+}
 
 function sameSpot(
   a: { path: string; line: number | null; title: string },
@@ -279,7 +293,7 @@ export async function loadTeamReviewView(
   prId: number,
   own: ClaudeReview | null,
   teammateReviews: readonly ClaudeTeammateReview[],
-  threadJudgements: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed }> | null,
+  threadJudgements: ReadonlyArray<TeamThreadJudgement> | null,
 ): Promise<ClaudeTeamReviewView> {
   // The review count: the reader's own succeeded full runs (a skip ran no review), pairs once.
   const ownRuns = await exec
@@ -823,7 +837,7 @@ export interface AllFindingsInput {
   judgements: ReadonlyArray<{ reviewId: number; at: number; items: ReadonlyArray<{ priorFindingId: number; status: ClaudeFollowUpStatus }> }>;
   resolvedThreads: ReadonlySet<number>;
   // The reader's current thread judgements, and the review they stand on (for `by`/`at`).
-  threadJudgements: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed }> | null;
+  threadJudgements: ReadonlyArray<TeamThreadJudgement> | null;
   threadJudgedBy: { reviewId: number; at: number } | null;
 }
 
@@ -885,7 +899,7 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
       list.push({ status: st, by: YOU, at: j.at, reviewId: j.reviewId });
       byFinding.set(it.priorFindingId, list);
     }
-  const threadJudged = new Map((input.threadJudgements ?? []).map((t) => [t.threadId, t.addressed]));
+  const threadJudged = new Map((input.threadJudgements ?? []).map((t) => [t.threadId, t]));
 
   const stateOf = (
     members: ReadonlyArray<{ id: number; commentId: string | null; threadId: number | null; at: number }>,
@@ -901,9 +915,14 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
       events.push(...(byFinding.get(m.id) ?? []));
       if (m.commentId != null) events.push(...(byComment.get(m.commentId) ?? []));
       const t = m.threadId != null ? threadJudged.get(m.threadId) : undefined;
-      if (t != null && input.threadJudgedBy != null) {
-        const st = t === 'addressed' ? 'addressed' : t === 'not_addressed' || t === 'partly_addressed' ? 'open' : null;
-        if (st != null) events.push({ status: st, by: YOU, at: input.threadJudgedBy.at, reviewId: input.threadJudgedBy.reviewId });
+      // Dated by the run that made it (a Check threads run newer than the review settles a teammate
+      // finding posted after that review), else by the review it stands on.
+      const at = t?.at ?? input.threadJudgedBy?.at;
+      const reviewId = t?.reviewId ?? input.threadJudgedBy?.reviewId;
+      if (t != null && at != null && reviewId != null) {
+        const a = t.addressed;
+        const st = a === 'addressed' ? 'addressed' : a === 'not_addressed' || a === 'partly_addressed' ? 'open' : null;
+        if (st != null) events.push({ status: st, by: YOU, at, reviewId });
       }
     }
     // A re-raise newer than a judgement keeps the point open.

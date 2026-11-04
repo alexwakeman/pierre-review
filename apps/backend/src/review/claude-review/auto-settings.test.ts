@@ -93,6 +93,8 @@ describe('the switch and its floor', () => {
       autoDiagramsEnabled: true,
       // "Mark auto reviews on GitHub" is ON by default (0159).
       teamClaimsEnabled: true,
+      // ON by default (migration 0165): withdraw Limn's own approval when new commits are pushed.
+      withdrawApprovalOnPush: true,
       // Claude + Codex is the default (2026-11-01); with one signed in, that one runs alone.
       autoReviewProviders: 'both',
       pairStrictness: 'strict',

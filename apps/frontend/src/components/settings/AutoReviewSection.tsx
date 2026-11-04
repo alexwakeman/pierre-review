@@ -162,6 +162,9 @@ export function AutoReviewSection(): JSX.Element {
   // TEAM CLAIMS ("Mark auto reviews on GitHub"): ON unless the workspace switched it off (0159).
   const storedClaims = stored?.teamClaimsEnabled !== false;
   const [claimsOn, setClaimsOn] = useState(storedClaims);
+  // "Withdraw Limn's approval when new commits are pushed": ON unless switched off (migration 0165).
+  const storedWithdraw = stored?.withdrawApprovalOnPush !== false;
+  const [withdrawOn, setWithdrawOn] = useState(storedWithdraw);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
@@ -213,6 +216,9 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setClaimsOn(storedClaims);
   }, [workspaceId, storedClaims]);
+  useEffect(() => {
+    setWithdrawOn(storedWithdraw);
+  }, [workspaceId, storedWithdraw]);
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
@@ -557,6 +563,27 @@ export function AutoReviewSection(): JSX.Element {
               </label>
             ))}
           </fieldset>
+          <div className={`flex items-start gap-1 pl-5 ${verdict ? '' : 'opacity-60'}`} data-withdraw-approval>
+            <label className="flex items-start gap-2 text-ui-ink">
+              <CheckInput
+                className="mt-0.5"
+                checked={withdrawOn}
+                onChange={(e) => setWithdrawOn(e.target.checked)}
+              />
+              <span className="font-medium">Withdraw Limn’s approval when new commits are pushed</span>
+            </label>
+            <InfoButton title="Withdraw Limn’s approval">
+              <p>
+                When the PR gets new commits, Limn dismisses the approval it posted automatically. It
+                never touches an approval you gave yourself or posted with the Post button.
+              </p>
+              <p>
+                A later review that finds problems always withdraws Limn’s approval first, with this
+                on or off.
+              </p>
+              <p>On by default.</p>
+            </InfoButton>
+          </div>
           <label className="flex items-start gap-2">
             <CheckInput
               className="mt-0.5"
@@ -721,6 +748,7 @@ export function AutoReviewSection(): JSX.Element {
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
             claimsOn !== storedClaims ||
+            withdrawOn !== storedWithdraw ||
             providers !== storedProviders ||
             strictness !== storedStrictness ||
             capDirty ||
@@ -734,6 +762,7 @@ export function AutoReviewSection(): JSX.Element {
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
             ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
+            ...(withdrawOn !== storedWithdraw ? { withdrawApprovalOnPush: withdrawOn } : {}),
             ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
             ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),

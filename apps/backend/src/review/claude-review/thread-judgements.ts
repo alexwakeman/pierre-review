@@ -10,7 +10,8 @@ import type {
   ClaudeThreadValidity,
   AiProviderId,
 } from '@pierre-review/shared';
-import { aiRunProvider } from '@pierre-review/shared';
+import { aiRunProvider, limnFindingPost, threadAssessmentCounts } from '@pierre-review/shared';
+import type { ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 // What the latest Claude review said about each review thread, for the THREAD CARDS
@@ -100,6 +101,13 @@ export interface CurrentThreadAssessments {
    * wins — and each judgement keeps the label of the run that made it.
    */
   providerByThread: Map<number, AiProviderId>;
+  /**
+   * When each thread's judgement as it stands was made: the Check threads run's completion for a
+   * thread the overlay judged, else the review's finish. The team fold (team-view.ts) dates a
+   * teammate finding's "found it addressed" by it — a check newer than the review settles a teammate
+   * finding posted after that review.
+   */
+  judgedAtByThread: Map<number, Date | null>;
 }
 
 /**
@@ -269,13 +277,22 @@ export async function currentThreadAssessmentsForPrs(
     if (!merged) continue;
     // Each thread is labelled by the run whose judgement won the fold (the overlay's, else the base's).
     const providerByThread = new Map<number, AiProviderId>();
+    const judgedAtByThread = new Map<number, Date | null>();
     if (rv && base) {
       const p = aiRunProvider(rv.provider, rv.model);
-      for (const a of base) if (a != null && typeof a.threadId === 'number') providerByThread.set(a.threadId, p);
+      for (const a of base)
+        if (a != null && typeof a.threadId === 'number') {
+          providerByThread.set(a.threadId, p);
+          judgedAtByThread.set(a.threadId, rv.finishedAt ?? null);
+        }
     }
     if (ck && over) {
       const p = aiRunProvider(ck.provider, ck.model);
-      for (const a of over) if (a != null && typeof a.threadId === 'number') providerByThread.set(a.threadId, p);
+      for (const a of over)
+        if (a != null && typeof a.threadId === 'number') {
+          providerByThread.set(a.threadId, p);
+          judgedAtByThread.set(a.threadId, ck.completedAt ?? null);
+        }
     }
     out.set(prId, {
       prId,
@@ -287,9 +304,138 @@ export async function currentThreadAssessmentsForPrs(
       checkFinishedAt: over ? ck!.completedAt : null,
       assessments: merged,
       providerByThread,
+      judgedAtByThread,
     });
   }
   return out;
+}
+
+// ---- LIMN FINDINGS ARE NOT REVIEW THREADS (docs/CLAUDE-REVIEW.md § Limn findings are not review threads) ----
+// A thread whose ROOT comment is a Limn finding — the reader's own post or a teammate's Limn — is a
+// FINDING: the Findings list shows it (the reader's own through the follow-up, a teammate's through
+// the team fold, team-view.ts). Listing it again under "Review threads" said the same point twice.
+// The reader's own are never judged (db/review-threads-for-review.ts leaves them out); a teammate's
+// ARE still judged — the team fold settles the teammate finding from that judgement — but the
+// DISPLAYED threads list and its counts leave them out (`shownThreadAssessments`).
+
+/**
+ * Per PR, the review threads whose ROOT comment (oldest, then lowest id — the loader's order) is a
+ * Limn finding: stored under a `limn:` bot (`limn_posted_by_user_id` set at sync, db/limn-bots.ts),
+ * or — a poster sync could not attribute — its body passes the shared `limnFindingPost` with
+ * `threadRoot`. Account-scoped, DB-only, one read for every PR.
+ */
+export async function limnFindingThreadIdsForPrs(
+  ctx: AgentContext,
+  accountId: number,
+  prIds: readonly number[],
+): Promise<Map<number, Set<number>>> {
+  const out = new Map<number, Set<number>>();
+  if (prIds.length === 0) return out;
+  const s = ctx.schema as any;
+  const rc = s.reviewComments;
+  const prs = s.pullRequests;
+  const rows = (await ctx.db
+    .select({
+      id: rc.id,
+      prId: rc.prId,
+      threadId: rc.threadId,
+      createdAt: rc.createdAt,
+      body: rc.body,
+      limnPostedBy: rc.limnPostedByUserId,
+    })
+    .from(rc)
+    .innerJoin(prs, eq(prs.id, rc.prId))
+    .where(and(inArray(rc.prId, [...new Set(prIds)]), eq(prs.accountId, accountId), isNotNull(rc.threadId)))
+    .execute()) as Array<{
+    id: number;
+    prId: number;
+    threadId: number | null;
+    createdAt: Date | null;
+    body: string | null;
+    limnPostedBy: number | null;
+  }>;
+  const roots = new Map<number, (typeof rows)[number]>();
+  for (const r of rows) {
+    if (r.threadId == null) continue;
+    const cur = roots.get(r.threadId);
+    if (!cur || ms(r.createdAt) < ms(cur.createdAt) || (ms(r.createdAt) === ms(cur.createdAt) && r.id < cur.id))
+      roots.set(r.threadId, r);
+  }
+  for (const [threadId, root] of roots) {
+    if (root.limnPostedBy == null && limnFindingPost(root.body, { threadRoot: true }) == null) continue;
+    const set = out.get(root.prId) ?? new Set<number>();
+    set.add(threadId);
+    out.set(root.prId, set);
+  }
+  return out;
+}
+
+/** The DISPLAYED threads: every assessment except a Limn finding's thread. Pure. */
+export function shownThreadAssessments<T extends { threadId: number }>(
+  items: readonly T[],
+  limnFindingThreads: ReadonlySet<number> | undefined,
+): T[] {
+  if (!limnFindingThreads || limnFindingThreads.size === 0) return [...items];
+  return items.filter((a) => a == null || !limnFindingThreads.has(a.threadId));
+}
+
+/** `shownThreadAssessments` + its counts, for a wire field pair (null stays null). Pure. */
+export function shownThreadsWire(
+  items: readonly ClaudeThreadAssessment[] | null | undefined,
+  limnFindingThreads: ReadonlySet<number> | undefined,
+): { items: ClaudeThreadAssessment[] | null; counts: ClaudeThreadAssessmentCounts | null } {
+  if (!Array.isArray(items)) return { items: null, counts: null };
+  const shown = shownThreadAssessments(items, limnFindingThreads);
+  return { items: shown, counts: threadAssessmentCounts(shown) };
+}
+
+/**
+ * The judgements the TEAM FOLD reads (team-view.ts `threadJudgements`) — EVERY judged thread,
+ * Limn finding threads included, each dated by the run that made it and naming the review it stands
+ * on. Pure.
+ */
+export function teamThreadJudgements(
+  current: Pick<CurrentThreadAssessments, 'assessments' | 'judgedAtByThread' | 'reviewId'> | null | undefined,
+): Array<{ threadId: number; addressed: ClaudeThreadAddressed; at?: number; reviewId?: number }> | null {
+  if (!current) return null;
+  return current.assessments
+    .filter((a) => a != null && typeof a.threadId === 'number')
+    .map((a) => {
+      const at = current.judgedAtByThread.get(a.threadId);
+      return {
+        threadId: a.threadId,
+        addressed: a.addressed,
+        ...(at != null ? { at: ms(at) } : {}),
+        ...(current.reviewId != null ? { reviewId: current.reviewId } : {}),
+      };
+    });
+}
+
+/**
+ * The AI Review tab's threads, as `GET /api/prs/:id/claude-review` serves them: the Limn finding
+ * threads, the current judgements DISPLAYED (Limn finding threads left out, with their counts) and
+ * the judgements the TEAM FOLD reads (all of them, dated). DB-only, account-scoped.
+ */
+export async function tabThreadView(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<{
+  limnFindingThreads: Set<number>;
+  shown: { items: ClaudeThreadAssessment[] | null; counts: ClaudeThreadAssessmentCounts | null };
+  team: ReturnType<typeof teamThreadJudgements>;
+}> {
+  const [limn, current] = await Promise.all([
+    limnFindingThreadIdsForPrs(ctx, accountId, [prId]),
+    currentThreadAssessmentsForPrs(ctx, accountId, [prId]),
+  ]);
+  const limnFindingThreads = limn.get(prId) ?? new Set<number>();
+  const rec = current.get(prId) ?? null;
+  return {
+    limnFindingThreads,
+    shown: shownThreadsWire(rec?.assessments ?? null, limnFindingThreads),
+    team: teamThreadJudgements(rec),
+  };
 }
 
 /** The two generic fields a finding's outcome MIRRORS (for readers that know only them). Pure. */

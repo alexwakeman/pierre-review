@@ -1595,6 +1595,43 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   threads `isThreadToFix` keeps are its `T` items (see § AI Fix). One fix covers the findings and
   the other reviewers' comments.
 
+### Limn findings are not review threads (2026-11-04)
+
+A thread whose ROOT comment is a Limn finding — the reader's own post OR a teammate's Limn — is a
+FINDING, and the Findings list already shows it (the reader's own through the follow-up, a
+teammate's through § Teammates' reviews → One review). Listing it again under "Review threads" said
+the same point twice (PR 591: two of Robin's Limn warnings in both lists).
+
+- **Which threads** (`thread-judgements.ts` `limnFindingThreadIdsForPrs`, DB-only, account-scoped,
+  one read per request): the thread's ROOT (oldest comment, then lowest id — the loader's order) has
+  `limn_posted_by_user_id` set (sync's `limnFindingPost(body, {threadRoot:true})` verdict, stored
+  under the `limn:` bot), or — a poster sync could not attribute — its body passes that same shared
+  predicate. Never a client-side text guess.
+- **Judged, not displayed.** The reader's OWN Limn threads are never sent to the model (the loader's
+  `isLimnPostedComment`, above). A TEAMMATE'S still are — the review run and Check threads judge
+  them like any other reviewer's thread — because the team fold settles the teammate finding from
+  that judgement. Only the DISPLAY leaves them out: `GET /api/prs/:id/claude-review`
+  (`currentThreadAssessments` + counts, and `review.threadAssessments` + counts) and
+  `GET /api/claude-reviews/:reviewId` serve `shownThreadAssessments(…)`, so the Review threads
+  section, its count pills and the rail's thread counts no longer list them. The STORED
+  `thread_assessments` keep them.
+- **Where the judgement shows instead**: the teammate finding's state in Findings
+  (`foldAllTeamFindings` `stateOf`, fed `teamThreadJudgements(current)` — EVERY judgement, Limn
+  threads included): `not_addressed` / `partly_addressed` keep it **Open**; `addressed` moves it to
+  **"Resolved or addressed"** with "Your review found it addressed · <day>". ⚠ Each judgement is
+  dated by the run that MADE it (`CurrentThreadAssessments.judgedAtByThread`: a later Check threads
+  run's completion, else the review's finish) and names the review it stands on — so a Check
+  threads run newer than the reader's review settles a teammate finding posted after that review
+  (dated by the review alone, it was older than the raise and ignored), and a failed latest run no
+  longer hides the judgements that still stand. `unclear` / `not_checked` change nothing.
+- **Left as they were, on purpose**: the Changes tab's thread cards still wear the judgement on a
+  teammate's Limn thread (`POST /api/claude-review/thread-judgements` — a label on the thread
+  itself, not a second list); AI Fix's seed still offers a teammate's Limn thread judged to fix as a
+  `T` item (its only way into a fix — the seed carries no teammate findings); Check threads' "Checking
+  N threads" counts what it really sends; and the Open PRs / Pending / PR overview "N threads to fix"
+  (`ClaudeReviewStateSummary.threadAssessments`) still counts them — those surfaces show only the
+  reader's own findings, so nothing is said twice there.
+
 ### Only new commits change a judgement (same-head runs)
 
 A run at the SAME head as the previous succeeded run — a comment-triggered auto re-review, or "Run
@@ -1652,7 +1689,8 @@ CODE, not by prompt:
   (`getThreadJudgements`), the Claude Review tab (`currentThreadAssessments` on
   `GET /api/prs/:id/claude-review`), the next REVIEW's carry (`manager.ts`, `beforeReviewId`), the
   next check's plan, and AI Fix's seed when the named review is the latest. Never read
-  `review.threadAssessments` for "what Claude says now".
+  `review.threadAssessments` for "what Claude says now". ⚠ The tab's copy leaves Limn finding
+  threads out (§ Limn findings are not review threads); the team fold reads them all.
 - **AUTO** (when the workspace's auto review is on): a SAME-HEAD comment burst — the code has not
   moved — now starts a CHECK, not a full re-review (`commentBurstRoute`, auto.ts), under the same
   settle rule. ⚠ A reply on one of Limn's OWN posted findings newer than what the reviews (and the
@@ -2945,6 +2983,39 @@ auto-posting: claim before any GitHub write, never retried.
     supersede the block is held as `already_requested`.
   - Cost: a DB pre-check (any earlier auto REQUEST_CHANGES on this PR?) gates the extra live review
     read, so an ordinary run reads nothing more.
+- ⚠ **WITHDRAWING LIMN'S APPROVAL** (2026-11-04; `review/claude-review/approval-withdraw.ts`). An
+  automatic APPROVE judges ONE head; it used to stay in force after a push and after a later run found
+  problems (PR #591: approved at 312c22e, 3 warnings at 91482c8 posted as COMMENT, the approval stood
+  until withdrawn by hand). Now:
+  - Limn's own approval is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
+    whose `verdict.submitted` is APPROVE (`loadLimnAutoApprovals`, the twin of `loadLimnAutoBlockIds`;
+    a pair's claim row is the half without `viaPairReviewId`) — ⚠ NEVER by marker or body: a hand
+    approval, or one sent with the Post button, is the reader's own and is never touched. Only while it
+    is still the reader's standing review LIVE (`ownStandingReview` → `LIMN_AUTO_APPROVED`).
+  - **The run path (always on)**: a run (auto, or "Review and post") at a NEW head whose verdict is not
+    APPROVE (`autoVerdictFor`, whatever the auto-verdict switch says now) dismisses it BEFORE its own
+    review, with "Limn withdrew its approval: 3 warnings found at 91482c8." (blockers and warnings
+    counted; none ⇒ "not approved at …"), then posts as before. The gate reads `LIMN_AUTO_APPROVED` as
+    not the reader's: a REQUEST_CHANGES goes out, a new APPROVE supersedes it. A run at the SAME head
+    never withdraws. Recorded on the later run as `withdrewApproval` (`withdrawn` / `withdraw_failed`);
+    a run whose only write is the withdrawal is `posted` / `failed` by it alone, and `skipped` when the
+    push path had already claimed it.
+  - **The push path** (`maybeWithdrawApprovalOnPush`): `persistPr` (every walk, the viewed-PR refresh
+    included) sees an OPEN PR's head move and, AFTER its transaction, fire-and-forget (every error
+    caught; never under the write lock), dismisses the newest unwithdrawn approval of another head
+    with "Limn withdrew its approval: new commits since it approved (<new short sha>)." Only with auto
+    review AND auto-posting on in the PR's workspace and the switch **"Withdraw Limn's approval when
+    new commits are pushed"** on (`workspaces.withdraw_approval_on_push`, migration 0165, ON by
+    default — only a stored false is off), never on the reader's own PR. DB pre-checks first, so an
+    ordinary walk makes no GitHub call. Success stamps the local review `dismissed` and settles.
+  - ⚠ **THE CLAIM**: `approvalWithdrawal` on the APPROVING run's `auto_post` JSON
+    (`{status: withdrawing|withdrawn|failed, why: push|run, headSha, message, byReviewId?, error}`),
+    written by a `json_set` compare-and-set guarded by `json_extract(…) IS NULL` BEFORE the GitHub
+    write. Whichever path claims first dismisses; the other does nothing. A refusal (403/422) is
+    recorded in GitHub's words and NEVER retried, by either path. Both fields ride the wire
+    (`ClaudeAutoPostWire`); the tab prints the message (approving run) or "Withdrew Limn’s earlier
+    approval." / "Couldn’t withdraw …: <why>" (`approvalWithdrawLines`). The replies pass does not
+    withdraw (it runs at the same head). Pinned by `approval-withdraw.test.ts`.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
   resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
 - **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from

@@ -257,6 +257,8 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
     ...(typeof r.viaPairReviewId === 'number' ? { viaPairReviewId: r.viaPairReviewId } : {}),
     ...(typeof r.reasonPosted === 'string' && r.reasonPosted !== '' ? { reasonPosted: true } : {}),
     ...(r.reasonOnly === true ? { reasonOnly: true } : {}),
+    ...(r.approvalWithdrawal != null && typeof r.approvalWithdrawal === 'object' ? { approvalWithdrawal: r.approvalWithdrawal } : {}),
+    ...(r.withdrewApproval != null && typeof r.withdrewApproval === 'object' ? { withdrewApproval: r.withdrewApproval } : {}),
   };
 }
 

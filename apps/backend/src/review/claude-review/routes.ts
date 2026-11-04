@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ActiveReviewsResponse,
   ClaudeFindingStory,
+  ClaudeReview,
   ClaudeReviewListResponse,
   ClaudeReviewPrState,
   ClaudeReviewResponse,
@@ -28,7 +29,6 @@ import {
   storyCommentLead,
   limnSeverityLabel,
   stripStoredStoryLead,
-  threadAssessmentCounts,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { anyProviderPreflight, preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
@@ -63,7 +63,7 @@ import {
   updateFinding,
   updateReviewDraft,
 } from './persist.js';
-import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-judgements.js';
+import { getThreadJudgements, limnFindingThreadIdsForPrs, shownThreadsWire, tabThreadView } from './thread-judgements.js';
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
@@ -212,6 +212,15 @@ export function withAutoHolds(
   return out;
 }
 
+/** A run's own thread fields as the reader sees them: Limn finding threads left out (null stays null). */
+function shownRunThreads(
+  review: Pick<ClaudeReview, 'threadAssessments'>,
+  limnThreads: ReadonlySet<number> | undefined,
+): Pick<ClaudeReview, 'threadAssessments' | 'threadAssessmentCounts'> {
+  const w = shownThreadsWire(review.threadAssessments, limnThreads);
+  return { threadAssessments: w.items, threadAssessmentCounts: w.counts };
+}
+
 export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentContext): void {
   // Latest run + findings + history + auth + enabled.
   app.get('/api/prs/:id/claude-review', { schema: idParam }, async (req): Promise<ClaudeReviewResponse> => {
@@ -229,11 +238,20 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     // route checks THAT one).
     const auth = anyProviderPreflight(preflightFor(ctx), 'review', ctx.llm.detectAuth('review'));
     const latest = await getLatestClaudeReview(ctx, id, accountId);
+    // The judgements as they stand now (the latest review's, with later Check threads runs over it).
+    // LIMN FINDINGS ARE NOT REVIEW THREADS (thread-judgements.ts): a thread rooted on a Limn finding
+    // (the reader's or a teammate's) is listed under Findings, so the DISPLAYED threads leave it out;
+    // the team fold still reads every judgement (`threads.team`).
+    const threads = await tabThreadView(ctx, accountId, id);
     // WHY IT WAS NOT APPROVED (not-approved.ts): recorded by auto-posting, else computed (DB-only).
-    const review = latest ? { ...latest, notApproved: await notApprovedForView(ctx, accountId, latest) } : null;
+    const review = latest
+      ? {
+          ...latest,
+          notApproved: await notApprovedForView(ctx, accountId, latest),
+          ...shownRunThreads(latest, threads.limnFindingThreads),
+        }
+      : null;
     const autoReview = autoReviewHold(id, accountId);
-    // The judgements as they stand now: the latest review's, with later Check threads runs over it.
-    const current = (await currentThreadAssessmentsForPrs(ctx, accountId, [id])).get(id)?.assessments ?? null;
     // TEAM CLAIMS (team-claim.ts): a skip in memory at the synced head, and the pending Limn line a
     // Clear would replace. DB + memory only.
     const syncedHead = review?.head?.currentHeadSha ?? (await getReviewPrContext(ctx, id, accountId))?.headSha ?? null;
@@ -244,7 +262,11 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     // Reviews teammates' Limn POSTED to GitHub, imported at sync (db/teammate-reviews.ts). Read-only.
     const teammateReviews = await listTeammateReviews(ctx.db, accountId, id).catch(() => []);
     // THE MERGED REVIEW (team-view.ts): the newest review leads, teammates' open findings join.
-    const teamView = await loadTeamReviewView(ctx.db, accountId, id, latest, teammateReviews, current).catch(() => undefined);
+    // ⚠ The fold reads EVERY judgement, Limn finding threads included: that is where a teammate
+    // finding's judgement shows (its state in Findings), now that its thread row is hidden.
+    const teamView = await loadTeamReviewView(ctx.db, accountId, id, latest, teammateReviews, threads.team).catch(
+      () => undefined,
+    );
     return {
       enabled: true,
       auth: auth.status,
@@ -262,8 +284,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         : null,
       // The failed auto run at the current head a reader's Retry would re-run (manual rows ignored).
       failedAutoAtHead: await getFailedAutoAtHead(ctx, id, accountId),
-      currentThreadAssessments: current,
-      currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
+      currentThreadAssessments: threads.shown.items,
+      currentThreadAssessmentCounts: threads.shown.counts,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
       teammateReviews,
@@ -615,7 +637,12 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       reply.status(404);
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
     }
-    return { ...review, notApproved: await notApprovedForView(ctx, ctx.accountIdOf(req), review) };
+    const limnThreads = (await limnFindingThreadIdsForPrs(ctx, ctx.accountIdOf(req), [review.prId])).get(review.prId);
+    return {
+      ...review,
+      notApproved: await notApprovedForView(ctx, ctx.accountIdOf(req), review),
+      ...shownRunThreads(review, limnThreads),
+    };
   });
 
   app.patch('/api/claude-reviews/:reviewId', { schema: updateReviewSchema }, async (req, reply) => {

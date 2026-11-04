@@ -1486,6 +1486,15 @@ teammate's block). The teammate import's update never writes it. Additive and nu
 no new table, so erasure and the delete paths are unchanged (the row is a `claude_reviews` row).
 Journal `idx` 164, `when` sqlite `1792224071016`.
 
+### `0165_withdraw_approval_on_push` — withdrawing Limn's own approval on a push
+
+ONE column, `workspaces.withdraw_approval_on_push` (integer boolean): "Withdraw Limn's approval when
+new commits are pushed". NULL = ON (the default) — only a stored false is off, in every reader and in
+the writer (`setWorkspaceAutoReview`). The claim and outcome of each withdrawal ride the approving
+run's existing `claude_reviews.auto_post` JSON (`approvalWithdrawal`, written by a `json_set`
+compare-and-set), so no other DDL ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Withdrawing Limn's
+approval). Additive and nullable, no backfill. Journal `idx` 165, `when` sqlite `1792224073016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
