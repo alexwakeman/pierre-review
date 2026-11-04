@@ -31,7 +31,7 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
   - Safety facts the copy may state, and nothing more: the reviewer reads code and cannot edit
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
     nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
-    workspace has switched AUTO-POSTING on for (§ Auto-posting; off by default). Never promise
+    workspace's AUTO-POSTING covers (§ Auto-posting; on by default, AUTO runs only). Never promise
     subscription billing. Copy reads "your own Claude Code login or Anthropic API key", or names
     the ChatGPT sign-in when Codex is the provider (§ Codex, the second provider).
 
@@ -2677,6 +2677,41 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   `ClaudeReviewStatesResponse.teamClaimSkips`). The sweeper holds such a PR (no lane place) until the
   holder's lease ends + 30 s ("reviewing") or 30 min ("reviewed"), unless the synced head moved; a
   reader's press reads GitHub afresh. A restart forgets it and re-reads once.
+- **THE SKIPPED LINE** (2026-11-04, migration 0166, `team-claim-skip.ts`). When the reader's Limn does
+  NOT start an auto review of a head it would otherwise review, for a reason other than a teammate's
+  claim (already visible), it says so ONCE on that head, under the provider's own context, state
+  **success** (green, settled — never pending, failure or error):
+  "Cleared by alex: auto review skipped · AI budget used" / "· daily auto-review limit reached" /
+  "· Codex over its usage limit until 15:40" (the reader's clock; the weekday when not today) /
+  "· Claude not signed in" ("not set up" when the runtime is missing).
+  - ⚠ **IT STARTS "Cleared by "** like every free success line, so every teammate's Limn — an older one
+    too — reads it as FREE (it reviewed nothing); the fold also reads any success carrying " skipped · "
+    as free (`isFreeLine`, so a future bare "alex skipped · …" stays free). A limn/ context: never CI.
+  - **WHEN.** The sweeper's tick: over the spend budget (asked once per account per tick) or AI not
+    ready (`agenticRunReady`, once per tick), a READ-ONLY pass (`dueHeadsHeld`) lists the heads the tick
+    would have started — first reviews, and MOVED heads whose start rule says go, read without touching
+    a clock — never one waiting in the lane, held for a teammate, a retry, or a same-head comment burst
+    (its head already carries this Limn's own line); past the workspace's daily cap, the capped first
+    reviews and moved heads (the first-review loop now notes each capped PR instead of stopping). At most
+    `AUTO_SKIP_LINES_PER_TICK` (25) PRs a tick. The lane (`startAutoItem`): an item dropped before its row
+    — AI went away, every provider over its usage limit (each locked provider's line, with its end), or
+    the per-provider budget check — says so in the background (`postAutoSkipLinesLater`), again only
+    for a first review or a moved head. The providers are the run's would-be ones (`autoProvidersForPr`:
+    the workspace's pair when both can review, else the default); "not ready" names the default provider.
+  - **A PRESS** ("Run auto reviews now" / Retry) never asks the budget and runs past a usage limit when
+    every provider is locked: it runs normally and says nothing. It does not waive the daily cap, so a
+    capped press is said like a tick. A press while AI is not ready says nothing (the next tick does).
+  - **ONCE, CLAIMED FIRST, NEVER RETRIED.** `team_claim_skip_lines`: one row per (account, PR, head,
+    provider, reason), inserted (unique key, `ON CONFLICT DO NOTHING`) BEFORE the GitHub write; 'posted'
+    / 'failed' (GitHub's error; never retried) / 'not_needed'. The context is READ first: posted only
+    when it has no line at the head or its newest line is already free — a pending claim or anyone's
+    "reviewed" line (ours too) is left alone ('not_needed'). Never where team claims are off for the
+    workspace, never on a closed or draft PR, a PR whose synced head moved, a bot-authored PR
+    (`globalAutomationUserIds`), or a head this account already has a review row at. No login known ⇒
+    nothing written or recorded. Both delete paths and the erasure delete its rows.
+  - **A LATER RUN REPLACES IT.** The skipped line is the reader's own, so `decideTeamClaim` reads it
+    free: when the budget frees up (or the reader presses), the run claims the head with its pending
+    "is reviewing" line and ends with "reviewed", as always.
 - ⚠ **NEVER BLOCKS A RUN ON GITHUB.** History unreadable ⇒ run without a line (logged). A write GitHub
   refuses (403/404, no write access) ⇒ run without a line (`teamClaim.state 'unmarked'`, reason
   `no_access`); ⚠ a RATE LIMIT (GitHub answers primary and secondary limits with 403 too) is asked
@@ -2793,10 +2828,16 @@ too, but post nothing.
 
 ## Auto-posting (per workspace)
 
-Settings → Workspace → Auto Claude review → **Post Claude reviews to GitHub automatically**. OFF for
-every workspace, existing and new, until someone switches it on (`workspaces.auto_post_enabled`,
-NULL/false = off; `auto_post_settings` is OVERRIDES ONLY `{ scope?, kinds? }`, folded by
-`resolveAutoPostSettings`; migration `0087`). Read and written through the auto-review route
+Settings → Workspace → Auto Claude review → **Post Claude reviews to GitHub automatically**. **ON by
+default since 2026-11-04** (the owner: auto-post and the auto verdict on by default) for every
+workspace, existing and new: `workspaces.auto_post_enabled` NULL reads ON and only a stored false is
+off — in `resolveAutoPostSettings`, the writer (`setWorkspaceAutoReview` compares against `!== false`)
+and approval-withdraw's read; no migration (before: NULL/false = off, migration `0087`). It acts on AUTO
+runs only, and auto review itself stays OFF per workspace until switched on, so the default matters only
+where auto review is on. ⚠ A ticket review's member PR also needs auto review ON in ITS own workspace
+(`readWorkspaceAutoPostForPr().autoReviewOn`): a ticket review started elsewhere never posts on a PR whose
+workspace has auto review off. `auto_post_settings` is OVERRIDES ONLY `{ scope?, kinds? }`, folded by
+`resolveAutoPostSettings`. Read and written through the auto-review route
 (`autoPost` on `WorkspaceAutoReviewSettings` / `SetWorkspaceAutoReviewBody`; `setWorkspaceAutoReview`
 is still the ONE writer). Like every agentic feature, the route and both hooks exist only
 where `config.aiEnabled` registers them.
@@ -2804,7 +2845,8 @@ where `config.aiEnabled` registers them.
 **Migration 0091 — the shared contract for the next batch** (types in `packages/shared`):
 `AutoPostKinds.ciFailures` (default ON; record `ci_reviews.auto_post` = `CiAutoPostRecord`, one PR
 comment per (PR, head, failing set)); `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`
-(default OFF, inside `auto_post_settings`; records `ClaudeAutoPostRecord.verdict` =
+(inside `auto_post_settings`; `autoVerdict` ON by default since 2026-11-04 — absent reads on, a stored
+`false` is the override — `autoResolve` OFF; records `ClaudeAutoPostRecord.verdict` =
 `ClaudeAutoVerdictRecord`, and per finding `claude_review_findings.auto_resolve` =
 `FindingAutoResolveRecord` + `auto_resolved_at`); skip reason `'already_posted'`
 (`alreadyPostedFindingIds`); `ci_review_items.confidence` (`ClaudeCiFailure.confidence`, 0-100);
@@ -2868,7 +2910,8 @@ auto-posting: claim before any GitHub write, never retried.
   then the hidden `<!-- pierre:claude-review` marker, so `isLimnPostedComment` classifies it as ours
   and an auto re-review is NOT triggered by it. It reuses `ctx.review.postReview` / `postFinding`
   (`post-seam.ts`): the same head pin, anchoring and off-diff fallback as the button.
-- **AUTO VERDICT** (`autoVerdict`, OFF by default; `autoVerdictFor` + `verdictGate`, pure). Stricter
+- **AUTO VERDICT** (`autoVerdict`, ON by default since 2026-11-04 — `AUTO_POST_DEFAULT_AUTO_VERDICT`;
+  only a stored `false` is off; `autoVerdictFor` + `verdictGate`, pure). Stricter
   than Claude, over the run's NON-STORY findings the reader did not ignore (`isReaderIgnoredFinding` —
   ⚠ a re-raise the server stored `included: false` because its comment is already on this commit
   still COUNTS), whatever the kind toggles say: any blocker ⇒
@@ -4264,8 +4307,8 @@ library, sprint briefs/paths and every one-shot completion. Details:
   (`no-shell.test.ts`). Every agent run sits behind the PreToolUse PATH GUARD
   (`review/path-guard.ts`). Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under
-  the reader's account, ONE review, `COMMENT` unless the OFF-by-default `autoVerdict` allows
+  auto-post (ON by default) / Push automatically (OFF) switches. Auto-posting is AUTO RUNS ONLY, under
+  the reader's account, ONE review, `COMMENT` unless `autoVerdict` (ON by default) allows
   stricter; ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
   failure is recorded and NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.

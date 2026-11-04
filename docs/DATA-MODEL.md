@@ -207,6 +207,13 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   memory (team-claim.ts, per provider) and, for the AI Review tab, in `teamClaimSeen` (`team_claim_seen`,
   migration `0159`: one row per `(accountId, prId, headSha, provider)` — kind `reviewing|reviewed`, the
   teammate's login and line; no FK, both delete paths and the erasure delete it).
+- **THE SKIPPED LINE** (`teamClaimSkipLines`, `team_claim_skip_lines`, migration `0166`;
+  docs/CLAUDE-REVIEW.md § Team claims → The skipped line): one row per `(accountId, prId, headSha,
+  provider, reason)` (unique `team_claim_skip_lines_key`) — an auto review this Limn did not start
+  (reason `budget|daily_cap|usage_limit|not_ready`) and said so on the head; `state
+  'posting'|'posted'|'failed'|'not_needed'`, `description`, `lastError`. Inserted BEFORE the GitHub
+  write (once, never retried). No FK on `pr_id`: both delete paths (`db/team-claim-lines-delete.ts`) and
+  the erasure delete it; in `accountScopedTables()`.
 - **TEAMMATES' POSTED REVIEWS** (migration `0160`, docs/CLAUDE-REVIEW.md § Teammates' reviews): a
   review a teammate's Limn posted to GitHub is a `claudeReviews` row with `kind = 'teammate'`,
   `sourceUserId` (the teammate), `sourceReviewNodeId` (the GitHub review; partial unique with
@@ -232,9 +239,10 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   erasure takes all; in `accountScopedTables()`. The reconciler reads only rows with `releaseAttempts`
   under the cap.
 - **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
-  docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
-  workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,
-  OVERRIDES ONLY — `{scope?, kinds?}`, folded by `resolveAutoPostSettings`; the ONE writer is
+  docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (⚠ since 2026-11-04 NULL reads
+  ON, only a stored false is off — no migration; before, NULL/false = off) + `workspaces.autoPostSettings`
+  (JSON `StoredAutoPostSettings`, OVERRIDES ONLY — `{scope?, kinds?, autoVerdict?, …}`; `autoVerdict`
+  absent reads ON since 2026-11-04 — folded by `resolveAutoPostSettings`; the ONE writer is
   `setWorkspaceAutoReview`); `claudeReviews.autoPost` / `ticketReviews.autoPost` (JSON
   `ClaudeAutoPostRecord` / `TicketAutoPostRecord` — what auto-posting did with that run; written by a
   compare-and-set from NULL BEFORE any GitHub call, so a run is claimed exactly once; a record left at

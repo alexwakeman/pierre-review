@@ -67,6 +67,16 @@ vi.mock('./team-claim.js', () => ({
   postedReviewUrl: () => null,
 }));
 
+// THE SKIPPED LINE (team-claim-skip.ts): what the lane asked to say on a dropped item's head.
+const skipLater: Array<{ prId: number; skips: Array<{ provider: string; reason: string; untilMs?: number | null }> }> = [];
+vi.mock('./team-claim-skip.js', () => ({
+  postAutoSkipLinesLater: (_ctx: unknown, a: { prId: number }, skips: any) => {
+    void (async () => {
+      skipLater.push({ prId: a.prId, skips: typeof skips === 'function' ? await skips() : skips });
+    })();
+  },
+}));
+
 let m: typeof import('./manager.js');
 let runs: Array<{ prId: number; release: () => void }> = [];
 let ctx: AgentContext;
@@ -80,6 +90,7 @@ beforeEach(async () => {
   claimCalls.length = 0;
   saved.length = 0;
   finished.length = 0;
+  skipLater.length = 0;
   nextId = 1;
   runs = [];
   /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -122,5 +133,51 @@ describe('team claims in the auto lane', () => {
     runs.shift()!.release();
     await flush();
     expect(finished).toEqual([]);
+  });
+});
+
+describe('the skipped line (an item the lane drops before its row)', () => {
+  it('over the spend budget: the head is said on the PR once, and no row is written', async () => {
+    (ctx as any).aiBudget = { allowAutomaticRun: async () => false };
+    m.enqueueAutoReview(ctx, 1, 60);
+    await flush();
+    expect(inserted).toEqual([]);
+    expect(skipLater).toEqual([{ prId: 60, skips: [{ provider: expect.any(String), reason: 'budget' }] }]);
+  });
+
+  it('a press is not asked the budget: it runs normally, nothing is said', async () => {
+    (ctx as any).aiBudget = { allowAutomaticRun: async () => false };
+    m.enqueueAutoReview(ctx, 1, 61, undefined, null, { pressed: true });
+    await flush();
+    expect(inserted).toEqual([61]);
+    expect(skipLater).toEqual([]);
+    runs.shift()!.release();
+    await flush();
+  });
+
+  it('every provider over its usage limit: the line names the limit and when it ends', async () => {
+    const ul = await import('../../ai/usage-lockout.js');
+    const { activeProviderId } = await import('../../ai/provider-setting.js');
+    const p = activeProviderId();
+    const at = Date.now();
+    ul.noteProviderFailure(p, 'usage limit reached', at);
+    ul.noteProviderFailure(p === 'claude' ? 'codex' : 'claude', 'usage limit reached', at);
+    try {
+      m.enqueueAutoReview(ctx, 1, 62);
+      await flush();
+      expect(inserted).toEqual([]);
+      expect(skipLater).toEqual([{ prId: 62, skips: [{ provider: p, reason: 'usage_limit', untilMs: expect.any(Number) }] }]);
+    } finally {
+      ul.clearUsageLockout();
+    }
+  });
+
+  it('a dropped RETRY or same-head comment burst says nothing (its head already carries our line)', async () => {
+    (ctx as any).aiBudget = { allowAutomaticRun: async () => false };
+    m.enqueueAutoReview(ctx, 1, 63, undefined, null, { retryOfReviewId: 9 });
+    m.enqueueAutoReview(ctx, 1, 64, undefined, Date.now() - 60_000);
+    await flush();
+    expect(inserted).toEqual([]);
+    expect(skipLater).toEqual([]);
   });
 });

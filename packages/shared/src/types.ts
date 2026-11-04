@@ -4478,8 +4478,8 @@ export interface WorkspaceAutoReviewSettings {
   // resolved value — `resolveAutoFixSettings` (auto-settings.ts) is the ONE fold.
   autoFix: AutoFixSettings;
   // AUTO-POSTING (`workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 / pg 0074):
-  // may a SUCCEEDED AUTO review post to GitHub without a click? OFF for every workspace until
-  // switched on. AUTO runs only — a review you start yourself keeps the Post button.
+  // may a SUCCEEDED AUTO review post to GitHub without a click? ON by default (NULL reads on; only a
+  // stored false is off). AUTO runs only — a review you start yourself keeps the Post button.
   autoPost: WorkspaceAutoPostSettings;
   // TEAM CLAIMS — "Mark auto reviews on GitHub" (`workspaces.team_claims_enabled`, migration 0134).
   // Each AUTO review posts a status line on the PR's head (limn/review-claude | limn/review-codex)
@@ -4528,7 +4528,7 @@ export interface AutoPostKinds {
   questions: boolean;
   // An AUTO CI review's diagnosed causes (confidence > 50, flaky/infra ones labelled as such), as
   // ONE PR comment per (PR, head, failing check set). Default ON — inside auto-posting, which is
-  // itself OFF until switched on. Stored record: `ci_reviews.auto_post` (`CiAutoPostRecord`).
+  // itself ON by default (auto review is off until switched on). Stored record: `ci_reviews.auto_post` (`CiAutoPostRecord`).
   ciFailures: boolean;
   // A ticket review's unmet / partly met criteria and missing pieces.
   storyGaps: boolean;
@@ -4555,7 +4555,7 @@ export interface WorkspaceAutoPostSettings {
   enabled: boolean;
   scope: AutoPostScope;
   kinds: AutoPostKinds;
-  // AUTO VERDICT (default OFF): the auto-posted review's event is Claude's verdict, stricter —
+  // AUTO VERDICT (default ON — absent reads on, a stored false is off): the auto-posted review's event is Claude's verdict, stricter —
   // APPROVE only with zero blocker and zero warning findings (non-ignored, non-story), any blocker
   // → REQUEST_CHANGES, else COMMENT. Submitted only when the reader's OWN latest review on the PR
   // (read LIVE from GitHub) is none or COMMENTED, and never on the reader's own PR (always
@@ -4588,7 +4588,7 @@ export interface WorkspaceAutoPostSettings {
 }
 export const AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT = false;
 export const AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS = false;
-export const AUTO_POST_DEFAULT_AUTO_VERDICT = false;
+export const AUTO_POST_DEFAULT_AUTO_VERDICT = true;
 // Per blast-radius level: may an automatic APPROVE be sent on a PR at that level?
 export interface AutoApproveImpact {
   high: boolean;

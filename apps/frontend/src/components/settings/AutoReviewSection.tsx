@@ -65,14 +65,15 @@ import { Select } from '../ui/index.js';
  * invalid one shuts Save with a reason instead of being clamped silently. Same Save as the rest.
  *
  * AUTO-POSTING (`autoPost`, `workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 /
- * pg 0074) — OFF until switched on. A master switch, the WHICH-PRs choice and one checkbox per kind.
+ * pg 0074) — ON by default (only a stored false is off; it acts on AUTO runs only). A master switch, the WHICH-PRs choice and one checkbox per kind.
  * Every control under the master switch is DIMMED, never disabled, while it is off (the reader can
  * set it up first), and the whole block is dimmed while auto review is off (it acts on auto runs
  * only). Same Save as the rest; only what changed is sent.
  *
- * Under it, two more switches ride the same `autoPost` object (both OFF by default, migration 0091 /
- * pg 0078): `autoVerdict` (the review's event becomes Claude's stricter verdict — only when the
- * reader's own last review was a comment, never on their own PR) and `autoResolve` (Limn's own
+ * Under it, two more switches ride the same `autoPost` object (migration 0091 / pg 0078):
+ * `autoVerdict` (ON by default since 2026-11-04; the review's event becomes Claude's stricter
+ * verdict — only when the reader's own last review was a comment, never on their own PR) and
+ * `autoResolve` (OFF by default; Limn's own
  * threads, once a later review finds them fixed). AUTO FIX gains "Always include" (one checkbox per
  * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
  * same route, dimmed while auto fix is off.
@@ -176,14 +177,15 @@ export function AutoReviewSection(): JSX.Element {
   const storedCap = stored?.dailyCap ?? 20;
   const [capText, setCapText] = useState(String(storedCap));
   const storedPost = stored?.autoPost ?? null;
-  const storedPostOn = storedPost?.enabled === true;
+  // Posting and the auto verdict: ON unless switched off (2026-11-04).
+  const storedPostOn = storedPost?.enabled !== false;
   const storedScope: AutoPostScope = storedPost?.scope ?? AUTO_POST_DEFAULT_SCOPE;
   const storedKinds: AutoPostKinds = storedPost?.kinds ?? AUTO_POST_DEFAULT_KINDS;
   const storedKindsKey = KIND_ROWS.map(({ key }) => (storedKinds[key] ? '1' : '0')).join('');
   const [postOn, setPostOn] = useState(storedPostOn);
   const [scope, setScope] = useState<AutoPostScope>(storedScope);
   const [kinds, setKinds] = useState<AutoPostKinds>(storedKinds);
-  const storedVerdict = storedPost?.autoVerdict === true;
+  const storedVerdict = storedPost?.autoVerdict !== false;
   const storedResolve = storedPost?.autoResolve === true;
   const [verdict, setVerdict] = useState(storedVerdict);
   const [resolve, setResolve] = useState(storedResolve);
@@ -460,6 +462,7 @@ export function AutoReviewSection(): JSX.Element {
               once per commit.
             </p>
             <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
+            <p>Posting and Approve or request changes are on by default.</p>
           </InfoButton>
         </div>
         {postOn && (

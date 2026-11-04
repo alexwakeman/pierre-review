@@ -162,7 +162,9 @@ beforeEach(async () => {
   let n = 0;
   postFinding.mockImplementation(async () => ({ commentId: `C${(n += 1)}`, postedCommentKind: 'pr_comment' }));
   live = null;
+  // A member PR's workspace needs auto review on too (auto-posting is on by default).
   await settings.setWorkspaceAutoReview(ctx, 1, wsId, {
+    enabled: true,
     autoPost: { enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS } },
   });
 });
@@ -234,6 +236,20 @@ describe('where story gaps go', () => {
     expect((await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: off }, deps())).kind).toBe('off');
     expect((await persist.getTicketReviewById(ctx, 1, off))!.autoPost).toBeNull();
     expect(postFinding).not.toHaveBeenCalled();
+  });
+
+  it('auto-posting is on by default, but a member PR whose workspace has auto review OFF is never posted on', async () => {
+    const pr = await makePr({ author: 'me' });
+    // Back to the never-set default (NULL) for posting, with auto review off.
+    await ctx.db.update(ctx.schema.workspaces).set({ autoPostEnabled: null }).execute();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { enabled: false });
+    const r = await run(newIdent(), [pr], [{ ref: 'AC1', ownerPrId: pr, title: 'd' }]);
+    expect((await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: r }, deps())).kind).toBe('off');
+    // Auto review on: the NULL switch reads ON and the gap posts.
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { enabled: true });
+    const r2 = await run(newIdent(), [pr], [{ ref: 'AC1', ownerPrId: pr, title: 'e' }]);
+    expect((await ap.maybeAutoPostTicketReview(ctx, { accountId: 1, runId: r2 }, deps())).kind).toBe('done');
+    expect(postFinding).toHaveBeenCalledTimes(1);
   });
 });
 

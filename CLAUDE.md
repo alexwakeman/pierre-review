@@ -432,9 +432,9 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `WORKTREE_RULES` and the tool list change together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO runs plus a
-  manual "Review and post" press (no switch), under the reader's account, ONE review,
-  `COMMENT` unless the OFF-by-default `autoVerdict` allows stricter (a run not approved says why,
+  auto-post (ON; NULL = on) / Push automatically (OFF) switches. Auto-posting is
+  AUTO runs plus a manual "Review and post" press, under the reader's account, ONE review,
+  `COMMENT` unless `autoVerdict` (ON likewise) allows stricter (a run not approved says why,
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
   write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.

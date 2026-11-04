@@ -17,4 +17,7 @@ export async function deleteSettledClaimLinesForPrs(tx: any, prIds: number[]): P
   // The teammate lines the AI Review tab names (migration 0159): nothing on GitHub to release, so
   // every row of these PRs goes.
   await tx.delete(schema.teamClaimSeen).where(inArray(schema.teamClaimSeen.prId, prIds)).execute();
+  // The skipped lines this machine posted (migration 0166): a settled success on GitHub, nothing to
+  // release, so every row of these PRs goes.
+  await tx.delete(schema.teamClaimSkipLines).where(inArray(schema.teamClaimSkipLines.prId, prIds)).execute();
 }

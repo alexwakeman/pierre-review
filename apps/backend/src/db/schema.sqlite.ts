@@ -4514,6 +4514,33 @@ export const teamClaimSeen = sqliteTable(
   }),
 );
 
+// 0166. AN AUTO REVIEW THIS LIMN SKIPPED, SAID ON THE PR (docs/CLAUDE-REVIEW.md § Team claims → The
+// skipped line): one row per (account, PR, head, provider, reason) — the claim, written BEFORE the
+// GitHub write, so the line "Cleared by alex: auto review skipped · AI budget used" goes out at most
+// ONCE and a failed write is never retried. `reason` 'budget' | 'daily_cap' | 'usage_limit' |
+// 'not_ready'; `state` 'posting' (claimed) → 'posted' | 'failed' (GitHub refused; `last_error`) |
+// 'not_needed' (another line already sits on the head). No FK on pr_id: BOTH delete paths delete its
+// rows (db/team-claim-lines-delete.ts), the erasure deletes everything.
+export const teamClaimSkipLines = sqliteTable(
+  'team_claim_skip_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    provider: text('provider').notNull(),
+    reason: text('reason').notNull(),
+    state: text('state', { enum: ['posting', 'posted', 'failed', 'not_needed'] }).notNull(),
+    description: text('description'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    keyUx: uniqueIndex('team_claim_skip_lines_key').on(t.accountId, t.prId, t.headSha, t.provider, t.reason),
+  }),
+);
+
 // 0139. THIS DATABASE'S OWN FACTS (key → value) — never an account's, so not account-scoped and not
 // erased with one. `instance_id`: a random id written once (db/instance-id.ts) that names this
 // database file wherever it is moved; the reference-docs janitor's ownership marker.

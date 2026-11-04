@@ -1495,6 +1495,18 @@ run's existing `claude_reviews.auto_post` JSON (`approvalWithdrawal`, written by
 compare-and-set), so no other DDL ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Withdrawing Limn's
 approval). Additive and nullable, no backfill. Journal `idx` 165, `when` sqlite `1792224073016`.
 
+### `0166_team_claim_skip_lines` — the skipped line, once per head
+
+A NEW table `team_claim_skip_lines` (one row per `(account_id, pr_id, head_sha, provider, reason)`,
+unique index `team_claim_skip_lines_key`): when the reader's Limn does not start an auto review it would
+otherwise run (the AI budget, the daily limit, a usage limit, AI not ready), it posts ONE green
+`limn/review-<provider>` line on the head; the row is CLAIMED before the GitHub write, so the line goes
+out at most once and a failed write is never retried ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims
+→ The skipped line). No FK on `pr_id`: both delete paths (`db/team-claim-lines-delete.ts`) and the
+erasure delete its rows; in `accountScopedTables()`. Additive, no backfill. Auto-posting and the auto
+verdict switched ON by default the same day WITHOUT a migration (NULL reads on). Journal `idx` 166,
+`when` sqlite `1792224075016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

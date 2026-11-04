@@ -335,7 +335,8 @@ describe('off, manual, and which PRs', () => {
 // consent, so the switch need not be on and the scope does not apply. "Review only" never posts.
 describe('a manual "Review and post" run', () => {
   it('posts ONCE through the claim, with the switch OFF and on a PR outside the scope', async () => {
-    await setPost(false, { scope: 'mine' });
+    // The auto verdict is ON by default; switched off here so the review only comments.
+    await setPost(false, { scope: 'mine', autoVerdict: false });
     const pr = await makePr({ author: 'alice' });
     const id = await run(pr, [{ severity: 'blocker', title: 'Null deref' }, { severity: 'nit', title: 'Name' }], 'pressed');
     expect((await persist.getClaudeReviewById(ctx, id, 1))?.postOnFinish).toBe(true);

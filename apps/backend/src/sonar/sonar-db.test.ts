@@ -416,6 +416,8 @@ describe('auto-posting after an auto review', () => {
     const { maybeAutoPostSonar } = await import('./post.js');
     const run = () => maybeAutoPostSonar(ctx, { accountId: 1, prId: prA, headSha: H3 }, postDeps);
 
+    // Auto-posting is ON by default; a stored false is off.
+    await settings.setWorkspaceAutoReview(ctx, 1, wsA, { autoPost: { enabled: false } } as any);
     expect(await run()).toEqual({ kind: 'off' });
     await settings.setWorkspaceAutoReview(ctx, 1, wsA, { autoPost: { enabled: true, scope: 'all', kinds: { sonar: false } } as any });
     expect(await run()).toEqual({ kind: 'off' });

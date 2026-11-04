@@ -155,8 +155,8 @@ from adopting one as a finding's thread. An auto post adds
 `AUTO_POST_FOOTER`; a manual one does not (the same as every other manual post).
 
 **Auto**: after a SUCCEEDED AUTO review, `maybeAutoPostSonar` posts when the workspace's auto-posting is
-on with its `sonar` kind (`AutoPostKinds.sonar`, default on inside auto-posting, which is off until
-switched on) and the PR passes `autoPostEligibility` (open, not a draft, not a bot's, and under scope
+on with its `sonar` kind (`AutoPostKinds.sonar`, default on inside auto-posting, itself on by
+default since 2026-11-04) and the PR passes `autoPostEligibility` (open, not a draft, not a bot's, and under scope
 `mine` yours). A decision NOT to post writes nothing, so a person can still post by hand.
 
 The post route registers **locally only**: it posts through the reader's `gh` session, like every

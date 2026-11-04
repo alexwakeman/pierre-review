@@ -393,9 +393,24 @@ export async function runAutoReviewSweep(
   // row that would use up its one automatic review. The PRs still qualify on a later tick.
   if (!agenticRunReady(ctx, 'review')) {
     result.stopped = 'ai_not_ready';
+    // THE SKIPPED LINE (team-claim-skip.ts): the tick says so on each due head, once. A press does not
+    // (the SPA shows its own line, and the next tick posts).
+    if (!press) {
+      sweeping = true;
+      try {
+        await noteSkippedWhileHeld(ctx, nowMs, candidatesOf, 'not_ready');
+      } catch (err) {
+        ctx.log.warn(`auto review skipped lines: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        sweeping = false;
+      }
+    }
     return result;
   }
   sweeping = true;
+  // Due heads this pass did not start, and why (the daily cap; the spend budget) — said on the PR once
+  // each, at the end of the pass (team-claim-skip.ts).
+  const skipped: SkippedHead[] = [];
   try {
     const dayStartMs = utcDayStartMs(nowMs);
     const liveHeads = new Set<string>();
@@ -428,7 +443,11 @@ export async function runAutoReviewSweep(
       if (!ok) result.overBudget = true;
     }
     for (const ws of roster) {
-      if (budgetOk.get(ws.accountId) === false) continue;
+      if (budgetOk.get(ws.accountId) === false) {
+        // Over the spend budget: nothing is queued; the due heads are said on the PR (read-only pass).
+        skipped.push(...(await dueHeadsHeld(ctx, nowMs, candidatesOf, ws, 'budget')));
+        continue;
+      }
       if (autoLaneRoom() === 0) {
         result.stopped = 'lane_full';
         break;
@@ -470,7 +489,9 @@ export async function runAutoReviewSweep(
         if (await heldByTeammate(prId)) continue;
         if (budget <= 0) {
           result.capped = true;
-          break;
+          // Said on the PR (team-claim-skip.ts); the rest of the list is noted the same way.
+          skipped.push({ accountId: ws.accountId, prId, headSha: null, reason: 'daily_cap' });
+          continue;
         }
         const k = `${ws.accountId}:${prId}`;
         livePrs.add(k);
@@ -706,6 +727,8 @@ export async function runAutoReviewSweep(
         if (await heldByTeammate(prId, headSha)) continue;
         if (budget <= 0) {
           result.capped = true;
+          // A MOVED HEAD is a head never reviewed: said on the PR. A same-head comment burst is not.
+          if (commentsAtMs == null) skipped.push({ accountId: ws.accountId, prId, headSha, reason: 'daily_cap' });
           continue;
         }
         const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null, { pressed });
@@ -735,6 +758,7 @@ export async function runAutoReviewSweep(
       for (const k of repliesSettled.keys()) if (!livePrs.has(k)) repliesSettled.delete(k);
     }
     if (result.queued > 0) ctx.log.info(`auto claude review: queued ${result.queued} PR(s)`);
+    await postSkippedHeads(ctx, skipped);
     return result;
   } catch (err) {
     ctx.log.warn(
@@ -743,6 +767,112 @@ export async function runAutoReviewSweep(
     return result;
   } finally {
     sweeping = false;
+  }
+}
+
+// ---- the skipped line (team-claim-skip.ts) ----
+
+type SkipReasonHere = 'budget' | 'daily_cap' | 'not_ready';
+interface SkippedHead {
+  accountId: number;
+  prId: number;
+  headSha: string | null; // null ⇒ the synced head (a first review)
+  reason: SkipReasonHere;
+}
+type CandidatesOf = NonNullable<AgentContext['queries']['getAutoReviewCandidates']>;
+/** At most this many PRs are said on GitHub per tick (each once per head and reason, recorded). */
+export const AUTO_SKIP_LINES_PER_TICK = 25;
+
+/**
+ * The heads this workspace's tick WOULD have started — first reviews, and moved heads whose start rule
+ * says go — without starting anything or touching a clock. Read-only: the spend budget and AI
+ * readiness hold the whole workspace, so these are said on the PR instead. Not a held PR (a teammate's
+ * claim, already visible), not one waiting in the lane, not a retry or a same-head comment burst.
+ */
+async function dueHeadsHeld(
+  ctx: AgentContext,
+  nowMs: number,
+  candidatesOf: CandidatesOf,
+  ws: { accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number },
+  reason: SkipReasonHere,
+): Promise<SkippedHead[]> {
+  const waiting = autoPendingPrIds();
+  const res = await candidatesOf(ws.accountId, ws.workspaceId, {
+    openedSinceMs: ws.enabledAtMs,
+    dayStartMs: utcDayStartMs(nowMs),
+    limit: ws.dailyCap + waiting.size,
+  });
+  if (!res) return [];
+  const retrying = new Set((res.retry ?? []).map((r) => r.prId));
+  const held = async (prId: number, headSha: string | null): Promise<boolean> => {
+    const h = teamClaimHeldHead(ws.accountId, prId, nowMs);
+    if (h == null) return false;
+    return (headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId))) === h;
+  };
+  const out: SkippedHead[] = [];
+  for (const prId of res.prIds) {
+    if (waiting.has(prId) || (await held(prId, null))) continue;
+    out.push({ accountId: ws.accountId, prId, headSha: null, reason });
+  }
+  for (const cand of res.reReview ?? []) {
+    const { prId, headSha, commentsAtMs, lastRunAtMs } = cand;
+    if (commentsAtMs != null || waiting.has(prId) || retrying.has(prId)) continue;
+    const seen = headSeen.get(`${ws.accountId}:${prId}`);
+    const due = autoReviewDue({
+      nowMs,
+      settle: {
+        quietSinceMs: seen && seen.key === `${headSha}|` ? seen.firstSeenMs : nowMs,
+        burstStartMs: seen ? seen.burstStartMs : nowMs,
+        reason: 'head',
+      },
+      lastRunAtMs: lastRunAtMs ?? null,
+    });
+    if (!due.due || (await held(prId, headSha))) continue;
+    out.push({ accountId: ws.accountId, prId, headSha, reason });
+  }
+  return out;
+}
+
+/** AI not ready: every switched-on workspace's due heads, said on the PR. */
+async function noteSkippedWhileHeld(
+  ctx: AgentContext,
+  nowMs: number,
+  candidatesOf: CandidatesOf,
+  reason: SkipReasonHere,
+): Promise<void> {
+  const heads: SkippedHead[] = [];
+  for (const ws of await listAutoReviewWorkspaces(ctx)) {
+    heads.push(...(await dueHeadsHeld(ctx, nowMs, candidatesOf, ws, reason)));
+    if (heads.length >= AUTO_SKIP_LINES_PER_TICK) break;
+  }
+  await postSkippedHeads(ctx, heads);
+}
+
+/** Post the skipped lines (each provider's context, once per head and reason). Never throws. */
+async function postSkippedHeads(ctx: AgentContext, heads: readonly SkippedHead[]): Promise<void> {
+  if (heads.length === 0) return;
+  try {
+    const m = await import('./team-claim-skip.js');
+    let notReady: { provider: 'claude' | 'codex'; notSetUp: boolean } | null = null;
+    for (const h of heads.slice(0, AUTO_SKIP_LINES_PER_TICK)) {
+      let skips: Array<import('./team-claim-skip.js').AutoSkip>;
+      if (h.reason === 'not_ready') {
+        if (!notReady) {
+          const [{ activeProviderId }, { activeRuntimeStatus }] = await Promise.all([
+            import('../../ai/provider-setting.js'),
+            import('../../ai/active-runtime.js'),
+          ]);
+          notReady = { provider: activeProviderId(), notSetUp: activeRuntimeStatus().runtime !== 'ready' };
+        }
+        skips = [{ provider: notReady.provider, reason: 'not_ready', notSetUp: notReady.notSetUp }];
+      } else {
+        const providers = await m.autoProvidersForPr(ctx, h.accountId, h.prId);
+        skips = providers.map((provider) => ({ provider, reason: h.reason }));
+      }
+      await m.postAutoSkipLines(ctx, { accountId: h.accountId, prId: h.prId, headSha: h.headSha }, skips);
+    }
+  } catch (err) {
+    ctx.log.warn(`auto review skipped lines: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

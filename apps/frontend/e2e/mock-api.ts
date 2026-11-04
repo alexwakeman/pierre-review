@@ -1692,7 +1692,8 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
               autoPush: false,
             },
             autoPost: {
-              enabled: false,
+              // Posting and the auto verdict are ON by default (2026-11-04).
+              enabled: true,
               scope: 'mine',
               kinds: {
                 blockers: true,
@@ -1704,7 +1705,7 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
                 sonar: true,
                 notAskedFor: false,
               },
-              autoVerdict: false,
+              autoVerdict: true,
               autoResolve: false,
               approveImpact: { high: true, medium: true, low: true },
               approveLeftovers: 'nits_questions',

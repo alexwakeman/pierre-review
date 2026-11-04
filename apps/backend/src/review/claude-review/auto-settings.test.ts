@@ -98,7 +98,7 @@ describe('the switch and its floor', () => {
       // Claude + Codex is the default (2026-11-01); with one signed in, that one runs alone.
       autoReviewProviders: 'both',
       pairStrictness: 'strict',
-      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false },
+      autoPost: { enabled: true, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });
   });
@@ -463,8 +463,8 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
   });
 });
 
-describe('auto-posting — off by default, overrides only', () => {
-  it('is OFF for an existing workspace and for one created now, with the defaults', async () => {
+describe('auto-posting — ON by default (NULL reads on, a stored false is off), overrides only', () => {
+  it('is ON for an existing workspace and for one created now, with the defaults (verdict on too)', async () => {
     const [fresh] = await (ctx.db as any)
       .insert((ctx.schema as any).workspaces)
       .values({ accountId: 1, name: 'Brand new', isDefault: false })
@@ -472,7 +472,7 @@ describe('auto-posting — off by default, overrides only', () => {
       .execute();
     for (const id of [wsA, wsA2, fresh.id]) {
       const r = await s.readWorkspaceAutoReview(ctx, 1, id);
-      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
+      expect(r?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
     }
     expect(AUTO_POST_DEFAULT_KINDS).toEqual({
       blockers: true,
@@ -493,11 +493,16 @@ describe('auto-posting — off by default, overrides only', () => {
   });
 
   it('resolves malformed or partial overrides to the defaults', () => {
-    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
+    // NULL (never set) reads ON; only a stored false is off — the same for the verdict.
+    expect(s.resolveAutoPostSettings(undefined, null).enabled).toBe(true);
+    expect(s.resolveAutoPostSettings(false, null).enabled).toBe(false);
+    expect(s.resolveAutoPostSettings(true, { autoVerdict: false }).autoVerdict).toBe(false);
+    expect(s.resolveAutoPostSettings(true, { autoVerdict: 'no' as any }).autoVerdict).toBe(true);
+    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: true, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
     expect(
       s.resolveAutoPostSettings(true, { scope: 'bogus' as any, kinds: { nits: true, blockers: 'yes' as any } }),
-    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
-    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT })).toBeNull();
+    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
+    expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT })).toBeNull();
     expect(s.autoPostOverrides({ scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false } })).toEqual({
       scope: 'all',
       kinds: { questions: false },
@@ -507,11 +512,11 @@ describe('auto-posting — off by default, overrides only', () => {
   it('writes alone, keeps unsent kinds, stores overrides only, and leaves auto review alone', async () => {
     const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
     const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { enabled: true, kinds: { nits: true } } });
-    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
+    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
     expect(on?.enabled).toBe(before?.enabled);
     expect(on?.enabledAt).toBe(before?.enabledAt);
     const scoped = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { scope: 'all' } });
-    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
+    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: true, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions', teamLiftConsent: false, liftTeammateBlocks: false });
     const [row] = await (ctx.db as any)
       .select({ st: (ctx.schema as any).workspaces.autoPostSettings })
       .from((ctx.schema as any).workspaces)
@@ -528,8 +533,10 @@ describe('auto-posting — off by default, overrides only', () => {
     expect(row2.st).toBeNull();
     expect(row2.e).toBe(false);
     // Another account's workspace is refused and not written.
+    await s.setWorkspaceAutoReview(ctx, 2, wsB, { autoPost: { enabled: false } });
     expect(await s.setWorkspaceAutoReview(ctx, 1, wsB, { autoPost: { enabled: true } })).toBeNull();
     expect((await s.readWorkspaceAutoReview(ctx, 2, wsB))?.autoPost.enabled).toBe(false);
+    await s.setWorkspaceAutoReview(ctx, 2, wsB, { autoPost: { enabled: true } });
   });
 
   it('the PUT validates the autoPost body', async () => {
@@ -561,7 +568,7 @@ describe('auto-posting — off by default, overrides only', () => {
       enabled: true,
       scope: 'all',
       kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false },
-      autoVerdict: false,
+      autoVerdict: true,
       autoResolve: false,
       approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT,
       approveLeftovers: 'nits_questions',
@@ -575,9 +582,9 @@ describe('auto-posting — off by default, overrides only', () => {
 });
 
 describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
-  it('default OFF / defaults; overrides only; written alone', async () => {
+  it('verdict ON by default, resolve OFF; overrides only; written alone', async () => {
     const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
-    expect(before?.autoPost.autoVerdict).toBe(false);
+    expect(before?.autoPost.autoVerdict).toBe(true);
     expect(before?.autoPost.autoResolve).toBe(false);
     expect(before?.autoFix).toEqual({ include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false });
     expect(AUTO_FIX_DEFAULT_INCLUDE).toEqual({
@@ -606,11 +613,22 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
       .from((ctx.schema as any).workspaces)
       .where(eq((ctx.schema as any).workspaces.id, wsA2))
       .execute();
-    expect(row.p).toEqual({ kinds: { ciFailures: false }, autoVerdict: true, autoResolve: true });
+    // The verdict's ON is the default, so it is not stored.
+    expect(row.p).toEqual({ kinds: { ciFailures: false }, autoResolve: true });
+    // An explicit false is stored and stays off.
+    const vOff = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { autoVerdict: false } });
+    expect(vOff?.autoPost.autoVerdict).toBe(false);
+    expect((await s.readWorkspaceAutoReview(ctx, 1, wsA2))?.autoPost.autoVerdict).toBe(false);
+    const [rowOff] = await (ctx.db as any)
+      .select({ p: (ctx.schema as any).workspaces.autoPostSettings })
+      .from((ctx.schema as any).workspaces)
+      .where(eq((ctx.schema as any).workspaces.id, wsA2))
+      .execute();
+    expect(rowOff.p).toEqual({ kinds: { ciFailures: false }, autoVerdict: false, autoResolve: true });
     expect(row.f).toEqual({ include: { untouchedThreads: false, styleBots: true }, autoPush: true });
     // Back to the defaults ⇒ NULL.
     await s.setWorkspaceAutoReview(ctx, 1, wsA2, {
-      autoPost: { autoVerdict: false, autoResolve: false, kinds: { ciFailures: true } },
+      autoPost: { autoVerdict: true, autoResolve: false, kinds: { ciFailures: true } },
       autoFix: { include: { styleBots: false, untouchedThreads: true }, autoPush: false },
     });
     const [row2] = await (ctx.db as any)

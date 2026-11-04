@@ -3219,12 +3219,14 @@ check(
   // AUTO-POSTING (workspaces.auto_post_enabled + auto_post_settings, migration 0087): the same
   // writer, and the per-PR read auto-posting gates on. It WRITES TO GITHUB as the reader, so a
   // cross-account read answering "on" would post on another tenant's PR.
+  // Auto-posting is ON by default (2026-11-04): B switches it off first, so A's write would show.
+  await autoSettings.setWorkspaceAutoReview(actx, 2, defaultB, { autoPost: { enabled: false } });
   check(
     "setWorkspaceAutoReview(A, B's workspace, autoPost) is refused (→ 404)",
     (await autoSettings.setWorkspaceAutoReview(actx, 1, defaultB, { autoPost: { enabled: true } })) === null,
   );
   check(
-    "B's auto-posting stays OFF (the default) after A's attempt",
+    "B's auto-posting stays OFF (B's stored false) after A's attempt",
     (await autoSettings.readWorkspaceAutoReview(actx, 2, defaultB))?.autoPost.enabled === false,
   );
   await autoSettings.setWorkspaceAutoReview(actx, 2, wsHoldingB, { autoPost: { enabled: true } });

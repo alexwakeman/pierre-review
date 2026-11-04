@@ -167,6 +167,10 @@ describe('the mounts', () => {
     }
     // The posting options show only under "Post to GitHub".
     expect(s).toMatch(/\{postOn && \(/);
+    // Posting and the auto verdict are ON by default: only a stored false is off.
+    expect(s).toContain('const storedPostOn = storedPost?.enabled !== false;');
+    expect(s).toContain('const storedVerdict = storedPost?.autoVerdict !== false;');
+    expect(s).toContain('Posting and Approve or request changes are on by default.');
   });
 
   it('the Claude Review tab and Story check render the chip and the failure line', () => {

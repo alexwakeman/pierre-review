@@ -22,7 +22,15 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from './ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { detectWake, FORCE_RELEASE_MS, runsToInterrupt, WATCHDOG_TICK_MS } from './run-watchdog.js';
-import { automaticRunProviders, isLockedOut, LOCKOUT_MAX_MS, noteProviderFailure, restoreUsageLockouts } from '../../ai/usage-lockout.js';
+import {
+  automaticRunProviders,
+  isLockedOut,
+  LOCKOUT_MAX_MS,
+  noteProviderFailure,
+  restoreUsageLockouts,
+  usageLockout,
+} from '../../ai/usage-lockout.js';
+import { postAutoSkipLinesLater, type AutoSkip } from './team-claim-skip.js';
 import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
 import {
@@ -535,10 +543,24 @@ async function startAutoItem(a: AutoItem): Promise<void> {
   let launched = false;
   // A claim posted before the row could be written is released ("free to claim") below.
   let teamClaim: TeamClaimHandle | null = null;
+  // THE SKIPPED LINE (team-claim-skip.ts): an item dropped here for the budget, a usage limit or AI not
+  // ready says so on the PR head, once — only a first review or a moved head (a retry's or a same-head
+  // comment burst's head already carries this Limn's own line). Posted in the background.
+  const sayOnPr = a.retryOfReviewId == null && a.commentsAtMs == null;
+  const sayNotReady = () => {
+    if (!sayOnPr) return;
+    postAutoSkipLinesLater(ctx, { accountId, prId }, async () => {
+      const { activeRuntimeStatus } = await import('../../ai/active-runtime.js');
+      return [{ provider: activeProviderId(), reason: 'not_ready', notSetUp: activeRuntimeStatus().runtime !== 'ready' }];
+    });
+  };
   try {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
-    if (!agenticRunReady(ctx, 'review')) return;
+    if (!agenticRunReady(ctx, 'review')) {
+      sayNotReady();
+      return;
+    }
     // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now — unless the workspace
     // asks for Claude + Codex (`auto_review_providers = 'both'`): then a PAIR when both can review,
     // else the one that can. ⚠ A provider LOCKED OUT by its usage limit (ai/usage-lockout.ts) never
@@ -563,6 +585,16 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     if (providers.length === 0 && a.pressed) providers = pick(true);
     if (providers.length === 0) {
       ctx.log.info(`auto claude review pr ${prId}: skipped — no provider outside its usage limit`);
+      // Each provider that would have run: over its usage limit (with its end), else not signed in.
+      if (sayOnPr) {
+        const wanted: AgentProviderId[] = wantsPair ? [...PAIR_ORDER] : [activeProviderId()];
+        const skips = wanted.flatMap((p): AutoSkip[] => {
+          if (isLockedOut(p, nowMs)) return [{ provider: p, reason: 'usage_limit', untilMs: usageLockout(p, nowMs)?.untilMs ?? null }];
+          // A pair half that is simply not signed in is not a skip of a review it would run.
+          return wantsPair ? [] : [{ provider: p, reason: 'not_ready' }];
+        });
+        if (skips.length > 0) postAutoSkipLinesLater(ctx, { accountId, prId }, skips);
+      }
       return;
     }
     let provider: AgentProviderId = providers[0]!;
@@ -573,7 +605,10 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
     // sweeper re-derives it once the budget is under its limit again.
     // A READER'S PRESS is not asked again: they chose it (the SPA's over-budget confirm ran).
-    if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review', provider))) return;
+    if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review', provider))) {
+      if (sayOnPr) postAutoSkipLinesLater(ctx, { accountId, prId }, providers.map((p) => ({ provider: p, reason: 'budget' as const })));
+      return;
+    }
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
     // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered

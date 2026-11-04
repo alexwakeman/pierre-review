@@ -312,7 +312,7 @@ async function withdrawOnPush(
   }>;
   const pr = rows[0];
   // Auto review AND auto-posting on (the approval could only exist there), and the switch not off.
-  if (!pr || pr.reviewOn !== true || pr.postOn !== true || pr.withdrawOn === false) return { kind: 'off' };
+  if (!pr || pr.reviewOn !== true || pr.postOn === false || pr.withdrawOn === false) return { kind: 'off' };
   if (pr.state !== 'open') return { kind: 'none' };
   // The latest unwithdrawn approval of ANOTHER head (only the latest can still stand).
   const approvals = [...(await loadLimnAutoApprovals(ctx, accountId, prId)).values()]

@@ -5,7 +5,7 @@
 //
 // THE RULE, in order (the first that fails decides):
 //   0. the workspace holding the PR's repo has auto-posting ON and its `ciFailures` kind on
-//      (default on, inside auto-posting, which is itself OFF until switched on). Off ⇒ nothing is
+//      (default on, inside auto-posting, itself ON by default since 2026-11-04). Off ⇒ nothing is
 //      recorded at all;
 //   1. the run is an AUTO run that SUCCEEDED (a CI check you started yourself is never posted) and
 //      has never been claimed;

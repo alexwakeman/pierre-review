@@ -160,7 +160,9 @@ async function autoPostTicket(
     let t: Target | null = null;
     const member = run.members.find((m) => m.prId === prId);
     const ws = member ? await readWorkspaceAutoPostForPr(ctx, accountId, prId) : null;
-    if (ws && ws.settings.enabled) {
+    // Auto-posting is ON by default, so a member PR also needs auto review on in ITS workspace: a
+    // ticket review started elsewhere never posts on a PR whose workspace has auto review off.
+    if (ws && ws.settings.enabled && ws.autoReviewOn) {
       const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
       t = { settings: ws.settings, blocked: facts ? autoPostEligibility(facts, ws.settings.scope) : 'not_open' };
     }

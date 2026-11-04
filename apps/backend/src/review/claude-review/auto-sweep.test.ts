@@ -52,6 +52,16 @@ vi.mock('./manager.js', () => ({
   },
 }));
 
+// THE SKIPPED LINE (team-claim-skip.ts): what the sweeper asked to say on each PR head.
+const skipPosts: Array<{ prId: number; headSha: string | null | undefined; skips: Array<{ provider: string; reason: string }> }> = [];
+vi.mock('./team-claim-skip.js', () => ({
+  postAutoSkipLines: async (_ctx: unknown, a: { prId: number; headSha?: string | null }, skips: any[]) => {
+    skipPosts.push({ prId: a.prId, headSha: a.headSha, skips });
+    return skips.map(() => 'posted');
+  },
+  autoProvidersForPr: async () => ['claude'],
+}));
+
 let aiReady = true;
 let providerNow: 'claude' | 'codex' = 'claude';
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
@@ -101,6 +111,7 @@ const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
   }) as any as ProContext;
 
 beforeEach(() => {
+  skipPosts.length = 0;
   enqueued.length = 0;
   enqueuedCommentsAt.length = 0;
   enqueuedOpts.length = 0;
@@ -141,12 +152,34 @@ describe('runAutoReviewSweep', () => {
     answers.set(7, { prIds: ids(10), autoToday: 17 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued.map(([, p]) => p)).toEqual([2, 3]);
+    // The waiting PR is not said; the ones past the cap are.
+    expect(skipPosts.map((p) => p.prId)).toEqual([4, 5, 6, 7, 8, 9, 10]);
   });
 
   it('enqueues nothing once the cap is reached — those PRs wait for tomorrow', async () => {
     answers.set(7, { prIds: ids(5), autoToday: 20 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued).toEqual([]);
+    // Each due head is said on the PR (the skipped line; once per head — team-claim-skip.ts).
+    expect(skipPosts.map((p) => [p.prId, p.headSha ?? null, p.skips.map((k) => k.reason)])).toEqual(
+      ids(5).map((id) => [id, null, ['daily_cap']]),
+    );
+  });
+
+  it('the daily cap: a due MOVED head is said on the PR; a same-head comment burst is not', async () => {
+    answers.set(7, {
+      prIds: [],
+      autoToday: 20,
+      reReview: [
+        { prId: 31, headSha: 'h31', lastRunAtMs: NOW - 3_600_000 },
+        { prId: 32, headSha: 'h32', commentsAtMs: NOW - 3_600_000, lastRunAtMs: NOW - 3_600_000 },
+      ],
+    });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(r.capped).toBe(true);
+    // Past the settle wait, the comment burst is due too — and still not said.
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    expect([...new Set(skipPosts.map((p) => `${p.prId}:${p.headSha}`))]).toEqual(['31:h31']);
   });
 
   it('⚠ each workspace uses its OWN stored cap — in the budget and in the candidate limit', async () => {
@@ -207,8 +240,19 @@ describe('runAutoReviewSweep', () => {
     aiReady = false;
     const r = await runAutoReviewSweep(makeCtx(), NOW);
     expect(r.stopped).toBe('ai_not_ready');
-    expect(calls).toEqual([]);
+    // Read only to say so on each due head (the skipped line); nothing is queued.
+    expect(calls).toHaveLength(1);
     expect(enqueued).toEqual([]);
+    expect(skipPosts.map((p) => [p.prId, p.skips.map((k) => k.reason)])).toEqual([
+      [1, ['not_ready']],
+      [2, ['not_ready']],
+    ]);
+    // A press says nothing (the next tick does).
+    skipPosts.length = 0;
+    calls = [];
+    await runAutoReviewSweep(makeCtx(), NOW, { accountId: 1, workspaceId: 7 });
+    expect(calls).toEqual([]);
+    expect(skipPosts).toEqual([]);
     aiReady = true;
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued.map(([, p]) => p)).toEqual([1, 2]);
@@ -710,13 +754,46 @@ describe('the Claude spend budget gate (ai/budget.ts)', () => {
     expect(asked).toEqual([[1, 'auto review']]);
     expect(paused.overBudget).toBe(true);
     expect(paused.queued).toBe(0);
-    expect(calls).toEqual([]); // the candidates are not even read
+    // The candidates are read only to say so on each due head (the skipped line), once per tick.
+    expect(calls).toHaveLength(1);
     expect(enqueued).toEqual([]);
+    expect(skipPosts.map((p) => [p.prId, p.skips])).toEqual([
+      [11, [{ provider: 'claude', reason: 'budget' }]],
+      [12, [{ provider: 'claude', reason: 'budget' }]],
+    ]);
+    skipPosts.length = 0;
 
     allow = true;
     const back = await runAutoReviewSweep(ctx, NOW + 60_000);
     expect(back.overBudget).toBeUndefined();
     expect(enqueued.map(([, p]) => p)).toEqual([11, 12]);
+    expect(skipPosts).toEqual([]);
+  });
+
+  it('over budget: a moved head that is due is said on the PR; a same-head comment burst, a waiting PR and a not-yet-due head are not', async () => {
+    waiting = new Set([13]);
+    answers.set(7, {
+      prIds: [13],
+      autoToday: 0,
+      reReview: [
+        { prId: 21, headSha: 'h21', lastRunAtMs: NOW - 3_600_000 },
+        { prId: 22, headSha: 'h22', commentsAtMs: NOW - 60_000, lastRunAtMs: NOW - 3_600_000 },
+        { prId: 23, headSha: 'h23', lastRunAtMs: NOW - 60_000 },
+      ],
+    });
+    const ctx = makeCtx({ aiBudget: { allowAutomaticRun: async () => false } });
+    await runAutoReviewSweep(ctx, NOW);
+    expect(skipPosts.map((p) => [p.prId, p.headSha])).toEqual([[21, 'h21']]);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('a press does not ask the budget and runs normally: no skipped line', async () => {
+    answers.set(7, { prIds: [11], autoToday: 0 });
+    const ctx = makeCtx({ aiBudget: { allowAutomaticRun: async () => false } });
+    const r = await runAutoReviewSweep(ctx, NOW, { accountId: 1, workspaceId: 7 });
+    expect(r.overBudget).toBeUndefined();
+    expect(enqueued.map(([, p]) => p)).toEqual([11]);
+    expect(skipPosts).toEqual([]);
   });
 
   it('a context without the gate (an older fake) is allowed', async () => {

@@ -13,6 +13,10 @@
 //                                                         run — never red, never pending)
 //     success  "Cleared by alex"                        (the reader's Clear; reads as free)
 //     success  "Cleared by alex: bob's claim expired"   (a teammate's stale line, released once)
+//     success  "Cleared by alex: auto review skipped · AI budget used"   (this Limn did not start an
+//                                                         auto review it would otherwise run — the
+//                                                         budget, the daily limit, a usage limit, AI
+//                                                         not signed in; team-claim-skip.ts. Free.)
 //   ⚠ Every FREE success line starts "Cleared by ": a teammate still on an older Limn (whose fold reads
 //   any other success by someone else as "already reviewed") reads it as free too. The fold still
 //   reads "free to claim" and "Released:" (lines a 2026-10-28 build may have posted) as free.
@@ -103,6 +107,43 @@ export function releasedLine(login: string, by: string): string {
   return clamp(`${CLEARED_PREFIX}${by}: ${login}'s claim expired`);
 }
 
+/** Why this Limn did not start an auto review it would otherwise run (team-claim-skip.ts). */
+export type AutoSkipReason = 'budget' | 'daily_cap' | 'usage_limit' | 'not_ready';
+/** The phrase every skipped line carries; the fold reads a success with it as FREE. */
+export const SKIPPED_PHRASE = ' skipped · ';
+
+/** "HH:MM" on the reader's clock, with the weekday when it is not today. */
+function clockTime(ms: number, nowMs: number): string {
+  const d = new Date(ms);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (new Date(nowMs).toDateString() === d.toDateString()) return hm;
+  return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${hm}`;
+}
+
+/**
+ * THE SKIPPED LINE: "Cleared by alex: auto review skipped · AI budget used". ⚠ It starts "Cleared by "
+ * like every free success line, so a teammate's older Limn reads it as free too (any other success
+ * by someone else reads "already reviewed" there). `untilMs`: when a usage limit ends, if known.
+ * `notSetUp`: AI is not installed (else not signed in).
+ */
+export function skippedLine(
+  login: string,
+  reason: AutoSkipReason,
+  provider: AiProviderId,
+  opts: { untilMs?: number | null; notSetUp?: boolean; nowMs?: number } = {},
+): string {
+  const who = aiProviderName(provider);
+  const why =
+    reason === 'budget'
+      ? 'AI budget used'
+      : reason === 'daily_cap'
+        ? 'daily auto-review limit reached'
+        : reason === 'usage_limit'
+          ? `${who} over its usage limit${opts.untilMs != null ? ` until ${clockTime(opts.untilMs, opts.nowMs ?? Date.now())}` : ''}`
+          : `${who} ${opts.notSetUp ? 'not set up' : 'not signed in'}`;
+  return clamp(`${CLEARED_PREFIX}${login}: auto review${SKIPPED_PHRASE}${why}`);
+}
+
 /** One status line of ONE context, as GitHub lists it. */
 export interface TeamClaimLine {
   id: number;
@@ -114,7 +155,8 @@ export interface TeamClaimLine {
 
 // A FREE line: a success starting "Cleared by " (a Clear, a release of ours or of a teammate's expired
 // line), a success "free to claim" or "Released:" (a 2026-10-28 build's wording), or a pending "free to
-// claim" (older Limn versions).
+// claim" (older Limn versions). A SKIPPED line ("… skipped · …", team-claim-skip.ts) reviewed nothing,
+// so it is free whatever its prefix.
 // A teammate's review KEPT IN LIMN put nothing on GitHub: the team got nothing from it, so it holds
 // nothing (2026-11-03 — robin-dunn's kept-in-Limn Claude reviews held six PRs, the pair fell back to a
 // Codex over its usage limit, and nobody got a review).
@@ -123,8 +165,18 @@ const isFreeLine = (l: TeamClaimLine): boolean => {
   const d = l.description ?? '';
   if (l.state === 'pending') return d.includes(FREE_PHRASE);
   if (l.state !== 'success') return false;
-  return d.includes(FREE_PHRASE) || d.startsWith(CLEARED_PREFIX) || d.startsWith(RELEASED_PREFIX) || d.endsWith(KEPT_PHRASE);
+  return (
+    d.includes(FREE_PHRASE) ||
+    d.startsWith(CLEARED_PREFIX) ||
+    d.startsWith(RELEASED_PREFIX) ||
+    d.endsWith(KEPT_PHRASE) ||
+    d.includes(SKIPPED_PHRASE)
+  );
 };
+/** Is this line FREE — it holds nothing (a Clear, a release, a kept-in-Limn review, a skipped line)? */
+export function isFreeTeamClaimLine(l: TeamClaimLine): boolean {
+  return isFreeLine(l);
+}
 const settles = (l: TeamClaimLine): boolean => l.state !== 'pending' || isFreeLine(l);
 const sameLogin = (a: string | null, b: string | null): boolean =>
   a != null && b != null && a.toLowerCase() === b.toLowerCase();

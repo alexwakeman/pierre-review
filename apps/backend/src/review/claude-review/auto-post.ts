@@ -3,7 +3,7 @@
 //
 // THE RULE, in order (the first that fails decides):
 //   0. the workspace holding the PR's repo has auto-posting ON (`workspaces.auto_post_enabled`,
-//      migration 0087 / pg 0074 — OFF for every workspace until switched on). Off ⇒ nothing is
+//      migration 0087 — ON by default since 2026-11-04: only a stored false is off). Off ⇒ nothing is
 //      recorded at all;
 //   1. WHICH PRs (`autoPostEligibility`, pure): open (never merged or closed), not a draft, not
 //      bot-authored (the workspace's bot union), and under scope 'mine' the PR is the reader's own,

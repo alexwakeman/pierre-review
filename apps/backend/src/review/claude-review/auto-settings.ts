@@ -69,12 +69,14 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // by the wire shape and the sweeper's roster alike. Bounded 1..500 at the route.
 //
 // AUTO-POSTING rides the same route as two more columns (migration 0087 / pg 0074):
-// `auto_post_enabled` (NULL/false = OFF — for every workspace, existing and new, until someone
-// switches it on: it writes to GitHub AS THE READER) and `auto_post_settings`, OVERRIDES ONLY
+// `auto_post_enabled` (⚠ ON BY DEFAULT since 2026-11-04 — NULL reads ON, only a stored false is
+// off, in every reader and in the writer; it writes to GitHub AS THE READER, but only for AUTO runs,
+// so it does nothing until auto review is switched on) and `auto_post_settings`, OVERRIDES ONLY
 // ({ scope?, kinds? }; NULL = the product defaults), resolved through `resolveAutoPostSettings`.
 // Stored independently of `auto_review_enabled`: it only ever acts on AUTO runs, so it does nothing
-// while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` and
-// `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
+// while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` (ON by
+// default since 2026-11-04: absent = on, a stored false = off) and `autoResolve` (OFF by default)
+// switches ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
 // So do the two TEAMMATE-LIFT opt-ins, `teamLiftConsent` and `liftTeammateBlocks` (both OFF by
 // default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
@@ -140,7 +142,8 @@ export function resolveAutoPostSettings(
     for (const k of APPROVE_IMPACT_KEYS) if (typeof si[k] === 'boolean') approveImpact[k] = si[k] as boolean;
   }
   return {
-    enabled: enabled === true,
+    // ON unless explicitly switched off (2026-11-04).
+    enabled: enabled !== false,
     scope: isScope(stored?.scope) ? stored!.scope! : AUTO_POST_DEFAULT_SCOPE,
     kinds,
     autoVerdict: typeof stored?.autoVerdict === 'boolean' ? stored.autoVerdict : AUTO_POST_DEFAULT_AUTO_VERDICT,
@@ -275,11 +278,19 @@ export async function readWorkspaceAutoPostForPr(
   ctx: AgentContext,
   accountId: number,
   prId: number,
-): Promise<{ workspaceId: number; settings: WorkspaceAutoPostSettings; pairStrictness: PairVerdictStrictness } | null> {
+): Promise<{
+  workspaceId: number;
+  settings: WorkspaceAutoPostSettings;
+  pairStrictness: PairVerdictStrictness;
+  // Is AUTO REVIEW on for this workspace? Auto-posting is ON by default, so a caller that may act on a
+  // PR outside the workspace that started the run (a ticket review's member PRs) checks this too.
+  autoReviewOn: boolean;
+} | null> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   const rows = (await ctx.db
     .select({
       workspaceId: w.id,
+      autoReviewOn: w.autoReviewEnabled,
       enabled: w.autoPostEnabled,
       stored: w.autoPostSettings,
       ...verdictRuleCols(w),
@@ -291,6 +302,7 @@ export async function readWorkspaceAutoPostForPr(
     .limit(1)
     .execute()) as Array<{
     workspaceId: number;
+    autoReviewOn: boolean | null;
     enabled: boolean | null;
     stored: StoredAutoPostSettings | null;
     pairStrictness?: string | null;
@@ -302,6 +314,7 @@ export async function readWorkspaceAutoPostForPr(
         workspaceId: r.workspaceId,
         settings: resolveAutoPostSettings(r.enabled, r.stored, r.approveLeftovers),
         pairStrictness: resolvePairStrictness(r.pairStrictness),
+        autoReviewOn: r.autoReviewOn === true,
       }
     : null;
 }
@@ -552,7 +565,7 @@ export async function setWorkspaceAutoReview(
     set.approveLeftovers = leftoversStored;
   }
   if (autoPost !== undefined) {
-    if (postAfter.enabled !== (existing.autoPostEnabled === true)) set.autoPostEnabled = postAfter.enabled;
+    if (postAfter.enabled !== (existing.autoPostEnabled !== false)) set.autoPostEnabled = postAfter.enabled;
     if (JSON.stringify(postOverrides) !== JSON.stringify(existing.autoPostSettings ?? null)) {
       set.autoPostSettings = postOverrides;
     }
@@ -625,7 +638,7 @@ function settingChanges(
           : 'Auto-approve: nits and questions may stay open',
     ]);
   }
-  if ('autoPostEnabled' in set) out.push(['auto_post', `Auto-posting ${onOff(next.autoPostEnabled === true)}`]);
+  if ('autoPostEnabled' in set) out.push(['auto_post', `Auto-posting ${onOff(next.autoPostEnabled !== false)}`]);
   else if ('autoPostSettings' in set) out.push(['auto_post', 'Auto-posting settings changed']);
   return out;
 }
