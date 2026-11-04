@@ -47,6 +47,7 @@ import type {
   WorkspaceDependencyAutomationResponse,
   DependencyAutomationPatch,
   DependencyAutomationLogResponse,
+  PushedSinceCommitsResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
   RequestReviewersBody,
@@ -597,6 +598,9 @@ export const api = {
   // What the dependency automation did (Pending → Dependencies, fetched on a click). DB only.
   dependencyAutomationLog: (workspaceId: number) =>
     get<DependencyAutomationLogResponse>(`/api/dependencies/automation-log?workspace=${workspaceId}`),
+  // Every commit a Pending "Pushed since" card counts (fetched only when the card is expanded). DB only.
+  pushedSinceCommits: (workspaceId: number, prId: number) =>
+    get<PushedSinceCommitsResponse>(`/api/my-turn/pushed-since/${prId}?workspace=${workspaceId}`),
   workspaceAutoReview: (id: number) =>
     get<WorkspaceAutoReviewResponse>(`/api/workspaces/${id}/auto-review`),
   setWorkspaceAutoReview: (id: number, body: SetWorkspaceAutoReviewBody) =>

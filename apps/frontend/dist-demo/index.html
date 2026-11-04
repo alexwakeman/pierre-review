@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Limn demo</title>
+    <meta name="theme-color" content="#0b1020" />
+    <!-- Brand favicon: the Limn mark, the `group` sprite the header wordmark draws.
+         Regenerate with `node scripts/make-favicons.mjs` — it renders from the ONE grid in
+         apps/landing/src/lib/sprites.ts, so the tab icon cannot drift from the header.
+         Root-absolute public-asset paths — Vite
+         base-prefixes them to '/app/...' in dev and in the production build, so they
+         load whether the SPA is served locally or behind the cloud auth gate. -->
+    <!-- ⚠ THE SVG MUST STAY FIRST AND KEEP ITS `type`. A tab slot is 16 CSS px — 32 device px
+         at DPR 2 — and Chrome picks ONE of these and scales it, so any pick but an exact 1:1
+         raster resamples a grid whose features are one pixel wide and reads as blur. Declared
+         this way Chrome takes the SVG and `shape-rendering: crispEdges` snaps it to the device
+         grid at every DPR. The PNGs remain for Safari < 16.4 and the big-raster surfaces. -->
+    <link rel="icon" href="/demo/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/demo/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/demo/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/demo/favicon-48.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/demo/apple-touch-icon.png" />
+    <!-- Brand wordmark font (the "Pierre" title) is SELF-HOSTED — the @font-face
+         lives in src/index.css and the .woff2 is bundled from src/fonts/. It is
+         deliberately NOT a Google Fonts <link>: that leaked every viewer's IP to
+         Google on load (breaking local mode's no-phone-home promise) and forced the
+         CSP to allowlist two third-party origins. Swap the family in index.css. -->
+    <script type="module" crossorigin src="/demo/assets/index-BeI1Dzmy.js"></script>
+    <link rel="stylesheet" crossorigin href="/demo/assets/index-DLjYBgAA.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

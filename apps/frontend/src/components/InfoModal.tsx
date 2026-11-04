@@ -152,6 +152,54 @@ const POPOVER_WIDTH: Record<'md' | 'lg', string> = {
  * or a collapsible header's own onClick.
  */
 export function InfoButton({ title, children, width = 'md', className }: InfoButtonProps): JSX.Element {
+  return (
+    <ClickPopover
+      title={title}
+      width={width}
+      triggerLabel={`About “${title}”`}
+      triggerClassName={(open) =>
+        `relative inline-flex shrink-0 items-center justify-center rounded-full p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:after:absolute touch:after:-inset-3 touch:after:content-[''] ${
+          className ?? (open ? 'text-ui-ink' : 'text-ui-mute hover:text-ui-ink')
+        }`
+      }
+      trigger={<InfoIcon size={13} />}
+    >
+      {children}
+    </ClickPopover>
+  );
+}
+
+export interface ClickPopoverProps {
+  /** The popover's heading. */
+  title: string;
+  /** The popover body, rendered only while open. */
+  children: ReactNode;
+  /** What the trigger button shows. */
+  trigger: ReactNode;
+  /** The trigger's accessible name. */
+  triggerLabel: string;
+  /** The trigger's classes, given whether the popover is open. */
+  triggerClassName: (open: boolean) => string;
+  width?: 'md' | 'lg';
+  /** Keep the trigger's click from reaching a clickable card or row around it. */
+  isolate?: boolean;
+  testId?: string;
+}
+
+/**
+ * THE CLICK POPOVER behind `InfoButton`, with any trigger — the blast-radius chip opens its reasons
+ * through it. Every rule in `InfoButton`'s note above holds for both.
+ */
+export function ClickPopover({
+  title,
+  children,
+  trigger,
+  triggerLabel,
+  triggerClassName,
+  width = 'md',
+  isolate = false,
+  testId,
+}: ClickPopoverProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -192,24 +240,23 @@ export function InfoButton({ title, children, width = 'md', className }: InfoBut
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
 
-  const colour =
-    className ??
-    (open
-      ? 'text-ui-ink'
-      : 'text-ui-mute hover:text-ui-ink');
   return (
     <>
       <button
         ref={refs.setReference}
         {...getReferenceProps()}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={(e) => {
+          if (isolate) e.stopPropagation();
+          setOpen((o) => !o);
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`About “${title}”`}
-        className={`relative inline-flex shrink-0 items-center justify-center rounded-full p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:after:absolute touch:after:-inset-3 touch:after:content-[''] ${colour}`}
+        aria-label={triggerLabel}
+        data-testid={testId}
+        className={triggerClassName(open)}
       >
-        <InfoIcon size={13} />
+        {trigger}
       </button>
       {open && (
         <FloatingPortal>

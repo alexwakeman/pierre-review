@@ -98,7 +98,7 @@ describe('the wiring', () => {
       expect(panel, f).toContain(f);
     }
     expect(panel).toMatch(/<LargePrFlag pr=\{pr\} \/>/);
-    expect(panel).toMatch(/<BlastRadiusChip pr=\{pr\} expandable \/>/);
+    expect(panel).toMatch(/<BlastRadiusChip pr=\{pr\} \/>/);
     expect(panel).toMatch(/<DrawerAiReview/);
     expect(panel).toMatch(/openStory\(/);
     expect(rows).toMatch(/View PR/);

@@ -349,7 +349,7 @@ describe('My turn — people events', () => {
     });
     expect(lead(card)).toBe('Robin Dunn pushed 2 commits since you approved');
     expect(lead(myTurn({ reason: 'pushed_since', ball: { kind: 'commits_after', humanCommitsAfter: 1 } }))).toBe(
-      '1 commit pushed since you last looked',
+      '1 commit pushed since your last review or comment',
     );
   });
 
@@ -458,7 +458,7 @@ describe('My turn — your own PR', () => {
     expect(
       pendingActionLine(myTurn({ reason: 'claude_review', detail: 'Claude review ready · COMMENT · head moved since' }), ctx())
         .where,
-    ).toEqual([{ text: 'new commits since' }]);
+    ).toEqual([{ text: 'new commits since this review' }]);
   });
 });
 

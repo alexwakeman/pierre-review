@@ -569,7 +569,8 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
       const ball = card.ball;
       const n = ball?.humanCommitsAfter ?? ball?.commits?.length ?? 0;
       const commits = n > 0 ? `${n} commit${n === 1 ? '' : 's'}` : 'new commits';
-      const since = ball?.yourLastAction != null ? ` since you ${LAST_ACTION_PAST[ball.yourLastAction]}` : ' since you last looked';
+      // The anchor is your last ACTION, never a view: an older response with no action named says the rule.
+      const since = ball?.yourLastAction != null ? ` since you ${LAST_ACTION_PAST[ball.yourLastAction]}` : ' since your last review or comment';
       const pusher = ball?.pusherId != null ? ctx.nameOf(ball.pusherId) : null;
       return plain(
         pusher != null ? `${pusher} pushed ${commits}${since}` : `${n > 0 ? commits : 'New commits'} pushed${since}`,
@@ -780,7 +781,7 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
           return {
             ...line,
             verb: 'Read the review',
-            where: card.detail.includes('head moved since') ? [{ text: 'new commits since' }] : [],
+            where: card.detail.includes('head moved since') ? [{ text: 'new commits since this review' }] : [],
           };
         default: {
           const _x: never = card;

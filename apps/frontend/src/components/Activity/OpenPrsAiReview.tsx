@@ -21,7 +21,7 @@ import type { CardTicketPill } from '../../lib/ticketReview.js';
 import { dateTime, relativeTime } from '../../lib/ui.js';
 import { AiRunGate } from '../AiSetup.js';
 import { CheckIcon, CommitIcon, SparkleIcon, WarningIcon } from '../Icons.js';
-import { LeadVerdict } from './ClaudeReviewCell.js';
+import { LatestReviewer, LeadVerdict } from './ClaudeReviewCell.js';
 import { Button, cx, FOCUS_RING, TEXT_LINK } from '../ui/index.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 
@@ -164,6 +164,7 @@ export function DrawerAiReview({
               <LeadVerdict cell={cell} iconSize={13} />
             </button>,
             autoWord,
+            cell.latest != null && <LatestReviewer key="latest" cell={cell} className="text-ui-mute" />,
           ]}
         />
       );

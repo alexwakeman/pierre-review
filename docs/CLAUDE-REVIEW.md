@@ -659,7 +659,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   quiet source chip ("Claude", "Codex", "Claude + Codex" — the lens chip's neutral 11px style, no
   colour per provider); a half that did not finish is one line under the header ("Codex didn't
   finish: usage limit reached", `pairHalfFailedLine`). How it was merged sits behind the header's ⓘ
-  only. The history select lists the pair as ONE option (§ The review tab's history). The progress
+  only. Reviews on this PR lists the pair as ONE row (§ The review tab's history). The progress
   line names the step: "Claude and Codex reviewing…" while both run (`ClaudeReviewStatusResponse.pair.both`),
   then the one still running ("Codex reviewing…"), then "Merging the two reviews…" (`pairRunningLabel`,
   the last half's `merging` phase).
@@ -774,18 +774,22 @@ Default, Low, Medium, High, Extra high, Max.
 
 ### The review tab's history
 
-Every review of the PR is listed, always, in ONE native drop-down ("Showing …",
-`components/ReviewHistoryList.tsx`; back to a select on 2026-10-28 — the always-visible list grew too
-long): all providers, all heads, newest first (`listClaudeReviewHistory` is uncapped and carries
-`findingCount`). ONE OPTION PER REVIEW (`lib/reviewHistory.ts reviewHistoryOptions`): "<what ran> ·
-<short head> · <when>", the status when not finished, "Auto review", "(latest)". What ran is
-`aiRunLabel`; a Claude + Codex pair is ONE option "Claude + Codex · abc1234 · <when>", addressed by its
-latest half's id (either half's id selects it, `historyOptionIdFor`); a replies pass reads "Replies
-checked · …". Picking one shows that review. Which run is shown is the reader's
-(`lib/reviewHistory.ts nextShownReviewId`): a run starting or finishing, a provider switch or the
-model menu never moves it, except to a run the reader just started (a MANUAL run that became the
-latest). Opening while an auto run is in flight shows the newest finished run. Editing and posting
-stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier fixes pushed").
+"Reviews on this PR" (`components/TeamReviewLayout.tsx` `ReviewsOnPrSection`, rows from
+`lib/teamReview.ts reviewsOnPr`; replaced the "Showing …" drop-down on 2026-11-04) lists EVERY review:
+the reader's runs (all providers, all heads; `listClaudeReviewHistory` is uncapped) and every
+teammate's posted review, newest first. A row is "<avatar> You · Request changes · 3 Nov · 8a8ec14 ·
+Claude + Codex · Auto review" — the status ("Running", "Queued", "Failed") in place of the verdict
+when not finished. A Claude + Codex pair is ONE row, addressed by its latest half's id (either half's
+id shows it, `itemShows`); a replies pass reads "Replies checked". ONE row is NOW, found by IDENTITY
+(`nowReviewKey`): the row holding the reader's latest FULL review (with none, the newest teammate
+review) — never the first row, since a newer replies pass is listed above it. The tab shows the PR as
+it stands there (§ Teammates' reviews → The tab's team layout). Any other row, a newer replies pass
+included, opens that review READ-ONLY under a bar naming it, with "Back to now"; a past review shows
+no live Story check or CI check (nothing can be started from it). **NEWEST ALWAYS SHOWS** (`nextShownReview` over
+`newestReviewKey`): the next review that starts or lands — the reader's (a row appears the moment a
+run is queued, auto or manual) or a teammate's newly imported one — takes over from a past review.
+Editing and posting stay on now only. AI Fix keeps no per-PR run selector (only "Earlier fixes
+pushed").
 
 ### The Codex runner
 
@@ -1284,7 +1288,8 @@ wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor
   (`latestFullReviewAtOrBefore`, `beforeReviewId` = this run) is a teammate row whose poster
   (`source_user_id`) is the PR's `author_id`, with at least one eligible finding
   (`isFollowUpEligible`: an imported finding is POSTED). A newer review of the reader's own anchors as
-  before. A NON-author teammate's posted review never anchors (it holds the head: § Team claims). A
+  before. A NON-author teammate's posted review never anchors; while its Request changes stands, its
+  findings join as carried items (§ Teammates' reviews → A teammate's standing block). A
   kept-in-Limn review posted nothing, so there is nothing to import: a normal review.
 - **What is sent.** The author's findings as the previous review's own (head = their review's head),
   then the reader's own previous review (`loadPriorReviewForFollowUp`, with its carries) as CARRIED, once
@@ -2027,7 +2032,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   is shared `jiraApiRoot`, ONE copy the server and the SPA both call. Members are OPEN + MERGED PRs
   (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
   (30; it was 8 before contribution cards) it REFUSES `too_many_prs` with the count, never samples.
-- **Adding a ticket by link or key** (the DEFAULT story input): the Story check's paste box turns
+- **Adding a ticket by link or key** (the DEFAULT story input): the Story check's paste box
+  (collapsed by default behind "Add tickets", a ChevronIcon disclosure) turns
   pasted URLs/keys into chips, previews each (`POST /api/prs/:id/tracker-ticket/resolve`, `link:
   false`), and its Check links the readable ones (`link: true`, a `'manual'` stored row — [TRACKERS.md](TRACKERS.md)
   § Adding a ticket by hand) then starts ONE ticket review PER ticket with `{prId, ident}` — never a
@@ -3121,16 +3127,36 @@ The reader and a teammate both run Limn on the same repos. A review the TEAMMATE
 GitHub** (summary + finding comments) joins the reader's AI Review tab as part of ONE review (below,
 § One review). A review a teammate kept in their own Limn never reaches GitHub, so it is never shown.
 
+- **The tab's team layout** (2026-11-04; SPA only, `lib/teamReview.ts` + `components/TeamReviewLayout.tsx`;
+  docs/FRONTEND.md § The AI Review tab → Team layout). On NOW (never on a past review):
+  - **Where this PR stands** (`standingRows` over `teamView.standings`): one line per Limn reviewer,
+    newest review first — "You · Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub",
+    "Robin · Comment · 4 Nov · 1c4bd65". An older block under a newer Comment of the same person reads
+    "Request changes from 3 Nov still blocking on GitHub"; an approval in force "approval stands on
+    GitHub"; a dismissed review "dismissed on GitHub". A blocking line is flagged. It replaces the
+    single verdict: the summary and the rail status show none while it is on screen.
+  - **Findings by their state now, across every review** (`teamFindingRows` over
+    `teamView.allFindings`): "Open" and a collapsed "Resolved or addressed (n)" whose rows say why
+    (`closedReason`: "Resolved on GitHub", "Robin’s review found it addressed · 4 Nov"). ⚠ "Resolved
+    on GitHub" counts only when the resolved thread is the point's NEWEST raise: a later re-raise
+    (the latest run's, unposted) keeps the point Open with its actions ("Post reminder"). EVERY row names
+    who raised it (`raisedByLabel`): "You", "Robin", "You and Robin", plus the model only when the
+    raising review was a Claude + Codex pair ("You · Codex", "You · Claude + Codex"). Only the
+    reader's own findings of the latest run keep Post / Reword / Ignore; every other row is read-only.
+    An ignored point is left out unless it is a latest-run finding (its card shows it ignored).
+  - **Reviews on this PR** (§ The review tab's history).
 - **One review** (`review/claude-review/team-view.ts`: `foldTeamReview`, pure; `loadTeamReviewView`
   reads its inputs; wire `ClaudeReviewResponse.teamView`). The reader's latest review and every
   teammate's posted review read as ONE until their findings are settled:
-  - **The newest review leads.** A teammate review posted after the reader's latest run finished (or
+  - **The newest review leads** — the summary heading the tab; the VERDICT shown follows § Standing
+    verdicts (a Request changes still in force outranks a newer, milder review). A teammate review posted after the reader's latest run finished (or
     with no run of the reader's) heads the tab: "Robin's review", its verdict, "Posted on GitHub", its
     summary (without Limn's "_Posted automatically by Limn’s … review._" footer,
     `withoutAutoPostFooter`). The PR tab label carries no verdict pill. A run of the reader's that is queued or running is the newest work. A FAILED run or a
-    skip (`review_mode = 'skip'`) reviewed nothing, so any teammate review leads over it — the tab
+    skip (`review_mode = 'skip'`) reviewed nothing, so the reader's latest run that DID review
+    competes in its place (`lastReviewedAt`; none ⇒ the teammate leads) — the tab
     and the Overview card agree, and so does the review count. The reader's older review stays in
-    the history list. ⚠ **THE RULE IS ONE PURE FUNCTION, `teamReviewLead(own, newestTeammateAt)`**
+    Reviews on this PR. ⚠ **THE RULE IS ONE PURE FUNCTION, `teamReviewLead(own, newestTeammateAt)`**
     (team-view.ts): `foldTeamReview` and the states batch both call it — never fork it.
   - **The Open PRs column and the Pending cards follow the same lead** (`POST
     /api/claude-review/states` → `ClaudeReviewPrState.teammateLead`, `persist.ts`
@@ -3172,7 +3198,9 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 
 - **The hidden metadata** (shared `packages/shared/src/limn-review-meta.ts`): every posted review
   summary ends in ONE marker, `<!-- pierre:claude-review v=1 a=<nonce> h=<head> k=auto|manual|replies
-  [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Limn version> -->`.
+  [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Limn version>
+  [j=<comment id>:<a|n|x>,…] [lift=1] -->` (`j=`: § Judgements travel with a post; `lift=1`: § Lifting a
+  teammate's block).
   Built ONLY by `limnReviewMarker` in `review/post-seam.ts` (head, verdict and version filled there;
   `PostReviewArgs.limnMeta` carries run kind, pair and runs — `review/claude-review/post-meta.ts`
   `limnMetaForReview` for the manual Post and auto-posting; a replies-pass outcome sends `k=replies`).
@@ -3223,6 +3251,121 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   `db/teammate-reviews.ts` `listTeammateReviews`) and the fold over it, `teamView` (§ One review, above).
   Never in `review` / `history`. The SPA's `components/TeammateReviews.tsx` (the lead summary, the
   read-only finding row) has no Post, Re-post, Delete or auto-post control.
+
+### Standing verdicts (2026-11-04)
+
+The VERDICT the Open PRs card, the Pending card and the AI Review tab pill show follows GitHub's own
+rule, not "newest review leads". Per Limn reviewer (the reader, each teammate whose Limn posted):
+
+- Their **verdict in force** is their newest DECISIVE synced review (`reviews.state` approved /
+  changes_requested; commented and pending never replace one; a dismissed newest one stands for
+  nothing) — when that review is a Limn review (it carries the summary marker, or it is one of the
+  reader's posted runs by `posted_review_id` / `auto_post.githubReviewId`). A later decisive review of
+  theirs that is not Limn's replaced the Limn verdict. A teammate's Comment never lifts the reader's
+  Request changes; neither does the reader's newer UNPOSTED run (GitHub still holds the old one).
+- The surface shows the **strictest in force** (`blocking`: the newest Request changes still
+  standing, anyone's) when the review it leads with is not that one, and names **who reviewed last**
+  beside it ("Latest: Robin · Comment · 4 Nov"). Nothing blocking ⇒ the newest review leads, as
+  before (`teamReviewLead`). A run of the reader's in flight still shows as running.
+- ⚠ ONE FOLD, `team-view.ts` `teamStandings` (pure). The states batch reads it through
+  `loadTeamStandingsForPrs` (a fixed number of batched reads for every listed PR, DB only) →
+  `ClaudeReviewPrState.standing`; the tab reads the same loader → `teamView.standings`. The SPA picks
+  the block in ONE place, `lib/claudeReviewColumn.ts` `standingBlockShown` (`reviewCellFor`,
+  `leadFinishedAt`, `leadCurrency`, `reviewTabPill`). Own-only readers (auto holds, caps, posting,
+  the reader's own `summary` counts) are unchanged.
+- Example (PR 203001): the reader's Claude + Codex pair asked for changes on 3 Nov and it was
+  posted; Robin's Limn commented on 4 Nov. Shown: "Request changes" with "Latest: Robin · Comment ·
+  4 Nov". Dismissing the reader's review on GitHub lifts it.
+
+### Judgements travel with a post (2026-11-04)
+
+A posted review's marker carries `j=<comment id>:<a|n|x>,…` (≤ `LIMN_META_MAX_JUDGED` = 50; a =
+addressed, n = not addressed, x = no longer applies): what this review found about earlier Limn
+findings ON GITHUB, keyed by the finding comment's databaseId. Built by `post-meta.ts`
+`loadJudgedForPost` (DB only, never throws) for the manual Post and auto-posting, from the run's
+follow-up items whose prior finding is posted (the reader's own and a teammate's; `reply_accepted`
+counts as addressed, `partly_addressed` / `reply_disputed` as not, `not_checked` is left out) and
+from its thread judgements of threads ROOTED on a Limn finding (`addressed` / not; `unclear` left
+out). The follow-up wins for the same comment. The import stores the parsed list on the teammate
+row (`teammate.judged`, no migration: it is part of the marker record) and serves it as
+`ClaudeTeammateReview.judged`. Without it, the reader's Limn learns of a teammate's judgement only
+when the thread is resolved or replied to. An older post has no `j=`: nothing is assumed.
+
+### Every finding (2026-11-04)
+
+`teamView.allFindings: ClaudeTeamPoint[]` (`team-view.ts` `foldAllTeamFindings`, pure) lists every
+point on the PR once: the reader's runs (a re-raise chain is one point, shown from its newest raise;
+an older run's never-posted finding is left out; the latest run's ignored ones are flagged), and every
+teammate's posted finding. Who raised it (`author`), which model (`providers`: the pair's
+`sourceOf`, else the run's provider; a teammate pair's comment lead tag, stored at import as
+`teammate.findingProviders`), and its state now: resolved on GitHub (its thread), else the NEWEST
+judgement — the reader's follow-up, the reader's thread judgement, or a teammate's posted `judged`
+entry — else open; a re-raise newer than a judgement keeps it open. The same point raised by several
+reviewers (the chain, the same thread, or the same spot) is ONE entry, the reader's first, the rest in
+`alsoRaisedBy`. Order: open first, then newest. Shapes: docs/API.md § Team review.
+
+### A teammate's standing block (2026-11-04)
+
+Besides the PR author's review (§ Follow-up on the previous review → The author's own review), the
+reader's run follows up EVERY teammate's Limn review whose Request changes is still in force
+(`teammate-anchor.ts` `loadStandingBlockAnchors`, through `teamStandings`). Its findings — a pair's
+Codex half's too, they are in the posted comments — join the follow-up as CARRIED items
+(`mergeStandingBlocks`), less those the reader's Limn already settled. With no previous review at all,
+the newest block anchors (`follow_up.teammate` names its poster). The writers never act on those
+threads (`ownOnly`), and the run's post carries its judgements back (`j=`). Team claims are per commit,
+so a teammate's standing block never holds a NEW head; the same head stays held as before. A failed
+read costs the block only.
+
+### Lifting a teammate's block (2026-11-04)
+
+Once the reader's Limn finds every point behind a teammate's standing Limn Request changes settled, it
+may DISMISS that review and post its own (`review/claude-review/teammate-lift.ts`, wired into
+`auto-post.ts`, so it runs for an AUTO run and a manual "Review and post" — never the Post button).
+The reader's OWN block is the other path (§ Auto-posting, the lift).
+
+- **Two opt-ins, both OFF by default, per workspace** (overrides JSON `workspaces.auto_post_settings`,
+  no column; Settings → Auto review → "Teammates' Limn blocks", ⓘ): (a) THE BLOCKED SIDE'S CONSENT,
+  `teamLiftConsent` — "Teammates' Limn may lift my Limn's block once every point is addressed" —
+  written as `lift=1` in the marker of a review that reader's AUTO-POSTING sends while it is on (an
+  auto run, or "Review and post": Limn's own computed verdict), imported as `teammate.liftConsent`.
+  ⚠ The manual Post button NEVER writes it: the person chose that verdict and body, and a review a
+  person chose is never dismissed. ⚠ Nor does a post whose comments leave out a BLOCKER its verdict
+  counts (`blockersAllInPost`: the blocker was already on GitHub from an earlier post, so the re-post
+  omits it yet still requests changes): the other side reads the points from the post's own comments
+  only. (b) THE LIFTING SIDE'S SETTING, `liftTeammateBlocks` — "Lift a teammate's Limn block when
+  everything is addressed". A post made with (a) off carries no consent, whatever the setting says later.
+- **The rule** (`teammateLiftHold`, pure, first failure decides): (b) on; not the reader's own PR; the
+  block is a teammate's (never the reader's — standings `you: false` AND the live login); still in
+  force (DB standings, then the LIVE review list: the poster's newest decisive review is this
+  CHANGES_REQUESTED); never tried before (`teammate_lift` NULL); the LIVE body carries LIMN'S SUMMARY
+  MARKER (a person's typed review is never dismissed) and `lift=1`; the reader's run has no blocker and
+  no own earlier blocker left unjudged; the run is at the PR's CURRENT head (the live head; a moved
+  head fails the post); and EVERY POINT is settled.
+- **The points** (`pointsBehindBlock`): the blocking review's findings the verdict counts — every
+  blocker, warning and unlabelled finding, plus each nit / question the READER'S `approveLeftovers`
+  does not let stay open. A pair's Codex-half comments are in the posted review like any other. ⚠ FAIL
+  SAFE: a review whose comments hold no blocker, warning or unlabelled finding is NEVER lifted (no
+  points): its block rests on something the comments do not show. One with no findings is never lifted.
+  **Settled** = the point's NEWEST follow-up word that HOLDS AT THE HEAD BEING LIFTED (`wordsAtHead`;
+  `not_checked` never counts) is `addressed`, `no_longer_applies` or `reply_accepted`. ⚠ A code
+  judgement holds only at the commit it read (a push can undo a fix): a word from a run at another head
+  never counts, and a later off-head word clears an earlier one; only a `reply_accepted` (a settled
+  discussion) holds across heads. The standing-block loader uses the SAME fold, so a point not settled
+  at this head is sent to this run's follow-up again — the dismissal message and `j=` describe a check
+  made at that commit (§ A teammate's standing block).
+- **The writes**, inside the run's auto-post claim: the reader's review goes out — APPROVE when the
+  auto verdict and its gate allow it (§ Auto-posting, rule 3), else COMMENT; always sent, because its
+  `j=` carries the judgements to the teammate's Limn. Then, only once it LANDED: ⚠ **CLAIM BEFORE WRITE**
+  — `claude_reviews.teammate_lift` on the teammate's imported row (migration 0164, JSON
+  `TeammateLiftRecord`) goes NULL → `dismissing` by compare-and-set, so one teammate review is
+  dismissed at most once by any run; then the REST dismissal with "Limn (alex) checked all 3 points are
+  addressed at 70cc9b5." (`teammateLiftMessage`); then `dismissed` (the local `reviews` row stamped
+  dismissed) or `failed` with GitHub's words. ⚠ **NEVER RETRIED** — a 403 (no write access, dismissal
+  restricted by branch protection) stays `failed`. The run's record copies it
+  (`ClaudeAutoPostRecord.liftedTeammateBlocks`, on the wire): the tab prints "Dismissed robin's request
+  for changes: every point is addressed." / "Couldn't dismiss robin's request for changes: <why>"
+  (`teammateLiftLines`). The teammate review serves it as `ClaudeTeammateReview.lift`. The post settles
+  the PR (`settlePrAfterWrite`) as every auto post does.
 
 ## Chat about a review
 

@@ -2,12 +2,13 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFollowUpStatus,
   ClaudeReviewPrState,
+  ClaudeReviewStandingRef,
   ClaudeReviewStateSummary,
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
 import { CLEAN_CLASS, OUTDATED_CLASS } from './claudeReviewFollowUp.js';
 import { teammateName } from './teammateReviews.js';
-import { dateTime, relativeTime } from './ui.js';
+import { relativeTime } from './ui.js';
 
 // Pure helpers for the Claude Review panel on each Open PRs card (OpenPrsCards → ClaudeReviewCell).
 // The column reads ONE batched `POST /api/claude-review/states` answer and starts runs through the
@@ -49,6 +50,10 @@ export type ReviewCell =
       auto?: true;
       // A teammate's posted review leads: `verdict` / `headMoved` are THEIRS, attributed.
       by?: ReviewCellBy;
+      // STANDING VERDICTS: the verdict shown is a Request changes still in force on GitHub that is not
+      // the newest review (`state.standing.blocking`). `latest` then names who reviewed last.
+      stillBlocking?: true;
+      latest?: { text: string; title: string };
     };
 
 /**
@@ -68,6 +73,23 @@ export function reviewCellFor(
     return { kind: state.status, ...auto };
   }
   if (starting) return { kind: 'starting' };
+  // STRICTEST STANDING VERDICT: a Request changes still in force on GitHub outranks a newer, milder
+  // review. A run of the reader's in flight still shows as running.
+  const block = standingBlockShown(state);
+  if (block != null && state.status !== 'queued' && state.status !== 'running') {
+    const latest = state.standing?.latest ?? null;
+    const by = block.you || block.poster == null ? undefined : cellBy(block.poster.login, block.poster.displayName, block.poster.avatarUrl);
+    return {
+      kind: 'done',
+      reviewId: block.reviewId ?? state.reviewId,
+      verdict: 'REQUEST_CHANGES',
+      verdictLabel: CLAUDE_VERDICT_LABEL.REQUEST_CHANGES,
+      headMoved: block.headSha != null && state.currentHeadSha != null && block.headSha !== state.currentHeadSha,
+      ...(by != null ? { by } : {}),
+      stillBlocking: true,
+      ...(latest != null && !sameRef(latest, block) ? { latest: latestReviewerLine(latest) } : {}),
+    };
+  }
   // THE NEWEST REVIEW LEADS: the server sets `teammateLead` only when a teammate's posted review is
   // newer than the reader's last real review (and none of the reader's is in flight).
   const mate = state.teammateLead;
@@ -103,6 +125,43 @@ export function reviewCellFor(
   }
 }
 
+function cellBy(login: string, displayName: string | null, avatarUrl: string | null): ReviewCellBy {
+  const name = teammateName({ login, displayName });
+  return { login, displayName, avatarUrl, name, title: `${name}’s review` };
+}
+
+function sameRef(a: ClaudeReviewStandingRef, b: ClaudeReviewStandingRef): boolean {
+  return a.you === b.you && (a.you || a.poster?.userId === b.poster?.userId) && a.reviewId === b.reviewId;
+}
+
+/** "4 Nov" — a review's day, short. */
+export function shortDay(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+/** Who reviewed last, beside a standing block: "Latest: Robin · Comment · 4 Nov". */
+export function latestReviewerLine(latest: ClaudeReviewStandingRef): { text: string; title: string } {
+  const who = latest.you || latest.poster == null ? 'You' : teammateName({ login: latest.poster.login, displayName: latest.poster.displayName });
+  const verdict = latest.verdict != null ? CLAUDE_VERDICT_LABEL[latest.verdict] : 'Reviewed';
+  const day = shortDay(latest.at);
+  return { text: `Latest: ${[who, verdict, day].filter(Boolean).join(' · ')}`, title: `The newest review is ${who === 'You' ? 'yours' : `${who}’s`}` };
+}
+
+/**
+ * The standing block a cell shows INSTEAD of its lead (pure): `state.standing.blocking`, unless the
+ * review the cell already leads with is that block (the reader's own Request changes, or the leading
+ * teammate review itself). null = nothing to raise.
+ */
+export function standingBlockShown(state: ClaudeReviewPrState | undefined): ClaudeReviewStandingRef | null {
+  const block = state?.standing?.blocking ?? null;
+  if (state == null || block == null) return null;
+  const mate = state.teammateLead;
+  if (mate != null) return !block.you && mate.reviewId === block.reviewId ? null : block;
+  if (block.you && state.status === 'succeeded' && state.verdict === 'REQUEST_CHANGES') return null;
+  return block;
+}
+
 /** "Robin · Approve" for a teammate's leading review; the bare verdict label for the reader's own. */
 export function leadVerdictText(cell: Extract<ReviewCell, { kind: 'done' }>): string {
   return cell.by != null ? `${cell.by.name} · ${cell.verdictLabel}` : cell.verdictLabel;
@@ -111,18 +170,26 @@ export function leadVerdictText(cell: Extract<ReviewCell, { kind: 'done' }>): st
 /** The figures of the reader's OWN finished run (`summary`), only while that run is what the cell
  *  shows — a teammate's leading review carries none, and the reader's older counts are not its. */
 export function ownSummaryFor(cell: ReviewCell, state: ClaudeReviewPrState | undefined): ClaudeReviewStateSummary | undefined {
+  // A standing block shows the reader's figures only when it IS the reader's latest run (same head).
+  if (cell.kind === 'done' && cell.stillBlocking) {
+    const block = state?.standing?.blocking;
+    return block?.you && block.headSha != null && block.headSha === state?.reviewedHeadSha ? state?.summary : undefined;
+  }
   return cell.kind === 'done' && cell.by == null ? state?.summary : undefined;
 }
 
-/** When the review the cell shows was done: the teammate's post when theirs leads, else the run. */
+/** When the review the cell shows was done: a standing block's, the teammate's post when theirs
+ *  leads, else the run. */
 export function leadFinishedAt(state: ClaudeReviewPrState | undefined): string | null {
-  return state?.teammateLead?.postedAt ?? state?.finishedAt ?? null;
+  return standingBlockShown(state)?.at ?? state?.teammateLead?.postedAt ?? state?.finishedAt ?? null;
 }
 
 /** Is the review the cell shows on the PR's current commit? The teammate's head when theirs leads
  *  (the newer-commit count is the reader's run's, so it is not reused there). */
 export function leadCurrency(state: ClaudeReviewPrState | undefined): ReviewCurrency | null {
   if (state == null) return null;
+  const block = standingBlockShown(state);
+  if (block != null) return reviewCurrency({ reviewedHeadSha: block.headSha, currentHeadSha: state.currentHeadSha });
   const mate = state.teammateLead;
   return mate != null
     ? reviewCurrency({ reviewedHeadSha: mate.reviewedHeadSha, currentHeadSha: state.currentHeadSha })
@@ -337,14 +404,6 @@ export function reviewedAgoLabel(iso: string): string {
   return isRelative(rel) ? `reviewed ${rel}` : `reviewed on ${rel}`;
 }
 
-/** A run in the AI Review tab's run list (ReviewHistoryList): its date and time of day, plus how long ago
- *  while that is still a relative phrase. */
-export function reviewRunWhen(iso: string): string {
-  const rel = relativeTime(iso);
-  const at = dateTime(iso);
-  return isRelative(rel) ? `${at} (${rel})` : at;
-}
-
 /**
  * The outcome pill on the PR pane's "Claude Review" TAB LABEL, from the tab's own cached read
  * (`['claude-review', prId]`, DB-only). The latest run's verdict once it succeeded (a teammate's when
@@ -362,7 +421,11 @@ export function reviewTabPill(
     | {
         review: { status: string; verdict: ClaudeReviewVerdict | null } | null;
         autoReview?: 'queued' | 'running' | null;
-        teamView?: { lead: 'own' | 'teammate' | null; teammateReviewId: number | null };
+        teamView?: {
+          lead: 'own' | 'teammate' | null;
+          teammateReviewId: number | null;
+          standings?: { blocking: ClaudeReviewStandingRef | null };
+        };
         teammateReviews?: ReadonlyArray<{ reviewId: number; verdict: ClaudeReviewVerdict | null }>;
       }
     | undefined,
@@ -372,6 +435,9 @@ export function reviewTabPill(
   const r = data.review;
   if (r?.status === 'running' || data.autoReview === 'running') return { kind: 'running', label: 'Reviewing…' };
   if (starting || r?.status === 'queued' || data.autoReview === 'queued') return { kind: 'queued', label: 'Queued' };
+  // STRICTEST STANDING VERDICT: a Request changes still in force on GitHub, whoever's, heads the pill.
+  if (data.teamView?.standings?.blocking != null)
+    return { kind: 'verdict', verdict: 'REQUEST_CHANGES', label: CLAUDE_VERDICT_LABEL.REQUEST_CHANGES };
   // ONE REVIEW (docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): when a teammate's posted
   // review is the newest, it heads the tab, so the pill says its verdict, not the reader's older one.
   if (data.teamView?.lead === 'teammate') {

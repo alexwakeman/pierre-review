@@ -262,8 +262,9 @@ tab's history):
   the running row's provider; AI Fix's ⓘ names the pick; run cost reads the run provider's own budget
   reading (`useRunCostText`). The chat's Busy line names no provider.
 - The review tab's `<select>` (shown only with two runs or more) became an always-visible list of EVERY
-  run (`components/ReviewHistoryList.tsx`, `findingCount` on `ClaudeReviewSummary`); the shown run never
-  moves on its own except to a run the reader just started (`lib/reviewHistory.ts`). AI Fix has no run
+  run (`findingCount` on `ClaudeReviewSummary`; since 2026-11-04 the list is "Reviews on this PR",
+  `lib/teamReview.ts`, and the newest review always takes over — docs/CLAUDE-REVIEW.md § The review
+  tab's history). AI Fix has no run
   selector to convert (only "Earlier fixes pushed").
 
 **Phase 4 status (integrated 2026-10-26, branch `codex/p4-integrated`)**: streams A1 (provider choice +

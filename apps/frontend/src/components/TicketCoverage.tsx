@@ -80,7 +80,6 @@ import { AiRunGate } from './AiSetup.js';
 import { ClaudeReviewTicketPanel, ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
 import { TicketPasteBox } from './TicketPasteBox.js';
 import { storiesOnOpen } from '../lib/storyTabs.js';
-import { JiraKeyLink } from './ClaudeReviewTickets.js';
 import { StoryDisclosure } from './TicketStory.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
@@ -230,12 +229,10 @@ function TicketBlock({
     <div aria-label={`Ticket ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h4 className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          {entry.ticketKey != null &&
-            (url != null ? (
-              <JiraKeyLink ticketKey={entry.ticketKey} url={url} />
-            ) : (
-              <span className="font-mono text-body font-semibold text-ui-ink">{entry.ticketKey}</span>
-            ))}
+          {/* Plain text, no link into the tracker: the story is right here (its "Ticket" disclosure). */}
+          {entry.ticketKey != null && (
+            <span className="font-mono text-body font-semibold text-ui-ink">{entry.ticketKey}</span>
+          )}
           {title != null && title !== '' && (
             <span className="min-w-0 break-words text-body font-semibold text-ui-ink">{title}</span>
           )}
@@ -269,7 +266,7 @@ function TicketBlock({
           )}
         </span>
       </div>
-      <StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[snapshot]} url={url} />
+      <StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[snapshot]} url={url} linkKey={false} />
       <div className="empty:hidden">
         <RegenProgressBar
           active={running}
@@ -373,7 +370,7 @@ function LegacyBlock({
           ))}
         </span>
       }
-      below={<StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[ticket]} url={url} />}
+      below={<StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[ticket]} url={url} linkKey={false} />}
     />
   );
 }
@@ -420,7 +417,6 @@ function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEnt
         <TicketPasteBox
           key={pr.id}
           prId={pr.id}
-          startOpen={entries.length === 0}
           manualShown={showManual}
           onInputManually={inputManually}
         />

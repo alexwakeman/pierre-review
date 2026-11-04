@@ -3,7 +3,7 @@
 // executor): review modules and their fake-context tests import it.
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
-import type { ClaudeTeammateFinding, ClaudeTeammateReview, TeammateReviewRecord } from '@pierre-review/shared';
+import type { ClaudeTeammateFinding, ClaudeTeammateReview, TeammateLiftRecord, TeammateReviewRecord } from '@pierre-review/shared';
 import type { Executor } from './client.js';
 import * as schema from './schema.sqlite.js';
 
@@ -51,6 +51,7 @@ export async function listTeammateReviews(
       postedAt: cr.postedAt,
       createdAt: cr.createdAt,
       teammate: cr.teammate,
+      teammateLift: cr.teammateLift,
       userId: users.id,
       login: users.githubLogin,
       displayName: users.displayName,
@@ -98,6 +99,13 @@ export async function listTeammateReviews(
     const rec = (r.teammate ?? null) as TeammateReviewRecord | null;
     const unlabelled = new Set(rec?.unlabelled ?? []);
     const prUrl = `https://github.com/${r.owner}/${r.name}/pull/${r.number}`;
+    // Who raised each finding: a pair comment's lead tag, else the single run's provider.
+    const single = rec != null && !rec.pair && rec.runs.length === 1 ? rec.runs[0]?.provider ?? null : null;
+    const providersOf = (nodeId: string | null): Pick<ClaudeTeammateFinding, 'providers'> => {
+      const tagged = nodeId != null ? rec?.findingProviders?.[nodeId] : undefined;
+      if (tagged != null && tagged.length > 0) return { providers: tagged };
+      return single != null ? { providers: [single] } : {};
+    };
     const mine: ClaudeTeammateFinding[] = findings
       .filter((f) => f.reviewId === r.id)
       .map((f) => {
@@ -118,6 +126,8 @@ export async function listTeammateReviews(
                 ? `${prUrl}#discussion_r${f.githubCommentId}`
                 : `${prUrl}#issuecomment-${f.githubCommentId}`,
           threadId: kind === 'inline' && f.nodeId != null ? (threadOf.get(f.nodeId) ?? null) : null,
+          ...providersOf(f.nodeId),
+          githubCommentId: f.githubCommentId ?? null,
         };
       });
     const at = r.postedAt ?? r.createdAt;
@@ -135,6 +145,9 @@ export async function listTeammateReviews(
       runs: rec?.runs ?? [],
       limnVersion: rec?.limnVersion ?? null,
       findings: mine,
+      ...(rec?.judged != null && rec.judged.length > 0 ? { judged: rec.judged } : {}),
+      // The reader's Limn's one attempt to lift this block (migration 0164).
+      ...(r.teammateLift != null ? { lift: r.teammateLift as TeammateLiftRecord } : {}),
     };
   });
 }

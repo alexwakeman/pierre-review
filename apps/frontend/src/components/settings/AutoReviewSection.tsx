@@ -184,6 +184,11 @@ export function AutoReviewSection(): JSX.Element {
   const storedResolve = storedPost?.autoResolve === true;
   const [verdict, setVerdict] = useState(storedVerdict);
   const [resolve, setResolve] = useState(storedResolve);
+  // The two teammate-lift opt-ins (both OFF by default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
+  const storedLiftConsent = storedPost?.teamLiftConsent === true;
+  const storedLiftTeammates = storedPost?.liftTeammateBlocks === true;
+  const [liftConsent, setLiftConsent] = useState(storedLiftConsent);
+  const [liftTeammates, setLiftTeammates] = useState(storedLiftTeammates);
   const storedImpact: AutoApproveImpact = storedPost?.approveImpact ?? AUTO_POST_DEFAULT_APPROVE_IMPACT;
   const storedImpactKey = IMPACT_ROWS.map(({ key }) => (storedImpact[key] ? '1' : '0')).join('');
   const [impact, setImpact] = useState<AutoApproveImpact>(storedImpact);
@@ -232,6 +237,12 @@ export function AutoReviewSection(): JSX.Element {
     setResolve(storedResolve);
   }, [workspaceId, storedResolve]);
   useEffect(() => {
+    setLiftConsent(storedLiftConsent);
+  }, [workspaceId, storedLiftConsent]);
+  useEffect(() => {
+    setLiftTeammates(storedLiftTeammates);
+  }, [workspaceId, storedLiftTeammates]);
+  useEffect(() => {
     setStrictness(storedStrictness);
   }, [workspaceId, storedStrictness]);
   useEffect(() => {
@@ -261,7 +272,9 @@ export function AutoReviewSection(): JSX.Element {
     verdict !== storedVerdict ||
     resolve !== storedResolve ||
     !sameImpact(impact, storedImpact) ||
-    leftovers !== storedLeftovers;
+    leftovers !== storedLeftovers ||
+    liftConsent !== storedLiftConsent ||
+    liftTeammates !== storedLiftTeammates;
   const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
 
   return (
@@ -562,6 +575,35 @@ export function AutoReviewSection(): JSX.Element {
         </div>
         )}
       </div>
+      <fieldset className="space-y-1 pl-5 text-body" data-teammate-lift>
+        <legend className="flex items-center gap-1 font-medium text-ui-ink">
+          Teammates’ Limn blocks
+          <InfoButton title="Teammates’ Limn blocks">
+            <p>
+              When a teammate’s Limn requests changes, your Limn checks each of its points on later
+              reviews. Once every point is addressed at the PR’s latest commit, and your own review
+              finds no blocker, your Limn can dismiss their review and post yours: an approval if
+              Approve or request changes allows it, else a comment.
+            </p>
+            <p>
+              Both sides must be on. The teammate turns on the first box, so their posted reviews
+              allow it. You turn on the second. A review someone typed by hand is never dismissed.
+            </p>
+            <p>
+              Dismissing needs write access to the repository, and branch protection can restrict who
+              may dismiss. If GitHub refuses, the AI Review tab says so and Limn does not try again.
+            </p>
+          </InfoButton>
+        </legend>
+        <label className="flex items-start gap-2 text-ui-ink">
+          <CheckInput className="mt-0.5" checked={liftConsent} onChange={(e) => setLiftConsent(e.target.checked)} />
+          <span>Teammates’ Limn may lift my Limn’s block once every point is addressed</span>
+        </label>
+        <label className="flex items-start gap-2 text-ui-ink">
+          <CheckInput className="mt-0.5" checked={liftTeammates} onChange={(e) => setLiftTeammates(e.target.checked)} />
+          <span>Lift a teammate’s Limn block when everything is addressed</span>
+        </label>
+      </fieldset>
       <div className={`pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <label className="flex flex-wrap items-center gap-1.5 text-ui-ink">
           <span>Up to</span>
@@ -705,6 +747,8 @@ export function AutoReviewSection(): JSX.Element {
                     autoResolve: resolve,
                     approveImpact: impact,
                     approveLeftovers: leftovers,
+                    teamLiftConsent: liftConsent,
+                    liftTeammateBlocks: liftTeammates,
                   },
                 }
               : {}),

@@ -36,10 +36,12 @@ function JiraStory({
   prId,
   jiraRef,
   fallback,
+  linkKey,
 }: {
   prId: number;
   jiraRef: TicketRef;
   fallback: ClaudeReviewTicket | null;
+  linkKey: boolean;
 }): JSX.Element {
   const { data, isLoading, isError, error } = useStoredJiraTicket(prId, jiraRef.key, true);
   const setField = useSetJiraAcField(prId, jiraRef.key);
@@ -54,7 +56,7 @@ function JiraStory({
         <p className={`text-meta ${ERROR_TEXT}`}>
           {fixedSource && error instanceof Error && error.message !== '' ? error.message : `Could not read ${jiraRef.key}.`}
         </p>
-        {fallback != null && <StoredStory ticket={fallback} url={jiraRef.url} />}
+        {fallback != null && <StoredStory ticket={fallback} url={jiraRef.url} linkKey={linkKey} />}
       </div>
     );
   }
@@ -65,6 +67,7 @@ function JiraStory({
       <JiraStoryView
         capHeight={false}
         draft={draft}
+        linkKey={linkKey}
         fieldControl={
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
@@ -119,12 +122,13 @@ function JiraStory({
 }
 
 /** A story Limn stored with a run (pasted, or read from Jira at the time). */
-function StoredStory({ ticket, url }: { ticket: ClaudeReviewTicket; url: string | null }): JSX.Element {
+function StoredStory({ ticket, url, linkKey }: { ticket: ClaudeReviewTicket; url: string | null; linkKey: boolean }): JSX.Element {
   const d = ticketDraftFromStored(ticket);
   // A pasted story keeps no key; a key known from the block (and its link) is still shown.
   return (
     <JiraStoryView
       capHeight={false}
+      linkKey={linkKey}
       draft={{
         ...d,
         ...(ticket.key != null && d.key == null ? { key: ticket.key } : {}),
@@ -144,6 +148,7 @@ export function StoryDisclosure({
   stored,
   url,
   label = 'Ticket',
+  linkKey = true,
 }: {
   /** Any PR on the ticket (the stored tracker row is read through it); null = none, so only `stored`. */
   prId: number | null;
@@ -153,6 +158,8 @@ export function StoryDisclosure({
   url: string | null;
   /** The toggle's words. */
   label?: string;
+  /** false: the key is plain text, no link into the tracker (the Story check). */
+  linkKey?: boolean;
 }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -175,9 +182,9 @@ export function StoryDisclosure({
         <div id={bodyId} className="mt-1.5 rounded-ui border border-ui-line p-2">
           {source.kind === 'jira' ? (
             // `source` is 'jira' only with a PR to read through (above).
-            prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} />
+            prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} linkKey={linkKey} />
           ) : (
-            <StoredStory ticket={source.ticket} url={url} />
+            <StoredStory ticket={source.ticket} url={url} linkKey={linkKey} />
           )}
         </div>
       )}

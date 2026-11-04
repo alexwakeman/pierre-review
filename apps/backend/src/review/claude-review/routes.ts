@@ -70,7 +70,7 @@ import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFo
 import { teammateLinesAtHead } from './team-claim-seen.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
-import { limnMetaForReview } from './post-meta.js';
+import { limnMetaForReview, loadJudgedForPost } from './post-meta.js';
 import { listTeammateReviews } from '../../db/teammate-reviews.js';
 import { loadTeamReviewView } from './team-view.js';
 
@@ -827,7 +827,14 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         body: review.userBody ?? '',
         verdict: userVerdict,
         // How the review ran, in the summary marker (a teammate's Limn shows it from there).
-        limnMeta: limnMetaForReview(review),
+        limnMeta: {
+          ...limnMetaForReview(review),
+          judged: await loadJudgedForPost(ctx, accountId, review.prId, [review]),
+          // ⚠ NEVER `lift=1` here (docs/CLAUDE-REVIEW.md § Lifting a teammate's block): the person
+          // chose this verdict and body in the composer, and a review a person chose is never
+          // dismissed by a teammate's Limn. Only Limn's own computed verdict (auto-post.ts) consents.
+          liftConsent: false,
+        },
         includedFindings: review.findings
           // A finding already on GitHub (posted on its own, or in an earlier submitted review) is
           // DONE: the SPA offers no "Post again", and a re-submitted review must not post it twice.

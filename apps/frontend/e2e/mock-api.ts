@@ -1707,6 +1707,8 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
               autoResolve: false,
               approveImpact: { high: true, medium: true, low: true },
               approveLeftovers: 'nits_questions',
+              teamLiftConsent: false,
+              liftTeammateBlocks: false,
             },
           },
         } satisfies WorkspaceAutoReviewResponse);

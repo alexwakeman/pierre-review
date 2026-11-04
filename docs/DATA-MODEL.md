@@ -210,6 +210,9 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `sourceCommentNodeId` (partial unique with `reviewId`). ⚠ Not a run of the reader's: every own-runs
   reader filters `kind IS NULL` or `ownRunsOnly` (`db/teammate-reviews.ts`). The PR AUTHOR'S such review
   may anchor a run's follow-up (`follow_up.teammate`; docs/CLAUDE-REVIEW.md § The author's own review).
+  `teammateLift` (migration `0164`, JSON `TeammateLiftRecord`) on such a row is the reader's Limn's ONE
+  claimed attempt to dismiss its standing Request changes (docs/CLAUDE-REVIEW.md § Lifting a
+  teammate's block); the import never writes it.
 - **"REVIEW AND POST"** (`claudeReviews.postOnFinish`, migration `0161`): true on a MANUAL run the
   reader started with "Review and post" (both halves of a pair), NULL otherwise. The run is posted by
   the auto-post path when it (its pair) ends; the outcome is its `autoPost` record, as for an auto run.

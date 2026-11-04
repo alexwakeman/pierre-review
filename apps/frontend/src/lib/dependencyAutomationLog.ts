@@ -38,3 +38,35 @@ export function automationVerb(i: Item): string {
   return VERB[i.action]?.[i.state] ?? i.action;
 }
 
+
+/** One PR in "What automation did": the PR once, its actions under it. */
+export interface AutomationPrGroup {
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  /** Newest first. */
+  items: Item[];
+}
+
+const atMs = (i: Item): number => {
+  const t = Date.parse(i.at);
+  return Number.isFinite(t) ? t : 0;
+};
+
+/** Groups the log by PR so no PR repeats: each PR's actions newest first, the PRs ordered by their
+ *  newest action (ties by the higher row id, the later write). Never drops a row. */
+export function groupAutomationByPr(items: readonly Item[]): AutomationPrGroup[] {
+  const newestFirst = (a: Item, b: Item): number => atMs(b) - atMs(a) || b.id - a.id;
+  const byPr = new Map<number, AutomationPrGroup>();
+  for (const i of [...items].sort(newestFirst)) {
+    let g = byPr.get(i.prId);
+    if (!g) {
+      g = { prId: i.prId, repoFullName: i.repoFullName, prNumber: i.prNumber, prTitle: i.prTitle, items: [] };
+      byPr.set(i.prId, g);
+    }
+    g.items.push(i);
+  }
+  // Map insertion order follows the sorted rows, so the groups are already ordered by newest action.
+  return [...byPr.values()];
+}

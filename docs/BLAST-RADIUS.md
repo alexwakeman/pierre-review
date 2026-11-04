@@ -148,8 +148,8 @@ reason to lower a level.
 
 A 2,000-line PR would otherwise carry an amber *"2,000 code lines"* from `largePrFlag` **and** a
 High chip whose only reason is those same 2,000 lines. `BlastVerdict.volumeOnly` marks that case:
-the flag keeps the number, the chip keeps the level, and the chip leads on the non-obvious reasons
-— surfaces, spread, hubs — which nothing else on the row reports.
+the flag keeps the number, the chip keeps the level. (Since 2026-11-04 the chip shows only its
+level on every surface, so it can no longer repeat the number; `volumeOnly` stays on the verdict.)
 
 ⚠ The resolver reads **the same `codeLoc` the flag reads**. It is deliberately *not* duplicated
 into `BlastSignals`: one fact, one grain, or the two chips quote different line counts.
@@ -165,7 +165,7 @@ it is not free either. It lands medium.
 
 `db_schema` matches `schema/` and `models/` trees. In a repo whose **product** is an ORM, its own
 `src/**/schema/**` source tree trips a rule that means "this changes the database" — measured, 55
-hits, almost all one such repo. This is why the chip always **names** the surface, and why
+hits, almost all one such repo. This is why the chip's popover always **names** the surface, and why
 `surfacesOff` exists in Settings. It is deliberately *not* special-cased in the matcher, which
 would make the behaviour invisible to the reader.
 
@@ -203,13 +203,25 @@ cannot be **called** here:
 
 ## Where the chip appears
 
+⚠ **THE CHIP SAYS THE LEVEL AND STOPS** (2026-11-04): icon + `High` / `Medium` / `Low` — never a
+file name or a reason after it, and no `title=` carrying them. On EVERY React surface it is a
+button; a click opens a popover (`ClickPopover` in `components/InfoModal.tsx`, the "i"s' popover:
+Escape, outside press, one open at a time) holding every reason — the hub reason's file set as
+code — and the evidence counts. Inside a clickable card the click is isolated (stopPropagation on
+the button, `data-noactivate` on the portalled panel), so it never also opens the pull request.
+⚠ It keeps `LargePrFlag`'s box (inline-flex, items-center, gap-1, text-meta, icon size 11, no
+padding or min-height) so the two sit on one centre line; the touch target grows via `::after`.
+`test/blastRadiusChip.test.ts` pins all of this.
+
 | Surface | Form |
 |---|---|
-| Pending board (`PrMetaRow`) | labelled, not expandable — the card is itself a link |
-| Feed, **PR-opened** cards | labelled, on the card's own metadata row |
-| Feed, every other card kind | icon-only on the PR-ref line (no card body to put it on) |
-| PR detail | labelled and **expandable** |
-| vis-timeline | a tooltip row, via the same resolver |
+| Pending board (`PrMetaRow`) | icon + level |
+| Pending card fact line | icon + "High reach" (`wordOnly`) |
+| Feed, **PR-opened** cards | icon + level, on the card's own metadata row |
+| Feed, every other card kind | icon only on the PR-ref line (no card body to put it on) |
+| Open PRs (row, side panel "Reach") | icon + level |
+| PR detail header | icon + level, after the size flag |
+| vis-timeline | a tooltip row, via the same resolver (the tooltip is itself the detail) |
 
 ⚠ **A PR-opened Feed card suppresses the ref-line icon**, because it carries the labelled chip
 below — the same fact twice on one card is the double-count the large-PR flag rule already names.

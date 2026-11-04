@@ -31,6 +31,7 @@ import type {
   ClaudeTeamClaimRecord,
   ClaudeReviewPairConsolidation,
   ClaudeNotApproved,
+  TeammateLiftRecord,
   TeammateReviewRecord,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
@@ -1442,6 +1443,11 @@ export const claudeReviews = sqliteTable(
     sourceUserId: integer('source_user_id').references(() => users.id),
     sourceReviewNodeId: text('source_review_node_id'),
     teammate: text('teammate', { mode: 'json' }).$type<TeammateReviewRecord>(),
+    // On a TEAMMATE review only (migration 0164; review/claude-review/teammate-lift.ts): the reader's
+    // Limn's ONE attempt to dismiss this teammate's standing Request changes. Claimed NULL →
+    // 'dismissing' BEFORE the GitHub write, settled 'dismissed' / 'failed'; never retried. The import
+    // never writes it.
+    teammateLift: text('teammate_lift', { mode: 'json' }).$type<TeammateLiftRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

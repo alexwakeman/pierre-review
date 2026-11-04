@@ -47,8 +47,11 @@ export function JiraStoryView({
   actions,
   fieldControl,
   capHeight = true,
+  linkKey = true,
 }: {
   draft: TicketDraft;
+  // false: the key is plain text, no link into the tracker (the Story check).
+  linkKey?: boolean;
   // false inside a disclosure the reader opened: show the whole story, no inner scroll box.
   capHeight?: boolean;
   // Refresh, when this session can read the ticket.
@@ -61,7 +64,7 @@ export function JiraStoryView({
       <div className="flex items-start gap-2">
         {draft.key != null && (
           <span className="pt-0.5">
-            <JiraKeyLink ticketKey={draft.key} url={draft.url} />
+            <JiraKeyLink ticketKey={draft.key} url={linkKey ? draft.url : null} />
           </span>
         )}
         <span className="min-w-0 flex-1 break-words text-body font-medium">{draft.title}</span>

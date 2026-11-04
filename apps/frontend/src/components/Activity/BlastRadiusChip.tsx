@@ -1,12 +1,17 @@
-import { useState } from 'react';
 import { BlastRadiusIcon } from '../Icons.js';
 import { blastRadius, count, type BlastPrFields, type BlastVerdict } from '../../lib/ui.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
+import { ClickPopover } from '../InfoModal.js';
 
 // THE BLAST-RADIUS CHIP, as rendered on every React surface: the Pending board's `PrMetaRow`, the
-// Feed's PR-ref line, and the PR-detail header (which passes `expandable`). The vis-timeline is
-// the exception — its bars are raw HTML strings, so the same `blastRadius` resolver is called in
-// `Timeline/prBar.ts` instead.
+// Feed's PR-ref line, Open PRs, and the PR-detail header. The vis-timeline is the exception — its
+// bars are raw HTML strings, so the same `blastRadius` resolver is called in `Timeline/prBar.ts`.
+//
+// ⚠ THE CHIP SAYS THE LEVEL AND STOPS — icon + "High" / "Medium" / "Low", never a file name or a
+// reason after it, and no `title=` carrying them either. It is a button on EVERY surface: a click
+// opens a popover (`ClickPopover`, the "i"s' popover) with every reason, the flagged file among
+// them, and the evidence. Inside a clickable card the click is ISOLATED (stopPropagation on the
+// button, `data-noactivate` on the portalled panel), so it never also opens the pull request.
 //
 // ⚠ IT RENDERS NOTHING unless the resolver returns a verdict, and the resolver returns null for
 // BOTH "we never measured this pull request" and "the file list was truncated, so no containment
@@ -52,7 +57,7 @@ function BlastEvidence({ pr }: { pr: BlastPrFields }): JSX.Element | null {
   ];
   const spread = `${count(b.dirs, 'directory', 'directories')} · ${count(b.subsystems, 'top-level area', 'top-level areas')}`;
   return (
-    <div className="border-t border-ui-line pt-1 text-ui-mute">
+    <div className="border-t border-ui-line pt-1.5 text-ui-mute">
       <div>{parts.join(', ')}</div>
       <div>{spread}</div>
       {/* ⚠ The line count comes from the SAME `codeLoc` the large-PR flag reads. A lower bound
@@ -80,103 +85,107 @@ function BlastEvidence({ pr }: { pr: BlastPrFields }): JSX.Element | null {
   );
 }
 
+/** A reason's text with its `path` spans set as code — the hub reason names the file it flagged. */
+function ReasonText({ text }: { text: string }): JSX.Element {
+  const parts = text.split('`');
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <code key={i} className="break-all font-mono text-ui-ink">
+            {part}
+          </code>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/** THE POPOVER BODY: every reason (the flagged file among them) and the evidence. Exported for its
+ *  test; nothing else renders it. */
+export function BlastReasons({ verdict, pr }: { verdict: BlastVerdict; pr: BlastPrFields }): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="blast-reasons">
+      {/* EVERY reason, not just the headline one. This list is what makes the verdict AUDITABLE —
+          the known false positive (a repo whose product IS a database schema) is only correctable
+          by a reader who can see that "a database schema" is what decided it, and then switch
+          that surface off in Settings. */}
+      <ul className="list-disc space-y-0.5 pl-4 text-ui-ink">
+        {verdict.reasons.map((r) => (
+          <li key={`${r.kind}:${r.text}`}>
+            <ReasonText text={r.text} />
+          </li>
+        ))}
+      </ul>
+      {/* THE EVIDENCE the verdict was computed from — the raw counts a reader checks the verdict
+          AGAINST, which is what makes the click worth making on a one-reason pull request. */}
+      <BlastEvidence pr={pr} />
+    </div>
+  );
+}
+
+/** The chip for a verdict already resolved — `BlastRadiusChip` minus the config read, so a test can
+ *  render it without a query client. */
+export function BlastRadiusChipView({
+  verdict,
+  pr,
+  className = '',
+  iconOnly = false,
+  wordOnly = false,
+}: {
+  verdict: BlastVerdict;
+  pr: BlastPrFields;
+  className?: string;
+  iconOnly?: boolean;
+  wordOnly?: boolean;
+}): JSX.Element {
+  const meta = LEVEL_META[verdict.level];
+  const phrase = `${meta.word} reach`;
+  return (
+    <ClickPopover
+      title={phrase}
+      triggerLabel={phrase}
+      isolate
+      testId="blast-radius-chip"
+      // ⚠ THE SAME BOX AS `LargePrFlag`, which sits just before it: inline-flex, items-center,
+      // gap-1, text-meta, no padding and no min-height — so the two share one height and one
+      // centre line. The touch target grows through an absolutely placed ::after, never the box.
+      triggerClassName={(open) =>
+        `relative inline-flex shrink-0 items-center gap-1 rounded-ui text-meta ${meta.className} ${
+          open ? 'underline' : 'hover:underline'
+        } focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:after:absolute touch:after:-inset-3 touch:after:content-[''] ${className}`
+      }
+      trigger={
+        <>
+          <BlastRadiusIcon rings={meta.rings} size={11} className="inline-block align-[-0.1em]" />
+          {!iconOnly && <span aria-hidden="true">{wordOnly ? phrase : meta.word}</span>}
+        </>
+      }
+    >
+      <BlastReasons verdict={verdict} pr={pr} />
+    </ClickPopover>
+  );
+}
+
 export function BlastRadiusChip({
   pr,
   className = '',
-  /** Drop the visible word and keep the icon + its accessible label — for rows too tight to
-   *  spend the characters. The REASONS survive either way, in the title/label. */
+  /** Drop the visible word and keep the icon + its accessible name — for rows too tight to spend
+   *  the characters. */
   iconOnly = false,
-  /** PR detail only: make the chip a button that discloses the reasons underneath. A board card
-   *  must NOT be expandable — the card is a link to the pull request, and a second interactive
-   *  target inside it competes with that. */
-  expandable = false,
-  /** The level as one phrase, "High reach" — a Pending card's fact line, where the reasons live
-   *  behind Details. The reasons still ride the title and the accessible name. */
+  /** The level as one phrase, "High reach" — a Pending card's fact line, where a bare "High"
+   *  beside other facts would not say what is high. */
   wordOnly = false,
 }: {
   pr: BlastPrFields;
   className?: string;
   iconOnly?: boolean;
-  expandable?: boolean;
   wordOnly?: boolean;
 }): JSX.Element | null {
   const config = useBlastConfig();
-  const [open, setOpen] = useState(false);
   const verdict = blastRadius(pr, config);
   if (verdict == null) return null;
-  const meta = LEVEL_META[verdict.level];
-
-  // ⚠ THE ANTI-DOUBLE-COUNT RULE, rendered. When SIZE is the only reason this is high, the
-  // large-PR flag sitting inches away already carries the number — so the chip shows its level
-  // and stops. See `BlastVerdict.volumeOnly`.
-  const summary = wordOnly
-    ? `${meta.word} reach`
-    : verdict.volumeOnly
-    ? meta.word
-    : `${meta.word} · ${verdict.reasons[0]!.text.replace(/^Touches /, '').replace(/^Spans /, '')}`;
-
-  const body = (
-    <>
-      <BlastRadiusIcon rings={meta.rings} size={12} className="inline-block align-[-0.1em]" />
-      {/* The full sentence — level AND every reason — is the accessible name; the compact text
-          beside it is a visual shorthand and would otherwise be read twice. */}
-      <span className="sr-only">{`Blast radius: ${verdict.label}`}</span>
-      {!iconOnly && <span aria-hidden="true">{summary}</span>}
-    </>
-  );
-
-  const shell = `inline-flex shrink-0 items-center gap-1 text-meta ${meta.className} ${className}`;
-
-  // EVERY pull request expands, not only the multi-reason ones.
-  //
-  // ⚠ THAT IS ONLY TRUE BECAUSE THE DISCLOSURE SHOWS THE EVIDENCE, NOT JUST THE REASONS. An
-  // earlier cut opened onto `reasons[]` alone, which on a single-reason pull request meant
-  // reading "1 code file in one area, with tests" under a chip already saying "Low · 1 code file
-  // in one area, with tests" — the same sentence twice. The signal vector underneath is what
-  // makes the click worth making on every pull request.
-  //
-  // Every line below is computed by `blastRadius()` and `blastSignalsFor()`. No model is in this
-  // call path.
-  if (!expandable) {
-    return (
-      <span className={shell} title={verdict.label}>
-        {body}
-      </span>
-    );
-  }
-
-  return (
-    // ⚠ `self-start`. This sits inside PR-detail's `items-center` metadata row, so without it an
-    // expanded panel makes the row tall and vertically CENTRES the author line against it — the
-    // line visibly drifts down the moment the reader opens the disclosure.
-    <span className="inline-flex flex-col items-start gap-0.5 self-start">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`${shell} rounded-ui text-left hover:underline touch:min-h-10`}
-        aria-expanded={open}
-        title={verdict.label}
-      >
-        {body}
-      </button>
-      {open && (
-        <div className="ml-4 flex flex-col gap-1 text-meta text-ui-mute">
-          <ul className="list-disc space-y-0.5">
-            {/* EVERY reason, not just the headline one. This list is what makes the verdict
-                AUDITABLE — the known false positive (a repo whose product IS a database schema)
-                is only correctable by a reader who can see that "a database schema" is what
-                decided it, and then switch that surface off in Settings. */}
-            {verdict.reasons.map((r) => (
-              <li key={`${r.kind}:${r.text}`}>{r.text}</li>
-            ))}
-          </ul>
-          {/* THE EVIDENCE the verdict was computed from. Deliberately the raw counts rather than
-              a restatement of the reasons: this is the half a reader checks the verdict AGAINST,
-              and it is what makes the disclosure worth opening on a pull request whose reason
-              list is one line long. */}
-          <BlastEvidence pr={pr} />
-        </div>
-      )}
-    </span>
-  );
+  return <BlastRadiusChipView verdict={verdict} pr={pr} className={className} iconOnly={iconOnly} wordOnly={wordOnly} />;
 }

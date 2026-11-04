@@ -579,7 +579,12 @@ a model payload.
   as it counts them, and `getAddedRepoActionablePrIds` reads `(sha, message_headline, author,
   committedAt)` for the survivors' newest five in ONE `inArray` select (the wide clocks read stays
   headline-free). "and N more" is `humanCommitsAfter − commits.length`. ⚠ `headline: null` is "not
-  synced yet" and renders as such, never as an empty line.
+  synced yet" and renders as such, never as an empty line. The SPA shows them behind a CLOSED
+  disclosure, "N commits since you approved / last reviewed / last commented / last pushed" (the
+  anchor is the reader's last ACTION — `lastActionClocks.mineLast` — never a view, so never "since
+  you last looked"). Opening it fetches `GET /api/my-turn/pushed-since/:prId` (`db/my-turn-pushed-since.ts`):
+  EVERY counted commit, by running the same `lastActionClocks` on the one PR, so the list and the
+  count cannot disagree; the inline five show while it loads.
 
 `commits.message_headline` (migration `0072`) is GitHub's `messageHeadline`, SELECTED ON
 EVERY WALK (not lean-gated like `message`, which stays the full body for PR detail), capped at 200

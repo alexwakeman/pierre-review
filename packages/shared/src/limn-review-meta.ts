@@ -14,6 +14,15 @@
 //   e   effort word(s), same order ('-' for a half with none)
 //   d   the verdict sent: COMMENT | REQUEST_CHANGES | APPROVE
 //   lv  the Limn version that posted it
+//   j   THE JUDGEMENTS this review made of earlier Limn findings already on GitHub (the reader's own
+//       or a teammate's): `<comment id>:<code>` pairs, comma-separated, ≤ LIMN_META_MAX_JUDGED.
+//       The comment id is the finding comment's GitHub databaseId; the code is a (addressed), n (not
+//       addressed) or x (no longer applies). A teammate's Limn reads it so the finding's own Limn can
+//       say "Robin's review found it addressed". Absent = none (and on every older post).
+//   lift  `1` = THE POSTER'S CONSENT: a teammate's Limn may lift this poster's Limn block (dismiss
+//       their standing Request changes) once every point behind it is addressed (docs/CLAUDE-REVIEW.md
+//       § Lifting a teammate's block). Written only while the poster's workspace setting
+//       `teamLiftConsent` is on; absent = no consent (and on every older post).
 // Nothing else: no secrets, no paths, no names. Every value is reduced to a small safe alphabet, so a
 // value can never close the comment or carry markup.
 //
@@ -31,6 +40,50 @@ export interface LimnReviewMetaRun {
   effort: string | null;
 }
 
+/** One earlier finding a posted review judged (`j=`). */
+export type LimnJudgedOutcome = 'addressed' | 'not_addressed' | 'no_longer_applies';
+export interface LimnJudgedFinding {
+  // The finding comment's GitHub databaseId (digits).
+  commentId: string;
+  outcome: LimnJudgedOutcome;
+}
+
+/** The most judgements one marker carries (the rest are left out, never truncated mid-entry). */
+export const LIMN_META_MAX_JUDGED = 50;
+
+const JUDGED_CODE: Record<LimnJudgedOutcome, string> = { addressed: 'a', not_addressed: 'n', no_longer_applies: 'x' };
+const JUDGED_OF_CODE: Record<string, LimnJudgedOutcome> = { a: 'addressed', n: 'not_addressed', x: 'no_longer_applies' };
+
+/** The `j=` value: valid entries only, first per comment id, bounded. '' ⇒ omitted. */
+export function limnJudgedValue(judged: readonly LimnJudgedFinding[] | null | undefined): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const j of judged ?? []) {
+    if (out.length >= LIMN_META_MAX_JUDGED) break;
+    const id = String(j.commentId ?? '');
+    const code = JUDGED_CODE[j.outcome];
+    if (!/^\d{1,20}$/.test(id) || code == null || seen.has(id)) continue;
+    seen.add(id);
+    out.push(`${id}:${code}`);
+  }
+  return out.join(',');
+}
+
+/** Parse a `j=` value (tolerant: a malformed entry is skipped). */
+export function parseLimnJudged(v: string | undefined): LimnJudgedFinding[] {
+  if (v == null) return [];
+  const seen = new Set<string>();
+  const out: LimnJudgedFinding[] = [];
+  for (const tok of v.split(',')) {
+    if (out.length >= LIMN_META_MAX_JUDGED) break;
+    const m = /^(\d{1,20}):([anx])$/.exec(tok.trim());
+    if (!m || seen.has(m[1]!)) continue;
+    seen.add(m[1]!);
+    out.push({ commentId: m[1]!, outcome: JUDGED_OF_CODE[m[2]!]! });
+  }
+  return out;
+}
+
 export interface LimnReviewMeta {
   headSha: string | null;
   run: LimnReviewRunKind | null;
@@ -39,6 +92,10 @@ export interface LimnReviewMeta {
   runs: LimnReviewMetaRun[];
   verdict: ClaudeReviewVerdict | null;
   limnVersion: string | null;
+  // The earlier Limn findings this review judged (`j=`). Absent = none.
+  judged?: LimnJudgedFinding[];
+  // `lift=1`: the poster consents to a teammate's Limn lifting this block. Absent / false = no.
+  liftConsent?: boolean;
 }
 
 /** What `parseLimnReviewMarker` found. `legacy` = the marker carried none of the metadata keys. */
@@ -88,6 +145,9 @@ export function limnReviewMarker(nonce: string, meta?: Partial<LimnReviewMeta> |
     if (meta.verdict && VERDICTS.includes(meta.verdict)) parts.push(`d=${meta.verdict}`);
     const lv = limnMetaValue(meta.limnVersion);
     if (lv) parts.push(`lv=${lv}`);
+    const j = limnJudgedValue(meta.judged);
+    if (j) parts.push(`j=${j}`);
+    if (meta.liftConsent === true) parts.push('lift=1');
   }
   return `<!-- pierre:claude-review ${parts.join(' ')} -->`;
 }
@@ -113,7 +173,7 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
     const k = tok.slice(0, eq).toLowerCase();
     if (!kv.has(k)) kv.set(k, tok.slice(eq + 1));
   }
-  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv'];
+  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv', 'j', 'lift'];
   const legacy = !keys.some((k) => kv.has(k));
   const clean = (v: string | undefined): string | null => {
     const c = limnMetaValue(v);
@@ -137,6 +197,7 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
   const k = kv.get('k');
   const d = kv.get('d');
   const h = clean(kv.get('h'));
+  const judged = parseLimnJudged(kv.get('j'));
   return {
     legacy,
     headSha: h != null && /^[0-9a-f]{7,64}$/i.test(h) ? h.toLowerCase() : null,
@@ -145,6 +206,10 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
     runs,
     verdict: d != null && (VERDICTS as readonly string[]).includes(d) ? (d as ClaudeReviewVerdict) : null,
     limnVersion: clean(kv.get('lv')),
+    // Only when the post carried judgements.
+    ...(judged.length > 0 ? { judged } : {}),
+    // Only when the post consented.
+    ...(kv.get('lift') === '1' ? { liftConsent: true } : {}),
   };
 }
 

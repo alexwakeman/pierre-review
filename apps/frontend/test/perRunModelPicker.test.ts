@@ -1,26 +1,18 @@
-// THE PER-RUN MODEL MENU AND THE FULL REVIEW HISTORY (docs/CODEX-PLAN.md § 6, revised 2026-10-26).
+// THE PER-RUN MODEL MENU (docs/CODEX-PLAN.md § 6, revised 2026-10-26).
 //
 //   1. The model menu of a manual surface (AI Review, AI Fix) lists the models of EVERY provider that
 //      can run its kind — both only when both are set up and signed in — the DEFAULT provider's
 //      (Settings → AI) first, opening on its model at the surface's usual depth; with one provider it
 //      is the menu it always was. A pick of a provider that stops being ready falls back.
 //   2. The follow-up rule (chat, plan passes): the stored run's provider while it is ready, else the default.
-//   3. The AI Review tab lists EVERY run (all providers, all heads) and the shown run never moves on its
-//      own — except to a run the reader just started.
-//
-// No JSX: this directory is plain `.ts`, so components are built with `createElement`.
+//   (The AI Review tab's list of every review and which one shows: test/teamReview.test.ts.)
 //
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend perRunModelPicker
 import { describe, expect, it } from 'vitest';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import type { AiKindStatus, AiRunKind, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
+import type { AiKindStatus, AiRunKind, MeResponse } from '@pierre-review/shared';
 import { aiGateReadyFor, aiRunnableProviders, aiProviderReadyFor } from '../src/lib/aiCapabilities.js';
 import { chatPreferredProviderOf, followUpProviderOf, resolveModelPick } from '../src/lib/modelPick.js';
-import { nextShownReviewId, reviewHistoryOptions } from '../src/lib/reviewHistory.js';
-import { reviewRunWhen } from '../src/lib/claudeReviewColumn.js';
-import { ReviewHistoryList } from '../src/components/ReviewHistoryList.js';
 
 const KINDS: AiRunKind[] = ['review', 'review_chat', 'fix', 'plan', 'complete'];
 const kinds = (s: AiKindStatus): Record<AiRunKind, AiKindStatus> =>
@@ -146,96 +138,6 @@ describe('the Run gate of a follow-up', () => {
     expect(aiGateReadyFor(me({ claude: true }), { kind: 'review' })).toBeNull();
     expect(aiGateReadyFor(me({}), { kind: 'review', anyProvider: true })).toBeNull();
     expect(aiGateReadyFor(me({ claude: true }), { followUp: true, provider: 'claude' })).toBeNull();
-  });
-});
-
-const run = (id: number, over: Partial<ClaudeReviewSummary> = {}): ClaudeReviewSummary => ({
-  id,
-  headSha: `${id}`.repeat(40).slice(0, 40),
-  status: 'succeeded',
-  model: 'claude-opus-5-5',
-  provider: 'claude',
-  scope: 'diff_only',
-  reviewMode: 'diff_only',
-  verdict: 'COMMENT',
-  userVerdict: null,
-  costUsd: null,
-  postedAt: null,
-  createdAt: '2026-10-26T10:00:00.000Z',
-  finishedAt: '2026-10-26T10:05:00.000Z',
-  trigger: 'manual',
-  findingCount: 2,
-  ...over,
-});
-
-describe('which run the AI Review tab shows', () => {
-  const history = [run(3, { provider: 'codex', model: 'gpt-6.1-sol' }), run(2), run(1)];
-
-  it('opens on the latest run', () => {
-    expect(nextShownReviewId({ shown: null, latest: { id: 3, status: 'succeeded' }, previousLatestId: null, history })).toBe(3);
-  });
-
-  it('keeps the reader’s pick when the latest run finishes or an auto run starts', () => {
-    // The reader picked run 1; the latest (3) finishes.
-    expect(nextShownReviewId({ shown: 1, latest: { id: 3, status: 'succeeded' }, previousLatestId: 3, history })).toBe(1);
-    // An AUTO run (4) starts on top: nothing moves, and it never blanks the pane.
-    const withAuto = [run(4, { status: 'running', trigger: 'auto' }), ...history];
-    expect(
-      nextShownReviewId({ shown: 3, latest: { id: 4, status: 'running', trigger: 'auto' }, previousLatestId: 3, history: withAuto }),
-    ).toBe(3);
-    // …and when it finishes, the reader still sees the run they were reading.
-    expect(
-      nextShownReviewId({ shown: 3, latest: { id: 4, status: 'succeeded', trigger: 'auto' }, previousLatestId: 4, history: withAuto }),
-    ).toBe(3);
-  });
-
-  it('a run the reader starts becomes the shown run', () => {
-    const started = [run(4, { status: 'queued', provider: 'codex', model: 'gpt-6.1-sol' }), ...history];
-    expect(
-      nextShownReviewId({ shown: 1, latest: { id: 4, status: 'queued', trigger: 'manual' }, previousLatestId: 3, history: started }),
-    ).toBe(4);
-  });
-
-  it('opening while an auto run is in flight shows the newest FINISHED run', () => {
-    const withAuto = [run(4, { status: 'running', trigger: 'auto' }), ...history];
-    expect(
-      nextShownReviewId({ shown: null, latest: { id: 4, status: 'running', trigger: 'auto' }, previousLatestId: null, history: withAuto }),
-    ).toBe(3);
-  });
-});
-
-describe('the history select', () => {
-  const history = [
-    run(3, { provider: 'codex', model: 'gpt-6.1-sol', trigger: 'auto', findingCount: 1, verdict: 'REQUEST_CHANGES' }),
-    run(2, { status: 'failed', verdict: null, findingCount: 0 }),
-    run(1, { model: 'claude-sonnet-5', findingCount: 0, headSha: 'abcdef1234'.padEnd(40, '0') }),
-  ];
-  const html = renderToStaticMarkup(
-    createElement(ReviewHistoryList, { history, shownId: 1, latestId: 3, onShow: () => {} }),
-  );
-
-  // The redesign swapped the native <select> for the custom Select, whose options exist only
-  // while it is open: the list is pinned through the fold it renders (`reviewHistoryOptions`), the
-  // closed control through the label it shows.
-  const options = reviewHistoryOptions(history, 3, reviewRunWhen);
-  const labels = options.map((o) => o.label).join('\n');
-
-  it('lists every run, every provider, newest first, each with what ran, its head, status and Auto', () => {
-    expect(options).toHaveLength(3);
-    expect(options.map((o) => o.id)).toEqual([3, 2, 1]);
-    expect(labels).toContain('Codex · GPT-6.1 Sol');
-    expect(labels).toContain('Auto review');
-    expect(labels).toContain('Failed');
-    expect(labels).toContain('Claude Sonnet 5');
-    expect(labels).toContain('abcdef1');
-    expect(labels).toContain('(latest)');
-  });
-
-  it('shows the shown run, and only it, on the closed control', () => {
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain('aria-label="Showing"');
-    expect(html).toContain('Claude Sonnet 5');
-    expect(html).not.toContain('GPT-6.1 Sol');
   });
 });
 

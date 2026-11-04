@@ -116,6 +116,8 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     run: args.limnMeta?.run ?? null,
     pair: args.limnMeta?.pair ?? false,
     runs: args.limnMeta?.runs ?? [],
+    judged: args.limnMeta?.judged ?? [],
+    liftConsent: args.limnMeta?.liftConsent === true,
   });
   const finalBody = args.body + `\n\n${marker}`;
 

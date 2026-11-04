@@ -294,6 +294,13 @@ describe('teamReviewLead (the one lead rule)', () => {
     expect(teamReviewLead(own('cancelled', t2), t1)).toBe('teammate');
     expect(teamReviewLead(own('succeeded', t2, 'skip'), t1)).toBe('teammate');
   });
+  it('after a failed or skipped run, the reader\'s latest REVIEWED run competes (203001: a failed retry)', () => {
+    // The reader reviewed at t2; a later retry failed; the teammate posted at t1 < t2 → the reader leads.
+    expect(teamReviewLead({ ...own('failed', t2 + 1000), lastReviewedAt: t2 }, t1)).toBe('own');
+    expect(teamReviewLead({ ...own('succeeded', t2 + 1000, 'skip'), lastReviewedAt: t2 }, t1)).toBe('own');
+    // The teammate posted after the reader's last review → the teammate leads.
+    expect(teamReviewLead({ ...own('failed', t2 + 1000), lastReviewedAt: t1 }, t2)).toBe('teammate');
+  });
   it('a teammate-only PR is led by the teammate; nothing at all is null', () => {
     expect(teamReviewLead(null, t1)).toBe('teammate');
     expect(teamReviewLead(own('failed', t1), null)).toBe('own');

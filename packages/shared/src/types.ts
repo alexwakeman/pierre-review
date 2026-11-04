@@ -4425,6 +4425,9 @@ export interface SetWorkspaceAutoReviewBody {
     approveImpact?: Partial<AutoApproveImpact>;
     // `WorkspaceAutoPostSettings.approveLeftovers`.
     approveLeftovers?: ApproveLeftovers;
+    // `WorkspaceAutoPostSettings.teamLiftConsent` / `.liftTeammateBlocks`.
+    teamLiftConsent?: boolean;
+    liftTeammateBlocks?: boolean;
   };
   // Auto AI Fix's contents + push switch (`WorkspaceAutoReviewSettings.autoFix`). Each field
   // optional; an `include` section left out keeps its stored value.
@@ -4565,7 +4568,19 @@ export interface WorkspaceAutoPostSettings {
   // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
   // `auto_resolve`, `FindingAutoResolveRecord`), never retried.
   autoResolve: boolean;
+  // LIFTING A TEAMMATE'S LIMN BLOCK (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). TWO
+  // opt-ins, both OFF by default, both needed:
+  //  - `teamLiftConsent` — the BLOCKED side: "Teammates' Limn may lift my Limn's block once every
+  //    point is addressed". Carried as `lift=1` in the hidden marker of every review this reader
+  //    posts while it is on (a teammate's Limn can only read GitHub).
+  //  - `liftTeammateBlocks` — the LIFTING side: "Lift a teammate's Limn block when everything is
+  //    addressed". With it on, a run that follows up on a consented, standing teammate block and
+  //    finds every point behind it settled dismisses that block and posts its own review.
+  teamLiftConsent: boolean;
+  liftTeammateBlocks: boolean;
 }
+export const AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT = false;
+export const AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS = false;
 export const AUTO_POST_DEFAULT_AUTO_VERDICT = false;
 // Per blast-radius level: may an automatic APPROVE be sent on a PR at that level?
 export interface AutoApproveImpact {
@@ -4583,6 +4598,8 @@ export interface StoredAutoPostSettings {
   autoVerdict?: boolean;
   autoResolve?: boolean;
   approveImpact?: Partial<AutoApproveImpact>;
+  teamLiftConsent?: boolean;
+  liftTeammateBlocks?: boolean;
 }
 
 // ---- Auto AI Fix contents + push (workspaces.auto_fix_settings, migration 0091 / pg 0078) ----
@@ -4717,6 +4734,10 @@ export interface ClaudeAutoPostRecord {
   verdict?: ClaudeAutoVerdictRecord | null;
   // Set when this run lifted Limn's OWN earlier automatic REQUEST_CHANGES (absent otherwise).
   liftedBlock?: ClaudeAutoLiftRecord | null;
+  // Set when this run lifted (or tried to lift) a TEAMMATE'S standing Limn block (docs/CLAUDE-REVIEW.md
+  // § Lifting a teammate's block). The teammate review's own `TeammateLiftRecord` is the claim; this
+  // is the run's copy. Absent otherwise.
+  liftedTeammateBlocks?: Array<{ teammateReviewId: number; login: string; status: TeammateLiftRecord['status']; error: string | null }>;
   // A CLAUDE + CODEX PAIR posts ONE review for both runs, claimed on the SECOND run's record. The
   // first run's record names the second here (its findings went out in that review); absent otherwise.
   viaPairReviewId?: number | null;
@@ -4758,6 +4779,8 @@ export interface ClaudeAutoPostWire {
   alreadyPostedCount?: number;
   verdict?: ClaudeAutoVerdictRecord | null;
   liftedBlock?: ClaudeAutoLiftRecord | null;
+  // Teammates' Limn blocks this run lifted or tried to (ClaudeAutoPostRecord.liftedTeammateBlocks).
+  liftedTeammateBlocks?: ClaudeAutoPostRecord['liftedTeammateBlocks'];
   // Posted in the pair's one review, recorded on this run (see ClaudeAutoPostRecord.viaPairReviewId).
   viaPairReviewId?: number | null;
   // The not-approved reason went to GitHub (ClaudeAutoPostRecord.reasonPosted / .reasonOnly).
@@ -6023,6 +6046,23 @@ export interface NewPrBall {
    *  a text node, never in a `title=`. ⚠ DISPLAY ONLY — never in `detail`, a hash or a model
    *  payload. Trailing optional. */
   commits?: PushedCommit[];
+}
+
+/** `GET /api/my-turn/pushed-since/:prId?workspace=` — EVERY commit a "Pushed since" card counts,
+ *  for its expanded list. The SAME population as `NewPrBall.humanCommitsAfter` (one fold,
+ *  `lastActionClocks`): human commits by someone other than you, strictly after your last review,
+ *  comment or push. `total` is that count; `commits` is newest first, at most
+ *  `PUSHED_SINCE_LIST_MAX` — "and N more" is `total − commits.length`. DB only; fetched only when
+ *  the reader expands the card. */
+export interface PushedSinceCommitsResponse {
+  workspaceId: number;
+  prId: number;
+  /** What you last did on the PR — the anchor. null = you never acted (nothing is counted). */
+  yourLastAction: MyLastAction | null;
+  /** ISO — when you did it. null with `yourLastAction`. */
+  anchorAt: string | null;
+  total: number;
+  commits: PushedCommit[];
 }
 
 /** One commit on a "Pushed since" card — see `NewPrBall.commits`. */
@@ -7412,6 +7452,37 @@ export interface TeammateReviewRecord {
   headInferred: boolean;
   // The finding comments posted with no severity lead (their stored severity is a placeholder).
   unlabelled?: string[];
+  // THE JUDGEMENTS IT CARRIED (the marker's `j=`, shared `parseLimnJudged`): earlier Limn findings on
+  // GitHub — the reader's own or another teammate's — this review judged, by finding comment
+  // databaseId. Absent = none (and on every older import).
+  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' }>;
+  // A PAIR's finding comments by node id → who raised each (from the comment's lead tag, "Codex",
+  // "Claude + Codex"). Absent on a single run (its `runs[0].provider` raised every finding).
+  findingProviders?: Record<string, AiProviderId[]>;
+  // The poster's marker carried `lift=1`: they consent to a teammate's Limn lifting this block once
+  // every point is addressed (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). Absent = no.
+  liftConsent?: boolean;
+}
+
+/**
+ * THE READER'S LIMN LIFTING A TEAMMATE'S BLOCK (`claude_reviews.teammate_lift` on the teammate's
+ * imported review, migration 0165; review/claude-review/teammate-lift.ts). ONE attempt per teammate
+ * review, ever: claimed ('dismissing') BEFORE the GitHub write, then settled. Never retried.
+ */
+export interface TeammateLiftRecord {
+  // 'dismissing' = claimed, the write in flight (or cut off: never retried); 'dismissed' = GitHub took
+  // it; 'failed' = GitHub refused (`error`, in GitHub's words — no permission, dismissal restricted).
+  status: 'dismissing' | 'dismissed' | 'failed';
+  at: string; // ISO-8601
+  // The reader's run that judged every point (a pair: its second half).
+  byReviewId: number;
+  // The head that run read (the PR's head at the time).
+  headSha: string;
+  // How many points behind the block it found settled.
+  points: number;
+  // The dismissal message sent to GitHub.
+  message: string;
+  error: string | null;
 }
 
 /** One finding of a teammate's posted review, rebuilt from its GitHub comment. */
@@ -7428,6 +7499,10 @@ export interface ClaudeTeammateFinding {
   githubUrl: string | null;
   // The synced review thread it opens (inline only), for "Open in Changes". null otherwise.
   threadId: number | null;
+  // Which model raised it: a single run's provider, or a pair comment's lead tag. Absent = unknown.
+  providers?: AiProviderId[];
+  // The comment's GitHub databaseId (what a posted judgement names). null = not synced.
+  githubCommentId?: string | null;
 }
 
 /** `ClaudeReviewResponse.teammateReviews[]` — read-only. */
@@ -7445,6 +7520,11 @@ export interface ClaudeTeammateReview {
   runs: Array<{ provider: AiProviderId | null; model: string | null; effort: string | null }>;
   limnVersion: string | null;
   findings: ClaudeTeammateFinding[];
+  // The earlier Limn findings this review judged (`TeammateReviewRecord.judged`). Absent = none.
+  judged?: TeammateReviewRecord['judged'];
+  // The reader's Limn lifted (or tried to lift) this review's block (`TeammateLiftRecord`). Absent =
+  // never tried.
+  lift?: TeammateLiftRecord;
 }
 
 /** The teammate who posted a review (`ClaudeTeammateReview.poster`). */
@@ -7478,6 +7558,106 @@ export interface ClaudeTeamReviewView {
   // How many Limn reviews have run on the PR so far (docs/CLAUDE-REVIEW.md § Teammates' reviews →
   // The review count). Absent on an older server.
   reviewCount?: ClaudeTeamReviewCount;
+  // STANDING VERDICTS: each Limn reviewer's verdict in force, the strictest one, who reviewed last
+  // (`teamStandings`). Absent on an older server.
+  standings?: ClaudeReviewStandings;
+  // EVERY FINDING ON THE PR, one entry per point, from every review (the reader's — a pair's halves
+  // named by provider — and every teammate's), with its state now (`foldAllTeamFindings`). Absent on
+  // an older server.
+  allFindings?: ClaudeTeamPoint[];
+}
+
+/** Who raised or judged something: the reader (`you`) or a teammate (`poster`). */
+export interface ClaudeTeamAuthor {
+  you: boolean;
+  poster: ClaudeTeammatePoster | null;
+}
+
+/** Where a point stands now. `by` = whose Limn judged it (the reader's, or a teammate's posted review). */
+export type ClaudeTeamPointState =
+  | { kind: 'open' }
+  | { kind: 'resolved_on_github' }
+  | {
+      kind: 'addressed' | 'no_longer_applies';
+      by: ClaudeTeamAuthor;
+      at: string; // ISO-8601: when that review ran (the reader's) or was posted (a teammate's)
+      reviewId: number;
+    };
+
+/** One point in `ClaudeTeamReviewView.allFindings`. */
+export interface ClaudeTeamPoint {
+  // `claude_review_findings.id` of the entry shown: the reader's newest raise of it, else the first
+  // teammate's.
+  findingId: number;
+  // The review it is shown from (`claude_reviews.id`).
+  reviewId: number;
+  origin: 'own' | 'teammate';
+  author: ClaudeTeamAuthor;
+  // Which model raised it: one provider, both for a pair's shared point; [] = unknown.
+  providers: AiProviderId[];
+  path: string;
+  line: number | null;
+  // null = a teammate's finding posted without a severity lead.
+  severity: Exclude<ClaudeFindingSeverity, 'praise'> | null;
+  title: string;
+  body: string;
+  // When it was first raised (ISO-8601), and the head of the review it is shown from.
+  raisedAt: string;
+  headSha: string;
+  // The comment on GitHub (`safeExternalUrl` before use); null = not posted, or its id not synced.
+  githubUrl: string | null;
+  // Its synced review thread (inline only); null otherwise.
+  threadId: number | null;
+  // On GitHub (the reader's own: posted; a teammate's: always).
+  posted: boolean;
+  // The reader's own finding, ignored before it was posted (never said to the author).
+  ignored: boolean;
+  state: ClaudeTeamPointState;
+  // Everyone else who raised the same point, each with their own finding, first raise first.
+  alsoRaisedBy: Array<ClaudeTeamAuthor & { findingId: number; reviewId: number; providers: AiProviderId[] }>;
+}
+
+// ---- STANDING VERDICTS (docs/CLAUDE-REVIEW.md § Teammates' reviews → Standing verdicts) ----
+// GitHub's own rule, per Limn reviewer (the reader, each teammate whose Limn posted): their latest
+// decisive review (Request changes / Approve) stays IN FORCE until it is dismissed on GitHub or the
+// same person's later decisive review replaces it (a Comment never does). A surface shows the
+// STRICTEST verdict in force — a Request changes still standing — and names who reviewed last.
+// Folded ONCE (team-view.ts `teamStandings`), for the states batch and the AI Review tab alike.
+
+/** One review a standing names. `you` = the reader's own (then `poster` is null). */
+export interface ClaudeReviewStandingRef {
+  you: boolean;
+  poster: ClaudeTeammatePoster | null;
+  // `claude_reviews.id`: the reader's run (a pair: one of its halves) or the imported teammate review.
+  // null = a Limn review on GitHub that is not a review here (a replies-pass outcome).
+  reviewId: number | null;
+  verdict: ClaudeReviewVerdict | null;
+  at: string; // ISO-8601
+  headSha: string | null;
+}
+
+/** One Limn reviewer's standing on the PR. */
+export interface ClaudeReviewStanding {
+  you: boolean;
+  poster: ClaudeTeammatePoster | null;
+  // Their newest Limn review (the reader's: the latest run that reviewed, posted or not). null = none
+  // here (only a GitHub verdict is known).
+  latest: ClaudeReviewStandingRef | null;
+  // The Limn verdict GitHub still holds for them; null = none (never decisive, dismissed, or replaced
+  // by a later review of theirs that was not Limn's).
+  inForce: (ClaudeReviewStandingRef & { verdict: 'REQUEST_CHANGES' | 'APPROVE' }) | null;
+  // Their newest Limn review on GitHub was dismissed.
+  dismissed: boolean;
+}
+
+export interface ClaudeReviewStandings {
+  // The reader first (when they have one), then teammates, newest review first.
+  reviewers: ClaudeReviewStanding[];
+  // THE STRICTEST VERDICT IN FORCE: the newest Request changes still standing (any reviewer). null =
+  // nothing blocks.
+  blocking: ClaudeReviewStandingRef | null;
+  // Who reviewed last: the newest `latest` across reviewers. null = no review.
+  latest: ClaudeReviewStandingRef | null;
 }
 
 /**
@@ -7982,6 +8162,12 @@ export interface ClaudeReviewPrState {
    *  listed for it with `reviewId: null`, `status: 'succeeded'` and no `trigger` / `summary` /
    *  `ranOn` / `fix`. DB-only. Absent on older servers. */
   teammateLead?: ClaudeTeammateLead;
+  /** STANDING VERDICTS (team-view.ts `teamStandings`, the AI Review tab's own fold): each Limn
+   *  reviewer's verdict in force on GitHub, the strictest one (`blocking`) and who reviewed last
+   *  (`latest`). The column and the Pending cards show `blocking` when it is not the review they lead
+   *  with, naming `latest` beside it. Present when the PR has a teammate review or a posted Limn review
+   *  of the reader's; absent otherwise and on older servers. DB-only. */
+  standing?: ClaudeReviewStandings;
 }
 
 /** The teammate review that leads a PR (`ClaudeReviewPrState.teammateLead`). */

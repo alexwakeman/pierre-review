@@ -64,6 +64,8 @@ import {
   type PendingFactPlan,
 } from '../../lib/pendingHeadings.js';
 import { usePr, useThread } from '../../hooks/usePr.js';
+import { usePushedSinceCommits } from '../../hooks/usePushedSince.js';
+import { pushedCommitHref, pushedSinceLabel, pushedSinceRows, pushedSinceTail } from '../../lib/pushedSince.js';
 import { useUsers } from '../../hooks/useTimeline.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
@@ -879,8 +881,7 @@ export function PrMetaRow({
       {/* BLAST RADIUS — how far the change can REACH, beside how big it is. The reason the board
           carries it at all: a maintainer must be able to see which cards are a quick eyeball
           WITHOUT opening them, and this row MAY NOT FETCH — the signals ride the card.
-          ⚠ NOT `expandable` here: the card is a link to the pull request, and a second
-          interactive target inside it competes with that. The reasons are in the title. */}
+          The reasons open on a click; the chip isolates it from the card's own. */}
       <BlastRadiusChip pr={pr} />
       {!byline && authorSourceLabel(pr) != null && (
         <BotVendorPill
@@ -1164,51 +1165,94 @@ function MyTurnReplyBody({
 }
 
 /**
- * WHAT WAS PUSHED on a "Pushed since" card (`NewPrBall.commits`): one line per commit, newest
- * first, then "and N more" over the same count the detail states. A headline not synced yet is
- * never an empty line — the short sha stands alone with a word saying so. The author is named only
- * when more than one person pushed (the detail already names the newest pusher).
+ * WHAT WAS PUSHED on a "Pushed since" card: a disclosure, "3 commits since you last reviewed",
+ * CLOSED by default. The anchor is the reader's last review, comment or push (never a view —
+ * `lib/pushedSince.ts`). Opened, it lists EVERY commit the count names, newest first: short sha
+ * (linked to the commit on GitHub), message first line, author, time. The card's inline few
+ * (`NewPrBall.commits`) show at once; the full list is fetched only on opening (⚠ nothing on the
+ * Pending board fetches on mount), and "and N more" appears only when the server's bound bites,
+ * over the same count. A headline not synced yet is never an empty line.
  */
-function PushedCommitList({
+function PushedSinceCommits({
   ball,
+  prId,
+  prUrl,
   usersById,
 }: {
   ball: NewPrBall;
+  prId: number;
+  prUrl: string | null;
   usersById: Map<number, User>;
 }): JSX.Element | null {
-  const list = ball.commits ?? [];
-  if (list.length === 0) return null;
-  const authors = new Set(list.map((c) => c.authorId));
-  const nameAuthors = authors.size > 1;
-  const more = Math.max(0, (ball.humanCommitsAfter ?? list.length) - list.length);
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const full = usePushedSinceCommits(workspaceId, prId, open);
+  const inline = ball.commits ?? [];
+  const inlineTotal = ball.humanCommitsAfter ?? inline.length;
+  if (inlineTotal === 0 && inline.length === 0) return null;
+  const rows = pushedSinceRows(inline, inlineTotal, open ? full.data : null);
+  const lastAction = full.data?.yourLastAction ?? ball.yourLastAction;
   return (
-    <ul className="mt-1.5 space-y-0.5 text-meta text-ui-ink">
-      {list.map((c) => {
-        const login = c.authorId != null ? usersById.get(c.authorId)?.githubLogin : undefined;
-        return (
-          <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 font-mono text-meta text-ui-mute">
-              {c.sha.slice(0, 7)}
-            </span>
-            {c.headline != null ? (
-              <span className="min-w-0 truncate">{c.headline}</span>
-            ) : (
-              <span className="min-w-0 truncate text-ui-mute">
-                Message not synced yet
-              </span>
-            )}
-            {nameAuthors && login != null && (
-              <span className="shrink-0 text-meta text-ui-mute">@{login}</span>
-            )}
-          </li>
-        );
-      })}
-      {more > 0 && (
-        <li className="text-meta text-ui-mute">
-          and {more} more
-        </li>
+    <div className="mt-1.5" data-noactivate>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
+        {pushedSinceLabel(rows.total, lastAction)}
+      </button>
+      {open && (
+        <div id={panelId} className="mt-1 pl-3.5">
+          {rows.commits.length === 0 ? (
+            <p className="text-meta text-ui-mute">{full.isError ? 'Couldn’t load the commits.' : 'Loading…'}</p>
+          ) : (
+            <ul className="space-y-0.5 text-meta text-ui-ink">
+              {rows.commits.map((c) => {
+                const login = c.authorId != null ? usersById.get(c.authorId)?.githubLogin : undefined;
+                const href = safeExternalUrl(pushedCommitHref(prUrl, c.sha));
+                const sha = c.sha.slice(0, 7);
+                return (
+                  <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
+                    {href != null ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 font-mono text-meta text-ui-mute hover:text-ui-ink hover:underline"
+                      >
+                        {sha}
+                      </a>
+                    ) : (
+                      <span className="shrink-0 font-mono text-meta text-ui-mute">{sha}</span>
+                    )}
+                    {c.headline != null ? (
+                      <span className="min-w-0 truncate">{c.headline}</span>
+                    ) : (
+                      <span className="min-w-0 truncate text-ui-mute">Message not synced yet</span>
+                    )}
+                    {login != null && <span className="shrink-0 text-meta text-ui-mute">@{login}</span>}
+                    <span className="ml-auto shrink-0 text-meta text-ui-faint" title={dateTime(c.at)}>
+                      {relativeTime(c.at)}
+                    </span>
+                  </li>
+                );
+              })}
+              {pushedSinceTail(rows, full.isLoading) != null && (
+                <li className="text-meta text-ui-mute">{pushedSinceTail(rows, full.isLoading)}</li>
+              )}
+            </ul>
+          )}
+        </div>
       )}
-    </ul>
+    </div>
   );
 }
 
@@ -2791,7 +2835,15 @@ function PendingCard({
         );
       }
       if (card.reason === 'pushed_since' && card.ball != null) {
-        content.push(<PushedCommitList key="commits" ball={card.ball} usersById={board.usersById} />);
+        content.push(
+          <PushedSinceCommits
+            key="commits"
+            ball={card.ball}
+            prId={card.prId}
+            prUrl={card.githubUrl}
+            usersById={board.usersById}
+          />,
+        );
       }
       if (card.reason === 'own_thread' && card.firstComment != null) {
         content.push(

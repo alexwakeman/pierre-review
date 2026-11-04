@@ -70,6 +70,14 @@ export const FAILING_CHECKS_SHOWN = 3;
 export const PUSHED_COMMITS_SHOWN = 5;
 
 /**
+ * The most commits the EXPANDED "N commits since you …" list on a "Pushed since" card returns
+ * (`GET /api/my-turn/pushed-since/:prId`, fetched only when the reader opens it). Every commit the
+ * count names is listed up to this; past it the list says "and N more" over the same count. A
+ * safety bound only: real PRs sit far below it.
+ */
+export const PUSHED_SINCE_LIST_MAX = 300;
+
+/**
  * The longest reply a reply-type My Turn card carries inline (`MyTurnCard.reply`), in characters.
  * Longer bodies are cut and flagged `truncated`, and the card offers "Open thread". MEASURED on
  * human review comments: average 262 characters, 44 of 13,200 over 2,000, longest 8,021.

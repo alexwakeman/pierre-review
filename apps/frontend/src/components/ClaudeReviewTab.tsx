@@ -36,11 +36,25 @@ import {
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
 import { useChatPreferredProvider, useReviewModelPick } from '../hooks/useModelPick.js';
-import { historyOptionIdFor, nextShownReviewId, reviewHistoryOptions } from '../lib/reviewHistory.js';
+import {
+  itemShows,
+  nowReviewKey,
+  newestReviewKey,
+  nextShownReview,
+  pairReviewIdsOf,
+  providersLabel,
+  reviewListLine,
+  reviewsOnPr,
+  standingRows,
+  teamFindingRows,
+  type RaisedBy,
+  type ShownReview,
+} from '../lib/teamReview.js';
 import { findingAuthorName, reviewByName, threadsByName } from '../lib/reviewAuthor.js';
 import { pairRunningLabel } from '../lib/modelPick.js';
 import {
   autoLiftLine,
+  teammateLiftLines,
   autoPostFailureLine,
   autoPostSkipLine,
   autoResolveLabel,
@@ -66,7 +80,7 @@ import {
   summaryPrefillOf,
   writeReviewPostMode,
 } from '../lib/reviewPostMode.js';
-import { ReviewHistoryList } from './ReviewHistoryList.js';
+import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection, TeamPointRow } from './TeamReviewLayout.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -116,8 +130,8 @@ import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
-import { TeammateChip, TeammateLeadSection, TeamFindingRow } from './TeammateReviews.js';
-import { alsoRaisedByFinding, alsoRaisedLabel, leadingTeammateReview, reviewCountLine, teamFindingByLabel } from '../lib/teammateReviews.js';
+import { TeammateChip, TeammateLeadSection } from './TeammateReviews.js';
+import { alsoRaisedByFinding, alsoRaisedLabel, leadingTeammateReview, reviewCountLine, teamFindingByLabel, teammateName } from '../lib/teammateReviews.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
@@ -133,7 +147,7 @@ import { useTicketReviews } from '../hooks/useTicketReview.js';
 import { useCiReview } from '../hooks/useCiReview.js';
 import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
 import { legacyOnlyEntries } from '../lib/ticketStory.js';
-import { reviewCurrency, reviewRunWhen, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
+import { reviewCurrency, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -680,11 +694,15 @@ export function FindingRow({
   docReferences = null,
   authorName = 'Claude',
   alsoRaisedBy = null,
+  raisedBy = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
   /** Teammates whose posted review raised this point too (`teamView.alsoRaisedBy`). null ⇒ none. */
   alsoRaisedBy?: readonly ClaudeTeammatePoster[] | null;
+  /** WHO RAISED IT on the team layout ("You · Codex", "You and Robin"; lib/teamReview.ts
+   *  `raisedByLabel`): one chip in place of the pair-source and "also raised" chips. null ⇒ those. */
+  raisedBy?: RaisedBy | null;
   /** Who wrote the finding: the provider that ran its review ('Claude' | 'Codex'). */
   authorName?: string;
   editable: boolean;
@@ -919,8 +937,11 @@ export function FindingRow({
                 {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
               </span>
             )}
+            {raisedBy != null && (
+              <TeammateChip by={raisedBy.posters} label={raisedBy.label} title={`Raised by ${raisedBy.label}`} />
+            )}
             {/* A Claude + Codex pair's finding: who raised it, quietly (one neutral chip). */}
-            {finding.source != null && (
+            {raisedBy == null && finding.source != null && (
               <span
                 className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
                 data-finding-source={finding.source}
@@ -934,7 +955,7 @@ export function FindingRow({
               </span>
             )}
             {/* The same point in a teammate's posted review: shown once, naming both. */}
-            {alsoRaisedBy != null && alsoRaisedBy.length > 0 && (
+            {raisedBy == null && alsoRaisedBy != null && alsoRaisedBy.length > 0 && (
               <TeammateChip
                 by={alsoRaisedBy}
                 label={alsoRaisedLabel(alsoRaisedBy)}
@@ -1302,8 +1323,9 @@ export function ClaudesReview({
   checkThreadsPrId = null,
   team = null,
 }: {
-  /** The merged view with teammates' posted reviews (the latest run only). null ⇒ this run alone. */
-  team?: { view: ClaudeTeamReviewView; reviews: readonly ClaudeTeammateReview[] } | null;
+  /** THE TEAM LAYOUT (the latest run only): teammates' posted reviews folded in — the newest leads,
+   *  findings by their state now across every review. null ⇒ this run alone (a past run). */
+  team?: TeamLayout | null;
   review: ClaudeReview;
   editable: boolean;
   /** The server's current thread judgements; null ⇒ read the run's own. */
@@ -1383,16 +1405,19 @@ export function ClaudesReview({
   const storyIds = placement.ids;
   // THE WIDE LAYOUT (REVIEW_RAIL): the run's facts move from the section header to the rail.
   const inRail = useRailWide('review');
-  // THE ONE REVIEW (latest run only): a teammate's newer posted review leads, their still-open
-  // findings join the list, and a point both raised shows once (`teamView`, server-folded).
+  // THE TEAM LAYOUT (latest run only): a teammate's newer posted review leads, and the findings are
+  // every review's, by their state now (`teamView.allFindings`, server-folded).
   const leadTeammate = leadingTeammateReview(team?.view, team?.reviews);
-  const teamFindings = team?.view.findings ?? [];
   const alsoRaised = alsoRaisedByFinding(team?.view);
+  // "Where this PR stands" names each verdict, so the summary does not repeat one.
+  const showVerdict = team?.standingsShown !== true;
+  const teamRows = team != null ? teamFindingRows(team.view.allFindings ?? [], findings, placement.placed) : null;
 
   // THE ONE FINDING CARD, for the Findings list and the Story check's older stories alike. `storyLabel`
   // is the chip naming the story item (null for an ordinary finding).
-  const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
+  const findingCard = (f: ClaudeFinding, storyLabel: string | null, raisedBy: RaisedBy | null = null): JSX.Element => (
     <FindingRow
+      raisedBy={raisedBy}
       // A pair's finding: its own text is the half's that raised it.
       authorName={findingAuthorName(storedReview, f)}
       alsoRaisedBy={alsoRaised.get(f.id) ?? null}
@@ -1421,29 +1446,42 @@ export function ClaudesReview({
     />
   );
   const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+  // "Copy all" (the reader's own findings of this run) and the Story check note, in the Findings header.
+  const findingsPills = (
+    <>
+      <CopyAllFindingsButton findings={findings} editable={editable} />
+      {placement.placed.size > 0 && (
+        <span className="text-meta text-ui-mute">{placement.placed.size} more under Story check</span>
+      )}
+    </>
+  );
 
   return (
     <>
       {leadTeammate == null && (
         <RailPiece slot="status">
-          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} cost={railCostLine(review, costText)} />
+          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} cost={railCostLine(review, costText)} showVerdict={showVerdict} />
         </RailPiece>
       )}
       <RailPiece slot="counts">
         <ReviewRailCounts
-          findings={[...findings, ...teamFindings]}
+          findings={
+            teamRows != null
+              ? teamRows.open.map((e) => (e.kind === 'own' ? e.finding : e.point))
+              : findings
+          }
           storyFindings={placement.placed.size}
           threads={(currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts) ?? null}
         />
       </RailPiece>
       {/* THE NEWEST REVIEW LEADS: a teammate's posted review newer than this one heads the tab. */}
-      {leadTeammate != null ? <TeammateLeadSection review={leadTeammate} /> : <ReviewSection
+      {leadTeammate != null ? <TeammateLeadSection review={leadTeammate} showVerdict={showVerdict} /> : <ReviewSection
         title={storedReview.pair != null ? `${by} review` : `${by}'s review`}
         section="review"
         pills={
           inRail ? null : <>
             {/* The outcome leads; everything after it is about the run. */}
-            {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
+            {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {currency != null && <CurrencyPill currency={currency} />}
             <ReviewedAgo at={review.finishedAt} />
             {review.trigger === 'auto' && (
@@ -1529,30 +1567,35 @@ export function ClaudesReview({
         // when its own assessments show. A pair's come from ONE half: that half's provider.
         by={currentThreads == null ? threadsByName(storedReview) : undefined}
       />
+      {team != null ? (
+        // FINDINGS BY STATE, every review's: Open, then "Resolved or addressed (n)".
+        <TeamFindingsSection
+          points={team.view.allFindings ?? []}
+          ownFindings={findings}
+          hiddenFindingIds={placement.placed}
+          pairReviewIds={team.pairReviewIds}
+          renderOwn={(f, raised) =>
+            findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null, raised)
+          }
+          onOpenThread={onOpenThread}
+          pills={findingsPills}
+        />
+      ) : (
       <ReviewSection
         title="Findings"
         section="findings"
         pills={
           <>
-            <SectionCount>{plural(findings.length + teamFindings.length, 'finding', 'findings')}</SectionCount>
-            <CopyAllFindingsButton findings={findings} editable={editable} />
-            {placement.placed.size > 0 && (
-              <span className="text-meta text-ui-mute">
-                {placement.placed.size} more under Story check
-              </span>
-            )}
+            <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
+            {findingsPills}
           </>
         }
       >
-        {findings.length + teamFindings.length > 0 ? (
+        {findings.length > 0 ? (
           <ul className={REVIEW_ITEM_GROUP}>
             {findings.map((f) =>
               findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null),
             )}
-            {/* Teammates' still-open findings, read-only, each naming who raised it. */}
-            {teamFindings.map((f) => (
-              <TeamFindingRow key={`team-${f.id}`} finding={f} onOpenThread={onOpenThread} />
-            ))}
           </ul>
         ) : (
           <div className="text-meta text-ui-mute">
@@ -1560,6 +1603,7 @@ export function ClaudesReview({
           </div>
         )}
       </ReviewSection>
+      )}
       {storyCheck({
         entries: legacyEntries,
         findingIds: storyIds,
@@ -1635,33 +1679,81 @@ const REVIEW_RAIL: RailLayoutConfig = {
   wideClassName: 'relative z-10 bg-ui-bg',
 };
 
+/** The team layout's inputs (the latest run only; `ClaudeReviewResponse.teamView`). */
+interface TeamLayout {
+  view: ClaudeTeamReviewView;
+  reviews: readonly ClaudeTeammateReview[];
+  // Every Claude + Codex pair half's review id (the model is named only for a pair's finding).
+  pairReviewIds: ReadonlySet<number>;
+  // "Where this PR stands" is on screen: the summary shows no verdict of its own.
+  standingsShown: boolean;
+}
+
 /**
- * THE ONE REVIEW WITHOUT A RUN OF THE READER'S (none yet, or the latest failed): a teammate's newer
- * posted review leads and their still-open findings list, read-only. Nothing when there are none.
+ * NOW, WITHOUT A FINISHED RUN OF THE READER'S (none yet, the latest failed, or one is running): a
+ * teammate's newer posted review leads, and every review's findings list by their state, read-only.
+ * Nothing when there are none.
  */
 function TeamOnlyReview({
-  data,
+  team,
   onOpenThread,
 }: {
-  data: { teamView?: ClaudeTeamReviewView; teammateReviews?: ClaudeTeammateReview[] } | undefined;
+  team: TeamLayout | null;
   onOpenThread?: (threadId: number) => void;
 }): JSX.Element | null {
-  const lead = leadingTeammateReview(data?.teamView, data?.teammateReviews);
-  const findings = data?.teamView?.findings ?? [];
-  if (lead == null && findings.length === 0) return null;
+  const lead = leadingTeammateReview(team?.view, team?.reviews);
+  const points = team?.view.allFindings ?? [];
+  if (team == null || (lead == null && points.length === 0)) return null;
   return (
     <>
-      {lead != null && <TeammateLeadSection review={lead} />}
+      {lead != null && <TeammateLeadSection review={lead} showVerdict={!team.standingsShown} />}
+      <TeamFindingsSection
+        points={points}
+        ownFindings={[]}
+        hiddenFindingIds={new Set()}
+        pairReviewIds={team.pairReviewIds}
+        renderOwn={() => <></>}
+        onOpenThread={onOpenThread}
+      />
+    </>
+  );
+}
+
+/** A TEAMMATE'S POSTED REVIEW, opened from "Reviews on this PR": its summary and findings, read-only. */
+function PastTeammateReview({
+  review: t,
+  onOpenThread,
+}: {
+  review: ClaudeTeammateReview;
+  onOpenThread?: (threadId: number) => void;
+}): JSX.Element {
+  const name = teammateName(t.poster);
+  return (
+    <>
+      <TeammateLeadSection review={t} />
       <ReviewSection
         title="Findings"
         section="findings"
-        pills={<SectionCount>{`${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}`}</SectionCount>}
+        pills={<SectionCount>{`${t.findings.length} ${t.findings.length === 1 ? 'finding' : 'findings'}`}</SectionCount>}
       >
-        {findings.length > 0 ? (
+        {t.findings.length > 0 ? (
           <ul className={REVIEW_ITEM_GROUP}>
-            {findings.map((f) => (
-              <TeamFindingRow key={`team-${f.id}`} finding={f} onOpenThread={onOpenThread} />
-            ))}
+            {t.findings.map((f) => {
+              const model = t.pair ? providersLabel(f.providers ?? []) : null;
+              return (
+                <TeamPointRow
+                  key={`mate-${f.id}`}
+                  severity={f.severity}
+                  body={f.body}
+                  path={f.path}
+                  line={f.line}
+                  threadId={f.threadId}
+                  githubUrl={f.githubUrl}
+                  raisedBy={{ label: [name, model].filter(Boolean).join(' · '), posters: [t.poster] }}
+                  onOpenThread={onOpenThread}
+                />
+              );
+            })}
           </ul>
         ) : (
           <div className="text-meta text-ui-mute">No line-level findings.</div>
@@ -1672,23 +1764,26 @@ function TeamOnlyReview({
 }
 
 /** The rail's first block: who reviewed, the verdict, whether it read the latest commit, when, and
- *  the cost. No commit hash and no model here (the history select and the narrow header name them). */
+ *  the cost. No commit hash and no model here (Reviews on this PR and the narrow header name them). */
 function ReviewRailStatus({
   review,
   title,
   currency,
   cost,
+  showVerdict = true,
 }: {
   review: ClaudeReview;
   title: string;
   currency: ReviewCurrency | null;
   cost: string | null;
+  // false: "Where this PR stands" already names the verdict.
+  showVerdict?: boolean;
 }): JSX.Element {
   return (
     <div className="space-y-1.5" data-testid="review-rail-status">
       <p className="text-meta text-ui-mute">{title}</p>
       <div className="flex flex-wrap items-center gap-2">
-        {review.verdict != null && <VerdictBadge verdict={review.verdict} />}
+        {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
         {currency != null && <CurrencyPill currency={currency} showSha={false} />}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">
@@ -1973,11 +2068,12 @@ export function ClaudeReviewTab({
   const [userBody, setUserBody] = useState('');
   const [userVerdict, setUserVerdict] = useState<ClaudeReviewVerdict>('COMMENT');
 
-  // THE SHOWN RUN (lib/reviewHistory.ts `nextShownReviewId`): the reader's pick from the history list.
-  // It never moves on its own — a run starting or finishing, a provider switch or the model menu leave
-  // it — except to a run the reader just started.
-  const [selectedReviewId, setSelectedReviewId] = useState<number | null>(null);
-  const previousLatestId = useRef<number | null>(null);
+  // WHAT THE TAB SHOWS (lib/teamReview.ts `nextShownReview`): null = NOW — the PR as it stands across
+  // every review — or one past review the reader opened from "Reviews on this PR", read-only. NEWEST
+  // ALWAYS SHOWS: the next review that starts or lands (the reader's, queued or running, auto or
+  // manual, or a teammate's newly imported) takes over from a past one.
+  const [shown, setShown] = useState<ShownReview | null>(null);
+  const previousNewestKey = useRef<string | null>(null);
 
   // Post actions: dry-run preview + confirm-then-post + result/skip surfacing.
   const [preview, setPreview] = useState<PostReviewPreview | null>(null);
@@ -2036,15 +2132,13 @@ export function ClaudeReviewTab({
     });
   }, [review?.id, prefill]);
 
-  // Re-pick the shown run on every read of the latest run and the history (see `nextShownReviewId`).
-  const history = data?.history;
+  // Re-pick what is shown on every read (see `nextShownReview`).
+  const newestKey = data != null ? newestReviewKey(review?.id ?? null, data.teammateReviews) : null;
   useEffect(() => {
-    const latest = review != null ? { id: review.id, status: review.status, trigger: review.trigger } : null;
-    setSelectedReviewId((shown) =>
-      nextShownReviewId({ shown, latest, previousLatestId: previousLatestId.current, history: history ?? [] }),
-    );
-    if (latest != null) previousLatestId.current = latest.id;
-  }, [review?.id, review?.status, review?.trigger, history]);
+    if (data == null) return;
+    setShown((s) => nextShownReview({ shown: s, newestKey, previousKey: previousNewestKey.current }));
+    previousNewestKey.current = newestKey;
+  }, [newestKey, data == null]);
 
   const isRunning = review?.status === 'running' || review?.status === 'queued';
   // An AUTO review holds this PR (waiting in its lane, or running): the manual start is locked
@@ -2059,16 +2153,27 @@ export function ClaudeReviewTab({
   const { status } = useClaudeReviewStream(pr.id, isRunning);
   const costText = useRunCostText();
 
-  // Which run is shown in Section A: the latest unless the user picked an older
-  // one from history. Both are hooks, so they MUST run unconditionally — before
-  // any early return below (React's Rules of Hooks).
-  // A Claude + Codex pair is ONE review: either half's id is the pair's (the select's option).
-  const historyOptions = reviewHistoryOptions(data?.history ?? [], review?.id ?? null, reviewRunWhen);
-  const shownOptionId = historyOptionIdFor(historyOptions, selectedReviewId);
+  // EVERY REVIEW ON THE PR (the reader's runs, a pair once, and teammates' posted reviews), newest
+  // first; the first row is now. Hooks below MUST run unconditionally — before any early return.
+  const reviewItems = useMemo(
+    () => reviewsOnPr(data?.history ?? [], data?.teammateReviews ?? []),
+    [data?.history, data?.teammateReviews],
+  );
+  // A pick of the reader's latest review (either half of a pair) is now.
+  const latestItem = review != null ? reviewItems.find((i) => i.runIds.includes(review.id)) ?? null : null;
   const viewingLatest =
-    shownOptionId == null || shownOptionId === review?.id;
+    shown == null || (latestItem != null && itemShows(latestItem, shown));
+  const shownItem = !viewingLatest && shown != null ? reviewItems.find((i) => itemShows(i, shown)) ?? null : null;
   const { data: historicReview } = useClaudeReviewById(
-    viewingLatest ? null : shownOptionId,
+    !viewingLatest && shown?.kind === 'own' ? (shownItem?.target.kind === 'own' ? shownItem.target.id : shown.id) : null,
+  );
+  const pastTeammate =
+    !viewingLatest && shown?.kind === 'teammate'
+      ? (data?.teammateReviews ?? []).find((t) => t.reviewId === shown.reviewId) ?? null
+      : null;
+  const pairReviewIds = useMemo(
+    () => pairReviewIdsOf(data?.history ?? [], data?.teammateReviews ?? []),
+    [data?.history, data?.teammateReviews],
   );
 
   if (isLoading) {
@@ -2123,7 +2228,20 @@ export function ClaudeReviewTab({
 
   const shownReview: ClaudeReview | null = viewingLatest
     ? review
-    : historicReview ?? null;
+    : shown?.kind === 'own'
+      ? historicReview ?? null
+      : null;
+  const showPick = (target: ShownReview | null): void => {
+    setShown(target);
+    setPreview(null);
+    setPostResult(null);
+  };
+  // THE TEAM LAYOUT (now only): where the PR stands, and every review's findings by their state.
+  const standingsShown = standingRows(data?.teamView?.standings).length > 0;
+  const team: TeamLayout | null =
+    viewingLatest && data?.teamView != null
+      ? { view: data.teamView, reviews: data.teammateReviews ?? [], pairReviewIds, standingsShown }
+      : null;
 
   // Editing + posting are only enabled for the latest review (a Claude + Codex pair is ONE review,
   // addressed by its latest half — the server's consolidated view).
@@ -2187,13 +2305,36 @@ export function ClaudeReviewTab({
       <RailPiece slot="actions" inline>
         <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       </RailPiece>
+      {/* WHERE THIS PR STANDS (now): each Limn reviewer's newest verdict. In the rail when wide;
+          above the run controls when narrow. */}
+      {viewingLatest && standingsShown && (
+        <RailPiece slot="status" inline>
+          <StandingsSection standings={data?.teamView?.standings} />
+        </RailPiece>
+      )}
+
       <RailPiece slot="run" inline>
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
           only the Run button (AiRunGate), so past reviews and the stories stay usable.
           ⚠ THERE IS NOWHERE IN THE APP TO ENTER A KEY, AND THE LINE MUST NOT PRETEND OTHERWISE:
           both credential rungs (an ambient Claude Code session, then ANTHROPIC_API_KEY) live
           outside the SPA. */}
-      <ReviewSection title="Run a review">
+      <ReviewSection
+        title="Run a review"
+        info={
+          <InfoButton title="Review only, or review and post">
+            <p>
+              <strong>Review only</strong> keeps the review in Limn. Its summary goes into the summary box, ready
+              to edit and post.
+            </p>
+            <p>
+              <strong>Review and post</strong> posts the review to GitHub when it is done, under your
+              account, the same way an auto review posts: one review, your workspace’s comment kinds and
+              verdict rules. The workspace’s auto-post switch does not need to be on.
+            </p>
+          </InfoButton>
+        }
+      >
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={isRunning || starting} />
@@ -2247,17 +2388,6 @@ export function ClaudeReviewTab({
             />
             </span>
             </AiRunGate>
-            <InfoButton title="Review only, or review and post">
-              <p>
-                <strong>Review only</strong> keeps the review in Limn. Its summary goes into the summary box, ready
-                to edit and post.
-              </p>
-              <p>
-                <strong>Review and post</strong> posts the review to GitHub when it is done, under your
-                account, the same way an auto review posts: one review, your workspace’s comment kinds and
-                verdict rules. The workspace’s auto-post switch does not need to be on.
-              </p>
-            </InfoButton>
             {autoHold != null && (
               <span className="text-meta text-ui-mute">
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
@@ -2434,40 +2564,40 @@ export function ClaudeReviewTab({
         <RepliesCheckLine
           prId={pr.id}
           state={data.repliesCheck}
-          onShow={(id) => {
-            setSelectedReviewId(id);
-            setPreview(null);
-            setPostResult(null);
-          }}
-        />
-      )}
-
-      {/* THE REVIEW COUNT: full Limn reviews on the PR so far, teammates' included (the server's
-          `teamView.reviewCount`; a pair once, a replies pass never). */}
-      {reviewCountLine(data?.teamView?.reviewCount) != null && (
-        <div className="text-meta text-ui-mute" data-testid="review-count">
-          {reviewCountLine(data?.teamView?.reviewCount)}
-        </div>
-      )}
-
-      {/* EVERY review of the PR, one option each, in a drop-down (all providers, all heads, newest
-          first; a Claude + Codex pair is one option). In the rail its options name no commit and no
-          model. */}
-      {data != null && data.history.length > 1 && (
-        <ReviewHistoryList
-          history={data.history}
-          shownId={shownOptionId ?? review?.id ?? null}
-          latestId={review?.id ?? null}
-          onShow={(id) => {
-            setSelectedReviewId(id);
-            setPreview(null);
-            setPostResult(null);
-          }}
+          onShow={(id) => showPick({ kind: 'own', id })}
         />
       )}
 
       </ReviewSection>
+
+      {/* EVERY REVIEW ON THE PR, newest first (the first row is now), with THE REVIEW COUNT — full
+          Limn reviews so far, teammates' included (`teamView.reviewCount`). Any other row opens that
+          review read-only. */}
+      {data != null && (
+        <ReviewsOnPrSection
+          items={reviewItems}
+          nowKey={nowReviewKey(reviewItems, review?.id ?? null)}
+          shown={viewingLatest ? null : shown}
+          countLine={reviewCountLine(data?.teamView?.reviewCount)}
+          onShow={showPick}
+        />
+      )}
       </RailPiece>
+
+      {/* A past review: who and when, read-only, and the way back to now. */}
+      {!viewingLatest && (
+        <PastReviewBar
+          label={
+            shownItem != null
+              ? `${shownItem.you ? 'Your' : `${shownItem.who}’s`} review · ${reviewListLine(shownItem)} · read-only`
+              : 'An earlier review · read-only'
+          }
+          onBack={() => showPick(null)}
+        />
+      )}
+
+      {/* A teammate's posted review, opened from the list: read-only. */}
+      {pastTeammate != null && <PastTeammateReview review={pastTeammate} onOpenThread={onOpenThread} />}
 
       {/* Section A — Claude's read-only review for the shown run. */}
       {shownReview != null && shownReview.status === 'succeeded' && (
@@ -2485,8 +2615,8 @@ export function ClaudeReviewTab({
               : null
           }
           checkThreadsPrId={canEdit ? pr.id : null}
-          // THE ONE REVIEW: teammates' posted reviews folded in (latest run only; `teamView`).
-          team={canEdit && data?.teamView != null ? { view: data.teamView, reviews: data.teammateReviews ?? [] } : null}
+          // THE TEAM LAYOUT: teammates' posted reviews folded in (now only; `teamView`).
+          team={canEdit ? team : null}
           prUrl={pr.githubUrl}
           repoFullName={pr.repoFullName}
           prHeadSha={pr.headSha}
@@ -2530,9 +2660,15 @@ export function ClaudeReviewTab({
         <>
           {/* No succeeded run of the reader's to show: a teammate's posted review still leads and
               their still-open findings still list (read-only). */}
-          {viewingLatest && <TeamOnlyReview data={data} onOpenThread={onOpenThread} />}
-          <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
-          <CiCheckSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+          {/* The live Story / CI checks belong to now: a past review (a teammate's, or a run of the
+              reader's still loading or failed) is read-only, with nothing to start from it. */}
+          {viewingLatest && (
+            <>
+              <TeamOnlyReview team={team} onOpenThread={onOpenThread} />
+              <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+              <CiCheckSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+            </>
+          )}
         </>
       )}
 
@@ -2585,6 +2721,11 @@ export function ClaudeReviewTab({
               {autoLiftLine(review.autoPost, reviewByName(review))}
             </p>
           )}
+          {teammateLiftLines(review.autoPost).map((l) => (
+            <p key={l.text} className={l.failed ? 'text-meta text-ui-warn' : 'text-meta text-ui-mute'}>
+              {l.text}
+            </p>
+          ))}
           <MentionTextarea
             prId={pr.id}
             value={userBody}

@@ -451,6 +451,13 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/me/review-suggestion/dismiss')).not.toContain('ai');
   });
 
+  // GET /api/my-turn/pushed-since/:prId — a Pushed since card's expanded commit list. DB-only.
+  it('keeps the Pushed since commit list on read', () => {
+    expect(tiers('GET', '/api/my-turn/pushed-since/42')).toEqual(['read']);
+    expect(tiers('GET', '/api/my-turn/pushed-since/42')).not.toContain('pr_detail');
+    expect(tiers('GET', '/api/my-turn/pushed-since/42')).not.toContain('github_write');
+  });
+
   // PUT / DELETE /api/my-turn/dismissals/:kind/:id — dismiss or bring back a My Turn entry. DB-only.
   it('keeps My Turn dismissals on read', () => {
     for (const m of ['PUT', 'DELETE']) {

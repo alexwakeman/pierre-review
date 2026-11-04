@@ -1476,6 +1476,16 @@ Additive, no backfill: the next walk of each PR fills it; until then the fold ac
 "never the default branch" clause removes the common case (a fork PR from its own `main`). Journal
 `idx` 163, `when` sqlite `1792224069016` (above every earlier entry).
 
+### `0164_teammate_block_lift` — lifting a teammate's Limn block
+
+ONE column, `claude_reviews.teammate_lift` (JSON `TeammateLiftRecord`), set only on an imported
+teammate review (`kind = 'teammate'`): the reader's Limn's ONE attempt to dismiss that teammate's
+standing Request changes — claimed NULL → `dismissing` by compare-and-set BEFORE the GitHub write,
+settled `dismissed` / `failed`, never retried ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Lifting a
+teammate's block). The teammate import's update never writes it. Additive and nullable, no backfill;
+no new table, so erasure and the delete paths are unchanged (the row is a `claude_reviews` row).
+Journal `idx` 164, `when` sqlite `1792224071016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

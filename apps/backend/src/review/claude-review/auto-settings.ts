@@ -7,7 +7,9 @@ import {
   AUTO_POST_DEFAULT_AUTO_RESOLVE,
   AUTO_POST_DEFAULT_AUTO_VERDICT,
   AUTO_POST_DEFAULT_KINDS,
+  AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS,
   AUTO_POST_DEFAULT_SCOPE,
+  AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT,
   type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
@@ -74,6 +76,8 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` and
 // `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
+// So do the two TEAMMATE-LIFT opt-ins, `teamLiftConsent` and `liftTeammateBlocks` (both OFF by
+// default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
 //
 // THE AUTO VERDICT'S TWO RULES ride the same route as two more columns (migration 0145), OVERRIDES
 // ONLY (NULL = today's rule): `pair_verdict_strictness` ('relaxed', else strict — wire
@@ -138,13 +142,19 @@ export function resolveAutoPostSettings(
     autoResolve: typeof stored?.autoResolve === 'boolean' ? stored.autoResolve : AUTO_POST_DEFAULT_AUTO_RESOLVE,
     approveImpact,
     approveLeftovers: resolveApproveLeftovers(approveLeftovers),
+    teamLiftConsent:
+      typeof stored?.teamLiftConsent === 'boolean' ? stored.teamLiftConsent : AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT,
+    liftTeammateBlocks:
+      typeof stored?.liftTeammateBlocks === 'boolean' ? stored.liftTeammateBlocks : AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS,
   };
 }
 
 /** The settings in force → what to store: only what differs from the product default (null = none). */
 export function autoPostOverrides(
   s: Pick<WorkspaceAutoPostSettings, 'scope' | 'kinds'> &
-    Partial<Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'autoResolve' | 'approveImpact'>>,
+    Partial<
+      Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'autoResolve' | 'approveImpact' | 'teamLiftConsent' | 'liftTeammateBlocks'>
+    >,
 ): StoredAutoPostSettings | null {
   const out: StoredAutoPostSettings = {};
   if (s.scope !== AUTO_POST_DEFAULT_SCOPE) out.scope = s.scope;
@@ -153,6 +163,12 @@ export function autoPostOverrides(
   if (Object.keys(kinds).length > 0) out.kinds = kinds;
   if (s.autoVerdict !== undefined && s.autoVerdict !== AUTO_POST_DEFAULT_AUTO_VERDICT) out.autoVerdict = s.autoVerdict;
   if (s.autoResolve !== undefined && s.autoResolve !== AUTO_POST_DEFAULT_AUTO_RESOLVE) out.autoResolve = s.autoResolve;
+  if (s.teamLiftConsent !== undefined && s.teamLiftConsent !== AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT) {
+    out.teamLiftConsent = s.teamLiftConsent;
+  }
+  if (s.liftTeammateBlocks !== undefined && s.liftTeammateBlocks !== AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS) {
+    out.liftTeammateBlocks = s.liftTeammateBlocks;
+  }
   if (s.approveImpact !== undefined) {
     const levels: Partial<AutoApproveImpact> = {};
     for (const k of APPROVE_IMPACT_KEYS) {
@@ -234,6 +250,18 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
  * by auto-posting before it touches GitHub. A repo with no membership row (or an unknown PR) reads
  * null, i.e. OFF: this switch WRITES as the reader, so a workspace it cannot find never says yes.
  */
+/**
+ * The BLOCKED side's consent (`teamLiftConsent`) for the PR's workspace: does a post carry `lift=1`?
+ * Never throws — a failed read is no consent (docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
+ */
+export async function readTeamLiftConsent(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
+  try {
+    return (await readWorkspaceAutoPostForPr(ctx, accountId, prId))?.settings.teamLiftConsent === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function readWorkspaceAutoPostForPr(
   ctx: AgentContext,
   accountId: number,
@@ -434,6 +462,8 @@ export async function setWorkspaceAutoReview(
     autoResolve: autoPost?.autoResolve ?? postBefore.autoResolve,
     approveImpact: { ...postBefore.approveImpact },
     approveLeftovers: autoPost?.approveLeftovers ?? postBefore.approveLeftovers,
+    teamLiftConsent: autoPost?.teamLiftConsent ?? postBefore.teamLiftConsent,
+    liftTeammateBlocks: autoPost?.liftTeammateBlocks ?? postBefore.liftTeammateBlocks,
   };
   // The leftovers rule is its own column (migration 0145): NULL = the default.
   const leftoversStored: string | null = postAfter.approveLeftovers === 'nits_questions' ? null : postAfter.approveLeftovers;
@@ -775,6 +805,8 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
                 },
                 autoVerdict: { type: 'boolean' },
                 autoResolve: { type: 'boolean' },
+                teamLiftConsent: { type: 'boolean' },
+                liftTeammateBlocks: { type: 'boolean' },
                 approveImpact: {
                   type: 'object',
                   minProperties: 1,
@@ -814,7 +846,11 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         if (
           (post != null &&
             typeof post === 'object' &&
-            (notBool(post, 'enabled') || notBool(post, 'autoVerdict') || notBool(post, 'autoResolve'))) ||
+            (notBool(post, 'enabled') ||
+              notBool(post, 'autoVerdict') ||
+              notBool(post, 'autoResolve') ||
+              notBool(post, 'teamLiftConsent') ||
+              notBool(post, 'liftTeammateBlocks'))) ||
           (kinds != null && typeof kinds === 'object' && Object.values(kinds).some((v) => typeof v !== 'boolean')) ||
           (impact != null && typeof impact === 'object' && Object.values(impact).some((v) => typeof v !== 'boolean'))
         ) {

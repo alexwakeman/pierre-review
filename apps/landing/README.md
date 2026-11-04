@@ -63,7 +63,7 @@ are the app's own; never invent a feature for a mock.
 | Mock (`components/mock/…`) | Page | Mirrors (`apps/frontend/src/…`) |
 |---|---|---|
 | `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx` |
-| `home.tsx` ReviewMock (PR tabs) | `/` Review | `components/PrDetail.tsx` (TAB_LABELS), `ClaudeReviewTab.tsx`, `AiFixTab.tsx` |
+| `home.tsx` ReviewMock (PR tabs) | `/` Review | `components/PrDetail.tsx` (TAB_LABELS), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `AiFixTab.tsx` |
 | `home.tsx` StoryCheckMock | `/` Review | the story check in `ClaudeReviewTab.tsx` |
 | `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/` (Start fix, Push, Pushed to) |
 | `home.tsx` CiMock | `/` Fix | `components/CheckList.tsx`, `Activity/PendingFlaky.tsx` (Re-run failed jobs) |

@@ -68,11 +68,17 @@ export const FINDINGS = {
     head: 'Handbook §4.2.',
     text: 'amount is a float; money is whole pence.',
   },
+  /** The AI Review tab's open findings. `by` is who raised it, as every row names it. */
   review: [
-    { sev: 'Major', tone: 'red', code: 'RefundPolicy.allows()', text: 'never reads paid_at.' },
-    { sev: 'Minor', tone: 'amber', code: null, text: 'Retried refund sends a second email.' },
-    { sev: 'Nit', tone: 'grey', code: 'policy.py', text: 'Unused import in' },
-  ] as { sev: string; tone: Tone; code: string | null; text: string }[],
+    { sev: 'Major', tone: 'red', code: 'RefundPolicy.allows()', text: 'never reads paid_at.', by: 'You and Priya' },
+    { sev: 'Minor', tone: 'amber', code: null, text: 'Retried refund sends a second email.', by: 'You' },
+    { sev: 'Nit', tone: 'grey', code: 'policy.py', text: 'Unused import in', by: 'You' },
+  ] as { sev: string; tone: Tone; code: string | null; text: string; by: string }[],
+  /** Closed findings, under "Resolved or addressed (n)", each saying why (lib/teamReview.ts closedReason). */
+  closed: [
+    { sev: 'Major', tone: 'red', text: 'A partial refund closes the order.', by: 'You', reason: 'Priya’s review found it addressed · 3 Nov' },
+    { sev: 'Minor', tone: 'amber', text: 'Refund amount is not logged.', by: 'Priya', reason: 'Resolved on GitHub' },
+  ] as { sev: string; tone: Tone; text: string; by: string; reason: string }[],
   docs: { source: 'Payments handbook', section: '§4.2', text: 'money in whole pence' },
 } as const;
 
@@ -195,11 +201,6 @@ export const PR_VIEW = {
     ] as { k: '-' | '+' | ' '; t: string }[],
     thread: { sev: 'Major', text: 'RefundPolicy.allows() never reads paid_at.', state: 'Untouched' },
   },
-  threads: [
-    { label: '3 resolved', tone: 'green' },
-    { label: '2 likely addressed?', tone: 'blue' },
-    { label: '1 untouched', tone: 'grey' },
-  ] as { label: string; tone: Tone }[],
 };
 
 // ---- fix ------------------------------------------------------------------

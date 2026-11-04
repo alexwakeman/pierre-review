@@ -2,8 +2,8 @@
 //
 //   1. The menu offers "Claude + Codex" only while BOTH providers can review; picked, it is a pair on
 //      Claude's default model; a provider signing out falls back to the opening choice.
-//   2. The history is a native select: a pair is ONE option (addressed by its latest half), replies
-//      passes and every other run are listed; either half's id selects the pair's option.
+//   2. Reviews on this PR: a pair is ONE row (addressed by its latest half), replies passes and every
+//      other run are listed; either half's id shows the pair's row.
 //   3. The progress line says which step a pair is on (Claude, Codex, merging).
 //   4. The consolidated review is ONE view: one header naming both models, one summary, one findings
 //      list with a quiet source label on each, one line for a half that did not finish.
@@ -17,8 +17,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AiKindStatus, AiRunKind, ClaudeFinding, ClaudeReview, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
 import { PAIR_PICK_LABEL, PAIR_PICK_VALUE, pairRunningLabel, resolveReviewModelPick } from '../src/lib/modelPick.js';
-import { historyOptionIdFor, reviewHistoryOptions } from '../src/lib/reviewHistory.js';
-import { ReviewHistoryList } from '../src/components/ReviewHistoryList.js';
+import { itemShows, nowReviewKey, reviewListLine, reviewsOnPr } from '../src/lib/teamReview.js';
+import { ReviewsOnPrSection } from '../src/components/TeamReviewLayout.js';
 import { ClaudesReview } from '../src/components/ClaudeReviewTab.js';
 
 const KINDS: AiRunKind[] = ['review', 'review_chat', 'fix', 'plan', 'complete'];
@@ -100,58 +100,55 @@ const run = (id: number, o: Partial<ClaudeReviewSummary> = {}): ClaudeReviewSumm
   ...o,
 });
 
-describe('the history select', () => {
+describe('reviews on this PR', () => {
   const first = run(10, { pair: { pairId: 10, role: 'first', otherReviewId: 11 } });
   const second = run(11, { provider: 'codex', model: 'gpt-6.1-sol', pair: { pairId: 10, role: 'second', otherReviewId: 10, dropped: 1 } });
   const replies = run(13, { kind: 'replies', findingCount: 0 });
   const history = [replies, run(12), second, first, run(9)];
-  const when = (iso: string) => iso.slice(0, 10);
 
   it('lists a pair ONCE, at its newest half, addressed by its latest half; replies passes and every other run listed', () => {
-    const opts = reviewHistoryOptions(history, 12, when);
-    expect(opts.map((o) => o.id)).toEqual([13, 12, 11, 9]);
-    expect(opts.find((o) => o.id === 11)).toMatchObject({ runIds: [11, 10], label: 'Claude + Codex · abcdef1 · 2026-10-27' });
-    expect(opts[0]!.label).toBe('Replies checked · abcdef1 · 2026-10-27');
-    expect(opts[1]!.label).toBe('Claude Opus 5.5 · abcdef1 · 2026-10-27 (latest)');
-    // Either half's id picks the pair's option.
-    expect(historyOptionIdFor(opts, 10)).toBe(11);
-    expect(historyOptionIdFor(opts, 11)).toBe(11);
-    expect(historyOptionIdFor(opts, 9)).toBe(9);
+    const items = reviewsOnPr(history, []);
+    expect(items.map((i) => i.target)).toEqual([13, 12, 11, 9].map((id) => ({ kind: 'own', id })));
+    expect(items.find((i) => i.runIds.includes(10))).toMatchObject({ runIds: [11, 10], what: 'Claude + Codex' });
+    expect(reviewListLine(items[0]!)).toBe('27 Oct · abcdef1 · Replies checked');
+    // Either half's id shows the pair's row.
+    const pair = items.find((i) => i.what === 'Claude + Codex')!;
+    expect(itemShows(pair, { kind: 'own', id: 10 })).toBe(true);
+    expect(itemShows(pair, { kind: 'own', id: 11 })).toBe(true);
   });
 
-  it('compact (the wide tab\'s right-hand column): no commit and no model, the provider only', () => {
-    const opts = reviewHistoryOptions(history, 12, when, true);
-    expect(opts.map((o) => o.label)).toEqual([
-      'Replies checked · 2026-10-27',
-      'Claude · 2026-10-27 (latest)',
-      'Claude + Codex · 2026-10-27',
-      expect.stringMatching(/^(Claude|Codex) · 2026-10-27/),
-    ]);
-    for (const o of opts) expect(o.label).not.toMatch(/abcdef1|Opus|GPT/);
+  it('a pair in flight reads as running; a pair with no second half yet is still one row', () => {
+    const running = reviewsOnPr([run(21, { status: 'running', pair: { pairId: 20, role: 'second', otherReviewId: 20 } }), run(20, { pair: { pairId: 20, role: 'first', otherReviewId: 21 } })], []);
+    expect(running.map((i) => [i.runIds, reviewListLine(i)])).toEqual([[[21, 20], 'Running · 27 Oct · abcdef1 · Claude + Codex']]);
+    const lone = reviewsOnPr([run(30, { status: 'running', pair: { pairId: 30, role: 'first', otherReviewId: null } })], []);
+    expect(lone.map((i) => i.runIds)).toEqual([[30]]);
   });
 
-  it('a pair in flight reads as running; a pair with no second half yet is still one option', () => {
-    const running = reviewHistoryOptions([run(21, { status: 'running', pair: { pairId: 20, role: 'second', otherReviewId: 20 } }), run(20, { pair: { pairId: 20, role: 'first', otherReviewId: 21 } })], null, when);
-    expect(running).toEqual([{ id: 21, runIds: [21, 20], label: 'Claude + Codex · abcdef1 · 2026-10-27 · Running' }]);
-    const lone = reviewHistoryOptions([run(30, { status: 'running', pair: { pairId: 30, role: 'first', otherReviewId: null } })], null, when);
-    expect(lone.map((o) => o.id)).toEqual([30]);
+  it('renders one button per review, the latest FULL review current; nothing but the count for a single review', () => {
+    const qc = new QueryClient();
+    const render = (items: ReturnType<typeof reviewsOnPr>, nowKey: string | null) =>
+      renderToStaticMarkup(
+        createElement(QueryClientProvider, { client: qc }, createElement(ReviewsOnPrSection, { items, nowKey, shown: null, countLine: null, onShow: () => {} })),
+      );
+    const items = reviewsOnPr(history, []);
+    // The replies pass (13) is listed first, but now is the latest full review (12).
+    const now = nowReviewKey(items, 12);
+    expect(now).toBe('own-12');
+    const html = render(items, now);
+    expect(html).toContain('Reviews on this PR');
+    expect(html.match(/<button/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(html.match(/aria-current="true"/g)?.length).toBe(1);
+    const buttons = html.split('<li>').slice(1);
+    expect(buttons[0]).not.toContain('aria-current');
+    expect(buttons[1]).toContain('aria-current="true"');
+    expect(render(reviewsOnPr([run(1)], []), 'own-1')).toBe('');
   });
 
-  // The redesign swapped the native <select> for the custom Select (its options exist only while
-  // open): the closed control is labelled "Showing" and shows the shown run's option — for the
-  // first half of a pair, the pair's ONE option.
-  it('renders the custom Select (labelled "Showing"), showing the shown run’s option', () => {
-    const html = renderToStaticMarkup(
-      createElement(ReviewHistoryList, { history, shownId: 10, latestId: 12, onShow: () => {} }),
-    );
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain('aria-label="Showing"');
-    expect(html.match(/Claude \+ Codex/g)?.length).toBe(1);
-    expect(html).toContain('Claude + Codex · abcdef1');
-  });
-
-  it('no select for a single review', () => {
-    expect(renderToStaticMarkup(createElement(ReviewHistoryList, { history: [run(1)], shownId: 1, latestId: 1, onShow: () => {} }))).toBe('');
+  it('now is found by identity: a pair by either half; with no review of the reader’s, the newest teammate review', () => {
+    const items = reviewsOnPr(history, []);
+    expect(nowReviewKey(items, 10)).toBe(items.find((i) => i.runIds.includes(11))!.key);
+    expect(nowReviewKey(items, 999)).toBeNull();
+    expect(nowReviewKey([], null)).toBeNull();
   });
 });
 

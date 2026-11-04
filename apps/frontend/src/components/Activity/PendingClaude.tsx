@@ -27,7 +27,7 @@ import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
-import { AutoMark, GREY_PILL, LeadVerdict, MUTED, PILL } from './ClaudeReviewCell.js';
+import { AutoMark, GREY_PILL, LatestReviewer, LeadVerdict, MUTED, PILL } from './ClaudeReviewCell.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { ciCardPill } from '../../lib/ciReview.js';
 
@@ -107,8 +107,8 @@ export function ClaudeReviewLine({
       break;
     case 'done':
       // A card whose heading names the reader's verdict omits it — unless a teammate's newer review
-      // leads, which the heading does not say.
-      lead = omitVerdict && cell.by == null ? null : (
+      // leads, or a Request changes still standing on GitHub is shown, which the heading does not say.
+      lead = omitVerdict && cell.by == null && !cell.stillBlocking ? null : (
         <button
           type="button"
           onClick={open}
@@ -168,6 +168,7 @@ export function ClaudeReviewLine({
       {ciPill != null
         ? !ciPill.running && <ReviewedAgo at={ciState?.checkedAt} className="text-meta" />
         : cell.kind === 'done' && <ReviewedAgo at={leadFinishedAt(state) ?? reviewedAt} className="text-meta" />}
+      {ciPill == null && <LatestReviewer cell={cell} />}
     </div>
   );
 }

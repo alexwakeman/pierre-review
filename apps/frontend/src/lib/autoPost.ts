@@ -157,6 +157,19 @@ export function autoLiftLine(
   return `Couldn’t lift ${by}’s earlier request for changes: ${why}`;
 }
 
+/** What this run did to TEAMMATES' Limn blocks (docs/CLAUDE-REVIEW.md § Lifting a teammate's block):
+ *  one line each — dismissed, or why GitHub refused. [] when it lifted none. */
+export function teammateLiftLines(
+  a: Pick<ClaudeAutoPostWire, 'liftedTeammateBlocks'> | null | undefined,
+): Array<{ text: string; failed: boolean }> {
+  return (a?.liftedTeammateBlocks ?? []).map((l) => {
+    if (l.status === 'dismissed') return { text: `Dismissed ${l.login}’s request for changes: every point is addressed.`, failed: false };
+    if (l.status === 'dismissing') return { text: `Dismissing ${l.login}’s request for changes.`, failed: false };
+    const why = l.error != null && l.error.trim() !== '' ? l.error.trim() : 'GitHub did not accept it.';
+    return { text: `Couldn’t dismiss ${l.login}’s request for changes: ${why}`, failed: true };
+  });
+}
+
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */
 export function autoResolveLabel(r: FindingAutoResolveRecord | null | undefined): string | null {
   if (r == null) return null;

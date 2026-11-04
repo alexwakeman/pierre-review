@@ -55,11 +55,11 @@ describe('the replies pass, in words', () => {
     expect(repliesCheckLine(null)).toBeNull();
   });
 
-  it('is mounted on the AI Review tab, and a pass is labelled in the history', () => {
+  it('is mounted on the AI Review tab, and a pass is labelled in Reviews on this PR', () => {
     const src = (f: string) => readFileSync(join(import.meta.dirname, '../src/components', f), 'utf8');
     expect(src('ClaudeReviewTab.tsx')).toMatch(/<RepliesCheckLine\b/);
-    // The history select labels a pass (lib/reviewHistory.ts `reviewHistoryOptions`).
-    expect(readFileSync(join(import.meta.dirname, '../src/lib/reviewHistory.ts'), 'utf8')).toMatch(/REPLIES_CHECK_LABEL/);
+    // Reviews on this PR labels a pass (lib/teamReview.ts `reviewsOnPr`).
+    expect(readFileSync(join(import.meta.dirname, '../src/lib/teamReview.ts'), 'utf8')).toMatch(/REPLIES_CHECK_LABEL/);
     expect(src('RepliesCheckLine.tsx')).toMatch(/<AiRunGate kind="thread_check">/);
   });
 });

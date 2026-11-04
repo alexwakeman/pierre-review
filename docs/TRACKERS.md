@@ -75,8 +75,8 @@ is not stored under lean storage and is not a source either.
 ## Adding a ticket by hand — the Story check's paste box
 
 A ticket that is not in the PR's title, branch or links can be ADDED by a person: the Story check's
-paste box (`components/TicketPasteBox.tsx`, the DEFAULT way in; "Input manually" reveals the typed
-story form) takes one or more ticket links or keys — `PROJ-123`, `owner/repo#12`, `#12` (an issue in
+paste box (`components/TicketPasteBox.tsx`, the DEFAULT way in, COLLAPSED by default behind its
+"Add tickets" ChevronIcon disclosure; "Input manually" reveals the typed story form) takes one or more ticket links or keys — `PROJ-123`, `owner/repo#12`, `#12` (an issue in
 the PR's own repo), `…/browse/KEY`, a Jira board `?selectedIssue=KEY`, a Jira Cloud issue view `…/projects/P/issues/KEY`, `github.com/o/r/issues/12`,
 `linear.app/<ws>/issue/KEY`. Parser: shared `ticket-refs.ts` (`parseTicketRef`, `splitTicketRefs`),
 run by the SPA for chips and again by the server. Route: `POST /api/prs/:id/tracker-ticket/resolve

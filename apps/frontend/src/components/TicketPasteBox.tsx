@@ -10,13 +10,14 @@ import { useLinkAndCheckTickets, usePreviewTicketRefs } from '../hooks/useTicket
 import { refusalSentence } from '../lib/ticketReview.js';
 import { safeExternalUrl } from '../lib/ui.js';
 import { AiRunGate } from './AiSetup.js';
-import { CheckIcon, CloseIcon, PlusIcon, WarningIcon } from './Icons.js';
+import { CheckIcon, ChevronIcon, CloseIcon, WarningIcon } from './Icons.js';
 
 // THE STORY CHECK'S PASTE BOX — the default way to add a ticket (docs/TRACKERS.md § Adding a ticket
 // by hand). One input takes one or more ticket links or keys; each becomes a removable chip that
 // reads its ticket from the PR's workspace tracker (`link: false`, nothing stored) and says what it
 // found. Check adds the readable ones to the PR and starts ONE ticket review per ticket. "Input
-// manually" reveals the typed-story form (ClaudeReviewTicketPanel), unchanged.
+// manually" reveals the typed-story form (ClaudeReviewTicketPanel), unchanged. The box is COLLAPSED
+// by default behind its "Add tickets" disclosure (ChevronIcon), whether or not the PR has tickets.
 
 const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
@@ -47,20 +48,19 @@ function localResult(ref: string): TicketRefResult | undefined {
 
 export function TicketPasteBox({
   prId,
-  startOpen,
   manualShown,
   onInputManually,
 }: {
   prId: number;
-  // Open on mount (the PR has no ticket yet); else a "+ Add ticket" link opens it.
-  startOpen: boolean;
   // The typed-story form is already on screen: no "Input manually" button.
   manualShown: boolean;
   onInputManually: () => void;
 }): JSX.Element {
   const inputId = useId();
+  const bodyId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [open, setOpen] = useState(startOpen);
+  // COLLAPSED BY DEFAULT: the "Add tickets" disclosure opens it.
+  const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [chips, setChipsState] = useState<Chip[]>([]);
   const chipsRef = useRef(chips);
@@ -173,20 +173,27 @@ export function TicketPasteBox({
     });
   };
 
+  const toggle = (
+    <button
+      type="button"
+      onClick={() => {
+        const next = !open;
+        setOpen(next);
+        if (next) requestAnimationFrame(() => inputRef.current?.focus());
+      }}
+      aria-expanded={open}
+      aria-controls={bodyId}
+      className="hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink"
+    >
+      <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
+      Add tickets
+    </button>
+  );
+
   if (!open) {
     return (
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(true);
-            requestAnimationFrame(() => inputRef.current?.focus());
-          }}
-          className={`inline-flex items-center gap-1 ${LINK_BTN}`}
-        >
-          <PlusIcon size={11} />
-          Add ticket
-        </button>
+        {toggle}
         {!manualShown && (
           <button type="button" onClick={onInputManually} className={LINK_BTN}>
             Input manually
@@ -198,9 +205,8 @@ export function TicketPasteBox({
 
   return (
     <div className="mt-2 space-y-2">
-      <label htmlFor={inputId} className="block text-meta font-medium text-ui-ink">
-        Add tickets
-      </label>
+      {toggle}
+      <div id={bodyId} className="space-y-2">
       <div className="flex flex-wrap items-center gap-1.5 rounded-ui border border-ui-line px-2 py-1.5 focus-within:border-ui-accent/50">
         {chips.length > 0 && (
           <ul className="contents" aria-label="Tickets to add">
@@ -211,6 +217,7 @@ export function TicketPasteBox({
         )}
         <input
           id={inputId}
+          aria-label="Ticket links or keys"
           ref={inputRef}
           type="text"
           value={text}
@@ -257,6 +264,7 @@ export function TicketPasteBox({
           {refusalSentence(r.refused!)}
         </p>
       ))}
+      </div>
     </div>
   );
 }

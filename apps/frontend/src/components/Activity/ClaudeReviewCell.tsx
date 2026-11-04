@@ -117,6 +117,17 @@ export function LeadVerdict({ cell, iconSize }: { cell: Extract<ReviewCell, { ki
   );
 }
 
+/** Beside a Request changes still standing on GitHub: who reviewed last ("Latest: Robin · Comment ·
+ *  4 Nov"). Nothing when the shown verdict is the newest review. */
+export function LatestReviewer({ cell, className = 'text-meta text-ui-mute' }: { cell: ReviewCell; className?: string }): JSX.Element | null {
+  if (cell.kind !== 'done' || cell.latest == null) return null;
+  return (
+    <span className={className} title={cell.latest.title} data-testid="ai-review-latest">
+      {cell.latest.text}
+    </span>
+  );
+}
+
 export function ClaudeReviewPanel({
   prId,
   state,
@@ -237,6 +248,7 @@ export function ClaudeReviewPanel({
             </span>
           )}
           <ReviewedAgo at={leadFinishedAt(state)} />
+          <LatestReviewer cell={cell} />
         </>
       );
       action = cell.headMoved ? (

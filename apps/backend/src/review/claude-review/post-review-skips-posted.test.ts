@@ -16,6 +16,12 @@ vi.mock('./manager.js', () => ({
   subscribeReviewStream: vi.fn(() => () => {}),
 }));
 
+// The reader's consent switch is ON: a manual Post must still never carry it.
+vi.mock('./auto-settings.js', async (orig) => ({
+  ...(await orig<typeof import('./auto-settings.js')>()),
+  readTeamLiftConsent: async () => true,
+}));
+
 const finding = (id: number, included: boolean, postedAt: string | null) => ({
   id,
   path: 'src/a.ts',
@@ -78,6 +84,35 @@ describe('posting a review', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(sent).toEqual([[1]]);
+    await app.close();
+  });
+
+  it('a manual Post never carries the lift consent: the person chose its verdict and body', async () => {
+    const metas: unknown[] = [];
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const ctx = {
+      accountIdOf: () => 1,
+      log: { warn: () => {}, info: () => {}, error: () => {} },
+      review: {
+        postReview: async (args: { limnMeta?: unknown }) => {
+          metas.push(args.limnMeta);
+          return { preview: { comments: [], prComments: [], event: 'REQUEST_CHANGES', body: '' } };
+        },
+      },
+    } as any as AgentContext;
+    const { default: Fastify } = await import('fastify');
+    const { registerClaudeReviewRoutes } = await import('./routes.js');
+    const app = Fastify({ logger: false });
+    registerClaudeReviewRoutes(app, ctx);
+    await app.ready();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/claude-reviews/5/post?dryRun=true',
+      payload: { userVerdict: 'REQUEST_CHANGES' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(metas).toHaveLength(1);
+    expect((metas[0] as { liftConsent?: boolean }).liftConsent).toBe(false);
     await app.close();
   });
 });

@@ -3,13 +3,14 @@ import { useDependencyAutomationLog } from '../../hooks/useDependencyMergeAll.js
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { relativeTime } from '../../lib/ui.js';
 import { ChevronIcon } from '../Icons.js';
-import { automationDetail, automationVerb } from '../../lib/dependencyAutomationLog.js';
+import { automationDetail, automationVerb, groupAutomationByPr } from '../../lib/dependencyAutomationLog.js';
 
 // ── PENDING → DEPENDENCIES: "WHAT AUTOMATION DID" ───────────────────────────────────────────────
 //
 // The dependency automation's own record (Settings → Dependencies; merge/dependency-automation.ts):
 // every approval, rebase request, AI conflict run, AI CI fix and merge it armed in this workspace in
-// the last two weeks, newest first, failures with GitHub's words. "Merged" appears only once the
+// the last two weeks, ONE entry per PR (its actions under it, newest first; PRs ordered by their
+// newest action — `groupAutomationByPr`), failures with GitHub's words. "Merged" appears only once the
 // merge LANDED (the watcher's outcome), never on arming. A teammate's Limn holding the PR
 // (`limn/deps`) is a skip, not a failure: "Robin Dunn is handling this". A disclosure: ⚠ it fetches
 // only once OPENED — nothing on the Pending board may fetch on mount.
@@ -46,29 +47,18 @@ export function DependencyAutomationLog({ workspaceId }: { workspaceId: number |
               Nothing in the last two weeks. Turn it on in Settings → Dependencies.
             </p>
           ) : (
-            <ul className="space-y-1">
-              {items.map((i) => (
-                <li key={i.id} className="flex items-baseline gap-2 text-body">
-                  <span
-                    className={
-                      i.state === 'failed'
-                        ? 'shrink-0 text-ui-danger'
-                        : i.state === 'skipped'
-                          ? 'shrink-0 text-ui-mute'
-                          : 'shrink-0 text-ui-ink'
-                    }
-                  >
-                    {automationVerb(i)}
-                  </span>
+            <ul className="space-y-2">
+              {groupAutomationByPr(items).map((g) => (
+                <li key={g.prId} className="text-body">
                   <button
                     type="button"
                     onClick={() =>
                       openPrDetailTab(
                         {
-                          id: i.prId,
-                          number: i.prNumber,
-                          title: i.prTitle,
-                          repoFullName: i.repoFullName,
+                          id: g.prId,
+                          number: g.prNumber,
+                          title: g.prTitle,
+                          repoFullName: g.repoFullName,
                           authorLogin: null,
                           authorDisplayName: null,
                           authorAvatarUrl: null,
@@ -76,14 +66,31 @@ export function DependencyAutomationLog({ workspaceId }: { workspaceId: number |
                         { fromActivity: true },
                       )
                     }
-                    className="min-w-0 truncate text-left text-ui-ink hover:underline outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+                    className="block max-w-full truncate text-left text-ui-ink hover:underline outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                   >
-                    {i.repoFullName} #{i.prNumber} {i.prTitle}
+                    {g.repoFullName} #{g.prNumber} {g.prTitle}
                   </button>
-                  {automationDetail(i) && (
-                    <span className="min-w-0 truncate text-meta text-ui-mute">{automationDetail(i)}</span>
-                  )}
-                  <span className="ml-auto shrink-0 text-meta text-ui-faint">{relativeTime(i.at)}</span>
+                  <ul className="mt-0.5 space-y-0.5 pl-3">
+                    {g.items.map((i) => (
+                      <li key={i.id} className="flex items-baseline gap-2">
+                        <span
+                          className={
+                            i.state === 'failed'
+                              ? 'shrink-0 text-ui-danger'
+                              : i.state === 'skipped'
+                                ? 'shrink-0 text-ui-mute'
+                                : 'shrink-0 text-ui-ink'
+                          }
+                        >
+                          {automationVerb(i)}
+                        </span>
+                        {automationDetail(i) && (
+                          <span className="min-w-0 truncate text-meta text-ui-mute">{automationDetail(i)}</span>
+                        )}
+                        <span className="ml-auto shrink-0 text-meta text-ui-faint">{relativeTime(i.at)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>

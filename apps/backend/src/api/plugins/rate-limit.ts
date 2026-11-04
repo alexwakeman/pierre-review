@@ -205,6 +205,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // EXACT `===` for the same near-miss.
   if (path === '/api/me/my-turn-settings') return [TIERS.read];
 
+  // GET /api/my-turn/pushed-since/:prId — the expanded "N commits since you …" list on a Pushed
+  // since card. FOLLOWING THE TOKEN: two DB reads over synced `commits`/`reviews`/comments, no
+  // GitHub call, no model. Recorded, EXACT pattern, so a future live variant is not inherited.
+  if (/^\/api\/my-turn\/pushed-since\/\d+$/.test(path)) return [TIERS.read];
+
   // PUT /api/me/feature-settings — Settings → Features (which sidebar destinations show). One
   // validated UPDATE plus DB-only reads; no GitHub, no model. Recorded, EXACT `===`.
   if (path === '/api/me/feature-settings') return [TIERS.read];

@@ -15,6 +15,7 @@ import type {
   MyTurnDismissTarget,
   MyTurnSettingsBody,
   MyTurnSettingsResponse,
+  PushedSinceCommitsResponse,
 } from '@pierre-review/shared';
 import { FEATURE_IDS, MY_TURN_TOGGLES, resolveFeatures, validateMyTurnSettings } from '@pierre-review/shared';
 import { config } from '../../config.js';
@@ -45,7 +46,8 @@ import {
   CODEX_RUNNABLE,
   getActiveProvider,
 } from '../../ai/provider.js';
-import { getMyTurn } from '../../db/queries.js';
+import { getMyTurn, resolveWorkspaceScope } from '../../db/queries.js';
+import { getPushedSinceCommits } from '../../db/my-turn-pushed-since.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
 import { featureFacts } from '../../db/feature-gates.js';
@@ -480,6 +482,27 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   // The account-wide inbox. Unscoped on purpose (see `getMyTurn`): the browser-notification
   // watcher reads exactly this call — and without `onePerPr`, which is the board's rule.
   app.get('/api/my-turn', async (req) => getMyTurn(accountIdOf(req)));
+
+  // EVERY commit a "Pushed since" card counts — its expanded "N commits since you …" list. The
+  // SAME fold as the count (db/my-turn-pushed-since.ts). DB only; the SPA fetches it only when the
+  // reader expands the card. Scoped by `?workspace=` (absent/unknown ⇒ the default); a PR outside
+  // the account or the workspace answers 404, so the route is no existence oracle.
+  app.get('/api/my-turn/pushed-since/:prId', async (req, reply) => {
+    const raw = (req.params as { prId?: string }).prId ?? '';
+    if (!/^[1-9][0-9]{0,15}$/.test(raw)) {
+      return reply.code(400).send({ error: 'BadRequest', message: 'Unknown pull request.' });
+    }
+    const accountId = accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, (req.query as { workspace?: string }).workspace);
+    const body: PushedSinceCommitsResponse | null = await getPushedSinceCommits(
+      accountId,
+      Number(raw),
+      scope.workspaceId,
+      scope.repoIds,
+    );
+    if (body == null) return reply.code(404).send({ error: 'NotFound', message: 'Not found' });
+    return body;
+  });
 
   // DISMISS / BRING BACK one My Turn subject — a pull request (`pr`) or, for a red default branch,
   // a repository (`repo`). ⚠ NOT the "Done" routes 0060 deleted: a dismissal lasts only until

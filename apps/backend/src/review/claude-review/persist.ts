@@ -20,6 +20,7 @@ import type {
   ClaudeReviewPairInfo,
   ClaudeReviewPrState,
   ClaudeTeammateLead,
+  ClaudeReviewStandings,
   ClaudeReviewScope,
   ClaudeReviewStateSummary,
   ClaudeReviewSummary,
@@ -46,7 +47,7 @@ import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoReso
 import type { ReviewFinding } from '../../platform/contract.js';
 import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
 import { TEAMMATE_KIND, newestTeammateReviewsForPrs, ownFindingsOnly, ownRunsOnly } from '../../db/teammate-reviews.js';
-import { teamReviewLead } from './team-view.js';
+import { loadTeamStandingsForPrs, teamReviewLead, type StandingsOwnLatest } from './team-view.js';
 import { ticketEntriesOf } from './ticket.js';
 import { overlayFollowUpItems } from './replies-pass.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
@@ -250,6 +251,9 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
       : {}),
     ...(r.verdict != null && typeof r.verdict === 'object' ? { verdict: r.verdict } : {}),
     ...(r.liftedBlock != null && typeof r.liftedBlock === 'object' ? { liftedBlock: r.liftedBlock } : {}),
+    ...(Array.isArray(r.liftedTeammateBlocks) && r.liftedTeammateBlocks.length > 0
+      ? { liftedTeammateBlocks: r.liftedTeammateBlocks }
+      : {}),
     ...(typeof r.viaPairReviewId === 'number' ? { viaPairReviewId: r.viaPairReviewId } : {}),
     ...(typeof r.reasonPosted === 'string' && r.reasonPosted !== '' ? { reasonPosted: true } : {}),
     ...(r.reasonOnly === true ? { reasonOnly: true } : {}),
@@ -1179,7 +1183,23 @@ export async function getLatestReviewStates(
   }
   await foldStateSummaries(ctx, out, latestByPr, repliesAfter);
   if (fixRunning) await foldFixStates(ctx, out, latestByPr, accountId, fixRunning);
-  await foldTeammateLeads(ctx, out, latestByPr, prIds, accountId);
+  // The reader's latest run that REVIEWED, per PR (succeeded, not a skip; a pair's verdict is the
+  // pair's when it is the latest run) — the standings' "you reviewed last".
+  const ownLatest = new Map<number, StandingsOwnLatest>();
+  const stateOf = new Map(out.map((st) => [st.prId, st]));
+  for (const r of rows) {
+    if (r.kind != null || ownLatest.has(r.prId) || r.status !== 'succeeded' || r.reviewMode === 'skip') continue;
+    const latest = latestByPr.get(r.prId);
+    const st = stateOf.get(r.prId);
+    const isLatest = latest != null && (latest.reviewId === r.reviewId || (latest.pairId != null && latest.pairId === r.pairId));
+    ownLatest.set(r.prId, {
+      reviewId: isLatest ? latest.reviewId : r.reviewId,
+      verdict: isLatest && st != null ? st.verdict : r.verdict,
+      at: (r.finishedAt ?? r.createdAt).getTime(),
+      headSha: r.headSha,
+    });
+  }
+  await foldTeammateLeads(ctx, out, latestByPr, prIds, accountId, ownLatest);
   return out;
 }
 
@@ -1196,7 +1216,20 @@ async function foldTeammateLeads(
   latestByPr: ReadonlyMap<number, { status: ClaudeReview['status']; reviewMode: string | null; finishedAt: Date | null; createdAt: Date }>,
   prIds: readonly number[],
   accountId: number,
+  ownLatest: ReadonlyMap<number, StandingsOwnLatest> = new Map(),
 ): Promise<void> {
+  // STANDING VERDICTS (team-view.ts `teamStandings`): the strictest verdict still in force on GitHub.
+  // A failed read costs the field only.
+  let standings = new Map<number, ClaudeReviewStandings>();
+  try {
+    standings = await loadTeamStandingsForPrs(ctx.db, accountId, prIds, ownLatest);
+  } catch (err) {
+    ctx.log.warn(`review standings: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  for (const st of states) {
+    const got = standings.get(st.prId);
+    if (got != null) st.standing = got;
+  }
   const newest = await newestTeammateReviewsForPrs(ctx.db, accountId, prIds);
   if (newest.size === 0) return;
   const byPr = new Map(states.map((s) => [s.prId, s]));
@@ -1212,6 +1245,7 @@ async function foldTeammateLeads(
             status: state.status,
             reviewMode: row.reviewMode as ClaudeReview['reviewMode'] | null,
             at: (row.finishedAt ?? row.createdAt).getTime(),
+            lastReviewedAt: ownLatest.get(prId)?.at ?? null,
           }
         : null;
     if (teamReviewLead(own, mate.postedAt.getTime()) !== 'teammate') continue;
@@ -1241,6 +1275,7 @@ async function foldTeammateLeads(
       headMoved: false,
       currentHeadSha: mate.prHeadSha,
       teammateLead,
+      ...(standings.get(prId) != null ? { standing: standings.get(prId)! } : {}),
     });
   }
 }

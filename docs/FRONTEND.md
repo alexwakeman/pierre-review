@@ -902,16 +902,17 @@ until its end is 8px above the pane's bottom, then holds. ⚠ Never its own scro
 would clip the agent log that widens LEFTWARDS out of the `run` piece (`RailWideLeft`). Before, it
 flowed with the page and left an empty column beside the findings once scrolled past. The story view's
 rail still flows (no `sticky`). The slots:
-  - `status` (rail only, `ReviewRailStatus`): who reviewed, the verdict, "On latest commit" / "N newer
+  - `status` (rail; "Where this PR stands" also in place when narrow, above the run controls):
+    `StandingsSection` (§ Team layout), then `ReviewRailStatus`: who reviewed, the verdict (left out
+    while Where this PR stands shows), "On latest commit" / "N newer
     commits" (`CurrencyPill showSha={false}`), when, auto / fresh / replies / depth, and the run's cost
     (`useRunCostText`, the one formatter) — NO commit hash and NO model (2026-11-03); the review header
     drops its pills and meta line then (narrow keeps the meta line);
   - `run` (in place when narrow): the whole "Run a review" section — model picker, Run / Re-review in
     its `AiRunGate`, the same-commit confirm, auto-review holds, team claims, live progress + Stop,
-    failures, the replies pass, THE REVIEW COUNT ("4 Limn reviews so far · 1 by Robin",
-    `reviewCountLine` over `teamView.reviewCount`, docs/CLAUDE-REVIEW.md § Teammates' reviews), the
-    history select — in the rail its options name the provider, when and status only
-    (`reviewHistoryOptions(…, compact)`, read through `useRailWide('review')` in `ReviewHistoryList`);
+    failures, the replies pass; its ⓘ ("Review only, or review and post") sits beside the section
+    title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Limn reviews so far ·
+    1 by Robin", `reviewCountLine` over `teamView.reviewCount`) and one row per review (§ Team layout);
   - `counts` (rail only, `ReviewRailCounts`): findings by severity (zeros left out), "Under Story check",
     "Threads to fix" (`validUnaddressed`) — each row scrolls to its section;
   - NO "On this page" (removed 2026-11-03; the sections still carry `data-review-section` for the
@@ -1722,8 +1723,11 @@ reappears.
     legacyEntries)`) and hands the cards to Story check through its `storyCheck` render prop; a
     story hidden because a ticket review covers it places nothing, so its findings stay in the
     Findings list with their chip. Every finding is still on screen once.
-  - **Each block has a collapsible "Story"** (`StoryDisclosure`, `TicketStory.tsx`): key linked to
-    Jira, title, description + criteria as markdown (`StoryText`). Source in order: the STORED Jira
+  - **The ticket key and title are PLAIN TEXT in Story check** (2026-11-04): no link into Jira, in
+    the block heading or inside its "Ticket" disclosure (`StoryDisclosure linkKey={false}` →
+    `JiraStoryView linkKey`). The story view's "As written in Jira" keeps the link.
+  - **Each block has a collapsible "Story"** (`StoryDisclosure`, `TicketStory.tsx`): key (linked to
+    Jira outside Story check), title, description + criteria as markdown (`StoryText`). Source in order: the STORED Jira
     row (`GET /api/prs/:id/tracker-ticket?key=`, ⚠ fetched only once opened — the worker read Jira
     on receipt) when `canFetchDetails`, else the latest ticket review's `ticket` snapshot, else the
     older run's ticket. A Jira story carries the criteria-field picker (`useSetJiraAcField`, no
@@ -1873,19 +1877,42 @@ reappears.
   in another repo, and a bare "repo#N" resolves server-side only when exactly ONE of the account's
   repos has that name. Unresolved refs, refs inside links or code, and the viewed PR itself stay plain
   text. Markdown gets it via the `rehypeReviewPrRefs` plugin, which runs AFTER the sanitizer.
-- **Teammates' reviews are part of THE ONE REVIEW** (`components/TeammateReviews.tsx`, words in
-  `lib/teammateReviews.ts`, docs/CLAUDE-REVIEW.md § Teammates' reviews → One review). The tab reads the
-  server's fold, `ClaudeReviewResponse.teamView`, on the LATEST run only (a past run from the history
-  select shows what it said then). The NEWEST review leads: when it is a teammate's,
-  `TeammateLeadSection` replaces the run's summary section (and the rail's status block) with
-  "Robin's review", the verdict, "Posted on GitHub <ago>" + Open, and their summary. Teammates' still-open
-  findings (`teamView.findings`) list in the same Findings section, after the reader's, as read-only
-  `TeamFindingRow`s: a chip with the avatar and name(s) ("Robin", "Robin and Sam"), the text,
-  `path:line` → `onOpenThread` (Reply / Resolve live on the thread), "On GitHub". No Post, Re-post,
-  Reword or Ignore. One of the reader's findings a teammate raised too carries the chip "You and Robin"
-  (`FindingRow` `alsoRaisedBy`). The section count and the rail counts include them. With no succeeded
-  run of the reader's, `TeamOnlyReview` shows the teammate lead and their findings alone. There is no
-  separate teammates' card list.
+- **Team layout: the AI Review tab shows NOW or ONE PAST REVIEW** (`components/TeamReviewLayout.tsx`,
+  pure rules in `lib/teamReview.ts`, teammate pieces in `components/TeammateReviews.tsx`;
+  docs/CLAUDE-REVIEW.md § Teammates' reviews → The tab's team layout). State: `shown: ShownReview |
+  null` (null = now). On NOW the tab reads the server's fold, `ClaudeReviewResponse.teamView`:
+  - **Where this PR stands** (`StandingsSection`, `standingRows`): one line per Limn reviewer, newest
+    first, avatar + name + verdict pill + day + short head + what GitHub still holds; a blocking line in
+    the danger colour. While it shows, the summary header, the rail status and `TeammateLeadSection`
+    drop their own verdict (`showVerdict`).
+  - **The newest review's summary**: the reader's run, or `TeammateLeadSection` ("Robin's review",
+    "Posted on GitHub <ago>" + Open, their summary) when a teammate's is newer (`teamView.lead`).
+    With no succeeded run of the reader's (none, failed, or one queued / running), `TeamOnlyReview`
+    shows the teammate lead and the findings alone.
+  - **Findings by state** (`TeamFindingsSection`, `teamFindingRows` over `teamView.allFindings`):
+    "Open", then the ChevronIcon disclosure "Resolved or addressed (n)", collapsed. The reader's own
+    latest-run findings keep their `FindingRow` (Post / Reword / Ignore) with ONE `raisedBy` chip in
+    place of the pair-source and "also raised" chips; every other point is a read-only `TeamPointRow`
+    (severity, who-raised chip, why it closed, text, `path:line` → `onOpenThread`, "On GitHub"). A
+    story-placed finding stays under Story check. The rail counts read the same open rows.
+  - **Reviews on this PR** (`ReviewsOnPrSection`, `reviewsOnPr`): every review, the reader's (a pair
+    once) and teammates', newest first; the NOW row is found by identity (`nowReviewKey`: the latest
+    full review's row, never position — a newer replies pass is a past run), `aria-current` marks what
+    shows. Any other row opens it READ-ONLY (no live Story / CI check under it) under `PastReviewBar` ("Your review · Comment · 4 Nov · 70cc9b5 ·
+    read-only", "Back to now"): an own run through `useClaudeReviewById` (`ClaudesReview` without
+    `team`, its own findings list), a teammate's from `teammateReviews` (`PastTeammateReview`).
+  - **NEWEST ALWAYS SHOWS** (`nextShownReview` over `newestReviewKey(latest own id, newest teammate
+    review)`): when the key changes — a run queued by anyone or anything, a teammate review imported —
+    a past pick gives way to now. The first read never moves a pick.
+- **A Request changes still in force outranks a newer, milder review** (docs/CLAUDE-REVIEW.md §
+  Teammates' reviews → Standing verdicts): `reviewCellFor` checks the batched states' `standing`
+  through `standingBlockShown` FIRST (after a start or an own run in flight) and returns a `done` cell
+  with `verdict: 'REQUEST_CHANGES'`, `stillBlocking`, `by` when it is a teammate's, and `latest`
+  ("Latest: Robin · Comment · 4 Nov", `latestReviewerLine`). `LatestReviewer` (`ClaudeReviewCell.tsx`)
+  renders `latest` beside the pill on the Open PRs card, the drawer and the Pending card's AI line; the
+  row label appends it. `leadFinishedAt` / `leadCurrency` read the block's time and head;
+  `ownSummaryFor` shows the reader's figures only when the block IS the reader's latest run (same
+  head). The tab pill (`reviewTabPill`) says Request changes while `teamView.standings.blocking` is set.
 - **The Open PRs column and the Pending cards follow the same lead** through the batched states'
   `teammateLead` (server-decided, docs/CLAUDE-REVIEW.md § Teammates' reviews → One review): ONE place,
   `reviewCellFor` (`lib/claudeReviewColumn.ts`), turns it into a `done` cell with `by` (first name,
@@ -1903,10 +1930,9 @@ reappears.
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
   Open PRs panel and the Claude's review header (the shown run's `finishedAt`), and at the end of
   a Pending card's one-line Claude summary on a finished run (`ClaudeReviewPrState.finishedAt`,
-  falling back to a `claude_review` My Turn card's `since`). The history select ("Showing …", `ReviewHistoryList` — a native `<select>`, one option per
-  review, a Claude + Codex pair ONE option; docs/CLAUDE-REVIEW.md § The review tab's history) prints
-  each review's date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age
-  while recent. A pair is shown as ONE review (the server's consolidated view): one header, one
+  falling back to a `claude_review` My Turn card's `since`). Reviews on this PR (docs/CLAUDE-REVIEW.md
+  § The review tab's history) prints each review's short day, with the date and time on hover. A pair
+  is shown as ONE review (the server's consolidated view): one header, one
   summary, one findings list with a quiet source chip per finding.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
   (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (second pill, after the verdict; also for a past

@@ -50,7 +50,7 @@ import {
   type FollowUpPlan,
   type PriorReviewForFollowUp,
 } from './follow-up.js';
-import { loadAuthorReviewAnchor, mergeAuthorAnchor } from './teammate-anchor.js';
+import { loadAuthorReviewAnchor, loadStandingBlockAnchors, mergeAuthorAnchor, mergeStandingBlocks } from './teammate-anchor.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
@@ -1144,9 +1144,29 @@ async function runPipeline(
       );
     }
   }
-  const prior: PriorReviewForFollowUp | null =
+  const anchored: PriorReviewForFollowUp | null =
     authorAnchor && authorAnchor.findings.length > 0 ? mergeAuthorAnchor(authorAnchor, ownPrior, settledIds) : ownPrior;
-  const teammateAnchor = authorAnchor && prior !== ownPrior ? authorAnchor.teammate : null;
+  // A TEAMMATE'S STANDING REQUEST FOR CHANGES (teammate-anchor.ts `loadStandingBlockAnchors`): its
+  // findings join as carried, so this run checks them too. A failure costs those findings only.
+  let blocks: Awaited<ReturnType<typeof loadStandingBlockAnchors>> = [];
+  if (!fresh) {
+    try {
+      blocks = await loadStandingBlockAnchors(ctx, item.prId, item.accountId, authorAnchor?.reviewId ?? null, item.headSha);
+    } catch (err) {
+      ctx.log.warn(
+        `claude review pr ${item.prId}: teammates' standing reviews not read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const prior: PriorReviewForFollowUp | null = mergeStandingBlocks(anchored, blocks, settledIds);
+  // The follow-up names a teammate when THEIR review anchors it: the author's, else (no review of the
+  // reader's at all) the newest standing block's.
+  const teammateAnchor =
+    authorAnchor && anchored !== ownPrior
+      ? authorAnchor.teammate
+      : anchored == null && prior != null
+        ? ((prior as { teammate?: { userId: number; login: string } }).teammate ?? null)
+        : null;
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
   // person's reply are kept (below), so they are judged once like any other.

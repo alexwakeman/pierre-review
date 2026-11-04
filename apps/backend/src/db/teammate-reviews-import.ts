@@ -39,6 +39,7 @@ import {
   parseLimnReviewMarker,
   parsePostedLimnFinding,
   stripLimnReviewMarker,
+  type AiProviderId,
   type ClaudeReviewVerdict,
   type TeammateReviewRecord,
 } from '@pierre-review/shared';
@@ -58,6 +59,19 @@ const STATE_VERDICT: Record<string, ClaudeReviewVerdict> = {
   changes_requested: 'REQUEST_CHANGES',
   commented: 'COMMENT',
 };
+
+/** A pair's finding comments → who raised each, from the lead's tag ("Codex", "Claude + Codex"). */
+function pairProviders(parsed: ReadonlyArray<{ c: { nodeId: string }; p: { tag: string | null } }>): Pick<TeammateReviewRecord, 'findingProviders'> {
+  const out: Record<string, AiProviderId[]> = {};
+  for (const { c, p } of parsed) {
+    const t = (p.tag ?? '').toLowerCase();
+    const who: AiProviderId[] = [];
+    if (/\bclaude\b/.test(t)) who.push('claude');
+    if (/\bcodex\b/.test(t)) who.push('codex');
+    if (who.length > 0) out[c.nodeId] = who;
+  }
+  return Object.keys(out).length > 0 ? { findingProviders: out } : {};
+}
 
 export interface TeammateImportResult {
   reviews: number;
@@ -229,6 +243,9 @@ export async function importTeammateReviews(accountId: number, prId: number): Pr
         ...(parsed.some((x) => x.p.severity == null)
           ? { unlabelled: parsed.filter((x) => x.p.severity == null).map((x) => x.c.nodeId) }
           : {}),
+        ...(meta.judged != null && meta.judged.length > 0 ? { judged: meta.judged } : {}),
+        ...(meta.liftConsent === true ? { liftConsent: true } : {}),
+        ...(meta.pair ? pairProviders(parsed) : {}),
       };
       const first = meta.runs[0];
       const values = {

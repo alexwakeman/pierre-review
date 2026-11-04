@@ -42,13 +42,12 @@ import {
   ignoredLabel,
   reviewWorkInProgress,
   reviewedAgoLabel,
-  reviewRunWhen,
   leadCurrency,
   leadFinishedAt,
   leadVerdictText,
   ownSummaryFor,
 } from '../src/lib/claudeReviewColumn.js';
-import { dateTime, formatDate } from '../src/lib/ui.js';
+import { formatDate } from '../src/lib/ui.js';
 import { fillDraftFromJira } from '../src/lib/jiraTicket.js';
 import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
 
@@ -402,8 +401,8 @@ describe('the panel', () => {
   });
 });
 
-// ── WHEN THE REVIEW RAN: "reviewed 2 days ago" and the Showing list's date + time ──
-describe('reviewedAgoLabel / reviewRunWhen', () => {
+// ── WHEN THE REVIEW RAN: "reviewed 2 days ago" ──
+describe('reviewedAgoLabel', () => {
   const NOW = new Date('2026-10-05T12:00:00Z');
   beforeEach(() => {
     vi.useFakeTimers();
@@ -424,14 +423,6 @@ describe('reviewedAgoLabel / reviewRunWhen', () => {
   it('past a month names the date, with "on" so the sentence still reads', () => {
     const iso = ago(45 * DAY);
     expect(reviewedAgoLabel(iso)).toBe(`reviewed on ${formatDate(iso)}`);
-  });
-
-  it('a Showing option carries the date AND the time of day, plus the age while recent', () => {
-    const iso = ago(DAY);
-    expect(reviewRunWhen(iso)).toBe(`${dateTime(iso)} (1 day ago)`);
-    expect(dateTime(iso)).toMatch(/\d{2}:\d{2}/);
-    const old = ago(60 * DAY);
-    expect(reviewRunWhen(old)).toBe(dateTime(old));
   });
 });
 

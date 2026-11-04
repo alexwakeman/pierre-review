@@ -1771,12 +1771,10 @@ export function PrDetail({
               PR. Placed right after the raw +/− delta so the two readings sit together — that
               total includes docs, config, lockfiles and generated files; this one does not. */}
           <LargePrFlag pr={codeLocFields} />
-          {/* BLAST RADIUS, beside the two size readings. This is the ONE surface that gets the
-              EXPANDABLE chip: there is room for the reason list here, and this is where a reader
-              who disagrees with a verdict needs to see what decided it. ⚠ It reads the SAME
-              `codeLoc` the flag beside it reads, so the two can never quote different line counts
-              for one pull request. */}
-          <BlastRadiusChip pr={{ ...blastFields, ...codeLocFields }} expandable />
+          {/* BLAST RADIUS, beside the two size readings: icon + level, its reasons behind a click.
+              ⚠ It reads the SAME `codeLoc` the flag beside it reads, so the two can never quote
+              different line counts for one pull request. */}
+          <BlastRadiusChip pr={{ ...blastFields, ...codeLocFields }} />
           {/* PR CHIPS — the stack and the criteria (PrChips.tsx), from this PR's own payload. */}
           <PrChips pr={pr} />
           </span>

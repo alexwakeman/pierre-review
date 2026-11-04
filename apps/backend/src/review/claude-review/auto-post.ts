@@ -115,8 +115,16 @@ import {
   type AiProviderName,
 } from '@pierre-review/shared';
 import { pairRaisedByLead, pairReviewBody } from './pair.js';
-import { limnMetaForReview } from './post-meta.js';
+import { limnMetaForReview, loadJudgedForPost } from './post-meta.js';
 import { TEAMMATE_KIND, ownRunsOnly } from '../../db/teammate-reviews.js';
+import {
+  claimTeammateLift,
+  liveLiftCheck,
+  loadTeammateLiftCandidates,
+  settleTeammateLift,
+  teammateLiftMessage,
+  type TeammateLiftCandidate,
+} from './teammate-lift.js';
 
 // A pair's body names both when it falls back to a count ("3 comments from Claude and Codex.").
 const PAIR_BODY_BY = 'Claude and Codex';
@@ -240,6 +248,23 @@ export function selectFindingsToPost(
   return { toPost, alreadyPosted };
 }
 
+/**
+ * May this post carry `lift=1` (the poster's consent to a teammate's Limn lifting its block)? Only
+ * when every BLOCKER the verdict counts is one of the post's own comments. A blocker already on GitHub
+ * from an earlier post is left out of this one, yet still makes it a REQUEST_CHANGES: a teammate's
+ * Limn reads the block's points from its comments alone (teammate-lift.ts `pointsBehindBlock`), so
+ * it could lift a block whose real reason it never checked.
+ */
+export function blockersAllInPost(
+  findings: ReadonlyArray<Pick<ClaudeFinding, 'id' | 'severity' | 'included' | 'story'> & Partial<Pick<ClaudeFinding, 'priorFindingId' | 'postedAt'>>>,
+  toPost: ReadonlyArray<Pick<ClaudeFinding, 'id'>>,
+): boolean {
+  const posted = new Set(toPost.map((f) => f.id));
+  return findings.every(
+    (f) => f.severity !== 'blocker' || f.story != null || isReaderIgnoredFinding(f) || posted.has(f.id),
+  );
+}
+
 // THE VERDICT RULE (./auto-verdict.ts), re-exported under its old name.
 export { autoVerdictFor } from './auto-verdict.js';
 
@@ -292,6 +317,8 @@ export interface LiveReview {
   id?: string | number | null;
   login: string | null;
   state: string;
+  // The review body (the live check of a teammate's block reads its marker). Absent = not read.
+  body?: string | null;
 }
 
 /**
@@ -467,10 +494,10 @@ export const defaultAutoPostDeps: AutoPostDeps = {
     const { ghRestGet } = await import('../../github/client.js');
     const out: LiveReview[] = [];
     for (let page = 1; page <= 10; page += 1) {
-      const rows = await ghRestGet<Array<{ id: number; user: { login: string } | null; state: string }>>(
+      const rows = await ghRestGet<Array<{ id: number; user: { login: string } | null; state: string; body?: string | null }>>(
         `/repos/${owner}/${name}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
       );
-      for (const r of rows) out.push({ id: r.id, login: r.user?.login ?? null, state: r.state });
+      for (const r of rows) out.push({ id: r.id, login: r.user?.login ?? null, state: r.state, body: r.body ?? null });
       if (rows.length < 100) return out;
     }
     // More than 1,000 reviews: the latest one may be beyond what was read — never guess.
@@ -934,11 +961,37 @@ async function autoPostReview(
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
   const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
+  // LIFTING A TEAMMATE'S LIMN BLOCK (./teammate-lift.ts): the DB pre-check first (both opt-ins, every
+  // point behind the block settled), so an ordinary run costs no extra GitHub read.
+  let readerLogin: string | null = null;
+  let teammateCandidates: TeammateLiftCandidate[] = [];
+  if (ws.settings.liftTeammateBlocks && !facts.authorIsMe && noBlocker && unjudgedBlockers.length === 0) {
+    try {
+      readerLogin = await deps.accountLogin(accountId);
+      teammateCandidates = await loadTeammateLiftCandidates(ctx, {
+        accountId,
+        prId,
+        reviewId,
+        headSha: review.headSha,
+        leftovers: rules.approveLeftovers,
+        readerLogin,
+      });
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read teammates' blocks: ${errText(err)}`);
+    }
+  }
+  const mayLiftTeammate = teammateCandidates.length > 0;
   // A COMMENT-only run with a reason still to tell GitHub goes on (to the reason-only review).
   // (Never while a review request of the reader is open: any review answers it.)
   const commentReasonToPost =
     wanted === 'COMMENT' && reasonMayPost(verdict) && !reasonAlreadyAtHead && facts.openRequestOfMe !== true;
-  if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift && !commentReasonToPost) {
+  if (
+    picked.toPost.length === 0 &&
+    (wanted == null || wanted === 'COMMENT') &&
+    !mayLift &&
+    !mayLiftTeammate &&
+    !commentReasonToPost
+  ) {
     return skip(...nothingReason());
   }
 
@@ -967,13 +1020,17 @@ async function autoPostReview(
   }
   const impactHeld = impact != null && !impactAllowsApprove(impact.level, impact.allowed);
   let standing: { state: OwnLatestReview; reviewId: string | null } = { state: 'unreadable', reviewId: null };
-  if (!facts.authorIsMe && ((wantsVerdict && !impactHeld) || mayLift)) {
+  // A teammate block still standing LIVE, with Limn's marker and the consent in its live body.
+  let teammateLifts: TeammateLiftCandidate[] = [];
+  if (!facts.authorIsMe && ((wantsVerdict && !impactHeld) || mayLift || mayLiftTeammate)) {
     try {
       const [login, reviews] = await Promise.all([
         deps.accountLogin(accountId),
         deps.liveReviews(pctx.owner, pctx.name, pctx.prNumber),
       ]);
+      readerLogin = login;
       standing = ownStandingReview(reviews, login, limnBlockIds);
+      teammateLifts = teammateCandidates.filter((c) => liveLiftCheck(reviews, c, login) == null);
     } catch (err) {
       ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
     }
@@ -1013,12 +1070,20 @@ async function autoPostReview(
   // Limn's own automatic request for changes still stands, this run has no blocker and none behind
   // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
   const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
-  if (picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && liftId == null && !reasonOnly) {
+  if (
+    picked.toPost.length === 0 &&
+    (verdict?.submitted ?? 'COMMENT') === 'COMMENT' &&
+    liftId == null &&
+    !reasonOnly &&
+    teammateLifts.length === 0
+  ) {
     return skip(...nothingReason());
   }
   const event: AutoVerdictEvent = verdict?.submitted ?? 'COMMENT';
-  // Nothing but the lift to do: no review is sent at all.
-  const sendsReview = picked.toPost.length > 0 || event !== 'COMMENT' || reasonOnly;
+  // Nothing but the lift of Limn's own block to do: no review is sent at all. Lifting a TEAMMATE'S
+  // block always sends the reader's own review (APPROVE when the gate allows it, else COMMENT): it
+  // carries the judgements (`j=`) the teammate's Limn reads.
+  const sendsReview = picked.toPost.length > 0 || event !== 'COMMENT' || reasonOnly || teammateLifts.length > 0;
 
   const record: ClaudeAutoPostRecord = {
     status: 'posting',
@@ -1052,6 +1117,8 @@ async function autoPostReview(
     first = null;
   }
   const pairFirst: ClaudeReview | null = first;
+  // The earlier Limn findings on GitHub this review judged, for the marker's `j=` (DB only, never throws).
+  const judged = await loadJudgedForPost(ctx, accountId, prId, pairFirst != null ? [pairFirst, review] : [review]);
   // THE PAIR'S ONE REVIEW (pair-consolidate.ts): its summary, and who raised each kept finding. A pair
   // from before the record reads as the two summaries joined and each half's own provider.
   const consolidation = pairFirst != null ? await readPairConsolidation(ctx, pairFirst.id, prId).catch(() => null) : null;
@@ -1081,6 +1148,8 @@ async function autoPostReview(
           withReasonLine(reason, footer),
         );
   };
+  // The poster's consent rides only a post whose comments hold every blocker behind it.
+  const liftConsent = ws.settings.teamLiftConsent && blockersAllInPost(allFindings, picked.toPost);
   const submit = (ev: AutoVerdictEvent) =>
     ctx.review.postReview({
       owner: pctx.owner,
@@ -1101,8 +1170,10 @@ async function autoPostReview(
                 model: r.model || null,
                 effort: r.effort ?? null,
               })),
+              judged,
+              liftConsent,
             }
-          : limnMetaForReview(review),
+          : { ...limnMetaForReview(review), judged, liftConsent },
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
       // comment carries its own provider's footer and names who raised it.
       includedFindings: picked.toPost.map((f) => toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), tagOf(f))),
@@ -1193,6 +1264,44 @@ async function autoPostReview(
         record.liftedBlock = { reviewId: liftId, how: 'dismiss_failed', error: res.message.slice(0, 300) };
       }
     }
+  }
+
+  // A TEAMMATE'S BLOCK, after the reader's review landed at the PR's current head: claim it on the
+  // teammate's row (compare-and-set, once ever), dismiss, record what GitHub said. Never retried.
+  if (teammateLifts.length > 0 && landed && !reviewFailed) {
+    const lifted: NonNullable<ClaudeAutoPostRecord['liftedTeammateBlocks']> = [];
+    for (const c of teammateLifts) {
+      const message = teammateLiftMessage(readerLogin ?? 'you', c.points, pctx.reviewHeadSha);
+      const base = { byReviewId: reviewId, headSha: pctx.reviewHeadSha, points: c.points, message };
+      let claimed = false;
+      try {
+        claimed = await claimTeammateLift(ctx, accountId, c.teammateReviewId, base);
+      } catch (err) {
+        ctx.log.warn(`auto post review ${reviewId}: could not claim the teammate lift: ${errText(err)}`);
+      }
+      // Another run tried this block already: never twice.
+      if (!claimed) continue;
+      let res: { ok: true } | { ok: false; message: string };
+      try {
+        res = deps.dismissReview
+          ? await deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, c.githubReviewId, message)
+          : { ok: false, message: 'Dismissing is not available.' };
+      } catch (err) {
+        res = { ok: false, message: errText(err) };
+      }
+      const error = res.ok ? null : res.message.slice(0, 300);
+      const status = res.ok ? ('dismissed' as const) : ('failed' as const);
+      await settleTeammateLift(ctx, accountId, c.teammateReviewId, { ...base, status, at: nowIso(), error }).catch((err) =>
+        ctx.log.warn(`auto post review ${reviewId}: could not record the teammate lift: ${errText(err)}`),
+      );
+      if (res.ok) {
+        await stampReviewDismissed(ctx, prId, c.githubReviewId).catch((err) =>
+          ctx.log.warn(`auto post review ${reviewId}: could not stamp the dismissal: ${errText(err)}`),
+        );
+      }
+      lifted.push({ teammateReviewId: c.teammateReviewId, login: c.login, status, error });
+    }
+    if (lifted.length > 0) record.liftedTeammateBlocks = lifted;
   }
 
   // A run whose only write was the lift: posted when it took, failed (GitHub's words) when not.

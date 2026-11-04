@@ -285,7 +285,7 @@ function AiMarker({ prId, state, ciRunning, ticketRunning }: { prId: number; sta
   } else if (cell.kind === 'done') {
     icon = cell.verdict != null ? <VerdictIcon verdict={cell.verdict} size={13} /> : <CommentIcon size={13} />;
     // A teammate's newer posted review leads: "AI review: Robin · Approve".
-    label = `AI review: ${leadVerdictText(cell)}${cell.headMoved ? ' · newer commits since' : ''}`;
+    label = `AI review: ${leadVerdictText(cell)}${cell.headMoved ? ' · newer commits since' : ''}${cell.latest != null ? ` · ${cell.latest.text}` : ''}`;
   } else if (cell.kind === 'start' && cell.failed) {
     icon = <WarningIcon size={13} />;
     label = 'AI review failed';
@@ -1034,7 +1034,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
             </span>
           </Fact>
           <Fact label="Reach">
-            <BlastRadiusChip pr={pr} expandable />
+            <BlastRadiusChip pr={pr} />
           </Fact>
         </dl>
         <PrChips pr={pr} className="mt-1.5" />

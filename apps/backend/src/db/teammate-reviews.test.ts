@@ -370,3 +370,180 @@ describe("teammates' posted reviews", () => {
     expect(withTeam.reviewCount).toEqual({ total: 4, byTeammate: [{ poster, count: 2 }] });
   });
 });
+
+// STANDING VERDICTS + JUDGEMENTS THAT TRAVEL WITH A POST + A TEAMMATE'S STANDING BLOCK (203001-shaped).
+describe('standing verdicts and posted judgements (real DB)', () => {
+  const NOV3 = '2026-11-03T10:00:00Z';
+  const NOV4 = '2026-11-04T10:00:00Z';
+  const aliceSummary = `Changes needed.\n\n${limnReviewMarker('ee55', { headSha: HEAD, run: 'auto', pair: true, runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: null }, { provider: 'codex', model: 'gpt-6.1', effort: null }], verdict: 'REQUEST_CHANGES' })}`;
+  const robinSummary = `Looks close.\n\n${limnReviewMarker('ff66', { headSha: HEAD, run: 'auto', runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: null }], verdict: 'COMMENT', judged: [{ commentId: '611', outcome: 'addressed' }] })}`;
+
+  async function seed203001(n: number, extraReviews: any[] = []): Promise<{ prId: number; ownId: number }> {
+    await persist(
+      gqlPr(n, {
+        reviews: {
+          nodes: [
+            review(`RV_${n}601`, ALICE, aliceSummary, NOV3, 'CHANGES_REQUESTED'),
+            review(`RV_${n}602`, ROBIN, robinSummary, NOV4, 'COMMENTED'),
+            ...extraReviews,
+          ],
+        },
+        reviewThreads: {
+          nodes: [
+            thread(`T_${n}a`, [comment(`C_611`, ALICE, `**Blocker** · Codex\n\nNull deref.\n\n${MARK}`, NOV3)], { path: 'src/a.ts', line: 5 }),
+            thread(`T_${n}b`, [comment(`C_${n}621`, ROBIN, `**Nit**\n\nRename this.\n\n${MARK}`, NOV4)], { path: 'src/r.ts', line: 9 }),
+          ],
+        },
+      }),
+    );
+    const prId = await prIdOf(n);
+    const halves = await db
+      .insert(schema.claudeReviews)
+      .values(
+        ['first', 'second'].map((role, i) => ({
+          accountId: 1,
+          prId,
+          headSha: HEAD,
+          status: 'succeeded',
+          model: i === 0 ? 'claude-opus-5-5' : 'gpt-6.1',
+          provider: i === 0 ? 'claude' : 'codex',
+          verdict: 'REQUEST_CHANGES',
+          trigger: 'auto',
+          pairRole: role,
+          createdAt: new Date(NOV3),
+          finishedAt: new Date(NOV3),
+          autoPost: { status: 'posted', githubReviewId: `${n}601`, verdict: { submitted: 'REQUEST_CHANGES' } },
+        })),
+      )
+      .returning()
+      .execute();
+    const { inArray } = await import('drizzle-orm');
+    await db.update(schema.claudeReviews).set({ pairId: halves[0].id }).where(inArray(schema.claudeReviews.id, halves.map((h: any) => h.id))).execute();
+    await db
+      .insert(schema.claudeReviewFindings)
+      .values({
+        reviewId: halves[1].id,
+        path: 'src/a.ts',
+        line: 5,
+        severity: 'blocker',
+        title: 'Null deref',
+        body: 'Null deref.',
+        included: true,
+        postedAt: new Date(NOV3),
+        githubCommentId: '611',
+        postedCommentKind: 'inline',
+      })
+      .execute();
+    return { prId, ownId: halves[1].id };
+  }
+
+  it("imports the judgements a teammate's post carried, and the reader's finding reads as addressed by them", async () => {
+    const { prId } = await seed203001(20);
+    const [tm] = await teammateRows(prId);
+    expect(tm.teammate.judged).toEqual([{ commentId: '611', outcome: 'addressed' }]);
+    const reviews = await teammate.listTeammateReviews(db, 1, prId);
+    expect(reviews[0]!.judged).toEqual([{ commentId: '611', outcome: 'addressed' }]);
+    expect(reviews[0]!.findings[0]).toMatchObject({ providers: ['claude'], githubCommentId: '20621' });
+
+    const { loadTeamReviewView } = await import('../review/claude-review/team-view.js');
+    const persistMod = await import('../review/claude-review/persist.js');
+    const ctx = { db, schema } as any;
+    const latest = await persistMod.getLatestClaudeReview(ctx, prId, 1);
+    const view = await loadTeamReviewView(db, 1, prId, latest, reviews, null);
+    const mine = view.allFindings!.find((p) => p.author.you)!;
+    expect(mine).toMatchObject({ providers: ['codex'], posted: true, state: { kind: 'addressed', by: { you: false, poster: { login: 'robin-dev' } } } });
+    expect(view.allFindings!.find((p) => !p.author.you)).toMatchObject({ origin: 'teammate', state: { kind: 'open' } });
+
+    // STANDING: the reader's Request changes (3 Nov) still blocks; Robin (4 Nov) reviewed last.
+    expect(view.standings?.blocking).toMatchObject({ you: true, verdict: 'REQUEST_CHANGES' });
+    expect(view.standings?.latest).toMatchObject({ you: false, verdict: 'COMMENT', poster: { login: 'robin-dev' } });
+
+    // The states batch says the same.
+    const [state] = await persistMod.getLatestReviewStates(ctx, [prId], 1);
+    expect(state!.teammateLead?.login).toBe('robin-dev');
+    expect(state!.standing?.blocking).toMatchObject({ you: true });
+    expect(state!.standing?.latest).toMatchObject({ poster: { login: 'robin-dev' } });
+
+    // Resolved on GitHub wins over any judgement.
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, mine.threadId)).execute();
+    const after = await loadTeamReviewView(db, 1, prId, latest, reviews, null);
+    expect(after.allFindings!.find((p) => p.author.you)!.state).toEqual({ kind: 'resolved_on_github' });
+  });
+
+  it('a post carries the judgements of posted Limn findings: the follow-up by comment id, a thread judgement by its root', async () => {
+    const { prId } = await seed203001(24);
+    const { loadJudgedForPost } = await import('../review/claude-review/post-meta.js');
+    const { and, eq } = await import('drizzle-orm');
+    const ownFinding = (
+      await db.select({ id: schema.claudeReviewFindings.id }).from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.githubCommentId, '611')).execute()
+    ).at(-1)!;
+    const robinThread = (
+      await db.select({ id: schema.reviewThreads.id }).from(schema.reviewThreads).where(and(eq(schema.reviewThreads.prId, prId), eq(schema.reviewThreads.path, 'src/r.ts'))).execute()
+    )[0]!;
+    const ctx = { db, schema, log: { warn() {} } } as any;
+    const judged = await loadJudgedForPost(ctx, 1, prId, [
+      {
+        followUp: { items: [{ priorFindingId: ownFinding.id, status: 'not_addressed' }, { priorFindingId: 999999, status: 'addressed' }] },
+        threadAssessments: [{ threadId: robinThread.id, addressed: 'addressed' }],
+      },
+      { followUp: { items: [{ priorFindingId: ownFinding.id, status: 'addressed' }] } },
+    ]);
+    expect(judged).toEqual([
+      { commentId: '611', outcome: 'addressed' },
+      { commentId: '24621', outcome: 'addressed' },
+    ]);
+  });
+
+  it('a dismissal on GitHub lifts the standing block', async () => {
+    const { prId } = await seed203001(21);
+    const persistMod = await import('../review/claude-review/persist.js');
+    const ctx = { db, schema } as any;
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviews).set({ state: 'dismissed' }).where(eq(schema.reviews.githubNodeId, 'RV_21601')).execute();
+    const [state] = await persistMod.getLatestReviewStates(ctx, [prId], 1);
+    expect(state!.standing?.blocking).toBeNull();
+    expect(state!.standing?.reviewers[0]).toMatchObject({ you: true, inForce: null, dismissed: true });
+  });
+
+  it("a non-author teammate's standing Request changes joins the reader's follow-up until lifted", async () => {
+    const robinBlock = `Fix first.\n\n${limnReviewMarker('gg77', { headSha: HEAD, run: 'auto', runs: [{ provider: 'codex', model: 'gpt-6.1', effort: null }], verdict: 'REQUEST_CHANGES' })}`;
+    await persist(
+      gqlPr(22, {
+        reviews: { nodes: [review('RV_22701', ROBIN, robinBlock, NOV3, 'CHANGES_REQUESTED')] },
+        reviewThreads: {
+          nodes: [thread('T_22a', [comment('C_22711', ROBIN, `**Blocker** · Codex\n\nRace on close.\n\n${MARK}`, NOV3)], { path: 'src/c.ts', line: 7 })],
+        },
+      }),
+    );
+    const prId = await prIdOf(22);
+    const { loadStandingBlockAnchors } = await import('../review/claude-review/teammate-anchor.js');
+    const ctx = { db, schema, log: { warn() {} } } as any;
+    const blocks = await loadStandingBlockAnchors(ctx, prId, 1);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ teammate: { login: 'robin-dev' }, headSha: HEAD });
+    expect(blocks[0]!.findings.map((f) => f.title)).toEqual(['Race on close.']);
+    // The reader's run settled it: not sent again.
+    const [tmFinding] = await findingRows((await teammateRows(prId))[0].id);
+    await db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha: HEAD, status: 'succeeded', model: 'claude-opus-5-5', followUp: { items: [{ priorFindingId: tmFinding.id, status: 'addressed' }] } })
+      .execute();
+    expect(await loadStandingBlockAnchors(ctx, prId, 1)).toEqual([]);
+  });
+
+  it("a teammate's own later Approve lifts their block (no follow-up on it)", async () => {
+    const block = `Fix first.\n\n${limnReviewMarker('hh88', { headSha: HEAD, run: 'auto', verdict: 'REQUEST_CHANGES' })}`;
+    const ok = `All good.\n\n${limnReviewMarker('ii99', { headSha: HEAD, run: 'auto', verdict: 'APPROVE' })}`;
+    await persist(
+      gqlPr(23, {
+        reviews: { nodes: [review('RV_23701', ROBIN, block, NOV3, 'CHANGES_REQUESTED'), review('RV_23702', ROBIN, ok, NOV4, 'APPROVED')] },
+        reviewThreads: {
+          nodes: [thread('T_23a', [comment('C_23711', ROBIN, `**Blocker**\n\nRace.\n\n${MARK}`, NOV3)], { path: 'src/c.ts', line: 7 })],
+        },
+      }),
+    );
+    const { loadStandingBlockAnchors } = await import('../review/claude-review/teammate-anchor.js');
+    expect(await loadStandingBlockAnchors({ db, schema, log: { warn() {} } } as any, await prIdOf(23), 1)).toEqual([]);
+  });
+});

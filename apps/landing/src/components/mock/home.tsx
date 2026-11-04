@@ -75,6 +75,7 @@ function ReviewFindings(): JSX.Element {
     <>
       {FINDINGS.review.map((f) => (
         <FindingRow key={f.sev} chip={f.sev} tone={f.tone}>
+          <small className="mk-by">{f.by}</small>
           {f.sev === 'Nit' ? (
             <>
               {f.text} <code>{f.code}</code>.
@@ -88,6 +89,33 @@ function ReviewFindings(): JSX.Element {
           )}
         </FindingRow>
       ))}
+    </>
+  );
+}
+
+/** The AI Review tab's findings: "Open", then a collapsed "Resolved or addressed (n)" saying why. */
+function ReviewFindingsByState({ onTouch }: { onTouch: () => void }): JSX.Element {
+  const [showClosed, setShowClosed] = useState(false);
+  return (
+    <>
+      <Group first>Open</Group>
+      <ReviewFindings />
+      <button type="button" className="mk-disc" aria-expanded={showClosed} onClick={() => {
+          setShowClosed((o) => !o);
+          onTouch();
+        }}>
+        Resolved or addressed ({FINDINGS.closed.length})
+      </button>
+      {showClosed
+        ? FINDINGS.closed.map((f) => (
+            <FindingRow key={f.text} chip={f.sev} tone={f.tone}>
+              <small className="mk-by">
+                {f.by} · {f.reason}
+              </small>
+              {f.text}
+            </FindingRow>
+          ))
+        : null}
     </>
   );
 }
@@ -328,7 +356,7 @@ function FixFlow(): JSX.Element {
   );
 }
 
-function PrPanel({ tab }: { tab: PrTabId }): JSX.Element {
+function PrPanel({ tab, onTouch }: { tab: PrTabId; onTouch: () => void }): JSX.Element {
   if (tab === 'overview') {
     return (
       <>
@@ -355,39 +383,32 @@ function PrPanel({ tab }: { tab: PrTabId }): JSX.Element {
     );
   }
   if (tab === 'ai_fix') return <FixFlow />;
-  return (
-    <>
-      <ReviewFindings />
-      <Group>Earlier threads</Group>
-      <div className="mk-chips">
-        {PR_VIEW.threads.map((t) => (
-          <Chip key={t.label} tone={t.tone}>
-            {t.label}
-          </Chip>
-        ))}
-      </div>
-    </>
-  );
+  return <ReviewFindingsByState onTouch={onTouch} />;
 }
 
 /** Review chapter: one pull request with its detail tabs. Opens on AI Review. */
 export function ReviewMock(): JSX.Element {
   const [tab, setTab] = useState<PrTabId>('claude_review');
   const [round, setRound] = useState(0);
+  const [touched, setTouched] = useState(false);
+  // A new key on Reset, so an opened disclosure closes again.
+  const [gen, setGen] = useState(0);
   return (
     <MockFrame
       live
       title={prLabel(refunds)}
       right={<Chip tone="green">Posted to GitHub</Chip>}
       onReset={
-        tab !== 'claude_review' || round > 0
+        tab !== 'claude_review' || round > 0 || touched
           ? () => {
               setTab('claude_review');
               setRound(0);
+              setGen((g) => g + 1);
+              setTouched(false);
             }
           : null
       }
-      label="Pull request 612 with its Overview, Changes, AI Review and AI Fix tabs. The AI review, posted to GitHub, found one major, one minor and one nit"
+      label="Pull request 612 with its Overview, Changes, AI Review and AI Fix tabs. The AI review, posted to GitHub, has one major, one minor and one nit open, and two findings resolved or addressed"
     >
       <MockTabs
         label="Pull request tabs"
@@ -398,7 +419,7 @@ export function ReviewMock(): JSX.Element {
           setRound((r) => r + 1);
         }}
       >
-        <PrPanel key={round} tab={tab} />
+        <PrPanel key={`${gen}-${round}`} tab={tab} onTouch={() => setTouched(true)} />
       </MockTabs>
     </MockFrame>
   );

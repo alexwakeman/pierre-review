@@ -1194,7 +1194,9 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
 - **WHAT IT DID — A TRUE RECORD**: Pending → Dependencies → "What automation did"
   (`DependencyAutomationLog`, words in `lib/dependencyAutomationLog.ts`), a disclosure that fetches
   `GET /api/dependencies/automation-log` only once OPENED (nothing on the board fetches on mount);
-  every row shows repo#number + title and opens the PR's detail tab. Each row's state is the REAL
+  it is GROUPED BY PR (`groupAutomationByPr`): each PR appears ONCE (repo#number + title, opening
+  the PR's detail tab) with its actions listed under it, newest first, and the PRs ordered by their
+  newest action — no row is dropped by the grouping. Each action's state is the REAL
   outcome: "Approved" only after GitHub accepted the review (a failed local stamp afterwards does not
   undo it), "Asked to rebase" only after the comment/body edit landed, "Resolved conflicts" / "Fixed CI
   with AI" only after the push, "Armed to merge" (`arm_merge`) when the policy armed it, and

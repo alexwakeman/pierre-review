@@ -2731,6 +2731,27 @@ check(
   );
 }
 
+// ── PUSHED SINCE COMMIT LIST (db/my-turn-pushed-since.ts) ─────────────────────
+// `GET /api/my-turn/pushed-since/:prId` takes a PR id in the PATH. Positive direction first, so a
+// getter that refused everything would fail rather than pass the cross-tenant half by accident.
+{
+  const { getPushedSinceCommits } = await import('../src/db/my-turn-pushed-since.js');
+  const wsA = await q.resolveWorkspaceScope(1, undefined);
+  const wsB = await q.resolveWorkspaceScope(2, undefined);
+  check(
+    'getPushedSinceCommits(A, A’s PR) answers (mutation check)',
+    (await getPushedSinceCommits(1, A.prId, wsA.workspaceId, wsA.repoIds)) !== null,
+  );
+  check(
+    'getPushedSinceCommits(B, A’s PR) refuses (IDOR blocked)',
+    (await getPushedSinceCommits(2, A.prId, wsB.workspaceId, wsB.repoIds)) === null,
+  );
+  check(
+    'getPushedSinceCommits(B, A’s PR, A’s repo ids) still refuses (account gate, not only membership)',
+    (await getPushedSinceCommits(2, A.prId, wsB.workspaceId, [A.repoId])) === null,
+  );
+}
+
 // ── BLAST RADIUS (db/file-coupling.ts + db/blast-radius-query.ts) ─────────────
 // Two id-addressed getters that live OUTSIDE db/queries.ts, so this script cannot see them
 // unless they are imported by name.
