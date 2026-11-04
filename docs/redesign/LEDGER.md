@@ -103,7 +103,7 @@ Known debts the redesign must clear here:
 - Actions: none on the wordmark (it is not a link)
 - States:
   - [ ] The controls cluster gap shrinks below sm
-- Tests: `docs/FRONTEND.md` § There is ONE header toast strip
+- Tests: `docs/FRONTEND.md` § There is ONE toast cluster
 
 ### [x] HeaderToastStrip + HeaderToast (the ONE toast strip) → unchanged component, now the right of `TopBar`; same order (+ AiBudgetToast, UndoToast)
 - Entry: fills the header between the wordmark and the controls. Every toast in the app is a card

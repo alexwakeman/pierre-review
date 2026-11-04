@@ -249,8 +249,14 @@ export function FilterBar(): JSX.Element | null {
     </button>
   );
 
+  // THE PAGE HEADER (docs/redesign/DESIGN.md § 1): every page opens on its title, at every width —
+  // the board's filters are its header row. Not on a PR Focus tab (its tab chip names it).
+  const header = isTimeline && <PageHeader title="Timeline" flushBottom className="bg-ui-bg" testId="timeline-header" />;
+
   if (phone && !phoneOpen) {
     return (
+      <>
+      {header}
       <div data-testid="filter-bar" className="flex shrink-0 items-center gap-1 bg-ui-bg px-2 py-1.5">
         <button type="button" onClick={() => setPhoneOpen(true)} aria-expanded={false} className={TOOL}>
           <FilterIcon size={13} />
@@ -262,17 +268,13 @@ export function FilterBar(): JSX.Element | null {
         {phoneLayout === 'board' && nowButton}
         {layoutToggle}
       </div>
+      </>
     );
   }
 
   return (
     <>
-    {/* THE PAGE HEADER (docs/redesign/DESIGN.md § 1): every page opens on its title; the board's
-        filters are its header row. Not on a phone (the top bar names the page) and not on a PR
-        Focus tab (its tab chip names it). */}
-    {isTimeline && !phone && (
-      <PageHeader title="Timeline" flushBottom className="bg-ui-bg" testId="timeline-header" />
-    )}
+    {header}
     <div data-testid="filter-bar" className={cx('flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-2 bg-ui-bg px-3 py-2', isTimeline && !phone ? 'md:px-[18px] md:pb-3' : 'md:px-4')}>
       {phone && (
         <button type="button" onClick={() => setPhoneOpen(false)} aria-expanded className={cx(TOOL, '-ml-1 text-ui-ink')}>

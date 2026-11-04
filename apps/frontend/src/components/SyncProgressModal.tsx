@@ -27,7 +27,7 @@ export function SyncProgressModal({
 }): JSX.Element {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
       role="presentation"
     >
       <div

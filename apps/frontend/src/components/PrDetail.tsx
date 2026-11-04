@@ -44,7 +44,8 @@ import {
   IconButton,
   Menu,
   panelId,
-  PageToastSlot,
+  PAGE_GUTTER,
+  PAGE_HEADER_TOP,
   StatusIcon,
   tabId,
   Tabs,
@@ -1609,10 +1610,10 @@ export function PrDetail({
           full-screen tab has none. */}
       <header
         className={cx(
-          'shrink-0 px-4 pt-3 md:px-5',
-          // Full-screen: the same top as a PageHeader (the story tab), so the first line sits at
-          // one height across tabs — the top bar collapses at ≥ lg via the toast seat below.
-          placement === 'fullscreen' && 'md:pt-5',
+          'shrink-0',
+          // Full-screen: a page — the same top and gutter as every PageHeader (components/ui/PageHeader.tsx),
+          // so its title sits where every page title sits (e2e/header-geometry.spec.ts).
+          placement === 'fullscreen' ? cx(PAGE_HEADER_TOP, PAGE_GUTTER) : 'px-4 pt-3 md:px-5',
           placement === 'pane' && 'pr-12 md:pr-12',
         )}
       >
@@ -1630,17 +1631,13 @@ export function PrDetail({
                 <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
               </button>
           ) : (
-            <h2 className="min-w-0 text-display text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
+            <h2 data-page-title className="min-w-0 text-display text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
               <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
             </h2>
           )}
           {/* THE ONE ACTION CONTROL — the "…" menu says every PR action in words (and ⌘K lists
               the same set, registered above). No icon row: the menu is the toolbar. */}
-          {/* THE TOAST SEAT (full-screen only): the header toast strip sits here at ≥ lg and the
-              empty top bar collapses, as on every PageHeader page. Never in the pane: a seat
-              there would pull the strip into a small box at the bottom of the board. */}
-          {placement === 'fullscreen' && <PageToastSlot className="ml-auto" />}
-          <div className={cx('flex shrink-0 items-center gap-1', placement !== 'fullscreen' ? 'ml-auto' : 'max-lg:ml-auto')} role="toolbar" aria-label="This pull request">
+          <div className="ml-auto flex shrink-0 items-center gap-1" role="toolbar" aria-label="This pull request">
             {/* The two states the old icon row showed, in words: a failed re-read of GitHub (a
                 stale note, never an error — the shown data is valid; click retries) and the
                 copy confirmation. Nothing renders in the normal case. */}

@@ -12,7 +12,7 @@ import {
 import { HeaderToast, ToastLineButton } from './HeaderToasts.js';
 import { ReviewIcon } from './Icons.js';
 
-// THE DAILY AUTO-REVIEW LIMIT, as a card in the ONE header toast strip (HeaderToasts.tsx) — never a
+// THE DAILY AUTO-REVIEW LIMIT, as a card in the ONE toast cluster (HeaderToasts.tsx) — never a
 // strip or `fixed` toast of its own. Near the cap (≥ 80%, ≥ 2 used) it says how many are used;
 // at the cap it says auto reviews stopped, when they start again (the next 00:00 UTC, in local
 // time) and offers Settings at the auto-review section, where the cap is changed.

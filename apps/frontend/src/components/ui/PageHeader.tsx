@@ -1,5 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { create } from 'zustand';
+import type { ReactNode } from 'react';
 import { cx } from './cx.js';
 
 // THE PAGE HEADER (docs/redesign/DESIGN.md § 1, § 4): every destination opens on ONE slim header —
@@ -10,70 +9,18 @@ import { cx } from './cx.js';
 // body is padded by the same token (the Activity pane, the story tab) passes `inset={false}` and the
 // title still lands on the gutter; nothing else may pad a page header horizontally.
 //
-// ⚠ THE TOAST SEAT. At ≥ lg (open tabs live in the sidebar) the top bar collapses and the ONE header
-// toast strip (HeaderToasts.tsx, mounted once in App.tsx) is PORTALLED into the end of the title row
-// of the page header on screen (`usePageToastSlot`). It is the same strip moved, never a second one.
-// Below lg the slot stays empty and the strip lives in the top bar, where a SidePanel sheet measures
-// it (`[data-shell-topbar]`).
+// ⚠ ONE TOP DISTANCE, `PAGE_HEADER_TOP`, so every page title sits at the same height under the top
+// of the main content (12px on a phone, 20px from md; below lg the slim top bar sits above it on every
+// page alike). A view that cannot be a `PageHeader` (the full-screen PR detail) uses the same tokens
+// and marks its title `data-page-title`; e2e/header-geometry.spec.ts measures every destination.
+// Nothing else ever sits in the title row's top-right corner: the toasts are a bottom-right cluster
+// out of the page flow (HeaderToasts.tsx), so a toast appearing never moves a page.
 
 /** The one horizontal padding of a page: a phone's 16px, 28px from md. */
 export const PAGE_GUTTER = 'px-4 md:px-7';
 
-// The mounted page headers' toast slots, in mount order. The newest wins: a full-main overlay
-// mounts its header after the board underneath it, and unmounting it hands the strip back.
-// ⚠ A slot scrolled OUT OF VIEW is not a seat: on a page that scrolls as a whole the header leaves
-// the screen, and a toast raised then would be painted where nobody can see it. While the newest
-// slot is off screen the hook answers null, so the strip goes back to the top bar (which shows).
-const useSlots = create<{ slots: HTMLElement[]; hidden: ReadonlySet<HTMLElement> }>(() => ({
-  slots: [],
-  hidden: new Set(),
-}));
-
-/** The toast slot of the page header on screen, or null when none is mounted and in view. */
-export function usePageToastSlot(): HTMLElement | null {
-  return useSlots((s) => {
-    const el = s.slots[s.slots.length - 1];
-    return el != null && !s.hidden.has(el) ? el : null;
-  });
-}
-
-function setHidden(el: HTMLElement, hide: boolean): void {
-  useSlots.setState((s) => {
-    if (s.hidden.has(el) === hide) return s;
-    const next = new Set(s.hidden);
-    if (hide) next.add(el);
-    else next.delete(el);
-    return { hidden: next };
-  });
-}
-
-/** The toast seat on its own, for a full-main view with its own header (the PR detail tab):
- *  mounting it collapses the top bar at ≥ lg exactly as a `PageHeader` does. */
-export function PageToastSlot({ className }: { className?: string } = {}): JSX.Element {
-  const [el, setEl] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (el == null) return;
-    useSlots.setState((s) => ({ slots: [...s.slots, el] }));
-    const io =
-      typeof IntersectionObserver === 'function'
-        ? new IntersectionObserver((entries) => {
-            for (const e of entries) setHidden(el, !e.isIntersecting);
-          })
-        : null;
-    io?.observe(el);
-    return () => {
-      io?.disconnect();
-      useSlots.setState((s) => {
-        const hidden = new Set(s.hidden);
-        hidden.delete(el);
-        return { slots: s.slots.filter((x) => x !== el), hidden };
-      });
-    };
-  }, [el]);
-  // Desktop only: below lg the strip stays in the top bar. Empty, it takes no room.
-  // `ml-auto`: the seat is always at the RIGHT, even when its row wraps under a long title.
-  return <div ref={setEl} data-page-toasts className={cx('ml-auto hidden min-w-0 max-w-[min(34rem,45%)] shrink justify-end self-start lg:flex', className)} />;
-}
+/** The one top padding of a page header: 12px on a phone, 20px from md. */
+export const PAGE_HEADER_TOP = 'pt-5 max-md:pt-3';
 
 export function PageHeader({
   title,
@@ -106,21 +53,20 @@ export function PageHeader({
   testId?: string;
 }): JSX.Element {
   return (
-    <header data-testid={testId} className={cx('shrink-0 pt-5 max-md:pt-3', !flushBottom && 'pb-3', inset && PAGE_GUTTER, className)}>
+    <header data-testid={testId} className={cx('shrink-0', PAGE_HEADER_TOP, !flushBottom && 'pb-3', inset && PAGE_GUTTER, className)}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="min-w-0 max-w-full basis-full md:basis-auto md:flex-[1_0_auto]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-            <h2 id={titleId} className="min-w-0 break-words text-display text-ui-ink">
+            <h2 id={titleId} data-page-title className="min-w-0 break-words text-display text-ui-ink">
               {title}
             </h2>
             {info}
           </div>
         </div>
         {actions != null && actions !== false && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
-        <PageToastSlot />
       </div>
       {/* The line under the title takes the FULL width: inside the title's column it was squeezed
-          to a sliver by the actions and the seated toast strip beside it. */}
+          to a sliver by the actions beside it. */}
       {typeof sub === 'string' ? <p className="mt-0.5 text-body text-ui-mute">{sub}</p> : sub}
       {children}
     </header>

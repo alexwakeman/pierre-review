@@ -77,7 +77,7 @@ const PHASE_LABEL: Record<string, string> = {
   merging: 'Merging the two reviews',
 };
 
-// The global progress card for in-flight Claude reviews (in the header toast strip). Polls the active
+// The global progress card for in-flight Claude reviews (in the toast cluster). Polls the active
 // list, keeps a local record (so completed runs linger until dismissed), and lets
 // you jump straight to a review's Claude Review tab. Renders nothing when there's
 // nothing to show.
@@ -197,7 +197,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const dismissOne = (reviewId: number): void =>
     setDismissed((prev) => ({ ...prev, [reviewId]: true }));
 
-  // A card in the ONE header toast strip (HeaderToasts.tsx): one line ("2 running" / "1 ready"),
+  // A card in the ONE toast cluster (HeaderToasts.tsx): one line ("2 running" / "1 ready"),
   // the reviews in the expanded panel, and the X once nothing is still running (a running review
   // keeps its card).
   const ready = visible.length - running.length;

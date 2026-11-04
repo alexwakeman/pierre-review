@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { Checkbox, Select } from '../ui/index.js';
 import type {
   AddressedConfidence,
@@ -318,10 +319,16 @@ export function BotThreadsDetail(): JSX.Element {
   // The header row, extracted so the return can slot the SynthesisCard between it and the
   // receipts without touching either.
   const header = (
-    <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-title font-semibold text-ui-ink">
-          <ResolveIcon size={15} className="inline-block align-[-0.1em]" /> Resolve bot threads
-        </h2>
+    <PageHeader
+      inset={false}
+      testId="bot-threads-header"
+      title={
+        <>
+          <ResolveIcon size={18} className="inline-block align-[-0.1em]" /> Resolve bot threads
+        </>
+      }
+      info={
+        <>
         <InfoButton title="Resolve bot threads">
           <p>
             Lists pull requests with unresolved review-bot threads where a later commit touched the
@@ -365,7 +372,9 @@ export function BotThreadsDetail(): JSX.Element {
           />{' '}
           Refresh
         </button>
-      </div>
+        </>
+      }
+    />
   );
 
   // The deterministic receipt surface — the action bar, the table and the pager. Extracted so
@@ -663,7 +672,7 @@ export function BotThreadsDetail(): JSX.Element {
   );
 
   return (
-    <div className="space-y-4 p-4">
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this tab's exact scope (the workspace-wide
           windowless backlog, focus-repo narrowed). Under a client-side repo filter or the

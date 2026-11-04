@@ -5,7 +5,7 @@ import { useSyncActivity } from '../hooks/useSyncActivity.js';
 import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
 import { RefreshIcon } from './Icons.js';
 
-// The global ambient loading bar — a card in the header toast strip, its bar in the card's own `sync` tone, non-dismissible, visible
+// The global ambient loading bar — a card in the toast cluster, its bar in the card's own `sync` tone, non-dismissible, visible
 // whenever heavy background work is running: any FULL-MODE sync walk (first-sync
 // backfill / deep re-sync / queued-for-full, via GET /api/sync-activity), a CATCH-UP walk
 // (the same endpoint's `catchups`: an established repo more than 24h behind, which is what a
@@ -29,7 +29,7 @@ import { RefreshIcon } from './Icons.js';
 // answer; the sync modal remains the detailed one.
 //
 // It is an INDICATOR, not a dialog: no close button and no action. It renders as the LAST
-// card of the app's ONE header toast strip (HeaderToasts.tsx, mounted in App.tsx); its bar
+// card of the app's ONE toast cluster (HeaderToasts.tsx, mounted in App.tsx); its bar
 // stays on the collapsed line and the per-stage sentences show when the card expands.
 
 // ---- Pure blend/ETA math (kept here, exported, so it is testable by reading) ----------

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { Checkbox, Select } from '../ui/index.js';
 import { Segmented, TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import type { BotOnlyPrItem, BotWindowKind, User } from '@pierre-review/shared';
@@ -266,9 +267,13 @@ export function BotOnlyPrsDetail(): JSX.Element {
   };
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-title font-semibold text-ui-ink">Bot-only PRs</h2>
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="bot-only-prs-header"
+        title="Bot-only PRs"
+        info={
+          <>
         <InfoButton title="Bot-only PRs">
           <p>
             Pull requests that only a bot has reviewed: no person has left a review or a comment.
@@ -327,7 +332,9 @@ export function BotOnlyPrsDetail(): JSX.Element {
           />{' '}
           Refresh
         </button>
-      </div>
+          </>
+        }
+      />
 
       {isLoading ? (
         <div className="space-y-2">

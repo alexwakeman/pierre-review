@@ -149,7 +149,7 @@ test.describe('Pending: one line per item, the event-first card in the panel', (
     await expect(row(page)).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('Enter opens the selected row, and e dismisses it with an Undo in the header strip', async ({ page }) => {
+  test('Enter opens the selected row, and e dismisses it with an Undo in the toast cluster', async ({ page }) => {
     await openMyTurn(page);
     await expect(row(page)).toBeVisible();
     await page.getByRole('listbox', { name: 'Pending items' }).focus();
@@ -161,6 +161,65 @@ test.describe('Pending: one line per item, the event-first card in the panel', (
     await dismissed;
     await expect(page.getByTestId('undo-toast')).toContainText('until something new happens on it');
   });
+
+  // THE ONE TOAST CLUSTER (docs/FRONTEND.md § There is ONE toast cluster): bottom right of the main
+  // content, out of the page flow — a toast appearing never moves the page — and its panel opens UP
+  // and LEFT from it. Below md it sits above the bottom bar, and above a sheet so the Undo is reachable.
+  for (const vp of [
+    { w: 1440, h: 900 },
+    { w: 390, h: 844 },
+  ]) {
+    test(`the Undo is a circle at the bottom right whose panel opens up and left — ${vp.w}×${vp.h}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h });
+      await openMyTurn(page);
+      await expect(row(page)).toBeVisible();
+      const title = page.locator('[data-page-title]').first();
+      const titleTop = (await title.boundingBox())!.y;
+      await expect(page.getByTestId('header-toast-cluster')).toBeHidden();
+      await page.getByRole('listbox', { name: 'Pending items' }).focus();
+      await page.keyboard.press('j');
+      await page.keyboard.press('Enter');
+      await expect(panel(page)).toBeVisible();
+      // The panel's own Dismiss (a sheet below lg): its Undo must stay reachable over the sheet.
+      await panel(page).getByRole('button', { name: /^Dismiss/ }).click();
+      const cluster = page.getByTestId('header-toast-cluster');
+      await expect(cluster).toBeVisible();
+      await expect(page.getByTestId('undo-toast')).toBeAttached();
+      // The dismissed item's panel closes; once it has, nothing is under the cluster.
+      await expect(panel(page)).toHaveCount(0);
+      await page.waitForTimeout(300);
+      // Nothing above the list moved.
+      expect((await title.boundingBox())!.y).toBe(titleTop);
+      const c = (await cluster.boundingBox())!;
+      // Bottom right of the main content.
+      expect(vp.w - (c.x + c.width)).toBeLessThanOrEqual(16);
+      if (vp.w < 768) {
+        const bar = (await page.getByTestId('bottom-bar').boundingBox())!;
+        expect(c.y + c.height).toBeLessThanOrEqual(bar.y);
+      } else {
+        expect(vp.h - (c.y + c.height)).toBeLessThanOrEqual(80);
+      }
+      await page.screenshot({ path: `test-results/toast-cluster-${vp.w}.png` });
+      // The panel: its bottom-right corner on the cluster's top-right corner, growing up and left.
+      await cluster.click();
+      const p = page.getByTestId('header-toast-panel');
+      await expect(p).toBeVisible();
+      await expect(page.getByTestId('undo-toast-panel')).toBeVisible();
+      await page.waitForTimeout(250);
+      const b = (await p.boundingBox())!;
+      expect(Math.abs(b.x + b.width - (c.x + c.width))).toBeLessThanOrEqual(1);
+      expect(b.y + b.height).toBeLessThanOrEqual(c.y);
+      expect(c.y - (b.y + b.height)).toBeLessThanOrEqual(8);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      // Never past the main content's left edge.
+      const main = (await page.locator('[data-shell-main]').boundingBox())!;
+      expect(b.x).toBeGreaterThanOrEqual(main.x);
+      await page.screenshot({ path: `test-results/toast-panel-${vp.w}.png` });
+      await page.keyboard.press('Escape');
+      await expect(p).toBeHidden();
+      await expect(cluster).toBeFocused();
+    });
+  }
 
   test('a double-click goes straight to the thread: the PR’s own tab, on Changes', async ({ page }) => {
     await openMyTurn(page);

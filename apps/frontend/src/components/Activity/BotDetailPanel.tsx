@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import type { BotBehaviourAnomaly, BotBehaviourBotStat, BotBehaviourMlBot } from '@pierre-review/shared';
 import { usePinnedTabs, parseBotDetailKey } from '../../store/pinnedTabs.js';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
@@ -388,13 +389,20 @@ export function BotDetailPanel(): JSX.Element {
   }
 
   return (
-    <div className="space-y-3 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="inline-flex items-center gap-1.5 text-title font-semibold text-ui-ink">
-          <BotIcon size={15} />
-          {label}
-          <span className="font-normal text-ui-faint"> · depth</span>
-        </h2>
+    <div className={`space-y-3 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="bot-detail-header"
+        title={
+          <span className="inline-flex items-center gap-2">
+            <BotIcon size={18} />
+            <span>
+              {label}
+              <span className="font-normal text-ui-faint"> · depth</span>
+            </span>
+          </span>
+        }
+        info={
         <InfoButton title={`${label}: depth`}>
           <p>How this bot behaves over time. No AI is involved.</p>
           <ul className="list-disc space-y-1 pl-5">
@@ -402,12 +410,12 @@ export function BotDetailPanel(): JSX.Element {
             <li>Times are UTC. Gaps in activity are inferred, not a direct rate-limit signal.</li>
           </ul>
         </InfoButton>
-        {botMeta?.repoId != null && (
-          <span className="text-meta text-ui-mute">
-            Measured on the repo the pill was opened from.
-          </span>
-        )}
-        <div className="ml-auto inline-flex overflow-hidden rounded-ui">
+        }
+        sub={
+          botMeta?.repoId != null ? 'Measured on the repo the pill was opened from.' : undefined
+        }
+        actions={
+        <div className="inline-flex overflow-hidden rounded-ui">
           {WINDOWS.map((wOpt) => (
             <button
               key={wOpt.key}
@@ -423,7 +431,8 @@ export function BotDetailPanel(): JSX.Element {
             </button>
           ))}
         </div>
-      </div>
+        }
+      />
       {body}
     </div>
   );

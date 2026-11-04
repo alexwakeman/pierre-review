@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { PAGE_GUTTER, PAGE_HEADER_TOP, PageHeader } from '../ui/PageHeader.js';
 import { FEED_WINDOW_DAYS } from '@pierre-review/shared';
 import { usePinnedTabs, parseUserActivityKey } from '../../store/pinnedTabs.js';
 import { useUsers } from '../../hooks/useTimeline.js';
@@ -41,54 +42,61 @@ export function UserActivityDetail(): JSX.Element {
 
   if (userId == null) {
     return (
-      <div className="p-4 text-body text-ui-mute">
+      <div className={`${PAGE_HEADER_TOP} ${PAGE_GUTTER} text-body text-ui-mute`}>
         No contributor selected.
       </div>
     );
   }
 
+  const avatar = avatarUrl ? (
+    <img
+      src={avatarUrl}
+      width={28}
+      height={28}
+      alt=""
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className="h-7 w-7 shrink-0 rounded-full bg-ui-raise"
+    />
+  ) : (
+    <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-mute">
+      {(label[0] ?? '?').toUpperCase()}
+    </span>
+  );
+
   return (
-    <div className="space-y-3 p-4">
-      <div className="flex flex-wrap items-center gap-2.5">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            width={32}
-            height={32}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            className="h-8 w-8 shrink-0 rounded-full bg-ui-raise"
-          />
-        ) : (
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-mute">
-            {(label[0] ?? '?').toUpperCase()}
+    <div className={`space-y-3 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="user-activity-header"
+        title={
+          <span className="inline-flex items-center gap-2.5">
+            {avatar}
+            <span>
+              {label}
+              <span className="font-normal text-ui-faint"> · activity</span>
+            </span>
           </span>
-        )}
-        <h2 className="text-title font-semibold text-ui-ink">
-          {label}
-          <span className="font-normal text-ui-faint"> · activity</span>
-        </h2>
-        {/* The scope caption is a FIXED string now, and deliberately so: the feed below covers
-            every repo in the active Workspace. It used to name the FilterBar's per-repo
-            visibility, which is a Timeline-board filter the feed no longer honours — a caption
-            reading "across 2 repos" over a Workspace-wide feed is worse than no caption. */}
-        <span className="text-meta text-ui-faint">
-          last {FEED_WINDOW_DAYS} days · across this Workspace · merge/close rows are PRs they authored
-        </span>
-        {githubUrl && (
-          <a
-            href={githubUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="hit bg-ui-raise ml-auto inline-flex items-center gap-0.5 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
-            title={`@${login} on GitHub`}
-          >
-            GitHub
-            <ExternalLinkIcon size={10} />
-          </a>
-        )}
-      </div>
+        }
+        // The scope caption is a FIXED string, and deliberately so: the feed below covers every repo
+        // in the active Workspace. It used to name the FilterBar's per-repo visibility, which is a
+        // Timeline-board filter the feed no longer honours.
+        sub={`Last ${FEED_WINDOW_DAYS} days · across this Workspace · merge/close rows are PRs they authored`}
+        actions={
+          githubUrl != null && (
+            <a
+              href={githubUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="hit bg-ui-raise inline-flex items-center gap-0.5 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
+              title={`@${login} on GitHub`}
+            >
+              GitHub
+              <ExternalLinkIcon size={10} />
+            </a>
+          )
+        }
+      />
 
       {/* The feed itself — the shared FeedView, scoped to this one actor. It skips the
           server "seen" marker, the new-item auto-insert and the "New" marker under a userIds scope. */}

@@ -309,7 +309,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   (`Timeline/PrPopover.tsx`, below) and "Open details" opens the PR's own tab. **App lands on Activity → Open PRs by
   default** (a bare load → `?view=activity`; Pending is `?view=activity&activityRepo=attention`;
   `?pr=`/`?thread=` deep links keep the timeline).
-- **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a header toast card fed by `GET /api/auto-merge`. One row per armed PR from the click that
+- **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a toast-cluster circle fed by `GET /api/auto-merge`. One row per armed PR from the click that
   arms, through the watcher's `phase`, to the outcome — see "The armed-merge progress stack"
   below and docs/MERGE-CI-TRUNK.md.
 - **Tabs / board slot** (`PinnedTabsBar` + `App.tsx`). `<main>` renders exactly ONE
@@ -799,8 +799,7 @@ and author-first.
 `[]` reads "No ticket found") only when the PR has a tracker (`tickets != null`); "Branch"
 (`PrBranchLine` — the head branch in monospace, a muted `→ base`, and a `CopyButton` for the HEAD name
 only, bare, no fork owner) on its own row under it, only when the head has synced. Long names
-`break-all`. The full-screen PR detail's top spacing matches the story tab's (§ ONE header toast strip:
-it hosts the strip through `PageToastSlot`). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
+`break-all`. The full-screen PR detail's title sits where every page title sits (§ One page header). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
 
 **The Overview's AI REVIEW sits just above the Checks row** (2026-11-04; `pr/PrOverviewAiReview.tsx`,
 passed to `ChecksTab` as `aiReview`): the SAME facts as the Open PRs side panel — it renders
@@ -4118,8 +4117,7 @@ landmines:
   `seedEditLines` (`useRegionEdit`'s module map, with a listener so a mounted pane re-reads it).
   ⚠ **HIDE, never disable.**
 - **The overlay mounts in `App.tsx`, not inside `PrDetail`** — it opens from three places and must
-  not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above an expanded header toast's
-  `z-50`), not a scrim: a translucent backdrop over a live timeline is unreadable at 12px.
+  not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above the toast cluster's `z-[51]`), not a scrim: a translucent backdrop over a live timeline is unreadable at 12px.
 - ⚠ **THERE IS NO URL KEY, NO HISTORY ENTRY AND NO `PrDetailTab` MEMBER, DELIBERATELY.** A
   `?prTab=conflicts` would make Back a way to lose work — a `popstate` cannot be cancelled and the
   only guard available is `useUrlState.ts`'s documented permanent-no-op trap — and it would make the
@@ -4283,7 +4281,7 @@ landmines:
   gutter-arrow rule below — the arrow is still the one per-CHANGE route to a side; these name the
   FILE so the two never announce alike. Not the wand either: the wand never picks a side because it
   acts for the reader, and this is the reader picking one.
-- **`ClosedResolverToast` is a card in the ONE header toast strip**, never its own `fixed`
+- **`ClosedResolverToast` is a circle in the ONE toast cluster**, never its own `fixed`
   element; Reopen stays on its one line.
 - The `--mr-*` state washes and the shared `--code-hl-*` syntax colours, with their hand-run guards:
   see **The AI-surface palette** above.
@@ -5093,22 +5091,36 @@ shared between the header sync button and the WorkspaceManager's embedded progre
 - **Adding a repo from the manager AUTO-SWITCHES the active workspace to the destination** once
   the move commits — the "synced fine but nothing loaded" fix; the scope used to stay behind.
 
-## There is ONE header toast strip (`HeaderToasts.tsx`) + `GlobalLoadingBar`
+## There is ONE toast cluster (`HeaderToasts.tsx`, bottom right) + `GlobalLoadingBar`
 
-⚠ **Never add an independent `fixed` toast element, and never a second strip.** The old
-bottom-right column (itself the fix for three `fixed bottom-4 right-4` elements painting over
-each other) is GONE: every toast is now a circle in ONE cluster at the top right, in
-`<HeaderToastStrip>`, which fills the right of the slim `TopBar` (components/shell/TopBar.tsx; the
-controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
-foot). App.tsx mounts, left to right: `UndoToast` (FIRST — it lives seconds and must be reachable
-now; last, a merge pill pushed it past the bar's clipped edge at 768px), the Claude reviews frame,
-`AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`, `DependencyMergeToast`,
-`AutoMergeBanner`, `GlobalLoadingBar`. ⚠ A `SidePanel` SHEET starts BELOW the top bar (`[data-shell-topbar]`), never over
-it, so the Undo for an action taken in the sheet stays on screen; an expanded card is `z-[60]`.
-On lg+ a page with its own header seats the strip there and the empty top bar hides: `PageHeader`
-(the story tab) and the full-screen PR detail tab, both through `PageToastSlot`. The bottom PR pane on
-the Timeline never hosts it.
+⚠ **Never add an independent `fixed` toast element, and never a second strip.** Every toast is a
+circle in ONE cluster, `<HeaderToastStrip>` (the component names keep "Header" from when it lived in
+the top bar / a page header's toast seat; both are GONE, 2026-11-04), mounted ONCE by App.tsx OUTSIDE
+the page flow and FIXED AT THE BOTTOM RIGHT of the main content. App.tsx mounts the jobs: `UndoToast`,
+the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`,
+`DependencyMergeToast`, `AutoMergeBanner`, `GlobalLoadingBar` — the circles' left-to-right order is
+`toastRank`, not this mount order.
 
+- **WHERE IT SITS, AND WHY NOTHING MOVES.** `data-testid="toast-dock"`: `position: fixed`,
+  `right: max(12px, safe-area-inset-right)`, `bottom: 12px + safe-area-inset-bottom` — and below md
+  `68px + safe-area-inset-bottom`, ABOVE the phone's bottom bar (`h-14`), never over it. The dock is
+  `pointer-events-none` (only the cluster button and the panel take clicks) and an EMPTY cluster is
+  `hidden`, never unmounted (the circles portal into it): it takes no space, catches no click, and —
+  being out of the flow — a toast appearing or going never moves a pixel of any page. The cluster
+  itself is a floating pill (`bg-ui-bg`, `ring-1 ring-ui-line`, `shadow-lg` — DESIGN.md § 4: floating
+  things get the shadow).
+- **IT RISES OVER A PINNED ACTION BAR** (`useToastLift`, `components/ui/toastObstacles.ts`; pure half
+  `toastLift`, lib/toastAnchor.ts). A `SidePanel` footer (docked at lg+, a sheet below) registers
+  itself while mounted; when one reaches the cluster's corner (its right edge within 160px of the
+  viewport's right) and sits at the viewport's bottom, the cluster's `bottom` becomes that bar's
+  height + 8px, so it never sits on Merge / Dismiss. Re-measured on register, resize, a
+  `ResizeObserver`, any scroll and `animationend`; an open panel re-anchors when the lift changes.
+- **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` sheet (`z-50`), so the Undo for an action
+  taken in a sheet (Dismiss, Approve, Merge) is always reachable; BELOW the mobile drawer
+  (`z-[55]`/`[56]`), the modals (Settings, Help, the sync-progress modal, `InfoModal` — all `z-[60]`
+  now; Settings/Help/SyncProgress were `z-50` and would have sat under the cluster), popovers
+  (`UserProfilePopover`, `MarkerPopover` → `z-[60]`), the resolver (`z-[60]`) and the workspace manager
+  (`z-[80]`). The expanded panel is `z-[60]`.
 - **THE DAILY AUTO-REVIEW LIMIT** (`AutoReviewCapToast`, pure half `lib/autoReviewCap.ts`): reads the
   auto-review GET's `usage` (`useWorkspaceAutoReview`, the Open PRs counter's query; re-read once a
   minute while auto review is on). `autoReviewCapState` folds it: **near** at ≥ 80% of the cap AND
@@ -5121,35 +5133,34 @@ the Timeline never hosts it.
   store keeps it for the session only).
 - **A CLUSTER OF CIRCLES, ONE PER ACTIVE JOB** (2026-11-02; it replaced the row of one-line cards).
   Each job component still renders ONE `HeaderToast`, which PORTALS a 28px circle into the cluster
-  button and, while the panel is open, its section into the panel. A circle is the job's icon, a
-  PROGRESS RING when `progress` is set, a COUNT BADGE (`count`), and a red ring + dot when `alert`
-  (a failed merge or AI fix, failed dependency results, the AI budget pause). Circles overlap like an
-  avatar stack; `toastRank` (lib/toastAnchor.ts) puts alert > on-line action (Undo, Reopen) >
-  progress > the rest, newest first within a tier, furthest RIGHT and on top — and the panel lists
-  the sections in that same order, top down. Each circle keeps its words `sr-only` (the live region
-  announces a circle appearing; `undo-toast` etc. test ids sit on the circle, the section is
-  `<testId>-panel`). ⚠ **The cluster's click is a NATIVE listener**: a React `onClick` on the button
-  never fires for a click on a portalled circle (React bubbles through the job's own tree).
-- **THE CLUSTER IS ALWAYS AT THE RIGHT.** The top bar's toast box is `ml-auto` and so is
-  `PageToastSlot`: at lg+ on a page with no toast seat of its own (Implement story) every other child
-  of the bar is hidden, and without it the cluster sat at the LEFT of the content.
-- **THE TOP BAR HAS A FIXED HEIGHT** (`h-11`, no vertical padding, `TopBar`); the cluster is 32px
-  inside it and an empty cluster is `hidden`, never unmounted (the circles portal into it), so a job
-  appearing never moves the page.
-- **CLICK EXPANDS, LEFTWARDS.** The cluster is one `<button aria-expanded aria-controls>`. The panel
-  (`data-testid="header-toast-panel"`) is `position: fixed`, `z-[60]`, its right edge on the
-  cluster's, and it grows LEFT as far as its content needs but never past the main content's left
-  edge (`anchorClusterPanel`; `[data-shell-main]` in App.tsx, so the docked sidebar's edge, or the
-  viewport gutter when the sidebar is a drawer); past that it truncates/wraps, and past
-  `TOAST_PANEL_MAX_H` (560px) it scrolls. It unfolds from the right (`animate-ui-unfold-left`,
+  button and its section into the panel. A circle is the job's icon, a PROGRESS RING when `progress`
+  is set, a COUNT BADGE (`count`), and a red ring + dot when `alert` (a failed merge or AI fix, failed
+  dependency results, the AI budget pause). Circles overlap like an avatar stack; `toastRank`
+  (lib/toastAnchor.ts) puts alert > on-line action (Undo, Reopen) > progress > the rest, newest first
+  within a tier, furthest RIGHT and on top — and the panel lists the sections in that same order, top
+  down. Each circle keeps its words `sr-only` (the live region announces a circle appearing;
+  `undo-toast` etc. test ids sit on the circle, the section is `<testId>-panel`). ⚠ **The cluster's
+  click is a NATIVE listener**: a React `onClick` on the button never fires for a click on a
+  portalled circle (React bubbles through the job's own tree).
+- **CLICK EXPANDS, UP AND LEFT.** The cluster is one `<button aria-expanded aria-controls>`. The panel
+  (`data-testid="header-toast-panel"`) is `position: fixed`, `z-[60]`, its BOTTOM-RIGHT corner on the
+  cluster's top-right corner (`TOAST_PANEL_GAP` 6px above it): it grows LEFT as far as its content
+  needs but never past the main content's left edge (`[data-shell-main]` in App.tsx, so the docked
+  sidebar's edge, or the viewport gutter when the sidebar is a drawer), and UP but never past the
+  viewport's top less `TOAST_GUTTER` (8px) — `anchorClusterPanel` (lib/toastAnchor.ts, pinned by
+  `test/toastClusterAnchor.test.ts`), which returns CSS `bottom`/`right`. Past the width it
+  truncates/wraps; past `TOAST_PANEL_MAX_H` (560px) or the room above the cluster (never below
+  `TOAST_PANEL_MIN_H`, 120px) it scrolls. It unfolds from the bottom-right (`animate-ui-unfold-up`,
   `motion-safe` only). Opening moves focus into the panel; it closes on a second click on the
   cluster, a press anywhere outside both, Escape (focus back to the cluster), a resize or an outside
   scroll. ⚠ While open it HOLDS THE ONE POPOVER SLOT (`claimActivePopover`) and takes Escape in the
   window CAPTURE phase, stopped — so the page's single-letter shortcuts stand down, a drawer's own
-  Escape does not fire under it, and a modal opening over it closes it. Each section is laid out the same: icon · label · summary · [on-line action] · [X], then
-  its progress bar, its rows (`ToastList` + `ToastRow`), its `footer`. The detail is MOUNTED ONLY
-  WHILE OPEN. ⚠ An Undo now takes two clicks (cluster, then Undo); its circle ranks just under an
-  alert so it is the one on top.
+  Escape does not fire under it, and a modal opening over it closes it. Each section is laid out the
+  same: icon · label · summary · [on-line action] · [X], then its progress bar, its rows (`ToastList`
+  + `ToastRow`), its `footer`. The sections are ALWAYS MOUNTED (the shut panel is `hidden`): an AI Fix
+  row drives its run's status stream. ⚠ An Undo takes two clicks (cluster, then Undo); its circle
+  ranks just under an alert so it is the one on top. `e2e/pending-cards.spec.ts` pins the corner, the
+  bottom bar clearance, the up-and-left panel and that the page title does not move.
 - ⚠ **THE PANEL IS ITS OWN ONE SCROLLER, `overscroll-behavior: contain`, AND THE ROOT IS
   `overscroll-behavior: none`** (`index.css`). A fixed box's scroll parent is the VIEWPORT, so a
   wheel the panel could not use chained to the root and became macOS's ELASTIC OVERSCROLL (the shell
@@ -5263,6 +5274,39 @@ fade-out.
 `backfillFinishing` (rows still listed but every walk at ~100%, `remaining <= 0.01`) suppresses
 the countdown: the post-walk tails (ML-label purge, CI-history backfill) leave no drain to
 estimate, and a "~5 sec left" would sit frozen for minutes.
+
+---
+
+## One page header: one title position on every page
+
+Every full page and full-main overlay opens on the SAME title row (DESIGN.md § 1 "one header"):
+`PageHeader` (`components/ui/PageHeader.tsx`) — the title (`text-display`, marked `data-page-title`)
+with its ⓘ / chips beside it (`info`), the page's actions at the row's end, one line or the page's
+facts under it (`sub`), then its tabs/toolbar (`children`). Its geometry is TWO tokens:
+`PAGE_GUTTER` (`px-4 md:px-7`) and `PAGE_HEADER_TOP` (`pt-5 max-md:pt-3`). A page whose body is
+already padded by `PAGE_GUTTER` passes `inset={false}`.
+
+- **Who uses it** (2026-11-04): Pending, Open PRs, Feed, Docs, Reports, Bots Monitoring, This Sprint,
+  the Timeline (FilterBar — now on a phone too), the repository console (its title is the repo's
+  name, the Activity | Bots tabs under it), the story tab, Implement (StoryBuildHeader — the ticket
+  title FIRST; "Implement · ACME-1 · Open ticket", the steps and the status line moved under it),
+  a person's activity, a bot's depth tab, Flow metrics, the bot drill-downs (Bot Drill-Down,
+  Bot-only PRs, Resolve bot threads, What the bots are flagging, Bot comments per merged PR), a
+  theme's threads and Search. These overlays used to pad `p-4` with a `text-title` heading.
+- **The full-screen PR detail is the one view that is not a `PageHeader`** (its title truncates,
+  its meta line and tabs are its own); it uses the SAME two tokens and marks its `h2`
+  `data-page-title`. The bottom PR pane keeps its own compact header.
+- **THE SLIM TOP BAR IS `lg:hidden` ON EVERY PAGE** (`TopBar`): at lg+ the sidebar holds the menu,
+  the location and the open tabs, so the bar would be empty. Below lg it shows on every page alike
+  (menu button + location, + open tabs md–lg), so the title's offset is the same everywhere: measured
+  from `[data-shell-main]`'s top, **20px at lg+**, **56px below lg** (44px bar + 12px on a phone;
+  44 + 20 from md), x = the gutter (28px md+, 16px phone).
+- **Measured, not hand-matched**: `e2e/header-geometry.spec.ts` opens 14 destinations at 1440×900
+  and 390×844 and asserts every `[data-page-title]` sits at the same top and left (±1px). A new page
+  without `PageHeader` (or a stray top padding, or a toast seat) fails it. Settings is a DIALOG over
+  the page, not a destination, and keeps its own dialog header.
+- **Nothing ever sits in a header's top-right corner for the shell's sake**: there is no toast seat
+  (the old `PageToastSlot` / `usePageToastSlot` are deleted) — the toasts are the bottom-right cluster.
 
 ---
 

@@ -4,7 +4,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { BotIcon, GearIcon } from '../Icons.js';
 import { Tabs } from '../ui/Tabs.js';
-import { PAGE_GUTTER, PageToastSlot } from '../ui/PageHeader.js';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { openWorkspaceManager } from '../WorkspaceSelector.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
@@ -40,9 +40,9 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
   const isolated = useFilters((s) => s.feedIsolatedPrId != null);
   return (
     <div className="space-y-3" data-testid="repo-console">
-      {/* The tabs row is this page's header: it takes a PageHeader's top padding and holds the
-          toast seat, so the empty top bar collapses at ≥ lg as on every other page. */}
-      <div className="flex items-start gap-3 pt-5 max-md:pt-3">
+      {/* The page header: the repo's name, then its Activity | Bots tabs. */}
+      <PageHeader inset={false} title={repo.repoFullName} testId="repo-console-header">
+        <div className="mt-3">
         <Tabs
           label="Repository views"
           value={tab}
@@ -52,8 +52,8 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
             { id: 'bots', label: 'Bots', icon: <BotIcon size={13} /> },
           ]}
         />
-        <PageToastSlot className="ml-auto" />
-      </div>
+        </div>
+      </PageHeader>
       {tab === 'activity' ? (
         <>
           {/* What the sidebar row's red and blue dots mean for THIS repo, as plain facts (no

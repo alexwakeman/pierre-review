@@ -34,7 +34,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ui-scrim/40 sm:items-center sm:p-4 motion-safe:animate-ui-fade"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-ui-scrim/40 sm:items-center sm:p-4 motion-safe:animate-ui-fade"
       onClick={onClose}
       role="presentation"
     >

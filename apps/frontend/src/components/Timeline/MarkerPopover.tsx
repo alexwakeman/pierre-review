@@ -505,7 +505,7 @@ export function MarkerPopover({
         {...getFloatingProps()}
         onPointerUp={persistSize}
         data-testid="marker-popover"
-        className="z-50 flex flex-col rounded-ui bg-ui-surface shadow-xl"
+        className="z-[60] flex flex-col rounded-ui bg-ui-surface shadow-xl"
       >
         <div className="tl-modal-header" onPointerDown={onDragStart}>
           <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">

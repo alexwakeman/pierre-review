@@ -17,7 +17,7 @@ import { WandIcon } from './Icons.js';
 // Where an agentic AI-Fix run is watched from once the reader has left the pane that started
 // it — a paid agent run must never be running with no visible sign of it.
 //
-// A card in the ONE header toast strip (HeaderToasts.tsx) — never its own `fixed` element.
+// A card in the ONE toast cluster (HeaderToasts.tsx) — never its own `fixed` element.
 //
 // ⚠ NO CHIME AND NO BROWSER NOTIFICATION, deliberately, and unlike ClaudeReviewBanner. A CI fix
 // is started from a pane the reader is looking at, seconds earlier, by their own click; the

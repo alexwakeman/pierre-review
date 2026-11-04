@@ -9,6 +9,7 @@ import { AiRunLabel } from '../AiRunLabel.js';
 import { InfoButton } from '../InfoModal.js';
 import { TrackerLinkOut } from '../TrackerLinkOut.js';
 import { cx } from '../ui/cx.js';
+import { PageHeader } from '../ui/PageHeader.js';
 
 // THE BUILD TAB'S HEADER: what the tab does ("Implement" or "Fill gaps", `storyBuildActionOf`), the ticket key, "Open story", "Open in <tracker>", the title, who ran it, what
 // it cost so far (ONE formatter, `useRunCostText` — US$ on an API key, a share of the week on a
@@ -47,8 +48,38 @@ export function StoryBuildHeader({
   const action = storyBuildActionOf(build, node, offered);
   const fill = action === 'fill_gaps';
   return (
-    <header data-testid="story-build-header" className="pt-5 max-md:pt-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
+    // THE PAGE HEADER (components/ui/PageHeader.tsx): the ticket's title first, at the one page
+    // title position, then what the tab does and the ticket, the steps and the status under it.
+    <PageHeader
+      inset={false}
+      testId="story-build-header"
+      title={shownTitle ?? ticketKey}
+      info={
+      <InfoButton title={fill ? 'Fill the gaps in this ticket' : 'Implement this ticket'}>
+        {fill ? (
+          <p>
+            The story check found criteria the pull requests do not meet yet. The AI plans only those gaps, across up to four
+            repositories, and builds each one on its own branch, in plan order. A criterion the check could not judge counts as a
+            gap. You can change the plan by chat before anything is built.
+          </p>
+        ) : (
+          <p>
+            The AI reads the story and the code, writes a plan across up to four repositories, and builds each one on its own
+            branch, in plan order. You can change the plan by chat before anything is built.
+          </p>
+        )}
+        <p>Nothing is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.</p>
+        <p>
+          If you ask it to check the docs, the story wins: where the docs say something else, the point is listed as
+          changed by the story, never as a fix to the story.
+        </p>
+        <p>The AI has no shell. It can run the project&rsquo;s own tests only when you tick Run tests.</p>
+      </InfoButton>
+      }
+      actions={actions}
+      sub={
+        <>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
         <span data-testid="story-build-action" data-action={action} className="font-semibold text-ui-ink">
           {STORY_BUILD_ACTION_WORDS[action]}
         </span>
@@ -61,32 +92,6 @@ export function StoryBuildHeader({
           Open ticket
         </button>
         {node != null && <TrackerLinkOut url={node.url} provider={node.provider} />}
-      </div>
-      <div className="mt-1 flex flex-wrap items-start gap-x-3 gap-y-2">
-        <h2 className="flex min-w-0 flex-1 items-center gap-2 break-words text-display text-ui-ink">
-          <span className="min-w-0">{shownTitle ?? ticketKey}</span>
-          <InfoButton title={fill ? 'Fill the gaps in this ticket' : 'Implement this ticket'}>
-            {fill ? (
-              <p>
-                The story check found criteria the pull requests do not meet yet. The AI plans only those gaps, across up to four
-                repositories, and builds each one on its own branch, in plan order. A criterion the check could not judge counts as a
-                gap. You can change the plan by chat before anything is built.
-              </p>
-            ) : (
-              <p>
-                The AI reads the story and the code, writes a plan across up to four repositories, and builds each one on its own
-                branch, in plan order. You can change the plan by chat before anything is built.
-              </p>
-            )}
-            <p>Nothing is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.</p>
-            <p>
-              If you ask it to check the docs, the story wins: where the docs say something else, the point is listed as
-              changed by the story, never as a fix to the story.
-            </p>
-            <p>The AI has no shell. It can run the project&rsquo;s own tests only when you tick Run tests.</p>
-          </InfoButton>
-        </h2>
-        {actions != null && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
       <ol aria-label="Steps" data-testid="story-build-steps" className="mt-2 flex flex-wrap items-center gap-x-1.5 text-meta">
         {steps.map((s, i) => (
@@ -130,6 +135,8 @@ export function StoryBuildHeader({
           )}
         </p>
       )}
-    </header>
+        </>
+      }
+    />
   );
 }

@@ -172,8 +172,8 @@ GitHub Release on the public repo (or the Hugging Face Hub). `build-release.mjs`
 `~/.limn/models/<version>/` (stream to a temp dir, verify sha256, atomic rename, never a partial
 directory), so a model bump is a new directory and an old one is swept.
 
-**Trigger.** `limn ml install` + a setup line in the SPA, with progress in the ONE header toast
-strip. Decision below on whether to start it without a click.
+**Trigger.** `limn ml install` + a setup line in the SPA, with progress in the ONE toast
+cluster. Decision below on whether to start it without a click.
 
 **Built**, with three deviations from the plan above:
 - **The installer was not generalised.** `ml/runtime.ts` is its own module and reuses the AI

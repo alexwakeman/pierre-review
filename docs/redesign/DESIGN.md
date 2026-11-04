@@ -77,7 +77,8 @@ Rules:
 - **One radius: `rounded-ui` (6px)** for rows, buttons, inputs, menus, panels. Exceptions: full
   circles (avatars, dots, radios), the palette dialog (10px), sheet tops on a phone (`rounded-t-xl`).
 - Spacing on the 4px grid. Row padding `px-3`; panel padding `px-5` (`px-4` on a phone); page
-  header `px-7 pt-5 pb-3`; gaps 8 / 12 / 16.
+  header `PAGE_GUTTER` + `PAGE_HEADER_TOP` + `pb-3` (16px / 12px on a phone, 28px / 20px from md),
+  the same on every page (docs/FRONTEND.md § One page header); gaps 8 / 12 / 16.
 - **Row height: `h-row` 36px; `touch:h-row-touch` 44px** on a coarse pointer.
 - Controls: 32px (`md`) / 28px (`sm`) on desktop; ≥ 40px (`touch:`) on touch.
 - Sidebar `w-sidebar` 232px; docked side panel `w-panel` 400px.
@@ -152,7 +153,7 @@ All in `components/ui/`, exported from `components/ui/index.ts`.
 - **`CommandPalette` + `useRegisterCommands` / `useCommandProvider`** — ⌘K. Screens register their
   commands while mounted.
 - **`removeOptimistically` / `useOptimisticList` / `UndoToast` / `undoLast`** — instant removal with
-  Undo through the ONE header toast strip.
+  Undo through the ONE toast cluster.
 - **`Kbd`**, `cx`, `FOCUS_RING`, `useIsDesktop` / `useIsPhone` / `useReducedMotion`, `shortcutBlocked`.
 
 Still the rule, unchanged: explanation behind `InfoButton` (ⓘ, click not hover); every icon from
@@ -196,8 +197,8 @@ why ("Can't merge: conflicts with main") — never a silent no-op, never an erro
 
 ## 9. Feedback
 
-- **Optimistic removal**: the row slides out (170ms), counts drop at once, an Undo card appears in
-  the header strip for 8s. `immediate` mode for writes with an inverse (dismiss ↔ restore);
+- **Optimistic removal**: the row slides out (170ms), counts drop at once, an Undo circle appears in
+  the ONE toast cluster (bottom right, out of the page flow) for 8s. `immediate` mode for writes with an inverse (dismiss ↔ restore);
   `deferred` for writes without one (merge) — the write fires when the offer ends, and the card says
   "Merging" not "Merged".
 - On failure the row returns and the reason shows where the row is.

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import { Tabs } from '../ui/index.js';
 import type {
@@ -474,11 +475,13 @@ export function BotPrsDetail(): JSX.Element {
   };
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-title font-semibold text-ui-ink">
-          Bot Drill-Down
-        </h2>
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="bot-prs-header"
+        title="Bot Drill-Down"
+        info={
+          <>
         <span className="text-meta text-ui-faint">
           {view === 'comments'
             ? `What ${activeLabel ?? 'an automated reviewer'} said in the window`
@@ -521,7 +524,9 @@ export function BotPrsDetail(): JSX.Element {
           />{' '}
           Refresh
         </button>
-      </div>
+          </>
+        }
+      />
 
       {analytics.isLoading ? (
         <div className="space-y-2">

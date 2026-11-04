@@ -633,8 +633,8 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
 /**
  * Does this press, while the drawer is docked open, close it? Not when it lands in the drawer, on a PR
  * row, on a control inside the list (a group's fold, a ticket link), on "Show more", in a popover or
- * menu portalled out of the drawer (`data-floating-layer`), in a modal, in the top bar (its toast
- * strip holds Undo), or on a scrollbar.
+ * menu portalled out of the drawer (`data-floating-layer` — the toast cluster carries it too, so an
+ * Undo press keeps the drawer), in a modal, in the top bar, or on a scrollbar.
  */
 export function pressClosesDrawer(
   e: Pick<PointerEvent, 'target' | 'clientX' | 'clientY'>,

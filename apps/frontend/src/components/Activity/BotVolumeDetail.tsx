@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import type { BotVolumePrRow, BotVolumePrSort, BotWindowKind } from '@pierre-review/shared';
 import { useAutoLoadSentinel } from '../../hooks/useAutoLoadSentinel.js';
@@ -280,10 +281,12 @@ export function BotVolumeDetail(): JSX.Element {
   // and the receipts without touching either.
   const header = (
     <>
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-title font-semibold text-ui-ink">
-          Bot comments per merged PR
-        </h2>
+      <PageHeader
+        inset={false}
+        testId="bot-volume-header"
+        title="Bot comments per merged PR"
+        info={
+          <>
         <InfoButton title="Bot comments per merged PR">
           <p>
             Lists every pull request merged in this window that drew at least one bot comment.
@@ -324,7 +327,9 @@ export function BotVolumeDetail(): JSX.Element {
             ))}
           </div>
         </div>
-      </div>
+          </>
+        }
+      />
     </>
   );
 
@@ -527,7 +532,7 @@ export function BotVolumeDetail(): JSX.Element {
       );
 
   return (
-    <div className="space-y-4 p-4">
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
           expressible descriptor (a multi-bot narrowing) the list renders exactly as today. */}

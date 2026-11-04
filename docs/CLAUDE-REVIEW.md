@@ -2541,8 +2541,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
   First reviews and re-reviews share it (one busy PR's pushes can use most of it). A Claude + Codex
   PAIR counts ONCE (its second half's row, `pair_role = 'second'`, is not counted). Past it, PRs wait for the next day.
-  The SPA warns in the header toast cluster (`AutoReviewCapToast`, docs/FRONTEND.md § header toast
-  strip): near at ≥ 80% of the cap (≥ 2 used), reached at the cap, from the auto-review GET's
+  The SPA warns in the toast cluster (`AutoReviewCapToast`, docs/FRONTEND.md § There is ONE
+  toast cluster): near at ≥ 80% of the cap (≥ 2 used), reached at the cap, from the auto-review GET's
   `usage` — the sweeper's own count (`getAutoReviewCandidates(...).autoToday`), so the toast and the
   sweeper never disagree. ⚠ The count must stay the reader's OWN auto runs: a review row imported
   from a teammate must be filtered out of `autoToday` (it would spend the reader's cap).

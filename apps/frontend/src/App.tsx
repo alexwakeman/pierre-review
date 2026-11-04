@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FilterBar } from './components/FilterBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { TimelineList } from './components/Timeline/TimelineList.js';
-import { useIsDesktop, useIsPhone, useTimelineListCapable } from './components/ui/media.js';
-import { usePageToastSlot } from './components/ui/PageHeader.js';
+import { useIsPhone, useTimelineListCapable } from './components/ui/media.js';
 import { useTimelineLayout } from './store/timelineLayout.js';
 import { ActivityView } from './components/Activity/index.js';
 import { SprintTabView } from './components/Sprint/SprintTabView.js';
@@ -125,13 +123,6 @@ export default function App(): JSX.Element {
   // board slot with its own isolated Timeline instance (keyed remount).
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
-  // THE TOAST SEAT: at ≥ lg (open tabs are in the sidebar) the top bar would hold nothing but the
-  // toast strip, so it collapses and the ONE strip moves (a portal, never a copy) to the end of the
-  // page header's title row (components/ui/PageHeader.tsx). Below lg it stays in the top bar, which a SidePanel
-  // sheet starts under, so an Undo raised from the sheet stays reachable.
-  const isDesktop = useIsDesktop();
-  const pageToastSlot = usePageToastSlot();
-  const toastsInPage = isDesktop && pageToastSlot != null;
   const activeTabObj = !isFixedView(activeTab)
     ? (tabs.find((t) => t.key === activeTab) ?? null) // stale/closed key → full board
     : null;
@@ -259,9 +250,9 @@ export default function App(): JSX.Element {
     );
   }
 
-  // The ONE header toast strip (components/HeaderToasts.tsx), in the slim top bar (or, at ≥ lg with no tabs, the page header). Every toast in
-  // the app is a one-line card in here — never an independent `fixed` element, never a second
-  // strip. Order = left to right: the Undo card, the agent runs, the one-shot results, then the ambient loading bar.
+  // The ONE toast cluster (components/HeaderToasts.tsx), fixed at the bottom right of the main
+  // content, out of the page flow. Every toast in the app is a circle in here — never an independent
+  // `fixed` element, never a second strip. The circles' order is `toastRank`, not this order.
   const toasts = (
     <HeaderToastStrip>
       {/* Undo for an optimistic row removal (components/ui/undo.ts). FIRST, not last: it lives a
@@ -298,8 +289,7 @@ export default function App(): JSX.Element {
       <div className="flex min-h-0 flex-1">
         <Sidebar dark={dark} toggleDark={toggleDark} />
         <div data-shell-main className="flex min-w-0 flex-1 flex-col bg-ui-bg">
-          <TopBar toasts={toastsInPage ? null : toasts} collapsed={toastsInPage} />
-          {toastsInPage && pageToastSlot != null && createPortal(toasts, pageToastSlot)}
+          <TopBar />
           {/* The Timeline's board filters (and a PR Focus tab's two) — nothing on other views. */}
           <FilterBar />
           {/* `relative` anchors the full-main overlays (pr-detail / Activity) below. `overflow-clip`: a
@@ -535,6 +525,7 @@ export default function App(): JSX.Element {
           <BottomBar />
         </div>
       </div>
+      {toasts}
 
       {helpOpen && <HelpModal onClose={closeHelp} />}
       {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}

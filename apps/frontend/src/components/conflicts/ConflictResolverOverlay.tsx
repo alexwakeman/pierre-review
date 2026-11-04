@@ -50,7 +50,7 @@ import {
 // Mounted from `App.tsx` beside HelpModal/SettingsModal, NOT from inside PrDetail: it opens from
 // three places and must not unmount when the pane behind it closes.
 //
-// ⚠ IT IS OPAQUE, NOT A SCRIM. `z-[60]` sits above the one bottom-right toast column's `z-50`,
+// ⚠ IT IS OPAQUE, NOT A SCRIM. `z-[60]` sits above the one bottom-right toast cluster's `z-[51]`,
 // and the ground is the page's own. A three-pane merge tool needs the whole viewport, and a
 // translucent backdrop over a live timeline is unreadable at 12px.
 //

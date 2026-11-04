@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { useQueries } from '@tanstack/react-query';
 import type {
   DerivedState,
@@ -396,15 +397,21 @@ export function ThemeThreadsDetail(): JSX.Element {
   const hiddenGroups = groups.length - shown.length;
 
   return (
-    <div className="space-y-4 p-4">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <SeverityPill severity={theme.severity} />
-          <h2 className="text-title font-semibold text-ui-ink">{theme.title}</h2>
-          <span className="rounded-ui bg-ui-raise px-1.5 text-meta font-medium text-ui-mute">
-            {source === 'bot' ? 'Bot theme' : 'Discussion theme'}
-          </span>
-        </div>
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="theme-threads-header"
+        title={theme.title}
+        info={
+          <>
+            <SeverityPill severity={theme.severity} />
+            <span className="rounded-ui bg-ui-raise px-1.5 text-meta font-medium text-ui-mute">
+              {source === 'bot' ? 'Bot theme' : 'Discussion theme'}
+            </span>
+          </>
+        }
+        sub={
+          <>
         {theme.summary && <p className="mt-1 text-body text-ui-mute">{theme.summary}</p>}
         {/* No count meta here — the metrics strip below carries the member/PR/repo numbers with
             the right names ("linked members", split threads vs PR-level). The old "N threads
@@ -427,7 +434,9 @@ export function ThemeThreadsDetail(): JSX.Element {
             </span>
           )}
         </div>
-      </div>
+          </>
+        }
+      />
 
       {theme.threads.length === 0 ? (
         <div className="text-body text-ui-faint">This theme has no linked threads.</div>

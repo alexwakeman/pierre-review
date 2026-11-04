@@ -273,7 +273,7 @@ export function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center bg-ui-scrim/40 md:items-center md:p-6 motion-safe:animate-ui-fade"
+      className="fixed inset-0 z-[60] flex items-stretch justify-center bg-ui-scrim/40 md:items-center md:p-6 motion-safe:animate-ui-fade"
       onClick={onClose}
       role="presentation"
     >

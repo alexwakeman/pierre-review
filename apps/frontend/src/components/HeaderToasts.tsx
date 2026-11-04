@@ -14,12 +14,14 @@ import { createPortal } from 'react-dom';
 import { CloseIcon } from './Icons.js';
 import { anchorClusterPanel, toastRank, type ToastPanelBox } from '../lib/toastAnchor.js';
 import { claimActivePopover } from '../lib/activePopover.js';
+import { useToastLift } from './ui/toastObstacles.js';
 
-// ── THE ONE HEADER TOAST CLUSTER ─────────────────────────────────────────────────────────────
+// ── THE ONE TOAST CLUSTER ────────────────────────────────────────────────────────────────────
 //
-// Every toast in the app is ONE CIRCLE in a cluster at the top right (the slim TopBar, or the page
-// header's toast seat at ≥ lg; App.tsx mounts `<HeaderToastStrip>` exactly once). ⚠ Never add an
-// independent `fixed` toast element anywhere else, and never a second strip or cluster.
+// Every toast in the app is ONE CIRCLE in a cluster FIXED AT THE BOTTOM RIGHT of the main content
+// (App.tsx mounts `<HeaderToastStrip>` exactly once, outside the page flow). ⚠ Never add an
+// independent `fixed` toast element anywhere else, and never a second strip or cluster. The name
+// "header" is historical (it lived in the top bar / the page header until 2026-11-04).
 //
 //  • ONE CIRCLE PER JOB TYPE that is active now (sync, merge when ready, AI reviews, AI fixes, the
 //    AI budget pause, dependency results, the resolver reopen, Undo). Each circle is the job's icon,
@@ -27,19 +29,24 @@ import { claimActivePopover } from '../lib/activePopover.js';
 //    ring + dot when it needs attention (`alert`). The circles OVERLAP like an avatar stack; the most
 //    urgent, then the newest, sits furthest right and on top (`toastRank`). Each circle carries its
 //    words for assistive tech (`sr-only`) and a tooltip.
-//  • THE CLUSTER IS ONE BUTTON (`aria-expanded`). A click EXPANDS it into ONE PANEL anchored to the
-//    cluster's right edge that grows LEFTWARDS as far as its content needs, never past the main
-//    content's left edge (`anchorClusterPanel`, lib/toastAnchor.ts; `[data-shell-main]` in App.tsx);
-//    past that the panel scrolls (its scroll bar on the right). The panel OVERLAYS the page
-//    (`position: fixed`, `z-[60]`: above a SidePanel sheet, below the resolver and modals). It lists
+//  • WHERE IT SITS: `right` 12px (or the safe-area inset), `bottom` 12px + the safe-area inset —
+//    below md, ABOVE the phone's bottom bar (56px). It rises above a SidePanel's pinned action bar in
+//    its corner (`useToastLift`, ui/toastObstacles.ts). z-[51]: above a SidePanel sheet (z-50), so
+//    the Undo for an action taken in the sheet stays reachable; below the drawer (z-[55]/[56]), the
+//    modals and the resolver (z-[60]+). The fixed box is `pointer-events-none` and an EMPTY cluster
+//    is `hidden`, never unmounted (the circles portal into it): it takes no space and catches no
+//    click, and since it is out of the page flow a toast appearing never moves the page.
+//  • THE CLUSTER IS ONE BUTTON (`aria-expanded`). A click EXPANDS it into ONE PANEL whose
+//    BOTTOM-RIGHT corner sits on the cluster's top-right corner; it grows UP and LEFT as far as its
+//    content needs, never past the main content's left edge (`[data-shell-main]` in App.tsx) nor the
+//    viewport's top (`anchorClusterPanel`, lib/toastAnchor.ts); past that the panel scrolls (its
+//    scroll bar on the right). The panel OVERLAYS the page (`position: fixed`, `z-[60]`). It lists
 //    every job's full content, in the circles' order (right-most first): the job's line (icon, label,
 //    summary, its one on-line action, its X), its progress bar, its rows, its footer.
 //  • It closes on a second click on the cluster, on any press outside the panel and the cluster, on
 //    Escape (focus returns to the cluster), and on a resize or an outside scroll (the measured rect
-//    is stale). Opening moves focus into the panel. The open animation unfolds it from the right and
-//    is `motion-safe` only.
-//  • THE TOP BAR NEVER SHIFTS: the cluster is 28px tall inside the fixed `h-11` bar, and an empty
-//    cluster is `hidden`, not unmounted (the circles portal into it).
+//    is stale). Opening moves focus into the panel. The open animation unfolds it from the
+//    bottom-right and is `motion-safe` only.
 //  • THE PANEL IS ITS OWN ONE SCROLLER, `overscroll-behavior: contain`. ⚠ A `position: fixed`
 //    box's scroll parent is the VIEWPORT: a wheel the panel could not use chained to the root, and
 //    on macOS that became the root's ELASTIC OVERSCROLL (the whole shell slid up). Rows therefore
@@ -48,8 +55,8 @@ import { claimActivePopover } from '../lib/activePopover.js';
 //    a circle appearing (its sr-only words), never a percentage ticking in place.
 //
 // Each job is still its own component with its own state (App.tsx); `HeaderToast` PORTALS its circle
-// into the cluster and, while the panel is open, its section into the panel. The detail is MOUNTED
-// ONLY WHILE OPEN.
+// into the cluster and its section into the panel's list (always mounted; the panel is `hidden`
+// while shut).
 
 interface ClusterCtx {
   circleHost: HTMLElement | null;
@@ -76,6 +83,7 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const expanded = box != null;
+  const lift = useToastLift();
   const names = Object.values(labels);
   const count = names.length;
 
@@ -120,6 +128,17 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
     b.addEventListener('click', onClick);
     return () => b.removeEventListener('click', onClick);
   }, []);
+
+  // The cluster rose or fell (a panel's action bar came or went under it): re-anchor the open
+  // panel to where the cluster now is, after the move has laid out.
+  useEffect(() => {
+    if (!expanded) return;
+    const frame = requestAnimationFrame(() => {
+      const b = buttonRef.current;
+      if (b != null) setBox(anchorClusterPanel(b.getBoundingClientRect(), contentLeft(), window.innerWidth, window.innerHeight));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [lift, expanded]);
 
   // Nothing left to show: close.
   useEffect(() => {
@@ -176,7 +195,7 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
     box != null
       ? {
           position: 'fixed',
-          top: box.top,
+          bottom: box.bottom,
           right: box.right,
           minWidth: box.minWidth,
           maxWidth: box.maxWidth,
@@ -189,8 +208,17 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
 
   return (
     <Ctx.Provider value={{ circleHost, listHost, expanded, setLabel }}>
-      <div className="flex min-w-0 flex-1 justify-end">
-        <div role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" aria-label="Notifications">
+      <div
+        data-testid="toast-dock"
+        // A press on the cluster or its panel is not a press "outside" an open drawer, menu or
+        // docked panel (useClickOutside, OpenPrsRows): acting on an Undo must not close them.
+        data-floating-layer=""
+        // Bottom right of the main content, out of the page flow; above the phone's bottom bar
+        // (h-14) and the safe areas. A registered action bar in the corner lifts it (inline style).
+        style={lift > 0 ? { bottom: lift + 8 } : undefined}
+        className="pointer-events-none fixed bottom-[calc(12px+env(safe-area-inset-bottom))] right-[max(12px,env(safe-area-inset-right))] z-[51] flex justify-end max-md:bottom-[calc(68px+env(safe-area-inset-bottom))]"
+      >
+        <div role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" aria-label="Notifications" className="pointer-events-auto">
           <button
             ref={buttonRef}
             type="button"
@@ -199,7 +227,7 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
             aria-controls={panelId}
             aria-label={name}
             title={count === 0 ? undefined : expanded ? 'Hide details' : names.join(' · ')}
-            className={`${count === 0 ? 'hidden' : 'flex'} h-8 items-center rounded-full py-0.5 pl-2.5 pr-0.5 outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${
+            className={`${count === 0 ? 'hidden' : 'flex'} h-9 items-center rounded-full bg-ui-bg py-0.5 pl-3 pr-1 shadow-lg outline-none ring-1 ring-ui-line hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${
               expanded ? 'bg-ui-hover' : ''
             }`}
           >
@@ -216,7 +244,7 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
           style={panelStyle}
           className={
             expanded
-              ? 'z-[60] flex w-max flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-ui bg-ui-raise text-ui-ink shadow-lg outline-none ring-1 ring-ui-line motion-safe:animate-ui-unfold-left'
+              ? 'pointer-events-auto z-[60] flex w-max flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-ui bg-ui-raise text-ui-ink shadow-lg outline-none ring-1 ring-ui-line motion-safe:animate-ui-unfold-up'
               : 'hidden'
           }
         >

@@ -12,7 +12,7 @@ import { MergeIcon } from './Icons.js';
 import { dateTime, relativeTime } from '../lib/ui.js';
 import { HeaderToast, ToastFooterButton, ToastList, ToastShowMore } from './HeaderToasts.js';
 
-// The global auto-merge progress stack, rendered as ONE card in the app's ONE header toast strip
+// The global auto-merge progress stack, rendered as ONE card in the app's ONE toast cluster
 // (HeaderToasts.tsx, mounted in App.tsx): a one-line summary, the rows when it expands.
 //
 // ONE CARD PER MERGE, FOR THE WHOLE LIFECYCLE. Arming used to produce nothing global at all

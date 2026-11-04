@@ -5,6 +5,7 @@ import { IconButton } from './Button.js';
 import { cx } from './cx.js';
 import { escapeBelongsToLayer } from './keys.js';
 import { useIsDesktop, useIsPhone } from './media.js';
+import { registerToastObstacle } from './toastObstacles.js';
 
 // THE SIDE PANEL (docs/redesign/DESIGN.md § Side panel).
 //
@@ -16,9 +17,11 @@ import { useIsDesktop, useIsPhone } from './media.js';
 // Escape closes it (capture phase, so the app's global Esc never also fires) unless an open
 // control or popover inside owns the key. As a sheet it traps Tab and returns focus to the opener.
 // `footer` is the action bar: pinned to the bottom, where a thumb reaches it on a phone.
-// ⚠ AS A SHEET IT STARTS BELOW THE TOP BAR (`[data-shell-topbar]`, measured at open), never over
-// it: the ONE header toast strip lives there, and an action taken in the sheet (Dismiss, Approve,
-// Merge) raises its Undo card in that strip. A sheet over the strip hid the only way back.
+// As a sheet it starts below the slim top bar (`[data-shell-topbar]`, measured at open), so the menu
+// and the location stay on screen.
+// ⚠ THE TOAST CLUSTER STAYS ABOVE A SHEET (HeaderToasts.tsx: z-[51] over this z-50), so the Undo for
+// an action taken in the sheet (Dismiss, Approve, Merge) is always reachable; the footer registers as
+// a toast obstacle (ui/toastObstacles.ts) so the cluster rises above the action bar, never onto it.
 
 /** A header action sized like the close button (an IconButton size="sm"): pass to a CopyButton or a
  *  link so the row lines up. */
@@ -59,6 +62,9 @@ export function SidePanel({
   const phone = useIsPhone();
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
+  // The action bar, so the toast cluster rises above it rather than sitting on its buttons.
+  const [footerEl, setFooterEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => (footerEl != null ? registerToastObstacle(footerEl) : undefined), [footerEl]);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -108,7 +114,7 @@ export function SidePanel({
     };
   }, [open, docked]);
 
-  // The top bar's bottom edge, so the sheet (and its scrim) start under the toast strip.
+  // The top bar's bottom edge, so the sheet (and its scrim) start under it.
   const [topInset, setTopInset] = useState(0);
   useLayoutEffect(() => {
     if (!open || docked) return;
@@ -152,7 +158,7 @@ export function SidePanel({
         {children}
       </div>
       {footer != null && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 bg-ui-surface px-5 py-3 max-md:px-4 max-md:pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div ref={setFooterEl} className="flex shrink-0 flex-wrap items-center gap-2 bg-ui-surface px-5 py-3 max-md:px-4 max-md:pb-[max(12px,env(safe-area-inset-bottom))]">
           {footer}
         </div>
       )}

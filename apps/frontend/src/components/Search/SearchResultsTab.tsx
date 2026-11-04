@@ -7,6 +7,7 @@ import { useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { indexUsers, PR_STATE_META } from '../../lib/ui.js';
 import { MagnifierIcon, TicketIcon } from '../Icons.js';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { ThreadCard } from '../ThreadView/index.js';
 import { PrMetaRow, PrDescriptionToggle, type PrMetaFields } from '../Activity/AttentionCards.js';
 import { KIND_ICON, KIND_LABEL, openHitPr, openSearchHit, openSearchStory, storyPrWords } from './searchNav.js';
@@ -60,10 +61,10 @@ export function SearchResultsTab(): JSX.Element {
     setKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
 
   return (
-    <div className="mx-auto max-w-[100rem] p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h2 className="text-body font-semibold text-ui-ink">Search</h2>
-        <div className="relative">
+    <div className={`max-w-[100rem] pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader inset={false} title="Search" testId="search-header">
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <div className="relative max-w-full">
           <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ui-faint">
             <MagnifierIcon size={14} />
           </div>
@@ -76,7 +77,7 @@ export function SearchResultsTab(): JSX.Element {
             onKeyDown={(e) => {
               if (e.key === 'Enter') openSearchDetail(q.trim());
             }}
-            className="w-96 rounded-ui border border-ui-line bg-transparent py-1 pl-8 pr-2 text-body focus:border-ui-accent/50 focus:outline-none"
+            className="w-96 max-w-full rounded-ui border border-ui-line bg-transparent py-1 pl-8 pr-2 text-body focus:border-ui-accent/50 focus:outline-none"
           />
         </div>
         <div className="flex items-center gap-1">
@@ -115,6 +116,7 @@ export function SearchResultsTab(): JSX.Element {
               : `${hits.length} of ${total} result${total === 1 ? '' : 's'}`}
         </span>
       </div>
+      </PageHeader>
 
       {/* Ticket matches FIRST: each opens the ticket's story tab. */}
       {stories.length > 0 && (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { Select } from '../ui/index.js';
 import type {
   BotFlaggingSelector,
@@ -490,10 +491,15 @@ export function BotFlaggingDetail(): JSX.Element {
   // and the receipts without touching either.
   const header = (
     <>
-      <div className="flex flex-wrap items-baseline gap-2">
-        {/* The BARE tile name — `selectorLabel` returns it unprefixed and PinnedTabsBar adds its
-            own "Flagged ·", so the tab chip and this heading always name the same population. */}
-        <h2 className="text-title font-semibold text-ui-ink">{title}</h2>
+      {/* The BARE tile name — `selectorLabel` returns it unprefixed and PinnedTabsBar adds its
+          own "Flagged ·", so the tab chip and this heading always name the same population. */}
+      <PageHeader
+        inset={false}
+        flushBottom
+        testId="bot-flagging-header"
+        title={title}
+        info={
+          <>
         {/* ⚠ On the overlap selector the grid folds the CLUSTERS' member comments, not the
             clusters — a cluster is not an ML row. Its total is unrelated to the list's count and
             must never be read as its denominator; the modal says so. */}
@@ -559,7 +565,9 @@ export function BotFlaggingDetail(): JSX.Element {
             ))}
           </div>
         </div>
-      </div>
+          </>
+        }
+      />
       <p className="max-w-4xl text-meta text-ui-mute">{subtitle}</p>
     </>
   );
@@ -785,7 +793,7 @@ export function BotFlaggingDetail(): JSX.Element {
       );
 
   return (
-    <div className="space-y-4 p-4">
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
           expressible descriptor (overlap tile / matrix cell / multi-bot set) the list renders

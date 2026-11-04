@@ -6,8 +6,8 @@ import { MOTION, prefersReducedMotion } from './media.js';
 // OPTIMISTIC REMOVAL + UNDO (docs/redesign/DESIGN.md § Feedback).
 //
 // A row the reader acted on (merged, dismissed, approved off the list) leaves AT ONCE: it slides out
-// (170ms, instant with reduced motion), the counts drop, and an Undo card appears in the ONE header
-// toast strip (`UndoToast`, mounted in App.tsx — never a toast of its own). `z` undoes too.
+// (170ms, instant with reduced motion), the counts drop, and an Undo circle appears in the ONE toast
+// cluster at the bottom right (`UndoToast`, mounted in App.tsx — never a toast of its own). `z` undoes too.
 //
 // Two modes, because not every write can be taken back:
 //  • 'immediate' — the write runs now; Undo runs an INVERSE write (`undo`, e.g. restore a dismissal).

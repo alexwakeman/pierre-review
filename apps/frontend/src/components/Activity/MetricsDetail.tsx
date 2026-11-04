@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import { Segmented, TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import { Tabs } from '../ui/index.js';
 import type { MetricPr, WorkspaceMetricKey, User } from '@pierre-review/shared';
@@ -546,30 +547,28 @@ export function MetricsDetail(): JSX.Element {
   };
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <div className="flex items-center gap-1">
-          <h2 className="text-title font-semibold text-ui-ink">Flow metrics</h2>
-          <MetricsInfo />
-        </div>
-        {detail && (
-          <span className="text-meta text-ui-faint">
-            {windowDate(detail.sprint.from)} to {windowDate(detail.sprint.to)}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-          className="hit ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
-        >
-          <RefreshIcon
-            size={11}
-            className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
-          />{' '}
-          Refresh
-        </button>
-      </div>
+    <div className={`space-y-4 pb-4 ${PAGE_GUTTER}`}>
+      <PageHeader
+        inset={false}
+        testId="metrics-detail-header"
+        title="Flow metrics"
+        info={<MetricsInfo />}
+        sub={detail ? `${windowDate(detail.sprint.from)} to ${windowDate(detail.sprint.to)}` : undefined}
+        actions={
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="hit rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
+          >
+            <RefreshIcon
+              size={11}
+              className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
+            />{' '}
+            Refresh
+          </button>
+        }
+      />
 
       {/* Sub-tab bar — one per metric. */}
       <Tabs

@@ -9,21 +9,18 @@ import { currentLocation, destination } from './nav.js';
 import { tabWords } from './Sidebar.js';
 import { AlertDot } from './AlertDot.js';
 import { useShellSignals } from './shellSignals.js';
-import type { ReactNode } from 'react';
 
-// THE SLIM TOP BAR — the one strip above the content (docs/redesign/DESIGN.md § 1).
+// THE SLIM TOP BAR — below lg only (docs/redesign/DESIGN.md § 1).
 //
-//   [≡ below lg] [where you are] [open tabs, md–lg] [the ONE header toast strip]
+//   [≡] [where you are] [open tabs, md–lg]
 //
-// ⚠ A FIXED HEIGHT (`h-11`): the toast strip and its cards fit inside it, so a card appearing or
-// disappearing never moves the page by a pixel (docs/FRONTEND.md § There is ONE header toast strip).
+// ⚠ A FIXED HEIGHT (`h-11`), and `lg:hidden` ON EVERY PAGE: at lg+ the sidebar holds the menu, the
+// location and the open tabs, so the bar would be empty — every page then starts on its own header
+// (components/ui/PageHeader.tsx) at the same top. It never hosts a toast: the ONE toast cluster sits at
+// the bottom right of the main content (HeaderToasts.tsx), so nothing here ever changes height.
 // The right-hand controls the old header carried — Sync, the bell, Help, the theme, AI usage, the
-// account — moved to the sidebar's foot; the wordmark heads the sidebar.
-//
-// ⚠ COLLAPSED (`collapsed`, App.tsx) at ≥ lg whenever the page header offers a toast seat: the open
-// tabs are in the sidebar there, so the band would hold only the toast strip — it sits at the end of
-// the page header's title row instead (components/ui/PageHeader.tsx) and the bar is `lg:hidden`. Below lg it always stays (menu button + location).
-export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; collapsed?: boolean }): JSX.Element {
+// account — are in the sidebar's foot; the wordmark heads the sidebar.
+export function TopBar(): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
   const activityRepoId = useFilters((s) => s.activityRepoId);
@@ -52,7 +49,7 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
     signals.alertWords,
   ].filter((w): w is string => w != null);
   return (
-    <header data-shell-topbar className={cx('flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:pl-4', collapsed && 'lg:hidden')}>
+    <header data-shell-topbar className="flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:hidden">
       <button
         type="button"
         onClick={() => setDrawerOpen(true)}
@@ -61,7 +58,7 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
         data-alert={signals.alert ?? undefined}
         data-testid="topbar-menu"
         className={cx(
-          'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10 lg:hidden',
+          'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10',
           FOCUS_RING,
         )}
       >
@@ -79,14 +76,13 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
           </span>
         )}
       </button>
-      {/* Where you are — for when the sidebar is not on screen (below lg). At lg+ the sidebar's
-          highlight says it; on md+ a dynamic tab says it through its highlighted chip. */}
+      {/* Where you are — the sidebar is not on screen here. On md+ a dynamic tab says it through its
+          highlighted chip. */}
       <p
         className={cx(
-          // Below md the location takes what the toasts leave (min-w-0 flex-1), never a fixed cap —
-          // a fixed 55% let a toast overrun the bar's clipped edge.
+          // Below md the location takes the bar's width (min-w-0 flex-1), truncated.
           'min-w-0 flex-1 truncate text-body font-medium text-ui-ink md:flex-none',
-          loc == null ? 'md:hidden' : 'md:max-w-[14rem] lg:hidden',
+          loc == null ? 'md:hidden' : 'md:max-w-[14rem]',
         )}
         data-testid="topbar-location"
         title={signals.workspaceName != null ? `${signals.workspaceName} · ${label}` : label}
@@ -102,13 +98,8 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
         {label}
       </p>
       {/* md to lg only: at lg+ the open tabs are listed in the sidebar. */}
-      <div className="hidden min-w-0 flex-1 md:flex lg:hidden">
+      <div className="hidden min-w-0 flex-1 md:flex">
         <PinnedTabsBar />
-      </div>
-      {/* ⚠ `ml-auto`: at lg+ on a page with no toast seat of its own (Implement story) every other
-          child of the bar is hidden, and without it the cluster sat at the LEFT. Always right. */}
-      <div className="ml-auto flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-auto">
-        {toasts}
       </div>
     </header>
   );

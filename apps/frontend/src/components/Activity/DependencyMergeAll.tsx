@@ -189,7 +189,7 @@ const TOAST_MS = 15_000;
 const FAILED_ROWS = 3;
 
 /**
- * The run's summary — a card in the ONE header toast strip (HeaderToasts.tsx), never its own
+ * The run's summary — a card in the ONE toast cluster (HeaderToasts.tsx), never its own
  * `fixed` element.
  */
 export function DependencyMergeToast(): JSX.Element | null {
