@@ -2,8 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Public marketing site. Independent of the timeline SPA; served at `/` by the tiny
-// site service in apps/site (which also serves the demo at /demo/ and the contact
-// form's API). A distinct dev port keeps it from colliding with the frontend (5173).
+// site service in apps/site (which also serves the contact form's API). A distinct dev port keeps it from colliding with the frontend (5173).
 export default defineConfig({
   plugins: [react()],
   base: '/',

@@ -143,15 +143,12 @@ for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s
 # then rename: favicon-16/32/48.png, apple-touch-icon.png (180), icon-192/512.png
 ```
 
-## Screenshots and the walkthrough clip
+## Screenshots
 
-The pages use no screenshots at all (see the mocks above), and no longer use `public/shots/` or
-`public/media/`. The two public folders stay because other things still
-write or read them: `pnpm shots` (`scripts/capture-shots.mjs`, `scripts/demo-stack.mjs`)
-writes `public/shots/`, the repository README embeds three of those shots, and
-`pnpm demo:video --publish` (`scripts/capture-demo-video.mjs`) writes the walkthrough clip
-to `public/media/`. Both pipelines film the fictional `acme/*` demo stack, never real
-GitHub data.
+The pages use no screenshots at all (see the mocks above). `public/shots/` stays only because
+`pnpm shots` (`scripts/capture-shots.mjs`, `scripts/demo-stack.mjs`) writes it and the repository
+README embeds three of those shots, filmed on the fictional `acme/*` stack, never real GitHub data.
+The walkthrough clip and its pipeline are gone.
 
 ## Reading the copy
 
