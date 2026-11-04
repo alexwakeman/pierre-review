@@ -15,8 +15,9 @@ import { VerdictIcon } from './VerdictIcon.js';
 // TEAMMATES' POSTED REVIEWS IN THE ONE REVIEW (docs/CLAUDE-REVIEW.md § Teammates' reviews → One
 // review). The server folds them with the reader's own (`ClaudeReviewResponse.teamView`); these are
 // the read-only pieces: the summary when a teammate's review is the newest (or opened from Reviews on
-// this PR), their avatar and the "who raised it" chip. Their findings list through TeamReviewLayout.tsx
-// `TeamPointRow`: no Post, Re-post, Reword or Ignore — the finding is theirs, on GitHub.
+// this PR), their avatar and the "who raised it" chip. Their findings are drawn with the reader's own
+// card (ClaudeReviewTab.tsx `PointFindingCard`, lib/teamReview.ts `pointCard`): Copy and "Post
+// reminder" (as the reader) only — no Post, Re-post, Reword or Ignore: the finding is theirs, on GitHub.
 
 const VERDICT_WORD: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',

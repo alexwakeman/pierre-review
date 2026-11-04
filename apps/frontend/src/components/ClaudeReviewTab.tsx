@@ -47,6 +47,8 @@ import {
   reviewsOnPr,
   standingRows,
   teamFindingRows,
+  teammateFindingCard,
+  type FindingCard,
   type RaisedBy,
   type ShownReview,
 } from '../lib/teamReview.js';
@@ -81,7 +83,7 @@ import {
   summaryPrefillOf,
   writeReviewPostMode,
 } from '../lib/reviewPostMode.js';
-import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection, TeamPointRow } from './TeamReviewLayout.js';
+import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection } from './TeamReviewLayout.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -696,9 +698,14 @@ export function FindingRow({
   authorName = 'Claude',
   alsoRaisedBy = null,
   raisedBy = null,
+  card = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
+  /** A finding that is NOT one of the latest run's own (a teammate's, an older run's, a closed one;
+   *  lib/teamReview.ts `pointCard`): the same card, read-only but for Copy and — when
+   *  `onPostReminder` is given — "Post reminder". Pass `editable={false}`. null ⇒ the reader's own. */
+  card?: { unlabelled: boolean; reason: string | null } | null;
   /** Teammates whose posted review raised this point too (`teamView.alsoRaisedBy`). null ⇒ none. */
   alsoRaisedBy?: readonly ClaudeTeammatePoster[] | null;
   /** WHO RAISED IT on the team layout ("You · Codex", "You and Robin"; lib/teamReview.ts
@@ -835,7 +842,8 @@ export function FindingRow({
   const canPostComment = editable && !isPosted;
   // ⚠ REMINDERS ARE ALLOWED, ALWAYS MARKED: a finding already on GitHub never offers the normal Post,
   // only "Post reminder" (the server marks the body and links the first comment).
-  const canRemind = canPostReminder(post, editable);
+  // A teammate's open point (`card`): its reminder posts as the reader, when the caller offers it.
+  const canRemind = card != null ? onPostReminder != null && post != null : canPostReminder(post, editable);
   const reminderUrl =
     finding.reminder != null
       ? finding.reminder.postedCommentKind === 'pr_comment'
@@ -923,11 +931,13 @@ export function FindingRow({
     >
       <div className="flex items-start gap-2">
         {selection}
-        <span
-          className={`mt-0.5 inline-flex shrink-0 items-center rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
-        >
-          {finding.severity}
-        </span>
+        {card?.unlabelled !== true && (
+          <span
+            className={`mt-0.5 inline-flex shrink-0 items-center rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
+          >
+            {finding.severity}
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={REVIEW_ITEM_TITLE}>
@@ -941,6 +951,7 @@ export function FindingRow({
             {raisedBy != null && (
               <TeammateChip by={raisedBy.posters} label={raisedBy.label} title={`Raised by ${raisedBy.label}`} />
             )}
+            {card?.reason != null && <span className={REVIEW_META}>{card.reason}</span>}
             {/* A Claude + Codex pair's finding: who raised it, quietly (one neutral chip). */}
             {raisedBy == null && finding.source != null && (
               <span
@@ -1272,13 +1283,16 @@ export function FindingRow({
             <button type="button" onClick={copy} className={BTN_SECONDARY}>
               {copied ? 'Copied' : 'Copy'}
             </button>
-            {/* Pins this finding to the Review chat (shown only while that chat is on screen). */}
-            <SendToChatButton
-              prId={prId}
-              reviewId={finding.reviewId}
-              pinRef={{ kind: 'finding', findingId: finding.id }}
-              label={`${finding.severity.charAt(0).toUpperCase()}${finding.severity.slice(1)} · ${finding.title}`}
-            />
+            {/* Pins this finding to the Review chat (shown only while that chat is on screen). The
+                chat is the latest run's: a card from another review has nothing to pin to. */}
+            {card == null && (
+              <SendToChatButton
+                prId={prId}
+                reviewId={finding.reviewId}
+                pinRef={{ kind: 'finding', findingId: finding.id }}
+                label={`${finding.severity.charAt(0).toUpperCase()}${finding.severity.slice(1)} · ${finding.title}`}
+              />
+            )}
             {canIgnore && (
               <button
                 type="button"
@@ -1446,6 +1460,18 @@ export function ClaudesReview({
       onPostReminder={() => onPostFinding(f.id, { reminder: true })}
     />
   );
+  // Every other point on the PR (a teammate's, an older run's, a closed one): the same card.
+  const cardEnv: CardEnv = {
+    prId: review.prId,
+    prUrl,
+    repoFullName,
+    changedPaths,
+    postingFindingId,
+    postErrorFindingId,
+    postErrorMessage,
+    onOpenInChanges,
+    onPostReminder: editable ? (findingId) => onPostFinding(findingId, { reminder: true }) : null,
+  };
   const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
   // "Copy all" (the reader's own findings of this run) and the Story check note, in the Findings header.
   const findingsPills = (
@@ -1578,7 +1604,7 @@ export function ClaudesReview({
           renderOwn={(f, raised) =>
             findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null, raised)
           }
-          onOpenThread={onOpenThread}
+          renderPoint={(c, raised) => <PointFindingCard card={c} raisedBy={raised} env={cardEnv} />}
           pills={findingsPills}
         />
       ) : (
@@ -1697,10 +1723,10 @@ interface TeamLayout {
  */
 function TeamOnlyReview({
   team,
-  onOpenThread,
+  env,
 }: {
   team: TeamLayout | null;
-  onOpenThread?: (threadId: number) => void;
+  env: CardEnv;
 }): JSX.Element | null {
   const lead = leadingTeammateReview(team?.view, team?.reviews);
   const points = team?.view.allFindings ?? [];
@@ -1714,20 +1740,15 @@ function TeamOnlyReview({
         hiddenFindingIds={new Set()}
         pairReviewIds={team.pairReviewIds}
         renderOwn={() => <></>}
-        onOpenThread={onOpenThread}
+        renderPoint={(c, raised) => <PointFindingCard card={c} raisedBy={raised} env={env} />}
       />
     </>
   );
 }
 
-/** A TEAMMATE'S POSTED REVIEW, opened from "Reviews on this PR": its summary and findings, read-only. */
-function PastTeammateReview({
-  review: t,
-  onOpenThread,
-}: {
-  review: ClaudeTeammateReview;
-  onOpenThread?: (threadId: number) => void;
-}): JSX.Element {
+/** A TEAMMATE'S POSTED REVIEW, opened from "Reviews on this PR": its summary and findings, read-only
+ *  (each with the reader's own card: Copy, the code in Changes, its comment on GitHub). */
+function PastTeammateReview({ review: t, env }: { review: ClaudeTeammateReview; env: CardEnv }): JSX.Element {
   const name = teammateName(t.poster);
   return (
     <>
@@ -1742,16 +1763,12 @@ function PastTeammateReview({
             {t.findings.map((f) => {
               const model = t.pair ? providersLabel(f.providers ?? []) : null;
               return (
-                <TeamPointRow
+                <PointFindingCard
                   key={`mate-${f.id}`}
-                  severity={f.severity}
-                  body={f.body}
-                  path={f.path}
-                  line={f.line}
-                  threadId={f.threadId}
-                  githubUrl={f.githubUrl}
+                  card={teammateFindingCard(f, t)}
                   raisedBy={{ label: [name, model].filter(Boolean).join(' · '), posters: [t.poster] }}
-                  onOpenThread={onOpenThread}
+                  // A past review is never acted on: no reminder from here.
+                  env={{ ...env, onPostReminder: null }}
                 />
               );
             })}
@@ -1761,6 +1778,51 @@ function PastTeammateReview({
         )}
       </ReviewSection>
     </>
+  );
+}
+
+/** What the shared card needs for a point that is not one of the latest run's own findings. */
+interface CardEnv {
+  prId: number;
+  prUrl: string;
+  repoFullName: string;
+  changedPaths: ReadonlySet<string>;
+  postingFindingId: number | null;
+  postErrorFindingId: number | null;
+  postErrorMessage: string | null;
+  onOpenInChanges?: OpenInChanges;
+  // "Post reminder" of a teammate's open point (lib/teamReview.ts `pointCard` decides which). null ⇒
+  // never offered (a past review).
+  onPostReminder: ((findingId: number) => Promise<unknown>) | null;
+}
+
+/**
+ * EVERY FINDING LOOKS THE SAME: a teammate's point, an older run's or a closed one is drawn with the
+ * reader's own card (`FindingRow`) — severity, title and text, suggestion, the path that opens the
+ * code in Changes, "Posted · <when>" linking its comment, who raised it. Read-only but for Copy and,
+ * on a teammate's open point, "Post reminder" (posted as the reader, linking theirs).
+ */
+function PointFindingCard({ card, raisedBy, env }: { card: FindingCard; raisedBy: RaisedBy; env: CardEnv }): JSX.Element {
+  const f = card.finding;
+  const remind = card.remind ? env.onPostReminder : null;
+  return (
+    <FindingRow
+      card={{ unlabelled: card.unlabelled, reason: card.reason }}
+      raisedBy={raisedBy}
+      prId={env.prId}
+      finding={f}
+      editable={false}
+      prUrl={env.prUrl}
+      repoFullName={env.repoFullName}
+      headSha={card.headSha}
+      posting={env.postingFindingId === f.id}
+      postError={env.postErrorFindingId === f.id ? env.postErrorMessage : null}
+      inChangeset={env.changedPaths.size > 0 ? env.changedPaths.has(f.path) : f.fileInDiff}
+      onOpenInChanges={env.onOpenInChanges}
+      onPostReminder={remind != null ? () => remind(f.id) : undefined}
+      // Another review's finding cites no section of this run's reference library.
+      docReferences={null}
+    />
   );
 }
 
@@ -2247,6 +2309,19 @@ export function ClaudeReviewTab({
   // Editing + posting are only enabled for the latest review (a Claude + Codex pair is ONE review,
   // addressed by its latest half — the server's consolidated view).
   const canEdit = viewingLatest && review != null;
+  // The shared card's environment, for the points drawn outside ClaudesReview (no finished run of the
+  // reader's, or a teammate's past review). Reminders only on now.
+  const teamCardEnv: CardEnv = {
+    prId: pr.id,
+    prUrl: pr.githubUrl,
+    repoFullName: pr.repoFullName,
+    changedPaths,
+    postingFindingId,
+    postErrorFindingId,
+    postErrorMessage,
+    onOpenInChanges,
+    onPostReminder: viewingLatest ? (findingId) => postFinding.mutateAsync({ findingId, reminder: true }) : null,
+  };
 
   const phase = status?.progress?.phase ?? null;
   // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
@@ -2598,7 +2673,7 @@ export function ClaudeReviewTab({
       )}
 
       {/* A teammate's posted review, opened from the list: read-only. */}
-      {pastTeammate != null && <PastTeammateReview review={pastTeammate} onOpenThread={onOpenThread} />}
+      {pastTeammate != null && <PastTeammateReview review={pastTeammate} env={teamCardEnv} />}
 
       {/* Section A — Claude's read-only review for the shown run. */}
       {shownReview != null && shownReview.status === 'succeeded' && (
@@ -2665,7 +2740,7 @@ export function ClaudeReviewTab({
               reader's still loading or failed) is read-only, with nothing to start from it. */}
           {viewingLatest && (
             <>
-              <TeamOnlyReview team={team} onOpenThread={onOpenThread} />
+              <TeamOnlyReview team={team} env={teamCardEnv} />
               <TicketCoverageSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
               <CiCheckSection pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
             </>

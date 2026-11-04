@@ -278,3 +278,62 @@ export function parsePostedLimnFinding(raw: string | null | undefined): PostedLi
   const title = first.length > 120 ? `${first.slice(0, 119).trimEnd()}…` : first;
   return { severity, tag, refPath, refLine, title, body: text };
 }
+
+/** A posted finding's text, split the way the reader's own findings are shown (`postedFindingDisplay`). */
+export interface PostedFindingDisplay {
+  // A short title: the text's first sentence (≤ 160 characters), else the stored title.
+  title: string;
+  // The rest of the text (no title sentence, no trailing suggestion block). May be ''.
+  body: string;
+  // The trailing ```suggestion block's code, or null.
+  suggestion: string | null;
+}
+
+const TRAILING_SUGGESTION_RE = /\n*```suggestion[^\n]*\n([\s\S]*?)\n?```\s*$/;
+const TITLE_MAX = 160;
+
+/**
+ * A posted finding's text without its trailing ```suggestion block, and that block's code (null when
+ * there is none). Limn posts a finding's suggestion LAST, so only a trailing block is one. Pure.
+ */
+export function splitTrailingSuggestion(text: string): { text: string; suggestion: string | null } {
+  const rest = text.replace(/\r\n?/g, '\n').trim();
+  const sug = TRAILING_SUGGESTION_RE.exec(rest);
+  if (!sug) return { text: rest, suggestion: null };
+  return { text: rest.slice(0, sug.index).trim(), suggestion: sug[1]! };
+}
+
+/**
+ * A POSTED Limn finding's text (a teammate's, as `parsePostedLimnFinding` returns its `body`) shown
+ * like the reader's own finding: a title, a body and a separate suggestion. Limn posts a finding's
+ * BODY only (never its title), so the title is the text's first sentence — a full stop, question
+ * mark or exclamation mark followed by a space or the line end, outside `code` — when it is short;
+ * else the stored title (`fallbackTitle`) and the whole text. Pure; never throws.
+ */
+export function postedFindingDisplay(text: string, fallbackTitle: string): PostedFindingDisplay {
+  const { text: rest, suggestion } = splitTrailingSuggestion(text);
+  const firstLineEnd = rest.indexOf('\n');
+  const firstLine = (firstLineEnd < 0 ? rest : rest.slice(0, firstLineEnd)).replace(/^#+\s*/, '');
+  let end = -1;
+  let inCode = false;
+  for (let i = 0; i < firstLine.length; i += 1) {
+    const ch = firstLine[i]!;
+    if (ch === '`') inCode = !inCode;
+    else if (!inCode && (ch === '.' || ch === '?' || ch === '!') && (i + 1 === firstLine.length || firstLine[i + 1] === ' ')) {
+      // "e.g." / "i.e." are not the end of a sentence.
+      if (ch === '.' && /\b(?:e\.g|i\.e|etc|vs)$/i.test(firstLine.slice(0, i))) continue;
+      end = i + 1;
+      break;
+    }
+  }
+  if (end < 0 && firstLineEnd >= 0) end = firstLine.length;
+  if (end < 0 && firstLine.length <= TITLE_MAX) end = firstLine.length;
+  if (end > 0 && end <= TITLE_MAX) {
+    const title = firstLine.slice(0, end).trim();
+    const afterTitle = firstLine.slice(end).trim();
+    // The rest keeps its own line breaks (a paragraph break stays one).
+    const body = (afterTitle + (firstLineEnd < 0 ? '' : rest.slice(firstLineEnd))).trim();
+    if (title !== '') return { title, body, suggestion };
+  }
+  return { title: fallbackTitle, body: rest, suggestion };
+}

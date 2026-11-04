@@ -1,6 +1,7 @@
 // TEAMMATES' POSTED REVIEWS — THE READ SIDE (docs/CLAUDE-REVIEW.md § Teammates' reviews). The import
 // is db/teammate-reviews-import.ts. ⚠ This module opens NO database at import (every reader takes an
 // executor): review modules and their fake-context tests import it.
+import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { ClaudeTeammateFinding, ClaudeTeammateReview, TeammateLiftRecord, TeammateReviewRecord } from '@pierre-review/shared';
@@ -80,6 +81,9 @@ export async function listTeammateReviews(
       kind: crf.postedCommentKind,
       githubCommentId: crf.githubCommentId,
       nodeId: crf.sourceCommentNodeId,
+      postedAt: crf.postedAt,
+      side: crf.side,
+      reminder: crf.reminder,
     })
     .from(crf)
     .where(inArray(crf.reviewId, rows.map((r) => r.id)))
@@ -128,6 +132,14 @@ export async function listTeammateReviews(
           threadId: kind === 'inline' && f.nodeId != null ? (threadOf.get(f.nodeId) ?? null) : null,
           ...providersOf(f.nodeId),
           githubCommentId: f.githubCommentId ?? null,
+          postedAt: f.postedAt != null ? f.postedAt.toISOString() : null,
+          side: f.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+          diffAnchorId: createHash('sha256').update(f.path, 'utf8').digest('hex'),
+          // The reader's reminder (stored beside the finding, never its own post); wire shape only.
+          reminder:
+            f.reminder == null
+              ? null
+              : { githubCommentId: f.reminder.githubCommentId, postedCommentKind: f.reminder.postedCommentKind, postedAt: f.reminder.postedAt },
         };
       });
     const at = r.postedAt ?? r.createdAt;

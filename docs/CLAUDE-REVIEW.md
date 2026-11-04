@@ -3212,8 +3212,10 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     on GitHub" counts only when the resolved thread is the point's NEWEST raise: a later re-raise
     (the latest run's, unposted) keeps the point Open with its actions ("Post reminder"). EVERY row names
     who raised it (`raisedByLabel`): "You", "Robin", "You and Robin", plus the model only when the
-    raising review was a Claude + Codex pair ("You · Codex", "You · Claude + Codex"). Only the
-    reader's own findings of the latest run keep Post / Reword / Ignore; every other row is read-only.
+    raising review was a Claude + Codex pair ("You · Codex", "You · Claude + Codex"). EVERY ROW IS THE
+    READER'S OWN FINDING CARD (docs/FRONTEND.md § Team layout). Only the reader's own findings of the
+    latest run keep Post / Reword / Ignore; every other row keeps Copy, and a teammate's open point also
+    "Post reminder" (§ A reminder of a teammate's finding).
     An ignored point is left out unless it is a latest-run finding (its card shows it ignored).
   - **Reviews on this PR** (§ The review tab's history).
 - **One review** (`review/claude-review/team-view.ts`: `foldTeamReview`, pure; `loadTeamReviewView`
@@ -3259,8 +3261,8 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     title alone), carries "You and Robin"
     (`alsoRaisedBy`); two teammates on the same thread or spot fold into one entry naming both.
   - ⚠ A VIEW ONLY. Own-only readers (caps, budget, posting, the follow-up chain) never read it.
-    Teammate findings stay read-only: no Post, Re-post, Reword or Ignore; Reply / Resolve are on the
-    GitHub thread (the path opens it in Changes).
+    Teammate findings are never rewritten: no Post, Re-post, Reword or Ignore; Reply / Resolve are on
+    the GitHub thread (the path opens it in Changes). The ONE write is the reader's own reminder.
   - **The review count** (`teamReviewCount`, pure; `teamView.reviewCount`): ONE line in the run
     section (the right-hand column when wide), "4 Limn reviews so far · 1 by Robin". FULL reviews
     only: the reader's own SUCCEEDED runs (`kind IS NULL`; a skip ran no review and is left out; a
@@ -3320,8 +3322,35 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   or the same point found again, is never posted a second time.
 - **The wire**: `ClaudeReviewResponse.teammateReviews: ClaudeTeammateReview[]` (newest first;
   `db/teammate-reviews.ts` `listTeammateReviews`) and the fold over it, `teamView` (§ One review, above).
-  Never in `review` / `history`. The SPA's `components/TeammateReviews.tsx` (the lead summary, the
-  read-only finding row) has no Post, Re-post, Delete or auto-post control.
+  Never in `review` / `history`. The SPA's `components/TeammateReviews.tsx` (the lead summary) has no
+  Post, Re-post, Delete or auto-post control; their findings use the reader's own card (Copy, Post
+  reminder). The point carries the card's fields (`side`, `diffAnchorId`, `suggestion`, `postedAt`,
+  comment id/kind, `reminder`, `remindable`; docs/API.md § Team review), all from the import's rows —
+  no GitHub call. A teammate's title / body: the comment text split at its first sentence
+  (`postedFindingDisplay`; Limn posts a finding's body, never its title).
+
+### A reminder of a teammate's finding (2026-11-04)
+
+"Post reminder" on a teammate's OPEN point (`POST /api/claude-findings/:id/post {reminder: true}` with
+the teammate finding's id; `review/claude-review/teammate-reminder.ts` `postTeammateReminder`) posts the
+point again AS THE READER: their own Limn finding comment (finding marker, severity lead, so
+`isLimnPostedComment` holds and sync re-attributes it to `limn:<reader>`), led by the SAME line as the
+reader's own reminders (`reminderLead`: "**Reminder:** first raised [on 4 Nov 2026](<teammate's
+comment>)."). The teammate's comment and thread are never edited, replied to or resolved.
+
+- **What may be reminded** — ONE rule, `team-view.ts` `teammatePointRemindable`, on the SAME fold the
+  tab shows (`loadTeamReviewView`): the entry is the teammate's own point (one folded under the reader's
+  re-raise carries the reader's card instead → `409 NotOpen`), still OPEN, its comment id synced. The
+  wire's `ClaudeTeamPoint.remindable` is the same predicate. Another account's / unknown id → 404.
+- **Where** — inline on the line GitHub shows the teammate's thread on NOW (not outdated), at the PR's
+  SYNCED head (the teammate's review head may be older); else a PR-level comment naming the file. The
+  seam refuses a live head past the synced one (`409 HeadMoved`, nothing written). The text is the
+  stored body; a trailing ```suggestion block goes as the finding's suggestion (`splitTrailingSuggestion`).
+- **Recorded exactly like the reader's own reminder**: `markFindingReminder` on the teammate's finding
+  row (`claude_review_findings.reminder`; the import never writes that column, so a later walk keeps
+  it). posted-state.ts already reads every run's reminders, teammates' rows included, so the comment is
+  CLAIMED and never read as a lost post. No claim-before-write, as for own reminders (the button is
+  disabled while posting); the SPA refetches through `invalidateAfterPrWrite`.
 
 ### Standing verdicts (2026-11-04)
 

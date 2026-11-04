@@ -13,11 +13,14 @@
 // tab, the PR overview and the review count read the result (`ClaudeReviewResponse.teamView`).
 // ⚠ Own-only readers (caps, budget, posting, follow-up) never read this: it is a view.
 // This module opens NO database at import (the loader takes an executor).
+import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { aiRunProvider } from '@pierre-review/shared';
+import { aiRunProvider, postedFindingDisplay } from '@pierre-review/shared';
 import type {
   AiProviderId,
+  ClaudeFindingReminder,
   ClaudeFindingSeverity,
+  ClaudeFindingSide,
   ClaudeFollowUpStatus,
   ClaudeReview,
   ClaudeReviewFollowUpRecord,
@@ -375,6 +378,10 @@ export async function loadTeamReviewView(
             kind: crf.postedCommentKind,
             mergedInto: crf.mergedInto,
             storyIndex: crf.storyIndex,
+            side: crf.side,
+            suggestion: crf.suggestion,
+            postedAuto: crf.postedAuto,
+            reminder: crf.reminder,
           })
           .from(crf)
           .where(inArray(crf.reviewId, [...runOf.keys()]))
@@ -421,6 +428,12 @@ export async function loadTeamReviewView(
               ? `${prUrl}#discussion_r${f.githubCommentId}`
               : `${prUrl}#issuecomment-${f.githubCommentId}`,
         threadId: inline && f.githubCommentId != null ? (threadOfComment.get(f.githubCommentId) ?? null) : null,
+        side: f.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+        suggestion: f.suggestion ?? null,
+        postedAt: f.postedAt != null ? f.postedAt.getTime() : null,
+        postedCommentKind: f.kind ?? null,
+        postedAuto: f.postedAuto === true,
+        reminder: f.reminder ?? null,
       };
     });
 
@@ -825,6 +838,13 @@ export interface AllFindingsOwn {
   githubCommentId: string | null;
   githubUrl: string | null;
   threadId: number | null;
+  // For the shared finding card (all optional: a test may leave them out).
+  side?: ClaudeFindingSide;
+  suggestion?: string | null;
+  postedAt?: number | null; // ms
+  postedCommentKind?: 'inline' | 'pr_comment' | null;
+  postedAuto?: boolean;
+  reminder?: ClaudeFindingReminder | null;
 }
 
 export interface AllFindingsInput {
@@ -968,6 +988,14 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
         ignored: postedOne == null && list.every((m) => m.ignored),
         state: stateOf(members, shown.at),
         alsoRaisedBy: [],
+        side: shown.side ?? 'RIGHT',
+        diffAnchorId: diffAnchorIdOf(shown.path),
+        suggestion: shown.suggestion ?? null,
+        postedAt: postedOne?.postedAt != null ? new Date(postedOne.postedAt).toISOString() : null,
+        githubCommentId: postedOne?.githubCommentId ?? null,
+        postedCommentKind: postedOne?.postedCommentKind ?? null,
+        postedAuto: postedOne?.postedAuto === true,
+        reminder: wireReminder(shown.reminder ?? postedOne?.reminder ?? null),
       },
       spot: shown,
       mateRoot: mateRootOf(shown.id),
@@ -995,6 +1023,8 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
         if (!named) twin.point.alsoRaisedBy.push({ ...author, findingId: f.id, reviewId: r.reviewId, providers });
         continue;
       }
+      // Limn posts a finding's text, never its title: split it the way the reader's own card shows one.
+      const shown = postedFindingDisplay(f.body, f.title);
       entries.push({
         point: {
           findingId: f.id,
@@ -1005,8 +1035,8 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
           path: f.path,
           line: f.line,
           severity: f.severity,
-          title: f.title,
-          body: f.body,
+          title: shown.title,
+          body: shown.body,
           raisedAt: r.postedAt,
           headSha: r.headSha,
           githubUrl: f.githubUrl,
@@ -1022,6 +1052,14 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
             ms(r.postedAt),
           ),
           alsoRaisedBy: [],
+          side: f.side ?? 'RIGHT',
+          diffAnchorId: f.diffAnchorId ?? diffAnchorIdOf(f.path),
+          suggestion: shown.suggestion,
+          postedAt: f.postedAt ?? r.postedAt,
+          githubCommentId: f.githubCommentId ?? null,
+          postedCommentKind: f.kind,
+          postedAuto: false,
+          reminder: wireReminder(f.reminder ?? null),
         },
         spot: f,
         mateRoot: f.id,
@@ -1033,5 +1071,27 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
   const rank = (p: ClaudeTeamPoint): number => (p.state.kind === 'open' ? 0 : 1);
   return entries
     .sort((a, b) => rank(a.point) - rank(b.point) || b.first - a.first || a.point.findingId - b.point.findingId)
-    .map((e) => e.point);
+    .map((e) => ({ ...e.point, remindable: teammatePointRemindable(e.point) }));
+}
+
+/**
+ * A TEAMMATE'S POINT THE READER MAY REMIND (docs/CLAUDE-REVIEW.md § Teammates' reviews → A reminder of a
+ * teammate's finding): the teammate raised it (the point is theirs, not folded under the reader's own
+ * card), it is still OPEN, and its comment is on GitHub (an id to link). The SPA's button and the
+ * route's check read this ONE rule.
+ */
+export function teammatePointRemindable(
+  p: Pick<ClaudeTeamPoint, 'origin' | 'state' | 'githubCommentId'>,
+): boolean {
+  return p.origin === 'teammate' && p.state.kind === 'open' && p.githubCommentId != null;
+}
+
+/** GitHub's "Files changed" anchor of a path (SHA-256, hex) — the reader's own findings use the same. */
+function diffAnchorIdOf(path: string): string {
+  return createHash('sha256').update(path).digest('hex');
+}
+
+/** A stored reminder on the wire (its earlier comment ids stay server-side). */
+function wireReminder(r: ClaudeFindingReminder | null): ClaudeFindingReminder | null {
+  return r == null ? null : { githubCommentId: r.githubCommentId, postedCommentKind: r.postedCommentKind, postedAt: r.postedAt };
 }

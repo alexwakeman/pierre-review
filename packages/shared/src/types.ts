@@ -7541,6 +7541,15 @@ export interface ClaudeTeammateFinding {
   providers?: AiProviderId[];
   // The comment's GitHub databaseId (what a posted judgement names). null = not synced.
   githubCommentId?: string | null;
+  // When the comment was made (ISO-8601). Absent on an older server.
+  postedAt?: string | null;
+  // The diff side it sits on (the import stores 'RIGHT': Limn comments on the new code), and GitHub's
+  // "Files changed" anchor of its path (SHA-256, hex).
+  side?: ClaudeFindingSide;
+  diffAnchorId?: string;
+  // The READER's latest "Post reminder" of this finding (it posted as the reader's own comment,
+  // linking this one). null/absent = none.
+  reminder?: ClaudeFindingReminder | null;
 }
 
 /** `ClaudeReviewResponse.teammateReviews[]` — read-only. */
@@ -7653,6 +7662,25 @@ export interface ClaudeTeamPoint {
   state: ClaudeTeamPointState;
   // Everyone else who raised the same point, each with their own finding, first raise first.
   alsoRaisedBy: Array<ClaudeTeamAuthor & { findingId: number; reviewId: number; providers: AiProviderId[] }>;
+  // THE SHARED FINDING CARD (docs/FRONTEND.md § The AI Review tab → Team layout): what the reader's
+  // own card needs to draw this point the same way. All absent on an older server.
+  // The diff side and GitHub's "Files changed" anchor (SHA-256 of `path`, hex).
+  side?: ClaudeFindingSide;
+  diffAnchorId?: string;
+  // The suggested code, apart from `body` (a teammate's: the trailing ```suggestion block of the
+  // comment, `postedFindingDisplay`). null = none.
+  suggestion?: string | null;
+  // When the comment shown went on GitHub (ISO-8601), and how. null = not posted.
+  postedAt?: string | null;
+  githubCommentId?: string | null;
+  postedCommentKind?: 'inline' | 'pr_comment' | null;
+  // The reader's own post went out automatically ("Posted automatically"). Never on a teammate's.
+  postedAuto?: boolean;
+  // The reader's latest "Post reminder" of it. null = none.
+  reminder?: ClaudeFindingReminder | null;
+  // The reader may post a reminder of it (`POST /api/claude-findings/:id/post` `{reminder: true}`):
+  // a teammate's OPEN point with its comment on GitHub. The reader's own points keep their own card.
+  remindable?: boolean;
 }
 
 // ---- STANDING VERDICTS (docs/CLAUDE-REVIEW.md § Teammates' reviews → Standing verdicts) ----

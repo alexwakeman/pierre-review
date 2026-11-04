@@ -7,6 +7,7 @@ import {
   limnReviewMarker,
   parseLimnReviewMarker,
   parsePostedLimnFinding,
+  postedFindingDisplay,
   stripLimnReviewMarker,
 } from '@pierre-review/shared';
 
@@ -137,6 +138,44 @@ describe('parsePostedLimnFinding', () => {
       refPath: 'src/z.ts',
       refLine: null,
       body: 'Old style.',
+    });
+  });
+});
+
+describe('postedFindingDisplay (a posted finding shown like the reader’s own)', () => {
+  it('splits the first sentence off as the title, outside `code`', () => {
+    const text =
+      "`schemaErrorListener` runs only on hapi's `request` event, `error` channel. Hapi emits that event only for a 500.\n\nTo fix this, move the count.";
+    expect(postedFindingDisplay(text, 'fallback')).toEqual({
+      title: "`schemaErrorListener` runs only on hapi's `request` event, `error` channel.",
+      body: 'Hapi emits that event only for a 500.\n\nTo fix this, move the count.',
+      suggestion: null,
+    });
+    // A full stop inside code (`error.message`) or "e.g." is not the end.
+    expect(postedFindingDisplay('Log `error.message` once, e.g. here. Then stop.', 'x').title).toBe(
+      'Log `error.message` once, e.g. here.',
+    );
+  });
+
+  it('a one-line text is all title; a short first line without a stop is the title', () => {
+    expect(postedFindingDisplay('Rename this', 'x')).toEqual({ title: 'Rename this', body: '', suggestion: null });
+    expect(postedFindingDisplay('Missing guard\nThe list can be empty.', 'x')).toEqual({
+      title: 'Missing guard',
+      body: 'The list can be empty.',
+      suggestion: null,
+    });
+  });
+
+  it('a long first sentence keeps the stored title and the whole text', () => {
+    const long = `${'word '.repeat(50)}end. More.`;
+    expect(postedFindingDisplay(long, 'Stored title…')).toEqual({ title: 'Stored title…', body: long, suggestion: null });
+  });
+
+  it('takes a trailing suggestion block out of the text', () => {
+    expect(postedFindingDisplay('Use a guard. It is safer.\n\n```suggestion\nif (!xs.length) return;\n```', 'x')).toEqual({
+      title: 'Use a guard.',
+      body: 'It is safer.',
+      suggestion: 'if (!xs.length) return;',
     });
   });
 });

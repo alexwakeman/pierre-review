@@ -1892,8 +1892,17 @@ reappears.
   - **Findings by state** (`TeamFindingsSection`, `teamFindingRows` over `teamView.allFindings`):
     "Open", then the ChevronIcon disclosure "Resolved or addressed (n)", collapsed. The reader's own
     latest-run findings keep their `FindingRow` (Post / Reword / Ignore) with ONE `raisedBy` chip in
-    place of the pair-source and "also raised" chips; every other point is a read-only `TeamPointRow`
-    (severity, who-raised chip, why it closed, text, `path:line` → `onOpenThread`, "On GitHub"). A
+    place of the pair-source and "also raised" chips. ⚠ EVERY OTHER POINT IS THE SAME CARD
+    (`PointFindingCard` → `FindingRow` with `editable={false}` and `card`; data from `lib/teamReview.ts`
+    `pointCard`, a past teammate review's from `teammateFindingCard`): severity, title + text,
+    suggestion, `path:line` → Changes (`onOpenInChanges` with the thread), "Posted · <when>" linking the
+    comment, the who-raised chip, why it closed (`card.reason`). Actions: Copy, plus "Post reminder" on
+    a teammate's open point (`pointCard(...).remind`, server `remindable`; now only, never on a past
+    review) — posted as the reader through `usePostFinding`. Never Post, Reword, Ignore or Send to chat
+    (their words are on GitHub; Ignore is not a local hide — it writes `included` and shapes the
+    reader's submitted review). "Posted automatically" is the reader's own auto-post: never on a
+    teammate's (`postedAuto` forced false). A posted chip reads "Posted · 3 hours ago" for a post by
+    hand too. No hunk preview on a teammate's (their comment's diff hunk is not stored). A
     story-placed finding stays under Story check. The rail counts read the same open rows.
   - **Reviews on this PR** (`ReviewsOnPrSection`, `reviewsOnPr`): every review, the reader's (a pair
     once) and teammates', newest first; the NOW row is found by identity (`nowReviewKey`: the latest

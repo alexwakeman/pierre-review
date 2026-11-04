@@ -25,8 +25,11 @@ import {
   reviewsOnPr,
   standingLine,
   standingRows,
+  pointCard,
   teamFindingRows,
+  teammateFindingCard,
 } from '../src/lib/teamReview.js';
+import { canPostReminder, effectivePost, postedChipLabel } from '../src/lib/autoPost.js';
 
 const robin: ClaudeTeammatePoster = { userId: 9, login: 'robin-dunn', displayName: 'Robin Dunn', avatarUrl: null };
 const you: ClaudeTeamAuthor = { you: true, poster: null };
@@ -294,5 +297,121 @@ describe('the tab, by its source', () => {
     const coverage = read('../src/components/TicketCoverage.tsx');
     expect(coverage).not.toContain('JiraKeyLink');
     expect(coverage.match(/<StoryDisclosure[^>]*linkKey=\{false\}/g)?.length).toBe(2);
+  });
+});
+
+// EVERY FINDING LOOKS THE SAME (ClaudeReviewTab.tsx `PointFindingCard` → `FindingRow`): a teammate's
+// point carries what the reader's own card shows, and keeps Copy + "Post reminder" only.
+describe('the shared finding card', () => {
+  const ANCHOR = 'f'.repeat(64);
+  const mate = (over: Partial<ClaudeTeamPoint> = {}): ClaudeTeamPoint =>
+    point(1875, {
+      origin: 'teammate',
+      author: byRobin,
+      reviewId: 20,
+      path: 'src/db/schema-check.js',
+      line: 76,
+      title: '`schemaErrorListener` runs only on the `request` event.',
+      body: 'Hapi emits that event only for a thrown 500.',
+      suggestion: 'countSchemaError(err);',
+      githubUrl: 'https://github.com/acme/x/pull/1#discussion_r4468216175',
+      threadId: 1200498,
+      side: 'RIGHT',
+      diffAnchorId: ANCHOR,
+      postedAt: '2026-11-04T09:00:00Z',
+      githubCommentId: '4468216175',
+      postedCommentKind: 'inline',
+      // Never believed on a teammate's: "Posted automatically" is the reader's own auto-post.
+      postedAuto: true,
+      reminder: null,
+      remindable: true,
+      ...over,
+    });
+
+  it("a teammate's open point: the same fields as the reader's own, Copy and Post reminder", () => {
+    const c = pointCard(mate());
+    expect(c.finding).toMatchObject({
+      id: 1875,
+      reviewId: 20,
+      path: 'src/db/schema-check.js',
+      line: 76,
+      side: 'RIGHT',
+      diffAnchorId: ANCHOR,
+      severity: 'warning',
+      title: '`schemaErrorListener` runs only on the `request` event.',
+      body: 'Hapi emits that event only for a thrown 500.',
+      suggestion: 'countSchemaError(err);',
+      postedAt: '2026-11-04T09:00:00Z',
+      githubCommentId: '4468216175',
+      postedCommentKind: 'inline',
+      postedAuto: false,
+      editedBody: null,
+      threadId: 1200498,
+    });
+    expect(c).toMatchObject({ remind: true, reason: null, unlabelled: false, headSha: SHA_A });
+    // "Posted · <when>" linking the comment — never "Posted automatically".
+    const post = effectivePost(c.finding);
+    expect(post).toMatchObject({ githubCommentId: '4468216175', postedCommentKind: 'inline', earlier: false });
+    expect(postedChipLabel(post!)).toMatch(/^Posted · /);
+    // The own-card rule would hide the reminder (not the latest run); the card offers it itself.
+    expect(canPostReminder(post, false)).toBe(false);
+  });
+
+  it('a closed or not-remindable teammate point: Copy only, with the reason; unlabelled hides the chip', () => {
+    const closed = pointCard(mate({ state: { kind: 'resolved_on_github' }, remindable: false }));
+    expect(closed).toMatchObject({ remind: false, reason: 'Resolved on GitHub' });
+    // A stale `remindable` never offers it on a closed point.
+    expect(pointCard(mate({ state: { kind: 'resolved_on_github' } })).remind).toBe(false);
+    expect(pointCard(mate({ severity: null })).unlabelled).toBe(true);
+    expect(pointCard(mate({ remindable: undefined })).remind).toBe(false);
+  });
+
+  it("the reader's own older point keeps its own post's words and no reminder", () => {
+    const c = pointCard(point(3, { postedAt: '2026-11-03T10:00:00Z', githubCommentId: '55', postedCommentKind: 'inline', postedAuto: true, remindable: true }));
+    expect(c.finding.postedAuto).toBe(true);
+    expect(postedChipLabel(effectivePost(c.finding)!)).toMatch(/^Posted automatically · /);
+    expect(c.remind).toBe(false);
+  });
+
+  it("a teammate's finding in their past review: title split from the text, the suggestion apart, read-only", () => {
+    const c = teammateFindingCard(
+      {
+        id: 1876,
+        path: 'src/routes/validate.js',
+        line: 434,
+        severity: 'warning',
+        title: '`describeError` limits each message…',
+        body: '`describeError` limits each message to 500 characters. But line 434 passes `error` too.\n\n```suggestion\nlogger.error({ err })\n```',
+        kind: 'inline',
+        githubUrl: null,
+        threadId: 1200499,
+        githubCommentId: '4468216182',
+        postedAt: '2026-11-04T09:00:01Z',
+        side: 'RIGHT',
+        diffAnchorId: ANCHOR,
+      },
+      { reviewId: 20, postedAt: '2026-11-04T09:00:00Z', headSha: SHA_B },
+    );
+    expect(c.finding).toMatchObject({
+      title: '`describeError` limits each message to 500 characters.',
+      body: 'But line 434 passes `error` too.',
+      suggestion: 'logger.error({ err })',
+      postedAt: '2026-11-04T09:00:01Z',
+      postedAuto: false,
+    });
+    expect(c.remind).toBe(false);
+  });
+
+  it('the card is the reader\'s own FindingRow, never editable: no Post, Reword or Ignore; no chat pin', () => {
+    const tab = readFileSync(fileURLToPath(new URL('../src/components/ClaudeReviewTab.tsx', import.meta.url)), 'utf8');
+    const card = tab.slice(tab.indexOf('function PointFindingCard'), tab.indexOf('function PointFindingCard') + 1500);
+    expect(card).toContain('<FindingRow');
+    expect(card).toContain('editable={false}');
+    expect(card).toContain('card={{ unlabelled: card.unlabelled, reason: card.reason }}');
+    // Post / Reword / Ignore are all `editable && …` in FindingRow.
+    expect(tab).toContain('const canPostComment = editable && !isPosted;');
+    expect(tab).toContain('const canIgnore = editable && !isPosted;');
+    expect(tab).toContain('{editable && !isPosted && !rewording && (');
+    expect(tab).toContain('{card == null && (\n              <SendToChatButton');
   });
 });

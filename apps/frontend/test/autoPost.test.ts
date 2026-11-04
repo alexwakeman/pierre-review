@@ -38,8 +38,8 @@ const minsAgo = (m: number): string => new Date(Date.now() - m * 60_000).toISOSt
 describe('the posted chip', () => {
   it('says automatically, with how long ago, only when auto-posting did it', () => {
     expect(postedChipLabel({ postedAt: minsAgo(5), postedAuto: true })).toBe('Posted automatically · 5 mins ago');
-    expect(postedChipLabel({ postedAt: minsAgo(5), postedAuto: false })).toBe('Posted');
-    expect(postedChipLabel({ postedAt: minsAgo(5) })).toBe('Posted');
+    expect(postedChipLabel({ postedAt: minsAgo(5), postedAuto: false })).toBe('Posted · 5 mins ago');
+    expect(postedChipLabel({ postedAt: minsAgo(5) })).toBe('Posted · 5 mins ago');
     expect(postedChipLabel({ postedAt: null, postedAuto: true })).toBe('Posted');
   });
 

@@ -13,10 +13,12 @@ import type {
 } from '@pierre-review/shared';
 import { relativeTime } from './ui.js';
 
-/** A posted finding's / item's chip: "Posted", or "Posted automatically · 3 mins ago". */
+/** A posted finding's / item's chip: "Posted · 2 hours ago", or "Posted automatically · 3 mins ago". */
 export function postedChipLabel(p: { postedAt: string | null; postedAuto?: boolean; earlier?: boolean }): string {
   if (p.postedAuto === true && p.postedAt != null) return `Posted automatically · ${relativeTime(p.postedAt)}`;
-  return p.earlier === true ? 'Posted earlier' : 'Posted';
+  if (p.earlier === true) return 'Posted earlier';
+  // When it went on GitHub — the reader's own post by hand and a teammate's alike.
+  return p.postedAt != null ? `Posted · ${relativeTime(p.postedAt)}` : 'Posted';
 }
 
 /** A finding's latest REMINDER chip ("Reminder posted · 3 mins ago"), shown BESIDE the original's

@@ -1,41 +1,33 @@
-import { useState, type ReactNode } from 'react';
-import type {
-  ClaudeFinding,
-  ClaudeFindingSeverity,
-  ClaudeReviewStandings,
-  ClaudeTeamPoint,
-  ClaudeTeammatePoster,
-} from '@pierre-review/shared';
+import { Fragment, useState, type ReactNode } from 'react';
+import type { ClaudeFinding, ClaudeReviewStandings, ClaudeTeamPoint, ClaudeTeammatePoster } from '@pierre-review/shared';
 import { useMe } from '../hooks/useTriage.js';
-import { SEVERITY_CLASS, VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
-import { dateTime, safeExternalUrl } from '../lib/ui.js';
-import { REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_META } from '../lib/reviewStyles.js';
+import { VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
+import { dateTime } from '../lib/ui.js';
+import { REVIEW_ITEM_GROUP, REVIEW_META } from '../lib/reviewStyles.js';
 import {
-  closedReason,
   itemShows,
+  pointCard,
   raisedByLabel,
   reviewListLine,
   standingLine,
   standingRows,
   teamFindingRows,
+  type FindingCard,
   type RaisedBy,
   type ReviewListItem,
   type ShownReview,
 } from '../lib/teamReview.js';
 import { FOCUS_RING, cx } from './ui/index.js';
-import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
+import { ChevronIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
-import { Markdown } from './Markdown.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
-import { TeammateAvatar, TeammateChip } from './TeammateReviews.js';
+import { TeammateAvatar } from './TeammateReviews.js';
 import { VerdictIcon } from './VerdictIcon.js';
 
 // THE AI REVIEW TAB'S TEAM LAYOUT (docs/FRONTEND.md § The AI Review tab → Team layout). The pieces the
 // "now" view adds over the reader's own run: where the PR stands (each Limn reviewer's newest verdict),
 // every finding on the PR by its state now, and the list of every review. Words and rules:
 // lib/teamReview.ts.
-
-const LINK = 'inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink hover:underline';
 
 /** The reader's avatar (their initials without one). */
 function YouAvatar({ size = 16 }: { size?: number }): JSX.Element {
@@ -98,81 +90,12 @@ export function StandingsSection({ standings }: { standings: ClaudeReviewStandin
   );
 }
 
-/** A finding shown read-only: a teammate's, an older review's of the reader, or one now closed. */
-export function TeamPointRow({
-  severity,
-  body,
-  path,
-  line,
-  threadId,
-  githubUrl,
-  raisedBy,
-  reason = null,
-  onOpenThread,
-}: {
-  severity: Exclude<ClaudeFindingSeverity, 'praise'> | null;
-  body: string;
-  path: string;
-  line: number | null;
-  threadId: number | null;
-  githubUrl: string | null;
-  raisedBy: RaisedBy;
-  // Why it is no longer open ("Resolved on GitHub"); null for an open one.
-  reason?: string | null;
-  onOpenThread?: (threadId: number) => void;
-}): JSX.Element {
-  const url = safeExternalUrl(githubUrl);
-  const where = path !== '' ? (line != null ? `${path}:${line}` : path) : null;
-  return (
-    <li className={REVIEW_ITEM_CARD} data-testid="team-finding">
-      <div className="flex items-start gap-2">
-        {severity != null && (
-          <span
-            className={`mt-0.5 inline-flex shrink-0 items-center rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[severity]}`}
-          >
-            {severity}
-          </span>
-        )}
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <TeammateChip by={raisedBy.posters} label={raisedBy.label} title={`Raised by ${raisedBy.label}`} />
-            {reason != null && <span className={REVIEW_META}>{reason}</span>}
-          </div>
-          {/* The title is the text's first line (as posted), so the text alone says it. */}
-          <div className="text-body">
-            <Markdown>{body}</Markdown>
-          </div>
-          <div className={`flex flex-wrap items-center gap-x-3 ${REVIEW_META}`}>
-            {where != null &&
-              (threadId != null && onOpenThread ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenThread(threadId)}
-                  className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline"
-                >
-                  {where}
-                </button>
-              ) : (
-                <span className="break-all font-mono">{where}</span>
-              ))}
-            {url && (
-              <a href={url} target="_blank" rel="noreferrer" className={LINK}>
-                On GitHub
-                <ExternalLinkIcon size={11} aria-hidden />
-              </a>
-            )}
-          </div>
-        </div>
-      </div>
-    </li>
-  );
-}
-
 /**
  * FINDINGS BY THEIR STATE NOW, across every review on the PR (`teamView.allFindings`): "Open", then a
- * collapsed "Resolved or addressed (n)" saying why each one closed. Every row names who raised it. The
- * reader's own findings from the latest run keep their card and its Post / Reword / Ignore
- * (`renderOwn`); everything else is read-only.
+ * collapsed "Resolved or addressed (n)" saying why each one closed. Every row names who raised it.
+ * EVERY ROW IS THE READER'S OWN CARD (`FindingRow`): the latest run's own findings keep Post / Reword /
+ * Ignore (`renderOwn`); every other point is drawn by `renderPoint` from `pointCard` — the same
+ * fields, Copy, and "Post reminder" on a teammate's open point.
  */
 export function TeamFindingsSection({
   points,
@@ -180,7 +103,7 @@ export function TeamFindingsSection({
   hiddenFindingIds,
   pairReviewIds,
   renderOwn,
-  onOpenThread,
+  renderPoint,
   pills,
 }: {
   points: readonly ClaudeTeamPoint[];
@@ -190,7 +113,7 @@ export function TeamFindingsSection({
   hiddenFindingIds: ReadonlySet<number>;
   pairReviewIds: ReadonlySet<number>;
   renderOwn: (f: ClaudeFinding, raisedBy: RaisedBy | null) => JSX.Element;
-  onOpenThread?: (threadId: number) => void;
+  renderPoint: (card: FindingCard, raisedBy: RaisedBy) => JSX.Element;
   pills?: ReactNode;
 }): JSX.Element {
   const [showClosed, setShowClosed] = useState(false);
@@ -202,21 +125,7 @@ export function TeamFindingsSection({
     return {
       key: `p-${p.findingId}`,
       el:
-        e.own != null ? (
-          renderOwn(e.own, by)
-        ) : (
-          <TeamPointRow
-            key={`p-${p.findingId}`}
-            severity={p.severity}
-            body={p.body}
-            path={p.path}
-            line={p.line}
-            threadId={p.threadId}
-            githubUrl={p.githubUrl}
-            raisedBy={by}
-            onOpenThread={onOpenThread}
-          />
-        ),
+        e.own != null ? renderOwn(e.own, by) : <Fragment key={`p-${p.findingId}`}>{renderPoint(pointCard(p), by)}</Fragment>,
     };
   });
   return (
@@ -253,18 +162,7 @@ export function TeamFindingsSection({
             {showClosed && (
               <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`} data-testid="team-findings-closed">
                 {closed.map((p) => (
-                  <TeamPointRow
-                    key={`c-${p.findingId}`}
-                    severity={p.severity}
-                    body={p.body}
-                    path={p.path}
-                    line={p.line}
-                    threadId={p.threadId}
-                    githubUrl={p.githubUrl}
-                    raisedBy={raisedByLabel(p, pairReviewIds)}
-                    reason={closedReason(p.state)}
-                    onOpenThread={onOpenThread}
-                  />
+                  <Fragment key={`c-${p.findingId}`}>{renderPoint(pointCard(p), raisedByLabel(p, pairReviewIds))}</Fragment>
                 ))}
               </ul>
             )}

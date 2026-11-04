@@ -680,6 +680,21 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const accountId = ctx.accountIdOf(req);
     const fctx = await getFindingPostContext(ctx, findingId, accountId);
     if (!fctx) {
+      // A TEAMMATE'S finding takes ONE action here, "Post reminder" (teammate-reminder.ts): posted as
+      // the reader, linking the teammate's comment. A plain Post of it stays 404 (it is theirs).
+      if ((req.body as { reminder?: boolean } | null | undefined)?.reminder === true) {
+        const { postTeammateReminder } = await import('./teammate-reminder.js');
+        const out = await postTeammateReminder(ctx, accountId, findingId);
+        if (out.kind === 'posted') return out.result;
+        if (out.kind === 'conflict') {
+          reply.status(409);
+          return { error: out.code, message: out.message };
+        }
+        if (out.kind === 'github_error') {
+          reply.status(502);
+          return { error: 'GitHubError', message: out.message };
+        }
+      }
       reply.status(404);
       return { error: 'NotFound', message: `Finding ${findingId} not found` };
     }

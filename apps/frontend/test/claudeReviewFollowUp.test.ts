@@ -521,8 +521,10 @@ describe('source guards', () => {
 
   it('like for like: a story finding renders as THE finding card inside its story, and once', () => {
     const tab = code(read('components/ClaudeReviewTab.tsx'));
-    // ONE card builder, used by the Findings list AND handed to Story check's older stories.
-    expect(tab.match(/<FindingRow\b/g) ?? []).toHaveLength(1);
+    // ONE card builder, used by the Findings list AND handed to Story check's older stories. The
+    // other mount is the SAME card for every other point (a teammate's, an older run's, a closed one).
+    expect(tab.match(/<FindingRow\b/g) ?? []).toHaveLength(2);
+    expect(tab.slice(tab.indexOf('function PointFindingCard')).match(/<FindingRow\b/g) ?? []).toHaveLength(1);
     expect(tab).toMatch(/renderFinding: findingCard/);
     expect(tab).toMatch(/findingIds: storyIds/);
     const cov = code(read('components/TicketCoverage.tsx'));

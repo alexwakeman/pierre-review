@@ -7,12 +7,17 @@
 //     every review, each naming who raised it;
 //   • `reviewsOnPr`      — "Reviews on this PR": the reader's runs and teammates' posted reviews;
 //   • `nextShownReview`  — NEWEST ALWAYS SHOWS: a picked past review gives way to the next new one.
+//   • `pointCard` / `teammateFindingCard` — every finding is drawn with the reader's OWN card
+//     (`FindingRow`): the same fields, minus the actions that would rewrite someone else's words.
 import {
   aiProviderName,
   aiRunProviderName,
   PAIR_RUN_LABEL,
+  postedFindingDisplay,
   type AiProviderId,
+  type ClaudeFinding,
   type ClaudeFindingSeverity,
+  type ClaudeTeammateFinding,
   type ClaudeReviewStanding,
   type ClaudeReviewStandings,
   type ClaudeReviewStatus,
@@ -246,6 +251,109 @@ export function pairReviewIdsOf(
   for (const h of history) if (h.pair != null) ids.add(h.id);
   for (const t of teammateReviews) if (t.pair) ids.add(t.reviewId);
   return ids;
+}
+
+// ---- THE SHARED FINDING CARD ----
+
+/**
+ * What the reader's own card (`FindingRow`) shows for a finding that is NOT one of the latest run's
+ * own: the finding itself, plus which actions it keeps. A teammate's finding keeps Copy and, while
+ * open and on GitHub, "Post reminder" (posted AS THE READER, linking theirs — never an edit or reply
+ * of theirs); never Post, Reword or Ignore (their words, already on GitHub), never "Posted
+ * automatically" (that is about the reader's own auto-post). The reader's own older finding keeps
+ * Copy only (its reminder belongs to the latest run's card).
+ */
+export interface FindingCard {
+  finding: ClaudeFinding;
+  // The commit it was raised at (the card's "view file" link).
+  headSha: string | null;
+  // Posted without a severity lead (a teammate's older post): no severity chip.
+  unlabelled: boolean;
+  // Why it is no longer open ("Resolved on GitHub"); null while open.
+  reason: string | null;
+  remind: boolean;
+}
+
+/** A point of `teamView.allFindings` as the shared card. Pure. */
+export function pointCard(p: ClaudeTeamPoint): FindingCard {
+  const teammate = p.origin === 'teammate';
+  const posted = p.posted && p.postedAt != null;
+  return {
+    finding: {
+      id: p.findingId,
+      reviewId: p.reviewId,
+      path: p.path,
+      line: p.line,
+      side: p.side ?? 'RIGHT',
+      diffAnchorId: p.diffAnchorId ?? '',
+      // The card needs a word for its type; `unlabelled` hides the chip.
+      severity: p.severity ?? 'warning',
+      title: p.title,
+      body: p.body,
+      editedBody: null,
+      suggestion: p.suggestion ?? null,
+      diffHunk: null,
+      anchored: p.path !== '' && p.line != null,
+      fileInDiff: p.path !== '',
+      included: true,
+      postedAt: posted ? p.postedAt! : null,
+      githubCommentId: posted ? (p.githubCommentId ?? null) : null,
+      postedCommentKind: posted ? (p.postedCommentKind ?? null) : null,
+      // "Posted automatically" is the READER's auto-post only.
+      postedAuto: !teammate && p.postedAuto === true,
+      earlierPost: null,
+      reminder: p.reminder ?? null,
+      threadId: p.threadId,
+      createdAt: p.raisedAt,
+    },
+    headSha: p.headSha !== '' ? p.headSha : null,
+    unlabelled: p.severity == null,
+    reason: closedReason(p.state),
+    remind: teammate && p.remindable === true && p.state.kind === 'open',
+  };
+}
+
+/**
+ * A teammate's finding in their PAST review (opened from Reviews on this PR): the same card, read-only
+ * (Copy only — a past review is never acted on).
+ */
+export function teammateFindingCard(
+  f: ClaudeTeammateFinding,
+  review: Pick<ClaudeTeammateReview, 'reviewId' | 'postedAt' | 'headSha'>,
+): FindingCard {
+  const shown = postedFindingDisplay(f.body, f.title);
+  const postedAt = f.postedAt ?? review.postedAt;
+  return {
+    finding: {
+      id: f.id,
+      reviewId: review.reviewId,
+      path: f.path,
+      line: f.line,
+      side: f.side ?? 'RIGHT',
+      diffAnchorId: f.diffAnchorId ?? '',
+      severity: f.severity ?? 'warning',
+      title: shown.title,
+      body: shown.body,
+      editedBody: null,
+      suggestion: shown.suggestion,
+      diffHunk: null,
+      anchored: f.path !== '' && f.line != null,
+      fileInDiff: f.path !== '',
+      included: true,
+      postedAt,
+      githubCommentId: f.githubCommentId ?? null,
+      postedCommentKind: f.kind,
+      postedAuto: false,
+      earlierPost: null,
+      reminder: f.reminder ?? null,
+      threadId: f.threadId,
+      createdAt: postedAt,
+    },
+    headSha: review.headSha !== '' ? review.headSha : null,
+    unlabelled: f.severity == null,
+    reason: null,
+    remind: false,
+  };
 }
 
 // ---- REVIEWS ON THIS PR ----
