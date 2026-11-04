@@ -2,12 +2,11 @@
 
 Public marketing site for Limn (limn-review.com). Built independently — it shares no
 runtime code with the timeline SPA — and served at `/` by the small site service in
-[`apps/site`](../site/README.md), which also serves the static demo at `/demo/` and the
-contact form's API.
+[`apps/site`](../site/README.md), which also serves the contact form's API.
 
 **Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
-so the site's call to action is the npm command (`npx limn-review`). The demo (`/demo/`, a static
-build of the app on sample data) is linked once, from the footer. The one limit — free for individuals and for
+so the site's call to action is the npm command (`npx limn-review`). There is no hosted demo:
+the product pictures are clickable HTML mocks (below). The one limit — free for individuals and for
 organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
 `src/lib/site.ts` (which mirrors the Limn License at the repository root).
@@ -37,15 +36,54 @@ page-scoped file under that root: `pages/getting-started.css`, `reporting.css`,
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
 
-**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on the home page, Reporting and metrics
-and How we measure. They are built from one kit, `components/mock/` (`kit.tsx`: MockFrame,
-PrRow, Chip, FindingRow, CheckRow, CourtBar, MiniTable, Diff, Log, Swap; `home.tsx` and
-`reports.tsx` the mocks themselves; `mock.css`), and every word and number comes from ONE file,
+**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page, Getting started's setup
+steps included; the site holds no picture of the Limn UI. They are built from one kit,
+`components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
+CheckRow, CourtBar, MiniTable, Diff, Log, Stat, and the settings controls Section / Field /
+SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx` and `setup.tsx`;
+`mock.css` + `live.css`), and every word, number and state comes from ONE file,
 `src/mock/acme.ts` (the fictional Acme team: PAY-142, #612, acme/payments …). Each mock is real
-text with an `aria-label` summary, restacks under 961px, and has at most one CSS-only change
-(`<Swap>`), whose markup state is the final one. Chip and button words are the app's own
-labels; keep them in step with the app. The only screenshots left are Getting started's
-`src/assets/pages/gs-*.jpg`: they are instructions, so the reader must match the real screen.
+text with an `aria-label` summary and restacks under 961px.
+
+**THE MOCKS ARE CLICKABLE.** A `live` MockFrame is `role="group"`; its tabs are a real tablist
+(arrow keys, Home/End), its buttons run (Fix → diff → Push → "Pushed to …", Re-run failed jobs →
+"Re-run requested.", Merge when ready → "Armed — merging when ready"), its rows open, and its
+settings selects and checkboxes change what the section shows. The title bar says "Try it", then
+"Reset" once something changed. The FIRST state is what the prerendered HTML shows, complete
+without JS; the client's fresh `createRoot` render (no hydration) starts from the same state, and
+adds the "Try it" hint only in the browser. A "working…" step lasts under a second and is skipped
+under `prefers-reduced-motion`.
+
+### The mocks mirror the app
+
+When a user-visible change lands in `apps/frontend` that a mock shows (labels, tabs, chips,
+flows), update `src/mock/acme.ts` and the mock in the same commit. Chip, tab and button words
+are the app's own; never invent a feature for a mock.
+
+| Mock (`components/mock/…`) | Page | Mirrors (`apps/frontend/src/…`) |
+|---|---|---|
+| `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx` |
+| `home.tsx` ReviewMock (PR tabs) | `/` Review | `components/PrDetail.tsx` (TAB_LABELS), `ClaudeReviewTab.tsx`, `AiFixTab.tsx` |
+| `home.tsx` StoryCheckMock | `/` Review | the story check in `ClaudeReviewTab.tsx` |
+| `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/` (Start fix, Push, Pushed to) |
+| `home.tsx` CiMock | `/` Fix | `components/CheckList.tsx`, `Activity/PendingFlaky.tsx` (Re-run failed jobs) |
+| `home.tsx` ConflictsMock | `/` Fix | `components/conflicts/` (`copy.ts`) |
+| `home.tsx` VerdictMock | `/` Ship | `lib/ui.ts` `mergeVerdict`, the PR Overview's Blocked row |
+| `home.tsx` MergeWhenReadyMock | `/` Ship | `components/MergeWhenReadyControl.tsx` |
+| `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
+| `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
+| `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
+| `reports.tsx` PeriodReportMock, PeriodSummaryMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` (Grain: Sprint · Month) |
+| `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx`, `ChronologyTrend.tsx` (Show markers) |
+| `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
+| `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure`, `/getting-started` | Bots Monitoring (platform), the peer benchmark |
+| `reports.tsx` SprintLanesMock | `/reporting` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` |
+| `setup.tsx` AiSettingsMock | `/getting-started` | `components/settings/AiProviderSection.tsx` |
+| `setup.tsx` BotScoringMock | `/getting-started` | `components/settings/BotScoringSection.tsx`, `hooks/useMlInstall.ts` |
+| `setup.tsx` AddReposMock | `/getting-started` | `components/Activity/FirstRunOnboarding.tsx` |
+| `setup.tsx` WorkspacesMock | `/getting-started` | `components/Activity/WorkspaceManager.tsx` |
+| `setup.tsx` TrackerMock | `/getting-started` | `components/settings/IssueLinksSection.tsx`, `JiraApiAccess.tsx`, `LinearApiAccess.tsx` |
+| `setup.tsx` SlackMock | `/getting-started` | `components/settings/SlackSection.tsx` |
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. The two role pages
@@ -61,9 +99,6 @@ the half addressed to them.
 that as "not configured" and renders its unavailable state, which looks exactly like a working
 failure path rather than a missing server.
 
-⚠ **`/demo/` is not a landing route.** The router treats it as external (a full navigation),
-`ROUTE_SEO` and the sitemap leave it out.
-
 ⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever page
 now carries its content — `/pricing` to `/contact`, `/how-it-works` to `/how-we-measure`, `/for-developers` and `/features` to `/getting-started`, `/for-managers`, `/bots`, `/pro`, `/insights` and `/reviews` to `/reporting` — and the header's `ALIAS_OF` (`components/Nav.tsx`) marks the matching link — and `prerender.mjs` writes the same mapping to disk so an old
 inbound link gets real HTML with a canonical pointing at the surviving page. Change both
@@ -72,11 +107,11 @@ tables together. `prerender.mjs` also writes `dist/404.html`, which `apps/site` 
 
 - **Routing** (`src/router.tsx`): a ~80-line client router (`useRoute`, `navigate`, `Link`)
   — no router dependency. `apps/site` serves each route's prerendered page, so deep-links /
-  reloads of every route work. `Link` full-navigates demo/API/external URLs and
+  reloads of every route work. `Link` full-navigates API/external URLs and
   client-routes the rest.
 - **Shared UI**: `Nav.tsx` is the sticky header + mobile drawer; `Footer.tsx` the site
-  footer; `legal.tsx` the shell the three legal pages share; `Lightbox.tsx` the screenshot
-  lightbox; `CookieBanner.tsx` the consent banner.
+  footer; `legal.tsx` the shell the three legal pages share; `CookieBanner.tsx` the consent
+  banner.
 - **Per-page SEO** (`src/lib/seo.ts`): `useSeo({ title, description, path })` sets the
   document title, meta description, canonical and Open Graph / Twitter tags on mount.
   Home-page defaults + JSON-LD live in `index.html`. `public/sitemap.xml` + `public/robots.txt`
@@ -110,14 +145,13 @@ for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s
 
 ## Screenshots and the walkthrough clip
 
-The pages no longer use `public/shots/` or `public/media/`. Getting started's screenshots are
-cropped JPEGs bundled from `src/assets/pages/`. The two public folders stay because other things still
+The pages use no screenshots at all (see the mocks above), and no longer use `public/shots/` or
+`public/media/`. The two public folders stay because other things still
 write or read them: `pnpm shots` (`scripts/capture-shots.mjs`, `scripts/demo-stack.mjs`)
 writes `public/shots/`, the repository README embeds three of those shots, and
 `pnpm demo:video --publish` (`scripts/capture-demo-video.mjs`) writes the walkthrough clip
 to `public/media/`. Both pipelines film the fictional `acme/*` demo stack, never real
-GitHub data. A screenshot on a page is still a CROP OF ONE ELEMENT, never a whole browser
-window.
+GitHub data.
 
 ## Reading the copy
 

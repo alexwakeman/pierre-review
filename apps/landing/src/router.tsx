@@ -69,13 +69,11 @@ export function useRoute(): string {
   return path;
 }
 
-/** True for links that must do a full browser navigation (demo, API, external). */
+/** True for links that must do a full browser navigation (API, external). */
 function isExternal(to: string): boolean {
   return (
     /^https?:\/\//.test(to) ||
     to.startsWith('/api') ||
-    // The demo is a separate app (a static build of the real SPA), not a landing route.
-    to.startsWith('/demo') ||
     to.startsWith('mailto:')
   );
 }

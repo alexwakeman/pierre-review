@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
-import { DEMO_PATH, LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
+import { LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The footer, on the board's dark ground (styles: .lb-foot in board.css): the
@@ -58,7 +58,6 @@ export default function Footer(): JSX.Element {
           <Link to="/how-we-measure">How we measure</Link>
         </div>
         <div>
-          <Link to={DEMO_PATH}>Demo</Link>
           <Link to="/contact">Contact</Link>
           <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
             GitHub

@@ -6,7 +6,7 @@
               · .tile.verdigris.gs-need (h2, ul, p)
      steps    ol.gs-steps > li.gs-step > section.board.gs-row(.wide)
               > .tile.gs-txt.<pigment> > .gs-in (span.gs-n, h2, p, .gs-cmd, p.gs-note)
-              · .tile.gs-shot (figure.gs-fig(.gs-phone-hide) > figcaption + a > img,
+              · .tile.gs-shot (figure.gs-fig > figcaption + an HTML mock (components/mock/setup.tsx),
                 or .gs-term, or .gs-modes > .gs-mode (b, dl > div > dt + dd))
      command  .gs-cmd > pre > code + button.gs-copy
      close    section.board.gs-close > .tile.gold.gs-close-mid · .tile.gs-close-side
@@ -100,7 +100,7 @@
     grid-column: 1 / -1;
     grid-row: 2;
   }
-  /* A tall screenshot column beside: the text rides down with the reader
+  /* A tall mock column beside: the text rides down with the reader
      instead of leaving an empty pigment field under it. `.tile` clips with
      overflow: hidden, which would make the tile the sticky scroll box; clip
      keeps the clipping without that. */
@@ -137,7 +137,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Screenshots keep their own shape: no crop, no grayscale. */
+/* A mock with its caption. */
 .lb.gs .gs-fig {
   margin: 0;
   min-width: 0;
@@ -146,16 +146,6 @@
   font-size: 14px;
   color: var(--muted);
   margin-bottom: 8px;
-}
-.lb.gs .gs-fig a {
-  display: block;
-}
-.lb.gs .gs-fig img {
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-  outline: 1px solid #ffffff1f;
-  outline-offset: -1px;
 }
 
 /* ---- command with copy button ----------------------------------------- */
@@ -321,9 +311,6 @@
   }
   .lb.gs .gs-copy {
     padding: 0 14px;
-  }
-  .lb.gs .gs-phone-hide {
-    display: none;
   }
   .lb.gs .gs-close .gs-close-mid {
     grid-column: 1 / -1;

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   BENCH,
@@ -7,14 +8,16 @@ import {
   COURTS,
   FLOW,
   OVER_TIME,
-  PERIOD,
+  PERIODS,
+  PERIOD_SUMMARY,
   SPRINT,
   WHERE,
 } from '../../mock/acme';
-import { Chip, CourtBar, Group, HBar, MiniTable, MockFrame, Stat } from './kit';
+import type { PeriodGrain, SprintCard, SprintView } from '../../mock/acme';
+import { Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
 
 // The Reporting and How we measure pages' mocks. Words and numbers:
-// src/mock/acme.ts. Each replaces a screenshot that was hard to read on a phone.
+// src/mock/acme.ts. The app surface each one mirrors: apps/landing/README.md.
 
 const PEOPLE = 'var(--verdigris)';
 const AUTOMATION = '#c98a4b';
@@ -41,21 +44,45 @@ function points(values: number[], max: number, w: number, h: number): string {
   return values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`).join(' ');
 }
 
+/** Flow metrics. Each tile opens the pull requests behind its figure, as in the app. */
 export function FlowMetricsMock(): JSX.Element {
   const W = 400;
   const H = 90;
+  const [open, setOpen] = useState<string | null>(null);
+  const tile = FLOW.sprint.find((s) => s.k === open);
   return (
     <MockFrame
+      live
       title="Flow metrics"
       meta={`${FLOW.window}, against the same point last sprint`}
-      label="Flow metrics for this sprint so far: 19 merged, 2.5 days to merge, 3.6 hours to first review, 84% of checks green at merge; 33 pull requests open now; a 12-week chart of pull requests opened and merged"
+      onReset={open ? () => setOpen(null) : null}
+      label="Flow metrics for this sprint so far: 19 merged, 2.5 days to merge, 3.6 hours to first review, 84% of checks green at merge; 33 pull requests open now; a 12-week chart of pull requests opened and merged. Each tile opens its pull requests."
     >
       <Group first>This sprint so far</Group>
       <div className="mk-stats">
         {FLOW.sprint.map((s) => (
-          <Stat key={s.k} k={s.k} v={s.v} d={s.d} tone={s.tone} />
+          <Stat
+            key={s.k}
+            k={s.k}
+            v={s.v}
+            d={s.d}
+            tone={s.tone}
+            pressed={open === s.k}
+            onClick={() => setOpen(open === s.k ? null : s.k)}
+          />
         ))}
       </div>
+      {tile ? (
+        <div className="mk-drill" role="region" aria-label={`${tile.k}: the pull requests behind it`}>
+          <Group first>{tile.k} · the pull requests behind it</Group>
+          <ul className="mk-lines">
+            {tile.prs.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+            <li className="more">and {tile.more} more</li>
+          </ul>
+        </div>
+      ) : null}
       <div className="rp-two">
         <div>
           <Group>Right now</Group>
@@ -90,16 +117,28 @@ export function FlowMetricsMock(): JSX.Element {
 
 // ---- period reports ------------------------------------------------------------
 
+const GRAINS: { id: PeriodGrain; label: string }[] = [
+  { id: 'sprint', label: 'Sprint' },
+  { id: 'month', label: 'Month' },
+];
+
+/** A period report at either grain. Months carry no forecast: they aren't the same length. */
 export function PeriodReportMock(): JSX.Element {
+  const [grain, setGrain] = useState<PeriodGrain>('sprint');
+  const p = PERIODS[grain];
+  const forecast = p.rows.some((r) => r.next !== null);
   return (
     <MockFrame
-      title={PERIOD.name}
-      meta={PERIOD.grain}
-      label="A sprint report for 1 to 15 October: 57% of merges by people and 43% by automation, the biggest movers, and each measure against the sprint before with a forecast"
+      live
+      title={p.name}
+      meta={p.grain}
+      onReset={grain !== 'sprint' ? () => setGrain('sprint') : null}
+      label="A period report, by sprint or by calendar month: the split of merges between people and automation, the biggest movers, and each measure against the period before"
     >
-      <Group first>People against automation</Group>
+      <Segmented label="Grain" options={GRAINS} value={grain} onChange={setGrain} />
+      <Group>People against automation</Group>
       <div className="rp-effort">
-        {PERIOD.effort.map((e) => (
+        {p.effort.map((e) => (
           <div key={e.k}>
             <span>{e.k}</span>
             <HBar parts={e.parts} colors={[PEOPLE, AUTOMATION]} />
@@ -115,24 +154,25 @@ export function PeriodReportMock(): JSX.Element {
       />
       <Group>Biggest movers</Group>
       <div className="mk-chips">
-        {PERIOD.movers.map((m) => (
+        {p.movers.map((m) => (
           <Chip key={m.k} tone={m.tone}>
             {m.k} {m.d}
           </Chip>
         ))}
       </div>
-      <Group>Against the sprint before</Group>
+      <Group>{p.before}</Group>
       <MiniTable
         className="stack"
         cols={[
           { key: 'k', label: 'Measure' },
-          { key: 'now', label: 'This sprint', num: true },
+          { key: 'now', label: grain === 'sprint' ? 'This sprint' : 'This month', num: true },
           { key: 'prior', label: 'Before', num: true },
           { key: 'change', label: 'Change', num: true },
-          { key: 'next', label: 'Next sprint', num: true },
+          ...(forecast ? [{ key: 'next', label: 'Next sprint', num: true }] : []),
         ]}
-        rows={PERIOD.rows.map((r) => ({ _key: r.k, ...r, now: <b>{r.now}</b> }))}
+        rows={p.rows.map((r) => ({ _key: r.k, k: r.k, now: <b>{r.now}</b>, prior: r.prior, change: r.change, next: r.next }))}
       />
+      {!forecast ? <p className="mk-note">No forecast for calendar months.</p> : null}
     </MockFrame>
   );
 }
@@ -141,18 +181,18 @@ export function PeriodSummaryMock(): JSX.Element {
   return (
     <MockFrame
       title="Written summary"
-      meta={PERIOD.name}
+      meta={PERIOD_SUMMARY.name}
       label="A sprint report's written summary: what happened, and what to watch"
     >
       <Group first>What happened</Group>
       <ul className="rp-bullets">
-        {PERIOD.summary.happened.map((t) => (
+        {PERIOD_SUMMARY.happened.map((t) => (
           <li key={t}>{t}</li>
         ))}
       </ul>
       <Group>What to watch</Group>
       <ul className="rp-bullets">
-        {PERIOD.summary.watch.map((t) => (
+        {PERIOD_SUMMARY.watch.map((t) => (
           <li key={t}>{t}</li>
         ))}
       </ul>
@@ -165,34 +205,48 @@ export function PeriodSummaryMock(): JSX.Element {
 const SCALE = 24; // hours across the track; anything past it runs off the end
 
 const pct = (h: number): string => `${(Math.min(h, SCALE) / SCALE) * 100}%`;
+const hrs = (h: number): string => `${h}h`;
 
+/** Chronology: each wait's row opens the figures behind its verdict. */
 export function ChronologyMock(): JSX.Element {
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <MockFrame
+      live
       title="Chronology"
       meta="This sprint · working hours, Monday to Friday, 09:00–17:30"
-      label="Chronology: 36% of working hours waiting for a reviewer, 31% waiting for the author, 33% approved and waiting to merge; first look, approved to merged and opened to merged are past their limits, reply to review is acceptable"
+      onReset={open ? () => setOpen(null) : null}
+      label="Chronology: 36% of working hours waiting for a reviewer, 31% waiting for the author, 33% approved and waiting to merge; first look, approved to merged and opened to merged are past their limits, reply to review is acceptable. Each wait opens its figures."
     >
       <Group first>Where the working hours went</Group>
       <CourtBar showPct segments={COURTS} />
       <Group>Each wait against its time budget</Group>
       <div className="rp-budgets">
-        {BUDGETS.map((b) => (
-          <div key={b.wait} className="rp-budget">
-            <div className="h">
-              <span>{b.wait}</span>
-              <Chip tone={b.tone}>{b.verdict}</Chip>
+        {BUDGETS.map((b) => {
+          const on = open === b.wait;
+          return (
+            <div key={b.wait} className={on ? 'rp-budget open' : 'rp-budget'}>
+              <button type="button" className="h" aria-expanded={on} onClick={() => setOpen(on ? null : b.wait)}>
+                <span>{b.wait}</span>
+                <Chip tone={b.tone}>{b.verdict}</Chip>
+              </button>
+              <div
+                className="track"
+                style={{ '--b': pct(b.budget), '--l': pct(b.limit) } as CSSProperties}
+              >
+                <i className="most" style={{ width: pct(b.most) }} />
+                <i className="half" style={{ left: pct(b.half) }} />
+                <i className="budget" style={{ left: pct(b.budget) }} />
+              </div>
+              {on ? (
+                <p className="rp-why">
+                  Budget {hrs(b.budget)}, limit {hrs(b.limit)}. Half of {b.n} pull requests finished within {hrs(b.half)}; three
+                  in four within {hrs(b.most)}.
+                </p>
+              ) : null}
             </div>
-            <div
-              className="track"
-              style={{ '--b': pct(b.budget), '--l': pct(b.limit) } as CSSProperties}
-            >
-              <i className="most" style={{ width: pct(b.most) }} />
-              <i className="half" style={{ left: pct(b.half) }} />
-              <i className="budget" style={{ left: pct(b.budget) }} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
         <div className="rp-axis" aria-hidden="true">
           <span>0h</span>
           <span>8h</span>
@@ -214,28 +268,43 @@ export function ChronologyMock(): JSX.Element {
 
 const VERDICT_COLOR: Record<string, string> = { g: '#2f6e5f', a: '#b48a35', r: '#b0505d', n: '#2c2d33' };
 
+/** Chronology over time. The marker chips switch their markers on and off, as in the app. */
 export function OverTimeMock(): JSX.Element {
   const W = 420;
   const H = 100;
+  const TOP = 14; // room above the bars for the markers
   const n = OVER_TIME.shares.length;
   const colW = W / n;
+  const all = OVER_TIME.markers.map((m) => m.id);
+  const [shown, setShown] = useState<string[]>(all);
+  const toggle = (id: string): void =>
+    setShown((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   return (
     <MockFrame
+      live
       title="Over time"
       meta="Last 26 weeks"
-      label="Chronology over time: where the working hours went each week, each wait against its budget week by week, and markers for repositories joining, new bots, new contributors and setting changes"
+      onReset={shown.length !== all.length ? () => setShown(all) : null}
+      label="Chronology over time: where the working hours went each week, each wait against its budget week by week, and markers for repositories joining, new bots, new contributors and setting changes, each of which can be shown or hidden"
     >
-      <div className="mk-chips" style={{ marginBottom: 6 }}>
+      <div className="mk-chips" role="group" aria-label="Show markers" style={{ marginBottom: 6 }}>
         {OVER_TIME.markers.map((m) => (
-          <Chip key={m.k}>
-            {m.k} {m.n}
-          </Chip>
+          <button
+            key={m.id}
+            type="button"
+            className="mk-toggle"
+            aria-pressed={shown.includes(m.id)}
+            onClick={() => toggle(m.id)}
+          >
+            <b style={{ background: m.color }} aria-hidden="true" />
+            {m.k} {m.weeks.length}
+          </button>
         ))}
       </div>
       <Group>Where the working hours went</Group>
-      <svg className="mk-svg" viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+      <svg className="mk-svg" viewBox={`0 0 ${W} ${H + TOP}`} aria-hidden="true">
         {OVER_TIME.shares.map((s, i) => {
-          let y = H;
+          let y = H + TOP;
           return (
             <g key={i}>
               {s.map((share, j) => {
@@ -248,6 +317,13 @@ export function OverTimeMock(): JSX.Element {
             </g>
           );
         })}
+        {OVER_TIME.markers
+          .filter((m) => shown.includes(m.id))
+          .map((m, k) =>
+            m.weeks.map((w) => (
+              <circle key={`${m.id}${w}`} cx={w * colW + colW / 2 + (k - 1.5) * 4} cy={6} r={3.5} fill={m.color} />
+            )),
+          )}
       </svg>
       <div className="rp-weeks" style={{ '--n': n } as CSSProperties} aria-hidden="true">
         {OVER_TIME.weeks.map((w, i) => (
@@ -372,12 +448,17 @@ export function WhereWorkMock(): JSX.Element {
 
 // ---- bots ----------------------------------------------------------------------------
 
+/** Bots Monitoring. A bot's row opens what Limn's model made of its comments. */
 export function BotsSeverityMock(): JSX.Element {
+  const [sel, setSel] = useState<string | null>(null);
+  const b = BOTS.find((x) => x.bot === sel);
   return (
     <MockFrame
+      live
       title="What the bots are flagging"
       meta="graded by Limn's model"
-      label="Bots Monitoring: 502 findings, 49% high severity, 30% nits, mostly about correctness; a row per bot with threads, share used, not addressed and severity mix"
+      onReset={sel ? () => setSel(null) : null}
+      label="Bots Monitoring: 502 findings, 49% high severity, 30% nits, mostly about correctness; a row per bot with threads, share used, not addressed and severity mix. Each bot's row opens its breakdown."
     >
       <div className="mk-stats">
         {BOT_SUMMARY.map((s) => (
@@ -387,6 +468,8 @@ export function BotsSeverityMock(): JSX.Element {
       <Group>A row per bot</Group>
       <MiniTable
         className="stack"
+        selected={sel}
+        onSelect={(k) => setSel(sel === k ? null : k)}
         cols={[
           { key: 'bot', label: 'Bot' },
           { key: 'threads', label: 'Threads', num: true },
@@ -395,16 +478,29 @@ export function BotsSeverityMock(): JSX.Element {
           { key: 'mix', label: 'Severity mix' },
           { key: 'high', label: 'High', num: true },
         ]}
-        rows={BOTS.map((b) => ({
-          _key: b.bot,
-          bot: b.bot,
-          threads: b.threads,
-          used: b.used,
-          open: b.open,
-          mix: <HBar parts={b.mix} colors={SEVERITY} />,
-          high: b.high,
+        rows={BOTS.map((x) => ({
+          _key: x.bot,
+          bot: x.bot,
+          threads: x.threads,
+          used: x.used,
+          open: x.open,
+          mix: <HBar parts={x.mix} colors={SEVERITY} />,
+          high: x.high,
         }))}
       />
+      {b ? (
+        <div className="mk-detail" role="status">
+          <b>{b.bot}</b>: {b.threads} threads. Your team used {b.used}; {b.open} were not addressed. Top topic:{' '}
+          {b.topic}.
+          <div className="mk-chips" style={{ marginTop: 6 }}>
+            {SEVERITY_NAMES.map((name, i) => (
+              <Chip key={name} tone={i === 0 ? 'red' : i === 1 ? 'amber' : i === 2 ? 'blue' : 'grey'}>
+                {name} {b.mix[i]}%
+              </Chip>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <Legend items={SEVERITY_NAMES.map((label, i) => ({ label, color: SEVERITY[i] ?? '' }))} />
     </MockFrame>
   );
@@ -443,51 +539,80 @@ export function BenchmarkMock(): JSX.Element {
 
 // ---- This Sprint ------------------------------------------------------------------------
 
+type Lane = { name: string; cards: SprintCard[] };
+
+/** One lane board, three views: rows by theme, by critical path, or by person. */
+function lanesFor(view: SprintView): Lane[] {
+  const by = (key: (c: SprintCard) => string | null): Lane[] => {
+    const out: Lane[] = [];
+    for (const c of SPRINT.cards) {
+      const name = key(c);
+      if (name === null) continue;
+      const lane = out.find((l) => l.name === name);
+      if (lane) lane.cards.push(c);
+      else out.push({ name, cards: [c] });
+    }
+    return out;
+  };
+  if (view === 'paths') {
+    return by((c) => (c.path ? `Path ${c.path}` : null)).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  if (view === 'people') return by((c) => c.who).sort((a, b) => a.name.localeCompare(b.name));
+  return by((c) => c.theme);
+}
+
+function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
+  return (
+    <div className={`card${card.path ? (card.waiting ? ' wait' : ' path') : ''}`} data-col={SPRINT.columns[card.col]}>
+      <span className="key">
+        {card.key}
+        {card.path ? <em>{card.path}</em> : null}
+      </span>
+      <span className="ti">{card.title}</span>
+      <span className="cr">{card.criteria}</span>
+      <Chip>{card.who}</Chip>
+    </div>
+  );
+}
+
 export function SprintLanesMock(): JSX.Element {
+  const [view, setView] = useState<SprintView>('themes');
+  const lanes = lanesFor(view);
   return (
     <MockFrame
+      live
       title={SPRINT.name}
       meta={SPRINT.meta}
-      label="This Sprint by theme: Refunds and Ledger as rows, status columns from not started to product review, ticket cards with criteria and assignee, and numbered critical-path links"
+      onReset={view !== 'themes' ? () => setView('themes') : null}
+      label="This Sprint: one lane board by theme, critical path or person, with status columns from not started to product review, ticket cards with criteria and assignee, and numbered critical-path links"
     >
-      <div className="mk-tabs">
-        <span className="on">Theme</span>
-        <span>Critical path</span>
-        <span>People</span>
-        <span>Merged so far</span>
-      </div>
-      <div className="rp-lanes">
-        <div className="hd" aria-hidden="true">
-          <span />
-          {SPRINT.columns.map((c) => (
-            <span key={c}>{c}</span>
+      <MockTabs label="This Sprint views" tabs={SPRINT.views} value={view} onChange={setView}>
+        <div className="rp-lanes">
+          <div className="hd" aria-hidden="true">
+            <span />
+            {SPRINT.columns.map((c) => (
+              <span key={c}>{c}</span>
+            ))}
+          </div>
+          {lanes.map((lane) => (
+            <div key={lane.name} className="lane">
+              <b className="theme">{lane.name}</b>
+              {SPRINT.columns.map((_, col) => {
+                const here = lane.cards.filter((c) => c.col === col);
+                return here.length > 0 ? (
+                  <div key={col} className="cell">
+                    {here.map((c) => (
+                      <SprintCardBox key={c.key} card={c} />
+                    ))}
+                  </div>
+                ) : (
+                  <span key={col} className="empty" />
+                );
+              })}
+            </div>
           ))}
         </div>
-        {SPRINT.lanes.map((lane) => (
-          <div key={lane.theme} className="lane">
-            <b className="theme">{lane.theme}</b>
-            {lane.cards.map((card, i) =>
-              card ? (
-                <div
-                  key={card.key}
-                  className={`card${card.path ? (card.waiting ? ' wait' : ' path') : ''}`}
-                  data-col={SPRINT.columns[i]}
-                >
-                  <span className="key">
-                    {card.key}
-                    {card.path ? <em>{card.path}</em> : null}
-                  </span>
-                  <span className="ti">{card.title}</span>
-                  <span className="cr">{card.criteria}</span>
-                  <Chip>{card.who}</Chip>
-                </div>
-              ) : (
-                <span key={i} className="empty" />
-              ),
-            )}
-          </div>
-        ))}
-      </div>
+      </MockTabs>
       <Legend
         items={[
           { label: 'On a critical path', color: 'var(--gold)' },
@@ -497,4 +622,3 @@ export function SprintLanesMock(): JSX.Element {
     </MockFrame>
   );
 }
-

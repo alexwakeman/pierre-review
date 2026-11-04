@@ -98,8 +98,7 @@ export default function Cookies(): JSX.Element {
         />
         <P>
           The site also uses your browser&apos;s <T>local storage</T> — not a cookie — to
-          remember your cookie choice itself. The demo uses local storage the same way the app
-          does, for interface preferences. None of it is sent anywhere.
+          remember your cookie choice itself. None of it is sent anywhere.
         </P>
       </LegalSection>
 

@@ -1,7 +1,7 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
-import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
+import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
   LEGAL_LINK,
@@ -17,8 +17,8 @@ import {
 // Terms and conditions. Kept short and readable.
 //
 // There is no hosted service any more, so there are no accounts, no billing and no
-// service levels to describe. What is left: this website (marketing pages, the demo,
-// the contact form), and the software itself — which is governed by the Limn License
+// service levels to describe. What is left: this website (marketing pages and the
+// contact form), and the software itself — which is governed by the Limn License
 // at the repository root, NOT by this page. §3 summarises that licence and says the
 // licence wins; FREE_TEAM_SIZE mirrors it.
 //
@@ -79,11 +79,7 @@ export default function Terms(): JSX.Element {
           none of that data.
         </P>
         <P>
-          This website has three parts: the pages describing {SITE_NAME}, a{' '}
-          <Link to={DEMO_PATH} className={LINK}>
-            demo
-          </Link>{' '}
-          that runs in your browser on invented sample data, and a{' '}
+          This website has two parts: the pages describing {SITE_NAME}, and a{' '}
           <Link to="/contact" className={LINK}>
             contact form
           </Link>

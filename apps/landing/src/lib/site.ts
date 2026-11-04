@@ -41,9 +41,6 @@ export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;
 /** The public source repository. */
 export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
 
-/** The live demo: a static build with sample data, served by apps/site at this path. */
-export const DEMO_PATH = '/demo/';
-
 /**
  * How many people in one organisation (affiliates counted together) may use Limn
  * without a licence. Mirrors the

@@ -6,7 +6,6 @@ import { NOT_FOUND_SEO } from './lib/routes';
 import Nav from './components/Nav';
 import Footer from './components/Footer';
 import CookieBanner from './components/CookieBanner';
-import { LightboxProvider } from './components/Lightbox';
 import { useReveal } from './components/board/useReveal';
 import './components/chrome.css';
 import Home from './pages/Home';
@@ -89,7 +88,7 @@ export default function App(): JSX.Element {
   }, [path]);
 
   return (
-    <LightboxProvider>
+    <>
       {/* Every page is a board page (root `.lb`), so the header, the page and the
           footer all run full width; each page lays out its own tiles. */}
       <div className="lb-app">
@@ -100,6 +99,6 @@ export default function App(): JSX.Element {
         <Footer />
         <CookieBanner />
       </div>
-    </LightboxProvider>
+    </>
   );
 }

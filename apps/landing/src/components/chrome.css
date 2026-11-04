@@ -1,14 +1,13 @@
 /* ===========================================================================
-   SITE CHROME IN THE BOARD STYLE: the 404 page, the cookie banner and the
-   screenshot lightbox. Everything is scoped under one of three roots:
+   SITE CHROME IN THE BOARD STYLE: the 404 page and the cookie banner.
+   Everything is scoped under one of two roots:
 
      .lb.notfound   the 404 page (App.tsx NotFound); board.css supplies the
                     tokens, the font and the dark ground
      .lb-banner     the consent banner (CookieBanner.tsx)
-     .lb-lightbox   the screenshot lightbox (Lightbox.tsx)
 
-   The banner and the lightbox sit outside any .lb root, so they declare the
-   few board tokens they use themselves.
+   The banner sits outside any .lb root, so it declares the few board tokens
+   it uses itself.
    =========================================================================== */
 
 /* ---- 404 --------------------------------------------------------------- */
@@ -55,9 +54,8 @@
   }
 }
 
-/* ---- shared tokens for the two overlays --------------------------------- */
-.lb-banner,
-.lb-lightbox {
+/* ---- the banner's own tokens --------------------------------------------- */
+.lb-banner {
   --ink: #f1f1ef;
   --muted: #a9a69f;
   --dark: #121110;
@@ -69,12 +67,10 @@
   font-family: 'Albert Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.lb-banner a,
-.lb-lightbox a {
+.lb-banner a {
   color: inherit;
 }
-.lb-banner .btn,
-.lb-lightbox .btn {
+.lb-banner .btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -87,18 +83,15 @@
   text-decoration: none;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-.lb-banner .btn.alt,
-.lb-lightbox .btn.alt {
+.lb-banner .btn.alt {
   background: transparent;
   color: var(--ink);
   box-shadow: inset 0 0 0 2px var(--ink);
 }
-.lb-banner .btn.alt:hover,
-.lb-lightbox .btn.alt:hover {
+.lb-banner .btn.alt:hover {
   background: rgba(241, 241, 239, 0.1);
 }
-.lb-banner :is(a, button):focus-visible,
-.lb-lightbox :is(a, button):focus-visible {
+.lb-banner :is(a, button):focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
@@ -141,132 +134,5 @@
     align-items: center;
     justify-content: space-between;
     gap: 32px;
-  }
-}
-
-/* ---- lightbox: dark overlay ------------------------------------------- */
-.lb-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  background: rgba(15, 16, 18, 0.96);
-}
-.lb-lightbox .top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-}
-.lb-lightbox .ttl {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  color: var(--muted);
-}
-.lb-lightbox .ttl > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lb-lightbox .pos {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-.lb-lightbox .btn svg {
-  width: 16px;
-  height: 16px;
-}
-.lb-lightbox .stage {
-  position: relative;
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 0 12px 8px;
-}
-.lb-lightbox .stage.fit {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.lb-lightbox .stage img {
-  display: block;
-  height: auto;
-}
-.lb-lightbox .stage img.fit {
-  max-height: 100%;
-  max-width: 100%;
-  cursor: zoom-in;
-}
-.lb-lightbox .stage img.fit.next {
-  cursor: pointer;
-}
-.lb-lightbox .stage img.zoom {
-  margin-inline: auto;
-  max-width: none;
-  cursor: zoom-out;
-}
-.lb-lightbox .step {
-  position: fixed;
-  top: 50%;
-  z-index: 101;
-  transform: translateY(-50%);
-  padding: 12px;
-}
-.lb-lightbox .btn.alt.step {
-  background: var(--surface);
-}
-.lb-lightbox .btn.alt.step:hover {
-  background: var(--surface-2);
-}
-.lb-lightbox .step svg {
-  width: 20px;
-  height: 20px;
-}
-.lb-lightbox .step.prev {
-  left: 8px;
-}
-.lb-lightbox .step.prev svg {
-  transform: rotate(180deg);
-}
-.lb-lightbox .step.next {
-  right: 8px;
-}
-.lb-lightbox .hint {
-  pointer-events: none;
-  margin: 0;
-  padding: 4px 16px 14px;
-  text-align: center;
-  font-size: 16px;
-  color: var(--muted);
-}
-.lb-lightbox .sm {
-  display: none;
-}
-@media (max-width: 639px) {
-  .lb-lightbox .lg {
-    display: none;
-  }
-  .lb-lightbox .sm {
-    display: inline;
-  }
-}
-@media (min-width: 640px) {
-  .lb-lightbox .top {
-    padding: 16px 24px;
-  }
-  .lb-lightbox .stage {
-    padding: 0 24px 8px;
-  }
-  .lb-lightbox .step.prev {
-    left: 16px;
-  }
-  .lb-lightbox .step.next {
-    right: 16px;
   }
 }

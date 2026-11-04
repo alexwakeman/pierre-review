@@ -101,10 +101,6 @@ export default function Privacy(): JSX.Element {
           pixel.
         </P>
         <P>
-          <T>The demo</T> runs in your browser on invented sample data. Nothing you type or
-          click in it is sent to us, beyond the consented analytics above.
-        </P>
-        <P>
           <T>Legal basis:</T> consent (UK/EU GDPR Art. 6(1)(a)) for analytics; legitimate
           interests (Art. 6(1)(f)) for keeping the site secure and for answering a message you
           chose to send.

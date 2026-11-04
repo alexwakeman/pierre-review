@@ -5,15 +5,15 @@ import { seoFor } from '../lib/routes';
 import { INSTALL_COMMAND, NPM_PACKAGE } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { copyText } from '../components/board/copyText';
-import { useLightbox } from '../components/Lightbox';
-import aiReady from '../assets/pages/gs-ai-ready.jpg';
-import mlSetup from '../assets/pages/gs-ml-setup.jpg';
-import mlBadges from '../assets/pages/gs-ml-badges.jpg';
-import addRepos from '../assets/pages/gs-add-repos.jpg';
-import workspaces from '../assets/pages/gs-workspaces.jpg';
-import trackerJira from '../assets/pages/gs-tracker-jira.jpg';
-import trackerLinear from '../assets/pages/gs-tracker-linear.jpg';
-import slack from '../assets/pages/gs-slack.jpg';
+import { BotsSeverityMock } from '../components/mock/reports';
+import {
+  AddReposMock,
+  AiSettingsMock,
+  BotScoringMock,
+  SlackMock,
+  TrackerMock,
+  WorkspacesMock,
+} from '../components/mock/setup';
 import './getting-started.css';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +25,10 @@ import './getting-started.css';
 // Every claim here is true of the code today (cli.ts, ai/credentials.ts,
 // docs/ML-SEVERITY.md, docs/SYNC.md, docs/TRACKERS.md, docs/PLATFORM.md § Slack).
 // Button and field names are quoted exactly as the app spells them.
+//
+// The pictures are HTML mocks of the real Settings sections and dialogs
+// (components/mock/setup.tsx, words in src/mock/acme.ts SETUP_*): their selects,
+// checkboxes and buttons work, so a reader can try the step before running it.
 // ---------------------------------------------------------------------------
 
 const CODEX_INSTALL = `${INSTALL_COMMAND} ai install codex`;
@@ -60,39 +64,13 @@ function Command({ text }: { text: string }): JSX.Element {
   );
 }
 
-type Shot = {
-  src: string;
-  width: number;
-  height: number;
-  alt: string;
-  label?: string;
-  /** Left out on phones, where a second strip of the same panel adds nothing. */
-  phoneHide?: boolean;
-};
-
-function Shots({ shots }: { shots: Shot[] }): JSX.Element {
-  const lightbox = useLightbox();
+/** A mock with a small caption over it. */
+function Pic({ label, children }: { label?: string; children: ReactNode }): JSX.Element {
   return (
-    <>
-      {shots.map((s) => (
-        <figure key={s.src} className={s.phoneHide ? 'gs-fig gs-phone-hide' : 'gs-fig'}>
-          {s.label ? <figcaption>{s.label}</figcaption> : null}
-          {/* A tap opens the screenshot full size: on a phone it is too small to read. */}
-          <a
-            href={s.src}
-            onClick={(e) => {
-              // The href still works without JS (and for a new-tab click); otherwise
-              // the shot opens in place.
-              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              lightbox.open({ src: s.src, alt: s.alt, title: s.label });
-            }}
-          >
-            <img src={s.src} width={s.width} height={s.height} alt={s.alt} loading="lazy" />
-          </a>
-        </figure>
-      ))}
-    </>
+    <figure className="gs-fig">
+      {label ? <figcaption>{label}</figcaption> : null}
+      {children}
+    </figure>
   );
 }
 
@@ -225,17 +203,9 @@ export default function GettingStarted(): JSX.Element {
           pigment="verdigris"
           wide
           aside={
-            <Shots
-              shots={[
-                {
-                  src: aiReady,
-                  width: 1424,
-                  height: 227,
-                  label: 'Signed in',
-                  alt: "A pull request's AI Review tab once you are signed in: a model picker, a Re-review button and the review",
-                },
-              ]}
-            />
+            <Pic>
+              <AiSettingsMock />
+            </Pic>
           }
         >
           <p>
@@ -334,24 +304,14 @@ export default function GettingStarted(): JSX.Element {
           pigment="lapis"
           wide
           aside={
-            <Shots
-              shots={[
-                {
-                  src: mlSetup,
-                  width: 622,
-                  height: 107,
-                  label: 'Settings → Bot comment scoring',
-                  alt: "The Bot comment scoring section of Settings, with the button 'Set up (one-time ~240 MB download)'",
-                },
-                {
-                  src: mlBadges,
-                  width: 1140,
-                  height: 170,
-                  label: 'What it gives you',
-                  alt: 'What the bots are flagging: 502 findings, 49% high severity, 30% nits, with categories and a severity legend',
-                },
-              ]}
-            />
+            <>
+              <Pic>
+                <BotScoringMock />
+              </Pic>
+              <Pic label="What it gives you">
+                <BotsSeverityMock />
+              </Pic>
+            </>
           }
         >
           <p>
@@ -375,22 +335,14 @@ export default function GettingStarted(): JSX.Element {
           title="Add your repositories"
           pigment="verdigris"
           aside={
-            <Shots
-              shots={[
-                {
-                  src: addRepos,
-                  width: 672,
-                  height: 475,
-                  alt: "The Repos & workspaces dialog: searching 'acme/' lists four repositories, each with an Add button",
-                },
-                {
-                  src: workspaces,
-                  width: 672,
-                  height: 475,
-                  alt: 'The Repos & workspaces dialog: two workspaces, Platform and Web, and each repository with its workspace picker',
-                },
-              ]}
-            />
+            <>
+              <Pic>
+                <AddReposMock />
+              </Pic>
+              <Pic label="Manage repos & workspaces">
+                <WorkspacesMock />
+              </Pic>
+            </>
           }
         >
           <p>
@@ -412,22 +364,9 @@ export default function GettingStarted(): JSX.Element {
           title="Connect Jira or Linear"
           pigment="madder"
           aside={
-            <Shots
-              shots={[
-                {
-                  src: trackerJira,
-                  width: 622,
-                  height: 663,
-                  alt: 'Settings → Issue tracker set to Jira, with base URL, project keys, where to look, and optional Jira API access',
-                },
-                {
-                  src: trackerLinear,
-                  width: 622,
-                  height: 387,
-                  alt: 'Settings → Issue tracker set to Linear, with workspace URL, team keys and where to look',
-                },
-              ]}
-            />
+            <Pic>
+              <TrackerMock />
+            </Pic>
           }
         >
           <p>
@@ -450,16 +389,9 @@ export default function GettingStarted(): JSX.Element {
           title="Connect Slack"
           pigment="lapis"
           aside={
-            <Shots
-              shots={[
-                {
-                  src: slack,
-                  width: 622,
-                  height: 476,
-                  alt: 'Settings → Slack: a stored webhook, Daily at 9:00 AM, three checkboxes and a Send test button',
-                },
-              ]}
-            />
+            <Pic>
+              <SlackMock />
+            </Pic>
           }
         >
           <p>

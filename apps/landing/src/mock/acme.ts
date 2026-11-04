@@ -5,9 +5,15 @@
 // pull request keeps the same number, title and repository wherever it appears:
 // #612 is always "Partial refunds" in acme/payments, PAY-142 is always its story.
 //
-// The words on chips and buttons are the app's own labels ("Criteria 3/4",
+// The words on chips, tabs and buttons are the app's own labels ("Criteria 3/4",
 // "Waiting on others", "Nudge", "Flaky", "Re-run failed jobs", "2 of 3 in stack",
 // "Large"). Keep them exactly as the app spells them.
+//
+// THE MOCKS ARE CLICKABLE, so this file also holds the states they move through
+// (a fix that becomes "Pushed", a re-run that becomes "Re-run requested."). Each
+// mock's FIRST state is the one the prerendered HTML shows. When the app changes a
+// label, a tab or a flow that a mock shows, change it here and in the mock in the
+// same commit (apps/landing/README.md, "The mocks mirror the app").
 // ---------------------------------------------------------------------------
 
 export type Tone = 'red' | 'amber' | 'green' | 'blue' | 'grey' | 'gold';
@@ -29,6 +35,8 @@ export const PRS = {
   ledgerRename: { num: 701, title: 'Rename ledger', repo: REPOS.ledger },
   ledgerIndex: { num: 476, title: 'Ledger index', repo: REPOS.payments },
   checkout: { num: 1184, title: 'Checkout redesign', repo: REPOS.web },
+  idempotency: { num: 493, title: 'Idempotency keys', repo: REPOS.api },
+  payouts: { num: 470, title: 'Payout batching', repo: REPOS.payments },
 } satisfies Record<string, Pr>;
 
 export const prLabel = (p: Pr): string => `#${p.num} ${p.title}`;
@@ -70,19 +78,147 @@ export const FINDINGS = {
 
 // ---- the Pending board ------------------------------------------------------
 
+/** The Pending board's tabs, as the app names them (Activity/pendingTabs.ts TAB_LABEL). */
+export type PendingTabId = 'my_turn' | 'claude' | 'fixing' | 'land' | 'waiting';
+export type PendingCardId = 'settings' | 'reply' | 'refunds' | 'flaky' | 'land' | 'waiting';
+
+export type PendingCard = {
+  pr: Pr;
+  chip: string;
+  tone: Tone;
+  why: string;
+  size?: string;
+  high?: string;
+  detail?: string[];
+};
+
 export const PENDING = {
   workspace: 'Acme payments',
   you: 'dana',
   tabs: [
-    { label: 'Your turn', count: 2, on: true },
-    { label: 'Waiting on others', count: 1 },
-    { label: 'Ready to merge', count: 1 },
-    { label: 'CI failing', count: 1 },
-  ],
+    { id: 'my_turn', label: 'My turn' },
+    { id: 'claude', label: 'AI reviews' },
+    { id: 'fixing', label: 'Needs fixing' },
+    { id: 'land', label: 'Ready to land' },
+    { id: 'waiting', label: 'Waiting on others' },
+  ] as { id: PendingTabId; label: string }[],
   waiting: { who: 'sam', hours: 6, target: 4 },
-} as const;
+  /** One card per pull request. `why` is the line under the title; `detail` shows when it is opened. */
+  cards: {
+    settings: {
+      pr: PRS.settings,
+      chip: 'Your review',
+      tone: 'blue',
+      why: 'Asked 26 working hours ago · +420 −88',
+      size: 'Large',
+      detail: ['Priya asked for your review.', '2 of 3 in stack: #1189 lands first.'],
+    },
+    reply: {
+      pr: PRS.ledgerRename,
+      chip: 'Reply owed',
+      tone: 'amber',
+      why: 'Priya replied to your thread',
+      detail: ['“Kept the old table name as a view until the nightly job is retired.”'],
+    },
+    refunds: {
+      pr: PRS.refunds,
+      chip: 'Criteria 3/4',
+      tone: 'amber',
+      why: 'Your PR · AI review finished 4 min ago',
+      high: '2 major',
+    },
+    flaky: {
+      pr: PRS.webhooks,
+      chip: 'CI failing',
+      tone: 'red',
+      why: 'test-api failed · Flaky',
+    },
+    land: {
+      pr: PRS.retry,
+      chip: 'Ready',
+      tone: 'green',
+      why: '2 approvals · threads resolved · checks green',
+    },
+    waiting: {
+      pr: PRS.idempotency,
+      chip: 'With sam · 6h',
+      tone: 'grey',
+      why: 'Over the 4h review target',
+    },
+  } as Record<PendingCardId, PendingCard>,
+  /** Which cards sit in which tab. A tab's count is its length. */
+  byTab: {
+    my_turn: ['settings', 'reply'],
+    claude: ['refunds'],
+    fixing: ['flaky'],
+    land: ['land'],
+    waiting: ['waiting'],
+  } as Record<PendingTabId, PendingCardId[]>,
+};
+
+/** The words a button says before, while and after it works. The app's own. */
+export const ACTIONS = {
+  nudge: { idle: 'Nudge', busy: 'Nudging…', done: 'Nudged' },
+  rerun: { idle: 'Re-run failed jobs', busy: 'Requesting…', done: 'Re-run requested.' },
+  merge: { idle: 'Merge', busy: 'Merging…', done: 'Merged' },
+  fixItems: { idle: 'Fix 2 items', busy: 'Fixing…', done: 'Ready to push' },
+};
+
+// ---- one pull request (#612), as its detail pane shows it ---------------------
+
+export type PrTabId = 'overview' | 'changes' | 'claude_review' | 'ai_fix';
+
+export const PR_VIEW = {
+  pr: PRS.refunds,
+  branch: 'dana/partial-refunds',
+  /** The detail pane's tabs, in the app's order (PrDetail.tsx TAB_LABELS). */
+  tabs: [
+    { id: 'overview', label: 'Overview' },
+    { id: 'changes', label: 'Changes' },
+    { id: 'claude_review', label: 'AI Review' },
+    { id: 'ai_fix', label: 'AI Fix' },
+  ] as { id: PrTabId; label: string }[],
+  overview: [
+    { name: 'build', state: 'Passed', tone: 'green' },
+    { name: 'test-api', state: 'Passed', tone: 'green' },
+    { name: 'Reviews', state: 'Needs 1 approval', tone: 'amber' },
+    { name: 'AI review', state: '1 major · 1 minor · 1 nit', tone: 'red' },
+    { name: 'PAY-142 Partial refunds', state: 'Criteria 3/4', tone: 'amber' },
+  ] as { name: string; state: string; tone: Tone }[],
+  /** The Changes tab: the file before the fix, with the review's thread on its line. */
+  changes: {
+    file: 'refunds/policy.py',
+    lines: [
+      { k: ' ', t: 'def allows(order):' },
+      { k: '+', t: '    """True if this order can be refunded."""' },
+      { k: '+', t: '    return order.status == "paid"' },
+    ] as { k: '-' | '+' | ' '; t: string }[],
+    thread: { sev: 'Major', text: 'RefundPolicy.allows() never reads paid_at.', state: 'Untouched' },
+  },
+  threads: [
+    { label: '3 resolved', tone: 'green' },
+    { label: '2 likely addressed?', tone: 'blue' },
+    { label: '1 untouched', tone: 'grey' },
+  ] as { label: string; tone: Tone }[],
+};
 
 // ---- fix ------------------------------------------------------------------
+
+/** AI Fix: the findings it offers (two ticked, as "Fix 2 items" picks them), then its change. */
+export const FIX = {
+  items: [
+    { id: 'c3', sev: 'Major', tone: 'red', text: 'Criterion 3 not met: refunds older than 30 days still go through.', on: true },
+    { id: 'paid', sev: 'Major', tone: 'red', text: 'RefundPolicy.allows() never reads paid_at.', on: true },
+    { id: 'email', sev: 'Minor', tone: 'amber', text: 'Retried refund sends a second email.', on: false },
+  ] as { id: string; sev: string; tone: Tone; text: string; on: boolean }[],
+  start: 'Start fix',
+  busy: 'Fixing…',
+  ready: 'Ready to push',
+  discard: 'Discard',
+  push: 'Push',
+  pushing: 'Pushing…',
+  pushedTo: 'Pushed to',
+};
 
 export const FIX_DIFF = {
   file: 'refunds/policy.py',
@@ -100,19 +236,50 @@ export const CI_FAILURE = {
   verdict: 'Not your change: the test lost its network connection.',
 };
 
+/** Merge conflicts on #701. The last one waits for a choice. */
 export const CONFLICTS = [
-  { state: 'Done', tone: 'green', file: 'ledger/post.py', note: 'took theirs' },
-  { state: 'Done', tone: 'green', file: 'ledger/models.py', note: 'both' },
-  { state: 'Decide', tone: 'amber', file: 'api/routes.py', note: 'lines 40–52' },
+  { state: 'Applied', tone: 'green', file: 'ledger/post.py', note: 'took theirs' },
+  { state: 'Both applied', tone: 'green', file: 'ledger/models.py', note: 'both' },
+  { state: 'Needs a decision', tone: 'amber', file: 'api/routes.py', note: 'lines 40–52' },
 ] as { state: string; tone: Tone; file: string; note: string }[];
+
+export const CONFLICT_WORDS = {
+  choices: [
+    { id: 'ours', label: 'Ours', state: 'Applied', note: 'took ours' },
+    { id: 'theirs', label: 'Theirs', state: 'Applied', note: 'took theirs' },
+    { id: 'both', label: 'Both', state: 'Both applied', note: 'both' },
+  ],
+  allDecided: 'Everything is decided.',
+  commit: 'Commit and push',
+  pushing: 'Pushing…',
+  pushed: 'Pushed',
+};
 
 // ---- ship -----------------------------------------------------------------
 
 export const TRUNKS = [
-  { repo: REPOS.payments, state: 'Green', tone: 'green' },
+  { repo: REPOS.payments, state: 'Green', tone: 'green', why: 'Last run passed 12 min ago' },
   { repo: REPOS.web, state: 'Red', tone: 'red', why: `e2e-checkout since #${PRS.checkout.num} merged · 35 min` },
-  { repo: REPOS.api, state: 'Green', tone: 'green' },
-] as { repo: string; state: string; tone: Tone; why?: string }[];
+  { repo: REPOS.api, state: 'Green', tone: 'green', why: 'Last run passed 40 min ago' },
+] as { repo: string; state: string; tone: Tone; why: string }[];
+
+/** The merge verdict on #1190: blockers in order. "Update branch" clears the second. */
+export const VERDICT = {
+  blockers: [
+    { id: 'approval', text: 'Needs 1 more approval', tone: 'red' },
+    { id: 'behind', text: 'Branch is behind main', tone: 'amber' },
+  ] as { id: string; text: string; tone: Tone }[],
+  update: { idle: 'Update branch', busy: 'Updating…' },
+};
+
+/** Merge when ready (MergeWhenReadyControl.tsx): the button and the armed state. */
+export const ARM = {
+  button: 'Merge when ready',
+  armed: 'Armed — merging when ready',
+  cancel: 'Cancel auto-merge',
+  first: { pr: PRS.ledgerIndex, why: 'Waiting for 1 check · then merges' },
+  second: { pr: PRS.retry, idle: '2 approvals · 1 check running', armed: `Lands after #${PRS.ledgerIndex.num}, one at a time` },
+};
 
 // ---- reporting --------------------------------------------------------------
 
@@ -124,16 +291,17 @@ export const COURTS = [
 ];
 
 export const BUDGETS = [
-  { wait: 'First look', budget: 4, limit: 8, half: 5.5, most: 8.5, verdict: 'Past limit', tone: 'red' },
-  { wait: 'Reply to review', budget: 8, limit: 16, half: 8.5, most: 12, verdict: 'Acceptable', tone: 'amber' },
-  { wait: 'Approved to merged', budget: 1, limit: 4, half: 2.5, most: 17, verdict: 'Past limit', tone: 'red' },
-  { wait: 'Opened to merged', budget: 8, limit: 16, half: 17, most: 24, verdict: 'Past limit', tone: 'red' },
-] as { wait: string; budget: number; limit: number; half: number; most: number; verdict: string; tone: Tone }[];
+  { wait: 'First look', budget: 4, limit: 8, half: 5.5, most: 8.5, n: 41, verdict: 'Past limit', tone: 'red' },
+  { wait: 'Reply to review', budget: 8, limit: 16, half: 8.5, most: 12, n: 33, verdict: 'Acceptable', tone: 'amber' },
+  { wait: 'Approved to merged', budget: 1, limit: 4, half: 2.5, most: 17, n: 30, verdict: 'Past limit', tone: 'red' },
+  { wait: 'Opened to merged', budget: 8, limit: 16, half: 17, most: 24, n: 30, verdict: 'Past limit', tone: 'red' },
+] as { wait: string; budget: number; limit: number; half: number; most: number; n: number; verdict: string; tone: Tone }[];
 
 /**
  * Chronology over time: the last 14 weeks with data (of 26), each week's share
  * of hours per court (reviewer / author / landing), and each wait's verdict
  * against its budget: g within, a acceptable, r past limit, n too few to judge.
+ * Each marker kind lists the weeks (by index) it happened in; the chips toggle them.
  */
 export const OVER_TIME = {
   weeks: ['Jul 20', '', '', '', 'Aug 17', '', '', '', 'Sep 14', '', '', '', '', 'This week'],
@@ -148,21 +316,50 @@ export const OVER_TIME = {
     'nrrrrrrrrrrrrr'.split(''),
   ],
   markers: [
-    { k: 'Repository joined', n: 3 },
-    { k: 'New bot', n: 4 },
-    { k: 'New contributor', n: 6 },
-    { k: 'Setting changed', n: 2 },
+    { id: 'repo', k: 'Repository joined', color: '#8fb0ea', weeks: [0, 4, 9] },
+    { id: 'bot', k: 'New bot', color: '#e3b866', weeks: [2, 5, 6, 11] },
+    { id: 'person', k: 'New contributor', color: '#8fd2bf', weeks: [1, 3, 7, 8, 10, 12] },
+    { id: 'setting', k: 'Setting changed', color: '#e79aa6', weeks: [9, 13] },
   ],
 };
 
+/** Flow metrics. Each tile opens the pull requests behind its figure. */
 export const FLOW = {
   window: 'Day 9 of 14 of this sprint',
   sprint: [
-    { k: 'Merged', v: '19', d: '13 fewer than the same point last sprint', tone: 'red' },
-    { k: 'Time to merge', v: '2.5d', d: '26h faster', tone: 'green' },
-    { k: 'Time to first review', v: '3.6h', d: 'no change', tone: 'grey' },
-    { k: 'Checks green at merge', v: '84%', d: '10 pts lower', tone: 'red' },
-  ] as { k: string; v: string; d: string; tone: Tone }[],
+    {
+      k: 'Merged',
+      v: '19',
+      d: '13 fewer than the same point last sprint',
+      tone: 'red',
+      prs: [`#${PRS.ledgerIndex.num} ${PRS.ledgerIndex.title} · 1.2d`, `#${PRS.payouts.num} ${PRS.payouts.title} · 2.4d`, `#${PRS.checkout.num} ${PRS.checkout.title} · 6.0d`],
+      more: 16,
+    },
+    {
+      k: 'Time to merge',
+      v: '2.5d',
+      d: '26h faster',
+      tone: 'green',
+      prs: [`#${PRS.checkout.num} ${PRS.checkout.title} · 6.0d`, `#${PRS.payouts.num} ${PRS.payouts.title} · 2.4d`, `#${PRS.ledgerIndex.num} ${PRS.ledgerIndex.title} · 1.2d`],
+      more: 16,
+    },
+    {
+      k: 'Time to first review',
+      v: '3.6h',
+      d: 'no change',
+      tone: 'grey',
+      prs: [`#${PRS.webhooks.num} ${PRS.webhooks.title} · 9.5h`, `#${PRS.settings.num} ${PRS.settings.title} · 7.0h`, `#${PRS.retry.num} ${PRS.retry.title} · 1.1h`],
+      more: 21,
+    },
+    {
+      k: 'Checks green at merge',
+      v: '84%',
+      d: '10 pts lower',
+      tone: 'red',
+      prs: [`#${PRS.checkout.num} ${PRS.checkout.title} · failed first`, `#${PRS.payouts.num} ${PRS.payouts.title} · failed first`, `#${PRS.ledgerIndex.num} ${PRS.ledgerIndex.title} · green`],
+      more: 16,
+    },
+  ] as { k: string; v: string; d: string; tone: Tone; prs: string[]; more: number }[],
   now: [
     { k: 'Open pull requests', v: '33' },
     { k: 'Red checks now', v: '1' },
@@ -172,35 +369,73 @@ export const FLOW = {
   merged: [14, 13, 24, 25, 25, 24, 27, 29, 25, 31, 27, 20],
 };
 
-export const PERIOD = {
-  name: 'Oct 1 – Oct 15',
-  grain: 'sprint · 14 days',
-  effort: [
-    { k: 'PRs merged', total: 53, parts: [57, 43] },
-    { k: 'Review comments', total: 635, parts: [26, 74] },
-    { k: 'Approvals', total: 34, parts: [100, 0] },
-  ],
-  movers: [
-    { k: 'Time to first review by a person', d: '+4.5h (+20%)', tone: 'red' },
-    { k: 'Human review comments', d: '+24 (+18%)', tone: 'green' },
-    { k: 'Merged PRs by people', d: '+4 (+15%)', tone: 'green' },
-  ] as { k: string; d: string; tone: Tone }[],
-  rows: [
-    { k: 'Merged PRs', now: '53', prior: '48', change: '+5 (+10%)', next: '≈ 53 (44–63)' },
-    { k: '…by people', now: '30', prior: '26', change: '+4 (+15%)', next: '≈ 30 (25–35)' },
-    { k: 'Opened PRs', now: '57', prior: '60', change: '−3 (−5%)', next: '≈ 57 (47–67)' },
-    { k: 'Automation share of merges', now: '43%', prior: '46%', change: '−2 pts', next: '≈ 43%' },
-  ],
-  summary: {
-    happened: [
-      'The team merged 53 pull requests. Half cleared in 77 working hours from opening to merge.',
-      'The biggest move was time to first review by a person, up 20% on the previous sprint.',
+export type PeriodGrain = 'sprint' | 'month';
+
+type Period = {
+  name: string;
+  grain: string;
+  before: string;
+  effort: { k: string; total: string; parts: number[] }[];
+  movers: { k: string; d: string; tone: Tone }[];
+  rows: { k: string; now: string; prior: string; change: string; next: string | null }[];
+};
+
+/** Period reports, at both grains (the app's "Grain: Sprint · Month" buttons). */
+export const PERIODS: Record<PeriodGrain, Period> = {
+  sprint: {
+    name: 'Oct 1 – Oct 15',
+    grain: 'sprint · 14 days',
+    before: 'Against the sprint before',
+    effort: [
+      { k: 'PRs merged', total: '53', parts: [57, 43] },
+      { k: 'Review comments', total: '635', parts: [26, 74] },
+      { k: 'Approvals', total: '34', parts: [100, 0] },
     ],
-    watch: [
-      'Time to first review by a person is the number to hold. It is the part of the wait the team controls.',
-      'Bot comments rise with pull-request volume. What matters is how many were acted on.',
+    movers: [
+      { k: 'Time to first review by a person', d: '+4.5h (+20%)', tone: 'red' },
+      { k: 'Human review comments', d: '+24 (+18%)', tone: 'green' },
+      { k: 'Merged PRs by people', d: '+4 (+15%)', tone: 'green' },
+    ],
+    rows: [
+      { k: 'Merged PRs', now: '53', prior: '48', change: '+5 (+10%)', next: '≈ 53 (44–63)' },
+      { k: '…by people', now: '30', prior: '26', change: '+4 (+15%)', next: '≈ 30 (25–35)' },
+      { k: 'Opened PRs', now: '57', prior: '60', change: '−3 (−5%)', next: '≈ 57 (47–67)' },
+      { k: 'Automation share of merges', now: '43%', prior: '46%', change: '−2 pts', next: '≈ 43%' },
     ],
   },
+  month: {
+    name: 'September 2026',
+    grain: 'calendar month · 30 days',
+    before: 'Against the month before',
+    effort: [
+      { k: 'PRs merged', total: '96', parts: [57, 43] },
+      { k: 'Review comments', total: '1,140', parts: [27, 73] },
+      { k: 'Approvals', total: '63', parts: [100, 0] },
+    ],
+    movers: [
+      { k: 'Merged PRs by people', d: '+6 (+12%)', tone: 'green' },
+      { k: 'Time to first review by a person', d: '−1.2h (−6%)', tone: 'green' },
+      { k: 'Opened PRs', d: '−6 (−5%)', tone: 'grey' },
+    ],
+    rows: [
+      { k: 'Merged PRs', now: '96', prior: '88', change: '+8 (+9%)', next: null },
+      { k: '…by people', now: '55', prior: '49', change: '+6 (+12%)', next: null },
+      { k: 'Opened PRs', now: '104', prior: '110', change: '−6 (−5%)', next: null },
+      { k: 'Automation share of merges', now: '43%', prior: '44%', change: '−1 pt', next: null },
+    ],
+  },
+};
+
+export const PERIOD_SUMMARY = {
+  name: PERIODS.sprint.name,
+  happened: [
+    'The team merged 53 pull requests. Half cleared in 77 working hours from opening to merge.',
+    'The biggest move was time to first review by a person, up 20% on the previous sprint.',
+  ],
+  watch: [
+    'Time to first review by a person is the number to hold. It is the part of the wait the team controls.',
+    'Bot comments rise with pull-request volume. What matters is how many were acted on.',
+  ],
 };
 
 /** Where the work is happening: opened by people / automation, lines changed, reach. */
@@ -213,10 +448,10 @@ export const WHERE = [
 
 /** Bots Monitoring: one row per review bot. Severity mix is critical/major/minor/nit, in %. */
 export const BOTS = [
-  { bot: 'CodeRabbit', threads: 132, used: '58%', open: 55, mix: [8, 36, 26, 30], high: '44%' },
-  { bot: 'Greptile', threads: 125, used: '61%', open: 49, mix: [10, 44, 16, 30], high: '54%' },
-  { bot: 'Copilot', threads: 41, used: '80%', open: 8, mix: [9, 42, 17, 32], high: '51%' },
-  { bot: 'Cursor Bugbot', threads: 41, used: '59%', open: 17, mix: [7, 37, 19, 37], high: '44%' },
+  { bot: 'CodeRabbit', threads: 132, used: '58%', open: 55, mix: [8, 36, 26, 30], high: '44%', topic: 'Correctness' },
+  { bot: 'Greptile', threads: 125, used: '61%', open: 49, mix: [10, 44, 16, 30], high: '54%', topic: 'Correctness' },
+  { bot: 'Copilot', threads: 41, used: '80%', open: 8, mix: [9, 42, 17, 32], high: '51%', topic: 'Error handling' },
+  { bot: 'Cursor Bugbot', threads: 41, used: '59%', open: 17, mix: [7, 37, 19, 37], high: '44%', topic: 'Tests' },
 ];
 
 export const BOT_SUMMARY = [
@@ -228,9 +463,9 @@ export const BOT_SUMMARY = [
 
 /** The home page's short bots table: comments, share high, share acted on. */
 export const BOT_WORTH = [
-  { bot: 'CodeRabbit', comments: 412, high: 60, acted: '38%' },
-  { bot: 'Copilot', comments: 290, high: 35, acted: '22%' },
-  { bot: 'Limn', comments: 118, high: 75, acted: '71%', ours: true },
+  { bot: 'CodeRabbit', comments: 412, high: 60, acted: '38%', actedN: 157 },
+  { bot: 'Copilot', comments: 290, high: 35, acted: '22%', actedN: 64 },
+  { bot: 'Limn', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
 ];
 
 export const BENCH = {
@@ -249,31 +484,170 @@ export const BENCH = {
   ],
 };
 
+export type SprintView = 'themes' | 'paths' | 'people';
+export type SprintCard = {
+  key: string;
+  title: string;
+  criteria: string;
+  who: string;
+  theme: string;
+  /** Status column index into SPRINT.columns. */
+  col: number;
+  path?: number;
+  waiting?: boolean;
+};
+
+/** This Sprint: one lane board, three views (sprintRailModel.ts SPRINT_RAIL_TABS). */
 export const SPRINT = {
   name: 'Payments Sprint 24',
   meta: 'Oct 15 – Oct 28 · day 10 of 14',
+  views: [
+    { id: 'themes', label: 'Theme' },
+    { id: 'paths', label: 'Critical path' },
+    { id: 'people', label: 'People' },
+  ] as { id: SprintView; label: string }[],
   columns: ['Not started', 'In progress', 'Code review', 'Product review'],
-  lanes: [
+  cards: [
+    { key: 'PAY-150', title: 'Refund emails sent once', criteria: '1 of 3 criteria met', who: 'Sam Carter', theme: 'Refunds', col: 1, path: 2 },
+    { key: 'PAY-142', title: 'Partial refunds', criteria: '3 of 4 criteria met', who: 'Dana Wu', theme: 'Refunds', col: 2, path: 1 },
+    { key: 'PAY-139', title: 'Refund reasons in the export', criteria: '2 criteria', who: 'Priya Nair', theme: 'Refunds', col: 3 },
+    { key: 'PAY-158', title: 'Retire the nightly ledger job', criteria: '2 criteria', who: 'Tom Becker', theme: 'Ledger', col: 0, path: 3, waiting: true },
+    { key: 'PAY-146', title: 'Rename ledger tables', criteria: '1 of 3 criteria met', who: 'Priya Nair', theme: 'Ledger', col: 1, path: 3 },
+    { key: 'PAY-148', title: 'Index ledger by day', criteria: '3 of 3 criteria met', who: 'Wei Zhang', theme: 'Ledger', col: 2 },
+  ] as SprintCard[],
+};
+
+// ---- Getting started: the settings the steps describe ---------------------------
+
+/** Settings → AI (settings/AiProviderSection.tsx). */
+export const SETUP_AI = {
+  choices: [
+    { id: 'auto', label: 'Auto' },
+    { id: 'claude', label: 'Claude' },
+    { id: 'codex', label: 'Codex' },
+  ] as { id: 'auto' | 'claude' | 'codex'; label: string }[],
+  efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'],
+  claude: 'Signed in to Claude Code.',
+  codexOut: 'Not signed in.',
+  codexIn: 'Signed in with ChatGPT.',
+  signIn: 'Sign in with ChatGPT',
+  useCode: 'Use a code instead',
+  signOut: 'Sign out',
+  footer: 'Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.',
+};
+
+/** Settings → Bot comment scoring (settings/BotScoringSection.tsx, hooks/useMlInstall.ts). */
+export const SETUP_ML = {
+  title: 'Bot comment scoring',
+  desc: 'Score how serious each bot review comment is.',
+  button: 'Set up (one-time ~240 MB download)',
+  busy: 'Setting up…',
+  ready: 'Set up. Bot review comments are scored on this machine.',
+};
+
+/** First run (Activity/FirstRunOnboarding.tsx): the repositories you have been active in. */
+export const SETUP_REPOS = {
+  title: 'Add the repos you work on',
+  lead: 'Limn tracks the repos you care about — here’s what you’ve been working on.',
+  suggestions: [
+    { name: REPOS.payments, desc: 'Card and bank payments', stars: 24, prs: 11, on: true },
+    { name: REPOS.api, desc: 'Public API and webhooks', stars: 12, prs: 7, on: true },
+    { name: REPOS.web, desc: 'Customer web app', stars: 41, prs: 9, on: true },
+    { name: REPOS.ledger, desc: 'Double-entry ledger', stars: 5, prs: 3, on: true },
+    { name: 'acme/docs-site', desc: 'Public developer documentation', stars: 41, prs: 3, on: true },
+    { name: 'acme/analytics-etl', desc: 'Nightly warehouse loads', stars: 5, prs: 2, on: false },
+  ],
+  search: 'Search repos to add…',
+  or: 'or add any repo by name',
+};
+
+/** Repos & workspaces (Activity/WorkspaceManager.tsx). */
+export const SETUP_WORKSPACES = {
+  title: 'Repos & workspaces',
+  rule: 'Every repo lives in exactly one workspace. Changing a repo’s workspace MOVES it — it leaves the one it’s in now.',
+  workspaces: [
+    { id: 'pay', name: 'Acme payments', isDefault: true },
+    { id: 'web', name: 'Web', isDefault: false },
+  ],
+  repos: [
+    { name: REPOS.payments, home: 'pay' },
+    { name: REPOS.api, home: 'pay' },
+    { name: REPOS.ledger, home: 'pay' },
+    { name: 'acme/docs-site', home: 'pay' },
+    { name: REPOS.web, home: 'web' },
+    { name: 'acme/design-system', home: 'web' },
+  ],
+};
+
+export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';
+
+/** Settings → Issue tracker (settings/IssueLinksSection.tsx, JiraApiAccess.tsx, LinearApiAccess.tsx). */
+export const SETUP_TRACKER = {
+  desc: 'Links each PR to its tickets. This workspace only: each workspace has its own tracker, or none.',
+  providers: [
+    { id: '', label: 'None' },
+    { id: 'jira', label: 'Jira' },
+    { id: 'github', label: 'GitHub Issues' },
+    { id: 'linear', label: 'Linear' },
+    { id: 'notion', label: 'Notion' },
+  ] as { id: TrackerProvider; label: string }[],
+  github: 'Uses the issues each PR closes or links. Nothing to set up.',
+  where: ['PR title and branch name (default)', 'PR title only'],
+  jira: {
+    url: 'https://acme.atlassian.net',
+    urlHint: 'Tickets link to {base}/browse/KEY-123. Moving to a different Jira site removes the saved API token.',
+    keys: 'PAY, LED',
+    keysHint: 'Optional, comma-separated (e.g. ENG, PROJ). Only keys with these prefixes count. Leave blank to look for keys in the PR title only.',
+    access: 'Jira API access (optional)',
+    accessDesc:
+      'Lets Limn read each ticket a PR names: its title, status and assignee, its description and acceptance criteria. A saved token is never shown again.',
+    email: 'dana@acme.example',
+    emailHint: 'Needed for Jira Cloud. Leave blank for a Data Center personal access token.',
+    connected: 'Connected. Jira accepted the saved token.',
+  },
+  linear: {
+    url: 'https://linear.app/acme',
+    urlHint: 'Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.',
+    keys: 'PAY, LED',
+    keysHint: 'Optional, comma-separated (e.g. ENG, OPS). Leave blank to look for keys in the PR title only.',
+    access: 'Linear API key',
+    keyHint: 'Create one in Linear under Settings → Security & access. It starts with lin_api_. Read access is enough.',
+  },
+  notion: {
+    url: 'https://www.notion.so/acme/Tasks-1a2b3c…',
+    urlHint: 'Copy the link of the database that holds your tickets. Moving to another database clears its mapping.',
+  },
+  checking: 'Checking…',
+  check: 'Check connection',
+};
+
+/** Settings → Slack (settings/SlackSection.tsx). */
+export const SETUP_SLACK = {
+  desc: 'Sends this workspace’s Pending board, sprint summary, merges and auto reviews to a Slack channel.',
+  stored: '•••••••• (unchanged)',
+  storedHint: 'A webhook is stored. Enter a new URL to replace it.',
+  cadences: [
+    { id: 'off', label: 'Off (paused, channel kept)' },
+    { id: 'daily', label: 'Daily' },
+    { id: 'twice_daily', label: 'Twice daily' },
+  ] as { id: 'off' | 'daily' | 'twice_daily'; label: string }[],
+  hours: ['7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '1:00 PM', '2:00 PM', '4:00 PM', '5:00 PM'],
+  timezone: 'Europe/London',
+  checks: [
     {
-      theme: 'Refunds',
-      cards: [
-        null,
-        { key: 'PAY-150', title: 'Refund emails sent once', criteria: '1 of 3 criteria met', who: 'Sam Carter', path: 2 },
-        { key: 'PAY-142', title: 'Partial refunds', criteria: '3 of 4 criteria met', who: 'Dana Wu', path: 1 },
-        { key: 'PAY-139', title: 'Refund reasons in the export', criteria: '2 criteria', who: 'Priya Nair' },
-      ],
+      id: 'bots',
+      label: 'Include a review-bot summary',
+      hint: 'Adds each review bot’s comment count, the share your team used and the number left untouched. This workspace’s digest only.',
+      on: true,
     },
     {
-      theme: 'Ledger',
-      cards: [
-        { key: 'PAY-158', title: 'Retire the nightly ledger job', criteria: '2 criteria', who: 'Tom Becker', path: 3, waiting: true },
-        { key: 'PAY-146', title: 'Rename ledger tables', criteria: '1 of 3 criteria met', who: 'Priya Nair', path: 3 },
-        { key: 'PAY-148', title: 'Index ledger by day', criteria: '3 of 3 criteria met', who: 'Wei Zhang' },
-        null,
-      ],
+      id: 'reviews',
+      label: 'Post when an auto review finishes',
+      hint: 'Reviews you start yourself are never posted. The pull request, its verdict and the review’s summary. Not the comments.',
+      on: false,
     },
-  ] as {
-    theme: string;
-    cards: ({ key: string; title: string; criteria: string; who: string; path?: number; waiting?: boolean } | null)[];
-  }[],
+    { id: 'merges', label: 'Post when a pull request merges', hint: 'The pull request and who merged it.', on: false },
+  ],
+  cap: '1 of 12 workspaces has a digest, each its own report on every send.',
+  test: { idle: 'Send test', busy: 'Sending…', done: 'Sent — check Slack.' },
 };

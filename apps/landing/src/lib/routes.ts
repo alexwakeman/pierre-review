@@ -41,9 +41,6 @@ export type RouteSeo = {
  * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
  * and this is where it asks. See src/pages/Contact.tsx.
  *
- * /demo/ is NOT a landing route. It is a separate static build of the app with
- * sample data, served by apps/site — so it is absent here and from the sitemap.
- *
  * Legacy aliases for the removed routes are handled in App.tsx and by the
  * prerenderer, which copies the nearest surviving page's HTML so an old inbound
  * link lands on something readable with a canonical pointing at the new page.
