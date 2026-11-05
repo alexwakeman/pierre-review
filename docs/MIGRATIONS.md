@@ -1521,6 +1521,14 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0170_claude_still_open_posts` — the still-open claim record
+
+NEW table `claude_still_open_posts` ([DATA-MODEL.md](DATA-MODEL.md); [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Still-open points): one row per claimed GitHub write (a "Still open:" reply, an unresolve, a
+continuation thread), unique `(account_id, claim_key)` — every insert uses that EXACT conflict target.
+Composite FK onto `pull_requests (id, account_id)`, cascade. Erased explicitly and listed in
+`accountScopedTables()`. Additive, no backfill. Journal `idx` 170, `when` sqlite `1792396879016`.
+
 ### `0169_approved_merged_since` — "Merged after your Limn approved" counts going forward only
 
 `accounts.approved_merged_since` (integer timestamp, nullable): the earliest merge My Turn's

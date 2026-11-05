@@ -1312,6 +1312,7 @@ export function PrDetail({
                   enabled={claudeReviewEnabled}
                   onOpenReview={() => goToTab('claude_review')}
                   onOpenFix={() => goToTab(aiFixTabEnabled ? 'ai_fix' : 'claude_review')}
+                  onShowThread={showThread}
                 />
               }
             />

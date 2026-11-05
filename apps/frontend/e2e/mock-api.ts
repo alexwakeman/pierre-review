@@ -1241,6 +1241,40 @@ const THREAD_5001: ThreadDetail = {
 
 // A complete-but-empty PR detail so opening a PR never crashes the (error-boundary-less)
 // app. Self-contained: PrDetail renders from this object's own users/labels/etc.
+// STILL-OPEN POINTS (docs/CLAUDE-REVIEW.md § Still-open points): PR 1's one thread, held open by a
+// teammate's Limn only — the wire shape the Threads tab, Changes and the Overview's "Still open" list read.
+export const STILL_OPEN_JUDGEMENTS = {
+  prId: 1,
+  reviewId: null,
+  checkId: null,
+  reviewedHeadSha: '',
+  finishedAt: null,
+  currentHeadSha: 'a'.repeat(40),
+  judgements: [
+    {
+      threadId: 9001,
+      validity: 'valid',
+      addressed: 'not_addressed',
+      explanation: null,
+      reason: 'The null case is still not handled.',
+      resolved: false,
+      assessedAtHead: 'a'.repeat(40),
+      carried: false,
+      teammateOnly: true,
+      stillOpen: {
+        by: { you: false, login: 'robin-dunn', name: 'Robin Dunn' },
+        reason: 'The null case is still not handled.',
+        at: '2026-11-05T09:00:00.000Z',
+        headSha: 'a'.repeat(40),
+        severity: 'warning',
+        path: 'src/metric.ts',
+        line: 42,
+        threadResolved: false,
+      },
+    },
+  ],
+} satisfies ClaudeThreadJudgementsResponse['prs'][number];
+
 export function prDetailFor(id: number): PrDetail {
   const p = PRS.find((x) => x.id === id) ?? PRS[0]!;
   return {
@@ -1520,9 +1554,15 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
       // The review banner's poll (AI on): nothing running.
       if (path.endsWith('/api/claude-reviews/active')) return json(route, { reviews: [] } satisfies ActiveReviewsResponse);
-      // The thread cards' Claude marker (one batched POST per screen): no judged run here.
-      if (path.endsWith('/api/claude-review/thread-judgements'))
-        return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);
+      // The thread cards' Claude marker (one batched POST per screen): no judged run here, except
+      // the still-open fixture's PR (a teammate's Limn holds one point open; served only when a spec
+      // turns AI on and asks for that PR).
+      if (path.endsWith('/api/claude-review/thread-judgements')) {
+        const asked = ((route.request().postDataJSON() as { prIds?: number[] } | null)?.prIds ?? []).filter(
+          (id) => id === STILL_OPEN_JUDGEMENTS.prId,
+        );
+        return json(route, { prs: asked.length > 0 ? [STILL_OPEN_JUDGEMENTS] : [] } satisfies ClaudeThreadJudgementsResponse);
+      }
       // The AI Review tab's per-run "seen" stamp (sent once while a finished run's `seenAt` is null).
       if (/\/api\/prs\/\d+\/claude-review\/seen$/.test(path) && route.request().method() === 'POST')
         return json(route, { status: 'ok', stamped: 1 });

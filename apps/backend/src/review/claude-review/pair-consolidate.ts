@@ -23,6 +23,7 @@
 // model never decides it. The pass's usage is recorded (`recordAiUsage`, feature `claude_review_merge`).
 // An automatic pair's pass is part of the run the budget gate already allowed: it is not asked again,
 // and the input cap keeps it cheap.
+import { runHasOpenPoints, withoutUnbackedOpenPoints } from './open-point-prose.js';
 import type {
   AiProviderId,
   ClaudeFinding,
@@ -421,7 +422,14 @@ export async function consolidatePair(
         const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), groups);
         record = {
           how: 'pass',
-          summary: pass.summary,
+          // THE PROSE GUARD over the pair: an open point either half recorded backs the claim.
+          summary:
+            withoutUnbackedOpenPoints(
+              pass.summary,
+              [x, y].some((h) =>
+                runHasOpenPoints({ findings: h.findings, followUpItems: h.followUp?.items, threadAssessments: h.threadAssessments }),
+              ),
+            ) ?? '',
           verdict: consolidatedVerdict(x, y, mergedFrom, rules),
           sourceOf,
           mergedFrom,

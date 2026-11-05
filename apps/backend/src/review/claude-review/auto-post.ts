@@ -89,6 +89,8 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
+import type { StillOpenDeps } from './still-open.js';
+import { stillOpenCountOf } from './open-point-prose.js';
 import type { PostReviewFinding } from '../../platform/contract.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { similarTitles } from './settled-by-reply.js';
@@ -844,6 +846,7 @@ export async function maybeAutoPostReview(
   a: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null },
   deps: AutoPostDeps = defaultAutoPostDeps,
   resolveDeps?: AutoResolveDeps,
+  stillOpenDeps?: StillOpenDeps,
 ): Promise<AutoPostOutcome> {
   let out: AutoPostOutcome;
   try {
@@ -851,6 +854,20 @@ export async function maybeAutoPostReview(
   } catch (err) {
     ctx.log.warn(`auto post review ${a.reviewId}: ${errText(err)}`);
     out = { kind: 'not_found' };
+  }
+  // STILL-OPEN POINTS (./still-open.ts): a run on the POSTING path says on each earlier thread it
+  // holds open that it is still open (one reply per head, a resolved thread reopened once ever, a
+  // serious one re-raised in a new thread). Only when the post went out, or had nothing new to post;
+  // never for an ineligible PR, a moved head or a claim lost to another writer. ⚠ A caller that
+  // passes its own `deps` (a test) gets no real GitHub writes here unless it passes `stillOpenDeps`.
+  const soDeps = stillOpenDeps ?? (deps === defaultAutoPostDeps ? undefined : null);
+  if (soDeps !== null && stillOpenAfterPost(out)) {
+    try {
+      const { maybePostStillOpen } = await import('./still-open.js');
+      await maybePostStillOpen(ctx, a, soDeps);
+    } catch (err) {
+      ctx.log.warn(`still open review ${a.reviewId}: ${errText(err)}`);
+    }
   }
   // A pair: each half's own follow-up judged its own provider's earlier findings, so resolve and
   // pushback run for both halves, first then second (each claims per thread, so nothing doubles).
@@ -925,7 +942,9 @@ async function autoPostReview(
   const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
   // WHY NOT APPROVED, from the findings and the model(s) — only while the auto verdict is on.
   const verdictRuns: VerdictRun[] = runs.map((r) => ({ by: aiRunProviderName(r), verdict: r.verdict, summary: r.summary }));
-  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules) : null;
+  // Earlier points the run(s) hold open name themselves in the line ("1 earlier point is still open.").
+  const stillOpen = stillOpenCountOf(runs.map((r) => ({ followUpItems: r.followUp?.items, threadAssessments: r.threadAssessments })));
+  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, stillOpen) : null;
   // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
   // other writer has it, and its findings leave this post.
   const claimFirst = async (rec: ClaudeAutoPostRecord): Promise<boolean> =>
@@ -1412,6 +1431,13 @@ async function autoPostReview(
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return { kind: 'done', record: final };
+}
+
+/** Did this auto-post outcome go down the posting path (posted, or nothing new to post)? Pure. */
+export function stillOpenAfterPost(out: AutoPostOutcome): boolean {
+  if (out.kind === 'done') return out.record.status === 'posted' || out.record.status === 'partial';
+  if (out.kind === 'skipped') return out.reason === 'nothing_new' || out.reason === 'already_posted';
+  return false;
 }
 
 /**

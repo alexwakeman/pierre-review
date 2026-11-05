@@ -1,5 +1,6 @@
 import type { AddressedConfidence, DerivedState } from '@pierre-review/shared';
 import { reviewBotKind } from './bot-detection.js';
+import { parseStillOpenMarker } from '@pierre-review/shared';
 import { matchBotResolutionMarker } from './bot-resolution-markers.js';
 
 export type { DerivedState };
@@ -7,7 +8,7 @@ export type { DerivedState };
 export interface ThreadComment {
   author: { login: string } | null;
   createdAt: string; // ISO-8601
-  // Comment body — used ONLY for bot resolution-marker detection. Optional so callers that
+  // Comment body — used ONLY for bot resolution-marker detection and Limn's still-open marker. Optional so callers that
   // don't need marker detection (or run lean without bodies) can omit it.
   body?: string | null;
 }
@@ -133,8 +134,10 @@ export function deriveThreadState(
     return { state: 'likely_addressed', addressedConfidence, addressedReason };
   }
 
+  // A Limn "Still open:" reply (its still-open marker) is the review's word, posted under a
+  // person's login — never that person's answer (docs/CLAUDE-REVIEW.md § Still-open points).
   const hasReply = thread.comments.some(
-    (c) => c.author?.login && c.author.login !== firstAuthor,
+    (c) => c.author?.login && c.author.login !== firstAuthor && parseStillOpenMarker(c.body) == null,
   );
   if (hasReply) {
     return { state: 'replied_unresolved', addressedConfidence: 'low', addressedReason: 'replied' };

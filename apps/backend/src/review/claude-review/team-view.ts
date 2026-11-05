@@ -902,7 +902,7 @@ export function foldAllTeamFindings(input: AllFindingsInput): ClaudeTeamPoint[] 
     for (const j of r.judged ?? []) {
       const list = byComment.get(j.commentId) ?? [];
       list.push({
-        status: j.outcome === 'not_addressed' ? 'open' : j.outcome,
+        status: j.outcome === 'not_addressed' || j.outcome === 'still_open' ? 'open' : j.outcome,
         by: { you: false, poster: r.poster },
         at: ms(r.postedAt),
         reviewId: r.reviewId,

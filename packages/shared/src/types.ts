@@ -2,6 +2,7 @@ import type { NotionTrackerMapping } from './notion-tracker.js';
 import type { TicketComment } from './ticket-comments.js';
 import type { CiFlakySummary, FlakyCheck } from './flaky-checks.js';
 import type { PrBranchStack, PrCriteriaCheck } from './pr-chips.js';
+import type { ClaudeThreadStillOpen } from './still-open.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
@@ -6258,13 +6259,16 @@ export interface OwnThreadItem {
   path: string;
   line: number | null;
   originalCommenterId: number | null;
-  /** ISO — the thread's own createdAt. */
+  /** ISO — the thread's own createdAt (a still-open one: when the Limn judged it). */
   since: string;
   githubUrl: string;
   /** See `MyTurnPr.personal` / `.relevance` / `.muted`. */
   personal?: boolean;
   relevance?: MyTurnRelevance;
   muted?: boolean;
+  /** A Limn — yours or a teammate's — holds this thread's point OPEN at the PR's current head
+   *  (docs/CLAUDE-REVIEW.md § Still-open points). Absent = an unanswered thread. */
+  stillOpen?: ClaudeThreadStillOpen;
 }
 
 export interface ThreadAwaitingItem {
@@ -7519,7 +7523,9 @@ export interface TeammateReviewRecord {
   // THE JUDGEMENTS IT CARRIED (the marker's `j=`, shared `parseLimnJudged`): earlier Limn findings on
   // GitHub — the reader's own or another teammate's — this review judged, by finding comment
   // databaseId. Absent = none (and on every older import).
-  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' }>;
+  // `still_open` (`o`, 2026-11-05): not addressed and held open; the id may be ANY thread's root
+  // comment (a person's too). docs/CLAUDE-REVIEW.md § Still-open points.
+  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open' }>;
   // A PAIR's finding comments by node id → who raised each (from the comment's lead tag, "Codex",
   // "Claude + Codex"). Absent on a single run (its `runs[0].provider` raised every finding).
   findingProviders?: Record<string, AiProviderId[]>;
@@ -8347,6 +8353,12 @@ export interface ClaudeThreadJudgement {
    *  thread judgement): what the newest review that followed it up found. `validity`/`addressed`
    *  then MIRROR it for readers that know only those two fields. Absent ⇒ an ordinary judgement. */
   finding?: ClaudeThreadFindingOutcome | null;
+  /** STILL OPEN (docs/CLAUDE-REVIEW.md § Still-open points): the newest Limn judgement that holds this
+   *  thread's point open — the reader's own run's, or a teammate's Limn's posted one (`j=` `o`). A
+   *  thread only a teammate's Limn judged is listed with `teammateOnly: true` (its validity/addressed
+   *  read valid / not addressed). Absent = nobody holds it open. */
+  stillOpen?: ClaudeThreadStillOpen | null;
+  teammateOnly?: boolean;
 }
 
 /** What a later review found about one of Claude's own posted findings, for its thread card. */
@@ -10541,6 +10553,9 @@ export type MyTurnOwnWork =
       originalCommenterId: number | null;
       botKind: AutomatedReviewerKind | null;
       botLabel: string | null;
+      /** Set when a Limn holds the thread's point open (docs/CLAUDE-REVIEW.md § Still-open points):
+       *  who, and its one-line reason. Absent = an unanswered thread. */
+      stillOpen?: Pick<ClaudeThreadStillOpen, 'by' | 'reason' | 'severity'>;
     };
 
 // Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different

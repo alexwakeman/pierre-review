@@ -19,6 +19,12 @@
 //       The comment id is the finding comment's GitHub databaseId; the code is a (addressed), n (not
 //       addressed) or x (no longer applies). A teammate's Limn reads it so the finding's own Limn can
 //       say "Robin's review found it addressed". Absent = none (and on every older post).
+//       o (STILL OPEN, 2026-11-05; docs/CLAUDE-REVIEW.md § Still-open points): the review found the
+//       point not (or only partly) addressed and holds it open. The id may then be ANY thread's root
+//       comment — a person's too, not only a Limn finding. ⚠ BACKWARD COMPATIBLE BY CONSTRUCTION: a
+//       still-open entry is written as TWO tokens, `<id>:n,<id>:o`. A Limn from before `o` parses
+//       `[anx]` only and keeps the first entry per id, so it reads `n` (not addressed — what it
+//       understood before) and skips the `o` token; this parser lets the `o` upgrade that `n`.
 //   lift  `1` = THE POSTER'S CONSENT: a teammate's Limn may lift this poster's Limn block (dismiss
 //       their standing Request changes) once every point behind it is addressed (docs/CLAUDE-REVIEW.md
 //       § Lifting a teammate's block). Written only while the poster's workspace setting
@@ -41,7 +47,7 @@ export interface LimnReviewMetaRun {
 }
 
 /** One earlier finding a posted review judged (`j=`). */
-export type LimnJudgedOutcome = 'addressed' | 'not_addressed' | 'no_longer_applies';
+export type LimnJudgedOutcome = 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open';
 export interface LimnJudgedFinding {
   // The finding comment's GitHub databaseId (digits).
   commentId: string;
@@ -51,37 +57,50 @@ export interface LimnJudgedFinding {
 /** The most judgements one marker carries (the rest are left out, never truncated mid-entry). */
 export const LIMN_META_MAX_JUDGED = 50;
 
-const JUDGED_CODE: Record<LimnJudgedOutcome, string> = { addressed: 'a', not_addressed: 'n', no_longer_applies: 'x' };
-const JUDGED_OF_CODE: Record<string, LimnJudgedOutcome> = { a: 'addressed', n: 'not_addressed', x: 'no_longer_applies' };
+const JUDGED_CODE: Record<LimnJudgedOutcome, string> = { addressed: 'a', not_addressed: 'n', no_longer_applies: 'x', still_open: 'o' };
+const JUDGED_OF_CODE: Record<string, LimnJudgedOutcome> = { a: 'addressed', n: 'not_addressed', x: 'no_longer_applies', o: 'still_open' };
 
-/** The `j=` value: valid entries only, first per comment id, bounded. '' ⇒ omitted. */
+/**
+ * The `j=` value: valid entries only, first per comment id, at most LIMN_META_MAX_JUDGED ids. A
+ * still-open entry is written `<id>:n,<id>:o` (see the header: an older parser reads the `n`).
+ * '' ⇒ omitted.
+ */
 export function limnJudgedValue(judged: readonly LimnJudgedFinding[] | null | undefined): string {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const j of judged ?? []) {
-    if (out.length >= LIMN_META_MAX_JUDGED) break;
+    if (seen.size >= LIMN_META_MAX_JUDGED) break;
     const id = String(j.commentId ?? '');
     const code = JUDGED_CODE[j.outcome];
     if (!/^\d{1,20}$/.test(id) || code == null || seen.has(id)) continue;
     seen.add(id);
-    out.push(`${id}:${code}`);
+    if (code === 'o') out.push(`${id}:n`, `${id}:o`);
+    else out.push(`${id}:${code}`);
   }
   return out.join(',');
 }
 
-/** Parse a `j=` value (tolerant: a malformed entry is skipped). */
+/**
+ * Parse a `j=` value (tolerant: a malformed or unknown entry is skipped; the first entry per id
+ * wins, except that an `o` upgrades the same id's `n` — the pair a still-open entry is written as).
+ */
 export function parseLimnJudged(v: string | undefined): LimnJudgedFinding[] {
   if (v == null) return [];
-  const seen = new Set<string>();
-  const out: LimnJudgedFinding[] = [];
+  const byId = new Map<string, LimnJudgedFinding>();
   for (const tok of v.split(',')) {
-    if (out.length >= LIMN_META_MAX_JUDGED) break;
-    const m = /^(\d{1,20}):([anx])$/.exec(tok.trim());
-    if (!m || seen.has(m[1]!)) continue;
-    seen.add(m[1]!);
-    out.push({ commentId: m[1]!, outcome: JUDGED_OF_CODE[m[2]!]! });
+    const m = /^(\d{1,20}):([a-z])$/.exec(tok.trim());
+    if (!m) continue;
+    const outcome = JUDGED_OF_CODE[m[2]!];
+    if (outcome == null) continue;
+    const cur = byId.get(m[1]!);
+    if (cur == null) {
+      if (byId.size >= LIMN_META_MAX_JUDGED) continue;
+      byId.set(m[1]!, { commentId: m[1]!, outcome });
+    } else if (cur.outcome === 'not_addressed' && outcome === 'still_open') {
+      cur.outcome = 'still_open';
+    }
   }
-  return out;
+  return [...byId.values()];
 }
 
 export interface LimnReviewMeta {

@@ -176,11 +176,16 @@ export function dissentText(run: VerdictRun, tail: string | null = null): string
   return tail ? `${lead} ${tail}` : lead;
 }
 
-/** What is still open once no blocker or warning is: "No findings are open." / "A nit is still open." */
-function minorTail(nits: number, questions: number): string {
-  if (nits + questions === 0) return 'No findings are open.';
+/** What is still open once no blocker or warning is: "No findings are open." / "A nit is still open."
+ *  `stillOpen`: earlier points the review holds open (docs/CLAUDE-REVIEW.md § Still-open points) —
+ *  "1 earlier point is still open." — so the line never says "no findings" beside a held-open point. */
+export function minorTail(nits: number, questions: number, stillOpen = 0): string {
+  const earlier =
+    stillOpen > 0 ? `${stillOpen === 1 ? '1 earlier point is' : `${stillOpen} earlier points are`} still open.` : null;
+  if (nits + questions === 0) return earlier ?? 'No findings are open.';
   const t = openText([[nits, 'nit'], [questions, 'question']]);
-  return `${t[0]!.toUpperCase()}${t.slice(1)}`;
+  const minor = `${t[0]!.toUpperCase()}${t.slice(1)}`;
+  return earlier ? `${minor} ${earlier[0]!.toUpperCase()}${earlier.slice(1)}` : minor;
 }
 
 /**
@@ -194,6 +199,8 @@ export function findingsNotApproved(
   runs: readonly VerdictRun[],
   findings: readonly VerdictFinding[],
   rules: VerdictRules = DEFAULT_VERDICT_RULES,
+  // Earlier points the run(s) hold open (`stillOpenCountOf`): named in the tail, never as "no findings".
+  stillOpen = 0,
 ): ClaudeNotApproved | null {
   const counted = countedOf(findings);
   const n = (sev: ClaudeFindingSeverity) => counted.filter((f) => f.severity === sev).length;
@@ -205,7 +212,7 @@ export function findingsNotApproved(
   const nits = n('nit');
   const questions = n('question');
   // No blocker or warning is open here: say so plainly beside a model that only commented.
-  const tail = minorTail(nits, questions);
+  const tail = minorTail(nits, questions, stillOpen);
   if (runs.length >= 2) {
     const [a, b] = runs as [VerdictRun, VerdictRun];
     const folded = pairVerdict(a.verdict, b.verdict, rules.pairStrictness);

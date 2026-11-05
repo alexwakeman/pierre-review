@@ -12,6 +12,7 @@ import type { AgentContext } from '../agent-context.js';
 import { readVerdictRulesForPr } from './auto-settings.js';
 import { findingsNotApproved, heldReasonText, type VerdictRun } from './auto-verdict.js';
 import { getClaudeReviewById } from './persist.js';
+import { stillOpenCountOf } from './open-point-prose.js';
 import { prAuthorIsAccount } from '../../coding/ai-fix/auto-fix.js';
 
 /** The reason auto-posting recorded on a run, or null (none, or it approved). */
@@ -43,13 +44,18 @@ export async function notApprovedForView(
     if (recorded !== undefined) return recorded;
     // A pair: each succeeded half's own verdict and summary (the view carries only the merged ones).
     let runs: VerdictRun[] = [{ by: aiRunProviderName(review), verdict: review.verdict, summary: review.summary }];
+    let judging: ClaudeReview[] = [review];
     const halfIds = review.pair?.halves?.filter((h) => h.status === 'succeeded').map((h) => h.reviewId) ?? [];
     if (halfIds.length >= 2) {
       const halves = await Promise.all(halfIds.map((id) => getClaudeReviewById(ctx, id, accountId)));
       const ok = halves.filter((h): h is ClaudeReview => h != null && h.prId === review.prId && h.status === 'succeeded');
-      if (ok.length >= 2) runs = ok.map((h) => ({ by: aiRunProviderName(h), verdict: h.verdict, summary: h.summary }));
+      if (ok.length >= 2) {
+        runs = ok.map((h) => ({ by: aiRunProviderName(h), verdict: h.verdict, summary: h.summary }));
+        judging = ok;
+      }
     }
-    const why = findingsNotApproved(runs, review.findings, rules);
+    const stillOpen = stillOpenCountOf(judging.map((r) => ({ followUpItems: r.followUp?.items, threadAssessments: r.threadAssessments })));
+    const why = findingsNotApproved(runs, review.findings, rules, stillOpen);
     if (why != null) return why;
     if (await prAuthorIsAccount(ctx, accountId, review.prId)) {
       return { heldReason: 'own_pr', text: heldReasonText({ heldReason: 'own_pr' })! };

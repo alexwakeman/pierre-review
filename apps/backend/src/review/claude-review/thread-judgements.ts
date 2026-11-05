@@ -10,7 +10,18 @@ import type {
   ClaudeThreadValidity,
   AiProviderId,
 } from '@pierre-review/shared';
-import { aiRunProvider, limnFindingPost, threadAssessmentCounts } from '@pierre-review/shared';
+import {
+  aiRunProvider,
+  isStillOpenFollowUp,
+  isStillOpenThread,
+  limnFindingPost,
+  parseStillOpenMarker,
+  stillOpenReasonOf,
+  threadAssessmentCounts,
+  type ClaudeStillOpenBy,
+  type ClaudeThreadStillOpen,
+  type TeammateReviewRecord,
+} from '@pierre-review/shared';
 import type { ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
@@ -558,22 +569,171 @@ async function followUpsForPrs(
   return out;
 }
 
+// ── STILL-OPEN POINTS ON THE THREAD CARDS (docs/CLAUDE-REVIEW.md § Still-open points) ──────────────
+// Each judged thread says whether a Limn holds its point open now: the reader's own newest judgement
+// (a thread judgement that holds up and is not addressed, or a follow-up item on a Limn finding still
+// open), or a TEAMMATE'S Limn's posted one (`j=` `o`, imported as `TeammateReviewRecord.judged`). The
+// NEWER of the two decides; a teammate's later "addressed" lifts the reader's older still-open, and the
+// reverse. A thread only a teammate's Limn judged is listed on its own (`teammateOnly`). The reason of
+// a teammate's still-open is its Limn's "Still open:" reply on that thread (the newest), else none.
+
+/** One word about a thread's point: open or not, when, and by whom. */
+export interface StillOpenWord {
+  open: boolean;
+  at: number; // ms
+  by: ClaudeStillOpenBy;
+  reason: string | null;
+  severity: ClaudeThreadStillOpen['severity'];
+  headSha: string | null;
+}
+
+/** The newer word wins (ties: the reader's own). Pure. */
+export function newerStillOpenWord(own: StillOpenWord | undefined, mate: StillOpenWord | undefined): StillOpenWord | undefined {
+  if (own == null) return mate;
+  if (mate == null) return own;
+  return mate.at > own.at ? mate : own;
+}
+
+const firstSentenceOf = (t: string | null | undefined): string | null => {
+  const one = (t ?? '').replace(/\s+/g, ' ').trim();
+  if (one === '') return null;
+  const m = /^(.+?[.!?])(?=\s|$)/.exec(one);
+  const s = (m?.[1] ?? one).trim();
+  return s.length > 200 ? `${s.slice(0, 199).trimEnd()}…` : s;
+};
+
+const sevOf = (s: string | null | undefined): ClaudeThreadStillOpen['severity'] =>
+  s === 'blocker' || s === 'warning' || s === 'nit' || s === 'question' ? s : null;
+
+/**
+ * Per PR, per thread, the NEWEST teammate Limn's word on it (every imported teammate review's `j=`
+ * entry, matched to the thread by its root comment's databaseId), with the reason from that Limn's
+ * "Still open:" reply. Account-scoped, DB-only, batched.
+ */
+export async function teammateStillOpenWordsForPrs(
+  ctx: AgentContext,
+  accountId: number,
+  prIds: readonly number[],
+): Promise<Map<number, Map<number, StillOpenWord>>> {
+  const out = new Map<number, Map<number, StillOpenWord>>();
+  if (prIds.length === 0) return out;
+  const s = ctx.schema as any;
+  const cr = s.claudeReviews;
+  const users = s.users;
+  const rc = s.reviewComments;
+  const mates = (await ctx.db
+    .select({
+      prId: cr.prId,
+      id: cr.id,
+      headSha: cr.headSha,
+      postedAt: cr.postedAt,
+      teammate: cr.teammate,
+      userId: cr.sourceUserId,
+      login: users.githubLogin,
+      name: users.displayName,
+    })
+    .from(cr)
+    .leftJoin(users, eq(users.id, cr.sourceUserId))
+    .where(and(inArray(cr.prId, [...new Set(prIds)]), eq(cr.accountId, accountId), eq(cr.kind, 'teammate')))
+    .execute()) as Array<{
+    prId: number;
+    id: number;
+    headSha: string;
+    postedAt: Date | null;
+    teammate: TeammateReviewRecord | null;
+    userId: number | null;
+    login: string | null;
+    name: string | null;
+  }>;
+  const withJudged = mates.filter((m) => (m.teammate?.judged ?? []).length > 0 && m.login != null);
+  if (withJudged.length === 0) return out;
+  const comments = (await ctx.db
+    .select({
+      id: rc.id,
+      prId: rc.prId,
+      threadId: rc.threadId,
+      databaseId: rc.databaseId,
+      body: rc.body,
+      createdAt: rc.createdAt,
+      poster: rc.limnPostedByUserId,
+      authorId: rc.authorId,
+    })
+    .from(rc)
+    .where(inArray(rc.prId, [...new Set(withJudged.map((m) => m.prId))]))
+    .execute()) as Array<{
+    id: number;
+    prId: number;
+    threadId: number | null;
+    databaseId: string | null;
+    body: string | null;
+    createdAt: Date | null;
+    poster: number | null;
+    authorId: number | null;
+  }>;
+  const threadOfComment = new Map<string, number>(); // `${prId}:${databaseId}` → thread
+  const byThread = new Map<number, typeof comments>();
+  for (const c of comments.sort((a, b) => ms(a.createdAt) - ms(b.createdAt) || a.id - b.id)) {
+    if (c.threadId == null) continue;
+    if (c.databaseId != null) threadOfComment.set(`${c.prId}:${c.databaseId}`, c.threadId);
+    const list = byThread.get(c.threadId) ?? [];
+    list.push(c);
+    byThread.set(c.threadId, list);
+  }
+  // Oldest first, so a newer teammate review's word replaces an older one.
+  for (const m of withJudged.sort((a, b) => ms(a.postedAt) - ms(b.postedAt) || a.id - b.id)) {
+    const at = ms(m.postedAt);
+    const by: ClaudeStillOpenBy = { you: false, login: m.login!, name: m.name ?? null };
+    for (const j of m.teammate?.judged ?? []) {
+      const threadId = threadOfComment.get(`${m.prId}:${j.commentId}`);
+      if (threadId == null) continue;
+      const list = byThread.get(threadId) ?? [];
+      // Only the thread's ROOT is what a judgement names.
+      if (list[0]?.databaseId !== j.commentId) continue;
+      const open = j.outcome === 'still_open';
+      // That Limn's newest "Still open:" reply on the thread, at or before its post.
+      const reply = open
+        ? [...list]
+            .reverse()
+            .find(
+              (c) =>
+                parseStillOpenMarker(c.body) != null &&
+                (c.poster ?? c.authorId) === m.userId &&
+                ms(c.createdAt) <= at + 10 * 60_000,
+            )
+        : undefined;
+      const rootPost = limnFindingPost(list[0]?.body, { threadRoot: true });
+      const map = out.get(m.prId) ?? new Map<number, StillOpenWord>();
+      map.set(threadId, {
+        open,
+        at,
+        by,
+        reason: reply != null ? stillOpenReasonOf(reply.body) || null : null,
+        severity: rootPost != null && !rootPost.stillOpen ? sevOf(rootPost.severity) : null,
+        headSha: m.headSha ?? null,
+      });
+      out.set(m.prId, map);
+    }
+  }
+  return out;
+}
+
 export async function getThreadJudgements(
   ctx: AgentContext,
   prIds: readonly number[],
   accountId: number,
 ): Promise<ClaudeThreadJudgementsForPr[]> {
   if (prIds.length === 0) return [];
-  const [current, followUps] = await Promise.all([
+  const [current, followUps, mateWords] = await Promise.all([
     currentThreadAssessmentsForPrs(ctx, accountId, prIds),
     followUpsForPrs(ctx, accountId, prIds),
+    teammateStillOpenWordsForPrs(ctx, accountId, prIds),
   ]);
   const findings = new Map<number, Map<number, ClaudeThreadJudgement>>();
   for (const [prId, list] of followUps) {
     const m = findingJudgementsFromFollowUps(list);
     if (m.size > 0) findings.set(prId, m);
   }
-  const wanted = [...new Set([...current.keys(), ...findings.keys()])];
+  const wanted = [...new Set([...current.keys(), ...findings.keys(), ...[...mateWords].filter(([, m]) => [...m.values()].some((w) => w.open)).map(([id]) => id)])];
   if (wanted.length === 0) return [];
   const s = ctx.schema as any;
   const prs = s.pullRequests;
@@ -596,6 +756,74 @@ export async function getThreadJudgements(
     // An ordinary thread judgement wins on a thread both somehow name (the two sets are disjoint).
     const judged = new Set(judgements.map((j) => j.threadId));
     for (const j of findings.get(prId)?.values() ?? []) if (!judged.has(j.threadId)) judgements.push(j);
+    // STILL OPEN: the reader's own word per thread, then the newer of it and a teammate's.
+    const ownWords = new Map<number, StillOpenWord>();
+    const finishedOf = new Map((followUps.get(prId) ?? []).map((r) => [r.id, ms(r.finishedAt)]));
+    for (const j of judgements) {
+      if (j.finding != null) {
+        ownWords.set(j.threadId, {
+          open: isStillOpenFollowUp(j.finding.status),
+          at: finishedOf.get(j.finding.reviewId) ?? 0,
+          by: { you: true },
+          reason: firstSentenceOf(j.explanation),
+          severity: null,
+          headSha: j.assessedAtHead,
+        });
+      } else {
+        ownWords.set(j.threadId, {
+          open: isStillOpenThread(j),
+          at: ms(c?.judgedAtByThread.get(j.threadId) ?? null),
+          by: { you: true },
+          reason: (j.reason ?? '').trim() || firstSentenceOf(j.explanation),
+          severity: null,
+          headSha: j.assessedAtHead,
+        });
+      }
+    }
+    const mates = mateWords.get(prId);
+    const words = new Map<number, StillOpenWord>();
+    for (const id of new Set([...ownWords.keys(), ...(mates?.keys() ?? [])])) {
+      const w = newerStillOpenWord(ownWords.get(id), mates?.get(id));
+      if (w?.open) words.set(id, w);
+    }
+    if (words.size > 0) {
+      const rt = s.reviewThreads;
+      const rows = (await ctx.db
+        .select({ id: rt.id, path: rt.path, line: rt.line, isResolved: rt.isResolved })
+        .from(rt)
+        .where(and(eq(rt.prId, prId), inArray(rt.id, [...words.keys()])))
+        .execute()) as Array<{ id: number; path: string; line: number | null; isResolved: boolean }>;
+      const threadRow = new Map(rows.map((r) => [r.id, r]));
+      for (const [threadId, w] of words) {
+        const t = threadRow.get(threadId);
+        if (t == null) continue;
+        const stillOpen: ClaudeThreadStillOpen = {
+          by: w.by,
+          reason: w.reason,
+          at: w.at > 0 ? new Date(w.at).toISOString() : null,
+          headSha: w.headSha ?? '',
+          severity: w.severity,
+          path: t.path,
+          line: t.line,
+          threadResolved: t.isResolved,
+        };
+        const i = judgements.findIndex((j) => j.threadId === threadId);
+        if (i >= 0) judgements[i] = { ...judgements[i]!, stillOpen };
+        else
+          judgements.push({
+            threadId,
+            validity: 'valid',
+            addressed: 'not_addressed',
+            explanation: null,
+            reason: w.reason,
+            resolved: t.isResolved,
+            assessedAtHead: w.headSha ?? '',
+            carried: false,
+            stillOpen,
+            teammateOnly: true,
+          });
+      }
+    }
     if (c) {
       const fromCheck = c.checkId != null;
       out.push({

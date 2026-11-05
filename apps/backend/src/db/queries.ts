@@ -198,6 +198,7 @@ import {
   FEED_WINDOW_DAYS as SHARED_FEED_WINDOW_DAYS,
   hasNewSinceLastViewed,
   USER_STATS_WINDOW_DAYS,
+  stillOpenLabel,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -5244,7 +5245,10 @@ export async function getWorkspaceInsights(
         refId: i.threadId,
         threadId: i.threadId,
         severity: MY_TURN_SEVERITY.own_thread,
-        detail: `No reply to ${handle(i.originalCommenterId)} on ${i.path}`,
+        detail:
+          i.stillOpen != null
+            ? `${stillOpenLabel(i.stillOpen.by)} on ${i.path}${i.stillOpen.reason ? ` · ${i.stillOpen.reason}` : ''}`
+            : `No reply to ${handle(i.originalCommenterId)} on ${i.path}`,
         since: new Date(Date.parse(i.since)),
         prId: i.prId,
         relevance: relevanceOf(i),
@@ -5257,6 +5261,9 @@ export async function getWorkspaceInsights(
           originalCommenterId: i.originalCommenterId,
           botKind,
           botLabel: botKind ? labelForKind(botKind) : null,
+          ...(i.stillOpen != null
+            ? { stillOpen: { by: i.stillOpen.by, reason: i.stillOpen.reason, severity: i.stillOpen.severity } }
+            : {}),
         },
       });
     }
@@ -8116,6 +8123,49 @@ export async function getMyTurn(
         githubUrl: `https://github.com/${repoFullName}/pull/${p.number}`,
         ...relevanceFor(p.repoId, 'direct'),
       });
+    }
+    // STILL OPEN (docs/CLAUDE-REVIEW.md § Still-open points): a thread on your PR whose point a Limn —
+    // yours or a teammate's — holds open at the PR's current head, with no reply from you since. It
+    // joins this card kind with its own line; an unanswered thread it also is shows once, as this.
+    if (config.aiEnabled) {
+      const { stillOpenThreadsForOwnPrs } = await import('./still-open-threads.js');
+      const held = await stillOpenThreadsForOwnPrs(
+        accountId,
+        own.map((p) => ({ id: p.id, headSha: p.headSha ?? null })),
+        localUserId,
+      );
+      if (held.length > 0) {
+        const threadRows = await db
+          .select({ id: reviewThreads.id, originalCommenterId: reviewThreads.originalCommenterId })
+          .from(reviewThreads)
+          .where(inArray(reviewThreads.id, held.map((h) => h.threadId)))
+          .execute();
+        const opener = new Map(threadRows.map((r) => [r.id, r.originalCommenterId]));
+        for (const h of held) {
+          const p = ownById.get(h.prId);
+          if (p == null) continue;
+          const repoFullName = repoNameById.get(p.repoId) ?? `repo ${p.repoId}`;
+          const originalCommenterId = opener.get(h.threadId) ?? null;
+          noteUser(originalCommenterId);
+          const item: OwnThreadItem = {
+            threadId: h.threadId,
+            prId: h.prId,
+            repoFullName,
+            prNumber: p.number,
+            prTitle: p.title,
+            path: h.stillOpen.path ?? '',
+            line: h.stillOpen.line,
+            originalCommenterId,
+            since: new Date(h.at > 0 ? h.at : now).toISOString(),
+            githubUrl: `https://github.com/${repoFullName}/pull/${p.number}`,
+            ...relevanceFor(p.repoId, 'direct'),
+            stillOpen: h.stillOpen,
+          };
+          const i = ownThreadsAll.findIndex((x) => x.threadId === h.threadId);
+          if (i >= 0) ownThreadsAll[i] = item;
+          else ownThreadsAll.push(item);
+        }
+      }
     }
     ownThreadsAll.sort((a, b) => a.since.localeCompare(b.since));
   }

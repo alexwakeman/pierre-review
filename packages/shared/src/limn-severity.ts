@@ -13,6 +13,7 @@
 // § Limn findings are bots): sync re-attributes such a comment to a per-poster bot user
 // ("Limn · alice", login `limn:alice`) and keeps the true poster beside it.
 import { PRODUCT_NAME } from './product.js';
+import { STILL_OPEN_LEAD } from './still-open.js';
 import type { ClaudeFindingSeverity, MlSeverity } from './types.js';
 
 /** A severity Limn posts with a label: every finding severity but praise. */
@@ -94,6 +95,8 @@ export interface LimnFindingPost {
   /** The lead's severity; null on a reminder with no severity. */
   severity: LimnSeverity | null;
   reminder: boolean;
+  /** A "Still open:" reply on a thread (still-open.ts): Limn's words, never a finding. Absent = no. */
+  stillOpen?: boolean;
 }
 
 const WORD_TO_SEVERITY: Record<string, LimnSeverity> = {
@@ -127,6 +130,9 @@ export function limnFindingPost(
     return { severity: WORD_TO_SEVERITY[lead[1]!] ?? null, reminder: LIMN_REMINDER_LEAD_RE.test(rest) };
   }
   if (LIMN_REMINDER_LEAD_RE.test(text)) return { severity: null, reminder: true };
+  // A still-open reply (still-open.ts): Limn's words on the thread, stored under the `limn:` bot like
+  // a reminder, so it is never read as the poster's own answer. Never a finding.
+  if (text.startsWith(STILL_OPEN_LEAD)) return { severity: null, reminder: false, stillOpen: true };
   if (opts.threadRoot === true && !/^\*\*[^*\n]* story check\*\*/.test(text)) return { severity: null, reminder: false };
   return null;
 }

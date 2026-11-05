@@ -1137,7 +1137,12 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   (`ClaudeThreadReason`); the longer explanation opens only on "More". "Resolved" is read off the
   thread NOW (a GitHub fact). No judgement ⇒ the derived pill, unchanged. Every surface — ThreadCard,
   the Timeline popover, the Feed's collapsed row and the Changes tab's inline pill (both inside a
-  button, so `noInfo` drops the ⓘ), the Claude Review tab's Review threads rows — prints these words.
+  button, so `noInfo` drops the ⓘ), the Claude Review tab's Review threads rows — prints these words. ⚠ **STILL OPEN (2026-11-05):** a judgement may carry `stillOpen`; a TEAMMATE'S
+  Limn's adds ONE pill "Robin’s Limn: still open" and leads the reason line ("… — <reason>"); a thread
+  only a teammate's Limn judged (`teammateOnly`) wears that pill alone. The PR Overview's AI review card
+  lists them as "Still open (N)" (`StillOpenList`, links through `showThread`); the `own_thread` Pending
+  card says "Robin’s Limn: still open on <path>" with the reason (docs/CLAUDE-REVIEW.md § Still-open
+  points).
   The state chips put an UNRESOLVED judged thread under "Claude judged"; a resolved one stays under
   Resolved. **Check threads** (`CheckThreadsButton`, above the list and in the Claude Review tab's
   Review threads header) starts the threads-only pass; ONE `['thread-check', prId]` status read polls

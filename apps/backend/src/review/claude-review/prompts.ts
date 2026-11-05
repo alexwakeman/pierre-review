@@ -78,6 +78,7 @@ Produce concrete, actionable findings. For each finding:
 When you are done, call the submit_review tool EXACTLY ONCE with:
   { summary, verdict, scopeUsed, findings }
 - 'summary' — markdown, read on screen before anything else. Start with ONE short plain-English sentence giving your overall read of the change. When there are issues worth the author's attention, follow it with a bullet list (one "- " line per main issue, most serious first, each one short and naming the symbol or file). Leave the issue bullets out when there are no issues. Then end with exactly ONE short line starting "- Good: " that names the one thing the change does well (for example "- Good: the retry loop now has a bounded backoff."). Never more than one, and no praise anywhere else. No headings, no tables.
+- Do not write in the summary that a point is still open, outstanding or unresolved unless you report it: as a finding, or as a followUp item or a thread with 'not_addressed' or 'partly_addressed'. The author must be able to find every open point.
 - 'verdict' — your suggested overall outcome: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'.
 - 'scopeUsed' — 'diff_only' or 'worktree', set per the guidance above.
 - 'findings' — the array described above (may be empty).

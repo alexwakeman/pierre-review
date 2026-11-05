@@ -783,6 +783,17 @@ stacks on), branch, build order, the patch and change report, "Run tests", the p
 session and `repos (id, account_id)`; `deleteRepo` deletes a repository's rows and keeps the session. The
 ONE wire mapper is `coding/story-build/persist.ts toStoryBuild`. [STORY-BUILD.md](STORY-BUILD.md).
 
+## `claude_still_open_posts` — the still-open claim record (CORE; migration `0170`)
+
+ONE row per GitHub write a posted Limn review makes about an earlier point it holds open
+([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Still-open points): `claim_key` `reply:<thread node>:<head>`
+(one "Still open:" reply per thread per head), `reopen:<thread node>` (unresolve — ONCE per thread,
+ever), `escalate:<thread node>` (a new thread continuing it — once, ever). The unique `(account_id,
+claim_key)` IS the compare-and-set: inserted `ON CONFLICT DO NOTHING` BEFORE the write, then `posted`
+(+ `comment_id`) / `failed` (+ `error`); never retried. `thread_id` is soft (the node id is the
+identity); `review_id` / `head_sha` name the judging run. Composite FK onto `pull_requests (id,
+account_id)`, cascade (no delete-path entry); erased with the account and on `accountScopedTables()`.
+
 ## Claude + Codex pairs (CORE; migration `0135`)
 
 A pair is TWO ordinary `claude_reviews` rows ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex):

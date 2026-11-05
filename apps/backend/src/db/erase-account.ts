@@ -192,6 +192,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(schema.claudeThreadChecks)
       .where(eq(schema.claudeThreadChecks.accountId, accountId))
       .execute();
+    // Still-open claim records (migration 0170). Cascades from the PR; explicit, like every agentic table.
+    await tx
+      .delete(schema.claudeStillOpenPosts)
+      .where(eq(schema.claudeStillOpenPosts.accountId, accountId))
+      .execute();
     // AI Fix runs (patches of the user's code + the prompts they were built from). Core since
     // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
@@ -400,6 +405,8 @@ export function accountScopedTables(): {
     { name: 'ciReviewItems', col: schema.ciReviewItems.accountId, table: schema.ciReviewItems },
     // Check threads runs (migration 0122 / pg 0109); erased explicitly above.
     { name: 'claudeThreadChecks', col: schema.claudeThreadChecks.accountId, table: schema.claudeThreadChecks },
+    // Still-open claim records (migration 0170); erased explicitly above.
+    { name: 'claudeStillOpenPosts', col: schema.claudeStillOpenPosts.accountId, table: schema.claudeStillOpenPosts },
     { name: 'aiUsage', col: aiUsage.accountId, table: aiUsage },
     // Adopted from the plugin (migration 0074 / pg 0061) with AI Fix's fixer. No FKs, so nothing
     // cascades: the explicit delete above is the whole guarantee. (`reviewLearnings`, review

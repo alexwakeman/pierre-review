@@ -1,3 +1,4 @@
+import { runHasOpenPoints, withoutUnbackedOpenPoints } from './open-point-prose.js';
 import {
   aiRunProvider,
   CLAUDE_REVIEW_MAX_TICKETS,
@@ -1445,13 +1446,19 @@ async function runPipeline(
     // quote not in its section is dropped). A docs run with nothing usable stores [] — "looked, found
     // nothing" — and a run without the library stores NULL.
     const checked = docs != null ? await checkReviewDocs(ctx, item, docs.workspaceId, res, findings) : null;
+    const savedFindings = checked != null ? checked.findings : findings;
+    // THE PROSE GUARD (open-point-prose.ts): a summary may not name an open point the run did not
+    // record — no finding, no follow-up item or thread judgement still open ⇒ that clause goes.
+    const summary =
+      withoutUnbackedOpenPoints(res.summary, runHasOpenPoints({ findings: savedFindings, followUpItems: items, threadAssessments })) ?? '';
+    if (summary !== res.summary) ctx.log.info(`claude review pr ${item.prId}: removed an open point the run did not record from the summary`);
     await saveReviewSuccess(ctx, reviewId, {
       scope: res.scope,
-      summary: res.summary,
+      summary,
       verdict: res.verdict,
       ...telemetry,
       excludedFiles: prep.excludedFiles,
-      findings: checked != null ? checked.findings : findings,
+      findings: savedFindings,
       ...(checked != null ? { docReferences: checked.references } : {}),
       followUp:
         plan && items

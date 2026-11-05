@@ -8,6 +8,9 @@ import {
   type ClaudeFollowUpStatus,
   type ClaudeReview,
   type ClaudeThreadAddressed,
+  type ClaudeThreadValidity,
+  isStillOpenFollowUp,
+  isStillOpenThread,
   type LimnJudgedFinding,
   type LimnJudgedOutcome,
   type LimnReviewMeta,
@@ -28,8 +31,11 @@ export function limnMetaForReview(
   };
 }
 
-/** A follow-up status as a posted judgement; null = not a judgement (`not_checked`). */
+/** A follow-up status as a posted judgement; null = not a judgement (`not_checked`). Not (or partly)
+ *  addressed, or a reply Limn disagreed with, holds the point open: `still_open` (`o`, written with
+ *  its `n` twin for older readers — shared limn-review-meta.ts). */
 export function judgedOutcomeOfFollowUp(status: ClaudeFollowUpStatus): LimnJudgedOutcome | null {
+  if (isStillOpenFollowUp(status)) return 'still_open';
   switch (status) {
     case 'addressed':
     case 'reply_accepted':
@@ -45,8 +51,14 @@ export function judgedOutcomeOfFollowUp(status: ClaudeFollowUpStatus): LimnJudge
   }
 }
 
-/** A thread judgement as a posted judgement; null = no verdict on the code (`unclear`, `not_checked`). */
-export function judgedOutcomeOfThread(addressed: ClaudeThreadAddressed): LimnJudgedOutcome | null {
+/** A thread judgement as a posted judgement; null = no verdict on the code (`unclear`, `not_checked`).
+ *  A comment that holds up and is not (or partly) dealt with is `still_open`; one judged wrong but not
+ *  dealt with stays `not_addressed`. */
+export function judgedOutcomeOfThread(
+  addressed: ClaudeThreadAddressed,
+  validity: ClaudeThreadValidity = 'not_checked',
+): LimnJudgedOutcome | null {
+  if (isStillOpenThread({ validity, addressed })) return 'still_open';
   if (addressed === 'addressed') return 'addressed';
   if (addressed === 'not_addressed' || addressed === 'partly_addressed') return 'not_addressed';
   return null;
@@ -55,7 +67,7 @@ export function judgedOutcomeOfThread(addressed: ClaudeThreadAddressed): LimnJud
 /** The parts of a run the judgements are read from (one run, or both halves of a pair). */
 export interface JudgingRun {
   followUp?: { items: ReadonlyArray<{ priorFindingId: number; status: ClaudeFollowUpStatus }> } | null;
-  threadAssessments?: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed }> | null;
+  threadAssessments?: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed; validity?: ClaudeThreadValidity }> | null;
 }
 
 /**
@@ -100,11 +112,12 @@ export async function loadJudgedForPost(
       for (const r of rows.sort((a, b) => a.id - b.id)) push(r.commentId, byFinding.get(r.id) ?? null);
     }
     // 2. Thread judgements of threads whose ROOT is a Limn finding (a teammate's: the reader's own
-    //    findings are never thread-judged, the follow-up covers them).
+    //    findings are never thread-judged, the follow-up covers them), and still-open judgements of
+    //    every other thread.
     const byThread = new Map<number, LimnJudgedOutcome>();
     for (const r of runs)
       for (const t of r.threadAssessments ?? []) {
-        const o = judgedOutcomeOfThread(t.addressed);
+        const o = judgedOutcomeOfThread(t.addressed, t.validity ?? 'not_checked');
         if (o != null) byThread.set(t.threadId, o);
       }
     if (byThread.size > 0) {
@@ -121,7 +134,10 @@ export async function loadJudgedForPost(
       }
       for (const [threadId, outcome] of [...byThread].sort((a, b) => a[0] - b[0])) {
         const c = root.get(threadId);
-        if (c != null && c.limn != null) push(c.databaseId, outcome);
+        // A Limn finding's thread carries every outcome. ANY other thread — a person's comment —
+        // only a still-open one (docs/CLAUDE-REVIEW.md § Still-open points): a teammate's Limn shows
+        // it on that thread; an older Limn reads its `n` and finds no finding of that id.
+        if (c != null && (c.limn != null || outcome === 'still_open')) push(c.databaseId, outcome);
       }
     }
     return out;

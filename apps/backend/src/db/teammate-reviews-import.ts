@@ -183,12 +183,12 @@ export async function importTeammateReviews(accountId: number, prId: number): Pr
   for (const c of inline) {
     if (!c.isRoot) continue;
     const post = limnFindingPost(c.body, { threadRoot: true });
-    if (post == null || post.reminder) continue;
+    if (post == null || post.reminder || post.stillOpen) continue;
     candidates.push({ ...c, body: c.body ?? '', kind: 'inline' });
   }
   for (const c of prLevel) {
     const post = limnFindingPost(c.body);
-    if (post == null || post.reminder) continue;
+    if (post == null || post.reminder || post.stillOpen) continue;
     candidates.push({ ...c, body: c.body ?? '', kind: 'pr_comment', path: null, line: null });
   }
 

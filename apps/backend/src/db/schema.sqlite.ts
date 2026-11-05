@@ -1951,6 +1951,54 @@ export const ciReviewItems = sqliteTable(
   }),
 );
 
+// STILL-OPEN POSTS (migration 0170; docs/CLAUDE-REVIEW.md § Still-open points). The CLAIM RECORD
+// for every GitHub write a posted review makes about an earlier point it holds open: ONE row per
+// claim, inserted (compare-and-set: the unique `(account_id, claim_key)` refuses a second) BEFORE the
+// write, then settled `posted` / `failed`. NEVER retried. The keys:
+//   reply:<thread node>:<head>   one "Still open:" reply per thread per head
+//   reopen:<thread node>         unresolve a resolved thread — once per thread, EVER
+//   escalate:<thread node>       a new inline thread continuing it (warning / blocker) — once, ever
+// Tenancy: the composite FK onto pull_requests (cascade), like claude_thread_checks.
+export const claudeStillOpenPosts = sqliteTable(
+  'claude_still_open_posts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Composite FK below (no single-column one).
+    prId: integer('pr_id').notNull(),
+    // review_threads.id (soft: sync may re-create a thread row; the node id is the identity).
+    threadId: integer('thread_id'),
+    threadNodeId: text('thread_node_id').notNull(),
+    claimKey: text('claim_key').notNull(),
+    action: text('action', { enum: ['reply', 'reopen', 'escalate'] }).notNull(),
+    // The run that judged the point open (a pair: its second half) and the head it read.
+    reviewId: integer('review_id').notNull(),
+    headSha: text('head_sha').notNull(),
+    status: text('status', { enum: ['posting', 'posted', 'failed'] }).notNull(),
+    // The reason posted (one line) and the point's severity when known.
+    reason: text('reason'),
+    severity: text('severity'),
+    // The reply's / new comment's GitHub databaseId once GitHub took it.
+    commentId: text('comment_id'),
+    error: text('error'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    claimUx: uniqueIndex('csop_account_claim').on(t.accountId, t.claimKey),
+    accountPrIdx: index('csop_account_pr_idx').on(t.accountId, t.prId),
+    prAccountFk: foreignKey({
+      name: 'csop_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // CHECK THREADS (migration 0122 / pg 0109; docs/CLAUDE-REVIEW.md § Check threads). ONE row per light,
 // threads-only Claude pass over a PR: judges ONLY the threads that changed since their last judgement
 // and stores the WHOLE reconciled set (changed + carried) — the thread cards read the newer of this

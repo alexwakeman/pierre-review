@@ -711,7 +711,9 @@ same settings apply in every workspace.
 - **Four PROMOTIONS move a card from another tab into My turn**, all about your own PRs:
   `own_ci_red` (a red build), `own_conflicts` (a conflict, in a repo you can push to), `own_ready`
   (GitHub will merge it now, or once the branch is updated) and `own_thread` (a review thread with
-  no reply and no later commit for a day). Each is `direct`. (The fifth, `trunk_red`, a red default
+  no reply and no later commit for a day — or, since 2026-11-05, one a Limn, yours or a teammate's,
+  holds STILL OPEN at the PR's current head with no reply from you since: `own.stillOpen`,
+  `db/still-open-threads.ts`, docs/CLAUDE-REVIEW.md § Still-open points). Each is `direct`. (The fifth, `trunk_red`, a red default
   branch, was removed 2026-11-04 with its `trunkScope` setting; a stored scope or order entry is
   ignored, and migration 0168 deleted its repository-subject dismissals.)
   - ⚠ **A PROMOTED CARD MOVES, IT IS NEVER LISTED TWICE.** `getWorkspaceInsights` builds

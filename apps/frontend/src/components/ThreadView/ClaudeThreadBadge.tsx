@@ -55,8 +55,20 @@ export function ClaudeThreadPills({
   noInfo?: boolean;
 }): JSX.Element {
   const by = aiProviderName(marker.provider);
+  // Only a teammate's Limn judged this thread: no run of the reader's to name.
+  const teammateOnly = marker.stillOpen != null && marker.finding == null && marker.validity == null && marker.reviewId == null && marker.checkId == null;
   return (
     <span className="inline-flex shrink-0 items-center gap-1" data-noactivate>
+      {marker.stillOpen != null && (
+        // A TEAMMATE'S Limn holds the point open (docs/CLAUDE-REVIEW.md § Still-open points).
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-ai-surface-2 px-2 py-0.5 text-meta font-medium text-ai-ink"
+          data-testid="claude-thread-still-open"
+        >
+          <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
+          {marker.stillOpen.label}
+        </span>
+      )}
       {marker.finding != null && (
         <span
           className={`inline-flex items-center gap-1 rounded-full bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${FINDING_TONE[marker.finding]}`}
@@ -94,15 +106,23 @@ export function ClaudeThreadPills({
         </span>
       )}
       {!noInfo && (
-        <InfoButton title={`${by}’s judgement`}>
+        <InfoButton title={teammateOnly && marker.stillOpen != null ? marker.stillOpen.label : `${by}’s judgement`}>
           {/* No run kind or date: a Check threads run re-judges only the threads that changed, so
               a judgement carried from the review would be credited to the wrong run. The commit is
               the judgement's own. */}
-          <p>
-            From {by}, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
-          </p>
+          {teammateOnly ? null : (
+            <p>
+              From {by}, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
+            </p>
+          )}
           {marker.stale && <p>The pull request has new commits since.</p>}
-          {marker.finding != null ? (
+          {marker.stillOpen != null && (
+            <p>
+              {marker.stillOpen.label}: a teammate’s Limn review found this point not addressed. When
+              it posted, it said so on the thread, and reopened the thread if it was resolved.
+            </p>
+          )}
+          {teammateOnly ? null : marker.finding != null ? (
             <p>
               {by} posted this comment. The pill says what the latest review that checked it
               found: in the code, or in a reply on the thread. Resolved is GitHub’s own state.
@@ -171,7 +191,10 @@ export function ClaudeThreadReason({
   const pill = threadPillFor(thread, judgements);
   const [open, setOpen] = useState(false);
   if (pill.kind !== 'claude') return null;
-  const { reason, explanation } = pill.marker;
+  const { explanation, stillOpen } = pill.marker;
+  // A teammate's Limn holds it open: its label and its reason lead the line.
+  const reason =
+    stillOpen != null ? `${stillOpen.label}${stillOpen.reason ? ` — ${stillOpen.reason}` : ''}` : pill.marker.reason;
   if (reason == null && explanation == null) return null;
   const more = explanation != null && explanation.trim() !== '' && explanation.trim() !== reason;
   return (

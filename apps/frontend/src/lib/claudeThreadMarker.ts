@@ -1,6 +1,9 @@
 import {
   aiProviderName,
+  stillOpenLabel,
   type AiProviderId,
+  type ClaudeThreadJudgement,
+  type ClaudeThreadStillOpen,
   type ClaudeThreadAddressed,
   type ClaudeThreadFindingOutcome,
   type ClaudeThreadJudgementsForPr,
@@ -159,6 +162,10 @@ export interface ClaudeThreadMarker {
   assessedAtHead: string;
   /** The provider whose run made the judgement (`threadPillFor`'s `provider`; default Claude). */
   provider: AiProviderId;
+  /** A TEAMMATE'S Limn holds this thread's point open (docs/CLAUDE-REVIEW.md § Still-open points):
+   *  its label ("Robin’s Limn: still open") and one-line reason. null otherwise — the reader's own
+   *  still-open reads in the pills already ("Holds up · Open", "Not addressed"). */
+  stillOpen: { label: string; reason: string | null } | null;
 }
 
 export type ThreadPill = { kind: 'derived' } | { kind: 'claude'; marker: ClaudeThreadMarker };
@@ -206,6 +213,30 @@ export function threadPillFor(
         finishedAt: pr.finishedAt,
         assessedAtHead: j.assessedAtHead,
         provider,
+        stillOpen: teammateStillOpen(j),
+      },
+    };
+  }
+  // ONLY A TEAMMATE'S LIMN judged it: one pill, its label — never the reader's validity / state words.
+  if (j.teammateOnly === true && j.stillOpen != null) {
+    const state: ClaudeStatePill | null = thread.derivedState === 'resolved' ? 'resolved' : null;
+    const so = teammateStillOpen(j);
+    return {
+      kind: 'claude',
+      marker: {
+        finding: null,
+        validity: null,
+        state,
+        label: [so?.label ?? stillOpenLabel(j.stillOpen.by), state != null ? CLAUDE_STATE_LABEL[state] : null].filter(Boolean).join(' · '),
+        stale,
+        reason: j.stillOpen.reason,
+        explanation: null,
+        reviewId: null,
+        checkId: null,
+        finishedAt: j.stillOpen.at,
+        assessedAtHead: j.assessedAtHead,
+        provider,
+        stillOpen: so,
       },
     };
   }
@@ -227,8 +258,39 @@ export function threadPillFor(
       finishedAt: pr.finishedAt,
       assessedAtHead: j.assessedAtHead,
       provider,
+      stillOpen: teammateStillOpen(j),
     },
   };
+}
+
+/** A teammate's still-open on a judgement, as the marker carries it; null for none or the reader's own. */
+function teammateStillOpen(j: Pick<ClaudeThreadJudgement, 'stillOpen'>): ClaudeThreadMarker['stillOpen'] {
+  const so = j.stillOpen;
+  if (so == null || so.by.you) return null;
+  return { label: stillOpenLabel(so.by), reason: so.reason?.trim() ? so.reason.trim() : null };
+}
+
+/** One point a Limn holds open on a PR, for the Overview's "Still open" list. */
+export interface StillOpenPoint {
+  threadId: number;
+  stillOpen: ClaudeThreadStillOpen;
+}
+
+/**
+ * THE "STILL OPEN" LIST of a PR (the PR Overview's AI review card): every thread a Limn — the
+ * reader's or a teammate's — holds open now, unresolved ones first, then newest first. Pure.
+ */
+export function stillOpenPoints(pr: ClaudeThreadJudgementsForPr | null | undefined): StillOpenPoint[] {
+  if (pr == null) return [];
+  return pr.judgements
+    .filter((j): j is ClaudeThreadJudgement & { stillOpen: ClaudeThreadStillOpen } => j.stillOpen != null)
+    .map((j) => ({ threadId: j.threadId, stillOpen: j.stillOpen }))
+    .sort(
+      (a, b) =>
+        Number(a.stillOpen.threadResolved) - Number(b.stillOpen.threadResolved) ||
+        (b.stillOpen.at ?? '').localeCompare(a.stillOpen.at ?? '') ||
+        a.threadId - b.threadId,
+    );
 }
 
 /**

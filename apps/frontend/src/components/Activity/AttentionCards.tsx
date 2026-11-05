@@ -2806,6 +2806,14 @@ function PendingCard({
           />,
         );
       }
+      if (card.reason === 'own_thread' && card.own?.kind === 'thread' && card.own.stillOpen?.reason) {
+        // Why a Limn holds it open (docs/CLAUDE-REVIEW.md § Still-open points), in its own words.
+        content.push(
+          <p key="still-open" className="m-0 text-meta text-ui-ink" data-testid="pending-still-open-reason">
+            {card.own.stillOpen.reason}
+          </p>,
+        );
+      }
       if (card.reason === 'own_thread' && card.firstComment != null) {
         content.push(
           <ThreadOpenerBlock key="opener" comment={card.firstComment} name={nameOf(card.firstComment.authorId)} />,

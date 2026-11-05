@@ -128,17 +128,23 @@ describe('judgements in the summary marker (j=)', () => {
     expect(parseLimnReviewMarker(limnReviewMarker('n3', { run: 'auto' }))?.judged).toBeUndefined();
   });
 
-  it('maps follow-up and thread words to the three outcomes', () => {
-    expect(['addressed', 'reply_accepted', 'no_longer_applies', 'partly_addressed', 'reply_disputed', 'not_checked'].map((s) => judgedOutcomeOfFollowUp(s as never))).toEqual([
+  it('maps follow-up and thread words to the outcomes (open points are still_open)', () => {
+    expect(['addressed', 'reply_accepted', 'no_longer_applies', 'partly_addressed', 'not_addressed', 'reply_disputed', 'not_checked'].map((s) => judgedOutcomeOfFollowUp(s as never))).toEqual([
       'addressed',
       'addressed',
       'no_longer_applies',
-      'not_addressed',
-      'not_addressed',
+      'still_open',
+      'still_open',
+      'still_open',
       null,
     ]);
     expect(judgedOutcomeOfThread('unclear')).toBeNull();
+    // No reading of the comment itself: not addressed, but nothing is held open.
     expect(judgedOutcomeOfThread('partly_addressed')).toBe('not_addressed');
+    expect(judgedOutcomeOfThread('not_addressed', 'not_valid')).toBe('not_addressed');
+    expect(judgedOutcomeOfThread('not_addressed', 'valid')).toBe('still_open');
+    expect(judgedOutcomeOfThread('partly_addressed', 'partly_valid')).toBe('still_open');
+    expect(judgedOutcomeOfThread('addressed', 'valid')).toBe('addressed');
   });
 });
 

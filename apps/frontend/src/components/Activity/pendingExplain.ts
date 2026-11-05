@@ -249,6 +249,9 @@ export function whyHere(card: InsightCard): string {
         case 'your_pr':
           return 'Your PR has new commits, comments or reviews since you last opened it here. Opening it clears this.';
         case 'own_thread':
+          if (card.own?.kind === 'thread' && card.own.stillOpen != null) {
+            return 'A Limn review found this earlier comment not addressed. It goes away when you push a fix, reply on the thread or resolve it.';
+          }
           return `A review comment on your PR has had no reply and no later commit for ${agePhrase(hoursSince(card.since))}.`;
         case 'claude_review':
           return 'Your Limn finished an AI review you have not read. It goes away when you open the PR’s AI Review tab.';

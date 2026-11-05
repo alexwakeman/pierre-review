@@ -3358,8 +3358,8 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 - **The hidden metadata** (shared `packages/shared/src/limn-review-meta.ts`): every posted review
   summary ends in ONE marker, `<!-- pierre:claude-review v=1 a=<nonce> h=<head> k=auto|manual|replies
   [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Limn version>
-  [j=<comment id>:<a|n|x>,…] [lift=1] -->` (`j=`: § Judgements travel with a post; `lift=1`: § Lifting a
-  teammate's block).
+  [j=<comment id>:<a|n|x|o>,…] [lift=1] -->` (`j=`: § Judgements travel with a post, `o`: § Still-open
+  points; `lift=1`: § Lifting a teammate's block).
   Built ONLY by `limnReviewMarker` in `review/post-seam.ts` (head, verdict and version filled there;
   `PostReviewArgs.limnMeta` carries run kind, pair and runs — `review/claude-review/post-meta.ts`
   `limnMetaForReview` for the manual Post and auto-posting; a replies-pass outcome sends `k=replies`).
@@ -3465,14 +3465,15 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
 
 ### Judgements travel with a post (2026-11-04)
 
-A posted review's marker carries `j=<comment id>:<a|n|x>,…` (≤ `LIMN_META_MAX_JUDGED` = 50; a =
-addressed, n = not addressed, x = no longer applies): what this review found about earlier Limn
+A posted review's marker carries `j=<comment id>:<a|n|x|o>,…` (≤ `LIMN_META_MAX_JUDGED` = 50 ids; a =
+addressed, n = not addressed, x = no longer applies, o = still open — § Still-open points): what this review found about earlier Limn
 findings ON GITHUB, keyed by the finding comment's databaseId. Built by `post-meta.ts`
 `loadJudgedForPost` (DB only, never throws) for the manual Post and auto-posting, from the run's
 follow-up items whose prior finding is posted (the reader's own and a teammate's; `reply_accepted`
 counts as addressed, `partly_addressed` / `reply_disputed` as not, `not_checked` is left out) and
 from its thread judgements of threads ROOTED on a Limn finding (`addressed` / not; `unclear` left
-out). The follow-up wins for the same comment. The import stores the parsed list on the teammate
+out) — and, since 2026-11-05, a STILL-OPEN judgement (`o`) of any thread, a person's too (§ Still-open
+points). The follow-up wins for the same comment. The import stores the parsed list on the teammate
 row (`teammate.judged`, no migration: it is part of the marker record) and serves it as
 `ClaudeTeammateReview.judged`. Without it, the reader's Limn learns of a teammate's judgement only
 when the thread is resolved or replied to. An older post has no `j=`: nothing is assumed.
@@ -3555,6 +3556,114 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   for changes: every point is addressed." / "Couldn't dismiss robin's request for changes: <why>"
   (`teammateLiftLines`). The teammate review serves it as `ClaudeTeammateReview.lift`. The post settles
   the PR (`settlePrAfterWrite`) as every auto post does.
+
+## Still-open points (2026-11-05)
+
+**Why (PR DEFRA/bng-metric-frontend#454, local 207912):** a teammate's Limn auto review posted COMMENT
+with "Not approved: Claude didn’t approve. The change is sound and close to ready to merge, with one
+open point from the previous review." Its marker judged all 9 earlier comments `:a`, it posted no
+inline comment and reopened nothing — the PR author could not find the "open point" anywhere. RULE:
+every open point a Limn review holds is LOCATABLE: recorded, said on its thread, and listed for the
+author. And the prose may not name an open point that is not recorded.
+
+- **THE JUDGEMENT** (shared `still-open.ts`, ONE rule): a follow-up item `not_addressed` /
+  `partly_addressed` / `reply_disputed` on an earlier Limn finding (`isStillOpenFollowUp`), or a thread
+  judgement whose comment holds up (`valid` / `partly_valid`) and is `not_addressed` /
+  `partly_addressed` (`isStillOpenThread`) holds a point OPEN. The reason is the judgement's own
+  (`reason`, else the first sentence of `explanation`). Nothing new is stored on the run: it is
+  derived from `follow_up` and `thread_assessments`.
+- **THE MARKER: `o`** (`limn-review-meta.ts`). A posted review's `j=` carries a still-open judgement of
+  ANY thread's root comment — a person's too, not only a Limn finding — as `o` (`post-meta.ts`
+  `judgedOutcomeOfFollowUp` / `judgedOutcomeOfThread`; other outcomes stay Limn-finding-only).
+  ⚠ **BACKWARD COMPATIBLE BY CONSTRUCTION:** it is written as TWO tokens, `<id>:n,<id>:o`. Every Limn
+  before it parses `^(\d{1,20}):([anx])$` and keeps the FIRST entry per id, so it reads `n` (not
+  addressed — what it already understood; a person's comment id matches none of its findings and is
+  ignored) and skips the `o` token; the new parser lets `o` upgrade that `n` (never an `a`/`x`) and
+  skips any other unknown code. The 50 cap counts ids, not tokens, on both. The reason does NOT
+  travel in the marker (its alphabet is too small): it is the "Still open:" reply on the thread.
+- **ON GITHUB** (`review/claude-review/still-open.ts` `maybePostStillOpen`, called by
+  `maybeAutoPostReview` when the run went down the posting path — `stillOpenAfterPost`: posted /
+  partial, or skipped `nothing_new` / `already_posted`; a run kept in Limn, an ineligible PR, a moved
+  head or a failed post writes nothing). It acts only when the PR's synced head is the reviewed head.
+  WHICH THREADS (`stillOpenCandidates`): a follow-up item with a thread (`item.threadId`), the reader's
+  own or a teammate's Limn finding — except `reply_disputed`, whose thread already got the ONE pushback
+  reply (auto-pushback.ts); a thread judgement of a PERSON'S thread or a teammate's Limn thread —
+  never another review bot's (`authorIsBot` and no Limn root). A pair: both halves, the later half's
+  word wins. THE PER-THREAD RULE (`planStillOpen`, pure):
+  - **unresolved** → ONE reply, as the reader: `**Still open:** <reason>` (≤ 240 chars, two sentences
+    at most, no pings, no HTML comment — `stillOpenReasonText`) + the auto-post footer + the FINDING
+    marker + `<!-- pierre:claude-review-still-open v=1 h=<head> [r=1] [c=<id>] -->`. At most one per
+    thread per HEAD: this account's `reply:<node>:<head>` claim, or ANY Limn's marker with `h=` = this head.
+  - **resolved, never reopened** → the reply (unless one is there at this head), then `unresolveReviewThread`
+    (the manual unresolve's mutation), `stampThreadResolved(…, false)`. ⚠ **REOPEN AT MOST ONCE PER
+    THREAD, EVER**: this account's `reopen:<node>` claim, AND any comment on the thread whose marker says
+    `r=1` — so a SECOND Limn (a teammate's, or the reader's on another machine) sees the first reopen on
+    GitHub and never reopens it again. ⚠ A failed reply leaves the thread RESOLVED (the reopen claim is
+    spent: `failed`, "The reply failed…") — Limn never reopens a thread without saying why.
+  - **resolved, reopened once already** → a WARNING or BLOCKER starts ONE new inline thread about the
+    same point (`ctx.review.postFinding`: on the thread's line when not outdated, else the re-raise's
+    anchored line, else the seam's file-first-change / PR-level fallback), led by its severity: "This
+    point is still open. It continues [an earlier thread](…#discussion_r<root>), which was reopened once
+    already." + the reason + `c=<root comment id>`. Once per thread, ever: the `escalate:<node>` claim,
+    or ANY Limn comment on the PR whose marker carries that `c=`. A nit, a question, or a point with no
+    known severity (a person's comment) is left as it is — no reply spam. A new thread refused because
+    the head moved wrote nothing: its claim is released.
+  - ⚠ **CLAIM BEFORE EVERY WRITE, NEVER RETRIED** — `claude_still_open_posts` (migration `0170`): ONE
+    row per claim, `INSERT … ON CONFLICT (account_id, claim_key) DO NOTHING` BEFORE the GitHub call
+    (the unique index IS the compare-and-set), then `posted` (+ `comment_id`) / `failed` (+ GitHub's
+    words). Composite FK onto `pull_requests` (cascade); erased; in `accountScopedTables()`. No
+    transaction spans a fetch. After any write: the PR change signal + `settlePrAfterWrite`.
+  - The reply is Limn's word, never the person's: shared `limnFindingPost` reads the `**Still open:**`
+    lead as `{stillOpen: true}`, so sync stores it under the `limn:<poster>` bot (it never counts as a
+    person's answer and never returns the ball); the teammate import skips it (never a finding);
+    `deriveThreadState` ignores a still-open-marked comment as a reply (fixture
+    `09-limn-still-open-reply-is-not-a-reply.json`). The NEW thread IS a finding (severity lead +
+    finding marker): a teammate's Limn imports it as one. ⚠ The reader's own continuation thread has no
+    finding row (the follow-up keeps following the ORIGINAL thread), so the reader's later runs do not
+    follow it up — the original stays the chain.
+  - ⚠ An auto-post test passing its own `deps` gets NO still-open writes unless it passes
+    `stillOpenDeps` (`maybeAutoPostReview`'s 4th argument) — real GitHub is never reached from a test.
+- **THE PROSE GUARD** (`open-point-prose.ts`). The prompt (`prompts.ts` FINDINGS_AND_FINISHING, shared
+  by Claude and Codex — `codexReviewSystemPrompt` derives Codex's from it; the user prompt and
+  `prompt-golden.json` are unchanged) says: "Do not write in the summary that a point is still open,
+  outstanding or unresolved unless you report it: as a finding, or as a followUp item or a thread with
+  'not_addressed' or 'partly_addressed'." Then, deterministically, `manager.ts` (every run, every
+  provider) and `pair-consolidate.ts` (the pair's merged summary): when the run records NO open point
+  (`runHasOpenPoints`: no finding but praise, no still-open follow-up item or thread judgement),
+  `withoutUnbackedOpenPoints` cuts the clause that claims one ("…, with one open point from the previous
+  review." → "The change is sound and close to ready to merge."), drops a sentence that is only the claim,
+  and drops a bullet that claims one. A recorded open point leaves the text as written. The stored
+  summary IS the guarded one, so the tab, the post and a teammate's import agree.
+- **THE "NOT APPROVED" LINE** (`auto-verdict.ts` `minorTail`, `findingsNotApproved(…, stillOpen)`):
+  with no blocker or warning open, the tail names held-open points — "1 earlier point is still open." —
+  instead of "No findings are open." (`stillOpenCountOf`, one per thread; auto-post and
+  `notApprovedForView` both pass it). ⚠ The VERDICT rule is unchanged: a still-open judgement does not
+  by itself withhold an approval (the model's verdict and the findings decide, as before).
+- **SURFACED FOR THE AUTHOR** — ONE read, the thread cards' batch (`POST
+  /api/claude-review/thread-judgements`, `getThreadJudgements`): each judgement may carry
+  `stillOpen: ClaudeThreadStillOpen {by, reason, at, headSha, severity, path, line, threadResolved}` —
+  the NEWER of the reader's own word (the fold's thread judgement, or the newest follow-up item on a
+  Limn finding) and a TEAMMATE'S (`teammateStillOpenWordsForPrs`: every imported teammate review's
+  `j=` entry matched to the thread's ROOT comment databaseId, its reason from that Limn's newest
+  "Still open:" reply on the thread). A teammate's later `a` lifts the reader's older still-open and
+  the reverse (`newerStillOpenWord`). A thread only a teammate's Limn judged is listed with
+  `teammateOnly: true` (validity/addressed read valid / not addressed). ⚠ `currentThreadAssessmentsForPrs`
+  itself is NOT changed: it feeds the next run's carry and the check's plan, which must never adopt a
+  teammate's word as the reader's own; the teammate layer is applied on read, for display.
+  - **Threads tab + Changes**: a teammate's still-open wears ONE pill "Robin’s Limn: still open"
+    (`claudeThreadMarker.ts` `stillOpenLabel`, `ClaudeThreadPills`) and its reason line reads "Robin’s
+    Limn: still open — <reason>". The reader's own still-open reads in the existing pills.
+  - **PR Overview → AI review card**: "Still open (N)" (`PrOverviewAiReview` `StillOpenList`,
+    `stillOpenPoints`), unresolved first: path:line (a link through PrDetail `showThread`), whose
+    Limn, "resolved on GitHub" when it was resolved again, and the reason. ⓘ explains.
+  - **My Turn** (`db/still-open-threads.ts`, joined into the `own_thread` promotion in `getMyTurn`):
+    on the reader's OWN open PR, a thread a Limn holds open becomes the `own_thread` card (it replaces
+    an "Unanswered thread" card for the same thread — one card per thread, and `onePerPr` still
+    applies), `since` = the judgement, `own.stillOpen {by, reason, severity}`, heading "Robin’s Limn:
+    still open on src/x.ts", the reason on the card. THE BALL RULE, state-derived
+    (`stillOpenOwesAuthor`): only while the judgement was made at the PR's CURRENT head, the thread is
+    unresolved, and the author has not replied on it since (a Limn post never counts). Dismissible like
+    every My Turn row (subject: the thread). Gated on `config.aiEnabled`.
 
 ## Chat about a review
 

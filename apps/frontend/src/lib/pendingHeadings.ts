@@ -10,6 +10,7 @@ import type {
   PrAutomation,
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
+import { stillOpenLabel } from '@pierre-review/shared';
 import { automatedReviewerMeta } from './ui.js';
 import { CLAUDE_VERDICT_LABEL } from './claudeReviewColumn.js';
 import { waitingHeading } from './reviewWaits.js';
@@ -614,6 +615,11 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
       return plain(ciRedLead(card), card.since);
     case 'own_thread': {
       const own = card.own?.kind === 'thread' ? card.own : null;
+      // A Limn holds the point open (docs/CLAUDE-REVIEW.md § Still-open points): say whose and where.
+      if (own?.stillOpen != null) {
+        const where = threadPathOf(card);
+        return plain(`${stillOpenLabel(own.stillOpen.by)}${where != null ? ` on ${where}` : ''}`, card.since);
+      }
       const who =
         brandName(own?.botKind) ??
         ctx.nameOf(own?.originalCommenterId ?? card.firstComment?.authorId) ??
