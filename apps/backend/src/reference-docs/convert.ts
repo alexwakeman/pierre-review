@@ -135,6 +135,116 @@ const fileNameOf = (src: string): string => {
   }
 };
 
+/** The slice of turndown's DOM (domino) the table rules touch. */
+interface DomNode {
+  nodeName: string;
+  parentNode: DomNode | null;
+  firstChild: DomNode | null;
+  previousSibling: DomNode | null;
+  nextSibling: DomNode | null;
+  childNodes: ArrayLike<DomNode>;
+  ownerDocument: { createElement(name: string): DomNode };
+  getAttribute(name: string): string | null;
+  cloneNode(deep: boolean): DomNode;
+  removeChild(n: DomNode): void;
+  appendChild(n: DomNode): void;
+  insertBefore(n: DomNode, ref: DomNode | null): void;
+  replaceChild(next: DomNode, old: DomNode): void;
+}
+
+const ELEMENT = (n: DomNode): boolean => /^[A-Z]/.test(n.nodeName);
+
+function previousElement(node: DomNode): DomNode | null {
+  for (let p = node.previousSibling; p; p = p.previousSibling) if (ELEMENT(p)) return p;
+  return null;
+}
+
+function elementChildren(node: DomNode): DomNode[] {
+  return Array.from(node.childNodes).filter(ELEMENT);
+}
+
+/**
+ * One table, shaped so the GFM plugin writes it as markdown (see `limnTableShape`): column groups
+ * dropped, whitespace between the table's parts dropped, merged cells laid out on the grid (below), and
+ * the first row's cells made <th> when it has none. A table with no rows is left alone.
+ */
+function shapeTable(table: DomNode): void {
+  for (const c of Array.from(table.childNodes)) {
+    if (c.nodeName === 'COLGROUP' || c.nodeName === 'COL' || c.nodeName === 'CAPTION' || !ELEMENT(c)) table.removeChild(c);
+  }
+  const sections = elementChildren(table);
+  // An empty <thead> before the body is what the plugin's "first tbody" test skips over; drop it.
+  if (sections[0]?.nodeName === 'THEAD' && elementChildren(sections[0]).length === 0) table.removeChild(sections[0]);
+  const firstSection = elementChildren(table)[0];
+  if (!firstSection) return;
+  const firstRow = firstSection.nodeName === 'TR' ? firstSection : elementChildren(firstSection).find((r) => r.nodeName === 'TR');
+  if (!firstRow) return;
+  for (const c of Array.from(firstRow.childNodes)) if (!ELEMENT(c)) firstRow.removeChild(c);
+  if (firstSection !== firstRow) {
+    for (const c of Array.from(firstSection.childNodes)) if (!ELEMENT(c)) firstSection.removeChild(c);
+  }
+  unmergeCells(table);
+  for (const cell of elementChildren(firstRow)) {
+    if (cell.nodeName !== 'TD') continue;
+    const th = cell.ownerDocument.createElement('th');
+    while (cell.firstChild) th.appendChild(cell.firstChild);
+    firstRow.replaceChild(th, cell);
+  }
+}
+
+const span = (cell: DomNode, attr: string): number => {
+  const n = Number.parseInt(cell.getAttribute(attr) ?? '', 10);
+  return Number.isFinite(n) && n > 1 ? Math.min(n, 100) : 1;
+};
+
+/**
+ * MERGED CELLS: a markdown table has one cell per column on every row. A cell that spans columns is
+ * followed by empty cells; a cell that spans rows is REPEATED on the rows below it (so each row still
+ * reads on its own); every row is padded to the widest. Without this the rows below a merged header
+ * have more cells than the header and the columns no longer line up.
+ */
+function unmergeCells(table: DomNode): void {
+  const rows: DomNode[] = [];
+  for (const part of elementChildren(table)) {
+    if (part.nodeName === 'TR') rows.push(part);
+    else for (const r of elementChildren(part)) if (r.nodeName === 'TR') rows.push(r);
+  }
+  // Per column: the cell still spanning down into it, and for how many more rows.
+  const carry: Array<{ cell: DomNode; left: number } | undefined> = [];
+  const widths: number[] = [];
+  for (const row of rows) {
+    for (const c of Array.from(row.childNodes)) if (!ELEMENT(c)) row.removeChild(c);
+    const cells = elementChildren(row);
+    let col = 0;
+    const fillCarried = (before: DomNode | null): void => {
+      for (let k = carry[col]; k; k = carry[col]) {
+        row.insertBefore(k.cell.cloneNode(true), before);
+        k.left -= 1;
+        if (k.left <= 0) carry[col] = undefined;
+        col += 1;
+      }
+    };
+    for (const cell of cells) {
+      fillCarried(cell);
+      const across = span(cell, 'colspan');
+      const down = span(cell, 'rowspan');
+      const next = cell.nextSibling ?? null;
+      for (let k = 1; k < across; k++) row.insertBefore(cell.ownerDocument.createElement(cell.nodeName.toLowerCase()), next);
+      // A cell merged both ways: its first column repeats below, its other columns stay empty below.
+      for (let k = 0; down > 1 && k < across; k++) {
+        carry[col + k] = { cell: k === 0 ? cell : cell.ownerDocument.createElement(cell.nodeName.toLowerCase()), left: down - 1 };
+      }
+      col += across;
+    }
+    fillCarried(null);
+    widths.push(col);
+  }
+  const width = Math.max(0, ...widths);
+  rows.forEach((row, i) => {
+    for (let k = widths[i]!; k < width; k++) row.appendChild(row.ownerDocument.createElement('td'));
+  });
+}
+
 async function turndownService(fig: HtmlFigureOptions = {}): Promise<TurndownService> {
   let Turndown;
   let gfm;
@@ -172,6 +282,28 @@ async function turndownService(fig: HtmlFigureOptions = {}): Promise<TurndownSer
       return alt ? `[Image: ${alt}]` : '';
     },
   });
+  // TABLES: the GFM plugin writes a table only when its first row is a header row of <th> cells that
+  // opens the table or its FIRST <tbody>; any other table is KEPT AS RAW HTML — one line, often tens of
+  // KB, which the splitter then cuts by characters into unreadable parts. Confluence puts a <colgroup>
+  // before the <tbody> (so its header row never counts) and Word tables rarely mark a header. So every
+  // table is shaped first: <colgroup>/<col> dropped, and a first row with no <th> becomes the header.
+  // The filter only reshapes the DOM and never matches: it runs before the plugin's own table checks.
+  t.addRule('limnTableShape', {
+    filter: (node: DomNode) => {
+      if (node.nodeName === 'TABLE') shapeTable(node);
+      return false;
+    },
+    replacement: () => '',
+  });
+  // A cell stays on ONE line (a <br>, a list or two paragraphs inside a cell would end the row), and a
+  // pipe in its text is escaped, or it would add a column.
+  t.addRule('limnTableCell', {
+    filter: ['th', 'td'],
+    replacement: (content: string, node: DomNode) => {
+      const text = content.replace(/\s+/g, ' ').replace(/\\?\|/g, '\\|').trim();
+      return `${previousElement(node) ? ' ' : '| '}${text} |`;
+    },
+  });
   // Only ordinary links survive; anything else (javascript:, data:, a relative path into a site the
   // library does not hold) keeps its text and loses its target.
   t.addRule('limnLinks', {
@@ -205,6 +337,53 @@ export async function htmlToMarkdown(html: string, fig: HtmlFigureOptions = {}):
   return normalizeMarkdown(t.turndown(main ?? html)).trim();
 }
 
+/**
+ * A markdown text's HTML TABLES → markdown tables (GitHub docs and hand-written markdown often hold a
+ * `<table>`): each table outside a code fence goes through `htmlToMarkdown`, so it gets the same table
+ * shaping as a web page instead of reaching the splitter as raw HTML. Without the converters installed,
+ * the text is returned unchanged.
+ */
+export async function htmlTablesToMarkdown(markdown: string): Promise<string> {
+  if (!/<table\b/i.test(markdown)) return markdown;
+  const spans: Array<[number, number]> = [];
+  let fence: string | null = null;
+  let offset = 0;
+  let open = -1;
+  let level = 0;
+  for (const line of markdown.split('\n')) {
+    const f = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (f && (fence == null || (f[0] === fence[0] && f.length >= fence.length))) fence = fence == null ? f : null;
+    else if (fence == null) {
+      for (const m of line.matchAll(/<(\/?)table\b[^>]*>/gi)) {
+        const at = offset + m.index!;
+        if (m[1] === '') {
+          if (level === 0) open = at;
+          level += 1;
+        } else if (level > 0) {
+          level -= 1;
+          if (level === 0) spans.push([open, at + m[0].length]);
+        }
+      }
+    }
+    offset += line.length + 1;
+  }
+  if (spans.length === 0) return markdown;
+  let out = '';
+  let from = 0;
+  try {
+    for (const [a, b] of spans) {
+      const before = markdown.slice(from, a).replace(/[ \t]*\n?\s*$/, '');
+      out += `${before}${before ? '\n\n' : ''}${await htmlToMarkdown(markdown.slice(a, b))}`;
+      from = b;
+    }
+  } catch (err) {
+    if (err instanceof ConverterMissingError) return markdown;
+    throw err;
+  }
+  const rest = markdown.slice(from).replace(/^[ \t]*(\n[ \t]*)*/, '');
+  return normalizeMarkdown(rest ? `${out}\n\n${rest}` : out);
+}
+
 export interface Converted {
   markdown: string;
   /** A title the document gives itself, when it has one. */
@@ -218,9 +397,12 @@ export async function convertToMarkdown(
   fig: HtmlFigureOptions = {},
 ): Promise<Converted> {
   switch (kind) {
-    case 'text':
-    case 'markdown': {
+    case 'text': {
       const markdown = normalizeMarkdown(decodeText(buf) ?? '').trim();
+      return { markdown, title: firstHeading(markdown) };
+    }
+    case 'markdown': {
+      const markdown = (await htmlTablesToMarkdown(normalizeMarkdown(decodeText(buf) ?? ''))).trim();
       return { markdown, title: firstHeading(markdown) };
     }
     case 'html': {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_DOC_MAX_BYTES } from '@pierre-review/shared';
 import { splitMarkdown } from './split.js';
-import { UNSUPPORTED_MESSAGE, convertToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload } from './convert.js';
+import { UNSUPPORTED_MESSAGE, convertToMarkdown, htmlTablesToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload } from './convert.js';
 
 const b = (s: string): Buffer => Buffer.from(s, 'utf8');
 
@@ -78,5 +78,77 @@ describe('headings from HTML', () => {
     const s = splitMarkdown(md, 'Doc');
     expect(s[0]!.title).toBe('1. Introduction');
     expect(s[0]!.subheadings.map((h) => h.title)).toEqual(['Using snake_case [beta]']);
+  });
+});
+
+describe('tables always become markdown (never a line of raw HTML)', () => {
+  it('reads a Confluence table: a <colgroup> before the body, the header row in the body, cells in <p>', async () => {
+    const html =
+      '<table><colgroup><col><col></colgroup><tbody><tr><th><strong>Ref</strong></th><th>Message</th></tr>' +
+      '<tr><td><p>1</p></td><td><p>Target set</p><p>below 10%</p></td></tr></tbody></table>';
+    expect(await htmlToMarkdown(html)).toBe('| **Ref** | Message |\n| --- | --- |\n| 1 | Target set below 10% |');
+  });
+
+  it('makes the first row the header when the table has none (a Word table)', async () => {
+    expect(await htmlToMarkdown('<table><tr><td>Plan</td><td>Price</td></tr><tr><td>Basic</td><td>$5</td></tr></table>')).toBe(
+      '| Plan | Price |\n| --- | --- |\n| Basic | $5 |',
+    );
+  });
+
+  it('keeps each cell on one line and escapes a pipe', async () => {
+    const md = await htmlToMarkdown('<table><tr><th>A</th><th>B</th></tr><tr><td>x<br>y</td><td><ul><li>a | b</li><li>c</li></ul></td></tr></table>');
+    const rows = md.split('\n');
+    expect(rows).toHaveLength(3);
+    expect(rows[2]).toMatch(/^\| x y \| - a \\\| b - c \|$/);
+  });
+
+  it('lays merged cells out on the grid: a column span adds empty cells, a row span repeats', async () => {
+    const html =
+      '<table><tbody><tr><th rowspan="2">Band</th><th colspan="2">Units</th></tr>' +
+      '<tr><th>Before</th><th>After</th></tr>' +
+      '<tr><td rowspan="2">Medium</td><td>2.2</td><td>0.5</td></tr><tr><td>4.4</td><td>2.9</td></tr></tbody></table>';
+    expect((await htmlToMarkdown(html)).split('\n')).toEqual([
+      '| Band | Units |  |',
+      '| --- | --- | --- |',
+      '| Band | Before | After |',
+      '| Medium | 2.2 | 0.5 |',
+      '| Medium | 4.4 | 2.9 |',
+    ]);
+  });
+});
+
+describe('htmlTablesToMarkdown (a <table> written inside markdown)', () => {
+  it('turns each table into a markdown table and leaves the rest, and code fences, alone', async () => {
+    const md = [
+      '# Flags',
+      '',
+      'Intro <b>bold</b> stays.',
+      '',
+      '<table><colgroup><col></colgroup><tr><td>Ref</td><td>Message</td></tr>',
+      '<tr><td>1</td><td>Target below 10%</td></tr></table>',
+      '',
+      '```html',
+      '<table><tr><td>example</td></tr></table>',
+      '```',
+    ].join('\n');
+    expect(await htmlTablesToMarkdown(md)).toBe(
+      [
+        '# Flags',
+        '',
+        'Intro <b>bold</b> stays.',
+        '',
+        '| Ref | Message |',
+        '| --- | --- |',
+        '| 1 | Target below 10% |',
+        '',
+        '```html',
+        '<table><tr><td>example</td></tr></table>',
+        '```',
+      ].join('\n'),
+    );
+  });
+
+  it('is a no-op without a table', async () => {
+    expect(await htmlTablesToMarkdown('plain | text')).toBe('plain | text');
   });
 });

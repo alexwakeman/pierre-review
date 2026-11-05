@@ -335,6 +335,64 @@ describe('the add-documents wizard: a subtree', () => {
   });
 });
 
+describe('restructuring: most of the tree leaves the page it was added from', () => {
+  const T1 = new Date('2026-10-02T00:00:00Z');
+  const addTree = async (rootId: string, title: string, children: string[]): Promise<number> => {
+    wiki.pages.set(rootId, { id: rootId, title, parentId: null, version: 1, editedAt: T1, body: `${title} overview.\n\n${words(title, 30)}` });
+    children.forEach((id, i) => wiki.pages.set(id, { id, title: `${title} ${id}`, parentId: rootId, version: 1, editedAt: T1, body: words(`topic${id}`, 120), position: i }));
+    const res = await app.inject({ method: 'POST', url: '/api/docs/wiki', headers: as(1), payload: { url: `https://acme.atlassian.net/wiki/spaces/PAY/pages/${rootId}/X`, childDepth: 3 } });
+    expect(res.statusCode).toBe(202);
+    const id = (res.json() as any).doc.id as number;
+    expect((await waitIdle(1, id)).status).toBe('ready');
+    return id;
+  };
+  // The listing is daily: make it due, as it was when the real tree moved.
+  const listDue = async (id: number): Promise<void> => {
+    const row = (await store.getDocRow(1, id))!;
+    await store.patchDoc(1, id, { wiki: { ...store.wikiStateOf(row.wiki)!, lastListedAt: 0 } });
+  };
+
+  it('pages that moved together under a new page are FOLLOWED there', async () => {
+    const id = await addTree('40', 'Rules', ['41', '42', '43']);
+    wiki.pages.set('50', { id: '50', title: 'BNG Rules', parentId: null, version: 1, editedAt: new Date(), body: `The rules, moved.\n\n${words('moved', 30)}` });
+    for (const c of ['41', '42', '43']) wiki.pages.get(c)!.parentId = '50';
+    wiki.edit('40', 'See the sheet.');
+    await listDue(id);
+    await app.inject({ method: 'POST', url: `/api/docs/${id}/refresh`, headers: as(1) });
+    const row = await waitIdle(1, id);
+    expect(row.status).toBe('ready');
+    const state = store.wikiStateOf(row.wiki)!;
+    expect(state).toMatchObject({ rootPageId: '50', rootTitle: 'BNG Rules', unreachableReason: null });
+    expect(state.rootUrl).toContain('pageId=50');
+    expect((await pagesMod.listWikiPages(1, id)).map((p) => p.pageId).sort()).toEqual(['41', '42', '43', '50']);
+  });
+
+  it('pages that are gone keep the LAST version and say so; a Rebuild accepts the smaller tree', async () => {
+    const id = await addTree('60', 'Flags', ['61', '62', '63']);
+    const before = (await store.getDocRow(1, id))!;
+    wiki.pages.delete('61');
+    wiki.pages.delete('62');
+    await listDue(id);
+    await app.inject({ method: 'POST', url: `/api/docs/${id}/refresh`, headers: as(1) });
+    let row = await waitIdle(1, id);
+    expect(row.status).toBe('ready');
+    expect(row.builtAt.getTime()).toBe(before.builtAt!.getTime());
+    expect(row.sectionCount).toBe(before.sectionCount);
+    expect(store.toReferenceDoc(row).wiki).toMatchObject({ unreachableReason: 'moved' });
+    expect((await pagesMod.listWikiPages(1, id)).length).toBe(4);
+    // The background check after it neither clears the note nor replaces the version.
+    await refresh.checkAndMaybeRefresh(ctx, row, true);
+    row = await waitIdle(1, id);
+    expect(row.builtAt.getTime()).toBe(before.builtAt!.getTime());
+    expect(store.toReferenceDoc(row).wiki).toMatchObject({ unreachableReason: 'moved' });
+    await app.inject({ method: 'POST', url: `/api/docs/${id}/rebuild`, headers: as(1) });
+    row = await waitIdle(1, id);
+    expect(row.status).toBe('ready');
+    expect((await pagesMod.listWikiPages(1, id)).map((p) => p.pageId).sort()).toEqual(['60', '63']);
+    expect(store.toReferenceDoc(row).wiki).toMatchObject({ unreachableReason: null });
+  });
+});
+
 describe('tenancy and removal', () => {
   it("another account's document is a 404 on refresh, and its pages are never listed", async () => {
     expect((await app.inject({ method: 'POST', url: `/api/docs/${docId}/refresh`, headers: as(2) })).statusCode).toBe(404);

@@ -125,7 +125,12 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
 - **Following links** (optional, the form's "Links to follow" select): the body may carry
   `crawl: {depth}` (1–3). See § Following links.
 - **Conversion**: text/markdown as is. Word: `mammoth` → HTML → `turndown` (+ `turndown-plugin-gfm`
-  tables). HTML: narrowed to `<main>`/`<article>` when present; `script`/`style`/`nav`/`footer`/forms/
+  tables). ⚠ **Every table is SHAPED first** (`convert.ts` `shapeTable`): the GFM plugin keeps any table
+  without a leading `<th>` row as ONE LINE OF RAW HTML (a Confluence `<colgroup>` before the body is enough), which
+  the splitter then cuts by characters. So `<colgroup>` goes, a header-less first row becomes the header, merged
+  cells are laid on the grid (a column span adds empty cells, a row span repeats), and a cell stays on one line
+  with `|` escaped. A `<table>` written INSIDE a markdown file (an upload, a GitHub doc) gets the same
+  treatment (`htmlTablesToMarkdown`, code fences left alone). HTML: narrowed to `<main>`/`<article>` when present; `script`/`style`/`nav`/`footer`/forms/
   embeds dropped; an image whose bytes are at hand (a Word file's `data:` image, a web page's image
   downloaded for the build) becomes a FIGURE (§ Figures), else `[Image: alt]` (never the base64); a
   link that is not http(s)/mailto/# keeps its text and loses its target.
@@ -302,6 +307,23 @@ cancelled or budget-skipped refresh never advances a version, so the next check 
 mark — `ConfluenceIcon` / `NotionIcon`), then "Checked 2 hours ago · last edited <date>" or the can't-reach
 line, then the figures line (§ Figures); "Refresh now" beside Rebuild. The form's ⓘ explains the import,
 the credential and the refresh. The address box is TEXT (`inputMode="url"`): a bare Notion id is accepted.
+
+### Restructuring — a tree that moved or emptied (`wiki/build.ts`; 2026-11-05)
+
+A refresh whose LISTING finds most of the stored tree gone (`treeCollapsed`: at least 2 child pages
+lost, and more than half of them) is never rebuilt down to what is left. Found live: a team moved
+every child of the tracked page under a new page and left the old one as a link, and the nightly
+refresh replaced 23 sections with one empty one.
+
+1. **Follow** (Confluence and Notion `tree` scopes): the lost top pages are asked for their parent
+   now (≤ 8 reads); when they all name ONE page (`commonNewParent`, never the old root), the tree under
+   it is read. It is taken only when it holds at least half the lost pages and at most 3× the old page
+   count + 10 (never swallow a space because a tree moved to its home page). The row's `rootPageId`,
+   `rootUrl` and `rootTitle` move with the commit.
+2. **Else keep**: the build ends `WikiIdle` (last version kept) and the row records
+   `unreachableReason: 'moved'` (`wikiUnreachableWords` tells the reader to add the new page or
+   Rebuild). ⚠ A cheap check that lists nothing does NOT clear `moved`; a Rebuild (`full`) accepts
+   the smaller tree.
 
 ### Scopes — a subtree, or the whole wiki (the add-documents wizard; 2026-10-30)
 

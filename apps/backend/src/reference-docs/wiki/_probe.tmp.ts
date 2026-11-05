@@ -1,0 +1,18 @@
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+const out = process.argv[2]!, root = process.argv[3]!;
+const { resolveWikiCredential } = await import('./credentials.js');
+const { confluenceSource } = await import('./confluence.js');
+const { syncWikiTree, bundleWikiMarkdown } = await import('./sync.js');
+const { splitMarkdown } = await import('../split.js');
+const c = await resolveWikiCredential(1, 1, { provider: 'confluence', host: 'eaflood.atlassian.net' });
+if (c.state !== 'ok') process.exit(1);
+const site: any = { provider: 'confluence', origin: 'https://eaflood.atlassian.net', host: 'eaflood.atlassian.net', pageId: root, scope: { kind: 'tree' } };
+const state: any = { provider: 'confluence', origin: site.origin, rootPageId: root, depth: 32, scope: { kind: 'tree' } };
+const sync: any = await syncWikiTree({ source: confluenceSource(), site, state, stored: [], credential: c.credential, readCached: () => null, full: true, now: new Date() } as any);
+const md = bundleWikiMarkdown(sync.pages);
+rmSync(`${out}/dry`, { recursive: true, force: true }); mkdirSync(`${out}/dry`, { recursive: true });
+writeFileSync(`${out}/dry/source.md`, md);
+const secs = splitMarkdown(md, 'BNG Rules & Flags');
+secs.forEach((s: any, i: number) => writeFileSync(`${out}/dry/${String(i + 1).padStart(2, '0')}.md`, `# ${s.title}\n\n${s.text}`));
+console.log('pages', sync.pages.length, 'sections', secs.length, secs.map((s: any) => s.title).join(' | '));
+process.exit(0);

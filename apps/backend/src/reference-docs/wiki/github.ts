@@ -3,6 +3,7 @@ import { isNonCodeFile } from '../../db/code-loc.js';
 import { ghRestGetFor, isRateLimitError } from '../../github/client.js';
 import { REFERENCE_DOC_WIKI_ALL_DEPTH, REFERENCE_DOC_WIKI_MAX_PAGES, type WikiScope } from '@pierre-review/shared';
 import { WikiSourceError, type WikiCallOptions, type WikiPage, type WikiPageMeta, type WikiPageRef, type WikiSource } from './source.js';
+import { htmlTablesToMarkdown } from '../convert.js';
 
 // A GITHUB REPOSITORY'S DOCUMENTS AS A WIKI (docs/REFERENCE-DOCS.md § GitHub repositories). The third
 // `WikiSource`: a folder of a repository (the root, or `docs/`, …) on its default branch is the ROOT
@@ -439,7 +440,7 @@ export function githubDocsSource(deps: GithubDocsDeps = {}): WikiSource & {
       try {
         const b = JSON.parse(page.body) as { path?: unknown; text?: unknown };
         if (typeof b.path !== 'string' || typeof b.text !== 'string') return '';
-        return repoDocToMarkdown(b.path, b.text);
+        return await htmlTablesToMarkdown(repoDocToMarkdown(b.path, b.text));
       } catch {
         return '';
       }

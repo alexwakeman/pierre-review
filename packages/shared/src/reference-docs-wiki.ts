@@ -41,8 +41,12 @@ export type WikiScope =
   | { kind: 'space'; name: string; key: string | null; id: string | null }
   | { kind: 'repo'; owner: string; repo: string; path: string; branch: string };
 
-/** Why the wiki could not be read on the last check. The last built version stays readable. */
-export type WikiUnreachableReason = 'not_found' | 'forbidden' | 'unauthorized' | 'no_credential' | 'network' | 'rate_limited';
+/**
+ * Why the wiki could not be read on the last check. The last built version stays readable. `moved`:
+ * most of the document's pages left the tree and Limn could not find one page they all moved under
+ * (docs/REFERENCE-DOCS.md § Wiki sources → Restructuring); a Rebuild accepts the smaller tree.
+ */
+export type WikiUnreachableReason = 'not_found' | 'forbidden' | 'unauthorized' | 'no_credential' | 'network' | 'rate_limited' | 'moved';
 
 export interface ReferenceDocWiki {
   provider: WikiProviderId;
@@ -404,6 +408,10 @@ export function wikiUnreachableWords(provider: WikiProviderId, reason: WikiUnrea
           : `Add a ${name} API token in Settings → Docs.`;
     case 'rate_limited':
       return `${name} asked Limn to slow down. It will try again later.`;
+    case 'moved':
+      return provider === 'github'
+        ? 'Most of these files moved or were deleted. Add their new folder, or Rebuild to keep only what is left.'
+        : `Most of these pages moved or were deleted in ${name}. Add their new page, or Rebuild to keep only what is left.`;
     case 'network':
     default:
       return `${name} could not be reached.`;
