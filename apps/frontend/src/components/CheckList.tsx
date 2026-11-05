@@ -246,8 +246,7 @@ export function CheckRow({
         </button>
       </div>
       {expanded && (
-        // `data-ci-log-open` lifts the Overview's reading-width cap while a log is open (ChecksTab).
-        <div className="mb-1 mt-1" data-ci-log-open>
+        <div className="mb-1 mt-1">
           {logs.isLoading ? (
             <div className="px-1 py-2 text-ui-faint">Loading logs…</div>
           ) : view?.available ? (
@@ -290,7 +289,11 @@ export function CheckRow({
               <pre
                 ref={preRef}
                 onScroll={onScroll}
-                className="max-h-[40rem] overflow-auto whitespace-pre rounded-ui bg-ui-raise p-2 font-mono text-meta leading-[1.45] text-ui-ink"
+                // ⚠ ONLY THE LOG TEXT BOX WIDENS: it spans the Overview's size container (ChecksTab's
+                // `container-type`), less the Checks section's own gutters (px-4 / md:px-5 either
+                // side), past the 46rem reading cap. Every row around it keeps the cap.
+                className="max-h-[40rem] w-[calc(100cqw-2rem)] max-w-none overflow-auto whitespace-pre rounded-ui bg-ui-raise p-2 font-mono text-meta leading-[1.45] text-ui-ink md:w-[calc(100cqw-2.5rem)]"
+                data-testid="ci-log-text"
               >
                 {view.text || '(empty log)'}
               </pre>

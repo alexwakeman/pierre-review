@@ -100,9 +100,10 @@ describe('Overview sections', () => {
     expect(s).toContain('sm:w-20 sm:pt-0.5');
     expect(s).not.toContain('sm:w-28');
     expect(body).toContain('max-w-[46rem]');
-    // …lifted while a CI log is open, so long log lines get the pane's full width.
-    expect(body).toContain('has-[[data-ci-log-open]]:max-w-none');
-    expect(readFileSync(new URL('../src/components/CheckList.tsx', import.meta.url), 'utf8')).toContain('data-ci-log-open');
+    // Only an open CI log's text box reaches past the cap, through the outer size container.
+    expect(body).toContain('[container-type:inline-size]');
+    expect(body).not.toContain('max-w-none');
+    expect(readFileSync(new URL('../src/components/CheckList.tsx', import.meta.url), 'utf8')).toContain('w-[calc(100cqw-2rem)]');
   });
 
   it('the AI review is its own card on the AI surface, with a real heading', () => {

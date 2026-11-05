@@ -776,9 +776,10 @@ export function ChecksTab({
           approve the app.)
         </div>
       )}
-      {/* One reading column, capped — except while a CI log is open: log lines are wide, so the
-          Overview takes the pane's full width until the log is closed (`data-ci-log-open`). */}
-      <div className="max-w-[46rem] pb-1 has-[[data-ci-log-open]]:max-w-none">
+      {/* One reading column, capped. The outer box is a size CONTAINER so an open CI log's text
+          box alone can reach the pane's full width (`100cqw`, CheckList.tsx) — nothing else moves. */}
+      <div className="[container-type:inline-size]">
+      <div className="max-w-[46rem] pb-1">
       {/* CAN IT LAND — the merge facts and the actions on them, first. */}
       <Section title="Can it land">
         {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). The
@@ -1240,6 +1241,7 @@ export function ChecksTab({
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
       </Section>
+      </div>
       </div>
     </>
   );
