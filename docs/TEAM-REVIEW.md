@@ -2,7 +2,7 @@
 
 **Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
 diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
-2026-11-05 (Limn 1.0.4, the next release). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+2026-11-05 (Limn 1.0.5). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
@@ -379,7 +379,7 @@ only replies: once per commit on an open thread, and once, ever, on a resolved t
   On a resolved thread (where pushback never goes), Limn treats it like any other open point.
 - **A new thread replaces the old one.** Later reviews judge the new thread, not the old one, and
   the author's card and list point to it. A new thread is never followed by another new thread. (A
-  Limn before 1.0.4 could do that; a later review then gets every earlier thread of the chain, oldest
+  Limn before 1.0.5 could do that; a later review then gets every earlier thread of the chain, oldest
   first, with the newest one.)
 - **What the author sees:** a "Robin's Limn: still open" pill on the thread, a "Still open (N)" list
   in the Overview's AI review card, and a My Turn card "Robin's Limn: still open on src/x.ts" while the
@@ -451,7 +451,7 @@ flowchart TD
 Any reply with Limn's hidden marker is stored as "Limn · alex" (a "Post reply" you press too: the
 words are Limn's draft). It never ends a thread card, never raises a "reply in a thread you
 commented in" card, never makes a thread "Replied", and never starts another Limn's review.
-Replies stored before 1.0.4 are moved to the bot on the next start or sync.
+Replies stored before 1.0.5 are moved to the bot on the next start or sync.
 
 The Slack digest and the Pending board word threads this way: "Comment on src/x.ts waiting on the
 author"; "Alex's comment on package.json has no reply · waiting on Robin".
@@ -586,13 +586,13 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |
 | before 1.0.2 | Shows a reviewer as "requested changes" after their later approval was dismissed. |
 | before 1.0.3 | Writes no "Still open:" replies, never reopens, may claim an open point it never recorded. Reads a new "still open" judgement as "not addressed". |
-| before 1.0.4 | **Verdicts:** approves while an earlier warning or blocker is still open (D1); does not withdraw its own automatic approval when set to "Keep it in Limn". **Still open:** reopens threads and starts new ones on its own PR (D2); writes "Still open:" without reading GitHub first; posts nothing on a resolved thread whose reply it disputes; keeps judging the old thread after a new one continues it. **Claims:** writes "kept in Limn" when an approval or a reason-only comment did reach GitHub, so the commit is reviewed again; a manual review it posts writes no "reviewed" line; posts a late final line without reading first; loses the Clear button for a teammate's claim on restart. **Team:** shows no "update" line for a teammate on an old Limn; on its own machine, stores Limn's pushbacks, acknowledgements and resolve replies as the person (a newer Limn stores that teammate's as their Limn); leaves its own fixed Limn threads open on your PR while your Limn has the commit (it never reads your review's judgements). Its writes stay safe for newer Limns: they read its markers. |
+| before 1.0.5 | **Verdicts:** approves while an earlier warning or blocker is still open (D1); does not withdraw its own automatic approval when set to "Keep it in Limn". **Still open:** reopens threads and starts new ones on its own PR (D2); writes "Still open:" without reading GitHub first; posts nothing on a resolved thread whose reply it disputes; keeps judging the old thread after a new one continues it. **Claims:** writes "kept in Limn" when an approval or a reason-only comment did reach GitHub, so the commit is reviewed again; a manual review it posts writes no "reviewed" line; posts a late final line without reading first; loses the Clear button for a teammate's claim on restart. **Team:** shows no "update" line for a teammate on an old Limn; on its own machine, stores Limn's pushbacks, acknowledgements and resolve replies as the person (a newer Limn stores that teammate's as their Limn); leaves its own fixed Limn threads open on your PR while your Limn has the commit (it never reads your review's judgements). Its writes stay safe for newer Limns: they read its markers. |
 | before 0.1.181 | Writes no thread judgements or lift consent. |
 | before 0.1.175 | Shows no teammates' reviews at all, and lets the PR author's claim hold the commit. |
 | before 0.1.174 | Reads a teammate's "kept in Limn" line as reviewed and stands down. |
 
 The Limn version rides every posted review's marker. When a teammate's newest review on a PR came
-from a Limn older than 1.0.4 (the team minimum, one shared constant), the AI Review tab shows one line
+from a Limn older than 1.0.5 (the team minimum, one shared constant), the AI Review tab shows one line
 beside "Where this PR stands": "Robin is on Limn 0.1.188 — update for still-open replies and claim
 fixes." A review with no version (a legacy post) reads "an older Limn". Nothing else acts on the
 version.

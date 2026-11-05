@@ -196,10 +196,11 @@ describe('compareLimnVersions / isLimnBelowTeamMinimum (docs/TEAM-REVIEW.md § 1
   });
 
   it('counts an unknown or unreadable version as older', () => {
-    expect(MIN_TEAM_LIMN_VERSION).toBe('1.0.4');
+    expect(MIN_TEAM_LIMN_VERSION).toBe('1.0.5');
     expect(isLimnBelowTeamMinimum('0.1.188')).toBe(true);
     expect(isLimnBelowTeamMinimum('1.0.3')).toBe(true);
-    expect(isLimnBelowTeamMinimum('1.0.4')).toBe(false);
+    expect(isLimnBelowTeamMinimum('1.0.4')).toBe(true);
+    expect(isLimnBelowTeamMinimum('1.0.5')).toBe(false);
     expect(isLimnBelowTeamMinimum('1.1.0')).toBe(false);
     expect(isLimnBelowTeamMinimum(null)).toBe(true);
     expect(isLimnBelowTeamMinimum('')).toBe(true);

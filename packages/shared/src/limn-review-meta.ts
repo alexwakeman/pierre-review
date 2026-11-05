@@ -366,7 +366,7 @@ export function postedFindingDisplay(text: string, fallbackTitle: string): Poste
  * older `lv=` (or none) gets a plain "update" line on the AI Review tab. Raise it when a release
  * changes how Limns on one team cooperate.
  */
-export const MIN_TEAM_LIMN_VERSION = '1.0.4';
+export const MIN_TEAM_LIMN_VERSION = '1.0.5';
 
 /** `1.2.3`, `v1.2.3`, `1.2.3-beta.1` → [1, 2, 3, prerelease]. null when it is not a version. */
 function parseLimnVersion(v: string): { nums: [number, number, number]; pre: string | null } | null {
