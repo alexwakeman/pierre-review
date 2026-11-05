@@ -4882,7 +4882,12 @@ export interface FindingAutoResolveRecord {
   manual?: boolean;
   // 'own_pr': closed under "Resolve my Limn threads when addressed" (the reader's own PR, any
   // run of theirs), not the workspace's auto-resolve switch.
-  why?: 'own_pr';
+  // 'teammate': the same setting, on a TEAMMATE'S Limn's word — their posted review judged the finding
+  // addressed / no longer applies at the PR's current head while the reader's Limn stepped aside
+  // (review/claude-review/teammate-resolve.ts). `byReviewId` is then the imported teammate review.
+  why?: 'own_pr' | 'teammate';
+  // why 'teammate' only: the teammate's GitHub login.
+  checkedBy?: string;
 }
 
 // The ONE pushback reply an auto run posted on a finding's thread
@@ -7972,7 +7977,9 @@ export interface ClaudeTeamClaimRecord {
   reason?: 'no_access' | 'error' | null;
   // The LAST line Limn posted for this run: reviewing (pending), reviewed (success), unfinished
   // (success "didn't finish · free to claim": released) or cleared (success, by the reader's Clear). null = none.
-  lastLine: 'reviewing' | 'reviewed' | 'unfinished' | 'cleared' | null;
+  // 'superseded': the run ended after a teammate's newer success or live claim, so its final line was NOT
+  // posted (gap 5: a late line is never posted blind; the teammate's line stands).
+  lastLine: 'reviewing' | 'reviewed' | 'unfinished' | 'cleared' | 'superseded' | null;
   at: string; // ISO-8601, when lastLine was posted (or the claim was decided)
 }
 

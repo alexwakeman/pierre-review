@@ -29,6 +29,7 @@ import type {
   ClaudeNotApproved,
 } from '@pierre-review/shared';
 import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
+import type { EarlierOpen } from './earlier-open.js';
 import { judgeReplyReport, type PriorFindingForFollowUp } from './follow-up.js';
 import { judgeableReplies } from './reply-text.js';
 
@@ -350,6 +351,10 @@ export interface RepliesVerdictInput {
   // A half of a Claude + Codex review that holds the approval whatever the replies say
   // (auto-verdict.ts `repliesDissent`, by the workspace's strictness). Absent/null = none.
   dissent?: ClaudeNotApproved | null;
+  // Earlier points the full review held open that no reply settled since (./earlier-open.ts, decision
+  // D1): an earlier blocker or warning holds an approval like an open finding; an earlier nit /
+  // question follows `leftovers`. Absent/null = none.
+  earlier?: EarlierOpen | null;
 }
 
 /**
@@ -367,6 +372,11 @@ export function repliesVerdict(i: RepliesVerdictInput): AutoVerdictEvent | null 
   if (i.unjudgedEarlierBlockers > 0) return null;
   if (i.open.some((f) => f.severity === 'blocker' || f.severity === 'warning')) return null;
   if (i.open.some((f) => !leftoverAllowed(f.severity, i.leftovers ?? 'nits_questions'))) return null;
+  const e = i.earlier;
+  if (e != null && e.blockers + e.warnings > 0) return null;
+  if (e != null && ((e.nits > 0 && !leftoverAllowed('nit', i.leftovers ?? 'nits_questions')) || (e.questions > 0 && !leftoverAllowed('question', i.leftovers ?? 'nits_questions')))) {
+    return null;
+  }
   if (i.dissent != null) return null;
   return 'APPROVE';
 }
@@ -381,13 +391,13 @@ export function repliesNotApproved(i: RepliesVerdictInput): { reason: ClaudeNotA
   const disputed = i.items.some((it) => it.status === 'reply_disputed' && it.severity === 'blocker');
   const accepted = i.items.some((it) => it.status === 'reply_accepted');
   if (!disputed && !accepted) return null;
-  const severe = openFindingsReason(i.open, 'severe');
+  const severe = openFindingsReason(i.open, 'severe', undefined, i.earlier ?? null);
   if (severe != null) return { reason: severe, held: false };
   if (disputed) return { reason: { heldReason: 'open_findings', text: 'Not approved: a blocker is still open.' }, held: false };
   if (i.unjudgedEarlierBlockers > 0) {
     return { reason: { heldReason: 'open_findings', text: 'Not approved: an earlier blocker is not checked yet.' }, held: false };
   }
-  const leftover = openFindingsReason(i.open, 'leftovers', i.leftovers ?? 'nits_questions');
+  const leftover = openFindingsReason(i.open, 'leftovers', i.leftovers ?? 'nits_questions', i.earlier ?? null);
   if (leftover != null) return { reason: leftover, held: true };
   if (i.dissent != null) return { reason: i.dissent, held: true };
   return null;

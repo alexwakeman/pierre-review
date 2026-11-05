@@ -59,6 +59,7 @@ import type {
   AiProviderId,
   ClaudeTeamClaimPending,
   ClaudeTeamClaimRecord,
+  ClaudeReviewVerdict,
   ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
@@ -66,13 +67,14 @@ import { isRateLimitError } from '../../github/client.js';
 import { noteLimited } from '../../github/rate-budget.js';
 import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
+import type { AutoPostOutcome } from './auto-post.js';
 import {
   openClaimLinesAtHead,
   recordClaimIntent,
   releaseClaimLinesAtHead,
   setClaimLine,
 } from './team-claim-ledger.js';
-import { forgetTeammateLine, recordTeammateLine } from './team-claim-seen.js';
+import { forgetTeammateLine, recordTeammateLine, teammateLinesAtHead } from './team-claim-seen.js';
 
 /** How long a pending line holds the head after its claimant's NEWEST line. */
 export const TEAM_CLAIM_LEASE_MS = 25 * 60 * 1000;
@@ -98,10 +100,20 @@ const clamp = (s: string): string =>
 export function reviewingLine(login: string, provider: AiProviderId): string {
   return clamp(`${login} is reviewing with ${aiProviderName(provider)}`);
 }
-/** `comments`: inline/PR comments the auto-post put on GitHub; null = nothing posted (kept in Limn). */
-export function reviewedLine(login: string, comments: number | null): string {
+/**
+ * THE "REVIEWED" LINE. `comments`: this model's findings the post put on GitHub (0 = a review went
+ * out with none of them: an approval, a reason-only comment, the other half's findings). ⚠ null =
+ * the run put NOTHING on GitHub (no review at all): "kept in Limn", which every Limn reads as FREE.
+ * Gap 12 (2026-11-05): a review that DID reach GitHub is never "kept in Limn" — it holds the commit.
+ * `verdict`: the event GitHub took ("approved" / "changes requested" lead the detail); a COMMENT adds
+ * nothing.
+ */
+export function reviewedLine(login: string, comments: number | null, verdict: ClaudeReviewVerdict | null = null): string {
   if (comments == null) return clamp(`${login} reviewed · kept in Limn`);
-  return clamp(`${login} reviewed · ${comments === 0 ? 'no' : comments} comment${comments === 1 ? '' : 's'}`);
+  const count = `${comments === 0 ? 'no' : comments} comment${comments === 1 ? '' : 's'}`;
+  if (verdict === 'APPROVE') return clamp(`${login} reviewed · approved${comments > 0 ? ` · ${count}` : ''}`);
+  if (verdict === 'REQUEST_CHANGES') return clamp(`${login} reviewed · changes requested · ${count}`);
+  return clamp(`${login} reviewed · ${count}`);
 }
 /** The release line for a run of ours that did not finish (a failure, a Stop, a dropped run). */
 export function unfinishedLine(login: string): string {
@@ -110,6 +122,29 @@ export function unfinishedLine(login: string): string {
 export function clearedLine(login: string): string {
   return clamp(`${CLEARED_PREFIX}${login}`);
 }
+/**
+ * WHAT ONE RUN'S "REVIEWED" LINE SAYS (pure; `reviewedLine`). ⚠ GAP 12 (2026-11-05):
+ * "kept in Limn" (comments null, read as FREE) ONLY when the run put NOTHING on GitHub. A review that
+ * went out — an approval, a reason-only comment, a pair's one review holding only the other half's
+ * findings — is a success that holds the commit: this run's posted findings (0 ⇒ "no comments") and
+ * the verdict GitHub took. A run with nothing to say at all also reads "no comments", posted or not.
+ */
+export function reviewedLineSummary(
+  out: AutoPostOutcome | null,
+  review: { findings: ReadonlyArray<{ id: number; severity: string }> } | null,
+): { comments: number | null; verdict: ClaudeReviewVerdict | null; onGithub: boolean } {
+  const rec = out?.kind === 'done' ? out.record : null;
+  if (rec != null && rec.githubReviewId != null) {
+    const posted = new Set(rec.postedFindingIds);
+    const mine = review ? review.findings.filter((f) => posted.has(f.id)).length : 0;
+    return { comments: mine, verdict: rec.verdict?.submitted ?? null, onGithub: true };
+  }
+  if (review && review.findings.filter((f) => f.severity !== 'praise').length === 0) {
+    return { comments: 0, verdict: null, onGithub: false };
+  }
+  return { comments: null, verdict: null, onGithub: false };
+}
+
 /** A teammate's expired (or older Limn's pending "free to claim") line, released by `by` (the reader). */
 export function releasedLine(login: string, by: string): string {
   return clamp(`${CLEARED_PREFIX}${by}: ${login}'s claim expired`);
@@ -916,8 +951,42 @@ export function stopTeamClaimRenew(handle: TeamClaimHandle): void {
 }
 
 export type TeamClaimFinish =
-  | { kind: 'succeeded'; comments: number | null; reviewUrl: string | null }
+  // `comments`: see `reviewedLine` (null = nothing reached GitHub). `verdict`: the event GitHub took.
+  | { kind: 'succeeded'; comments: number | null; reviewUrl: string | null; verdict?: ClaudeReviewVerdict | null }
   | { kind: 'unfinished' };
+
+/**
+ * A TEAMMATE HOLDS THE CONTEXT NOW (pure): the fold over the head's lines, as THIS Limn reads them,
+ * says a teammate reviewed it (their success is the newest line) or is reviewing it (their claim is the
+ * live one). Their login, else null. The PR author's lines never hold (`decideTeamClaim`).
+ */
+export function teammateHolds(
+  lines: readonly TeamClaimLine[],
+  me: string | null,
+  nowMs: number,
+  author: string | null = null,
+): string | null {
+  const d = decideTeamClaim(lines, me, nowMs, author);
+  return d.kind === 'reviewed' || d.kind === 'reviewing' ? d.login : null;
+}
+
+/** Read the handle's context and ask `teammateHolds`. null on any read error (post as before). */
+async function supersedingTeammate(
+  ctx: AgentContext,
+  handle: TeamClaimHandle,
+  gh: TeamClaimGithub,
+  nowMs: number,
+): Promise<string | null> {
+  const { accountId, prId, owner, name, headSha, provider } = handle.target;
+  try {
+    const lines = await gh.listLines(accountId, owner, name, headSha, teamClaimContext(provider));
+    const author = handle.target.authorLogin !== undefined ? handle.target.authorLogin : await prAuthorLogin(ctx, accountId, prId);
+    return teammateHolds(lines, handle.login, nowMs, author);
+  } catch (err) {
+    ctx.log.warn(`team claim pr ${prId}: statuses unreadable before the final line (${errText(err)}); posting it`);
+    return null;
+  }
+}
 
 /**
  * Steps 4-5: the final line, and the run row's record. Never throws. A handle that is not marked
@@ -932,6 +1001,7 @@ export async function finishTeamClaim(
   reviewId: number | null,
   outcome: TeamClaimFinish,
   gh: TeamClaimGithub = defaultTeamClaimGithub,
+  nowMs: () => number = Date.now,
 ): Promise<void> {
   stopTeamClaimRenew(handle);
   const ledgerId = handle.ledgerId ?? null;
@@ -953,8 +1023,28 @@ export async function finishTeamClaim(
     const { accountId, prId, owner, name, headSha, provider } = handle.target;
     const post: TeamClaimPost =
       outcome.kind === 'succeeded'
-        ? { state: 'success', description: reviewedLine(handle.login, outcome.comments), targetUrl: outcome.reviewUrl }
+        ? {
+            state: 'success',
+            description: reviewedLine(handle.login, outcome.comments, outcome.verdict ?? null),
+            targetUrl: outcome.reviewUrl,
+          }
         : { state: 'success', description: unfinishedLine(handle.login) };
+    // ⚠ NEVER BLIND (gap 5, 2026-11-05): a run that slept or crashed may end long after its lease. Read
+    // the context first: a teammate's newer success or live claim stands, and nothing is posted (the row
+    // is closed as 'superseded'). An unreadable history posts as before — a line left pending is worse.
+    const over = await supersedingTeammate(ctx, handle, gh, nowMs());
+    if (over != null) {
+      ctx.log.info(`team claim pr ${prId}: final line not posted: @${over} has the commit now`);
+      handle.record = { ...handle.record, lastLine: 'superseded', at: new Date().toISOString() };
+      if (ledgerId != null) {
+        await setClaimLine(ctx, ledgerId, {
+          state: outcome.kind === 'succeeded' ? 'finished' : 'released',
+          lastError: 'superseded',
+        }).catch(() => {});
+      }
+      if (reviewId != null) await saveTeamClaimRecord(ctx, reviewId, handle.record).catch(() => {});
+      return;
+    }
     try {
       await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), post);
       handle.record = {
@@ -1010,7 +1100,7 @@ export async function saveTeamClaimRecord(
 
 /**
  * The pending Limn line at the PR's current head that "Clear" would replace (DB + memory only): a
- * teammate's live claim this Limn skipped for, else this machine's own OPEN ledger row at the head
+ * teammate's live claim this Limn skipped for (memory, else the stored `team_claim_seen` line), else this machine's own OPEN ledger row at the head
  * (a run that died, or a final line GitHub did not take yet) when no run is going — the reconciler
  * releases it on its own too; Clear just does it now.
  */
@@ -1020,10 +1110,20 @@ export async function teamClaimPendingFor(
   prId: number,
   headSha: string | null,
   running: boolean,
+  nowMs: number = Date.now(),
 ): Promise<ClaudeTeamClaimPending | null> {
   if (!headSha) return null;
   const skip = skipsOfPr(accountId, prId).find((e) => e.skip.headSha === headSha && e.skip.kind === 'reviewing')?.skip;
   if (skip) return { provider: skip.provider, login: skip.login, mine: false };
+  // ⚠ GAP 6 (2026-11-05): the memory above is gone after a restart. The STORED teammate line at this
+  // head (team_claim_seen, written by every read that found a teammate's live claim) still says who is
+  // reviewing, so the Clear button survives a restart. The next read rewrites or forgets it.
+  // ⚠ Only while it can still be live: nothing re-reads it until a new run on the PR, so a stored
+  // line past TEAM_CLAIM_LEASE_MS (from its first line — the earliest it can lapse) offers no Clear.
+  const seen = (await teammateLinesAtHead(ctx, accountId, prId, headSha).catch(() => [])).find(
+    (t) => t.kind === 'reviewing' && Date.parse(t.at) + TEAM_CLAIM_LEASE_MS > nowMs,
+  );
+  if (seen) return { provider: seen.provider, login: seen.login, mine: false };
   if (running) return null;
   const row = (await openClaimLinesAtHead(ctx, accountId, prId, headSha)).find((r) => !claimLineFinishing(r.id));
   if (!row) return null;
@@ -1035,6 +1135,10 @@ export async function teamClaimPendingFor(
  * CLEAR: post "Cleared by <login>" (success — free to every Limn) at the PR's current head for one
  * provider. Never retried. Forgets the skip and marks this machine's latest record at the head
  * cleared, so the button goes.
+ * ⚠ It READS the commit's lines first and posts ONLY when the newest is still a pending claim: a
+ * teammate who finished since the button was drawn ("robin reviewed · 3 comments") must not be
+ * overwritten by a free line, or every Limn reviews that commit again. Nothing to clear still forgets
+ * the local state (the button goes); an unreadable history posts nothing.
  */
 export async function clearTeamClaim(
   ctx: AgentContext,
@@ -1044,19 +1148,32 @@ export async function clearTeamClaim(
   const { accountId, prId, owner, name, headSha, provider } = target;
   const login = (await gh.login(accountId).catch(() => null)) ?? null;
   if (!login) return { ok: false, error: 'error', message: 'Your GitHub login is not known yet.' };
+  let stillPending: boolean;
   try {
-    await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), {
-      state: 'success',
-      description: clearedLine(login),
-    });
+    const newest = newestLine(await gh.listLines(accountId, owner, name, headSha, teamClaimContext(provider)));
+    stillPending = newest != null && !settles(newest);
   } catch (err) {
     const kind = claimErrorKind(err, accountId);
     if (kind === 'rate_limited') {
       return { ok: false, error: 'rate_limited', message: 'GitHub rate limit reached. Try again in a few minutes.' };
     }
-    return kind === 'no_access'
-      ? { ok: false, error: 'no_access', message: 'GitHub refused: you need write access to this repo.' }
-      : { ok: false, error: 'error', message: errText(err).slice(0, 200) };
+    return { ok: false, error: 'error', message: `Could not read the commit's Limn lines: ${errText(err).slice(0, 160)}` };
+  }
+  if (stillPending) {
+    try {
+      await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), {
+        state: 'success',
+        description: clearedLine(login),
+      });
+    } catch (err) {
+      const kind = claimErrorKind(err, accountId);
+      if (kind === 'rate_limited') {
+        return { ok: false, error: 'rate_limited', message: 'GitHub rate limit reached. Try again in a few minutes.' };
+      }
+      return kind === 'no_access'
+        ? { ok: false, error: 'no_access', message: 'GitHub refused: you need write access to this repo.' }
+        : { ok: false, error: 'error', message: errText(err).slice(0, 200) };
+    }
   }
   forgetSkip(accountId, prId, provider);
   // The teammate's line the tab showed is no longer the newest one.
@@ -1068,7 +1185,7 @@ export async function clearTeamClaim(
   const row = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
     (r) => r.teamClaim.context === teamClaimContext(provider),
   );
-  if (row) {
+  if (row && stillPending) {
     await saveTeamClaimRecord(ctx, row.id, { ...row.teamClaim, lastLine: 'cleared', at: new Date().toISOString() });
   }
   return { ok: true };

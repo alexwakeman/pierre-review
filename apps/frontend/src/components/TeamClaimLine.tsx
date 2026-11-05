@@ -3,6 +3,7 @@ import type { ClaudeReviewResponse } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
 import { useClearTeamClaim } from '../hooks/useClaudeReview.js';
 import { teamClaimRecordLine, teamClaimSkipLine, teammateReviewLine } from '../lib/claudeAutoReview.js';
+import { ReviewingNowIcon } from './Icons.js';
 
 // TEAM CLAIMS ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims) on the AI Review
 // tab: why the auto review here was skipped (a teammate's Limn holds this commit), what the latest
@@ -16,8 +17,9 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
   const clear = useClearTeamClaim(prId);
   const [confirming, setConfirming] = useState(false);
   // The teammates this Limn stood down for at this commit (durable), else the in-memory skip.
-  const teammates = (data?.teamClaimTeammates ?? []).map(teammateReviewLine);
+  const teammates = (data?.teamClaimTeammates ?? []).map((t) => ({ line: teammateReviewLine(t), live: t.kind === 'reviewing' }));
   const skipLine = teammates.length > 0 ? null : teamClaimSkipLine(data?.teamClaimSkip);
+  const skipLive = data?.teamClaimSkip?.kind === 'reviewing';
   const recordLine = data?.review?.trigger === 'auto' ? teamClaimRecordLine(data.review.teamClaim) : null;
   const pending = data?.teamClaimPending ?? null;
   if (teammates.length === 0 && skipLine == null && recordLine == null && pending == null) return null;
@@ -26,10 +28,27 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
   return (
     <div className="mt-2 space-y-1 text-meta text-ui-mute">
-      {teammates.map((line) => (
-        <div key={line}>{line}</div>
-      ))}
-      {skipLine != null && <div>{skipLine}</div>}
+      {/* A teammate's Limn reviewing NOW is the one line that must stand out: the ink colour and the
+          pulsing sparkle. "Reviewed" stays quiet. */}
+      {teammates.map(({ line, live }) =>
+        live ? (
+          <div key={line} className="flex items-center gap-1.5 text-ui-ink" data-testid="teammate-reviewing-now">
+            <ReviewingNowIcon />
+            <span>{line}</span>
+          </div>
+        ) : (
+          <div key={line}>{line}</div>
+        ),
+      )}
+      {skipLine != null &&
+        (skipLive ? (
+          <div className="flex items-center gap-1.5 text-ui-ink" data-testid="teammate-reviewing-now">
+            <ReviewingNowIcon />
+            <span>{skipLine}</span>
+          </div>
+        ) : (
+          <div>{skipLine}</div>
+        ))}
       {skipLine == null && recordLine != null && pendingLine == null && <div>{recordLine}</div>}
       {pendingLine != null && <div>{pendingLine}</div>}
       {pending != null && (

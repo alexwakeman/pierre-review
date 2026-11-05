@@ -2618,8 +2618,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 `manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold); the ledger
 `team-claim-ledger.ts` and the reconciler `team-claim-release.ts` (§ Releasing stale lines).
 
-- **AUTO REVIEWS ONLY** — the minute tick AND the reader's "Run auto reviews now" / Retry. A manual run
-  never claims and never checks claims. ⚠ A REPLIES PASS never claims either (it is not a review of a
+- **AUTO REVIEWS CLAIM** — the minute tick AND the reader's "Run auto reviews now" / Retry. A manual run
+  never claims, never posts a pending line and is never held back (a click is never refused); see
+  **MANUAL REVIEWS** below for the two light touches it does get. ⚠ A REPLIES PASS never claims either (it is not a review of a
   head; § The replies pass), and the Clear button's reads skip its rows (`kind IS NULL`).
 - **A Claude + Codex pair claims per half**, each on its own provider's context, when that half starts
   (§ Claude + Codex → With team claims); a held half never starts, the other still runs.
@@ -2631,7 +2632,15 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 - **THE LINES** (≤ 140 characters, plain English, naming the GitHub login):
   pending "alex is reviewing with Claude" (the claim, re-posted every 8 min while the run goes) →
   success "alex reviewed · 4 comments" (`target_url` = the auto-posted GitHub review, built from our
-  own stored ids and validated) or "alex reviewed · kept in Limn" (nothing posted) / "· no comments" →
+  own stored ids and validated), "· approved" / "· approved · 2 comments" / "· changes requested · 3
+  comments" (the verdict GitHub took leads; a COMMENT adds nothing), "· no comments", or "alex reviewed
+  · kept in Limn" → ⚠ **"kept in Limn" ONLY when the run put NOTHING on GitHub** (2026-11-05, gap 12;
+  `reviewedLineSummary`): a review that went out — an approval with only nits, a reason-only comment, a
+  pair's one review holding only the other half's findings — is a "reviewed" success that holds the
+  commit, with this run's posted-finding count (0 ⇒ "no comments"). Before, any run with none of ITS
+  findings posted read "kept in Limn", so teammates reviewed the commit again. A run with nothing to
+  say at all still reads "no comments", posted or not. The fold still reads an old "kept in Limn" as
+  free. →
   on a failure, a Stop or a dropped run, SUCCESS "Cleared by alex: review didn't finish · free to
   claim" (the RELEASE line; ⚠ never 'error'/'failure' — red reads as broken CI — and, since 2026-10-28,
   never pending either: the owner chose pending-on-failure on 2026-10-27, and a pending line held every
@@ -2680,6 +2689,20 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   and `claimBeforeAutoRun` skips its no-read shortcut for such a skip, so the next tick re-reads the
   head ONCE and folds it as reviewed — within a sync walk of the post, not 25 minutes. Pinned by
   `team-claim.test.ts`.
+- **MANUAL REVIEWS** (2026-11-05, gap 4; `team-claim-manual.ts`). Light, never a block:
+  - **SEEN.** When a manual run starts (`startReview`, after it launches or queues), each of its
+    providers' contexts is read once (`readTeammateLinesForManualRun`, the same fold with the author
+    and posted reviews); a teammate's live claim or "reviewed" line for that model is stored in
+    `team_claim_seen` (a free head forgets it), so the AI Review tab names it beside the run. The start
+    waits for that read at most 1.5 s (`MANUAL_SEEN_WAIT_MS`), so the tab's refetch sees it. When the run
+    ends, only a stored "is reviewing" line is read again (`refreshTeammateLinesAfterRun`).
+  - **POSTED.** A review the READER posted — "Review and post" (`runEnded`, on the auto-post outcome) or
+    the Post button (`postReviewHandler`, any run, an auto run kept in Limn included) — writes the same
+    success line per model in it (`markPostedReviewLines`): "<login> reviewed · approved · 2 comments",
+    `target_url` the posted review. Teammates' automatic runs then step aside for that model at that
+    commit. ⚠ Never a pending line; never over a teammate's success or live claim (`teammateHolds`); never
+    twice (our own non-free success already newest ⇒ 'already'); never on the reader's own PR (the
+    author's lines hold nothing); only with team claims on; written ONCE, never retried, no ledger row.
 - **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
   re-posts the winner's description, so GitHub's displayed latest line names the winner.
 - **THE TEAMMATE'S LINE ON THE TAB** (2026-11-02, migration 0159, `team-claim-seen.ts`). Real: PR
@@ -2744,13 +2767,30 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   still honoured. A CLAIM's write is never retried (a renew is a new line); only the RELEASE of a line
   we posted is (below). The renew timer is cleared on every exit path (`launch`'s `finally`), and a
   claim posted before the row could be written is released ("free to claim").
+- **THE FINAL LINE IS NEVER POSTED BLIND** (2026-11-05, gap 5; `finishTeamClaim` →
+  `supersedingTeammate` → pure `teammateHolds`). A run that slept or crashed may end long after its
+  lease. Before its "reviewed" or "didn't finish" line, the run's end reads the context: when the fold
+  (as this Limn reads it, the author left out) says a teammate reviewed it (their success is newest) or
+  holds the live claim, NOTHING is posted — the ledger row is closed with `lastError 'superseded'`
+  ('finished' or 'released') and the record reads `lastLine 'superseded'`. A loser's stand-down line
+  (pending, naming us, posted later) does not count: the fold still finds us earliest. A teammate's
+  free line does not count either. An unreadable history posts as before (a pending line left behind is
+  worse). The reconciler already read first; a Clear is the reader's own choice and does not read.
 - **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Marked on GitHub,
-  then released" (`lastLine 'unfinished'`) / "Not marked on GitHub: no write access" on the tab.
+  then released" (`lastLine 'unfinished'`) / "Marked on GitHub; a teammate's line is newer"
+  (`'superseded'`) / "Not marked on GitHub: no write access" on the tab.
 - **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
-  when a pending Limn line sits on the PR's head — a teammate's live claim, or this machine's OPEN
+  when a pending Limn line sits on the PR's head — a teammate's live claim (the skip memory, else ⚠
+  the STORED `team_claim_seen` "is reviewing" row at the head — 2026-11-05, gap 6: the button survives a
+  restart; the next read rewrites or forgets the row; ⚠ only while `lineAt + TEAM_CLAIM_LEASE_MS > now`,
+  since nothing re-reads it until a new run on the PR), or this machine's OPEN
   ledger row there while no run is going ("Your auto review didn't finish. Limn releases its pending
-  GitHub line on its own."; the reconciler does it within a tick, Clear does it now). Posts "Cleared by
-  <login>" at the current synced head and closes every open ledger row there for that provider. ⚠ A teammate's LIVE claim clears only after
+  GitHub line on its own."; the reconciler does it within a tick, Clear does it now). ⚠ READS the
+  context's lines first and posts "Cleared by <login>" at the current synced head ONLY when the newest
+  is still a pending, non-free claim — a teammate who finished since ("robin reviewed · 3 comments")
+  is never overwritten by a free line (that re-opens the commit to every Limn, gap 12). Nothing to
+  clear still forgets the skip, the stored line and the ledger rows (the button goes); an unreadable
+  history posts nothing and errors. It closes every open ledger row there for that provider. ⚠ A teammate's LIVE claim clears only after
   a confirm naming them ("@bob is reviewing this now. Clear anyway?") — clearing it frees the commit for
   a second review while theirs runs; this machine's own unfinished line clears in one press. A new commit also frees the PR (claims are
   per commit).
@@ -2830,7 +2870,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     ≤ 10 such commits per page, else GitHub's state stands; the PR backfill: under `MAX_DETAIL_SHAS`,
     else nothing is synthesized for the commit.
 - If a team marks `limn/review-*` as REQUIRED in branch protection, a lapsed or unfinished line blocks
-  merges — don't.
+  merges — don't. Limn does not read the repo's branch rules (no call reads them today, and none is
+  added for this), so it cannot warn per repo: the claims setting's ⓘ says "Don't make limn/ lines
+  required checks." (docs/TEAM-REVIEW.md § 13, gap 11).
 
 ## The Slack "Claude Review ran" signal
 
@@ -2941,7 +2983,20 @@ auto-posting: claim before any GitHub write, never retried.
   ⚠ a re-raise the server stored `included: false` because its comment is already on this commit
   still COUNTS), whatever the kind toggles say: any blocker ⇒
   REQUEST_CHANGES; APPROVE only when Claude approved AND there is no blocker and no warning; else
-  COMMENT. A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
+  COMMENT. ⚠ **EARLIER POINTS STILL OPEN COUNT TOO** (decision D1, 2026-11-05;
+  `review/claude-review/earlier-open.ts` `earlierOpenOf` / `earlierOpenForRuns`): an earlier point the
+  run judges still open (shared `isStillOpenFollowUp` / `isStillOpenThread`) whose severity is KNOWN —
+  a follow-up item's own severity, or a thread judgement's ROOT comment when it is a Limn finding
+  (any Limn's, the lead read by `limnFindingPost`) — holds the verdict like a finding: an earlier
+  blocker ⇒ REQUEST_CHANGES (same gates), an earlier warning ⇒ never APPROVE, earlier nits /
+  questions ⇒ the leftovers rule. A person's comment or another bot's has no severity: it counts
+  only in the "1 earlier point is still open." tail. ⚠ A follow-up item RE-RAISED as a finding of the
+  run (`priorFindingId`) is never counted twice (and a reader-ignored re-raise stays ignored). One
+  `EarlierOpen` feeds every verdict reader: `autoVerdictFor`, `findingsNotApproved`,
+  `blockerWarningCounts` (the withdrawal message), the pair's code verdict (`pairCodeVerdict`, from
+  `consolidatePair`), `notApprovedForView` and the replies outcome (`RepliesVerdictInput.earlier`,
+  less any point a reply has settled since). The line names them apart: "Not approved: 1 earlier
+  warning is still open." / "…: a blocker and 2 earlier warnings are still open." A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
   self-approval → `own_pr`) and (b) when the reader has no STANDING verdict — read LIVE
   (`GET …/pulls/:n/reviews`, the synced table can lag; `ownStandingReview`): their latest DECISIVE
   review (APPROVED / CHANGES_REQUESTED / DISMISSED). ⚠ A COMMENTED review never supersedes one on
@@ -3065,6 +3120,13 @@ auto-posting: claim before any GitHub write, never retried.
     a pair's claim row is the half without `viaPairReviewId`) — ⚠ NEVER by marker or body: a hand
     approval, or one sent with the Post button, is the reader's own and is never touched. Only while it
     is still the reader's standing review LIVE (`ownStandingReview` → `LIMN_AUTO_APPROVED`).
+  - **Posting off ("Keep it in Limn") still withdraws** (gap 7, 2026-11-05;
+    `auto-post.ts` `withdrawApprovalWhenKept`): an AUTO run with the workspace's auto-posting off posts
+    nothing, but when it is at a NEW head, does not approve (the same `autoVerdictFor`, earlier points
+    included), the PR is open, not a draft and still at that head, and Limn's own approval is the
+    reader's live standing review, it withdraws it — the same claim, message and once-only rule, then
+    `settlePrAfterWrite`. The run itself keeps no `auto_post` record (it stays kept in Limn); the
+    approving run's `approvalWithdrawal` carries `byReviewId`. ⚠ A manual "Review only" run never writes.
   - **The run path (always on)**: a run (auto, or "Review and post") at a NEW head whose verdict is not
     APPROVE (`autoVerdictFor`, whatever the auto-verdict switch says now) dismisses it BEFORE its own
     review, with "Limn withdrew its approval: 3 warnings found at 91482c8." (blockers and warnings
@@ -3118,6 +3180,28 @@ auto-posting: claim before any GitHub write, never retried.
   Claude review." (not the auto footer) above the finding marker, so `isLimnPostedComment` holds and
   it never counts as a person's answer. Not a model run: no budget gate, no route, no tier. Pinned by
   `auto-post.test.ts` (own PRs) and `replies-check-pipeline.test.ts`.
+- **ON A TEAMMATE'S WORD** (gap 13, 2026-11-05; `claude-review/teammate-resolve.ts`): the same
+  setting closes the reader's own fixed Limn threads while the reader's Limn STEPS ASIDE (a teammate
+  holds the commit). After each import of a PR's teammate reviews, sync KICKS (never awaits;
+  `sync/teammate-review-hooks.ts`, bound at boot in `startAgenticBackground`) `maybeResolveOnTeammateWord`:
+  the PR is the reader's own, open, not bot-authored, `resolveOwnPrs` on; an imported teammate review
+  (`kind = 'teammate'`, a STATED head — never `headInferred`) AT THE PR'S CURRENT HEAD judged the
+  thread root's comment id `a` / `x` in its `j=`, and that is the NEWEST teammate word on it at that
+  head (a later `n` / `o` keeps it open); no succeeded run of the reader's own at that head finished
+  after the post; the thread is rooted on the reader's own posted inline finding (`ownRunsOnly`,
+  `findFindingThread`, followed into the reader's own continuation) and unresolved; the finding has
+  no `auto_resolve`. Same claim-before-write, never-retry, one reply per thread then the resolve,
+  stamp, settle + change signal. The reply: "Addressed in abc1234 (checked by Robin’s Limn)." /
+  "No longer applies as of abc1234 (checked by Robin’s Limn)." + "_Resolved by Limn._" + the finding
+  marker; the name is the teammate's first name (else login), reduced to letters, digits and spaces.
+  The record carries `why: 'teammate'`, `checkedBy: <login>`, `byReviewId` = the imported teammate
+  review; the tab reads "Resolved automatically (checked by robin’s Limn)". ⚠ **THE TRUST GATE**
+  (rule 2b): the import is display-only and accepts any marker, so the WRITE path accepts an `a` / `x`
+  word only from a reviewer who is not a bot (`users.is_bot`, then `isAutomation` for the workspace)
+  AND has write access, read LIVE (`GET /repos/{o}/{r}/collaborators/{login}/permission` is `admin` /
+  `write`; any failure refuses; `TeammateTrustDeps.canWrite`). A refused reviewer's words are dropped
+  and returned as `untrusted` + logged — never a resolve. An `n` / `o`-only reviewer is not checked
+  (it can only hold). Pinned by `teammate-resolve.test.ts`.
 - ⚠ **NEVER TWICE** (`selectFindingsToPost` + `alreadyOnGithub`, pure): a finding posts only when
   INCLUDED (an ignored one never does; the server's own `included: false` re-raise counts as
   `already_posted`), not already posted, and not on GitHub from ANY earlier run of
@@ -3244,9 +3328,21 @@ activity.
   finding marker (`<!-- pierre:claude-review-finding`) PLUS a severity lead (`**Warning**` …) or a
   reminder lead (`**Reminder:**`), on an inline or PR-level comment, by ANY author, manual or
   automatic. ALSO an inline thread ROOT with the marker and no lead (`{ threadRoot: true }`): a
-  finding posted before leads existed (2026-10-27) — the bot's, with NO severity. NOT the bot:
-  replies on a finding thread (never a root), pushback, review bodies and auto verdicts, CI, Sonar,
-  dependency and ticket "story check" posts, and a lead-less PR-level comment. Those stay the person's.
+  finding posted before leads existed (2026-10-27) — the bot's, with NO severity. NOT a finding:
+  replies (never a root), pushback, review bodies and auto verdicts, CI, Sonar, dependency and ticket
+  "story check" posts, and a lead-less PR-level comment.
+- **Limn's REPLIES are the bot's too** (gap 1, 2026-11-05; shared `isLimnThreadReply(body)`): a
+  review-thread REPLY carrying ANY Limn marker (`<!-- pierre:claude-review…`) outside a quoted `>`
+  line — a pushback, an acknowledgement / resolve reply, a "Still open:" reply, a "Post reply" of a
+  drafted answer — is stored under the poster's `limn:` bot like a finding (sync `attribute`, the boot
+  reconcile, and `upsertLocalReply`'s instant row via `limnReplyAttribution`). Every Limn reply writer
+  emits a marker (auto-resolve + manual "Post reply": the finding marker; pushback: the pushback
+  marker; still-open: finding + still-open). So no Limn reply is a person's reply in My Turn (bot set),
+  derived thread state (`derive-thread-state.ts`, fixture 10), the replies pass (`humanReplies`
+  already flags it `fromLimn`), or the re-review trigger (`newestReviewCommentTimes` /
+  `loadReviewThreadsForReview` skip a non-root Limn reply — a teammate's "Still open:" never starts
+  another review). A thread ROOT's author is unchanged by a reply. Everything else on GitHub (review
+  bodies, PR-level non-finding posts, a person's own reply) stays the person's.
 - **Identity**: a synthetic `users` row per poster, login `limn:<login>` (`:` is impossible in a
   GitHub login, so it never collides and is NEVER sent to GitHub), `is_bot` pinned, no node id,
   display name "Limn · <login>" (`db/limn-bots.ts` `ensureLimnBotUser`). Its `workspace_reviewers`
@@ -3414,6 +3510,14 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   comment id/kind, `reminder`, `remindable`; docs/API.md § Team review), all from the import's rows —
   no GitHub call. A teammate's title / body: the comment text split at its first sentence
   (`postedFindingDisplay`; Limn posts a finding's body, never its title).
+- **A teammate on an old Limn** (2026-11-05; docs/TEAM-REVIEW.md § 12): the `lv=` each import stores
+  (`ClaudeTeammateReview.limnVersion`) is read by ONE rule — shared `isLimnBelowTeamMinimum` against
+  `MIN_TEAM_LIMN_VERSION` (`limn-review-meta.ts`, semver order by `compareLimnVersions`; prerelease <
+  release). For each teammate's NEWEST review on the PR that is older, the tab's status slot shows one
+  line (`lib/teammateReviews.ts` `teammateVersionLines`, `TeamReviewLayout.tsx`
+  `TeammateVersionNotes`): "Robin is on Limn 0.1.188 — update for still-open replies and claim
+  fixes."; no `lv=` or an unreadable one reads "an older Limn". Words only — nothing acts on the
+  version. Raise the constant when a release changes how Limns on one team cooperate.
 
 ### A reminder of a teammate's finding (2026-11-04)
 
@@ -3586,8 +3690,9 @@ author. And the prose may not name an open point that is not recorded.
   partial, or skipped `nothing_new` / `already_posted`; a run kept in Limn, an ineligible PR, a moved
   head or a failed post writes nothing). It acts only when the PR's synced head is the reviewed head.
   WHICH THREADS (`stillOpenCandidates`): a follow-up item with a thread (`item.threadId`), the reader's
-  own or a teammate's Limn finding — except `reply_disputed`, whose thread already got the ONE pushback
-  reply (auto-pushback.ts); a thread judgement of a PERSON'S thread or a teammate's Limn thread —
+  own or a teammate's Limn finding — `reply_disputed` ONLY on a RESOLVED thread (gap 2,
+  `candidate.disputed`): on an unresolved one the ONE pushback reply (auto-pushback.ts) answers it, and
+  pushback never writes on a resolved one, so there it is said like any other open point; a thread judgement of a PERSON'S thread or a teammate's Limn thread —
   never another review bot's (`authorIsBot` and no Limn root). A pair: both halves, the later half's
   word wins. THE PER-THREAD RULE (`planStillOpen`, pure):
   - **unresolved** → ONE reply, as the reader: `**Still open:** <reason>` (≤ 240 chars, two sentences
@@ -3607,7 +3712,19 @@ author. And the prose may not name an open point that is not recorded.
     already." + the reason + `c=<root comment id>`. Once per thread, ever: the `escalate:<node>` claim,
     or ANY Limn comment on the PR whose marker carries that `c=`. A nit, a question, or a point with no
     known severity (a person's comment) is left as it is — no reply spam. A new thread refused because
-    the head moved wrote nothing: its claim is released.
+    the head moved wrote nothing: its claim is released. ⚠ A CONTINUATION (its own root carries `c=`)
+    is never continued again (`escalatedBefore`): one new thread per point, ever.
+  - ⚠ **THE READER'S OWN PR (decision D2, `facts.ownPr` = `prAuthorIsAccount`)**: never `unresolve`,
+    never a new thread. The reply only: once per head on an unresolved thread, ONCE EVER on a resolved
+    one (`repliedBefore`: any Limn's still-open marker on the thread, or any `reply:<node>:*` claim).
+  - ⚠ **READ GITHUB LIVE BEFORE WRITING (gap 3)**: when the synced facts plan a write, ONE small GraphQL
+    read of that thread (`deps.liveThread`: `node(id)` → `isResolved`, its last 100 comments, and the
+    PR's thread roots for `c=`), outside any transaction, is folded in (`mergeLiveFacts`: reply-at-head,
+    reopen and continuation are the UNION of both readings; `resolved` is GitHub's live word) and the
+    plan is made again — so two Limns at one head that have not synced each other do not both reply,
+    reopen or continue. A disputed point found UNRESOLVED live is left to the pushback. ⚠ A FAILED read
+    writes nothing: a `read:<node>:<head>` row, `failed`, "Nothing written: couldn't read the thread on
+    GitHub first (…)", and that thread is not tried again at that head (`result.unread`).
   - ⚠ **CLAIM BEFORE EVERY WRITE, NEVER RETRIED** — `claude_still_open_posts` (migration `0170`): ONE
     row per claim, `INSERT … ON CONFLICT (account_id, claim_key) DO NOTHING` BEFORE the GitHub call
     (the unique index IS the compare-and-set), then `posted` (+ `comment_id`) / `failed` (+ GitHub's
@@ -3618,9 +3735,19 @@ author. And the prose may not name an open point that is not recorded.
     person's answer and never returns the ball); the teammate import skips it (never a finding);
     `deriveThreadState` ignores a still-open-marked comment as a reply (fixture
     `09-limn-still-open-reply-is-not-a-reply.json`). The NEW thread IS a finding (severity lead +
-    finding marker): a teammate's Limn imports it as one. ⚠ The reader's own continuation thread has no
-    finding row (the follow-up keeps following the ORIGINAL thread), so the reader's later runs do not
-    follow it up — the original stays the chain.
+    finding marker): a teammate's Limn imports it as one.
+  - **CONTINUATIONS ARE FOLLOWED (gap 8).** THE MAPPING lives on GitHub: the new thread's ROOT carries
+    `c=<earlier root comment id>` (this account's `escalate:<node>` row also keeps the new root's
+    `comment_id`). ONE pure reader, shared `continuationThreadMap(comments)` → earlier thread id → its
+    continuation (thread roots only, the oldest continuation wins, chains followed). Its readers:
+    finding-replies.ts `loadFindingThreadContexts` (the follow-up of the reader's own finding) and
+    auto-resolve / auto-pushback follow the reader's OWN continuation (`followOwnContinuation`: root by
+    the account's login with Limn's marker) — a teammate's continuation is their Limn's thread, judged as
+    one; db/review-threads-for-review.ts sends a continued non-own thread ONCE, as its continuation
+    (its id, place and state; the earlier thread's comments, then the continuation's — an own-rooted
+    continuation included); `getThreadJudgements` moves a still-open word from the earlier thread to its
+    continuation unless the continuation has a newer word of its own — so the Overview "Still open"
+    list and My Turn (db/still-open-threads.ts, unchanged) follow it. No migration.
   - ⚠ An auto-post test passing its own `deps` gets NO still-open writes unless it passes
     `stillOpenDeps` (`maybeAutoPostReview`'s 4th argument) — real GitHub is never reached from a test.
 - **THE PROSE GUARD** (`open-point-prose.ts`). The prompt (`prompts.ts` FINDINGS_AND_FINISHING, shared
@@ -3634,11 +3761,12 @@ author. And the prose may not name an open point that is not recorded.
   review." → "The change is sound and close to ready to merge."), drops a sentence that is only the claim,
   and drops a bullet that claims one. A recorded open point leaves the text as written. The stored
   summary IS the guarded one, so the tab, the post and a teammate's import agree.
-- **THE "NOT APPROVED" LINE** (`auto-verdict.ts` `minorTail`, `findingsNotApproved(…, stillOpen)`):
+- **THE "NOT APPROVED" LINE** (`auto-verdict.ts` `minorTail`, `findingsNotApproved(…, earlierOpen)`):
   with no blocker or warning open, the tail names held-open points — "1 earlier point is still open." —
-  instead of "No findings are open." (`stillOpenCountOf`, one per thread; auto-post and
-  `notApprovedForView` both pass it). ⚠ The VERDICT rule is unchanged: a still-open judgement does not
-  by itself withhold an approval (the model's verdict and the findings decide, as before).
+  instead of "No findings are open." (`EarlierOpen.total`, one per thread; auto-post and
+  `notApprovedForView` both pass it). ⚠ Since decision D1 (2026-11-05) a still-open point of KNOWN
+  severity also holds the VERDICT (§ Auto-posting → AUTO VERDICT): "Not approved: 1 earlier warning is
+  still open."; an earlier blocker requests changes.
 - **SURFACED FOR THE AUTHOR** — ONE read, the thread cards' batch (`POST
   /api/claude-review/thread-judgements`, `getThreadJudgements`): each judgement may carry
   `stillOpen: ClaudeThreadStillOpen {by, reason, at, headSha, severity, path, line, threadResolved}` —

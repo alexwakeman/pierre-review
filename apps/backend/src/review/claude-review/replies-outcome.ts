@@ -57,6 +57,7 @@ import {
 } from './auto-post.js';
 import { readVerdictRulesForPr, readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { DEFAULT_VERDICT_RULES, reasonMayPost, repliesDissent, withReason } from './auto-verdict.js';
+import { earlierOpenForRuns } from './earlier-open.js';
 import {
   getClaudeReviewById,
   getReviewPostContext,
@@ -67,6 +68,7 @@ import {
 import { sourceOfRun } from './pair-view.js';
 import {
   disputedBlockerTitle,
+  isSettledFinding,
   openFindingsAfterReplies,
   repliesNotApproved,
   repliesReviewBody,
@@ -143,11 +145,22 @@ export async function computeRepliesOutcome(
   // THE WORKSPACE'S RULES (migration 0145); a failed read is the defaults, auto verdict off.
   const rules = await readVerdictRulesForPr(ctx, accountId, prId).catch(() => ({ ...DEFAULT_VERDICT_RULES, autoVerdict: false }));
   const dissent = halves.length >= 2 ? repliesDissent(await pairHalvesRaised(ctx, prId, halves), rules.pairStrictness) : null;
-  const input = { open, unjudgedEarlierBlockers: unjudged.length, items, leftovers: rules.approveLeftovers, dissent };
+  // Earlier points the full review held open (decision D1) — less any a reply has settled since.
+  const earlierOpen = await earlierOpenForRuns(ctx, prId, halves, (id) =>
+    isSettledFinding({ id, priorFindingId: priorById.get(id) ?? null }, settledIds, (x) => priorById.get(x)),
+  );
+  const input = {
+    open,
+    unjudgedEarlierBlockers: unjudged.length,
+    items,
+    leftovers: rules.approveLeftovers,
+    dissent,
+    earlier: earlierOpen,
+  };
   const why = repliesNotApproved(input);
   return {
     wanted: repliesVerdict(input),
-    noBlocker: !disputedBlocker && unjudged.length === 0 && !open.some((f) => f.severity === 'blocker'),
+    noBlocker: !disputedBlocker && unjudged.length === 0 && earlierOpen.blockers === 0 && !open.some((f) => f.severity === 'blocker'),
     blockerTitle: disputedBlockerTitle(items),
     full,
     restsOnAuto: halves.every((h) => h.trigger === 'auto'),

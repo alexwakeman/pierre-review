@@ -1,6 +1,6 @@
 import type { AddressedConfidence, DerivedState } from '@pierre-review/shared';
 import { reviewBotKind } from './bot-detection.js';
-import { parseStillOpenMarker } from '@pierre-review/shared';
+import { isLimnThreadReply, parseStillOpenMarker } from '@pierre-review/shared';
 import { matchBotResolutionMarker } from './bot-resolution-markers.js';
 
 export type { DerivedState };
@@ -134,10 +134,15 @@ export function deriveThreadState(
     return { state: 'likely_addressed', addressedConfidence, addressedReason };
   }
 
-  // A Limn "Still open:" reply (its still-open marker) is the review's word, posted under a
-  // person's login — never that person's answer (docs/CLAUDE-REVIEW.md § Still-open points).
+  // A Limn reply (any Limn marker: "Still open:", a pushback, an acknowledgement / resolve reply) is
+  // the review's word, posted under a person's login — never that person's answer
+  // (docs/CLAUDE-REVIEW.md § Still-open points; docs/TEAM-REVIEW.md § 8).
   const hasReply = thread.comments.some(
-    (c) => c.author?.login && c.author.login !== firstAuthor && parseStillOpenMarker(c.body) == null,
+    (c, i) =>
+      c.author?.login &&
+      c.author.login !== firstAuthor &&
+      parseStillOpenMarker(c.body) == null &&
+      !(i > 0 && isLimnThreadReply(c.body)),
   );
   if (hasReply) {
     return { state: 'replied_unresolved', addressedConfidence: 'low', addressedReason: 'replied' };

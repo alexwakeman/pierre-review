@@ -43,6 +43,7 @@ import { getClaudeReviewById, savePairConsolidation } from './persist.js';
 import { codeConsolidation, pairCodeVerdict, shortFailReason, sourceOfRun } from './pair-view.js';
 import { DEFAULT_VERDICT_RULES, type VerdictRules } from './auto-verdict.js';
 import { readVerdictRulesForPr } from './auto-settings.js';
+import { earlierOpenForRuns, type EarlierOpen } from './earlier-open.js';
 import { isPairRepeat } from './pair.js';
 
 // ---- the pass's limits ----
@@ -286,9 +287,10 @@ export function consolidatedVerdict(
   b: ClaudeReview,
   mergedFrom: Readonly<Record<string, number>>,
   rules: VerdictRules = DEFAULT_VERDICT_RULES,
+  earlier: EarlierOpen | null = null,
 ): ClaudeReview['verdict'] {
   const kept: ClaudeFinding[] = [...a.findings, ...b.findings].filter((f) => mergedFrom[String(f.id)] == null);
-  return pairCodeVerdict(a.verdict, b.verdict, kept, rules);
+  return pairCodeVerdict(a.verdict, b.verdict, kept, rules, earlier);
 }
 
 // ---- the I/O half ----
@@ -407,15 +409,17 @@ export async function consolidatePair(
       record = codeConsolidation(halves, failedHalf, at, rules);
     } else {
       const [x, y] = ok as [ClaudeReview, ClaudeReview];
+      // Earlier points both halves hold open hold the code verdict too (decision D1).
+      const earlier = await earlierOpenForRuns(ctx, a.prId, [x, y]);
       // The code's repeats always count; the pass may find more (the same point in other words).
       const repeats = pairRepeatGroups(x, y);
       const pass = await runMergePass(ctx, a.accountId, a.prId, x, y, deps);
       if (pass == null) {
-        const base = codeConsolidation(halves, null, at, rules);
+        const base = codeConsolidation(halves, null, at, rules, earlier);
         if (repeats.length === 0) record = base;
         else {
           const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), repeats);
-          record = { ...base, sourceOf, mergedFrom, verdict: consolidatedVerdict(x, y, mergedFrom, rules) };
+          record = { ...base, sourceOf, mergedFrom, verdict: consolidatedVerdict(x, y, mergedFrom, rules, earlier) };
         }
       } else {
         const groups = joinDuplicateGroups([...repeats, ...pass.groups]);
@@ -430,7 +434,7 @@ export async function consolidatePair(
                 runHasOpenPoints({ findings: h.findings, followUpItems: h.followUp?.items, threadAssessments: h.threadAssessments }),
               ),
             ) ?? '',
-          verdict: consolidatedVerdict(x, y, mergedFrom, rules),
+          verdict: consolidatedVerdict(x, y, mergedFrom, rules, earlier),
           sourceOf,
           mergedFrom,
           failedHalf: null,

@@ -1,6 +1,6 @@
 // TEAMMATES' POSTED REVIEWS on the AI Review tab (docs/CLAUDE-REVIEW.md § Teammates' reviews): the
 // words, pure, so they can be tested. The pieces are components/TeammateReviews.tsx.
-import { aiRunLabel, PAIR_RUN_LABEL, type ClaudeFollowUpItemRecord, type ClaudeReviewFollowUpRecord, type ClaudeTeammatePoster, type ClaudeTeammateReview, type ClaudeTeamReviewCount, type ClaudeTeamReviewView } from '@pierre-review/shared';
+import { aiRunLabel, isLimnBelowTeamMinimum, PAIR_RUN_LABEL, type ClaudeFollowUpItemRecord, type ClaudeReviewFollowUpRecord, type ClaudeTeammatePoster, type ClaudeTeammateReview, type ClaudeTeamReviewCount, type ClaudeTeamReviewView } from '@pierre-review/shared';
 
 /** A teammate's name as the tab shows it: the first name when GitHub has one, else "@robin-dev". */
 export function teammateName(p: Pick<ClaudeTeammatePoster, 'login' | 'displayName'>): string {
@@ -99,4 +99,28 @@ export function reviewCountLine(count: ClaudeTeamReviewCount | null | undefined)
   const head = `${count.total} Limn ${count.total === 1 ? 'review' : 'reviews'} so far`;
   if (count.byTeammate.length === 0) return head;
   return [head, count.byTeammate.map((t) => `${t.count} by ${teammateName(t.poster)}`).join(', ')].join(' · ');
+}
+
+/**
+ * TEAMMATES ON AN OLD LIMN (docs/TEAM-REVIEW.md § 12): one line per teammate whose NEWEST review on
+ * this PR came from a Limn older than shared `MIN_TEAM_LIMN_VERSION` — "Robin is on Limn 0.1.188 —
+ * update for still-open replies and claim fixes." A post with no readable version (a legacy post)
+ * reads "an older Limn". [] when every teammate is current.
+ */
+export function teammateVersionLines(
+  reviews: readonly Pick<ClaudeTeammateReview, 'poster' | 'postedAt' | 'limnVersion'>[] | null | undefined,
+): string[] {
+  const newest = new Map<number, Pick<ClaudeTeammateReview, 'poster' | 'postedAt' | 'limnVersion'>>();
+  for (const r of reviews ?? []) {
+    const cur = newest.get(r.poster.userId);
+    if (cur == null || r.postedAt > cur.postedAt) newest.set(r.poster.userId, r);
+  }
+  const lines: string[] = [];
+  for (const r of [...newest.values()].sort((a, b) => b.postedAt.localeCompare(a.postedAt))) {
+    if (!isLimnBelowTeamMinimum(r.limnVersion)) continue;
+    const v = r.limnVersion?.trim();
+    const on = v != null && v !== '' && /^v?\d+\.\d+\.\d+/.test(v) ? `Limn ${v.replace(/^v/, '')}` : 'an older Limn';
+    lines.push(`${teammateName(r.poster)} is on ${on} — update for still-open replies and claim fixes.`);
+  }
+  return lines;
 }

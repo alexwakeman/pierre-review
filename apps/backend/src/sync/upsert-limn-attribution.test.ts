@@ -4,7 +4,9 @@
 // What this pins:
 //   1. Sync stores a Limn finding (inline root, PR-level, reminder) under the poster's `limn:` bot,
 //      with the poster in `limn_posted_by_user_id`; the thread root and the event actor follow.
-//      A reply on the thread stays the person's.
+//      A reply on the thread stays the person's — unless it carries a Limn marker (a pushback, an
+//      acknowledgement / resolve reply, a "Still open:" reply): that is Limn's words, under the same
+//      bot (gap 1, docs/TEAM-REVIEW.md § 8).
 //   2. A re-sync with the marker edited away gives the comment back to its person.
 //   3. Two posters are two bots, each with a 'review' row in the repo's workspace.
 //   4. "Is this my own post" still reads the TRUE poster (isLimnPostedComment via the loaders), so
@@ -122,6 +124,11 @@ const FINDING = `**Warning**\n\nThis can throw on an empty list.\n\n${MARK}`;
 const PR_LEVEL = `**Blocker** · \`src/y.ts:4\`\n\nThe lock is never released.\n\n${MARK}`;
 const REMINDER = `**Reminder:** first raised on 2 Oct 2026.\n\nStill open.\n\n${MARK}`;
 const REPLY = `Fixed in the next commit, thanks.\n\n${MARK}`;
+const PUSHBACK = `Thanks for the reply. I still think this needs changing in this pull request.\n\n_Posted automatically by Limn’s Claude review._\n\n<!-- pierre:claude-review-pushback v=1 -->`;
+const RESOLVE_REPLY = `Addressed in abc1234.\n\n_Resolved by Limn’s Claude review._\n\n${MARK}`;
+const STILL_OPEN = `**Still open:** The null case is still not handled.\n\n${MARK}\n<!-- pierre:claude-review-still-open v=1 h=abc1234 -->`;
+// A person quoting a Limn comment: the marker sits only on a quoted line, so it stays theirs.
+const QUOTED = `> Addressed in abc1234.\n> ${MARK}\n\nNo, it isn't.`;
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -152,7 +159,7 @@ afterAll(() => {
 });
 
 describe('persistPr — Limn findings are bots', () => {
-  it('stores findings under the poster\'s limn: bot, keeps replies with the person', async () => {
+  it('stores findings and Limn-marked replies under the poster\'s limn: bot, keeps typed replies with the person', async () => {
     await persist(
       gqlPr(1, {
         reviewThreads: {
@@ -163,6 +170,13 @@ describe('persistPr — Limn findings are bots', () => {
               comment('C_103', ALICE, REPLY, '2026-10-02T12:00:00Z'),
               // A typed reply that happens to open with a lead is still a reply, never a finding.
               comment('C_104', ALICE, `**Nit**\n\nAgreed, renamed.\n\n${MARK}`, '2026-10-02T13:00:00Z'),
+              comment('C_105', ALICE, PUSHBACK, '2026-10-02T14:00:00Z'),
+              comment('C_106', ALICE, RESOLVE_REPLY, '2026-10-02T15:00:00Z'),
+              comment('C_107', CAROL, QUOTED, '2026-10-02T16:00:00Z'),
+            ]),
+            thread('T_3', [
+              comment('C_301', CAROL, 'Please handle null.', '2026-10-02T10:40:00Z'),
+              comment('C_302', BOB, STILL_OPEN, '2026-10-02T10:50:00Z'),
             ]),
             thread('T_2', [comment('C_201', BOB, `**Nit** · Codex\n\nName this better.\n\n${MARK}`, '2026-10-02T10:30:00Z')]),
           ],
@@ -187,11 +201,21 @@ describe('persistPr — Limn findings are bots', () => {
     const root = await rc('C_101');
     expect(root.authorId).toBe(aliceBot);
     expect(root.limnPostedByUserId).toBe(alice);
-    const reply = await rc('C_103');
-    expect(reply.authorId).toBe(alice);
-    expect(reply.limnPostedByUserId).toBeNull();
-    expect((await rc('C_104')).authorId).toBe(alice);
-    expect((await rc('C_104')).limnPostedByUserId).toBeNull();
+    // Limn's replies (gap 1): the finding-marked reply, a lead on a reply (never a finding, but
+    // Limn's words), the pushback, the resolve reply — all under alice's bot, poster kept.
+    for (const id of ['C_103', 'C_104', 'C_105', 'C_106']) {
+      expect((await rc(id)).authorId).toBe(aliceBot);
+      expect((await rc(id)).limnPostedByUserId).toBe(alice);
+    }
+    // A teammate's "Still open:" on carol's thread is bob's Limn; carol's quote stays carol's.
+    expect((await rc('C_302')).authorId).toBe(bobBot);
+    expect((await rc('C_302')).limnPostedByUserId).toBe(await userId('bob-dev'));
+    expect((await rc('C_107')).authorId).toBe(await userId('carol-dev'));
+    expect((await rc('C_107')).limnPostedByUserId).toBeNull();
+    // A reply never moves a thread's root author: T_3 is still carol's.
+    expect((await threadRow('T_3')).originalCommenterId).toBe(await userId('carol-dev'));
+    // …and the thread state: Limn's "Still open:" is not a reply.
+    expect((await threadRow('T_3')).derivedState).toBe('untouched');
     expect((await rc('C_201')).authorId).toBe(bobBot);
 
     expect((await pc('IC_301')).authorId).toBe(aliceBot);
@@ -202,7 +226,8 @@ describe('persistPr — Limn findings are bots', () => {
     expect((await threadRow('T_1')).originalCommenterId).toBe(aliceBot);
     expect(await eventActor('review_comment:C_101')).toBe(aliceBot);
     expect(await eventActor('pr_comment:IC_301')).toBe(aliceBot);
-    expect(await eventActor('review_comment:C_103')).toBe(alice);
+    expect(await eventActor('review_comment:C_103')).toBe(aliceBot);
+    expect(await eventActor('review_comment:C_107')).toBe(await userId('carol-dev'));
 
     const { eq } = await import('drizzle-orm');
     const bot = (await db.select().from(schema.users).where(eq(schema.users.id, aliceBot)).execute())[0];
@@ -235,18 +260,22 @@ describe('persistPr — Limn findings are bots', () => {
     const { eq } = await import('drizzle-orm');
     const pr = (await db.select().from(schema.pullRequests).where(eq(schema.pullRequests.githubNodeId, 'PR_limn_1')).execute())[0];
     const times = await newestReviewCommentTimes(1, [pr.id], new Date('2026-10-01T00:00:00Z'));
-    // Alice's own finding (10:00) and her own reply (12:00) are not new activity; carol's reply is.
-    expect(times.get(pr.id)!.newest.toISOString()).toBe('2026-10-02T11:00:00.000Z');
+    // Alice's own finding and her Limn's replies are not new activity, nor bob's Limn "Still open:"
+    // (10:50, a Limn reply never moves the trigger); carol's replies are — her quote (16:00) newest.
+    expect(times.get(pr.id)!.newest.toISOString()).toBe('2026-10-02T16:00:00.000Z');
     // `countsAuthor` sees the ATTRIBUTED id: bob's finding counts as his Limn bot's.
     const bobBot = await userId('limn:bob-dev');
     const botsOnly = await newestReviewCommentTimes(1, [pr.id], new Date('2026-10-01T00:00:00Z'), (id) => id === bobBot);
     expect(botsOnly.get(pr.id)!.newest.toISOString()).toBe('2026-10-02T10:30:00.000Z');
-    const loaded = await loadReviewThreadsForReview(1, pr.id);
-    // T_1 is rooted on alice's own finding (the follow-up's); T_2 is bob's, sent to the review.
+    const loaded = await loadReviewThreadsForReview(1, pr.id, (id) => id === bobBot);
+    // T_1 is rooted on alice's own finding (the follow-up's); T_2 is bob's and T_3 carol's, sent to
+    // the review. Bob's "Still open:" in T_3 is context, never the trigger: only his finding counts.
     expect(loaded.ownThreadCount).toBe(1);
-    expect(loaded.threads.map((x) => x.path)).toEqual(['src/x.ts']);
-    expect(loaded.threads[0]!.comments[0]!.authorLogin).toBe('bob-dev');
-    expect(loaded.threads[0]!.comments[0]!.authorIsBot).toBe(true);
+    expect(loaded.newestCommentAt?.toISOString()).toBe('2026-10-02T10:30:00.000Z');
+    const t2 = loaded.threads.find((x) => x.comments[0]!.authorLogin === 'bob-dev')!;
+    expect(t2.comments[0]!.authorIsBot).toBe(true);
+    const t3 = loaded.threads.find((x) => x.comments[0]!.authorLogin === 'carol-dev')!;
+    expect(t3.comments.map((c) => c.authorIsBot)).toEqual([false, true]);
   });
 
   it('the synthetic users are in the global automation set', async () => {
@@ -298,11 +327,16 @@ describe('reconcileLimnFindingAuthors', () => {
     await db.update(schema.reviewComments).set({ authorId: bob, limnPostedByUserId: null }).where(eq(schema.reviewComments.id, row.id)).execute();
     await db.update(schema.reviewThreads).set({ originalCommenterId: bob }).where(eq(schema.reviewThreads.githubNodeId, 'T_2')).execute();
     await db.update(schema.events).set({ actorId: bob }).where(eq(schema.events.dedupeKey, 'review_comment:C_201')).execute();
-    // A reply wrongly stored under a Limn bot goes back to its person (only a root is a finding).
+    // A typed reply wrongly stored under a Limn bot goes back to its person (no Limn marker).
     const alice = await userId('alice-dev');
     const aliceBot = await userId('limn:alice-dev');
-    const replyRow = await rc('C_104');
-    await db.update(schema.reviewComments).set({ authorId: aliceBot, limnPostedByUserId: alice }).where(eq(schema.reviewComments.id, replyRow.id)).execute();
+    const carolId = await userId('carol-dev');
+    const plainRow = await rc('C_102');
+    await db.update(schema.reviewComments).set({ authorId: aliceBot, limnPostedByUserId: carolId }).where(eq(schema.reviewComments.id, plainRow.id)).execute();
+    // A Limn pushback stored as the person (before gap 1) joins the bot.
+    const pushRow = await rc('C_105');
+    await db.update(schema.reviewComments).set({ authorId: alice, limnPostedByUserId: null }).where(eq(schema.reviewComments.id, pushRow.id)).execute();
+    await db.update(schema.events).set({ actorId: alice }).where(eq(schema.events.dedupeKey, 'review_comment:C_105')).execute();
     // And a human wrongly classed as Limn by an older classifier.
     const carol = await userId('carol-dev');
     await db
@@ -311,9 +345,12 @@ describe('reconcileLimnFindingAuthors', () => {
       .execute();
 
     const first = await limnBots.reconcileLimnFindingAuthors(1);
-    expect(first.comments).toBe(2);
-    expect((await rc('C_104')).authorId).toBe(alice);
-    expect((await rc('C_104')).limnPostedByUserId).toBeNull();
+    expect(first.comments).toBe(3);
+    expect((await rc('C_102')).authorId).toBe(carolId);
+    expect((await rc('C_102')).limnPostedByUserId).toBeNull();
+    expect((await rc('C_105')).authorId).toBe(aliceBot);
+    expect((await rc('C_105')).limnPostedByUserId).toBe(alice);
+    expect(await eventActor('review_comment:C_105')).toBe(aliceBot);
     expect(first.threads).toBe(1);
     expect(first.repairedReviewerRows).toBe(1);
     expect((await rc('C_201')).authorId).toBe(bobBot);

@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isLimnBotLogin,
+  isLimnThreadReply,
   LIMN_ML_SEVERITY,
   limnBotLabel,
   limnBotLogin,
@@ -54,6 +55,26 @@ describe('limnFindingPost', () => {
 
   it('reads CRLF bodies and leading whitespace', () => {
     expect(limnFindingPost(`\r\n**Warning**\r\n\r\nThis can throw.\r\n\r\n${MARK}`)).toEqual({ severity: 'warning', reminder: false });
+  });
+});
+
+describe('isLimnThreadReply (gap 1: Limn\'s replies are Limn\'s, never the person\'s answer)', () => {
+  it('knows every reply Limn writes', async () => {
+    const { autoResolveReplyBody } = await import('./claude-review/auto-resolve.js');
+    const { manualReplyBody } = await import('./claude-review/manual-reply.js');
+    const { pushbackReplyBody: pushbackBody } = await import('./claude-review/auto-pushback.js');
+    expect(isLimnThreadReply(autoResolveReplyBody('addressed', 'abcdef1234'))).toBe(true);
+    expect(isLimnThreadReply(autoResolveReplyBody('reply_accepted', 'abcdef1234', 'Fair enough.', 'Claude', 'own_pr'))).toBe(true);
+    expect(isLimnThreadReply(manualReplyBody('reply_accepted', 'Fair.'))).toBe(true);
+    expect(isLimnThreadReply(manualReplyBody('reply_disputed', 'Still needed.'))).toBe(true);
+    expect(isLimnThreadReply(pushbackBody('Still needed.'))).toBe(true);
+    expect(isLimnThreadReply(`**Still open:** No.\n\n${MARK}\n<!-- pierre:claude-review-still-open v=1 h=abc1234 -->`)).toBe(true);
+  });
+
+  it('a person\'s reply — plain, or quoting Limn — is not', () => {
+    expect(isLimnThreadReply('Fixed, thanks.')).toBe(false);
+    expect(isLimnThreadReply(null)).toBe(false);
+    expect(isLimnThreadReply(`> Addressed in abc1234.\n> ${MARK}\n\nIt is not.`)).toBe(false);
   });
 });
 

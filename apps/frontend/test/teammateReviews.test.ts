@@ -12,6 +12,7 @@ import {
   teammateReviewMeta,
   teammateReviewTitle,
   teammateRunLabel,
+  teammateVersionLines,
 } from '../src/lib/teammateReviews.js';
 
 const base = {
@@ -93,5 +94,31 @@ describe('the review count line', () => {
     expect(reviewCountLine({ total: 1, byTeammate: [] })).toBe('1 Limn review so far');
     expect(reviewCountLine({ total: 0, byTeammate: [] })).toBeNull();
     expect(reviewCountLine(undefined)).toBeNull();
+  });
+});
+
+describe('teammateVersionLines (docs/TEAM-REVIEW.md § 12)', () => {
+  const robin = { userId: 2, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
+  const sam = { userId: 3, login: 'sam-k', displayName: null, avatarUrl: null };
+  it('warns once per teammate, from their newest review here', () => {
+    expect(
+      teammateVersionLines([
+        { poster: robin, postedAt: '2026-11-01T10:00:00Z', limnVersion: '1.0.3' },
+        { poster: robin, postedAt: '2026-11-02T10:00:00Z', limnVersion: '0.1.188' },
+        { poster: sam, postedAt: '2026-11-03T10:00:00Z', limnVersion: null },
+      ]),
+    ).toEqual([
+      '@sam-k is on an older Limn — update for still-open replies and claim fixes.',
+      'Robin is on Limn 0.1.188 — update for still-open replies and claim fixes.',
+    ]);
+  });
+  it('says nothing when the newest review is current', () => {
+    expect(
+      teammateVersionLines([
+        { poster: robin, postedAt: '2026-11-01T10:00:00Z', limnVersion: '0.1.180' },
+        { poster: robin, postedAt: '2026-11-02T10:00:00Z', limnVersion: '1.0.10' },
+      ]),
+    ).toEqual([]);
+    expect(teammateVersionLines(null)).toEqual([]);
   });
 });

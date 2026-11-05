@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from 'react';
-import type { ClaudeFinding, ClaudeReviewStandings, ClaudeTeamPoint, ClaudeTeammatePoster } from '@pierre-review/shared';
+import type { ClaudeFinding, ClaudeReviewStandings, ClaudeTeamPoint, ClaudeTeammatePoster, ClaudeTeammateReview } from '@pierre-review/shared';
 import { useMe } from '../hooks/useTriage.js';
 import { VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
 import { dateTime } from '../lib/ui.js';
@@ -21,6 +21,7 @@ import { FOCUS_RING, cx } from './ui/index.js';
 import { ChevronIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
+import { teammateVersionLines } from '../lib/teammateReviews.js';
 import { TeammateAvatar } from './TeammateReviews.js';
 import { VerdictIcon } from './VerdictIcon.js';
 
@@ -87,6 +88,24 @@ export function StandingsSection({ standings }: { standings: ClaudeReviewStandin
         ))}
       </ul>
     </ReviewSection>
+  );
+}
+
+/**
+ * TEAMMATES ON AN OLD LIMN (docs/TEAM-REVIEW.md § 12): "Robin is on Limn 0.1.188 — update for
+ * still-open replies and claim fixes." Read from the `lv=` on each teammate's newest review here.
+ */
+export function TeammateVersionNotes({ reviews }: { reviews: readonly ClaudeTeammateReview[] | null | undefined }): JSX.Element | null {
+  const lines = teammateVersionLines(reviews);
+  if (lines.length === 0) return null;
+  return (
+    <ul className="space-y-0.5" data-testid="teammate-version-notes">
+      {lines.map((l) => (
+        <li key={l} className="text-meta text-ui-warn">
+          {l}
+        </li>
+      ))}
+    </ul>
   );
 }
 

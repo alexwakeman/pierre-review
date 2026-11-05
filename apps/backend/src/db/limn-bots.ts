@@ -15,12 +15,15 @@
 // ⚠ "IS THIS MY OWN POST" READS THE TRUE POSTER — `trueAuthorId(table)`, never `author_id`.
 //
 // Which comment is a finding is ONE predicate, shared `limnFindingPost` (marker + a severity or
-// reminder lead). Sync applies it on every walk (sync/upsert.ts `persistPr`), so a body edited to
+// reminder lead); which thread REPLY is Limn's is another, shared `isLimnThreadReply` (any Limn
+// marker: a pushback, an acknowledgement / resolve reply, a "Still open:" reply, a "Post reply" —
+// stored under the same bot, so it is never read as the person's own answer). Sync applies both on every walk (sync/upsert.ts `persistPr`), so a body edited to
 // drop the marker goes back to its person; `reconcileLimnFindingAuthors` applies the same rule to
 // rows already stored (boot, and the demo seed).
 import { and, eq, inArray, isNotNull, like, or, sql, type SQL } from 'drizzle-orm';
 import {
   isLimnBotLogin,
+  isLimnThreadReply,
   limnBotLabel,
   limnBotLogin,
   limnFindingPost,
@@ -149,6 +152,38 @@ export async function limnBotUserIdForUser(userId: number, exec: Executor = db):
   return limnBotUserIdFor(row.login, exec);
 }
 
+/**
+ * The attribution sync would give a freshly-posted review-thread REPLY (the instant local row a
+ * "Post reply" writes before the next walk): a Limn-marked reply (`isLimnThreadReply`) goes under the
+ * poster's `limn:` bot with the poster kept beside it; anything else stays its author's. DB only.
+ */
+export async function limnReplyAttribution(
+  exec: Executor,
+  a: { accountId: number; prId: number; posterUserId: number | null; body: string | null },
+): Promise<{ authorId: number | null; limnPostedByUserId: number | null }> {
+  const plain = { authorId: a.posterUserId, limnPostedByUserId: null };
+  if (a.posterUserId == null || !isLimnThreadReply(a.body)) return plain;
+  const poster = (
+    await exec.select({ login: users.githubLogin }).from(users).where(eq(users.id, a.posterUserId)).limit(1).execute()
+  )[0];
+  if (!poster?.login || isLimnBotLogin(poster.login)) return plain;
+  const botId = await ensureLimnBotUser(exec, poster.login);
+  const ws = (
+    await exec
+      .select({ workspaceId: workspaceRepos.workspaceId })
+      .from(pullRequests)
+      .innerJoin(
+        workspaceRepos,
+        and(eq(workspaceRepos.repoId, pullRequests.repoId), eq(workspaceRepos.accountId, a.accountId)),
+      )
+      .where(and(eq(pullRequests.id, a.prId), eq(pullRequests.accountId, a.accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (ws) await ensureLimnReviewerRow(exec, a.accountId, ws.workspaceId, botId, poster.login);
+  return { authorId: botId, limnPostedByUserId: a.posterUserId };
+}
+
 export interface LimnReconcileResult {
   /** Comment rows whose author changed (either direction). */
   comments: number;
@@ -165,7 +200,8 @@ export interface LimnReconcileResult {
  * second run writes no comment, event, search or thread row. DB only, one transaction.
  */
 export async function reconcileLimnFindingAuthors(accountId: number): Promise<LimnReconcileResult> {
-  const markerLike = '%pierre:claude-review-finding%';
+  // Thread replies wear any Limn marker (the pushback's too); PR-level comments follow the finding rule.
+  const markerLike = '%pierre:claude-review%';
   const poster = sql<number | null>`coalesce(${reviewComments.limnPostedByUserId}, ${reviewComments.authorId})`;
   const rcRows = await db
     .select({
@@ -243,13 +279,15 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
       return id;
     };
     // The rule, per row: { authorId, limnPostedBy } as sync would write it now.
+    // `reply`: a review-thread comment that is not its thread's root (the reply rule, as sync's).
     const desired = async (r: {
       body: string | null;
       posterId: number | null;
       repoId: number;
-    }, threadRoot = false): Promise<{ authorId: number | null; limnPostedBy: number | null }> => {
+    }, threadRoot = false, reply = false): Promise<{ authorId: number | null; limnPostedBy: number | null }> => {
       const login = r.posterId != null ? posterLogin.get(r.posterId) : undefined;
-      if (r.posterId == null || login == null || isLimnBotLogin(login) || limnFindingPost(r.body, { threadRoot }) == null) {
+      const isLimn = reply ? isLimnThreadReply(r.body) : limnFindingPost(r.body, { threadRoot }) != null;
+      if (r.posterId == null || login == null || isLimnBotLogin(login) || !isLimn) {
         return { authorId: r.posterId, limnPostedBy: null };
       }
       const botId = await botFor(login);
@@ -261,7 +299,7 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
     let comments = 0;
     const touchedThreads = new Set<number>();
     for (const r of rcRows) {
-      const d = await desired(r.isRoot ? r : { ...r, body: null }, Boolean(r.isRoot));
+      const d = await desired(r, Boolean(r.isRoot), !r.isRoot);
       if (d.authorId === r.authorId && d.limnPostedBy === r.limnPostedBy) continue;
       comments++;
       touchedThreads.add(r.threadId);

@@ -238,6 +238,11 @@ export function SlackSection(): JSX.Element {
         </p>
       )}
 
+      {/* Gap 9 (docs/TEAM-REVIEW.md): Limn runs on each machine, so two teammates on one channel both post. */}
+      <p className="text-meta text-ui-mute" data-testid="slack-one-per-channel">
+        Only one person per channel should set this up — each Limn posts its own copy.
+      </p>
+
       <Field
         label="Incoming webhook URL"
         hint={

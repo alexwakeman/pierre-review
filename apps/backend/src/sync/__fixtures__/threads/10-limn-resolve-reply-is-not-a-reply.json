@@ -1,0 +1,20 @@
+{
+  "name": "a Limn reply with no still-open marker (an acknowledgement / pushback: the finding or pushback marker) is Limn's word, not a person's answer -> untouched",
+  "expected": "untouched",
+  "thread": {
+    "isResolved": false,
+    "path": "src/api/orders.ts",
+    "comments": [
+      { "author": { "login": "reviewer-anna" }, "createdAt": "2026-01-10T10:00:00Z", "body": "Should this return 404?" },
+      {
+        "author": { "login": "teammate-robin" },
+        "createdAt": "2026-01-11T10:00:00Z",
+        "body": "Thanks for the reply. I still think this needs changing in this pull request.\n\n_Posted automatically by Limn’s Claude review._\n\n<!-- pierre:claude-review-pushback v=1 -->"
+      }
+    ]
+  },
+  "commits": [
+    { "oid": "c1", "committedDate": "2026-01-09T09:00:00Z" }
+  ],
+  "commitFiles": { "c1": ["src/api/orders.ts"] }
+}

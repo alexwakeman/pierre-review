@@ -20,7 +20,7 @@ import { unlockReviewSound } from '../../lib/sound.js';
 import type { CardTicketPill } from '../../lib/ticketReview.js';
 import { dateTime, relativeTime } from '../../lib/ui.js';
 import { AiRunGate } from '../AiSetup.js';
-import { CheckIcon, CommitIcon, SparkleIcon, WarningIcon } from '../Icons.js';
+import { CheckIcon, CommitIcon, ReviewingNowIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { LatestReviewer, LeadVerdict } from './ClaudeReviewCell.js';
 import { Button, cx, FOCUS_RING, TEXT_LINK } from '../ui/index.js';
 import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
@@ -126,9 +126,14 @@ export function DrawerAiReview({
           Review failed
         </button>
       ) : teamClaimSkip ? (
-        <span className="text-ui-mute">
-          {teamClaimSkip.kind === 'reviewed' ? `Reviewed by @${teamClaimSkip.login}` : `Being reviewed by @${teamClaimSkip.login}`}
-        </span>
+        teamClaimSkip.kind === 'reviewed' ? (
+          <span className="text-ui-mute">Reviewed by @{teamClaimSkip.login}</span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-ui-ink">
+            <ReviewingNowIcon />
+            Being reviewed by @{teamClaimSkip.login}
+          </span>
+        )
       ) : (
         <span className="text-ui-mute">Not reviewed</span>
       );

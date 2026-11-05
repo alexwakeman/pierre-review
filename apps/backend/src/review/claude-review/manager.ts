@@ -96,6 +96,7 @@ import {
   claimBeforeAutoRun,
   finishTeamClaim,
   postedReviewUrl,
+  reviewedLineSummary,
   saveTeamClaimRecord,
   startTeamClaimRenew,
   stopTeamClaimRenew,
@@ -433,12 +434,38 @@ export async function startReview(
     ...(pair ? { pair } : {}),
   };
   reviewIdByPr.set(prId, reviewId);
-  if (inFlight() < REVIEW_CONCURRENCY) {
-    launch(item);
-    return { ok: true, reviewId, queued: false };
-  }
-  pending.push(item);
-  return { ok: true, reviewId, queued: true };
+  const queued = !(inFlight() < REVIEW_CONCURRENCY);
+  if (queued) pending.push(item);
+  else launch(item);
+  // TEAM CLAIMS, MANUAL (team-claim-manual.ts, gap 4): a manual run never claims and is never held,
+  // but a teammate's live claim or review of this commit with the same model is read now and stored,
+  // so the AI Review tab names it beside the run. Bounded: the run has already started or queued, and
+  // the answer waits at most MANUAL_SEEN_WAIT_MS (the SPA refetches the tab when this returns).
+  await Promise.race([
+    readManualSeen(ctx, item, pair?.secondProvider != null ? [provider, pair.secondProvider] : [provider]),
+    new Promise((r) => setTimeout(r, MANUAL_SEEN_WAIT_MS).unref?.()),
+  ]);
+  return { ok: true, reviewId, queued };
+}
+
+/** How long a manual start waits for the teammate-line read (team-claim-manual.ts) before answering. */
+const MANUAL_SEEN_WAIT_MS = 1_500;
+
+function manualClaimTarget(item: Pick<QueueItem, 'accountId' | 'prId' | 'headSha'>, prCtx: Pick<ReviewPrContext, 'owner' | 'name' | 'number'>) {
+  return {
+    accountId: item.accountId,
+    prId: item.prId,
+    owner: prCtx.owner,
+    name: prCtx.name,
+    number: prCtx.number,
+    headSha: item.headSha,
+  };
+}
+
+function readManualSeen(ctx: AgentContext, item: QueueItem, providers: AgentProviderId[]): Promise<unknown> {
+  return import('./team-claim-manual.js')
+    .then((m) => m.readTeammateLinesForManualRun(ctx, manualClaimTarget(item, item.prCtx), providers))
+    .catch(() => null);
 }
 
 /**
@@ -855,7 +882,8 @@ interface RunEnd {
 }
 
 /** What `runEnded` reads off the run: a live queue item, or a pair ended at boot (`finishInterruptedPairs`). */
-type RunEndedItem = Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'trigger' | 'headSha' | 'postOnFinish'>;
+type RunEndedItem = Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'trigger' | 'headSha' | 'postOnFinish'> &
+  Partial<Pick<QueueItem, 'prCtx'>>;
 
 /** After a run (or a whole pair): the Slack signal, diagrams and the auto hooks — ONCE per pair.
  *  Returns the auto-post it started (null when none), which the team claim's final line waits for.
@@ -913,6 +941,17 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
         ctx.log.warn(`review and post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
+    // TEAM CLAIMS, MANUAL (gap 4): the review this press posted holds its commit for each model in it.
+    const runs = end.pairFirstReviewId != null ? [end.pairFirstReviewId, reviewId] : [reviewId];
+    void autoPosted.then((out) => markManualPostLines(ctx, item, runs, out)).catch(() => {});
+  }
+  // TEAM CLAIMS, MANUAL (gap 4): a teammate's "is reviewing" line stored at this run's start is read
+  // again now, so it does not outlive their run. DB only when none is stored.
+  if (item.trigger !== 'auto' && item.prCtx != null) {
+    const t = manualClaimTarget(item, item.prCtx);
+    void import('./team-claim-manual.js')
+      .then((m) => m.refreshTeammateLinesAfterRun(ctx, t))
+      .catch(() => {});
   }
   // "RESOLVE MY LIMN THREADS WHEN ADDRESSED" (auto-resolve.ts path B): a manual "Review only" run on
   // the reader's OWN PR closes the reader's own Limn threads its follow-up judged fixed. The auto and
@@ -964,6 +1003,31 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
   return autoPosted;
 }
 
+/** The "reviewed" line(s) for a review a manual press posted (team-claim-manual.ts). Never throws. */
+async function markManualPostLines(
+  ctx: AgentContext,
+  item: RunEndedItem,
+  runIds: number[],
+  out: AutoPostOutcome | null,
+): Promise<void> {
+  if (out?.kind !== 'done' || out.record.githubReviewId == null) return;
+  const prCtx = item.prCtx ?? (await getReviewPrContext(ctx, item.prId, item.accountId));
+  if (!prCtx) return;
+  const runs: Array<{ provider: AgentProviderId; comments: number }> = [];
+  for (const id of runIds) {
+    const review = await getClaudeReviewById(ctx, id, item.accountId);
+    if (!review) continue;
+    const s = reviewedLineSummary(out, review);
+    runs.push({ provider: aiRunProvider(review.provider, review.model), comments: s.comments ?? 0 });
+  }
+  const m = await import('./team-claim-manual.js');
+  await m.markPostedReviewLines(ctx, manualClaimTarget(item, prCtx), {
+    runs,
+    verdict: out.record.verdict?.submitted ?? null,
+    reviewUrl: postedReviewUrl(prCtx.owner, prCtx.name, prCtx.number, out.record.githubReviewId),
+  });
+}
+
 /** TEAM CLAIMS: stop renewing an ended run's line and post its final one (never throws). */
 function finishItemClaim(item: QueueItem): void {
   const handle = item.teamClaim;
@@ -989,18 +1053,12 @@ async function finishAutoRunClaim(
     }
     const out = await autoPosted;
     const review = await getClaudeReviewById(ctx, item.reviewId, item.accountId);
-    let comments: number | null = null;
-    let reviewUrl: string | null = null;
-    const posted = out?.kind === 'done' ? new Set(out.record.postedFindingIds) : null;
-    const mine = posted && review ? review.findings.filter((f) => posted.has(f.id)).length : 0;
-    if (out?.kind === 'done' && mine > 0) {
-      comments = mine;
-      reviewUrl = postedReviewUrl(item.prCtx.owner, item.prCtx.name, item.prCtx.number, out.record.githubReviewId);
-    } else if (review && review.findings.filter((f) => f.severity !== 'praise').length === 0) {
-      // Nothing to say at all reads "no comments"; anything kept local reads "kept in Limn".
-      comments = 0;
-    }
-    await finishTeamClaim(ctx, handle, item.reviewId, { kind: 'succeeded', comments, reviewUrl });
+    const s = reviewedLineSummary(out, review);
+    const reviewUrl =
+      s.onGithub && out?.kind === 'done'
+        ? postedReviewUrl(item.prCtx.owner, item.prCtx.name, item.prCtx.number, out.record.githubReviewId)
+        : null;
+    await finishTeamClaim(ctx, handle, item.reviewId, { kind: 'succeeded', comments: s.comments, reviewUrl, verdict: s.verdict });
   } catch (err) {
     ctx.log.warn(`team claim pr ${item.prId}: ${err instanceof Error ? err.message : String(err)}`);
   }

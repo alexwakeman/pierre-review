@@ -8,6 +8,13 @@
 //      and never retried.
 //   4. THERE IS NO PUSH PATH (removed 2026-11-05): nothing withdraws on a moved head alone, and the
 //      setting is gone from the route.
+//   5. "KEEP IT IN LIMN" STILL WITHDRAWS (gap 7): with auto-posting off, a later AUTO run at a new
+//      head that does not approve dismisses Limn's own automatic approval — once, claimed first, the
+//      same message, nothing else posted. A manual "Review only" run never writes; a hand approval
+//      is never touched.
+//   6. EARLIER POINTS HOLD THE VERDICT (decision D1): an earlier warning still open (a teammate's Limn
+//      finding judged valid and not addressed) stops an APPROVE ("Not approved: 1 earlier warning is
+//      still open."); an earlier blocker requests changes; a person's point (no severity) does not.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/approval-withdraw
 import { rmSync } from 'node:fs';
@@ -79,9 +86,11 @@ async function run(
   findings: Array<{ severity: ClaudeFindingSeverity; title: string }>,
   verdict: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES',
   trigger: 'auto' | 'manual' = 'auto',
+  extra: { threadAssessments?: any[] } = {},
 ): Promise<number> {
   const id = await persist.insertQueuedReview(ctx, prId, headSha, 'claude-opus-5-5' as any, 1, [], trigger);
   await persist.saveReviewSuccess(ctx, id, {
+    ...extra,
     scope: 'diff_only',
     summary: 'A summary.',
     verdict,
@@ -358,5 +367,144 @@ describe('no push path (removed 2026-11-05)', () => {
     const upsert = readFileSync(new URL('../../sync/upsert.ts', import.meta.url), 'utf8');
     expect(upsert).not.toContain('approval-withdraw');
     expect('withdrawApprovalOnPush' in settings.autoReviewOf(null)).toBe(false);
+  });
+});
+
+describe('"keep it in Limn" still withdraws (gap 7)', () => {
+  it('an AUTO run at a new head that does not approve dismisses the approval; nothing else posts', async () => {
+    const { pr, a } = await approvedPr();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } });
+    const b = await run(pr, H2, [{ severity: 'warning', title: 'W1' }, { severity: 'warning', title: 'W2' }], 'COMMENT');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps())).toEqual({ kind: 'off' });
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(dismissReview.mock.calls[0]!.slice(4)).toEqual(['R1', 'Limn withdrew its approval: 2 warnings found at 91482c8.']);
+    expect(postReview).not.toHaveBeenCalled();
+    // Kept in Limn: the run itself has no auto-post record; the approving run records the withdrawal.
+    expect(await rec(b)).toBeNull();
+    expect((await rec(a)).approvalWithdrawal).toMatchObject({ status: 'withdrawn', why: 'run', byReviewId: b, headSha: H2 });
+    expect(settle).toHaveBeenCalled();
+    // Once: a later run finds the claim and does nothing.
+    const c = await run(pr, H2, [{ severity: 'warning', title: 'W3' }], 'COMMENT');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: c }, deps());
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal is recorded in GitHub’s words and never retried', async () => {
+    const { pr, a } = await approvedPr();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } });
+    dismissReview.mockImplementation(async () => ({ ok: false, message: 'Must have admin rights to Repository.' }));
+    const b = await run(pr, H2, [{ severity: 'blocker', title: 'B' }], 'REQUEST_CHANGES');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
+    expect((await rec(a)).approvalWithdrawal).toMatchObject({ status: 'failed', error: 'Must have admin rights to Repository.' });
+    const c = await run(pr, H2, [{ severity: 'blocker', title: 'B2' }], 'REQUEST_CHANGES');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: c }, deps());
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(postReview).not.toHaveBeenCalled();
+  });
+
+  it('nothing is withdrawn: a run that approves, a run at the same head, a MANUAL "Review only" run, a hand approval', async () => {
+    const { pr } = await approvedPr();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: await run(pr, H2, [], 'APPROVE') }, deps());
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: await run(pr, H2, [{ severity: 'warning', title: 'W' }], 'COMMENT', 'manual') }, deps());
+    liveHead = H1;
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: await run(pr, H1, [{ severity: 'warning', title: 'W' }], 'COMMENT') }, deps());
+    expect(dismissReview).not.toHaveBeenCalled();
+    // A hand approval (no auto_post record behind it) standing on GitHub.
+    const pr2 = await makePr();
+    liveHead = H2;
+    liveReviewList = [{ id: 'R7', login: 'me', state: 'APPROVED' }];
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: await run(pr2, H2, [{ severity: 'blocker', title: 'B' }], 'REQUEST_CHANGES') }, deps());
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(postReview).not.toHaveBeenCalled();
+  });
+
+  it('the PR moved past the reviewed head: nothing (a later run decides)', async () => {
+    const { pr } = await approvedPr();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } });
+    liveHead = '4444444444444444444444444444444444444444';
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: await run(pr, H2, [{ severity: 'warning', title: 'W' }], 'COMMENT') }, deps());
+    expect(dismissReview).not.toHaveBeenCalled();
+  });
+});
+
+describe('earlier points hold the verdict (decision D1)', () => {
+  let seq = 0;
+  async function thread(prId: number, rootBody: string): Promise<number> {
+    seq += 1;
+    const [t] = await db
+      .insert(schema.reviewThreads)
+      .values({ githubNodeId: `T_d1_${seq}`, prId, path: 'src/a.ts', line: 4, isResolved: false, derivedState: 'untouched', createdAt: new Date() })
+      .returning()
+      .execute();
+    await db
+      .insert(schema.reviewComments)
+      .values({ githubNodeId: `C_d1_${seq}`, threadId: t.id, prId, authorId: users.alice, body: rootBody, databaseId: `9${seq}`, createdAt: new Date() })
+      .execute();
+    return t.id;
+  }
+  const judged = (threadId: number) => ({
+    ref: 'R1',
+    threadId,
+    sent: true,
+    carried: false,
+    authorLogin: 'alice',
+    authorIsBot: false,
+    path: 'src/a.ts',
+    line: 4,
+    excerpt: 'x',
+    commentCount: 1,
+    lastCommentAt: null,
+    url: null,
+    validity: 'valid',
+    addressed: 'not_addressed',
+    explanation: 'Still null.',
+    reason: 'Still null.',
+    draftReply: null,
+    assessedAtHead: H1,
+  });
+  const limnRoot = (word: string) => `**${word}**\n\nThis can be null.\n\n<!-- pierre:claude-review-finding v=1 -->`;
+
+  it("a teammate's Limn WARNING still open: no APPROVE, and the line names it", async () => {
+    const pr = await makePr();
+    liveHead = H1;
+    liveReviewList = [];
+    const t = await thread(pr, limnRoot('Warning'));
+    const id = await run(pr, H1, [], 'APPROVE', 'auto', { threadAssessments: [judged(t)] });
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(out.kind).toBe('done');
+    expect(await rec(id)).toMatchObject({
+      verdict: { wanted: 'COMMENT', submitted: 'COMMENT', reasonText: 'Not approved: 1 earlier warning is still open.' },
+    });
+    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+  });
+
+  it('an earlier BLOCKER still open requests changes, through the same gates', async () => {
+    const pr = await makePr();
+    liveHead = H1;
+    liveReviewList = [];
+    const t = await thread(pr, limnRoot('Blocker'));
+    const id = await run(pr, H1, [], 'APPROVE', 'auto', { threadAssessments: [judged(t)] });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(await rec(id)).toMatchObject({ verdict: { wanted: 'REQUEST_CHANGES', submitted: 'REQUEST_CHANGES' } });
+    expect(postReview.mock.calls[0]![0].verdict).toBe('REQUEST_CHANGES');
+  });
+
+  it("a person's point (no known severity) does not hold the approval", async () => {
+    const pr = await makePr();
+    liveHead = H1;
+    liveReviewList = [];
+    const t = await thread(pr, 'Could this be null?');
+    const id = await run(pr, H1, [], 'APPROVE', 'auto', { threadAssessments: [judged(t)] });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
+    expect(await rec(id)).toMatchObject({ verdict: { submitted: 'APPROVE' } });
+  });
+
+  it('an approval withdrawn by an earlier warning says so in the message', async () => {
+    const { pr } = await approvedPr();
+    const t = await thread(pr, limnRoot('Warning'));
+    const b = await run(pr, H2, [], 'APPROVE', 'auto', { threadAssessments: [judged(t)] });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
+    expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: 1 warning found at 91482c8.');
   });
 });

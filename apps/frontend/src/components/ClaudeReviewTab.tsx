@@ -83,7 +83,7 @@ import {
   summaryPrefillOf,
   writeReviewPostMode,
 } from '../lib/reviewPostMode.js';
-import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection } from './TeamReviewLayout.js';
+import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection, TeammateVersionNotes } from './TeamReviewLayout.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -2390,6 +2390,12 @@ export function ClaudeReviewTab({
       {viewingLatest && standingsShown && (
         <RailPiece slot="status" inline>
           <StandingsSection standings={data?.teamView?.standings} />
+        </RailPiece>
+      )}
+      {/* A teammate whose newest review here came from an older Limn: one plain "update" line. */}
+      {viewingLatest && (data?.teammateReviews?.length ?? 0) > 0 && (
+        <RailPiece slot="status" inline>
+          <TeammateVersionNotes reviews={data?.teammateReviews} />
         </RailPiece>
       )}
 

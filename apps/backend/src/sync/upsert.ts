@@ -29,6 +29,7 @@ import type {
 import {
   hasLimnReviewMarker,
   isLimnStatusContext,
+  isLimnThreadReply,
   limnFindingPost,
   mergeStateWithoutLimn,
   rollupStateWithoutLimn,
@@ -37,6 +38,7 @@ import {
 import { ensureLimnBotUser, ensureLimnReviewerRow } from '../db/limn-bots.js';
 import { syncLimnFindingLabels } from '../db/limn-finding-labels.js';
 import { importTeammateReviews } from '../db/teammate-reviews-import.js';
+import { notifyTeammateReviewsImported } from './teammate-review-hooks.js';
 import { checkContextState } from '../github/check-context-state.js';
 
 const {
@@ -1236,8 +1238,11 @@ export async function persistPr(
         .execute()
     )[0]?.workspaceId;
     const limnBots = new Map<string, number>();
-    // `finding` false = this comment can never be a finding: Limn posts a finding or a reminder
-    // as a new thread ROOT, so a reply (even one opening with a bold "**Nit**") stays its author's.
+    // `finding` false = this comment is a thread REPLY, which can never be a finding: Limn posts a
+    // finding or a reminder as a new thread ROOT, so a reply (even one opening with a bold "**Nit**")
+    // is judged by the REPLY rule instead — a reply carrying any Limn marker (a pushback, an
+    // acknowledgement / resolve reply, a "Still open:" reply, a "Post reply") is Limn's words and
+    // joins the poster's bot too (shared `isLimnThreadReply`, gap 1); every other reply stays its author's.
     const attribute = async (
       c: {
         author?: GqlActor | null;
@@ -1248,7 +1253,8 @@ export async function persistPr(
     ): Promise<{ authorId: number | null; limnPostedByUserId: number | null }> => {
       const posterId = await resolver.resolve(tx, c.author);
       const login = c.author?.login;
-      if (!finding || posterId == null || !login || limnFindingPost(c.body, { threadRoot }) == null) {
+      const isLimn = finding ? limnFindingPost(c.body, { threadRoot }) != null : isLimnThreadReply(c.body);
+      if (posterId == null || !login || !isLimn) {
         return { authorId: posterId, limnPostedByUserId: null };
       }
       let botId = limnBots.get(login);
@@ -1521,6 +1527,9 @@ export async function persistPr(
   if (persistedPrId != null && pr.reviews.nodes.some((r) => hasLimnReviewMarker(r.body))) {
     try {
       await importTeammateReviews(accountId, persistedPrId);
+      // A KICK (never awaited): on the reader's own PR, resolve their Limn threads a teammate's
+      // review found addressed at the current head (claude-review/teammate-resolve.ts, gap 13).
+      notifyTeammateReviewsImported({ accountId, prId: persistedPrId });
     } catch {
       /* the next walk tries again */
     }

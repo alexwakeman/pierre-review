@@ -22,6 +22,7 @@ import type {
 } from '@pierre-review/shared';
 import {
   AI_PICKER_MODELS,
+  aiRunProvider,
   REVIEW_POST_MODES,
   findingSourceLabel,
   CLAUDE_REVIEW_STATES_MAX_IDS,
@@ -66,7 +67,7 @@ import {
 import { getThreadJudgements, limnFindingThreadIdsForPrs, shownThreadsWire, tabThreadView } from './thread-judgements.js';
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
-import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
+import { clearTeamClaim, postedReviewUrl, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
 import { teammateLinesAtHead } from './team-claim-seen.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
@@ -958,6 +959,29 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           { inlineComments: (outcome.inlineComments ?? []).filter((c) => mine(hid)(c.findingId)) },
         );
       }
+      // TEAM CLAIMS (team-claim-manual.ts, gap 4): the review the reader posted holds its commit for
+      // each model in it, so teammates' automatic runs step aside. Background; written once.
+      const lineRuns = (pair?.halves ?? [{ reviewId: review.id, provider: aiRunProvider(review.provider, review.model) }]).map(
+        (h) => ({
+          provider: h.provider,
+          comments:
+            outcome.inlineFindingIds.filter(mine(h.reviewId)).length +
+            outcome.prComments.filter((pc) => mine(h.reviewId)(pc.findingId)).length,
+        }),
+      );
+      void import('./team-claim-manual.js')
+        .then((m) =>
+          m.markPostedReviewLines(
+            ctx,
+            { accountId, prId: review.prId, owner: pctx.owner, name: pctx.name, number: pctx.prNumber, headSha: pctx.reviewHeadSha },
+            {
+              runs: lineRuns,
+              verdict: userVerdict,
+              reviewUrl: postedReviewUrl(pctx.owner, pctx.name, pctx.prNumber, outcome.postedReviewId),
+            },
+          ),
+        )
+        .catch(() => {});
       const result: PostReviewResult = {
         postedReviewId: outcome.postedReviewId,
         postedAt: new Date().toISOString(),

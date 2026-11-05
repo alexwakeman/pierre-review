@@ -208,7 +208,10 @@ export function approvalWithdrawLines(
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */
 export function autoResolveLabel(r: FindingAutoResolveRecord | null | undefined): string | null {
   if (r == null) return null;
-  if (r.status === 'resolved') return 'Resolved automatically';
+  if (r.status === 'resolved') {
+    // Resolved on a teammate's Limn's word (gap 13): their review found it fixed at this commit.
+    return r.why === 'teammate' && r.checkedBy ? `Resolved automatically (checked by ${r.checkedBy}’s Limn)` : 'Resolved automatically';
+  }
   if (r.status === 'resolving') return 'Resolving automatically';
   const why = r.error != null && r.error.trim() !== '' ? r.error.trim() : 'GitHub did not accept it.';
   return `Couldn’t resolve automatically: ${why}`;

@@ -36,6 +36,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   aiRunProviderName,
   autoPostFooter,
+  continuationThreadMap,
   type AiProviderName,
   type ClaudeFollowUpStatus,
   type ClaudeReplyAcceptKind,
@@ -46,7 +47,7 @@ import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
 import { getClaudeReviewById } from './persist.js';
 import { findFindingThread } from './finding-thread.js';
-import { isClearReplyRefusal, loadPrThreads, loadThreadOwners } from './finding-replies.js';
+import { followOwnContinuation, isClearReplyRefusal, loadPrThreads, loadThreadOwners } from './finding-replies.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -205,7 +206,9 @@ async function autoResolve(
   const taken = new Set<number>();
   let wroteAny = false;
   for (const f of candidates) {
-    const thread = findFindingThread(f, threads, comments, accountLogin, taken);
+    const found = findFindingThread(f, threads, comments, accountLogin, taken);
+    // A point continued in a new thread (still-open.ts) is resolved THERE (the reader's own only).
+    const thread = found ? followOwnContinuation(found, threads, comments, continuationThreadMap(comments), accountLogin) : null;
     if (!thread || thread.isResolved) continue;
     taken.add(thread.id);
     const want = target.get(f.id)!;

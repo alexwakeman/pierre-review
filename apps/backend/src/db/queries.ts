@@ -279,7 +279,7 @@ import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
 import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
-import { limnBotUserIdForUser, limnBotUserIds } from './limn-bots.js';
+import { limnBotUserIdForUser, limnBotUserIds, limnReplyAttribution } from './limn-bots.js';
 import { ownRunsOnly } from './teammate-reviews.js';
 import {
   automationVendorUserIds,
@@ -11466,13 +11466,22 @@ export interface StampGithubComment {
 // thread immediately). Upserts on (prId, githubNodeId) — the sync's conflict
 // target — so the next sync updates rather than duplicates it. Stores the excerpt
 // and the full body (comment bodies are always persisted). Returns the local row id.
+// A Limn-marked reply ("Post reply" of a drafted answer) is attributed as sync would: under the
+// poster's `limn:` bot (db/limn-bots.ts `limnReplyAttribution`), never as the person's own answer.
 export async function upsertLocalReply(
   prId: number,
   threadId: number,
-  authorId: number | null,
+  posterUserId: number | null,
   gh: StampGithubComment,
 ): Promise<number> {
   const createdAt = new Date(gh.createdAt);
+  const prAccount = (
+    await db.select({ accountId: pullRequests.accountId }).from(pullRequests).where(eq(pullRequests.id, prId)).limit(1).execute()
+  )[0];
+  const { authorId, limnPostedByUserId } =
+    prAccount != null
+      ? await limnReplyAttribution(db, { accountId: prAccount.accountId, prId, posterUserId, body: gh.body })
+      : { authorId: posterUserId, limnPostedByUserId: null };
   const row = (
     await db
       .insert(reviewComments)
@@ -11481,6 +11490,7 @@ export async function upsertLocalReply(
         threadId,
         prId,
         authorId,
+        limnPostedByUserId,
         // Comment bodies are always persisted now, so don't clobber a synced body
         // back to null under lean storage.
         body: gh.body,

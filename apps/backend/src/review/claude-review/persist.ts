@@ -446,7 +446,11 @@ export function teamClaimRecordOf(v: unknown): ClaudeTeamClaimRecord | null {
     state: r.state,
     reason: r.reason === 'no_access' || r.reason === 'error' ? r.reason : null,
     lastLine:
-      r.lastLine === 'reviewing' || r.lastLine === 'reviewed' || r.lastLine === 'unfinished' || r.lastLine === 'cleared'
+      r.lastLine === 'reviewing' ||
+      r.lastLine === 'reviewed' ||
+      r.lastLine === 'unfinished' ||
+      r.lastLine === 'cleared' ||
+      r.lastLine === 'superseded'
         ? r.lastLine
         : null,
     at: r.at,

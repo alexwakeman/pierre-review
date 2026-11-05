@@ -146,5 +146,7 @@ export function teamClaimRecordLine(rec: ClaudeTeamClaimRecord | null | undefine
   if (rec.lastLine === 'cleared') return 'Marked on GitHub, then cleared';
   // A run that did not finish: its line was released ("didn't finish · free to claim").
   if (rec.lastLine === 'unfinished') return 'Marked on GitHub, then released';
+  // It ended after a teammate's newer line (gap 5): their line stands, ours was not posted.
+  if (rec.lastLine === 'superseded') return 'Marked on GitHub; a teammate’s line is newer';
   return 'Marked on GitHub';
 }

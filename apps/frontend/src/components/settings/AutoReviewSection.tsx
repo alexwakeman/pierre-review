@@ -349,6 +349,7 @@ export function AutoReviewSection(): JSX.Element {
             review the commit. You can also Clear a line from the AI Review tab.
           </p>
           <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
+          <p>Don’t make limn/ lines required checks. A line that is still pending would block merges.</p>
           <p>On by default.</p>
         </InfoButton>
       </div>

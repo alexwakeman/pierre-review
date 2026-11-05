@@ -356,3 +356,70 @@ export function postedFindingDisplay(text: string, fallbackTitle: string): Poste
   }
   return { title: fallbackTitle, body: rest, suggestion };
 }
+
+// ---- THE TEAM'S MINIMUM LIMN VERSION (docs/TEAM-REVIEW.md § 12 Mixed versions) ----
+
+/**
+ * The oldest Limn that takes full part in shared reviews: still-open replies and reopens, and claims
+ * that never take an open point it did not record; no approval over an open earlier warning (D1)
+ * and no reopen on its own PR (D2). A teammate whose newest review on a PR carries an
+ * older `lv=` (or none) gets a plain "update" line on the AI Review tab. Raise it when a release
+ * changes how Limns on one team cooperate.
+ */
+export const MIN_TEAM_LIMN_VERSION = '1.0.4';
+
+/** `1.2.3`, `v1.2.3`, `1.2.3-beta.1` → [1, 2, 3, prerelease]. null when it is not a version. */
+function parseLimnVersion(v: string): { nums: [number, number, number]; pre: string | null } | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
+  if (m == null) return null;
+  return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null };
+}
+
+/**
+ * SEMVER ORDER of two Limn versions: < 0 when `a` is older, 0 when equal, > 0 when newer. A
+ * prerelease is older than its release (`1.0.3-beta` < `1.0.3`); two prereleases compare by
+ * dot-separated identifier, numbers numerically. null when either is not a version.
+ */
+export function compareLimnVersions(a: string, b: string): number | null {
+  const pa = parseLimnVersion(a);
+  const pb = parseLimnVersion(b);
+  if (pa == null || pb == null) return null;
+  for (let i = 0; i < 3; i += 1) {
+    const d = pa.nums[i]! - pb.nums[i]!;
+    if (d !== 0) return d;
+  }
+  if (pa.pre === pb.pre) return 0;
+  if (pa.pre == null) return 1;
+  if (pb.pre == null) return -1;
+  const ia = pa.pre.split('.');
+  const ib = pb.pre.split('.');
+  for (let i = 0; i < Math.max(ia.length, ib.length); i += 1) {
+    const x = ia[i];
+    const y = ib[i];
+    if (x == null) return -1;
+    if (y == null) return 1;
+    const nx = /^\d+$/.test(x) ? Number(x) : null;
+    const ny = /^\d+$/.test(y) ? Number(y) : null;
+    if (nx != null && ny != null) {
+      if (nx !== ny) return nx - ny;
+    } else if (nx != null) {
+      return -1;
+    } else if (ny != null) {
+      return 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Is a teammate's Limn (the `lv=` on their review) older than the team minimum? An unknown or
+ * unreadable version (a legacy post) counts as older: every Limn that writes `lv=` also writes it in
+ * a readable form.
+ */
+export function isLimnBelowTeamMinimum(version: string | null | undefined, min: string = MIN_TEAM_LIMN_VERSION): boolean {
+  if (version == null || version.trim() === '') return true;
+  const c = compareLimnVersions(version, min);
+  return c == null || c < 0;
+}

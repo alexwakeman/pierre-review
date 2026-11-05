@@ -7,8 +7,9 @@
 // WHICH POINTS (`stillOpenCandidates`, pure; the ONE rule is shared `isStillOpenFollowUp` /
 // `isStillOpenThread`):
 //   • a follow-up item `not_addressed` / `partly_addressed` on an earlier Limn finding with a thread
-//     (the reader's own or a teammate's). ⚠ `reply_disputed` is held open too (the marker says `o`)
-//     but writes nothing here: the ONE pushback reply (auto-pushback.ts) already answers that thread;
+//     (the reader's own or a teammate's). `reply_disputed` too, but ONLY on a RESOLVED thread (gap 2):
+//     on an unresolved one the ONE pushback reply (auto-pushback.ts) already answers it, and pushback
+//     never writes on a resolved thread — so a resolved, disputed point is said here, like any other;
 //   • a thread judgement whose comment holds up (valid / partly valid) and is not (or partly)
 //     addressed, on a PERSON'S thread or a teammate's Limn thread. Another review bot's thread
 //     (CodeRabbit, Copilot…) is left alone.
@@ -22,7 +23,22 @@
 //     whose marker says `r=1` (a teammate's Limn reopened it) — a second Limn never reopens again.
 //   • RESOLVED, reopened once already: a WARNING or BLOCKER starts ONE new inline thread about the
 //     same point (`c=` names the earlier thread's root comment; once per thread, ever, by any Limn);
-//     a nit, a question or a point with no known severity is left as it is.
+//     a nit, a question or a point with no known severity is left as it is. ⚠ A CONTINUATION thread
+//     (its root carries `c=`) is never continued again: one new thread per point, ever.
+//   • ⚠ THE READER'S OWN PR (decision D2): never a reopen, never a new thread. The reply only: once
+//     per head on an unresolved thread, ONCE EVER on a resolved one (any Limn's still-open reply there,
+//     or this account's reply claim, counts).
+//
+// ⚠ READ GITHUB LIVE BEFORE EVERY WRITE (gap 3): two Limns at the same head may both act before
+// either synced the other. Just before a thread's writes, ONE small GraphQL read of that thread (its
+// resolved state, its comments' markers, and the PR's thread roots for `c=`) — outside any
+// transaction — is folded into the facts (`mergeLiveFacts`) and the plan is made again. A FAILED read
+// writes nothing: it is recorded as this head's reply claim, `failed`, with why. Never guessed.
+//
+// CONTINUATIONS (gap 8): later runs judge the continuation, not the earlier thread — the follow-up
+// (finding-replies.ts) and the thread loader (db/review-threads-for-review.ts) follow shared
+// `continuationThreadMap`, so the run's judgement, this file's writes and the author's still-open
+// card all land on the continuation.
 //
 // ⚠ CLAIM BEFORE EVERY WRITE: a row in `claude_still_open_posts` (the unique claim key is the
 // compare-and-set) BEFORE the GitHub call, then settled `posted` / `failed` with GitHub's words.
@@ -67,6 +83,8 @@ export interface StillOpenCandidate {
   source: 'follow_up' | 'thread';
   // follow_up only: the earlier finding (its re-raise in this run, if any, gives the new location).
   priorFindingId?: number | null;
+  // follow_up only: Limn disputed the reply (`reply_disputed`). Written ONLY on a resolved thread.
+  disputed?: boolean;
 }
 
 type JudgingRun = Pick<ClaudeReview, 'followUp' | 'threadAssessments'>;
@@ -105,7 +123,7 @@ export function stillOpenCandidates(
     for (const it of r.followUp?.items ?? []) {
       const threadId = it?.threadId;
       if (typeof threadId !== 'number' || it.status === 'not_checked') continue;
-      if (!isStillOpenFollowUp(it.status) || it.status === 'reply_disputed') {
+      if (!isStillOpenFollowUp(it.status)) {
         mine.set(threadId, null);
         continue;
       }
@@ -115,6 +133,7 @@ export function stillOpenCandidates(
         severity: sev(it.severity),
         source: 'follow_up',
         priorFindingId: it.priorFindingId,
+        ...(it.status === 'reply_disputed' ? { disputed: true } : {}),
       });
     }
     for (const [k, v] of mine) out.set(k, v);
@@ -127,8 +146,13 @@ export interface StillOpenThreadFacts {
   resolved: boolean;
   reopenedBefore: boolean;
   repliedAtHead: boolean;
+  // Any Limn's still-open reply on the thread, at any head (or this account's reply claim).
+  repliedBefore?: boolean;
+  // A new thread continuing it exists — or the thread IS a continuation (never continued again).
   escalatedBefore: boolean;
   severity: StillOpenSeverity | null;
+  // The PR is the reader's own (decision D2).
+  ownPr?: boolean;
 }
 
 export interface StillOpenPlan {
@@ -140,6 +164,8 @@ export interface StillOpenPlan {
 /** THE PER-THREAD RULE (header). Pure. */
 export function planStillOpen(f: StillOpenThreadFacts): StillOpenPlan {
   if (!f.resolved) return { reply: !f.repliedAtHead, reopen: false, escalate: false };
+  // D2: the reader's own PR — the reply only, once ever on a resolved thread; never reopen or continue.
+  if (f.ownPr === true) return { reply: !f.repliedAtHead && f.repliedBefore !== true, reopen: false, escalate: false };
   if (!f.reopenedBefore) return { reply: !f.repliedAtHead, reopen: true, escalate: false };
   const serious = f.severity === 'blocker' || f.severity === 'warning';
   return { reply: false, reopen: false, escalate: serious && !f.escalatedBefore };
@@ -154,29 +180,79 @@ const sameHead = (a: string | null, b: string): boolean => a != null && a.toLowe
  */
 export function stillOpenThreadFacts(a: {
   thread: { githubNodeId: string; isResolved: boolean };
+  // The thread's comments, OLDEST FIRST (the first is its root).
   threadComments: ReadonlyArray<{ body: string | null }>;
   prComments: ReadonlyArray<{ body: string | null }>;
   rootDatabaseId: string | null;
   headSha: string;
   claims: ReadonlySet<string>;
   severity: StillOpenSeverity | null;
+  ownPr?: boolean;
 }): StillOpenThreadFacts {
   const node = a.thread.githubNodeId;
-  const marks = a.threadComments.map((c) => parseStillOpenMarker(c.body)).filter((m) => m != null);
+  const [root, ...replies] = a.threadComments;
+  const marks = replies.map((c) => parseStillOpenMarker(c.body)).filter((m) => m != null);
   const continued =
     a.rootDatabaseId != null &&
     a.prComments.some((c) => parseStillOpenMarker(c.body)?.continuesCommentId === a.rootDatabaseId);
+  // The thread IS a continuation: its root names the thread it continues.
+  const isContinuation = parseStillOpenMarker(root?.body)?.continuesCommentId != null;
+  const replyPrefix = `reply:${node}:`;
   return {
     resolved: a.thread.isResolved,
     reopenedBefore: a.claims.has(claimKey('reopen', node)) || marks.some((m) => m!.reopened),
     repliedAtHead: a.claims.has(claimKey('reply', node, a.headSha)) || marks.some((m) => sameHead(m!.headSha, a.headSha)),
-    escalatedBefore: a.claims.has(claimKey('escalate', node)) || continued,
+    repliedBefore: marks.length > 0 || [...a.claims].some((k) => k.startsWith(replyPrefix)),
+    escalatedBefore: a.claims.has(claimKey('escalate', node)) || continued || isContinuation,
     severity: a.severity,
+    ownPr: a.ownPr === true,
   };
 }
 
-export function claimKey(action: 'reply' | 'reopen' | 'escalate', threadNodeId: string, headSha?: string): string {
-  return action === 'reply' ? `reply:${threadNodeId}:${(headSha ?? '').toLowerCase()}` : `${action}:${threadNodeId}`;
+/** What a LIVE read of one thread on GitHub says (gap 3). Bodies only; oldest first. */
+export interface StillOpenLiveThread {
+  isResolved: boolean;
+  comments: ReadonlyArray<{ body: string | null }>;
+  // The ROOT comment of every review thread on the PR (for `c=`).
+  prRoots: ReadonlyArray<{ body: string | null }>;
+}
+
+/**
+ * The synced facts with GitHub's live word folded in: what any Limn already did (a reply at this head,
+ * a reopen, a continuation) is the UNION of both readings; resolved is GitHub's live state. Pure.
+ */
+export function mergeLiveFacts(
+  synced: StillOpenThreadFacts,
+  live: StillOpenLiveThread,
+  a: { githubNodeId: string; rootDatabaseId: string | null; headSha: string },
+): StillOpenThreadFacts {
+  const l = stillOpenThreadFacts({
+    thread: { githubNodeId: a.githubNodeId, isResolved: live.isResolved },
+    threadComments: live.comments,
+    prComments: live.prRoots,
+    rootDatabaseId: a.rootDatabaseId,
+    headSha: a.headSha,
+    claims: new Set(),
+    severity: synced.severity,
+    ownPr: synced.ownPr,
+  });
+  return {
+    resolved: live.isResolved,
+    reopenedBefore: synced.reopenedBefore || l.reopenedBefore,
+    repliedAtHead: synced.repliedAtHead || l.repliedAtHead,
+    repliedBefore: synced.repliedBefore === true || l.repliedBefore === true,
+    escalatedBefore: synced.escalatedBefore || l.escalatedBefore,
+    severity: synced.severity,
+    ownPr: synced.ownPr,
+  };
+}
+
+const nothingPlanned = (p: StillOpenPlan): boolean => !p.reply && !p.reopen && !p.escalate;
+
+export function claimKey(action: 'reply' | 'reopen' | 'escalate' | 'read', threadNodeId: string, headSha?: string): string {
+  return action === 'reply' || action === 'read'
+    ? `${action}:${threadNodeId}:${(headSha ?? '').toLowerCase()}`
+    : `${action}:${threadNodeId}`;
 }
 
 /** The reply on the thread: the lead, the reason, the footer, the markers. */
@@ -194,6 +270,8 @@ export function stillOpenNewThreadText(reason: string | null, headSha: string, e
 
 /** The pieces that touch GitHub, so a test can replace them. */
 export interface StillOpenDeps {
+  // ONE small read of a thread just before writing on it (gap 3). Throws on any failure.
+  liveThread(accountId: number, threadNodeId: string): Promise<StillOpenLiveThread>;
   reply(accountId: number, threadNodeId: string, body: string): Promise<{ commentId: string | null }>;
   unresolve(accountId: number, threadNodeId: string): Promise<void>;
   stampUnresolved(threadId: number, accountId: number): Promise<void>;
@@ -202,7 +280,64 @@ export interface StillOpenDeps {
   settle(a: { accountId: number; prId: number; log: AgentContext['log'] }): Promise<{ visible: boolean }>;
 }
 
+const LIVE_THREAD_QUERY = /* GraphQL */ `
+  query StillOpenLiveThread($thread: ID!) {
+    node(id: $thread) {
+      ... on PullRequestReviewThread {
+        isResolved
+        comments(last: 100) {
+          nodes {
+            body
+          }
+        }
+        pullRequest {
+          reviewThreads(last: 100) {
+            nodes {
+              comments(first: 1) {
+                nodes {
+                  body
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+interface LiveThreadResponse {
+  node: {
+    isResolved?: boolean;
+    comments?: { nodes: Array<{ body: string | null } | null> | null } | null;
+    pullRequest?: {
+      reviewThreads?: { nodes: Array<{ comments?: { nodes: Array<{ body: string | null } | null> | null } | null } | null> | null } | null;
+    } | null;
+  } | null;
+}
+
 export const defaultStillOpenDeps: StillOpenDeps = {
+  async liveThread(accountId, threadNodeId) {
+    const [{ getAccessToken }, { getGraphqlClientFor }] = await Promise.all([
+      import('../../auth/account.js'),
+      import('../../github/client.js'),
+    ]);
+    const gql = getGraphqlClientFor(await getAccessToken(accountId));
+    const res = await gql<LiveThreadResponse>(LIVE_THREAD_QUERY, { thread: threadNodeId });
+    const n = res.node;
+    // Never guess: a thread GitHub does not describe fully is a failed read.
+    if (n == null || typeof n.isResolved !== 'boolean' || n.comments?.nodes == null || n.pullRequest?.reviewThreads?.nodes == null) {
+      throw new Error('GitHub did not return the thread.');
+    }
+    return {
+      isResolved: n.isResolved,
+      comments: n.comments.nodes.filter((c) => c != null).map((c) => ({ body: c!.body ?? null })),
+      prRoots: n.pullRequest.reviewThreads.nodes
+        .map((t) => t?.comments?.nodes?.[0])
+        .filter((c) => c != null)
+        .map((c) => ({ body: c!.body ?? null })),
+    };
+  },
   async reply(accountId, threadNodeId, body) {
     const [{ getAccessToken }, { addReviewThreadReply }] = await Promise.all([
       import('../../auth/account.js'),
@@ -240,6 +375,8 @@ export interface StillOpenResult {
   reopened: number[];
   escalated: number[];
   failed: number[];
+  // Threads left alone because the live read failed (recorded as this head's reply claim).
+  unread: number[];
 }
 
 /**
@@ -323,13 +460,17 @@ async function postStillOpen(
     .execute()) as Array<{ key: string }>;
   const claims = new Set(claimRows.map((r) => r.key));
 
+  // D2: the reader's own PR — replies only.
+  const { prAuthorIsAccount } = await import('../../coding/ai-fix/auto-fix.js');
+  const ownPr = await prAuthorIsAccount(ctx, accountId, prId);
+
   const footer = runs.length > 1 ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
-  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [] };
+  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [], unread: [] };
   let wrote = false;
 
   // ⚠ THE CLAIM: insert-or-nothing on the unique (account, key). true = this call owns the write.
   const claim = async (
-    action: 'reply' | 'reopen' | 'escalate',
+    action: 'reply' | 'reopen' | 'escalate' | 'read',
     thread: { id: number; githubNodeId: string },
     c: StillOpenCandidate,
   ): Promise<number | null> => {
@@ -370,7 +511,9 @@ async function postStillOpen(
     if (thread == null || !thread.githubNodeId) continue;
     const list = byThread.get(thread.id) ?? [];
     const rootDatabaseId = list[0]?.databaseId ?? null;
-    const facts = stillOpenThreadFacts({
+    // Gap 2: a disputed reply on an UNRESOLVED thread is the pushback's (one reply, auto-pushback.ts).
+    if (c.disputed === true && !thread.isResolved) continue;
+    const synced = stillOpenThreadFacts({
       thread,
       threadComments: list,
       prComments: comments,
@@ -378,8 +521,26 @@ async function postStillOpen(
       headSha: review.headSha,
       claims,
       severity: c.severity,
+      ownPr,
     });
+    if (nothingPlanned(planStillOpen(synced))) continue;
+    // A live read that failed at this head already: nothing more on this thread at this head.
+    if (claims.has(claimKey('read', thread.githubNodeId, review.headSha))) continue;
+    // Gap 3: read the thread LIVE, then plan again on what GitHub says now. A failed read writes
+    // nothing; it is recorded (`read:<node>:<head>`, failed, with why) and not tried again at this head.
+    let facts: StillOpenThreadFacts;
+    try {
+      const live = await deps.liveThread(accountId, thread.githubNodeId);
+      facts = mergeLiveFacts(synced, live, { githubNodeId: thread.githubNodeId, rootDatabaseId, headSha: review.headSha });
+    } catch (err) {
+      const id = await claim('read', thread, c);
+      if (id != null) await settleClaim(id, 'failed', { error: `Nothing written: couldn't read the thread on GitHub first (${errText(err)}).` });
+      result.unread.push(thread.id);
+      continue;
+    }
+    if (c.disputed === true && !facts.resolved) continue;
     let plan = planStillOpen(facts);
+    if (nothingPlanned(plan)) continue;
     let failedHere = false;
 
     // REOPEN — once per thread, ever. Lost claim ⇒ it was reopened before: plan again on that fact.

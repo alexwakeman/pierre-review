@@ -17,6 +17,7 @@ import {
   limnFindingPost,
   parseStillOpenMarker,
   stillOpenReasonOf,
+  continuationThreadMap,
   threadAssessmentCounts,
   type ClaudeStillOpenBy,
   type ClaudeThreadStillOpen,
@@ -786,6 +787,35 @@ export async function getThreadJudgements(
       const w = newerStillOpenWord(ownWords.get(id), mates?.get(id));
       if (w?.open) words.set(id, w);
     }
+    // GAP 8: a point held open on a thread that a newer thread CONTINUES (shared
+    // `continuationThreadMap`) is shown on the continuation — where the author can act — unless the
+    // continuation has a newer word of its own. The earlier thread then shows none.
+    const moved = new Set<number>();
+    if (words.size > 0) {
+      const rcs = s.reviewComments;
+      const cms = (await ctx.db
+        .select({ id: rcs.id, threadId: rcs.threadId, databaseId: rcs.databaseId, body: rcs.body, createdAt: rcs.createdAt })
+        .from(rcs)
+        .where(eq(rcs.prId, prId))
+        .execute()) as Array<{ id: number; threadId: number | null; databaseId: string | null; body: string | null; createdAt: Date | null }>;
+      const cont = continuationThreadMap(cms.map((x) => ({ ...x, createdAt: ms(x.createdAt) })));
+      for (const [from, w] of [...words]) {
+        const to = cont.get(from);
+        if (to == null) continue;
+        words.delete(from);
+        const there = newerStillOpenWord(ownWords.get(to), mates?.get(to));
+        const best = there == null || there.at < w.at ? w : there;
+        if (best.open) words.set(to, best);
+        else words.delete(to);
+        if (best === w && !judgements.some((j) => j.threadId === to)) {
+          const base = judgements.find((j) => j.threadId === from);
+          if (base != null) {
+            judgements.push({ ...base, threadId: to });
+            moved.add(to);
+          }
+        }
+      }
+    }
     if (words.size > 0) {
       const rt = s.reviewThreads;
       const rows = (await ctx.db
@@ -808,7 +838,7 @@ export async function getThreadJudgements(
           threadResolved: t.isResolved,
         };
         const i = judgements.findIndex((j) => j.threadId === threadId);
-        if (i >= 0) judgements[i] = { ...judgements[i]!, stillOpen };
+        if (i >= 0) judgements[i] = { ...judgements[i]!, ...(moved.has(threadId) ? { resolved: t.isResolved } : {}), stillOpen };
         else
           judgements.push({
             threadId,

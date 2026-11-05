@@ -451,6 +451,7 @@ export function SlackMock(): JSX.Element {
       label="Settings, Slack: a stored incoming webhook, cadence Daily at 9:00 AM, three checkboxes, Save and Send test"
     >
       <Section title="Slack" desc={S.desc}>
+        <p className="mk-muted">{S.onePerChannel}</p>
         <Field label="Incoming webhook URL" hint={S.storedHint}>
           <TextBox value={S.stored} />
         </Field>

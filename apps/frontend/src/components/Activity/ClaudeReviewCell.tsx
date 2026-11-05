@@ -35,7 +35,7 @@ import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
+import { CheckIcon, ReviewingNowIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
 import { TeammateAvatar } from '../TeammateReviews.js';
 
@@ -190,11 +190,14 @@ export function ClaudeReviewPanel({
           Review failed
         </button>
       ) : teamClaimSkip ? (
-        <span className="text-meta text-ai-muted">
-          {teamClaimSkip.kind === 'reviewed'
-            ? `Reviewed by @${teamClaimSkip.login}`
-            : `Being reviewed by @${teamClaimSkip.login}`}
-        </span>
+        teamClaimSkip.kind === 'reviewed' ? (
+          <span className="text-meta text-ai-muted">Reviewed by @{teamClaimSkip.login}</span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-meta text-ui-ink">
+            <ReviewingNowIcon size={12} />
+            Being reviewed by @{teamClaimSkip.login}
+          </span>
+        )
       ) : (
         <span className="text-meta text-ai-muted">Not reviewed</span>
       );

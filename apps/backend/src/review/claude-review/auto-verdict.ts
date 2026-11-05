@@ -8,6 +8,12 @@
 //     'none'. Blockers and warnings ALWAYS prevent it; praise never counts.
 //   • `pairStrictness` — how a pair's two model verdicts fold (`pairVerdict`): 'strict' (default) =
 //     both approved; 'relaxed' = at least one approved and NEITHER asked for changes.
+//
+// EARLIER POINTS HOLD THE VERDICT TOO (decision D1, 2026-11-05; ./earlier-open.ts): an earlier point the
+// run judges STILL OPEN, of known severity and not raised again as one of its findings, counts like
+// a finding — an earlier blocker ⇒ REQUEST_CHANGES, an earlier warning ⇒ never APPROVE, an earlier
+// nit / question ⇒ the leftovers rule. ⚠ Every verdict reader passes the SAME `EarlierOpen`: the
+// auto post, the pair's code verdict, the "Not approved" line on read and the replies outcome.
 import {
   AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
   PAIR_VERDICT_DEFAULT_STRICTNESS,
@@ -24,6 +30,7 @@ import {
   type PairVerdictStrictness,
 } from '@pierre-review/shared';
 import { isReaderIgnoredFinding } from './finding-facts.js';
+import { NO_EARLIER_OPEN, type EarlierOpen } from './earlier-open.js';
 
 /** The two workspace rules every verdict reads. */
 export interface VerdictRules {
@@ -67,29 +74,52 @@ type VerdictFinding = Pick<ClaudeFinding, 'severity' | 'included' | 'story'> &
 const countedOf = <F extends VerdictFinding>(findings: readonly F[]): F[] =>
   findings.filter((f) => f.story == null && !isReaderIgnoredFinding(f));
 
-/** How many blockers and warnings a run's verdict counts (the same findings `autoVerdictFor` reads). */
-export function blockerWarningCounts(findings: readonly VerdictFinding[]): { blockers: number; warnings: number } {
+/** How many blockers and warnings a run's verdict counts (the same findings `autoVerdictFor` reads,
+ *  plus the earlier ones it holds open). */
+export function blockerWarningCounts(
+  findings: readonly VerdictFinding[],
+  earlier: EarlierOpen | null = null,
+): { blockers: number; warnings: number } {
   const counted = countedOf(findings);
   return {
-    blockers: counted.filter((f) => f.severity === 'blocker').length,
-    warnings: counted.filter((f) => f.severity === 'warning').length,
+    blockers: counted.filter((f) => f.severity === 'blocker').length + (earlier?.blockers ?? 0),
+    warnings: counted.filter((f) => f.severity === 'warning').length + (earlier?.warnings ?? 0),
   };
+}
+
+/** Do the earlier points held open stop an approval under `leftovers`? */
+function earlierHoldsApproval(e: EarlierOpen | null | undefined, leftovers: ApproveLeftovers): boolean {
+  if (e == null) return false;
+  return (
+    e.blockers + e.warnings > 0 ||
+    (e.nits > 0 && !leftoverAllowed('nit', leftovers)) ||
+    (e.questions > 0 && !leftoverAllowed('question', leftovers))
+  );
 }
 
 /**
  * The verdict an auto post wants — the model's, made STRICTER. Counts the run's non-story findings a
  * reader did not ignore (whatever the kind toggles say): any blocker ⇒ REQUEST_CHANGES; APPROVE only
  * when the model approved and every open finding is one `leftovers` allows (never a warning);
- * everything else ⇒ COMMENT.
+ * everything else ⇒ COMMENT. `earlier`: the earlier points the run holds open (./earlier-open.ts) —
+ * an earlier blocker requests changes, an earlier warning (or a leftover the rule forbids) holds the
+ * approval, exactly like a finding of the run.
  */
 export function autoVerdictFor(
   modelVerdict: ClaudeReview['verdict'],
   findings: readonly VerdictFinding[],
   leftovers: ApproveLeftovers = AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
+  earlier: EarlierOpen | null = null,
 ): AutoVerdictEvent {
   const counted = countedOf(findings);
-  if (counted.some((f) => f.severity === 'blocker')) return 'REQUEST_CHANGES';
-  if (modelVerdict === 'APPROVE' && counted.every((f) => leftoverAllowed(f.severity, leftovers))) return 'APPROVE';
+  if (counted.some((f) => f.severity === 'blocker') || (earlier?.blockers ?? 0) > 0) return 'REQUEST_CHANGES';
+  if (
+    modelVerdict === 'APPROVE' &&
+    counted.every((f) => leftoverAllowed(f.severity, leftovers)) &&
+    !earlierHoldsApproval(earlier, leftovers)
+  ) {
+    return 'APPROVE';
+  }
   return 'COMMENT';
 }
 
@@ -136,10 +166,14 @@ export function firstSentence(summary: string | null | undefined, max = REASON_S
 
 const plural = (n: number, one: string): string => (n === 1 ? `a ${one}` : `${n} ${one}s`);
 
-/** "2 warnings are still open." / "a blocker and a question are still open." */
-function openText(counts: Array<[number, string]>): string {
-  const parts = counts.filter(([n]) => n > 0).map(([n, w]) => plural(n, w));
-  const total = counts.reduce((a, [n]) => a + n, 0);
+/** "2 warnings are still open." / "a blocker and a question are still open." / "1 earlier warning is
+ *  still open." — `earlier` counts are named with their number ("1 earlier warning"). */
+function openText(counts: Array<[number, string]>, earlier: Array<[number, string]> = []): string {
+  const parts = [
+    ...counts.filter(([n]) => n > 0).map(([n, w]) => plural(n, w)),
+    ...earlier.filter(([n]) => n > 0).map(([n, w]) => `${n} earlier ${w}${n === 1 ? '' : 's'}`),
+  ];
+  const total = [...counts, ...earlier].reduce((a, [n]) => a + n, 0);
   const list = parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
   return `${list} ${total === 1 ? 'is' : 'are'} still open.`;
 }
@@ -199,20 +233,37 @@ export function findingsNotApproved(
   runs: readonly VerdictRun[],
   findings: readonly VerdictFinding[],
   rules: VerdictRules = DEFAULT_VERDICT_RULES,
-  // Earlier points the run(s) hold open (`stillOpenCountOf`): named in the tail, never as "no findings".
-  stillOpen = 0,
+  // Earlier points the run(s) hold open (./earlier-open.ts; a bare number = `total` only, no
+  // severities): an earlier blocker / warning holds like a finding ("1 earlier warning is still
+  // open."); the rest are named in the tail, never as "no findings".
+  stillOpen: number | EarlierOpen = 0,
 ): ClaudeNotApproved | null {
+  const earlier: EarlierOpen = typeof stillOpen === 'number' ? { ...NO_EARLIER_OPEN, total: stillOpen } : stillOpen;
   const counted = countedOf(findings);
   const n = (sev: ClaudeFindingSeverity) => counted.filter((f) => f.severity === sev).length;
   const blockers = n('blocker');
   const warnings = n('warning');
-  if (blockers + warnings > 0) {
-    return { heldReason: 'open_findings', text: sentence(openText([[blockers, 'blocker'], [warnings, 'warning']])) };
+  if (blockers + warnings + earlier.blockers + earlier.warnings > 0) {
+    return {
+      heldReason: 'open_findings',
+      text: sentence(
+        openText(
+          [
+            [blockers, 'blocker'],
+            [warnings, 'warning'],
+          ],
+          [
+            [earlier.blockers, 'blocker'],
+            [earlier.warnings, 'warning'],
+          ],
+        ),
+      ),
+    };
   }
   const nits = n('nit');
   const questions = n('question');
   // No blocker or warning is open here: say so plainly beside a model that only commented.
-  const tail = minorTail(nits, questions, stillOpen);
+  const tail = minorTail(nits, questions, earlier.total);
   if (runs.length >= 2) {
     const [a, b] = runs as [VerdictRun, VerdictRun];
     const folded = pairVerdict(a.verdict, b.verdict, rules.pairStrictness);
@@ -234,10 +285,18 @@ export function findingsNotApproved(
       return { heldReason: 'model_comment', text: sentence(dissentText(only ?? { by: 'Claude', verdict: null, summary: null }, tail)) };
     }
   }
-  const leftNits = leftoverAllowed('nit', rules.approveLeftovers) ? 0 : nits;
-  const leftQuestions = leftoverAllowed('question', rules.approveLeftovers) ? 0 : questions;
-  if (leftNits + leftQuestions > 0) {
-    return { heldReason: 'open_findings', text: sentence(openText([[leftNits, 'nit'], [leftQuestions, 'question']])) };
+  const nitsBlocked = !leftoverAllowed('nit', rules.approveLeftovers);
+  const questionsBlocked = !leftoverAllowed('question', rules.approveLeftovers);
+  const left: Array<[number, string]> = [
+    [nitsBlocked ? nits : 0, 'nit'],
+    [questionsBlocked ? questions : 0, 'question'],
+  ];
+  const leftEarlier: Array<[number, string]> = [
+    [nitsBlocked ? earlier.nits : 0, 'nit'],
+    [questionsBlocked ? earlier.questions : 0, 'question'],
+  ];
+  if ([...left, ...leftEarlier].some(([c]) => c > 0)) {
+    return { heldReason: 'open_findings', text: sentence(openText(left, leftEarlier)) };
   }
   return null;
 }
@@ -318,19 +377,38 @@ export function openFindingsReason(
   open: readonly Pick<ClaudeFinding, 'severity'>[],
   which: 'severe' | 'leftovers',
   leftovers: ApproveLeftovers = AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
+  // Earlier points held open (./earlier-open.ts), named apart: "1 earlier warning".
+  earlier: EarlierOpen | null = null,
 ): ClaudeNotApproved | null {
   const n = (sev: ClaudeFindingSeverity) => open.filter((f) => f.severity === sev).length;
-  const counts: Array<[number, string]> =
+  const e = earlier ?? NO_EARLIER_OPEN;
+  const nitsOk = leftoverAllowed('nit', leftovers);
+  const questionsOk = leftoverAllowed('question', leftovers);
+  const [counts, earlierCounts]: [Array<[number, string]>, Array<[number, string]>] =
     which === 'severe'
       ? [
-          [n('blocker'), 'blocker'],
-          [n('warning'), 'warning'],
+          [
+            [n('blocker'), 'blocker'],
+            [n('warning'), 'warning'],
+          ],
+          [
+            [e.blockers, 'blocker'],
+            [e.warnings, 'warning'],
+          ],
         ]
       : [
-          [leftoverAllowed('nit', leftovers) ? 0 : n('nit'), 'nit'],
-          [leftoverAllowed('question', leftovers) ? 0 : n('question'), 'question'],
+          [
+            [nitsOk ? 0 : n('nit'), 'nit'],
+            [questionsOk ? 0 : n('question'), 'question'],
+          ],
+          [
+            [nitsOk ? 0 : e.nits, 'nit'],
+            [questionsOk ? 0 : e.questions, 'question'],
+          ],
         ];
-  return counts.some(([c]) => c > 0) ? { heldReason: 'open_findings', text: sentence(openText(counts)) } : null;
+  return [...counts, ...earlierCounts].some(([c]) => c > 0)
+    ? { heldReason: 'open_findings', text: sentence(openText(counts, earlierCounts)) }
+    : null;
 }
 
 /**

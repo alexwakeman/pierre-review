@@ -567,6 +567,7 @@ describe('finish and clear', () => {
     expect(await tc.clearTeamClaim(ctx, target(), f.gh)).toEqual({ ok: true });
     expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
     const refused = fakeGh({ postFails: Object.assign(new Error('404'), { status: 404 }) });
+    refused.seed('limn/review-claude', line('bob', 'pending', NOW - MIN));
     expect(await tc.clearTeamClaim(ctx, target(), refused.gh)).toMatchObject({ ok: false, error: 'no_access' });
   });
 });
@@ -651,5 +652,230 @@ describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () =>
     const { sql } = await import('drizzle-orm');
     await db.run(sql.raw(update));
     expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
+  });
+});
+
+describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
+  const done = (githubReviewId: string | null, posted: number[], submitted?: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES') =>
+    ({
+      kind: 'done',
+      record: {
+        status: githubReviewId != null ? 'posted' : 'skipped',
+        at: '',
+        reason: null,
+        error: null,
+        findingIds: [],
+        postedFindingIds: posted,
+        githubReviewId,
+        ...(submitted ? { verdict: { wanted: submitted, submitted, heldReason: null } } : {}),
+      },
+    }) as any;
+  const run = { findings: [{ id: 1, severity: 'nit' }, { id: 2, severity: 'warning' }] };
+  it('the verdict leads the line; a COMMENT adds nothing', () => {
+    expect(reviewedLine('alex', 0, 'APPROVE')).toBe('alex reviewed · approved');
+    expect(reviewedLine('alex', 2, 'APPROVE')).toBe('alex reviewed · approved · 2 comments');
+    expect(reviewedLine('alex', 3, 'REQUEST_CHANGES')).toBe('alex reviewed · changes requested · 3 comments');
+    expect(reviewedLine('alex', 0, 'COMMENT')).toBe('alex reviewed · no comments');
+    expect(reviewedLine('alex', null, 'APPROVE')).toBe('alex reviewed · kept in Limn');
+  });
+  it('an approval with only nits (nothing of ours posted) holds the commit: "approved", not "kept in Limn"', () => {
+    const s = tc.reviewedLineSummary(done('55', [], 'APPROVE'), run);
+    expect(s).toEqual({ comments: 0, verdict: 'APPROVE', onGithub: true });
+    const d = reviewedLine('bob', s.comments, s.verdict);
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, d)], 'me', NOW).kind).toBe('reviewed');
+  });
+  it('a reason-only comment, or a pair review holding only the other half’s findings, reads "no comments"', () => {
+    expect(tc.reviewedLineSummary(done('56', [], 'COMMENT'), run)).toMatchObject({ comments: 0, onGithub: true });
+    expect(tc.reviewedLineSummary(done('57', [99], 'COMMENT'), run)).toMatchObject({ comments: 0, onGithub: true });
+    expect(tc.reviewedLineSummary(done('58', [2], 'COMMENT'), run)).toMatchObject({ comments: 1, onGithub: true });
+  });
+  it('no review on GitHub (auto-post off, skipped, failed) ⇒ "kept in Limn" (free); nothing to say ⇒ "no comments"', () => {
+    expect(tc.reviewedLineSummary(done(null, []), run).comments).toBeNull();
+    expect(tc.reviewedLineSummary({ kind: 'off' }, run).comments).toBeNull();
+    expect(tc.reviewedLineSummary(null, run).comments).toBeNull();
+    expect(tc.reviewedLineSummary(null, { findings: [{ id: 3, severity: 'praise' }] }).comments).toBe(0);
+    // An old "kept in Limn" line still reads free.
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, 'bob reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
+  });
+});
+
+describe('gap 5: a late final line is never posted blind', () => {
+  beforeAll(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
+  });
+
+  it("a teammate's newer success ⇒ nothing posted, the row closed 'superseded', the record says so", async () => {
+    const f = fakeGh();
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    if (r.kind !== 'run') throw new Error('expected a run');
+    const before = f.posts.length;
+    // The laptop slept: the lease ran out, bob claimed and finished.
+    f.seed('limn/review-claude', line('bob', 'pending', NOW + 30 * MIN));
+    f.seed('limn/review-claude', line('bob', 'success', NOW + 40 * MIN, 'bob reviewed · 2 comments'));
+    await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, f.gh, () => NOW + 45 * MIN);
+    expect(f.posts.length).toBe(before);
+    expect(await ledgerRow(r.handle.ledgerId!)).toMatchObject({ state: 'released', lastError: 'superseded' });
+    const [row] = await db.select().from(schema.claudeReviews).where((await import('drizzle-orm')).eq(schema.claudeReviews.id, reviewId)).execute();
+    expect(row.teamClaim).toMatchObject({ lastLine: 'superseded' });
+  });
+
+  it("a teammate's live claim ⇒ a finished review's line is not posted either", async () => {
+    const f = fakeGh();
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    if (r.kind !== 'run') throw new Error('expected a run');
+    const before = f.posts.length;
+    f.seed('limn/review-claude', line('bob', 'pending', NOW + 30 * MIN));
+    await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'succeeded', comments: 1, reviewUrl: null }, f.gh, () => NOW + 35 * MIN);
+    expect(f.posts.length).toBe(before);
+    expect(await ledgerRow(r.handle.ledgerId!)).toMatchObject({ state: 'finished', lastError: 'superseded' });
+  });
+
+  it("a loser's stand-down line (naming us) or a teammate's free line does not stop our line", async () => {
+    const f = fakeGh();
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    if (r.kind !== 'run') throw new Error('expected a run');
+    f.seed('limn/review-claude', line('bob', 'pending', NOW + MIN, 'me is reviewing with Claude'));
+    await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'succeeded', comments: 0, reviewUrl: null, verdict: 'APPROVE' }, f.gh, () => NOW + 2 * MIN);
+    expect(f.posts.at(-1)).toMatchObject({ state: 'success', description: 'me reviewed · approved' });
+    const g = fakeGh();
+    const r2 = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, g.gh);
+    if (r2.kind !== 'run') throw new Error('expected a run');
+    g.seed('limn/review-claude', line('bob', 'success', NOW + MIN, 'Cleared by bob: auto review skipped · AI budget used'));
+    await tc.finishTeamClaim(ctx, r2.handle, reviewId, { kind: 'unfinished' }, g.gh, () => NOW + 2 * MIN);
+    expect(g.posts.at(-1)?.description).toBe("Cleared by me: review didn't finish · free to claim");
+  });
+
+  it('an unreadable history still posts the line (a pending line left behind is worse)', async () => {
+    const f = fakeGh();
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    if (r.kind !== 'run') throw new Error('expected a run');
+    const broken: TeamClaimGithub = { ...f.gh, listLines: async () => Promise.reject(new Error('502')) };
+    await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, broken, () => NOW + MIN);
+    expect(f.posts.at(-1)?.description).toBe("Cleared by me: review didn't finish · free to claim");
+  });
+});
+
+describe("gap 6: Clear for a teammate's claim survives a restart", () => {
+  beforeAll(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
+  });
+  it("the stored 'is reviewing' line offers Clear with no memory; a 'reviewed' one does not", async () => {
+    const seen = await import('./team-claim-seen.js');
+    await db.delete(schema.teamClaimSeen).execute();
+    tc._resetTeamClaimsForTest();
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toBeNull();
+    await seen.recordTeammateLine(ctx, 1, prId, {
+      provider: 'codex',
+      kind: 'reviewing',
+      login: 'robin-dunn',
+      headSha: 'head1',
+      at: new Date(NOW).toISOString(),
+      description: 'robin-dunn is reviewing with Codex',
+    });
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false, NOW + MIN)).toEqual({ provider: 'codex', login: 'robin-dunn', mine: false });
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head2', false, NOW + MIN)).toBeNull();
+    // GAP 6: a stored line past the lease offers no Clear (nothing re-reads it after a restart).
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false, NOW + tc.TEAM_CLAIM_LEASE_MS)).toBeNull();
+    // The Clear forgets it; the teammate has finished since, so the Clear reads that and posts nothing.
+    const done = fakeGh();
+    done.seed('limn/review-codex', line('robin-dunn', 'pending', NOW - MIN));
+    done.seed('limn/review-codex', { ...line('robin-dunn', 'success', NOW), description: 'robin-dunn reviewed · 3 comments' });
+    expect(await tc.clearTeamClaim(ctx, { ...target(), provider: 'codex' }, done.gh)).toEqual({ ok: true });
+    expect(done.posts).toEqual([]);
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false, NOW + MIN)).toBeNull();
+    // An unreadable history posts nothing.
+    const blind = fakeGh({ readFails: Object.assign(new Error('boom'), { status: 502 }) });
+    expect(await tc.clearTeamClaim(ctx, { ...target(), provider: 'codex' }, blind.gh)).toMatchObject({ ok: false, error: 'error' });
+    expect(blind.posts).toEqual([]);
+    await seen.recordTeammateLine(ctx, 1, prId, {
+      provider: 'claude',
+      kind: 'reviewed',
+      login: 'robin-dunn',
+      headSha: 'head1',
+      at: new Date(NOW).toISOString(),
+      description: 'robin-dunn reviewed · no comments',
+    });
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toBeNull();
+    await db.delete(schema.teamClaimSeen).execute();
+  });
+});
+
+describe('gap 4: manual reviews and team claims', () => {
+  const mt = () => ({ accountId: 1, prId, owner: 'acme', name: 'api', number: 7, headSha: 'head1' });
+  beforeAll(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
+  });
+  beforeEach(async () => {
+    await db.delete(schema.teamClaimSeen).execute();
+  });
+
+  it("a manual run's start stores a teammate's live claim (the tab names it); never posts a line", async () => {
+    const m = await import('./team-claim-manual.js');
+    const seen = await import('./team-claim-seen.js');
+    const f = fakeGh();
+    f.seed('limn/review-claude', line('robin-dunn', 'pending', NOW - MIN));
+    expect(await m.readTeammateLinesForManualRun(ctx, mt(), ['claude', 'codex'], f.gh, () => NOW)).toBe('read');
+    expect(f.posts).toEqual([]);
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toMatchObject([{ provider: 'claude', kind: 'reviewing', login: 'robin-dunn' }]);
+    // The teammate finished: the run's end reads again and the line follows.
+    f.seed('limn/review-claude', line('robin-dunn', 'success', NOW + MIN, 'robin-dunn reviewed · 2 comments'));
+    await m.refreshTeammateLinesAfterRun(ctx, mt(), f.gh);
+    expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toMatchObject([{ kind: 'reviewed', description: 'robin-dunn reviewed · 2 comments' }]);
+    expect(f.posts).toEqual([]);
+  });
+
+  it('a posted manual review writes "<login> reviewed · …" per model; teammates then step aside', async () => {
+    const m = await import('./team-claim-manual.js');
+    const f = fakeGh();
+    const out = await m.markPostedReviewLines(
+      ctx,
+      mt(),
+      { runs: [{ provider: 'claude', comments: 2 }, { provider: 'codex', comments: 0 }], verdict: 'APPROVE', reviewUrl: null },
+      f.gh,
+      () => NOW,
+    );
+    expect(out).toEqual({ claude: 'posted', codex: 'posted' });
+    expect(f.posts.map((p) => [p.context, p.state, p.description])).toEqual([
+      ['limn/review-claude', 'success', 'me reviewed · approved · 2 comments'],
+      ['limn/review-codex', 'success', 'me reviewed · approved'],
+    ]);
+    expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-codex'), 'bob', NOW).kind).toBe('reviewed');
+    // Never twice.
+    const again = await m.markPostedReviewLines(ctx, mt(), { runs: [{ provider: 'claude', comments: 2 }], verdict: 'APPROVE', reviewUrl: null }, f.gh, () => NOW);
+    expect(again).toEqual({ claude: 'already' });
+    expect(f.posts).toHaveLength(2);
+  });
+
+  it("never over a teammate's success or live claim; never on the reader's own PR; never when claims are off", async () => {
+    const m = await import('./team-claim-manual.js');
+    const f = fakeGh();
+    f.seed('limn/review-claude', line('bob', 'pending', NOW - MIN));
+    f.seed('limn/review-codex', line('bob', 'success', NOW - MIN, 'bob reviewed · 1 comment'));
+    const out = await m.markPostedReviewLines(
+      ctx,
+      mt(),
+      { runs: [{ provider: 'claude', comments: 1 }, { provider: 'codex', comments: 1 }], verdict: 'COMMENT', reviewUrl: null },
+      f.gh,
+      () => NOW,
+    );
+    expect(out).toEqual({ claude: 'teammate', codex: 'teammate' });
+    expect(f.posts).toEqual([]);
+    // The reader is the author.
+    const { eq } = await import('drizzle-orm');
+    const [u] = await db.insert(schema.users).values({ githubLogin: 'me', githubNodeId: 'U_me_author' }).onConflictDoNothing().returning().execute();
+    const meUser = u ?? (await db.select().from(schema.users).where(eq(schema.users.githubLogin, 'me')).execute())[0];
+    await db.update(schema.pullRequests).set({ authorId: meUser.id }).where(eq(schema.pullRequests.id, prId)).execute();
+    const g = fakeGh();
+    expect(await m.markPostedReviewLines(ctx, mt(), { runs: [{ provider: 'claude', comments: 1 }], verdict: 'COMMENT', reviewUrl: null }, g.gh)).toEqual({
+      claude: 'author',
+    });
+    await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, prId)).execute();
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
+    expect(await m.markPostedReviewLines(ctx, mt(), { runs: [{ provider: 'claude', comments: 1 }], verdict: 'COMMENT', reviewUrl: null }, g.gh)).toEqual({
+      claude: 'off',
+    });
+    expect(await m.readTeammateLinesForManualRun(ctx, mt(), ['claude'], g.gh)).toBe('off');
+    expect(g.posts).toEqual([]);
+    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
 });

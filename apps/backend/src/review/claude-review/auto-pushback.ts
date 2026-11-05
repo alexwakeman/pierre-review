@@ -19,7 +19,7 @@
 //      retried. A later run may still ACCEPT a newer reply on the same thread.
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
-import { aiRunProviderName, autoPostFooter, type AiProviderName, type FindingPushbackRecord } from '@pierre-review/shared';
+import { aiRunProviderName, autoPostFooter, continuationThreadMap, type AiProviderName, type FindingPushbackRecord } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
@@ -32,6 +32,7 @@ import {
   loadPrThreads,
   loadThreadOwners,
   threadHasPushback,
+  followOwnContinuation,
   type ThreadOwnerRow,
 } from './finding-replies.js';
 
@@ -106,7 +107,9 @@ async function autoPushback(
   const taken = new Set<number>();
   let wroteAny = false;
   for (const f of candidates) {
-    const thread = findFindingThread(f, threads, comments, accountLogin, taken);
+    const found = findFindingThread(f, threads, comments, accountLogin, taken);
+    // A point continued in a new thread (still-open.ts) is answered THERE.
+    const thread = found ? followOwnContinuation(found, threads, comments, continuationThreadMap(comments), accountLogin) : null;
     if (!thread) continue;
     taken.add(thread.id);
     // A RESOLVED thread is left alone: someone closed it, and a pushback there reopens nothing.

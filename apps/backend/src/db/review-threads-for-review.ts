@@ -33,10 +33,19 @@
 // loader's `newestCommentAt` that becomes `comments_through`) also takes a `countsAuthor` filter —
 // built ONCE per workspace by db/queries.ts `reReviewCommentAuthorFilter`: a person, or a bot whose
 // role in this workspace is `'review'`. CI, coverage, deploy and dependency bots never re-trigger a
-// review. Both readers get the SAME filter, so what a run records as seen and what the sweeper
+// review, and neither does any Limn REPLY (shared `isLimnThreadReply`: a teammate's "Still open:",
+// pushback or acknowledgement is that Limn's word on an existing point, not new input — gap 1). Both readers get the SAME filter, so what a run records as seen and what the sweeper
 // calls new still agree. ⚠ The THREADS themselves are not filtered: the review still assesses
 // every open thread, whoever wrote it.
-import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
+//
+// ⚠ A CONTINUED POINT IS JUDGED ON ITS CONTINUATION (docs/CLAUDE-REVIEW.md § Still-open points, gap 8).
+// A thread another thread continues (shared `continuationThreadMap`: the new root's still-open `c=`
+// marker) is sent ONCE, as the CONTINUATION: its id, place and state, with the earlier thread's
+// comments then the continuation's. So the run's judgement, its still-open writes and the author's
+// card all land where the point is open now. Only when the EARLIER thread is not rooted on Limn's
+// own finding (that one belongs to the follow-up, which follows the continuation itself).
+import { continuationThreadMap, isLimnThreadReply } from '@pierre-review/shared';
+import { and, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { globalAutomationUserIds } from './automation-ids.js';
 import { trueAuthorId } from './limn-bots.js';
@@ -158,6 +167,8 @@ export async function newestReviewCommentTimes(
       databaseId: rc.databaseId,
       authorId: rc.authorId,
       authorLogin: users.githubLogin,
+      // A thread ROOT (the earliest comment): a Limn reply is never one (`isLimnThreadReply` below).
+      isRoot: sql<number>`not exists (select 1 from review_comments rc2 where rc2.thread_id = ${rc.threadId} and (rc2.created_at < ${rc.createdAt} or (rc2.created_at = ${rc.createdAt} and rc2.id < ${rc.id})))`,
     })
     .from(rc)
     .innerJoin(rt, eq(rt.id, rc.threadId))
@@ -179,7 +190,10 @@ export async function newestReviewCommentTimes(
     accountGithubLogin(accountId),
   ]);
   const kept = rows.filter(
-    (r) => !isLimnPostedComment(r, own.get(r.prId), login) && (!countsAuthor || countsAuthor(r.authorId ?? null)),
+    (r) =>
+      !isLimnPostedComment(r, own.get(r.prId), login) &&
+      !(!r.isRoot && isLimnThreadReply(r.body)) &&
+      (!countsAuthor || countsAuthor(r.authorId ?? null)),
   );
   if (kept.length === 0) return out;
   // Which of those threads are rooted on Limn's own finding: the root is the thread's FIRST comment
@@ -336,10 +350,21 @@ export async function loadReviewThreadsForReview(
     byThread.set(r.threadId, list);
   }
 
+  const continuations = continuationThreadMap(
+    rows.map((r) => ({ threadId: r.threadId, databaseId: r.databaseId, body: r.body, createdAt: r.createdAt.getTime(), id: r.commentId })),
+  );
+  // Each continuation's earlier (non-own) thread, filled in the loop below.
+  // Continuation thread id → EVERY earlier thread continued into it (a chain A→B→C sends A and B both
+  // to C; an older Limn could continue a continuation), merged oldest first.
+  const continuedFrom = new Map<number, ReviewThreadForReview[]>();
+  const continuedTo = new Map<number, number>();
   let newest: Date | null = null;
   let newestOwn: Date | null = null;
   let ownThreads = 0;
   const threads: ReviewThreadForReview[] = [];
+  const ownRooted = new Set<number>();
+  // Own-rooted threads are sent only as a continuation; their kept comments are kept for that.
+  const ownKept = new Map<number, { root: (typeof rows)[number]; kept: typeof rows }>();
   for (const list of byThread.values()) {
     list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.commentId - b.commentId);
     const root = list[0]!;
@@ -347,12 +372,19 @@ export async function loadReviewThreadsForReview(
     const kept = list.filter((c) => !isLimnPostedComment(c, own, login));
     for (const c of kept) {
       if (root.isResolved) continue;
+      // A Limn REPLY (a teammate's "Still open:", pushback, acknowledgement — any Limn marker) is the
+      // review's word, never new input: it never moves the trigger (the sweeper's filter is the same).
+      if (c !== root && isLimnThreadReply(c.body)) continue;
       if (countsAuthor && !countsAuthor(c.authorId ?? null)) continue;
       if (!newest || c.createdAt > newest) newest = c.createdAt;
       if (rootIsOwn && (!newestOwn || c.createdAt > newestOwn)) newestOwn = c.createdAt;
     }
     // A thread rooted on Limn's own posted finding belongs to the follow-up, not here.
-    if (rootIsOwn) ownThreads += 1;
+    if (rootIsOwn) {
+      ownThreads += 1;
+      ownRooted.add(root.threadId);
+      ownKept.set(root.threadId, { root, kept });
+    }
     if (rootIsOwn || kept.length === 0) continue;
     const first = kept[0]!;
     const last = kept[kept.length - 1]!;
@@ -375,6 +407,61 @@ export async function loadReviewThreadsForReview(
       commitsAfterFirstComment: after(first.createdAt),
       commitsAfterLastComment: after(last.createdAt),
     });
+  }
+  // CONTINUATIONS (header): the earlier thread is sent as its continuation, once.
+  for (const t of threads) {
+    const to = continuations.get(t.threadId);
+    if (to != null && !ownRooted.has(t.threadId)) {
+      const list = continuedFrom.get(to) ?? [];
+      list.push(t);
+      continuedFrom.set(to, list);
+      continuedTo.set(t.threadId, to);
+    }
+  }
+  if (continuedTo.size > 0) {
+    const byId = new Map(threads.map((t) => [t.threadId, t]));
+    const merged: ReviewThreadForReview[] = [];
+    for (const t of threads) {
+      if (continuedTo.has(t.threadId) || continuedFrom.has(t.threadId)) continue;
+      merged.push(t);
+    }
+    const firstAt = (t: ReviewThreadForReview): number => t.comments[0]?.createdAt?.getTime() ?? 0;
+    for (const [to, list] of continuedFrom) {
+      const froms = [...list].sort((a, b) => firstAt(a) - firstAt(b) || a.threadId - b.threadId);
+      const from = froms[0]!;
+      const cont = byId.get(to);
+      const own = ownKept.get(to);
+      const rootRow = cont != null ? null : (own?.root ?? byThread.get(to)?.[0]);
+      if (cont == null && rootRow == null) {
+        merged.push(...froms);
+        continue;
+      }
+      const contComments = cont?.comments ?? (own?.kept ?? []).map((c) => ({
+        authorLogin: c.authorLogin ?? null,
+        authorIsBot: c.authorId != null && bots.has(c.authorId),
+        createdAt: c.createdAt,
+        body: (c.body ?? c.excerpt ?? '').trim(),
+      }));
+      const comments = [...froms.flatMap((f) => f.comments), ...contComments];
+      const last = comments[comments.length - 1]!;
+      if (own != null) ownThreads -= 1;
+      merged.push({
+        threadId: to,
+        path: cont?.path ?? rootRow!.path,
+        line: cont?.line ?? rootRow!.line,
+        isOutdated: cont?.isOutdated ?? rootRow!.isOutdated,
+        derivedState: cont?.derivedState ?? rootRow!.derivedState,
+        isResolved: cont?.isResolved ?? rootRow!.isResolved === true,
+        url:
+          cont?.url ??
+          (rootRow!.databaseId ? `https://github.com/${pr.owner}/${pr.name}/pull/${pr.number}#discussion_r${rootRow!.databaseId}` : from.url),
+        comments,
+        commitsAfterFirstComment: from.commitsAfterFirstComment,
+        commitsAfterLastComment: after(last.createdAt),
+      });
+    }
+    threads.length = 0;
+    threads.push(...merged);
   }
   threads.sort((a, b) => a.threadId - b.threadId);
   return { threads, newestCommentAt: newest, newestOwnThreadCommentAt: newestOwn, ownThreadCount: ownThreads };

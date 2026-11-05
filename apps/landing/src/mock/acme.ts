@@ -640,6 +640,7 @@ export const SETUP_SLACK = {
   desc: 'Sends this workspace’s Pending board, sprint summary, merges and auto reviews to a Slack channel.',
   stored: '•••••••• (unchanged)',
   storedHint: 'A webhook is stored. Enter a new URL to replace it.',
+  onePerChannel: 'Only one person per channel should set this up — each Limn posts its own copy.',
   cadences: [
     { id: 'off', label: 'Off (paused, channel kept)' },
     { id: 'daily', label: 'Daily' },

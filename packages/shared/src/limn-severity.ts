@@ -137,6 +137,32 @@ export function limnFindingPost(
   return null;
 }
 
+// ── LIMN'S REPLIES ARE BOTS TOO (docs/TEAM-REVIEW.md § 8, gap 1 settled 2026-11-05) ─────────────────
+// Every reply Limn writes on a review thread carries one of Limn's hidden markers: a pushback
+// (`pierre:claude-review-pushback`), an acknowledgement or resolve reply ("Addressed in abc1234.",
+// `pierre:claude-review-finding`), a "Still open:" reply (finding + still-open markers), and the
+// reader's "Post reply" of a drafted answer. Those words are the review's, not the person's, so sync
+// stores such a reply under the poster's `limn:` bot exactly like a finding. A person's own reply has
+// no marker (they cannot type a hidden comment by accident; a GitHub quote-reply copies rendered
+// text, and quoted `>` lines are ignored here anyway).
+
+const LIMN_ANY_MARKER_RE = /<!--\s*pierre:claude-review/i;
+
+/**
+ * Is this review-thread REPLY (never a thread root) one Limn wrote? True when the body carries any
+ * Limn hidden marker outside a quoted (`>`) line. Pure.
+ */
+export function isLimnThreadReply(body: string | null | undefined): boolean {
+  if (typeof body !== 'string' || body === '') return false;
+  if (!LIMN_ANY_MARKER_RE.test(body)) return false;
+  const unquoted = body
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((l) => !/^\s*>/.test(l))
+    .join('\n');
+  return LIMN_ANY_MARKER_RE.test(unquoted);
+}
+
 /** A finding's severity as the ML severity scale reads it, for its badge. */
 export const LIMN_ML_SEVERITY: Record<LimnSeverity, MlSeverity> = {
   blocker: 'critical',

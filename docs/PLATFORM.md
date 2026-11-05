@@ -886,6 +886,10 @@ The host hands the platform `host.appWebUrl` (the SPA's browser-facing base) for
 and posted to this channel; no row ⇒ nothing.
 
 Slack is a TEAM feature: no personal tab, no card ABOUT the configuring account, never its name.
+⚠ **ONE PERSON PER CHANNEL.** Limn runs on each reader's machine, so two teammates who point
+their digest at the same channel BOTH post — nothing de-duplicates across machines. The Slack
+section says so in one visible line ("Only one person per channel should set this up — each Limn
+posts its own copy."); docs/TEAM-REVIEW.md § 13, gap 9.
 (Until 2026-10-22 it was strictly Pro, `slackDigest`, 402 on every route; it is ungated now.)
 
 **WHAT THE MESSAGE SAYS — the TEAM tabs of the Pending board** (`slack/pending-blocks.ts`),

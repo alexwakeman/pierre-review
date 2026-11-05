@@ -1958,6 +1958,8 @@ export const ciReviewItems = sqliteTable(
 //   reply:<thread node>:<head>   one "Still open:" reply per thread per head
 //   reopen:<thread node>         unresolve a resolved thread — once per thread, EVER
 //   escalate:<thread node>       a new inline thread continuing it (warning / blocker) — once, ever
+//   read:<thread node>:<head>    the LIVE read before those writes FAILED: nothing was written, and
+//                                nothing is tried again on that thread at that head (status `failed`)
 // Tenancy: the composite FK onto pull_requests (cascade), like claude_thread_checks.
 export const claudeStillOpenPosts = sqliteTable(
   'claude_still_open_posts',
@@ -1972,7 +1974,8 @@ export const claudeStillOpenPosts = sqliteTable(
     threadId: integer('thread_id'),
     threadNodeId: text('thread_node_id').notNull(),
     claimKey: text('claim_key').notNull(),
-    action: text('action', { enum: ['reply', 'reopen', 'escalate'] }).notNull(),
+    // `read` (no migration: a plain text column) records a failed live read — nothing was written.
+    action: text('action', { enum: ['reply', 'reopen', 'escalate', 'read'] }).notNull(),
     // The run that judged the point open (a pair: its second half) and the head it read.
     reviewId: integer('review_id').notNull(),
     headSha: text('head_sha').notNull(),

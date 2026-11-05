@@ -81,6 +81,7 @@ import {
   type AutoPostScope,
   type AutoPostSkipReason,
   type AutoVerdictEvent,
+  type ClaudeApprovalWithdrawal,
   type ClaudeAutoPostRecord,
   type ClaudeAutoVerdictRecord,
   type ClaudeFinding,
@@ -90,7 +91,7 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
 import type { StillOpenDeps } from './still-open.js';
-import { stillOpenCountOf } from './open-point-prose.js';
+import { earlierOpenForRuns, type EarlierOpen } from './earlier-open.js';
 import type { PostReviewFinding } from '../../platform/contract.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { similarTitles } from './settled-by-reply.js';
@@ -913,7 +914,12 @@ async function autoPostReview(
   // manual run keeps the Post button.
   const pressed = isPressedPost(review);
   if (review.trigger !== 'auto' && !pressed) return { kind: 'off' };
-  if (!pressed && !ws.settings.enabled) return { kind: 'off' };
+  if (!pressed && !ws.settings.enabled) {
+    // "KEEP IT IN LIMN" posts nothing — but Limn's OWN earlier automatic approval is still corrected
+    // (gap 7): a later auto run at a new head that does not approve withdraws it.
+    await withdrawApprovalWhenKept(ctx, { accountId, prId, review, pairFirstReviewId: pairFirstReviewId ?? null }, ws, deps);
+    return { kind: 'off' };
+  }
   if (review.autoPost != null) return { kind: 'already_claimed' };
   // THE PAIR'S FIRST HALF, when it is usable: the same PR and head, an auto run that succeeded and
   // that nothing has claimed. Otherwise this run posts alone.
@@ -942,9 +948,11 @@ async function autoPostReview(
   const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
   // WHY NOT APPROVED, from the findings and the model(s) — only while the auto verdict is on.
   const verdictRuns: VerdictRun[] = runs.map((r) => ({ by: aiRunProviderName(r), verdict: r.verdict, summary: r.summary }));
-  // Earlier points the run(s) hold open name themselves in the line ("1 earlier point is still open.").
-  const stillOpen = stillOpenCountOf(runs.map((r) => ({ followUpItems: r.followUp?.items, threadAssessments: r.threadAssessments })));
-  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, stillOpen) : null;
+  // EARLIER POINTS THE RUN(S) HOLD OPEN (decision D1, ./earlier-open.ts): an earlier blocker or
+  // warning still open holds the verdict like a finding; the rest name themselves in the line
+  // ("1 earlier point is still open.").
+  const earlierOpen: EarlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, earlierOpen) : null;
   // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
   // other writer has it, and its findings leave this post.
   const claimFirst = async (rec: ClaudeAutoPostRecord): Promise<boolean> =>
@@ -970,7 +978,7 @@ async function autoPostReview(
   };
 
   const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict
-    ? autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers)
+    ? autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen)
     : null;
   // A run that never wanted more than a COMMENT is recorded with its reason from the start (shown in
   // Limn whatever happens next).
@@ -998,7 +1006,7 @@ async function autoPostReview(
   // LIFTING LIMN'S OWN BLOCK: a run with NO blocker (whatever the auto-verdict switch says now) may
   // withdraw an earlier AUTOMATIC request for changes of Limn's that still stands. A DB pre-check
   // first, so an ordinary run costs no extra GitHub read.
-  const noBlocker = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers) !== 'REQUEST_CHANGES';
+  const noBlocker = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) !== 'REQUEST_CHANGES';
   // ⚠ "No blocker" from this run's OWN findings is not enough to lift: an earlier blocker the run
   // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows. (A pair: either
   // half's.)
@@ -1009,7 +1017,7 @@ async function autoPostReview(
   // WITHDRAWING LIMN'S OWN APPROVAL (./approval-withdraw.ts): a run at a NEW head that does not
   // approve (whatever the auto-verdict switch says now) dismisses Limn's earlier AUTOMATIC approval
   // that still stands, BEFORE it posts. A DB pre-check first, so an ordinary run reads nothing more.
-  const runApproves = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers) === 'APPROVE';
+  const runApproves = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) === 'APPROVE';
   const limnApprovals = !facts.authorIsMe
     ? await loadLimnAutoApprovals(ctx, accountId, prId, reviewId)
     : new Map<string, LimnAutoApproval>();
@@ -1185,7 +1193,7 @@ async function autoPostReview(
   // so the review below never sits under a stale approval.
   let withdrew = false;
   if (withdrawFrom != null) {
-    const message = withdrawMessageForRun(blockerWarningCounts(allFindings), review.headSha);
+    const message = withdrawMessageForRun(blockerWarningCounts(allFindings, earlierOpen), review.headSha);
     const w = await withdrawApproval(
       ctx,
       { accountId, prId, approval: withdrawFrom, why: 'run', headSha: review.headSha, message, byReviewId: reviewId },
@@ -1431,6 +1439,70 @@ async function autoPostReview(
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return { kind: 'done', record: final };
+}
+
+/**
+ * WITHDRAWAL WITH POSTING OFF (gap 7, 2026-11-05). The workspace keeps auto reviews in Limn, so this
+ * AUTO run posts nothing — yet an approval Limn itself sent automatically on an OLDER head must not
+ * stay in force on GitHub once a later automatic run does not approve. The same rule as the posting
+ * path (3b'): the verdict by `autoVerdictFor` (earlier points included), Limn's own approval by STORED
+ * id only (never a hand approval or a Post-button one), read LIVE as the reader's standing review,
+ * the PR open, not a draft and still at the reviewed head; then `withdrawApproval` — claimed on the
+ * approving run's record BEFORE the dismissal, once, never retried, the same message. Then settle.
+ * ⚠ AUTO runs only: a manual "Review only" run never writes (the caller returns before this).
+ * Returns the withdrawal record, or null when nothing was attempted. Never throws.
+ */
+export async function withdrawApprovalWhenKept(
+  ctx: AgentContext,
+  a: { accountId: number; prId: number; review: ClaudeReview; pairFirstReviewId: number | null },
+  ws: { pairStrictness: VerdictRules['pairStrictness']; settings: { approveLeftovers: VerdictRules['approveLeftovers'] } },
+  deps: AutoPostDeps,
+): Promise<ClaudeApprovalWithdrawal | null> {
+  const { accountId, prId, review } = a;
+  try {
+    if (review.trigger !== 'auto' || review.status !== 'succeeded') return null;
+    // DB pre-check first: an ordinary run (no approval of Limn's on an older head) reads nothing more.
+    const approvals = await loadLimnAutoApprovals(ctx, accountId, prId, review.id);
+    if (![...approvals.values()].some((x) => x.headSha !== review.headSha && x.withdrawal == null)) return null;
+    // A pair: both halves at this head decide together, as on the posting path.
+    let first: ClaudeReview | null = null;
+    if (a.pairFirstReviewId != null && a.pairFirstReviewId !== review.id) {
+      const f = await getClaudeReviewById(ctx, a.pairFirstReviewId, accountId);
+      if (f != null && f.prId === prId && f.headSha === review.headSha && f.status === 'succeeded' && f.trigger === 'auto') first = f;
+    }
+    const runs: ClaudeReview[] = first ? [first, review] : [review];
+    const allFindings = runs.flatMap((r) => r.findings);
+    const rules: VerdictRules = { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers };
+    const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
+    const earlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+    if (autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) === 'APPROVE') return null;
+
+    const pctx = await getReviewPostContext(ctx, review.id, accountId);
+    if (!pctx) return null;
+    const live = await deps.livePr(pctx.owner, pctx.name, pctx.prNumber);
+    if (live.merged || live.state !== 'open' || live.draft) return null;
+    // A judgement of an older head says nothing about the code on GitHub now: a later run decides.
+    if (live.headSha !== pctx.reviewHeadSha) return null;
+    const [login, reviews] = await Promise.all([deps.accountLogin(accountId), deps.liveReviews(pctx.owner, pctx.name, pctx.prNumber)]);
+    const standing = ownStandingReview(reviews, login, new Set(), new Set(approvals.keys()));
+    if (standing.state !== 'LIMN_AUTO_APPROVED' || standing.reviewId == null) return null;
+    const approval = approvals.get(standing.reviewId);
+    if (approval == null || approval.headSha === review.headSha || approval.withdrawal != null) return null;
+    const message = withdrawMessageForRun(blockerWarningCounts(allFindings, earlierOpen), review.headSha);
+    const w = await withdrawApproval(
+      ctx,
+      { accountId, prId, approval, why: 'run', headSha: review.headSha, message, byReviewId: review.id },
+      (id, msg) =>
+        deps.dismissReview
+          ? deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, id, msg)
+          : Promise.resolve({ ok: false as const, message: 'Dismissing is not available.' }),
+    );
+    if (w?.status === 'withdrawn') await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    return w;
+  } catch (err) {
+    ctx.log.warn(`auto review ${review.id}: could not withdraw Limn's approval: ${errText(err)}`);
+    return null;
+  }
 }
 
 /** Did this auto-post outcome go down the posting path (posted, or nothing new to post)? Pure. */

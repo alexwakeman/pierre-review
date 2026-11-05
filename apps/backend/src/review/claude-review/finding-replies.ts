@@ -16,7 +16,12 @@
 // written by people on an attacker-influenced pull request: prompts.ts fences it with the run's
 // nonce as data, never instructions.
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { PUSHBACK_REPLY_MARKER, type FindingAutoResolveRecord, type FindingPushbackRecord } from '@pierre-review/shared';
+import {
+  continuationThreadMap,
+  PUSHBACK_REPLY_MARKER,
+  type FindingAutoResolveRecord,
+  type FindingPushbackRecord,
+} from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { automationVendorFor, isLikelyBot } from '../../sync/bot-detection.js';
 import { findFindingThread, type ThreadComment, type ThreadRow } from './finding-thread.js';
@@ -316,11 +321,16 @@ export async function loadFindingThreadContexts(
   }
   const taken = new Set<number>();
   const byOwner = new Map<number, FindingThreadContext | null>();
+  const continuations = continuationThreadMap(comments);
   for (const id of findingIds) {
     const owner = owners.get(id);
     if (!owner) continue;
     if (!byOwner.has(owner.id)) {
-      const thread = findFindingThread(owner, threads, comments, accountLogin, taken);
+      const found = findFindingThread(owner, threads, comments, accountLogin, taken);
+      // GAP 8: a point continued in a new thread (still-open.ts) is followed THERE — the reader's own
+      // continuation only (a teammate's is their Limn's thread, judged as one).
+      const thread = found ? followOwnContinuation(found, threads, comments, continuations, accountLogin) : null;
+      if (thread && thread !== found) taken.add(found!.id);
       if (!thread) {
         byOwner.set(owner.id, null);
       } else {
@@ -341,6 +351,27 @@ export async function loadFindingThreadContexts(
     if (ctxFor) out.set(id, ctxFor);
   }
   return out;
+}
+
+/**
+ * The reader's OWN continuation of a thread (shared `continuationThreadMap`: its root carries the
+ * still-open `c=` marker naming this thread's root), else the thread itself. Own = the root's poster is
+ * the account's login AND it carries Limn's marker — the provenance `findFindingThread` requires.
+ */
+export function followOwnContinuation<T extends { id: number }>(
+  thread: T,
+  threads: readonly T[],
+  comments: readonly ThreadComment[],
+  continuations: ReadonlyMap<number, number>,
+  accountLogin: string | null,
+): T {
+  const next = continuations.get(thread.id);
+  if (next == null || !accountLogin) return thread;
+  const to = threads.find((t) => t.id === next);
+  if (!to) return thread;
+  let root: ThreadComment | undefined;
+  for (const c of comments) if (c.threadId === next && (!root || c.createdAt < root.createdAt)) root = c;
+  return root != null && sameLogin(root.authorLogin, accountLogin) && LIMN_MARKER.test(root.body ?? '') ? to : thread;
 }
 
 /** The account's own GitHub login (the author half of "Limn posted it"). */

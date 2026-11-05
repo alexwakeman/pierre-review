@@ -12,7 +12,7 @@ import type { AgentContext } from '../agent-context.js';
 import { readVerdictRulesForPr } from './auto-settings.js';
 import { findingsNotApproved, heldReasonText, type VerdictRun } from './auto-verdict.js';
 import { getClaudeReviewById } from './persist.js';
-import { stillOpenCountOf } from './open-point-prose.js';
+import { earlierOpenForRuns } from './earlier-open.js';
 import { prAuthorIsAccount } from '../../coding/ai-fix/auto-fix.js';
 
 /** The reason auto-posting recorded on a run, or null (none, or it approved). */
@@ -54,8 +54,9 @@ export async function notApprovedForView(
         judging = ok;
       }
     }
-    const stillOpen = stillOpenCountOf(judging.map((r) => ({ followUpItems: r.followUp?.items, threadAssessments: r.threadAssessments })));
-    const why = findingsNotApproved(runs, review.findings, rules, stillOpen);
+    // Earlier points still open hold it too (decision D1): the same fold the auto post reads.
+    const earlier = await earlierOpenForRuns(ctx, review.prId, judging);
+    const why = findingsNotApproved(runs, review.findings, rules, earlier);
     if (why != null) return why;
     if (await prAuthorIsAccount(ctx, accountId, review.prId)) {
       return { heldReason: 'own_pr', text: heldReasonText({ heldReason: 'own_pr' })! };

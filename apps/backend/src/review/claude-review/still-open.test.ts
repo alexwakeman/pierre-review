@@ -17,6 +17,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  continuationThreadMap,
   limnFindingPost,
   limnReviewMarker,
   parseLimnReviewMarker,
@@ -29,6 +30,7 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import {
   claimKey,
+  mergeLiveFacts,
   planStillOpen,
   stillOpenCandidates,
   stillOpenReplyBody,
@@ -175,6 +177,66 @@ describe('the per-thread rule', () => {
   });
 });
 
+describe('D2, continuations and the live read (pure)', () => {
+  const base = { resolved: true, reopenedBefore: false, repliedAtHead: false, escalatedBefore: false, severity: 'warning' as const };
+  it("the reader's own PR: never a reopen or a new thread; a resolved thread gets one reply, ever", () => {
+    expect(planStillOpen({ ...base, resolved: false, ownPr: true })).toEqual({ reply: true, reopen: false, escalate: false });
+    expect(planStillOpen({ ...base, ownPr: true })).toEqual({ reply: true, reopen: false, escalate: false });
+    expect(planStillOpen({ ...base, ownPr: true, repliedBefore: true })).toEqual({ reply: false, reopen: false, escalate: false });
+    expect(planStillOpen({ ...base, ownPr: true, reopenedBefore: true, severity: 'blocker' })).toEqual({ reply: true, reopen: false, escalate: false });
+    // A teammate's PR: as before.
+    expect(planStillOpen({ ...base, ownPr: false })).toEqual({ reply: true, reopen: true, escalate: false });
+  });
+  it('a continuation thread is never continued again', () => {
+    const f = stillOpenThreadFacts({
+      thread: { githubNodeId: 'TC', isResolved: true },
+      threadComments: [{ body: `**Warning**\n\nThis point is still open.\n\n${stillOpenMarker({ headSha: HEAD, continuesCommentId: '500' })}` }],
+      prComments: [],
+      rootDatabaseId: '900',
+      headSha: HEAD,
+      claims: new Set([claimKey('reopen', 'TC')]),
+      severity: 'warning',
+    });
+    expect(f.escalatedBefore).toBe(true);
+    expect(planStillOpen(f).escalate).toBe(false);
+  });
+  it('the live read: a teammate reply or reopen not synced yet stops the write; resolved is the live state', () => {
+    const synced = { ...base, repliedBefore: false, ownPr: false };
+    const ids = { githubNodeId: 'T1', rootDatabaseId: '500', headSha: HEAD };
+    const mate = { body: stillOpenReplyBody('x', HEAD, '_f_', true) };
+    const live = mergeLiveFacts(synced, { isResolved: true, comments: [{ body: 'root' }, mate], prRoots: [] }, ids);
+    expect(live).toMatchObject({ reopenedBefore: true, repliedAtHead: true });
+    // No second reply, no second reopen (a warning reopened once may now be continued instead).
+    expect(planStillOpen(live)).toMatchObject({ reply: false, reopen: false });
+    // A teammate's continuation (c=500) on the PR, seen only live.
+    const cont = mergeLiveFacts(
+      { ...synced, reopenedBefore: true },
+      { isResolved: true, comments: [{ body: 'root' }], prRoots: [{ body: `x ${stillOpenMarker({ headSha: HEAD, continuesCommentId: '500' })}` }] },
+      ids,
+    );
+    expect(planStillOpen(cont).escalate).toBe(false);
+    // Unresolved on GitHub now: a reply, no reopen.
+    expect(planStillOpen(mergeLiveFacts(synced, { isResolved: false, comments: [{ body: 'root' }], prRoots: [] }, ids))).toEqual({
+      reply: true,
+      reopen: false,
+      escalate: false,
+    });
+  });
+  it('continuationThreadMap: root c= only, the oldest wins, chains followed', () => {
+    const m = stillOpenMarker;
+    const map = continuationThreadMap([
+      { threadId: 1, databaseId: '100', body: 'a', createdAt: 1 },
+      { threadId: 1, databaseId: '101', body: `reply ${m({ headSha: HEAD, continuesCommentId: '100' })}`, createdAt: 2 },
+      { threadId: 2, databaseId: '200', body: `new ${m({ headSha: HEAD, continuesCommentId: '100' })}`, createdAt: 5 },
+      { threadId: 3, databaseId: '300', body: `later ${m({ headSha: HEAD, continuesCommentId: '100' })}`, createdAt: 9 },
+      { threadId: 4, databaseId: '400', body: `chain ${m({ headSha: HEAD, continuesCommentId: '200' })}`, createdAt: 10 },
+    ]);
+    expect(map.get(1)).toBe(4);
+    expect(map.get(2)).toBe(4);
+    expect(map.has(3)).toBe(false);
+  });
+});
+
 describe('which points a run holds open', () => {
   const ta = (over: Partial<ClaudeThreadAssessment> & { threadId: number }): ClaudeThreadAssessment =>
     ({
@@ -182,7 +244,7 @@ describe('which points a run holds open', () => {
       excerpt: '', commentCount: 1, lastCommentAt: null, url: null, validity: 'valid', addressed: 'not_addressed',
       explanation: 'Still unhandled.', reason: 'The null case is not handled.', draftReply: null, assessedAtHead: HEAD, ...over,
     }) as ClaudeThreadAssessment;
-  it("a person's thread and a Limn finding's; never another bot's; a disputed reply writes nothing here", () => {
+  it("a person's thread and a Limn finding's; never another bot's; a disputed reply is marked (written only when resolved)", () => {
     const c = stillOpenCandidates(
       [
         {
@@ -202,7 +264,10 @@ describe('which points a run holds open', () => {
       [1, 'thread', null],
       [3, 'thread', 'blocker'],
       [5, 'follow_up', 'warning'],
+      [6, 'follow_up', 'blocker'],
     ]);
+    expect(c.find((x) => x.threadId === 6)?.disputed).toBe(true);
+    expect(c.find((x) => x.threadId === 5)?.disputed).toBeUndefined();
   });
   it("a pair: the later half's word on a thread wins", () => {
     const c = stillOpenCandidates(
@@ -290,6 +355,8 @@ beforeAll(async () => {
   await runMigrations();
   const q = await import('../../db/queries.js');
   await db.insert(schema.accounts).values({ id: 1, githubUserId: 'U_me', githubLogin: 'me', isLocal: true }).onConflictDoNothing().execute();
+  // The migrations may have made the local account already (no login): give it the reader's login.
+  await db.update(schema.accounts).set({ githubLogin: 'me' }).where((await import('drizzle-orm')).eq(schema.accounts.id, 1)).execute();
   for (const login of ['me', 'bob', 'robin']) {
     await db
       .insert(schema.users)
@@ -322,11 +389,11 @@ afterAll(async () => {
   for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
 });
 
-async function pr(): Promise<number> {
+async function pr(author: 'bob' | 'me' = 'bob'): Promise<number> {
   seq += 1;
   const [p] = await db
     .insert(schema.pullRequests)
-    .values({ githubNodeId: `PR_${seq}`, accountId: 1, repoId, number: seq, title: `pr ${seq}`, state: 'open', isDraft: false, headSha: HEAD, authorId: users.bob, openedAt: new Date(), updatedAt: new Date() })
+    .values({ githubNodeId: `PR_${seq}`, accountId: 1, repoId, number: seq, title: `pr ${seq}`, state: 'open', isDraft: false, headSha: HEAD, authorId: users[author], openedAt: new Date(), updatedAt: new Date() })
     .returning()
     .execute();
   return p.id;
@@ -383,11 +450,28 @@ async function judgingRun(prId: number, threadId: number, addressed: 'not_addres
   return id;
 }
 
+// GitHub's live word, by default the synced rows (a test overrides it to model a teammate's write
+// that has not synced yet, or a failed read).
+async function syncedLive(node: string) {
+  const { eq } = await import('drizzle-orm');
+  const [t] = await db.select().from(schema.reviewThreads).where(eq(schema.reviewThreads.githubNodeId, node)).execute();
+  const all = await db.select().from(schema.reviewComments).where(eq(schema.reviewComments.prId, t.prId)).execute();
+  const sorted = all.sort((a: any, b: any) => a.createdAt - b.createdAt || a.id - b.id);
+  const roots = new Map<number, any>();
+  for (const c of sorted) if (!roots.has(c.threadId)) roots.set(c.threadId, c);
+  return {
+    isResolved: !!t.isResolved,
+    comments: sorted.filter((c: any) => c.threadId === t.id).map((c: any) => ({ body: c.body })),
+    prRoots: [...roots.values()].map((c: any) => ({ body: c.body })),
+  };
+}
+
 function fakeDeps(over: Partial<StillOpenDeps> = {}): StillOpenDeps & { calls: string[] } {
   const calls: string[] = [];
   let n = 0;
   return {
     calls,
+    liveThread: vi.fn(async (_a: number, node: string) => syncedLive(node)),
     reply: vi.fn(async (_a, node, body) => {
       calls.push(`reply ${node} ${/r=1/.test(body) ? 'r=1' : ''}`.trim());
       return { commentId: `9${(n += 1)}` };
@@ -486,6 +570,206 @@ describe('claim before write, never retried (real DB)', () => {
     const again = fakeDeps();
     await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id }, again);
     expect(again.calls).toEqual([]);
+  });
+});
+
+describe('D2: the reader\'s own PR (real DB)', () => {
+  it('a resolved thread gets the reply only, never a reopen; once ever; a warning is never continued', async () => {
+    const p = await pr('me');
+    const t = await thread(p, { resolved: true, comments: [{ by: 'bob', body: 'Handle null.' }] });
+    const id = await judgingRun(p, t.id);
+    const d = fakeDeps();
+    const res = await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id }, d);
+    expect(d.calls).toEqual([`reply ${t.node}`]);
+    expect(res).toMatchObject({ replied: [t.id], reopened: [], escalated: [] });
+
+    // A still-open reply (any head) is already on the resolved thread: nothing more.
+    const t2 = await thread(p, {
+      resolved: true,
+      comments: [
+        { by: 'bob', body: 'Handle null.' },
+        { by: 'robin', poster: 'robin', body: stillOpenReplyBody('Not yet.', 'b'.repeat(40), '_f_', false) },
+      ],
+    });
+    const id2 = await judgingRun(p, t2.id);
+    const d2 = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id2 }, d2);
+    expect(d2.calls).toEqual([]);
+
+    // A Limn WARNING reopened once already: no new thread on the reader's own PR.
+    const warn = await thread(p, {
+      resolved: true,
+      comments: [
+        { by: 'robin', poster: 'robin', body: '**Warning**\n\nHandle null.\n\n<!-- pierre:claude-review-finding v=1 -->', dbId: '5151' },
+        { by: 'robin', poster: 'robin', body: stillOpenReplyBody('Not yet.', 'b'.repeat(40), '_f_', true) },
+      ],
+    });
+    const id3 = await judgingRun(p, warn.id);
+    const d3 = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id3 }, d3);
+    expect(d3.calls).toEqual([]);
+  });
+});
+
+describe('gap 2: a disputed reply on a resolved thread (real DB)', () => {
+  async function disputedRun(prId: number, threadId: number): Promise<number> {
+    const id = await persist.insertQueuedReview(ctx, prId, HEAD, 'claude-opus-5-5' as any, 1, [], 'auto');
+    await persist.saveReviewSuccess(ctx, id, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null, numTurns: 1,
+      excludedFiles: [], findings: [],
+      followUp: {
+        priorReviewId: 0, priorHeadSha: HEAD, headMoved: false,
+        items: [{ priorFindingId: 0, threadId, status: 'reply_disputed', severity: 'warning', explanation: 'The reply does not fix the null case.' }],
+      } as any,
+    });
+    return id;
+  }
+  it('resolved: "Still open:" + the reopen; unresolved: left to the one pushback', async () => {
+    const p = await pr();
+    const resolved = await thread(p, { resolved: true, comments: [{ by: 'me', poster: 'me', body: '**Warning**\n\nHandle null.\n\n<!-- pierre:claude-review-finding v=1 -->' }, { by: 'bob', body: 'Not needed.' }] });
+    const open = await thread(p, { resolved: false, comments: [{ by: 'me', poster: 'me', body: '**Warning**\n\nHandle null.\n\n<!-- pierre:claude-review-finding v=1 -->' }, { by: 'bob', body: 'Not needed.' }] });
+    const d = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: await disputedRun(p, resolved.id) }, d);
+    expect(d.calls).toEqual([`reply ${resolved.node} r=1`, `unresolve ${resolved.node}`]);
+    const d2 = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: await disputedRun(p, open.id) }, d2);
+    expect(d2.calls).toEqual([]);
+  });
+});
+
+describe('gap 3: read GitHub live before writing (real DB)', () => {
+  it("a teammate's reply and reopen GitHub has but sync has not: nothing is written", async () => {
+    const p = await pr();
+    const t = await thread(p, { resolved: true, comments: [{ by: 'bob', body: 'Handle null.' }] });
+    const id = await judgingRun(p, t.id);
+    const d = fakeDeps({
+      liveThread: vi.fn(async () => ({
+        isResolved: true,
+        comments: [{ body: 'Handle null.' }, { body: stillOpenReplyBody('Not yet.', HEAD, '_f_', true) }],
+        prRoots: [],
+      })),
+    });
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id }, d);
+    expect(d.calls).toEqual([]);
+    expect(d.liveThread).toHaveBeenCalledTimes(1);
+  });
+  it('a failed read writes nothing and records why (never tried again at this head)', async () => {
+    const p = await pr();
+    const t = await thread(p, { resolved: true, comments: [{ by: 'bob', body: 'Handle null.' }] });
+    const id = await judgingRun(p, t.id);
+    const d = fakeDeps({ liveThread: vi.fn(async () => { throw new Error('502 Bad Gateway'); }) });
+    const res = await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id }, d);
+    expect(d.calls).toEqual([]);
+    expect(res?.unread).toEqual([t.id]);
+    const rows = (await db.select().from(schema.claudeStillOpenPosts).execute()).filter((r: any) => r.prId === p);
+    expect(rows.map((r: any) => [r.action, r.status])).toEqual([['read', 'failed']]);
+    expect(rows[0].error).toMatch(/couldn't read the thread on GitHub/);
+    const again = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: id }, again);
+    expect(again.calls).toEqual([]);
+    expect(again.liveThread).not.toHaveBeenCalled();
+  });
+  it('nothing planned from the synced facts: no read at all', async () => {
+    const p = await pr();
+    const t = await thread(p, {
+      resolved: false,
+      comments: [{ by: 'bob', body: 'Handle null.' }, { by: 'robin', poster: 'robin', body: stillOpenReplyBody('x', HEAD, '_f_', false) }],
+    });
+    const d = fakeDeps();
+    await so.maybePostStillOpen(ctx, { accountId: 1, prId: p, reviewId: await judgingRun(p, t.id) }, d);
+    expect(d.liveThread).not.toHaveBeenCalled();
+  });
+});
+
+describe('gap 8: later runs and the author follow the continuation (real DB)', () => {
+  it('a chain A → B → C (an older Limn continued a continuation) sends A and B both, oldest first', async () => {
+    const p = await pr();
+    const now = Date.now();
+    const a = await thread(p, {
+      resolved: true,
+      comments: [
+        { by: 'robin', poster: 'robin', body: '**Warning**\n\nHandle null.\n\n<!-- pierre:claude-review-finding v=1 -->', dbId: '6300', at: now - 900_000 },
+        { by: 'bob', body: 'Done.', at: now - 850_000 },
+      ],
+    });
+    const b = await thread(p, {
+      resolved: true,
+      comments: [
+        { by: 'robin', poster: 'robin', body: `**Warning**\n\nStill open.\n\n<!-- pierre:claude-review-finding v=1 -->\n${stillOpenMarker({ headSha: HEAD, continuesCommentId: '6300' })}`, dbId: '6400', at: now - 800_000 },
+        { by: 'bob', body: 'Done again.', at: now - 750_000 },
+      ],
+    });
+    const c = await thread(p, {
+      resolved: false,
+      comments: [
+        { by: 'robin', poster: 'robin', body: `**Warning**\n\nStill open, again.\n\n<!-- pierre:claude-review-finding v=1 -->\n${stillOpenMarker({ headSha: HEAD, continuesCommentId: '6400' })}`, dbId: '6500', at: now - 700_000 },
+      ],
+    });
+    const { loadReviewThreadsForReview } = await import('../../db/review-threads-for-review.js');
+    const loaded = await loadReviewThreadsForReview(1, p);
+    const ids = loaded.threads.map((t) => t.threadId);
+    expect(ids).toContain(c.id);
+    expect(ids).not.toContain(a.id);
+    expect(ids).not.toContain(b.id);
+    const sent = loaded.threads.find((t) => t.threadId === c.id)!;
+    expect(sent.comments.map((x) => x.body)).toEqual([
+      expect.stringContaining('Handle null.'),
+      'Done.',
+      expect.stringContaining('Still open.'),
+      'Done again.',
+      expect.stringContaining('Still open, again.'),
+    ]);
+  });
+
+  it('the thread loader sends the continuation once; the still-open card moves to it', async () => {
+    const p = await pr();
+    const now = Date.now();
+    const orig = await thread(p, {
+      resolved: true,
+      comments: [
+        { by: 'robin', poster: 'robin', body: '**Warning**\n\nHandle null.\n\n<!-- pierre:claude-review-finding v=1 -->', dbId: '6100', at: now - 900_000 },
+        { by: 'bob', body: 'Done, I think.', at: now - 800_000 },
+      ],
+    });
+    const cont = await thread(p, {
+      resolved: false,
+      comments: [
+        {
+          by: 'me',
+          poster: 'me',
+          body: `**Warning**\n\nThis point is still open.\n\n<!-- pierre:claude-review-finding v=1 -->\n${stillOpenMarker({ headSha: HEAD, continuesCommentId: '6100' })}`,
+          dbId: '6200',
+          at: now - 700_000,
+        },
+        { by: 'bob', body: 'Looking.', at: now - 600_000 },
+      ],
+    });
+    const { loadReviewThreadsForReview } = await import('../../db/review-threads-for-review.js');
+    const loaded = await loadReviewThreadsForReview(1, p);
+    const ids = loaded.threads.map((t) => t.threadId);
+    expect(ids).toContain(cont.id);
+    expect(ids).not.toContain(orig.id);
+    const sent = loaded.threads.find((t) => t.threadId === cont.id)!;
+    expect(sent.isResolved).toBe(false);
+    expect(sent.comments.map((c) => c.body)).toEqual([expect.stringContaining('Handle null.'), 'Done, I think.', 'Looking.']);
+
+    // An earlier run judged the ORIGINAL thread still open: the card shows on the continuation.
+    await judgingRun(p, orig.id);
+    const [r] = await tj.getThreadJudgements(ctx, [p], 1);
+    expect(r!.judgements.find((j) => j.threadId === orig.id)?.stillOpen ?? null).toBeNull();
+    const moved = r!.judgements.find((j) => j.threadId === cont.id);
+    expect(moved?.stillOpen).toMatchObject({ threadResolved: false, path: 'src/a.ts' });
+    expect(moved?.resolved).toBe(false);
+  });
+  it("the follow-up, auto resolve and pushback follow the reader's OWN continuation only", async () => {
+    const { followOwnContinuation } = await import('./finding-replies.js');
+    const threads = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    const c = (threadId: number, body: string, authorLogin: string, createdAt: number, databaseId: string) => ({ threadId, body, authorLogin, createdAt, databaseId });
+    const contBody = `**Warning**\n\nx\n\n<!-- pierre:claude-review-finding v=1 -->\n${stillOpenMarker({ headSha: HEAD, continuesCommentId: '10' })}`;
+    const own = [c(1, 'root <!-- pierre:claude-review-finding v=1 -->', 'me', 1, '10'), c(2, contBody, 'me', 2, '20')];
+    expect(followOwnContinuation(threads[0]!, threads, own, continuationThreadMap(own), 'me').id).toBe(2);
+    const mate = [c(1, 'root <!-- pierre:claude-review-finding v=1 -->', 'me', 1, '10'), c(3, contBody, 'robin', 2, '30')];
+    expect(followOwnContinuation(threads[0]!, threads, mate, continuationThreadMap(mate), 'me').id).toBe(1);
   });
 });
 

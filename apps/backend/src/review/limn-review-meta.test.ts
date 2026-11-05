@@ -3,7 +3,10 @@
 // comment parser, and the post seam's marker keeping the prefix every reader matches.
 import { describe, expect, it } from 'vitest';
 import {
+  compareLimnVersions,
   hasLimnReviewMarker,
+  isLimnBelowTeamMinimum,
+  MIN_TEAM_LIMN_VERSION,
   limnReviewMarker,
   parseLimnReviewMarker,
   parsePostedLimnFinding,
@@ -177,5 +180,29 @@ describe('postedFindingDisplay (a posted finding shown like the reader’s own)'
       body: 'It is safer.',
       suggestion: 'if (!xs.length) return;',
     });
+  });
+});
+
+describe('compareLimnVersions / isLimnBelowTeamMinimum (docs/TEAM-REVIEW.md § 12)', () => {
+  it('orders by semver, numerically', () => {
+    expect(compareLimnVersions('0.1.188', '1.0.3')).toBeLessThan(0);
+    expect(compareLimnVersions('1.0.10', '1.0.3')).toBeGreaterThan(0);
+    expect(compareLimnVersions('1.0.3', '1.0.3')).toBe(0);
+    expect(compareLimnVersions('v1.0.3', '1.0.3')).toBe(0);
+    expect(compareLimnVersions('1.10.0', '1.9.9')).toBeGreaterThan(0);
+    expect(compareLimnVersions('1.0.3-beta.1', '1.0.3')).toBeLessThan(0);
+    expect(compareLimnVersions('1.0.3-beta.2', '1.0.3-beta.10')).toBeLessThan(0);
+    expect(compareLimnVersions('1.0', '1.0.3')).toBeNull();
+  });
+
+  it('counts an unknown or unreadable version as older', () => {
+    expect(MIN_TEAM_LIMN_VERSION).toBe('1.0.4');
+    expect(isLimnBelowTeamMinimum('0.1.188')).toBe(true);
+    expect(isLimnBelowTeamMinimum('1.0.3')).toBe(true);
+    expect(isLimnBelowTeamMinimum('1.0.4')).toBe(false);
+    expect(isLimnBelowTeamMinimum('1.1.0')).toBe(false);
+    expect(isLimnBelowTeamMinimum(null)).toBe(true);
+    expect(isLimnBelowTeamMinimum('')).toBe(true);
+    expect(isLimnBelowTeamMinimum('dev')).toBe(true);
   });
 });

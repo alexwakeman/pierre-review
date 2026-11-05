@@ -902,6 +902,20 @@ export function SparkleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A TEAMMATE'S LIMN IS REVIEWING THIS COMMIT RIGHT NOW: the AI sparkle, pulsing, in the AI signal
+// colour. Shown ONLY beside a live "is reviewing" / "Being reviewed by" claim — never on "reviewed".
+// Holds still under prefers-reduced-motion.
+export function ReviewingNowIcon({ size = 13, className, ...rest }: IconProps): JSX.Element {
+  return (
+    <SparkleIcon
+      size={size}
+      aria-hidden
+      className={`shrink-0 text-ai-signal motion-safe:animate-pulse${className ? ` ${className}` : ''}`}
+      {...rest}
+    />
+  );
+}
+
 // A spanner (an open-ended wrench) — A MODEL WRITES CODE: AI Fix (PR detail's AI Fix tab, the AI Fix
 // toast) and Implement story (the sprint card's Implement button, the build tab, the palette). One
 // mark for both; the hammer that once marked Implement story is gone. Never the merge resolver's wand. Drawn level (round-ended handle, open jaw on the right) and turned 45° so the jaw

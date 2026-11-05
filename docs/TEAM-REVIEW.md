@@ -2,7 +2,7 @@
 
 **Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
 diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
-2026-11-05 (Limn 1.0.3). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+2026-11-05 (Limn 1.0.4, the next release). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
@@ -77,8 +77,17 @@ commit with Claude, nobody else's Limn reviews that commit with Claude. Another 
 welcome: if Robin used Claude, Alex's Limn reviews with Codex only. If Robin ran both, Alex's runs
 nothing. A new commit starts the race again.
 
-This applies to **automatic** reviews only. A review you start yourself never checks or posts a
-claim. Claims are **on by default**.
+Only **automatic** reviews claim. A review you start yourself never waits, never posts an "is
+reviewing" line and is never refused. Two things still connect it to the team:
+
+- When it starts, your AI Review tab names a teammate who is reviewing, or has reviewed, the same
+  commit with the same model ("Robin Dunn is reviewing this commit with Claude"). Your run goes ahead.
+- When you post it ("Review and post", or the Post button), your Limn writes the same "reviewed" line
+  an automatic review writes ("alex reviewed · approved · 2 comments"). Teammates' automatic reviews
+  then step aside for that model on that commit. It is not written over a teammate's newer line, or
+  on your own PR.
+
+Claims are **on by default**.
 
 ### When an automatic review starts
 
@@ -101,8 +110,8 @@ stateDiagram-v2
   [*] --> Free
   Free --> Reviewing: a Limn posts "alex is reviewing with Claude"
   Reviewing --> Reviewing: renewed every 8 minutes while it runs
-  Reviewing --> Reviewed: "alex reviewed · 3 comments" (findings posted)
-  Reviewing --> Free: "alex reviewed · kept in Limn" (none of its findings posted)
+  Reviewing --> Reviewed: "alex reviewed · 3 comments" / "· approved" (a review reached GitHub)
+  Reviewing --> Free: "alex reviewed · kept in Limn" (nothing reached GitHub)
   Reviewing --> Free: "Cleared by alex: review didn't finish · free to claim"
   Reviewing --> Free: no renewal for 25 minutes (the lease ends)
   Reviewing --> Free: someone presses Clear (a confirm for a teammate's claim)
@@ -118,14 +127,17 @@ stateDiagram-v2
   Limn treats that posted review as the "reviewed" line as soon as it syncs it, instead of waiting
   out the 25 minutes.
 - **Free again:** a failure, a Stop, a skipped run ("Cleared by alex: auto review skipped · daily
-  auto-review limit reached"), a review whose findings were not posted ("· kept in Limn"), the Clear
+  auto-review limit reached"), a review that put nothing on GitHub ("· kept in Limn"), the Clear
   button on a live claim, or a lease that ran out (another Limn then posts "Cleared by alex: bob's
   claim expired"). Every free line except "kept in Limn" starts "Cleared by", which older Limns also
   read as free. Limn never posts a red line.
-- **⚠ "Kept in Limn" means none of that model's findings were posted**, not that nothing reached
-  GitHub: an approval with only nits (nits are not posted), a reason-only comment, or findings all
-  credited to the other half of a pair also read "kept in Limn". The commit is then free, and a
-  teammate's Limn reviews it again (gap 12).
+- **"Kept in Limn" means nothing reached GitHub.** Any review that did is "reviewed" and holds the
+  commit, with the verdict first: an approval with only nits (nits are not posted) reads "· approved";
+  a reason-only comment, or a pair review that holds only the other model's findings, reads "· no
+  comments". A review with nothing to say also reads "· no comments".
+- **A late line is never posted blind.** Before a run's final line ("reviewed" or "didn't finish"),
+  Limn reads the commit's lines. If a teammate has since reviewed the commit or holds a live claim (a
+  laptop slept past the lease), the late line is not posted and the teammate's line stands.
 - **Status lines are the one write Limn retries**: releasing a line, or a final line that failed, is
   retried up to 5 times. Everything else is written once.
 - **The author never holds a commit for the reviewers.** Because the author cannot approve, their
@@ -133,6 +145,9 @@ stateDiagram-v2
   Limn still steps aside for a reviewer's claim (their review would only be a comment on their own PR).
 - **If a claim cannot be read or written** (no write access, GitHub error), the review runs without
   a line. Claims never block a review outright.
+- **Never make a `limn/` line a required check** in branch protection or a ruleset: a line still
+  reading "reviewing" would block merges. Limn does not read branch rules, so it cannot warn per repo;
+  the claims setting's ⓘ says "Don't make limn/ lines required checks." (gap 11).
 
 ### Pairs and usage limits
 
@@ -147,10 +162,16 @@ stateDiagram-v2
 ### What you see when your Limn steps aside
 
 - AI Review tab: "Robin Dunn is reviewing this commit with Claude", or "…reviewed this commit with
-  Claude · 4 comments" (or "· not posted on GitHub" / "· posted on GitHub").
+  Claude · 4 comments" (or "· approved", "· posted on GitHub"). A teammate's live claim has a Clear
+  button, with a confirm. It is stored, so it is still there after Limn restarts, but only while the
+  claim's 25-minute lease could still run. Clear reads the commit's lines on GitHub first and posts
+  "Cleared by …" only if the newest line is still a claim: if the teammate has finished, it posts
+  nothing and the button goes. If GitHub cannot be read, it posts nothing.
 - Open PRs column: "Being reviewed by @robin" / "Reviewed by @robin".
+- While a teammate's Limn is reviewing **now**, that line is in full ink with a pulsing AI sparkle beside it (still under reduced motion); "reviewed" lines stay quiet.
 - No run is recorded, no daily allowance is spent. Your Limn looks again when the lease could end,
   every 30 minutes after a "reviewed", or at once on a new commit or when Robin's review syncs.
+- On your own PR, Robin's posted review still closes your fixed Limn threads: see § 6 Resolving.
 
 ---
 
@@ -177,7 +198,7 @@ flowchart TB
 | Steps aside for others | Yes, for a reviewer's claim on the same model. | Yes, for another reviewer's claim. |
 | Resolves its own threads when fixed | Yes, on by default ("Resolve my Limn threads when addressed"), after any run. | Only with the workspace's "Resolve Limn's threads once fixed" (off by default), on automatic runs. |
 | Auto AI Fix | Optional, off by default; at most 3 per PR a day; pushes only if "Push automatically" is on. | Never on someone else's PR. |
-| Writes on the other's threads | Never resolves a teammate's thread. May post "Still open:" on any open point, its own PR included (decision D2). | Never resolves a teammate's thread. May post one "Still open:" reply per thread per commit and reopen a thread once, ever (§ 6). |
+| Writes on the other's threads | Never resolves a teammate's thread. On its own PR, may post "Still open:" but never reopens a thread or starts a new one (decision D2). | Never resolves a teammate's thread. May post one "Still open:" reply per thread per commit and reopen a thread once, ever (§ 6). |
 
 How the two Limns read each other:
 
@@ -191,9 +212,10 @@ How the two Limns read each other:
 - **Own PR** means the PR's author login is yours. PRs opened by bots get no auto review and no
   automatic posting (a "Review and post" you press still posts). Drafts get no auto review, no
   automatic posting and no still-open writes; "Resolve my Limn threads" does act on your own drafts.
-- **⚠ The author's own threads may stay open.** When a reviewer's Limn has the commit, the author's
-  Limn steps aside, so no author run happens and "Resolve my Limn threads" never fires; the
-  reviewer's Limn never resolves a teammate's thread (gap 13).
+- **The author's own threads still close when a reviewer has the commit.** The author's Limn steps
+  aside, but it reads the reviewer's posted review: each of the author's Limn findings that review
+  found addressed at the PR's latest commit is resolved by the author's Limn (§ 6 Resolving). The
+  reviewer's Limn still never resolves a teammate's thread.
 - **Teammates' Limn posts wake your Limn.** A teammate's Limn findings count as review-bot comments,
   so a new teammate review can start a Check threads pass on every other Limn (within the 30 a day).
 
@@ -206,9 +228,9 @@ default), the posted verdict is chosen like this:
 
 ```mermaid
 flowchart TD
-  S[Run finished] --> B{Any open blocker?}
+  S[Run finished] --> B{Any open blocker?<br/>new, or an earlier one still open}
   B -- yes --> RC[Request changes]
-  B -- no --> W{Open warning?}
+  B -- no --> W{Open warning?<br/>new, or an earlier one still open}
   W -- yes --> C[Comment]
   W -- no --> M{Did the model approve?<br/>pair: both, unless set to relaxed}
   M -- no --> C
@@ -221,6 +243,12 @@ flowchart TD
   G -- clear --> SEND[Sent as chosen]
 ```
 
+- **Earlier points count too** (decision D1). If the review judges an earlier point still open and
+  knows its severity, it counts like a new finding: an earlier blocker means "request changes", an
+  earlier warning stops an approval, and earlier nits and questions follow "Approve with open
+  findings". The severity is known for Limn findings (yours or a teammate's Limn), reminders
+  included. A person's comment
+  has no severity, so it never stops an approval; it is named in the "Not approved" line only.
 - **Your own standing review wins.** If you approved or requested changes by hand, Limn never
   overrides it; it posts a comment. Limn's own earlier automatic verdict does not count as yours.
 - **Impact:** an approval can be limited by the PR's impact level (all levels allowed by default;
@@ -240,11 +268,11 @@ When the verdict is not an approval, the review ends with one line saying why. T
 
 | Situation | Line |
 |---|---|
-| Blockers or warnings open | "Not approved: 2 warnings are still open." |
+| Blockers or warnings open, new or earlier | "Not approved: 2 warnings are still open." · "Not approved: 1 earlier warning is still open." · "Not approved: a blocker and 2 earlier warnings are still open." |
 | A model asked for changes | "Not approved: Codex asked for changes. <its first sentence>" |
 | A model only commented | "Not approved: Claude left a comment, not an approval. No findings are open." (or "A nit is still open." / "1 earlier point is still open.") |
 | Pair, neither approved | "Not approved: neither Claude nor Codex approved. No findings are open." |
-| Leftovers not allowed | "Not approved: a question is still open." |
+| Leftovers not allowed | "Not approved: a question is still open." (or "1 earlier question is still open.") |
 | Gates | "your own pull request." · "your own review on GitHub still stands." · "the earlier request for changes still stands." · "High impact." · "couldn't read the earlier reviews on GitHub." · "GitHub refused it." |
 
 The own-PR, own-review, couldn't-read and refused reasons show in Limn only. If a review has nothing
@@ -271,9 +299,10 @@ sequenceDiagram
 
 - **A push alone never makes Limn withdraw anything** (since 1.0.1). Each repo's own branch rule or
   ruleset decides, per branch, and GitHub does the dismissing.
-- **A later review that does not approve** withdraws Limn's earlier automatic approval first, once,
-  only on the posting path (an automatic run with posting on, or "Review and post"). A run at the
-  same commit never withdraws.
+- **A later review that does not approve** withdraws Limn's earlier automatic approval first, once:
+  an automatic run, or "Review and post". This happens even when "When an auto review finishes" is
+  "Keep it in Limn": the approval is Limn's own earlier write, so Limn corrects it and posts nothing
+  else. A "Review only" run never writes. A run at the same commit never withdraws.
 - **Never touched:** an approval you gave by hand, one you sent with the Post button, or anyone
   else's approval.
 - **How Limn reads a dismissal:** a reviewer's newest verdict-type review decides their standing,
@@ -308,8 +337,8 @@ Never dismissed by this: any approval, a review typed by hand, a review sent wit
 
 Once a Limn review has judged a thread, its card shows that judgement instead: two pills for a
 comment ("Holds up / Partly / Doesn't hold" and "Addressed / Partly addressed / Open"), or one
-outcome pill for a Limn finding ("Not addressed"). Newest judgement wins. A Limn's own "Still open:"
-reply never counts as a reply.
+outcome pill for a Limn finding ("Not addressed"). Newest judgement wins. No Limn reply ("Still
+open:", a pushback, an acknowledgement, a resolve reply) counts as a reply.
 
 ### How a later review judges earlier comments
 
@@ -336,15 +365,25 @@ flowchart TD
   S -- nit, question, or a person's comment --> X[Leave it]
 ```
 
+On **the reader's own PR** (decision D2) Limn never reopens a thread and never starts a new one. It
+only replies: once per commit on an open thread, and once, ever, on a resolved thread.
+
 - Written only when the review is posted (automatic with posting on, or "Review and post"), and only
   if the PR has not moved past the reviewed commit. Never on another review bot's thread.
 - "Once" is known to every Limn: the hidden marker on the reply records the commit and the reopen.
   Every write is recorded before it happens and never retried.
-- A point already answered by a pushback (§ 7) is skipped — the pushback said it.
+- **Just before writing, Limn reads the thread on GitHub again.** If another Limn has replied at this
+  commit, reopened the thread or started a new one since the last sync, Limn writes nothing. If the
+  read fails, Limn writes nothing on that thread at that commit and records why.
+- **A disputed reply:** on an open thread, the one pushback (§ 7) says it, so nothing more is posted.
+  On a resolved thread (where pushback never goes), Limn treats it like any other open point.
+- **A new thread replaces the old one.** Later reviews judge the new thread, not the old one, and
+  the author's card and list point to it. A new thread is never followed by another new thread. (A
+  Limn before 1.0.4 could do that; a later review then gets every earlier thread of the chain, oldest
+  first, with the newest one.)
 - **What the author sees:** a "Robin's Limn: still open" pill on the thread, a "Still open (N)" list
   in the Overview's AI review card, and a My Turn card "Robin's Limn: still open on src/x.ts" while the
-  thread is unresolved, until they reply, push or resolve. (Needs AI on in the author's Limn. A
-  continuation thread gets no card — gap 8.)
+  thread is unresolved, until they reply, push or resolve. (Needs AI on in the author's Limn.)
 
 ### Resolving
 
@@ -353,7 +392,20 @@ Limn resolves **only its own reader's Limn findings**, never a teammate's or a p
 | Setting | Default | When | Reply |
 |---|---|---|---|
 | "Resolve my Limn threads when addressed" | On | Your own PR, after any of your runs | "Addressed in abc1234." / "No longer applies as of abc1234." — "_Resolved by Limn's Claude review._" |
+| (the same setting) | On | Your own PR, open, when a teammate's posted review found your Limn finding addressed or no longer applies **at the PR's latest commit**, and no run of yours at that commit is newer | "Addressed in abc1234 (checked by Robin's Limn)." — "_Resolved by Limn._" |
 | "Resolve Limn's threads once fixed" | Off | Any PR, automatic runs with posting on | Same wording, with the automatic-post footer |
+
+The teammate row is how your fixed threads close while your Limn steps aside (§ 3). Your Limn acts
+on the teammate's word only when it is the newest word at that commit: a later "still open" from any
+teammate keeps the thread open. Each thread is recorded before the write and never retried. In your
+AI Review tab the finding reads "Resolved automatically (checked by robin's Limn)".
+
+**Only a trusted reviewer's word closes a thread.** Anyone who can post a review can type Limn's hidden
+marker, so your Limn acts on an "addressed" or "no longer applies" word only when the reviewer is a
+person (not a bot) and GitHub says, when Limn asks just before writing, that they have write access to
+the repo. Otherwise, or if GitHub cannot be read, nothing is written and Limn logs whose word it ignored.
+The review still shows in the AI Review tab. A "still open" word needs no check: it only keeps a thread
+open.
 
 ---
 
@@ -381,7 +433,8 @@ flowchart TD
   the fallbacks are "Thanks for explaining. That makes sense." and "Thanks for the reply. I still
   think this needs changing in this pull request."
 - **Pushback** goes only on automatic runs with posting on, on an unresolved thread, from your
-  account, once per thread ever. Limn never resolves after a pushback. Manual runs show a draft with
+  account, once per thread ever. A disputed reply on a resolved thread gets a "Still open:" reply
+  instead (§ 6). Limn never resolves after a pushback. Manual runs show a draft with
   "Post reply" instead.
 
 ---
@@ -393,8 +446,12 @@ flowchart TD
 | An unanswered review thread | **The PR author** — never the person who opened it | The author replies, pushes a fix, or resolves |
 | A still-open point | The PR author | Same, judged at the current commit |
 | An outstanding review request | The requested reviewer | They review |
-| A Limn finding, reminder or "Still open:" reply | Nobody — stored as "Limn · alex", never as the person | — |
-| A Limn pushback, acknowledgement or resolve reply | ⚠ Stored as the person today, so it can count as their reply (gap 1) | — |
+| A Limn finding, reminder, "Still open:" reply, pushback, acknowledgement or resolve reply | Nobody — stored as "Limn · alex", never as the person | — |
+
+Any reply with Limn's hidden marker is stored as "Limn · alex" (a "Post reply" you press too: the
+words are Limn's draft). It never ends a thread card, never raises a "reply in a thread you
+commented in" card, never makes a thread "Replied", and never starts another Limn's review.
+Replies stored before 1.0.4 are moved to the bot on the next start or sync.
 
 The Slack digest and the Pending board word threads this way: "Comment on src/x.ts waiting on the
 author"; "Alex's comment on package.json has no reply · waiting on Robin".
@@ -426,9 +483,10 @@ All names and times are illustrative; every step follows the current rules.
 
 ### 9.4 The author reviews first, then a reviewer
 1. 10:00 Carol opens #10; her own Limn reviews and posts a comment with 2 warnings, ending "Not approved: 2 warnings are still open." (Had it wanted to approve, "Not approved: your own pull request." would show in her Limn only.)
-2. Alex's Limn ignores Carol's claim (she is the author) and reviews, following up on Carol's 2 warnings. It finds one new nit, which is not posted; on each of Carol's two open warning threads it replies "**Still open:** …".
-3. Carol pushes a fix. Alex's Limn claims the new commit first; Carol's Limn steps aside, so it never runs and her two threads stay open on GitHub (gap 13).
-4. Alex's run judges both warnings addressed; with no blocker or warning open and the impact allowed, Alex's Limn approves. Carol resolves her threads herself.
+2. Alex's Limn ignores Carol's claim (she is the author) and reviews, following up on Carol's 2 warnings. It finds one new nit, which is not posted; on each of Carol's two open warning threads it replies "**Still open:** …". Carol's warnings are still open, so it does not approve: "Not approved: 2 earlier warnings are still open."
+3. Carol pushes a fix. Alex's Limn claims the new commit first; Carol's Limn steps aside.
+4. Alex's run judges both warnings addressed; with no blocker or warning open and the impact allowed, Alex's Limn approves. Its review records both judgements.
+5. Carol's Limn syncs Alex's review. Both warnings were found addressed at the latest commit, so Carol's Limn resolves her two threads: "Addressed in 1234abc (checked by Alex's Limn)." Carol does nothing.
 
 ### 9.5 Your PR, a teammate on Claude, your Codex at its limit
 1. Robin's Limn reviews your commit with Claude and posts.
@@ -440,6 +498,7 @@ All names and times are illustrative; every step follows the current rules.
 2. You push commit B. Your repo keeps approvals after a push, so the approval stands. (In a repo that dismisses stale approvals, GitHub dismisses it.)
 3. Robin's Limn reviews B and finds 2 warnings. It withdraws its own approval ("Limn withdrew its approval: 2 warnings found at B."), then posts a comment with the warnings.
 4. Your header shows Robin's standing as dismissed, which counts as nothing, and GitHub's "review required".
+5. Had Robin's workspace been set to "Keep it in Limn", step 3 would still withdraw the approval with the same message; the warnings would stay in Robin's Limn.
 
 ### 9.7 Pushback, then agreement
 1. Alex's Limn posts a warning on Bob's PR: "this can be null".
@@ -450,10 +509,10 @@ All names and times are illustrative; every step follows the current rules.
 
 ### 9.8 Resolved too early: reopen once, then a new thread
 1. Robin's Limn posts a warning on Bob's PR. Bob resolves it without fixing anything.
-2. Alex's automatic review (posting on) at commit H1 judges it valid and not addressed: it replies "**Still open:** the null check is still missing in parse()" and reopens the thread.
+2. Alex's automatic review (posting on) at commit H1 judges it valid and not addressed: it replies "**Still open:** the null check is still missing in parse()" and reopens the thread. With Robin's warning still open, Alex's review does not approve.
 3. While it is open, Bob's My Turn shows "Alex's Limn: still open on src/parse.ts". Bob resolves it again.
-4. Robin's review at H2 sees the thread was reopened once already. It is a warning, so it starts one new thread that links the old one. Alex's Limn sees that and does nothing more.
-5. The new thread is an ordinary open finding; it raises no still-open card (gap 8).
+4. Robin's review at H2 sees the thread was reopened once already. It is a warning, so it starts one new thread that links the old one. Alex's Limn sees that and does nothing more. (Had Alex's Limn acted at H2 at the same moment, its read of GitHub just before writing would have seen Robin's new thread first.)
+5. Bob's My Turn card and the Overview's "Still open" list now point to the new thread. Later reviews judge the new thread, not the old one. If Bob resolves the new thread too, it is reopened once more, and then left alone.
 
 ### 9.9 A teammate's block is lifted
 1. Carol's Limn requests changes on Bob's PR (1 blocker, 1 warning). Carol has ticked "Let a teammate's Limn dismiss my Limn's 'changes requested'…".
@@ -465,6 +524,14 @@ All names and times are illustrative; every step follows the current rules.
 1. Carol asks a question on Bob's PR. Alex's posted review judges it valid and not addressed and replies "**Still open:** …".
 2. The thread still reads as untouched (a Limn reply is not a reply). Bob gets "Alex's Limn: still open" in My Turn.
 3. If Bob resolves it and it is reopened once and resolved again, it is left alone: a person's comment has no severity, so no new thread.
+4. For the same reason the open question does not stop Alex's approval; the "Not approved" line, if any, names it as "1 earlier point is still open."
+
+### 9.11 A manual review holds the commit
+1. 11:00 Dana pushes commit D. Alex presses Review on Dana's PR. Bob's automatic review claimed D with Claude at 10:59.
+2. Alex's run starts at once. His AI Review tab says "Bob is reviewing this commit with Claude".
+3. 11:12 Bob's Limn posts an approval with 2 nits, which are not posted. Its line reads "bob reviewed · approved", so Carol's Limn steps aside on Claude.
+4. Alex posts his own review with the Post button. Bob's line is newer, so Alex's Limn writes no line for Claude.
+5. On commit E, nobody's Limn has claimed Codex when Alex posts a Codex review by hand. His Limn writes "alex reviewed · 1 comment" for Codex, and Bob's and Carol's automatic runs review E with Claude only.
 
 ---
 
@@ -476,10 +543,10 @@ All names and times are illustrative; every step follows the current rules.
 - Dismiss anyone's approval to lift a block; dismiss a review typed by hand.
 - Edit or delete a teammate's comment, or resolve a teammate's or a person's thread.
 - Reopen a thread more than once, or post more than one pushback per thread.
+- Reopen a thread, or start a new thread about an open point, on the reader's own PR.
 - Retry a GitHub write that failed — except its own status lines (up to 5 tries) and a refused
   verdict, which is sent once more as a plain comment.
-- Treat its findings, reminders or "Still open:" replies as a person's reply (pushbacks and
-  resolve replies still can — gap 1).
+- Treat its findings, reminders or any of its replies as a person's reply.
 - Count its `limn/` status lines as CI.
 - Show a teammate anything that was kept in Limn.
 
@@ -496,7 +563,7 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Auto reviews use | Claude + Codex when both signed in | One merged review. |
 | When Claude and Codex disagree | Strict | Strict: both must approve. Relaxed: one approves, neither asks for changes. |
 | Mark auto reviews on GitHub (claims) | On | Status lines; the team shares the work per model. |
-| When an auto review finishes | Post to GitHub | Or keep it in Limn (invisible to teammates). |
+| When an auto review finishes | Post to GitHub | Or keep it in Limn (invisible to teammates). Limn still withdraws its own earlier automatic approval when a later run does not approve. |
 | Which PRs | Mine | Or every PR. |
 | What to post | Blockers, warnings, questions, CI failures, story gaps, SonarCloud | Nits and "not asked for" off. |
 | Approve or request changes for me | On | Off means every post is a comment. |
@@ -519,32 +586,35 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |
 | before 1.0.2 | Shows a reviewer as "requested changes" after their later approval was dismissed. |
 | before 1.0.3 | Writes no "Still open:" replies, never reopens, may claim an open point it never recorded. Reads a new "still open" judgement as "not addressed". |
+| before 1.0.4 | **Verdicts:** approves while an earlier warning or blocker is still open (D1); does not withdraw its own automatic approval when set to "Keep it in Limn". **Still open:** reopens threads and starts new ones on its own PR (D2); writes "Still open:" without reading GitHub first; posts nothing on a resolved thread whose reply it disputes; keeps judging the old thread after a new one continues it. **Claims:** writes "kept in Limn" when an approval or a reason-only comment did reach GitHub, so the commit is reviewed again; a manual review it posts writes no "reviewed" line; posts a late final line without reading first; loses the Clear button for a teammate's claim on restart. **Team:** shows no "update" line for a teammate on an old Limn; on its own machine, stores Limn's pushbacks, acknowledgements and resolve replies as the person (a newer Limn stores that teammate's as their Limn); leaves its own fixed Limn threads open on your PR while your Limn has the commit (it never reads your review's judgements). Its writes stay safe for newer Limns: they read its markers. |
 | before 0.1.181 | Writes no thread judgements or lift consent. |
 | before 0.1.175 | Shows no teammates' reviews at all, and lets the PR author's claim hold the commit. |
 | before 0.1.174 | Reads a teammate's "kept in Limn" line as reviewed and stands down. |
 
-The Limn version rides every posted review's marker but nothing acts on it yet.
+The Limn version rides every posted review's marker. When a teammate's newest review on a PR came
+from a Limn older than 1.0.4 (the team minimum, one shared constant), the AI Review tab shows one line
+beside "Where this PR stands": "Robin is on Limn 0.1.188 — update for still-open replies and claim
+fixes." A review with no version (a legacy post) reads "an older Limn". Nothing else acts on the
+version.
 
 ---
 
-## 13. Known gaps and open decisions
+## 13. Known gaps and decisions
 
-Confirmed in the code on 2026-11-05. Each is a candidate for the next change; update this list when one is settled.
+### Decided
+
+| # | Decision | Where |
+|---|---|---|
+| D1 | An earlier warning or blocker that a review judges still open stops an approval, like a new one; an earlier blocker means "request changes". | § 5 |
+| D2 | On the reader's own PR, Limn never reopens a thread and never starts a new one; it may only reply "Still open:". | § 6 |
+
+### Gaps that remain
+
+Confirmed in the code on 2026-11-05. Each is a candidate for the next change; update this list when one is settled. There are no open decisions.
 
 | # | Gap | Effect |
 |---|---|---|
-| 1 | Pushbacks, acknowledgements and resolve replies are stored as the person, not as their Limn. | In My Turn they can count as that person's reply: on the poster's machine they end the thread card; on a third person's machine they can raise a "reply in a thread you commented in" card. |
-| 2 | A **resolved** thread whose reply Limn disputes gets nothing on GitHub (pushback skips resolved threads; still-open skips disputed points). | The disagreement shows only in the reviewer's Limn. Breaks "every open point has a place". |
-| 3 | Two Limns acting at the same commit before either has synced the other. | Could both reply "Still open" or both reopen once. |
-| 4 | Manual reviews never claim. | A teammate's manual review does not stop your automatic one. |
-| 5 | A very late "Cleared by…" from a crashed run is posted without reading first. | Could free a commit a teammate has since finished (inferred, not tested). |
-| 6 | The Clear button for a teammate's claim relies on memory. | Missing after a restart until the next read. |
-| 7 | Approval withdrawal runs only on the posting path. | With "keep it in Limn", a later failing review does not withdraw an earlier automatic approval. |
-| 8 | The continuation thread (after one reopen) is not tracked as a finding. | Later runs keep following the original thread, and the author gets no still-open card for it. |
-| 9 | Two teammates pointing their Slack digest at one channel. | Both post (inferred). |
-| 10 | The Limn version in the marker is never used. | No warning that a teammate is on an old version. |
-| 11 | A `limn/` status line made a required check in branch protection. | An unfinished line would block merges. Do not make them required. |
-| 12 | "Kept in Limn" is written whenever none of a model's findings were posted — even when an approval or a reason-only comment did reach GitHub. | The commit reads free, so teammates review it again. |
-| 13 | On the author's own PR, a reviewer's claim makes the author's Limn step aside, and only the author's Limn may resolve its own threads. | The author's fixed Limn threads stay open until the author resolves them by hand. |
-| **D1** | **Open decision:** should a still-open warning or blocker stop an approval? | Today a review can approve and still mark an earlier point open. |
-| **D2** | **Open decision:** should still-open replies and reopens happen on the reader's own PR? | Today they do. |
+| 9 | Two teammates pointing their Slack digest at one channel. | Both post: each Limn sends its own. Guidance only — Settings → Slack says "Only one person per channel should set this up". |
+| 11 | A `limn/` status line made a required check in branch protection. | An unfinished line would block merges. Guidance only — Limn does not read branch rules; the claims setting's ⓘ says not to. |
+| 14 | You post a manual review while a teammate's automatic run holds a live claim on that model, so your Limn writes no "reviewed" line; then the teammate's run fails. | Nothing marks the commit as reviewed for that model, so a third teammate's Limn may review it again. |
+| 15 | A finding whose point moved to a new thread (§ 6). | Its jump-to-thread link in the AI Review tab still opens the original thread, not the new one. |

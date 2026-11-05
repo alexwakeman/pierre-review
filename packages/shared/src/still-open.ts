@@ -14,7 +14,10 @@
 //     machine) sees the reopen on GitHub and never reopens it again.
 //   • Reopened once already and still open: a WARNING or BLOCKER starts ONE new inline thread about
 //     the same point (`c=<root comment id>` names the thread it continues); a nit, a question or a
-//     point with no severity is left as it is.
+//     point with no severity is left as it is. A continuation is never continued again.
+//   • ON THE READER'S OWN PR (decision D2): the reply only — never a reopen, never a new thread; a
+//     resolved thread there gets one reply, ever.
+//   • Later runs judge the CONTINUATION, not the earlier thread (`continuationThreadMap`, below).
 //
 // The marker: `<!-- pierre:claude-review-still-open v=1 h=<head> [r=1] [c=<comment id>] -->`. Its
 // `pierre:claude-review` prefix is the provenance every Limn reader already matches.
@@ -65,6 +68,61 @@ export function parseStillOpenMarker(body: string | null | undefined): StillOpen
     reopened: kv.get('r') === '1',
     continuesCommentId: /^\d{1,20}$/.test(c) ? c : null,
   };
+}
+
+// ── CONTINUATION THREADS (gap 8) ───────────────────────────────────────────────────────────────────
+//
+// THE MAPPING IS STORED ON GITHUB: a continuation thread's ROOT comment carries the still-open marker
+// with `c=<the earlier thread's root comment databaseId>`. Every Limn reads it on sync, so the reader's
+// own continuations and a teammate's are followed the same way. (This account's `escalate:<node>`
+// claim row also keeps the new root's comment id; the marker is what every reader trusts.)
+
+/** One synced review comment, as `continuationThreadMap` reads it. */
+export interface ContinuationComment {
+  threadId: number | null;
+  databaseId: string | null;
+  body: string | null;
+  // Any order key that sorts a thread's comments oldest first (ms).
+  createdAt: number;
+  // A tie-break (the comment's local id); optional.
+  id?: number;
+}
+
+/**
+ * Per PR's comments: earlier thread id → the thread that continues it (followed to the END of a
+ * chain; the oldest continuation wins when two name the same thread). Only a thread ROOT counts on
+ * either side. Pure.
+ */
+export function continuationThreadMap(comments: readonly ContinuationComment[]): Map<number, number> {
+  const roots = new Map<number, ContinuationComment>();
+  for (const c of comments) {
+    if (c.threadId == null) continue;
+    const r = roots.get(c.threadId);
+    if (!r || c.createdAt < r.createdAt || (c.createdAt === r.createdAt && (c.id ?? 0) < (r.id ?? 0))) roots.set(c.threadId, c);
+  }
+  const threadOfRoot = new Map<string, number>();
+  for (const [threadId, r] of roots) if (r.databaseId != null) threadOfRoot.set(r.databaseId, threadId);
+  const next = new Map<number, { to: number; at: number }>();
+  for (const [threadId, r] of roots) {
+    const from = parseStillOpenMarker(r.body)?.continuesCommentId;
+    const original = from != null ? threadOfRoot.get(from) : undefined;
+    if (original == null || original === threadId) continue;
+    const had = next.get(original);
+    if (!had || r.createdAt < had.at) next.set(original, { to: threadId, at: r.createdAt });
+  }
+  const out = new Map<number, number>();
+  for (const start of next.keys()) {
+    let at = start;
+    const seen = new Set<number>([start]);
+    for (let hop = 0; hop < 10; hop += 1) {
+      const n = next.get(at);
+      if (!n || seen.has(n.to)) break;
+      seen.add(n.to);
+      at = n.to;
+    }
+    if (at !== start) out.set(start, at);
+  }
+  return out;
 }
 
 /** Does this body START with the still-open lead (after leading space)? */

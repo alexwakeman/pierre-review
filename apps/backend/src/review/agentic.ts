@@ -107,6 +107,14 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   // DEPENDENCY AUTOMATION's AI fallback (Settings → Dependencies → resolve conflicts): without this
   // binding the tick asks bots to rebase but never starts an AI run.
   bindDependencyAutomationAi(ctx);
+  // GAP 13: on the reader's own PR, a teammate's posted review that found the reader's Limn findings
+  // addressed at the current head resolves those threads (a kick after each teammate-review import).
+  try {
+    const { bindTeammateResolve } = await import('./claude-review/teammate-resolve.js');
+    await bindTeammateResolve(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'teammate resolve: bind failed');
+  }
   try {
     await reconcileReviewsOnStartup(ctx);
   } catch (err) {
