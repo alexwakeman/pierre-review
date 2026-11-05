@@ -156,7 +156,8 @@ beforeAll(async () => {
 
   const { accounts, repos, users } = schema;
   const { eq } = await import('drizzle-orm');
-  await db.update(accounts).set({ githubLogin: 'viewer-me' }).where(eq(accounts.id, 1)).execute();
+  // The going-forward floor for "Merged after your Limn approved" sits before every fixture merge.
+  await db.update(accounts).set({ githubLogin: 'viewer-me', approvedMergedSince: new Date(0) }).where(eq(accounts.id, 1)).execute();
   const insertUser = async (login: string, isBot = false): Promise<number> => {
     const [u] = await db
       .insert(users)
@@ -412,6 +413,19 @@ describe('"Merged after your Limn approved"', () => {
       expect(again.dismissed.some((d: any) => d.target.id === id && d.reason === 'ai_approved_merged')).toBe(true);
     } finally {
       await restoreMyTurn(1, { kind: 'pr', id });
+    }
+  });
+
+  it('counts only merges from the moment the card type arrived, never retrospectively', async () => {
+    const { eq } = await import('drizzle-orm');
+    const set = (at: Date | null) =>
+      db.update(schema.accounts).set({ approvedMergedSince: at }).where(eq(schema.accounts.id, 1)).execute();
+    // am-standing merged at now - DAY: a floor just after it drops it.
+    await set(new Date(now - DAY + 1000));
+    try {
+      expect((await mergedKeys()).has('am-standing')).toBe(false);
+    } finally {
+      await set(new Date(0));
     }
   });
 

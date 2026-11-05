@@ -10141,7 +10141,8 @@ export async function getUnseenOwnAiReviews(
 /**
  * MERGED AFTER YOUR LIMN APPROVED IT — the My Turn `ai_approved_merged` section's seeds (docs/BACKEND.md
  * § My Turn). One item per merged PR in scope, merged within `APPROVED_MERGED_DAYS` of `now` and at or
- * after the repo's onboarding floor (`passesFloor`), where:
+ * after the repo's onboarding floor (`passesFloor`) AND the account's `approvedMergedSince` (going forward
+ * only — never retrospective), where:
  *   • an OWN run's auto-post LANDED a review SENT as APPROVE (`auto_post.githubReviewId` set,
  *     `verdict.submitted = 'APPROVE'`) before the merge — a pair's one review is recorded on both
  *     halves, so the earliest record wins;
@@ -10156,7 +10157,15 @@ export async function getApprovedThenMerged(
   now: number,
   passesFloor: (repoId: number, at: Date) => boolean,
 ): Promise<ApprovedMergedItem[]> {
-  const from = new Date(now - APPROVED_MERGED_DAYS * 86_400_000);
+  // ⚠ GOING FORWARD ONLY: no merge before the card type reached this account counts
+  // (`accounts.approvedMergedSince`, NULL = the account's own `createdAt`).
+  const [acct] = await db
+    .select({ since: schema.accounts.approvedMergedSince, createdAt: schema.accounts.createdAt })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.id, accountId))
+    .execute();
+  const sinceMs = (acct?.since ?? acct?.createdAt)?.getTime() ?? now;
+  const from = new Date(Math.max(now - APPROVED_MERGED_DAYS * 86_400_000, sinceMs));
   const rows = await db
     .select({
       reviewId: claudeReviews.id,

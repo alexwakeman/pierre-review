@@ -142,6 +142,10 @@ export const accounts = sqliteTable('accounts', {
   // a positive integer the user typed (the route rejects anything else), so a reader that sees
   // null knows the user never expressed an opinion, rather than guessing at a sentinel.
   largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
+  // MY TURN "Merged after your Limn approved" starts HERE, never retrospectively: only merges at or
+  // after this moment make a card. Migration 0169 stamps existing accounts with the upgrade time;
+  // NULL (an account created later) reads as the account's own `createdAt`.
+  approvedMergedSince: integer('approved_merged_since', { mode: 'timestamp' }),
   // BLAST RADIUS reading settings: `{sensitivity, surfacesOff[], overrides?}` — the dial, the
   // per-account surface opt-out, and (stored, honoured, no UI in v1) numeric overrides. Same
   // ACCOUNT grain and same two-state rule as the threshold above: NULL means the user has never

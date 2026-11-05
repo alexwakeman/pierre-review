@@ -1516,6 +1516,15 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0169_approved_merged_since` — "Merged after your Limn approved" counts going forward only
+
+`accounts.approved_merged_since` (integer timestamp, nullable): the earliest merge My Turn's
+`ai_approved_merged` card may count. ⚠ **BACKFILLED** to the upgrade's `unixepoch()` for every existing
+account, so an upgrade never lists the past week's approved-then-merged PRs at once; NULL (an account
+created later) reads as that account's `created_at`. Read only by `getApprovedThenMerged`. On an
+existing table, so erasure and export already cover it. Journal `idx` 169, `when` sqlite
+`1792310479016` ([BACKEND.md](BACKEND.md) § My Turn's two AI review types).
+
 ### `0168_ai_review_seen_per_run` — My Turn's "New AI review" is seen-based; the red branch leaves My Turn
 
 `claude_reviews.seen_at` (integer timestamp, nullable): when the reader first had a finished run on

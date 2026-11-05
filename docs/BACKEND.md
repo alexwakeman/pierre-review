@@ -375,8 +375,9 @@ review runs), and both dismissable like every other type.
   An auto run is owned like a manual one (`trigger` is the "Auto review" label only). Migration 0168
   stamped every run that had already finished, so an upgrade does not flood My turn.
 - **`ai_approved_merged` — "Merged after your Limn approved"** (`getApprovedThenMerged`, S7 below): a
-  MERGED PR in scope, merged within `APPROVED_MERGED_DAYS` (7) and at or after the repo's onboarding
-  floor, on which an own run's `auto_post` LANDED a review SENT as APPROVE (`githubReviewId` set,
+  MERGED PR in scope, merged within `APPROVED_MERGED_DAYS` (7), at or after the repo's onboarding
+  floor AND at or after `accounts.approved_merged_since` (⚠ GOING FORWARD ONLY: the upgrade's moment,
+  NULL = the account's `created_at` — never a retrospective flood), on which an own run's `auto_post` LANDED a review SENT as APPROVE (`githubReviewId` set,
   `verdict.submitted = 'APPROVE'`, status posted / partial) BEFORE the merge, and that approval still
   STANDS — the synced `reviews` row with that `database_id` is `approved` (a Limn withdrawal or a
   dismissal makes it `dismissed`); with no synced row yet, no withdrawal is recorded on the run. It
