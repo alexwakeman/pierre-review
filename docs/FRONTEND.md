@@ -823,7 +823,7 @@ first the **review pill** (`pr/ReviewDecisionPill.tsx`), then the file delta, th
 blast chip, `PrChips`, Stalled, Auto-merge armed and "N new" (the phone's "Details" fold still holds
 size/reach/chips). ⚠ **The review pill is GITHUB's `reviewDecision`, never the AI review**: the face
 is the decision in the review style (`REVIEW_STATE_META`; `review_required` → "Review required" and
-null → "No review required", both in the quiet `pending` look — null never reads as "nobody looked"),
+null with nobody reviewed → "No reviews yet" when someone was asked, else no pill, both in the quiet `pending` look; null WITH reviewers → no face at all, the newest definite verdict chip leads — GitHub gives no decision when no rule on the base branch requires a review, so reviews are optional, and an approval must never sit beside "No review required"),
 then ONE reviewer chip from OUR fold (`reviewStandings`: the newest whose standing matches the
 decision, else the newest, in their OWN standing style), then "+N" (unnamed reviewers count). The two
 claims sit side by side, never merged into one sentence. The pill is one button (the name is plain

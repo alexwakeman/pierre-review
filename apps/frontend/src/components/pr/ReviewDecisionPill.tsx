@@ -20,8 +20,11 @@ import { AutomatedReviewerBadge, reviewFacts } from './ReviewsRow.js';
 // in that reviewer's own standing style. They disagree on real data (a dismissed approval), so they
 // are never merged into one sentence. The face is never AI review's verdict.
 //
-// ⚠ `reviewDecision: null` means "this repo requires no review" (or not synced yet) — it never
-// reads as "nobody looked". Who looked is the chips.
+// ⚠ `reviewDecision: null` means GitHub has no decision: no rule on the base branch requires an
+// approving review (most open-source and many team repos), or not synced yet. Reviews are then
+// OPTIONAL, not unwanted, so there is no decision face: the pill leads with the reviewers' own
+// standing (an approval reads "Approved", never "No review required" beside it). With nobody
+// reviewed it reads "No reviews yet" when someone was asked, and is absent otherwise.
 //
 // Nothing fetches: every field is on the PR detail payload.
 
@@ -34,7 +37,8 @@ interface DecisionFaceMeta {
 }
 
 /** GitHub's decision, in the review table's own style. `review_required` and "none" have no
- *  standing of their own, so they take the quiet `pending` look. */
+ *  standing of their own, so they take the quiet `pending` look. "none" (no decision) is drawn
+ *  only when nobody has reviewed. */
 const DECISION_FACE: Record<DecisionKey, DecisionFaceMeta> = {
   approved: { label: 'Approved', icon: REVIEW_STATE_META.approved.icon, cls: REVIEW_STATE_META.approved.cls },
   changes_requested: {
@@ -43,13 +47,14 @@ const DECISION_FACE: Record<DecisionKey, DecisionFaceMeta> = {
     cls: REVIEW_STATE_META.changes_requested.cls,
   },
   review_required: { label: 'Review required', icon: null, cls: REVIEW_STATE_META.pending.cls },
-  none: { label: 'No review required', icon: null, cls: REVIEW_STATE_META.pending.cls },
+  none: { label: 'No reviews yet', icon: null, cls: REVIEW_STATE_META.pending.cls },
 };
 
 export interface ReviewDecisionFace {
-  /** GitHub's decision; null = no review required (or not synced). */
+  /** GitHub's decision; null = no rule requires a review (or not synced). */
   decision: PrReviewDecision | null;
-  label: string;
+  /** The decision face. Null = GitHub has no decision and someone reviewed: the reviewer chip leads. */
+  label: string | null;
   /** The one reviewer shown on the pill: the newest whose standing matches the decision, else the
    *  newest. Null when nobody has reviewed. */
   lead: PrReviewerRef | null;
@@ -68,16 +73,18 @@ export function reviewDecisionFace(pr: FaceFields): ReviewDecisionFace | null {
   if (decision == null && standings.length === 0 && unnamed === 0 && pr.requestedReviewers.length === 0) {
     return null;
   }
-  // `reviewStandings` is newest first.
+  // `reviewStandings` is newest first. With no decision, a definite verdict leads over a comment.
   const lead =
     (decision === 'approved' || decision === 'changes_requested'
       ? standings.find((r) => r.standing === decision)
-      : undefined) ??
+      : decision == null
+        ? standings.find((r) => r.standing === 'approved' || r.standing === 'changes_requested')
+        : undefined) ??
     standings[0] ??
     null;
   return {
     decision,
-    label: DECISION_FACE[decision ?? 'none'].label,
+    label: decision == null && (lead != null || unnamed > 0) ? null : DECISION_FACE[decision ?? 'none'].label,
     lead,
     more: standings.length - (lead != null ? 1 : 0) + unnamed,
   };
@@ -99,8 +106,9 @@ export function ReviewDecisionPill({
   const leadUser = lead != null ? usersById.get(lead.userId) : undefined;
   const leadMeta = lead != null ? REVIEW_STATE_META[lead.standing] : null;
   const { automatedByAuthor, unnamedReviewers } = reviewFacts(pr);
+  const githubSays = face.decision == null ? 'reviews optional on this branch' : face.label;
   const triggerLabel = [
-    `GitHub: ${face.label}`,
+    face.label != null ? `GitHub: ${githubSays}` : null,
     lead != null && leadMeta != null ? `${userLabel(leadUser, lead.userId)} ${leadMeta.label.toLowerCase()}` : null,
     face.more > 0 ? `${face.more} more` : null,
     'show all reviews',
@@ -122,10 +130,18 @@ export function ReviewDecisionPill({
       }
       trigger={
         <>
-          <span className={cx(PILL, 'font-medium', decisionMeta.cls)} title={`GitHub's review decision: ${face.label}`}>
-            {decisionMeta.icon && <decisionMeta.icon size={12} />}
-            {face.label}
-          </span>
+          {face.label != null && (
+            <span
+              className={cx(PILL, 'font-medium', decisionMeta.cls)}
+              title={face.decision == null ? 'No rule on this branch requires a review' : `GitHub's review decision: ${face.label}`}
+            >
+              {decisionMeta.icon && <decisionMeta.icon size={12} />}
+              {face.label}
+            </span>
+          )}
+          {face.label == null && lead == null && face.more > 0 && (
+            <span className={cx(PILL, 'font-medium', REVIEW_STATE_META.pending.cls)}>Reviewed</span>
+          )}
           {lead != null && leadMeta != null && (
             // The name is plain text here: the whole pill is one button, and a UserName inside it
             // would nest a second control. The popover carries the linked names.
@@ -135,12 +151,14 @@ export function ReviewDecisionPill({
               <span className="max-w-[10rem] truncate">{userLabel(leadUser, lead.userId)}</span>
             </span>
           )}
-          {face.more > 0 && <span className="tabular-nums text-ui-mute">+{face.more}</span>}
+          {face.more > 0 && (lead != null || face.label != null) && (
+            <span className="tabular-nums text-ui-mute">+{face.more}</span>
+          )}
         </>
       }
     >
       <p className="m-0">
-        GitHub: <span className="font-medium text-ui-ink">{face.label}</span>
+        GitHub: <span className="font-medium text-ui-ink">{face.decision == null ? 'Reviews optional on this branch' : face.label}</span>
       </p>
       {pr.reviewStandings.length > 0 && (
         <ul className="m-0 list-none space-y-1.5 p-0" data-testid="pr-header-review-list">
