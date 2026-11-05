@@ -1,6 +1,7 @@
 # Limn on a team: how shared reviews work
 
-**Status:** the design reference for every multi-user behaviour. Checked against the code on
+**Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
+diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
 2026-11-05 (Limn 1.0.3). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit. Engineering detail (names, tables, markers) lives in
@@ -450,9 +451,9 @@ All names and times are illustrative; every step follows the current rules.
 ### 9.8 Resolved too early: reopen once, then a new thread
 1. Robin's Limn posts a warning on Bob's PR. Bob resolves it without fixing anything.
 2. Alex's automatic review (posting on) at commit H1 judges it valid and not addressed: it replies "**Still open:** the null check is still missing in parse()" and reopens the thread.
-3. Bob resolves it again.
+3. While it is open, Bob's My Turn shows "Alex's Limn: still open on src/parse.ts". Bob resolves it again.
 4. Robin's review at H2 sees the thread was reopened once already. It is a warning, so it starts one new thread that links the old one. Alex's Limn sees that and does nothing more.
-5. Between steps 2 and 3, while the thread was open, Bob's My Turn showed "Alex's Limn: still open on src/parse.ts". The new thread from step 4 is an ordinary open finding; it raises no still-open card (gap 8).
+5. The new thread is an ordinary open finding; it raises no still-open card (gap 8).
 
 ### 9.9 A teammate's block is lifted
 1. Carol's Limn requests changes on Bob's PR (1 blocker, 1 warning). Carol has ticked "Let a teammate's Limn dismiss my Limn's 'changes requested'…".
