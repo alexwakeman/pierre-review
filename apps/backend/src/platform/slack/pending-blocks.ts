@@ -118,7 +118,8 @@ export function pendingCardText(card: InsightCard): string {
       return 'Nobody asked to review';
     case 'untouched_thread': {
       const a = age(card.ageHours);
-      return `Unanswered comment on ${card.path}${a === '' ? '' : `, ${a}`}`;
+      // ⚠ Waiting on the PR's AUTHOR (the line's "by @login"), never on whoever opened the thread.
+      return `Comment on ${card.path} waiting on the author${a === '' ? '' : `, ${a}`}`;
     }
     case 'merge':
       return 'Ready to merge';

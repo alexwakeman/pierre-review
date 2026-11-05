@@ -70,7 +70,7 @@ Output GitHub-flavoured markdown, in three parts:
 
 Trend rule: for a metric with \`.lowConfidence\` false, express the trend as "<value> (<trend> vs the comparison window)" from its \`.previous\` (phrase the window per WINDOW MODE). When \`.previous\` is null, say "no comparable baseline" and invent no direction. When \`.previous\` is a real 0 you MAY say "up from 0", but only when 0 is an actual prior value. NEVER express a percentage or multiple for a lowConfidence metric — never a partial window against a complete one, never an absolute.
 
-GROUNDING — the load-bearing rule for THIS report. Every specific problem you mention (a stall, a CI failure, a long wait, a "many PRs are …" pattern) MUST name the concrete PR(s) it refers to by copying their exact \`ref\` token from the JSON. Never describe a problem, a duration, or a "waiting on <person>" without the backing \`ref\`. A PR number belongs ONLY to the repo in its own \`ref\` — never pair a number with a different repo, never re-type or re-join a ref yourself. For durations, use ONLY the precomputed \`redDays\`/\`ageDays\`/\`ageHours\` fields — never compute your own day count. NEVER invent a name, login, or identifier (no placeholder like "Wlkr123"): every person you name must be a login present in the JSON, and every PR you name must be a \`ref\` present in the JSON.
+GROUNDING — the load-bearing rule for THIS report. Every specific problem you mention (a stall, a CI failure, a long wait, a "many PRs are …" pattern) MUST name the concrete PR(s) it refers to by copying their exact \`ref\` token from the JSON. Never describe a problem, a duration, or a "waiting on <person>" without the backing \`ref\`. "Waiting on <person>" may name ONLY a login from that issue's \`waitingOn\`: for an untouched thread that is the PR's author, who owes a reply or a change — \`raisedBy\` opened the thread and is never the one being waited on. A PR number belongs ONLY to the repo in its own \`ref\` — never pair a number with a different repo, never re-type or re-join a ref yourself. For durations, use ONLY the precomputed \`redDays\`/\`ageDays\`/\`ageHours\` fields — never compute your own day count. NEVER invent a name, login, or identifier (no placeholder like "Wlkr123"): every person you name must be a login present in the JSON, and every PR you name must be a \`ref\` present in the JSON.
 
 Rules: ground EVERY metric claim in the JSON \`metrics\` (never invent or round wildly — one decimal max). Be terse and factual — no preamble, no restating the whole title verbatim, no invented facts. Only mention PRs present in the JSON, always by copying their \`ref\` (never in backticks). Keep it under ~230 words and always end on a complete sentence.`;
 
@@ -304,7 +304,11 @@ async function buildSprintPayload(
         path: c.path,
         ageHours: c.ageHours,
         ageDays: Math.round((c.ageHours / 24) * 10) / 10,
-        waitingSince: loginOf(c.originalCommenterId),
+        // ⚠ WHO OWES THE MOVE: an unanswered review thread waits on the PR's AUTHOR (a reply or a
+        // change), never on whoever opened it. The opener is `raisedBy` — a field once named
+        // `waitingSince` read as "waiting on <the reviewer>" in the narration.
+        raisedBy: loginOf(c.originalCommenterId),
+        waitingOn: [loginOf(c.authorId)].filter(Boolean),
       });
     } else if (c.kind === 'reviewer_routing') {
       agg.needsReviewer += 1;

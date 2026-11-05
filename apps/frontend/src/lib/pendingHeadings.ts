@@ -422,8 +422,11 @@ export function pendingHeading(card: InsightCard, ctx: HeadingContext): PendingH
     }
     case 'untouched_thread': {
       const who = brandName(card.botKind) ?? ctx.nameOf(card.originalCommenterId) ?? 'A reviewer';
+      // ⚠ The thread waits on the PR's AUTHOR (a reply or a change), never on whoever opened it.
+      const author =
+        ctx.viewerId != null && card.authorId === ctx.viewerId ? 'you' : authorName(card, ctx.nameOf);
       return plain(
-        `${possessive(who)} comment on ${card.path} has no reply`,
+        `${possessive(who)} comment on ${card.path} has no reply${author != null ? ` · waiting on ${author}` : ''}`,
         card.firstComment?.at ?? agoIso(card.ageHours, now),
       );
     }

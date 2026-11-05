@@ -637,12 +637,14 @@ describe('the other tabs', () => {
     expect(pendingCardEvent(c)).toEqual({ kind: 'none' });
   });
 
-  it('untouched_thread: whose comment, on which file, quoted below — and it opens the thread', () => {
+  it('untouched_thread: whose comment, on which file, waiting on the AUTHOR — and it opens the thread', () => {
     const c = { ...prRef(), id: 'u', kind: 'untouched_thread', severity: 'warn', threadId: 11, path: 'src/api/tariff.ts', ageHours: 6, originalCommenterId: 77, botKind: 'coderabbit', botLabel: 'CodeRabbit' } as UntouchedThreadCard;
-    expect(lead(c)).toBe('CodeRabbit’s comment on src/api/tariff.ts has no reply');
+    expect(lead(c)).toBe('CodeRabbit’s comment on src/api/tariff.ts has no reply · waiting on Robin Dunn');
     expect(compactAge(pendingHeading(c, ctx()).at, NOW)).toBe('6h');
     expect(pendingCardEvent(c)).toEqual({ kind: 'thread', threadId: 11 });
-    expect(lead({ ...c, botKind: null, originalCommenterId: 404 })).toBe('A reviewer’s comment on src/api/tariff.ts has no reply');
+    expect(lead({ ...c, botKind: null, originalCommenterId: 404 })).toBe('A reviewer’s comment on src/api/tariff.ts has no reply · waiting on Robin Dunn');
+    // The opener is never the one waited on — even when it is the reader's own (Limn) comment.
+    expect(lead({ ...c, botKind: null, authorId: null })).not.toContain('waiting on');
   });
 
   it('merge / update_branch: ready, unstable, behind, queued', () => {
