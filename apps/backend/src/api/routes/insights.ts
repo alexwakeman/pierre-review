@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  AiReviewsSeenBody,
+  AiReviewsSeenResponse,
   AttentionCardsResponse,
   AttentionLivenessBody,
   AttentionLivenessResponse,
@@ -23,12 +25,25 @@ import { getMergedPrsInWindow } from '../../db/merged-prs.js';
 import { getStories } from '../../db/stories.js';
 import { getReportingWindow, reportingWindowInfo } from '../../db/reporting-window.js';
 import { buildPendingBoard } from '../../db/pending-tabs.js';
+import { markAiReviewsSeen } from '../../db/ai-reviews-seen.js';
 import { PR_LIVENESS_MAX_IDS, sweepPrLiveness } from '../../sync/pr-liveness-sweep.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // The liveness body. `maxItems` is a coarse guard only — the real cap is applied in the handler
 // AFTER de-duplication (a board legitimately renders several cards for one PR), and it 400s
 // rather than truncating.
+const aiReviewsSeenSchema = {
+  querystring: {
+    type: 'object',
+    properties: { workspace: { type: 'string' } },
+  },
+  body: {
+    type: ['object', 'null'],
+    additionalProperties: false,
+    properties: { through: { type: 'string', maxLength: 40 } },
+  },
+} as const;
+
 const livenessSchema = {
   querystring: {
     type: 'object',
@@ -269,6 +284,32 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
         };
       }
       return { workspaceId: scope.workspaceId, ...swept };
+    },
+  );
+
+  // POST /api/attention/ai-reviews/seen — THE READER LOOKED AT "AI REVIEWS" (db/ai-reviews-seen.ts).
+  // Moves the workspace's stamp to `through` (the newest review time the reader's list showed; absent
+  // = now), never back. Sent by the SPA when the tab is ON SCREEN — never on the board's mount for
+  // another tab. DB only (one UPDATE): no GitHub, no model. `?workspace=` resolves like every scoped
+  // route (absent / unknown ⇒ the Default) and is echoed.
+  app.post(
+    '/api/attention/ai-reviews/seen',
+    { schema: aiReviewsSeenSchema },
+    async (req, reply): Promise<AiReviewsSeenResponse> => {
+      const q = req.query as { workspace?: string };
+      const body = (req.body ?? {}) as AiReviewsSeenBody;
+      let through: Date | null = null;
+      if (body.through != null) {
+        const ms = Date.parse(body.through);
+        if (!Number.isFinite(ms)) {
+          return reply.code(400).send({ error: 'BadThrough', message: '`through` must be an ISO date.' }) as never;
+        }
+        through = new Date(ms);
+      }
+      const accountId = accountIdOf(req);
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      const at = await markAiReviewsSeen(accountId, scope.workspaceId, through);
+      return { workspaceId: scope.workspaceId, seenAt: (at ?? new Date()).toISOString() };
     },
   );
 

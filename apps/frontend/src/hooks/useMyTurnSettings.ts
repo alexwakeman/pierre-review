@@ -19,15 +19,14 @@ const MY_TURN_SETTINGS_MUTATION_KEY = ['my-turn-settings'] as const;
 /**
  * Write the account's settings. `null` resets everything to the product default.
  *
- * ⚠ ONE SAVE MOVES FIVE READS, AND THEY MOVE TOGETHER. A type switched off leaves the list, every
+ * ⚠ ONE SAVE MOVES FOUR READS, AND THEY MOVE TOGETHER. A type switched off leaves the list, every
  * count, the brief lines and the notifications at once (the gate runs inside `getMyTurn`), so:
  *   • `['me']` — Settings re-seeds from what was stored;
  *   • `['my-turn']` — the notification watcher, which re-baselines on the new `configKey` rather
  *     than announcing a backlog it was just told to show;
- *   • `['attention-cards']` + `['daily-brief']` + `['work-plan']` — the THREE reads of the one
- *     board fold, invalidated together (the liveness rule): the brief's count and the board's list
- *     are compared for equality by the cap disclosures, and the plan's `stale` chip exists to say
- *     the list moved. `useMyTurnByWorkspace` rides `['daily-brief']`.
+ *   • `['attention-cards']` + `['daily-brief']` — the TWO reads of the one board fold,
+ *     invalidated together (the liveness rule): the brief's count and the board's list are
+ *     compared for equality by the cap disclosures. `useMyTurnByWorkspace` rides `['daily-brief']`.
  */
 export function useSetMyTurnSettings() {
   const qc = useQueryClient();
@@ -44,7 +43,6 @@ export function useSetMyTurnSettings() {
       void qc.invalidateQueries({ queryKey: ['my-turn'] });
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
       void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-      void qc.invalidateQueries({ queryKey: ['work-plan'] });
     },
   });
 }

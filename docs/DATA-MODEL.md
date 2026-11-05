@@ -207,6 +207,9 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   memory (team-claim.ts, per provider) and, for the AI Review tab, in `teamClaimSeen` (`team_claim_seen`,
   migration `0159`: one row per `(accountId, prId, headSha, provider)` — kind `reviewing|reviewed`, the
   teammate's login and line; no FK, both delete paths and the erasure delete it).
+- **AI REVIEWS "SINCE YOU LAST LOOKED"** (`workspaces.aiReviewsSeenAt`, migration `0167`;
+  docs/BACKEND.md § The AI reviews list): per (account, workspace), when the reader last looked at
+  Pending → AI reviews; NULL = never (the last 7 days). Moved only by `markAiReviewsSeen`, never back.
 - **THE SKIPPED LINE** (`teamClaimSkipLines`, `team_claim_skip_lines`, migration `0166`;
   docs/CLAUDE-REVIEW.md § Team claims → The skipped line): one row per `(accountId, prId, headSha,
   provider, reason)` (unique `team_claim_skip_lines_key`) — an auto review this Limn did not start
@@ -569,8 +572,8 @@ because two teams in two zones in one account work different hours. Written only
 ## `accounts.my_turn_settings` (CORE — Settings → My Turn)
 
 JSON (`text` json, migration `0068`) holding OVERRIDES ONLY:
-which My Turn card types are shown (`show`), the red-default-branch scope (`trunkScope`), the type
-order (`order`, stored as all fifteen once changed) and the Do next weights (`weights`, integer
+which My Turn card types are shown (`show`), the type order (`order`, stored as every type once
+changed; a retired `trunkScope` or `trunk_red` entry in an old row is ignored on read) and the Do next weights (`weights`, integer
 percents in steps of 10 summing to 100). NULL until the reader changes something, and never a
 stored default: `compactMyTurnSettings` drops anything equal to the product default, on the SPA's
 side and again on the server's. Every reader resolves through `resolveMyTurnSettings`
@@ -603,8 +606,8 @@ backfill; a sprint source). Visibility only — nothing else reads them. Written
 
 ## `my_turn_dismissals` (CORE — Pending → My turn → "Dismiss")
 
-One row per dismissed SUBJECT — `pr_id` for a pull request, `repo_id` for a red default branch;
-exactly one is set (the writer's rule). One column of substance, `dismissed_at`, stored ROUNDED UP
+One row per dismissed SUBJECT — `pr_id`, a pull request. (`repo_id` served the retired red-default-
+branch type; migration 0168 deleted its rows and the column stays, dormant.) One column of substance, `dismissed_at`, stored ROUNDED UP
 to the whole second (`dismissalInstant` — SQLite keeps whole seconds, and a truncated write would
 land up to 999ms early and fail to hide an item from just before the press). Unique
 `(account_id, pr_id)` and `(account_id, repo_id)` are the upsert targets; both ids are COMPOSITE FKs
@@ -816,6 +819,12 @@ people's replies on Limn's own posted findings ([CLAUDE-REVIEW.md](CLAUDE-REVIEW
 pass): no findings, its `follow_up` items shaped like a review's, its `verdict` the outcome the
 replies point to, its `auto_post` the record of that outcome's ONE review. NULL = a full review. ⚠ A
 pass is NOT a review: every "latest review" / "run at this head" reader filters `kind IS NULL`.
+
+`claude_reviews.seen_at` (migration `0168`): when the reader first had the finished run on screen in
+the PR's AI Review tab (every half of a Claude + Codex pair is stamped). NULL = not seen: the newest
+such run on an open PR is My Turn's "New AI review" card (`getUnseenOwnAiReviews`). One writer,
+`db/claude-review-seen.ts` `markClaudeReviewSeen` (`POST /api/prs/:id/claude-review/seen`), which
+stamps only a NULL row. The migration stamped every run that had already succeeded.
 
 ## `workspace_setting_events` — when a workspace setting changed (CORE; migration `0096`)
 

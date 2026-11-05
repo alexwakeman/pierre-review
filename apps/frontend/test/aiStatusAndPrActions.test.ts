@@ -31,7 +31,7 @@ describe('AiStatusLine', () => {
     for (const p of [
       'components/ClaudeReviewTab.tsx',
       'components/CheckThreadsButton.tsx',
-      'components/Activity/AttentionView.tsx',
+      // AttentionView left the list with "Plan my day", its only agentic run.
       'components/Activity/SprintView.tsx',
       'components/Activity/SprintAskPanel.tsx',
       'components/Activity/StoryDocsAlignment.tsx',
@@ -56,8 +56,8 @@ describe('Check threads', () => {
     expect(threadCheckActive('running')).toBe(true);
     for (const s of ['succeeded', 'failed', 'cancelled', null] as const) expect(threadCheckActive(s)).toBe(false);
   });
-  it('sits on the Changes tab\'s Threads only view and beside the Claude Review tab\'s Review threads section', () => {
-    expect(src('components/PrDetail.tsx')).toContain('<CheckThreadsButton prId={pr.id} />');
+  it('sits on the Threads tab and beside the Claude Review tab\'s Review threads section', () => {
+    expect(src('components/pr/PrThreadsTab.tsx')).toContain('<CheckThreadsButton prId={pr.id} />');
     expect(src('components/ClaudeReviewTab.tsx')).toContain('<CheckThreadsButton prId={checkThreadsPrId} />');
     // Gated like Claude Review.
     expect(src('components/CheckThreadsButton.tsx')).toContain('<AiRunGate kind="thread_check">');

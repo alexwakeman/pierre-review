@@ -27,7 +27,7 @@ import { useFilters } from '../../store/filters.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BuildIcon, CloseIcon, PullRequestIcon } from '../Icons.js';
+import { WrenchIcon, CloseIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
@@ -208,7 +208,7 @@ function ActionBar({ build, choices }: { build: StoryBuild; choices: ReadonlyMap
           variant="primary"
           data-ai-run
           data-story-build-action="accept"
-          icon={<BuildIcon size={13} />}
+          icon={<WrenchIcon size={13} />}
           disabled={busy || problem != null}
           onClick={() => {
             if ('body' in ready) accept.mutate({ id: build.id, body: ready.body });
@@ -290,7 +290,7 @@ function StoryBuildCommands({ build }: { build: StoryBuild | null }): null {
     };
     const out: Command[] = [];
     if (canAccept)
-      out.push({ id: 'accept', group: 'Actions', title: `Accept plan and build ${key}`, keywords: ['implement', 'build', 'plan'], icon: <BuildIcon size={14} />, run: press('accept') });
+      out.push({ id: 'accept', group: 'Actions', title: `Accept plan and build ${key}`, keywords: ['implement', 'build', 'plan'], icon: <WrenchIcon size={14} />, run: press('accept') });
     if (canPushAll)
       out.push({ id: 'push-all', group: 'Actions', title: `Push all of ${key}`, keywords: ['pull request', 'open'], icon: <PullRequestIcon size={14} />, run: press('push-all') });
     if (canCancel) out.push({ id: 'cancel', group: 'Actions', title: `Cancel the build of ${key}`, keywords: ['stop'], icon: <CloseIcon size={14} />, run: press('cancel') });

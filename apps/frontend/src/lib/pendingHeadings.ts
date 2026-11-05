@@ -7,7 +7,6 @@ import type {
   MergeQueueEntryState,
   MyLastAction,
   MyTurnCard,
-  MyTurnTrunkCard,
   PrAutomation,
   ClaudeReviewVerdict,
 } from '@pierre-review/shared';
@@ -40,7 +39,7 @@ import {
 // `committerId`, `firstComment`, `newActorIds`, `requesterId`) drops the clause that needed it. Nothing prints a
 // placeholder, and a missing actor reads "Someone", never "user 12" and never an @login.
 //
-// ⚠ A REPO-GRAINED CARD IS NOT A PR. A red default branch (`trunk_red`, `ci_failing`'s trunk arm)
+// ⚠ A REPO-GRAINED CARD IS NOT A PR. A red default branch (`ci_failing`'s trunk arm)
 // is headed by its branch and repository, and nothing on it says "PR" except the landing PR line.
 
 /** Characters of quote a heading carries before it is cut on a word boundary. The heading is also
@@ -380,12 +379,8 @@ export function pendingHeading(card: InsightCard, ctx: HeadingContext): PendingH
   const name = (id: number | null | undefined): string => ctx.nameOf(id) ?? SOMEONE;
 
   switch (card.kind) {
-    case 'my_turn': {
-      if (card.reason === 'trunk_red') {
-        return plain(trunkHeading(card, card.branchName, ctx), card.observedAt ?? card.since);
-      }
+    case 'my_turn':
       return myTurnHeading(card, ctx);
-    }
     case 'ci_failing':
       return card.arm === 'trunk'
         ? plain(trunkHeading(card, null, ctx), card.observedAt)
@@ -637,6 +632,8 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
             : 'AI review finished';
       return plain(lead, card.since);
     }
+    case 'ai_approved_merged':
+      return plain('Merged after your Limn approved it', card.since);
     default: {
       const _x: never = card.reason;
       return plain(card.detail, card.since);
@@ -648,13 +645,13 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
 
 /** The relevance label a my_turn card's action line starts with, or null. */
 export function pendingRelevanceLabel(
-  card: MyTurnCard | MyTurnTrunkCard,
+  card: MyTurnCard,
   tab: string | null | undefined,
 ): string | null {
   // ⚠ ABSENT relevance is NEUTRAL — the same rule `cardKindLabel` follows: a missing field may
   // never invent an ownership claim on screen.
-  // Inside My turn and Claude reviews the tab already says it is yours.
-  if (card.relevance === 'direct') return tab === 'my_turn' || tab === 'claude' ? null : 'Your turn';
+  // Inside My turn the tab already says it is yours.
+  if (card.relevance === 'direct') return tab === 'my_turn' ? null : 'Your turn';
   return cardKindLabel(card);
 }
 
@@ -701,21 +698,6 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
     case 'my_turn': {
       const label = pendingRelevanceLabel(card, ctx.tab);
       const muted = card.muted === true;
-      if (card.reason === 'trunk_red') {
-        return {
-          ...base,
-          label,
-          muted,
-          verb: 'Fix it or chase it',
-          where: [
-            ...(card.maintained ? [{ text: 'you maintain this repo' }] : []),
-            ...(card.headSha != null
-              ? [{ text: `at ${card.headSha.slice(0, 7)}`, mono: true, href: card.githubUrl }]
-              : []),
-          ],
-          showTitle: false,
-        };
-      }
       const line = { ...base, label, muted };
       const path = threadPathOf(card);
       const pathClause = (prefix: string): ActionClause[] =>
@@ -783,8 +765,10 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
             verb: 'Read the review',
             where: card.detail.includes('head moved since') ? [{ text: 'new commits since this review' }] : [],
           };
+        case 'ai_approved_merged':
+          return { ...line, verb: 'Take a quick look', where: [{ text: 'clears when you open it' }] };
         default: {
-          const _x: never = card;
+          const _x: never = card.reason;
           return line;
         }
       }
@@ -899,7 +883,6 @@ export function pendingFactPlan(card: InsightCard): PendingFactPlan {
   switch (card.kind) {
     case 'my_turn':
       switch (card.reason) {
-        case 'trunk_red':
         case 'own_ci_red':
           return 'none';
         case 'review_request':
@@ -955,9 +938,9 @@ export function factDropsNoReviews(card: InsightCard): boolean {
 export type PendingCardEvent =
   | { kind: 'thread'; threadId: number }
   // A mention / comment-after-yours card that knows WHICH comment: land on it — a comment on a
-  // line of code in Changes (its thread opened), a conversation comment on the Comments tab.
+  // line of code in Changes (its thread opened), a conversation comment on the Activity tab.
   | { kind: 'comment'; comment: MyTurnCommentRef }
-  | { kind: 'pr'; tab: 'overview' | 'activity' | 'comments' | 'changes' }
+  | { kind: 'pr'; tab: 'overview' | 'activity' | 'changes' }
   | { kind: 'claude_review' }
   | { kind: 'trunk'; repoId: number }
   | { kind: 'external' }
@@ -989,7 +972,6 @@ export function pendingDestinationLabel(event: PendingCardEvent): string | null 
 export function pendingCardEvent(card: InsightCard): PendingCardEvent {
   switch (card.kind) {
     case 'my_turn':
-      if (card.reason === 'trunk_red') return { kind: 'trunk', repoId: card.repoId };
       if (
         card.threadId != null &&
         (card.reason === 'thread' || card.reason === 'thread_reply' || card.reason === 'own_thread')
@@ -1002,9 +984,9 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
       if ((card.reason === 'mention' || card.reason === 'comment_reply') && card.comment != null) {
         return { kind: 'comment', comment: card.comment };
       }
-      // A mention / reply that does not name its comment: the conversation, on the Comments tab.
+      // A mention / reply that does not name its comment: the conversation, on the Activity tab.
       if (card.reason === 'comment_reply' || card.reason === 'mention') {
-        return { kind: 'pr', tab: 'comments' };
+        return { kind: 'pr', tab: 'activity' };
       }
       if (
         card.reason === 'pushed_since' ||

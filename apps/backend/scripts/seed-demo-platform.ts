@@ -383,59 +383,6 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
     }
   }
 
-  // ---- 5. the work-plan wording (stored as the route stores it) ----
-  {
-    const { getWorkPlan } = await import('../src/db/work-plan.js');
-    const { resolveWorkspaceScope } = await import('../src/db/queries.js');
-    const { workPlanPayloadHash } = await import('../src/platform/work-plan/hash.js');
-    const { parseWorkPlanOutput } = await import('../src/platform/work-plan/prompt.js');
-    const { proSchemaFor } = await import('../src/platform/db.js');
-    const scope = await resolveWorkspaceScope(1, platformWs);
-    const evidence = await getWorkPlan(1, scope as never);
-    const scopeKey = `ws:${platformWs}`;
-    const why = (i: (typeof evidence.items)[number]): string => {
-      switch (i.kind) {
-        case 'review':
-          return 'Someone asked you for this review, and it is the oldest wait on your list.';
-        case 'reply':
-          return 'A reply is waiting on you in this thread.';
-        case 'merge':
-          return 'Approved and green, so landing it clears it off everyone’s board.';
-        case 'update_branch':
-          return 'Behind main and otherwise ready; one update and it can land.';
-        case 'unblock_ci':
-          return 'Your change has red checks, and they block the merge.';
-        case 'thread':
-          return 'Nobody has answered this review thread yet.';
-        case 'nudge':
-          return 'Waiting on a first review for longer than the team’s budget.';
-        default:
-          return 'High on the list for how long it has waited and how close it is to done.';
-      }
-    };
-    const answer = JSON.stringify({
-      headline: 'Start with your review requests, then land what is already approved.',
-      steps: evidence.items.slice(0, 6).map((i) => ({ id: i.id, why: why(i) })),
-      parked: 'The stale scheduler change can wait until the queue work is reviewed.',
-    });
-    const validated = parseWorkPlanOutput(answer, evidence);
-    if (validated == null) throw new Error('work plan: answer refused');
-    const pro = proSchemaFor();
-    await db
-      .insert(pro.proWorkPlans)
-      .values({
-        accountId: 1,
-        scopeKey,
-        payloadHash: workPlanPayloadHash(scopeKey, evidence),
-        output: JSON.stringify(validated),
-        model: 'claude-haiku-5-5',
-        itemCount: evidence.items.length,
-        generatedAt: new Date(nowMs - 40 * 60_000),
-      })
-      .execute();
-    out.workPlanSteps = validated.steps.length;
-  }
-
   void and;
   void inArray;
   return out;

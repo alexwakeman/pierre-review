@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BOT_VENDOR_META, contrastRatio, readableInk, vendorInk } from '../src/lib/ui.js';
+import { INK_GROUNDS } from '../src/lib/colorSchemes.js';
+import { luminance, pageGrounds } from './schemeCss.js';
 
 // BRAND INK — every vendor colour must be legible on BOTH page grounds.
 //
@@ -72,5 +74,33 @@ describe('brand ink', () => {
     // chip on its inherited colour. It typechecked and rendered; only the screen showed it.
     expect(ink['color']).toBeUndefined();
     expect(Object.keys(ink).sort()).toEqual(['--ink-dark', '--ink-light']);
+  });
+});
+
+// EVERY COLOUR SCHEME'S PAGE (docs/FRONTEND.md § Colour schemes). The CSS picks `--ink-light` or
+// `--ink-dark` by `.dark` alone, so one pair must hold on every scheme of that mode. `vendorInk` fits
+// each against the HARDEST page of its mode (lib/colorSchemes.ts `INK_GROUNDS`).
+describe('brand ink on every colour scheme', () => {
+  it('fits against the hardest page of each mode', () => {
+    const darkestLight = pageGrounds('light').reduce((a, b) => (luminance(b[1]) < luminance(a[1]) ? b : a));
+    const lightestDark = pageGrounds('dark').reduce((a, b) => (luminance(b[1]) > luminance(a[1]) ? b : a));
+    expect(INK_GROUNDS.light).toBe(darkestLight[1]);
+    expect(INK_GROUNDS.dark).toBe(lightestDark[1]);
+  });
+
+  it('every vendor clears AA on every scheme’s page', () => {
+    const failures: string[] = [];
+    for (const [kind, meta] of Object.entries(BOT_VENDOR_META)) {
+      const ink = vendorInk(meta.color);
+      for (const [id, bg] of pageGrounds('light')) {
+        const r = contrastRatio(ink['--ink-light']!, bg);
+        if (r < AA) failures.push(`${kind} on ${id} ${r.toFixed(2)}:1`);
+      }
+      for (const [id, bg] of pageGrounds('dark')) {
+        const r = contrastRatio(ink['--ink-dark']!, bg);
+        if (r < AA) failures.push(`${kind} on ${id} ${r.toFixed(2)}:1`);
+      }
+    }
+    expect(failures).toEqual([]);
   });
 });

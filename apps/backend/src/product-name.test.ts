@@ -72,7 +72,7 @@ describe('no user-visible "Pierre" in the platform\'s rendered strings', () => {
   // The platform's one-shot prompts. (The impact note's per-PR prompt, and the CI-analysis and
   // PR-summary prompts in `ai-fix/prompts.ts`, are gone.)
   it('the plugin prompts carry no old brand outside comments', () => {
-    for (const f of ['work-plan/prompt.ts', 'bot-themes/prompt.ts', 'flow-pointers/prompt.ts', 'synthesis/prompt.ts']) {
+    for (const f of ['bot-themes/prompt.ts', 'flow-pointers/prompt.ts', 'synthesis/prompt.ts']) {
       const src = read(`apps/backend/src/platform/${f}`);
       const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
       expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one

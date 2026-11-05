@@ -10,6 +10,7 @@ import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
 import { BotClassificationSection } from './BotClassificationSection.js';
 import { FeaturesSection } from './FeaturesSection.js';
+import { AppearanceSection } from './AppearanceSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
 import { DiskSpaceSection } from './DiskSpaceSection.js';
@@ -81,6 +82,7 @@ import { useSettingsModal, type SettingsFocus } from '../../store/settingsModal.
 
 /** Every section, by the name `SETTINGS_TABS` lists it under. */
 const SECTIONS: Record<string, () => JSX.Element | null> = {
+  AppearanceSection,
   LargePrThresholdSection,
   BlastRadiusSection,
   MyTurnSection,

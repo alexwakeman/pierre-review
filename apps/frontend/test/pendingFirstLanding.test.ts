@@ -16,7 +16,7 @@ const tab = (key: PendingTabKey, total: number, people = total, automation = 0):
 
 const TABS: PendingTab[] = [
   tab('my_turn', 3, 3, 0),
-  tab('claude', 1, 1, 0),
+  { ...tab('claude', 5, 5, 0), newTotal: 1 },
   tab('fixing', 2, 1, 1),
   tab('review', 0),
   tab('threads', 1, 1, 0),
@@ -31,7 +31,7 @@ describe('pendingSummaryParts', () => {
     for (const p of parts) expect(p.count).toBe(tabBadgeCount(TABS.find((t) => t.key === p.tab)!, null));
     expect(parts.map((p) => p.text)).toEqual([
       '3 waiting on you',
-      '1 AI review to read',
+      '1 new AI review',
       '2 to fix',
       '1 unanswered thread',
       '4 dependency updates',
@@ -48,7 +48,7 @@ describe('pendingSummaryParts', () => {
   });
 
   it('says nothing when every tab is empty', () => {
-    expect(pendingSummaryParts(TABS.map((t) => ({ ...t, total: 0, authorTotals: { people: 0, automation: 0 } })), null)).toEqual([]);
+    expect(pendingSummaryParts(TABS.map((t) => ({ ...t, total: 0, authorTotals: { people: 0, automation: 0 }, ...(t.newTotal != null ? { newTotal: 0 } : {}) })), null)).toEqual([]);
   });
 });
 

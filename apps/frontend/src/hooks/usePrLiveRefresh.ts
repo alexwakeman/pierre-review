@@ -119,8 +119,8 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     // a PR that merged, closed or went behind while its pane was open is already stale in the
     // DB's own terms, and the board behind the pane went on rendering the card for up to five
     // minutes (its refetchInterval) with no GitHub call able to fix it. These three keys are ONE
-    // FOLD READ THREE TIMES (getWorkspaceInsights): the board, the daily-brief counts (banner +
-    // badges) whose count the cap disclosure divides by, and the ranked plan. Sweep them TOGETHER or
+    // FOLD READ TWICE (getWorkspaceInsights): the board and the daily-brief counts (banner +
+    // badges) whose count the cap disclosure divides by. Sweep them TOGETHER or
     // `capFor`'s `shown === count` guard compares two snapshots and the "50 of 148" line
     // silently vanishes — the same rule ACTIVITY_QUERY_KEYS keeps for a landing sync.
     //
@@ -128,7 +128,6 @@ export function usePrLiveRefresh(prId: number, enabled: boolean): PrLiveRefresh 
     // the churn this effect's comment above forbids.
     void qc.invalidateQueries({ queryKey: ['attention-cards'] });
     void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-    void qc.invalidateQueries({ queryKey: ['work-plan'] });
   }, [data, dataUpdatedAt, prId, qc]);
 
   const refreshNow = useCallback(() => {

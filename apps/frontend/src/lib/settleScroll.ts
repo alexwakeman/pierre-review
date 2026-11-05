@@ -104,7 +104,7 @@ export function revealIntoView(el: Element, block: ScrollLogicalPosition): () =>
     pane != null ? pane.scrollTop : (document.scrollingElement?.scrollTop ?? 0);
   const top = (): number => el.getBoundingClientRect().top - paneTop();
 
-  // A HIDDEN target (the code under the Threads only view is `display: none`) measures 0×0 at the
+  // A HIDDEN target (an ancestor under `display: none`) measures 0×0 at the
   // pane's corner: never scroll for it — that sent the pane to the top and fought the thread list.
   const hidden = (): boolean => {
     const r = el.getBoundingClientRect();

@@ -388,14 +388,21 @@ describe('the Pending mute', () => {
   });
 
   it('DOES lower the "Do next" rank of a muted item — accepted, and pinned so it is a decision', async () => {
-    const insMuted = await q.getWorkspaceInsights(1, undefined, defaultScope);
-    const planMuted = await workPlan.rankWorkPlan(1, defaultScope, insMuted);
+    const { getMyTurnSettings } = await import('./my-turn-settings.js');
+    const { weights } = await getMyTurnSettings(1);
+    const scoredNow = async (): Promise<{ prId: number | null; score: number }[]> => {
+      const ins = await q.getWorkspaceInsights(1, undefined, defaultScope, { uncapped: true });
+      return (await workPlan.scoreCards(1, ins.cards, Date.now(), weights)).scored;
+    };
+    const planMuted = await scoredNow();
     await mute.setWorkspacePendingMute(1, defaultScope.workspaceId, { mutedRepoIds: [] });
-    const insLoud = await q.getWorkspaceInsights(1, undefined, defaultScope);
-    const planLoud = await workPlan.rankWorkPlan(1, defaultScope, insLoud);
+    const planLoud = await scoredNow();
 
-    const scoreFor = (plan: any, prId: number): number | undefined =>
-      plan.items.find((i: { prId: number }) => i.prId === prId)?.score;
+    // The PR's best card score — what its place in a tab is ranked by.
+    const scoreFor = (scored: { prId: number | null; score: number }[], prId: number): number | undefined => {
+      const mine = scored.filter((c) => c.prId === prId).map((c) => c.score);
+      return mine.length > 0 ? Math.max(...mine) : undefined;
+    };
 
     const betaMuted = scoreFor(planMuted, requestedPr.beta!);
     const betaLoud = scoreFor(planLoud, requestedPr.beta!);
@@ -406,7 +413,7 @@ describe('the Pending mute', () => {
     // mean two relevance values in flight — two answers to one question — so the coupling is
     // accepted; it is asserted here because nothing on screen says the head re-ordered.
     expect(betaMuted!).toBeLessThan(betaLoud!);
-    // ⚠ AND IT IS A RE-ORDERING, NEVER A FILTER: the item is still in the plan either way.
+    // ⚠ AND IT IS A RE-ORDERING, NEVER A FILTER: the item is still scored either way.
     expect(scoreFor(planMuted, requestedPr.alpha!)).toBe(scoreFor(planLoud, requestedPr.alpha!));
   });
 });

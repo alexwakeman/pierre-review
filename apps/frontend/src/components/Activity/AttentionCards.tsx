@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
@@ -16,7 +16,6 @@ import type {
   MyTurnOwnWork,
   MyTurnReply,
   MyTurnCommentRef,
-  MyTurnTrunkCard,
   NewPrBall,
   PrAutomation,
   ReviewerRoutingCard,
@@ -118,8 +117,8 @@ import {
   ExternalLinkIcon,
   MergeIcon,
   ShieldIcon,
-  SparkleIcon,
   WarningIcon,
+  CloseIcon,
 } from '../Icons.js';
 import { ReviewTargetNote, ReviewWaitList } from '../ReviewWaitActions.js';
 import { UserName } from '../UserName.js';
@@ -1596,7 +1595,6 @@ export function mergeRowCardOf(card: InsightCard): MergeRowCard | null {
       if (card.kind === 'security' && !card.dependencyUpdate) return null;
       return card.depState === 'conflicts' ? null : card;
     case 'my_turn':
-      if (card.reason === 'trunk_red') return null;
       return card.own?.kind === 'ready' ? asForwardCard(card, card.own) : null;
     default:
       return null;
@@ -2185,36 +2183,6 @@ export function asConflictsCard(c: MyTurnCard, own: ConflictsWork): ConflictsCar
   };
 }
 
-/** A promoted red default branch, as the ci_failing trunk card it replaces — same body, same
- *  landing-PR byline (the four author fields are copied, never re-resolved). */
-export function asCiFailingCard(t: MyTurnTrunkCard): CiFailingCard {
-  return {
-    id: t.id,
-    kind: 'ci_failing',
-    severity: t.severity,
-    arm: 'trunk',
-    repoId: t.repoId,
-    repoFullName: t.repoFullName,
-    ciStatus: t.ciStatus,
-    prId: t.prId,
-    prNumber: t.prNumber,
-    prTitle: t.prTitle,
-    headSha: t.headSha,
-    mergedById: t.mergedById,
-    viewerMerged: t.viewerMerged,
-    detail: t.detail,
-    observedAt: t.observedAt,
-    githubUrl: t.githubUrl,
-    authorId: t.authorId,
-    authorIsBot: t.authorIsBot,
-    authorBotKind: t.authorBotKind,
-    automation: t.automation,
-    // The red head's failing checks — copied, or the promoted card silently loses its names.
-    failingChecks: t.failingChecks,
-    failingCheckTotal: t.failingCheckTotal,
-  };
-}
-
 /** Opens the PR a card names, when it names one — the ci_failing card's rule (a trunk with no
  *  landing PR has nothing to open). */
 function landingPrMeta(
@@ -2255,12 +2223,11 @@ export function shouldShowDivider(doNextCount: number | undefined, total: number
 //   1. THE HEADING — what happened, who did it, the quote, the time once (`pendingHeading`).
 //   2. THE ACTION LINE — [In your repos] [muted] **what to do** · where · on <PR title> ·
 //      repo#N ↗ ⓘ (`pendingActionLine`). The title opens the PR on Overview.
-//   3. THE PRO "why" LINE — model prose, labelled apart, directly under the action line.
-//   4. THE EVENT'S OWN CONTENT — the attributed reply, the pushed commits, the failing checks, the
+//   3. THE EVENT'S OWN CONTENT — the attributed reply, the pushed commits, the failing checks, the
 //      suggested reviewers, the advisory, the thread's opening comment, the last-landed PR.
-//   5. ONE FACT LINE chosen by the card's job (`pendingFactPlan`).
-//   6. CLAUDE AS ONE LINE — the verdict and counts, or on a red-build card the diagnosis.
-//   7. THE BUTTONS — primary · secondaries · Details · Dismiss, on the left.
+//   4. ONE FACT LINE chosen by the card's job (`pendingFactPlan`).
+//   5. CLAUDE AS ONE LINE — the verdict and counts, or on a red-build card the diagnosis.
+//   6. THE BUTTONS — primary · secondaries · Details · Dismiss, on the left.
 //
 // DETAILS (click, per-card local state) holds the rest: who reviewed, files and +/−, when it was
 // opened, the reach phrase, Claude's other pills, the PR summary and the thread's conversation —
@@ -2301,11 +2268,9 @@ interface PendingBoardApi {
   openTrunk: (repoId: number) => void;
 }
 
-/** A card's trunk (red build) view, when it is one — the ci_failing card or a promoted red trunk. */
+/** A card's trunk (red build) view, when it is one — the ci_failing card. */
 function trunkOf(card: InsightCard): CiFailingCard | null {
-  if (card.kind === 'ci_failing') return card;
-  if (card.kind === 'my_turn' && card.reason === 'trunk_red') return asCiFailingCard(card);
-  return null;
+  return card.kind === 'ci_failing' ? card : null;
 }
 
 /**
@@ -2735,8 +2700,6 @@ function PendingCard({
 }): JSX.Element {
   const titleId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const boardInfo = useContext(PendingBoardContext);
-  const whyLine = boardInfo?.whyById?.get(card.id);
   const rowCard = mergeRowCardOf(card);
   const queueLine = useMergeRowQueueLine(rowCard);
   const ctx: HeadingContext = { ...board.ctx, ...(queueLine !== undefined ? { queueLine } : {}) };
@@ -2749,8 +2712,7 @@ function PendingCard({
   // The PR the card is about (null for a repository or a person).
   const prRef: (PrCardRef & InsightPrRef & { id: string }) | null =
     'inMergeQueue' in card ? (card as PrCardRef & InsightPrRef & { id: string }) : null;
-  const trunk: CiFailingCard | null =
-    card.kind === 'ci_failing' ? card : card.kind === 'my_turn' && card.reason === 'trunk_red' ? asCiFailingCard(card) : null;
+  const trunk: CiFailingCard | null = trunkOf(card);
   const landing = trunk != null ? landingPrMeta(trunk, board.usersById) : null;
   // A red build on YOUR PR is a PR card even though it carries no `InsightPrRef`: its own fields
   // name the PR, so the action line still says which one ("Fix the build · on <title> · repo#N").
@@ -2816,11 +2778,10 @@ function PendingCard({
 
   switch (card.kind) {
     case 'my_turn': {
-      if (card.reason === 'trunk_red') break;
       const threadOpen =
         card.threadId != null ? () => board.openThreadOn(card, card.threadId as number) : undefined;
       // A mention / comment-after-yours card that names its comment lands ON it (a comment on a
-      // line → Changes; a PR comment or review body → Comments); without one, the Comments tab.
+      // line → Changes; a PR comment or review body → Activity); without one, the Activity tab.
       const commentOpen =
         card.comment != null ? () => board.openComment(card, card.comment as MyTurnCommentRef) : undefined;
       if (card.reply != null && replyBlockShown(heading, card.reply)) {
@@ -2865,10 +2826,10 @@ function PendingCard({
           resolveButton(card.threadId);
           break;
         case 'comment_reply':
-          primary('Answer', commentOpen ?? (() => board.openPr(card, 'comments')));
+          primary('Answer', commentOpen ?? (() => board.openPr(card, 'activity')));
           break;
         case 'mention':
-          primary('Read it', commentOpen ?? (() => board.openPr(card, 'comments')));
+          primary('Read it', commentOpen ?? (() => board.openPr(card, 'activity')));
           break;
         case 'review_request':
           if (card.overReviewTarget != null) {
@@ -3120,7 +3081,7 @@ function PendingCard({
   const threadIdForDetails =
     card.kind === 'untouched_thread'
       ? card.threadId
-      : card.kind === 'my_turn' && card.reason !== 'trunk_red'
+      : card.kind === 'my_turn'
         ? card.threadId
         : null;
 
@@ -3236,13 +3197,6 @@ function PendingCard({
           </span>
         </h3>
         <ActionLine card={card} line={line} pr={prLine} external={external} />
-        {/* GENERATED (work plan) — its own line, palette and mark, never mixed with a fact. */}
-        {whyLine != null && whyLine.trim() !== '' && (
-          <p className="flex items-start gap-1.5 text-body italic text-ai-ink">
-            <SparkleIcon size={12} className="mt-1 shrink-0 not-italic text-ai-signal" />
-            <span className="min-w-0">{whyLine}</span>
-          </p>
-        )}
         {content}
         {prRef != null && (
           <FactLine
@@ -3331,10 +3285,10 @@ export function AttentionCards({
   doNextCount?: number;
   /** Review-load cards for the "who has reviews waiting" group, above the ranked rows. */
   people?: InsightCard[];
-  /** The Pending board's placement data (every card's ⓘ) and the work plan's per-card lines. */
+  /** The Pending board's placement data (every card's ⓘ). */
   explain?: Pick<
     PendingBoardInfo,
-    'tab' | 'rules' | 'scores' | 'viewName' | 'total' | 'whyById' | 'onOpenGuide'
+    'tab' | 'rules' | 'scores' | 'viewName' | 'total' | 'onOpenGuide'
   >;
   /** Inside the list's scroll box, above / below the rows (empty notes, Merge or arm all, the cap
    *  sentence, the Dismissed list). */
@@ -3475,8 +3429,8 @@ export function AttentionCards({
   const showPrComment = useFilters((s) => s.showPrComment);
   const openComment = (card: PrCardRef & { id: string }, comment: MyTurnCommentRef): void => {
     if (comment.kind === 'review_comment') {
-      // PrDetail resolves the thread → Changes jump (and falls back to the Threads only view when
-      // the file has left the diff).
+      // PrDetail resolves the thread → Changes jump (and falls back to the Threads tab when the
+      // file has left the diff).
       openPrChangesAt(metaFor(card, usersById), comment.path, {
         fromActivity: true,
         returnItemId: card.id,
@@ -3485,9 +3439,9 @@ export function AttentionCards({
       });
       return;
     }
-    // A comment with no file (a PR comment, a review body) lives on the Comments tab.
+    // A comment with no file (a PR comment, a review body) lives on the Activity tab.
     open(metaFor(card, usersById), card.id);
-    setPrDetailTab(card.prId, 'comments');
+    setPrDetailTab(card.prId, 'activity');
     showPrComment(card.prId, comment.id, comment.kind === 'review' ? 'review' : 'comment');
   };
 
@@ -3875,12 +3829,10 @@ export function AttentionCards({
   const reasonShown =
     reasonColumnShown([...summaries.values()].map((s) => s.reason)) ||
     flat.some((c) => c.kind === 'waiting_on_others');
-  const whyById = explain?.whyById;
   const now = Date.now();
   const renderRow = (card: InsightCard): JSX.Element => {
     const i = flat.indexOf(card);
     const s = summaries.get(card.id) ?? pendingRowSummary(card, ctx);
-    const why = whyById?.get(card.id);
     const err = errors[card.id];
     const age = s.at != null ? compactAge(s.at, now) : null;
     const toneWord = PENDING_ROW_TONE_WORD[s.tone];
@@ -3913,12 +3865,6 @@ export function AttentionCards({
           {toneWord !== '' && s.tone !== 'blocked' && <span className="sr-only"> · {toneWord}</span>}
         </span>
         <RowTitle sub={s.ref != null ? <span className="max-sm:hidden">{s.ref}</span> : undefined}>{s.title}</RowTitle>
-        {why != null && why.trim() !== '' && (
-          <span className="flex shrink-0 text-ai-signal" title={why}>
-            <SparkleIcon size={12} />
-            <span className="sr-only">The plan says: {why}</span>
-          </span>
-        )}
         {err != null && <span className="max-w-[40%] shrink truncate text-meta text-ui-danger">{err}</span>}
         {s.size != null && (
           <RowMeta hideBelow="lg" className="w-[5.5rem] text-right">
@@ -3949,6 +3895,19 @@ export function AttentionCards({
           )}
           {s.overTarget != null && <span className="sr-only">. {s.overTarget}</span>}
         </RowMeta>
+        {/* DISMISS, ON EVERY MY TURN ROW (the same per-PR dismissal as the panel's button and `e`).
+            Rendered only where it applies — never a disabled button — and shown on hover or on the
+            selected row with a pointer, always on touch. Fetches nothing until pressed. */}
+        {dismissTargetOf(card) != null && (
+          <IconButton
+            label="Dismiss until something new happens"
+            icon={<CloseIcon size={12} />}
+            size="sm"
+            onClick={() => dismiss(card)}
+            data-testid="pending-row-dismiss"
+            className={`-mr-1 ${i === selIndex ? '' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 touch:opacity-100'}`}
+          />
+        )}
       </Row>
     );
   };

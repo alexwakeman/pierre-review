@@ -665,7 +665,7 @@ export function anchorRowFor(
  * before a rename and is re-homed under the current path (previously it was invisible in
  * Changes: the fold keyed on `t.path` while blocks looked up `f.path`). A thread matching
  * neither stays out of the map — a file not loaded yet (past the pages shown) renders only in the
- * Changes tab's Threads only view, and the bar's count reads `pr.threads` so the aggregate never
+ * Threads tab, and the bar's count reads `pr.threads` so the aggregate never
  * lies.
  */
 export function indexThreadsByPath<T extends { path: string }>(

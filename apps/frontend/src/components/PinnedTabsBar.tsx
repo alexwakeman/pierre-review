@@ -8,7 +8,7 @@ import {
   useFloating,
   useInteractions,
 } from '@floating-ui/react';
-import { usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
+import { canPinTab, usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
@@ -19,8 +19,9 @@ import {
   CommentIcon,
   MagnifierIcon,
   PersonIcon,
+  PinIcon,
   TicketIcon,
-  BuildIcon,
+  WrenchIcon,
   ResolveIcon,
   ThreadsIcon,
 } from './Icons.js';
@@ -63,6 +64,7 @@ interface ChipDragHandlers {
 function ChipShell({
   tabKey,
   active,
+  pinned,
   isDragged,
   width,
   buttonClass,
@@ -75,6 +77,7 @@ function ChipShell({
 }: {
   tabKey: string;
   active: boolean;
+  pinned: boolean;
   isDragged: boolean;
   width?: string;
   buttonClass?: string;
@@ -86,6 +89,7 @@ function ChipShell({
   onOpenMenu: (e: React.MouseEvent, tabKey: string | null) => void;
 }): JSX.Element {
   const closeTab = usePinnedTabs((s) => s.closeTab);
+  const togglePinTab = usePinnedTabs((s) => s.togglePinTab);
   return (
     <div
       role="presentation"
@@ -118,16 +122,30 @@ function ChipShell({
       >
         {body}
       </button>
-      <button
-        type="button"
-        data-tab-close
-        onClick={() => closeTab(tabKey)}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint opacity-70 hover:bg-ui-hover hover:text-ui-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover:opacity-100 touch:h-10 touch:w-10 touch:opacity-100"
-        title="Close this tab"
-        aria-label={closeAria}
-      >
-        <CloseIcon />
-      </button>
+      {/* A PINNED tab has no ✕ (browser-style): the pin sits in its place and unpins it. */}
+      {pinned ? (
+        <button
+          type="button"
+          data-tab-pin
+          onClick={() => togglePinTab(tabKey)}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10"
+          title="Pinned. Click to unpin"
+          aria-label="Unpin tab"
+        >
+          <PinIcon size={12} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-tab-close
+          onClick={() => closeTab(tabKey)}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint opacity-70 hover:bg-ui-hover hover:text-ui-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover:opacity-100 touch:h-10 touch:w-10 touch:opacity-100"
+          title="Close this tab"
+          aria-label={closeAria}
+        >
+          <CloseIcon />
+        </button>
+      )}
     </div>
   );
 }
@@ -272,7 +290,7 @@ export function useTabChip(tab: Tab): TabChipCfg {
       icon: (
         <>
           <span aria-hidden="true" className="shrink-0">
-            <BuildIcon />
+            <WrenchIcon />
           </span>
         </>
       ),
@@ -481,6 +499,7 @@ function TabChip({
     <ChipShell
       tabKey={tab.key}
       active={active}
+      pinned={tab.pinned === true}
       isDragged={isDragged}
       width={cfg.width}
       buttonClass={cfg.buttonClass}
@@ -503,22 +522,28 @@ function TabChip({
 // a FloatingPortal — the strip is overflow-x-auto, so a non-portaled absolute menu would
 // clip to the 42px bar. Anchored to a virtual zero-size rect at the click point (the
 // MarkerPopover trick). `tabKey` null = a fixed Activity/Timeline chip: only "Close all".
+// Pin / Unpin shows only where it can act (`canPinTab`); a pinned tab has no "Close this tab", and
+// the close-many items count only UNPINNED tabs (pinned ones survive them).
 export function TabContextMenu({
   x,
   y,
   tabKey,
-  tabCount,
   onClose,
 }: {
   x: number;
   y: number;
   tabKey: string | null;
-  tabCount: number;
   onClose: () => void;
 }): JSX.Element {
   const closeTab = usePinnedTabs((s) => s.closeTab);
   const closeOtherTabs = usePinnedTabs((s) => s.closeOtherTabs);
   const closeAllTabs = usePinnedTabs((s) => s.closeAllTabs);
+  const togglePinTab = usePinnedTabs((s) => s.togglePinTab);
+  const tabs = usePinnedTabs((s) => s.tabs);
+  const tab = tabKey != null ? tabs.find((t) => t.key === tabKey) ?? null : null;
+  const pinned = tab?.pinned === true;
+  const closableOthers = tabs.filter((t) => t.pinned !== true && t.key !== tabKey).length;
+  const closableAll = tabs.filter((t) => t.pinned !== true).length;
 
   const { refs, floatingStyles, context, isPositioned } = useFloating({
     // Placed by top/left: the entry animation animates `transform` (ui/floating.ts).
@@ -566,7 +591,21 @@ export function TabContextMenu({
         aria-label="Tab actions"
         className="z-[60] w-48 rounded-ui bg-ui-raise p-1 shadow-xl shadow-black/30 motion-safe:animate-ui-pop"
       >
-        {tabKey != null && (
+        {tab != null && (pinned || canPinTab(tab)) && (
+          <button
+            role="menuitem"
+            type="button"
+            data-testid="tab-menu-pin"
+            onClick={() => {
+              onClose();
+              togglePinTab(tab.key);
+            }}
+            className={item}
+          >
+            {pinned ? 'Unpin tab' : 'Pin tab'}
+          </button>
+        )}
+        {tabKey != null && !pinned && (
           <button
             role="menuitem"
             type="button"
@@ -583,7 +622,7 @@ export function TabContextMenu({
           <button
             role="menuitem"
             type="button"
-            disabled={tabCount <= 1}
+            disabled={closableOthers === 0}
             onClick={() => {
               onClose();
               closeOtherTabs(tabKey);
@@ -600,7 +639,7 @@ export function TabContextMenu({
             onClose();
             closeAllTabs();
           }}
-          disabled={tabCount === 0}
+          disabled={closableAll === 0}
           className={item}
         >
           Close all tabs
@@ -754,6 +793,7 @@ export function PinnedTabsBar(): JSX.Element | null {
     // slot maths, which enumerates `[data-tabkey]`, can never count the ghost) and its ✕.
     clone.removeAttribute('data-tabkey');
     clone.querySelector('[data-tab-close]')?.remove();
+    clone.querySelector('[data-tab-pin]')?.remove();
     clone.classList.remove('opacity-50');
     host.replaceChildren(clone);
     // Paint it at the grab point immediately: without this it renders once at the parked
@@ -835,8 +875,8 @@ export function PinnedTabsBar(): JSX.Element | null {
         // freezing the strip in an uncommitted preview order.
         if (dragRef.current?.dragging) return;
         if (e.button !== 0) return;
-        // Never start a drag from the ✕ button.
-        if ((e.target as HTMLElement).closest('[data-tab-close]') != null) return;
+        // Never start a drag from the ✕ or the pin button.
+        if ((e.target as HTMLElement).closest('[data-tab-close], [data-tab-pin]') != null) return;
         const key = e.currentTarget.dataset.tabkey;
         if (key == null) return;
         draggedRef.current = false;
@@ -940,7 +980,6 @@ export function PinnedTabsBar(): JSX.Element | null {
           x={menu.x}
           y={menu.y}
           tabKey={menu.tabKey}
-          tabCount={tabs.length}
           onClose={() => setMenu(null)}
         />
       )}

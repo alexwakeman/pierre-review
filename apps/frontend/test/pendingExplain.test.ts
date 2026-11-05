@@ -308,12 +308,12 @@ describe('what a card means', () => {
     );
   });
 
-  it('says a red default branch is yours to watch only when you maintain the repo', () => {
-    expect(whyHere(mt('trunk_red', { maintained: true }))).toBe(
-      'The default branch is failing CI in a repo you maintain. Every open PR there builds on it.',
+  it('says what the two AI review types ask, and what clears them', () => {
+    expect(whyHere(mt('claude_review'))).toBe(
+      'Your Limn finished an AI review you have not read. It goes away when you open the PR’s AI Review tab.',
     );
-    expect(whyHere(mt('trunk_red', { maintained: false }))).toBe(
-      'The default branch is failing CI. Every open PR there builds on it.',
+    expect(whyHere(mt('ai_approved_merged'))).toBe(
+      'Your Limn approved this PR and it has since merged. It goes away when you open the PR.',
     );
   });
 
@@ -324,10 +324,10 @@ describe('what a card means', () => {
   });
 
   it('says a promoted card is here because the reader added its type — unless its repo is muted', () => {
-    for (const reason of ['own_ci_red', 'own_conflicts', 'own_ready', 'own_thread', 'trunk_red'] as const) {
+    for (const reason of ['own_ci_red', 'own_conflicts', 'own_ready', 'own_thread'] as const) {
       expect(whoseItIs(mt(reason))).toBe('You added this type to My Turn in Settings.');
     }
-    expect(whoseItIs(mt('trunk_red', { relevance: 'none', muted: true }))).toBe(
+    expect(whoseItIs(mt('own_ci_red', { relevance: 'none', muted: true }))).toBe(
       'Its repo is muted for Pending, so it does not claim your turn or notify you.',
     );
     // A direct summons needs no second sentence: its `whyHere` already says who asked.
@@ -346,12 +346,8 @@ describe('what a card means', () => {
     expect(colourReason(mt('own_conflicts'))).toBe('your PR cannot merge');
     expect(colourReason(mt('own_ready', { severity: 'warn' }))).toBe('it is your own PR');
     expect(colourReason(mt('own_thread', { severity: 'warn' }))).toBe('it is your own PR');
-    expect(colourReason(mt('trunk_red', { severity: 'warn', viewerMerged: false }))).toBe(
-      'the default branch is failing',
-    );
-    expect(colourReason(mt('trunk_red', { viewerMerged: true }))).toBe(
-      'you merged the PR that landed this commit',
-    );
+    expect(colourReason(mt('claude_review', { severity: 'warn' }))).toBe('you have not read it yet');
+    expect(colourReason(mt('ai_approved_merged', { severity: 'info' }))).toBe('your Limn approved it');
   });
 });
 

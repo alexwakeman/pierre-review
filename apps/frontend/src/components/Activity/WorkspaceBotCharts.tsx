@@ -670,7 +670,7 @@ function BotRepoWorkChart({
             {[0, maxV].map((v) => (
               <g key={v}>
                 <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="decorative-mark text-ui-faint" stroke="currentColor" strokeWidth={1} />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-ui-faint text-meta">
                   {fmtNum(v)}
                 </text>
               </g>
@@ -691,7 +691,7 @@ function BotRepoWorkChart({
               const cx = colCenter(i);
               const ly = baseY + 9;
               return (
-                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-meta">
+                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-ui-faint text-meta">
                   {clipTick(singleRepo ? c.botLabel : c.repoName)}
                   <title>{singleRepo ? c.botLabel : c.repoName}</title>
                 </text>

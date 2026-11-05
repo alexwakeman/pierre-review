@@ -22,6 +22,7 @@
   src: url('./fonts/archivo-latin-600.woff2') format('woff2');
 }
 
+[data-scheme='light'],
 :root {
   color-scheme: light dark;
   /* ── AI-surface tokens (Limn landing palette, mapped two-theme) ─────────────
@@ -45,6 +46,7 @@
   --ai-signal-fill: 124 77 219;   /* #7C4DDB signal-fill (non-text) */
 }
 
+[data-scheme='dark'],
 .dark {
   --ai-surface: 22 22 26;         /* #16161A ink as panel ground        */
   --ai-surface-2: 28 28 33;       /* #1C1C21 raised step (derived)      */
@@ -64,6 +66,7 @@
    whether it still holds. Colour is reserved: danger = what blocks, success = what is ready to
    land, accent = the selection and the one primary action. Everything else is ink on surface.
    warn is for the few legacy "attention" marks the redesign keeps (stale, near a limit). */
+[data-scheme='light'],
 :root {
   --ui-bg: 255 255 255;           /* #FFFFFF page                         */
   --ui-surface: 250 250 250;      /* #FAFAFA sidebar, side panel          */
@@ -83,6 +86,7 @@
   --ui-scrim: 15 16 20;           /* modal / sheet backdrop (use at /40)  */
 }
 
+[data-scheme='dark'],
 .dark {
   --ui-bg: 25 25 25;              /* #191919 */
   --ui-surface: 31 31 31;         /* #1F1F1F */
@@ -100,6 +104,200 @@
   --ui-success: 79 199 142;       /* #4FC78E */
   --ui-warn: 226 163 54;          /* #E2A336 */
   --ui-scrim: 0 0 0;
+}
+
+/* ── THE NAMED COLOUR SCHEMES (docs/FRONTEND.md § Colour schemes; the list is lib/colorSchemes.ts) ──
+   One block per scheme: all 16 `--ui-*` roles and all 8 `--ai-*` roles. `[data-scheme]` sits on
+   <html> beside the mode's `.dark` class; these blocks come AFTER the defaults so, at the same
+   specificity, they win. The same attribute on any element repaints that element's subtree, which is
+   how Settings → Appearance shows each name in its own colours. The defaults above carry
+   `[data-scheme='light'|'dark']` for the same reason.
+
+   Each keeps its palette's canonical hues; a text ink that missed the floor was moved in LIGHTNESS
+   only until it cleared 4.6:1 on every surface (bg → sel), so these are "Solarized-style", not
+   pixel-exact. test/colorSchemes.test.ts measures every block with the defaults' own checks.
+   --ai-signal-fill is the palette's own violet/purple (non-text only). */
+[data-scheme='solarized-light'] {
+  --ui-bg: 253 246 227;           /* #fdf6e3 */
+  --ui-surface: 247 240 220;      /* #f7f0dc */
+  --ui-raise: 238 232 213;        /* #eee8d5 */
+  --ui-hover: 232 225 204;        /* #e8e1cc */
+  --ui-sel: 221 214 193;          /* #ddd6c1 */
+  --ui-line: 211 203 180;         /* #d3cbb4 */
+  --ui-ink: 7 54 66;              /* #073642 */
+  --ui-mute: 59 79 85;            /* #3b4f55 */
+  --ui-faint: 77 93 99;           /* #4d5d63 */
+  --ui-accent: 26 96 145;         /* #1a6091 */
+  --ui-accent-fill: 33 122 184;   /* #217ab8 */
+  --ui-on-accent: 255 255 255;    /* #ffffff */
+  --ui-danger: 178 33 30;         /* #b2211e */
+  --ui-success: 84 97 0;          /* #546100 */
+  --ui-warn: 115 87 0;            /* #735700 */
+  --ui-scrim: 0 43 54;            /* #002b36 */
+  --ai-surface: 247 240 220;      /* #f7f0dc */
+  --ai-surface-2: 238 232 213;    /* #eee8d5 */
+  --ai-border: 211 203 180;       /* #d3cbb4 */
+  --ai-hairline: 232 225 204;     /* #e8e1cc */
+  --ai-ink: 7 54 66;              /* #073642 */
+  --ai-muted: 77 93 99;           /* #4d5d63 */
+  --ai-signal: 73 80 182;         /* #4950b6 */
+  --ai-signal-fill: 108 113 196;  /* #6c71c4 */
+}
+[data-scheme='github-light'] {
+  --ui-bg: 255 255 255;           /* #ffffff */
+  --ui-surface: 246 248 250;      /* #f6f8fa */
+  --ui-raise: 239 242 245;        /* #eff2f5 */
+  --ui-hover: 234 238 242;        /* #eaeef2 */
+  --ui-sel: 221 227 234;          /* #dde3ea */
+  --ui-line: 208 215 222;         /* #d0d7de */
+  --ui-ink: 31 35 40;             /* #1f2328 */
+  --ui-mute: 66 74 83;            /* #424a53 */
+  --ui-faint: 89 99 110;          /* #59636e */
+  --ui-accent: 8 96 198;          /* #0860c6 */
+  --ui-accent-fill: 9 105 218;    /* #0969da */
+  --ui-on-accent: 255 255 255;    /* #ffffff */
+  --ui-danger: 192 31 43;         /* #c01f2b */
+  --ui-success: 23 114 49;        /* #177231 */
+  --ui-warn: 134 89 0;            /* #865900 */
+  --ui-scrim: 31 35 40;           /* #1f2328 */
+  --ai-surface: 246 248 250;      /* #f6f8fa */
+  --ai-surface-2: 239 242 245;    /* #eff2f5 */
+  --ai-border: 208 215 222;       /* #d0d7de */
+  --ai-hairline: 234 238 242;     /* #eaeef2 */
+  --ai-ink: 31 35 40;             /* #1f2328 */
+  --ai-muted: 89 99 110;          /* #59636e */
+  --ai-signal: 118 63 220;        /* #763fdc */
+  --ai-signal-fill: 130 80 223;   /* #8250df */
+}
+[data-scheme='gruvbox-light'] {
+  --ui-bg: 251 241 199;           /* #fbf1c7 */
+  --ui-surface: 246 235 191;      /* #f6ebbf */
+  --ui-raise: 242 229 188;        /* #f2e5bc */
+  --ui-hover: 235 219 178;        /* #ebdbb2 */
+  --ui-sel: 226 211 166;          /* #e2d3a6 */
+  --ui-line: 213 196 161;         /* #d5c4a1 */
+  --ui-ink: 40 40 40;             /* #282828 */
+  --ui-mute: 60 56 54;            /* #3c3836 */
+  --ui-faint: 98 88 81;           /* #625851 */
+  --ui-accent: 7 98 115;          /* #076273 */
+  --ui-accent-fill: 7 102 120;    /* #076678 */
+  --ui-on-accent: 251 241 199;    /* #fbf1c7 */
+  --ui-danger: 157 0 6;           /* #9d0006 */
+  --ui-success: 96 92 11;         /* #605c0b */
+  --ui-warn: 162 54 3;            /* #a23603 */
+  --ui-scrim: 40 40 40;           /* #282828 */
+  --ai-surface: 246 235 191;      /* #f6ebbf */
+  --ai-surface-2: 242 229 188;    /* #f2e5bc */
+  --ai-border: 213 196 161;       /* #d5c4a1 */
+  --ai-hairline: 235 219 178;     /* #ebdbb2 */
+  --ai-ink: 40 40 40;             /* #282828 */
+  --ai-muted: 98 88 81;           /* #625851 */
+  --ai-signal: 141 62 112;        /* #8d3e70 */
+  --ai-signal-fill: 143 63 113;   /* #8f3f71 */
+}
+[data-scheme='solarized-dark'] {
+  --ui-bg: 0 43 54;               /* #002b36 */
+  --ui-surface: 4 49 61;          /* #04313d */
+  --ui-raise: 7 54 66;            /* #073642 */
+  --ui-hover: 11 61 74;           /* #0b3d4a */
+  --ui-sel: 17 70 82;             /* #114652 */
+  --ui-line: 28 82 96;            /* #1c5260 */
+  --ui-ink: 238 232 213;          /* #eee8d5 */
+  --ui-mute: 197 205 205;         /* #c5cdcd */
+  --ui-faint: 163 175 177;        /* #a3afb1 */
+  --ui-accent: 111 180 229;       /* #6fb4e5 */
+  --ui-accent-fill: 33 122 184;   /* #217ab8 */
+  --ui-on-accent: 255 255 255;    /* #ffffff */
+  --ui-danger: 237 149 147;       /* #ed9593 */
+  --ui-success: 160 184 0;        /* #a0b800 */
+  --ui-warn: 219 166 0;           /* #dba600 */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 4 49 61;          /* #04313d */
+  --ai-surface-2: 7 54 66;        /* #073642 */
+  --ai-border: 28 82 96;          /* #1c5260 */
+  --ai-hairline: 11 61 74;        /* #0b3d4a */
+  --ai-ink: 238 232 213;          /* #eee8d5 */
+  --ai-muted: 163 175 177;        /* #a3afb1 */
+  --ai-signal: 166 169 219;       /* #a6a9db */
+  --ai-signal-fill: 108 113 196;  /* #6c71c4 */
+}
+[data-scheme='dracula'] {
+  --ui-bg: 40 42 54;              /* #282a36 */
+  --ui-surface: 45 47 61;         /* #2d2f3d */
+  --ui-raise: 50 52 68;           /* #323444 */
+  --ui-hover: 58 60 78;           /* #3a3c4e */
+  --ui-sel: 68 71 90;             /* #44475a */
+  --ui-line: 80 83 106;           /* #50536a */
+  --ui-ink: 248 248 242;          /* #f8f8f2 */
+  --ui-mute: 214 215 224;         /* #d6d7e0 */
+  --ui-faint: 175 184 209;        /* #afb8d1 */
+  --ui-accent: 139 233 253;       /* #8be9fd */
+  --ui-accent-fill: 139 233 253;  /* #8be9fd */
+  --ui-on-accent: 40 42 54;       /* #282a36 */
+  --ui-danger: 255 159 159;       /* #ff9f9f */
+  --ui-success: 80 250 123;       /* #50fa7b */
+  --ui-warn: 255 184 108;         /* #ffb86c */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 45 47 61;         /* #2d2f3d */
+  --ai-surface-2: 50 52 68;       /* #323444 */
+  --ai-border: 80 83 106;         /* #50536a */
+  --ai-hairline: 58 60 78;        /* #3a3c4e */
+  --ai-ink: 248 248 242;          /* #f8f8f2 */
+  --ai-muted: 175 184 209;        /* #afb8d1 */
+  --ai-signal: 202 169 250;       /* #caa9fa */
+  --ai-signal-fill: 189 147 249;  /* #bd93f9 */
+}
+[data-scheme='nord'] {
+  --ui-bg: 46 52 64;              /* #2e3440 */
+  --ui-surface: 50 56 69;         /* #323845 */
+  --ui-raise: 55 62 76;           /* #373e4c */
+  --ui-hover: 59 66 82;           /* #3b4252 */
+  --ui-sel: 63 71 87;             /* #3f4757 */
+  --ui-line: 76 86 106;           /* #4c566a */
+  --ui-ink: 236 239 244;          /* #eceff4 */
+  --ui-mute: 216 222 233;         /* #d8dee9 */
+  --ui-faint: 175 184 198;        /* #afb8c6 */
+  --ui-accent: 136 192 208;       /* #88c0d0 */
+  --ui-accent-fill: 136 192 208;  /* #88c0d0 */
+  --ui-on-accent: 46 52 64;       /* #2e3440 */
+  --ui-danger: 220 170 174;       /* #dcaaae */
+  --ui-success: 164 191 142;      /* #a4bf8e */
+  --ui-warn: 235 203 139;         /* #ebcb8b */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 50 56 69;         /* #323845 */
+  --ai-surface-2: 55 62 76;       /* #373e4c */
+  --ai-border: 76 86 106;         /* #4c566a */
+  --ai-hairline: 59 66 82;        /* #3b4252 */
+  --ai-ink: 236 239 244;          /* #eceff4 */
+  --ai-muted: 175 184 198;        /* #afb8c6 */
+  --ai-signal: 202 176 197;       /* #cab0c5 */
+  --ai-signal-fill: 180 142 173;  /* #b48ead */
+}
+[data-scheme='tokyo-night'] {
+  --ui-bg: 26 27 38;              /* #1a1b26 */
+  --ui-surface: 31 33 48;         /* #1f2130 */
+  --ui-raise: 36 40 59;           /* #24283b */
+  --ui-hover: 41 46 66;           /* #292e42 */
+  --ui-sel: 47 53 76;             /* #2f354c */
+  --ui-line: 59 66 97;            /* #3b4261 */
+  --ui-ink: 192 202 245;          /* #c0caf5 */
+  --ui-mute: 169 177 214;         /* #a9b1d6 */
+  --ui-faint: 155 160 188;        /* #9ba0bc */
+  --ui-accent: 122 162 247;       /* #7aa2f7 */
+  --ui-accent-fill: 122 162 247;  /* #7aa2f7 */
+  --ui-on-accent: 26 27 38;       /* #1a1b26 */
+  --ui-danger: 247 120 144;       /* #f77890 */
+  --ui-success: 158 206 106;      /* #9ece6a */
+  --ui-warn: 224 175 104;         /* #e0af68 */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 31 33 48;         /* #1f2130 */
+  --ai-surface-2: 36 40 59;       /* #24283b */
+  --ai-border: 59 66 97;          /* #3b4261 */
+  --ai-hairline: 41 46 66;        /* #292e42 */
+  --ai-ink: 192 202 245;          /* #c0caf5 */
+  --ai-muted: 155 160 188;        /* #9ba0bc */
+  --ai-signal: 187 154 247;       /* #bb9af7 */
+  --ai-signal-fill: 187 154 247;  /* #bb9af7 */
 }
 
 /* ── THE TYPE SCALE (tailwind.config.ts `text-meta/body/title/display`) ─────────────────────────────
@@ -463,27 +661,29 @@ body {
 }
 
 /* ---- vis-timeline: dark-mode + custom item styling ---- */
+/* Tokens, not hexes, so every dark colour scheme repaints the board (raise = the old #262626 line,
+   sel = #333333, ink / faint / mute = the three text greys). */
 .dark .vis-timeline {
-  border-color: #262626;
+  border-color: rgb(var(--ui-raise));
 }
 .dark .vis-panel .vis-content,
 .dark .vis-panel .vis-background,
 .dark .vis-labelset .vis-label,
 .dark .vis-foreground .vis-group {
-  border-color: #262626;
-  color: #e5e5e5;
+  border-color: rgb(var(--ui-raise));
+  color: rgb(var(--ui-ink));
 }
 .dark .vis-time-axis .vis-text {
-  color: #9e9e9e;
+  color: rgb(var(--ui-faint));
 }
 .dark .vis-time-axis .vis-grid.vis-minor {
-  border-color: #262626;
+  border-color: rgb(var(--ui-raise));
 }
 .dark .vis-time-axis .vis-grid.vis-major {
-  border-color: #333333;
+  border-color: rgb(var(--ui-sel));
 }
 .dark .vis-labelset .vis-label {
-  color: #d4d4d4;
+  color: rgb(var(--ui-mute));
 }
 .vis-current-time,
 .dark .vis-current-time {
@@ -738,17 +938,15 @@ body {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
-  color: #111827; /* gray-900 */
-  background-color: #ffffff; /* opaque light base */
-  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  color: rgb(var(--ui-ink));
+  background-color: rgb(var(--ui-bg)); /* opaque page ground, in every scheme */
+  border-bottom: 1px solid rgb(var(--ui-line));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .dark .tl-repo-sticky {
-  color: #f0f0f0;
-  background-color: #191919; /* the dark page ground (gray-950, remapped in tailwind.config) */
-  border-bottom-color: #262626;
+  border-bottom-color: rgb(var(--ui-raise));
 }
 /* Faint zebra wash echoing the current repo's tint. Drawn as a background-IMAGE so it
    composes OVER the opaque background-color (which stays fully opaque) — same trick as
@@ -1625,18 +1823,23 @@ body {
      conflict  #f5e0df      5.20       6.57          #261920     7.35       8.76
      applied   #e3ede7      5.95       7.13          #132324     11.56      14.34
      ignored   #efefef      5.97       6.87          #12161f     6.40       7.12
+
+   (That table predates the colour schemes. conflict and ignored, and five `--code-hl-*` colours,
+   were then moved in lightness so the SAME light / dark set also clears AA on every scheme's page
+   and side panel — Nord's lighter dark ground and Gruvbox's darker cream were the binding ones.
+   codeTokens.test.ts § every colour scheme measures it.)
    ───────────────────────────────────────────────────────────────────────────────────────────── */
 :root {
   --mr-change: 29 78 216;
-  --mr-conflict: 180 35 24;
+  --mr-conflict: 164 32 22;
   --mr-applied: 22 101 52;
-  --mr-ignored: 90 90 94;
+  --mr-ignored: 84 84 88;
 }
 .dark {
   --mr-change: 147 197 253;
-  --mr-conflict: 255 138 115;
+  --mr-conflict: 255 163 145;
   --mr-applied: 134 239 172;
-  --mr-ignored: 154 154 148;
+  --mr-ignored: 184 184 178;
 }
 
 /* The washes. Alphas are per role, not one number: the same alpha on a red and on a grey does not
@@ -1782,21 +1985,21 @@ body {
    Seven colours, not thirty: github's own themes group hljs's ~40 classes into about this many,
    and a token nobody can name the colour of is a decoration. */
 .code-hl {
-  --code-hl-keyword: #b31d28;
+  --code-hl-keyword: #a61b25;
   --code-hl-string: #0a3069;
-  --code-hl-comment: #5b6570;
+  --code-hl-comment: #4f5863;
   --code-hl-number: #0550ae;
   --code-hl-title: #6639ba;
   --code-hl-type: #8a3800;
   --code-hl-meta: #0f5323;
 }
 .dark .code-hl {
-  --code-hl-keyword: #ff9a94;
+  --code-hl-keyword: #ffaba6;
   --code-hl-string: #a5d6ff;
-  --code-hl-comment: #9aa4b0;
-  --code-hl-number: #79c0ff;
-  --code-hl-title: #d2a8ff;
-  --code-hl-type: #ffa657;
+  --code-hl-comment: #b8c0ca;
+  --code-hl-number: #8ccaff;
+  --code-hl-title: #dab8ff;
+  --code-hl-type: #ffb070;
   --code-hl-meta: #7ee787;
 }
 .code-hl .hljs-keyword,

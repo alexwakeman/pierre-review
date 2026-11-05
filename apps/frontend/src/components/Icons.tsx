@@ -710,6 +710,30 @@ export function MergeIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Octicon git-pull-request-closed — a PR closed without merging (PR detail → Activity).
+export function PullRequestClosedIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <circle cx="6.5" cy="6" r="2.4" />
+      <circle cx="6.5" cy="18" r="2.4" />
+      <line x1="6.5" y1="8.4" x2="6.5" y2="15.6" />
+      <circle cx="17.5" cy="18" r="2.4" />
+      <line x1="17.5" y1="10.5" x2="17.5" y2="15.6" />
+      <line x1="15.2" y1="3.6" x2="19.8" y2="8.2" />
+      <line x1="19.8" y1="3.6" x2="15.2" y2="8.2" />
+    </IconShell>
+  );
+}
+
+// A pulse line (Lucide activity) — a PR's history of events: the PR detail Activity tab.
+export function ActivityIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M22 12h-4l-3 8.5L9 3.5 6 12H2" />
+    </IconShell>
+  );
+}
+
 // Octicon git-commit — a commit, and the Feed's "Commits" lens.
 export function CommitIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
@@ -878,9 +902,9 @@ export function SparkleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
-// A spanner (an open-ended wrench) — AI Fix: a model changes the PR's code (PR detail's AI Fix tab).
-// Not the hammer below, which is "Implement story" (building a ticket from nothing), and not the merge
-// resolver's wand. Drawn level (round-ended handle, open jaw on the right) and turned 45° so the jaw
+// A spanner (an open-ended wrench) — A MODEL WRITES CODE: AI Fix (PR detail's AI Fix tab, the AI Fix
+// toast) and Implement story (the sprint card's Implement button, the build tab, the palette). One
+// mark for both; the hammer that once marked Implement story is gone. Never the merge resolver's wand. Drawn level (round-ended handle, open jaw on the right) and turned 45° so the jaw
 // sits top-right; the jaw's gap is wide enough to stay open at 12px.
 export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (
@@ -889,16 +913,6 @@ export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
         transform="rotate(-45 12 12)"
         d="M11.77 10.3H1.2a1.7 1.7 0 0 0 0 3.4h10.57A5.5 5.5 0 0 0 22 14.3H16.3V9.7H22A5.5 5.5 0 0 0 11.77 10.3z"
       />
-    </IconShell>
-  );
-}
-
-// A hammer — "Implement story": build a ticket's code (the sprint card's Implement button, the build tab).
-export function BuildIcon({ size = 13, ...rest }: IconProps): JSX.Element {
-  return (
-    <IconShell size={size} strokeWidth={1.9} {...rest}>
-      <path d="m14.5 6.5-9.8 9.8a1.8 1.8 0 0 0 2.5 2.5l9.8-9.8" />
-      <path d="m12.6 4.6 2.2-1.6c1.3-.9 3-.8 4.1.3l1.8 1.8-1.4 1.4 1 1-2.8 2.8-1-1-1.4 1.4-3.9-3.9z" />
     </IconShell>
   );
 }

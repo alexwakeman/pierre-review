@@ -1366,7 +1366,7 @@ export const claudeReviews = sqliteTable(
     // no earlier review with findings to check.
     followUp: text('follow_up', { mode: 'json' }).$type<ClaudeReviewFollowUpRecord>(),
     // WHO STARTED THE RUN: 'manual' (a click) or 'auto' (the Pro per-workspace auto-review sweeper,
-    // for a newly opened human PR). Core because `getUnactionedClaudeReviews` carries it to the My
+    // for a newly opened human PR). Core because `getUnseenOwnAiReviews` carries it to the My
     // Turn card's "Auto review" label (an auto run is owned like a manual one). Migration 0071
     // (pg 0058); existing rows are 'manual'.
     trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
@@ -1448,6 +1448,10 @@ export const claudeReviews = sqliteTable(
     // 'dismissing' BEFORE the GitHub write, settled 'dismissed' / 'failed'; never retried. The import
     // never writes it.
     teammateLift: text('teammate_lift', { mode: 'json' }).$type<TeammateLiftRecord>(),
+    // SEEN (migration 0168; docs/BACKEND.md § My Turn): when the reader first had this run on screen
+    // in the PR's AI Review tab after it finished (a pair: every half is stamped). NULL = not seen,
+    // so the run can be a `claude_review` My Turn card. One writer, `markClaudeReviewSeen`; set once.
+    seenAt: integer('seen_at', { mode: 'timestamp' }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -2235,6 +2239,11 @@ export const workspaces = sqliteTable(
     // 0140. When this workspace's reference library was last USED (listed, read, asked, or read by a
     // review). The wiki refresh's demand gate: only libraries used in the last 7 days are re-checked.
     docsUsedAt: integer('docs_used_at', { mode: 'timestamp' }),
+    // 0167. When the reader last LOOKED at Pending → "AI reviews" in this workspace: the list holds
+    // the AI reviews newer than it (NULL = never looked; the list covers the last
+    // `AI_REVIEWS_FIRST_LOOK_DAYS` days). Never moves back. The ONE reader/writer is
+    // db/ai-reviews-seen.ts.
+    aiReviewsSeenAt: integer('ai_reviews_seen_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

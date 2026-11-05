@@ -13,16 +13,14 @@ import { api } from '../api/client.js';
 // pairing. Instead the mutation stays PENDING until the reads it moved have refetched — the button
 // says "Dismissing…" and the card leaves with the refetch, the counts moving in the same frame.
 //
-// ⚠ FOUR READS MOVE TOGETHER, the My Turn settings save's list: `['my-turn']` (the notification
-// watcher), and the three reads of the one board fold — `['attention-cards']`, `['daily-brief']`,
-// `['work-plan']`.
+// ⚠ THREE READS MOVE TOGETHER, the My Turn settings save's list: `['my-turn']` (the notification
+// watcher), and the two reads of the one board fold — `['attention-cards']` and `['daily-brief']`.
 
 async function refetchMyTurnReads(qc: QueryClient): Promise<void> {
   await Promise.all([
     qc.invalidateQueries({ queryKey: ['my-turn'] }),
     qc.invalidateQueries({ queryKey: ['attention-cards'] }),
     qc.invalidateQueries({ queryKey: ['daily-brief'] }),
-    qc.invalidateQueries({ queryKey: ['work-plan'] }),
   ]);
 }
 

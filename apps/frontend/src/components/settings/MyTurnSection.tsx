@@ -4,7 +4,6 @@ import {
   DO_NEXT_PRESET_ORDER,
   MY_TURN_DEFAULT_ORDER,
   MY_TURN_SETTING_LABEL,
-  MY_TURN_TRUNK_SCOPES,
   presetOf,
   type MyTurnCardReason,
   type MyTurnToggle,
@@ -13,7 +12,7 @@ import { useMe } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useSetMyTurnSettings } from '../../hooks/useMyTurnSettings.js';
 import { ArrowIcon } from '../Icons.js';
-import { SaveButton, CheckInput, RadioInput } from './ui.js';
+import { SaveButton, CheckInput } from './ui.js';
 import {
   ADD_ROWS,
   buildMyTurnSettingsBody,
@@ -29,7 +28,6 @@ import {
   seedMyTurnForm,
   SHOW_ROWS,
   slideWeight,
-  TRUNK_SCOPE_LABEL,
   WEIGHT_KEYS,
   WEIGHT_LABEL,
   type MyTurnForm,
@@ -75,10 +73,10 @@ export function MyTurnSection(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
 
-  // Claude reviews exist only where the capability is on; elsewhere the type is neither offered
+  // The two AI review types exist only where the capability is on; elsewhere they are neither offered
   // nor listed — but it keeps its place in the stored order, and a move steps over it.
   const hidden = useMemo(
-    () => new Set<MyTurnCardReason>(claudeReview ? [] : ['claude_review']),
+    () => new Set<MyTurnCardReason>(claudeReview ? [] : ['claude_review', 'ai_approved_merged']),
     [claudeReview],
   );
   const showRows = SHOW_ROWS.filter((r) => !hidden.has(r.reason));
@@ -176,23 +174,6 @@ export function MyTurnSection(): JSX.Element {
                 </span>
               </label>
             ))}
-          </div>
-          <div role="radiogroup" aria-label={MY_TURN_SETTING_LABEL.trunk_red} className="space-y-1">
-            <div className="text-meta font-medium text-ui-ink">
-              {MY_TURN_SETTING_LABEL.trunk_red}
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {MY_TURN_TRUNK_SCOPES.map((scope) => (
-                <label key={scope} className="flex cursor-pointer items-center gap-1.5 text-body">
-                  <RadioInput
-                    name="my-turn-trunk-scope"
-                    checked={form.trunkScope === scope}
-                    onChange={() => setForm((f) => ({ ...f, trunkScope: scope }))}
-                  />
-                  <span className="text-ui-ink">{TRUNK_SCOPE_LABEL[scope]}</span>
-                </label>
-              ))}
-            </div>
           </div>
           <p className={hint}>
             These move out of their own tab into My turn, and notify you unless the repo is muted.

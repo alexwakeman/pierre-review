@@ -123,11 +123,11 @@ async function thread(pr: number, comments: Array<{ authorId: number; at: number
   }
 }
 
-async function makePr(state: 'open' | 'closed' = 'open'): Promise<number> {
+async function makePr(state: 'open' | 'closed' = 'open', author: 'alice' | 'me' = 'alice'): Promise<number> {
   prSeq += 1;
   const [p] = await db
     .insert(schema.pullRequests)
-    .values({ githubNodeId: `PR_${prSeq}`, accountId: 1, repoId, number: prSeq, title: `pr ${prSeq}`, state, isDraft: false, openedAt: new Date(), updatedAt: new Date(), headSha: HEAD, authorId: users.alice })
+    .values({ githubNodeId: `PR_${prSeq}`, accountId: 1, repoId, number: prSeq, title: `pr ${prSeq}`, state, isDraft: false, openedAt: new Date(), updatedAt: new Date(), headSha: HEAD, authorId: users[author] })
     .returning()
     .execute();
   return p.id;
@@ -337,7 +337,7 @@ describe('a manual pass', () => {
     expect(await persist.hasReviewAtHead(ctx, pr, 1, 'f'.repeat(40))).toBe(false);
     await db.update(cr).set({ headSha: HEAD }).where(eq(cr.id, passId)).execute();
     const q = await import('../../db/queries.js');
-    expect((await q.getUnactionedClaudeReviews(1)).some((c) => c.reviewId === passId)).toBe(false);
+    expect((await q.getUnseenOwnAiReviews(1)).some((c) => c.reviewId === passId)).toBe(false);
   });
 
   it('⚠ the next FULL review anchors on the full review, not the pass — and the accepted one is settled', async () => {
@@ -356,6 +356,30 @@ describe('a manual pass', () => {
       expect.arrayContaining([expect.objectContaining({ title: 'Unchecked input in sendMail', reason: 'settled' })]),
     );
     expect(lastFullPrompt).toContain('Settled in an earlier review');
+  });
+});
+
+describe('a manual pass on MY OWN PR ("Resolve my Limn threads when addressed")', () => {
+  it('acknowledges and resolves my Limn finding the reply settled — once; a disputed one gets no pushback', async () => {
+    const pr = await makePr('open', 'me');
+    await reviewed(pr, [
+      { title: 'Unchecked input in sendMail', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] },
+      { title: 'Drops the error', severity: 'blocker', replies: [{ by: 'alice', body: DEFER }] },
+    ], { trigger: 'manual' });
+    script = () => ({
+      replies: [
+        { ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair, the form validates it.', explanation: 'Validated upstream.' },
+        { ref: 'T2', status: 'reply_disputed', reply: 'This still drops the error.', explanation: 'Not fixed.' },
+      ],
+    });
+    replyCalls.length = 0;
+    expect(await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'manual' })).toMatchObject({ outcome: 'queued' });
+    await settleFor(pr);
+    // Auto-posting is off (beforeEach): only the own-PR path wrote, and only the acknowledgement.
+    expect(replyCalls).toHaveLength(1);
+    expect(replyCalls[0]!.body.startsWith('Fair, the form validates it.')).toBe(true);
+    expect(replyCalls[0]!.body).toContain('Resolved by Limn’s Claude review.');
+    expect(postReview).not.toHaveBeenCalled();
   });
 });
 

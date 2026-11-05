@@ -54,7 +54,7 @@ export function Heatmap({
                 x={PAD_L - 4}
                 y={PAD_T + row * cellH + cellH - 4}
                 textAnchor="end"
-                className="fill-gray-500 dark:fill-gray-400 text-meta"
+                className="fill-ui-faint text-meta"
               >
                 {d}
               </text>
@@ -85,7 +85,7 @@ export function Heatmap({
                 key={hr}
                 x={PAD_L + hr * cellW}
                 y={H - 3}
-                className="fill-gray-500 dark:fill-gray-400 text-meta"
+                className="fill-ui-faint text-meta"
               >
                 {hr}:00
               </text>

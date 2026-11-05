@@ -78,7 +78,7 @@ export function BotTriageCard({
   pr: PrDetailT;
   usersById: Map<number, User>;
   variant: 'full' | 'compact';
-  /** Compact (Overview) only: open the Changes tab's Threads only view. */
+  /** Compact (Overview) only: open the Threads tab. */
   onOpenThreads?: () => void;
 }): JSX.Element | null {
   // ── hooks first, unconditionally (early returns come after) ──────────────────────────────
@@ -141,7 +141,7 @@ export function BotTriageCard({
   // card on screen into one DB read. Never a run.
   const judgements = useClaudeThreadJudgements(show ? pr.id : null);
 
-  // Free grade: the Threads only view's own state fold over the bot subset.
+  // Free grade: the Threads tab's own state fold over the bot subset.
   const stateCounts = useMemo(() => rollupCounts(botThreads), [botThreads]);
   // ML split: bot threads CONTAINING a nit-severity comment — the tab's contains-fold, reused.
   const nitCount = useMemo(
@@ -166,7 +166,7 @@ export function BotTriageCard({
     return { judged, real, unjudged: botThreads.length - judged };
   }, [judgements, botThreads]);
 
-  // The resolve offer — the EXACT predicate the server re-derives (and the Threads only view's own
+  // The resolve offer — the EXACT predicate the server re-derives (and the Threads tab's own
   // vendor-scoped button uses), over the full thread list with no vendor narrowing.
   const reviewerRoles = useMemo(() => {
     if (detected == null) return null;

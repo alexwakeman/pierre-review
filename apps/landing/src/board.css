@@ -426,9 +426,14 @@ body:has(.lb) {
   .lb-nav .mark {
     grid-column: span 2;
   }
+  /* Six links: tighter here so they still fit one row down to 961px. */
   .lb-nav .links {
     grid-column: span 8;
-    gap: 16px;
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .lb-nav .links a {
+    font-size: 14px;
   }
 }
 /* Narrow tablets: the four links and the CTA no longer fit one row, so the

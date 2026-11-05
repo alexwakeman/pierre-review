@@ -207,12 +207,15 @@ export function MockTabs<T extends string>({
   value,
   onChange,
   children,
+  boxed = false,
 }: {
   label: string;
   tabs: ReadonlyArray<{ id: T; label: string; count?: number }>;
   value: T;
   onChange: (id: T) => void;
   children: ReactNode;
+  /** The app's button tabs (`Tabs variant="boxed"`): PR detail and Pending. */
+  boxed?: boolean;
 }): JSX.Element {
   const base = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -236,7 +239,7 @@ export function MockTabs<T extends string>({
 
   return (
     <>
-      <div className="mk-tabs" role="tablist" aria-label={label} onKeyDown={onKey}>
+      <div className={boxed ? 'mk-tabs boxed' : 'mk-tabs'} role="tablist" aria-label={label} onKeyDown={onKey}>
         {tabs.map((t, i) => {
           const on = t.id === value;
           return (

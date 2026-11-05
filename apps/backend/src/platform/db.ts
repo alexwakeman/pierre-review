@@ -15,7 +15,7 @@ import * as assessSqlite from './review-assess/schema.sqlite.js';
 import * as addrSqlite from './resolution-check/schema.sqlite.js';
 import * as botThemesSqlite from './bot-themes/schema.sqlite.js';
 import * as synthesisSqlite from './synthesis/schema.sqlite.js';
-// The work-plan narration cache — the pro_synthesis family (regenerable, scope_key-keyed, no
+// The work-plan narration cache (DORMANT: "Plan my day" was removed; kept for erasure) — the pro_synthesis family (regenerable, scope_key-keyed, no
 // pr_id grain), NOT the period keyed-history family.
 import * as workPlanSqlite from './work-plan/schema.sqlite.js';
 // The Chronology pointers cache — the same regenerable scope_key family as the work plan.

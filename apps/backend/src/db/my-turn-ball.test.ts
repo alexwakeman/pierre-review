@@ -166,7 +166,7 @@ async function myTurnCards(): Promise<Map<string, MyTurnCard>> {
   const byPrId = new Map<number, MyTurnCard>();
   for (const c of insights.cards as InsightCard[]) {
     // A red-trunk card is repo-grained — no fixture PR to key it on (none here: no trunk is red).
-    if (c.kind !== 'my_turn' || c.reason === 'trunk_red') continue;
+    if (c.kind !== 'my_turn') continue;
     byPrId.set(c.prId, c);
   }
   const out = new Map<string, MyTurnCard>();
@@ -405,25 +405,15 @@ beforeAll(async () => {
       return id;
     };
 
-    // Nothing posted at all — the run was never worked. Stays, exactly as before.
+    // ⚠ SEEN, NOT POSTED, RETIRES A RUN (`claude_reviews.seen_at`). A run you have not seen stays,
+    // whatever was posted from it and whatever you did on the PR since…
     const fresh = await seedRun('fresh', await seedActionedPr('claude-fresh'));
-    await seedFinding(fresh, 'fresh-1', 'warning', false, false);
-
-    // Worked finding-by-finding: everything actionable posted, only a `praise` note left. This
-    // is run 95 on the real dev DB, and the card that would not die.
+    await seedFinding(fresh, 'fresh-1', 'warning', true, true);
+    // …and a run you saw is gone, whatever is left unposted on it.
     const worked = await seedRun('worked', await seedActionedPr('claude-worked'));
-    await seedFinding(worked, 'worked-1', 'blocker', true, true);
-    await seedFinding(worked, 'worked-praise', 'praise', true, false);
-
-    // Worked, but a finding you TICKED is still unposted — you said you meant to send it.
-    const partial = await seedRun('partial', await seedActionedPr('claude-partial'));
-    await seedFinding(partial, 'partial-1', 'warning', true, true);
-    await seedFinding(partial, 'partial-2', 'nit', true, false);
-
-    // Worked, and the leftover is one you never ticked — a triage decision, not a task.
-    const skipped = await seedRun('skipped', await seedActionedPr('claude-skipped'));
-    await seedFinding(skipped, 'skipped-1', 'warning', true, true);
-    await seedFinding(skipped, 'skipped-2', 'nit', false, false);
+    await seedFinding(worked, 'worked-1', 'blocker', true, false);
+    const { markClaudeReviewSeen } = await import('./claude-review-seen.js');
+    await markClaudeReviewSeen(db, 1, prIdByKey.get('claude-worked')!, worked);
   }
 
   // ⚠ Through the production resolver, never a hand-built {workspaceId, repoIds}: it is
@@ -595,9 +585,9 @@ describe('dropping seeds keeps the cap disclosure arithmetically true', () => {
   it('moves myTurnTotal with the population, and it equals the cards painted', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, scope);
     const painted = (insights.cards as InsightCard[]).filter((c) => c.kind === 'my_turn').length;
-    // Three survivors: the untouched PR, the human-pushed-after PR, and the likely_addressed
-    // thread. Every other fixture is a negative.
-    expect(painted).toBe(3);
+    // Four survivors: the untouched PR, the human-pushed-after PR, the likely_addressed thread and
+    // the unseen AI review (S4). Every other fixture is a negative.
+    expect(painted).toBe(4);
     // ⚠ THE WHOLE POINT OF FILTERING SEEDS RATHER THAN CARDS. `myTurnTotal` is measured after
     // seed assembly and before the 50-slice, so a dropped seed leaves numerator and denominator
     // in step. Under the cap this is an equality; above it, it is what makes "50 of 148" true.
@@ -611,35 +601,21 @@ describe('dropping seeds keeps the cap disclosure arithmetically true', () => {
   });
 });
 
-describe('a finished Claude review retires when there is nothing left to do (S4)', () => {
+describe('a finished AI review of your Limn retires once SEEN (S4)', () => {
   const runsByPr = async (): Promise<Map<string, boolean>> => {
-    const rows = await q.getUnactionedClaudeReviews(1);
+    const rows = await q.getUnseenOwnAiReviews(1);
     const live = new Set<number>(rows.map((r: any) => r.prId));
     const out = new Map<string, boolean>();
-    for (const key of ['claude-fresh', 'claude-worked', 'claude-partial', 'claude-skipped']) {
-      out.set(key, live.has(prIdByKey.get(key)!));
-    }
+    for (const key of ['claude-fresh', 'claude-worked']) out.set(key, live.has(prIdByKey.get(key)!));
     return out;
   };
 
-  it('keeps a run nothing has been posted from', async () => {
-    // ⚠ The branch that stops `included` from retiring every fresh run: the column defaults to
-    // false, so a rule that required a ticked finding would retire a run the moment it finished.
+  it('keeps a run you have not seen, though its findings were posted and you acted on the PR', async () => {
     expect((await runsByPr()).get('claude-fresh')).toBe(true);
   });
 
-  it('retires a run whose only unposted finding is praise, even with a NULL parent posted_at', async () => {
-    // The real defect: the per-finding post route stamps the FINDING and never the run, so
-    // `postedAt != null` on the parent said "never actioned" about a run five comments deep.
+  it('retires a run you saw, though a ticked finding is still unposted', async () => {
     expect((await runsByPr()).get('claude-worked')).toBe(false);
-  });
-
-  it('keeps a worked run with a finding you ticked and have not posted', async () => {
-    expect((await runsByPr()).get('claude-partial')).toBe(true);
-  });
-
-  it('retires a worked run whose leftover you never ticked — that is a triage decision', async () => {
-    expect((await runsByPr()).get('claude-skipped')).toBe(false);
   });
 });
 

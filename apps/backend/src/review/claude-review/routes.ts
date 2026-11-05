@@ -72,6 +72,7 @@ import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 import { notApprovedForView } from './not-approved.js';
 import { limnMetaForReview, loadJudgedForPost } from './post-meta.js';
 import { listTeammateReviews } from '../../db/teammate-reviews.js';
+import { markClaudeReviewSeen } from '../../db/claude-review-seen.js';
 import { loadTeamReviewView } from './team-view.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
@@ -530,6 +531,34 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       cleanup();
     }
   });
+
+  // SEEN — the AI Review tab had this finished run on screen (db/claude-review-seen.ts). Retires the
+  // run's "New AI review" My Turn card. DB only (`tierFor`: `read`, exact path); idempotent.
+  app.post(
+    '/api/prs/:id/claude-review/seen',
+    {
+      schema: {
+        ...idParam,
+        body: {
+          type: 'object',
+          required: ['reviewId'],
+          additionalProperties: false,
+          properties: { reviewId: { type: 'integer', minimum: 1 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const { reviewId } = req.body as { reviewId: number };
+      const stamped = await markClaudeReviewSeen(ctx.db, ctx.accountIdOf(req), id, reviewId);
+      if (stamped == null) {
+        reply.status(404);
+        return { error: 'NotFound', message: 'No such review on this PR.' };
+      }
+      return { status: 'ok', stamped };
+    },
+  );
 
   app.post('/api/prs/:id/claude-review/cancel', { schema: idParam }, async (req, reply) => {
     const { id } = req.params as { id: number };

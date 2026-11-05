@@ -55,6 +55,7 @@ export default function Footer(): JSX.Element {
         <div>
           <Link to="/getting-started">Getting started</Link>
           <Link to="/reporting">Reporting and metrics</Link>
+          <Link to="/teams">For teams</Link>
           <Link to="/how-we-measure">How we measure</Link>
         </div>
         <div>

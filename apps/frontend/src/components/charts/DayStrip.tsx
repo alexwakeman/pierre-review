@@ -184,10 +184,10 @@ export function DayStrip({
               />
             ))}
             {/* x ticks: first + last date */}
-            <text x={0} y={H - 2} className="fill-gray-500 dark:fill-gray-400 text-meta">
+            <text x={0} y={H - 2} className="fill-ui-faint text-meta">
               {dateAt(0)}
             </text>
-            <text x={w} y={H - 2} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
+            <text x={w} y={H - 2} textAnchor="end" className="fill-ui-faint text-meta">
               {dateAt(n - 1)}
             </text>
             <rect

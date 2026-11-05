@@ -17,6 +17,7 @@ import {
   STORY,
   TRUNKS,
   VERDICT,
+  pendingTabCount,
   prLabel,
 } from '../../mock/acme';
 import type { PendingCardId, PendingTabId, PrTabId } from '../../mock/acme';
@@ -184,6 +185,8 @@ function PendingCards({
 }): JSX.Element {
   return (
     <>
+      {/* My turn's one visible sentence (AttentionView.tsx). */}
+      {tab === 'my_turn' ? <p className="mk-muted mk-purpose">Pull requests where the next move is yours.</p> : null}
       {PENDING.byTab[tab].map((id) => {
         const c = PENDING.cards[id];
         const open = openId === id;
@@ -207,6 +210,27 @@ function PendingCards({
           </PrRow>
         );
       })}
+      {/* AI reviews: the newest AI review on each PR, "New" since you last looked
+          (Activity/PendingAiReviews.tsx). */}
+      {tab === 'claude' ? (
+        <>
+          <p className="mk-muted mk-purpose">Latest AI review on each pull request</p>
+          {PENDING.aiSeen.map((r) => (
+            <PrRow
+              key={r.pr.num}
+              title={prLabel(r.pr)}
+              repo={r.pr.repo}
+              status={<Chip tone={r.tone}>{r.verdict}</Chip>}
+              why={
+                <>
+                  {r.isNew ? <Chip tone="blue">New</Chip> : null}
+                  <span>{`${r.by} · ${r.findings} · ${r.when}`}</span>
+                </>
+              }
+            />
+          ))}
+        </>
+      ) : null}
     </>
   );
 }
@@ -242,9 +266,10 @@ export function PendingBoardMock(): JSX.Element {
     >
       <MockTabs
         label="Pending tabs"
-        tabs={PENDING.tabs.map((t) => ({ ...t, count: PENDING.byTab[t.id].length }))}
+        tabs={PENDING.tabs.map((t) => ({ ...t, count: pendingTabCount(t.id) }))}
         value={tab}
         onChange={go}
+        boxed
       >
         <PendingCards key={round} tab={tab} openId={openId} setOpenId={setOpenId} />
       </MockTabs>
@@ -252,20 +277,24 @@ export function PendingBoardMock(): JSX.Element {
   );
 }
 
-/** Review chapter: My turn and Waiting on others, with a working Nudge. */
-export function PendingListMock(): JSX.Element {
-  const [tab, setTab] = useState<PendingTabId>('my_turn');
-  const [openId, setOpenId] = useState<PendingCardId | null>(null);
+/**
+ * Review chapter: My turn and Waiting on others, with a working Nudge. `initialTab`
+ * 'waiting' opens on Waiting on others with its card open (the /teams page).
+ */
+export function PendingListMock({ initialTab = 'my_turn' }: { initialTab?: 'my_turn' | 'waiting' } = {}): JSX.Element {
+  const initialOpen: PendingCardId | null = initialTab === 'waiting' ? 'waiting' : null;
+  const [tab, setTab] = useState<PendingTabId>(initialTab);
+  const [openId, setOpenId] = useState<PendingCardId | null>(initialOpen);
   const [round, setRound] = useState(0);
   return (
     <MockFrame
       live
       title="Pending"
       onReset={
-        tab !== 'my_turn' || openId !== null || round > 0
+        tab !== initialTab || openId !== initialOpen || round > 0
           ? () => {
-              setTab('my_turn');
-              setOpenId(null);
+              setTab(initialTab);
+              setOpenId(initialOpen);
               setRound(0);
             }
           : null
@@ -276,13 +305,14 @@ export function PendingListMock(): JSX.Element {
         label="Pending tabs"
         tabs={PENDING.tabs
           .filter((t) => t.id === 'my_turn' || t.id === 'waiting')
-          .map((t) => ({ ...t, count: PENDING.byTab[t.id].length }))}
+          .map((t) => ({ ...t, count: pendingTabCount(t.id) }))}
         value={tab}
         onChange={(t) => {
           setTab(t);
           setOpenId(t === 'waiting' ? 'waiting' : null);
           setRound((r) => r + 1);
         }}
+        boxed
       >
         <PendingCards key={round} tab={tab} openId={openId} setOpenId={setOpenId} />
       </MockTabs>
@@ -418,6 +448,7 @@ export function ReviewMock(): JSX.Element {
           setTab(t);
           setRound((r) => r + 1);
         }}
+        boxed
       >
         <PrPanel key={`${gen}-${round}`} tab={tab} onTouch={() => setTouched(true)} />
       </MockTabs>

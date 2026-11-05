@@ -32,7 +32,7 @@
 // any observed work at all keeps a reviewer visible.
 //
 // The predicate is CORE so no second surface can grow its own rule: the benchmark reaches this
-// through the OPTIONAL `ProHostQueries.dormantBotUserIds` seam (apiVersion stays 21 — the `getWorkPlan` /
+// through the OPTIONAL `ProHostQueries.dormantBotUserIds` seam (apiVersion stays 21 — the `registerAccountErasure?` /
 // `workspaceHumanSeatCount` precedent; an older host simply hides nothing).
 //
 // ⚠ IT DELIBERATELY IMPORTS NOTHING FROM `queries.ts` — a cycle with the app's largest module

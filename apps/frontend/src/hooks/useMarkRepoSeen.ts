@@ -12,7 +12,7 @@ import { api } from '../api/client.js';
  * the repo status panel's blue line (`ActivityRepo.hasUnread` / `unreadPrs`).
  */
 export function invalidateSeenState(qc: QueryClient): void {
-  for (const key of ['open-prs', 'timeline', 'my-turn', 'me', 'attention-cards', 'daily-brief', 'work-plan', 'activity']) {
+  for (const key of ['open-prs', 'timeline', 'my-turn', 'me', 'attention-cards', 'daily-brief', 'activity']) {
     void qc.invalidateQueries({ queryKey: [key] });
   }
 }

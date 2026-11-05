@@ -1,36 +1,26 @@
-// The work plan's CODE-DERIVED EVIDENCE, on a THROWAWAY sqlite DB (the ci-failing-cards.test.ts
-// pattern).
+// The Do next SCORER (`scoreCards`, db/work-plan.ts), on a THROWAWAY sqlite DB (the
+// ci-failing-cards.test.ts pattern). Every Pending tab ranks its cards with it.
 //
 // WHAT THIS PINS, and why each one is worth a fixture rather than a comment:
 //
-//   1. ⚠ THE ALIGNMENT CONTRACT — THE LOAD-BEARING ONE. The plan sits directly under the daily
-//      brief, and both fold the SAME `/api/attention` cards. `getWorkPlan(...).counts` must equal
-//      `getDailyBriefEntry(...).counts` field for field, for the same (accountId, workspaceId).
-//      A divergence is a defect in ONE fold, not two opinions — and the two folds live in two
-//      files (db/work-plan.ts and db/daily-brief.ts) as two hand-maintained spellings, which is
-//      exactly the shape that drifts. THE ASSERTION IS MUTATION-TESTED: see its comment.
-//   2. THE MERGE CLASSIFICATION. 'unstable' IS mergeable (only NON-required checks are red) and
+//   1. THE MERGE CLASSIFICATION. 'unstable' IS mergeable (only NON-required checks are red) and
 //      'behind' is NOT (GitHub 405s it). A CONFLICTING PR IS NEITHER even when its
 //      `mergeStateStatus` is otherwise ready — the `mergeable !== 'conflicting'` guard is the only
 //      thing that excludes it, and a fixture without that row would pass with the guard deleted.
 //      Drafts, merged PRs, 'blocked' and 'dirty' are the other negative controls.
-//   3. THE THREE RELEVANCE TIERS on the two new kinds: `direct` = you authored it, `maintained` =
+//   2. THE THREE RELEVANCE TIERS on the two new kinds: `direct` = you authored it, `maintained` =
 //      it is in a repo you maintain (the SAME `viewerMaintainedRepoIds` resolver My Turn and the
 //      ci_failing trunk arm use), `none` = neither.
-//   4. THE RANK IS THE CODE'S. A mergeable, approved PR outranks a four-day-old untouched thread;
-//      a `direct` item outranks an otherwise IDENTICAL `none` item; and the order is STABLE across
-//      two calls, because a panel people read top-down may not reshuffle between polls.
-//   5. THE EMPTY-WORKSPACE SHORT-CIRCUIT. `scope.repoIds === []` is a real answer ("this workspace
-//      is empty"), never a widening to the whole account.
-//   6. ⚠ THE ID IS THE MODEL'S JOIN KEY, so ids must be UNIQUE — including across the PR and REPO
-//      id spaces, which both start at 1 (the trunk `unblock_ci` row is repo-grained).
+//   3. THE SCORE IS THE CODE'S. A mergeable, approved PR outscores a four-day-old untouched
+//      thread; a `direct` item outscores an otherwise IDENTICAL `none` item; and two calls over
+//      unchanged data score identically.
+//   4. ROW IDS are UNIQUE — including across the PR and REPO id spaces, which both start at 1 (the
+//      trunk `unblock_ci` row is repo-grained) — and every row joins back to a card.
+//   5. THE PENDING TABS: every card in exactly one tab, in score order, counted as its own
+//      population.
 //
-// ⚠ WHY THERE ARE THREE WORKSPACES. `WORK_PLAN_ITEM_CAP` is 12, and a row pushed out by the cap
-// reads EXACTLY like a row the classifier rejected — so every absence assertion ("a conflicting PR
-// is neither") would pass with the guard deleted if the fixture were crowded. The 'Plan' workspace
-// is therefore kept deliberately UNDER the cap (asserted, so a future addition fails loudly) and
-// owns every classification / relevance / rank assertion; 'Default' holds a filler repo whose only
-// job is to EXCEED the cap so the disclosure has something to disclose; 'Empty' holds nothing.
+// THE WORKSPACES. 'Plan' owns every classification / relevance / rank assertion; 'Default'
+// holds a filler repo with many PRs; 'Empty' holds nothing; 'Crowd' overflows the board's list cap.
 //
 // The repos in 'Plan' are added with `createdAt: now`, which puts every seeded PR BEFORE their
 // My Turn "New PRs" cutoff — that is the documented per-repo rule (my-turn-new-prs.test.ts) and it
@@ -39,13 +29,7 @@
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load).
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DO_NEXT_PRESETS } from '@pierre-review/shared';
-import type {
-  InsightCard,
-  WorkPlanEvidence,
-  WorkPlanItem,
-  WorkPlanKind,
-} from '@pierre-review/shared';
+import type { InsightCard, WorkPlanItem, WorkPlanKind } from '@pierre-review/shared';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-work-plan-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
@@ -88,11 +72,22 @@ let threadId = 0;
 
 const pr = (key: string): number => prIdByKey.get(key)!;
 const repo = (key: string): number => repoIdByKey.get(key)!;
-const itemFor = (ev: WorkPlanEvidence, id: string): WorkPlanItem | undefined =>
+/** Every scored row of a workspace's uncapped fold, highest score first (id breaks ties). */
+interface Scored {
+  items: WorkPlanItem[];
+}
+const itemFor = (ev: Scored, id: string): WorkPlanItem | undefined =>
   ev.items.find((i) => i.id === id);
 
-async function plan(s: any = planScope): Promise<WorkPlanEvidence> {
-  return workPlan.getWorkPlan(1, s);
+async function plan(s: any = planScope): Promise<Scored> {
+  const insights = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
+  const { getMyTurnSettings } = await import('./my-turn-settings.js');
+  const { weights } = await getMyTurnSettings(1);
+  const { candidates } = await workPlan.scoreCards(1, insights.cards, Date.now(), weights);
+  const items = (candidates as { item: WorkPlanItem }[])
+    .map((c) => c.item)
+    .sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { items };
 }
 
 beforeAll(async () => {
@@ -507,54 +502,6 @@ describe('the fixture really is split the way the assertions assume', () => {
     expect(emptyScope.repoIds).toHaveLength(0);
   });
 
-  it('drops nothing from Plan, so an absence really is a rejection', async () => {
-    // ⚠ THE GUARD FOR EVERY `toBeUndefined()` BELOW. A row pushed out by WORK_PLAN_ITEM_CAP reads
-    // exactly like a row the classifier rejected, so if a future addition crowds this workspace
-    // the negative controls quietly stop testing anything. Fail here instead.
-    //
-    // Deliberately NOT `< WORK_PLAN_ITEM_CAP`: a fixture sitting exactly ON the cap has still
-    // dropped nothing, so pinning the constant fails on a workspace that is perfectly sound. The
-    // line below states the property itself.
-    const ev = await plan();
-    // The direct proof: `totals` is the PRE-CAP fold, so totals === shown means nothing at all was
-    // sliced off — every `toBeUndefined()` below really is the classifier's answer.
-    const totalRows = Object.values(ev.totals).reduce<number>((s, v) => s + (v ?? 0), 0);
-    expect(totalRows).toBe(ev.items.length);
-  });
-});
-
-describe('the work plan agrees with the daily brief', () => {
-  // ⚠ THE LOAD-BEARING ASSERTION, AND IT IS MUTATION-TESTED. With `stalled_review` folded into
-  // `untouchedThreads` in db/work-plan.ts's `foldCounts`, this `it` fails on the Plan workspace
-  // with `untouchedThreads` 3 against the brief's 1 and `stalled` 0 against 2 — so the assertion
-  // can genuinely fail, and the non-vacuity guard is what keeps it that way.
-  it.each([
-    ['Plan', () => planScope],
-    ['Default (filler)', () => fillerScope],
-  ])('counts every attention kind exactly as the daily brief does — %s', async (_label, get) => {
-    const s = get();
-    const ev = await plan(s);
-    const { counts } = await brief.getDailyBriefEntry(1, s.workspaceId);
-    expect(ev.counts).toEqual({
-      myTurn: counts.myTurn,
-      myTurnPersonal: counts.myTurnPersonal,
-      ciFailing: counts.ciFailing,
-      stalled: counts.stalled,
-      untouchedThreads: counts.untouchedThreads,
-      needsReviewer: counts.needsReviewer,
-    });
-    expect(ev.workspaceId).toBe(s.workspaceId);
-  });
-
-  it('is NOT vacuous — the fixture actually populates the kinds it pins', async () => {
-    // Zeros on both sides would make the assertion above pass with either fold deleted.
-    const ev = await plan();
-    expect(ev.counts.ciFailing).toBeGreaterThan(0);
-    expect(ev.counts.stalled).toBeGreaterThan(0);
-    expect(ev.counts.untouchedThreads).toBeGreaterThan(0);
-    const fill = await plan(fillerScope);
-    expect(fill.counts.myTurn).toBe(FILLER_PRS);
-  });
 });
 
 describe('merge / update_branch classification', () => {
@@ -690,26 +637,15 @@ describe('the deterministic rank', () => {
     expect(itemFor(ev, `wp:unblock_ci:trunk:${repo('mine')}`)?.facts.clock).toBe('observed');
   });
 
-  it('is sorted descending and STABLE across two calls', async () => {
+  it('scores identically across two calls over unchanged data', async () => {
     for (const s of [planScope, fillerScope]) {
       const a = await plan(s);
       const b = await plan(s);
-      // A panel people read top-down may not reshuffle between polls.
-      expect(b.items.map((i) => i.id)).toEqual(a.items.map((i) => i.id));
-      for (let i = 1; i < a.items.length; i++)
-        expect(a.items[i]!.score).toBeLessThanOrEqual(a.items[i - 1]!.score);
+      // A list people read top-down may not reshuffle between polls.
+      expect(b.items.map((i) => [i.id, i.score])).toEqual(a.items.map((i) => [i.id, i.score]));
     }
   });
 
-  it('caps the list and discloses the UNCAPPED population per kind', async () => {
-    const ev = await plan(fillerScope);
-    expect(ev.items).toHaveLength(workPlan.WORK_PLAN_ITEM_CAP);
-    // ⚠ `totals` is the PRE-CAP fold. Counted after the slice it would be bounded by 12 and would
-    // stop being a total — a capped list that says nothing is a silent truncation.
-    expect(ev.totals.review).toBe(FILLER_PRS);
-    const totalRows = Object.values(ev.totals).reduce<number>((s, v) => s + (v ?? 0), 0);
-    expect(totalRows).toBeGreaterThan(ev.items.length);
-  });
 });
 
 describe('the item rows', () => {
@@ -762,93 +698,21 @@ describe('the item rows', () => {
     expect(t?.githubUrl).toContain(`/commit/${TRUNK_SHA}`);
   });
 
-  it('never writes a relative clock into `reason` (it is a hashable field)', async () => {
-    // ⚠ `reason` is stable-across-ticks by construction so the plugin can hash it; a "3d ago"
-    // inside it would drift on a timer and re-bill a dormant workspace.
-    for (const s of [planScope, fillerScope]) {
-      for (const i of (await plan(s)).items) expect(i.reason).not.toMatch(/\bago\b/);
-    }
-  });
-});
-
-describe('the empty workspace', () => {
-  it('is a real answer, not a widening to the whole account', async () => {
-    const ev = await plan(emptyScope);
-    expect(ev.items).toEqual([]);
-    expect(ev.totals).toEqual({});
-    expect(ev.workspaceId).toBe(emptyScope.workspaceId);
-    expect(ev.counts).toEqual({
-      myTurn: 0,
-      myTurnPersonal: 0,
-      ciFailing: 0,
-      stalled: 0,
-      untouchedThreads: 0,
-      needsReviewer: 0,
-    });
-    // …and the brief says the same nothing for the same workspace, so the short-circuit did not
-    // buy its speed by disagreeing with the strip.
-    const { counts } = await brief.getDailyBriefEntry(1, emptyScope.workspaceId);
-    expect([counts.myTurn, counts.ciFailing, counts.stalled, counts.untouchedThreads]).toEqual([
-      0, 0, 0, 0,
-    ]);
-  });
-});
-
-describe('the head spreads across kinds AND repos', () => {
-  // ⚠ THE REGRESSION THIS EXISTS FOR, seen only by running the app against real data. Seating one
-  // row per kind stops a kind being ABSENT; it did nothing to stop one kind DOMINATING, and the
-  // first real workspace produced EIGHT of twelve head slots as `update_branch` in ONE repo, with
-  // byte-identical scores — one instruction printed eight times, presented as a plan for the day.
-  //
-  // It happens because the score DEGENERATES on a backlog: every row past the top stall bucket
-  // carries `stallRisk === 1`, and a workspace with no `direct` work has a constant relevance
-  // term too, so the ranking collapses to `proximity`, which is per-KIND.
-  it('never lets one kind or one repo own the head when others are available', async () => {
-    const ev = await plan(fillerScope);
-    expect(ev.items.length).toBe(workPlan.WORK_PLAN_ITEM_CAP);
-    const kinds = new Map<string, number>();
-    const repos = new Map<number, number>();
-    for (const i of ev.items) {
-      kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);
-      repos.set(i.repoId, (repos.get(i.repoId) ?? 0) + 1);
-    }
-    // The filler workspace is deliberately over the cap. However its rows are distributed, no
-    // single kind may take more than half the head while a second kind is available.
-    const distinctKinds = new Set(ev.items.map((i) => i.kind)).size;
-    if (distinctKinds > 1) {
-      expect(Math.max(...kinds.values())).toBeLessThanOrEqual(workPlan.WORK_PLAN_ITEM_CAP / 2);
-    }
-    const distinctRepos = new Set(ev.items.map((i) => i.repoId)).size;
-    if (distinctRepos > 1) {
-      expect(Math.max(...repos.values())).toBeLessThanOrEqual(workPlan.WORK_PLAN_ITEM_CAP / 2);
-    }
-  });
-
-  it('still fills the whole head when only one kind exists', async () => {
-    // The levelling must DEGRADE, not truncate: a workspace whose work is all one kind still gets
-    // a full head, in score order.
-    const ev = await plan(fillerScope);
-    expect(ev.items.length).toBe(workPlan.WORK_PLAN_ITEM_CAP);
-  });
 });
 
 describe('every row joins back to a card', () => {
-  // ⚠ THE PRO PLAN'S LINES DEPEND ON THIS. The SPA lands each narration step on its card through
-  // `WorkPlanItem.cardId`; a ranked row whose `cardId` names no card would lose its line with no
-  // error. Asserted over the whole fixture so a NEW signal that forgets to pass `cardId` fails
-  // here rather than in the browser.
-  it('carries a cardId that exists in the fold it was ranked from', async () => {
-    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
-    const ev = await workPlan.rankWorkPlan(1, planScope, insights);
+  // ⚠ THE BOARD'S SCORES DEPEND ON THIS. `ScoredCard.cardId` is read off `WorkPlanItem.cardId`;
+  // a row whose `cardId` names no card would score nothing on the board. Asserted over the whole
+  // fixture so a NEW signal that forgets to pass `cardId` fails here rather than in the browser.
+  it('carries a cardId that exists in the fold it was scored from', async () => {
+    const insights = await q.getWorkspaceInsights(1, undefined, planScope, { uncapped: true });
+    const ev = await plan();
     const cardIds = new Set(insights.cards.map((c: { id: string }) => c.id));
     expect(ev.items.length).toBeGreaterThan(0);
     for (const item of ev.items) {
       expect([item.id, item.cardId != null]).toEqual([item.id, true]);
       expect([item.id, cardIds.has(item.cardId!)]).toEqual([item.id, true]);
     }
-    // …and the head the route would serve is a strict subset of the board, same length as the
-    // ranked list (nothing is dropped by the join).
-    expect(workPlan.doNextCardIds(ev)).toHaveLength(ev.items.length);
   });
 
   // The two forward kinds are now CARDS, so the board renders them and the ranker merely
@@ -859,55 +723,6 @@ describe('every row joins back to a card', () => {
     const kinds = insights.cards.map((c: { kind: string }) => c.kind);
     expect(kinds).toContain('merge');
     expect(kinds).toContain('update_branch');
-  });
-});
-
-describe('one PR is one job', () => {
-  // ⚠ THE REGRESSION THIS FILE WAS MISSING. Every fold here is individually correct, so the unit
-  // tests all passed while a real workspace rendered `DEFRA/bng-metric-backend#284` TWICE — once
-  // from the merge fold ("Mergeable now · 1 approval · checks green") and once from the my_turn
-  // fold ("Your PR is approved and waiting on you"). One instruction, printed twice, burning two
-  // of the twelve slots. It was only visible by looking at the running app.
-  //
-  // The id dedup could not catch it: the two rows carry DIFFERENT ids (`wp:merge:<id>` and
-  // `wp:review:<id>`), which is precisely why a second pass keyed on the PR exists.
-  it('collapses a PR reached by two folds onto its furthest-along action', async () => {
-    const ev = await plan();
-    const target = pr('m-clean-direct');
-    const rows = ev.items.filter((i) => i.prId === target);
-    expect(rows).toHaveLength(1);
-    // The survivor is the one naming the action furthest from "nothing has happened yet":
-    // "merge it" carries strictly more information than "it is approved".
-    expect(rows[0]!.kind).toBe('merge');
-    expect(rows[0]!.id).toBe(`wp:merge:${target}`);
-  });
-
-  it('never lists one PR twice under two PR-grained kinds', async () => {
-    const ev = await plan();
-    // The invariant, stated over the whole fixture rather than one row — a new signal that
-    // reaches an already-covered PR fails here without anyone remembering to add a case.
-    // Repo- and thread-grained rows are exempt BY CONSTRUCTION (their id is not `wp:<kind>:<prId>`)
-    // and are filtered out the same way the production dedup does it.
-    const prGrained = ev.items.filter((i) => i.prId != null && i.id === `wp:${i.kind}:${i.prId}`);
-    const seen = prGrained.map((i) => i.prId);
-    expect(seen).toEqual([...new Set(seen)]);
-  });
-
-  it('keeps a red trunk exempt from the PR dedup, by construction', async () => {
-    // A trunk row is REPO-grained: on a live workspace its `prId` names the LANDING PR of the
-    // current head — a PR the card deliberately claims nothing about (~11% of red heads are direct
-    // pushes and resolve to no PR at all, which is this fixture's case, so `prId` here is null).
-    // Were it ever treated as PR-grained, a mergeable landing PR would swallow the only signal
-    // saying the default branch is broken — and a red trunk invalidates every open PR in the repo
-    // at once.
-    //
-    // The exemption is structural rather than a special case in the dedup: the row is addressed by
-    // its REPO, so its id is not `wp:<kind>:<prId>` and it can never match the PR-grained test.
-    const ev = await plan();
-    const trunk = ev.items.find((i) => i.id.startsWith('wp:unblock_ci:trunk:'));
-    expect(trunk).toBeDefined();
-    expect(trunk!.id).toBe(`wp:unblock_ci:trunk:${trunk!.repoId}`);
-    expect(trunk!.id).not.toBe(`wp:${trunk!.kind}:${trunk!.prId}`);
   });
 });
 
@@ -926,19 +741,19 @@ describe('subject — what a row is ABOUT', () => {
   });
 
   it('calls a thread a PR, even though it is not the PR’s one job', async () => {
-    // The exact row the id-shape derivation got wrong: not PR-grained for dedup (two threads on a
-    // PR are two jobs), but unambiguously ABOUT a pull request.
+    // The exact row the id-shape derivation got wrong: two threads on a PR are two jobs, but each
+    // is unambiguously ABOUT a pull request.
     const ev = await plan();
     const thread = ev.items.find((i) => i.kind === 'thread' || i.kind === 'reply');
     expect(thread).toBeDefined();
     expect(thread!.subject).toBe('pr');
     expect(thread!.prId).not.toBeNull();
-    // …and it is still exempt from the per-PR dedup, which is the other half of the distinction.
+    // …and its id is thread-grained, never `wp:<kind>:<prId>`.
     expect(thread!.id).not.toBe(`wp:${thread!.kind}:${thread!.prId}`);
   });
 });
 
-describe('a conflicts card is a CARD, never a plan row', () => {
+describe('a conflicts card is a CARD, never a scorer row', () => {
   // ⚠ THE EXCLUSION IS A DECISION, SO IT GETS A PIN RATHER THAN AN ABSENCE. A `conflicts` card
   // falls out of the card→job chain in db/work-plan.ts and produces nothing, deliberately: a plan
   // row needs a `WorkPlanKind`, and that vocabulary spans TWO REPOSITORIES — the union and
@@ -950,7 +765,7 @@ describe('a conflicts card is a CARD, never a plan row', () => {
   // `m-conflicting` is the right fixture for it: a READY merge state with `mergeable:
   // 'conflicting'`, in a repo the viewer ADMINs, with no request, no review and no thread — so
   // the conflicts card is the ONLY card it produces and an absence in the plan is unambiguous.
-  it('reaches the board and produces no work-plan row, no total and no head slot', async () => {
+  it('reaches the board and produces no scorer row', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, planScope);
     const cardId = `conflicts:${pr('m-conflicting')}`;
     // Non-vacuity first: the assertions below are all absences.
@@ -958,52 +773,15 @@ describe('a conflicts card is a CARD, never a plan row', () => {
 
     const ev = await plan();
     expect(ev.items.find((i) => i.prId === pr('m-conflicting'))).toBeUndefined();
-    // `totals` is `Partial<Record<WorkPlanKind, number>>` and `conflicts` is not a WorkPlanKind —
-    // a key here would mean the two vocabularies had been merged in the host alone.
-    expect(Object.keys(ev.totals)).not.toContain('conflicts');
-    // …and nothing the route would serve as the ranked head names one, so
-    // `GET /api/attention`'s `rendered`-set filter never has to drop a row.
-    expect(
-      (workPlan.doNextCardIds(ev) as string[]).some((id) => id.startsWith('conflicts:')),
-    ).toBe(false);
   });
 
-  it('does not move a single counted scalar', async () => {
-    // The alignment assertion above compares the whole `counts` object against the brief; this one
-    // states the other half — that `foldCounts` ignores the kind entirely. Written as an equality
-    // between the counters and the cards of exactly the five COUNTED kinds, so a `conflicts` card
-    // folded into any of them breaks the arithmetic rather than merely inflating a number nobody
-    // is checking.
-    const insights = await q.getWorkspaceInsights(1, undefined, planScope);
-    const byKind = new Map<string, number>();
-    for (const c of insights.cards as { kind: string }[])
-      byKind.set(c.kind, (byKind.get(c.kind) ?? 0) + 1);
-    // Non-vacuity: there really are conflicts cards on this board.
-    expect(byKind.get('conflicts') ?? 0).toBeGreaterThan(0);
-
-    const ev = await plan();
-    const counted =
-      ev.counts.myTurn +
-      (ev.counts.ciFailing ?? 0) +
-      ev.counts.stalled +
-      ev.counts.untouchedThreads +
-      ev.counts.needsReviewer;
-    const countedKinds = [
-      'my_turn',
-      'ci_failing',
-      'stalled_review',
-      'untouched_thread',
-      'reviewer_routing',
-    ].reduce((n, k) => n + (byKind.get(k) ?? 0), 0);
-    expect(counted).toBe(countedKinds);
-  });
 });
 
-describe('the Dependencies kinds are CARDS, never plan rows', () => {
+describe('the Dependencies kinds are CARDS, never scorer rows', () => {
   // The `conflicts` precedent, for the same two-repository reason: `WorkPlanKind` is the plugin's
   // prompt vocabulary too. They are SCORED — they compete inside the Dependencies tab — from the
   // base their state names.
-  it('reach the board, and produce no work-plan row', async () => {
+  it('reach the board, and produce no scorer row', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, planScope, { uncapped: true });
     const ids = insights.cards.map((c: { id: string }) => c.id);
     // Non-vacuity: all three really are cards.
@@ -1014,13 +792,10 @@ describe('the Dependencies kinds are CARDS, never plan rows', () => {
         `security:${pr('sec-flagged')}`,
       ]),
     );
-    const ev = await workPlan.rankWorkPlan(1, planScope, insights);
+    const ev = await plan();
     for (const key of ['dep-behind', 'dep-ready', 'sec-flagged']) {
       expect([key, ev.items.find((i: WorkPlanItem) => i.prId === pr(key))]).toEqual([key, undefined]);
     }
-    expect(
-      (workPlan.doNextCardIds(ev) as string[]).some((id) => /^(deps|security):/.test(id)),
-    ).toBe(false);
   });
 
   it('start from the base their state names', async () => {
@@ -1056,15 +831,12 @@ describe('the Pending tabs', () => {
       my_turn: true, ci_failing: true, stalled_review: true, untouched_thread: true,
       reviewer_load: true, reviewer_routing: true, conflicts: true, merge: true,
       update_branch: true, security: true, dependency_bump: true, bot_signal: true,
-      bot_only_review: true, waiting_on_others: true,
+      bot_only_review: true, waiting_on_others: true, ai_review: true,
     };
     const kinds = Object.keys(ALL);
     const seen = PENDING_TABS.flatMap((t) => [...t.kinds]);
-    // No kind in two tabs — except `my_turn`, split BY TYPE between My turn and Claude reviews.
-    const split = PENDING_TABS.filter((t) => t.reasons != null || t.exceptReasons != null);
-    expect(split.map((t) => t.key)).toEqual(['my_turn', 'claude']);
-    const unsplit = seen.filter((k) => k !== 'my_turn');
-    expect(new Set(unsplit).size).toBe(unsplit.length);
+    // No kind in two tabs.
+    expect(new Set(seen).size).toBe(seen.length);
     for (const k of kinds) {
       const bot = k === 'bot_signal' || k === 'bot_only_review';
       expect([k, seen.includes(k as never)]).toEqual([k, !bot]);
@@ -1210,10 +982,7 @@ describe('the Pending tabs', () => {
   });
 });
 
-describe('the plan names only cards the board lists', () => {
-  // The plan's `why` is shown on its row's card, so a row whose card sits below a tab's
-  // `boardListCap` has nowhere to go. MUTATION-TESTED: with `getWorkPlan` back on the capped fold,
-  // every Crowd row is one of the 15 NEWEST merge cards, and none of those is listed.
+describe('the board list cap', () => {
   const listedIds = async (s: any): Promise<Set<string>> => {
     const insights = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
     const tabs = await import('./pending-tabs.js');
@@ -1221,39 +990,12 @@ describe('the plan names only cards the board lists', () => {
     return new Set(board.tabs.flatMap((t: { cardIds: string[] }) => t.cardIds));
   };
 
-  it.each([
-    ['Balanced', undefined],
-    ['Oldest first', DO_NEXT_PRESETS.oldest_first],
-  ])('holds under the %s weights', async (_label, weights) => {
-    const { setMyTurnSettings } = await import('../auth/account.js');
-    await setMyTurnSettings(1, { show: { watched_repo_pr: true }, ...(weights ? { weights } : {}) });
-    try {
-      for (const s of [crowdScope, planScope, fillerScope]) {
-        const ev = await plan(s);
-        const listed = await listedIds(s);
-        expect(ev.items.length).toBeGreaterThan(0);
-        for (const item of ev.items) {
-          expect([item.id, item.cardId != null && listed.has(item.cardId)]).toEqual([item.id, true]);
-        }
-      }
-    } finally {
-      await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
-    }
-  });
-
-  it('is not vacuous — Crowd overflows both caps, and the capped fold keeps only unlisted cards', async () => {
+  it('Crowd overflows both caps, and the capped fold keeps only unlisted cards', async () => {
     const capped = await q.getWorkspaceInsights(1, undefined, crowdScope);
     expect(capped.kindTotals.merge).toBe(CROWD_PRS + 3);
     const cappedMerge = capped.cards.filter((c: InsightCard) => c.kind === 'merge');
     expect(cappedMerge.length).toBeGreaterThan(0);
     const listed = await listedIds(crowdScope);
     for (const c of cappedMerge) expect([c.id, listed.has(c.id)]).toEqual([c.id, false]);
-    // The plan still fills every row, from the cards the board does list — and still discloses
-    // every row it could have drawn from.
-    const ev = await plan(crowdScope);
-    expect(ev.items).toHaveLength(workPlan.WORK_PLAN_ITEM_CAP);
-    expect(ev.totals.merge).toBe(CROWD_PRS + 3);
-    // The spread's pull is real: the second repo's three merge cards are the group's lowest.
-    for (let i = 0; i < 3; i++) expect(listed.has(`wp:merge:${pr(`cn${i}`)}`)).toBe(false);
   });
 });

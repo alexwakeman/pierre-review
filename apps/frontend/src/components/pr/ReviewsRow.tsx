@@ -22,7 +22,7 @@ import { BotIcon } from '../Icons.js';
 // summary posted as-is) vs "· curated" (a human materially edited it). The kind is in hand, so we
 // look it up via automatedReviewerMeta (which covers vendors + in_house + pierre — botVendorMeta
 // only maps a login→ReviewBotKind).
-function AutomatedReviewerBadge({
+export function AutomatedReviewerBadge({
   kind,
   provenance,
 }: {

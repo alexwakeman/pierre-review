@@ -15,8 +15,7 @@
 //      call `prRef` with `{...t, id: t.prId}`; the Dependencies cards and a `merge` card whose red is
 //      non-required checks go through it too.
 //   5. THE TRUNK ARM NAMES A DIRECT PUSH. No landing PR resolves, and the names still come from the
-//      head's `branch_commits` row — bare names, never workflow-prefixed. The promoted `trunk_red`
-//      card carries the same pair. ⚠ A red head with NO `branch_commits` row at all (outside the
+//      head's `branch_commits` row — bare names, never workflow-prefixed. ⚠ A red head with NO `branch_commits` row at all (outside the
 //      stored window, or not walked yet) is a real state: its card still ships, naming nothing —
 //      null, never [] or 0.
 //   6. ONLY `GET /api/attention` PAYS. The default fold (the daily brief, the work plan, every Pro
@@ -32,7 +31,6 @@ import type {
   InsightCard,
   InsightPrRef,
   MyTurnSettings,
-  MyTurnTrunkCard,
 } from '@pierre-review/shared';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-failing-checks-test.sqlite`;
@@ -77,7 +75,6 @@ const prCardsFor = (cards: InsightCard[], prId: number): (InsightCard & InsightP
   cards.filter(
     (c): c is InsightCard & InsightPrRef =>
       c.kind !== 'ci_failing' &&
-      !(c.kind === 'my_turn' && c.reason === 'trunk_red') &&
       'prId' in c &&
       c.prId === prId,
   );
@@ -550,11 +547,6 @@ describe('the Pending board carries the names on every red card', () => {
     cards.find(
       (c): c is CiFailingCard => c.kind === 'ci_failing' && c.arm === 'trunk' && c.repoId === repoId,
     );
-  const promotedFor = (cards: InsightCard[], repoId: number): MyTurnTrunkCard | undefined =>
-    cards.find(
-      (c): c is MyTurnTrunkCard =>
-        c.kind === 'my_turn' && c.reason === 'trunk_red' && c.repoId === repoId,
-    );
 
   it('the trunk card names a DIRECT PUSH’s failing checks — no landing PR needed', async () => {
     const cards = (await boardFold()).cards as InsightCard[];
@@ -574,24 +566,10 @@ describe('the Pending board carries the names on every red card', () => {
     expect(trunk?.failingCheckTotal).toBeNull();
   });
 
-  it('a promoted red trunk carries the same pair', async () => {
-    await setMyTurnSettings(1, { trunkScope: 'maintained' });
-    try {
-      const cards = (await boardFold()).cards as InsightCard[];
-      const promoted = promotedFor(cards, appRepo);
-      expect(promoted?.repoId).toBe(appRepo);
-      expect(promoted?.failingChecks).toEqual(['lint', 'Run Journey Tests / Run Journey Tests']);
-      expect(promoted?.failingCheckTotal).toBe(2);
-      // …and the row-less head is promoted too, naming nothing.
-      const rowless = promotedFor(cards, rowlessRepo);
-      expect(rowless).toBeDefined();
-      expect(rowless?.failingChecks).toBeNull();
-      expect(rowless?.failingCheckTotal).toBeNull();
-      // They MOVED: no ci_failing trunk card beside them.
-      expect(cards.some((c) => c.kind === 'ci_failing' && c.arm === 'trunk')).toBe(false);
-    } finally {
-      await setMyTurnSettings(1, null);
-    }
+  it('a red trunk is never a My Turn card — it stays in Needs fixing', async () => {
+    const cards = (await boardFold()).cards as InsightCard[];
+    expect(trunkCardFor(cards, appRepo)).toBeDefined();
+    expect(cards.some((c) => c.kind === 'my_turn' && c.prId == null)).toBe(false);
   });
 
   it('no card’s sentence ever names a check', async () => {
@@ -616,7 +594,7 @@ describe('every other consumer pays nothing', () => {
     const cards = (await defaultFold()).cards as InsightCard[];
     expect(cards.length).toBeGreaterThan(0);
     for (const c of cards) {
-      if (c.kind === 'ci_failing' || (c.kind === 'my_turn' && c.reason === 'trunk_red')) {
+      if (c.kind === 'ci_failing') {
         expect(c.failingChecks, c.id).toBeNull();
         expect(c.failingCheckTotal, c.id).toBeNull();
       } else {

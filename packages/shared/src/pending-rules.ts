@@ -147,12 +147,12 @@ export const MY_TURN_SEVERITY: Record<MyTurnCardReason, InsightSeverity> = {
   pushed_since: 'warn',
   own_ci_red: 'high',
   own_conflicts: 'high',
-  trunk_red: 'warn',
   pr_approved: 'warn',
   own_ready: 'warn',
   your_pr: 'warn',
   own_thread: 'warn',
   claude_review: 'warn',
+  ai_approved_merged: 'info',
   watched_repo_pr: 'info',
 };
 
@@ -182,6 +182,7 @@ export const PENDING_KIND_RANK: Record<InsightKind, number> = {
   update_branch: 11,
   dependency_bump: 12,
   waiting_on_others: 13,
+  ai_review: 14,
 };
 
 /**
@@ -310,6 +311,8 @@ export const DO_NEXT_UNSCORED_KINDS: ReadonlySet<InsightKind> = new Set<InsightK
   'bot_only_review',
   // Read-only: the ball is with someone else, so there is no next step of the reader's to rank.
   'waiting_on_others',
+  // Read-only reference: the newest AI review per PR. Listed newest first.
+  'ai_review',
 ]);
 
 // ── THE PENDING TABS ──────────────────────────────────────────────────────────────────────────
@@ -327,8 +330,12 @@ export type PendingTabKey =
   | 'deps'
   | 'waiting';
 
-/** The My Turn card type that has its own tab ("Claude reviews") instead of a group in My turn. */
-export const CLAUDE_REVIEW_TAB_REASONS: readonly MyTurnCardReason[] = ['claude_review'];
+/** "AI reviews" lists at most this many rows: the newest AI review on each PR, newest first. */
+export const AI_REVIEWS_LIST_CAP = 100;
+
+/** A PR merged after the reader's Limn approved it (`ai_approved_merged`) is a My Turn card only for
+ *  this many days after the merge. */
+export const APPROVED_MERGED_DAYS = 7;
 
 /** One tab's definition — see `PENDING_TABS`. */
 export interface PendingTabDef {
@@ -336,24 +343,18 @@ export interface PendingTabDef {
   kinds: readonly InsightKind[];
   groupByKind?: true;
   groupByReason?: true;
-  /** `my_turn` cards: list ONLY these types. */
-  reasons?: readonly MyTurnCardReason[];
-  /** `my_turn` cards: list every type EXCEPT these. */
-  exceptReasons?: readonly MyTurnCardReason[];
   /** AN UNSCORED TAB: its cards get no Do next score and are listed LONGEST WAIT FIRST
    *  (`WaitingOnOthersCard.waitHours`), with no "Do next" head. Only "Waiting on others". */
   byWait?: true;
+  /** AN UNSCORED LIST: cards of these kinds get no Do next score and are listed NEWEST FIRST
+   *  (`AiReviewCard.at`), at most `AI_REVIEWS_LIST_CAP`. Only "AI reviews"' `ai_review`. */
+  newestFirst?: readonly InsightKind[];
 }
 
 /**
  * The eight tabs, in display order, and the cards each holds. Every PR card on the board belongs to
  * exactly ONE tab, so a card is listed once; a PR with two jobs (your approved PR is both "Approved"
  * in My turn and "Ready to merge") appears once per job, in each job's tab.
- *
- * ⚠ `my_turn` IS SPLIT BY TYPE ACROSS TWO TABS: a finished Claude review (`reason: 'claude_review'`)
- * is listed in "Claude reviews", every other type in My turn. Both are the SAME my_turn fold — the
- * ball rule, dismissals and the one-card-per-PR exception for a Claude review are unchanged — and
- * `pendingTabHolds` is the ONE predicate the server lists and counts by and the SPA reads.
  *
  * `reviewer_load` sits in 'review' but is not ranked with the PR cards — it is the "who has reviews
  * waiting" strip at the top of that tab, and it is not in the tab's count.
@@ -368,37 +369,38 @@ export interface PendingTabDef {
  * sort chosen by tab key.
  */
 export const PENDING_TABS: readonly PendingTabDef[] = [
-  {
-    key: 'my_turn',
-    kinds: ['my_turn'],
-    groupByReason: true,
-    exceptReasons: CLAUDE_REVIEW_TAB_REASONS,
-  },
-  { key: 'claude', kinds: ['my_turn'], reasons: CLAUDE_REVIEW_TAB_REASONS },
+  { key: 'my_turn', kinds: ['my_turn'], groupByReason: true },
+  // AI reviews: a stable REFERENCE list — the newest AI review on each PR of the workspace (the
+  // reader's Limn and teammates'), newest first, unscored, live board only. Looking never removes a
+  // row; the last-looked stamp only marks rows "New" and counts the badge (`PendingTab.newTotal`).
+  { key: 'claude', kinds: ['ai_review'], newestFirst: ['ai_review'] },
   { key: 'fixing', kinds: ['ci_failing', 'conflicts'] },
   { key: 'review', kinds: ['stalled_review', 'reviewer_routing', 'reviewer_load'] },
   { key: 'threads', kinds: ['untouched_thread'] },
   { key: 'land', kinds: ['merge', 'update_branch'] },
   { key: 'deps', kinds: ['security', 'dependency_bump'], groupByKind: true },
   // ⚠ READ-ONLY, AND COUNTED ONLY HERE: the reader's own PRs where the ball is with someone else.
-  // Last, so the seven action tabs keep their keys 1–7. Never in a brief figure, a My Turn count,
-  // the work plan or Slack (PERSONAL there).
+  // Last, so the seven action tabs keep their keys 1–7. Never in a brief figure, a My Turn count
+  // or Slack (PERSONAL there).
   { key: 'waiting', kinds: ['waiting_on_others'], byWait: true },
 ];
 
-/** Is this card one of this tab's PR cards? Kind first, then — for `my_turn` — its type. Review
- *  load is not a PR card and is never held (it rides `peopleCardIds`). ONE predicate for the
- *  server's lists and totals and the SPA's fallback. */
+/** A READ-ONLY tab — "Waiting on others" (`byWait`) or "AI reviews" (`newestFirst`): information,
+ *  never something to do, so an "is the board empty" test does not ask it. */
+export function pendingTabIsReference(key: PendingTabKey): boolean {
+  const def = PENDING_TABS.find((d) => d.key === key);
+  return def?.byWait === true || (def?.newestFirst?.length ?? 0) > 0;
+}
+
+/** Is this card one of this tab's PR cards? By kind. Review load is not a PR card and is never
+ *  held (it rides `peopleCardIds`). ONE predicate for the server's lists and totals and the SPA's
+ *  fallback. */
 export function pendingTabHolds(def: PendingTabDef, card: InsightCard): boolean {
-  if (card.kind === 'reviewer_load' || !def.kinds.includes(card.kind)) return false;
-  if (card.kind !== 'my_turn') return true;
-  if (def.reasons != null && !def.reasons.includes(card.reason)) return false;
-  if (def.exceptReasons != null && def.exceptReasons.includes(card.reason)) return false;
-  return true;
+  return card.kind !== 'reviewer_load' && def.kinds.includes(card.kind);
 }
 
 /** The tab a card kind lives in, or null for the two bot kinds (they never reach the board).
- *  `my_turn` answers My turn — a Claude review card's own tab is `pendingTabOfCard`. */
+ *  `my_turn` answers My turn. */
 export function pendingTabOf(kind: InsightKind): PendingTabKey | null {
   for (const t of PENDING_TABS) if (t.kinds.includes(kind)) return t.key;
   return null;

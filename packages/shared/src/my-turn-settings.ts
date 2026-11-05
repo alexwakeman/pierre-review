@@ -25,17 +25,14 @@ import {
   type DoNextWeightsPct,
 } from './pending-rules.js';
 
-/** A card type with an on/off switch. A red default branch has a three-way scope instead. */
-export type MyTurnToggle = Exclude<MyTurnCardReason, 'trunk_red'>;
-/** Which red default branches become My Turn cards: none, repos you maintain, or every repo in
- *  the workspace. */
-export type MyTurnTrunkScope = 'off' | 'maintained' | 'all';
+/** A card type with an on/off switch — every type. (A red default branch is NOT a My Turn type:
+ *  it lives in Needs fixing. A stored `trunkScope` / `trunk_red` from before is ignored.) */
+export type MyTurnToggle = MyTurnCardReason;
 
 /** What `accounts.my_turn_settings` holds: only what the reader changed. NULL = all defaults. */
 export interface MyTurnSettings {
   show?: Partial<Record<MyTurnToggle, boolean>>;
-  trunkScope?: MyTurnTrunkScope;
-  /** A permutation (or a prefix of one) of MyTurnCardReason. Stored normalised to all fifteen. */
+  /** A permutation (or a prefix of one) of MyTurnCardReason. Stored normalised to all of them. */
   order?: MyTurnCardReason[];
   weights?: DoNextWeightsPct;
 }
@@ -43,10 +40,9 @@ export interface MyTurnSettings {
 /** The settings in force, every field filled, with which parts are still the defaults. */
 export interface ResolvedMyTurnSettings {
   show: Record<MyTurnToggle, boolean>;
-  trunkScope: MyTurnTrunkScope;
-  /** All fifteen types, in the reader's order. */
+  /** Every type, in the reader's order. */
   order: MyTurnCardReason[];
-  /** The types switched off (`trunk_red` when the scope is 'off'), in `order`. */
+  /** The types switched off, in `order`. */
   off: MyTurnCardReason[];
   weightsPct: DoNextWeightsPct;
   /** `weightsPct` / 100 — what the ranker multiplies by. */
@@ -54,7 +50,7 @@ export interface ResolvedMyTurnSettings {
   /** Derived from the weights, never stored. */
   preset: DoNextPreset | 'custom';
   /** True where the part equals the product default — Settings says "default" beside it. */
-  defaults: { show: boolean; trunkScope: boolean; order: boolean; weights: boolean };
+  defaults: { show: boolean; order: boolean; weights: boolean };
   /** Changes exactly when WHICH TYPES ARE SHOWN changes — never with the order or the weights.
    *  The notification watcher re-baselines on it, so switching a type on does not announce its
    *  whole existing backlog. */
@@ -74,20 +70,16 @@ export const MY_TURN_DEFAULT_ORDER: readonly MyTurnCardReason[] = [
   'pushed_since',
   'own_ci_red',
   'own_conflicts',
-  'trunk_red',
   'pr_approved',
   'own_ready',
   'your_pr',
   'own_thread',
   'claude_review',
+  'ai_approved_merged',
   'watched_repo_pr',
 ];
 
-export const MY_TURN_TOGGLES: readonly MyTurnToggle[] = MY_TURN_DEFAULT_ORDER.filter(
-  (r): r is MyTurnToggle => r !== 'trunk_red',
-);
-
-export const MY_TURN_TRUNK_SCOPES: readonly MyTurnTrunkScope[] = ['off', 'maintained', 'all'];
+export const MY_TURN_TOGGLES: readonly MyTurnToggle[] = MY_TURN_DEFAULT_ORDER;
 
 /** What shows before the reader changes anything. Untouched PRs by others and the own-work
  *  promotions are OFF: the first is a survey of the workspace, not a summons, and the others
@@ -106,6 +98,7 @@ export const MY_TURN_SHOW_DEFAULTS: Readonly<Record<MyTurnToggle, boolean>> = {
   your_pr: true,
   own_thread: false,
   claude_review: true,
+  ai_approved_merged: true,
   watched_repo_pr: false,
 };
 
@@ -116,7 +109,6 @@ export const MY_TURN_OWN_WORK_REASONS: ReadonlySet<MyTurnCardReason> = new Set<M
   'own_conflicts',
   'own_ready',
   'own_thread',
-  'trunk_red',
 ]);
 
 /** The ONE spelling of each type's name in Settings, the CLI footer and the guide. */
@@ -129,12 +121,12 @@ export const MY_TURN_SETTING_LABEL: Readonly<Record<MyTurnCardReason, string>> =
   pushed_since: 'New commits since you reviewed',
   own_ci_red: 'Failing builds on your PRs',
   own_conflicts: 'Merge conflicts on your PRs',
-  trunk_red: 'Red default branch',
   pr_approved: 'Your PRs that are approved',
   own_ready: 'Your PRs ready to land',
   your_pr: 'New activity on your PRs',
   own_thread: 'Unanswered threads on your PRs',
-  claude_review: 'Finished Claude reviews',
+  claude_review: 'New AI reviews by your Limn',
+  ai_approved_merged: 'Merged after your Limn approved',
   watched_repo_pr: 'New PRs nobody asked you about',
 };
 
@@ -167,17 +159,15 @@ export function resolveMyTurnSettings(
     const v = storedShow[k];
     show[k] = typeof v === 'boolean' ? v : MY_TURN_SHOW_DEFAULTS[k];
   }
-  const trunkScope: MyTurnTrunkScope = isTrunkScope(s.trunkScope) ? s.trunkScope : 'off';
   const order = completeOrder(s.order);
   const weightsPct: DoNextWeightsPct =
     s.weights !== undefined && weightsProblem(s.weights) === null
       ? { proximity: s.weights.proximity, stall: s.weights.stall, relevance: s.weights.relevance }
       : { ...DO_NEXT_PRESETS.balanced };
   const preset = presetOf(weightsPct);
-  const off = order.filter((r) => (r === 'trunk_red' ? trunkScope === 'off' : !show[r]));
+  const off = order.filter((r) => !show[r]);
   return {
     show,
-    trunkScope,
     order,
     off,
     weightsPct,
@@ -189,11 +179,10 @@ export function resolveMyTurnSettings(
     preset,
     defaults: {
       show: MY_TURN_TOGGLES.every((k) => show[k] === MY_TURN_SHOW_DEFAULTS[k]),
-      trunkScope: trunkScope === 'off',
       order: order.every((r, i) => r === MY_TURN_DEFAULT_ORDER[i]),
       weights: preset === 'balanced',
     },
-    configKey: `${[...off].sort().join(',')}|${trunkScope}`,
+    configKey: [...off].sort().join(','),
   };
 }
 
@@ -208,9 +197,6 @@ export function validateMyTurnSettings(s: MyTurnSettings): string | null {
       if (!isToggle(k)) return `“${k}” is not a My Turn card type.`;
       if (v !== undefined && typeof v !== 'boolean') return 'Each card type must be on or off.';
     }
-  }
-  if (s.trunkScope !== undefined && !isTrunkScope(s.trunkScope)) {
-    return 'Red default branch must be Off, Repos you maintain or Every repo.';
   }
   if (s.order !== undefined) {
     if (!Array.isArray(s.order)) return 'The order must be a list of card types.';
@@ -227,8 +213,8 @@ export function validateMyTurnSettings(s: MyTurnSettings): string | null {
 
 /**
  * Overrides only: what differs from the product default, and nothing else — `null` when nothing
- * does. A `show` entry equal to its default is dropped, a trunk scope of 'off' is dropped, the
- * order is stored as the resolved full order (all fifteen) or dropped when it is the default, and
+ * does. A `show` entry equal to its default is dropped, the order is stored as the resolved full
+ * order (every type) or dropped when it is the default, and
  * Balanced weights are dropped. Keys come out in one fixed order, so two compactions of the same
  * settings serialise identically (the Settings form's "unsaved changes" test compares them).
  *
@@ -241,7 +227,6 @@ export function compactMyTurnSettings(s: MyTurnSettings | null | undefined): MyT
   const show: Partial<Record<MyTurnToggle, boolean>> = {};
   for (const k of MY_TURN_TOGGLES) if (r.show[k] !== MY_TURN_SHOW_DEFAULTS[k]) show[k] = r.show[k];
   if (Object.keys(show).length > 0) out.show = show;
-  if (!r.defaults.trunkScope) out.trunkScope = r.trunkScope;
   if (!r.defaults.order) out.order = r.order;
   if (!r.defaults.weights) out.weights = r.weightsPct;
   return Object.keys(out).length > 0 ? out : null;
@@ -275,10 +260,6 @@ function isReason(v: unknown): v is MyTurnCardReason {
 
 function isToggle(v: unknown): v is MyTurnToggle {
   return typeof v === 'string' && (MY_TURN_TOGGLES as readonly string[]).includes(v);
-}
-
-function isTrunkScope(v: unknown): v is MyTurnTrunkScope {
-  return typeof v === 'string' && (MY_TURN_TRUNK_SCOPES as readonly string[]).includes(v);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

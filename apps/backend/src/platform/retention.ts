@@ -102,7 +102,7 @@ export async function eraseProByAccountId(
     // so erasure is the only delete path it needs: it has no pr_id grain for pruneProByPrIds, and
     // it ages by STALENESS (the payload hash moves as items churn), not by deletion.
     pro.proSynthesis,
-    // The work-plan narration cache. Same family and same reasoning as pro_synthesis directly
+    // The work-plan narration cache (DORMANT: "Plan my day" was removed; old rows still erase). Same family and same reasoning as pro_synthesis directly
     // above: scope-keyed, REGENERABLE, no pr_id grain (the row spans a whole workspace), so it is
     // absent from pruneProByPrIds and erasure is its only delete path. It also holds prose the
     // model wrote about the account's own open work — exactly the content an erasure promises to

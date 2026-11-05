@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type {
+  AiReviewCard,
   DailyBriefCounts,
   InsightCard,
   InsightKind,
@@ -12,13 +13,7 @@ import {
   useAttentionLiveness,
 } from '../../hooks/useAttentionCards.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { AiRunGate } from '../AiSetup.js';
-import {
-  useGenerateWorkPlan,
-  useWorkPlan,
-  useWorkPlanGenerating,
-} from '../../hooks/useWorkPlan.js';
-import { AiStatusLine } from '../AiStatusLine.js';
+import { useAiReviewsSeen } from '../../hooks/useAiReviewsSeen.js';
 import { useFilters, type AttentionRelevanceLens } from '../../store/filters.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import {
@@ -31,16 +26,16 @@ import {
   tabsOf,
   TAB_LABEL,
 } from './pendingTabs.js';
-import { relativeTime } from '../../lib/ui.js';
-import { CheckCircleIcon, GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
+import { CheckCircleIcon, GearIcon } from '../Icons.js';
 import { PendingKindIcon, PendingTabIcon } from './PendingKindIcon.js';
-import { AttentionCards, KIND_LABEL, type PendingFocusRequest } from './AttentionCards.js';
+import { AttentionCards, type PendingFocusRequest } from './AttentionCards.js';
+import { chipLabel } from './pendingLabels.js';
+import { PendingAiReviews } from './PendingAiReviews.js';
 import { pendingRowSummary } from './pendingRow.js';
 import {
   Button,
   PageHeader,
   Tabs,
-  cx,
   useEdgeFade,
   panelId,
   tabId,
@@ -58,7 +53,6 @@ import { PendingEmptyBoard, PendingSummaryLine, ReviewSuggestionCard } from './P
 import { DocsOfferCard } from './DocsOfferCard.js';
 import { goTo } from '../shell/nav.js';
 import { pendingBoardEmpty } from '../../lib/pendingFirstLanding.js';
-import { aiRunLabel } from '@pierre-review/shared';
 
 // The **Pending** rail entry — the attention cards (your turn / stalled reviews / untouched
 // threads / reviewer load / needs-a-reviewer) that used to sit under the Insights AI panels, now a
@@ -202,7 +196,7 @@ export const LENS_COPY: Record<
 
 const TAB_EMPTY: Record<PendingTabKey, string> = {
   my_turn: 'Nothing is your turn right now.',
-  claude: 'No finished AI reviews are waiting on you.',
+  claude: 'No AI reviews yet.',
   fixing: 'No failing builds or merge conflicts are yours to fix.',
   review: 'No reviews are waiting.',
   threads: 'No review threads are waiting for an answer.',
@@ -252,7 +246,7 @@ export function pendingEmptyNote(v: {
   const emptiedBy = v.authorLens != null && v.allTotal > 0 ? v.authorLens : null;
   const narrowed = emptiedBy != null || v.kind != null || v.relevance != null;
   if (v.people > 0 && !narrowed) return null;
-  const where = v.kind != null ? `under ${KIND_LABEL[v.kind]}` : `in ${TAB_LABEL[v.tab]}`;
+  const where = v.kind != null ? `under ${chipLabel(v.tab, v.kind)}` : `in ${TAB_LABEL[v.tab]}`;
   const sentence =
     emptiedBy != null
       ? `Nothing from ${emptiedBy} ${where} right now.`
@@ -306,6 +300,27 @@ export function AttentionView(): JSX.Element {
   const activeTab = tabs.find((t) => t.key === tabKey);
   const lensOn = tabKey === 'my_turn' ? attentionRelevance : null;
 
+  // ── "AI REVIEWS": THE NEWEST AI REVIEW PER PR (hooks/useAiReviewsSeen.ts) ──────────────────────
+  // A stable reference list, listed by its own block in the server's order — looking never removes a
+  // row. Rows newer than the stamp the visit started with wear "New"; while the tab is on screen the
+  // workspace's stamp moves to the newest row (never on another tab, never in a loop).
+  // (`ai_review` cards are always the People side: the Automation lens shows none.)
+  const aiShown = tabKey === 'claude' && attentionAuthorLens !== 'automation';
+  const aiCards = useMemo(() => {
+    const ids = tabs.find((t) => t.key === 'claude')?.cardIds ?? [];
+    const byId = new Map((data?.cards ?? []).map((c) => [c.id, c]));
+    return ids.map((id) => byId.get(id)).filter((c): c is AiReviewCard => c?.kind === 'ai_review');
+  }, [data?.cards, tabs]);
+  const aiSeen = useAiReviewsSeen({
+    workspaceId,
+    active: aiShown && !isLoading && !isError,
+    cards: aiCards,
+    seenAt: data?.aiReviewsSeenAt,
+  });
+  const aiRows = aiShown ? aiCards : [];
+  const aiUsersById = useMemo(() => new Map((data?.users ?? []).map((u) => [u.id, u])), [data?.users]);
+  const listCards = useMemo(() => view.cards.filter((c) => c.kind !== 'ai_review'), [view.cards]);
+
   // ── LIVENESS: ONE GITHUB QUESTION FOR THE WHOLE BOARD ─────────────────────────────────────
   //
   // Everything here is a read of already-synced rows, which is what lets the board paint in one
@@ -325,8 +340,15 @@ export function AttentionView(): JSX.Element {
   // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card names a PR only when the red
   // head's landing PR resolved, and review-load cards name none — nothing for a PR probe to ask.
   const livenessPrIds = useMemo(() => {
+    // An AI review names a PR (often closed) but claims nothing about its state: never swept. Nor is
+    // a merged PR ("Merged after your Limn approved").
     const prIdOf = (c: InsightCard): number | null =>
-      'prId' in c && typeof c.prId === 'number' ? c.prId : null;
+      c.kind !== 'ai_review' &&
+      !(c.kind === 'my_turn' && c.reason === 'ai_approved_merged') &&
+      'prId' in c &&
+      typeof c.prId === 'number'
+        ? c.prId
+        : null;
     const onScreen = new Set(view.cards.map((c) => c.id));
     const rank = (c: InsightCard): number => {
       if (c.kind === 'merge' || c.kind === 'update_branch' || c.kind === 'conflicts') return 0;
@@ -347,47 +369,8 @@ export function AttentionView(): JSX.Element {
   }, [data?.cards, view.cards]);
   useAttentionLiveness(workspaceId, livenessPrIds, !isLoading && !isError);
 
-  // ── THE WORK-PLAN NARRATION (optional, additive, and QUIET) ───────────────────────────────
-  //
-  // ⚠ The tabs, their counts and their order all come from `/api/attention` alone; the screen is
-  // complete without the narration. The narration runs on the reader's own AI, so it shows only
-  // where agentic AI is enabled. Its headline is the page header's sentence; each `why` is a small
-  // mark on its row and its full line in the side panel.
-  const canNarrate = aiEnabled;
-  const wp = useWorkPlan(workspaceId, canNarrate);
-  const generate = useGenerateWorkPlan(workspaceId);
-  // ⚠ THE SHARED MUTATION KEY, never a per-mount `isPending`: a per-mount flag resets the button
-  // to "Plan my day" on a tab switch mid-run, which invites a second model run.
-  const busy = useWorkPlanGenerating(workspaceId);
-  const plan = wp.data?.enabled ? (wp.data.plan ?? null) : null;
-
-  // The join: a narration step names a WORK-PLAN row id; the board renders CARDS. `cardId` is the
-  // translation table. ⚠ THE JOIN KEY STAYS `WorkPlanItem.id` — the plugin's id check, its payload
-  // hash and every stored plan speak `wp:<kind>:<id>`; `cardId` is a lookup the SPA performs.
-  const whyById = useMemo(() => {
-    const out = new Map<string, string>();
-    if (plan == null) return out;
-    const wpToCard = new Map(
-      (wp.data?.evidence?.items ?? []).flatMap((i) =>
-        i.cardId != null ? ([[i.id, i.cardId]] as const) : [],
-      ),
-    );
-    for (const step of plan.steps) {
-      const cardId = wpToCard.get(step.id);
-      if (cardId != null) out.set(cardId, step.why);
-    }
-    return out;
-  }, [plan, wp.data?.evidence?.items]);
-
-  const notice = generate.data?.throttled
-    ? 'A plan is already being written — the latest shows here shortly.'
-    : generate.data?.empty
-      ? 'Nothing needs doing in this workspace right now.'
-      : null;
-
   // ── "HOW IS THIS ORDERED" ─────────────────────────────────────────────────────────────────
   const [guideOpen, setGuideOpen] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
   // The phone's one filter row scrolls sideways; its hidden edge fades so the rest reads as "more".
   const filterRowRef = useRef<HTMLDivElement>(null);
   const filterFade = useEdgeFade(filterRowRef, 'x');
@@ -395,7 +378,7 @@ export function AttentionView(): JSX.Element {
   const closeGuide = useCallback(() => setGuideOpen(false), []);
   const viewName =
     (view.kind != null
-      ? `${KIND_LABEL[view.kind]} (${TAB_LABEL[view.tab]})`
+      ? `${chipLabel(view.tab, view.kind)} (${TAB_LABEL[view.tab]})`
       : lensOn === 'mine'
         ? 'My turn, only yours'
         : lensOn === 'others'
@@ -415,10 +398,9 @@ export function AttentionView(): JSX.Element {
       scores: data?.scores,
       viewName,
       total: view.total,
-      whyById,
       onOpenGuide: openGuide,
     }),
-    [view.tab, data?.rules, data?.scores, viewName, view.total, whyById, openGuide],
+    [view.tab, data?.rules, data?.scores, viewName, view.total, openGuide],
   );
   // Settings → My Turn, opened straight to its section — the "Customise" link on My turn.
   const openSettings = useSettingsModal((s) => s.openSettings);
@@ -439,7 +421,7 @@ export function AttentionView(): JSX.Element {
     relevance: lensOn,
     authorLens: attentionAuthorLens,
     allTotal: view.allTotal,
-    cards: view.cards.length,
+    cards: listCards.length + aiRows.length,
     people: view.people.length,
   });
   // THE FIRST LANDING (docs/FRONTEND.md § Pending on the first landing) — all from this response.
@@ -470,7 +452,6 @@ export function AttentionView(): JSX.Element {
   // ── ⌘K: every Pending item (across every tab), and the page's own controls ──
   const [focusRequest, setFocusRequest] = useState<PendingFocusRequest | null>(null);
   const focusN = useRef(0);
-  const replanRef = useRef<HTMLSpanElement>(null);
   const live = useRef({ data, tabs });
   live.current = { data, tabs };
   const itemProvider = useCallback((query: string): Command[] => {
@@ -485,7 +466,8 @@ export function AttentionView(): JSX.Element {
     };
     const out: Command[] = [];
     for (const c of d.cards) {
-      if (BOT_CARD_KINDS.has(c.kind)) continue;
+      // AI reviews are a reference list, not Pending items (they are opened from their own rows).
+      if (BOT_CARD_KINDS.has(c.kind) || c.kind === 'ai_review') continue;
       const tab = live.current.tabs.find((t) => t.cardIds?.includes(c.id))?.key ?? null;
       if (tab == null) continue;
       const s = pendingRowSummary(c, { nameOf, tab, sharedOwner: null });
@@ -508,7 +490,7 @@ export function AttentionView(): JSX.Element {
   }, [setAttentionAuthorLens, setAttentionRelevance, setAttentionTab]);
   useCommandProvider('pending-items', itemProvider);
 
-  const pageCommandsKey = `${tabKey}|${attentionRelevance ?? ''}|${attentionAuthorLens ?? ''}|${canNarrate}|${plan != null}`;
+  const pageCommandsKey = `${tabKey}|${attentionRelevance ?? ''}|${attentionAuthorLens ?? ''}`;
   const pageCommands = useMemo<Command[]>(() => {
     const out: Command[] = [
       { id: 'pending:customise', group: 'Settings', title: 'Customise My turn', keywords: ['pending', 'settings', 'weights', 'order'], run: () => openSettings('my-turn') },
@@ -540,17 +522,6 @@ export function AttentionView(): JSX.Element {
         run: () => setAttentionTab('deps'),
       },
     ];
-    if (canNarrate) {
-      out.push({
-        id: 'pending:replan',
-        group: 'Actions',
-        title: plan != null ? 'Re-plan my day…' : 'Plan my day…',
-        keywords: ['work plan', 'ai'],
-        // ⚠ To the button, never around it: the run goes through `AiRunGate` (setup, sign-in and
-        // the spend budget), so the command lands focus on the gated button and the reader presses it.
-        run: () => replanRef.current?.querySelector<HTMLButtonElement>('button')?.focus(),
-      });
-    }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageCommandsKey]);
@@ -563,43 +534,11 @@ export function AttentionView(): JSX.Element {
   const count = (n: number | string | null | undefined): JSX.Element | null =>
     n == null || n === '' ? null : <span className="text-meta tabular-nums text-ui-faint">{n}</span>;
 
-  const planControls = canNarrate && !isLoading && !isError && (data?.cards.length ?? 0) > 0 && (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 text-meta text-ui-faint">
-      {plan != null && wp.data?.stale === true && (
-        <span
-          className="text-ui-warn"
-          title="The list has moved on since this plan was written — the rows are current, the lines marked with the sparkle describe the list as it stood."
-        >
-          stale
-        </span>
-      )}
-      {plan != null && (
-        <span className="max-sm:hidden" title={aiRunLabel(null, plan.model)}>
-          written {relativeTime(plan.generatedAt)}
-        </span>
-      )}
-      {busy && <AiStatusLine stage="Writing the plan" />}
-      {!busy && (
-        <span ref={replanRef} className="contents">
-          <AiRunGate kind="complete">
-            <Button
-              size="sm"
-              icon={plan != null ? <RefreshIcon size={12} /> : <SparkleIcon size={12} className="text-ai-signal" />}
-              onClick={() => generate.mutate()}
-              title="Have the model say why some items are worth doing now. The tabs, figures and order are computed either way."
-            >
-              {plan != null ? 'Re-plan my day' : 'Plan my day'}
-            </Button>
-          </AiRunGate>
-        </span>
-      )}
-    </div>
-  );
-
   const tabItems: TabItem<PendingTabKey>[] = shownTabs.map((t) => ({
     id: t.key,
     label: TAB_LABEL[t.key],
-    icon: <PendingTabIcon tab={t.key} size={13} className="text-ui-faint" />,
+    // PR detail's tab icon size; the boxed strip tints it (accent when on, faint when off).
+    icon: <PendingTabIcon tab={t.key} size={14} />,
     // Under the People / Automation lens a badge counts that side of its tab — the list a click on
     // it opens. The server's own figure, never `total − other`. "…" while loading, never "0".
     count: isLoading ? 'loading' : tabBadgeCount(t, attentionAuthorLens),
@@ -607,51 +546,14 @@ export function AttentionView(): JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="attention-view">
-      {/* THE PAGE HEADER (components/ui/PageHeader.tsx). On a phone the plan's controls drop under
-          the title, full width; from md they sit at the end of the title row. LABEL-ONLY rename
+      {/* THE PAGE HEADER (components/ui/PageHeader.tsx). LABEL-ONLY rename
           (the Insights→Reports precedent): the store/URL literal stays `'attention'`. How the board
           is gathered and ordered is the ⓘ — a short popover with a way into the guide. */}
       <PageHeader
         title="Pending"
         info={<PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />}
-        actions={planControls}
         sub={
           <>
-            {/* GENERATED — the plan's framing sentences, quiet, labelled by their ink and mark. */}
-            {/* The model's words are grey text; only the sparkle wears the AI colour. On a phone
-                the headline is one line until tapped (the parked line shows with it). */}
-            {plan != null && plan.headline.trim() !== '' && (
-              <button
-                type="button"
-                key={plan.generatedAt}
-                onClick={() => setPlanOpen((o) => !o)}
-                aria-expanded={planOpen}
-                className="digest-fade-in mt-1 flex w-full items-start gap-1.5 rounded-ui text-left text-body text-ui-mute md:pointer-events-none md:cursor-text"
-                tabIndex={-1}
-              >
-                <SparkleIcon size={12} className="mt-1 shrink-0 text-ai-signal" />
-                <span className={cx('min-w-0', !planOpen && 'max-md:line-clamp-1')}>{plan.headline}</span>
-              </button>
-            )}
-            {plan != null && plan.parked != null && plan.parked.trim() !== '' && (
-              <p className={cx('mt-0.5 flex items-start gap-1.5 text-meta text-ui-mute', !planOpen && 'max-md:hidden')}>
-                <SparkleIcon size={11} className="mt-0.5 shrink-0 text-ai-signal" />
-                <span className="min-w-0">{plan.parked}</span>
-              </p>
-            )}
-            {plan != null && plan.droppedIds > 0 && (
-              <p className="mt-0.5 text-meta text-ui-warn">
-                {plan.droppedIds} reference{plan.droppedIds === 1 ? '' : 's'} the model named{' '}
-                {plan.droppedIds === 1 ? 'was' : 'were'} not on this board and{' '}
-                {plan.droppedIds === 1 ? 'was' : 'were'} discarded.
-              </p>
-            )}
-            {canNarrate && generate.isError && (
-              <p className="mt-0.5 text-meta text-ui-danger">
-                {(generate.error as Error)?.message ?? 'Couldn’t write the plan.'}
-              </p>
-            )}
-            {canNarrate && !generate.isError && notice != null && <p className="mt-0.5 text-meta text-ui-mute">{notice}</p>}
             {/* THE ONE-LINE SUMMARY, while the account is new (`summary`, server-decided). Each part
                 is its tab's own badge figure and opens that tab. */}
             {!isLoading && !isError && data?.summary === true && (
@@ -672,16 +574,25 @@ export function AttentionView(): JSX.Element {
             Each count is the tab's WHOLE population (uncapped), the same figure `/api/daily-brief`
             returns for it — except "Waiting on others", which the brief never counts. A tab with
             nothing in it stays, dimmed, so the layout never shifts and "0" is a fact rather than an
-            absence (AI reviews and Waiting on others hide instead, above). 1–8 pick them. */}
+            absence (AI reviews and Waiting on others hide instead, above). 1–8 pick them.
+            ⚠ The SAME button tabs as PR detail (`variant="boxed"`, same strip classes and icon
+            size) — one look for every tab strip a reader clicks. */}
         <Tabs
-          className="-mx-2 mt-3"
+          className="-mx-[3px] mt-3 md:flex-wrap md:gap-y-1.5"
           label="Pending"
           idPrefix="pending"
           tabs={tabItems}
           value={tabKey}
           onChange={(k) => setAttentionTab(k)}
           numberKeys
+          variant="boxed"
         />
+        {/* My turn's one visible sentence; the rest of the explanation stays behind the ⓘ. */}
+        {tabKey === 'my_turn' && (
+          <p className="mt-1.5 text-meta text-ui-mute" data-testid="pending-my-turn-purpose">
+            Pull requests where the next move is yours.
+          </p>
+        )}
 
         {/* The tab's narrowing controls: kind chips on a two-kind tab, "Only yours" on My turn,
             and — at the end — the People / Automation lens wherever it would change the list, then
@@ -703,7 +614,7 @@ export function AttentionView(): JSX.Element {
                     className={pill(view.kind === c.kind)}
                   >
                     <PendingKindIcon kind={c.kind} className="shrink-0 text-ui-faint" />
-                    {KIND_LABEL[c.kind]} {count(c.total)}
+                    {chipLabel(tabKey, c.kind)} {count(c.total)}
                   </button>
                 ))}
               </>
@@ -783,7 +694,7 @@ export function AttentionView(): JSX.Element {
           <p className="px-7 py-6 text-body text-ui-danger max-md:px-4">Couldn’t load what needs attention.</p>
         ) : (
           <AttentionCards
-            cards={empty?.placement === 'alone' ? [] : view.cards}
+            cards={empty?.placement === 'alone' ? [] : listCards}
             users={data?.users}
             doNextCount={data?.tabs != null ? view.doNextCount : 0}
             people={empty?.placement === 'alone' ? [] : view.people}
@@ -828,6 +739,10 @@ export function AttentionView(): JSX.Element {
             }
             after={
               <>
+                {/* AI reviews: the newest AI review per PR, newest first; "New" since the last look. */}
+                {aiRows.length > 0 && (
+                  <PendingAiReviews rows={aiRows} usersById={aiUsersById} baseline={aiSeen.baseline} />
+                )}
                 {empty?.placement !== 'alone' && view.shown < view.total && (
                   <p className="px-3 pt-3 text-meta text-ui-faint">
                     {capSentence(view.tab, view.kind, view.shown, view.total, data?.rules)}

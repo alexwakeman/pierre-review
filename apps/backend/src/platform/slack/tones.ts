@@ -70,7 +70,6 @@ export function pendingCardEmoji(card: InsightCard): string {
     case 'ci_failing':
       return card.arm === 'trunk' ? ':red_circle:' : ':x:';
     case 'my_turn':
-      if (card.reason === 'trunk_red') return ':red_circle:';
       if (card.reason === 'own_ci_red') return ':x:';
       if (card.reason === 'own_conflicts') return ':crossed_swords:';
       if (card.reason === 'own_ready' || card.reason === 'pr_approved') return ':white_check_mark:';
@@ -95,6 +94,7 @@ export function pendingCardEmoji(card: InsightCard): string {
     case 'bot_signal':
     case 'bot_only_review':
     case 'waiting_on_others':
+    case 'ai_review':
       return '•';
   }
 }

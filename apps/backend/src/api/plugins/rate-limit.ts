@@ -362,30 +362,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.search, TIERS.read];
   }
 
-  // ---- The work plan (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // ONE endpoint, two verbs, two costs — the synthesis shape exactly, and tiered by copying it:
-  //   POST /api/pro/work-plan  the generate path — one Haiku call behind a payload-hash $0 cache,
-  //                            plus the evidence fold below. The catch-all's `generates` branch
-  //                            would land it on `ai` anyway; spelled here so the family's two
-  //                            tiers are DECIDED together (this file's failure mode is a tier
-  //                            nobody re-examined).
-  //   GET  /api/pro/work-plan  the free cached read — but it re-runs the whole `getWorkPlan`
-  //                            evidence fold to recompute the payload hash for the `stale` probe,
-  //                            and that fold reaches getWorkspaceInsights (the stalled-review /
-  //                            untouched-thread / reviewer-load / merge / update_branch cards).
-  //                            That is the synthesis / bot-behaviour shape of cost — this
-  //                            process's event loop and this database, not GitHub quota and not
-  //                            Anthropic — so it takes the same 60/min `search` bucket, NOT the
-  //                            catch-all's 600/min GET→read branch. The narration now decorates
-  //                            the Pending board, so this GET fires whenever that board is
-  //                            mounted. It must NEVER grow a generation leg.
-  if (path === '/api/pro/work-plan') {
-    if (mutating) return [TIERS.ai, TIERS.aiHourly];
-    return [TIERS.search, TIERS.read];
-  }
-
   // ---- Chronology pointers (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // The work plan's shape and costs exactly: POST is one Haiku call behind a payload-hash $0 cache
+  // The synthesis shape and costs exactly: POST is one Haiku call behind a payload-hash $0 cache
   // (the `ai` pair); the free GET re-runs the whole Chronology fold (`getFlowCourts` — the lane
   // resolver plus chunked action scans over every merge in the window) plus the exemplar text
   // reads to recompute the hash for its `stale` probe, so it takes `search`, never the
@@ -586,6 +564,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // EXACTLY here, before the Claude Review family below would park it on the AI bucket (the
   // `hitsGithub` alternation further down is never reached by a `/claude-review` path).
   if (mutating && /^\/api\/prs\/\d+\/claude-review\/team-claim\/clear$/.test(path)) return [TIERS.githubWrite];
+  // SEEN (db/queries.ts `markClaudeReviewSeen`): the AI Review tab showed a finished run — one
+  // UPDATE of one column; no GitHub, no model. `read`, EXACT, so it never lands on the AI bucket
+  // the `/claude-review` family's generic POST rule below would give it.
+  if (mutating && /^\/api\/prs\/\d+\/claude-review\/seen$/.test(path)) return [TIERS.read];
   // AI Fix PLAN MODE (coding/ai-fix/routes.ts, LOCAL ONLY). Spelled out so the family cannot drift
   // with the /api/pro/ catch-all below, which would also have parked the DB-only discard on `ai`:
   //   POST /api/pro/prs/:id/ai-fix/plan             starts a planning agent pass  → ai + ai_hourly
@@ -718,7 +700,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // GET /api/attention — the Pending board. RE-TIERED off the 600/min blanket `read` when it
   // absorbed the ranked head: one request now runs `getWorkspaceInsights` (including the
   // maintained-repo resolution, which the merge-card emitter makes effectively unconditional)
-  // AND `rankWorkPlan` on top of it — the approvals fold, the untouched-thread group-by and a
+  // AND `rankPendingTabs` (`scoreCards`) on top of it — the approvals fold, the untouched-thread group-by and a
   // narrow PR select. Same cost shape as the daily brief above, same 60/min bucket.
   // ⚠ "This route is DB-only" is exactly the sentence this file exists to distrust: the fold
   // moved into it, so the tier moves with it. The board mounts on navigation and refetches on a
@@ -739,6 +721,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // (`githubWrite` would also be the wrong bucket regardless: this route writes nothing to
   // GitHub, it reads.)
   if (mutating && path === '/api/attention/liveness') return [TIERS.prDetail, TIERS.read];
+  // POST /api/attention/ai-reviews/seen — "AI reviews" was looked at (db/ai-reviews-seen.ts).
+  // FOLLOWING THE TOKEN: one UPDATE of one column; no GitHub, no model. `read`, decided rather than
+  // inherited; EXACT `===`.
+  if (mutating && path === '/api/attention/ai-reviews/seen') return [TIERS.read];
   // GET /api/flow-findings — the Chronology tab (deterministic, no model and no GitHub). DECIDED,
   // not inherited: "this
   // route is DB-only" is the sentence this file exists to distrust, and one call here runs the

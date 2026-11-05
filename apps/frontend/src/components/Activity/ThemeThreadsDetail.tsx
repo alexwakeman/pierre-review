@@ -22,7 +22,7 @@ import { SeverityPill } from './ThemesReportView.js';
 
 // The "click a theme card → all its threads" drill-down (ephemeral singleton tab). It renders the
 // concrete review threads / PR-level comments a Bot or Human theme groups, using the SAME ThreadCard
-// (full metadata + follow-up comments) the Changes tab's Threads only view uses. Grouped by PR; each group
+// (full metadata + follow-up comments) the Threads tab uses. Grouped by PR; each group
 // fetches that PR's detail once and can open the PR in its own tab. The theme is the transient seed
 // (store `themeThreadsSeed`); nothing is fetched beyond the involved PRs' detail — the metrics
 // strip's queries are byte-identical to the groups'/badges' own, so they dedupe rather than add.

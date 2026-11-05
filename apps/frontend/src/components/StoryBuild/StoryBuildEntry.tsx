@@ -16,7 +16,7 @@ import {
 } from '../../lib/storyBuild.js';
 import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { useFilters } from '../../store/filters.js';
-import { BuildIcon, FillGapsIcon } from '../Icons.js';
+import { WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 
@@ -105,7 +105,7 @@ function Entry({
       : entry.kind === 'open'
         ? { label: `Open ${ticket.key}'s build: ${STORY_BUILD_MARK_WORDS[entry.mark]}`, title: 'Open the build' }
         : storyBuildActionLabel(entry.action, ticket.key);
-  const icon = entry?.kind === 'offer' && entry.action === 'fill_gaps' ? <FillGapsIcon size={12} /> : <BuildIcon size={12} />;
+  const icon = entry?.kind === 'offer' && entry.action === 'fill_gaps' ? <FillGapsIcon size={12} /> : <WrenchIcon size={12} />;
   const commandKind = entry == null ? null : entry.kind === 'open' ? `open:${entry.mark}` : entry.action;
   const label = words?.label ?? null;
 
@@ -119,7 +119,7 @@ function Entry({
         group: 'Actions',
         title: title != null ? `${label} · ${title}` : label,
         keywords: fill ? ['build', 'story', 'code', 'gaps', 'fill'] : ['build', 'story', 'code', 'implement'],
-        icon: fill ? <FillGapsIcon size={14} /> : <BuildIcon size={14} />,
+        icon: fill ? <FillGapsIcon size={14} /> : <WrenchIcon size={14} />,
         run: () => live.current(),
       },
     ];

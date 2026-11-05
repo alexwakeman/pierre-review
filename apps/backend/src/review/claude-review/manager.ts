@@ -913,6 +913,20 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
         return null;
       });
   }
+  // "RESOLVE MY LIMN THREADS WHEN ADDRESSED" (auto-resolve.ts path B): a manual "Review only" run on
+  // the reader's OWN PR closes the reader's own Limn threads its follow-up judged fixed. The auto and
+  // "Review and post" paths reach the same writer through `maybeAutoPostReview`. A pair: both halves,
+  // first then second (each thread is claimed once). Fire-and-forget; never thrown into the review.
+  if (succeeded && item.trigger !== 'auto' && item.postOnFinish !== true) {
+    const runs = end.pairFirstReviewId != null ? [end.pairFirstReviewId, reviewId] : [reviewId];
+    void import('./auto-resolve.js')
+      .then(async (m) => {
+        for (const id of runs) await m.maybeAutoResolveFindings(ctx, { accountId: item.accountId, prId, reviewId: id });
+      })
+      .catch((err) =>
+        ctx.log.warn(`resolve own threads pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+  }
   if (succeeded && item.trigger === 'auto') {
     // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
     // (./auto-post.ts decides; it never throws and never retries). Independent of the fix. A pair

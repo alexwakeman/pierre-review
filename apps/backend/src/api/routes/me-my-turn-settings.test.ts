@@ -99,7 +99,6 @@ describe('the My Turn settings', () => {
       settings: {
         // One real change, beside three values that ARE the defaults.
         show: { watched_repo_pr: true, mention: true },
-        trunkScope: 'off',
         weights: DO_NEXT_PRESETS.balanced,
       },
     });
@@ -111,7 +110,7 @@ describe('the My Turn settings', () => {
   });
 
   it('treat null as a RESET back to the defaults', async () => {
-    await put({ settings: { trunkScope: 'all' } });
+    await put({ settings: { show: { mention: false } } });
     const res = await put({ settings: null });
     expect(res.json().myTurnSettings).toBeNull();
     expect(await stored()).toBeNull();
@@ -119,8 +118,8 @@ describe('the My Turn settings', () => {
   });
 
   it('store a settings object that equals the defaults as NULL', async () => {
-    await put({ settings: { trunkScope: 'maintained' } });
-    const res = await put({ settings: { show: { mention: true }, trunkScope: 'off' } });
+    await put({ settings: { show: { mention: false } } });
+    const res = await put({ settings: { show: { mention: true } } });
     expect(res.json().myTurnSettings).toBeNull();
     expect(await stored()).toBeNull();
   });
@@ -144,7 +143,6 @@ describe('the My Turn settings', () => {
   });
 
   it.each<[string, unknown, string]>([
-    ['an unknown scope', { trunkScope: 'everywhere' }, 'Red default branch must be Off, Repos you maintain or Every repo.'],
     ['an unknown type in the order', { order: ['mention', 'nope'] }, '“nope” is not a My Turn card type.'],
     ['a repeated type in the order', { order: ['mention', 'mention'] }, 'Each card type can appear in the order once.'],
     ['a missing weight', { weights: { proximity: 50, stall: 50 } }, 'Set all three weights.'],

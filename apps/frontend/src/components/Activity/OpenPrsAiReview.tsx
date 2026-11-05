@@ -34,7 +34,8 @@ import { AUTO_REVIEW_LABEL } from './pendingLabels.js';
 // nothing fetches on mount: the only requests follow a click.
 
 /** Where the facts are drawn: the Open PRs side panel ('drawer'), or the PR's Overview tab
- *  ('overview'), whose rows have their own gutters and a wider label column (ChecksTab `Row`). */
+ *  ('overview'), where they sit inside the AI review card (pr/PrOverviewAiReview.tsx) with the
+ *  card's own gutter and label column. */
 export type AiReviewLayout = 'drawer' | 'overview';
 const LayoutContext = createContext<AiReviewLayout>('drawer');
 
@@ -42,10 +43,10 @@ const LayoutContext = createContext<AiReviewLayout>('drawer');
 export function Fact({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   const layout = useContext(LayoutContext);
   if (layout === 'overview') {
-    // The Overview's row: label above the value on a phone, beside it from sm up (ChecksTab `Row`).
+    // Inside the Overview's AI review card: label above the value on a phone, beside it from sm up.
     return (
-      <div className="flex flex-col gap-0.5 px-4 py-1.5 text-body sm:flex-row sm:gap-3 md:px-5">
-        <dt className="shrink-0 text-meta text-ui-faint sm:w-28 sm:pt-0.5">{label}</dt>
+      <div className="flex flex-col gap-0.5 px-3 py-1 text-body sm:flex-row sm:gap-3">
+        <dt className="shrink-0 text-meta text-ui-faint sm:w-20 sm:pt-0.5">{label}</dt>
         <dd className="m-0 min-w-0 flex-1 text-body text-ui-ink">{children}</dd>
       </div>
     );
@@ -210,9 +211,17 @@ export function DrawerAiReview({
       role="group"
       aria-label="AI review"
       data-testid={layout === 'overview' ? 'pr-ai-review-overview' : 'open-prs-panel-ai-review'}
-      className={layout === 'overview' ? 'py-1' : undefined}
+      className={layout === 'overview' ? 'pb-2.5' : undefined}
     >
-      <h3 className={cx('mb-1 text-meta text-ui-faint', layout === 'overview' && 'px-4 pt-1 font-medium md:px-5')}>AI review</h3>
+      {layout === 'overview' ? (
+        // A real heading for the card: the AI mark, then the words.
+        <h3 className="m-0 flex items-center gap-1.5 px-3 pb-1 pt-2.5 text-body font-semibold text-ui-ink">
+          <SparkleIcon size={13} className="shrink-0 text-ai-signal" aria-hidden />
+          AI review
+        </h3>
+      ) : (
+        <h3 className="mb-1 text-meta text-ui-faint">AI review</h3>
+      )}
       <dl className="m-0">
         <Fact label={cell.kind === 'done' ? 'Verdict' : 'Status'}>{status}</Fact>
 
@@ -358,8 +367,8 @@ export function DrawerAiReview({
       </dl>
 
       {/* The action sits in the value column, under the facts it acts on. */}
-      <div className={cx('mt-1.5 flex gap-3', layout === 'overview' && 'px-4 md:px-5')}>
-        <span aria-hidden className={cx('shrink-0', layout === 'overview' ? 'max-sm:hidden sm:w-28' : 'w-24')} />
+      <div className={cx('mt-1.5 flex gap-3', layout === 'overview' && 'px-3')}>
+        <span aria-hidden className={cx('shrink-0', layout === 'overview' ? 'max-sm:hidden sm:w-20' : 'w-24')} />
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5">
           {canStart ? (
             <AiRunGate kind="review">

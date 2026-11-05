@@ -957,8 +957,7 @@ degrades to the original silent-first-poll behaviour, which is what a genuinely 
 ⚠ **`useEnqueueMergeQueue`/`useDequeueMergeQueue` AWAIT THE WHOLE WRITE SET** — their hook-level
 `onSuccess` returns `invalidateAfterPrWrite(qc, prId)` — and they are the only mutations in
 `usePrWrites.ts` that await anything. The set is the PR-scoped keys (`['merge-options', id]` and
-`['pr', id]` among them) plus the workspace half (`['attention-cards']` / `['daily-brief']` /
-`['work-plan']`), and inside the sweep throttle it includes the one trailing workspace sweep. The
+`['pr', id]` among them) plus the workspace half (`['attention-cards']` / `['daily-brief']`), and inside the sweep throttle it includes the one trailing workspace sweep. The
 reason: the control resolves membership from THREE reads — the live merge-options, `['pr']` and the
 board — whichever is newer, so a fire-and-forget invalidation dropped `isPending` while all three
 still held the pre-click answer: the row snapped back to "Add to merge queue" (or "Remove from
@@ -1304,8 +1303,8 @@ read through the same reader (below) and only displayed — nothing counts them.
   (one writer, ONE READER FUNCTION), matched by SHA and not by position — a backdated committer
   date can sort the head outside the read cap. That reader is `trunkHeadFailingChecks(accountId,
   heads)` in `db/branch-queries.ts`, keyed by `trunkHeadKey(repoId, sha)` and shared by
-  `getBranchStatus` and the Pending board's red-trunk cards (the `ci_failing` trunk arm and the
-  promoted `trunk_red` My Turn card, through `db/failing-checks.ts`, which maps to bare names). One
+  `getBranchStatus` and the Pending board's red-trunk card (the `ci_failing` trunk arm, through
+  `db/failing-checks.ts`, which maps to bare names). One
   account-scoped query over the `(accountId, repoId, sha)` unique; the `inArray × inArray` predicate
   over-matches, so only REQUESTED pairs are kept. ⚠ The writer's `MAX_FAILING_CHECKS_PER_COMMIT`
   = 20 cap reaches the cards too: a trunk card's `failingCheckTotal` of 20 is a floor and its "and

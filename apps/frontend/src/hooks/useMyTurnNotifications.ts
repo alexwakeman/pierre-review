@@ -149,8 +149,11 @@ export function useMyTurnNotifications(enabled: boolean): void {
     for (const t of data.ownThreads ?? []) {
       note(`othread:${t.threadId}`, t.since, t.repoFullName, t.personal);
     }
-    for (const t of data.redTrunks ?? []) {
-      note(`trunk:${t.repoId}:${t.headSha ?? ''}`, t.since, t.repoFullName, t.personal);
+    for (const c of data.claudeReviewsToAction ?? []) {
+      note(`airev:${c.reviewId}`, c.finishedAt ?? '', c.repoFullName, c.personal);
+    }
+    for (const a of data.approvedMerged ?? []) {
+      note(`aimerged:${a.prId}`, a.since, a.repoFullName, a.personal);
     }
 
     const prev = prevRef.current;

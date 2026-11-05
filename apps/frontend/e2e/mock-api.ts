@@ -12,6 +12,8 @@ import type {
   WorkspaceAutoReviewResponse,
   AttentionCardsResponse,
   AttentionLivenessResponse,
+  AiReviewCard,
+  AiReviewsSeenResponse,
   AwaitingReviewItem,
   BranchStatusResponse,
   BranchTrendsResponse,
@@ -552,7 +554,26 @@ const BUMP_CARD: DependencyBumpCard = {
 };
 
 // Security before bumps — the Dependencies tab's strict group, as the server orders it.
-const ATTENTION_CARDS: InsightCard[] = [SECURITY_CARD, BUMP_CARD];
+// "AI reviews" — the newest AI review per PR: one review by the reader's own Limn, every REQUIRED field.
+const AI_REVIEW_CARD: AiReviewCard = {
+  id: 'ai_review:9001',
+  kind: 'ai_review',
+  severity: 'info',
+  reviewId: 9001,
+  prId: 9101,
+  repoId: REPO.id,
+  repoFullName: REPO.fullName,
+  prNumber: 42,
+  prTitle: 'Tighten the retry budget',
+  githubUrl: `https://github.com/${REPO.fullName}/pull/42`,
+  ranByUserId: null,
+  auto: false,
+  verdict: 'COMMENT',
+  findingCount: 2,
+  at: iso(1),
+};
+
+const ATTENTION_CARDS: InsightCard[] = [SECURITY_CARD, BUMP_CARD, AI_REVIEW_CARD];
 
 /** A population split by who opened it — the server's own predicate, so the fixture's totals
  *  agree with its cards by construction (people + automation === total). */
@@ -580,6 +601,8 @@ const ATTENTION: AttentionCardsResponse = {
       cardIds: cards.map((c) => c.id),
       authorTotals: authorSplit(cards),
       kindAuthorTotals: Object.fromEntries(ranked.map((k) => [k, authorSplit(ofKind(k))])),
+      // "AI reviews" badges the rows since the last look (never looked: all of them).
+      ...(t.key === 'claude' ? { newTotal: cards.length } : {}),
       ...(t.key === 'my_turn'
         ? {
             relevanceTotals: { mine: 0, others: 0 },
@@ -597,7 +620,10 @@ const ATTENTION: AttentionCardsResponse = {
     myTurnOrder: MY_TURN_DEFAULTS.order,
     myTurnOff: MY_TURN_DEFAULTS.off,
   },
+  aiReviewsSeenAt: null,
 };
+// Opening "AI reviews" stamps "last looked" (a POST on its own path, under the board's).
+const AI_REVIEWS_SEEN: AiReviewsSeenResponse = { workspaceId: WORKSPACE.id, seenAt: iso(0) };
 // The board's batched liveness sweep (POST). Landing on Pending fires it on every spec's first
 // paint; `changed: 0` means "nothing moved", so it never triggers a refetch loop. ⚠ NOT OPTIONAL:
 // under the catch-all `{}`, the hook's `data.changed <= 0` guard reads `undefined <= 0` (false),
@@ -1044,7 +1070,7 @@ const MY_TURN: MyTurnResponse = {
   ownConflicts: [],
   ownReady: [],
   ownThreads: [],
-  redTrunks: [],
+  approvedMerged: [],
   order: MY_TURN_DEFAULTS.order,
   off: MY_TURN_DEFAULTS.off,
   configKey: MY_TURN_DEFAULTS.configKey,
@@ -1485,6 +1511,7 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       if (path.endsWith('/api/my-turn')) return json(route, MY_TURN);
       // The Pending board and its liveness sweep (a POST on its own path).
       if (path.endsWith('/api/attention/liveness')) return json(route, ATTENTION_LIVENESS);
+      if (path.endsWith('/api/attention/ai-reviews/seen')) return json(route, AI_REVIEWS_SEEN);
       if (path.endsWith('/api/attention')) return json(route, ATTENTION);
       if (path.endsWith('/api/activity/feed')) return json(route, CONSOLIDATED_FEED);
       if (path.endsWith('/api/activity')) return json(route, ACTIVITY);
@@ -1496,6 +1523,9 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
       // The thread cards' Claude marker (one batched POST per screen): no judged run here.
       if (path.endsWith('/api/claude-review/thread-judgements'))
         return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);
+      // The AI Review tab's per-run "seen" stamp (sent once while a finished run's `seenAt` is null).
+      if (/\/api\/prs\/\d+\/claude-review\/seen$/.test(path) && route.request().method() === 'POST')
+        return json(route, { status: 'ok', stamped: 1 });
       // The Changes tab's Check threads status (PR detail): never run here.
       const threadCheckMatch = path.match(/\/api\/prs\/(\d+)\/claude-review\/thread-check$/);
       if (threadCheckMatch && route.request().method() === 'GET')
@@ -1707,6 +1737,7 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
               },
               autoVerdict: true,
               autoResolve: false,
+              resolveOwnPrs: true,
               approveImpact: { high: true, medium: true, low: true },
               approveLeftovers: 'nits_questions',
               teamLiftConsent: false,

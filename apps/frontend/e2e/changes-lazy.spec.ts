@@ -5,8 +5,8 @@ import type { PrFileContentResponse } from '@pierre-review/shared';
 
 // THE CHANGES TAB ON A LARGE PR (100 files, ~18,000 diff rows, 54 threads — `big-diff.ts`). The
 // tab mounts files and hunks as they near the screen, so these pin what must still work on content
-// that is not mounted yet: a thread deep link into the LAST file, a rail click, the Threads only
-// view (every thread, mounted or not), and the first paint's size. The two `measure` tests log the
+// that is not mounted yet: a thread deep link into the LAST file, a rail click, the Threads tab
+// (every thread, mounted or not) and its "Show in context", and the first paint's size. The two `measure` tests log the
 // numbers docs/FRONTEND.md § Lazy mounting cites; they assert nothing and are SKIPPED unless
 // `MEASURE=1` (`MEASURE=1 pnpm test:e2e --grep measure`; against a `vite build` + `vite preview` for
 // production numbers).
@@ -241,27 +241,26 @@ test.describe('Changes tab on a large PR', () => {
     await expect(page.locator(`[data-file-block="${big.targetPath}"] [data-diff-row]`).first()).toBeVisible();
   });
 
-  test('Threads only lists every thread, mounted or not', async ({ page }) => {
-    const big = await openBigPr(page, '&prTab=changes');
-    await page.locator('button[title="Collapse this file"]').first().waitFor();
-    await page.getByTestId('changes-threads-only').click();
-    const view = page.getByTestId('changes-threads-view');
+  test('the Threads tab lists every thread, mounted or not', async ({ page }) => {
+    const big = await openBigPr(page, '&prTab=threads');
+    const view = page.getByTestId('pr-threads-tab');
     await expect(view).toBeVisible();
     await expect(view.getByText('The target thread: deep in the last file.')).toHaveCount(1);
-    await expect(page.getByTestId('changes-threads-only')).toContainText(String(big.threadCount));
+    // No code here: the diff is the Changes tab's.
+    await expect(page.locator('[data-file-block]')).toHaveCount(0);
+    expect(big.threadCount).toBeGreaterThan(0);
   });
 
-  test('"Show in context" from Threads only lands on the pill in an unmounted file', async ({ page }) => {
-    const big = await openBigPr(page, '&prTab=changes');
-    await page.locator('button[title="Collapse this file"]').first().waitFor();
-    await page.getByTestId('changes-threads-only').click();
+  test('"Show in context" from the Threads tab lands on the pill in an unmounted file', async ({ page }) => {
+    const big = await openBigPr(page, '&prTab=threads');
     const card = page
-      .getByTestId('changes-threads-view')
+      .getByTestId('pr-threads-tab')
       .locator('div', { hasText: 'The target thread: deep in the last file.' })
       .filter({ has: page.getByRole('button', { name: /^Show in context/ }) })
       .last();
     await card.getByRole('button', { name: /^Show in context/ }).click();
-    await expect(page.getByTestId('changes-threads-view')).toHaveCount(0);
+    await expect(page.getByTestId('pr-threads-tab')).toHaveCount(0);
+    await expect(page).toHaveURL(/prTab=changes/);
     const pill = `[data-thread-id="${big.targetThreadId}"] > button`;
     await expect.poll(() => inPane(page, pill), { timeout: 5000 }).toBe(true);
     await page.waitForTimeout(800);

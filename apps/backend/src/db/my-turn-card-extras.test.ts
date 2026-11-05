@@ -124,7 +124,7 @@ async function cardsByKey(): Promise<Map<string, MyTurnCard>> {
   const insights = await q.getWorkspaceInsights(1, undefined, scope);
   const byPrId = new Map<number, MyTurnCard>();
   for (const c of insights.cards as InsightCard[]) {
-    if (c.kind !== 'my_turn' || c.reason === 'trunk_red') continue;
+    if (c.kind !== 'my_turn') continue;
     byPrId.set(c.prId, c);
   }
   const out = new Map<string, MyTurnCard>();

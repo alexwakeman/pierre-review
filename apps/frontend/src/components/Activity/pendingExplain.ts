@@ -240,10 +240,6 @@ export function whyHere(card: InsightCard): string {
           return 'The latest build on your open PR failed. It goes away when the build passes.';
         case 'own_conflicts':
           return 'Your PR conflicts with its base branch. It goes away when the conflict is resolved.';
-        case 'trunk_red':
-          return card.maintained
-            ? 'The default branch is failing CI in a repo you maintain. Every open PR there builds on it.'
-            : 'The default branch is failing CI. Every open PR there builds on it.';
         case 'pr_approved':
           return 'Your PR is approved. It goes away when it is merged or closed.';
         case 'own_ready':
@@ -255,11 +251,13 @@ export function whyHere(card: InsightCard): string {
         case 'own_thread':
           return `A review comment on your PR has had no reply and no later commit for ${agePhrase(hoursSince(card.since))}.`;
         case 'claude_review':
-          return 'An AI review finished with findings you have not posted. It goes away when you post them or act on the PR.';
+          return 'Your Limn finished an AI review you have not read. It goes away when you open the PR’s AI Review tab.';
+        case 'ai_approved_merged':
+          return 'Your Limn approved this PR and it has since merged. It goes away when you open the PR.';
         case 'watched_repo_pr':
           return 'A new PR you have not reviewed, commented on or pushed to. It goes away when you do one of those.';
         default: {
-          const _x: never = card;
+          const _x: never = card.reason;
           return _x;
         }
       }
@@ -309,7 +307,7 @@ export function whoseItIs(card: InsightCard): string | null {
     if (card.muted === true) {
       return 'Its repo is muted for Pending, so it does not claim your turn or notify you.';
     }
-    // Your own work, or a red default branch, that you moved into My turn — not a summons, so say
+    // Your own work that you moved into My turn — not a summons, so say
     // how it got here.
     if (MY_TURN_OWN_WORK_REASONS.has(card.reason)) return 'You added this type to My Turn in Settings.';
     if (card.relevance === 'direct') return null;
@@ -356,21 +354,19 @@ export function colourReason(card: InsightCard): string {
           return 'your build is failing';
         case 'own_conflicts':
           return 'your PR cannot merge';
-        case 'trunk_red':
-          return card.viewerMerged
-            ? 'you merged the PR that landed this commit'
-            : 'the default branch is failing';
         case 'pr_approved':
         case 'your_pr':
         case 'own_ready':
         case 'own_thread':
           return 'it is your own PR';
         case 'claude_review':
-          return 'findings are waiting to be posted';
+          return 'you have not read it yet';
+        case 'ai_approved_merged':
+          return 'your Limn approved it';
         case 'watched_repo_pr':
           return 'nobody asked you directly';
         default: {
-          const _x: never = card;
+          const _x: never = card.reason;
           return _x;
         }
       }

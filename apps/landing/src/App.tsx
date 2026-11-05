@@ -12,6 +12,7 @@ import Home from './pages/Home';
 import GettingStarted from './pages/GettingStarted';
 import Reporting from './pages/Reporting';
 import HowWeMeasure from './pages/HowWeMeasure';
+import Teams from './pages/Teams';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -21,6 +22,7 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
   '/getting-started': GettingStarted,
   '/reporting': Reporting,
+  '/teams': Teams,
   '/how-we-measure': HowWeMeasure,
   // Contact. Also where an organisation with more than three people asks for a
   // licence, which is why /pricing aliases to it below.

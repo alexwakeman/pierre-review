@@ -17,6 +17,7 @@ const PAGES = [
   ['home', '/'],
   ['getting-started', '/getting-started'],
   ['reporting', '/reporting'],
+  ['teams', '/teams'],
   ['how-we-measure', '/how-we-measure'],
   ['contact', '/contact'],
 ];

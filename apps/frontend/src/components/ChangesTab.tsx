@@ -23,7 +23,7 @@ import {
 } from './diff/FileDiffView.js';
 import { FileTree } from './diff/FileTree.js';
 import { ThreadCountChips, rollupCounts } from './ThreadList/ThreadCountChips.js';
-import { ExternalLinkIcon, ThreadsIcon } from './Icons.js';
+import { ExternalLinkIcon } from './Icons.js';
 import {
   createThreadResolveBus,
   useResolveEvents,
@@ -165,7 +165,7 @@ function MoreFilesNote({
 /**
  * THE CHANGES TAB'S STICKY BAR. It stays on screen while the code scrolls (`sticky top-0`
  * inside PrDetail's scroll pane), and everything else that sticks in this tab — the rail, each
- * file's header, the Threads only filter header — pins BELOW it through `--diff-sticky-top`,
+ * file's header — pins BELOW it through `--diff-sticky-top`,
  * which ChangesTab measures off this bar.
  *
  * ⚠ It carries NO file delta (file count, +/− lines): the PR header above every tab already
@@ -174,16 +174,12 @@ function MoreFilesNote({
 function Header({
   pr,
   barRef,
-  threadsOnly,
-  onThreadsOnlyChange,
   wrapToggle = false,
   filesMenu,
 }: {
   pr: PrDetail;
   barRef?: Ref<HTMLDivElement>;
-  threadsOnly: boolean;
-  onThreadsOnlyChange: (on: boolean) => void;
-  /** Only while code is on screen — the metadata list and the Threads only view have none. */
+  /** Only while code is on screen — the metadata list has none. */
   wrapToggle?: boolean;
   /** Below md, where the rail is hidden: the changed files as a menu (a sheet on a phone). */
   filesMenu?: ReactNode;
@@ -198,33 +194,10 @@ function Header({
       className="sticky top-[var(--pr-tabs-h,0px)] z-30 flex flex-wrap items-center gap-x-3 gap-y-1 bg-ui-bg px-4 py-1.5 text-meta text-ui-mute md:px-5"
     >
       {filesMenu}
-      {/* "Threads only": the review threads without the code. A toggle, so it says its state to
-          a screen reader. Absent on a PR with no threads (there is nothing to show). The 4-state
-          mix beside it counts `pr.threads`, not the indexed map, so a thread on a file not loaded
-          yet is still counted. */}
-      {threadCount > 0 && (
-        <>
-          <button
-            type="button"
-            aria-pressed={threadsOnly}
-            onClick={() => onThreadsOnlyChange(!threadsOnly)}
-            data-testid="changes-threads-only"
-            title="Show the review threads without the code"
-            aria-keyshortcuts="t"
-            className={cx(
-              'inline-flex h-7 items-center gap-1.5 rounded-ui px-2 text-meta font-medium touch:h-10 touch:px-3',
-              'motion-safe:transition-colors motion-safe:duration-ui-fast',
-              threadsOnly ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
-              FOCUS_RING,
-            )}
-          >
-            <ThreadsIcon size={12} className="shrink-0" />
-            Threads only
-            <span className="tabular-nums text-ui-faint">{threadCount}</span>
-          </button>
-          <ThreadCountChips counts={rollupCounts(pr.threads)} compact />
-        </>
-      )}
+      {/* The thread mix (one grey count, a red dot when one is untouched). The threads without the
+          code are the Threads tab. It counts `pr.threads`, not the indexed map, so a thread on a
+          file not loaded yet is still counted. */}
+      {threadCount > 0 && <ThreadCountChips counts={rollupCounts(pr.threads)} compact />}
       <span className="ml-auto flex items-center gap-3">
         {wrapToggle && <DiffWrapToggle />}
         <a
@@ -244,9 +217,6 @@ export function ChangesTab({
   pr,
   focus: externalFocus,
   threadOpenMemory,
-  threadsOnly,
-  onThreadsOnlyChange,
-  renderThreads,
   keysEnabled = false,
 }: {
   pr: PrDetail;
@@ -260,23 +230,10 @@ export function ChangesTab({
    */
   threadOpenMemory: Map<number, boolean>;
   /**
-   * The "Threads only" view: the review threads without the code. PrDetail owns it (LOCAL state,
-   * per PR pane), because its deep links switch it: a thread whose file left the diff, the
-   * Overview's Bots chip, a state-pill preset from the Bots pane.
-   */
-  threadsOnly: boolean;
-  onThreadsOnlyChange: (on: boolean) => void;
-  /**
-   * The Threads only view's list, built by PrDetail (which holds the selection, the guarded
-   * filters and the thread → code ladder). `visibleThreadIds` is the rail's file pick, null for
-   * every file.
-   */
-  /**
-   * n / p (next / previous file), ] / [ (next / previous thread), t (Threads only) and their ⌘K
+   * n / p (next / previous file), ] / [ (next / previous thread) and their ⌘K
    * commands — only while this PR is the one on screen (PrDetail's `liveVisible`).
    */
   keysEnabled?: boolean;
-  renderThreads: (visibleThreadIds: ReadonlySet<number> | null) => JSX.Element;
 }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
   // Pages 2+ ("Load next 100 files"), click-gated. Appended after page 1, deduplicated by path in
@@ -305,9 +262,9 @@ export function ChangesTab({
   );
   // A RESOLVE COLLAPSES ITS THREAD, whichever view it was made in. ONE subscription to the
   // successful resolve writes (every resolve shares RESOLVE_THREAD_MUTATION_KEY): the decision is
-  // written to `threadOpenMemory` first, so a pill that is not mounted (a collapsed file, the
-  // Threads only view on screen) comes back shut, then the mounted pill hears it on the bus. The
-  // Threads only list collapses its own (ThreadList, same hook). The bus is created once, so it
+  // written to `threadOpenMemory` first, so a pill that is not mounted (a collapsed file, this tab
+  // not on screen) comes back shut, then the mounted pill hears it on the bus. The Threads tab's
+  // list collapses its own (ThreadList, same hook). The bus is created once, so it
   // is stable by construction for `threadCtx`.
   const [resolveBus] = useState(createThreadResolveBus);
   useResolveEvents(pr.id, (events) => {
@@ -411,8 +368,8 @@ export function ChangesTab({
   }, [data]);
 
   // THE STICKY BAR'S HEIGHT, measured, because everything else that sticks in this tab pins BELOW
-  // it: the rail (inline `top`), each file header and the Threads only filter header (both read
-  // `--diff-sticky-top`, set on this tab's root). A callback ref because the bar is rendered by
+  // it: the rail (inline `top`) and each file header (reads `--diff-sticky-top`, set on this tab's
+  // root). A callback ref because the bar is rendered by
   // whichever branch is on screen (loading, the metadata list, the diff), each a new element.
   const [barH, setBarH] = useState(0);
   const barObserver = useRef<ResizeObserver | null>(null);
@@ -428,21 +385,6 @@ export function ChangesTab({
   }, []);
   // Plus PrDetail's sticky tab strip below md (`--pr-tabs-h`, 0 from md up).
   const rootStyle = { '--diff-sticky-top': `calc(var(--pr-tabs-h, 0px) + ${barH}px)` } as CSSProperties;
-
-  // The Threads only view's file pick (the rail's click there): which file's threads to list.
-  // EPHEMERAL, and dropped whenever the view is switched off, so turning it back on starts from
-  // every file. Rename-aware through the same `threadsByPath` fold the diff uses.
-  const [threadsPath, setThreadsPath] = useState<string | null>(null);
-  useEffect(() => {
-    if (!threadsOnly) setThreadsPath(null);
-  }, [threadsOnly]);
-  const visibleThreadIds = useMemo(
-    () =>
-      threadsPath == null
-        ? null
-        : new Set((threadsByPath.get(threadsPath) ?? []).map((t) => t.id)),
-    [threadsPath, threadsByPath],
-  );
 
   // Computed BEFORE the early returns below — hooks-order rule.
   const files = allFiles;
@@ -465,7 +407,7 @@ export function ChangesTab({
   );
 
   // No changes at all on this PR — same empty state as before.
-  // KEYBOARD: n / p walk the files, ] / [ walk the threads in file order, t toggles Threads only.
+  // KEYBOARD: n / p walk the files, ] / [ walk the threads in file order.
   // The cursor is the last file / thread a key (or a rail click, via `focus`) went to. Every move
   // goes through `setFocus`, the same reveal a rail click or a finding anchor uses. Hooks sit above
   // the early returns; the handler reads the latest values through a ref.
@@ -480,28 +422,16 @@ export function ChangesTab({
     return out;
   }, [files, threadsByPath]);
   const threadCursor = useRef(-1);
-  const navLive = useRef({ files, orderedThreads, focus, threadsOnly, threadsPath });
-  navLive.current = { files, orderedThreads, focus, threadsOnly, threadsPath };
-  const stepFile = useCallback(
-    (delta: 1 | -1): void => {
-      const { files: fs, focus: f, threadsOnly: only, threadsPath: tp } = navLive.current;
-      if (fs.length === 0) return;
-      if (only) {
-        // In the Threads only view the rail lists a file's threads: step through files that have some.
-        const withThreads = fs.filter((x) => (threadsByPath.get(x.path)?.length ?? 0) > 0);
-        if (withThreads.length === 0) return;
-        const at = withThreads.findIndex((x) => x.path === tp);
-        const next = withThreads[(at + delta + withThreads.length) % withThreads.length] ?? withThreads[0]!;
-        setThreadsPath(next.path);
-        return;
-      }
-      const at = f == null ? -1 : fs.findIndex((x) => x.path === f.path || x.previousPath === f.path);
-      const nextIdx = at < 0 ? (delta === 1 ? 0 : fs.length - 1) : (at + delta + fs.length) % fs.length;
-      const next = fs[nextIdx];
-      if (next) setFocus({ path: next.path, nonce: Date.now() });
-    },
-    [threadsByPath],
-  );
+  const navLive = useRef({ files, orderedThreads, focus });
+  navLive.current = { files, orderedThreads, focus };
+  const stepFile = useCallback((delta: 1 | -1): void => {
+    const { files: fs, focus: f } = navLive.current;
+    if (fs.length === 0) return;
+    const at = f == null ? -1 : fs.findIndex((x) => x.path === f.path || x.previousPath === f.path);
+    const nextIdx = at < 0 ? (delta === 1 ? 0 : fs.length - 1) : (at + delta + fs.length) % fs.length;
+    const next = fs[nextIdx];
+    if (next) setFocus({ path: next.path, nonce: Date.now() });
+  }, []);
   const stepThread = useCallback(
     (delta: 1 | -1): void => {
       const { orderedThreads: ts } = navLive.current;
@@ -511,15 +441,10 @@ export function ChangesTab({
       const t = ts[nextIdx];
       if (!t) return;
       threadCursor.current = nextIdx;
-      // The code comes back: a thread jump is "Show in context".
-      if (navLive.current.threadsOnly) onThreadsOnlyChange(false);
       setFocus({ path: t.path, line: t.line, side: 'RIGHT', threadId: t.id, nonce: Date.now() });
     },
-    [onThreadsOnlyChange],
+    [],
   );
-  const toggleThreadsOnly = useCallback((): void => {
-    if (pr.threads.length > 0) onThreadsOnlyChange(!navLive.current.threadsOnly);
-  }, [pr.threads.length, onThreadsOnlyChange]);
   useEffect(() => {
     if (!keysEnabled) return;
     const onKey = (e: KeyboardEvent): void => {
@@ -528,13 +453,12 @@ export function ChangesTab({
       else if (e.key === 'p') stepFile(-1);
       else if (e.key === ']') stepThread(1);
       else if (e.key === '[') stepThread(-1);
-      else if (e.key === 't') toggleThreadsOnly();
       else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [keysEnabled, stepFile, stepThread, toggleThreadsOnly]);
+  }, [keysEnabled, stepFile, stepThread]);
   const hasThreads = pr.threads.length > 0;
   const changesCommands = useMemo((): Command[] | null => {
     if (!keysEnabled) return null;
@@ -545,11 +469,10 @@ export function ChangesTab({
         ? [
             { id: 'changes:next-thread', title: 'Next review thread', group: 'Actions' as const, shortcut: ']', keywords: ['comment'], run: () => stepThread(1) },
             { id: 'changes:prev-thread', title: 'Previous review thread', group: 'Actions' as const, shortcut: '[', keywords: ['comment'], run: () => stepThread(-1) },
-            { id: 'changes:threads-only', title: 'Threads only: show or hide the code', group: 'Actions' as const, shortcut: 't', run: toggleThreadsOnly },
           ]
         : []),
     ];
-  }, [keysEnabled, hasThreads, stepFile, stepThread, toggleThreadsOnly]);
+  }, [keysEnabled, hasThreads, stepFile, stepThread]);
   useRegisterCommands('pr-changes', changesCommands);
 
   if (pr.files.length === 0 && pr.changedFilesCount === 0 && pr.threads.length === 0 && !isLoading) {
@@ -581,8 +504,7 @@ export function ChangesTab({
                   +{f.additions} −{f.deletions}
                 </span>
               ),
-              onSelect: () =>
-                threadsOnly ? setThreadsPath(f.path) : setFocus({ path: f.path, nonce: Date.now() }),
+              onSelect: () => setFocus({ path: f.path, nonce: Date.now() }),
             }),
           )}
           trigger={(p) => (
@@ -605,25 +527,12 @@ export function ChangesTab({
     <Header
       pr={pr}
       barRef={barRef}
-      threadsOnly={threadsOnly}
-      onThreadsOnlyChange={onThreadsOnlyChange}
-      wrapToggle={wrapToggle && !threadsOnly}
+      wrapToggle={wrapToggle}
       filesMenu={wrapToggle ? filesMenu : null}
     />
   );
 
   const havePatches = !isLoading && !isError && files.length > 0;
-
-  // THREADS ONLY with no rail to show (the diff is still loading, or never came): the list alone.
-  // The threads do not need the patches — every one of them is on the PR payload.
-  if (threadsOnly && !havePatches) {
-    return (
-      <div style={rootStyle}>
-        {bar(false)}
-        {renderThreads(null)}
-      </div>
-    );
-  }
 
   if (isLoading) {
     return (
@@ -646,10 +555,8 @@ export function ChangesTab({
   // Review finding cites the path its run read, and `focusMissing` above already treats a
   // `previousPath` hit as present. Without this the renamed file's row would never take the
   // selected style and never scroll into view, while the diff pane below jumped correctly.
-  // In the Threads only view the selected row is the file whose threads are listed.
-  const selectedTreePath = threadsOnly
-    ? threadsPath
-    : focus == null
+  const selectedTreePath =
+    focus == null
       ? null
       : (files.find((f) => f.previousPath === focus.path && f.path !== focus.path)?.path ??
         focus.path);
@@ -699,8 +606,7 @@ export function ChangesTab({
             and NOT otherwise — see the ⚠ at the top of this file. Past here `files` is non-empty
             by `havePatches`, so there is always something to list. The rail + its drag handle
             share ONE sticky flex wrapper so the handle inherits the rail's height (and its
-            stickiness) instead of needing its own measurement. It stays in the Threads only view,
-            where a click lists that file's threads instead of scrolling the code. */}
+            stickiness) instead of needing its own measurement. */}
         <div
           className="sticky z-20 hidden shrink-0 self-start md:flex"
           style={{ top: barH }}
@@ -717,14 +623,9 @@ export function ChangesTab({
             <FileTree
               nodes={tree}
               selectedPath={selectedTreePath}
-              revealNonce={threadsOnly ? undefined : focus?.nonce}
+              revealNonce={focus?.nonce}
               railHeight={railCap}
-              onSelectFile={(path) =>
-                threadsOnly
-                  ? // A second click on the listed file goes back to every file.
-                    setThreadsPath((cur) => (cur === path ? null : path))
-                  : setFocus({ path, nonce: Date.now() })
-              }
+              onSelectFile={(path) => setFocus({ path, nonce: Date.now() })}
               note={
                 truncated ? (
                   <MoreFilesNote
@@ -752,33 +653,8 @@ export function ChangesTab({
             className="w-1.5 shrink-0 cursor-col-resize touch-none bg-ui-bg motion-safe:transition-colors hover:bg-ui-accent/40 focus-visible:bg-ui-accent focus-visible:outline-none"
           />
         </div>
-        {threadsOnly && (
-          <div className="min-w-0 flex-1" data-testid="changes-threads-view">
-            {threadsPath != null && (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-1.5 text-meta text-ui-mute md:px-5">
-                <span>Threads on</span>
-                <code className="min-w-0 truncate font-mono font-semibold" title={threadsPath}>
-                  {threadsPath.split('/').at(-1)}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => setThreadsPath(null)}
-                  className="rounded-ui px-1.5 py-0.5 text-ui-ink underline-offset-2 hover:underline touch:min-h-10"
-                >
-                  All files
-                </button>
-              </div>
-            )}
-            {renderThreads(visibleThreadIds)}
-          </div>
-        )}
-        {/* THE CODE STAYS MOUNTED (hidden) under the Threads only view. Unmounting it would drop
-            every file's expand state and each block's record of the reveal it already delivered,
-            so switching the view off by hand would re-run the LAST reveal (the focus target is
-            sticky) and teleport the reader to an old line. "Show in context" sets a NEW target in
-            the same render that shows the code, so its reveal runs once the code is visible.
-            No divide-y: each file's (sticky) header carries its own bottom border. */}
-        <div className={threadsOnly ? 'hidden' : 'min-w-0 flex-1'}>
+        {/* No divide-y: each file's (sticky) header carries its own bottom border. */}
+        <div className="min-w-0 flex-1">
           {focusMissing && focus != null && (
             <div className="border-b border-ui-line bg-ui-raise px-4 py-1.5 text-meta text-ui-warn">
               <code className="font-mono">{focus.path}</code> isn’t in the diff shown here.
@@ -804,7 +680,7 @@ export function ChangesTab({
           />
         </div>
       </div>
-      {truncated && !threadsOnly && (
+      {truncated && (
         <MoreFilesNote
           shown={files.length}
           total={pr.changedFilesCount}

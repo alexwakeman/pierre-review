@@ -2708,10 +2708,6 @@ check(
     (await dismissMyTurn(2, { kind: 'pr', id: A.prId })) === null,
   );
   check(
-    'dismissMyTurn(B, A’s repo) refuses (IDOR blocked)',
-    (await dismissMyTurn(2, { kind: 'repo', id: A.repoId })) === null,
-  );
-  check(
     'dismissMyTurn(A, A’s PR) accepts',
     (await dismissMyTurn(1, { kind: 'pr', id: A.prId })) !== null,
   );
@@ -2939,7 +2935,7 @@ check(
 // ── MY TURN: SETTINGS, MENTIONS, REPLIES, PROMOTIONS (db/my-turn-settings.ts, getMyTurn) ──────
 // The per-ACCOUNT settings row, and five sections whose readers are new: `mentions` (a join on
 // `pr_mentions`, whose rows carry a LOGIN), `commentReplies` and `threadReplies` (comment tables
-// with no account_id of their own), and the promotions `ownCiRed` / `redTrunks`.
+// with no account_id of their own), and the promotion `ownCiRed`.
 //
 // ⚠ THE NEGATIVE HAS TO BE ABLE TO FAIL. Account 1's placeholder login is empty, which makes
 // getMyTurn short-circuit — so both accounts get a real viewer first, and account A's data carries
@@ -3052,17 +3048,6 @@ check(
       .insert(prMentions)
       .values({ accountId, repoId, prId, login, mentionedAt: at(1), mentionedByUserId: colleague })
       .execute();
-  const redTrunk = (repoId: number) =>
-    db
-      .update(repos)
-      .set({
-        defaultBranchName: 'main',
-        defaultBranchHeadSha: `sha_trunk_${repoId}`,
-        defaultBranchCiStatus: 'failure',
-        defaultBranchUpdatedAt: at(1),
-      })
-      .where(eq(repos.id, repoId))
-      .execute();
 
   // A's own rows, and BAIT for B inside A's account.
   const aMention = await mkPr(1, A.repoId, 'a-mention', colleague);
@@ -3081,18 +3066,16 @@ check(
   const baitThread = await threadWithReply(baitThreadPr, 'bait', viewerB);
   const aOwn = await mkPr(1, A.repoId, 'a-own', viewerA, 'failure');
   const baitOwn = await mkPr(1, A.repoId, 'bait-own', viewerB, 'failure');
-  await redTrunk(A.repoId);
   // B's own positives: its fold must actually run for the negatives below to mean anything.
   const bOwn = await mkPr(2, B.repoId, 'b-own', viewerB, 'failure');
-  await redTrunk(B.repoId);
 
   // THE SETTING IS PER ACCOUNT. A saves; B still reads the product default.
-  await setMyTurnSettings(1, { show: { own_ci_red: true }, trunkScope: 'all' });
+  await setMyTurnSettings(1, { show: { own_ci_red: true } });
   const settingsA = await getMyTurnSettings(1);
   const settingsB = await getMyTurnSettings(2);
   check(
     "getMyTurnSettings(A) holds A's saved switches",
-    settingsA.show.own_ci_red && settingsA.trunkScope === 'all',
+    settingsA.show.own_ci_red,
   );
   check(
     "getMyTurnSettings(B) is the product default after A saves",
@@ -3100,18 +3083,16 @@ check(
       Object.values(settingsB.defaults).every(Boolean),
   );
   // …and B switches the same types on, so a leak would have somewhere to land.
-  await setMyTurnSettings(2, { show: { own_ci_red: true }, trunkScope: 'all' });
+  await setMyTurnSettings(2, { show: { own_ci_red: true } });
 
   const mtA = await q.getMyTurn(1);
   check("getMyTurn(A) has A's mention", mtA.mentions.some((m) => m.prId === aMention));
   check("getMyTurn(A) has A's comment reply", mtA.commentReplies.some((m) => m.prId === aReply));
   check("getMyTurn(A) has A's thread reply", mtA.threadReplies.some((t) => t.threadId === aThread));
   check("getMyTurn(A) has A's own red build", mtA.ownCiRed.some((m) => m.prId === aOwn));
-  check("getMyTurn(A) has A's red trunk", mtA.redTrunks.some((t) => t.repoId === A.repoId));
 
   const mtB = await q.getMyTurn(2);
   check("getMyTurn(B) has B's own red build (B's fold ran)", mtB.ownCiRed.some((m) => m.prId === bOwn));
-  check("getMyTurn(B) has B's red trunk (B's fold ran)", mtB.redTrunks.some((t) => t.repoId === B.repoId));
   const aPrs = new Set([aMention, baitMention, aReply, baitReply, aThreadPr, baitThreadPr, aOwn, baitOwn]);
   check(
     "getMyTurn(B) has none of A's mentions — not even the row keyed on B's own login",
@@ -3129,7 +3110,24 @@ check(
     "getMyTurn(B) has none of A's own-work PRs — not even one B's viewer authored",
     !mtB.ownCiRed.some((m) => aPrs.has(m.prId)),
   );
-  check("getMyTurn(B) has no red trunk of A's", !mtB.redTrunks.some((t) => t.repoId === A.repoId));
+
+  // THE AI REVIEW SEEN STAMP (db/claude-review-seen.ts): B cannot stamp A's run; A can.
+  const { markClaudeReviewSeen } = await import('../src/db/claude-review-seen.js');
+  const [runA] = await db
+    .insert(schema.claudeReviews)
+    .values({
+      accountId: 1,
+      prId: aOwn,
+      headSha: 'sha_seen_a',
+      status: 'succeeded',
+      model: 'claude-opus-4-8',
+      createdAt: at(1),
+      finishedAt: at(1),
+    })
+    .returning({ id: schema.claudeReviews.id })
+    .execute();
+  check('markClaudeReviewSeen(B, A’s run) refuses (IDOR blocked)', (await markClaudeReviewSeen(db, 2, aOwn, runA!.id)) === null);
+  check('markClaudeReviewSeen(A, A’s run) stamps it', (await markClaudeReviewSeen(db, 1, aOwn, runA!.id)) === 1);
 }
 
 // ── THE AGENTIC TABLES (core since migration 0074 / pg 0061) ─────────────────────────────────────
@@ -4833,6 +4831,20 @@ check(
     return ok;
   })());
   await db.delete(schema.referenceDocRepoOffers).where(inArray(schema.referenceDocRepoOffers.accountId, [1, 2])).execute();
+}
+
+// ── PENDING → AI REVIEWS: THE LAST-LOOKED STAMP AND THE LIST (db/ai-reviews-seen.ts) ───────────
+// The stamp's workspace id arrives in a query string: A's write and read must never reach B's row,
+// and A's cards never list B's repo.
+{
+  const ars = await import('../src/db/ai-reviews-seen.js');
+  const t = new Date(Date.now() - 60_000);
+  check("markAiReviewsSeen(A, B's workspace id) writes nothing", (await ars.markAiReviewsSeen(1, defaultB, t)) == null);
+  check("B's stamp is still unset after A's attempt", (await ars.getAiReviewsSeenAt(2, defaultB)) == null);
+  check("markAiReviewsSeen(B, B's workspace) stamps B (mutation check)", (await ars.markAiReviewsSeen(2, defaultB, t)) != null);
+  check("getAiReviewsSeenAt(A, B's workspace id) reads nothing", (await ars.getAiReviewsSeenAt(1, defaultB)) == null);
+  check("AI review cards (A, B's repo) list nothing", (await ars.buildAiReviewCards(1, [B.repoId])).cards.length === 0);
+  await db.update(schema.workspaces).set({ aiReviewsSeenAt: null }).where(eq(schema.workspaces.id, defaultB)).execute();
 }
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

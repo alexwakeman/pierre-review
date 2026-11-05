@@ -4423,6 +4423,8 @@ export interface SetWorkspaceAutoReviewBody {
     // `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`.
     autoVerdict?: boolean;
     autoResolve?: boolean;
+    // `WorkspaceAutoPostSettings.resolveOwnPrs`.
+    resolveOwnPrs?: boolean;
     // `WorkspaceAutoPostSettings.approveImpact`; a level left out keeps its stored value.
     approveImpact?: Partial<AutoApproveImpact>;
     // `WorkspaceAutoPostSettings.approveLeftovers`.
@@ -4575,6 +4577,12 @@ export interface WorkspaceAutoPostSettings {
   // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
   // `auto_resolve`, `FindingAutoResolveRecord`), never retried.
   autoResolve: boolean;
+  // RESOLVE MY LIMN THREADS WHEN ADDRESSED (default ON — absent reads on, a stored false is off):
+  // on the reader's OWN PR (drafts too), ANY succeeded run of theirs — manual, "Review and post",
+  // auto, or a replies pass — closes the reader's own Limn finding threads its follow-up judged
+  // fixed, through the same claimed record as `autoResolve` (`why: 'own_pr'`). Independent of
+  // `enabled` and `autoResolve`. Never a teammate's Limn thread.
+  resolveOwnPrs: boolean;
   // LIFTING A TEAMMATE'S LIMN BLOCK (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). TWO
   // opt-ins, both OFF by default, both needed:
   //  - `teamLiftConsent` — the BLOCKED side: "Teammates' Limn may lift my Limn's block once every
@@ -4597,6 +4605,7 @@ export interface AutoApproveImpact {
 }
 export const AUTO_POST_DEFAULT_APPROVE_IMPACT: AutoApproveImpact = { high: true, medium: true, low: true };
 export const AUTO_POST_DEFAULT_AUTO_RESOLVE = false;
+export const AUTO_POST_DEFAULT_RESOLVE_OWN_PRS = true;
 
 // What `workspaces.auto_post_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
 export interface StoredAutoPostSettings {
@@ -4604,6 +4613,7 @@ export interface StoredAutoPostSettings {
   kinds?: Partial<AutoPostKinds>;
   autoVerdict?: boolean;
   autoResolve?: boolean;
+  resolveOwnPrs?: boolean;
   approveImpact?: Partial<AutoApproveImpact>;
   teamLiftConsent?: boolean;
   liftTeammateBlocks?: boolean;
@@ -4875,6 +4885,9 @@ export interface FindingAutoResolveRecord {
   // Written by "Post reply" in the tab (POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply)
   // rather than by an auto run.
   manual?: boolean;
+  // 'own_pr': closed under "Resolve my Limn threads when addressed" (the reader's own PR, any
+  // run of theirs), not the workspace's auto-resolve switch.
+  why?: 'own_pr';
 }
 
 // The ONE pushback reply an auto run posted on a finding's thread
@@ -5628,6 +5641,14 @@ export interface PrCommentDetail {
   limnSeverity?: LimnSeverity | null;
 }
 
+/** One lifecycle event on `PrDetail.lifecycle`. `actorId` is the event log's actor (the sync
+ *  records the PR's author for these). */
+export interface PrLifecycleEvent {
+  type: 'pr_reopened' | 'pr_ready_for_review';
+  at: string;
+  actorId: number | null;
+}
+
 export interface CommitDetail {
   id: number;
   sha: string;
@@ -5911,6 +5932,9 @@ export interface PrDetail {
   reviews: ReviewDetail[];
   comments: PrCommentDetail[];
   commits: CommitDetail[];
+  /** The Activity tab's lifecycle moments that have no column of their own (a reopen, a draft
+   *  marked ready), from the synced event log, oldest first. Absent on an older server. */
+  lifecycle?: PrLifecycleEvent[];
   // Users referenced by any nested entity, for client-side lookup.
   users: User[];
   // Incremental review: when the local user last viewed this PR, and what's
@@ -6249,33 +6273,6 @@ export interface OwnThreadItem {
   muted?: boolean;
 }
 
-/** Promotion: the default branch of a repo is red right now. REPO-grained — no PR is required. */
-export interface RedTrunkItem {
-  repoId: number;
-  repoFullName: string;
-  branchName: string | null;
-  ciStatus: CiStatus;
-  headSha: string | null;
-  /** When we last refreshed the branch snapshot — our observation, not the commit's time. */
-  observedAt: string | null;
-  /** The PR that landed the red head, when the sha resolves to one. Null is ordinary (~11% of red
-   *  heads are direct pushes). */
-  landingPr: { prId: number; number: number; title: string; mergedById: number | null } | null;
-  viewerMerged: boolean;
-  /** You can push to the repo or have merged into its default branch (`viewerMaintainedRepoIds`).
-   *  DISPLAY ONLY — it picks the card's sentence; `relevance` is what every counter reads. */
-  maintained: boolean;
-  /** ISO — `observedAt`, or the fold time when null. Display clock only. */
-  since: string;
-  /** The commit page (the trunk_ci_failed feed rule); the repo page when `headSha` is null. */
-  githubUrl: string;
-  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. A red default branch you added is
-   *  `'direct'` in either scope; only the Pending mute downgrades it. */
-  personal?: boolean;
-  relevance?: MyTurnRelevance;
-  muted?: boolean;
-}
-
 export interface ThreadAwaitingItem {
   threadId: number;
   prId: number;
@@ -6319,9 +6316,10 @@ export interface ThreadAwaitingItem {
   muted?: boolean;
 }
 
-// A completed Claude review that hasn't been actioned yet — no GitHub review/
-// comments posted from it. Surfaced in My Turn so finished reviews don't get
-// forgotten. headStale = the reviewed head no longer matches the PR's head.
+// A finished AI review your OWN Limn ran that you have NOT SEEN yet (`claude_reviews.seen_at` is
+// NULL on every half: you have not opened the PR's AI Review tab on it since it finished) — the
+// newest succeeded full run on each OPEN PR. Seen or dismissed retires it; a newer run brings a
+// card of its own. headStale = the reviewed head no longer matches the PR's head.
 export interface ClaudeReviewToAction {
   reviewId: number;
   prId: number;
@@ -6344,6 +6342,32 @@ export interface ClaudeReviewToAction {
   trigger?: ClaudeReviewTrigger;
 }
 
+/** A PR MERGED after your Limn's automatic approval stood on it (`ai_approved_merged`) — a quick
+ *  look after the fact. The approval: an own run's `auto_post` landed a review SENT as APPROVE
+ *  before the merge, and GitHub still records it as approved (not withdrawn or dismissed). Listed
+ *  until you open the PR after the merge (`pr_views.last_viewed_at`) or dismiss it; merges older
+ *  than `APPROVED_MERGED_DAYS` (or before the repo's onboarding floor) never are. `since` is the
+ *  merge time. */
+export interface ApprovedMergedItem {
+  /** The run whose auto-post approved. */
+  reviewId: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  authorId: number | null;
+  mergedById: number | null;
+  /** ISO — when the approval was posted. */
+  approvedAt: string;
+  /** ISO — the merge. */
+  since: string;
+  githubUrl: string;
+  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. DIRECT — your Limn approved it. */
+  personal?: boolean;
+  relevance?: MyTurnRelevance;
+  muted?: boolean;
+}
+
 // ── Dismissing a My Turn entry (Pending → My turn → "Dismiss") ──
 //
 // ⚠ A DISMISSAL IS NOT THE RETIRED "Done" BUTTON. That one never expired, so a PR whose ball came
@@ -6352,12 +6376,13 @@ export interface ClaudeReviewToAction {
 // item), and a subject that leaves your plate on its own — you acted, it closed, the request was
 // withdrawn — discharges the dismissal outright, so the next summons starts fresh.
 //
-// The SUBJECT is a pull request, or a repository for a red default branch. Never a card: one PR
-// can hold several My Turn jobs, and dismissing the one on screen must not surface the next.
-export type MyTurnDismissKind = 'pr' | 'repo';
+// The SUBJECT is a pull request. Never a card: one PR can hold several My Turn jobs, and
+// dismissing the one on screen must not surface the next. (A repository subject existed for the
+// retired red-default-branch type; migration 0168 deleted its rows.)
+export type MyTurnDismissKind = 'pr';
 export interface MyTurnDismissTarget {
   kind: MyTurnDismissKind;
-  /** `pull_requests.id` for 'pr', `repos.id` for 'repo'. */
+  /** `pull_requests.id`. */
   id: number;
 }
 
@@ -6366,9 +6391,9 @@ export interface MyTurnDismissTarget {
 export interface MyTurnDismissedItem {
   target: MyTurnDismissTarget;
   repoFullName: string;
-  /** The PR's number; null for a red default branch. */
+  /** The PR's number. */
   prNumber: number | null;
-  /** The PR's title, or the branch name for a red default branch; null when neither is known. */
+  /** The PR's title; null when not known. */
   title: string | null;
   /** The highest-priority job the hidden entry holds, in the reader's type order. */
   reason: MyTurnCardReason;
@@ -6412,18 +6437,21 @@ export interface MyTurnResponse {
   /** S3c — the "pushed since you reviewed" rows, split OUT of `watchedRepoPrs`. Every row's
    *  `ball.kind === 'commits_after'`. */
   pushedSince: WatchedRepoPrItem[];
-  /** The four own-work promotions and the red default branches — OFF by default. When on, each
-   *  item MOVES here from its own tab (the home card is not built), so nothing is listed twice. */
+  /** The four own-work promotions — OFF by default. When on, each item MOVES here from its own tab
+   *  (the home card is not built), so nothing is listed twice. A red default branch is NOT a My Turn
+   *  type: it stays in Needs fixing (`ci_failing`, trunk arm). */
   ownCiRed: OwnCiRedItem[];
   ownConflicts: OwnConflictsItem[];
   ownReady: OwnReadyItem[];
   ownThreads: OwnThreadItem[];
-  redTrunks: RedTrunkItem[];
+  /** A PR MERGED after your Limn's automatic approval stood on it, not opened by you since the merge
+   *  (see `ApprovedMergedItem`). Empty when AI review is off or the type is switched off. */
+  approvedMerged: ApprovedMergedItem[];
   /** The reader's resolved type order (all fifteen) — the CLI prints its sections in this order. */
   order: MyTurnCardReason[];
-  /** The types switched off (`trunk_red` is off when the trunk scope is 'off'), in `order`. */
+  /** The types switched off, in `order`. */
   off: MyTurnCardReason[];
-  /** Changes exactly when WHICH TYPES ARE SHOWN changes (`off` + the trunk scope) — never with the
+  /** Changes exactly when WHICH TYPES ARE SHOWN changes (`off`) — never with the
    *  order or the weights. The notification watcher re-baselines on it, or switching a type on
    *  would announce its whole existing backlog. */
   configKey: string;
@@ -6613,7 +6641,7 @@ export interface PrRefreshResponse {
 }
 
 // WHY an item is on your plate — the fifteen sections of GET /api/my-turn, one value each, carried
-// by `MyTurnCard.reason` (`MyTurnTrunkCard` for `trunk_red`). Each value is ONE user-facing type:
+// by `MyTurnCard.reason`. Each value is ONE user-facing type:
 // one switch and one row in the order list in Settings → My Turn, one chip, one notification bit.
 // The union's order below is the product's default type order (`MY_TURN_DEFAULT_ORDER`).
 //
@@ -6639,12 +6667,12 @@ export type MyTurnCardReason =
   | 'pushed_since'
   | 'own_ci_red'
   | 'own_conflicts'
-  | 'trunk_red'
   | 'pr_approved'
   | 'own_ready'
   | 'your_pr'
   | 'own_thread'
   | 'claude_review'
+  | 'ai_approved_merged'
   | 'watched_repo_pr';
 
 export interface UpdateUserBody {
@@ -7327,6 +7355,10 @@ export interface ClaudeReview {
   excludedFiles: string[];
   postedReviewId: string | null;
   postedAt: string | null;
+  // ISO — when the reader first had this run on screen in the PR's AI Review tab after it finished
+  // (`claude_reviews.seen_at`, migration 0168; a pair: either half). null = not yet — the run is a
+  // My Turn `claude_review` card until then. Absent on an older server.
+  seenAt?: string | null;
   createdAt: string;
   finishedAt: string | null;
   findings: ClaudeFinding[];
@@ -10166,6 +10198,10 @@ export type InsightKind =
   // NOWHERE but its own tab (never `myTurn*`, the brief, the work plan or Slack). See
   // `WaitingOnOthersCard`.
   | 'waiting_on_others'
+  // AN AI REVIEW SINCE THE READER LAST LOOKED — their own Limn's or a teammate's Limn's, on any PR in
+  // the workspace. Read-only, unscored, listed newest first, counted ONLY in "AI reviews". See
+  // `AiReviewCard`.
+  | 'ai_review'
   | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
   | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
 
@@ -10375,7 +10411,7 @@ export interface SuggestedReviewersResponse {
 //
 // ⚠ THIS IS THE SAME POPULATION AS `GET /api/my-turn`, WORKSPACE-SCOPED — the server builds these
 // cards by calling the very same fold (`getMyTurn(accountId, scope)`), one card per row of its
-// sections, never a re-derivation (a red default branch is the repo-grained `MyTurnTrunkCard`). And the daily brief's "N need your review or reply" IS the
+// sections, never a re-derivation. And the daily brief's "N need your review or reply" IS the
 // number of `my_turn` cards emitted here, so the strip's number and the list the user lands on
 // cannot disagree. (It used to be a count of feed EVENTS in a rolling 14 days, which corresponded
 // to no clickable list at all — that is the defect this card kind exists to close.)
@@ -10387,8 +10423,7 @@ export interface SuggestedReviewersResponse {
 // anything the client did with the number.
 export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   kind: 'my_turn';
-  /** Every type but `trunk_red`, whose subject is a repository — see `MyTurnTrunkCard`. */
-  reason: Exclude<MyTurnCardReason, 'trunk_red'>;
+  reason: MyTurnCardReason;
   /** WHY the ball is in your court on a `watched_repo_pr` or `pushed_since` row — see `NewPrBall`.
    *  Set only for those two reasons; absent everywhere else.
    *  ⚠ THE CARD CARRIES THE FACT AND THE SPA CHOOSES THE WORDS. The section label was a static
@@ -10513,58 +10548,6 @@ export type MyTurnOwnWork =
       botKind: AutomatedReviewerKind | null;
       botLabel: string | null;
     };
-
-/** A red default branch promoted into My turn (Settings → My Turn → Red default branch).
- *
- *  `kind: 'my_turn'`, so every my_turn count, lens and total includes it with no second predicate
- *  — but NOT an `InsightPrRef`: its subject is a repository. ⚠ That is deliberate: `c.kind ===
- *  'my_turn'` now narrows to a union whose `prId` is `number | null`, so every consumer that treated
- *  a my_turn card as a PR fails to compile until it handles this one. A `card as MyTurnCard` cast
- *  defeats that — branch on `reason === 'trunk_red'` first. */
-export interface MyTurnTrunkCard extends InsightCardBase {
-  kind: 'my_turn';
-  reason: 'trunk_red';
-  repoId: number;
-  repoFullName: string;
-  branchName: string | null;
-  /** Always red — 'failure' | 'error'. */
-  ciStatus: CiStatus;
-  headSha: string | null;
-  /** The LANDING PR of the red head; all four null when the sha resolves to none (ordinary). */
-  prId: number | null;
-  prNumber: number | null;
-  prTitle: string | null;
-  mergedById: number | null;
-  /** You merged the landing PR — an attribution of LANDING, never of breaking (CiFailingCard). */
-  viewerMerged: boolean;
-  /** DISPLAY ONLY — picks the card's sentence; `relevance` is what every counter reads. */
-  maintained: boolean;
-  /** When we last refreshed the branch snapshot — our observation, not the commit's time. */
-  observedAt: string | null;
-  /** The commit page; the repo page when `headSha` is null. Render via safeExternalUrl. */
-  githubUrl: string;
-  detail: string;
-  since: string;
-  personal: boolean;
-  relevance?: MyTurnRelevance;
-  muted?: boolean;
-  threadId: null;
-  /** The LANDING PR's author, exactly as `CiFailingCard`'s trunk arm carries it — same names, same
-   *  resolution — so the two cards for one red trunk cannot disagree about who opened the landing
-   *  PR. All null/false when no PR resolved. `automation` decides the People / Automation side
-   *  (`pendingAuthorSideOf`), so a tab's `authorTotals.people + automation === total` holds with
-   *  trunk cards in it. REQUIRED — an absent field would silently count automation as a person. */
-  authorId: number | null;
-  authorIsBot: boolean;
-  authorBotKind: AutomatedReviewerKind | null;
-  automation: PrAutomation | null;
-  /** The red head's failing check names and the count of every name stored for it —
-   *  `CiFailingCard`'s pair, read from the SAME stored row (`branch_commits` at `headSha`). ⚠ That
-   *  row keeps at most 20 (`MAX_FAILING_CHECKS_PER_COMMIT`), so a total of 20 is a floor.
-   *  null = no names known. */
-  failingChecks: string[] | null;
-  failingCheckTotal: number | null;
-}
 
 // Which relationship puts a red build on the viewer's plate. TWO ARMS, and they are two different
 // claims — the card's copy says which, exactly as `MyTurnRelevance` does for the my_turn board.
@@ -10997,9 +10980,43 @@ export interface SecurityCard extends InsightCardBase, InsightPrRef, DependencyC
   stateDetail: string | null;
 }
 
+/**
+ * ONE ROW OF THE "AI REVIEWS" REFERENCE LIST — the NEWEST AI review on one PR of the workspace (open or
+ * not), by the reader's own Limn (a finished full review, `claude_reviews.kind IS NULL`; a Claude +
+ * Codex pair is ONE review) or by a teammate's Limn (a review it posted to GitHub, imported as
+ * `kind = 'teammate'`). One row per PR, newest first, at most `AI_REVIEWS_LIST_CAP` rows
+ * (docs/BACKEND.md § The AI reviews list).
+ *
+ * ⚠ A STABLE LIST, NOT AN INBOX: looking never removes a row. The workspace's `ai_reviews_seen_at`
+ * stamp only marks rows newer than the last look ("New", decided in the SPA against the stamp the
+ * visit started with) and feeds the tab's `newTotal` badge. Built only for the live board
+ * (`GET /api/attention`) and counted only in its own tab: never `myTurn*`, the daily brief, Slack or
+ * a notification. UNSCORED. Not an `InsightPrRef` — the PR may be closed, and nothing here gates a
+ * button.
+ */
+export interface AiReviewCard extends InsightCardBase {
+  kind: 'ai_review';
+  /** The `claude_reviews` row (a pair's FIRST half). */
+  reviewId: number;
+  prId: number;
+  repoId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  githubUrl: string;
+  /** null = the reader's own Limn ran it; else the teammate who posted it (in `users[]`). */
+  ranByUserId: number | null;
+  /** An own run the auto-review sweeper started. Always false on a teammate's review. */
+  auto: boolean;
+  verdict: 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE' | null;
+  /** Findings that ask for something (praise is not counted; a pair's merged-away repeats neither). */
+  findingCount: number;
+  /** ISO — when it finished (own) or was posted (teammate). The list's order and the seen line. */
+  at: string;
+}
+
 export type InsightCard =
   | MyTurnCard
-  | MyTurnTrunkCard
   | CiFailingCard
   | StalledReviewCard
   | UntouchedThreadCard
@@ -11012,7 +11029,8 @@ export type InsightCard =
   | DependencyBumpCard
   | BotSignalCard
   | BotOnlyReviewCard
-  | WaitingOnOthersCard;
+  | WaitingOnOthersCard
+  | AiReviewCard;
 
 // ---- Workspace DORA-ish flow metrics (Insights header; no AI) ----
 // Best-effort DORA mapping from synced PR/CI data (there is NO stored CI-state history,
@@ -11170,10 +11188,6 @@ export interface WorkspaceInsightsResponse {
    * Trailing optional (independent deploys).
    */
   kindTotals?: Partial<Record<InsightKind, number>>;
-  /** Repos whose red default branch is a my_turn card for this viewer in this fold — the WHOLE
-   *  population, never the capped cards. The daily brief's red-trunk line leaves these out, so a
-   *  trunk the reader promoted into My Turn is counted once, there. Trailing optional. */
-  myTurnTrunkRepoIds?: number[];
   /** The my_turn fold's dismissed subjects — `MyTurnResponse.dismissed`, scoped the same way.
    *  Trailing optional. */
   myTurnDismissed?: MyTurnDismissedItem[];
@@ -11234,6 +11248,23 @@ export interface AttentionCardsResponse {
    *  the Docs page shows (`GET /api/docs` `offers`). Present only while AI is on and at least one is
    *  waiting; nothing is built before the reader presses Add. */
   docsOffers?: RepoDocsOffers | null;
+  /** ISO — when the reader last looked at "AI reviews" in this workspace: an `ai_review` row newer
+   *  than it is "New". null = never looked (every row is new). Live board only. Trailing optional. */
+  aiReviewsSeenAt?: string | null;
+}
+
+/** POST /api/attention/ai-reviews/seen — the reader looked at "AI reviews". `through` (ISO) is the
+ *  newest review time the reader's list showed; absent = now. The stamp never moves back. The SPA
+ *  sends it only when `through` is newer than the response's `aiReviewsSeenAt`, so the refetch that
+ *  follows (stamp = through) sends nothing: no loop. */
+export interface AiReviewsSeenBody {
+  through?: string;
+}
+
+export interface AiReviewsSeenResponse {
+  workspaceId: number;
+  /** ISO — the stamp after this call. */
+  seenAt: string;
 }
 
 /** One of the reader's own open PRs on an empty Pending board — synced columns only, no fetch. */
@@ -11327,6 +11358,9 @@ export interface PendingTab {
   relevanceAuthorTotals?: { mine: PendingAuthorSplit; others: PendingAuthorSplit };
   /** Review-load card ids for the "who has reviews waiting" strip ('review' tab only). */
   peopleCardIds?: string[];
+  /** "AI reviews" only: how many listed rows are newer than the workspace's last look — the tab's
+   *  badge (the list itself is a stable reference, so its length is no news). */
+  newTotal?: number;
 }
 
 /** One card's Do next score and how it was reached. */
@@ -13454,29 +13488,11 @@ export interface PersonPeriod {
   evidence?: PersonPeriodEvidence;
 }
 
-// ---- The work plan (Pro): "what should I work on today" ----------------------------------
+// ---- The Do next scorer's working rows (core db/work-plan.ts `scoreCards`) ----------------
 //
-// A prioritised worklist for ONE workspace, plus an optional Haiku-written narration of it.
-// Its population is the daily brief's (`/api/daily-brief`), and the relationship between the two
-// is the whole design constraint:
-//
-//   THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
-//
-// `WorkPlanEvidence` is folded from the SAME `/api/attention` cards `computeBriefCounts` counts
-// (plus two signals the cards never carried — "can land now" and "behind trunk"), so a plan that
-// disagreed with the brief's counts would be a bug in one fold, not two opinions. `counts` below
-// is carried on the wire precisely so that agreement is ASSERTABLE rather than assumed.
-//
-// ── THE DIVISION OF LABOUR, WHICH IS THE SAFETY PROPERTY ─────────────────────────────────────
-// EVERY FIGURE, ID, LINK AND RANK IS CODE-DERIVED. The model receives the already-ranked items
-// and may only (a) choose which of them to foreground, (b) order those, and (c) write one
-// sentence each about WHY NOW. It may not invent an item, restate a number, or drop work from
-// the board — anything it omits still renders, below, under its own heading.
-//
-// That is enforced three ways, not by prompt alone: ids the model names are intersected with the
-// evidence (unknown ⇒ dropped and COUNTED, see `droppedIds`); every string it produces passes the
-// digit gate, so a figure cannot reach the screen through prose; and the UI renders model text in
-// the `--ai-*` palette beneath code-derived chips, never mixed into the same line.
+// One row per scorable signal on a Pending card. EVERY FIGURE, ID, LINK AND SCORE IS
+// CODE-DERIVED. (Named `WorkPlan*` for history: "Plan my day", which narrated them, was removed
+// 2026-11-04.)
 export type WorkPlanKind =
   /** Approved-or-clean and GitHub will take it: the shortest path to a merged PR. */
   | 'merge'
@@ -13518,8 +13534,8 @@ export interface WorkPlanFacts {
 }
 
 export interface WorkPlanItem {
-  /** Namespaced and stable across ticks: `wp:<kind>:<prId|repoId[:threadId]>`. It is the join
-   *  key between the evidence and the model's steps, so it may never encode a time. */
+  /** Namespaced and stable across ticks: `wp:<kind>:<prId|repoId[:threadId]>`. It may never
+   *  encode a time. */
   id: string;
   kind: WorkPlanKind;
   /**
@@ -13560,78 +13576,9 @@ export interface WorkPlanItem {
   /** A CODE-WRITTEN one-liner naming the concrete blocker ("behind trunk", "2 approvals,
    *  checks green"). ⚠ NEVER model output — this renders even when nothing was generated. */
   reason: string;
-  /**
-   * The `InsightCard.id` this row was folded from — THE JOIN KEY between a narration step and a
-   * board row. The SPA resolves `WorkPlanStep.id → WorkPlanItem.id → cardId` to land each model
-   * sentence under the right card.
-   *
-   * ⚠ Deliberately ABSENT from the plugin's `itemSignature` allow-list, so it never enters
-   * `workPlanPayloadHash`: it is redundant with `id` + `prId`, and folding it in would move every
-   * stored hash for no change in meaning.
-   *
-   * Trailing optional (the SPA and the server deploy independently).
-   */
+  /** The `InsightCard.id` this row was folded from — `ScoredCard.cardId` is read off it.
+   *  Trailing optional. */
   cardId?: string;
-}
-
-export interface WorkPlanEvidence {
-  workspaceId: number;
-  /** ISO — when this fold ran. ⚠ NEVER folded into a payload hash: a dormant workspace must
-   *  stay a cache hit forever rather than re-billing on a timer. */
-  generatedAt: string;
-  /** Ranked, capped. */
-  items: WorkPlanItem[];
-  /** The UNCAPPED population per kind, so a capped list can disclose what it left out. */
-  totals: Partial<Record<WorkPlanKind, number>>;
-  /** ⚠ THE ALIGNMENT CONTRACT. These are folded from the same `/api/attention` cards the daily
-   *  brief counts, carried here so the panel can be asserted equal to the strip above it rather
-   *  than hoped equal. A divergence is a defect in ONE fold. */
-  counts: {
-    myTurn: number;
-    myTurnPersonal?: number;
-    ciFailing?: number;
-    stalled: number;
-    untouchedThreads: number;
-    needsReviewer: number;
-  };
-}
-
-/** One narrated step. `why` is model prose; the row it decorates is entirely code-derived. */
-export interface WorkPlanStep {
-  /** MUST be an id from the evidence. Anything else was dropped before storage. */
-  id: string;
-  /** One sentence, digit-free, ≤ the phrase cap. */
-  why: string;
-}
-
-export interface StoredWorkPlan {
-  /** One sentence framing the day. Digit-free. */
-  headline: string;
-  steps: WorkPlanStep[];
-  /** What can wait until tomorrow, in one sentence. null when the model offered none. */
-  parked: string | null;
-  model: string;
-  generatedAt: string;
-  /** How many ids the model named that the evidence did not contain. Rendered when non-zero:
-   *  a silent drop would let a hallucinated reference vanish without trace. */
-  droppedIds: number;
-}
-
-/** GET (cache read + staleness probe) and POST (billed generation) share this envelope, exactly
- *  like the synthesis seam. `enabled: false` is the OSS/free answer and is never an error. */
-export interface WorkPlanResponse {
-  enabled: boolean;
-  /** Always present when enabled — the deterministic worklist renders with or without a plan. */
-  evidence: WorkPlanEvidence | null;
-  plan: StoredWorkPlan | null;
-  /** GET only: the stored plan was written against different evidence. */
-  stale?: boolean;
-  /** POST only: already generating, or inside the min-interval — cached row served, $0 spent. */
-  throttled?: boolean;
-  /** POST only: metered plan out of credits — cached row served, nothing billed. */
-  creditsExhausted?: boolean;
-  /** POST only: nothing needs doing in this workspace — nothing generated, nothing stored. */
-  empty?: boolean;
 }
 
 // ── The bot PEER BENCHMARK — GET /api/pro/bot-benchmark (plugin-owned, rides `botDepth`) ────────

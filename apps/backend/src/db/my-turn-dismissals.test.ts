@@ -309,7 +309,6 @@ describe('dismissing a My Turn entry', () => {
   it('refuses another account’s subject, and the database refuses the pair too', async () => {
     expect(await dz.dismissMyTurn(1, { kind: 'pr', id: otherAccountPr })).toBeNull();
     expect(await dz.dismissMyTurn(OTHER_ACCOUNT, { kind: 'pr', id: reqPr })).toBeNull();
-    expect(await dz.dismissMyTurn(1, { kind: 'repo', id: 999_999 })).toBeNull();
     expect(await dz.restoreMyTurn(OTHER_ACCOUNT, { kind: 'pr', id: reqPr })).toBe(false);
     // ⚠ STRUCTURAL: the composite FK rejects (account 1, another account's PR) even when a
     // handler forgets to check.
@@ -323,19 +322,16 @@ describe('dismissing a My Turn entry', () => {
 });
 
 describe('the pure fold', () => {
-  it('a red default branch is dismissed by repo and dated by its observation, not `since`', () => {
+  it('a merged PR (“merged after your Limn approved”) is dismissed by PR and dated by its merge', () => {
     const f = new dz.MyTurnDismissalFilter(
-      [{ target: { kind: 'repo', id: 7 }, dismissedAtMs: now, repoId: 7, closed: false }],
-      ['trunk_red'],
+      [{ target: { kind: 'pr', id: 7 }, dismissedAtMs: now, repoId: 3, closed: true }],
+      ['ai_approved_merged'],
     );
-    const desc = () => ({ repoFullName: 'a/b', prNumber: null, title: 'main', githubUrl: 'x' });
-    // Observed before the dismissal → hidden; no observation at all → cannot prove it is newer.
-    expect(f.keep({ kind: 'repo', id: 7 }, new Date(now - HOUR).toISOString(), 'trunk_red', desc)).toBe(false);
-    expect(f.keep({ kind: 'repo', id: 7 }, null, 'trunk_red', desc)).toBe(false);
-    expect(f.dismissed().map((d: any) => d.title)).toEqual(['main']);
-    // A new red head, observed after it → shown.
-    expect(f.keep({ kind: 'repo', id: 7 }, new Date(now + HOUR).toISOString(), 'trunk_red', desc)).toBe(true);
-    expect(f.dismissed()).toEqual([]);
+    const desc = () => ({ repoFullName: 'a/b', prNumber: 7, title: 'Merged', githubUrl: 'x' });
+    // Merged before the dismissal → hidden, listed, and not discharged while it is still an item.
+    expect(f.keep({ kind: 'pr', id: 7 }, new Date(now - HOUR).toISOString(), 'ai_approved_merged', desc)).toBe(false);
+    expect(f.dismissed().map((d: any) => d.title)).toEqual(['Merged']);
+    expect(f.dischargeable(() => true)).toEqual([]);
   });
 
   it('discharges only subjects the read could have seen, and every closed PR', () => {
@@ -358,7 +354,7 @@ describe('the pure fold', () => {
     const empty = {
       awaitingReview: [], mentions: [], commentReplies: [], pushedSince: [], ownCiRed: [],
       ownConflicts: [], approvedPrs: [], ownReady: [], yourPrs: [], watchedRepoPrs: [],
-      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], redTrunks: [],
+      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], approvedMerged: [],
     };
     const out = dz.onePerPr(
       {
@@ -377,7 +373,7 @@ describe('the pure fold', () => {
     const empty = {
       awaitingReview: [], mentions: [], commentReplies: [], pushedSince: [], ownCiRed: [],
       ownConflicts: [], approvedPrs: [], ownReady: [], yourPrs: [], watchedRepoPrs: [],
-      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], redTrunks: [],
+      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], approvedMerged: [],
     };
     const out = dz.onePerPr(
       {

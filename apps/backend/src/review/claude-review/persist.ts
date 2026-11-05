@@ -73,7 +73,7 @@ import {
 
 // The Claude Review persistence layer. It reads + writes the claudeReviews /
 // claudeReviewFindings tables via ctx.db + ctx.schema (review/agent-context.ts). Only the
-// FEATURE-only reads live here; the cross-surface reads (getUnactionedClaudeReviews /
+// FEATURE-only reads live here; the cross-surface reads (getUnseenOwnAiReviews /
 // listClaudeReviewsByRepo) live in db/queries.ts.
 
 // ctx.schema is typed loosely (Record<string, any>) — this module addresses tables by name and
@@ -173,6 +173,8 @@ interface ReviewRow {
   postedAt: Date | null;
   createdAt: Date;
   finishedAt: Date | null;
+  // Migration 0168: when the AI Review tab first showed the finished run (db/claude-review-seen.ts).
+  seenAt?: Date | null;
   // One object on runs from before several tickets; an array since (`storedList` reads both).
   ticket?: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
   ticketAssessment?: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
@@ -404,6 +406,7 @@ function mapReview(
     excludedFiles: r.excludedFiles ?? [],
     postedReviewId: r.postedReviewId,
     postedAt: iso(r.postedAt),
+    seenAt: iso(r.seenAt ?? null),
     createdAt: isoReq(r.createdAt),
     finishedAt: iso(r.finishedAt),
     findings: findings.map((f) => mapFinding(f, threadIds, earlier)),

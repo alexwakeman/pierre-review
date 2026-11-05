@@ -128,9 +128,9 @@ export const PENDING = {
     },
     refunds: {
       pr: PRS.refunds,
-      chip: 'Criteria 3/4',
+      chip: 'New AI review',
       tone: 'amber',
-      why: 'Your PR · AI review finished 4 min ago',
+      why: 'Your Limn finished 4 min ago · criteria 3/4',
       high: '2 major',
     },
     flaky: {
@@ -154,13 +154,23 @@ export const PENDING = {
   } as Record<PendingCardId, PendingCard>,
   /** Which cards sit in which tab. A tab's count is its length. */
   byTab: {
-    my_turn: ['settings', 'reply'],
-    claude: ['refunds'],
+    my_turn: ['settings', 'reply', 'refunds'],
+    claude: [],
     fixing: ['flaky'],
     land: ['land'],
     waiting: ['waiting'],
   } as Record<PendingTabId, PendingCardId[]>,
+  /** AI reviews: the newest AI review on each PR, theirs and their teammates', newest first
+   *  (Activity/PendingAiReviews.tsx). Read-only rows; `isNew` = since the reader last opened the tab. */
+  aiSeen: [
+    { pr: PRS.refunds, by: 'Your Limn', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
+    { pr: PRS.ledgerIndex, by: 'Priya’s Limn', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false },
+  ] as { pr: Pr; by: string; verdict: string; tone: Tone; findings: string; when: string; isNew: boolean }[],
 };
+
+/** A Pending tab's badge: its cards; AI reviews' badge is its rows marked New. */
+export const pendingTabCount = (id: PendingTabId): number =>
+  id === 'claude' ? PENDING.aiSeen.filter((r) => r.isNew).length : PENDING.byTab[id].length;
 
 /** The words a button says before, while and after it works. The app's own. */
 export const ACTIONS = {
@@ -177,18 +187,21 @@ export type PrTabId = 'overview' | 'changes' | 'claude_review' | 'ai_fix';
 export const PR_VIEW = {
   pr: PRS.refunds,
   branch: 'dana/partial-refunds',
-  /** The detail pane's tabs, in the app's order (PrDetail.tsx TAB_LABELS). */
+  /** The detail pane's tabs, in the app's order (PrDetail.tsx TAB_LABELS). A subset: the app's
+   *  Activity and Threads tabs (between Overview and Changes) are not drawn here. */
   tabs: [
     { id: 'overview', label: 'Overview' },
     { id: 'changes', label: 'Changes' },
     { id: 'claude_review', label: 'AI Review' },
     { id: 'ai_fix', label: 'AI Fix' },
   ] as { id: PrTabId; label: string }[],
+  /** The Overview in the app's order (ChecksTab.tsx): the AI review card, Checks, People
+   *  (GitHub's review decision words, as the header's review pill says them), About. */
   overview: [
+    { name: 'AI review', state: '1 major · 1 minor · 1 nit', tone: 'red' },
     { name: 'build', state: 'Passed', tone: 'green' },
     { name: 'test-api', state: 'Passed', tone: 'green' },
-    { name: 'Reviews', state: 'Needs 1 approval', tone: 'amber' },
-    { name: 'AI review', state: '1 major · 1 minor · 1 nit', tone: 'red' },
+    { name: 'Reviews', state: 'Review required', tone: 'amber' },
     { name: 'PAY-142 Partial refunds', state: 'Criteria 3/4', tone: 'amber' },
   ] as { name: string; state: string; tone: Tone }[],
   /** The Changes tab: the file before the fix, with the review's thread on its line. */
@@ -651,4 +664,40 @@ export const SETUP_SLACK = {
   ],
   cap: '1 of 12 workspaces has a digest, each its own report on every send.',
   test: { idle: 'Send test', busy: 'Sending…', done: 'Sent — check Slack.' },
+};
+
+// ---- reviewing as a team (/teams) ---------------------------------------------
+
+/**
+ * Team claims ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims): the status
+ * lines each teammate's Limn posts on a commit, as the PR's checks list shows them
+ * (components/CheckList.tsx: the "Limn" label, the state words "passed" / "running"). The lines'
+ * own words are the backend's (review/claude-review/team-claim.ts). #1190 is Priya's pull request.
+ */
+export const TEAM = {
+  claims: {
+    pr: PRS.settings,
+    sha: '3f9e2a1',
+    checks: [
+      { name: 'build', limn: false, state: 'passed', tone: 'green', note: null },
+      { name: 'test-web', limn: false, state: 'passed', tone: 'green', note: null },
+      { name: 'limn/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
+      { name: 'limn/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
+    ] as { name: string; limn: boolean; state: string; tone: Tone; note: string | null }[],
+    /** The "Limn" label's tooltip in CheckList.tsx. */
+    limnTitle: 'Posted by Limn to mark an auto review. Not CI.',
+    /** The Open PRs panel's cell for the provider a teammate holds (Activity/OpenPrsAiReview.tsx). */
+    skip: 'Reviewed by @sam',
+  },
+  /**
+   * #612 is dana's (the reader's) own pull request. "Where this PR stands" (TeamReviewLayout.tsx,
+   * lib/teamReview.ts standingLine): newest review first. The author's own review is a Comment.
+   */
+  standing: {
+    pr: PRS.refunds,
+    rows: [
+      { name: 'Priya', verdict: 'Approve', tone: 'green', day: '3 Nov', sha: '1c4bd65', note: 'approval stands on GitHub' },
+      { name: 'You', verdict: 'Comment', tone: 'grey', day: '3 Nov', sha: '8a8ec14', note: null },
+    ] as { name: string; verdict: string; tone: Tone; day: string; sha: string; note: string | null }[],
+  },
 };

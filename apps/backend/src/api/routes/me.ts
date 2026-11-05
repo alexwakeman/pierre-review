@@ -168,10 +168,9 @@ const myTurnSettingsSchema = {
             additionalProperties: false,
             properties: Object.fromEntries(MY_TURN_TOGGLES.map((k) => [k, { type: 'boolean' }])),
           },
-          trunkScope: { type: 'string', maxLength: 32 },
           order: {
             type: 'array',
-            maxItems: 15,
+            maxItems: MY_TURN_TOGGLES.length,
             items: { type: 'string', maxLength: 32 },
           },
           weights: {
@@ -504,8 +503,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     return body;
   });
 
-  // DISMISS / BRING BACK one My Turn subject — a pull request (`pr`) or, for a red default branch,
-  // a repository (`repo`). ⚠ NOT the "Done" routes 0060 deleted: a dismissal lasts only until
+  // DISMISS / BRING BACK one My Turn subject — a pull request (`pr`), whatever its card type. ⚠ NOT the "Done" routes 0060 deleted: a dismissal lasts only until
   // something newer happens on the subject, and a subject that leaves your plate discharges it
   // (db/my-turn-dismissals.ts). DB-only, both modes, free.
   //
@@ -544,7 +542,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
 /** `:kind/:id` → a target, or null for anything else (a non-integer id, an unknown kind). */
 export function parseDismissTarget(params: unknown): MyTurnDismissTarget | null {
   const p = (params ?? {}) as { kind?: unknown; id?: unknown };
-  if (p.kind !== 'pr' && p.kind !== 'repo') return null;
+  if (p.kind !== 'pr') return null;
   const raw = typeof p.id === 'string' ? p.id : '';
   if (!/^[1-9][0-9]{0,15}$/.test(raw)) return null;
   const id = Number(raw);

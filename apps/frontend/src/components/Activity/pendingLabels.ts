@@ -6,7 +6,7 @@ import type {
   MergeQueueEntryState,
   MyTurnCard,
   MyTurnCardReason,
-  MyTurnTrunkCard,
+  PendingTabKey,
   PrMergeQueueInfo,
   ReviewerRole,
   SecurityAlertSource,
@@ -58,7 +58,15 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   dependency_bump: 'Bumps',
   // Your own PR, with someone else — read-only, never counted as your turn.
   waiting_on_others: 'Waiting on others',
+  // The newest AI review on a PR ("AI reviews") — yours or a teammate's.
+  ai_review: 'AI review',
 };
+
+/** A KIND CHIP'S NAME IN ITS TAB — the kind's own name. (`tab` stays in the signature for a tab
+ *  whose kinds would need naming apart.) */
+export function chipLabel(_tab: PendingTabKey, kind: InsightCard['kind']): string {
+  return KIND_LABEL[kind];
+}
 
 /**
  * What THIS card is called, as opposed to what its kind is called. THREE labels for `my_turn`,
@@ -91,8 +99,6 @@ export function cardKindLabel(card: InsightCard): string {
     // KIND label says "Review or reply", which is never true of a branch, a failing build, a
     // conflict or a PR that is ready. Name what it is instead — as its home tab names it.
     switch (card.reason) {
-      case 'trunk_red':
-        return 'Trunk CI failing';
       case 'own_ci_red':
         return 'CI failing on your PR';
       case 'own_conflicts':
@@ -219,12 +225,12 @@ export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
   pushed_since: 'Pushed since',
   own_ci_red: 'Build failed',
   own_conflicts: 'Merge conflicts',
-  trunk_red: 'Trunk red',
   pr_approved: 'Approved',
   own_ready: 'Ready to land',
   your_pr: 'Your PR',
   own_thread: 'Unanswered thread',
-  claude_review: 'AI review',
+  claude_review: 'New AI review',
+  ai_approved_merged: 'Merged after approval',
   watched_repo_pr: 'New PR',
 };
 
@@ -237,7 +243,7 @@ export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
  * type now (`pushed_since`, with its own switch in Settings), so the chip is the map and nothing
  * here has to guess.
  */
-export function myTurnReasonLabel(card: MyTurnCard | MyTurnTrunkCard): string {
+export function myTurnReasonLabel(card: MyTurnCard): string {
   if (card.reason === 'own_ready' && card.own?.kind === 'ready') return KIND_LABEL[card.own.forward];
   // A run the workspace's auto review started says so; a clicked one keeps "Claude review".
   if (card.reason === 'claude_review' && card.trigger === 'auto') return AUTO_REVIEW_LABEL;

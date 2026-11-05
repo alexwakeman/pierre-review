@@ -54,7 +54,6 @@ describe('overrides only', () => {
   it('opens on the product defaults when nothing is stored', () => {
     const f = seedMyTurnForm(null);
     expect(f.show).toEqual(MY_TURN_SHOW_DEFAULTS);
-    expect(f.trunkScope).toBe('off');
     expect(f.order).toEqual(MY_TURN_DEFAULT_ORDER);
     expect(f.weights).toEqual(DO_NEXT_PRESETS.balanced);
   });
@@ -79,7 +78,6 @@ describe('overrides only', () => {
   it('round-trips what is stored, and nothing more', () => {
     const stored = {
       show: { own_ci_red: true },
-      trunkScope: 'maintained' as const,
       weights: DO_NEXT_PRESETS.mine_first,
     };
     expect(buildMyTurnSettingsBody(seedMyTurnForm(stored))).toEqual(stored);
@@ -283,10 +281,9 @@ describe('the order', () => {
     expect(movedTypeAnnouncement(up, after, 'x', hidden)).toBe(`“x” moved to ${i} of ${order.length - 1}.`);
   });
 
-  it('marks a red default branch off by its scope, and every other type by its switch', () => {
+  it('marks every type off by its switch', () => {
     const f = seedMyTurnForm(null);
-    expect(isOff(f, 'trunk_red')).toBe(true);
-    expect(isOff({ ...f, trunkScope: 'all' }, 'trunk_red')).toBe(false);
+    expect(isOff(f, 'ai_approved_merged')).toBe(false);
     expect(isOff(f, 'mention')).toBe(false);
     expect(isOff(f, 'watched_repo_pr')).toBe(true);
   });

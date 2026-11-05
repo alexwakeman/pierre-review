@@ -9,7 +9,6 @@ import {
   type MyTurnCardReason,
   type MyTurnSettings,
   type MyTurnToggle,
-  type MyTurnTrunkScope,
 } from '@pierre-review/shared';
 
 // The Settings → My Turn form, as pure functions so `test/myTurnSettingsForm.test.ts` can pin them
@@ -29,8 +28,7 @@ import {
 
 export interface MyTurnForm {
   show: Record<MyTurnToggle, boolean>;
-  trunkScope: MyTurnTrunkScope;
-  /** All fifteen types, in the reader's order. */
+  /** Every type, in the reader's order. */
   order: MyTurnCardReason[];
   weights: DoNextWeightsPct;
 }
@@ -85,7 +83,8 @@ export const SHOW_ROWS: readonly { reason: MyTurnToggle; hint: string }[] = [
   // conflict or are blocked), and with "Your PRs ready to land" on, the mergeable ones move there.
   { reason: 'pr_approved', hint: 'Your PR has an approval and no “changes requested”.' },
   { reason: 'your_pr', hint: 'Since you last opened them here.' },
-  { reason: 'claude_review', hint: 'Findings you have not posted.' },
+  { reason: 'claude_review', hint: 'A review your Limn finished that you have not opened.' },
+  { reason: 'ai_approved_merged', hint: 'A PR your Limn approved has merged.' },
   { reason: 'watched_repo_pr', hint: 'Open PRs in your repos you have not touched.' },
 ];
 
@@ -97,19 +96,11 @@ export const ADD_ROWS: readonly MyTurnToggle[] = [
   'own_thread',
 ];
 
-/** The red-default-branch scope, as the radio group names it. */
-export const TRUNK_SCOPE_LABEL: Record<MyTurnTrunkScope, string> = {
-  off: 'Off',
-  maintained: 'Repos you maintain',
-  all: 'Every repo in the workspace',
-};
-
 /** The form as it opens: whatever is stored, and the defaults everywhere else. */
 export function seedMyTurnForm(stored: MyTurnSettings | null | undefined): MyTurnForm {
   const r = resolveMyTurnSettings(stored);
   return {
     show: { ...r.show },
-    trunkScope: r.trunkScope,
     order: [...r.order],
     weights: { ...r.weightsPct },
   };
@@ -119,7 +110,6 @@ export function seedMyTurnForm(stored: MyTurnSettings | null | undefined): MyTur
 export function buildMyTurnSettingsBody(form: MyTurnForm): MyTurnSettings | null {
   return compactMyTurnSettings({
     show: form.show,
-    trunkScope: form.trunkScope,
     order: form.order,
     weights: form.weights,
   });
@@ -142,15 +132,14 @@ export function myTurnFormDirty(
 export function myTurnFormProblem(form: MyTurnForm): string | null {
   return validateMyTurnSettings({
     show: form.show,
-    trunkScope: form.trunkScope,
     order: form.order,
     weights: form.weights,
   });
 }
 
-/** Is this type switched off in the form? A red default branch is off when its scope is. */
+/** Is this type switched off in the form? */
 export function isOff(form: MyTurnForm, reason: MyTurnCardReason): boolean {
-  return reason === 'trunk_red' ? form.trunkScope === 'off' : !form.show[reason];
+  return !form.show[reason];
 }
 
 /**

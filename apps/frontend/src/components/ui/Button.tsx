@@ -75,7 +75,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   label: string;
   icon: ReactNode;
   size?: ButtonSize;
-  /** A toggle's state (the bell, Threads only). */
+  /** A toggle's state (the bell). */
   pressed?: boolean;
 }
 

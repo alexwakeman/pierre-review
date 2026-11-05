@@ -84,9 +84,11 @@ describe('Slack tones', () => {
     // "Waiting on others" is personal — never in a team digest.
     const kinds = PENDING_TABS.filter((t) => t.key !== 'waiting')
       .flatMap((t) => t.kinds)
-      .filter((k) => k !== 'reviewer_load');
+      .filter((k) => k !== 'reviewer_load')
+      // The AI reviews reference list: personal, and built only for the live board.
+      .filter((k) => k !== 'ai_review');
     for (const kind of kinds) {
-      const card = { id: 'x', kind, arm: 'trunk', reason: 'trunk_red' } as unknown as InsightCard;
+      const card = { id: 'x', kind, arm: 'trunk', reason: 'mention' } as unknown as InsightCard;
       expect(pendingCardEmoji(card), kind).toMatch(/^:[a-z_]+:$/);
     }
     const trunk = { kind: 'ci_failing', arm: 'trunk' } as unknown as InsightCard;

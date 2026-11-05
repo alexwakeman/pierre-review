@@ -25,7 +25,7 @@ export function trunkHeadKey(repoId: number, sha: string): string {
 
 /**
  * THE ONE READER OF A DEFAULT-BRANCH HEAD'S FAILING CHECKS — `/api/branch-status` and the Pending
- * board's red-trunk cards (ci_failing's trunk arm, the promoted `trunk_red` my_turn card) both read
+ * board's red-trunk card (ci_failing's trunk arm) reads
  * through it, so the two surfaces cannot name different checks for one red head.
  *
  * The head's own `branch_commits` row holds them (written by the branch snapshot in the same

@@ -154,7 +154,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
   rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
   ⓘ), **Open tabs** (EVERY open tab at every width — `useTabChip`'s icon + words, a ✕, the strip's
-  right-click menu, "Close all"; the active row scrolls into view; `data-testid="sidebar-tabs"`; a
+  right-click menu, "Close all"; PINNED tabs first under a "Pinned" heading
+  (`data-testid="sidebar-pinned-tabs"`, a pin in place of the ✕ that unpins, never grouped by author —
+  § Pinned tabs); the active row scrolls into view; `data-testid="sidebar-tabs"`; a
   **Group by author** icon toggle (`PeopleIcon`, `aria-pressed`, remembered in `localStorage`
   `limn:sidebarTabsByAuthor` via `useShell.tabsByAuthor`, try/catch) puts each PR tab under its
   author's name — the reader's own first, then A–Z, then "Other" for tabs with no author
@@ -348,7 +350,22 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   in-flow menu would clip to the 42px bar — virtual reference at the click point): Close this
   tab / Close other tabs / Close all tabs (`closeOtherTabs`/`closeAllTabs` in the store; on
   the fixed chips the menu shows only "Close all tabs"; "close all" keeps you on a fixed view if
-  that's where you are, else lands on Activity, mirroring `closeTab`'s fallback). ⚠ The menu's
+  that's where you are, else lands on Activity, mirroring `closeTab`'s fallback), plus Pin tab /
+  Unpin tab (below). **PINNED TABS (browser-style, 2026-11-04).** `Tab.pinned`, flipped by
+  `togglePinTab` (the menu's "Pin tab" / "Unpin tab", ⌘K "Pin this tab" / "Unpin this tab", and the
+  pin button that replaces a pinned tab's ✕ in the strip and the sidebar). A pinned tab: has NO ✕
+  (`closeTab` REFUSES it — unpin first); SURVIVES "Close other tabs" and "Close all tabs" (both act on
+  unpinned tabs only; "Close all" lands on Activity only when the active tab was closed, and is a
+  no-op with only pinned tabs left; the sidebar hides its "Close all" then); sits BEFORE every
+  unpinned tab — every write to `tabs` goes through `pinnedFirst` (a stable partition), so a drag
+  never crosses the line and a new tab never opens among the pinned; and PERSISTS across a reload.
+  ⚠ **Only `canPinTab` kinds pin**: `pr-detail`, `pr-focus`, `ticket`, `story-build` — the ones a
+  key alone can rebuild. The seed-backed drill-downs render from in-memory seeds a reload loses, so
+  "Pin tab" is HIDDEN on them (and the store refuses). `persist()` keeps PR tabs and every pinned
+  tab (with `ticketMeta`); `loadTabs()` rebuilds a pinned `ticket:`/`story-build:` key in a SEPARATE
+  branch (`ticketMetaFrom` — the ident always from the KEY, malformed words fall back to it) —
+  ⚠ never widen `parseTabKey`, which `boardSlotMode` relies on being PR-only. A NEW build tab opens
+  pinned (§ The build tab). Pinned in `test/pinnedTabsPin.test.ts`. ⚠ The menu's
   (and an in-flight drag's) Escape MUST `stopPropagation` or `useKeyboard`'s global Escape
   also yanks the user to the Timeline. TabChip is now one shared `ChipShell` — the nine
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
@@ -358,6 +375,13 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   `data-testid="sidebar-tabs"`, `role="tab"` names and the ✕ aria-labels. The docked sidebar is
   resizable from its right edge (`useShell` `sidebarWidth`, default 268px, 232–420px, `localStorage`; double-click resets); its middle
   scrolls vertically only, with the scrollbar hidden (`.scrollbar-hidden`, the edge fade shows it).
+  ⚠ **That middle scroller is `relative` ON PURPOSE** (2026-11-04): it is the containing block of the
+  tab rows' `sr-only` spans (`position:absolute`). Unpositioned, they resolved against the aside,
+  sat at their in-list y (thousands of px with many tabs), escaped the scroller's clip and stretched
+  the DOCUMENT's scroll range — a wheel over Open PRs then scrolled the whole shell, sidebar
+  included, up the page. Pinned by `e2e/shell-scroll.spec.ts` (fails with 1706px of document
+  overflow without it). Do not "fix" such a leak with `overflow-hidden` on the aside: its resize
+  handle hangs 5px past the right edge.
   **REDESIGN (2026-10-29, `redesign/open-prs`): Open PRs draws ONE-LINE ROWS + a SIDE PANEL**
   (`Activity/OpenPrsRows.tsx`, mounted by `<OpenPrsCards layout="rows">` from `OpenPrsDetail`).
   `OpenPrsCards` still owns EVERY read (the ticket gate, the ONE batched Claude / CI / ticket-review /
@@ -538,7 +562,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   the never-mounted `FeedOpenPrsPanel` are DELETED; the old `MetricsDetail` `open_prs` sub-tab is
   GONE too. Pinned in `test/openPrsTab.test.ts` + `landingTab.test.ts`.
   Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
-  URL/localStorage-persisted; a reload drops them): `metrics-detail`, `bot-prs`, `bot-only-prs`
+  URL/localStorage-persisted, never pinnable; a reload drops them): `metrics-detail`, `bot-prs`, `bot-only-prs`
   (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
   scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
@@ -557,7 +581,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   on-click + the ⧉ button were removed; **feed isolation is reached from PrDetail's "Show in
   Activity feed" header button** (`FeedIcon`: `setRepoConsoleTab(repoId,'activity')`→`setActivityRepo`
   →`setFeedIsolatedPrId`→`showActivity`, order load-bearing). `bot-threads` rows open the PR's
-  Changes tab, Threads only view, with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
+  Threads tab, with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
   (`PinnedTabsBar` `TabChip` reads the seed + `useRepos`). Each drill-down = a `TabKind` + key
   const + opener in `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
   `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
@@ -790,10 +814,23 @@ Refresh, GitHub) and DetailPane's ✕ wear ONE ink, `PR_HEADER_ICON_BTN` (gray-9
 the title's colour); Refresh's amber stale state and the Stalled / Auto-merge / new-since chips keep
 their colours because they mean something. Pinned in `test/prDetailPlacement.test.ts`.
 
-**Header meta line** (`data-testid="pr-header-meta"`): REPO first, then the author's avatar + name,
-"opened …", the file delta button, the large-PR flag and the blast chip — at 14px (`text-sm`,
-gray-600 / dark gray-300; the delta's +/− are green-700 / red-600 so they clear AA). It was 12px
-and author-first.
+**Header: three lines** (2026-11-04). Line 1 is the title and the "…" menu. **Line 2**
+(`data-testid="pr-header-meta"`, body text, mute): the state as a NEUTRAL pill (`bg-ui-raise`, ink
+words for open and merged; a draft or closed PR keeps the faint words; colour only by rule), the CI
+readout, the REPO, the author's avatar + name, "opened …". **Line 3**
+(`data-testid="pr-header-review-line"`, rendered only when it has something on it — `headerLine3`):
+first the **review pill** (`pr/ReviewDecisionPill.tsx`), then the file delta, the large-PR flag, the
+blast chip, `PrChips`, Stalled, Auto-merge armed and "N new" (the phone's "Details" fold still holds
+size/reach/chips). ⚠ **The review pill is GITHUB's `reviewDecision`, never the AI review**: the face
+is the decision in the review style (`REVIEW_STATE_META`; `review_required` → "Review required" and
+null → "No review required", both in the quiet `pending` look — null never reads as "nobody looked"),
+then ONE reviewer chip from OUR fold (`reviewStandings`: the newest whose standing matches the
+decision, else the newest, in their OWN standing style), then "+N" (unnamed reviewers count). The two
+claims sit side by side, never merged into one sentence. The pill is one button (the name is plain
+text, no nested control); clicking opens a `ClickPopover` listing every reviewer's standing (the
+same fold Pending and the Reviews row read) with its relative time, then "Waiting on" the requested
+reviewers. No fetch: everything is on the detail payload. Pure `reviewDecisionFace` is pinned in
+`test/prReviewDecisionPill.test.ts`; the lines in `test/prOverviewLayout.test.ts`.
 
 **Overview → Ticket, then Branch, TWO rows** (ChecksTab): "Ticket" (`PrTicketLine`, the ticket chips;
 `[]` reads "No ticket found") only when the PR has a tracker (`tickets != null`); "Branch"
@@ -801,30 +838,69 @@ and author-first.
 only, bare, no fork owner) on its own row under it, only when the head has synced. Long names
 `break-all`. The full-screen PR detail's title sits where every page title sits (§ One page header). Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
 
-**The Overview's AI REVIEW sits just above the Checks row** (2026-11-04; `pr/PrOverviewAiReview.tsx`,
-passed to `ChecksTab` as `aiReview`): the SAME facts as the Open PRs side panel — it renders
-`DrawerAiReview` (`Activity/OpenPrsAiReview.tsx`) with `layout="overview"`, which draws each `Fact` in
-the Overview's row (label column `sm:w-28`, the page gutters) instead of the panel's. Verdict and its
+**The Overview is FIVE sections in one capped column** (2026-11-04; `ChecksTab.tsx`, `max-w-[46rem]`,
+`Row`'s label column `sm:w-20`): **Can it land** (Status, Conflicts, Auto-merge, Blocked, Actions) →
+the **AI review card** → **Checks** (the collapsed summary) → **People** (Reviews, Requested,
+Suggested, Bots, Bot activity; the section renders only when a row does) → **About** (Ticket, Branch,
+Labels, Merged by, Updated, the description). Section headings (`Section`) name the groups. There is
+NO Meta row: the header carries repo and opened; "Updated" is its own About row. Activity is its own
+tab (below), not a section here.
+
+**The AI review is a CARD of its own** (`pr/PrOverviewAiReview.tsx`, passed to `ChecksTab` as
+`aiReview`): a bordered block on the AI surface (`border-ai-border bg-ai-surface`) holding
+`DrawerAiReview` (`Activity/OpenPrsAiReview.tsx`) with `layout="overview"` — a real heading (the
+sparkle in `text-ai-signal`, "AI review") and its own inner label column (`sm:w-20`, `px-3`), so it
+never reads as more of the Overview's rows. The SAME facts as the Open PRs side panel: verdict and its
 commit, findings, the earlier review, CI, what was posted, when it ran, and the one action (Review /
 Re-review / Open review). It reads the batched `useClaudeReviewStates` / `useCiReviewStates` for this
 one PR, so the panel and the Overview never disagree. The panel's Story check line is left out (the
 header's criteria chips and the Ticket row carry the story). Hidden with `me.ai.enabled` off. **The AI
 Review tab label has NO verdict pill**; it keeps its sparkle like every tab's icon.
 
-**Tabs: Overview · Comments · Threads · Changes** (+ the gated ones below). ⚠ **Activity is NOT a tab
-any more** — it is the collapsed **Activity** section at the foot of Overview (`ActivitySection`, a
-compact one-line-per-event list of the same rows: opened, commits, reviews, comments, merged/closed,
-each with the timeline magnifier and a GitHub link). `'activity'` stays a `PrDetailTab` member so an
-old `?prTab=activity` link, the timeline's commit popover (`activityFocus`) and the header's "N new"
-chip still work: it RENDERS Overview with the section open, DERIVED (`effectiveTab`), never written
-back; a local flag mirrors it so pressing Overview afterwards does not snap it shut, and shutting the
-section while seated on `'activity'` moves the tab to `'overview'`. **Comments** (`?prTab=comments`,
-badge = issue comments + review bodies, `prConversationCount`) holds `PrCommentsList` + the composer;
-a PR-comment deep link (`commentFocus`) seats it.
+**A check with a log: the NAME opens the log** (`CheckList.tsx` `CheckRow`), the same as the rest of
+the row; a small `ExternalLinkIcon` link beside the name opens the run on GitHub. Siblings, never
+nested. A check with no log stays one whole link.
+
+**Tabs: Overview · Activity · Threads · Changes** (+ the gated ones below; 2026-11-04).
+
+- **ACTIVITY** (`?prTab=activity`, `components/pr/PrActivityTab.tsx`, `test/prActivityTab.test.ts`)
+  replaced BOTH the Comments tab and the collapsed Activity section that sat at the foot of Overview.
+  Everything that happened, **newest first** (`buildPrActivity`): opened, ready for review and
+  reopened (`PrDetail.lifecycle`, read from the event log by `getPrDetail`; a reopen and a close name
+  nobody — the log does not know who), commits (short sha + copy, first line of the message), reviews,
+  PR comments, merged (by `mergedById`) or closed. **The composer is at the TOP.** One continuous
+  vertical rail down the left (git-history style) with a marker disc per entry whose icon names the
+  event type (`activityMarker`: comment, approved, changes requested, review, Limn — the sparkle in
+  `text-ai-signal` —, commit, opened, ready, reopened, merged, closed; every glyph from `Icons.tsx`,
+  `PullRequestClosedIcon` / `ActivityIcon` added for this). Every Limn review (stored kind `pierre` or
+  the summary marker) and every Limn PR-level finding wears a small **"Limn"** chip; the NEWEST Limn
+  AUTO review (marker `k=auto`, else the auto-post footer on an older post) adds **"Auto review ·
+  latest"**. No per-row timeline magnifier and no per-row GitHub link.
+  - A PR comment or a review with a body is a **card**: the header (avatar, name, state pill, chips,
+    time, New, Limn severity, ML badge, Copy, the expand chevron) and the body as **Markdown clamped
+    to ~6 lines** (`max-h-[7.5rem]`, a fade when it overflows; images such as SonarCloud's render
+    through the ONE `Markdown` sanitiser). A click on the preview (not on a link in it) or the chevron
+    opens the card in place: the full body, `ReactionBar` (mounted ONLY on an open card, so a long PR
+    fetches no reactions until asked), **Reply** (the quoted-reply composer) and **View on GitHub** —
+    the block the Comments tab drew.
+  - A deep link opens its card: `commentFocus` (`comment:<id>` / `review:<id>`) and `activityFocus`
+    (the timeline's commit popover) seat `'activity'`, clear the "since" filter, scroll to and flash
+    the entry; `selectedCommentId` starts open with its permanent ring. The header's "N new" chip
+    seats Activity filtered to what is new ("Showing N since you last looked · Show all").
+  - Badge = PR comments + review bodies (`prConversationCount`). ⚠ `'comments'` is no longer a
+    `PrDetailTab` member: `?prTab=comments` reads as `activity` (`prTabFromUrl`) and is rewritten.
+- **THREADS** (`?prTab=threads`, `components/pr/PrThreadsTab.tsx`): the review threads WITHOUT the
+  code — the full `BotTriageCard`, Check threads, and `ThreadList` (pills, reply, resolve, Claude's
+  judgements). Grouped by file through the SAME rename-aware fold as the diff (`indexThreadsByPath`,
+  passed to `ThreadList` as `pathFor`; the file list is `pr.files` + the CACHED `['pr-files']`, a
+  subscription with `enabled: false`, never a fetch). The state / severity filters arrive GUARDED
+  (`selectedPrId === prId`). **"Show in context"** moves to Changes through `openInChanges` (the one
+  helper that sets the tab THEN the focus). Badge = unresolved threads. The Changes tab no longer has
+  a "Threads only" toggle or a `t` key.
 
 **REOPENING A PR LANDS WHERE THE READER LEFT IT** (2026-11-02; `lib/prViewMemory.ts`,
-`test/prViewMemory.test.ts`): per PR, the last tab, the tab panel's scroll position PER TAB, and the
-Changes tab's "Threads only" switch, in a module Map — **this session only**, never storage or the store
+`test/prViewMemory.test.ts`): per PR, the last tab and the tab panel's scroll position PER TAB, in a
+module Map — **this session only**, never storage or the store
 (a reload starts on Overview; ≤ 50 PRs, least recently used out). Read ONCE per ARRIVAL (`liveVisible`
 turning true: a mount, or the pane coming out from under another PR's overlay), never on a tab switch
 inside the PR. ⚠ **A memory, never an instruction:** a `{prId, tab}` pair already naming this PR (an
@@ -850,7 +926,7 @@ PR. Measured on the dev stack: click → result 2.2–3.7s cold, ≈ 0.85s warme
 agent-agnostic. Internally it stays `PrDetailTab` `'claude_review'` (store, effects, ⌘K ids); ONLY the
 URL spells it `ai_review`. ⚠ The old `?prTab=claude_review` is still READ as an alias (old links,
 bookmarks) and the load's reconcile write (`markUrlCorrection` + `writeToUrl`) REPLACES it with
-`ai_review` at once; `?prTab=threads` likewise reads as `changes`. Never emit the raw tab id: the
+`ai_review` at once; `?prTab=comments` likewise reads as `activity`. Never emit the raw tab id: the
 serializer goes through `prTabToUrl`. Nothing persists the inner tab (pinned tabs, localStorage), so
 there is nothing to migrate. No backend link names a PR tab (Slack's `prLink` opens the PR's tab only).
 
@@ -989,7 +1065,7 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   `blocked` PR only (the ranked candidate causes from `deriveMergeBlockers`, ordered by a computed
   certainty — proven first — that is deliberately NOT narrated: the PROVEN/INFERRED chip and the
   note under each row were removed, and only the ordering survives; the `unresolved_threads` row is
-  clickable through to the Changes tab's Threads only view via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
+  clickable through to the Threads tab via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
   `likely_addressed`, which is why the Bots chips inches away say "N need a look" rather than "N
   unresolved" — the full three-count table and the never-assert-a-cause rules are in
   **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
@@ -1021,9 +1097,8 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   undo of a close and is itself undone by the Close button beside it, so a two-click gate would be
   ceremony around a reversible act. It prints GitHub's own refusal sentence when the 409 comes back
   — normally the head branch was deleted after the close) — then the PR **Summary** (markdown,
-  clamped to 8 lines (`SUMMARY_COLLAPSED_LINES`), tall images hidden when collapsed). The collapsed **Activity** section rounds
-  the tab off (rendered by `PrDetail`, not `ChecksTab`); the **PR comments** moved to the Comments
-  tab. (The AI PR summary under the description and the per-comment "Check review" + its
+  clamped to 8 lines (`SUMMARY_COLLAPSED_LINES`), tall images hidden when collapsed). The **PR
+  comments** and the event history are the Activity tab. (The AI PR summary under the description and the per-comment "Check review" + its
   annotations are REMOVED 2026-10-18.) The **Checks
   row** is ONE collapsed summary line (`ChecksSummary`: chevron + the Default branches strip's
   pills — "N passed" / "N failing" (failure + error) / "N running", one per state that exists, "all
@@ -1034,9 +1109,8 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   failing count is unchanged
   (`checksRowVisible` is DELETED with the old `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
-- **There is NO Threads tab** (removed 2026-10-26; a legacy `?prTab=threads` reads as `changes`).
-  What it held is the Changes tab's **Threads only** view (see *The sticky bar and the Threads
-  only view* under Changes); this bullet describes that list. `ThreadList`/`ThreadView`: review
+- **The Threads tab** (back 2026-11-04 as its own tab, after a spell as the Changes tab's "Threads
+  only" view; `pr/PrThreadsTab.tsx`). This bullet describes its list. `ThreadList`/`ThreadView`: review
   threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. **Collapse is per THREAD, never per file**: a
@@ -1094,34 +1168,24 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   thread — see *Inline thread indicators* below.
   A **navigation rail** (`diff/FileTree.tsx`) sits to its left — see below.
 
-  **The sticky bar and the Threads only view.** The bar above the rail and the code (`Header` in
+  **The sticky bar.** The bar above the rail and the code (`Header` in
   `ChangesTab.tsx`, `data-testid="changes-bar"`) is `sticky top-0 z-30` inside PrDetail's scroll
   pane. Everything else that sticks in the tab pins BELOW it: ChangesTab measures the bar (a
   callback ref + `ResizeObserver`, because each render branch mounts its own bar) and sets
   `--diff-sticky-top` on its root; the rail takes it as an inline `top` (and subtracts it from its
   measured max-height), each `FileDiffView` file header is `top-[var(--diff-sticky-top,0px)]`
-  with a matching `scroll-mt` on the block, and `ThreadList`'s filter header does the same. Unset
-  (the AI Fix tab) it is 0. ⚠ **The bar carries NO file delta** (no file count, no +/− lines):
-  the PR header above every tab states it. It holds the **Threads only** toggle (`aria-pressed`,
-  with the PR's thread count, absent on a PR with no threads) and the 4-state mix, then Wrap (code
-  view only) and the GitHub link.
-  - **Threads only** swaps the code for `ThreadList` (built by PrDetail's `renderThreads`, so the
-    guarded `threadStateFilter` / severity / vendor filters, the full `BotTriageCard`, Check
-    threads, reply, resolve and Claude's judgements all come with it). The state lives in
-    PrDetail (`changesThreadsOnly`, LOCAL per PR pane) because deep links switch it: the
-    Overview's Bots chip and Blocked row, a Bots-pane state-pill preset, and a selected thread
-    whose file has left the diff. **The rail stays**: there a click lists that file's threads
-    (`visibleThreadIds`, rename-aware through the same `threadsByPath`; a second click or "All
-    files" lists every file) instead of scrolling the code. Resolved threads stay one line.
-  - ⚠ **THE CODE STAYS MOUNTED, hidden, under the Threads only view.** Unmounting it dropped every
-    file's expand state and each block's `consumedFocus`, so switching the view off by hand
-    re-ran the LAST reveal (the focus target is sticky) and teleported the reader to an old line.
-  - **"Show in context"** on each card (ThreadCard's `openInChanges`, from `openInChangesFor`)
-    calls `openInChanges`, which switches the view OFF and arms a NEW focus in one go: the code
-    shows, the file opens, the pill scrolls into view, opens and rings. An outdated thread whose
-    live line is gone gets "Show in context ~" (the reconstructed line); a thread whose file left
-    the diff has no control, and stays listed. Review comments with no file are not threads (PR
-    comments live on the PR's comments list).
+  with a matching `scroll-mt` on the block. Unset (the AI Fix tab) it is 0. ⚠ **The bar carries NO
+  file delta** (no file count, no +/− lines): the PR header above every tab states it. It holds the
+  thread mix (`ThreadCountChips` compact), then Wrap (code view only) and the GitHub link. ⚠ **There
+  is NO "Threads only" toggle any more** (2026-11-04): the threads without the code are the Threads
+  tab.
+  - **"Show in context"** on each Threads-tab card (ThreadCard's `openInChanges`, from
+    `openInChangesFor`) calls `openInChanges`, which seats Changes and arms a NEW focus in one go:
+    Changes mounts with that focus, the file opens, the pill scrolls into view, opens and rings. An
+    outdated thread whose live line is gone gets "Show in context ~" (the reconstructed line); a
+    thread whose file left the diff has no control, and stays listed. Review comments with no file
+    are not threads (PR comments live on the Activity tab). Leaving Changes for another tab by hand
+    goes through `goToTab`, which clears the focus, so a later return never replays an old reveal.
   - ⚠ **A RESOLVE COLLAPSES THE THREAD IN BOTH VIEWS, once GitHub said yes**: ThreadList through
     `lib/threadCollapse.ts`, the inline pills through ChangesTab's `resolveBus` (*Inline thread
     indicators* below). Both read the one `useResolveEvents` hook.
@@ -1388,7 +1452,7 @@ header.)
   stop, then re-issues the same scroll whenever the target moves while the pane did not, until it
   holds still for 700ms (cap 4s). ⚠ It sets the PANE's `scrollTop` (`paneScrollTarget`, honouring
   `scroll-margin`), never `scrollIntoView`, which also scrolls the document and the shell's
-  `overflow: hidden` boxes. ⚠ A HIDDEN target (the code under Threads only, `display: none`) is
+  `overflow: hidden` boxes. ⚠ A HIDDEN target (`display: none`) is
   ignored and its settle stops — measured 0×0, it sent the pane to the top and fought the thread
   list, which reveals its selected card through `revealIntoView` too. The reader wins: wheel /
   touch / pointer / key input, or a frame where the pane scrolled by what the target moved (a
@@ -1401,9 +1465,8 @@ header.)
   scrolls the pane, before paint, by a chunk's height change when it mounts starting above the
   pane's top, and on any later resize while it lies wholly above. ONE owner: with anchoring on as
   well, a 300px wheel step jumped 719px. This also holds in Safari, which has no anchoring.
-- **The Threads only view is unaffected**: it renders from `pr.threads`, never from the diff, so it
-  lists every thread whether or not its code has mounted. The hidden code under it intersects nothing
-  and mounts nothing while hidden.
+- **The Threads tab is unaffected**: it renders from `pr.threads`, never from the diff, so it lists
+  every thread whether or not its code has mounted.
 - **Caveat: the browser's find-in-page (⌘F) only finds code that has mounted** — a placeholder has
   no text. Scroll past it, or open the file on GitHub. Accepted for the first-paint win; the rail and
   `n`/`p` reach any file.
@@ -1429,11 +1492,11 @@ bounded by resolved staying shut, a one-click Hide remembered per thread, the fi
 lock files, which start collapsed whatever they hold. There is deliberately NO count cap (an
 invisible threshold is the rail's lesson). MEASURED on the dev DB's open PRs (2026-09-24): 2,777
 of 4,127 threads are unresolved; of 581 PRs with threads, 361 carry 1–5, 23 carry more than 20,
-and the most is 532 (29 files, one bot comment each). The Threads only view already mounts a full card
+and the most is 532 (29 files, one bot comment each). The Threads tab already mounts a full card
 for every one of those (`FileGroup` opens any file holding an unresolved thread), so this default
 is bounded by a screen that already exists. An open pill fetches nothing of its own: ThreadCard's
 ML queries are one per PR, and its reaction bars batch per tick (`useReactions`, 60
-targets a request, a cache shared with the Threads only view — 532 threads is 9 lookups).
+targets a request, a cache shared with the Threads tab — 532 threads is 9 lookups).
 
 - ⚠ **THE OPEN STATE IS THE READER'S, REMEMBERED PER THREAD ID — AND ONLY THEIR DECISIONS ARE.**
   - How it works: every open/close (the pill click, a thread reveal, the posted-comment
@@ -1444,8 +1507,8 @@ targets a request, a cache shared with the Threads only view — 532 threads is 
   - A pill REMOUNTS far more often than it looks: collapsing and re-expanding its file; the Wrap
     toggle (`DiffTable`/`FullWidthCell` change the tree's shape); a push moving the anchor row or
     dropping the thread to file grain; and a tab switch, which remounts ChangesTab. Without the
-    memory, each of those undid the reader's choice. (The Threads only view does NOT remount the
-    code: it stays mounted, hidden — see *The Threads only view* below.)
+    memory, each of those undid the reader's choice (the Threads tab → "Show in context" round trip
+    remounts ChangesTab too).
   - A MOUNTED pill never moves on its own (`useState` latches), so the ~5s poll resolving a
     thread under the reader does not snap it shut.
   - The default is never recorded, so a thread resolved elsewhere (a bulk resolve) comes back
@@ -1548,7 +1611,7 @@ scrolled to the thread's pill, opened and ringed — never a Threads tab (there 
 them arrive as `selectThread(prId, id)`; PrDetail's selected-thread effect waits for the PR to
 load and shows each selection ONCE (`handledThreadRef`, so a refetch never yanks the reader back).
 When the ladder below returns null (the file has left the diff) or the pane does not hold the
-thread, it lands on the **Threads only** view with the thread selected, and `ThreadList` scrolls to
+thread, it lands on the **Threads tab** with the thread selected, and `ThreadList` scrolls to
 it (`block: 'center'`, clear of the two sticky headers).
 
 **Thread → code.** `PrDetail.openInChangesFor(thread)` resolves the jump and hands `ThreadCard` an
@@ -1592,7 +1655,7 @@ conversations are all settled no longer forces itself open.
 The old return leg ("In Threads", `ThreadCard.onOpenInThreads`) is DELETED with the tab.
 
 ⚠ `openInChanges` is **optional**, because only ONE of `ThreadCard`'s mounts can honour it: the
-Threads only view's `ThreadList`, which sits in the Changes tab without showing the code. The
+Threads tab's `ThreadList`, which shows no code. The
 mount inside `FileDiffView` (the `InlineThread` pill's expansion — both the table and binary
 branches route through it) is already in the code, and the Feed / search / attention / themes
 mounts have no Changes tab at all (they use `onOpenInPr`). The control is a real `<button>` so
@@ -1603,7 +1666,7 @@ ALSO fire `onOpenInPr` and navigate away from the PR the reader is already in.
 
 CORE, and **nothing is stored or synced** — no column, no migration, no sync step; state is
 read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all seven
-`ThreadCard` mount sites at once — the Threads only view, Feed, search results, attention cards, the
+`ThreadCard` mount sites at once — the Threads tab, Feed, search results, attention cards, the
 themes drill-down, the diff's inline pill) and PrDetail's conversation list (PR comments + review bodies,
 the kind riding the same `isComment` discriminator as the ML badge). There is deliberately **no
 thread-level bar** (`PullRequestReviewThread` is not in GitHub's `Reactable` interface) and no
@@ -1645,7 +1708,7 @@ EVERY model-backed surface gates on the TOP-LEVEL `MeResponse.ai` through
 through the one `AiRunGate`: the agentic ones — Claude Review (run, follow-up, user-story check,
 auto review, the review chat), AI Fix, Resolve with Claude, the docs library — AND the one-shot
 ones — Bot themes (the Bots Themes sub-tab is ABSENT while AI is off), the synthesis cards,
-Chronology pointers, the period-report write-up and the work-plan narration. They
+Chronology pointers and the period-report write-up. They
 run on the reader's own Claude Code login or `ANTHROPIC_API_KEY` (the one credential ladder,
 docs/CLAUDE-REVIEW.md § The credential ladder); Limn stores no key and charges nothing. Copy reads
 "your own Claude Code login or Anthropic API key". There is no `me.pro`, no `useProCapabilities`,
@@ -1679,8 +1742,8 @@ reappears.
 - **ONE STATUS LINE FOR EVERY AGENTIC PASS** — `components/AiStatusLine.tsx`: the stage in words,
   an optional "N of M", and the elapsed clock; no spinner, and it fetches nothing (each surface feeds
   it what it has: Claude Review's SSE phase, Check threads' poll, the sprint read's `briefs` +
-  `passes` via `sprintAiPass`, or a single request's pending state — the work-plan
-  wording, sprint Ask, the docs check). A new agentic pass uses it; `test/aiStatusAndPrActions.test.ts`
+  `passes` via `sprintAiPass`, or a single request's pending state — sprint Ask,
+  the docs check). A new agentic pass uses it; `test/aiStatusAndPrActions.test.ts`
   pins the mounts.
 - **The old CI-analysis card is DELETED** (the CI review diagnoses failing CI). The AI summary, the
   CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
@@ -2114,8 +2177,7 @@ but broken deep links).
 
 - **The daily-brief strip is DELETED** (it duplicated Pending line for line). What stays:
   `GET /api/daily-brief` + `useDailyBrief` (the Welcome-back banner and the Workspace badges read
-  it through `useMyTurnByWorkspace`; it still refetches in lockstep with `['attention-cards']` /
-  `['work-plan']`). Gone with it: `openBriefLine`, the "Elsewhere" roll-up,
+  it through `useMyTurnByWorkspace`; it still refetches in lockstep with `['attention-cards']`). Gone with it: `openBriefLine`, the "Elsewhere" roll-up,
   `myTurnOtherCapDisclosure`, `ciFailingCapDisclosure`, and the Feed's bot-anomaly / red-trunk
   lines (red trunks show atop Activity → Open PRs; bot anomalies on Bots). The synthesis seam's
   `kind:'brief'`/`'rollup'` narration was removed 2026-10-18.
@@ -2124,14 +2186,14 @@ but broken deep links).
   issues" segment reads the latest Claude review's STORED thread judgements
   (`useClaudeThreadJudgements`; the card never runs one) — without them it renders
   "X awaiting a look" from the derived-state rollup in that slot instead. Mounted
-  TWICE (full atop the Changes tab's Threads only view, compact in the Overview attention area); renders ONLY at
+  TWICE (full atop the Threads tab, compact in the Overview attention area); renders ONLY at
   ≥5 union-bot review comments and issues NO extra query below the threshold (the
   ThreadAssessment 60-empty-boxes lesson) — everything it reads is already shared (the
   workspace-reviewer listing, the per-PR ML label index, the batched thread-judgement read — the
   card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
   UNION set (workspace judgement wins both ways, the wire `User.isBot` fallback) — deliberately NOT the
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
-  the SAME folds the Threads only view uses (`rollupCounts`/`threadSeverities`/
+  the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
 - **Bots view is `ROI ('roi' = Measure) | Themes | Benchmark`** (`'settings'` LEFT
   the union long ago; `'advisor'` LEFT 2026-10-26 with the Bot Tuning Advisor; `'classification'`
@@ -3230,10 +3292,11 @@ nothing fetches on mount, and the Slack snapshot carries none of them (`buildPen
 
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
-Pending is eight tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`) — seven scored ones,
-then the unscored **Waiting on others** (§ below): **My turn** ·
-**Claude reviews** (finished Claude reviews you have not acted on — the my_turn cards of type
-`claude_review`, moved out of My turn; same ball rule and dismissals, one scored list) ·
+Pending is eight tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`) — six scored ones and
+two unscored read-only ones (`pendingTabIsReference`): **My turn** (every My Turn type, the two AI
+review types — "New AI review", "Merged after approval" — included) ·
+**AI reviews** (key `claude`, unscored: the newest AI review on each PR, yours and your teammates',
+newest first, up to 100 — § The AI reviews list) ·
 **Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
 reviewer; review load as a "Reviews waiting on people" strip above the list, unranked and uncounted)
 · **Unanswered threads** · **Ready to land** (ready to merge, behind trunk) · **Dependencies**
@@ -3247,11 +3310,34 @@ within. There are no group headings — each card's type chip names its group, a
 Dependencies (plus My turn for a direct summons); the server contract is [BACKEND.md](BACKEND.md)
 § The Dependencies tab, and My Turn's is § My Turn — the ball rule.
 
-- **My turn and Claude reviews split ONE kind by type.** `pendingTabHolds(def, card)` (shared) is the
-  one predicate — `reasons` / `exceptReasons` on the tab def — read by the server's lists and totals
-  and the SPA's `tabsOf` fallback; `pendingTabOfCard` names a card's tab (`pendingTabOf(kind)` still
-  answers My turn for `my_turn`). Claude reviews is shown only where `me.ai.enabled`, or while it
-  holds something or is on screen. Inside both tabs a `direct` card drops its "Your turn" label.
+- **The AI reviews list** (`PendingAiReviews.tsx`, `hooks/useAiReviewsSeen.ts`,
+  `lib/aiReviewsSeen.ts`; server: [BACKEND.md](BACKEND.md) § The AI reviews list). A STABLE
+  REFERENCE: the tab's `ai_review` cards, in the server's order, drawn by their own block (never by
+  `AttentionCards`, never "Do next"): one row per PR — the PR (opens its AI Review tab,
+  `openClaudeReview`), who ran its newest review ("Your Limn", "Your Limn, auto review" or "Robin's
+  Limn" with their avatar), the verdict pill, the findings count and when. The heading is "Latest AI
+  review on each pull request" with its ⓘ. ⚠ **LOOKING NEVER REMOVES A ROW.** A row newer than the
+  stamp the VISIT started with (`aiReviewsSeenAt` on the first settled response with the tab on
+  screen) wears a small "New" tag (`isNewAiReview`; never looked = every row), and keeps it until
+  the reader leaves the tab or the workspace. The tab's badge is `PendingTab.newTotal` (the rows
+  since the last look, `pendingTabBadge` — the summary line reads the same rule), never the list's
+  length. ⚠ **THE STAMP POST CANNOT LOOP**: while the tab is on screen and the page visible,
+  `useAiReviewsSeen` posts `POST /api/attention/ai-reviews/seen` with the newest row's time — only
+  when it is newer than the response's own stamp and than what the visit already sent
+  (`aiReviewsStampToSend`); the refetch that follows carries exactly that stamp, so it sends nothing,
+  and an empty list sends nothing. It refetches `['attention-cards']` only (the brief never counts
+  these). Nothing is sent from another tab, or under the Automation lens (`ai_review` rows are always
+  the People side). ⌘K and the liveness sweep skip `ai_review` cards (and a merged
+  "Merged after approval" PR). The tab never keeps the board from reading as empty.
+- **Every My turn row has Dismiss** — a ✕ `IconButton` at the row's end (`dismissTargetOf`, the same
+  per-PR dismissal as the panel's Dismiss and `e`), shown on hover or on the selected row with a
+  pointer, always on touch; rendered only where it applies, never disabled; nothing fetches until it
+  is pressed.
+- **The AI Review tab marks a run SEEN** (`hooks/useClaudeReviewSeen.ts`): while it has a finished,
+  read (not a router skip) run whose `seenAt` is null, it posts `POST /api/prs/:id/claude-review/seen
+  {reviewId}` once per run, writes `seenAt` into the cached review, and refetches the board, the
+  brief and My Turn — the "New AI review" My Turn card leaves. An older server (no `seenAt`) gets
+  nothing.
 - **Every card leads with its type's mark** (`PendingCardIcon`, on `PrCardEventHeading`'s `icon`),
   every tab and kind chip with its own (`PendingTabIcon` / `PendingKindIcon`), and the guide's tab and
   My Turn tables carry them too. The marks are purpose-built `Pending*Icon`s in `Icons.tsx`; the maps
@@ -3303,10 +3389,8 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   entry.
 - **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
-  thing on the board itself) and the spread/superseded explanations. The work plan still picks its
-  rows across kinds; its headline and `parked` line sit above the tabs and each `why` lands on its
-  card in whichever tab — `PendingCard` reads it from `PendingBoardContext` for EVERY kind (before,
-  only three kinds were passed a `why`, so most narrated rows never showed theirs).
+  thing on the board itself) and the spread/superseded explanations. ("Plan my day", which
+  narrated rows above the tabs, was removed 2026-11-04.)
 - **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts, every
   dependency update, which carries its own merge row, and a My Turn `own_ready` / `own_conflicts`
   card, which carries the same rows), then the view on screen, then the rest.
@@ -3326,14 +3410,13 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   Cards view, empty or not, so the way into Settings is there when the tab holds nothing.
 - **A promoted card keeps its home card's controls**, through pure adapters in `AttentionCards.tsx`
   (pinned in `pendingCardControls.test.ts`): `own_ready` → `PendingMergeActions` (`asForwardCard`),
-  `own_conflicts` → `PendingConflictActions` (`asConflictsCard`), `trunk_red` → the `ci_failing`
-  trunk body with the landing PR's byline (`CiFailingBody` via `asCiFailingCard`), and `own_thread`
-  a `BotVendorPill` when a bot opened the thread. Nothing new fetches on mount. The chip is
+  `own_conflicts` → `PendingConflictActions` (`asConflictsCard`), and `own_thread` a
+  `BotVendorPill` when a bot opened the thread. Nothing new fetches on mount. The chip is
   `myTurnReasonLabel` (fifteen short labels, `MY_TURN_REASON_LABEL`; a ready card says "Ready to
   merge" or "Behind trunk"). ⚠ **The `my_turn` case is an EXHAUSTIVE inner `switch (card.reason)`
   ending in `never`**: the outer `default: return null` would hide a new type while the tab still
-  counted it — how `my_turn` once shipped invisible. The trunk card is REPO-grained (`prId` may be
-  null), so nothing may treat a `my_turn` card as a PR before checking `reason !== 'trunk_red'`.
+  counted it — how `my_turn` once shipped invisible. Every `my_turn` card names a PR (the
+  repo-grained `trunk_red` type was removed 2026-11-04).
 
 **Every PR card names who opened it** (`PrByline`, drawn from the pure `authorByline` +
 `bylineParts`, pinned in `pendingCardControls.test.ts`). It reads `automation`, the SAME field the
@@ -3513,8 +3596,7 @@ Every Pending card, on all seven tabs, reads top to bottom in one order, everyth
    sha) · on <PR title> (a button → Overview) · `repo#N` (org dropped when every card on the board
    shares it) · ↗ · ⓘ. Inside My turn "Your turn" is NOT printed (the tab says it); "In your repos"
    and the neutral label stay, and an ABSENT `relevance` is neutral.
-3. **The work plan's `why` line** (model prose, labelled apart, only while `me.ai.enabled`), directly under it.
-4. **The event's own content** — the attributed reply (only when the heading's quote was cut), up
+3. **The event's own content** — the attributed reply (only when the heading's quote was cut), up
    to 3 pushed commits, the failing checks the heading did not name, suggested reviewers, the
    advisory, a thread's opening comment (`firstComment`), the trunk card's "Last landed: #354 … by
    Dependabot, merged by … — not necessarily the cause".
@@ -3546,10 +3628,10 @@ commits / your PR's new activity the PR's Activity (`tab: 'activity'` = Overview
 section open and scrolled to), a mention / comment-after-yours card THE
 COMMENT when it carries `comment` (`board.openComment`: a comment on a line of code → Changes via
 `openPrChangesAt` with `threadId` + `line`, which PrDetail runs through `openInChangesFor` — the
-thread → Changes ladder that opens its inline pill — falling back to the Threads only view when the
-file left the diff; a comment with no file — a PR comment or review body — → the Comments tab via
-`showPrComment(prId, id, kind)`, keyed `comment:<id>` / `review:<id>` in `PrCommentsList`; without
-`comment`, the Comments tab too), a Claude card the
+thread → Changes ladder that opens its inline pill — falling back to the Threads tab when the
+file left the diff; a comment with no file — a PR comment or review body — → the Activity tab via
+`showPrComment(prId, id, kind)`, keyed `comment:<id>` / `review:<id>` in `PrActivityTab`, which
+opens that card; without `comment`, the Activity tab too), a Claude card the
 review, a red trunk its checks page on GitHub (the "at <sha>" link is the commit itself); the title
 always opens Overview (it seats `prDetailTab` explicitly). A red build on YOUR PR (`ci_failing`'s
 `your_pr` arm, no `InsightPrRef`) still prints "on <title> · repo#N" from its own fields.
@@ -3566,8 +3648,8 @@ right edge.
 - ⚠ **Absent heading facts drop their clause** (`mentionExcerpt`, `threadPath`, `committerId`,
   `firstComment`, `newActorIds`); an unknown actor is "Someone". A `likely_addressed` card says "A
   commit changed <path> after your comment" — never "addressed".
-- ⚠ **A repo-grained card is not drawn as a PR.** `ci_failing`'s trunk arm and a promoted
-  `trunk_red` head with the branch and repo, print no PR title, and link the sha to the commit;
+- ⚠ **A repo-grained card is not drawn as a PR.** `ci_failing`'s trunk arm heads with the branch
+  and repo, print no PR title, and link the sha to the commit;
   `reviewer_load` heads with the PERSON. `pendingCardPrId` gives neither a PR.
 - Pinned by `test/pendingHeadings.test.ts` (every card type, the fallbacks, the relevance labels).
 
@@ -3720,7 +3802,7 @@ the "Requested" row (user id, or a team by slug / `owner/slug`). Someone asked f
   hence `> 1`). The route stamps the request, so a board refetch RETIRES the card and every sibling
   row's outcome with it. A failure refreshes nothing, so the card stays with its words and the retry.
   The last request runs the ONE write set (`invalidateAfterPrWrite`, § The cascading sync), so
-  `['attention-cards']` + `['daily-brief']` + `['work-plan']` move together (plus
+  `['attention-cards']` + `['daily-brief']` move together (plus
   `['workspace-insights']`, the capped fold's copy); a request with a sibling still in flight
   refreshes only the PR's own `['pr', id]`, and `['suggested-reviewers', id]` is refreshed on every
   success.
@@ -3743,7 +3825,7 @@ until the adaptive walk (2-15 min). `AttentionView` mounts ONE batched sweep for
 - ⚠ **ON `changed > 0` IT REFETCHES; IT NEVER SPLICES A CARD OUT.** The response carries counts,
   never cards — deliberately, so a local removal is not even expressible. `capFor` gates the
   "50 of 148" disclosure on `shown === count` with `shown` off these cards and `count` off
-  `useDailyBrief`, so `['attention-cards']`, `['daily-brief']` and `['work-plan']` are invalidated
+  `useDailyBrief`, so `['attention-cards']` and `['daily-brief']` are invalidated
   TOGETHER and the server re-ranks.
 - ⚠ **THE QUERY KEY DOES NOT CARRY THE IDS** (`['attention-liveness', 'ws:<id>']`; the ids ride the
   closure). Keying on them would refetch the sweep every time the board refetched — and a sweep can
@@ -3764,11 +3846,11 @@ until the adaptive walk (2-15 min). `AttentionView` mounts ONE batched sweep for
 
 `main.tsx` turns focus-refetching off globally, which is right for a persisted PR-detail cache and
 a heavy vis board. It also left the ONE surface whose claim is "here is what is still outstanding"
-frozen at whatever it fetched before you switched to GitHub and retired half of it. `useAttentionCards`,
-`useDailyBrief` and `useWorkPlan` each set `refetchOnWindowFocus: true`.
+frozen at whatever it fetched before you switched to GitHub and retired half of it. `useAttentionCards`
+and `useDailyBrief` each set `refetchOnWindowFocus: true`.
 
-- ⚠ **ALL THREE OR NONE.** They are one fold (`getWorkspaceInsights`) read three times: the board,
-  the strip whose count is the board's cap denominator, and the plan beneath it. A focus policy on
+- ⚠ **BOTH OR NONE.** They are one fold (`getWorkspaceInsights`) read twice: the board and the
+  strip whose count is the board's cap denominator. A focus policy on
   one of them is two snapshots of one population — the "the strip says 5, the board lists 3" defect.
   They already share one `refetchInterval` and sit together in `ACTIVITY_QUERY_KEYS` for this reason.
 - The shared `staleTime: 60_000` bounds it: rapid tab flipping refetches at most once a minute,
@@ -3819,7 +3901,7 @@ Pending `conflicts` card stayed until something unrelated refetched the board. T
   forced floor walk always reports `changed: true`, and the full set would put every workspace
   screen on a 30s timer.
 - ⚠ **THE WORKSPACE HALF IS THROTTLED**: at most one sweep per `WORKSPACE_SWEEP_MIN_GAP_MS` (5s)
-  per QueryClient, because `/api/attention`, `/api/daily-brief` and `/api/pro/work-plan` share the
+  per QueryClient, because `/api/attention` and `/api/daily-brief` share the
   60/min `search` tier. The first write sweeps at once. Writes and server-change sweeps inside the
   gap refetch their own PR keys at once and share ONE trailing sweep carrying the union of their
   extras. Sweeps never overlap. During a burst the board catches up at the end of the gap.
@@ -4050,9 +4132,11 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
 `storyBuildActive`), mounting `components/StoryBuild/StoryBuildTabView.tsx`.
 
 - **The tab.** Key `story-build:<ident>` (shared `STORY_BUILD_TAB_PREFIX`; `storyBuildTabKey` /
-  `parseStoryBuildTabKey` in `store/pinnedTabs.ts`), carrying `TabTicketMeta`. EPHEMERAL but
-  SELF-DESCRIBING exactly like `ticket:` — `applyUrlTab` re-creates it, `useUrlState` emits
-  `view=<key>`. The prefixes never overlap. Chip words: `lib/storyBuildTab.ts storyBuildTabLabels`
+  `parseStoryBuildTabKey` in `store/pinnedTabs.ts`), carrying `TabTicketMeta`. SELF-DESCRIBING
+  exactly like `ticket:` — `applyUrlTab` re-creates it, `useUrlState` emits `view=<key>`. **A NEW
+  build tab opens PINNED** (`openStoryBuildTab` sets `pinned: true`; § Pinned tabs), so it has no ✕,
+  survives Close all and comes back after a reload with its words and offer. Re-opening keeps the
+  reader's choice; nothing unpins it automatically, not even a pushed or merged build. The prefixes never overlap. Chip words: `lib/storyBuildTab.ts storyBuildTabLabels`
   ("KEY · Build", tooltip "KEY: implementation", "Close build tab"). ⚠ **THE ONE OPENER is
   `useOpenStoryBuild()`**; nothing calls `openStoryBuildTab` directly. Opening never starts a run.
 - **The ONLY entry point is the STORY VIEW (owner decision 4; moved off the sprint cards 2026-10-31).**
@@ -4061,7 +4145,8 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   heading row in one column / the tray), so it is in EVERY story view: This Sprint's tray, the story tab
   and the PR view's Story tab. Shown only while `me.ai.enabled` (HIDDEN, never disabled). ONE gate,
   shared `storyBuildOffered`, via `lib/storyBuild.ts storyViewBuildEntry`: `'implement'` (not started,
-  no PR, no open session — `BuildIcon`, "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
+  no PR, no open session — `WrenchIcon`, the AI Fix wrench (one mark for "a model writes code"; the
+  hammer `BuildIcon` is DELETED, 2026-11-04), "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
   STARTED ticket — a PR, or a status past Not started, short of Complete — whose latest succeeded story
   check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
   `missing`; `FillGapsIcon`, "Fill gaps in KEY"); with an OPEN session "Open build · <mark>" (accessible
@@ -4357,6 +4442,7 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
 
 | Tab | Global sections | Workspace sections | Gate |
 |---|---|---|---|
+| Appearance (FIRST) | `AppearanceSection` (the colour scheme, per BROWSER — § Colour schemes) | — | none |
 | Pull requests | `LargePrThresholdSection`, `BlastRadiusSection` | — | none |
 | Pending | `MyTurnSection` (per ACCOUNT) | `PendingMuteSection` | none |
 | Features | `FeaturesSection` (per ACCOUNT; which sidebar pages show — § Features shown) | — | none |
@@ -4412,8 +4498,8 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
 — Settings: gates and promotions; the route is `PUT /api/me/my-turn-settings`.
 
 - **Four parts**: "Show in My Turn" (a checkbox per summons type, each with a one-line hint;
-  "Finished Claude reviews" only where `me.ai.enabled`), "Add to My Turn" (the four own-work
-  promotions, plus "Red default branch" as Off · Repos you maintain · Every repo in the workspace),
+  "New AI reviews by your Limn" and "Merged after your Limn approved" only where `me.ai.enabled`),
+  "Add to My Turn" (the four own-work promotions),
   "Order of My turn" (an ordered list with up / down buttons) and "How Pending ranks cards" (preset
   pills, three range sliders, Reset). Type names come from the shared `MY_TURN_SETTING_LABEL`, the
   one spelling Settings, the CLI and the guide use. The copy says "Show in My Turn", never "mute":
@@ -4444,8 +4530,8 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
   stable and SettingsModal's capture-phase Escape handler registers once — never pass an inline
   arrow.
 - **One save moves five reads, together** (`useSetMyTurnSettings`): `['me']` (seeded at once from
-  what the server stored), `['my-turn']`, and the three board keys `['attention-cards']`,
-  `['daily-brief']`, `['work-plan']`. The notification watcher then RE-BASELINES on the new
+  what the server stored), `['my-turn']`, and the two board keys `['attention-cards']`,
+  `['daily-brief']`. The notification watcher then RE-BASELINES on the new
   `configKey` rather than announcing the backlog of a type just switched on (§ Per-workspace "My
   Turn" below).
 
@@ -4474,8 +4560,8 @@ the source.
 - ⚠ **THE ROSTER COMES FROM `Repo.workspaceId`**, the client's only repo→workspace mapping — never
   from the timeline's repo picker, which is a Timeline-only board control not mounted here.
 - The mutation reuses `useWorkspaceMutations`' shared invalidation set: `['my-turn']` (the
-  account-wide inbox the notification watcher reads) plus `['attention-cards']` / `['daily-brief']`
-  / `['work-plan']`, the three reads of the one fold whose whole contract is that they agree.
+  account-wide inbox the notification watcher reads) plus `['attention-cards']` / `['daily-brief']`,
+  the two reads of the one fold whose whole contract is that they agree.
 - On the board, a muted `my_turn` card carries a `muted` chip beside its label
   (`AttentionCards.tsx`). ⚠ **DISPLAY ONLY — no counter, lens or ranker reads it**; they all read
   `relevance`, which has already absorbed the mute. It exists so a card the reader last saw as
@@ -4487,6 +4573,44 @@ the source.
   `SlackSection`). ⚠ `data-testid="bot-settings-section"` died with the latter — `pnpm shots`' 7d
   targeted `bot-settings-panel` on Bots Monitoring → Classification, which is Settings → Bots since
   2026-11-03 (`BotSettingsPanel` deleted; the capture needs re-pointing).
+
+## Colour schemes (`lib/colorSchemes.ts`, Settings → Appearance)
+
+Nine schemes: the two defaults (Limn Light, Limn Dark) and seven named ones — LIGHT: Solarized
+Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo Night.
+
+- **One CSS block per scheme** in `index.css`, `[data-scheme='<id>'] { --ui-*: …; --ai-*: …; }` —
+  all 16 `--ui-*` and all 8 `--ai-*` roles. The defaults are the existing `:root` / `.dark` blocks,
+  which also carry `[data-scheme='light'|'dark']`. Named blocks come AFTER the defaults so, at equal
+  specificity, they win. `COLOR_SCHEMES` is the list (id, name, mode); `test/colorSchemes.test.ts`
+  proves list and CSS agree.
+- ⚠ **`.dark` STAYS.** `data-scheme` sits on `<html>` BESIDE the mode's `.dark` class, so every
+  `dark:` utility, the vendor-ink pick and the code colours keep following light/dark. A scheme is
+  values, never a third mode.
+- ⚠ **Every scheme passes the defaults' floors** (`colorSchemes.test.ts`): 7 inks × 5 surfaces at
+  4.5:1, on-accent on accent-fill, surfaces stepping one way, `ai-ink`/`ai-muted`/`ai-signal` on
+  both AI surfaces and `ai-signal` on every row surface. Canonical hues are kept; a hex that missed was
+  moved in LIGHTNESS only (Solarized's blue, Nord's red …), so these are "Solarized-style", not
+  pixel-exact. Change a value and that test says whether it still holds.
+- **Code highlighting and the resolver washes (`--code-hl-*`, `--mr-*`) are NOT per scheme**: a light
+  scheme inherits the light set, a dark one the dark set, and `codeTokens.test.ts` measures each set
+  on every scheme's page and side panel (that is why a few of them were brightened/darkened).
+- **Vendor ink** is fitted against the HARDEST page of each mode (`INK_GROUNDS`: Gruvbox Light's
+  cream, Nord's slate); `vendorInk.test.ts` checks every vendor on every scheme's page.
+  `textContrast.test.ts` measures its muted pairings on every page of the mode too.
+- **Grounds that were raw hexes are tokens now** — the vis-timeline's dark lines/labels, the sticky
+  repo header, the chart axes (`fill-ui-faint`) and the chart veils (`fill-ui-bg`). A new `.dark`
+  hex that paints a ground or text shows Limn Dark's colour on Nord; use a `--ui-*` token.
+- **Storage is per browser** (`localStorage`): `theme` keeps its old meaning (`'light'` |
+  `'dark'`, absent = dark — the mode), plus `theme-scheme-light` / `theme-scheme-dark` (the last
+  scheme used in each mode). The sidebar's sun/moon and ⌘K's theme command flip the MODE, so they
+  land on the other mode's last scheme. ONE store, `hooks/useColorScheme.ts` (`setColorScheme`,
+  `toggleColorMode`, `useColorScheme`); Settings, the sidebar and ⌘K all go through it.
+- **Applied before first paint** by `public/theme-boot.js`, a blocking `<script src>` in
+  `index.html`'s `<head>` (the CSP allows `'self'` scripts, never inline ones). It repeats the
+  storage rule; the test pins the keys. The hook re-applies on load.
+- **The picker** is the custom `Select`; each option is a chip with `data-scheme=<id>`, so that
+  scheme's block repaints the chip alone and its name shows in its own ink on its own page.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
@@ -4640,7 +4764,7 @@ need a className branch, not a var in the hex table.
 
 ## ML severity badges + the Bots severity rollup
 
-Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads only view a
+Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads tab a
 severity filter, and the Bots ROI tab a "What the bots are flagging" block. All of it reads ONE
 per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never fetches, and a
 target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field). `threadSeverityFilter` is a global store field and carries the same
@@ -4829,7 +4953,7 @@ back:
   a red branch. The board lists ONE card per PR, so a card-keyed dismissal would surface the PR's
   next job in its place and read as "Dismiss did nothing".
 - ⚠ **NOTHING IS SPLICED OUT LOCALLY** (`hooks/useMyTurnDismiss.ts`). The mutation stays pending
-  ("Dismissing…") until `['my-turn']`, `['attention-cards']`, `['daily-brief']` and `['work-plan']`
+  ("Dismissing…") until `['my-turn']`, `['attention-cards']` and `['daily-brief']`
   have refetched — the My Turn settings save's list — so the card and every count move in one frame
   and `capFor`'s `shown === count` pairing never sees a half-updated board. Per-target mutation key.
 - **Two ways back**: the ONE `UndoToast` in the header strip (10s, "Undo", `z`; the old
@@ -5042,8 +5166,7 @@ now). Server contract + the two things it deliberately does NOT compute:
   (`text-red-600 dark:text-red-400`, `CHECK_STATE_META.failure.icon` aria-hidden, an sr-only
   "Failing checks:") under the CI-dot/sha row, from the card's REQUIRED `failingChecks` /
   `failingCheckTotal` (null = no names known: nothing renders, never "0 failing"). The names
-  truncate; "and N more" never does and is never only a tooltip. A promoted red trunk reaches this
-  body through `asCiFailingCard`, which COPIES both fields (pinned in `pendingCardControls.test.ts`).
+  truncate; "and N more" never does and is never only a tooltip.
   Names are bare check/job names, never workflow-prefixed, unlike `BranchStatusPanel`'s
   `checkLabel` ("workflow / name"): the PR side stores no workflow name, so the cards keep one
   vocabulary. Shared rendering with the meta row: see *Every PR card names who opened it* above.
@@ -5150,6 +5273,11 @@ the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, 
   viewport's right) and sits at the viewport's bottom, the cluster's `bottom` becomes that bar's
   height + 8px, so it never sits on Merge / Dismiss. Re-measured on register, resize, a
   `ResizeObserver`, any scroll and `animationend`; an open panel re-anchors when the lift changes.
+  ⚠ **MEASURE AFTER LAYOUT SETTLES** (2026-11-04): each read is taken on the next frame AND again on
+  the frame after, and the `ResizeObserver` watches the bar's PANEL (its parent) as well as the bar.
+  The Open PRs docked panel re-fills to the pane's bottom on scroll (`useFillToPaneBottom`) in its own
+  rAF + a later React commit; a single read on the scroll took the footer's in-between position and
+  kept it, so the cluster sat ~40px too high until the next event.
 - **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` sheet (`z-50`), so the Undo for an action
   taken in a sheet (Dismiss, Approve, Merge) is always reachable; BELOW the mobile drawer
   (`z-[55]`/`[56]`), the modals (Settings, Help, the sync-progress modal, `InfoModal` — all `z-[60]`
@@ -5170,13 +5298,21 @@ the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, 
   Each job component still renders ONE `HeaderToast`, which PORTALS a 28px circle into the cluster
   button and its section into the panel. A circle is the job's icon, a PROGRESS RING when `progress`
   is set, a COUNT BADGE (`count`), and a red ring + dot when `alert` (a failed merge or AI fix, failed
-  dependency results, the AI budget pause). Circles overlap like an avatar stack; `toastRank`
+  dependency results, the AI budget pause). Circles overlap like an avatar stack (each circle sits in
+  a SLOT span that carries the order, stacking and the -10px overlap); `toastRank`
   (lib/toastAnchor.ts) puts alert > on-line action (Undo, Reopen) > progress > the rest, newest first
   within a tier, furthest RIGHT and on top — and the panel lists the sections in that same order, top
   down. Each circle keeps its words `sr-only` (the live region announces a circle appearing;
   `undo-toast` etc. test ids sit on the circle, the section is `<testId>-panel`). ⚠ **The cluster's
   click is a NATIVE listener**: a React `onClick` on the button never fires for a click on a
   portalled circle (React bubbles through the job's own tree).
+- **HOVER SPREADS THE CIRCLES** (2026-11-04; `CLUSTER_SLOT` / `CLUSTER_PAD` in HeaderToasts.tsx).
+  A real hover (`[@media(hover:hover)]`, so a tap on touch never spreads and opens in one gesture) or
+  keyboard focus (`focus-visible`) on the cluster fans the circles out to the left with 10px between
+  them (`ml-2.5`, the button's left padding drops to 0), so every count badge and alert dot is
+  readable; leaving folds them back. Margin and padding transition `motion-safe` only (200ms). The
+  cluster is still ONE button: a click anywhere opens the panel, anchored to the live (spread) rect.
+  The group is NAMED (`group/toasts`) so no `group` above the dock can spread it.
 - **CLICK EXPANDS, UP AND LEFT.** The cluster is one `<button aria-expanded aria-controls>`. The panel
   (`data-testid="header-toast-panel"`) is `position: fixed`, `z-[60]`, its BOTTOM-RIGHT corner on the
   cluster's top-right corner (`TOAST_PANEL_GAP` 6px above it): it grows LEFT as far as its content
@@ -5403,7 +5539,7 @@ text's own colour at 50% (`color-mix` on `currentColor`), full strength on hover
   list's own controls, "Show more" and scrollbars do not close it.
 - **The Open PRs drawer underlines at EVERY width** (`TEXT_LINK`): it is a panel of facts, so a
   link must read as one at a glance. Underlined there: the **Threads** fact ("2 untouched" /
-  "N open threads" / "N resolved" — a link to the PR's Changes → Threads only view, every thread
+  "N open threads" / "N resolved" — a link to the PR's Threads tab, every thread
   shown), the linked ticket rows' words (story view or tracker), the "Also in" ticket keys, and
   the AI review section's links (verdict / "Reviewing…" / "Review failed", the "N threads to fix"
   line → the AI review, the AI Fix state). NOT underlined there: the footer's Buttons (**View PR**,
@@ -5801,7 +5937,7 @@ shorter form of each rule; this is the full wording.
 
 - **Every AI surface gates VISIBILITY on `me.ai.enabled` and its Run button on the ONE
   `AiRunGate`** (`components/AiSetup.tsx`) — agentic and one-shot alike (bot themes, synthesis,
-  pointers, period write-up, work-plan wording). Never credits: on an API key a run
+  pointers, period write-up). Never credits: on an API key a run
   shows US$; on a subscription it shows its share of the week, never US$ — always through ONE
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
 
@@ -5826,7 +5962,7 @@ shorter form of each rule; this is the full wording.
 - **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (one `nodes(ids:)`
   call; mergeability for a ranked subset ≤ 25 — 50 ids 502s). ⚠ An observed `unknown` never
   demotes a known merge state. ⚠ **It returns COUNTS, never cards**: refetch `['attention-cards']`
-  + `['daily-brief']` + `['work-plan']` together — the only keys opting out of
+  + `['daily-brief']` together — the only keys opting out of
   `refetchOnWindowFocus: false`.
 
 ### This Sprint
@@ -5865,11 +6001,13 @@ shorter form of each rule; this is the full wording.
 Nothing is selected on arrival or on a tab switch (`sel.index` null): a click, `j`/`k` or an arrow
 picks the first row, and Enter/a/m/e act only on a selection.
 
-`AttentionView.tsx` is one page header (title + ⓘ, the work plan's quiet sentences, Re-plan inside
-`AiRunGate`), the shared `Tabs` (`1`–`7`), the controls row, then `AttentionCards` — now a
-`List` of one-line rows (`pendingRow.ts`: tone mark, reason, title + repo#N, plan mark, size,
+`AttentionView.tsx` is one page header (title + ⓘ), the shared `Tabs` (`1`–`7`) drawn as PR
+detail's BUTTON tabs (`variant="boxed"`, same strip classes and 14px icons, no icon colour of
+its own — `test/pendingTabStrip.test.ts`), on My turn ONE visible sentence ("Pull requests where
+the next move is yours."; the rest stays behind the ⓘ), the controls row, then `AttentionCards` — now a
+`List` of one-line rows (`pendingRow.ts`: tone mark, reason, title + repo#N, size,
 author, age) beside a `SidePanel` that renders the WHOLE card (`PendingCard`): heading, action
-line, why line, content, fact line, AI line, Details, and every button in the footer. Nothing was
+line, content, fact line, AI line, Details, and every button in the footer. Nothing was
 removed from the card; it moved one click (or Enter) away.
 
 - **Colour**: a row's mark is red when it blocks, green when it can land, amber when `severity` is

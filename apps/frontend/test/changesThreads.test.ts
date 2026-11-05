@@ -1,5 +1,5 @@
-// THREADS LIVE IN THE CHANGES TAB. The Threads tab is gone: a thread is read inline in the code,
-// or in the Changes tab's "Threads only" view, and every thread link lands on Changes.
+// THE THREADS TAB: the review threads without the code (it was the Changes tab's "Threads only"
+// view). Inline in the diff they still live in Changes; every thread link lands through ONE helper.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend changesThreads
 import { readFileSync } from 'node:fs';
@@ -22,43 +22,51 @@ const read = (rel: string): string =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '');
 
-describe('the Threads tab is gone', () => {
-  it('is not a PR detail tab', () => {
-    expect(PR_DETAIL_TABS as readonly string[]).not.toContain('threads');
-    expect(read('PrDetail.tsx')).not.toMatch(/'threads'/);
+describe('the Threads tab', () => {
+  it('is a PR detail tab, between Activity and Changes', () => {
+    expect([...PR_DETAIL_TABS].slice(0, 4)).toEqual(['overview', 'activity', 'threads', 'changes']);
+    expect(read('PrDetail.tsx')).toMatch(/'overview',\s*'activity',\s*'threads',\s*'changes'/);
   });
 
-  it('an old ?prTab=threads link lands on Changes, keeping the named thread', () => {
+  it('?prTab=threads opens it, keeping the named thread', () => {
     location.search = '?view=pr-detail:5&prTab=threads&thread=9';
     const out = readFromUrl();
-    expect(out.prDetailTab).toEqual({ prId: 5, tab: 'changes' });
+    expect(out.prDetailTab).toEqual({ prId: 5, tab: 'threads' });
     expect(out.selectedThreadId).toBe(9);
   });
 
-  it('every thread selection is shown through ONE helper, on Changes', () => {
+  it('every thread selection is shown through ONE helper; rung 4 lands on Threads', () => {
     const src = read('PrDetail.tsx');
     // The selected-thread effect and the Pending comment-card jump both go through showThread.
     expect(src.match(/showThread\(selectedThreadId\)/g)).toHaveLength(1);
     expect(src).toMatch(/showThread\(thread\.id\)/);
     // The Claude Review tab's thread rows too.
     expect(src).toMatch(/onOpenThread=\{showThread\}/);
+    const show = src.slice(src.indexOf('const showThread = '), src.indexOf('const openPrFocused'));
+    expect(show).toMatch(/setPrDetailTab\(prId, 'threads'\)/);
+  });
+
+  it('keeps the guarded filters, the rename-aware fold and "Show in context"', () => {
+    const detail = read('PrDetail.tsx');
+    expect(detail).toMatch(/selectedPrId === prId \? rawThreadStateFilter : EMPTY_THREAD_STATE_FILTER/);
+    expect(detail).toMatch(/<PrThreadsTab[\s\S]*?stateFilter=\{threadStateFilter\}[\s\S]*?openInChangesFor=\{openInChangesFor\}/);
+    const tab = read('pr/PrThreadsTab.tsx');
+    expect(tab).toMatch(/indexThreadsByPath\(pr\.threads, files\)/);
+    expect(tab).toMatch(/pathFor=\{pathFor\}/);
+    // A cache read, never a fetch.
+    expect(tab).toMatch(/enabled: false/);
   });
 });
 
 describe('the Changes tab sticky bar', () => {
-  it('is sticky, carries the Threads only toggle, and no file delta', () => {
+  it('is sticky, has no Threads only toggle, and no file delta', () => {
     const src = read('ChangesTab.tsx');
     const header = src.slice(src.indexOf('function Header('), src.indexOf('export function ChangesTab('));
     // Pins under PrDetail's sticky tab strip below md (`--pr-tabs-h`, 0 from md up).
     expect(header).toMatch(/className="sticky top-\[var\(--pr-tabs-h,0px\)\] z-30/);
-    expect(header).toMatch(/aria-pressed=\{threadsOnly\}/);
-    expect(header).toMatch(/Threads only/);
+    expect(src).not.toMatch(/threadsOnly|Threads only|changes-threads/);
     // The PR header already states these.
     expect(header).not.toMatch(/changedFilesCount|pr\.additions|pr\.deletions/);
-  });
-
-  it('keeps the code mounted under the Threads only view', () => {
-    expect(read('ChangesTab.tsx')).toMatch(/className=\{threadsOnly \? 'hidden' : 'min-w-0 flex-1'\}/);
   });
 });
 

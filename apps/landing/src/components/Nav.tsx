@@ -3,7 +3,7 @@ import { SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The header, as three tiles of the board (styles: .lb-nav in board.css): an ink
-// tile carrying the name, a surface tile with the five links (Product, then four pages), and a flat
+// tile carrying the name, a surface tile with the six links (Product, then five pages), and a flat
 // gold "Run it now" tile that lands on the home page's run section.
 //
 // The active page is marked by a gold underline on its link (aria-current="page").
@@ -12,7 +12,7 @@ import { SITE_NAME } from '../lib/site';
 // There is no sign-in. Limn has no hosted app and no accounts.
 //
 // NO MOBILE DRAWER. On a phone the link tile is hidden, as in the design, and the
-// same five links follow as a second row of small text under the tiles. A modal
+// same six links follow as a second row of small text under the tiles. A modal
 // drawer is a box this design does not need.
 // ---------------------------------------------------------------------------
 
@@ -21,6 +21,8 @@ const NAV_LINKS = [
   { to: '/#review', label: 'Product' },
   { to: '/getting-started', label: 'Getting started' },
   { to: '/reporting', label: 'Reporting and metrics' },
+  // How reviews work when several teammates run Limn, and where a team above the free size asks for a licence.
+  { to: '/teams', label: 'For teams' },
   { to: '/how-we-measure', label: 'How we measure' },
   // Contact is in the header, not only the footer, because it is how an organisation
   // with more than three people gets a licence — a path in a footer is one nobody takes.

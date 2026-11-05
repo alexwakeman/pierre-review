@@ -328,7 +328,7 @@ looking at RIGHT NOW any fresher than its repo's bucket. `sync/refresh-pr.ts` +
   bust it would hand the client's refetch a ≤60s-old snapshot.
 - **`changed` is the client's only invalidation trigger**: `['pr', id]` + its cached
   thread keys + `['ml-labels', id]` + `['timeline']` + `['open-prs']` + **`['attention-cards']`
-  + `['daily-brief']` + `['work-plan']`** on `changed:true`;
+  + `['daily-brief']`** on `changed:true`;
   NOTHING on false (a 5s timeline invalidation would churn the vis board). A probe-200
   walk whose `updated_at` didn't move is NOT changed (REST fields like `mergeable_state`
   churn ETags without real activity).
@@ -391,7 +391,7 @@ adaptive scheduler next walked that repo. `sync/pr-liveness-sweep.ts` +
   removal. Each tab's count and its list come from one server response (and `/api/daily-brief`
   returns the same figures), so dropping one card locally would make a tab list fewer cards than its count
   claims. On `changed > 0` the SPA invalidates
-  `['attention-cards']` + `['daily-brief']` + `['work-plan']` together. The same diff raises the
+  `['attention-cards']` + `['daily-brief']` together. The same diff raises the
   PR change signal once per repo that moved (below), so every OTHER screen and tab catches up
   too, not just the board that asked.
 - **One sweep per ACCOUNT at a time** (a synchronous in-flight claim released in `finally` on

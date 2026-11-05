@@ -14,6 +14,7 @@ import {
   MagnifierIcon,
   MoonIcon,
   PendingBallIcon,
+  PinIcon,
   PullRequestIcon,
   QuestionIcon,
   RefreshIcon,
@@ -25,7 +26,7 @@ import { SETTINGS_TABS } from '../components/settings/settingsTabs.js';
 import { useCommandProvider, useRegisterCommands, type Command } from '../components/ui/commands.js';
 import { indexUsers } from '../lib/ui.js';
 import { getSyncRoundActions, useFilters } from '../store/filters.js';
-import { usePinnedTabs } from '../store/pinnedTabs.js';
+import { canPinTab, usePinnedTabs } from '../store/pinnedTabs.js';
 import { useSettingsModal } from '../store/settingsModal.js';
 import { PENDING_TABS } from '@pierre-review/shared';
 import { useAiCapabilities } from './useAiCapabilities.js';
@@ -197,7 +198,7 @@ export function useShellCommands({
           m.openSettings();
         },
       })),
-      { id: 'theme', group: 'Actions', title: 'Switch light / dark theme', icon: <MoonIcon size={14} />, keywords: ['dark mode', 'light mode'], run: toggleTheme },
+      { id: 'theme', group: 'Actions', title: 'Switch light / dark theme', icon: <MoonIcon size={14} />, keywords: ['dark mode', 'light mode', 'colour scheme', 'appearance'], run: toggleTheme },
       {
         id: 'sync',
         group: 'Actions',
@@ -233,6 +234,7 @@ export function useShellCommands({
   // ── what the redesign's shell added (the old header / rail / strip controls, reachable by name) ──
   const { data: allRepos } = useRepos();
   const tabs = usePinnedTabs((s) => s.tabs);
+  const activeTabKey = usePinnedTabs((s) => s.activeTab);
   const { lines: needsYou } = useMyTurnByWorkspace();
   const notif = useNotificationToggle();
   const { data: armed } = useArmedMerges();
@@ -336,18 +338,31 @@ export function useShellCommands({
         run: () => usePinnedTabs.getState().setActiveTab(tab.key),
       });
     }
-    if (tabs.length > 0) {
+    // Pin / unpin the tab on screen (the menu's item; hidden where a pin cannot survive a reload).
+    const current = tabs.find((t) => t.key === activeTabKey);
+    if (current != null && (current.pinned === true || canPinTab(current))) {
+      out.push({
+        id: 'toggle-pin-tab',
+        group: 'Actions',
+        title: current.pinned === true ? 'Unpin this tab' : 'Pin this tab',
+        hint: tabWords(current),
+        icon: <PinIcon size={14} />,
+        keywords: ['pin', 'unpin', 'tab'],
+        run: () => usePinnedTabs.getState().togglePinTab(current.key),
+      });
+    }
+    if (tabs.some((t) => t.pinned !== true)) {
       out.push({
         id: 'close-all-tabs',
         group: 'Actions',
         title: 'Close all tabs',
-        hint: `${tabs.length} open`,
+        hint: `${tabs.filter((t) => t.pinned !== true).length} open`,
         icon: <CloseIcon size={14} />,
         run: () => usePinnedTabs.getState().closeAllTabs(),
       });
     }
     return out;
-  }, [notif.supported, notif.enabled, notif.toggle, aiOn, armedCount, needsYou, allRepos, workspaceId, tabs]);
+  }, [notif.supported, notif.enabled, notif.toggle, aiOn, armedCount, needsYou, allRepos, workspaceId, tabs, activeTabKey]);
   useRegisterCommands('shell:extras', shellExtras);
 
   // The server search (PR bodies, reviews, threads, comments, people, tickets) — the old search box.

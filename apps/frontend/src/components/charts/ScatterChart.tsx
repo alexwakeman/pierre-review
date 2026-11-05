@@ -152,7 +152,7 @@ export function ScatterChart({
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
+                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-ui-faint text-meta">
                   {formatY(v)}
                 </text>
               </g>
@@ -163,7 +163,7 @@ export function ScatterChart({
                 x={X(v)}
                 y={height - 3}
                 textAnchor="middle"
-                className="fill-gray-500 dark:fill-gray-400 text-meta"
+                className="fill-ui-faint text-meta"
               >
                 {formatX(v)}
               </text>

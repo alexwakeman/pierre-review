@@ -44,7 +44,7 @@ import {
   ticketCodeNote,
 } from '../lib/laneBoard.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, PendingStalledIcon, RefreshIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, WrenchIcon, CriticalPathIcon, PullRequestIcon, PendingStalledIcon, RefreshIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -172,7 +172,7 @@ export function TicketCard({
               {buildMark === 'building' ? (
                 <RefreshIcon size={10} className="shrink-0 animate-spin motion-reduce:animate-none" />
               ) : (
-                <BuildIcon size={11} className="shrink-0" />
+                <WrenchIcon size={11} className="shrink-0" />
               )}
               <span className="truncate">{STORY_BUILD_MARK_WORDS[buildMark]}</span>
             </span>

@@ -10,7 +10,7 @@ export interface ResolveEvent {
 /**
  * Every resolve/unresolve that SUCCEEDED on this PR since the caller mounted, delivered once each
  * and in the order they were made. Every resolve in the app shares `RESOLVE_THREAD_MUTATION_KEY`
- * (the Changes tab's inline cards and its Threads only view, the Claude Review tab, a Pending
+ * (the Changes tab's inline cards and its Threads tab, the Claude Review tab, a Pending
  * card), so one subscription hears them all. The writes already in the cache when the caller
  * mounted are history, not news, and are never delivered.
  *

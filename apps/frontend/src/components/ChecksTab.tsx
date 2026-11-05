@@ -73,11 +73,22 @@ function Row({
     // Label above the value on a phone, beside it from sm up. A quiet mute word, never an
     //  tracked label (docs/redesign/DESIGN.md § Type).
     <div className="flex flex-col gap-0.5 px-4 py-1.5 text-body sm:flex-row sm:gap-3 md:px-5">
-      <span className="shrink-0 text-meta text-ui-faint sm:w-28 sm:pt-0.5">
+      <span className="shrink-0 text-meta text-ui-faint sm:w-20 sm:pt-0.5">
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
+  );
+}
+
+/** One Overview section: a heading, then its rows. The heading names the group, so the rows keep
+ *  short labels (`Row`'s narrow label column). */
+function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <section aria-label={title} className="pt-3 first:pt-1.5">
+      <h3 className="px-4 pb-0.5 text-meta font-semibold text-ui-mute md:px-5">{title}</h3>
+      {children}
+    </section>
   );
 }
 
@@ -425,8 +436,7 @@ function RequestedReviewersRow({
   );
 }
 
-// The PR description (markdown), shown in the Overview between "Merged by" and
-// "Checks". Collapsed to the first eight lines by default (`SUMMARY_COLLAPSED_LINES`) with a Show more/less
+// The PR description (markdown), shown last in the Overview's About section. Collapsed to the first eight lines by default (`SUMMARY_COLLAPSED_LINES`) with a Show more/less
 // toggle — surfaced only when the body actually overflows. No own top border: it
 // sits inside the divide-y section list, which separates it from its neighbours.
 /** How many lines of the PR summary show while it is collapsed. */
@@ -728,6 +738,14 @@ export function ChecksTab({
       .sort((a, b) => b.threads - a.threads);
   })();
 
+  // The People section renders only when one of its rows does.
+  const peopleVisible =
+    reviewsRowVisible(pr) ||
+    pr.requestedReviewers.length > 0 ||
+    suggestions.length > 0 ||
+    botGroups.length > 0 ||
+    (slowBots.length > 0 && onShowBotActivity != null);
+
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
@@ -758,7 +776,9 @@ export function ChecksTab({
           approve the app.)
         </div>
       )}
-      <div className="py-1">
+      <div className="max-w-[46rem] pb-1">
+      {/* CAN IT LAND — the merge facts and the actions on them, first. */}
+      <Section title="Can it land">
         {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). The
             wrapper is the scroll + focus target for PrDetail's header CI readout. */}
         <div
@@ -1026,6 +1046,54 @@ export function ChecksTab({
           </Row>
         )}
 
+      {/* Actions = every viewer write action on the PR in one row: approve, merge (push + open +
+          non-draft), arm "merge when ready" (same gate; its own eligibility inside) and
+          close-without-merging (push OR author + open, HIDDEN while an auto-merge is armed).
+          Each control expands in place; the approvers themselves read from the green ✓ badges
+          in the Reviews row (People). The "check addressed" run used to sit here too — it is
+          now folded into the single "Check review" bar above the tabs, which covers the same
+          threads and comments in one combined call per target, so leaving both would let a
+          user pay twice for one judgement.
+
+          …and REOPEN (same permission, `state === 'closed'` — the mirror gate, and the reason
+          this Row now opens at all on a closed PR: its other three disjuncts are two
+          `state === 'open'` gates plus `viewerCanApprove`, which is not state-gated, so a closed
+          PR the viewer AUTHORED rendered no Actions row whatsoever while a closed PR somebody
+          else authored rendered one holding only Approve). ⚠ No `armedIntent` condition on the
+          reopen branch: an armed auto-merge intent and a closed PR are not a live combination
+          (the runner resolves an intent whose PR closed), and the guard would hide the button
+          for the wrong reason. */}
+      {prActionsVisible(pr, armedIntent != null) && (
+        <Row label="Actions">
+          <PrActionControls pr={pr} blockFacts={blockFacts} />
+        </Row>
+      )}
+
+      </Section>
+
+      {/* The AI review, as its own card (pr/PrOverviewAiReview.tsx). */}
+      {aiReview}
+
+      {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
+          lists the checks — COLLAPSED to one summary line until the reader opens it. */}
+      {checks.length > 0 && (
+        <Section title="Checks">
+          <div className="px-4 py-1 md:px-5">
+          <ChecksSummary checks={checks} flakyChecks={pr.flakyChecks}>
+            <ChecksList
+              prId={pr.id}
+              prGithubUrl={pr.githubUrl}
+              checks={checks}
+              flakyChecks={pr.flakyChecks}
+            />
+            <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
+          </ChecksSummary>
+          </div>
+        </Section>
+      )}
+
+      {peopleVisible && (
+      <Section title="People">
         {/* Reviews = everyone who reviewed and where they stand, off the server's fold, plus the
             "only bots reviewed" coverage chip. UNCAPPED — the pane has the room the card does
             not, so there is no "+N" here and the only gap between the chips and `reviewerCount`
@@ -1034,6 +1102,12 @@ export function ChecksTab({
         <Row label="Reviews">
           <ReviewsChips pr={pr} usersById={usersById} />
         </Row>
+      )}
+
+      {pr.requestedReviewers.length > 0 && <RequestedReviewersRow pr={pr} usersById={usersById} />}
+
+      {suggestions.length > 0 && (
+        <SuggestedReviewersRow pr={pr} suggestions={suggestions} usersById={suggestUsersById} />
       )}
 
       {botGroups.length > 0 && (
@@ -1094,26 +1168,42 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* Actions = every viewer write action on the PR in one row: approve, merge (push + open +
-          non-draft), arm "merge when ready" (same gate; its own eligibility inside) and
-          close-without-merging (push OR author + open, HIDDEN while an auto-merge is armed).
-          Each control expands in place; the approvers themselves read from the green ✓ badges
-          in the Reviews row above. The "check addressed" run used to sit here too — it is
-          now folded into the single "Check review" bar above the tabs, which covers the same
-          threads and comments in one combined call per target, so leaving both would let a
-          user pay twice for one judgement.
+      </Section>
+      )}
 
-          …and REOPEN (same permission, `state === 'closed'` — the mirror gate, and the reason
-          this Row now opens at all on a closed PR: its other three disjuncts are two
-          `state === 'open'` gates plus `viewerCanApprove`, which is not state-gated, so a closed
-          PR the viewer AUTHORED rendered no Actions row whatsoever while a closed PR somebody
-          else authored rendered one holding only Approve). ⚠ No `armedIntent` condition on the
-          reopen branch: an armed auto-merge intent and a closed PR are not a live combination
-          (the runner resolves an intent whose PR closed), and the guard would hide the button
-          for the wrong reason. */}
-      {prActionsVisible(pr, armedIntent != null) && (
-        <Row label="Actions">
-          <PrActionControls pr={pr} blockFacts={blockFacts} />
+      <Section title="About">
+      {/* Ticket, then Branch, each on its OWN row. Tickets (core tracker, compute-on-read) are
+          tri-state: null → no tracker, row omitted; [] → a muted "No ticket found"; non-empty →
+          one chip per ticket. The head branch (what you would `git checkout`) and its base: a
+          null head is not synced yet and the row is omitted. */}
+      {pr.tickets != null && (
+        <Row label="Ticket">
+          <PrTicketLine pr={pr} />
+        </Row>
+      )}
+      {pr.headRefName != null && (
+        <Row label="Branch">
+          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
+        </Row>
+      )}
+
+      {pr.labels.length > 0 && (
+        <Row label="Labels">
+          <div className="flex flex-wrap gap-1">
+            {pr.labels.map((l) => (
+              <span
+                key={l.name}
+                // The label's own colour is its DOT only; the words are grey on a tone.
+                className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
+              >
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: `#${l.color}` }}
+                />
+                {l.name}
+              </span>
+            ))}
+          </div>
         </Row>
       )}
 
@@ -1139,74 +1229,15 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* Ticket, then Branch, each on its OWN row. Tickets (core tracker, compute-on-read) are
-          tri-state: null → no tracker, row omitted; [] → a muted "No ticket found"; non-empty →
-          one chip per ticket. The head branch (what you would `git checkout`) and its base: a
-          null head is not synced yet and the row is omitted. */}
-      {pr.tickets != null && (
-        <Row label="Ticket">
-          <PrTicketLine pr={pr} />
-        </Row>
-      )}
-      {pr.headRefName != null && (
-        <Row label="Branch">
-          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
-        </Row>
-      )}
+      <Row label="Updated">
+        <span className="text-meta text-ui-mute" title={dateTime(pr.updatedAt)}>
+          {relativeTime(pr.updatedAt)}
+        </span>
+      </Row>
 
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
-      {aiReview}
-
-      {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
-          lists the checks — COLLAPSED to one summary line until the reader opens it. */}
-      {checks.length > 0 && (
-        <Row label="Checks">
-          <ChecksSummary checks={checks} flakyChecks={pr.flakyChecks}>
-            <ChecksList
-              prId={pr.id}
-              prGithubUrl={pr.githubUrl}
-              checks={checks}
-              flakyChecks={pr.flakyChecks}
-            />
-            <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
-          </ChecksSummary>
-        </Row>
-      )}
-
-      {pr.labels.length > 0 && (
-        <Row label="Labels">
-          <div className="flex flex-wrap gap-1">
-            {pr.labels.map((l) => (
-              <span
-                key={l.name}
-                // The label's own colour is its DOT only; the words are grey on a tone.
-                className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
-              >
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ backgroundColor: `#${l.color}` }}
-                />
-                {l.name}
-              </span>
-            ))}
-          </div>
-        </Row>
-      )}
-
-      {pr.requestedReviewers.length > 0 && <RequestedReviewersRow pr={pr} usersById={usersById} />}
-
-      {suggestions.length > 0 && (
-        <SuggestedReviewersRow pr={pr} suggestions={suggestions} usersById={suggestUsersById} />
-      )}
-
-      <Row label="Meta">
-        <div className="space-y-0.5 text-meta text-ui-mute">
-          <div>{pr.repoFullName}</div>
-          <div>opened {relativeTime(pr.openedAt)}</div>
-          <div>updated {relativeTime(pr.updatedAt)}</div>
-        </div>
-      </Row>
+      </Section>
       </div>
     </>
   );

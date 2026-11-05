@@ -193,7 +193,7 @@ async function buildSprintPayload(
   const issues: unknown[] = [];
   const prRefs: DigestPrRef[] = [];
   const seenPr = new Set<number>();
-  const addRef = (c: Extract<InsightCard, { prId: number }>): void => {
+  const addRef = (c: Exclude<Extract<InsightCard, { prId: number }>, { kind: 'ai_review' }>): void => {
     if (seenPr.has(c.prId)) return;
     seenPr.add(c.prId);
     prRefs.push({
@@ -260,6 +260,8 @@ async function buildSprintPayload(
     // The reader's own PRs held by someone else — the live board's alone (never built for this
     // fold), and personal, never a team action item. Named so it cannot fall through.
     if (c.kind === 'waiting_on_others') continue;
+    // An AI review since the reader last looked — the live board's alone, and seen-based per reader.
+    if (c.kind === 'ai_review') continue;
     if (c.kind === 'reviewer_load') {
       reviewersOverloaded += 1;
       issues.push({

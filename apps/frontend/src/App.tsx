@@ -56,19 +56,7 @@ import { ShortcutsSheet } from './components/shell/ShortcutsSheet.js';
 import { useShell } from './store/shell.js';
 import { useWorkspaceShell } from './components/WorkspaceSelector.js';
 import { WorkspaceManagerModal } from './components/Activity/WorkspaceManager.js';
-
-function useDarkMode(): [boolean, () => void] {
-  const [dark, setDark] = useState(
-    () => (localStorage.getItem('theme') ?? 'dark') !== 'light',
-  );
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
-  }, [dark]);
-  // Stable, so the ⌘K command list built from it is not rebuilt on every render.
-  const toggle = useCallback(() => setDark((d) => !d), []);
-  return [dark, toggle];
-}
+import { toggleColorMode, useColorScheme } from './hooks/useColorScheme.js';
 
 export default function App(): JSX.Element {
   // All hooks run unconditionally (rules-of-hooks) before we branch on the me state for the
@@ -83,7 +71,9 @@ export default function App(): JSX.Element {
   // A Claude review that starts or ends anywhere refetches that PR's review (the tab pill). ONE
   // passive observer of the polled active list; it fetches nothing itself.
   useClaudeReviewActiveSync();
-  const [dark, toggleDark] = useDarkMode();
+  // The colour scheme (hooks/useColorScheme.ts): the sun/moon swaps to the other mode's last scheme.
+  const dark = useColorScheme().mode === 'dark';
+  const toggleDark = toggleColorMode;
   // Help and the key sheet open from the sidebar foot, ⌘K and `?`, so their state is the shell's.
   const helpOpen = useShell((s) => s.helpOpen);
   const setHelpOpen = useShell((s) => s.setHelpOpen);

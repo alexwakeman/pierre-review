@@ -13,7 +13,7 @@ block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE`
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Five content routes** (home, `/getting-started`, `/reporting`, `/how-we-measure`, `/contact`)
+A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Six content routes** (home, `/getting-started`, `/reporting`, `/teams`, `/how-we-measure`, `/contact`)
 plus the three legal ones:
 
 | Route | Page | Focus |
@@ -21,6 +21,7 @@ plus the three legal ones:
 | `/` | `pages/Home.tsx` | "Your team writes more code than it can review": the hero (with the Pending board), works with, the proof figures, the Review / Fix / Ship / See chapters, Why Limn, every feature free, questions and the close |
 | `/getting-started` | `pages/GettingStarted.tsx` | Install and run, turn on Claude, add the scoring model, add repositories, connect Jira or Linear, connect Slack |
 | `/reporting` | `pages/Reporting.tsx` | Reporting and metrics: the one window, period reports, Chronology, 26 weeks, where the work is happening, what bots are worth, This Sprint |
+| `/teams` | `pages/Teams.tsx` | For teams: several teammates each running Limn, with GitHub as the go-between — team claims (one review per commit per provider), the author can't approve their own PR, one review across teammates, Waiting on others, what it never does, and the licence above the free size |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner. Terms summarise the Limn License and defer to it |
@@ -31,7 +32,7 @@ Albert Sans face, the shared header (`.lb-nav`) and footer (`.lb-foot`), and the
 header comment lists the classes. Every page renders a root `<div className="lb <page>">`
 with `useReveal` (`components/board/useReveal.ts`, which lifts `.rise` tiles in as they
 scroll into view and leaves everything visible without JS) and keeps its own rules in a
-page-scoped file under that root: `pages/getting-started.css`, `reporting.css`,
+page-scoped file under that root: `pages/getting-started.css`, `reporting.css`, `teams.css`,
 `how-we-measure.css`, `contact.css`, `legal.css`, and `components/chrome.css` for the 404, the
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
@@ -40,7 +41,7 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 steps included; the site holds no picture of the Limn UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
 CheckRow, CourtBar, MiniTable, Diff, Log, Stat, and the settings controls Section / Field /
-SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx` and `setup.tsx`;
+SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx`, `setup.tsx` and `teams.tsx`;
 `mock.css` + `live.css`), and every word, number and state comes from ONE file,
 `src/mock/acme.ts` (the fictional Acme team: PAY-142, #612, acme/payments …). Each mock is real
 text with an `aria-label` summary and restacks under 961px.
@@ -62,8 +63,8 @@ are the app's own; never invent a feature for a mock.
 
 | Mock (`components/mock/…`) | Page | Mirrors (`apps/frontend/src/…`) |
 |---|---|---|
-| `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx` |
-| `home.tsx` ReviewMock (PR tabs) | `/` Review | `components/PrDetail.tsx` (TAB_LABELS), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `AiFixTab.tsx` |
+| `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review; `/teams` (PendingListMock opened on Waiting on others) | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx`, `PendingAiReviews.tsx` (AI reviews: the newest review per PR, New since the last look) |
+| `home.tsx` ReviewMock (PR tabs) | `/` Review, `/teams` | `components/PrDetail.tsx` (TAB_LABELS), `ChecksTab.tsx` (the Overview's order), `pr/ReviewDecisionPill.tsx` ("Review required"), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `AiFixTab.tsx` |
 | `home.tsx` StoryCheckMock | `/` Review | the story check in `ClaudeReviewTab.tsx` |
 | `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/` (Start fix, Push, Pushed to) |
 | `home.tsx` CiMock | `/` Fix | `components/CheckList.tsx`, `Activity/PendingFlaky.tsx` (Re-run failed jobs) |
@@ -72,6 +73,8 @@ are the app's own; never invent a feature for a mock.
 | `home.tsx` MergeWhenReadyMock | `/` Ship | `components/MergeWhenReadyControl.tsx` |
 | `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
 | `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
+| `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Limn" label, "passed" / "running"), the `limn/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
+| `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingLine`), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
 | `reports.tsx` PeriodReportMock, PeriodSummaryMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` (Grain: Sprint · Month) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx`, `ChronologyTrend.tsx` (Show markers) |

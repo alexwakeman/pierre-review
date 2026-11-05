@@ -24,7 +24,6 @@ import type {
   InsightCard,
   MergeReadyCard,
   MyTurnCard,
-  MyTurnTrunkCard,
   ReviewerLoadCard,
   ReviewerRoutingCard,
   SecurityCard,
@@ -117,15 +116,15 @@ function myTurn(over: Partial<MyTurnCard> & { reason: MyTurnCard['reason'] }): M
   } as MyTurnCard;
 }
 
-function trunk(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
+/** A red default branch — the Needs fixing tab's `ci_failing` trunk arm. */
+function trunk(over: Partial<CiFailingCard> = {}): CiFailingCard {
   return {
-    id: 'myturn:trunk_red:6:f48aec5',
-    kind: 'my_turn',
+    id: 'cifail:trunk:6:f48aec5',
+    kind: 'ci_failing',
     severity: 'warn',
-    reason: 'trunk_red',
+    arm: 'trunk',
     repoId: 6,
     repoFullName: 'DEFRA/bng-metric-frontend',
-    branchName: 'main',
     ciStatus: 'failure',
     headSha: 'f48aec54f7559889',
     prId: 354,
@@ -133,14 +132,9 @@ function trunk(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
     prTitle: 'chore(deps-dev): bump the tools group',
     mergedById: 3,
     viewerMerged: false,
-    maintained: true,
     observedAt: hoursAgo(0.25),
     githubUrl: 'https://github.com/DEFRA/bng-metric-frontend/commit/f48aec5',
     detail: 'You maintain this repo — main is red at f48aec5',
-    since: hoursAgo(0.25),
-    personal: true,
-    relevance: 'direct',
-    threadId: null,
     authorId: 9,
     authorIsBot: true,
     authorBotKind: 'dependabot',
@@ -148,7 +142,7 @@ function trunk(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
     failingChecks: ['Run Journey Tests / Run Journey Tests', 'lint'],
     failingCheckTotal: 4,
     ...over,
-  } as MyTurnTrunkCard;
+  } as CiFailingCard;
 }
 
 const lead = (card: InsightCard, c: HeadingContext = ctx()): string => pendingHeading(card, c).lead;
@@ -310,8 +304,8 @@ describe('My turn — people events', () => {
       pendingCardEvent(myTurn({ reason: 'mention', comment: { kind: 'review', id: 5 } })),
     ).toEqual({ kind: 'comment', comment: { kind: 'review', id: 5 } });
     // Not known: the PR's Activity tab, as before.
-    expect(pendingCardEvent(myTurn({ reason: 'mention' }))).toEqual({ kind: 'pr', tab: 'comments' });
-    expect(pendingCardEvent(myTurn({ reason: 'comment_reply' }))).toEqual({ kind: 'pr', tab: 'comments' });
+    expect(pendingCardEvent(myTurn({ reason: 'mention' }))).toEqual({ kind: 'pr', tab: 'activity' });
+    expect(pendingCardEvent(myTurn({ reason: 'comment_reply' }))).toEqual({ kind: 'pr', tab: 'activity' });
   });
 
   it('a review request: the author on line two, and how many others were asked', () => {
@@ -472,7 +466,6 @@ describe('a red default branch is a repository, not a PR', () => {
     expect(line.where[0]).toEqual({ text: 'you maintain this repo' });
     expect(line.where[1]).toMatchObject({ text: 'at f48aec5', mono: true, href: t.githubUrl });
     expect(JSON.stringify({ h: pendingHeading(t, ctx()), line })).not.toMatch(/\bPR\b/);
-    expect(pendingCardEvent(t)).toEqual({ kind: 'trunk', repoId: 6 });
   });
 
   it('the ci_failing trunk arm reads the branch from its sentence', () => {

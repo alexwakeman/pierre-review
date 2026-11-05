@@ -31,8 +31,8 @@ export function useAttentionCards(workspaceId: number | null) {
     // signal that the world may have moved, and `staleTime: 60_000` bounds it: rapid tab flipping
     // refetches at most once a minute, well inside the route's 60/min `search` tier.
     //
-    // ⚠ It must be set here, on `useDailyBrief` and on `useWorkPlan` TOGETHER — the three are one
-    // fold read three times, and a focus policy on only one of them is two snapshots of one
+    // ⚠ It must be set here and on `useDailyBrief` TOGETHER — the two are one fold read
+    // twice, and a focus policy on only one of them is two snapshots of one
     // population, which is precisely the "the strip says 5, the board lists 3" defect.
     refetchOnWindowFocus: true,
   });
@@ -117,8 +117,6 @@ export function useAttentionLiveness(
     // "the strip says 5, the board lists 3" defect with a GitHub call in front of it.
     void qc.invalidateQueries({ queryKey: ['attention-cards'] });
     void qc.invalidateQueries({ queryKey: ['daily-brief'] });
-    // The third read of the same fold (the ranked plan under the board). See ACTIVITY_QUERY_KEYS.
-    void qc.invalidateQueries({ queryKey: ['work-plan'] });
     // Keyed on dataUpdatedAt as well as data (the usePrLiveRefresh rule): two consecutive sweeps
     // can report an identical `changed` count over different PRs, and each still needs its
     // repaint.

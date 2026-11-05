@@ -169,17 +169,17 @@ for (const path of PRERENDER_PATHS) {
 // checks against would shrink with it. That is what the hard-coded floor is
 // for, and it is the reason this number must be changed by hand whenever the
 // route list does. It was 10; the restructure took the site to six,
-// /how-we-measure took it to seven, and /contact to eight (home, the two role
-// pages, the models page, contact, and the three legal ones).
+// /how-we-measure took it to seven, /contact to eight, and /teams to nine (home,
+// the two role pages, the teams page, the models page, contact, and the three legal ones).
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
       `a route was skipped: ${PRERENDER_PATHS.filter((p) => !written.includes(p)).join(', ')}`,
   );
 }
-if (written.length < 8) {
+if (written.length < 9) {
   throw new Error(
-    `only ${written.length} routes prerendered — expected at least 8. ` +
+    `only ${written.length} routes prerendered — expected at least 9. ` +
       `If you deliberately removed a route, lower this floor in the same change.`,
   );
 }

@@ -1,6 +1,6 @@
-// AUTO RESOLVE — after an AUTO Claude review SUCCEEDS, close the threads of LIMN'S OWN earlier
-// findings that this run's follow-up judged fixed (CORE, free, local-only like every agentic
-// feature). docs/CLAUDE-REVIEW.md § Auto-posting → Auto resolve.
+// AUTO RESOLVE — after a Claude review SUCCEEDS, close the threads of LIMN'S OWN earlier findings
+// that this run's follow-up judged fixed (CORE, free, local-only like every agentic feature).
+// docs/CLAUDE-REVIEW.md § Auto-posting → Auto resolve.
 //
 // ⚠ A DELIBERATE EXCEPTION to "no automatic resolve" (bot-triage/resolve.ts): it touches ONLY a
 // thread Limn itself started — an inline finding comment posted from a Claude review, authored by
@@ -8,9 +8,15 @@
 // (`isLimnPostedComment`). Never another reviewer's thread, never a person's, never a bot's.
 //
 // THE RULE, in order:
-//   0. auto-posting is ON for the PR's workspace AND its `autoResolve` switch is on (both OFF by
-//      default); the run is a SUCCEEDED AUTO run; the PR passes `autoPostEligibility` (open, not a
-//      draft, not bot-authored, in scope);
+//   0. the run SUCCEEDED, and ONE of two paths allows it:
+//      A. (the workspace's auto resolve) auto-posting is ON for the PR's workspace AND its
+//         `autoResolve` switch is on (OFF by default); the run is an AUTO run; the PR passes
+//         `autoPostEligibility` (open, not a draft, not bot-authored, in scope);
+//      B. (`why: 'own_pr'`, "Resolve my Limn threads when addressed", `resolveOwnPrs`, ON by
+//         default) the PR is the READER'S OWN and open — a draft too; ANY trigger (manual, "Review
+//         and post", auto, a replies pass). Independent of auto-posting. Path A wins when both hold.
+//      Both still touch ONLY the reader's own Limn findings (`ownOnly`): never a teammate's Limn
+//      thread on the reader's PR;
 //   1. each follow-up item of THIS run whose status is 'addressed', 'no_longer_applies' or
 //      'reply_accepted' (a person's reply settled it — the reply posted is Claude's one-sentence
 //      acknowledgement, finding-replies.ts / docs § Replies to Limn's findings), whose
@@ -21,7 +27,7 @@
 //   3. THE CLAIM — compare-and-set of `claude_review_findings.auto_resolve` from NULL to
 //      `status: 'resolving'` BEFORE any GitHub write: never twice, never retried;
 //   4. a short reply ("Addressed in abc1234." / "No longer applies as of abc1234.") with the
-//      auto-post footer + the finding marker, THEN the resolve through the same mutation the manual
+//      auto-post footer (path B: "Resolved by Limn's Claude review.") + the finding marker, THEN the resolve through the same mutation the manual
 //      resolve uses, then `stampThreadResolved` and the PR change signal;
 //   5. the record settles `resolved` (+ `auto_resolved_at`) or `failed` with GitHub's error (a
 //      permission refusal, a deleted thread…). A failure is shown, never retried.
@@ -66,6 +72,7 @@ export function autoResolveReplyBody(
   headSha: string,
   response: string | null = null,
   by: AiProviderName = 'Claude',
+  why: FindingAutoResolveRecord['why'] = undefined,
 ): string {
   const short = headSha.slice(0, 7);
   const lead =
@@ -76,7 +83,9 @@ export function autoResolveReplyBody(
         : outcome === 'reply_accepted'
           ? 'Thanks, that settles it.'
           : `No longer applies as of ${short}.`;
-  return `${lead}\n\n${autoPostFooter(by)}\n\n${FINDING_MARKER}`;
+  // Path B is the reader's own run, not an automatic post: the footer says what Limn did.
+  const footer = why === 'own_pr' ? `_Resolved by Limn’s ${by} review._` : autoPostFooter(by);
+  return `${lead}\n\n${footer}\n\n${FINDING_MARKER}`;
 }
 
 // The thread matcher is shared with the review read (`ClaudeFinding.threadId`).
@@ -122,8 +131,9 @@ export interface AutoResolveResult {
 }
 
 /**
- * Close Limn's own fixed threads for ONE succeeded auto run. Called by `maybeAutoPostReview` after
- * it posts (or skips). Never throws.
+ * Close Limn's own fixed threads for ONE succeeded run. Called by `maybeAutoPostReview` after it
+ * posts (or skips), by `runEnded` for a manual "Review only" run, and after a replies pass.
+ * Never throws.
  */
 export async function maybeAutoResolveFindings(
   ctx: AgentContext,
@@ -146,9 +156,12 @@ async function autoResolve(
   deps: AutoResolveDeps,
 ): Promise<AutoResolveResult | null> {
   const ws = await readWorkspaceAutoPostForPr(ctx, accountId, prId);
-  if (!ws || !ws.settings.enabled || !ws.settings.autoResolve) return null;
+  if (!ws) return null;
   const review = await getClaudeReviewById(ctx, reviewId, accountId);
-  if (!review || review.prId !== prId || review.status !== 'succeeded' || review.trigger !== 'auto') return null;
+  if (!review || review.prId !== prId || review.status !== 'succeeded') return null;
+  // Path A (the workspace's auto resolve) or path B (the reader's own PR); B needs the PR facts.
+  const autoPath = ws.settings.enabled && ws.settings.autoResolve && review.trigger === 'auto';
+  if (!autoPath && !ws.settings.resolveOwnPrs) return null;
   type Wanted = { outcome: AutoResolveOutcome; acceptKind: ClaudeReplyAcceptKind | null; response: string | null };
   const wanted = new Map<number, Wanted>();
   for (const it of review.followUp?.items ?? []) {
@@ -161,7 +174,11 @@ async function autoResolve(
   if (wanted.size === 0) return null;
 
   const facts = await readAutoPostPrFacts(ctx, postDeps, accountId, ws.workspaceId, prId);
-  if (!facts || autoPostEligibility(facts, ws.settings.scope) != null) return null;
+  if (!facts) return null;
+  let why: FindingAutoResolveRecord['why'];
+  if (autoPath && autoPostEligibility(facts, ws.settings.scope) == null) why = undefined;
+  else if (ws.settings.resolveOwnPrs && facts.authorIsMe && !facts.authorIsBot && facts.state === 'open') why = 'own_pr';
+  else return null;
 
   // The earlier findings, owned by this account and this PR (the follow-up ids are soft refs).
   // ⚠ A follow-up names the LATEST raise of an issue, and a re-raise over an already-posted
@@ -202,6 +219,7 @@ async function autoResolve(
       headSha: review.headSha,
       replyCommentId: null,
       error: null,
+      ...(why ? { why } : {}),
     };
     // ⚠ THE CLAIM, BEFORE ANY WRITE.
     const claimed = (await ctx.db
@@ -218,7 +236,7 @@ async function autoResolve(
       const { commentId } = await deps.reply(
         accountId,
         thread.githubNodeId,
-        autoResolveReplyBody(outcome, review.headSha, want.response, aiRunProviderName(review)),
+        autoResolveReplyBody(outcome, review.headSha, want.response, aiRunProviderName(review), why),
       );
       wroteAny = true;
       final = { ...final, replyCommentId: commentId };

@@ -102,11 +102,11 @@ function render(
     data.pushedSince.length +
     data.ownCiRed.length +
     data.ownConflicts.length +
-    data.redTrunks.length +
     data.approvedPrs.length +
     data.ownReady.length +
     data.yourPrs.length +
     data.ownThreads.length +
+    data.approvedMerged.length +
     data.watchedRepoPrs.length;
 
   lines.push('');
@@ -310,21 +310,6 @@ function render(
       }
       lines.push('');
     },
-    trunk_red: () => {
-      if (data.redTrunks.length === 0) return;
-      section('Red default branches', data.redTrunks.length);
-      for (const it of data.redTrunks) {
-        row(
-          `trunk:${it.repoId}`,
-          it.repoFullName,
-          it.githubUrl,
-          `${it.branchName ?? 'trunk'} is red`,
-          it.since,
-          null,
-        );
-      }
-      lines.push('');
-    },
     // Your open PRs with a standing approval. It says nothing about merge state — most approved PRs
     // conflict or are blocked — and with `own_ready` on, the mergeable ones are listed under "Your
     // PRs ready to land" instead, so this heading may not claim "ready".
@@ -392,6 +377,21 @@ function render(
     },
     // Finished Claude reviews are a local, in-app action; the terminal board has never listed them.
     claude_review: () => {},
+    ai_approved_merged: () => {
+      if (data.approvedMerged.length === 0) return;
+      section('Merged after your Limn approved', data.approvedMerged.length);
+      for (const it of data.approvedMerged) {
+        row(
+          `approved-merged:${it.prId}`,
+          `${it.repoFullName}#${it.prNumber}`,
+          it.githubUrl,
+          it.prTitle,
+          it.since,
+          null,
+        );
+      }
+      lines.push('');
+    },
     // New open PRs by others you have never touched, opened since the repo was ADDED. The wire
     // field keeps its historical `watchedRepoPrs` name; the section is "New PRs".
     watched_repo_pr: () => {

@@ -1,15 +1,18 @@
-// THE "CLAUDE REVIEW READY" CARD UNDER THE BALL RULE, and the AUTO-review half of core, on a
-// THROWAWAY sqlite DB (the my-turn-ball.test.ts pattern).
+// MY TURN'S TWO AI REVIEW CARDS, and the AUTO-review half of core, on a THROWAWAY sqlite DB (the
+// my-turn-ball.test.ts pattern).
 //
 // WHAT THIS PINS:
-//   1. ⚠ ACTING ON THE PR RETIRES THE CARD. The card used to retire only on Claude-Review-internal
-//      stamps (posted_at), so approving the PR — from the pane or from github.com — left it up
-//      (real: PR #335, run 110, approved one minute after the run finished). Any action of yours
-//      at or after `finishedAt` discharges it; an action BEFORE the run finished does not.
-//   2. ⚠ A BOT ACTION NEVER DISCHARGES IT — the ball rule's standing exception.
-//   3. AN AUTO RUN IS OWNED LIKE A MANUAL ONE. This account's workspace switched it on, so its card
-//      shows exactly as a clicked run's does; `trigger` rides the card for the "Auto review" label.
-//   4. `getAutoReviewCandidates` — the sweeper's population: open, not draft, opened at/after the
+//   1. ⚠ "NEW AI REVIEW" (`claude_review`) IS SEEN-BASED, NOT THE BALL RULE. The newest succeeded full
+//      run of your Limn on an open PR is a card until you SEE it (the AI Review tab showed it —
+//      `markClaudeReviewSeen`) or dismiss it. Acting on the PR does NOT retire it: auto-posting posts
+//      most runs under your own account, and the card used to vanish before you ever read the run.
+//      A router skip, a closed PR and an older run under a newer one are never cards.
+//   2. THE CARDS ARE MY TURN'S: listed in the My turn tab and counted in every My turn total.
+//   3. AN AUTO RUN IS OWNED LIKE A MANUAL ONE. `trigger` rides the card for the "Auto review" label.
+//   4. "MERGED AFTER YOUR LIMN APPROVED" (`ai_approved_merged`): a merged PR whose standing Limn
+//      auto-approval was posted before the merge, until you open the PR after the merge or dismiss
+//      it; never a withdrawn approval, an approval after the merge, or a merge older than 7 days.
+//   5. `getAutoReviewCandidates` — the sweeper's population: open, not draft, opened at/after the
 //      switch-on, a PERSON under the WORKSPACE's judgement (manual "human" wins over the global bot
 //      flag, and a manual "bot" wins over a clean user row), and no claude_reviews row of any kind;
 //      plus `reReview` — the same population, already reviewed (a SUCCEEDED run), whose head moved
@@ -90,8 +93,9 @@ async function seedRun(
   key: string,
   trigger: 'manual' | 'auto' = 'manual',
   finishedAt = RUN_DONE,
-): Promise<void> {
-  await db
+  extra: Record<string, unknown> = {},
+): Promise<number> {
+  const [row] = await db
     .insert(schema.claudeReviews)
     .values({
       accountId: 1,
@@ -102,8 +106,33 @@ async function seedRun(
       trigger,
       createdAt: new Date(finishedAt - HOUR / 2),
       finishedAt: new Date(finishedAt),
+      ...extra,
     })
+    .returning()
     .execute();
+  return row.id;
+}
+
+/** An auto-post record that LANDED an APPROVE at `at` as GitHub review `githubReviewId`. */
+const approvePost = (githubReviewId: string, at: number, extra: Record<string, unknown> = {}) => ({
+  status: 'posted',
+  at: new Date(at).toISOString(),
+  reason: null,
+  error: null,
+  findingIds: [],
+  postedFindingIds: [],
+  githubReviewId,
+  verdict: { wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null },
+  ...extra,
+});
+
+/** Which fixture PRs carry a "Merged after your Limn approved" item right now. */
+async function mergedKeys(): Promise<Set<string>> {
+  const mt = await q.getMyTurn(1, scope);
+  const ids = new Set<number>(mt.approvedMerged.map((c: any) => c.prId));
+  const out = new Set<string>();
+  for (const [k, id] of prIdByKey) if (ids.has(id)) out.add(k);
+  return out;
 }
 
 /** Which fixture PRs carry a "Claude review ready" item right now. */
@@ -153,58 +182,118 @@ beforeAll(async () => {
     .execute();
   repoId = repo.id;
 
-  // ── The ball rule over manual runs ──
+  const { markClaudeReviewSeen } = await import('./claude-review-seen.js');
+
+  // ── "New AI review": seen-based ──
+  await seedRun(await seedPr('unseen'), 'unseen');
   {
-    // You reviewed before the run, then approved after it finished: discharged (PR #335).
+    // Seen in the AI Review tab: retired.
+    const id = await seedPr('seen');
+    const run = await seedRun(id, 'seen');
+    expect(await markClaudeReviewSeen(db, 1, id, run)).toBe(1);
+    // A repeat stamps nothing.
+    expect(await markClaudeReviewSeen(db, 1, id, run)).toBe(0);
+  }
+  {
+    // You approved after the run finished — the ball rule would have retired it; seen does not.
     const id = await seedPr('acted-after');
     await addReview(id, viewerId, BEFORE_RUN, 'aa0');
     await seedRun(id, 'acted-after');
     await addReview(id, viewerId, AFTER_RUN, 'aa1');
-  }
-  {
-    // You commented after the run (PR #19's shape: findings posted as comments of yours).
-    const id = await seedPr('commented-after');
-    await seedRun(id, 'commented-after');
     await addPrComment(id, viewerId, AFTER_RUN, 'ca');
   }
   {
-    // Your only action predates the run: still yours.
-    const id = await seedPr('acted-before');
-    await addReview(id, viewerId, BEFORE_RUN, 'ab');
-    await seedRun(id, 'acted-before');
+    // An older run you saw, and a newer one you have not: the newer one is a card.
+    const id = await seedPr('newer-run');
+    const old = await seedRun(id, 'newer-old', 'manual', RUN_DONE - DAY);
+    await markClaudeReviewSeen(db, 1, id, old);
+    await seedRun(id, 'newer-new');
   }
   {
-    // Never touched: still yours.
-    const id = await seedPr('untouched');
-    await seedRun(id, 'untouched');
+    // A newer run you SAW over an older one you did not: nothing (only the newest counts).
+    const id = await seedPr('newest-seen');
+    await seedRun(id, 'newest-seen-old', 'manual', RUN_DONE - DAY);
+    const latest = await seedRun(id, 'newest-seen-new');
+    await markClaudeReviewSeen(db, 1, id, latest);
   }
+  // A router skip read nothing; a closed PR is not My Turn.
+  await seedRun(await seedPr('skip'), 'skip', 'manual', RUN_DONE, { reviewMode: 'skip' });
+  await seedRun(await seedPr('closed', { state: 'closed' }), 'closed');
   {
-    // Only a BOT acted after the run: still yours.
-    const id = await seedPr('bot-after');
-    await addReview(id, viewerId, BEFORE_RUN, 'ba0');
-    await seedRun(id, 'bot-after');
-    await addPrComment(id, botId, AFTER_RUN, 'ba');
-    await db
-      .insert(schema.commits)
-      .values({ sha: 'sha_ba', prId: id, authorId: botId, committedAt: new Date(AFTER_RUN) })
-      .execute();
+    // A Claude + Codex pair: seeing one half sees the pair.
+    const id = await seedPr('pair');
+    const first = await seedRun(id, 'pair-1', 'manual', RUN_DONE, { pairRole: 'first' });
+    await db.update(schema.claudeReviews).set({ pairId: first }).where(eq(schema.claudeReviews.id, first)).execute();
+    await seedRun(id, 'pair-2', 'manual', RUN_DONE + 60_000, { pairId: first, pairRole: 'second' });
+    expect(await markClaudeReviewSeen(db, 1, id, first)).toBe(2);
   }
 
   // ── AUTO runs: owned by the account whose workspace switched them on ──
   // Someone else's PR, nobody asked you to review it: still your card.
   await seedRun(await seedPr('auto-stranger'), 'auto-stranger', 'auto');
   await seedRun(await seedPr('auto-mine', { authorId: viewerId }), 'auto-mine', 'auto');
+
+  // ── "Merged after your Limn approved" ──
+  const MERGED = now - DAY;
+  const merged = async (key: string, mergedAt = MERGED): Promise<number> => {
+    const id = await seedPr(key, { state: 'merged' });
+    await db
+      .update(schema.pullRequests)
+      .set({ mergedAt: new Date(mergedAt), mergedById: aliceId })
+      .where(eq(schema.pullRequests.id, id))
+      .execute();
+    return id;
+  };
+  const approvalRow = async (prId: number, dbId: string, state: string): Promise<void> => {
+    await db
+      .insert(schema.reviews)
+      .values({ githubNodeId: `RV_lim_${dbId}`, prId, authorId: viewerId, state, databaseId: dbId, submittedAt: new Date(MERGED - HOUR) })
+      .execute();
+  };
   {
-    // The ball rule still applies: you reviewed after the auto run finished.
-    const id = await seedPr('auto-acted-after');
-    await seedRun(id, 'auto-acted-after', 'auto');
-    await addReview(id, viewerId, AFTER_RUN, 'aaa');
+    const id = await merged('am-standing');
+    await seedRun(id, 'am-standing', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('901', MERGED - HOUR) });
+    await approvalRow(id, '901', 'approved');
   }
   {
-    // Only a bot acted after it: still yours.
-    const id = await seedPr('auto-bot-after');
-    await seedRun(id, 'auto-bot-after', 'auto');
-    await addPrComment(id, botId, AFTER_RUN, 'aba');
+    // No synced review row yet, and no withdrawal recorded: still standing.
+    const id = await merged('am-unsynced');
+    await seedRun(id, 'am-unsynced', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('902', MERGED - HOUR) });
+  }
+  {
+    // GitHub says the approval was dismissed (Limn withdrew it).
+    const id = await merged('am-withdrawn');
+    await seedRun(id, 'am-withdrawn', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('903', MERGED - HOUR) });
+    await approvalRow(id, '903', 'dismissed');
+  }
+  {
+    // Opened after the merge: seen.
+    const id = await merged('am-viewed');
+    await seedRun(id, 'am-viewed', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('904', MERGED - HOUR) });
+    await db.insert(schema.prViews).values({ prId: id, lastViewedAt: new Date(MERGED + HOUR) }).execute();
+  }
+  {
+    // Opened only BEFORE the merge: still a card.
+    const id = await merged('am-viewed-before');
+    await seedRun(id, 'am-viewed-before', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('905', MERGED - HOUR) });
+    await db.insert(schema.prViews).values({ prId: id, lastViewedAt: new Date(MERGED - HOUR / 2) }).execute();
+  }
+  {
+    // Merged ten days ago: past the window.
+    const id = await merged('am-old', now - 10 * DAY);
+    await seedRun(id, 'am-old', 'auto', now - 11 * DAY, { autoPost: approvePost('906', now - 11 * DAY) });
+  }
+  {
+    // A COMMENT, not an approval.
+    const id = await merged('am-comment');
+    await seedRun(id, 'am-comment', 'auto', MERGED - 2 * HOUR, {
+      autoPost: approvePost('907', MERGED - HOUR, { verdict: { wanted: 'COMMENT', submitted: 'COMMENT', heldReason: null } }),
+    });
+  }
+  {
+    // An open PR the Limn approved: not merged, no card of this type.
+    const id = await seedPr('am-open');
+    await seedRun(id, 'am-open', 'auto', MERGED - 2 * HOUR, { autoPost: approvePost('908', MERGED - HOUR) });
   }
 
   scope = await q.resolveWorkspaceScope(1, null);
@@ -215,56 +304,52 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-describe('the Claude review card follows the ball rule', () => {
-  it('retires when you act on the PR after the run finished', async () => {
+describe('"New AI review" is seen-based', () => {
+  it('lists the newest unseen run per open PR — acting on the PR does not retire it', async () => {
     const keys = await claudeKeys();
-    expect(keys.has('acted-after')).toBe(false);
-    expect(keys.has('commented-after')).toBe(false);
+    expect(keys.has('unseen')).toBe(true);
+    expect(keys.has('acted-after')).toBe(true);
+    expect(keys.has('newer-run')).toBe(true);
   });
 
-  it('stays when your only action came before the run finished', async () => {
+  it('retires a run once seen — a pair by either half — and never lists a skip, a closed PR or an older run', async () => {
     const keys = await claudeKeys();
-    expect(keys.has('acted-before')).toBe(true);
-    expect(keys.has('untouched')).toBe(true);
+    for (const k of ['seen', 'newest-seen', 'skip', 'closed', 'pair']) expect([k, keys.has(k)]).toEqual([k, false]);
   });
 
-  it('stays when only a bot acted after the run', async () => {
-    expect((await claudeKeys()).has('bot-after')).toBe(true);
-  });
-
-  it('filters the SEEDS: the retired cards leave the Pending counts too', async () => {
-    const insights = await q.getWorkspaceInsights(1, undefined, scope);
-    const claudeCards = insights.cards.filter(
-      (c: any) => c.kind === 'my_turn' && c.reason === 'claude_review',
-    );
-    const ids = new Set(claudeCards.map((c: any) => c.prId));
-    expect(ids.has(prIdByKey.get('acted-after'))).toBe(false);
-    expect(ids.has(prIdByKey.get('acted-before'))).toBe(true);
+  it('a dismissal hides it; a newer run brings it back', async () => {
+    const { dismissMyTurn, restoreMyTurn } = await import('./my-turn-dismissals.js');
+    const id = prIdByKey.get('unseen')!;
+    await dismissMyTurn(1, { kind: 'pr', id });
+    try {
+      expect((await claudeKeys()).has('unseen')).toBe(false);
+    } finally {
+      await restoreMyTurn(1, { kind: 'pr', id });
+    }
+    expect((await claudeKeys()).has('unseen')).toBe(true);
   });
 });
 
-describe('the Claude reviews tab', () => {
-  it('lists every Claude review card and none in My turn; My turn’s totals leave them out', async () => {
+describe('the AI review cards are My turn’s', () => {
+  it('lists them in the My turn tab and counts them in every My turn total', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, scope, { uncapped: true });
     const { rankPendingTabs } = await import('./pending-tabs.js');
     const board = await rankPendingTabs(1, scope, insights);
     const mt = insights.cards.filter((c: any) => c.kind === 'my_turn');
-    const claude = mt.filter((c: any) => c.reason === 'claude_review').map((c: any) => c.id);
-    const others = mt.filter((c: any) => c.reason !== 'claude_review').map((c: any) => c.id);
-    expect(claude.length).toBeGreaterThan(0); // non-vacuous
+    const ai = mt.filter((c: any) => c.reason === 'claude_review' || c.reason === 'ai_approved_merged');
+    expect(ai.length).toBeGreaterThan(0); // non-vacuous
     const tab = (k: string) => board.tabs.find((t: any) => t.key === k)!;
-    expect([...tab('claude').cardIds].sort()).toEqual([...claude].sort());
-    expect([...tab('my_turn').cardIds].sort()).toEqual([...others].sort());
-    expect(tab('claude').total).toBe(claude.length);
-    expect(tab('my_turn').total).toBe(others.length);
-    // The fold's own totals are My turn's population — what the brief and the badges count.
-    expect(insights.myTurnTotal).toBe(others.length);
-    expect(insights.kindTotals!.my_turn).toBe(others.length);
+    for (const c of ai) expect(tab('my_turn').cardIds).toContain(c.id);
+    expect(tab('claude').cardIds.some((id: string) => id.startsWith('myturn:'))).toBe(false);
+    expect(insights.myTurnTotal).toBe(mt.length);
+    expect(insights.kindTotals!.my_turn).toBe(mt.length);
   });
 
-  it('keeps them in GET /api/my-turn, so the reader is still notified', async () => {
+  it('keeps them in GET /api/my-turn, so the reader is notified', async () => {
     const mt = await q.getMyTurn(1, scope);
     expect(mt.claudeReviewsToAction.length).toBeGreaterThan(0);
+    expect(mt.approvedMerged.length).toBeGreaterThan(0);
+    expect(mt.approvedMerged.every((a: any) => a.personal === true && a.relevance === 'direct')).toBe(true);
   });
 });
 
@@ -273,12 +358,6 @@ describe('an AUTO run is owned like a manual one', () => {
     const keys = await claudeKeys();
     expect(keys.has('auto-stranger')).toBe(true);
     expect(keys.has('auto-mine')).toBe(true);
-  });
-
-  it('still follows the ball rule: your action after the run clears it, a bot\'s does not', async () => {
-    const keys = await claudeKeys();
-    expect(keys.has('auto-acted-after')).toBe(false);
-    expect(keys.has('auto-bot-after')).toBe(true);
   });
 
   it('marks the item as an auto run', async () => {
@@ -297,14 +376,53 @@ describe('an AUTO run is owned like a manual one', () => {
         .map((c: any) => [c.prId, c]),
     );
     expect((byPr.get(prIdByKey.get('auto-stranger')) as any)?.trigger).toBe('auto');
-    expect((byPr.get(prIdByKey.get('untouched')) as any)?.trigger).toBe('manual');
+    expect((byPr.get(prIdByKey.get('unseen')) as any)?.trigger).toBe('manual');
   });
 
   it('keeps auto runs in the unscoped read (the notification watcher\'s)', async () => {
-    const rows = await q.getUnactionedClaudeReviews(1);
+    const rows = await q.getUnseenOwnAiReviews(1);
     const ids = new Set(rows.map((r: any) => r.prId));
     expect(ids.has(prIdByKey.get('auto-stranger'))).toBe(true);
-    expect(ids.has(prIdByKey.get('untouched'))).toBe(true);
+    expect(ids.has(prIdByKey.get('unseen'))).toBe(true);
+  });
+});
+
+describe('"Merged after your Limn approved"', () => {
+  it('lists a merged PR whose standing Limn approval came before the merge, until opened after it', async () => {
+    const keys = await mergedKeys();
+    expect(keys.has('am-standing')).toBe(true);
+    expect(keys.has('am-unsynced')).toBe(true);
+    expect(keys.has('am-viewed-before')).toBe(true);
+    for (const k of ['am-withdrawn', 'am-viewed', 'am-old', 'am-comment', 'am-open']) {
+      expect([k, keys.has(k)]).toEqual([k, false]);
+    }
+  });
+
+  it('is dated by the merge, and a dismissal hides it', async () => {
+    const mt = await q.getMyTurn(1, scope);
+    const item = mt.approvedMerged.find((a: any) => a.prId === prIdByKey.get('am-standing'));
+    expect(Date.parse(item.since)).toBe(now - DAY);
+    const { dismissMyTurn, restoreMyTurn } = await import('./my-turn-dismissals.js');
+    const id = prIdByKey.get('am-standing')!;
+    await dismissMyTurn(1, { kind: 'pr', id });
+    try {
+      expect((await mergedKeys()).has('am-standing')).toBe(false);
+      // Listed under "Dismissed" so it can be brought back.
+      const again = await q.getMyTurn(1, scope);
+      expect(again.dismissed.some((d: any) => d.target.id === id && d.reason === 'ai_approved_merged')).toBe(true);
+    } finally {
+      await restoreMyTurn(1, { kind: 'pr', id });
+    }
+  });
+
+  it('is off when the type is switched off', async () => {
+    const { setMyTurnSettings } = await import('../auth/account.js');
+    await setMyTurnSettings(1, { show: { ai_approved_merged: false } });
+    try {
+      expect((await q.getMyTurn(1, scope)).approvedMerged).toEqual([]);
+    } finally {
+      await setMyTurnSettings(1, null);
+    }
   });
 });
 
@@ -394,8 +512,9 @@ describe('getAutoReviewCandidates — the sweeper’s population', () => {
       dayStartMs: 0,
       limit: 0,
     });
-    // four auto succeeded runs from the card fixtures + the failed auto one
-    expect(res.autoToday).toBe(5);
+    // two auto runs from the "New AI review" fixtures, eight from the "merged after approval" ones,
+    // + the failed auto one
+    expect(res.autoToday).toBe(11);
     expect(res.prIds).toEqual([]);
   });
 

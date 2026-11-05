@@ -36,7 +36,7 @@ export function ThreadCard({
   viewedSince?: string | null;
   // When set, ONLY this comment is marked "new" (the Activity feed highlights the
   // specific comment a card represents). When null/undefined, fall back to the
-  // viewedSince heuristic (the Changes tab's Threads only view).
+  // viewedSince heuristic (the Threads tab).
   highlightCommentId?: number | null;
   // When provided, the whole card HEADER becomes a clickable region that deep-links this thread
   // inside its PR (search results + theme drill-downs) — a large, discoverable target. The
@@ -45,7 +45,7 @@ export function ThreadCard({
   onOpenInPr?: () => void;
   /**
    * "Show in context" — this thread's code in the Changes tab. Optional because only ONE of
-   * ThreadCard's mounts can honour it: the Changes tab's Threads only view (`ThreadList`), which
+   * ThreadCard's mounts can honour it: the Threads tab (`ThreadList`), which
    * sits in the Changes tab without showing the code. The mount inside FileDiffView (the
    * InlineThread pill's expansion) is already in the code, and the Feed / search / attention /
    * themes mounts have no Changes tab at all — they navigate INTO a PR instead (`onOpenInPr`).
@@ -164,7 +164,7 @@ export function ThreadCard({
           {lineLabel}
         </span>
         {thread.isOutdated && <span>· outdated</span>}
-        {/* "SHOW IN CONTEXT" — from the Changes tab's Threads only view back to the code: it
+        {/* "SHOW IN CONTEXT" — from the Threads tab back to the code: it
             turns that view off, opens the file and scrolls to this thread's pill. A real <button>
             so ThreadCard's header-click guard (`closest('a,button,…')`) swallows it — a
             <span onClick> here would ALSO fire `onOpenInPr` and navigate away. */}

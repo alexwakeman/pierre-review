@@ -295,16 +295,6 @@ await db
   .execute();
 done('own_thread', F);
 
-// 7. trunk_red — a red default branch (DEFRA/bng-metric-backend when the workspace has it).
-const trunk =
-  repoRows.find((r) => r.owner === 'DEFRA' && r.name === 'bng-metric-backend') ?? repoRows[0]!;
-await db
-  .update(repos)
-  .set({ defaultBranchCiStatus: 'failure', defaultBranchUpdatedAt: new Date(now) })
-  .where(eq(repos.id, trunk.id))
-  .execute();
-printed.push(`  ${'trunk_red'.padEnd(16)} https://github.com/${trunk.owner}/${trunk.name}`);
-
 console.log(`Seeded My Turn fixtures for @${login} in “${WORKSPACE}” (workspace ${ws.id}):`);
 console.log(printed.join('\n'));
 await closeDb();

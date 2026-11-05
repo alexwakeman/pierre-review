@@ -47,6 +47,7 @@ const KIND_ICON: Record<InsightKind, IconComponent> = {
   security: PendingSecurityAlertIcon,
   dependency_bump: PendingDependencyIcon,
   waiting_on_others: PendingWaitingOnOthersIcon,
+  ai_review: PendingClaudeReviewIcon,
   // Never on the board (the route filters them out); a mark so the Record is total.
   bot_signal: BotIcon,
   bot_only_review: BotIcon,
@@ -61,12 +62,12 @@ const REASON_ICON: Record<MyTurnCardReason, IconComponent> = {
   pushed_since: PendingPushedIcon,
   own_ci_red: PendingBuildFailedIcon,
   own_conflicts: PendingConflictsIcon,
-  trunk_red: PendingTrunkRedIcon,
   pr_approved: PendingApprovedIcon,
   own_ready: PendingLandIcon,
   your_pr: PendingActivityIcon,
   own_thread: PendingUnansweredIcon,
   claude_review: PendingClaudeReviewIcon,
+  ai_approved_merged: PendingLandIcon,
   watched_repo_pr: PendingNewPrIcon,
 };
 

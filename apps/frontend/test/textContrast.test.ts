@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { pageGrounds } from './schemeCss.js';
 
 // TEXT CONTRAST, ENFORCED FROM THE SOURCE.
 //
@@ -45,6 +46,12 @@ const TW: Record<string, string> = {
 const LIGHT_BG = '#ffffff';
 const DARK_BG = '#191919';
 
+/** ⚠ EVERY COLOUR SCHEME'S PAGE, not only the defaults (docs/FRONTEND.md § Colour schemes). A muted
+ *  colour that clears white can miss Solarized's cream; the checks below measure each mode's colour
+ *  against every page of that mode, read from index.css. */
+const LIGHT_GROUNDS = pageGrounds('light');
+const DARK_GROUNDS = pageGrounds('dark');
+
 function rgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
   return [
@@ -87,7 +94,7 @@ interface Violation {
   file: string;
   line: number;
   cls: string;
-  theme: 'light' | 'dark';
+  theme: string;
   ratio: number;
 }
 
@@ -128,12 +135,16 @@ function check(): Violation[] {
     const lightKey = `${light[1]}-${light[2]}`;
     const darkKey = `${dark[1]}-${dark[2]}`;
     if (TW[lightKey]) {
-      const r = contrastRatio(TW[lightKey], LIGHT_BG);
-      if (r < AA_BODY) bad.push({ file, line, cls: `text-${lightKey}`, theme: 'light', ratio: r });
+      for (const [scheme, bg] of LIGHT_GROUNDS) {
+        const r = contrastRatio(TW[lightKey], bg);
+        if (r < AA_BODY) bad.push({ file, line, cls: `text-${lightKey}`, theme: `light (${scheme})`, ratio: r });
+      }
     }
     if (TW[darkKey]) {
-      const r = contrastRatio(TW[darkKey], DARK_BG);
-      if (r < AA_BODY) bad.push({ file, line, cls: `dark:text-${darkKey}`, theme: 'dark', ratio: r });
+      for (const [scheme, bg] of DARK_GROUNDS) {
+        const r = contrastRatio(TW[darkKey], bg);
+        if (r < AA_BODY) bad.push({ file, line, cls: `dark:text-${darkKey}`, theme: `dark (${scheme})`, ratio: r });
+      }
     }
   }
   return bad;
@@ -161,7 +172,7 @@ function checkUnpaired(): Violation[] {
     if (/dark:(?:text|fill)-[a-z]+-\d{2,3}/.test(value)) continue;
     const m = value.match(/(?:^|\s)(?:text|fill)-([a-z]+-\d{2,3})\b/);
     if (!m || !UNPAIRED_MEASURED_FAILING.includes(m[1]!)) continue;
-    for (const [theme, bg] of [['light', LIGHT_BG], ['dark', DARK_BG]] as const) {
+    for (const [theme, bg] of [...LIGHT_GROUNDS, ...DARK_GROUNDS]) {
       const r = contrastRatio(TW[m[1]!]!, bg);
       if (r < AA_BODY) bad.push({ file, line, cls: `text-${m[1]}`, theme, ratio: r });
     }

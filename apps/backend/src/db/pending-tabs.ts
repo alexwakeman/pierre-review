@@ -10,9 +10,8 @@
 // There is no severity-first sort and no cross-kind spread rule — a card competes only with the
 // cards in its own tab (and group), and a PR with two jobs appears once per job, in each job's tab.
 //
-// ⚠ `my_turn` FEEDS TWO TABS, SPLIT BY TYPE: a finished Claude review is listed in "Claude reviews",
-// every other type in My turn (`pendingTabHolds`, the ONE predicate). Each tab's figures are counted
-// off the uncapped cards with that predicate, never `kindTotals.my_turn` minus something.
+// "AI reviews" is the second UNSCORED tab (`newestFirst`): a stable reference list of the newest AI
+// review on each PR (`listNewestFirst`), with a `newTotal` badge of the rows since the last look.
 //
 // ⚠ THE RULES RIDE THE RESPONSE (`PendingBoard.rules`). The board's info popovers and guide explain
 // the order the reader actually got — their weights and their type order — never the constants.
@@ -30,6 +29,7 @@
 // ⚠ SUGGESTIONS ARE LOOKED UP ONLY FOR THE TOP "NEEDS A REVIEWER" CARDS. The lookup is network-
 // backed per PR (CODEOWNERS), so it runs for `routingSuggestCap` cards, AFTER ranking decided which.
 import {
+  AI_REVIEWS_LIST_CAP,
   PENDING_LIMITS,
   PENDING_TABS,
   pendingTabHolds,
@@ -60,6 +60,12 @@ import { scoreCards, type ScoredCard } from './work-plan.js';
 import { getMyTurnSettings, rankRulesOf } from './my-turn-settings.js';
 import { getPendingFirstLanding } from './pending-first-landing.js';
 import { attachPrChips } from './pr-chips.js';
+import {
+  buildAiReviewCards,
+  compareAiReviews,
+  countNewAiReviews,
+  getAiReviewsSeenAt,
+} from './ai-reviews-seen.js';
 
 export interface PendingBoard {
   tabs: PendingTab[];
@@ -172,6 +178,18 @@ export function listByWait(def: PendingTabDef, cards: readonly InsightCard[]): I
   return out;
 }
 
+/** THE LISTING RULE FOR AN UNSCORED NEWEST-FIRST TAB (`newestFirst` — "AI reviews"' `ai_review`
+ *  cards, one per PR): newest first (then the higher review id), at most `AI_REVIEWS_LIST_CAP`. No
+ *  score, no Do next. */
+export function listNewestFirst(def: PendingTabDef, cards: readonly InsightCard[]): InsightCard[] {
+  const kinds = def.newestFirst ?? [];
+  if (kinds.length === 0) return [];
+  return cards
+    .filter((c): c is Extract<InsightCard, { kind: 'ai_review' }> => c.kind === 'ai_review' && kinds.includes(c.kind) && pendingTabHolds(def, c))
+    .sort(compareAiReviews)
+    .slice(0, AI_REVIEWS_LIST_CAP);
+}
+
 /** Every card id any tab lists, for these cards, scores and My turn type order — the population
  *  the Pro work plan may name. A plan row whose card the board does not list would put its
  *  sentence on a card the reader cannot find. */
@@ -235,6 +253,11 @@ export async function rankPendingTabs(
         const { cardId: _cardId, prId: _prId, ...score } = s;
         scores[s.cardId] = score;
       }
+      // The tab's unscored list ("AI reviews": the newest AI review per PR, newest first).
+      for (const c of listNewestFirst(def, insights.cards)) {
+        ids.push(c.id);
+        listed.push(c);
+      }
     }
     if (def.key === 'review') {
       routingTop = ids
@@ -246,14 +269,8 @@ export async function rankPendingTabs(
     // WHO OPENED IT, counted off the UNCAPPED fold's cards — so these ARE the populations, exactly
     // like `relevanceTotals` below, and each of the lens's pills has a total of its own.
     const tabCards = insights.cards.filter((c) => pendingTabHolds(def, c));
-    // ⚠ A TYPE-SPLIT TAB (My turn / Claude reviews share `my_turn`) counts its OWN cards: the fold's
-    // `kindTotals.my_turn` is already My turn's population alone, and Claude reviews has no total
-    // of its own there. Both are the uncapped cards, so the count IS the population.
-    const splitByType = def.reasons != null || def.exceptReasons != null;
     const kindTotals: Partial<Record<InsightCard['kind'], number>> = {};
-    for (const k of rankedKinds) {
-      kindTotals[k] = splitByType ? tabCards.filter((c) => c.kind === k).length : (totals[k] ?? 0);
-    }
+    for (const k of rankedKinds) kindTotals[k] = totals[k] ?? 0;
     const kindAuthorTotals: Partial<Record<InsightCard['kind'], PendingAuthorSplit>> = {};
     for (const k of rankedKinds) kindAuthorTotals[k] = authorSplit(tabCards.filter((c) => c.kind === k));
     const tab: PendingTab = {
@@ -330,9 +347,32 @@ export async function buildPendingBoard(
     withWaiting: live,
     ...(live ? { boardFacts } : {}),
   });
+  // "AI REVIEWS" — THE NEWEST AI REVIEW PER PR (db/ai-reviews-seen.ts) — the live board's alone,
+  // appended after the fold so no other count (brief, Slack, My Turn) ever sees one. The list is
+  // the population (at most `AI_REVIEWS_LIST_CAP`); `newTotal` counts the rows since the last look.
+  let aiReviewsSeenAt: Date | null = null;
+  let aiNew = 0;
+  if (live) {
+    aiReviewsSeenAt = await getAiReviewsSeenAt(accountId, scope.workspaceId);
+    const ai = await buildAiReviewCards(accountId, scope.repoIds);
+    aiNew = countNewAiReviews(ai.cards, aiReviewsSeenAt);
+    insights.cards.push(...ai.cards);
+    insights.kindTotals = { ...(insights.kindTotals ?? {}), ai_review: ai.cards.length };
+    const have = new Set(insights.users.map((u) => u.id));
+    const missingUsers = ai.userIds.filter((id) => !have.has(id));
+    if (missingUsers.length > 0) {
+      insights.users.push(
+        ...(await db.select().from(schema.users).where(inArray(schema.users.id, missingUsers)).execute()).map(mapUser),
+      );
+    }
+  }
   const board = await rankPendingTabs(accountId, scope, insights, opts.now ?? Date.now(), {
     suggestReviewers: live,
   });
+  if (live) {
+    const aiTab = board.tabs.find((t) => t.key === 'claude');
+    if (aiTab != null) aiTab.newTotal = aiNew;
+  }
   // THE HEADING FACTS, read only for the cards just LISTED — the uncapped fold holds every card,
   // and reading comment bodies for the ones no tab shows was most of the cost of a board load.
   const factUserIds =
@@ -375,6 +415,7 @@ export async function buildPendingBoard(
     rules: board.rules,
     // Out of every tab and count — listed under My turn with a way back.
     myTurnDismissed: insights.myTurnDismissed ?? [],
+    ...(live ? { aiReviewsSeenAt: aiReviewsSeenAt?.toISOString() ?? null } : {}),
   };
 }
 

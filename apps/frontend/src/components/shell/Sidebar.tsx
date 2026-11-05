@@ -33,6 +33,7 @@ import {
   ChevronIcon,
   CloseIcon,
   PeopleIcon,
+  PinIcon,
   FeedIcon,
   KeyboardIcon,
   MagnifierIcon,
@@ -285,6 +286,8 @@ function SidebarTabRow({
   const cfg = useTabChip(tab);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const closeTab = usePinnedTabs((s) => s.closeTab);
+  const togglePinTab = usePinnedTabs((s) => s.togglePinTab);
+  const pinned = tab.pinned === true;
   // The list sits below the destinations and repos, so a tab just opened can land under the fold
   // of a scroller with no visible bar: bring the active one into view. The repo list often lands
   // AFTER the tab (a reload, a link) and pushes it down, so it is kept in view while the content
@@ -330,28 +333,46 @@ function SidebarTabRow({
         <span className="flex w-[18px] shrink-0 justify-center text-ui-ink">{cfg.icon}</span>
         <span className="min-w-0 flex-1 truncate">{cfg.label}</span>
       </button>
-      <button
-        type="button"
-        data-tab-close
-        onClick={() => closeTab(tab.key)}
-        aria-label={cfg.closeAria}
-        title="Close this tab"
-        className={cx(
-          'flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11 touch:w-11',
-          // Shown on the open tab and on hover/focus; always on touch (no hover there).
-          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100',
-          'mr-1',
-          FOCUS_RING,
-        )}
-      >
-        <CloseIcon size={12} />
-      </button>
+      {/* A PINNED tab has no ✕: its pin, always shown, unpins it. */}
+      {pinned ? (
+        <button
+          type="button"
+          data-tab-pin
+          onClick={() => togglePinTab(tab.key)}
+          aria-label="Unpin tab"
+          title="Pinned. Click to unpin"
+          className={cx(
+            'mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11 touch:w-11',
+            FOCUS_RING,
+          )}
+        >
+          <PinIcon size={12} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-tab-close
+          onClick={() => closeTab(tab.key)}
+          aria-label={cfg.closeAria}
+          title="Close this tab"
+          className={cx(
+            'flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11 touch:w-11',
+            // Shown on the open tab and on hover/focus; always on touch (no hover there).
+            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 touch:opacity-100',
+            'mr-1',
+            FOCUS_RING,
+          )}
+        >
+          <CloseIcon size={12} />
+        </button>
+      )}
     </li>
   );
 }
 
 /** Every open tab, under Repositories, at every width. Activate, ✕ to close, right-click for
- *  Close this / Close other tabs / Close all tabs (the strip's own menu), "Close all" for touch.
+ *  Pin / Unpin and Close this / Close other tabs / Close all tabs (the strip's own menu), "Close all"
+ *  for touch. PINNED tabs (no ✕, kept by every close-many) sit in a "Pinned" group at the top.
  *  "Group by author" (remembered, `useShell.tabsByAuthor`) puts each PR tab under its author's name:
  *  the reader's own first, then A–Z, then "Other" (`lib/sidebarTabGroups.ts`). This list has no drag
  *  reorder; the top bar's strip keeps its own, ungrouped. */
@@ -363,7 +384,12 @@ function OpenTabs(): JSX.Element | null {
   const setByAuthor = useShell((s) => s.setTabsByAuthor);
   // The reader's login — the key the palette and the account menu already hold (no new fetch).
   const myLogin = useMe().data?.user?.login ?? null;
-  const groups = useMemo(() => (byAuthor ? groupTabsByAuthor(tabs, myLogin) : null), [byAuthor, tabs, myLogin]);
+  const pinnedTabs = useMemo(() => tabs.filter((t) => t.pinned === true), [tabs]);
+  const unpinnedTabs = useMemo(() => tabs.filter((t) => t.pinned !== true), [tabs]);
+  const groups = useMemo(
+    () => (byAuthor ? groupTabsByAuthor(unpinnedTabs, myLogin) : null),
+    [byAuthor, unpinnedTabs, myLogin],
+  );
   const [menu, setMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null);
   if (tabs.length === 0) return null;
   const openMenu = (e: React.MouseEvent, key: string): void => {
@@ -393,17 +419,35 @@ function OpenTabs(): JSX.Element | null {
         >
           <PeopleIcon size={14} />
         </button>
-        <button
-          type="button"
-          onClick={closeAllTabs}
-          className={cx('h-7 shrink-0 rounded-ui px-2 text-meta text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-10', FOCUS_RING)}
-        >
-          Close all
-        </button>
+        {unpinnedTabs.length > 0 && (
+          <button
+            type="button"
+            onClick={closeAllTabs}
+            title={pinnedTabs.length > 0 ? 'Close all tabs except pinned ones' : undefined}
+            className={cx('h-7 shrink-0 rounded-ui px-2 text-meta text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-10', FOCUS_RING)}
+          >
+            Close all
+          </button>
+        )}
       </div>
-      {groups == null ? (
+      {pinnedTabs.length > 0 && (
+        <div data-testid="sidebar-pinned-tabs" className="mb-2">
+          <p id="sidebar-tab-group-pinned" className="truncate px-2 pb-0.5 pt-1 text-meta font-medium text-ui-mute">
+            Pinned
+          </p>
+          <ul
+            role="tablist"
+            aria-orientation="vertical"
+            aria-labelledby="sidebar-tab-group-pinned"
+            className="m-0 flex list-none flex-col gap-px p-0"
+          >
+            {rows(pinnedTabs)}
+          </ul>
+        </div>
+      )}
+      {unpinnedTabs.length === 0 ? null : groups == null ? (
         <ul role="tablist" aria-orientation="vertical" aria-label="Open tabs" data-testid="sidebar-tabs" className="m-0 flex list-none flex-col gap-px p-0">
-          {rows(tabs)}
+          {rows(unpinnedTabs)}
         </ul>
       ) : (
         // One tablist per author, labelled by the heading above it.
@@ -426,7 +470,7 @@ function OpenTabs(): JSX.Element | null {
         </div>
       )}
       {menu != null && (
-        <TabContextMenu x={menu.x} y={menu.y} tabKey={menu.tabKey} tabCount={tabs.length} onClose={() => setMenu(null)} />
+        <TabContextMenu x={menu.x} y={menu.y} tabKey={menu.tabKey} onClose={() => setMenu(null)} />
       )}
     </div>
   );
@@ -921,7 +965,12 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
           data-sidebar-middle
           style={drawer ? undefined : middleFade}
           // Vertical only, and no visible scrollbar: the edge fade says there is more.
-          className={cx('px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain')}
+          // ⚠ `relative` is LOAD-BEARING: it makes this scroller the containing block of the
+          // `sr-only` spans (position:absolute) in the tab rows. Without it they resolve against the
+          // aside, sit at their in-list y (thousands of px with many tabs), escape this clip and
+          // stretch the DOCUMENT's scroll range, so a wheel over Open PRs scrolled the whole shell —
+          // sidebar included — up the page (pinned by e2e/shell-scroll.spec.ts).
+          className={cx('relative px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain')}
         >
           <div>
             <Destinations location={location} />

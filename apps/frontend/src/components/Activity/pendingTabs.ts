@@ -1,4 +1,5 @@
 import {
+  DO_NEXT_UNSCORED_KINDS,
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
   PENDING_TABS,
@@ -14,6 +15,7 @@ import {
   type PendingTabKey,
 } from '@pierre-review/shared';
 import type { AttentionRelevanceLens } from '../../store/filters.js';
+import { pendingTabBadge } from '../../lib/pendingFirstLanding.js';
 
 // THE PENDING BOARD'S VIEW MODEL — which tab is on screen, which cards it lists, where Do next
 // ends, and the counts. Pure and JSX-free so `test/pendingTabs.test.ts` can pin it.
@@ -66,9 +68,9 @@ export function passesAuthorLens(card: InsightCard, lens: PendingAuthorLens | nu
   return lens == null || pendingAuthorSideOf(card) === lens;
 }
 
-/** The figure on a tab's badge: the lens's own total when one is on and the server sent it. */
+/** The figure on a tab's badge — `pendingTabBadge`, the one rule (the summary line reads it too). */
 export function tabBadgeCount(tab: PendingTab, lens: PendingAuthorLens | null): number {
-  return lens != null && tab.authorTotals != null ? tab.authorTotals[lens] : tab.total;
+  return pendingTabBadge(tab, lens);
 }
 
 /** Offer the lens only when it would change the list — both sides non-empty — or it is already on
@@ -187,10 +189,11 @@ export function buildPendingView(
     tab: tab.key,
     cards,
     // An unscored tab ("Waiting on others", `byWait`) has no Do next head: nothing in it is the
-    // reader's next step.
+    // reader's next step. Nor does a tab's unscored group ("AI reviews"' `ai_review` cards, listed
+    // after the scored ones): only scored cards are counted.
     doNextCount: PENDING_TABS.find((d) => d.key === tab.key)?.byWait === true
       ? 0
-      : Math.min(PENDING_DO_NEXT_SIZE, cards.length),
+      : Math.min(PENDING_DO_NEXT_SIZE, cards.filter((c) => !DO_NEXT_UNSCORED_KINDS.has(c.kind)).length),
     shown: cards.length,
     total: Math.max(total, cards.length),
     // Under the lens a chip counts that kind's lensed side, the list its click opens.

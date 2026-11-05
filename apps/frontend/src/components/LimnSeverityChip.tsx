@@ -1,7 +1,7 @@
 import { LIMN_SEVERITY_WORD, isLimnSeverity, type LimnSeverity } from '@pierre-review/shared';
 import { vendorInk } from '../lib/ui.js';
 
-// The severity a LIMN-POSTED finding carries, on its thread (Changes tab pills, the Threads only
+// The severity a LIMN-POSTED finding carries, on its thread (Changes tab pills, the Threads tab
 // view) and its PR-level comment (Comments tab). The words are the review's own, the same ones the
 // GitHub comment leads with (shared `limnSeverityLead`). Drawn like the ML severity pill on bot
 // comments (MlSeverityBadge), with the colour run through `vendorInk` so the text clears AA on both

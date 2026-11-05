@@ -1,5 +1,7 @@
-// THE AI REVIEW ON THE PR OVERVIEW, above the Checks row: the SAME facts the Open PRs side panel
-// shows (Activity/OpenPrsAiReview.tsx `DrawerAiReview`), drawn in the Overview's row layout — the
+// THE AI REVIEW ON THE PR OVERVIEW, a CARD of its own between "Can it land" and Checks: the SAME
+// facts the Open PRs side panel shows (Activity/OpenPrsAiReview.tsx `DrawerAiReview`), drawn on the
+// AI surface (the `--ai-*` tokens) with a real heading and its own label column, so it never reads
+// as more of the Overview's rows — the
 // verdict and its commit, the findings, the earlier review, CI, what was posted, when it ran, and
 // the one action. It reads the same batched answers Open PRs reads (`useClaudeReviewStates`,
 // `useCiReviewStates`) for this one PR, so the two never tell different stories.
@@ -30,6 +32,7 @@ export function PrOverviewAiReview({
   const ciState = ciData?.states.find((st) => st.prId === prId);
   const skip = claudeData?.teamClaimSkips?.find((sk) => sk.prId === prId) ?? null;
   return (
+    <div className="mx-4 mt-3 rounded-ui border border-ai-border bg-ai-surface md:mx-5" data-testid="pr-ai-review-card">
     <DrawerAiReview
       layout="overview"
       prId={prId}
@@ -40,5 +43,6 @@ export function PrOverviewAiReview({
       onOpenReview={onOpenReview}
       onOpenFix={onOpenFix}
     />
+    </div>
   );
 }

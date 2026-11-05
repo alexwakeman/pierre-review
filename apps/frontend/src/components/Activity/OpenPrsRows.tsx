@@ -118,7 +118,7 @@ export interface OpenPrsRowsData {
   onOpenPr: (pr: TimelinePr) => void;
   onOpenReview: (pr: TimelinePr) => void;
   onOpenFix: (pr: TimelinePr) => void;
-  /** The PR's Changes tab, on its Threads only view (the drawer's threads link). */
+  /** The PR's Changes tab, on its Threads tab (the drawer's threads link). */
   onOpenThreads: (pr: TimelinePr) => void;
   /** The list's identity (workspace, repo filter, sort, layout): a change starts at one page. */
   windowKey: string | null;
@@ -936,7 +936,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
           {threads != null ? (
             <span className="inline-flex items-center gap-2 text-ui-ink">
               <ThreadStateBar counts={pr.threadCounts} compact className="!w-10" />
-              {/* The PR's threads, every one shown (Changes → Threads only). */}
+              {/* The PR's threads, every one shown (the Threads tab). */}
               <button
                 type="button"
                 onClick={() => data.onOpenThreads(pr)}

@@ -1507,6 +1507,27 @@ erasure delete its rows; in `accountScopedTables()`. Additive, no backfill. Auto
 verdict switched ON by default the same day WITHOUT a migration (NULL reads on). Journal `idx` 166,
 `when` sqlite `1792224075016`.
 
+### `0167_ai_reviews_seen` — Pending → AI reviews "since you last looked"
+
+`workspaces.ai_reviews_seen_at` (integer timestamp, nullable): when the reader last looked at the AI
+reviews tab in this workspace. NULL = never. (Since 2026-11-04 the stamp only marks rows "New" and
+counts the tab's badge — the list is the newest AI review per PR and looking never removes a row.) One writer,
+`db/ai-reviews-seen.ts` `markAiReviewsSeen` (never moves back; [BACKEND.md](BACKEND.md) § The AI
+reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
+Journal `idx` 167, `when` sqlite `1792224077016`.
+
+### `0168_ai_review_seen_per_run` — My Turn's "New AI review" is seen-based; the red branch leaves My Turn
+
+`claude_reviews.seen_at` (integer timestamp, nullable): when the reader first had a finished run on
+screen in the PR's AI Review tab (a pair: every half). One writer, `db/claude-review-seen.ts`
+`markClaudeReviewSeen`, which stamps only a NULL row. ⚠ **BACKFILLED**: every run already
+`succeeded` is stamped `coalesce(finished_at, created_at)` — the card's meaning changed from
+"un-posted findings" to "not seen", and an upgrade must not drop every PR's latest review onto My
+Turn at once. The same file DELETEs every `my_turn_dismissals` row with `pr_id IS NULL` (the
+repository subjects of the retired `trunk_red` type); `repo_id` stays, dormant. On existing tables, so
+erasure and export already cover them. Journal `idx` 168, `when` sqlite `1792224079016`
+([BACKEND.md](BACKEND.md) § My Turn's two AI review types).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

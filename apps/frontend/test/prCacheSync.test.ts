@@ -3,9 +3,9 @@
 //
 // WHAT THIS PINS, and why each is worth a test rather than a comment:
 //
-//   1. THE BOARD'S THREE READS MOVE TOGETHER. attention-cards, daily-brief and work-plan are one
-//      fold read three times; a write that refetched one without the others is how a count and the
-//      list under it came to disagree ("5 items" over a board of 3).
+//   1. THE BOARD'S TWO READS MOVE TOGETHER. attention-cards and daily-brief are one fold read
+//      twice; a write that refetched one without the other is how a count and the list under it
+//      came to disagree ("5 items" over a board of 3).
 //   2. TWO KEYS ARE NEVER IN THE SET. `prRefreshKey(prId)` fires a POST that walks the PR on GitHub,
 //      and `['attention-liveness', …]` is a batched GitHub sweep — a write must not spend quota.
 //   3. THE WORKSPACE HALF IS `ACTIVITY_QUERY_KEYS`, not a third hand-typed list, so a sync landing
@@ -48,7 +48,7 @@ import { ARMED_MERGES_KEY } from '../src/hooks/useAutoMerge.js';
 import { prMlLabelsKey } from '../src/hooks/useMlLabels.js';
 import { prRefreshKey } from '../src/hooks/usePrLiveRefresh.js';
 
-const TRIO = [['attention-cards'], ['daily-brief'], ['work-plan']];
+const TRIO = [['attention-cards'], ['daily-brief']];
 const s = (k: unknown): string => JSON.stringify(k);
 const has = (keys: readonly unknown[], k: unknown): boolean => keys.some((x) => s(x) === s(k));
 

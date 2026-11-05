@@ -1,6 +1,6 @@
-// WHERE THE READER WAS IN EACH PR — the PR detail's last tab, the scroll position of its scrolling
-// pane per tab, and the Changes tab's "Threads only" switch, so reopening a PR (a tab click, the
-// sidebar's open tabs, a link that names no tab) lands where they left it.
+// WHERE THE READER WAS IN EACH PR — the PR detail's last tab and the scroll position of its
+// scrolling pane per tab, so reopening a PR (a tab click, the sidebar's open tabs, a link that names
+// no tab) lands where they left it.
 //
 // ⚠ THIS SESSION ONLY, IN MEMORY. A plain module Map, never localStorage or the store: a reload
 // starts every PR on Overview, as before. Not the Zustand store either — the store's URL-owned keys
@@ -16,7 +16,6 @@ import type { PrDetailTab } from '../store/filters.js';
 interface PrView {
   tab: PrDetailTab;
   scroll: Map<PrDetailTab, number>;
-  threadsOnly: boolean;
 }
 
 /** How many PRs are remembered; the least recently touched one goes first. */
@@ -26,7 +25,7 @@ const memory = new Map<number, PrView>();
 
 function touch(prId: number): PrView {
   const existing = memory.get(prId);
-  const view: PrView = existing ?? { tab: 'overview', scroll: new Map(), threadsOnly: false };
+  const view: PrView = existing ?? { tab: 'overview', scroll: new Map() };
   // Re-insert so Map order is recency order.
   memory.delete(prId);
   memory.set(prId, view);
@@ -38,27 +37,13 @@ function touch(prId: number): PrView {
   return view;
 }
 
-/**
- * The tab a pane should be remembered on. `'activity'` is Overview with its Activity section open
- * (DERIVED in PrDetail, never a screen of its own), so it is remembered as Overview.
- */
-export function rememberedTabOf(tab: PrDetailTab): PrDetailTab {
-  return tab === 'activity' ? 'overview' : tab;
-}
-
 export function rememberPrTab(prId: number, tab: PrDetailTab): void {
-  touch(prId).tab = rememberedTabOf(tab);
+  touch(prId).tab = tab;
 }
 
 export function rememberPrScroll(prId: number, tab: PrDetailTab, top: number): void {
   if (!Number.isFinite(top)) return;
-  touch(prId).scroll.set(rememberedTabOf(tab), Math.max(0, Math.round(top)));
-}
-
-export function rememberPrThreadsOnly(prId: number, threadsOnly: boolean): void {
-  // Only worth an entry once the reader has turned it on.
-  if (!threadsOnly && !memory.has(prId)) return;
-  touch(prId).threadsOnly = threadsOnly;
+  touch(prId).scroll.set(tab, Math.max(0, Math.round(top)));
 }
 
 /** The PR's last tab, or null when this session has not seen the PR. */
@@ -68,11 +53,7 @@ export function rememberedPrTab(prId: number): PrDetailTab | null {
 
 /** The pane's last scroll position on that tab, or null. */
 export function rememberedPrScroll(prId: number, tab: PrDetailTab): number | null {
-  return memory.get(prId)?.scroll.get(rememberedTabOf(tab)) ?? null;
-}
-
-export function rememberedPrThreadsOnly(prId: number): boolean {
-  return memory.get(prId)?.threadsOnly ?? false;
+  return memory.get(prId)?.scroll.get(tab) ?? null;
 }
 
 /** Tests only. */

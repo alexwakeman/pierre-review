@@ -1170,6 +1170,20 @@
       "when": 1792224075016,
       "tag": "0166_team_claim_skip_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "6",
+      "when": 1792224077016,
+      "tag": "0167_ai_reviews_seen",
+      "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "6",
+      "when": 1792224079016,
+      "tag": "0168_ai_review_seen_per_run",
+      "breakpoints": true
     }
   ]
 }

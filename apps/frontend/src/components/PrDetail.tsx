@@ -1,13 +1,14 @@
 import { PrStoryTab } from './pr/PrStoryTab.js';
 import { PrOverviewAiReview } from './pr/PrOverviewAiReview.js';
+import { ReviewDecisionPill, reviewDecisionFace } from './pr/ReviewDecisionPill.js';
+import { PrActivityTab, prConversationCount } from './pr/PrActivityTab.js';
+import { PrThreadsTab } from './pr/PrThreadsTab.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invalidateSeenState } from '../hooks/useMarkRepoSeen.js';
 import type {
-  EventType,
   PrDetail as PrDetailT,
   PrFilesResponse,
-  ReviewState,
   ThreadDetail,
   User,
 } from '@pierre-review/shared';
@@ -27,7 +28,6 @@ import { useFilters, type PrDetailTab } from '../store/filters.js';
 import { markUrlCorrection } from '../hooks/useUrlState.js';
 import { parseTabKey, usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
 import {
-  buildQuotedReply,
   dateTime,
   indexUsers,
   PR_STATE_META,
@@ -37,7 +37,7 @@ import {
 } from '../lib/ui.js';
 import { CiDot } from './Activity/BranchStatusChip.js';
 import { Avatar } from './CommentCard.js';
-import { CopyButton, writeClipboard } from './CopyButton.js';
+import { writeClipboard } from './CopyButton.js';
 import {
   cx,
   FOCUS_RING,
@@ -55,25 +55,22 @@ import {
   type TabItem,
 } from './ui/index.js';
 import { UserName } from './UserName.js';
-import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
+import { PrFocusMetaContext } from './ShowOnTimeline.js';
 import { useOpenStory } from '../lib/ticketTab.js';
 import {
   rememberedPrScroll,
   rememberedPrTab,
-  rememberedPrThreadsOnly,
   rememberPrScroll,
   rememberPrTab,
-  rememberPrThreadsOnly,
   restorePaneScroll,
 } from '../lib/prViewMemory.js';
 import {
+  ActivityIcon,
   BotIcon,
   ChevronIcon,
-  CommentIcon,
   DiffIcon,
   DotIcon,
   EllipsisIcon,
-  ExternalLinkIcon,
   EyeIcon,
   FeedIcon,
   MagnifierIcon,
@@ -86,28 +83,22 @@ import {
   OverviewIcon,
   RefreshIcon,
   SparkleIcon,
+  ThreadsIcon,
   TicketIcon,
   TimelineIcon,
   TimerIcon,
   WarningIcon,
   WrenchIcon,
 } from './Icons.js';
-import { ThreadList } from './ThreadList/index.js';
-import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
 import { PrChips } from './Activity/PrChips.js';
 import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
 import { ChecksTab } from './ChecksTab.js';
-import type { LimnSeverity, MlSeverity } from '@pierre-review/shared';
-import { MlSeverityBadge } from './MlSeverityBadge.js';
-import { LimnSeverityChip } from './LimnSeverityChip.js';
-import { ReactionBar } from './ReactionBar.js';
-import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
+import type { MlSeverity } from '@pierre-review/shared';
 import { ChangesTab } from './ChangesTab.js';
 import { anchorLineFromHunk } from '../lib/diff.js';
 import type { DiffFocusTarget } from './diff/FileDiffView.js';
-import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
 // The two agentic tabs are the heaviest components in the app (~3k LOC combined, pulling their
 // own deep imports) and most sessions never open them. Lazy-load them so they leave the initial bundle and fetch on first open. (Named
@@ -119,8 +110,6 @@ const AiFixTab = lazy(() => import('./AiFixTab.js').then((m) => ({ default: m.Ai
 const PrBotBehaviourTab = lazy(() =>
   import('./PrBotBehaviourTab.js').then((m) => ({ default: m.PrBotBehaviourTab })),
 );
-import { Markdown } from './Markdown.js';
-import { isNewComment, NewTag } from './ThreadView/index.js';
 
 function newSummary(n: PrDetailT['newSinceLastViewed']): string | null {
   if (!n) return null;
@@ -156,9 +145,8 @@ function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
 // whichever provider made it (each run names its own).
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
-  comments: 'Comments',
-  // Never listed in the strip (Activity is a section of Overview now); kept for the type.
   activity: 'Activity',
+  threads: 'Threads',
   changes: 'Changes',
   bot_activity: 'Bot activity',
   claude_review: 'AI Review',
@@ -173,558 +161,14 @@ const TAB_LABELS: Record<Tab, string> = {
 // verdict pill: the verdict lives on the tab's own page and the Overview card (2026-11-03).
 const TAB_ICONS: Record<Tab, JSX.Element> = {
   overview: <OverviewIcon size={14} />,
-  comments: <CommentIcon size={14} />,
-  activity: <OverviewIcon size={14} />,
+  activity: <ActivityIcon size={14} />,
+  threads: <ThreadsIcon size={14} />,
   changes: <DiffIcon size={14} />,
   bot_activity: <BotIcon size={14} />,
   claude_review: <SparkleIcon size={14} className="text-ai-signal" />,
   ai_fix: <WrenchIcon size={14} className="text-ai-signal" />,
   story: <TicketIcon size={14} />,
 };
-
-interface ActivityRow {
-  key: string;
-  time: string;
-  label: string;
-  actorId: number | null;
-  detail?: string;
-  href?: string;
-  /** A commit row's full SHA — printed as the 7-character short hash, copied in full. */
-  sha?: string;
-  // The timeline event this entry maps to, so "Show" can recenter on and glow
-  // it. refId matches the event's ref_id (null for lifecycle, which has no
-  // marker — "Show" just recenters on the PR bar then).
-  event: { type: EventType; refId: number | null };
-}
-
-function buildActivity(pr: PrDetailT): ActivityRow[] {
-  const rows: ActivityRow[] = [];
-  rows.push({
-    key: 'opened',
-    time: pr.openedAt,
-    label: 'opened this PR',
-    actorId: pr.authorId,
-    href: pr.githubUrl,
-    event: { type: 'pr_opened', refId: null },
-  });
-  for (const c of pr.commits) {
-    rows.push({
-      key: `commit:${c.id}`,
-      time: c.committedAt,
-      label: 'pushed a commit',
-      actorId: c.authorId ?? c.committerId,
-      detail: c.message?.split('\n')[0],
-      href: `${pr.githubUrl}/commits/${c.sha}`,
-      sha: c.sha,
-      event: { type: 'commit_pushed', refId: c.id },
-    });
-  }
-  for (const r of pr.reviews) {
-    rows.push({
-      key: `review:${r.id}`,
-      time: r.submittedAt,
-      label: `reviewed (${r.state.replace('_', ' ')})`,
-      actorId: r.authorId,
-      detail: r.body ?? undefined,
-      href: r.url ?? pr.githubUrl,
-      event: { type: 'review_submitted', refId: r.id },
-    });
-  }
-  for (const c of pr.comments) {
-    rows.push({
-      key: `comment:${c.id}`,
-      time: c.createdAt,
-      label: 'commented',
-      actorId: c.authorId,
-      detail: c.body,
-      href: c.url ?? pr.githubUrl,
-      event: { type: 'pr_comment', refId: c.id },
-    });
-  }
-  if (pr.mergedAt) {
-    rows.push({
-      key: 'merged',
-      time: pr.mergedAt,
-      label: 'merged this PR',
-      actorId: pr.authorId,
-      href: pr.githubUrl,
-      event: { type: 'pr_merged', refId: null },
-    });
-  } else if (pr.closedAt) {
-    rows.push({
-      key: 'closed',
-      time: pr.closedAt,
-      label: 'closed this PR',
-      actorId: pr.authorId,
-      href: pr.githubUrl,
-      event: { type: 'pr_closed', refId: null },
-    });
-  }
-  // Newest first.
-  return rows.sort((a, b) => b.time.localeCompare(a.time));
-}
-
-function ActivityList({
-  pr,
-  usersById,
-  since,
-  onClearSince,
-  focusEvent,
-  onConsumed,
-}: {
-  pr: PrDetailT;
-  usersById: Map<number, User>;
-  since: string | null;
-  onClearSince: () => void;
-  // Deep link from the timeline (e.g. a commit popover): scroll to + flash the
-  // matching entry, then consume the request.
-  focusEvent: { type: EventType; refId: number | null } | null;
-  onConsumed: () => void;
-}): JSX.Element {
-  const all = useMemo(() => buildActivity(pr), [pr]);
-  const rows = since ? all.filter((r) => r.time > since) : all;
-  const rowRefs = useRef(new Map<string, HTMLLIElement>());
-  const [flashKey, setFlashKey] = useState<string | null>(null);
-
-  // Scroll to + flash the targeted entry once it's rendered.
-  useEffect(() => {
-    if (!focusEvent) return;
-    const row = all.find(
-      (r) => r.event.type === focusEvent.type && r.event.refId === focusEvent.refId,
-    );
-    onConsumed();
-    if (!row) return;
-    rowRefs.current.get(row.key)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setFlashKey(row.key);
-  }, [focusEvent, all, onConsumed]);
-
-  // Fade the flash after a beat — kept on its own key so consuming focusEvent
-  // (which re-runs the effect above) can't cancel the timer early.
-  useEffect(() => {
-    if (flashKey == null) return;
-    const t = setTimeout(() => setFlashKey(null), 1800);
-    return () => clearTimeout(t);
-  }, [flashKey]);
-
-  // COMPACT: one line per entry (it used to be a whole tab of three-line cards). Same rows, same
-  // order, same two controls — the timeline magnifier and the GitHub link — as icons at the end.
-  return (
-    <ul className="divide-y divide-ui-line" data-testid="pr-activity-list">
-      {since && (
-        <li className="flex items-center gap-2 bg-ui-sel px-4 py-1 text-meta text-ui-accent">
-          <span>Showing {rows.length} since you last looked</span>
-          <button
-            type="button"
-            onClick={onClearSince}
-            className="hit ml-auto text-ui-mute hover:text-ui-ink"
-          >
-            Show all
-          </button>
-        </li>
-      )}
-      {rows.map((r) => {
-        const user = r.actorId != null ? usersById.get(r.actorId) : undefined;
-        const href = r.href != null ? safeExternalUrl(r.href) : null;
-        return (
-          <li
-            key={r.key}
-            ref={(el) => {
-              if (el) rowRefs.current.set(r.key, el);
-              else rowRefs.current.delete(r.key);
-            }}
-            className={`flex items-center gap-1.5 px-4 py-1 text-meta ${
-              r.key === flashKey ? 'activity-flash' : ''
-            }`}
-          >
-            <Avatar user={user} size={16} />
-            <UserName
-              user={user}
-              fallbackId={r.actorId}
-              repoId={pr.repoId}
-              className="shrink-0 font-medium"
-            />
-            <span className="shrink-0 text-ui-mute">{r.label}</span>
-            {r.sha && (
-              <span className="inline-flex shrink-0 items-center gap-0.5">
-                <a
-                  href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="hit font-mono text-ui-mute hover:text-ui-ink"
-                  aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
-                >
-                  {r.sha.slice(0, 7)}
-                </a>
-                <CopyButton text={r.sha} what="commit hash" title="Copy commit hash" />
-              </span>
-            )}
-            <span
-              className="min-w-0 flex-1 truncate text-ui-mute"
-              title={r.detail}
-            >
-              {r.detail?.split('\n')[0]}
-            </span>
-            <span
-              className="shrink-0 tabular-nums text-ui-mute"
-              title={dateTime(r.time)}
-            >
-              {relativeTime(r.time)}
-            </span>
-            {/* Opens the PR's OWN timeline tab centred on this event (the one focus-entry funnel
-                every "show this moment" control uses). */}
-            <ShowOnTimeline
-              prId={pr.id}
-              at={r.time}
-              event={r.event}
-              title="Show on this PR's own timeline"
-            />
-            {href != null && (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-ink"
-                title="Open on GitHub"
-                aria-label="Open on GitHub"
-              >
-                <ExternalLinkIcon size={12} />
-              </a>
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/**
- * Overview's last section: the PR's Activity (opened, commits, reviews, comments, merged/closed),
- * newest first. It was a tab of its own; now it sits COLLAPSED at the foot of Overview, and the
- * header bar is the toggle (the Default branches strip's pattern). `open` is owned by PrDetail,
- * because a `?prTab=activity` link, the timeline's commit popover and the header's "N new" chip
- * all open it from outside.
- */
-export function ActivitySection({
-  open,
-  onToggle,
-  count,
-  scrollNonce,
-  onScrollConsumed,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  count: number;
-  /** Set when something outside asks to SEE the section (the header's "N new" chip, an arrival on
-   *  `'activity'`). Consumed after one scroll, so a later return to Overview does not jump. */
-  scrollNonce?: number | null;
-  onScrollConsumed?: () => void;
-  children?: React.ReactNode;
-}): JSX.Element {
-  const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (scrollNonce == null) return;
-    ref.current?.scrollIntoView({ block: 'start' });
-    onScrollConsumed?.();
-    // Keyed on the nonce alone: the callback is a fresh closure every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollNonce]);
-  return (
-    <section
-      ref={ref}
-      // scroll-mt: below md the sticky tab strip would cover a section scrolled to the top.
-      className="mt-2 scroll-mt-[var(--pr-tabs-h,0px)]"
-      data-testid="pr-activity-section"
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className={cx('flex h-9 w-full items-center gap-2 px-4 text-left hover:bg-ui-hover touch:h-11 md:px-5', FOCUS_RING)}
-      >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-ui-faint" />
-        <span className="text-body font-medium text-ui-ink">
-          Activity
-        </span>
-        <span className="ml-auto text-meta tabular-nums text-ui-faint">
-          {count} event{count === 1 ? '' : 's'}
-        </span>
-      </button>
-      {open && children}
-    </section>
-  );
-}
-
-// A review that carries a body counts as a "PR comment" for the conversation view (the
-// note the reviewer wrote when submitting — a plain "Review: comment", or the summary
-// attached to an approval / change-request). Inline review-thread comments live in the
-// Changes tab's threads, so they're NOT counted here.
-const reviewCommentCount = (pr: PrDetailT): number =>
-  pr.reviews.filter((r) => r.body != null && r.body.trim() !== '').length;
-
-/** The Comments tab's badge: issue-level PR comments plus reviews that carried a body — exactly
- *  the items `PrCommentsList` renders, so the badge and the list cannot disagree. */
-export const prConversationCount = (pr: PrDetailT): number =>
-  pr.comments.length + reviewCommentCount(pr);
-
-// Small state pill next to a review author in the conversation, so an approval-with-note
-// reads differently from a plain review comment or a change request.
-const REVIEW_TAG: Record<ReviewState, { label: string; cls: string }> = {
-  approved: { label: 'approved', cls: 'bg-ui-raise text-ui-success' },
-  changes_requested: {
-    label: 'changes requested',
-    cls: 'bg-ui-raise text-ui-warn',
-  },
-  commented: { label: 'review', cls: 'bg-ui-sel text-ui-accent' },
-  dismissed: { label: 'dismissed', cls: 'bg-ui-raise text-ui-mute' },
-  pending: { label: 'pending', cls: 'bg-ui-raise text-ui-mute' },
-};
-
-function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
-  const t = REVIEW_TAG[state];
-  return (
-    <span
-      className={`rounded-ui px-1.5 py-0.5 text-meta font-medium ${t.cls}`}
-      title={`Review: ${state.replace('_', ' ')}`}
-    >
-      {t.label}
-    </span>
-  );
-}
-
-// One entry in the merged conversation: either an issue-level PR comment or a review
-// that carried a body. Both are sorted together chronologically so the pane reads like
-// the GitHub conversation, not two disjoint lists.
-type ConversationItem = {
-  kind: 'comment' | 'review';
-  id: number;
-  authorId: number | null;
-  body: string;
-  at: string;
-  url: string | null;
-  state?: ReviewState;
-  // A PR-level comment Limn posted as a finding: its severity (PrCommentDetail.limnSeverity).
-  limnSeverity?: LimnSeverity | null;
-};
-
-// The PR conversation: issue-level comments PLUS reviews that carry a body (a review
-// summary / "Review: comment"), merged chronologically. Comments map to a `pr_comment`
-// timeline event, reviews to `review_submitted`, so "Show on timeline" reuses the same
-// (type, refId) + recenter mechanism as the Activity tab. Inline review-thread comments
-// are the Changes tab's concern, not this list.
-function PrCommentsList({
-  pr,
-  usersById,
-  viewedSince,
-  focusKey,
-  selectedCommentId,
-  onFocusConsumed,
-}: {
-  pr: PrDetailT;
-  usersById: Map<number, User>;
-  viewedSince: string | null;
-  // Deep link from the timeline (pr_comment popover → "Open in detail pane"):
-  // scroll to + flash this comment card, then consume the request.
-  // `${kind}:${id}` — `comment:<pr_comments.id>` or `review:<reviews.id>` (a Pending mention can
-  // point at a review body), the same key the rows render under.
-  focusKey: string | null;
-  // The selected comment gets a PERMANENT amber border (mirrors a selected thread),
-  // distinct from the one-shot flash above.
-  selectedCommentId: number | null;
-  onFocusConsumed: () => void;
-}): JSX.Element {
-  const cardRefs = useRef(new Map<string, HTMLDivElement>());
-  const [flashId, setFlashId] = useState<string | null>(null);
-  // The item whose expand-in-place reply composer is open (only one at a time). Keyed by
-  // `${kind}:${id}` so a review id can't collide with a comment id.
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-
-  // Scroll to + flash the deep-linked comment once it's rendered, then consume the
-  // request (the flash lives on its own state so consuming can't cancel it early).
-  useEffect(() => {
-    if (focusKey == null) return;
-    onFocusConsumed();
-    const el = cardRefs.current.get(focusKey);
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setFlashId(focusKey);
-  }, [focusKey, onFocusConsumed]);
-
-  useEffect(() => {
-    if (flashId == null) return;
-    const t = setTimeout(() => setFlashId(null), 1800);
-    return () => clearTimeout(t);
-  }, [flashId]);
-
-  // ML severity/category labels for this PR — the same one-query-per-PR index the Changes tab's threads
-  // reads, deduped by React Query. Two target kinds meet here: an issue comment is
-  // ('pr_comment', prComments.id) and a review body is ('review', reviews.id). Those are
-  // SEPARATE id spaces on separate tables, so the lookup must key on `it.kind` — a badge that
-  // assumed one kind would find a different row's label and be confidently wrong.
-  const mlEnabled = useMlSeverityEnabled();
-  const mlIndex = useMlLabelIndex(pr.id, mlEnabled);
-
-  // Merge issue comments + reviews-with-body, oldest first — chronological reading order
-  // (matches the GitHub conversation; comments carry createdAt, reviews submittedAt).
-  const items: ConversationItem[] = [
-    ...pr.comments.map(
-      (c): ConversationItem => ({
-        kind: 'comment',
-        id: c.id,
-        authorId: c.authorId,
-        body: c.body,
-        at: c.createdAt,
-        url: c.url,
-        limnSeverity: c.limnSeverity ?? null,
-      }),
-    ),
-    ...pr.reviews
-      .filter((r) => r.body != null && r.body.trim() !== '')
-      .map(
-        (r): ConversationItem => ({
-          kind: 'review',
-          id: r.id,
-          authorId: r.authorId,
-          body: r.body as string,
-          at: r.submittedAt,
-          url: r.url,
-          state: r.state,
-        }),
-      ),
-  ].sort((a, b) => a.at.localeCompare(b.at));
-
-  if (items.length === 0) {
-    return (
-      <div className="px-4 py-6 text-center text-body text-ui-mute md:px-5">
-        No PR comments on this PR.
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto max-w-4xl space-y-2 px-3 pb-3 md:px-5">
-      {items.map((it) => {
-        const user = it.authorId != null ? usersById.get(it.authorId) : undefined;
-        const isNew = isNewComment(it.at, viewedSince);
-        const isComment = it.kind === 'comment';
-        const rowKey = `${it.kind}:${it.id}`;
-        // The permanent selection targets comment ids only (the pr_comment popover); the
-        // one-shot scroll + flash takes either kind (a Pending mention in a review body).
-        const selected = isComment && it.id === selectedCommentId;
-        const flashing = rowKey === flashId;
-        return (
-          <div
-            key={rowKey}
-            ref={(el) => {
-              if (el) cardRefs.current.set(rowKey, el);
-              else cardRefs.current.delete(rowKey);
-            }}
-            // A tone, not a border; the selected comment keeps its permanent amber ring.
-            className={`rounded-ui bg-ui-surface px-3 py-2.5 ${
-              selected ? 'ring-1 ring-ui-warn/40' : ''
-            } ${isNew ? 'comment-new' : ''} ${flashing ? 'activity-flash' : ''}`}
-          >
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
-              <ShowOnTimeline
-                prId={pr.id}
-                at={it.at}
-                event={
-                  isComment
-                    ? { type: 'pr_comment', refId: it.id }
-                    : { type: 'review_submitted', refId: it.id }
-                }
-                title={
-                  isComment
-                    ? 'Show this comment on the timeline'
-                    : 'Show this review on the timeline'
-                }
-              />
-              <Avatar user={user} size={18} />
-              <UserName
-                user={user}
-                fallbackId={it.authorId}
-                repoId={pr.repoId}
-                className="font-medium text-ui-ink"
-              />
-              {it.kind === 'review' && it.state != null && <ReviewStateTag state={it.state} />}
-              <span className="whitespace-nowrap text-ui-faint" title={dateTime(it.at)}>
-                {relativeTime(it.at)}
-              </span>
-              {isNew && <NewTag />}
-              {/* A PR-level comment Limn posted as a finding: its severity. */}
-              <LimnSeverityChip severity={it.limnSeverity} />
-              <MlSeverityBadge
-                label={mlIndex?.get(
-                  mlLabelKey(isComment ? 'pr_comment' : 'review', it.id),
-                )}
-              />
-              {/* Right-aligned, matching CommentBlock's, so the control sits in one predictable
-                  place across both comment surfaces. A review body copies too — it is where a
-                  bot's summary verdict lands, and it is the single most-copied text here. */}
-              <CopyButton
-                text={it.body}
-                what={isComment ? 'comment' : 'review'}
-                className="ml-auto"
-              />
-            </div>
-            <div className="mt-1.5 text-body">
-              <Markdown>{it.body}</Markdown>
-            </div>
-            {/* Emoji reactions on this conversation item. BOTH kinds are reactable on GitHub —
-                an issue comment is `IssueComment` and a review body is `PullRequestReview` —
-                and they are SEPARATE id spaces on separate tables, exactly like the ML badge
-                above, so the kind rides the same `isComment` discriminator. (A review body is
-                the highest-value target in this product: it is where a bot's summary verdict
-                lands, and REST has no reactions endpoint for it at all, which is why the whole
-                write path is GraphQL.) Renders nothing when there are none and the viewer may
-                not add one. */}
-            <ReactionBar
-              kind={isComment ? 'pr_comment' : 'review'}
-              id={it.id}
-              className="mt-1.5 pl-2"
-            />
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta">
-              {replyingTo !== rowKey && (
-                <button
-                  type="button"
-                  onClick={() => setReplyingTo(rowKey)}
-                  className="text-ui-ink hover:underline touch:min-h-10"
-                >
-                  Reply
-                </button>
-              )}
-              {it.url && (
-                <a
-                  href={safeExternalUrl(it.url)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-ui-ink hover:underline text-link-phone touch:min-h-10"
-                >
-                  <ExternalLinkIcon size={11} />
-                  {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
-                </a>
-              )}
-            </div>
-            {replyingTo === rowKey && (
-              <div className="mt-2">
-                <PrCommentComposer
-                  prId={pr.id}
-                  initialBody={buildQuotedReply(
-                    it.body,
-                    usersById.get(it.authorId ?? -1)?.githubLogin ?? null,
-                  )}
-                  autoFocus
-                  onCancel={() => setReplyingTo(null)}
-                  onDone={() => setReplyingTo(null)}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // First-load placeholder for the detail pane: the header (title + meta), the tab strip,
 // and a few content blocks — mirrors the real layout so nothing jumps when the PR loads.
@@ -820,12 +264,6 @@ export function PrDetail({
   // pane — and it must outlive ChangesTab, which every tab switch remounts. A plain Map mutated in
   // place and read only when a pill MOUNTS, so a click re-renders one pill and never this component.
   const [threadOpenMemory] = useState(() => new Map<number, boolean>());
-  // The Changes tab's "Threads only" view (the review threads without the code) — there is no
-  // Threads TAB any more. LOCAL for the same reason as `changesFocus`: it belongs to this PR's
-  // pane. Owned here, not in ChangesTab, because the deep links below switch it: a selected thread
-  // whose file has left the diff, the Overview's Bots chip, a state-pill preset. "Show in context"
-  // (`openInChanges`) switches it off.
-  const [changesThreadsOnly, setChangesThreadsOnly] = useState(false);
   // The header CI readout's "show me" — a nonce ChecksTab consumes by scrolling its Status row
   // into view, so the click lands there even when Overview is already the tab on screen (the tab
   // body's scroll container is shared by every tab and never reset). Consumed, not sticky: a
@@ -863,7 +301,7 @@ export function PrDetail({
   );
   /**
    * THE SAME MOVE, MADE BY THE APP RATHER THAN THE READER — used by every deep-link effect below
-   * (a Bots chip forces the Changes tab's threads, a review banner forces Claude Review, …).
+   * (a Bots chip forces the Threads tab, a review banner forces Claude Review, …).
    *
    * Identical to `goToTab` except that it tells the URL layer this write is a CORRECTION, so the
    * entry is REPLACED instead of pushed. Those effects fire one tick after the open that already
@@ -889,30 +327,23 @@ export function PrDetail({
   ): void => {
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
     // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
-    // no clearing sits between the two. It is also "Show in context": the code comes back.
+    // no clearing sits between the two. It is also the Threads tab's "Show in context".
     cancelScrollRestore();
     setPrDetailTab(prId, 'changes');
-    setChangesThreadsOnly(false);
     setChangesFocus({ path, line, side, threadId: threadId ?? null, nonce: Date.now() });
   };
-  /** The Changes tab with its "Threads only" view on — where every "see the threads" link lands. */
+  /** The Threads tab — where every "see the threads" link lands. */
   const openThreadsView = useCallback((): void => {
-    goToTab('changes');
-    setChangesThreadsOnly(true);
+    goToTab('threads');
   }, [goToTab]);
   /** The same, made by a deep-link effect rather than the reader: a URL correction. */
   const seedThreadsView = useCallback((): void => {
     markUrlCorrection();
     openThreadsView();
   }, [openThreadsView]);
+  // The Activity tab's "what's new" filter (the header's "N new" chip). Cleared by a deep link to
+  // one entry, so the target is never filtered out.
   const [activitySince, setActivitySince] = useState<string | null>(null);
-  // Overview's Activity section: COLLAPSED by default. `'activity'` as the seated tab (an old
-  // `?prTab=activity` link, the timeline's commit popover, the header's "N new" chip) means
-  // "Overview, with this section open" — DERIVED below, never written back. The local flag holds the
-  // reader's own clicks and mirrors an arrival on `'activity'`, so pressing the Overview tab
-  // afterwards does not snap the section shut under them.
-  const [activityOpenLocal, setActivityOpenLocal] = useState(false);
-  const [activityScroll, setActivityScroll] = useState<number | null>(null);
   // PHONE HEADER (below md): the size/reach readings fold behind "Details"
   // (local, ephemeral — every fact stays one tap away), and the tab strip sticks to the top of
   // the one scroller as the header scrolls away. Its height is measured into `--pr-tabs-measured`;
@@ -931,14 +362,6 @@ export function PrDetail({
     ro.observe(el);
     tabsObserver.current = ro;
   }, []);
-  useEffect(() => {
-    if (tab !== 'activity') return;
-    setActivityOpenLocal(true);
-    // Arriving on it (a Pending card, an old link) should SHOW the section, which sits below the
-    // fold of Overview. Not when a single entry is targeted: ActivityList scrolls to that row.
-    if (useFilters.getState().activityFocus?.prId !== prId) setActivityScroll((n) => (n ?? 0) + 1);
-  }, [tab, prId]);
-  const activityOpen = activityOpenLocal || tab === 'activity';
   const qc = useQueryClient();
   /**
    * THREAD → CHANGES, with the full fallback ladder. Resolved here because this is the only
@@ -999,8 +422,8 @@ export function PrDetail({
    * the Feed, a timeline marker, the Claude Review tab's thread rows): the Changes tab with the
    * code, scrolled to the thread's pill, opened and ringed. It takes the thread → code ladder
    * (`openInChangesFor`); when the thread's file has left the diff (rung 4) it lands on the
-   * Threads only view instead, with the thread selected so the list scrolls to it. A thread this
-   * pane does not hold (a stale link) lands on the Threads only view too, never on nothing.
+   * Threads tab instead, with the thread selected so the list scrolls to it. A thread this pane
+   * does not hold (a stale link) lands on the Threads tab too, never on nothing.
    *
    * `handledThreadRef` is the selected-thread effect's record: a selection made HERE is already
    * shown, so the effect must not show it a second time.
@@ -1017,8 +440,7 @@ export function PrDetail({
     cancelScrollRestore();
     // `selectThread` also clears the state/severity pill presets that could filter it out.
     useFilters.getState().selectThread(prId, threadId);
-    setPrDetailTab(prId, 'changes');
-    setChangesThreadsOnly(true);
+    setPrDetailTab(prId, 'threads');
   };
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
@@ -1080,14 +502,14 @@ export function PrDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- showThread is a fresh closure each render
   }, [selectedThreadId, prLoaded]);
 
-  // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → the Changes tab's
-  // Threads only view, which then shows only that vendor's threads.
+  // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → the Threads tab, which
+  // then shows only that vendor's threads.
   const threadBotFilter = useFilters((s) => s.threadBotFilter);
   useEffect(() => {
     if (threadBotFilter != null) seedThreadsView();
   }, [threadBotFilter, seedThreadsView]);
 
-  // The Open PRs drawer's threads link: land on the Threads only view, every thread shown. A
+  // The Open PRs drawer's threads link: land on the Threads tab, every thread shown. A
   // request for ANOTHER PR is left for that PR's pane; this one is consumed once.
   const threadsViewRequest = useFilters((s) => s.threadsViewRequest);
   useEffect(() => {
@@ -1097,7 +519,7 @@ export function PrDetail({
   }, [threadsViewRequest, prId, seedThreadsView]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
-  // → force the Threads only view so the relevant threads are visible immediately. The preset belongs
+  // → force the Threads tab so the relevant threads are visible immediately. The preset belongs
   // to the PR it was set FOR (openPrThreadsFiltered sets selectedPrId + the filter together);
   // guard on selectedPrId === prId — mirroring App's selectedThreadId guard — so opening ANOTHER
   // PR via openPrDetailTab (which never resets the filter) can't inherit it and force the wrong
@@ -1114,9 +536,8 @@ export function PrDetail({
     if (threadStateFilter.size > 0) seedThreadsView();
   }, [threadStateFilter, seedThreadsView]);
 
-  // A timeline deep link to an Activity entry (e.g. the commit popover) seats `'activity'` —
-  // Overview with its Activity section open — and clears the "since" filter so the target is
-  // visible; the list then scrolls to + flashes it.
+  // A timeline deep link to an Activity entry (e.g. the commit popover) seats the Activity tab and
+  // clears the "since" filter so the target is visible; the list then scrolls to + flashes it.
   useEffect(() => {
     if (activityFocusForPr) {
       seedTab('activity');
@@ -1142,7 +563,7 @@ export function PrDetail({
       const { threadId } = prChangesFocus;
       // A Pending comment card names a THREAD: `showThread` takes the thread → code ladder (live
       // line, else the anchor hunk's, else the file), and when the file has left the diff, lands
-      // on the thread in the Threads only view instead.
+      // on the thread in the Threads tab instead.
       const thread = threadId != null ? pr.threads.find((t) => t.id === threadId) : undefined;
       if (thread != null) {
         showThread(thread.id);
@@ -1165,11 +586,14 @@ export function PrDetail({
     }
   }, [aiFixTabFocus, prId, aiFixTabEnabled, seedTab]);
 
-  // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
-  // pane") forces the Comments tab, where PrCommentsList then scrolls to + flashes
-  // it. PrCommentsList consumes the signal (not here) once it has scrolled.
+  // A deep link to a PR comment or review body (the pr_comment popover's "Open in detail pane", a
+  // Pending mention) seats the Activity tab, which opens that card, scrolls to + flashes it, and
+  // consumes the signal (not here) once it has.
   useEffect(() => {
-    if (commentFocusForPr != null) seedTab('comments');
+    if (commentFocusForPr != null) {
+      seedTab('activity');
+      setActivitySince(null);
+    }
   }, [commentFocusForPr, seedTab]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
@@ -1250,16 +674,13 @@ export function PrDetail({
   const [storyIndex, setStoryIndex] = useState(0);
   const currentStory = storyTickets[storyIndex] ?? storyTickets[0] ?? null;
   const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
-  // `'activity'` is not a screen of its own any more: it renders Overview (section open, above).
   const effectiveTab: Tab =
-    tab === 'activity'
+    tab === 'bot_activity' && botTabResolved && !botTabVisible
       ? 'overview'
-      : tab === 'bot_activity' && botTabResolved && !botTabVisible
+      : // A PR naming no story (a stale `?prTab=story`): Overview, derived — never written back.
+        tab === 'story' && pr != null && !storyTabVisible
         ? 'overview'
-        : // A PR naming no story (a stale `?prTab=story`): Overview, derived — never written back.
-          tab === 'story' && pr != null && !storyTabVisible
-          ? 'overview'
-          : tab;
+        : tab;
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -1287,7 +708,7 @@ export function PrDetail({
 
   /**
    * REOPENING A PR LANDS WHERE THE READER LEFT IT (`lib/prViewMemory.ts`, this session only): the
-   * last tab, that tab's scroll position, and the Changes tab's "Threads only" switch. Read ONCE
+   * last tab and that tab's scroll position. Read ONCE
    * per ARRIVAL — this copy becoming the one on screen (a mount, or the pane coming back out from
    * under another PR's overlay) — never on a tab switch inside the PR.
    *
@@ -1317,7 +738,6 @@ export function PrDetail({
     if (target == null) return;
     const top = rememberedPrScroll(prId, target);
     if (!pairIsOurs && target !== 'overview') seedTab(target);
-    if (target === 'changes' && rememberedPrThreadsOnly(prId)) setChangesThreadsOnly(true);
     if (top != null && top > 0) {
       cancelScrollRestore();
       restoreCancelRef.current = restorePaneScroll(() => panelRef.current, top);
@@ -1326,20 +746,10 @@ export function PrDetail({
     return cancelScrollRestore;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival (`liveVisible` turning true); the rest is read live
   }, [liveVisible, prId]);
-  // What to remember: the tab whenever the pair names this PR, and "Threads only" once the reader
-  // changes it (the first run is the mount's `false`, which must not overwrite the memory the
-  // arrival above is about to read).
+  // What to remember: the tab whenever the pair names this PR.
   useEffect(() => {
     if (prDetailTab?.prId === prId) rememberPrTab(prId, prDetailTab.tab);
   }, [prDetailTab, prId]);
-  const threadsOnlySeen = useRef(false);
-  useEffect(() => {
-    if (!threadsOnlySeen.current) {
-      threadsOnlySeen.current = true;
-      return;
-    }
-    rememberPrThreadsOnly(prId, changesThreadsOnly);
-  }, [changesThreadsOnly, prId]);
   // The pane's scroll is remembered as the reader scrolls (`onScroll` on the tab panel) and when
   // the tab changes: the tabs share ONE scroller that is never reset, so a switch can leave a tab
   // at a position no scroll event reported. Not on the mount (nothing has moved yet).
@@ -1373,7 +783,8 @@ export function PrDetail({
   const cmdLive = useRef<{ tab: (t: Tab, story?: number) => void; act: (id: string) => void }>({ tab: () => {}, act: () => {} });
   const cmdTabs = [
     'overview',
-    'comments',
+    'activity',
+    'threads',
     'changes',
     ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
     ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
@@ -1423,8 +834,6 @@ export function PrDetail({
       { id: 'pr:copy', title: 'Copy the GitHub link to this pull request', group: 'Actions', hint: where, run: () => cmdLive.current.act('copy') },
       { id: 'pr:github', title: 'Open this pull request on GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('github') },
       { id: 'pr:ci', title: 'Show CI status (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('ci') },
-      { id: 'pr:threads', title: 'Show the review threads (Changes, threads only)', group: 'Actions', hint: where, keywords: ['comments', 'review'], run: () => cmdLive.current.act('threads-view') },
-      { id: 'pr:activity', title: 'Show this pull request’s activity (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('activity') },
     ];
   }, [liveVisible, prNumber, cmdTabsKey, placement, storyTickets, openStory]);
   useRegisterCommands(`pr-detail:${placement}`, prCommands);
@@ -1443,9 +852,15 @@ export function PrDetail({
   const stateMeta = PR_STATE_META[pr.state];
   const headerCi = prHeaderCi(pr.state, pr.ciStatus);
   // Something to fold behind the phone header's "Details": the size, the large-PR flag or reach.
-  const hasHeaderDetails = pr.changedFilesCount > 0 || blastFields.blast != null || codeLocFields.codeLoc != null;
+  const hasHeaderDetails =
+    pr.changedFilesCount > 0 ||
+    blastFields.blast != null ||
+    codeLocFields.codeLoc != null ||
+    pr.branchStack != null ||
+    (pr.criteria?.length ?? 0) > 0;
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   const conversationCount = prConversationCount(pr);
+  const unresolvedThreads = pr.threads.filter((t) => !t.isResolved).length;
 
   // "Show in Activity feed" — see the ORDER note by setWorkspace above (isolate LAST).
   const showInFeed = (): void => {
@@ -1465,16 +880,22 @@ export function PrDetail({
     setStatusFocus((n) => (n ?? 0) + 1);
   };
   const showNewActivity = (): void => {
-    // Overview, Activity section open and scrolled to, filtered to what's new.
+    // The Activity tab, filtered to what's new.
     goToTab('activity');
     setActivitySince(pr.lastViewedAt);
-    setActivityScroll((n) => (n ?? 0) + 1);
   };
   const githubHref = safeExternalUrl(pr.githubUrl);
   const copyLink = (href: string): void => {
     void writeClipboard(href).then((ok) => setLinkCopied(ok ? 'copied' : 'failed'));
   };
   const newSince = newSummary(pr.newSinceLastViewed);
+  // The header's third line renders only when it has something on it.
+  const headerLine3 =
+    reviewDecisionFace(pr) != null ||
+    hasHeaderDetails ||
+    pr.isStalled ||
+    (armedIntent != null && pr.state === 'open') ||
+    newSince != null;
   cmdLive.current = {
     tab: (t, story) => {
       if (story != null) setStoryIndex(story);
@@ -1489,11 +910,6 @@ export function PrDetail({
       else if (id === 'copy' && githubHref != null) copyLink(githubHref);
       else if (id === 'github' && githubHref != null) window.open(githubHref, '_blank', 'noopener,noreferrer');
       else if (id === 'ci') showCiStatus();
-      else if (id === 'threads-view') openThreadsView();
-      else if (id === 'activity') {
-        goToTab('activity');
-        setActivityScroll((n) => (n ?? 0) + 1);
-      }
     },
   };
   const failingChecks = pr.checkRuns.filter(
@@ -1502,7 +918,8 @@ export function PrDetail({
   const stateLabel = pr.isDraft ? 'Draft' : stateMeta.label;
   const tabIds: Tab[] = [
     'overview',
-    'comments',
+    'activity',
+    'threads',
     'changes',
     // Also listed while the bot data is still in flight for a reader who ARRIVED on this
     // tab (a deep link / a refresh), so the strip is never showing a screen with no
@@ -1553,17 +970,25 @@ export function PrDetail({
       </>
     ),
     count:
-      t === 'comments'
-        ? conversationCount
-        : t === 'changes' && pr.changedFilesCount > 0
-          ? pr.changedFilesCount
-          : null,
+      t === 'activity'
+        ? conversationCount > 0
+          ? conversationCount
+          : null
+        : t === 'threads'
+          ? unresolvedThreads > 0
+            ? unresolvedThreads
+            : null
+          : t === 'changes' && pr.changedFilesCount > 0
+            ? pr.changedFilesCount
+            : null,
     title:
-      t === 'comments'
-        ? `${conversationCount} comments`
-        : t === 'changes' && pr.changedFilesCount > 0
-          ? `${pr.changedFilesCount} files changed`
-          : undefined,
+      t === 'activity' && conversationCount > 0
+        ? `${conversationCount} comments and reviews`
+        : t === 'threads' && unresolvedThreads > 0
+          ? `${unresolvedThreads} unresolved of ${pr.threads.length} threads`
+          : t === 'changes' && pr.changedFilesCount > 0
+            ? `${pr.changedFilesCount} files changed`
+            : undefined,
   }]);
   // Everything the toolbar does, in words — the overflow menu (every width) and, below md, the
   // only way to the actions the icon row hides. Nothing here is unique to the menu.
@@ -1605,8 +1030,8 @@ export function PrDetail({
       className="flex h-full flex-col bg-ui-bg max-md:overflow-y-auto max-md:overflow-x-clip max-md:[--pr-tabs-h:var(--pr-tabs-measured)]"
       style={{ '--pr-tabs-measured': `${tabsH}px` } as CSSProperties}
     >
-      {/* THE ONE SLIM HEADER: title + toolbar, then one meta line (state, CI, repo, author, age,
-          size, reach), then the tabs. pr-12 leaves room for DetailPane's close ✕ in the pane; the
+      {/* THE ONE SLIM HEADER: title + toolbar, then the meta line (state, CI, repo, author, age),
+          then the review line (GitHub's review decision, size, reach, flags), then the tabs. pr-12 leaves room for DetailPane's close ✕ in the pane; the
           full-screen tab has none. */}
       <header
         className={cx(
@@ -1666,18 +1091,22 @@ export function PrDetail({
             />
           </div>
         </div>
-        {/* THE META LINE: state and CI, then the REPO, then the author, age, size and reach.
+        {/* THE META LINE: state and CI, then the REPO, then the author and age.
             13px body ink in the mute tone (both themes clear AA). */}
         <div
           className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-ui-mute"
           data-testid="pr-header-meta"
         >
-          <StatusIcon
-            tone={pr.state === 'open' && !pr.isDraft ? 'neutral' : 'quiet'}
-            icon={pr.state === 'merged' ? <MergeIcon size={14} /> : <PullRequestIcon size={14} />}
-            label={stateLabel}
-            className="font-medium text-ui-ink"
-          />
+          {/* The state as a NEUTRAL pill — one look for open and merged (colour only by rule,
+              ui/StatusIcon.tsx), ink words; a draft or closed PR keeps the faint words. */}
+          <span className="inline-flex shrink-0 items-center rounded-ui bg-ui-raise px-1.5 py-0.5" data-testid="pr-header-state">
+            <StatusIcon
+              tone={pr.state === 'open' && !pr.isDraft ? 'neutral' : 'quiet'}
+              icon={pr.state === 'merged' ? <MergeIcon size={14} /> : <PullRequestIcon size={14} />}
+              label={stateLabel}
+              className={cx('font-medium', !pr.isDraft && pr.state !== 'closed' && 'text-ui-ink')}
+            />
+          </span>
           {/* CI, visible from EVERY tab because it lives in the header. It reads `pr.ciStatus` —
               the synced rollup the Status row, the Timeline bar and the Pending cards read, never
               the live `checkRuns` — and stays fresh through usePrLiveRefresh's ['pr', prId]
@@ -1721,6 +1150,16 @@ export function PrDetail({
           <span className="inline-flex shrink-0 items-center gap-2">
             <span title={dateTime(pr.openedAt)}>opened {relativeTime(pr.openedAt)}</span>
           </span>
+        </div>
+        {/* THE THIRD LINE: GitHub's review decision first (ReviewDecisionPill — GitHub's claim and
+            our reviewer fold drawn apart), then size, reach, chips and the state flags. Nothing
+            renders when it would be empty. */}
+        {headerLine3 && (
+        <div
+          className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-ui-mute"
+          data-testid="pr-header-review-line"
+        >
+          <ReviewDecisionPill pr={pr} usersById={usersById} />
           {/* PHONE ONLY: the size and reach readings fold
               behind this toggle; it and the folded group sort LAST so the line's other facts keep
               their place. md+ never sees it — there the group is `contents`, exactly as before. */}
@@ -1812,6 +1251,7 @@ export function PrDetail({
             </button>
           )}
         </div>
+        )}
       </header>
       {/* THE TABS — counts as facts, 1–9 while this PR is the one on screen. Picking a tab by
           hand drops any pending "show me this finding" target (`goToTab`'s whole job). A sibling
@@ -1882,87 +1322,38 @@ export function PrDetail({
                 />
               }
             />
-            {/* The PR's Activity, collapsed at the foot of Overview (it was a tab). */}
-            <ActivitySection
-              open={activityOpen}
-              count={buildActivity(pr).length}
-              scrollNonce={activityScroll}
-              onScrollConsumed={() => setActivityScroll(null)}
-              onToggle={() => {
-                if (activityOpen) {
-                  setActivityOpenLocal(false);
-                  // Shutting it while the seated tab still says "activity" must move the tab, or
-                  // the derived open state would hold it open.
-                  if (tab === 'activity') goToTab('overview');
-                } else {
-                  setActivityOpenLocal(true);
-                }
-              }}
-            >
-              <ActivityList
-                pr={pr}
-                usersById={usersById}
-                since={activitySince}
-                onClearSince={() => setActivitySince(null)}
-                focusEvent={activityFocusForPr}
-                onConsumed={consumeActivityFocus}
-              />
-            </ActivitySection>
           </div>
-        ) : effectiveTab === 'comments' ? (
-          // The PR conversation (issue comments + review bodies, oldest first) and the composer —
-          // its own tab now, beside Overview.
-          <div className="pt-2">
-            <PrCommentsList
-              pr={pr}
-              usersById={usersById}
-              viewedSince={pr.lastViewedAt}
-              focusKey={commentFocusForPr}
-              selectedCommentId={selectedCommentId}
-              onFocusConsumed={consumeCommentFocus}
-            />
-            <PrCommentComposer prId={pr.id} />
-          </div>
+        ) : effectiveTab === 'activity' ? (
+          // Every comment, review, commit and lifecycle event, newest first, the composer on top.
+          <PrActivityTab
+            pr={pr}
+            usersById={usersById}
+            since={activitySince}
+            onClearSince={() => setActivitySince(null)}
+            focusEvent={activityFocusForPr}
+            onEventFocusConsumed={consumeActivityFocus}
+            focusKey={commentFocusForPr}
+            onCommentFocusConsumed={consumeCommentFocus}
+            selectedCommentId={selectedCommentId}
+          />
+        ) : effectiveTab === 'threads' ? (
+          // The review threads without the code; "Show in context" moves to Changes.
+          <PrThreadsTab
+            pr={pr}
+            usersById={usersById}
+            aiEnabled={aiEnabled}
+            selectedThreadId={selectedThreadId}
+            botFilter={threadBotFilter}
+            stateFilter={threadStateFilter}
+            severityFilter={threadSeverityFilter}
+            openInChangesFor={openInChangesFor}
+          />
         ) : effectiveTab === 'changes' ? (
           <ChangesTab
             pr={pr}
             focus={changesFocus}
             threadOpenMemory={threadOpenMemory}
-            threadsOnly={changesThreadsOnly}
-            onThreadsOnlyChange={setChangesThreadsOnly}
             keysEnabled={liveVisible}
-            renderThreads={(visibleThreadIds) => (
-              // THE THREADS ONLY VIEW — everything the old Changes tab's threads offered: the full bot
-              // triage card, Check threads, the state / severity / vendor pills (guarded to this
-              // PR above), reply and resolve on every card, Claude's judgements, and "Show in
-              // context" back to the code.
-              <>
-                {/* P3.2: full triage card — threadSeverities / resolvableBotThreadIds are the
-                    list's own folds. Its state counts are the DERIVED states (`rollupCounts`); the
-                    list's state chips count what the cards show (`threadStateBucket`). */}
-                <BotTriageCard pr={pr} usersById={usersById} variant="full" />
-                {/* Check threads: Claude re-judges only the threads that changed (local, me.ai). */}
-                {aiEnabled && pr.threads.length > 0 && (
-                  <div className="px-3 pt-2">
-                    <CheckThreadsButton prId={pr.id} />
-                  </div>
-                )}
-                <ThreadList
-                  threads={pr.threads}
-                  usersById={usersById}
-                  prUrl={pr.githubUrl}
-                  prId={pr.id}
-                  repoId={pr.repoId}
-                  selectedThreadId={selectedThreadId}
-                  viewedSince={pr.lastViewedAt}
-                  botFilter={threadBotFilter}
-                  stateFilter={threadStateFilter}
-                  severityFilter={threadSeverityFilter}
-                  openInChangesFor={openInChangesFor}
-                  visibleThreadIds={visibleThreadIds}
-                />
-              </>
-            )}
           />
         ) : effectiveTab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />

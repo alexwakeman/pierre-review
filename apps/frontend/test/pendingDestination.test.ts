@@ -120,22 +120,20 @@ describe('My turn', () => {
       expect(go(myTurn(r, { threadId: 41 }))).toEqual({ label: 'Open thread', call: ['openThreadOn', 41] });
     }
   });
-  it('a comment that names itself lands on it; one that does not, on Comments', () => {
+  it('a comment that names itself lands on it; one that does not, on Activity', () => {
     expect(go(myTurn('mention', { comment: { kind: 'issue_comment', id: 9 } })).call?.[0]).toBe('openComment');
-    expect(go(myTurn('mention'))).toEqual({ label: 'Open PR', call: ['openPr', 'comments'] });
+    expect(go(myTurn('mention'))).toEqual({ label: 'Open PR', call: ['openPr', 'activity'] });
   });
   it('red CI on your PR, your ready / conflicting / approved PR → Overview', () => {
     for (const r of ['own_ci_red', 'own_ready', 'own_conflicts', 'pr_approved']) {
       expect(go(myTurn(r))).toEqual({ label: 'Open PR', call: ['openPr', 'overview'] });
     }
   });
-  it('new commits on a PR you reviewed → Overview with Activity open', () => {
+  it('new commits on a PR you reviewed → the Activity tab', () => {
     expect(go(myTurn('pushed_since')).call).toEqual(['openPr', 'activity']);
   });
-  it('a red default branch → Open PRs, that repo’s Default branches row', () => {
-    const t = myTurn('trunk_red', { repoId: 6, prId: null, prNumber: null, prTitle: null, githubUrl: 'https://github.com/acme/web/commit/f48aec5' });
-    expect(pendingCardEvent(t)).toEqual({ kind: 'trunk', repoId: 6 });
-    expect(go(t)).toEqual({ label: 'Open default branch', call: ['openTrunk', 6] });
+  it('merged after your Limn approved → the PR, Overview (opening it clears the card)', () => {
+    expect(go(myTurn('ai_approved_merged'))).toEqual({ label: 'Open PR', call: ['openPr', 'overview'] });
   });
 });
 

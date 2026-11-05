@@ -105,8 +105,8 @@ export function useWorkspaceMutations() {
   //
   // ⚠ IT SWEEPS THE SAME KEY SET AS A MEMBERSHIP MOVE, and every key in it is load-bearing here:
   // 'my-turn' is the account-wide inbox the browser notification reads, and 'attention-cards' /
-  // 'daily-brief' / 'work-plan' are the three reads of the ONE `getWorkspaceInsights` fold whose
-  // whole contract is that they agree — the board's list, the strip's count and the ranked head.
+  // 'daily-brief' are the two reads of the ONE `getWorkspaceInsights` fold whose whole contract
+  // is that they agree — the board's list and the strip's count.
   // A mute changes which population every one of them puts a row in, so sweeping a subset would
   // leave the strip saying "5 need your attention" over a board of 3 for up to a staleTime. The
   // shared `invalidate` is reused rather than a narrower list precisely so that cannot drift.

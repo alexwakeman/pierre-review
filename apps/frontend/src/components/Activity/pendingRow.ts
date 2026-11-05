@@ -59,7 +59,7 @@ export function pendingRowBlocks(card: InsightCard): boolean {
     case 'dependency_bump':
       return card.depState === 'ci_red' || card.depState === 'conflicts';
     case 'my_turn':
-      return card.reason === 'own_ci_red' || card.reason === 'own_conflicts' || card.reason === 'trunk_red';
+      return card.reason === 'own_ci_red' || card.reason === 'own_conflicts';
     default:
       return false;
   }
@@ -120,7 +120,7 @@ export function pendingRowSummary(card: InsightCard, ctx: HeadingContext): Pendi
         ? waitingWith(card, ctx.nameOf)
         : cardKindLabel(card);
   const over =
-    (card.kind === 'my_turn' && card.reason !== 'trunk_red') ||
+    card.kind === 'my_turn' ||
     card.kind === 'stalled_review' ||
     card.kind === 'waiting_on_others'
       ? card.overReviewTarget
@@ -155,7 +155,6 @@ export function reasonColumnShown(reasons: readonly string[]): boolean {
 /** What `e` takes off My turn — the server's per-subject dismissal. Null off My turn. */
 export function dismissTargetOf(card: InsightCard): { target: MyTurnDismissTarget; label: string } | null {
   if (card.kind !== 'my_turn') return null;
-  if (card.reason === 'trunk_red') return { target: { kind: 'repo', id: card.repoId }, label: card.repoFullName };
   return { target: { kind: 'pr', id: card.prId }, label: `${card.repoFullName} #${card.prNumber}` };
 }
 

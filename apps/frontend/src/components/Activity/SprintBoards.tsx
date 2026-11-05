@@ -46,7 +46,7 @@ import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
 import { AiRunLabel } from '../AiRunLabel.js';
-import { BuildIcon, CriticalPathIcon, PendingStalledIcon, PullRequestIcon, WarningIcon } from '../Icons.js';
+import { WrenchIcon, CriticalPathIcon, PendingStalledIcon, PullRequestIcon, WarningIcon } from '../Icons.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
@@ -362,7 +362,7 @@ function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
   if (present.has('outside')) items.push({ key: 'outside', label: TICKET_CARD_MARK_LABEL.outside, swatch: ticketCardSurface({ ghost: true }) });
   if (present.has(PR_KEY)) items.push({ key: PR_KEY, label: 'Has a pull request', icon: <PullRequestIcon size={11} className="text-ui-mute" /> });
   for (const m of STORY_BUILD_MARKS) {
-    if (present.has(`${BUILD_KEY}${m}`)) items.push({ key: `${BUILD_KEY}${m}`, label: `Build: ${STORY_BUILD_MARK_WORDS[m]}`, icon: <BuildIcon size={11} className="text-ui-mute" /> });
+    if (present.has(`${BUILD_KEY}${m}`)) items.push({ key: `${BUILD_KEY}${m}`, label: `Build: ${STORY_BUILD_MARK_WORDS[m]}`, icon: <WrenchIcon size={11} className="text-ui-mute" /> });
   }
   return items;
 }

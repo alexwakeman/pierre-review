@@ -36,7 +36,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the work plan, Slack |
+| [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, Slack |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
@@ -254,7 +254,8 @@ shortest honest version wins.
 
 Four separated state layers: **server state** in TanStack Query (detail on demand,
 IndexedDB-persisted), **filter/selection** in Zustand `store/filters.ts` (`workspaceId` is the
-scope), **tabs** in `store/pinnedTabs.ts` (one board mounts at a time), **URL** mirrored by
+scope), **tabs** in `store/pinnedTabs.ts` (one board mounts at a time; a PINNED tab never closes and
+survives a reload: PR, focus, story and build tabs only), **URL** mirrored by
 `useUrlState.ts`. App lands on **Activity → Open PRs** (headed by the trunk strip). Nav: ONE
 sidebar (`components/shell/` `goTo`), never unmounted. Pending is `?activityRepo=attention`; the Insights rail entry is
 labelled **"Reports"** (store/URL value stays `'insights'`). The only gates are
@@ -280,23 +281,25 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - **"Where the work is happening" = two `charts/RepoRows` cards in `WorkspaceFlowMetrics`**
   (never `WorkspaceMetricsPanel`); **unknown is never zero** (`linesChanged: null` → "size
   unknown"; a null reach verdict is undrawn).
-- **The Pending board is SEVEN scored TABS + "Waiting on others"** (`PENDING_TABS`) ranked by ONE
+- **The Pending board is SIX scored TABS + two read-only ones** (`PENDING_TABS`) ranked by ONE
   scorer (`db/work-plan.ts` `scoreCards`). ⚠ **It ranks the UNCAPPED fold, then caps**; only
   `/api/attention` passes `uncapped`. ⚠ **Each count is its own population** (`/api/daily-brief`
   returns them). ⚠ **The tabs are an ALLOW-list.** Every floor/cap/threshold lives ONCE in
-  `pending-rules.ts`. ⚠ Waiting on others: UNSCORED, counted nowhere else.
+  `pending-rules.ts`. ⚠ Waiting on others and AI reviews (the newest AI review per PR, a STABLE
+  list: the last-looked stamp only tags "New" and counts the badge): UNSCORED, counted nowhere else.
 - **NOTHING ON THE PENDING BOARD MAY FETCH ON MOUNT.** Merge buttons gate on synced fields through
   `mergeVerdict()`; live merge options are CLICK-gated; HIDE, never disable. A QUEUED PR never
   shows Merge. `conflicts` carries ONE action (the resolver), only in `writableRepoIds`.
 - **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (mergeability for ≤ 25
   ids — 50 502s). ⚠ An observed `unknown` never demotes a known merge state. ⚠ **It returns
-  COUNTS, never cards**: refetch `['attention-cards']` + `['daily-brief']` + `['work-plan']` together.
+  COUNTS, never cards**: refetch `['attention-cards']` + `['daily-brief']` together.
 - **MY TURN IS THE BALL RULE, STATE-DERIVED** ([docs/BACKEND.md](docs/BACKEND.md) § My Turn): a
   card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
   one stored thing is a per-SUBJECT DISMISSAL timestamp, applied inside `getMyTurn`. ⚠ **No bot
   action returns the ball, including a push**; bot-ness via `globalAutomationUserIds`, NEVER
   `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array.** One card per PR
-  (`onePerPr`), except Claude reviews.
+  (`onePerPr`), except Claude reviews. Exceptions, SEEN-based: an unseen own AI review, a PR merged
+  after your Limn approved it. Every card is dismissable; a red trunk is never My Turn.
 - **A surface that NOTIFIES counts `myTurnPersonal`; one you OPEN counts `myTurn`.**
   `attentionRelevance` is three-valued and every entry point SEATS it; `myTurnOther` is never
   `myTurn - myTurnPersonal`; `?attnRel=` is the only key emitted.
@@ -310,8 +313,9 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
 - **Timeline vertical scroll is GATED** — every programmatic scroll goes through
   `setVisScrollTop` and claims the gate; copy `centerShowTarget`.
-- **THERE IS NO THREADS TAB.** Threads live in Changes: inline pills, or the sticky bar's
-  "Threads only" view; every thread link lands through PrDetail `showThread`. The fold is
+- **PR tabs: Overview · Activity · Threads · Changes …** Activity (`pr/PrActivityTab.tsx`) is the
+  conversation + events, newest first; `?prTab=comments` reads as `activity`. THREADS has no code
+  ("Show in context" → Changes); every thread link lands through PrDetail `showThread`. The fold is
   RENAME-AWARE (`indexThreadsByPath`); `threadStateFilter` is global — applied only when
   `selectedPrId === prId`. `UserName`'s tree SHAPE must not depend on popover-open state.
 - **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
@@ -432,7 +436,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `WORKTREE_RULES` and the tool list change together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post (ON; NULL = on) / Push automatically (OFF) switches. Auto-posting is
+  auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
+  (ON; own PRs, any run, still `ownOnly`) switches. Auto-posting is
   AUTO runs plus a manual "Review and post" press, under the reader's account, ONE review,
   `COMMENT` unless `autoVerdict` (ON likewise) allows stricter (a run not approved says why,
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
@@ -466,7 +471,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 ## Platform features (formerly Pro)
 
 The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
-Monitoring, the work-plan wording, Slack.
+Monitoring, Slack.
 [docs/PLATFORM.md](docs/PLATFORM.md).
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
@@ -482,9 +487,8 @@ Monitoring, the work-plan wording, Slack.
   in-flight slot claimed SYNCHRONOUSLY.
 - ⚠ **The D4 digit gate rejects UNICODE numerals** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`). A
   model-derived figure and a code-derived figure are LABELLED APART.
-- **The work plan: THE CODE RANKS, THE MODEL NARRATES** — the scorer is core (`db/work-plan.ts`);
-  the model adds a headline, a `parked` line and one `why` per row, and may name ONLY a listed
-  card. ⚠ `ageHours`/`stallRisk`/`score` stay OUT of the payload hash; ONE PR IS ONE JOB.
+- **"Plan my day" is REMOVED (2026-11-04)** — no route, no narration; `pro_work_plans` stays
+  dormant. The Do next scorer (`db/work-plan.ts` `scoreCards`) is core and ranks the Pending tabs.
 - **The peer benchmark** reads the BUNDLED `platform/data/benchmark/benchmark-fit.json`. ⚠
   **Refusals are the product** — never normalise one into a distribution shape. ⚠ **Money lives
   at WORKSPACE grain only** (a `?repoIds=`-NARROWED request builds no rollup); `$ per acted-on
@@ -558,7 +562,7 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 
 - **Relative imports carry an explicit `.js` everywhere** — backend AND frontend.
 - **`packages/shared` is the only bridge.** Never import backend↔frontend directly.
-- **Colour and contrast are MEASURED.** ⚠ A raw brand hex may not be TEXT colour — go through
+- **Colour and contrast are MEASURED, on EVERY colour scheme** (`lib/colorSchemes.ts`; a ground is a `--ui-*` token, never a `.dark` hex). ⚠ A raw brand hex may not be TEXT colour — go through
   `vendorInk()` (it sets the `--ink-*` variables only, never `color`). `decorative-mark` is the
   only contrast opt-out, never on text that says something.
 - **FOUR PATH CLASSIFIERS, NONE FOLDED INTO ANOTHER**: `NOISE_GLOBS`, `isLockFile`,

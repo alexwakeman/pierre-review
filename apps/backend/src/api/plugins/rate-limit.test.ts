@@ -562,22 +562,7 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/pro/synthesis')).not.toContain('ai');
   });
 
-  // /api/pro/work-plan — the synthesis shape again, and tiered by copying it. The POST is a real
-  // model spend (Haiku behind a payload-hash $0 cache) → the `ai` pair. The free GET re-runs the
-  // whole getWorkPlan evidence fold to recompute the hash for its `stale` probe — attention cards
-  // + getWorkspaceInsights + the open-PR merge-state walk — so it must sit on `search`, NOT
-  // inherit the /api/pro/ catch-all's 600/min GET→read branch. The panel lives under the Activity
-  // brief strip, so that GET fires on every Activity mount and on the sync cadence behind it.
-  it('tiers the work-plan endpoint per verb: POST on the AI pair, GET on the expensive read bucket', () => {
-    expect(tiers('POST', '/api/pro/work-plan')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('GET', '/api/pro/work-plan')).toEqual(['search', 'read']);
-    // The free read must never be swept onto the billed bucket...
-    expect(tiers('GET', '/api/pro/work-plan')).not.toContain('ai');
-    // ...and must never drift down onto the 600/min blanket the catch-all would have handed it.
-    expect(tiers('GET', '/api/pro/work-plan')).not.toEqual(['read']);
-  });
-
-  // /api/pro/flow-pointers — Chronology's pointers, tiered by copying the work plan: the POST is a
+  // /api/pro/flow-pointers — Chronology's pointers, tiered by copying synthesis: the POST is a
   // model spend, the free GET re-runs the Chronology fold for its `stale` probe.
   it('tiers the Chronology pointers per verb: POST on the AI pair, GET on the expensive read bucket', () => {
     expect(tiers('POST', '/api/pro/flow-pointers')).toEqual(['ai', 'ai_hourly']);
@@ -649,7 +634,7 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 
   // GET /api/attention — the Pending board. It used to be a plain card read on the blanket
-  // bucket; it now ALSO runs `rankWorkPlan` (approvals fold + untouched-thread group-by + a PR
+  // bucket; it now ALSO runs `scoreCards` (approvals fold + untouched-thread group-by + a PR
   // select) on top of a `getWorkspaceInsights` whose maintained-repo resolution the merge-card
   // emitter makes effectively unconditional. The negative assertion is the point: the failure
   // this file guards against is a tier left on the default after the cost moved.
@@ -667,6 +652,16 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/attention/liveness')).toEqual(['pr_detail', 'read']);
     expect(tiers('POST', '/api/attention/liveness')).not.toEqual(['read']);
     expect(tiers('POST', '/api/attention/liveness')).not.toEqual(['github_write']);
+  });
+
+  // POST /api/attention/ai-reviews/seen — one UPDATE of one column, no GitHub, no model: `read`,
+  // DECIDED (an exact match), and never the GitHub-write bucket a "mutating POST" reading would pick.
+  it('puts the AI reviews seen stamp on the read bucket', () => {
+    expect(tiers('POST', '/api/attention/ai-reviews/seen')).toEqual(['read']);
+    expect(tiers('POST', '/api/attention/ai-reviews/seen')).not.toEqual(['github_write']);
+    // The AI Review tab's per-run seen stamp: one UPDATE, exact path — never the AI bucket.
+    expect(tiers('POST', '/api/prs/12/claude-review/seen')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/12/claude-review/seen/x')).not.toEqual(['read']);
   });
 
   // GET /api/flow-findings — the Chronology tab. PAID (`periodReports`) but deterministic, with no

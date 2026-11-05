@@ -9,7 +9,6 @@ import { registerBotBehaviourRoutes } from './bots/behaviour-routes.js';
 import { registerBotBenchmarkRoutes } from './bots/benchmark-routes.js';
 import { registerBotBenchmarkPlacementRoutes } from './bots/benchmark/placement-routes.js';
 import { registerSynthesisRoutes } from './synthesis/routes.js';
-import { registerWorkPlanRoutes } from './work-plan/routes.js';
 import { registerFlowPointerRoutes } from './flow-pointers/routes.js';
 import { registerBotThemesRoutes } from './bot-themes/routes.js';
 import { registerSettingsRoutes } from './settings/routes.js';
@@ -18,7 +17,7 @@ import { registerSlackFeature } from './slack/cron.js';
 import { eraseProByAccountId, pruneProByPrIds } from './retention.js';
 
 // THE PLATFORM — reporting (Reports, Chronology pointers, period reports), Bots Monitoring (ROI,
-// behaviour, the peer benchmark, bot themes), the work-plan wording,
+// behaviour, the peer benchmark, bot themes),
 // the Slack digest and the settings behind them. It was the private @pierre/pro plugin; it is core
 // now, free, and registered statically at boot (platform/context.ts builds the context, index.ts
 // calls this). Every feature is on for every account — there is no capability or entitlement.
@@ -76,11 +75,6 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
   // The ONE synthesis seam — the cached grouping pass behind the drill-down verdict cards and the
   // workspace bot synthesis (GET = cache read + staleness probe, POST = the only generating path).
   registerSynthesisRoutes(app, ctx, llm);
-
-  // The WORK PLAN's wording — the headline, the per-row "why" and the "what can wait" line on the
-  // Pending board. ⚠ The RANKED WORKLIST is core's (db/work-plan.ts) and is not stored here; only
-  // the model's prose is cached, joined back to the live rows by WorkPlanItem.id.
-  registerWorkPlanRoutes(app, ctx, llm);
 
   // CHRONOLOGY POINTERS — evidence-led pointers beside Reports → Chronology, each citing the pull
   // requests behind it. Core folds the evidence (db/flow-pointers.ts) and sends no person.

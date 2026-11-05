@@ -12,7 +12,7 @@ import { useFilters, type AiFixRunEntry } from '../store/filters.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
-import { WandIcon } from './Icons.js';
+import { WrenchIcon } from './Icons.js';
 
 // Where an agentic AI-Fix run is watched from once the reader has left the pane that started
 // it — a paid agent run must never be running with no visible sign of it.
@@ -95,7 +95,7 @@ export function AiFixBanner(): JSX.Element | null {
       testId="ai-fix-toast"
       tone="ai"
       label="AI fixes"
-      icon={<WandIcon size={13} className={running.length > 0 ? 'animate-pulse' : undefined} />}
+      icon={<WrenchIcon size={13} className={running.length > 0 ? 'animate-pulse' : undefined} />}
       summary={
         running.length > 0
           ? `${running.length} running${finished > 0 ? `, ${finished} finished` : ''}`

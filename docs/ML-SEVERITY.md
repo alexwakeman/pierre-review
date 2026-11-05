@@ -358,7 +358,7 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
 - **`PrDetail` conversation** — PR comments (`pr_comment`) and review bodies (`review`) in one
   list. The lookup **must** key on `it.kind`: those are separate id spaces on separate tables,
   and a badge that assumed one kind would find a different row's label and be confidently wrong.
-- **`ThreadList` severity pills** — filter the Changes tab's Threads only view. A thread matches when **any** of its
+- **`ThreadList` severity pills** — filter the Threads tab. A thread matches when **any** of its
   non-summary comments carries a selected severity (not when its *worst* equals it — filtering
   to "major" should surface the thread with one major among five nits). The row hides itself
   entirely when nothing on the PR is labelled.

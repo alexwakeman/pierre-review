@@ -1,0 +1,306 @@
+/* ===========================================================================
+   "For teams" (pages/Teams.tsx). Layout only; the tokens, tiles, pigments and
+   buttons come from src/board.css. Every rule is scoped under `.lb.teams`, so
+   nothing here reaches another page.
+
+   CLASSES
+     shared   .tm-shot (a quiet tile holding an HTML mock) · .tm-txt (h2/h3 + p)
+              · .tm-list (square-marked ul) · .tm-word (a large name) · .tm-q + .tm-cols
+     header   .tm-head > .tm-name (h1, .tm-lead) · .tm-hero-shot · .verdigris.tm-say · .gold.tm-go
+     pair     .tm-pair / .tm-claims > .tm-id (.tm-word, .tm-story) · .tm-wide
+     claims   .tm-line ×3 (.tm-l1 .tm-l2 .tm-l3: h3, .tm-words, p) · .tm-fine
+     split    .tm-split > .tm-left + .tm-right (7/5) · .tm-left-n + .tm-right-w (5/7)
+     start    .tm-start > .gold.tm-start-main (h2, p, code.tm-cmd, .btns) · .tm-start-list
+   =========================================================================== */
+
+/* ---- shared ----------------------------------------------------------- */
+.lb.teams .tm-shot {
+  padding: 10px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.lb.teams h2 {
+  font-size: clamp(30px, 3.2vw, 50px);
+}
+.lb.teams .tm-txt {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 36px;
+}
+.lb.teams .tm-txt p {
+  max-width: 58ch;
+}
+.lb.teams .tm-word {
+  font-size: clamp(40px, 4vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+.lb.teams .tm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.teams .tm-list li {
+  position: relative;
+  padding: 12px 14px 12px 38px;
+  background: #ffffff0f;
+  line-height: 1.4;
+}
+.lb.teams .tm-list li::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: calc(12px + 0.45em);
+  width: 10px;
+  height: 10px;
+  background: var(--gold);
+}
+.lb.teams .tm-list b {
+  font-weight: 600;
+}
+.lb.teams .gold .tm-list li {
+  background: #1211101a;
+}
+.lb.teams .gold .tm-list li::before {
+  background: var(--dark);
+}
+.lb.teams .tm-list a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- header ----------------------------------------------------------- */
+.lb.teams .tm-head {
+  grid-template-rows: minmax(340px, auto) minmax(160px, auto);
+}
+.lb.teams .tm-name {
+  grid-column: 1 / 8;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 28px;
+  padding: 32px;
+}
+.lb.teams .tm-name h1 {
+  font-size: clamp(56px, 7vw, 116px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  max-width: 10ch;
+}
+.lb.teams .tm-lead {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 44ch;
+  color: var(--muted);
+}
+.lb.teams .tm-hero-shot {
+  grid-column: 8 / 13;
+  grid-row: 1 / 3;
+}
+.lb.teams .tm-say,
+.lb.teams .tm-go {
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+  padding: 28px;
+}
+.lb.teams .tm-say {
+  grid-column: 1 / 5;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.lb.teams .tm-go {
+  grid-column: 5 / 8;
+}
+
+/* ---- name + text pairs ------------------------------------------------ */
+.lb.teams .tm-id {
+  grid-column: 1 / 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 32px;
+  min-height: 260px;
+}
+.lb.teams .tm-pair .tm-id {
+  justify-content: flex-end;
+}
+.lb.teams .tm-story {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 17px;
+  line-height: 1.4;
+  max-width: 32ch;
+}
+.lb.teams .tm-story b {
+  font-weight: 600;
+  font-size: 19px;
+}
+.lb.teams .tm-wide {
+  grid-column: 5 / 13;
+}
+.lb.teams .tm-q {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 36px;
+}
+.lb.teams .tm-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+/* ---- the three lines -------------------------------------------------- */
+.lb.teams .tm-line {
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+}
+.lb.teams .tm-line h3 {
+  font-size: clamp(24px, 2.2vw, 32px);
+}
+.lb.teams .tm-words {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: #ffffff0f;
+  padding: 10px 12px;
+}
+.lb.teams .tm-line p:last-child {
+  color: var(--muted);
+}
+.lb.teams .tm-fine {
+  grid-column: 1 / -1;
+}
+.lb.teams .tm-fine .tm-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ---- split sections --------------------------------------------------- */
+.lb.teams .tm-left {
+  grid-column: 1 / 8;
+}
+.lb.teams .tm-right {
+  grid-column: 8 / 13;
+}
+.lb.teams .tm-left-n {
+  grid-column: 1 / 6;
+}
+.lb.teams .tm-right-w {
+  grid-column: 6 / 13;
+}
+
+/* ---- start ------------------------------------------------------------ */
+.lb.teams .tm-start-main {
+  grid-column: 1 / 8;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 44px;
+}
+.lb.teams .tm-start-main h2 {
+  margin-bottom: 8px;
+}
+.lb.teams .tm-start-main p:not(.btns) {
+  max-width: 56ch;
+}
+.lb.teams .tm-cmd {
+  font-size: 18px;
+}
+.lb.teams .tm-start-list {
+  grid-column: 8 / 13;
+}
+
+/* ---- tablet ----------------------------------------------------------- */
+@media (max-width: 1100px) and (min-width: 761px) {
+  .lb.teams .section > * {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .lb.teams .tm-claims .tm-line {
+    grid-column: span 4;
+  }
+  .lb.teams .tm-id {
+    min-height: 0;
+  }
+  .lb.teams .tm-head .tm-name {
+    grid-column: 1 / -1;
+  }
+  .lb.teams .tm-head .tm-hero-shot {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .lb.teams .tm-head .tm-say {
+    grid-column: 1 / 7;
+  }
+  .lb.teams .tm-head .tm-go {
+    grid-column: 7 / 13;
+  }
+}
+
+/* ---- phone ------------------------------------------------------------ */
+@media (max-width: 760px) {
+  .lb.teams .board > * {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
+  .lb.teams .tm-head {
+    grid-template-rows: none;
+  }
+  .lb.teams .tm-name {
+    padding: 22px;
+    min-height: 240px;
+  }
+  .lb.teams .tm-name h1 {
+    font-size: clamp(34px, 11vw, 64px);
+    max-width: none;
+  }
+  .lb.teams h2 {
+    font-size: clamp(24px, 7vw, 34px);
+  }
+  .lb.teams .tm-say {
+    font-size: 20px;
+  }
+  .lb.teams .tm-txt,
+  .lb.teams .tm-q,
+  .lb.teams .tm-id,
+  .lb.teams .tm-line,
+  .lb.teams .tm-say,
+  .lb.teams .tm-go,
+  .lb.teams .tm-start-main {
+    padding: 24px;
+  }
+  .lb.teams .tm-id {
+    min-height: 0;
+  }
+  .lb.teams .tm-cols,
+  .lb.teams .tm-fine .tm-list {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .lb.teams .tm-fine .tm-list {
+    gap: 8px;
+  }
+  .lb.teams .tm-shot {
+    padding: 6px;
+  }
+}

@@ -5,8 +5,7 @@
 //
 // ── 1. A DISMISSAL SETS ONE ITEM DOWN UNTIL SOMETHING NEW HAPPENS ────────────────────────────
 //
-// The reader can take a subject — a pull request, or a repository for a red default branch — off
-// their plate. ⚠ This is NOT the "Done" button migration 0060 deleted, and the difference is the
+// The reader can take a subject — a pull request — off their plate. ⚠ This is NOT the "Done" button migration 0060 deleted, and the difference is the
 // whole design. That one stored "I dealt with this" and never expired, so a PR whose ball came back
 // stayed hidden behind it for weeks. This one stores a TIMESTAMP and lets the fold decide:
 //
@@ -39,7 +38,7 @@
 // ⚠ IT IS A BOARD RULE, NOT A NOTIFICATION RULE. `getWorkspaceInsights` asks for it; the
 // account-wide `GET /api/my-turn` does not, because the browser-notification watcher diffs item
 // ids — a deduplicated list would flip the winner whenever the top job cleared and announce the
-// runner-up as "new". Red default branches are repo-grained and never collide with a PR.
+// runner-up as "new".
 import { and, eq, inArray } from 'drizzle-orm';
 import type {
   MyTurnCardReason,
@@ -49,13 +48,13 @@ import type {
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 
-const { myTurnDismissals, pullRequests, repos } = schema;
+const { myTurnDismissals, pullRequests } = schema;
 
 /** One stored dismissal, with what the fold needs to decide whether it still applies. */
 export interface StoredDismissal {
   target: MyTurnDismissTarget;
   dismissedAtMs: number;
-  /** The subject's repository: the PR's repo for 'pr', the repo itself for 'repo'. */
+  /** The subject PR's repository. */
   repoId: number;
   /** A PR subject that is no longer open — discharged unless something is still on it. */
   closed: boolean;
@@ -86,13 +85,6 @@ export async function readMyTurnDismissals(accountId: number): Promise<StoredDis
         repoId: r.prRepoId,
         closed: r.prState !== 'open',
       });
-    } else if (r.repoId != null) {
-      out.push({
-        target: { kind: 'repo', id: r.repoId },
-        dismissedAtMs: r.dismissedAt.getTime(),
-        repoId: r.repoId,
-        closed: false,
-      });
     }
   }
   return out;
@@ -121,36 +113,18 @@ export async function dismissMyTurn(
   nowMs: number = Date.now(),
 ): Promise<Date | null> {
   const at = dismissalInstant(nowMs);
-  if (target.kind === 'pr') {
-    const owned = await db
-      .select({ id: pullRequests.id })
-      .from(pullRequests)
-      .where(and(eq(pullRequests.id, target.id), eq(pullRequests.accountId, accountId)))
-      .limit(1)
-      .execute();
-    if (owned[0] == null) return null;
-    await db
-      .insert(myTurnDismissals)
-      .values({ accountId, prId: target.id, repoId: null, dismissedAt: at })
-      .onConflictDoUpdate({
-        target: [myTurnDismissals.accountId, myTurnDismissals.prId],
-        set: { dismissedAt: at },
-      })
-      .execute();
-    return at;
-  }
   const owned = await db
-    .select({ id: repos.id })
-    .from(repos)
-    .where(and(eq(repos.id, target.id), eq(repos.accountId, accountId)))
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(and(eq(pullRequests.id, target.id), eq(pullRequests.accountId, accountId)))
     .limit(1)
     .execute();
   if (owned[0] == null) return null;
   await db
     .insert(myTurnDismissals)
-    .values({ accountId, prId: null, repoId: target.id, dismissedAt: at })
+    .values({ accountId, prId: target.id, repoId: null, dismissedAt: at })
     .onConflictDoUpdate({
-      target: [myTurnDismissals.accountId, myTurnDismissals.repoId],
+      target: [myTurnDismissals.accountId, myTurnDismissals.prId],
       set: { dismissedAt: at },
     })
     .execute();
@@ -162,10 +136,9 @@ export async function restoreMyTurn(
   accountId: number,
   target: MyTurnDismissTarget,
 ): Promise<boolean> {
-  const col = target.kind === 'pr' ? myTurnDismissals.prId : myTurnDismissals.repoId;
   const deleted = await db
     .delete(myTurnDismissals)
-    .where(and(eq(myTurnDismissals.accountId, accountId), eq(col, target.id)))
+    .where(and(eq(myTurnDismissals.accountId, accountId), eq(myTurnDismissals.prId, target.id)))
     .returning({ id: myTurnDismissals.id })
     .execute();
   return deleted.length > 0;
@@ -176,20 +149,11 @@ export async function dischargeMyTurnDismissals(
   accountId: number,
   targets: readonly MyTurnDismissTarget[],
 ): Promise<void> {
-  const prIds = targets.filter((t) => t.kind === 'pr').map((t) => t.id);
-  const repoIds = targets.filter((t) => t.kind === 'repo').map((t) => t.id);
+  const prIds = targets.map((t) => t.id);
   if (prIds.length > 0) {
     await db
       .delete(myTurnDismissals)
       .where(and(eq(myTurnDismissals.accountId, accountId), inArray(myTurnDismissals.prId, prIds)))
-      .execute();
-  }
-  if (repoIds.length > 0) {
-    await db
-      .delete(myTurnDismissals)
-      .where(
-        and(eq(myTurnDismissals.accountId, accountId), inArray(myTurnDismissals.repoId, repoIds)),
-      )
       .execute();
   }
 }
@@ -339,6 +303,7 @@ export function onePerPr(
     approvedPrs: pr<MyTurnSections['approvedPrs'][number]>('pr_approved'),
     ownReady: pr<MyTurnSections['ownReady'][number]>('own_ready'),
     yourPrs: pr<MyTurnSections['yourPrs'][number]>('your_pr'),
+    approvedMerged: pr<MyTurnSections['approvedMerged'][number]>('ai_approved_merged'),
     watchedRepoPrs: pr<MyTurnSections['watchedRepoPrs'][number]>('watched_repo_pr'),
   };
   const thread = (reason: MyTurnCardReason) => ({
@@ -368,6 +333,7 @@ export function onePerPr(
   for (const i of mt.approvedPrs) offer(S.approvedPrs.of(i));
   for (const i of mt.ownReady) offer(S.ownReady.of(i));
   for (const i of mt.yourPrs) offer(S.yourPrs.of(i));
+  for (const i of mt.approvedMerged) offer(S.approvedMerged.of(i));
   for (const i of mt.watchedRepoPrs) offer(S.watchedRepoPrs.of(i));
   for (const i of mt.threadsAwaiting) offer(threadsAwaiting.of(i));
   for (const i of mt.threadReplies) offer(threadReplies.of(i));
@@ -389,7 +355,6 @@ export function onePerPr(
     ownThreads: mt.ownThreads.filter((i) => winnerIs(ownThreads.of(i))),
     // Exempt (header, rule 2): every Claude review keeps its own card.
     claudeReviewsToAction: mt.claudeReviewsToAction,
-    // Repo-grained: a branch is not a pull request, and never shares a key with one.
-    redTrunks: mt.redTrunks,
+    approvedMerged: mt.approvedMerged.filter((i) => winnerIs(S.approvedMerged.of(i))),
   };
 }

@@ -29,11 +29,10 @@ import {
   type MyTurnSettings,
 } from '@pierre-review/shared';
 
-/** The six types that are off before anyone changes anything, in the default order. */
+/** The five types that are off before anyone changes anything, in the default order. */
 const DEFAULT_OFF: MyTurnCardReason[] = [
   'own_ci_red',
   'own_conflicts',
-  'trunk_red',
   'own_ready',
   'own_thread',
   'watched_repo_pr',
@@ -47,11 +46,13 @@ describe('resolveMyTurnSettings', () => {
     const r = resolveMyTurnSettings(null);
     expect(r.order).toEqual([...MY_TURN_DEFAULT_ORDER]);
     expect(r.off).toEqual(DEFAULT_OFF);
-    expect(r.trunkScope).toBe('off');
     expect(r.preset).toBe('balanced');
     expect(r.weightsPct).toEqual(DO_NEXT_PRESETS.balanced);
     expect(r.weights).toEqual({ proximity: 0.5, stall: 0.3, relevance: 0.2 });
-    expect(r.defaults).toEqual({ show: true, trunkScope: true, order: true, weights: true });
+    expect(r.defaults).toEqual({ show: true, order: true, weights: true });
+    // The AI review types are on.
+    expect(r.show.claude_review).toBe(true);
+    expect(r.show.ai_approved_merged).toBe(true);
     // The summonses are on; the survey and the promotions are off.
     expect(r.show.review_request).toBe(true);
     expect(r.show.mention).toBe(true);
@@ -72,10 +73,9 @@ describe('resolveMyTurnSettings', () => {
     // A valid toggle survives beside an invalid one, which falls back to its default.
     expect(r.show.mention).toBe(false);
     expect(r.show.watched_repo_pr).toBe(false);
-    expect(r.trunkScope).toBe('off');
     // Unknown and repeated entries are dropped; the rest keep their stored order.
     expect(r.order.slice(0, 2)).toEqual(['your_pr', 'mention']);
-    expect(new Set(r.order).size).toBe(15);
+    expect(new Set(r.order).size).toBe(MY_TURN_DEFAULT_ORDER.length);
     // 50 + 30 + 10 = 90: the weights fall back, and nothing else does.
     expect(r.weightsPct).toEqual(DO_NEXT_PRESETS.balanced);
     expect(r.off).toContain('mention');
@@ -91,10 +91,12 @@ describe('resolveMyTurnSettings', () => {
     expect(r.defaults.order).toBe(false);
   });
 
-  it('reads trunk_red as off exactly when its scope is off', () => {
-    expect(resolveMyTurnSettings({ trunkScope: 'maintained' }).off).not.toContain('trunk_red');
-    expect(resolveMyTurnSettings({ trunkScope: 'all' }).off).not.toContain('trunk_red');
-    expect(resolveMyTurnSettings({ trunkScope: 'off' }).off).toContain('trunk_red');
+  it('ignores a stored red-branch scope and a stored trunk_red order entry (the retired type)', () => {
+    const r = resolveMyTurnSettings(stored({ trunkScope: 'all', order: ['trunk_red', 'mention'] }));
+    expect(r.order).not.toContain('trunk_red');
+    expect(r.order[0]).toBe('mention');
+    expect(r.off).not.toContain('trunk_red');
+    expect(compactMyTurnSettings(stored({ trunkScope: 'all' }))).toBeNull();
   });
 
   it('derives the preset from the weights — an exact match, else custom', () => {
@@ -113,16 +115,11 @@ describe('validateMyTurnSettings — one plain sentence per problem', () => {
   const cases: [string, unknown, string][] = [
     ['an unknown type in show', { show: { nonsense: true } }, '“nonsense” is not a My Turn card type.'],
     [
-      'trunk_red in show (it has a scope, not a switch)',
+      'trunk_red in show (no longer a My Turn type)',
       { show: { trunk_red: true } },
       '“trunk_red” is not a My Turn card type.',
     ],
     ['a non-boolean switch', { show: { mention: 'on' } }, 'Each card type must be on or off.'],
-    [
-      'an unknown scope',
-      { trunkScope: 'everywhere' },
-      'Red default branch must be Off, Repos you maintain or Every repo.',
-    ],
     ['an order that is not a list', { order: 'mention' }, 'The order must be a list of card types.'],
     ['an unknown order entry', { order: ['mention', 'nope'] }, '“nope” is not a My Turn card type.'],
     [
@@ -158,7 +155,6 @@ describe('validateMyTurnSettings — one plain sentence per problem', () => {
     expect(
       validateMyTurnSettings({
         show: { watched_repo_pr: true, mention: false },
-        trunkScope: 'maintained',
         order: ['mention', 'review_request'],
         weights: DO_NEXT_PRESETS.mine_first,
       }),
@@ -173,7 +169,6 @@ describe('compactMyTurnSettings — overrides only', () => {
     expect(
       compactMyTurnSettings({
         show: { mention: true, watched_repo_pr: false },
-        trunkScope: 'off',
         order: [...MY_TURN_DEFAULT_ORDER],
         weights: DO_NEXT_PRESETS.balanced,
       }),
@@ -186,21 +181,21 @@ describe('compactMyTurnSettings — overrides only', () => {
     });
   });
 
-  it('stores a changed order as all fifteen types', () => {
+  it('stores a changed order as every type', () => {
     const out = compactMyTurnSettings({ order: ['your_pr'] });
-    expect(out?.order).toHaveLength(15);
+    expect(out?.order).toHaveLength(MY_TURN_DEFAULT_ORDER.length);
     expect(out?.order?.[0]).toBe('your_pr');
   });
 
-  it('keeps a non-default scope and non-Balanced weights', () => {
-    expect(
-      compactMyTurnSettings({ trunkScope: 'all', weights: DO_NEXT_PRESETS.quick_wins }),
-    ).toEqual({ trunkScope: 'all', weights: DO_NEXT_PRESETS.quick_wins });
+  it('keeps non-Balanced weights', () => {
+    expect(compactMyTurnSettings({ weights: DO_NEXT_PRESETS.quick_wins })).toEqual({
+      weights: DO_NEXT_PRESETS.quick_wins,
+    });
   });
 
   it('serialises two equal settings identically, whatever order their keys arrived in', () => {
-    const a = compactMyTurnSettings({ weights: DO_NEXT_PRESETS.mine_first, trunkScope: 'all' });
-    const b = compactMyTurnSettings({ trunkScope: 'all', weights: DO_NEXT_PRESETS.mine_first });
+    const a = compactMyTurnSettings({ weights: DO_NEXT_PRESETS.mine_first, show: { mention: false } });
+    const b = compactMyTurnSettings({ show: { mention: false }, weights: DO_NEXT_PRESETS.mine_first });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });
@@ -225,11 +220,10 @@ describe('the weights', () => {
 describe('configKey', () => {
   const key = (s: MyTurnSettings | null) => resolveMyTurnSettings(s).configKey;
 
-  it('changes when a type is switched, or the trunk scope moves', () => {
+  it('changes when a type is switched', () => {
     expect(key({ show: { watched_repo_pr: true } })).not.toBe(key(null));
     expect(key({ show: { mention: false } })).not.toBe(key(null));
-    expect(key({ trunkScope: 'maintained' })).not.toBe(key(null));
-    expect(key({ trunkScope: 'maintained' })).not.toBe(key({ trunkScope: 'all' }));
+    expect(key({ show: { ai_approved_merged: false } })).not.toBe(key(null));
   });
 
   it('does NOT change with the order or the weights', () => {

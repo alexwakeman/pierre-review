@@ -13,6 +13,7 @@ import {
   toastLift,
   toastRank,
 } from '../src/lib/toastAnchor.js';
+import { settlingReads } from '../src/components/ui/toastObstacles.js';
 
 // The cluster at the bottom right of a 1440×900 viewport: its top at 856, its right edge at 1428.
 const DESK = { top: 856, right: 1428 };
@@ -77,6 +78,70 @@ describe('toastLift — the cluster rises over an action bar pinned at the botto
         900,
       ),
     ).toBe(120);
+  });
+});
+
+describe('toastLift — a bar partly below the viewport', () => {
+  it('rises only by the part that shows, and not at all once the bar is gone below', () => {
+    // A docked panel's footer pushed past the window's bottom (the panel's 240px floor).
+    expect(toastLift([{ top: 870, bottom: 930, right: 1440, height: 60 }], 1440, 900)).toBe(30);
+    expect(toastLift([{ top: 905, bottom: 965, right: 1440, height: 60 }], 1440, 900)).toBe(0);
+  });
+});
+
+describe('settlingReads — the lift is re-read after layout settles', () => {
+  function fakeFrames(): { raf: (cb: () => void) => number; caf: (id: number) => void; tick: () => void; pending: () => number } {
+    let next = 1;
+    let queue = new Map<number, () => void>();
+    return {
+      raf: (cb) => {
+        const id = next++;
+        queue.set(id, cb);
+        return id;
+      },
+      caf: (id) => {
+        queue.delete(id);
+      },
+      tick: () => {
+        const run = queue;
+        queue = new Map();
+        for (const cb of run.values()) cb();
+      },
+      pending: () => queue.size,
+    };
+  }
+  it('reads on the next frame and again on the frame after', () => {
+    const f = fakeFrames();
+    const seen: number[] = [];
+    let footerTop = 830; // where the bar is when the scroll fires
+    const { schedule } = settlingReads(() => seen.push(footerTop), f.raf, f.caf);
+    schedule();
+    f.tick();
+    footerTop = 868; // the panel re-filled in its own frame and committed later
+    f.tick();
+    expect(seen).toEqual([830, 868]);
+    expect(f.pending()).toBe(0);
+  });
+  it('coalesces a burst of events into one pair of reads', () => {
+    const f = fakeFrames();
+    let reads = 0;
+    const { schedule } = settlingReads(() => reads++, f.raf, f.caf);
+    schedule();
+    schedule();
+    schedule();
+    f.tick();
+    f.tick();
+    expect(reads).toBe(2);
+  });
+  it('cancel drops both frames', () => {
+    const f = fakeFrames();
+    let reads = 0;
+    const { schedule, cancel } = settlingReads(() => reads++, f.raf, f.caf);
+    schedule();
+    f.tick();
+    cancel();
+    f.tick();
+    expect(reads).toBe(1);
   });
 });
 

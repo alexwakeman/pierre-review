@@ -34,7 +34,8 @@ describe('prTab on the wire', () => {
   it('reads ai_review, and the old claude_review as an alias', () => {
     expect(prTabFromUrl('ai_review')).toBe('claude_review');
     expect(prTabFromUrl('claude_review')).toBe('claude_review');
-    expect(prTabFromUrl('threads')).toBe('changes');
+    expect(prTabFromUrl('threads')).toBe('threads');
+    expect(prTabFromUrl('comments')).toBe('activity');
     expect(prTabFromUrl('story')).toBe('story');
     expect(prTabFromUrl('nope')).toBeNull();
     expect(prTabFromUrl(null)).toBeNull();

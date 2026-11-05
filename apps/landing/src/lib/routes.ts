@@ -31,8 +31,9 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS FIVE CONTENT PAGES plus the three legal ones: home, Getting
- * started, Reporting and metrics, How we measure and Contact. The earlier
+ * THE SITE IS SIX CONTENT PAGES plus the three legal ones: home, Getting
+ * started, Reporting and metrics, For teams (/teams: how reviews work when
+ * several teammates run Limn), How we measure and Contact. The earlier
  * feature-area pages (/features, /bots, /pro, /pricing, /how-it-works, /arcade)
  * and then the two role pages (/for-developers, /for-managers) were retired;
  * their URLs survive as aliases.
@@ -63,6 +64,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
     description: `${SITE_NAME} is free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it. More users than that need a licence: ask for one here. Questions and bug reports are welcome too.`,
+  },
+  '/teams': {
+    title: `Reviewing as a team — GitHub keeps the score · ${SITE_NAME}`,
+    description: `How reviews work when several teammates run ${SITE_NAME}: no server between you, so GitHub keeps the score. A status line on each commit stops two people reviewing it with the same AI provider, the author's own review never counts as approval, and every teammate's posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people; a licence above that.`,
   },
   '/how-we-measure': {
     title: `How we measure — the two models, in plain English · ${SITE_NAME}`,

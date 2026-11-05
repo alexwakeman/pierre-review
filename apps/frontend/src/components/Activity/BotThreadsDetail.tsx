@@ -35,7 +35,7 @@ import { SynthesisCard } from './SynthesisCard.js';
 // the TOP. PRs are DESELECTED by default; per-PR checkboxes + "Select all" (across all pages) /
 // "Clear" drive the batch. Selecting all resolves the ENTIRE backlog (uncapped) — chunked into
 // sequential POSTs with a Stop control. The server RE-DERIVES eligibility (the heuristic only
-// LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's Changes tab (Threads only)
+// LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's Threads tab
 // with the 'likely_addressed' pill preselected — inspect before resolving.
 //
 // ⚠ THE LISTING AND THE RESOLVE SEND THE SAME `workspaceId`, and that is the whole design. Its
@@ -527,7 +527,7 @@ export function BotThreadsDetail(): JSX.Element {
           )}
 
           {/* Sortable per-PR table — a checkbox to include, then a clickable body opening the PR's
-              threads (the Changes tab's Threads only view, likely-addressed pill preset). No
+              threads (the Threads tab, likely-addressed pill preset). No
               per-thread enumeration. */}
           {filtered.length > 0 && (
           <div className="overflow-x-auto">

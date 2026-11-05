@@ -105,6 +105,8 @@ import type {
   WorkspaceInsightsResponse,
   AttentionCardsResponse,
   AttentionLivenessBody,
+  AiReviewsSeenBody,
+  AiReviewsSeenResponse,
   AttentionLivenessResponse,
   DailyBriefResponse,
   FlowResponse,
@@ -266,7 +268,6 @@ import type {
   TimelineResponse,
   User,
   UserContributionStats,
-  WorkPlanResponse,
   SetWorkspaceAutoReviewBody,
   WorkspaceAutoReviewResponse,
   AutoReviewSweepBody,
@@ -443,25 +444,6 @@ function synthesisQueryParts(p: SynthesisRequestParams): (string | undefined)[] 
       : undefined,
     p.category ? `category=${encodeURIComponent(p.category)}` : undefined,
   ];
-}
-
-// The work-plan scope on the wire. ONE builder for the GET (free cached read + `stale` probe)
-// and the POST (the billed narration), exactly like the synthesis pair above: the row the POST
-// writes and the row the GET reads must be addressable only one way, or a paid generation lands
-// in a cache slot the panel never looks at.
-//
-// `repoIds` is carried for completeness (the server scope is a `BotScope`, and it resolves the
-// narrowing as `membership ∩ narrow`), but the Activity console — the only surface that mounts
-// this panel — never sends one: the repo picker is Timeline-only, so the plan covers the whole
-// workspace. When a caller DOES pass an array it goes through `repoIdsParam`, which emits it
-// whenever it EXISTS, empty included — an empty workspace must not widen to the whole account.
-export interface WorkPlanRequestParams {
-  workspaceId: number;
-  repoIds?: number[] | null;
-}
-
-function workPlanQueryParts(p: WorkPlanRequestParams): (string | undefined)[] {
-  return [workspaceParam(p.workspaceId), repoIdsParam(p.repoIds)];
 }
 
 export const api = {
@@ -1102,6 +1084,13 @@ export const api = {
       withQuery('/api/attention/liveness', workspaceParam(workspaceId)),
       jsonBody('POST', body),
     ).then((r) => handle<AttentionLivenessResponse>(r)),
+  // Pending → "AI reviews" was looked at: the stamp moves to `through` (the newest review the list
+  // showed), never back. Sent only while that tab is on screen (useAiReviewsVisit).
+  markAiReviewsSeen: (workspaceId: number, body: AiReviewsSeenBody) =>
+    fetch(
+      withQuery('/api/attention/ai-reviews/seen', workspaceParam(workspaceId)),
+      jsonBody('POST', body),
+    ).then((r) => handle<AiReviewsSeenResponse>(r)),
   // The daily brief (counts only — plan P3.1/P3.3). `rollup` adds the per-workspace counts (the
   // Workspace badges read them); the narration is a SEPARATE synthesis fetch,
   // never this route.
@@ -1500,6 +1489,12 @@ export const api = {
       `/api/prs/${prId}/claude-review/team-claim/clear`,
       jsonBody('POST', { provider } satisfies ClearTeamClaimBody),
     ).then((r) => handle<ClearTeamClaimResponse>(r)),
+  // SEEN: the AI Review tab showed this finished run — retires its "New AI review" My Turn card.
+  // Sent once per run, only while the run's `seenAt` is null (hooks/useClaudeReviewSeen.ts).
+  markClaudeReviewSeen: (prId: number, reviewId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/seen`, jsonBody('POST', { reviewId })).then((r) =>
+      handle<{ status: string; stamped: number }>(r),
+    ),
   cancelClaudeReview: (prId: number) =>
     fetch(`/api/prs/${prId}/claude-review/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
@@ -2084,20 +2079,6 @@ export const api = {
   synthesisGenerate: (p: SynthesisRequestParams) =>
     fetch(withQuery('/api/pro/synthesis', ...synthesisQueryParts(p)), jsonBody('POST')).then(
       (r) => handle<SynthesisResponse>(r),
-    ),
-  // ---- The work plan: "what should I work on today" ----------------------------------
-  // GET = free. It returns the DETERMINISTIC, code-derived worklist (`evidence`) plus any stored
-  // narration and a `stale` probe; it never generates and never bills. POST = the only billing
-  // path — it writes the Haiku narration over the SAME evidence. Both verbs address the row
-  // through `workPlanQueryParts`, so the plan the POST stores is the plan the GET reads back.
-  //
-  // The panel renders `evidence` with or without a `plan`: the worklist is real data that stands
-  // on its own, and the model only annotates it. `enabled: false` is an answer, not an error.
-  workPlan: (p: WorkPlanRequestParams) =>
-    get<WorkPlanResponse>(withQuery('/api/pro/work-plan', ...workPlanQueryParts(p))),
-  workPlanGenerate: (p: WorkPlanRequestParams) =>
-    fetch(withQuery('/api/pro/work-plan', ...workPlanQueryParts(p)), jsonBody('POST')).then((r) =>
-      handle<WorkPlanResponse>(r),
     ),
   // Chronology's pointers. ONE builder for both verbs so the POST writes the
   // row the GET reads: the workspace and the Chronology window. The GET never generates; the POST

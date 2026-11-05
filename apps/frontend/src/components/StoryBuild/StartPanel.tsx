@@ -21,7 +21,7 @@ import type { TabTicketMeta } from '../../store/pinnedTabs.js';
 import { storyBuildErrorText, storyBuildStatusLine } from '../../lib/storyBuild.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
-import { BuildIcon, FillGapsIcon } from '../Icons.js';
+import { WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 
@@ -129,7 +129,7 @@ export function StartPanel({
                 variant="primary"
                 data-ai-run
                 data-testid="story-build-start-button"
-                icon={fill ? <FillGapsIcon size={13} /> : <BuildIcon size={13} />}
+                icon={fill ? <FillGapsIcon size={13} /> : <WrenchIcon size={13} />}
                 busy={busy}
                 busyLabel="Starting…"
                 onClick={go}

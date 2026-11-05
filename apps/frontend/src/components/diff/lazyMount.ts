@@ -12,7 +12,7 @@ import { scrollParentOf } from '../../lib/settleScroll.js';
 // with everything mounted, exactly as before; what changes is that the first paint, a tab switch and
 // a deep link pay only for what is near the screen.
 //
-// ⚠ A HIDDEN diff (the Threads only view keeps the code mounted under `display: none`) intersects
+// ⚠ A HIDDEN diff (any ancestor under `display: none`) intersects
 // nothing, so nothing mounts behind it; switching the view off mounts what comes into sight.
 
 /** How far beyond the pane's visible area a placeholder starts to mount: 1.5 panes each way. */
@@ -77,7 +77,7 @@ export function createLazyMounter(): LazyMounter {
     for (const el of [...callbacks.keys()]) {
       if (!el.isConnected) continue;
       const r = el.getBoundingClientRect();
-      if (r.width === 0 && r.height === 0) continue; // display:none (Threads only): not now
+      if (r.width === 0 && r.height === 0) continue; // display:none: not now
       if (r.bottom >= -reach && r.top <= window.innerHeight + reach) fire(el);
     }
   };
@@ -166,7 +166,7 @@ export function useHoldAboveReader(ref: RefObject<Element>, live: boolean, estim
     if (el == null || typeof window === 'undefined') return;
     const pane = scrollParentOf(el);
     if (pane == null) return;
-    const shown = (r: DOMRect): boolean => r.width !== 0 || r.height !== 0; // display:none: Threads only
+    const shown = (r: DOMRect): boolean => r.width !== 0 || r.height !== 0; // display:none
     if (!wasLive.current) {
       wasLive.current = true;
       const r = el.getBoundingClientRect();

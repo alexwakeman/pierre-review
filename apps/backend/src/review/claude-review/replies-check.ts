@@ -804,7 +804,8 @@ export function passCoverageMs(
 
 /**
  * After a pass: the outcome the replies point to (stored as the newest row's verdict, manual and
- * auto alike), and — AUTO only — auto resolve, auto pushback and the outcome review. Never throws.
+ * auto alike), auto resolve (manual passes: the own-PR path only), and — AUTO only — auto pushback
+ * and the outcome review. Never throws.
  */
 async function afterPass(
   ctx: AgentContext,
@@ -815,14 +816,18 @@ async function afterPass(
   const { accountId, prId } = job;
   const last = succeeded[succeeded.length - 1]!;
   try {
-    if (job.trigger === 'auto') {
+    {
       // The existing writers, on their own switches and claimed records (at most ONE pushback per
-      // thread, ever). Each reads the row's follow-up items exactly as it reads a review's.
+      // thread, ever). Each reads the row's follow-up items exactly as it reads a review's. Resolve
+      // runs for a MANUAL pass too — only its own-PR path ("Resolve my Limn threads when addressed")
+      // can act there (auto-resolve.ts gates it); pushback stays AUTO only.
       const { maybeAutoResolveFindings } = await import('./auto-resolve.js');
       const { maybeAutoPushback } = await import('./auto-pushback.js');
       for (const r of succeeded) {
         await maybeAutoResolveFindings(ctx, { accountId, prId, reviewId: r.reviewId }, autoDeps.post, autoDeps.resolve);
-        await maybeAutoPushback(ctx, { accountId, prId, reviewId: r.reviewId }, autoDeps.post, autoDeps.resolve);
+        if (job.trigger === 'auto') {
+          await maybeAutoPushback(ctx, { accountId, prId, reviewId: r.reviewId }, autoDeps.post, autoDeps.resolve);
+        }
       }
     }
     const { computeRepliesOutcome, maybePostRepliesOutcome } = await import('./replies-outcome.js');

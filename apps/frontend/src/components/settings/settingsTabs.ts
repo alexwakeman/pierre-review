@@ -17,6 +17,7 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // sections — never a suffix on a section's own title.
 
 export type SettingsTabId =
+  | 'appearance'
   | 'pull-requests'
   | 'pending'
   | 'features'
@@ -41,6 +42,9 @@ export interface SettingsTabDef {
 }
 
 export const SETTINGS_TABS: readonly SettingsTabDef[] = [
+  // The colour scheme, per browser (Settings → Appearance; lib/colorSchemes.ts). First, so a new
+  // reader finds it where most apps keep it.
+  { id: 'appearance', label: 'Appearance', summary: 'Colour scheme', global: ['AppearanceSection'], workspace: [] },
   {
     id: 'pull-requests',
     label: 'Pull requests', summary: 'Large pull requests, blast radius',

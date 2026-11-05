@@ -40,8 +40,8 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
 ONE ladder for EVERY model call Limn makes — the agent runs (Claude Review, AI Fix, the ticket /
 CI reviews, diagrams, sprint paths, the docs build and chat, Resolve with Claude, every chat) AND
 the one-shot completions (`review/llm.ts` `cheapComplete`, which the sprint briefs/themes, story
-labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis, work-plan
-wording, Chronology pointers, bot themes, the Slack report —
+labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis,
+Chronology pointers, bot themes, the Slack report —
 go through). It lives in **`ai/credentials.ts`** and nowhere else:
 
 1. **The local Claude Code login** (default) — `CLAUDE_CODE_OAUTH_TOKEN`, or a logged-in `claude`
@@ -708,8 +708,8 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   provider, and the outcome re-check counts the open findings of BOTH succeeded halves (the
   consolidated set: merged-away duplicates are never read).
 - **Elsewhere the pair is one review too**: the Open PRs column (`getLatestReviewStates`: the pair's
-  status and verdict, both halves' counts and "Earlier: …" items), My Turn's "Claude review ready" card
-  (`getUnactionedClaudeReviews`: both halves' findings, posted when either was, the pair's verdict) and
+  status and verdict, both halves' counts and "Earlier: …" items), My Turn's "New AI review" card
+  (`getUnseenOwnAiReviews`: seen when either half was, the pair's verdict) and
   the history's finding counts all leave merged-away duplicates out.
 
 ### The finding check (tried 2026-11-01, REMOVED)
@@ -1376,9 +1376,11 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 - **Disputed stays OPEN** exactly like `not_addressed`: raised again (synthesized lead "the reply on
   GitHub did not settle it"), carried, counted in the auto verdict at its severity (a disputed
   blocker ⇒ `REQUEST_CHANGES`), and an AI Fix `P` seed item.
-- **GitHub writes — AUTO runs only**, same claim-before-write / never-retry / footer + marker rules:
-  accepted + `autoResolve` on ⇒ auto resolve posts the acknowledgement, then resolves (outcome
-  `reply_accepted` + `acceptKind`; an already-resolved thread is a no-op). Disputed + auto-posting on
+- **GitHub writes — AUTO runs only** (except the own-PR resolve below), same claim-before-write /
+  never-retry / footer + marker rules: accepted + `autoResolve` on ⇒ auto resolve posts the
+  acknowledgement, then resolves (outcome `reply_accepted` + `acceptKind`; an already-resolved
+  thread is a no-op). On the reader's OWN PR a MANUAL pass resolves too, under "Resolve my Limn
+  threads when addressed" (§ Auto-posting → Resolve my Limn threads); its pushback stays auto-only. Disputed + auto-posting on
   ⇒ `auto-pushback.ts` posts ONE reply (footer + `PUSHBACK_REPLY_MARKER`), never resolves, recorded
   on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, migration `0092`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
   pushback marker already on the thread (posted by hand) blocks it too. A later run may still accept.
@@ -1481,7 +1483,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   resolve, auto pushback and the manual "Post reply" read it with no special case. ⚠ It is NOT a
   review: every "latest review" / "run at this head" reader filters `kind IS NULL` —
   `getLatestClaudeReview` (the tab's `review`), `getLatestSucceededReviewId` (AI Fix),
-  `listAllClaudeReviews`, `getUnactionedClaudeReviews` (My Turn), `hasReviewAtHead` /
+  `listAllClaudeReviews`, `getUnseenOwnAiReviews` (My Turn), `hasReviewAtHead` /
   `isAutoReReviewSettled` / `isAutoRetryStillDue` / `getFailedAutoAtHead`, `loadPriorRunForCarry`,
   the candidate read (first review, re-review, retry, in flight, the daily cap). The Open PRs column
   shows the latest FULL review with later passes' items folded over its "Earlier:" counts
@@ -1701,7 +1703,7 @@ CODE, not by prompt:
 
 ### The judgement on the thread cards
 
-Wherever a thread wears a state pill — the Changes tab's Threads only view and every `ThreadCard` (Feed, Pending
+Wherever a thread wears a state pill — the Threads tab and every `ThreadCard` (Feed, Pending
 expansions), the Timeline marker popover, the inline thread in the Changes diff — the LATEST judged
 run's verdict REPLACES the derived-state pill AND the "Likely addressed" confidence marker with ONE
 `--ai-*` marker: "Claude: addressed" / "partly addressed" / "not addressed" / "not valid" / "unsure"
@@ -1719,7 +1721,7 @@ non-skip run with `thread_assessments`, with any later Check threads run folded 
 FOLD above; the response adds `checkId`, and `reviewId` is null for a check-only PR); a run in
 flight, failed or skipped leaves the previous judgements standing. Each judgement now carries
 `reason` (one line) and `resolved`; the SPA's two pills (validity + state) read them. The removed Haiku "addressed" check panel was an explicit, separate output and is
-NOT replaced. ⚠ **The Threads only view's State chips count and filter what the CARDS show**
+NOT replaced. ⚠ **The Threads tab's State chips count and filter what the CARDS show**
 (`threadStateBucket` / `threadStateBucketCounts`, same module): a thread wearing a Claude marker sits
 under its own "Claude judged" chip (shown only when one exists), never under the derived state its
 card no longer displays — a "Likely addressed" chip listing cards that read "Claude: not addressed"
@@ -2875,7 +2877,8 @@ auto-posting: claim before any GitHub write, never retried.
     write, a failure recorded and NEVER retried). ⚠ THE PRESS IS THE CONSENT: step 0 (the
     workspace switch) and the scope / bot-author part of step 1 are skipped
     (`isPressedPost` / `pressedPostEligibility`); open and not a draft still apply, synced and live.
-    Auto resolve, auto pushback, Sonar's comment and auto fix stay AUTO-only. A pair a restart
+    Auto resolve (except the own-PR path, § Resolve my Limn threads), auto pushback, Sonar's
+    comment and auto fix stay AUTO-only. A pair a restart
     interrupted still posts when the boot ends it (`finishInterruptedPairs` reads `postOnFinish` off
     the first half); a single run a restart interrupted fails, like an auto run. The footer is the
     auto footer ("Posted automatically by Limn's … review"). Its REQUEST_CHANGES is recorded in
@@ -3075,6 +3078,21 @@ auto-posting: claim before any GitHub write, never retried.
   the PR change signal + settle. `auto_resolved_at` on success; a failure (reply or resolve) is
   recorded with GitHub's error and shown on the finding ("Couldn’t resolve automatically: …"), never
   retried. A thread not synced yet, or already resolved, records nothing.
+- **RESOLVE MY LIMN THREADS WHEN ADDRESSED** (`autoPost.resolveOwnPrs` in the same overrides JSON,
+  no column; ⚠ ON BY DEFAULT — absent reads on, a stored false is off; Settings → Auto review, outside
+  the dimmed auto-post block). The SAME writer (`auto-resolve.ts`, path B) on the reader's OWN PR
+  (`authorIsMe`, open, a draft too) after ANY succeeded run of theirs: auto, "Review and post"
+  (both through `maybeAutoPostReview`), a manual "Review only" run (`runEnded`, fire-and-forget, both
+  halves of a pair) and a replies pass of either trigger (`afterPass`). Independent of auto-posting
+  and of `autoResolve`; path A (the workspace's auto resolve) wins when both hold. ⚠ Still
+  `ownOnly`: never a teammate's Limn thread on the reader's PR, never a person's. Same statuses
+  (`addressed` / `no_longer_applies` / `reply_accepted`), same claim of
+  `claude_review_findings.auto_resolve` BEFORE the reply (shared with "Post reply", so never two
+  replies), same never-retry, same settle + PR change signal (the open pane's live refresh
+  re-reads the tab). The record carries `why: 'own_pr'`; the reply's footer is "Resolved by Limn's
+  Claude review." (not the auto footer) above the finding marker, so `isLimnPostedComment` holds and
+  it never counts as a person's answer. Not a model run: no budget gate, no route, no tier. Pinned by
+  `auto-post.test.ts` (own PRs) and `replies-check-pipeline.test.ts`.
 - ⚠ **NEVER TWICE** (`selectFindingsToPost` + `alreadyOnGithub`, pure): a finding posts only when
   INCLUDED (an ignored one never does; the server's own `included: false` re-raise counts as
   `already_posted`), not already posted, and not on GitHub from ANY earlier run of
@@ -3185,8 +3203,8 @@ Every comment Limn posts for a finding LEADS with the finding's severity as a bo
   which both shapes carry. Everything else matches on the marker or the stored comment id.
 - **In Limn:** the PR details pane shows the same word as a chip (`LimnSeverityChip`, the ML badge's
   shape, `vendorInk` colours) on a thread that is one of Limn's posted findings (the Changes tab's
-  collapsed pill, every `ThreadCard` header incl. the Threads only view) and on such a PR-level
-  comment (Comments tab). It reads `ThreadDetail.limnSeverity` / `PrCommentDetail.limnSeverity` from
+  collapsed pill, every `ThreadCard` header incl. the Threads tab) and on such a PR-level
+  comment (Activity tab). It reads `ThreadDetail.limnSeverity` / `PrCommentDetail.limnSeverity` from
   GET `/api/prs/:id` (`db/limn-finding-severity.ts`: the finding's stored comment id = the thread's
   ROOT comment or the PR comment, its latest reminder's comment, else `findFindingThread`; severity
   through the same seam). No request of its own, no migration.
@@ -3345,7 +3363,7 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 - ⚠ **Every reader that means "the reader's own runs" leaves these rows out.** `kind IS NULL`
   already does (latest review, latest succeeded, listAll, hasReviewAtHead, settle/retry/failed-auto
   at head, carry, follow-up `loadPriorReviewForFollowUp`, replies anchor, team-claim record,
-  getUnactionedClaudeReviews, the auto sweeper's daily cap and runs). A reader with no kind filter
+  getUnseenOwnAiReviews, the auto sweeper's daily cap and runs). A reader with no kind filter
   uses `db/teammate-reviews.ts` `ownRunsOnly(cr.kind)` / `ownFindingsOnly(crf.reviewId)`: the tab's
   `history`, Open PRs states (`getLatestReviewStates`), posted-state reconcile, earlier-runs chain
   (`loadEarlierRuns`), usage-lockout boot read (`failedRunsSinceLastSuccess`), post contexts (→ 404),

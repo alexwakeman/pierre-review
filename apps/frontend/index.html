@@ -21,6 +21,9 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <!-- The stored colour scheme, applied before first paint (a blocking 'self' script: the CSP
+         forbids inline ones). See public/theme-boot.js and src/lib/colorSchemes.ts. -->
+    <script src="/theme-boot.js"></script>
     <!-- Brand wordmark font (the "Pierre" title) is SELF-HOSTED — the @font-face
          lives in src/index.css and the .woff2 is bundled from src/fonts/. It is
          deliberately NOT a Google Fonts <link>: that leaked every viewer's IP to

@@ -37,7 +37,7 @@
 //                            Claude Reviews, a review chat, Check threads, a CI review, AI Fix and a
 //                            plan, ticket reviews, designs, the reference library and a docs check.
 //   • seed-demo-platform.ts  settings through the real routes (with their Chronology markers), merge
-//                            state, bot themes / Chronology pointers / the work-plan wording / impact
+//                            state, bot themes / Chronology pointers / impact
 //                            notes. A model is never called: every answer is written at its seam.
 // The current sprint (seed-periods.ts SPRINT_DAYS_IN) is pinned eight days in, so "this sprint so
 // far" always has a week of work in it.
@@ -2637,7 +2637,7 @@ if (proSeeded) {
 
 // ===========================================================================
 // SETTINGS, MERGE STATE AND THE WRITTEN SUMMARIES (scripts/seed-demo-platform.ts) — last, because
-// the summaries and the work-plan wording hash what everything above wrote.
+// the summaries hash what everything above wrote.
 // ===========================================================================
 {
   const { seedDemoPlatform } = await import('./seed-demo-platform.js');

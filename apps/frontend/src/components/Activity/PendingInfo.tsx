@@ -222,8 +222,6 @@ export function PendingOrderInfo({
  *  Pending board (the Insights pane renders the same cards with no ranking behind them). */
 export interface PendingBoardInfo extends PendingBoardState {
   onOpenGuide: () => void;
-  /** The work plan's one-sentence line per card id, shown on the card wherever it sits. */
-  whyById?: Map<string, string>;
 }
 
 export const PendingBoardContext = createContext<PendingBoardInfo | null>(null);
@@ -339,7 +337,8 @@ function Dot({ severity }: { severity: InsightSeverity }): JSX.Element {
 /** One line per tab for the guide — what the reader will find in it. */
 const TAB_BLURB: Record<(typeof PENDING_TABS)[number]['key'], string> = {
   my_turn: 'Things you owe an action on — see “When it is your turn” below.',
-  claude: 'AI reviews that finished with findings you have not posted. Same rules as My turn.',
+  claude:
+    'The newest AI review on each pull request, yours and your teammates’, newest first. Up to 100, not scored. Reviews since you last opened the tab are marked New.',
   fixing: 'Failing builds you are on the hook for, and PRs with merge conflicts in repos you can push to.',
   review:
     'PRs whose requested review has not come, and PRs nobody has been asked to review. People with reviews waiting are listed above them.',
@@ -382,10 +381,6 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     appears: 'Your PR conflicts with its base. Only if added in Settings.',
     goes: 'The conflict is resolved.',
   },
-  trunk_red: {
-    appears: 'A default branch is failing. Only if added in Settings.',
-    goes: 'The branch goes green.',
-  },
   pr_approved: {
     appears: 'Your PR has an approval and no “changes requested”.',
     goes: 'It is merged or closed.',
@@ -403,8 +398,12 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     goes: 'Someone replies or pushes to its file.',
   },
   claude_review: {
-    appears: 'An AI review finished with findings you have not posted. Local installs only.',
-    goes: 'You post them.',
+    appears: 'Your Limn finished an AI review you have not read yet.',
+    goes: 'You open the PR’s AI Review tab, or dismiss it.',
+  },
+  ai_approved_merged: {
+    appears: 'A PR your Limn approved has merged.',
+    goes: 'You open the PR, or dismiss it.',
   },
   watched_repo_pr: {
     appears:
@@ -731,8 +730,8 @@ export function PendingGuideModal({
           <GuideSection title="When it is your turn">
             <p>
               A My turn card means you owe an action. These put one on the board, in the order My
-              turn groups them. A finished AI review follows the same rules but is listed in{' '}
-              {TAB_LABEL.claude}.
+              turn groups them. Every card has Dismiss: it sets the card down until something new
+              happens on its PR.
             </p>
             <table className="w-full border-collapse text-body">
               <thead>
@@ -756,12 +755,6 @@ export function PendingGuideModal({
                     <td className={td}>{MY_TURN_GUIDE[reason].goes}</td>
                     <td className={td}>
                       <Dot severity={MY_TURN_SEVERITY[reason]} />
-                      {/* The card builder's one exception — the ci_failing trunk card's rule. */}
-                      {reason === 'trunk_red' && (
-                        <>
-                          , or <Dot severity="high" /> if you merged the PR that landed it
-                        </>
-                      )}
                     </td>
                   </tr>
                 ))}

@@ -152,7 +152,7 @@ export interface DiffThreadContext {
    * self-focus, the reader's own resolve) and read ONCE, when a pill mounts. Only decisions are
    * recorded, never the default (`inlineThreadStartsOpen`). Mutated in place, never replaced: a
    * click must re-render one pill, not the diff. It outlives the pill because a pill remounts on a
-   * file collapse, the Wrap toggle, an anchor move, the Threads only round trip and a tab switch.
+   * file collapse, the Wrap toggle, an anchor move, the Threads tab round trip and a tab switch.
    */
   openMemory: Map<number, boolean>;
   /**
@@ -406,7 +406,7 @@ function InlineThread({
     },
     [memory, thread.id],
   );
-  // The reader resolved this thread (here, in the Threads only view, anywhere): shut it, after
+  // The reader resolved this thread (here, in the Threads tab, anywhere): shut it, after
   // GitHub said yes. ChangesTab has already written the decision to `openMemory`, so a pill that
   // is not mounted right now comes back shut too.
   const bus = ctx.resolveBus;

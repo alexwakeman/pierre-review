@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { SCHEMES } from './schemeCss.js';
 
 // ── THE CODE SURFACES' COLOURS, MEASURED FROM SOURCE ─────────────────────────────────────────
 //
@@ -382,5 +383,41 @@ describe('the shared syntax colours', () => {
     // now. A `.mr-code` left anywhere is a claim that they belong to the resolver.
     expect(CSS, 'no .mr-code selector may survive').not.toMatch(/\.mr-code\b/);
     expect(CSS, 'no --mr-hl-* token may survive').not.toMatch(/--mr-hl-/);
+  });
+});
+
+// ── EVERY COLOUR SCHEME'S GROUNDS (docs/FRONTEND.md § Colour schemes) ───────────────────────────
+//
+// The resolver washes and the syntax colours do NOT change per scheme: a light scheme inherits the
+// light set, a dark one the dark set. So each set must still clear AA on every page and panel of its
+// mode — the bare page, the side panel (`surface`) and each resolver wash over them.
+describe('the code colours on every colour scheme', () => {
+  const HL = ['keyword', 'string', 'comment', 'number', 'title', 'type', 'meta'] as const;
+  const lightHl = tokens(blockCarrying('\\.code-hl', '--code-hl-keyword'), 'code-hl');
+  const darkHl = tokens(blockCarrying('\\.dark \\.code-hl', '--code-hl-keyword'), 'code-hl');
+
+  it.each(SCHEMES)('$label', (s) => {
+    const mr = s.mode === 'light' ? lightInk : darkInk;
+    const hl = s.mode === 'light' ? lightHl : darkHl;
+    const fails: string[] = [];
+    for (const groundName of ['bg', 'surface'] as const) {
+      const ground = hexToRgb(s.ui[groundName]!);
+      const washes: [string, RGB][] = ROLES.map((role) => [`${role} wash`, over(channels(mr[role]!), alphaFor(role), ground)]);
+      for (const role of ROLES) {
+        const ink = channels(mr[role]!);
+        for (const [n, g] of [[groundName, ground] as [string, RGB], [`${role} wash`, over(ink, alphaFor(role), ground)] as [string, RGB]]) {
+          const r = contrastRatio(ink, g);
+          if (r < AA_BODY) fails.push(`--mr-${role} on ${n}: ${r.toFixed(2)}`);
+        }
+      }
+      for (const name of HL) {
+        const ink = hexToRgb(hl[name]!);
+        for (const [n, g] of [[groundName, ground] as [string, RGB], ...washes]) {
+          const r = contrastRatio(ink, g);
+          if (r < AA_BODY) fails.push(`${name} on ${n} over ${groundName}: ${r.toFixed(2)}`);
+        }
+      }
+    }
+    expect(fails).toEqual([]);
   });
 });

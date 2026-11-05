@@ -94,6 +94,22 @@ export interface Tab {
   userMeta?: TabUserMeta | null; // label meta for user-activity tabs
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
   ticketMeta?: TabTicketMeta | null; // label meta for ticket and story-build tabs
+  // PINNED by the reader (browser-style): no ✕, kept by Close all / Close other tabs, listed first,
+  // and persisted across a reload. Only `canPinTab` kinds; a build tab opens pinned.
+  pinned?: boolean;
+}
+
+// The kinds a reader may PIN: the ones a reload can rebuild from the key alone (a PR, a story, a
+// build). The singleton drill-downs render from in-memory seeds a reload loses, so they never pin.
+const PINNABLE_KINDS: ReadonlySet<TabKind> = new Set<TabKind>(['pr-detail', 'pr-focus', 'ticket', 'story-build']);
+/** Whether this tab may be pinned (the menu's "Pin tab" is hidden otherwise). */
+export function canPinTab(tab: Pick<Tab, 'kind'>): boolean {
+  return PINNABLE_KINDS.has(tab.kind);
+}
+/** Pinned tabs first, each group in its own order (a stable partition). Every write to `tabs` goes
+ *  through it, so a pin, an open or a drag can never leave a pinned tab after an unpinned one. */
+export function pinnedFirst(tabs: readonly Tab[]): Tab[] {
+  return [...tabs.filter((t) => t.pinned === true), ...tabs.filter((t) => t.pinned !== true)];
 }
 
 // Which "tab" the main area is showing: one of the three FIXED views (the Activity console — the
@@ -179,9 +195,9 @@ export function parseBotDetailKey(key: string): number | null {
 
 // One ticket's PRs, keyed PER TICKET (the user-activity pattern): two tickets' tabs sit side by side
 // and re-opening the same ticket re-focuses its tab. The key is `ticket:<ident>` with the ident
-// VERBATIM (it contains ':' '/' '#'; URLSearchParams escapes it in `view=`). EPHEMERAL like the other
-// per-entity drill-downs (`persist` keeps only the two PR kinds) but SELF-DESCRIBING: `applyUrlTab`
-// re-creates it from the key alone, with the key text parsed off the ident's tail.
+// VERBATIM (it contains ':' '/' '#'; URLSearchParams escapes it in `view=`). EPHEMERAL unless PINNED
+// (`persist` keeps the two PR kinds and any pinned tab) and SELF-DESCRIBING: `applyUrlTab` and
+// `loadTabs` re-create it from the key alone, with the key text parsed off the ident's tail.
 export const ticketTabKey = (ident: string): string => `${TICKET_TAB_PREFIX}${ident}`;
 /** The ident behind a ticket tab key (null for any other key or an empty ident). */
 export function parseTicketTabKey(key: string): string | null {
@@ -190,8 +206,8 @@ export function parseTicketTabKey(key: string): string | null {
   return ident.trim() === '' || ident.length > 600 ? null : ident;
 }
 // One ticket's "Implement story" session (the build tab), keyed PER TICKET like the story tab, with the
-// ident VERBATIM after `story-build:`. EPHEMERAL (`persist` keeps only the two PR kinds) but
-// SELF-DESCRIBING: `applyUrlTab` re-creates it from the key alone. ⚠ The prefixes never overlap
+// ident VERBATIM after `story-build:`. Opens PINNED, so it persists until the reader unpins and closes
+// it; SELF-DESCRIBING: `applyUrlTab` and `loadTabs` re-create it from the key alone. ⚠ The prefixes never overlap
 // (`ticket:` vs `story-build:`), so a key parses as at most one of the two.
 export const storyBuildTabKey = (ident: string): string => `${STORY_BUILD_TAB_PREFIX}${ident}`;
 /** The ident behind a build tab key (null for any other key or an empty ident). */
@@ -283,10 +299,11 @@ interface TabsState {
   openStoryBuildTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
-  closeTab: (key: string) => void; // remove; if it was active → a neighbour tab, else Activity
+  closeTab: (key: string) => void; // remove (never a pinned tab); if it was active → a neighbour tab, else Activity
   moveTab: (key: string, toIndex: number) => void; // drag-reorder; never touches activeTab
-  closeOtherTabs: (key: string) => void; // keep only that tab (context menu)
-  closeAllTabs: () => void; // remove every dynamic tab (context menu)
+  closeOtherTabs: (key: string) => void; // keep only that tab and the pinned ones (context menu)
+  closeAllTabs: () => void; // remove every UNPINNED dynamic tab (context menu)
+  togglePinTab: (key: string) => void; // pin / unpin (only `canPinTab` kinds can be pinned)
   unpin: (id: number) => void; // back-compat: closeTab(prDetailKey(id))
 
   setActiveTab: (tab: ActiveTab) => void;
@@ -330,32 +347,66 @@ function metaFrom(p: Record<string, unknown>): TabMeta {
   };
 }
 
+// A stored story / build tab's label meta. The ident always comes from the KEY (the identity); the
+// stored words are only a label, so anything malformed falls back to what the key says.
+function ticketMetaFrom(ident: string, raw: unknown): TabTicketMeta {
+  const m = raw != null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const offer = m.buildOffer != null && typeof m.buildOffer === 'object' ? (m.buildOffer as Record<string, unknown>) : null;
+  return {
+    ident,
+    key: typeof m.key === 'string' && m.key !== '' ? m.key : ticketKeyOfIdent(ident),
+    title: typeof m.title === 'string' ? m.title : null,
+    ...(offer != null && (offer.action === 'implement' || offer.action === 'fill_gaps')
+      ? { buildOffer: { action: offer.action, reviewId: typeof offer.reviewId === 'number' ? offer.reviewId : null } }
+      : {}),
+  };
+}
+
 function loadTabs(): Tab[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed
+        return pinnedFirst(parsed
           .filter(
             (t): t is Record<string, unknown> =>
               t != null && typeof t === 'object' && typeof (t as { key?: unknown }).key === 'string',
           )
           .map((t): Tab | null => {
-            const parsedKey = parseTabKey(t.key as string);
-            // Drop anything unrecognised (e.g. a legacy transient 'my-turn' key).
-            if (!parsedKey) return null;
+            const key = t.key as string;
+            const pinned = t.pinned === true ? { pinned: true } : {};
+            const parsedKey = parseTabKey(key);
+            if (parsedKey) {
+              return {
+                key,
+                kind: parsedKey.kind,
+                prId: parsedKey.prId,
+                meta:
+                  t.meta != null && typeof t.meta === 'object'
+                    ? metaFrom(t.meta as Record<string, unknown>)
+                    : null,
+                ...pinned,
+              };
+            }
+            // A PINNED story or build tab is kept too, rebuilt from its self-describing key (a
+            // separate branch: `parseTabKey` stays PR-only, `boardSlotMode` and others rely on it).
+            // Drop anything else unrecognised (e.g. a legacy transient 'my-turn' key).
+            if (t.pinned !== true) return null;
+            const ticketIdent = parseTicketTabKey(key);
+            const buildIdent = ticketIdent == null ? parseStoryBuildTabKey(key) : null;
+            const ident = ticketIdent ?? buildIdent;
+            if (ident == null) return null;
             return {
-              key: t.key as string,
-              kind: parsedKey.kind,
-              prId: parsedKey.prId,
-              meta:
-                t.meta != null && typeof t.meta === 'object'
-                  ? metaFrom(t.meta as Record<string, unknown>)
-                  : null,
+              key,
+              kind: ticketIdent != null ? 'ticket' : 'story-build',
+              prId: 0,
+              meta: null,
+              ticketMeta: ticketMetaFrom(ident, t.ticketMeta),
+              pinned: true,
             };
           })
-          .filter((t): t is Tab => t != null);
+          .filter((t): t is Tab => t != null));
       }
     }
     // One-time migration of the old pinned-PR blob → pr-detail tabs.
@@ -382,11 +433,11 @@ function loadTabs(): Tab[] {
 
 function persist(tabs: Tab[]): void {
   try {
-    // Only PR-backed tabs persist; the singleton drill-downs (metrics / bot-PRs / open-PRs)
-    // are ephemeral.
+    // PR-backed tabs persist, and any PINNED tab (a story or build tab, `canPinTab`); the singleton
+    // drill-downs (metrics / bot-PRs / …) are ephemeral.
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus')),
+      JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus' || t.pinned === true)),
     );
   } catch {
     /* quota / private mode — non-fatal, the tabs just won't persist */
@@ -424,8 +475,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
                 ? { ...t, ticketMeta: tab.ticketMeta }
                 : t,
         )
-      : [...s.tabs, tab];
-    if (!exists || tab.meta != null) persist(tabs);
+      : pinnedFirst([...s.tabs, tab]);
+    if (!exists || tab.meta != null || tab.ticketMeta != null) persist(tabs);
     set({
       tabs,
       activeTab: tab.key,
@@ -445,7 +496,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       set((s) => {
         const key = prDetailKey(meta.id);
         if (s.tabs.some((t) => t.key === key)) return s;
-        const tabs = [...s.tabs, { key, kind: 'pr-detail' as const, prId: meta.id, meta }];
+        const tabs: Tab[] = [...s.tabs, { key, kind: 'pr-detail' as const, prId: meta.id, meta }];
         persist(tabs);
         return { tabs };
       }),
@@ -504,6 +555,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         },
         opts,
       ),
+    // A NEW build tab opens PINNED (the reader's long-running session); re-opening one keeps
+    // whatever the reader set — it stays pinned until they unpin it, never unpinned by the app.
     openStoryBuildTab: (ticket, opts) =>
       openTab(
         {
@@ -512,6 +565,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
           prId: 0,
           meta: null,
           ticketMeta: ticket,
+          pinned: true,
         },
         opts,
       ),
@@ -537,7 +591,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     closeTab: (key) =>
       set((s) => {
         const idx = s.tabs.findIndex((t) => t.key === key);
-        if (idx === -1) return s;
+        // A pinned tab has no ✕ and is never closed: unpin it first.
+        if (idx === -1 || s.tabs[idx]?.pinned === true) return s;
         const tabs = s.tabs.filter((t) => t.key !== key);
         persist(tabs);
         // Closing a non-active tab leaves the active one alone. Closing the ACTIVE tab
@@ -564,31 +619,56 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         if (from === -1) return s;
         const to = Math.max(0, Math.min(s.tabs.length - 1, toIndex));
         if (to === from) return s;
-        const tabs = [...s.tabs];
-        const [moved] = tabs.splice(from, 1);
-        tabs.splice(to, 0, moved as Tab);
+        const moving = [...s.tabs];
+        const [moved] = moving.splice(from, 1);
+        moving.splice(to, 0, moved as Tab);
+        // A drag never crosses the pinned / unpinned line: the partition puts it back on its side.
+        const tabs = pinnedFirst(moving);
+        if (tabs.every((t, i) => t === s.tabs[i])) return s;
         persist(tabs);
         return { tabs };
       }),
     closeOtherTabs: (key) =>
       set((s) => {
-        const kept = s.tabs.find((t) => t.key === key);
-        if (!kept || s.tabs.length <= 1) return s;
-        const tabs = [kept];
+        if (!s.tabs.some((t) => t.key === key)) return s;
+        // Pinned tabs survive "Close other tabs".
+        const tabs = s.tabs.filter((t) => t.key === key || t.pinned === true);
+        if (tabs.length === s.tabs.length) return s;
         persist(tabs);
         // If the active tab was one of the closed dynamic tabs, land on the survivor;
-        // the fixed views (and the survivor itself) stay put.
-        const activeTab = isFixedView(s.activeTab) || s.activeTab === key ? s.activeTab : key;
+        // the fixed views (and the survivors) stay put.
+        const activeTab = isFixedView(s.activeTab) || tabs.some((t) => t.key === s.activeTab) ? s.activeTab : key;
         return { tabs, activeTab };
       }),
     closeAllTabs: () =>
       set((s) => {
-        if (s.tabs.length === 0) return s;
-        persist([]);
-        // Stay on a fixed view; when the active tab was one of the dynamic tabs just destroyed,
-        // land on Activity (mirrors closeTab's fallback).
-        const activeTab = isFixedView(s.activeTab) ? s.activeTab : DEFAULT_FIXED_VIEW;
-        return { tabs: [], activeTab };
+        // Pinned tabs survive "Close all tabs".
+        const tabs = s.tabs.filter((t) => t.pinned === true);
+        if (tabs.length === s.tabs.length) return s;
+        persist(tabs);
+        // Stay on a fixed view or a surviving pinned tab; when the active tab was one of the dynamic
+        // tabs just destroyed, land on Activity (mirrors closeTab's fallback).
+        const activeTab =
+          isFixedView(s.activeTab) || tabs.some((t) => t.key === s.activeTab) ? s.activeTab : DEFAULT_FIXED_VIEW;
+        return { tabs, activeTab };
+      }),
+    togglePinTab: (key) =>
+      set((s) => {
+        const t = s.tabs.find((x) => x.key === key);
+        // Unpinning is always allowed; pinning only a kind a reload can rebuild.
+        if (t == null || (t.pinned !== true && !canPinTab(t))) return s;
+        const tabs = pinnedFirst(
+          s.tabs.map((x) => {
+            if (x.key !== key) return x;
+            if (x.pinned === true) {
+              const { pinned: _drop, ...rest } = x;
+              return rest;
+            }
+            return { ...x, pinned: true };
+          }),
+        );
+        persist(tabs);
+        return { tabs };
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 
@@ -653,7 +733,7 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
                           },
                         }
                       : null;
-        const tabs = newTab != null ? [...s.tabs, newTab] : s.tabs;
+        const tabs = newTab != null ? pinnedFirst([...s.tabs, newTab]) : s.tabs;
         if (tabs !== s.tabs) persist(tabs);
         // The Back-flash: EXACTLY on a pop that lands on Activity with a launching item pending.
         const flashing =

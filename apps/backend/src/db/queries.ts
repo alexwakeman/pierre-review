@@ -73,6 +73,7 @@ import type {
   NewSinceLastViewed,
   PrCommentDetail,
   PrDetail,
+  PrLifecycleEvent,
   PrReviewDecision,
   PrReviewerRef,
   PrFileChange,
@@ -123,7 +124,6 @@ import type {
   MyTurnPr,
   MyTurnDismissedItem,
   MyTurnRelevance,
-  MyTurnTrunkCard,
   MyTurnOwnWork,
   MentionItem,
   CommentReplyItem,
@@ -131,7 +131,7 @@ import type {
   OwnConflictsItem,
   OwnReadyItem,
   OwnThreadItem,
-  RedTrunkItem,
+  ApprovedMergedItem,
   BotSignalCard,
   BotSignalVendorStat,
   AutomatedReviewerKind,
@@ -184,6 +184,7 @@ import type {
 // from `shared` (not typed here) because the board's info popovers print the same values; a local
 // literal would let the app explain an order it no longer produces. See pending-rules.ts.
 import {
+  APPROVED_MERGED_DAYS,
   aiRunProvider,
   asUnreadableReason,
   automationVendorFor,
@@ -4426,9 +4427,6 @@ export async function getWorkspaceInsights(
   // where a silent cap is the same lie my_turn's was. Written inside the block below, so an empty
   // workspace leaves it undefined = nothing to disclose.
   let ciFailingTotal: number | undefined;
-  // The repos whose red default branch the reader PROMOTED into My Turn — see
-  // `WorkspaceInsightsResponse.myTurnTrunkRepoIds`. Written by the my_turn block below.
-  let myTurnTrunkRepoIds: number[] | undefined;
   // What the reader dismissed from My Turn in this scope — `WorkspaceInsightsResponse.myTurnDismissed`.
   let myTurnDismissed: MyTurnDismissedItem[] | undefined;
   // Every kind's pre-cap population — see `WorkspaceInsightsResponse.kindTotals`. Written by each
@@ -4574,7 +4572,6 @@ export async function getWorkspaceInsights(
       myTurnOtherTotal,
       ciFailingTotal,
       kindTotals,
-      myTurnTrunkRepoIds,
       myTurnDismissed,
     };
   };
@@ -4896,10 +4893,6 @@ export async function getWorkspaceInsights(
   const promotedConflicts = new Set(mt.ownConflicts.map((i) => i.prId));
   const promotedReady = new Set(mt.ownReady.map((i) => i.prId));
   const promotedThreads = new Set(mt.ownThreads.map((i) => i.threadId));
-  const promotedTrunks = new Set(mt.redTrunks.map((i) => i.repoId));
-  // The WHOLE promoted-trunk population, never the capped cards — the daily brief's red-trunk line
-  // leaves these out, so a trunk the reader promoted is counted once, in My Turn.
-  myTurnTrunkRepoIds = mt.redTrunks.map((t) => t.repoId);
   {
     const loginById = new Map(mt.users.map((u) => [u.id, u.githubLogin]));
     const handle = (id: number | null): string =>
@@ -4909,8 +4902,7 @@ export async function getWorkspaceInsights(
     // the sort is done (the cards' wire field is ISO), and is NULL when the section row carries no
     // usable timestamp of its own — `sinceFor` then dates the card off the PR row.
     type Seed = {
-      /** Every type but `trunk_red`, whose subject is a repository — see `RankedMyTurn`. */
-      reason: Exclude<MyTurnCardReason, 'trunk_red'>;
+      reason: MyTurnCardReason;
       /** WHAT THE CARD `id` KEYS ON, and nothing else — it is NOT on the wire. Two cards can sit
        *  on one PR (a thread reply and a finished Claude review), and two threads can sit on one
        *  PR, so `myturn:<reason>:<prId>` would collapse them into one React key and one board row.
@@ -5284,36 +5276,22 @@ export async function getWorkspaceInsights(
         extraActorIds: [],
       });
     }
+    for (const i of mt.approvedMerged) {
+      seeds.push({
+        reason: 'ai_approved_merged',
+        refId: i.reviewId,
+        threadId: null,
+        severity: MY_TURN_SEVERITY.ai_approved_merged,
+        detail: `Merged ${i.mergedById != null ? `by ${handle(i.mergedById)} ` : ''}after your Limn approved it`,
+        since: new Date(Date.parse(i.since)),
+        prId: i.prId,
+        relevance: relevanceOf(i),
+        muted: mutedOf(i),
+        extraActorIds: [i.mergedById],
+      });
+    }
 
-    // ── THE RED DEFAULT BRANCHES the reader promoted (repo-grained, no PR required). Their
-    // LANDING PR's author is resolved EXACTLY as the ci_failing trunk arm resolves it — the same
-    // helper, the same author fields — so the two cards for one red trunk cannot disagree about
-    // who opened it, and `pendingAuthorSideOf` puts the card on exactly one side of the People /
-    // Automation lens ('people' when no PR resolved, the trunk arm's own rule). Re-resolved here
-    // rather than carried on the /api/my-turn wire, which keeps an internal detection column off it.
-    const trunkLanding = await resolveTrunkCommitPrs(
-      accountId,
-      mt.redTrunks.flatMap((t) => (t.headSha != null ? [{ repoId: t.repoId, sha: t.headSha }] : [])),
-    );
-    await learnLogins([...trunkLanding.values()].map((l) => l.authorId));
-    // The red heads' failing checks, through the one reader /api/branch-status uses — keyed by the
-    // head, so a direct push (no landing PR) is named as readily as a merge.
-    const trunkFailing = withFailingChecks
-      ? await trunkFailingChecks(
-          accountId,
-          mt.redTrunks.map((t) => ({ repoId: t.repoId, sha: t.headSha })),
-        )
-      : new Map<string, FailingChecksSummary>();
-    const trunkAuthor = (
-      t: RedTrunkItem,
-    ): Pick<MyTurnTrunkCard, 'authorId' | 'authorIsBot' | 'authorBotKind' | 'automation'> => {
-      const landed = t.headSha != null ? trunkLanding.get(`${t.repoId}:${t.headSha}`) : undefined;
-      return landed != null
-        ? { authorId: landed.authorId, ...authorFields(landed.authorId, landed.dependencyVendor) }
-        : { authorId: null, authorIsBot: false, authorBotKind: null, automation: null };
-    };
-
-    if (seeds.length > 0 || mt.redTrunks.length > 0) {
+    if (seeds.length > 0) {
       // The PR context (repoId / CI / diff size) the sections don't carry. These PRs are already
       // inside `scope.repoIds` — getMyTurn was passed the scope — so this select is the account
       // guard, not the scope one.
@@ -5364,25 +5342,15 @@ export async function getWorkspaceInsights(
       // derivation of "when did this happen".
       const sinceFor = (s: Seed, p: (typeof prRows)[number]): Date => s.since ?? p.openedAt;
 
-      // PR-grained seeds and repo-grained red trunks in ONE union, so they share the one sort, the
-      // one cap and the one set of totals below — a trunk card is a my_turn card to every counter,
-      // lens and total, with no second predicate anywhere.
-      type RankedMyTurn =
-        | {
-            type: 'pr';
-            s: Seed;
-            p: (typeof prRows)[number];
-            since: Date;
-            severity: InsightSeverity;
-            relevance: MyTurnRelevance;
-          }
-        | {
-            type: 'trunk';
-            t: RedTrunkItem;
-            since: Date;
-            severity: InsightSeverity;
-            relevance: MyTurnRelevance;
-          };
+      // Every seed in ONE array, so they share the one sort, the one cap and the one set of totals
+      // below.
+      type RankedMyTurn = {
+        s: Seed;
+        p: (typeof prRows)[number];
+        since: Date;
+        severity: InsightSeverity;
+        relevance: MyTurnRelevance;
+      };
       const sevRank: Record<InsightSeverity, number> = { high: 0, warn: 1, info: 2 };
       const ranked: RankedMyTurn[] = [
         ...seeds.flatMap((s): RankedMyTurn[] => {
@@ -5392,7 +5360,6 @@ export async function getWorkspaceInsights(
           return p
             ? [
                 {
-                  type: 'pr',
                   s,
                   p,
                   since: sinceFor(s, p),
@@ -5402,17 +5369,6 @@ export async function getWorkspaceInsights(
               ]
             : [];
         }),
-        ...mt.redTrunks.map(
-          (t): RankedMyTurn => ({
-            type: 'trunk',
-            t,
-            since: new Date(Date.parse(t.since)),
-            // You LANDED the commit sitting on a red trunk: the home arm's `high`, for its reason.
-            severity: t.viewerMerged ? 'high' : MY_TURN_SEVERITY.trunk_red,
-            // Absent ⇒ 'none': a missing field may never invent an ownership claim.
-            relevance: t.relevance ?? 'none',
-          }),
-        ),
       ].sort(
         (a, b) =>
           sevRank[a.severity] - sevRank[b.severity] || b.since.getTime() - a.since.getTime(),
@@ -5426,13 +5382,10 @@ export async function getWorkspaceInsights(
       // reporting 148 where the list holds 50 — that is the "number with no list behind it" bug
       // this whole surface exists to end.
       //
-      // ⚠ EVERY my_turn TOTAL IS THE MY TURN TAB'S POPULATION — a finished Claude review is listed
-      // in its own Pending tab ("Claude reviews", `PENDING_TABS`), so it is filtered out of these
-      // totals HERE, before any is taken, and the banner, Workspace badges and the daily brief —
-      // which open My turn — count exactly what My turn lists. The cards themselves stay in the
-      // array (the Claude reviews tab lists them, counted off the uncapped cards in
-      // db/pending-tabs.ts).
-      const myTurnTab = ranked.filter((r) => r.type !== 'pr' || r.s.reason !== 'claude_review');
+      // ⚠ EVERY my_turn TOTAL IS THE MY TURN TAB'S POPULATION — every type, a new AI review of your
+      // Limn's included, is listed in My turn, so the banner, Workspace badges and the daily brief
+      // — which open My turn — count exactly what My turn lists.
+      const myTurnTab = ranked;
       myTurnTotal = myTurnTab.length;
       // ⚠ FOLDED OFF THE PRE-CAP ARRAY, for the same reason `myTurnTotal` is. Counted after the
       // slice it would be bounded by 50 and would stop being a total; counted here it is the real
@@ -5561,47 +5514,6 @@ export async function getWorkspaceInsights(
       }
 
       for (const r of built) {
-        if (r.type === 'trunk') {
-          const t = r.t;
-          addUser(t.landingPr?.mergedById ?? null);
-          const author = trunkAuthor(t);
-          addUser(author.authorId);
-          const branch = t.branchName ?? 'trunk';
-          const card: MyTurnTrunkCard = {
-            id: `myturn:trunk_red:${t.repoId}:${t.headSha ?? ''}`,
-            kind: 'my_turn',
-            reason: 'trunk_red',
-            severity: r.severity,
-            repoId: t.repoId,
-            repoFullName: t.repoFullName,
-            branchName: t.branchName,
-            ciStatus: t.ciStatus,
-            headSha: t.headSha,
-            prId: t.landingPr?.prId ?? null,
-            prNumber: t.landingPr?.number ?? null,
-            prTitle: t.landingPr?.title ?? null,
-            mergedById: t.landingPr?.mergedById ?? null,
-            viewerMerged: t.viewerMerged,
-            maintained: t.maintained,
-            observedAt: t.observedAt,
-            githubUrl: t.githubUrl,
-            // The home card's sentence: what is red, where, and the one attribution this data
-            // supports (who LANDED the head — never who broke it).
-            detail: `${t.maintained ? 'You maintain this repo — ' : ''}${branch} is red${
-              t.headSha != null ? ` at ${t.headSha.slice(0, 7)}` : ''
-            }${t.viewerMerged ? '; you merged the PR that landed this commit' : ''}`,
-            since: r.since.toISOString(),
-            personal: r.relevance !== 'none',
-            relevance: r.relevance,
-            muted: t.muted ? true : undefined,
-            threadId: null,
-            ...author,
-            // Display only — the `detail` above never names a check.
-            ...failingChecksFields(trunkFailingFor(trunkFailing, t.repoId, t.headSha)),
-          };
-          cards.push(card);
-          continue;
-        }
         const { s, p, since } = r;
         addUser(p.authorId);
         for (const id of s.extraActorIds) addUser(id);
@@ -5992,8 +5904,7 @@ export async function getWorkspaceInsights(
     // landed a PR on its default branch". Skipped entirely when no trunk is red, because membership
     // is the only thing that could change the answer.
     const maintained = redTrunks.length > 0 ? await maintainedRepoIds() : new Set<number>();
-    // A red trunk the reader promoted into My Turn is listed there instead (it MOVES).
-    const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id) && !promotedTrunks.has(r.id));
+    const myRedTrunks = redTrunks.filter((r) => maintained.has(r.id));
     // ONE lookup for every red head, before the loop — resolving inside it would repeat the same
     // two queries per repo.
     const landingPrs = await resolveTrunkCommitPrs(
@@ -6729,7 +6640,7 @@ export async function getWorkspaceInsights(
   if (opts.withWaiting === true) {
     const viewerId = await getAccountUserId(accountId);
     const yours = new Set<number>();
-    for (const c of cards) if (c.kind === 'my_turn' && c.reason !== 'trunk_red') yours.add(c.prId);
+    for (const c of cards) if (c.kind === 'my_turn') yours.add(c.prId);
     for (const d of myTurnDismissed ?? []) if (d.target.kind === 'pr') yours.add(d.target.id);
     const candidates =
       viewerId == null
@@ -7869,12 +7780,12 @@ export async function getMyTurn(
     pushedSince: [],
     ownCiRed: [],
     ownConflicts: [],
-    redTrunks: [],
     approvedPrs: [],
     ownReady: [],
     yourPrs: [],
     ownThreads: [],
     claudeReviewsToAction: [],
+    approvedMerged: [],
     watchedRepoPrs: [],
     users: [],
     order: settings.order,
@@ -8510,27 +8421,29 @@ export async function getMyTurn(
         })
       : { threadsAwaiting: [], threadReplies: [] };
 
-  // S4 — completed Claude reviews you have not acted on (local-only feature; empty otherwise).
-  // ⚠ THE BALL RULE APPLIES HERE TOO, ON THE SEEDS: a run is yours only until you act on its PR.
-  // Any action of yours at or after the run FINISHED — a review of any state, a review comment, a
-  // PR comment, your own push — discharges it, wherever you did it (the panel, the PR pane or
-  // github.com; the data cannot tell them apart). A bot's action never counts: `mineLast` is the
-  // viewer's own clock. A newer run has a later `finishedAt`, so it re-summons on its own. The
-  // posted-findings rule inside `getUnactionedClaudeReviews` still retires a card as well.
-  const claudeSeeds: ClaudeReviewToAction[] =
+  // S4 — new AI reviews by your Limn that you have not SEEN (local-only feature; empty otherwise).
+  // ⚠ SEEN, NOT THE BALL RULE: auto-posting posts most runs under the reader's own account, so "you
+  // acted on the PR since it finished" retired the card before the reader read it. Seen (the AI
+  // Review tab showed the run — `claude_reviews.seen_at`) or a dismissal retires it; a newer run has
+  // its own row and comes back on its own (`getUnseenOwnAiReviews`).
+  const claudeRows: ClaudeReviewToAction[] =
     show.claude_review && config.aiEnabled
-      ? await getUnactionedClaudeReviews(accountId, scopedRepoIds)
+      ? await getUnseenOwnAiReviews(accountId, scopedRepoIds)
       : [];
-  const claudeClocks = await lastActionClocks(
-    localUserId,
-    [...new Set(claudeSeeds.map((c) => c.prId))],
-    bots,
-  );
-  const claudeRows = claudeSeeds.filter((c) => {
-    const mine = claudeClocks.get(c.prId)?.mineLast ?? null;
-    if (mine == null || c.finishedAt == null) return true;
-    return mine.getTime() < Date.parse(c.finishedAt);
-  });
+
+  // S7 — MERGED AFTER YOUR LIMN APPROVED IT (`ai_approved_merged`). A merged PR on which an own run's
+  // auto-post LANDED a review sent as APPROVE before the merge, still standing on GitHub (the synced
+  // `reviews` row is 'approved'; with no synced row, no withdrawal is recorded), merged within
+  // `APPROVED_MERGED_DAYS` and after the repo's onboarding floor, and NOT opened by the reader since
+  // the merge (`pr_views.last_viewed_at`). Opening the PR or a dismissal retires it. DB only.
+  const approvedMergedRows: ApprovedMergedItem[] =
+    show.ai_approved_merged && config.aiEnabled
+      ? await getApprovedThenMerged(accountId, scopedRepoIds, now, passesFloor)
+      : [];
+  for (const a of approvedMergedRows) {
+    noteUser(a.authorId);
+    noteUser(a.mergedById);
+  }
 
   // ⚠ THESE SECTIONS HAVE NO `repoId` IN HAND. `ThreadAwaitingItem` and `ClaudeReviewToAction`
   // carry `repoFullName` (a rendering field) and `prId`, not a repo id — and a Claude review's PR
@@ -8545,6 +8458,7 @@ export async function getMyTurn(
         ...threadTurns.threadsAwaiting.map((t) => t.prId),
         ...threadTurns.threadReplies.map((t) => t.prId),
         ...claudeRows.map((c) => c.prId),
+        ...approvedMergedRows.map((c) => c.prId),
       ]),
     ];
     if (ids.length > 0) {
@@ -8593,75 +8507,16 @@ export async function getMyTurn(
     ...relevanceFor(repoIdByPrId.get(c.prId), 'direct'),
   }));
 
-  // 9. RED DEFAULT BRANCHES (promotion, repo-grained) — `trunkScope` 'maintained' keeps repos you
-  //    maintain (`viewerMaintainedRepoIds`, the ci_failing trunk arm's own set), 'all' every repo in
-  //    scope. DIRECT in both scopes: the reader added this type in Settings, so it is theirs and it
-  //    notifies — `maintained` stays a display fact that picks the card's sentence, and only the
-  //    Pending mute downgrades it. The landing PR is resolved through the SAME helper as the home
-  //    card, so the two can never name different PRs for one red head.
-  const redTrunks: RedTrunkItem[] = [];
-  if (settings.trunkScope !== 'off') {
-    const inScope = scopedRepoIds == null ? null : new Set(scopedRepoIds);
-    const red = repoRows.filter(
-      (r) => (inScope == null || inScope.has(r.id)) && isRedCiStatus(r.defaultBranchCiStatus),
-    );
-    const maintained =
-      red.length > 0 ? await viewerMaintainedRepoIds(accountId, localUserId) : new Set<number>();
-    const kept = red.filter((r) => settings.trunkScope === 'all' || maintained.has(r.id));
-    const landing = await resolveTrunkCommitPrs(
-      accountId,
-      kept.flatMap((r) =>
-        r.defaultBranchHeadSha != null ? [{ repoId: r.id, sha: r.defaultBranchHeadSha }] : [],
-      ),
-    );
-    for (const r of kept) {
-      const full = repoNameById.get(r.id) ?? `repo ${r.id}`;
-      const sha = r.defaultBranchHeadSha;
-      const landed = sha != null ? landing.get(`${r.id}:${sha}`) : undefined;
-      noteUser(landed?.mergedById);
-      const observedAt = r.defaultBranchUpdatedAt?.toISOString() ?? null;
-      // A red branch is dismissed by REPO, and dated by the head it was observed on (`observedAt`),
-      // never `since`, whose fallback is the fold time — that would make every dismissal of a
-      // branch with no observation stamp expire on the next read.
-      if (
-        !inbox.keep({ kind: 'repo', id: r.id }, observedAt, 'trunk_red', () => ({
-          repoFullName: full,
-          prNumber: null,
-          title: r.defaultBranchName ?? null,
-          githubUrl:
-            sha != null ? `https://github.com/${full}/commit/${sha}` : `https://github.com/${full}`,
-        }))
-      ) {
-        continue;
-      }
-      redTrunks.push({
-        repoId: r.id,
-        repoFullName: full,
-        branchName: r.defaultBranchName,
-        ciStatus: r.defaultBranchCiStatus as CiStatus,
-        headSha: sha,
-        observedAt,
-        landingPr:
-          landed != null
-            ? {
-                prId: landed.id,
-                number: landed.number,
-                title: landed.title,
-                mergedById: landed.mergedById,
-              }
-            : null,
-        viewerMerged: landed?.mergedById != null && landed.mergedById === localUserId,
-        maintained: maintained.has(r.id),
-        since: observedAt ?? new Date(now).toISOString(),
-        // The COMMIT page — a trunk run's checks live on the commit (the trunk_ci_failed feed
-        // rule); the repo page when we hold no head sha.
-        githubUrl:
-          sha != null ? `https://github.com/${full}/commit/${sha}` : `https://github.com/${full}`,
-        ...relevanceFor(r.id, 'direct'),
-      });
-    }
-    redTrunks.sort((a, b) => b.since.localeCompare(a.since));
-  }
+  // Your Limn approved it — DIRECT by construction.
+  const approvedMerged: ApprovedMergedItem[] = keepPr(
+    'ai_approved_merged',
+    approvedMergedRows,
+    (a) => a.since,
+    (a) => describeByNumber(a.repoFullName, a.prNumber, a.prTitle),
+  ).map((a) => ({
+    ...a,
+    ...relevanceFor(repoIdByPrId.get(a.prId), 'direct'),
+  }));
 
   const users =
     referencedUsers.size > 0
@@ -8690,12 +8545,12 @@ export async function getMyTurn(
     pushedSince,
     ownCiRed,
     ownConflicts,
-    redTrunks,
     approvedPrs,
     ownReady,
     yourPrs,
     ownThreads,
     claudeReviewsToAction,
+    approvedMerged,
     watchedRepoPrs,
   };
   return {
@@ -9421,6 +9276,20 @@ export async function getPrDetail(
     .where(eq(commits.prId, id))
     .orderBy(asc(commits.committedAt))
     .execute();
+  // The PR detail's Activity tab: the lifecycle moments that have no column of their own (a reopen,
+  // a draft marked ready), read from the synced event log. Opened / merged / closed are columns.
+  const lifecycleRows = await db
+    .select({ type: events.type, occurredAt: events.occurredAt, actorId: events.actorId })
+    .from(events)
+    .where(
+      and(
+        eq(events.accountId, accountId),
+        eq(events.prId, id),
+        inArray(events.type, ['pr_reopened', 'pr_ready_for_review']),
+      ),
+    )
+    .orderBy(asc(events.occurredAt))
+    .execute();
 
   const commentsByThread = new Map<number, typeof commentRows>();
   for (const c of commentRows) {
@@ -9593,6 +9462,7 @@ export async function getPrDetail(
   // A maintainer who only merged the PR (never authored/reviewed/commented) is
   // otherwise absent from userList, leaving "Merged by" unresolved.
   if (pr.mergedById) userIds.add(pr.mergedById);
+  for (const e of lifecycleRows) if (e.actorId) userIds.add(e.actorId);
   const userList =
     userIds.size > 0
       ? (
@@ -9751,6 +9621,11 @@ export async function getPrDetail(
     reviews: reviewsOut,
     comments: commentsOut,
     commits: commitsOut,
+    lifecycle: lifecycleRows.map((e) => ({
+      type: e.type as PrLifecycleEvent['type'],
+      at: e.occurredAt.toISOString(),
+      actorId: e.actorId,
+    })),
     users: userList,
     lastViewedAt: iso(lastViewedAt),
     newSinceLastViewed,
@@ -10103,7 +9978,7 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
 // contexts + mapReview/mapFinding) MOVED to apps/backend/src/platform/claude-review/persist.ts
 // when Claude Review became a Pro capability. The two readers below stay CORE because
 // CORE surfaces consume them: listClaudeReviewsByRepo (Activity console) +
-// getUnactionedClaudeReviews (My-Turn inbox). Both read the still-core tables.
+// getUnseenOwnAiReviews (My-Turn inbox). Both read the still-core tables.
 
 // Repo-oriented Claude-review retrieval for the Activity single-repo console: ALL runs
 // for a repo's PRs, grouped by PR (newest run first within each), PRs ordered by
@@ -10168,43 +10043,19 @@ export async function listClaudeReviewsByRepo(
   return { enabled: true, prs: [...byPr.values()] };
 }
 
-// Completed Claude reviews on OPEN PRs that haven't been actioned: each PR's MOST-RECENT
-// succeeded run, kept only while there is still something on it to do. Account-scoped. Feeds the
-// My Turn "Claude reviews to action" section so finished reviews don't fall through the cracks.
+// NEW AI REVIEWS BY YOUR LIMN — the My Turn `claude_review` section (docs/BACKEND.md § My Turn):
+// each OPEN PR's MOST-RECENT succeeded full run of the reader's own Limn (`kind IS NULL`, not a router
+// skip), kept only while the reader has NOT SEEN it — `claude_reviews.seen_at` NULL on every half of
+// a Claude + Codex pair. Account-scoped.
 //
-// ⚠ `claude_reviews.posted_at` ALONE IS NOT "ACTIONED", and testing only that made this card
-// IMMORTAL. There are TWO post paths and only one of them stamps the parent: posting the whole
-// run as a GitHub review (`markReviewPosted`) does, while posting findings ONE AT A TIME
-// (`markFindingPosted`, the per-finding route) stamps `claude_review_findings.posted_at` and
-// never touches the run. On the author's own dev DB that is 96 runs with 2 stamped against 287
-// findings with 62 stamped — including the live card for run 95, whose parent is null while five
-// of its six findings carry real GitHub comment ids.
+// ⚠ SEEN IS THE ONE DISCHARGE (plus a dismissal, applied in `getMyTurn`). Seen = the reader had the
+// run on screen in the PR's AI Review tab after it finished (`markClaudeReviewSeen`, the SPA's POST).
+// It is NOT "posted" and NOT the ball rule: auto-posting now posts most runs under the reader's own
+// account, so "posted" or "you acted since" retired the card before the reader ever read it. A newer
+// run has its own row and `seen_at`, so it comes back on its own.
 //
-// The fix is CORE-side and reads the findings, because a fix in the posting path would heal
-// nothing already on the board: the 94 unstamped runs stay unstamped forever.
-//
-// WHAT COUNTS AS SOMETHING LEFT TO DO — two states, and the second is why `included` appears at
-// all:
-//   • NOTHING from this run has reached GitHub (neither the run nor any finding). The run was
-//     never worked, so it stays, exactly as before. ⚠ This is the branch that keeps a fresh run
-//     visible: `included` defaults to false, so gating on it here would retire every run the
-//     moment it finished.
-//   • SOMETHING from it has been posted, so you worked it. Then it stays only for a finding you
-//     TICKED (`included`) and have not posted — the one thing you told the app you meant to send.
-//     An unticked leftover is a triage decision, not an outstanding task.
-// In both branches `severity: 'praise'` is skipped: it is the one value in the enum that asks for
-// no change, so it can never be the reason a card survives.
-//
-// ⚠ AN AUTO RUN IS OWNED LIKE A MANUAL ONE. A run the Pro auto-review sweeper started
-// (`trigger = 'auto'`) was switched on by THIS account's workspace setting, and the row is
-// account-scoped, so it is kept exactly as a manual run is: whoever the PR belongs to. There is no
-// author / requested-reviewer audience test; `trigger` rides the result for the label only.
-//
-// ⚠ THIS IS ONLY HALF THE DISCHARGE. The other half is the BALL RULE, applied by `getMyTurn` over
-// these rows' SEEDS: any action of the viewer's on the PR (a review of any state, a review
-// comment, a PR comment, their own commit) at or after `finishedAt` retires the card too. It is
-// not applied here because this read has no clocks; `getMyTurn` already batches them.
-export async function getUnactionedClaudeReviews(
+// ⚠ AN AUTO RUN IS OWNED LIKE A MANUAL ONE (`trigger` rides the result for the label only).
+export async function getUnseenOwnAiReviews(
   accountId: number,
   // Optional workspace repo narrowing (same contract as getThreadsAwaiting's): null/undefined =
   // the account-wide read, an array = only these repos' PRs.
@@ -10220,7 +10071,7 @@ export async function getUnactionedClaudeReviews(
       prTitle: pullRequests.title,
       verdict: claudeReviews.verdict,
       finishedAt: claudeReviews.finishedAt,
-      postedAt: claudeReviews.postedAt,
+      seenAt: claudeReviews.seenAt,
       reviewHead: claudeReviews.headSha,
       prHead: pullRequests.headSha,
       trigger: claudeReviews.trigger,
@@ -10231,22 +10082,21 @@ export async function getUnactionedClaudeReviews(
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(
+        eq(claudeReviews.accountId, accountId),
         eq(repos.accountId, accountId),
         repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
         eq(claudeReviews.status, 'succeeded'),
         eq(pullRequests.state, 'open'),
-        // A REPLIES PASS (kind 'replies') is not a review to action: the card follows the full one.
+        // A REPLIES PASS and a teammate's imported review are not runs of a review to read.
         isNull(claudeReviews.kind),
+        // A router SKIP read nothing: there is no review to see.
+        sql`coalesce(${claudeReviews.reviewMode}, '') <> 'skip'`,
       ),
     )
-    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
+    .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt), desc(claudeReviews.id))
     .execute();
 
-  const seen = new Set<number>(); // most-recent succeeded run per PR only
-  const candidates: typeof rows = [];
-  // A CLAUDE + CODEX PAIR is ONE review (review/claude-review/pair-view.ts): its succeeded halves
-  // are read together — posted when either was posted as a review, its findings both halves' (a
-  // merged-away duplicate never counts), its verdict the pair's one verdict.
+  // A CLAUDE + CODEX PAIR is ONE review: seen when either half was, its verdict the pair's one.
   const halvesOf = new Map<number, typeof rows>();
   for (const r of rows) {
     if (r.pairId == null) continue;
@@ -10254,89 +10104,149 @@ export async function getUnactionedClaudeReviews(
     list.push(r);
     halvesOf.set(r.pairId, list);
   }
+  const latest: typeof rows = [];
+  const seenPr = new Set<number>(); // the most-recent succeeded run per PR only
   for (const r of rows) {
-    if (seen.has(r.prId)) continue;
-    seen.add(r.prId);
+    if (seenPr.has(r.prId)) continue;
+    seenPr.add(r.prId);
     const halves = r.pairId != null ? (halvesOf.get(r.pairId) ?? [r]) : [r];
-    if (halves.some((h) => h.postedAt != null)) continue; // the run itself was posted → actioned, no findings needed
-    candidates.push(r);
+    if (halves.some((h) => h.seenAt != null)) continue;
+    latest.push(r);
   }
-  if (candidates.length === 0) return [];
-  const runIdsOf = (c: (typeof rows)[number]): number[] =>
-    c.pairId != null ? (halvesOf.get(c.pairId) ?? [c]).map((h) => h.reviewId) : [c.reviewId];
-  // The pairs' one verdicts (on each pair's FIRST row), in ONE read.
-  const pairIds = [...new Set(candidates.map((c) => c.pairId).filter((id): id is number => id != null))];
+  if (latest.length === 0) return [];
+  const pairIds = [...new Set(latest.map((c) => c.pairId).filter((id): id is number => id != null))];
   const pairVerdicts = new Map<number, (typeof rows)[number]['verdict']>();
   if (pairIds.length > 0) {
     const recs = await db
       .select({ id: claudeReviews.id, rec: claudeReviews.pairConsolidation })
       .from(claudeReviews)
-      .where(inArray(claudeReviews.id, pairIds))
+      .where(and(eq(claudeReviews.accountId, accountId), inArray(claudeReviews.id, pairIds)))
       .execute();
     for (const p of recs) pairVerdicts.set(p.id, p.rec?.verdict ?? null);
   }
+  return latest.map((r) => ({
+    reviewId: r.reviewId,
+    prId: r.prId,
+    repoFullName: `${r.owner}/${r.name}`,
+    prNumber: r.prNumber,
+    prTitle: r.prTitle,
+    verdict: r.pairId != null ? (pairVerdicts.get(r.pairId) ?? r.verdict) : r.verdict,
+    finishedAt: iso(r.finishedAt),
+    headStale: r.reviewHead !== r.prHead,
+    githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
+    trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+  }));
+}
 
-  // ONE grouped read over the candidate runs — never one query per run, and never a per-run
-  // EXISTS in the select above, which would run the sub-query for every historical run of every
-  // open PR rather than the handful that got this far.
-  const findingRows = await db
+/**
+ * MERGED AFTER YOUR LIMN APPROVED IT — the My Turn `ai_approved_merged` section's seeds (docs/BACKEND.md
+ * § My Turn). One item per merged PR in scope, merged within `APPROVED_MERGED_DAYS` of `now` and at or
+ * after the repo's onboarding floor (`passesFloor`), where:
+ *   • an OWN run's auto-post LANDED a review SENT as APPROVE (`auto_post.githubReviewId` set,
+ *     `verdict.submitted = 'APPROVE'`) before the merge — a pair's one review is recorded on both
+ *     halves, so the earliest record wins;
+ *   • that approval still STANDS: GitHub's synced `reviews` row for it is 'approved' (a withdrawal
+ *     or a dismissal makes it 'dismissed'); with no synced row yet, no withdrawal is recorded;
+ *   • the reader has NOT opened the PR since the merge (`pr_views.last_viewed_at`).
+ * DB only, account-scoped. The dismissal filter is applied by `getMyTurn`.
+ */
+export async function getApprovedThenMerged(
+  accountId: number,
+  repoIds: number[] | null,
+  now: number,
+  passesFloor: (repoId: number, at: Date) => boolean,
+): Promise<ApprovedMergedItem[]> {
+  const from = new Date(now - APPROVED_MERGED_DAYS * 86_400_000);
+  const rows = await db
     .select({
-      reviewId: claudeReviewFindings.reviewId,
-      severity: claudeReviewFindings.severity,
-      included: claudeReviewFindings.included,
-      postedAt: claudeReviewFindings.postedAt,
+      reviewId: claudeReviews.id,
+      autoPost: claudeReviews.autoPost,
+      prId: pullRequests.id,
+      repoId: pullRequests.repoId,
+      number: pullRequests.number,
+      title: pullRequests.title,
+      authorId: pullRequests.authorId,
+      mergedAt: pullRequests.mergedAt,
+      mergedById: pullRequests.mergedById,
+      owner: repos.owner,
+      name: repos.name,
     })
-    .from(claudeReviewFindings)
+    .from(claudeReviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
+    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
     .where(
       and(
-        inArray(
-          claudeReviewFindings.reviewId,
-          candidates.flatMap(runIdsOf),
-        ),
-        isNull(claudeReviewFindings.mergedInto),
+        eq(claudeReviews.accountId, accountId),
+        eq(repos.accountId, accountId),
+        repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
+        eq(pullRequests.state, 'merged'),
+        gte(pullRequests.mergedAt, from),
+        ownRunsOnly(claudeReviews.kind),
+        sql`json_extract(${claudeReviews.autoPost}, '$.verdict.submitted') = 'APPROVE'`,
+        sql`json_extract(${claudeReviews.autoPost}, '$.githubReviewId') is not null`,
       ),
     )
+    .orderBy(asc(claudeReviews.id))
     .execute();
-  const findingsByRun = new Map<number, typeof findingRows>();
-  for (const f of findingRows) {
-    const arr = findingsByRun.get(f.reviewId) ?? [];
-    arr.push(f);
-    findingsByRun.set(f.reviewId, arr);
+  if (rows.length === 0) return [];
+
+  // The FIRST approval posted before the merge, per PR.
+  const byPr = new Map<number, { row: (typeof rows)[number]; at: Date; githubReviewId: string }>();
+  for (const r of rows) {
+    const a = r.autoPost;
+    if (r.mergedAt == null || a?.githubReviewId == null || (a.status !== 'posted' && a.status !== 'partial')) continue;
+    const at = new Date(Date.parse(a.at));
+    if (!Number.isFinite(at.getTime()) || at.getTime() >= r.mergedAt.getTime()) continue;
+    if (!passesFloor(r.repoId, r.mergedAt)) continue;
+    // A recorded withdrawal (or one in flight) means it no longer stood.
+    if (a.approvalWithdrawal != null && a.approvalWithdrawal.status !== 'failed') continue;
+    if (byPr.has(r.prId)) continue;
+    byPr.set(r.prId, { row: r, at, githubReviewId: String(a.githubReviewId) });
+  }
+  if (byPr.size === 0) return [];
+  const prIds = [...byPr.keys()];
+
+  // GitHub's own word on each approval: a synced row that is not 'approved' was withdrawn or dismissed.
+  const states = new Map<string, string>();
+  for (const v of await db
+    .select({ prId: reviews.prId, databaseId: reviews.databaseId, state: reviews.state })
+    .from(reviews)
+    .where(and(inArray(reviews.prId, prIds), isNotNull(reviews.databaseId)))
+    .execute()) {
+    states.set(`${v.prId}:${v.databaseId}`, v.state);
+  }
+  // Opened since the merge ⇒ seen.
+  const viewed = new Map<number, Date>();
+  for (const v of await db
+    .select({ prId: prViews.prId, at: prViews.lastViewedAt })
+    .from(prViews)
+    .where(inArray(prViews.prId, prIds))
+    .execute()) {
+    viewed.set(v.prId, v.at);
   }
 
-  const out: ClaudeReviewToAction[] = [];
-  for (const r of candidates) {
-    const findings = runIdsOf(r).flatMap((id) => findingsByRun.get(id) ?? []);
-    // STATE ONE: nothing from this run has reached GitHub. It was never worked, so it stays —
-    // including a run with no findings at all, whose summary and verdict are still yours to post
-    // or discard. ⚠ This branch is what keeps a fresh run visible: `included` defaults to false,
-    // so testing it below without this guard would retire every run the moment it finished.
-    const everPosted = findings.some((f) => f.postedAt != null);
-    if (everPosted) {
-      // STATE TWO: you worked it. It stays only for a finding you TICKED and have not posted —
-      // the one thing you told the app you meant to send. An unticked leftover is a triage
-      // decision, not an outstanding task. `praise` is skipped in either case: it is the one
-      // severity that asks for no change, so it can never be why a card survives.
-      const outstanding = findings.some(
-        (f) => f.postedAt == null && f.severity !== 'praise' && f.included,
-      );
-      if (!outstanding) continue;
-    }
+  const out: ApprovedMergedItem[] = [];
+  for (const [prId, { row: r, at, githubReviewId }] of byPr) {
+    const state = states.get(`${prId}:${githubReviewId}`);
+    if (state != null && state !== 'approved') continue;
+    const seen = viewed.get(prId);
+    if (seen != null && seen.getTime() >= r.mergedAt!.getTime()) continue;
     out.push({
       reviewId: r.reviewId,
-      prId: r.prId,
+      prId,
       repoFullName: `${r.owner}/${r.name}`,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      verdict: r.pairId != null ? (pairVerdicts.get(r.pairId) ?? r.verdict) : r.verdict,
-      finishedAt: iso(r.finishedAt),
-      headStale: r.reviewHead !== r.prHead,
-      githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,
-      trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+      prNumber: r.number,
+      prTitle: r.title,
+      authorId: r.authorId,
+      mergedById: r.mergedById,
+      approvedAt: at.toISOString(),
+      since: r.mergedAt!.toISOString(),
+      githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.number}`,
     });
   }
-  return out;
+  return out.sort((a, b) => b.since.localeCompare(a.since));
 }
+
 
 // ---- Auto Claude review: which PRs the Pro sweeper may start a run on ----
 // The plugin's per-workspace auto-review sweeper (apps/backend/src/platform/claude-review/auto.ts) is PULL

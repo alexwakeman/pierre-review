@@ -12,7 +12,8 @@
 In the STORY VIEW (This Sprint's tray, the story tab, the PR view's Story tab — § Entry points), a ticket
 that has NOT STARTED (its status sits in the Not started bucket) and has NO pull request offers
 **Implement**. A STARTED ticket whose current story check found gaps offers **Fill gaps** instead (§ Fill
-gaps). One click opens a build tab that:
+gaps). One click opens a build tab (opened PINNED: no ✕, kept by Close all and across a reload, until the
+reader unpins it) that:
 
 1. **Assesses** the ticket: its story and criteria, and what any existing ticket PRs already deliver — the
    gap fold (always for Fill gaps; rarely for Implement, which needs no PRs).

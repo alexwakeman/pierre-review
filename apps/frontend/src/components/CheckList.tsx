@@ -197,7 +197,8 @@ export function CheckRow({
   return (
     <li className="text-meta">
       {/* An Actions check carries BOTH affordances, so the row is SPLIT rather than nested: the
-          name is an <a> to the workflow run, the log toggle is a SIBLING <button>. This row used
+          name and the right side are log toggles, and a small SIBLING <a> beside the name goes to
+          the workflow run. (It used to be the name that linked out.) This row used
           to be one big <button>, and an <a> inside a <button> is both invalid HTML and one click
           meaning two things — the same trap the whole-row handlers elsewhere in this codebase
           dodge with closest('a,button'). Because they are siblings, opening the run cannot also
@@ -207,15 +208,27 @@ export function CheckRow({
           name, so the row still toggles almost everywhere it used to. */}
       <div className="flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-ui-hover">
         {dot}
+        {/* The NAME opens the logs, like the rest of the row; the small mark beside it is the
+            link to the run on GitHub. Siblings, never nested. */}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={expanded}
+          title={expanded ? `Hide the ${check.name} log` : `Show the ${check.name} log`}
+          className="hit min-w-0 truncate text-left hover:underline"
+        >
+          {check.name}
+        </button>
         <a
           href={link.href}
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
           title={linkTitle}
-          className="hit min-w-0 truncate hover:underline"
+          aria-label={link.own ? `Open ${check.name} on GitHub` : `Open the PR's Checks tab on GitHub`}
+          className="hit inline-flex shrink-0 items-center rounded-ui text-ui-faint hover:text-ui-ink"
         >
-          {check.name}
+          <ExternalLinkIcon size={11} />
         </a>
         {flaky != null && <FlakyChip reasons={flaky.reasons} />}
         <button

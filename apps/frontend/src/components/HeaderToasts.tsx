@@ -227,7 +227,7 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
             aria-controls={panelId}
             aria-label={name}
             title={count === 0 ? undefined : expanded ? 'Hide details' : names.join(' · ')}
-            className={`${count === 0 ? 'hidden' : 'flex'} h-9 items-center rounded-full bg-ui-bg py-0.5 pl-3 pr-1 shadow-lg outline-none ring-1 ring-ui-line hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${
+            className={`${count === 0 ? 'hidden' : 'flex'} group/toasts h-9 items-center rounded-full bg-ui-bg py-0.5 pr-1 ${CLUSTER_PAD} shadow-lg outline-none ring-1 ring-ui-line hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${
               expanded ? 'bg-ui-hover' : ''
             }`}
           >
@@ -257,6 +257,17 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
     </Ctx.Provider>
   );
 }
+
+// THE SPREAD. At rest the circles overlap (-10px each, the button's 12px left padding makes up for
+// the first). When the reader HOVERS the cluster (a real hover only: on touch a tap would spread it
+// and open the panel in one gesture) or reaches it with the keyboard, they fan out to the left with
+// 10px between them — room for each count badge and alert dot, which sit on a circle's left — and
+// fold back on leave. The cluster stays ONE button: a click anywhere on it still opens the panel.
+// The motion is `motion-safe` only; with reduced motion the circles just move.
+const CLUSTER_SPREAD_ON = '[@media(hover:hover)]:group-hover/toasts:ml-2.5 group-focus-visible/toasts:ml-2.5';
+const CLUSTER_SLOT = `-ml-2.5 ${CLUSTER_SPREAD_ON} motion-safe:transition-[margin] motion-safe:duration-200 motion-safe:ease-out`;
+const CLUSTER_PAD =
+  'pl-3 [@media(hover:hover)]:hover:pl-0 focus-visible:pl-0 motion-safe:transition-[padding,background-color] motion-safe:duration-200 motion-safe:ease-out';
 
 export interface HeaderToastProgress {
   /** 0–100. */
@@ -360,52 +371,56 @@ export function HeaderToast({
   const rank = toastRank({ alert, action: action != null, progress: progress != null }, seq);
   const badge = count != null && count > 0 ? (count > 99 ? '99+' : String(count)) : null;
 
+  // The SLOT is the flex item: it carries the order, the stacking and the overlap (and the spread,
+  // `CLUSTER_SLOT`), so the circle's own `className` (a fade's `transition-opacity`) never fights
+  // the spread's margin transition.
   const circle = (
-    <span
-      data-testid={testId}
-      data-tone={tone}
-      data-alert={alert ? 'true' : undefined}
-      title={badge != null ? `${label} · ${badge}` : label}
-      style={{ order: rank, zIndex: rank }}
-      className={`relative -ml-2.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ui-raise ring-2 ${
-        alert ? 'ring-ui-danger' : 'ring-ui-bg'
-      } ${colours.mark} touch:h-9 touch:w-9 ${className}`}
-    >
-      {progress != null && (
-        <svg aria-hidden viewBox="0 0 28 28" className="pointer-events-none absolute inset-0 h-full w-full -rotate-90">
-          <circle cx="14" cy="14" r={RING_R} fill="none" strokeWidth="2" className="stroke-ui-line" />
-          <circle
-            cx="14"
-            cy="14"
-            r={RING_R}
-            fill="none"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeDasharray={RING_C}
-            strokeDashoffset={RING_C * (1 - pct / 100)}
-            className={`${colours.stroke} motion-safe:transition-[stroke-dashoffset] motion-safe:duration-500`}
-          />
-        </svg>
-      )}
-      <span aria-hidden className="flex items-center">
-        {icon}
-      </span>
-      {/* ⚠ The badge and the alert dot sit on the circle's LEFT: each circle overlaps the one to
-          its left and paints above it, so anything on a circle's right half is under its neighbour
-          (a merge count was hidden under the loading circle). */}
-      {badge != null && (
-        <span
-          aria-hidden
-          className="absolute -bottom-1.5 -left-2 min-w-[18px] rounded-full bg-ui-accent-fill px-1 text-center text-meta font-medium leading-[18px] tabular-nums text-ui-on-accent"
-        >
-          {badge}
+    <span style={{ order: rank, zIndex: rank }} className={`flex shrink-0 ${CLUSTER_SLOT}`}>
+      <span
+        data-testid={testId}
+        data-tone={tone}
+        data-alert={alert ? 'true' : undefined}
+        title={badge != null ? `${label} · ${badge}` : label}
+        className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ui-raise ring-2 ${
+          alert ? 'ring-ui-danger' : 'ring-ui-bg'
+        } ${colours.mark} touch:h-9 touch:w-9 ${className}`}
+      >
+        {progress != null && (
+          <svg aria-hidden viewBox="0 0 28 28" className="pointer-events-none absolute inset-0 h-full w-full -rotate-90">
+            <circle cx="14" cy="14" r={RING_R} fill="none" strokeWidth="2" className="stroke-ui-line" />
+            <circle
+              cx="14"
+              cy="14"
+              r={RING_R}
+              fill="none"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray={RING_C}
+              strokeDashoffset={RING_C * (1 - pct / 100)}
+              className={`${colours.stroke} motion-safe:transition-[stroke-dashoffset] motion-safe:duration-500`}
+            />
+          </svg>
+        )}
+        <span aria-hidden className="flex items-center">
+          {icon}
         </span>
-      )}
-      {alert && <span aria-hidden className="absolute -left-0.5 -top-0.5 h-2 w-2 rounded-full bg-ui-danger ring-2 ring-ui-bg" />}
-      {/* The words, for the live region and for tests; the button's own name lists every label. */}
-      <span className="sr-only">
-        {label}
-        {summary != null && <> · {summary}</>}
+        {/* ⚠ The badge and the alert dot sit on the circle's LEFT: each circle overlaps the one to
+            its left and paints above it, so anything on a circle's right half is under its neighbour
+            (a merge count was hidden under the loading circle). */}
+        {badge != null && (
+          <span
+            aria-hidden
+            className="absolute -bottom-1.5 -left-2 min-w-[18px] rounded-full bg-ui-accent-fill px-1 text-center text-meta font-medium leading-[18px] tabular-nums text-ui-on-accent"
+          >
+            {badge}
+          </span>
+        )}
+        {alert && <span aria-hidden className="absolute -left-0.5 -top-0.5 h-2 w-2 rounded-full bg-ui-danger ring-2 ring-ui-bg" />}
+        {/* The words, for the live region and for tests; the button's own name lists every label. */}
+        <span className="sr-only">
+          {label}
+          {summary != null && <> · {summary}</>}
+        </span>
       </span>
     </span>
   );

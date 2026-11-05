@@ -75,6 +75,27 @@
 .lb .mk-tabs button.on {
   color: var(--ink);
 }
+/* Button tabs — the app's `Tabs variant="boxed"` (PR detail, Pending): every tab a bordered
+   button, the selected one filled with the accent. */
+.lb .mk-tabs.boxed {
+  gap: 6px;
+  border-bottom: 0;
+}
+.lb .mk-tabs.boxed button {
+  border: 1px solid #2c2d33;
+  border-radius: 6px;
+  background: #1d1e23;
+  padding: 4px 10px;
+}
+.lb .mk-tabs.boxed button:hover {
+  background: #26272d;
+}
+.lb .mk-tabs.boxed button.on {
+  border-color: var(--gold);
+  background: rgba(210, 176, 113, 0.15);
+  box-shadow: inset 0 0 0 1px var(--gold);
+  padding-bottom: 4px;
+}
 .lb .mk-panel {
   min-width: 0;
 }
@@ -424,6 +445,9 @@
 .lb .mk-muted {
   font-size: 12.5px;
   color: var(--muted);
+}
+.lb .mk-purpose {
+  margin: -4px 0 8px;
 }
 .lb .mk-ok {
   font-size: 12.5px;

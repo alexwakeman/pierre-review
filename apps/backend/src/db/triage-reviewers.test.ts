@@ -5,10 +5,9 @@
 // away, and `computeApprovalInfoByPr` is now a projection of it. That refactor is only safe if two
 // things hold, and both are fixtures here rather than comments:
 //
-//   1. ⚠ THE COUNTS DO NOT MOVE. `approvals` is hashed into stored Pro work plans
-//      (db/work-plan.ts → payloadHashFor). A count that shifts by one flips every stored plan on
-//      an affected workspace permanently `stale` and re-bills it, with nothing on screen saying
-//      why. So the first block below re-implements the OLD rule verbatim and asserts the new fold
+//   1. ⚠ THE COUNTS DO NOT MOVE. `approvals` drives the Do next merge proximity
+//      (db/work-plan.ts). A count that shifts by one re-orders the Pending tabs, with nothing on
+//      screen saying why. So the first block below re-implements the OLD rule verbatim and asserts the new fold
 //      agrees with it on every fixture PR — an equivalence test, not a spot check.
 //   2. ⚠ THE TWO HALVES CANNOT DISAGREE. The chips ("alice · approved") and the number beside
 //      them ("approved by 2") are one array folded twice, never two scans. A cap or a
@@ -206,7 +205,7 @@ describe('the approval counts do not move', () => {
   it('⚠ agrees with the OLD rule on every fixture PR', async () => {
     // The predecessor, transcribed verbatim from the fold this replaced: the latest row per
     // (pr, author) whose state is `approved` or `changes_requested`, every other row skipped.
-    // If this ever disagrees, stored work-plan payload hashes have moved.
+    // If this ever disagrees, the Do next order has moved.
     const { reviews } = schema;
     const { inArray } = await import('drizzle-orm');
     const ids = [...prIdByKey.values()];

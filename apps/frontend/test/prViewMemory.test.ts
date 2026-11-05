@@ -4,10 +4,8 @@ import {
   PR_VIEW_MEMORY_CAP,
   rememberedPrScroll,
   rememberedPrTab,
-  rememberedPrThreadsOnly,
   rememberPrScroll,
   rememberPrTab,
-  rememberPrThreadsOnly,
   restoreStep,
 } from '../src/lib/prViewMemory.js';
 import { AI_EDGE_COLOR, threadEdgeColor } from '../src/lib/threadEdge.js';
@@ -19,27 +17,27 @@ describe('prViewMemory — where the reader was in each PR (this session)', () =
   it('knows nothing about a PR it has not seen', () => {
     expect(rememberedPrTab(1)).toBeNull();
     expect(rememberedPrScroll(1, 'changes')).toBeNull();
-    expect(rememberedPrThreadsOnly(1)).toBe(false);
   });
 
   it('remembers the last tab and a scroll position PER TAB, per PR', () => {
     rememberPrTab(1, 'changes');
     rememberPrScroll(1, 'changes', 4200.4);
     rememberPrScroll(1, 'overview', 300);
-    rememberPrTab(2, 'comments');
+    rememberPrTab(2, 'activity');
     expect(rememberedPrTab(1)).toBe('changes');
     expect(rememberedPrScroll(1, 'changes')).toBe(4200);
     expect(rememberedPrScroll(1, 'overview')).toBe(300);
-    expect(rememberedPrScroll(1, 'comments')).toBeNull();
-    expect(rememberedPrTab(2)).toBe('comments');
+    expect(rememberedPrScroll(1, 'activity')).toBeNull();
+    expect(rememberedPrTab(2)).toBe('activity');
     expect(rememberedPrScroll(2, 'changes')).toBeNull();
   });
 
-  it("remembers 'activity' as Overview (it is Overview with a section open)", () => {
-    rememberPrTab(1, 'activity');
-    rememberPrScroll(1, 'activity', 90);
-    expect(rememberedPrTab(1)).toBe('overview');
-    expect(rememberedPrScroll(1, 'overview')).toBe(90);
+  it('remembers the Activity and Threads tabs as themselves', () => {
+    rememberPrTab(1, 'threads');
+    rememberPrScroll(1, 'threads', 90);
+    expect(rememberedPrTab(1)).toBe('threads');
+    expect(rememberedPrScroll(1, 'threads')).toBe(90);
+    expect(rememberedPrScroll(1, 'overview')).toBeNull();
   });
 
   it('never stores a negative or non-finite scroll', () => {
@@ -49,22 +47,13 @@ describe('prViewMemory — where the reader was in each PR (this session)', () =
     expect(rememberedPrScroll(1, 'changes')).toBe(0);
   });
 
-  it('remembers Threads only once turned on, and its turning off', () => {
-    rememberPrThreadsOnly(1, false);
-    expect(rememberedPrTab(1)).toBeNull(); // a mount's `false` makes no entry
-    rememberPrThreadsOnly(1, true);
-    expect(rememberedPrThreadsOnly(1)).toBe(true);
-    rememberPrThreadsOnly(1, false);
-    expect(rememberedPrThreadsOnly(1)).toBe(false);
-  });
-
   it('forgets the least recently touched PR past the cap', () => {
     for (let id = 1; id <= PR_VIEW_MEMORY_CAP; id++) rememberPrTab(id, 'changes');
     rememberPrScroll(1, 'changes', 10); // PR 1 is now the most recent
-    rememberPrTab(PR_VIEW_MEMORY_CAP + 1, 'comments');
+    rememberPrTab(PR_VIEW_MEMORY_CAP + 1, 'activity');
     expect(rememberedPrTab(1)).toBe('changes');
     expect(rememberedPrTab(2)).toBeNull();
-    expect(rememberedPrTab(PR_VIEW_MEMORY_CAP + 1)).toBe('comments');
+    expect(rememberedPrTab(PR_VIEW_MEMORY_CAP + 1)).toBe('activity');
   });
 });
 

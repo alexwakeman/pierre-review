@@ -35,7 +35,7 @@ export function useReplyToThread() {
   });
 }
 
-/** Shared by every resolve/unresolve, so the Threads only view can collapse a thread the moment ANY
+/** Shared by every resolve/unresolve, so the Threads tab can collapse a thread the moment ANY
  *  surface resolves it (lib/threadCollapse.ts), before the refetch lands. */
 export const RESOLVE_THREAD_MUTATION_KEY = ['resolve-thread'] as const;
 
@@ -272,7 +272,7 @@ export function requestReviewersMutationKey(prId: number, reviewerKey?: string):
 // nothing changed on GitHub, and the card must stay to show the words and offer the retry. A held
 // board catches up on its own (focus / the 5-minute interval).
 //
-// ⚠ ['attention-cards'], ['daily-brief'], ['work-plan'] MOVE TOGETHER — one fold read three times
+// ⚠ ['attention-cards'] and ['daily-brief'] MOVE TOGETHER — one fold read twice
 // (useAttentionCards) — and they arrive together through `invalidateAfterPrWrite`, alongside the
 // capped fold's copy of the same card (['workspace-insights']).
 export function requestReviewersOptions(qc: QueryClient, prId: number, reviewerKey?: string) {

@@ -12,8 +12,9 @@
 //      YOUR PR comment, a person's @mention — never a bot of either kind (including one only
 //      GitHub's type says is a bot), and never "anything after me".
 //   3. A PROMOTION MOVES A CARD, IT NEVER COPIES IT. Every combination of the four own-work switches
-//      and the three trunk scopes is swept: no PR, thread or repo is ever both a promoted my_turn
-//      card and its home card, none is lost, and capped and uncapped `kindTotals` agree.
+//      is swept: no PR or thread is ever both a promoted my_turn card and its home card, none is
+//      lost, and capped and uncapped `kindTotals` agree. A red default branch is never a My Turn
+//      card: it stays in Needs fixing.
 //   4. THE BOARD AND THE PLAN RANK BY THE READER'S RULES — the type order groups My turn, the
 //      weights score every tab, the response says which rules it used, and a promoted card keeps
 //      its home plan id so the Pro plan's evidence does not change shape under it.
@@ -26,7 +27,6 @@ import type {
   MyTurnCard,
   MyTurnSettings,
   MyTurnToggle,
-  MyTurnTrunkCard,
   PendingCardScore,
 } from '@pierre-review/shared';
 
@@ -220,7 +220,7 @@ async function withSettings<T>(s: MyTurnSettings | null, fn: () => Promise<T>): 
 
 const fold = (uncapped = true) => q.getWorkspaceInsights(1, undefined, scope, { uncapped });
 const myTurnCards = (cards: InsightCard[]) =>
-  cards.filter((c): c is MyTurnCard | MyTurnTrunkCard => c.kind === 'my_turn');
+  cards.filter((c): c is MyTurnCard => c.kind === 'my_turn');
 const ids = (cards: InsightCard[]) => new Set(cards.map((c) => c.id));
 
 beforeAll(async () => {
@@ -404,7 +404,7 @@ describe('the defaults', () => {
   it('leaves an untouched stranger PR out — until "New PRs" is switched on', async () => {
     const mt = await q.getMyTurn(1, scope);
     expect(mt.watchedRepoPrs).toEqual([]);
-    expect(mt.off).toEqual(['own_ci_red', 'own_conflicts', 'trunk_red', 'own_ready', 'own_thread', 'watched_repo_pr']);
+    expect(mt.off).toEqual(['own_ci_red', 'own_conflicts', 'own_ready', 'own_thread', 'watched_repo_pr']);
     await withSettings({ show: { watched_repo_pr: true } }, async () => {
       const on = await q.getMyTurn(1, scope);
       expect(on.watchedRepoPrs.map((r: { prId: number }) => r.prId)).toContain(P('untouched'));
@@ -669,19 +669,11 @@ describe('promotions MOVE a card out of its home tab', () => {
     });
   });
 
-  it('red trunk: "Repos you maintain" moves the home card; "Every repo" adds the others too', async () => {
+  it('red trunk: never a My Turn card — the home card stays in Needs fixing', async () => {
     const homeW = `cifail:trunk:${writeRepo}:shaWRITE000000000000000000000000000000000`;
-    const mineW = `myturn:trunk_red:${writeRepo}:shaWRITE000000000000000000000000000000000`;
-    const mineR = `myturn:trunk_red:${readRepo}:shaREAD0000000000000000000000000000000000`;
-    expect(ids((await fold()).cards).has(homeW)).toBe(true);
-    await withSettings({ trunkScope: 'maintained' }, async () => {
-      const c = ids((await fold()).cards);
-      expect([c.has(homeW), c.has(mineW), c.has(mineR)]).toEqual([false, true, false]);
-    });
-    await withSettings({ trunkScope: 'all' }, async () => {
-      const c = ids((await fold()).cards);
-      expect([c.has(homeW), c.has(mineW), c.has(mineR)]).toEqual([false, true, true]);
-    });
+    const c = (await fold()).cards as InsightCard[];
+    expect(ids(c).has(homeW)).toBe(true);
+    expect(c.some((x) => x.id.startsWith('myturn:trunk_red:'))).toBe(false);
   });
 
   it('never lists one thing twice, never loses one — across every combination, capped and not', async () => {
@@ -695,9 +687,9 @@ describe('promotions MOVE a card out of its home tab', () => {
     };
     let combos = 0;
     for (let mask = 0; mask < 16; mask++) {
-      for (const trunkScope of ['off', 'maintained', 'all'] as const) {
+      {
         const show = Object.fromEntries(toggles.map((t, i) => [t, (mask & (1 << i)) !== 0]));
-        await withSettings({ show, trunkScope }, async () => {
+        await withSettings({ show }, async () => {
           const uncapped = await fold(true);
           const capped = await fold(false);
           expect(capped.kindTotals).toEqual(uncapped.kindTotals);
@@ -709,7 +701,6 @@ describe('promotions MOVE a card out of its home tab', () => {
               promoted(['own_ci_red', 'own_conflicts', 'own_ready']).map((c) => (c as MyTurnCard).prId),
             );
             const promotedThread = new Set(promoted(['own_thread']).map((c) => c.threadId));
-            const promotedRepo = new Set(promoted(['trunk_red']).map((c) => (c as MyTurnTrunkCard).repoId));
             const homePr = new Set(
               cards
                 .filter(
@@ -724,26 +715,17 @@ describe('promotions MOVE a card out of its home tab', () => {
             const homeThread = new Set(
               cards.filter((c) => c.kind === 'untouched_thread').map((c: any) => c.threadId),
             );
-            const homeRepo = new Set(
-              cards.filter((c) => c.kind === 'ci_failing' && c.arm === 'trunk').map((c: any) => c.repoId),
-            );
             for (const id of [watched.ci, watched.conflict, watched.ready, watched.behind]) {
               // Exactly one of the two — never both, never neither.
-              expect([mask, trunkScope, id, promotedPr.has(id) !== homePr.has(id)]).toEqual([
-                mask,
-                trunkScope,
-                id,
-                true,
-              ]);
+              expect([mask, id, promotedPr.has(id) !== homePr.has(id)]).toEqual([mask, id, true]);
             }
             expect(promotedThread.has(watched.thread) !== homeThread.has(watched.thread)).toBe(true);
-            expect(promotedRepo.has(writeRepo) !== homeRepo.has(writeRepo)).toBe(true);
           }
         });
         combos += 1;
       }
     }
-    expect(combos).toBe(48);
+    expect(combos).toBe(16);
   });
 
   it('never promotes a PR carrying a dependency tool\'s marker, though your token opened it', async () => {
@@ -753,56 +735,6 @@ describe('promotions MOVE a card out of its home tab', () => {
       expect(c.has(`cifail:pr:${P('own-snyk')}`)).toBe(false);
       // Its one card is the Dependencies card.
       expect(c.has(`deps:${P('own-snyk')}`) || c.has(`security:${P('own-snyk')}`)).toBe(true);
-    });
-  });
-});
-
-describe('a promoted red trunk you do not maintain', () => {
-  const readTrunk = (cards: InsightCard[]) =>
-    myTurnCards(cards).find(
-      (c): c is MyTurnTrunkCard => c.reason === 'trunk_red' && c.repoId === readRepo,
-    );
-
-  it('is DIRECT and notifies — you added it — and the mute still downgrades it without removing it', async () => {
-    await withSettings({ trunkScope: 'all' }, async () => {
-      const f = await fold();
-      const card = readTrunk(f.cards)!;
-      expect(card.relevance).toBe('direct');
-      expect(card.personal).toBe(true);
-      expect(card.maintained).toBe(false);
-      const mt = myTurnCards(f.cards);
-      expect(f.myTurnPersonalTotal).toBe(mt.filter((c) => c.relevance !== 'none').length);
-
-      const mute = await import('./pending-mute.js');
-      await mute.setWorkspacePendingMute(1, scope.workspaceId, { mutedRepoIds: [readRepo] });
-      try {
-        const muted = readTrunk((await fold()).cards)!;
-        expect(muted).toBeDefined();
-        expect(muted.relevance).toBe('none');
-        expect(muted.personal).toBe(false);
-        expect(muted.muted).toBe(true);
-      } finally {
-        await mute.setWorkspacePendingMute(1, scope.workspaceId, { mutedRepoIds: [] });
-      }
-    });
-  });
-
-  it('names its landing PR\'s author the way the ci_failing trunk card does — one side of the lens', async () => {
-    await withSettings({ trunkScope: 'all' }, async () => {
-      const f = await fold();
-      const read = readTrunk(f.cards)!;
-      expect(read.authorId).toBe(botId);
-      expect(read.automation?.role).toBe('dependency');
-      // No landing PR resolved on the WRITE repo's head: nobody, and the people side.
-      const write = myTurnCards(f.cards).find(
-        (c): c is MyTurnTrunkCard => c.reason === 'trunk_red' && c.repoId === writeRepo,
-      )!;
-      expect(write.automation).toBeNull();
-      const tabs = await import('./pending-tabs.js');
-      const board = await tabs.rankPendingTabs(1, scope, f);
-      const myTurn = board.tabs.find((t: { key: string }) => t.key === 'my_turn')!;
-      expect(myTurn.authorTotals!.automation).toBeGreaterThanOrEqual(1);
-      expect(myTurn.authorTotals!.people + myTurn.authorTotals!.automation).toBe(myTurn.total);
     });
   });
 });
@@ -826,15 +758,10 @@ describe('the Pending mute on own work', () => {
 });
 
 describe('the daily brief', () => {
-  it('counts a promoted red trunk once — in My Turn, not on the red-trunk line', async () => {
+  it('lists every red trunk on the red-trunk line — none is a My Turn card', async () => {
     const brief = await import('./daily-brief.js');
-    const before = (await brief.getDailyBriefEntry(1, scope.workspaceId)).counts;
-    expect(before.trunkRed.map((t: { repoId: number }) => t.repoId).sort()).toEqual([writeRepo, readRepo].sort());
-    await withSettings({ trunkScope: 'maintained' }, async () => {
-      const after = (await brief.getDailyBriefEntry(1, scope.workspaceId)).counts;
-      expect(after.trunkRed.map((t: { repoId: number }) => t.repoId)).toEqual([readRepo]);
-      expect(after.myTurn).toBe(before.myTurn + 1);
-    });
+    const counts = (await brief.getDailyBriefEntry(1, scope.workspaceId)).counts;
+    expect(counts.trunkRed.map((t: { repoId: number }) => t.repoId).sort()).toEqual([writeRepo, readRepo].sort());
   });
 
   it('leaves a promoted own red build out of the CI-failing line', async () => {

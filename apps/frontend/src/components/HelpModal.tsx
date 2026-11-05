@@ -126,8 +126,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             the top five are{' '}
             <strong>Do next</strong>. <strong>Settings → My Turn</strong> chooses what counts as
             your turn and how the three are weighed. The{' '}
-            <strong>i</strong> beside the title, and on every card, explains the order.{' '}
-            <strong>Plan my day</strong> adds a sentence per item saying why it is worth doing now.
+            <strong>i</strong> beside the title, and on every card, explains the order.
           </Section>
 
           <Section title="Reports">

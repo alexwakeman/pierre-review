@@ -51,6 +51,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { isLimnBotLogin, limnPosterOf, reviewBotKind } from '@pierre-review/shared';
+import { INK_GROUNDS } from './colorSchemes.js';
 
 // AI runs spend the reader's OWN Claude Code session or Anthropic API key and Limn bills nothing
 // for them, so their cost shows as plain money, as the provider would charge it.
@@ -397,9 +398,10 @@ export const BOT_VENDOR_META: Record<
    BRAND INK — a vendor's colour, made legible on whichever ground it lands on.
    ───────────────────────────────────────────────────────────────────────────────────────── */
 
-/** THE PAGE GROUNDS. `bg-white` in light, `dark:bg-gray-950` in dark. */
-const INK_LIGHT_BG = '#ffffff';
-const INK_DARK_BG = '#191919';
+/** THE PAGE GROUNDS, the hardest of each mode across every colour scheme (lib/colorSchemes.ts
+ *  `INK_GROUNDS`): an ink that clears AA on the darkest light page clears it on every lighter one. */
+const INK_LIGHT_BG = INK_GROUNDS.light;
+const INK_DARK_BG = INK_GROUNDS.dark;
 /** WCAG AA for body text. Vendor chips render at 10-11px, so the large-text 3:1 relaxation
  *  does not apply to them. */
 const INK_TARGET = 4.5;

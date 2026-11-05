@@ -2,9 +2,11 @@ import { test, expect, type Page } from '@playwright/test';
 import type { ClaudeReviewResponse, PrDetail, TicketPrsResponse } from '@pierre-review/shared';
 import { fixtures, installMockApi, prDetailFor } from './mock-api.js';
 
-// THE PR VIEW'S TABS ON THE WIRE (docs/FRONTEND.md § PrDetail): the AI Review tab is `?prTab=ai_review`
-// (the old `?prTab=claude_review` still opens it and is rewritten), and the Story tab (`?prTab=story`)
-// is listed only while the PR names a story, rendering the story view inside the PR.
+// THE PR VIEW'S TABS ON THE WIRE (docs/FRONTEND.md § PrDetail): the strip starts Overview · Activity
+// · Threads · Changes; the retired `?prTab=comments` opens Activity and is rewritten; the AI Review
+// tab is `?prTab=ai_review` (the old `?prTab=claude_review` still opens it and is rewritten), and the
+// Story tab (`?prTab=story`) is listed only while the PR names a story, rendering the story view
+// inside the PR.
 
 const PR_ID = 101;
 const IDENT = 'jira:https://acme.atlassian.net#ACME-7';
@@ -71,6 +73,36 @@ test.describe('PR tabs on the wire', () => {
     await expect(tabs(page).getByRole('tab', { name: /^AI Review/ })).toHaveAttribute('aria-selected', 'true');
     await expect(page).toHaveURL(/prTab=ai_review/);
     expect(page.url()).not.toContain('claude_review');
+  });
+
+  test('the strip starts Overview, Activity, Threads, Changes; there is no Comments tab', async ({ page }) => {
+    await setup(page, { story: false });
+    await page.goto(`/app/?view=pr-detail:${PR_ID}`);
+    await expect(tabs(page).getByRole('tab', { name: /^Changes/ })).toBeVisible();
+    const names = await tabs(page).getByRole('tab').allTextContents();
+    expect(names.slice(0, 4).map((n) => n.replace(/\d+$/, '').trim())).toEqual([
+      'Overview',
+      'Activity',
+      'Threads',
+      'Changes',
+    ]);
+    await expect(tabs(page).getByRole('tab', { name: /^Comments/ })).toHaveCount(0);
+  });
+
+  test('the old ?prTab=comments opens Activity, and the URL says activity', async ({ page }) => {
+    await setup(page, { story: false });
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=comments`);
+    await expect(tabs(page).getByRole('tab', { name: /^Activity/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('pr-activity-tab')).toBeVisible();
+    await expect(page).toHaveURL(/prTab=activity/);
+  });
+
+  test('?prTab=threads opens the Threads tab, with no code', async ({ page }) => {
+    await setup(page, { story: false });
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=threads`);
+    await expect(tabs(page).getByRole('tab', { name: /^Threads/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('pr-threads-tab')).toBeVisible();
+    await expect(page.locator('[data-file-block]')).toHaveCount(0);
   });
 
   test('picking AI Review writes ai_review', async ({ page }) => {

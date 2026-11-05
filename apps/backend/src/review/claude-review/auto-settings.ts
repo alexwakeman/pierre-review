@@ -8,6 +8,7 @@ import {
   AUTO_POST_DEFAULT_AUTO_VERDICT,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS,
+  AUTO_POST_DEFAULT_RESOLVE_OWN_PRS,
   AUTO_POST_DEFAULT_SCOPE,
   AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT,
   type ApproveLeftovers,
@@ -75,7 +76,8 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // ({ scope?, kinds? }; NULL = the product defaults), resolved through `resolveAutoPostSettings`.
 // Stored independently of `auto_review_enabled`: it only ever acts on AUTO runs, so it does nothing
 // while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` (ON by
-// default since 2026-11-04: absent = on, a stored false = off) and `autoResolve` (OFF by default)
+// default since 2026-11-04: absent = on, a stored false = off), `autoResolve` (OFF by default) and
+// `resolveOwnPrs` ("Resolve my Limn threads when addressed", ON by default: absent = on)
 // switches ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
 // So do the two TEAMMATE-LIFT opt-ins, `teamLiftConsent` and `liftTeammateBlocks` (both OFF by
@@ -148,6 +150,7 @@ export function resolveAutoPostSettings(
     kinds,
     autoVerdict: typeof stored?.autoVerdict === 'boolean' ? stored.autoVerdict : AUTO_POST_DEFAULT_AUTO_VERDICT,
     autoResolve: typeof stored?.autoResolve === 'boolean' ? stored.autoResolve : AUTO_POST_DEFAULT_AUTO_RESOLVE,
+    resolveOwnPrs: typeof stored?.resolveOwnPrs === 'boolean' ? stored.resolveOwnPrs : AUTO_POST_DEFAULT_RESOLVE_OWN_PRS,
     approveImpact,
     approveLeftovers: resolveApproveLeftovers(approveLeftovers),
     teamLiftConsent:
@@ -161,7 +164,10 @@ export function resolveAutoPostSettings(
 export function autoPostOverrides(
   s: Pick<WorkspaceAutoPostSettings, 'scope' | 'kinds'> &
     Partial<
-      Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'autoResolve' | 'approveImpact' | 'teamLiftConsent' | 'liftTeammateBlocks'>
+      Pick<
+        WorkspaceAutoPostSettings,
+        'autoVerdict' | 'autoResolve' | 'resolveOwnPrs' | 'approveImpact' | 'teamLiftConsent' | 'liftTeammateBlocks'
+      >
     >,
 ): StoredAutoPostSettings | null {
   const out: StoredAutoPostSettings = {};
@@ -171,6 +177,9 @@ export function autoPostOverrides(
   if (Object.keys(kinds).length > 0) out.kinds = kinds;
   if (s.autoVerdict !== undefined && s.autoVerdict !== AUTO_POST_DEFAULT_AUTO_VERDICT) out.autoVerdict = s.autoVerdict;
   if (s.autoResolve !== undefined && s.autoResolve !== AUTO_POST_DEFAULT_AUTO_RESOLVE) out.autoResolve = s.autoResolve;
+  if (s.resolveOwnPrs !== undefined && s.resolveOwnPrs !== AUTO_POST_DEFAULT_RESOLVE_OWN_PRS) {
+    out.resolveOwnPrs = s.resolveOwnPrs;
+  }
   if (s.teamLiftConsent !== undefined && s.teamLiftConsent !== AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT) {
     out.teamLiftConsent = s.teamLiftConsent;
   }
@@ -487,6 +496,7 @@ export async function setWorkspaceAutoReview(
     kinds: { ...postBefore.kinds },
     autoVerdict: autoPost?.autoVerdict ?? postBefore.autoVerdict,
     autoResolve: autoPost?.autoResolve ?? postBefore.autoResolve,
+    resolveOwnPrs: autoPost?.resolveOwnPrs ?? postBefore.resolveOwnPrs,
     approveImpact: { ...postBefore.approveImpact },
     approveLeftovers: autoPost?.approveLeftovers ?? postBefore.approveLeftovers,
     teamLiftConsent: autoPost?.teamLiftConsent ?? postBefore.teamLiftConsent,
@@ -840,6 +850,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
                 },
                 autoVerdict: { type: 'boolean' },
                 autoResolve: { type: 'boolean' },
+                resolveOwnPrs: { type: 'boolean' },
                 teamLiftConsent: { type: 'boolean' },
                 liftTeammateBlocks: { type: 'boolean' },
                 approveImpact: {
@@ -884,6 +895,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             (notBool(post, 'enabled') ||
               notBool(post, 'autoVerdict') ||
               notBool(post, 'autoResolve') ||
+              notBool(post, 'resolveOwnPrs') ||
               notBool(post, 'teamLiftConsent') ||
               notBool(post, 'liftTeammateBlocks'))) ||
           (kinds != null && typeof kinds === 'object' && Object.values(kinds).some((v) => typeof v !== 'boolean')) ||

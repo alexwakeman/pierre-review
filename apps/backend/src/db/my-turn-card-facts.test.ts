@@ -172,7 +172,7 @@ async function insights(board: boolean) {
 function myTurnByKey(cards: InsightCard[]): Map<string, MyTurnCard> {
   const byPrId = new Map<number, MyTurnCard>();
   for (const c of cards) {
-    if (c.kind !== 'my_turn' || c.reason === 'trunk_red') continue;
+    if (c.kind !== 'my_turn') continue;
     byPrId.set(c.prId, c);
   }
   const out = new Map<string, MyTurnCard>();
@@ -619,7 +619,7 @@ describe('board only, display only', () => {
   it('without the board flag no fact is set', async () => {
     const res = await insights(false);
     for (const c of res.cards as InsightCard[]) {
-      if (c.kind === 'my_turn' && c.reason !== 'trunk_red') {
+      if (c.kind === 'my_turn') {
         for (const k of [
           'mentionedById',
           'mentionExcerpt',

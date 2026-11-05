@@ -725,3 +725,31 @@
     flex: 0 1 50%;
   }
 }
+
+/* ---- team claims + standings (mock/teams.tsx) ------------------------------ */
+/* The "Limn" label beside a limn/review-* line (CheckList.tsx): listed, never counted as CI. */
+.lb .mk-limn {
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #2c2d33;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+/* One "Where this PR stands" line: name, verdict, then day · commit · what GitHub still holds. */
+.lb .mk-stand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: #1a1b1f;
+  border: 1px solid #26272c;
+  border-radius: 3px;
+}
+.lb .mk-stand > span {
+  color: var(--muted);
+  font-size: 12.5px;
+}

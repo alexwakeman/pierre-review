@@ -26,7 +26,7 @@
 // ⚠ LIVE STATE, like the board: nothing here may enter a payload hash.
 import {
   PENDING_OWN_PRS_SHOWN,
-  PENDING_TABS,
+  pendingTabIsReference,
   PENDING_SUMMARY_DAYS,
   type MergeStateStatus,
   type Mergeable,
@@ -61,11 +61,12 @@ export function summaryWindowOpen(firstOnboardingAt: Date | null, now: number): 
 }
 
 /** Is every tab empty? The tabs' totals are the board's populations (review load is not counted).
- *  ⚠ "Waiting on others" (`byWait`) is not asked: it is information about the reader's own PRs, not
- *  something to do — and the empty board lists those same PRs, with what blocks each. */
+ *  ⚠ The read-only tabs are not asked (`pendingTabIsReference`): "Waiting on others" is information
+ *  about the reader's own PRs — and the empty board lists those same PRs, with what blocks each —
+ *  and "AI reviews" is a reference list of finished reviews. */
 export function boardIsEmpty(tabs: readonly Pick<PendingTab, 'total' | 'key'>[]): boolean {
   return tabs.every(
-    (t) => t.total === 0 || PENDING_TABS.find((d) => d.key === t.key)?.byWait === true,
+    (t) => t.total === 0 || pendingTabIsReference(t.key),
   );
 }
 

@@ -51,7 +51,7 @@ export const COURT_TEXT: Record<PrCourt, string> = {
   landing: 'text-indigo-600 dark:text-indigo-400',
 };
 
-const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-meta';
+const AXIS_TEXT = 'fill-ui-faint text-meta';
 
 /** The evidence rows carry no author identity, so the lookup is always empty by construction. */
 const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;
@@ -271,7 +271,7 @@ function BudgetBullet({
                 {/* Bar: where three in four had finished. */}
                 <rect x={X(0)} y={10} width={Math.max(2, X(row.p75) - X(0))} height={10} rx={2} className="fill-gray-800 dark:fill-gray-100" />
                 {/* Dot: the median. */}
-                <circle cx={X(row.p50)} cy={15} r={5} className="fill-white stroke-gray-800 dark:fill-gray-950 dark:stroke-gray-100" strokeWidth={2} />
+                <circle cx={X(row.p50)} cy={15} r={5} className="fill-ui-bg stroke-gray-800 dark:stroke-gray-100" strokeWidth={2} />
                 {/* ⚠ Past the scale: the bar is drawn to the edge, so the arrow is what says it
                     is longer than it looks — the figure itself is only in the popover. It sits
                     clear of the median dot and is drawn after it, because a median past the edge
@@ -532,7 +532,7 @@ export function LeadScatter({
                 cx={p.x}
                 cy={p.y}
                 r={dotRadius(p.pr.lines)}
-                className={`${COURT_FILL[p.pr.dominant]} stroke-white dark:stroke-gray-950`}
+                className={`${COURT_FILL[p.pr.dominant]} stroke-ui-bg`}
                 strokeWidth={1.5}
                 fillOpacity={hover == null || hover.pr.prId === p.pr.prId ? 0.85 : 0.35}
               />
@@ -659,13 +659,13 @@ export function CourtTriangle({
                 cx={p.x}
                 cy={p.y}
                 r={3.5}
-                className={`${COURT_FILL[p.pr.dominant]} stroke-white dark:stroke-gray-950`}
+                className={`${COURT_FILL[p.pr.dominant]} stroke-ui-bg`}
                 strokeWidth={1}
                 fillOpacity={hover == null || hover.pr.prId === p.pr.prId ? 0.8 : 0.3}
               />
             ))}
             <circle cx={centre.x} cy={centre.y} r={12} fill="none" className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} strokeDasharray="3 3" />
-            <circle cx={agg.x} cy={agg.y} r={7} className="fill-white stroke-gray-800 dark:fill-gray-950 dark:stroke-gray-100" strokeWidth={2.2} />
+            <circle cx={agg.x} cy={agg.y} r={7} className="fill-ui-bg stroke-gray-800 dark:stroke-gray-100" strokeWidth={2.2} />
             <rect
               x={0}
               y={0}

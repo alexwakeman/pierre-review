@@ -2,7 +2,7 @@
 //
 // Everything here reads the board response the page already holds (`GET /api/attention`); nothing
 // fetches. The components are in Activity/PendingFirstLanding.tsx.
-import { PENDING_TABS } from '@pierre-review/shared';
+import { pendingTabIsReference } from '@pierre-review/shared';
 import type {
   MergeVerdictInfo,
   PendingAuthorLens,
@@ -17,7 +17,7 @@ const plural = (n: number, one: string, many: string): string => (n === 1 ? one 
 /** Each tab's phrase in the summary line — the figure is the tab's own badge count. */
 const SUMMARY_PHRASE: Record<PendingTabKey, (n: number) => string> = {
   my_turn: (n) => `${n} waiting on you`,
-  claude: (n) => `${n} AI ${plural(n, 'review', 'reviews')} to read`,
+  claude: (n) => `${n} new AI ${plural(n, 'review', 'reviews')}`,
   fixing: (n) => `${n} to fix`,
   review: (n) => `${n} waiting on review`,
   threads: (n) => `${n} unanswered ${plural(n, 'thread', 'threads')}`,
@@ -33,9 +33,20 @@ export interface PendingSummaryPart {
 }
 
 /**
+ * THE FIGURE ON A TAB'S BADGE — ONE rule for the tab strip and the summary line: the tab's `total`,
+ * or under the People / Automation lens that side's own count. "AI reviews" (`newTotal` set) is a
+ * stable reference list, so its badge is the rows NEW since the last look — never the list's length
+ * (its rows are all opened by people, so the Automation side is 0).
+ */
+export function pendingTabBadge(tab: PendingTab, lens: PendingAuthorLens | null): number {
+  if (tab.newTotal != null) return lens === 'automation' ? 0 : tab.newTotal;
+  return lens != null && tab.authorTotals != null ? tab.authorTotals[lens] : tab.total;
+}
+
+/**
  * THE ONE-LINE SUMMARY: one part per tab that holds anything, in tab order. Each figure is EXACTLY
- * the tab's badge (`total`, or under the People / Automation lens that side's own count), so a
- * part and the tab it links to can never disagree. Empty when every tab is empty.
+ * the tab's badge (`pendingTabBadge`), so a part and the tab it links to can never disagree. Empty
+ * when every tab is empty.
  */
 export function pendingSummaryParts(
   tabs: readonly PendingTab[],
@@ -43,18 +54,18 @@ export function pendingSummaryParts(
 ): PendingSummaryPart[] {
   const out: PendingSummaryPart[] = [];
   for (const t of tabs) {
-    const count = lens != null && t.authorTotals != null ? t.authorTotals[lens] : t.total;
+    const count = pendingTabBadge(t, lens);
     if (count > 0) out.push({ tab: t.key, count, text: SUMMARY_PHRASE[t.key](count) });
   }
   return out;
 }
 
-/** Every tab is empty — the board's own totals, never the listed cards. "Waiting on others"
- *  (`byWait`) is not asked: it is information, and the empty board lists those same PRs. */
+/** Every tab is empty — the board's own totals, never the listed cards. The read-only tabs
+ *  (`pendingTabIsReference`: "Waiting on others", "AI reviews") are not asked: they are information. */
 export function pendingBoardEmpty(tabs: readonly PendingTab[]): boolean {
   return (
     tabs.length > 0 &&
-    tabs.every((t) => t.total === 0 || PENDING_TABS.find((d) => d.key === t.key)?.byWait === true)
+    tabs.every((t) => t.total === 0 || pendingTabIsReference(t.key))
   );
 }
 

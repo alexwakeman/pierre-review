@@ -74,7 +74,9 @@ import { Select } from '../ui/index.js';
  * `autoVerdict` (ON by default since 2026-11-04; the review's event becomes Claude's stricter
  * verdict — only when the reader's own last review was a comment, never on their own PR) and
  * `autoResolve` (OFF by default; Limn's own
- * threads, once a later review finds them fixed). AUTO FIX gains "Always include" (one checkbox per
+ * threads, once a later review finds them fixed). `resolveOwnPrs` ("Resolve my Limn threads when
+ * addressed", ON by default) sits outside the dimmed block: it acts on the reader's own PRs after
+ * ANY run, with auto review off too. AUTO FIX gains "Always include" (one checkbox per
  * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
  * same route, dimmed while auto fix is off.
  *
@@ -189,6 +191,9 @@ export function AutoReviewSection(): JSX.Element {
   const storedResolve = storedPost?.autoResolve === true;
   const [verdict, setVerdict] = useState(storedVerdict);
   const [resolve, setResolve] = useState(storedResolve);
+  // "Resolve my Limn threads when addressed": ON unless switched off. Own PRs, any run.
+  const storedResolveOwn = storedPost?.resolveOwnPrs !== false;
+  const [resolveOwn, setResolveOwn] = useState(storedResolveOwn);
   // The two teammate-lift opt-ins (both OFF by default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
   const storedLiftConsent = storedPost?.teamLiftConsent === true;
   const storedLiftTeammates = storedPost?.liftTeammateBlocks === true;
@@ -245,6 +250,9 @@ export function AutoReviewSection(): JSX.Element {
     setResolve(storedResolve);
   }, [workspaceId, storedResolve]);
   useEffect(() => {
+    setResolveOwn(storedResolveOwn);
+  }, [workspaceId, storedResolveOwn]);
+  useEffect(() => {
     setLiftConsent(storedLiftConsent);
   }, [workspaceId, storedLiftConsent]);
   useEffect(() => {
@@ -279,6 +287,7 @@ export function AutoReviewSection(): JSX.Element {
     !sameKinds(kinds, storedKinds) ||
     verdict !== storedVerdict ||
     resolve !== storedResolve ||
+    resolveOwn !== storedResolveOwn ||
     !sameImpact(impact, storedImpact) ||
     leftovers !== storedLeftovers ||
     liftConsent !== storedLiftConsent ||
@@ -605,6 +614,23 @@ export function AutoReviewSection(): JSX.Element {
         </div>
         )}
       </div>
+      <div className="flex items-start gap-1 pl-5 text-body" data-resolve-own>
+        <label className="flex items-start gap-2 text-ui-ink">
+          <CheckInput className="mt-0.5" checked={resolveOwn} onChange={(e) => setResolveOwn(e.target.checked)} />
+          <span className="font-medium">Resolve my Limn threads when addressed</span>
+        </label>
+        <InfoButton title="Resolve my Limn threads when addressed">
+          <p>
+            On your own PRs, drafts too. When any review you run finds one of your Limn’s comments
+            fixed, Limn replies “Addressed in” and the commit, then resolves the thread.
+          </p>
+          <p>
+            It never touches a person’s thread or a teammate’s Limn thread. Auto review and posting
+            can be off. If GitHub refuses, the AI Review tab says so and Limn does not try again.
+          </p>
+          <p>On by default.</p>
+        </InfoButton>
+      </div>
       <fieldset className="space-y-1 pl-5 text-body" data-teammate-lift>
         <legend className="flex items-center gap-1 font-medium text-ui-ink">
           Teammates’ Limn blocks
@@ -777,6 +803,7 @@ export function AutoReviewSection(): JSX.Element {
                     kinds,
                     autoVerdict: verdict,
                     autoResolve: resolve,
+                    resolveOwnPrs: resolveOwn,
                     approveImpact: impact,
                     approveLeftovers: leftovers,
                     teamLiftConsent: liftConsent,

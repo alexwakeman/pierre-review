@@ -18,8 +18,8 @@ import { prRefreshKey } from './usePrLiveRefresh.js';
 // ⚠ THE WORKSPACE HALF IS `ACTIVITY_QUERY_KEYS`, NOT A THIRD HAND-TYPED LIST. SyncStatus sweeps
 // that list when a walk lands; a write sweeping a different list is how the two drift apart.
 //
-// ⚠ `['attention-cards']`, `['daily-brief']` AND `['work-plan']` ALWAYS MOVE TOGETHER. They are
-// one fold read three times (the board, its counts, the ranked plan). Invalidate, never splice:
+// ⚠ `['attention-cards']` AND `['daily-brief']` ALWAYS MOVE TOGETHER. They are
+// one fold read twice (the board and its counts). Invalidate, never splice:
 // a local edit kills `capFor`'s `shown === count` guard and the "50 of 148" line with it. They
 // arrive together through `ACTIVITY_QUERY_KEYS`, and the test pins that.
 //
@@ -32,9 +32,9 @@ import { prRefreshKey } from './usePrLiveRefresh.js';
 // on demand (cached server-side), and `['merge-options', id]` is the merge control's live read,
 // enabled only while that control is open.
 //
-// ⚠ THE WORKSPACE HALF IS THROTTLED: AT MOST ONE SWEEP PER `WORKSPACE_SWEEP_MIN_GAP_MS`. Three of
-// its reads (`/api/attention`, `/api/daily-brief`, `/api/pro/work-plan`) share the 60/min `search`
-// rate tier, and a run of replies or resolves used to cost three of them per click. The first
+// ⚠ THE WORKSPACE HALF IS THROTTLED: AT MOST ONE SWEEP PER `WORKSPACE_SWEEP_MIN_GAP_MS`. Two of
+// its reads (`/api/attention`, `/api/daily-brief`) share the 60/min `search` rate tier, and a run
+// of replies or resolves used to cost both per click. The first
 // write sweeps at once; writes inside the gap refetch their OWN PR at once and share ONE trailing
 // sweep at the end of it. The PR's own keys are never throttled.
 //

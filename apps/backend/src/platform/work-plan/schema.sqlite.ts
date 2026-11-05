@@ -1,3 +1,6 @@
+// ⚠ DORMANT since 2026-11-04: "Plan my day" was removed and nothing writes this table any more.
+// It is kept (never dropped) and still erased with the account (platform/retention.ts).
+//
 // Plugin-owned SQLite schema (local mode) for the WORK PLAN cache — the credit-metered Haiku
 // narration of the Activity feed's prioritised worklist ("what should I work on today", the panel
 // directly under the daily-brief strip). Migrated by

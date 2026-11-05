@@ -172,9 +172,6 @@ describe('pendingCardPrId', () => {
   it('gives a PR card its PR and a repo- or person-grained card none', () => {
     expect(pendingCardPrId({ kind: 'merge', prId: 7, inMergeQueue: null } as unknown as InsightCard)).toBe(7);
     expect(pendingCardPrId({ kind: 'ci_failing', prId: 9, arm: 'trunk' } as unknown as InsightCard)).toBeNull();
-    expect(
-      pendingCardPrId({ kind: 'my_turn', reason: 'trunk_red', prId: 9 } as unknown as InsightCard),
-    ).toBeNull();
     expect(pendingCardPrId({ kind: 'reviewer_load', reviewerId: 1 } as unknown as InsightCard)).toBeNull();
   });
 });

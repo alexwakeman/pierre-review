@@ -123,9 +123,8 @@ function standingTier(state: string): 0 | 1 | 2 | null {
  * ever filed one; failing that their latest dismissal; failing that their latest comment.
  *
  * ⚠ THIS IS A STRICT SUPERSET OF THE OLD APPROVAL FOLD, BY CONSTRUCTION, AND HAS TO STAY ONE.
- * `approvals` is hashed into stored Pro work plans (`db/work-plan.ts` → `payloadHashFor`), so a
- * count that moves flips every stored plan on an affected workspace permanently `stale` and
- * re-bills it. The predecessor picked the latest row whose state was `approved` or
+ * `approvals` drives the Do next merge proximity (`db/work-plan.ts`), so a count that moves
+ * re-orders every Pending tab on an affected workspace. The predecessor picked the latest row whose state was `approved` or
  * `changes_requested` and ignored every other row; tier 0 is that pick, unchanged, and tiers 1-2
  * can only add reviewers the old rule dropped entirely — reviewers who count for nothing. Pinned
  * in `triage-reviewers.test.ts`.

@@ -283,11 +283,7 @@ async function computeBriefCounts(
     trunkRedRepos(accountId, scope),
   ]);
 
-  // ⚠ A RED TRUNK THE READER PROMOTED INTO MY TURN IS COUNTED THERE, NOT HERE — it is a my_turn
-  // card (and in `myTurn` below), so listing it on this line too would count one red branch twice.
-  // Filtered after the fold resolves, then capped.
-  const promotedTrunks = new Set(insights.myTurnTrunkRepoIds ?? []);
-  const trunkRed = allRedTrunks.filter((t) => !promotedTrunks.has(t.repoId)).slice(0, TRUNK_CAP);
+  const trunkRed = allRedTrunks.slice(0, TRUNK_CAP);
 
   let myTurn = 0;
   // The `MyTurnCard.personal` subset of the same cards — the figure the NOTIFICATION surfaces
@@ -331,8 +327,6 @@ async function computeBriefCounts(
   // it at all: it is built only for the live board (`withFailingChecks`), and counted only there.
   for (const c of insights.cards) {
     if (c.kind === 'ci_failing') ciFailing += 1;
-    // A finished Claude review is listed in its own tab, not My turn, so no My turn line counts it.
-    else if (c.kind === 'my_turn' && c.reason === 'claude_review') continue;
     else if (c.kind === 'my_turn') {
       myTurn += 1;
       if (c.personal) myTurnPersonal += 1;

@@ -9,7 +9,7 @@
 ## The platform — the former Pro plugin, folded into core
 
 **What it is.** `apps/backend/src/platform/` holds reporting (Reports, period reports, Chronology
-pointers, the work-plan wording), Bots Monitoring (ROI, behaviour, the peer benchmark, bot
+pointers), Bots Monitoring (ROI, behaviour, the peer benchmark, bot
 themes, bot classification), the synthesis seam, the Slack digest and
 the per-workspace settings behind them. Until 2026-10-22 it was **`@pierre/pro`**, a private git
 submodule at `packages/pro`, loaded by file path through `pro/bind.ts` behind an `apiVersion`
@@ -204,7 +204,7 @@ shared at runtime so `sync/bot-detection.ts` keeps a **LOCAL copy** (folded into
 kept in lockstep by `bot-detection.test.ts`. Verified logins (2026-07); coding agents (`sweep-ai`,
 `copilot-swe-agent`) + dependency bots (`dependabot`/`renovate`/`snyk`) are deliberately EXCLUDED —
 still `isBot`, just not *review* bots. **Surfaces:** a PrDetail "Bots" chip ("CodeRabbit · 12 · 3
-unresolved", `ChecksTab`) that opens the Changes tab's Threads only view filtered to that vendor (`store.threadBotFilter`); a
+unresolved", `ChecksTab`) that opens the Threads tab filtered to that vendor (`store.threadBotFilter`); a
 Feed **Humans | Bots** toggle (`store.feedAuthors`, default humans, never mixed; server-side via
 the feed route's `authors`, union bot definition) + per-row vendor tag (`FeedView`); a **core
 per-repo acted-on stat** (`ActivityRepoStats.botThreads/botThreadsActedOn` computed in `getActivity`
@@ -720,7 +720,7 @@ addition.
   work in a repo you happen to have write on — the defect the split exists to end.
 - **The rule lives in `getMyTurn`, once.** Every section but "New PRs" is `'direct'` by
   construction — it exists only because the viewer is involved, or because they added the type in
-  Settings → My Turn (the own-work promotions and red default branches) — and is stamped through
+  Settings → My Turn (the own-work promotions) — and is stamped through
   `relevanceFor`. "New PRs" (`watched_repo_pr`, off by default) is the one section that needs a
   test: the MAINTAINER test (`viewerMaintainedRepoIds`) asks *is this your patch of ground* —
   `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the viewer has
@@ -800,19 +800,18 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
   `ci_failing` cards). Folding either into the other gives one of them a number its list does not
   match. (Both are still sent on the daily brief with no SPA reader since its Feed strip was
   deleted.) What the reader PROMOTED into My Turn
-  (Settings → My Turn) leaves them: a promoted red build leaves `ciFailing`, a promoted red trunk
-  leaves both (`trunkRed` drops `myTurnTrunkRepoIds` before its cap), and each is counted once, in
-  `myTurn`.
+  (Settings → My Turn) leaves them: a promoted red build leaves `ciFailing` and is counted once, in
+  `myTurn`. A red trunk is never a My Turn card (`trunkRed` lists every one).
 - **Cap:** it shares `INSIGHT_CARD_CAP` (15) with the survey kinds but, like `my_turn`, DISCLOSES
   it (`ciFailingTotal`; the board states its cut with `capSentence` — the brief-line rule was
   deleted with the strip) — a worklist the viewer clears may not be
   silently capped. Everything is trailing-optional.
-- **Which checks are failing.** `CiFailingCard` and `MyTurnTrunkCard` carry REQUIRED
+- **Which checks are failing.** `CiFailingCard` carries REQUIRED
   `failingChecks: string[] | null` + `failingCheckTotal: number | null`; `InsightPrRef` carries
   them OPTIONAL, absent when there are no names (never `[]`, never `0`). Bare names, deduped,
   alphabetical, at most `FAILING_CHECKS_SHOWN` (3, `packages/shared/src/pending-rules.ts`), with
   the uncapped total behind them. `'your_pr'`: the newest `ci_status_events` row for the PR's
-  CURRENT head, used only when that row is red. `'trunk'` and the promoted `trunk_red`: the head's
+  CURRENT head, used only when that row is red. `'trunk'`: the head's
   `branch_commits` row, through `trunkHeadFailingChecks` (MERGE-CI-TRUNK.md § Default-branch
   status), looked up by the red head itself, so a direct push is named too. ⚠ **null is "no names",
   never "0 failing"** — render the CI label alone. ⚠ **The total counts every STORED name, not every
@@ -1967,7 +1966,7 @@ survives ONLY so `retention.ts` still ERASES them and `test/isolation.test.ts` s
 not add a reader. An old `?botsTab=advisor` link is not a member any more and opens the ROI tab.
 `users.app_slug` is still written; its one reader (the discovery tier) went with the Advisor.
 
-## Chronology pointers — the work plan's shape, over Chronology's evidence
+## Chronology pointers — the synthesis shape, over Chronology's evidence
 
 Three to five pointers beside Reports → Chronology (a pattern, an example worth copying, a thing to
 try), each citing the pull requests behind it. Full contract: docs/BOTTLENECKS.md § Pointers.
@@ -1986,214 +1985,17 @@ try), each citing the pull requests behind it. Full contract: docs/BOTTLENECKS.m
 
 ---
 
-## The work plan — "what should I work on today"
+## The work plan — REMOVED 2026-11-04
 
-> **THE CODE RANKS. THE MODEL NARRATES.**
+"Plan my day" (the model's headline, `parked` line and one `why` per Pending row) is gone: no
+`/api/pro/work-plan` route, no `ProHostQueries.getWorkPlan`, no `platform/work-plan/{routes,prompt,hash}.ts`,
+no SPA hook or button. What stays:
 
-**There is no "Plan for today" panel any more.** It was a card under the daily-brief strip
-rendering a ranked worklist that was, by its own alignment contract, the SAME POPULATION as the
-attention board two rail clicks away — one population on two surfaces. It has been folded into the
-**Pending** board:
-
-- the two signals the cards never carried (`merge`, `update_branch`) are now real `InsightKind`s
-  emitted by `getWorkspaceInsights`, so **all seven** WorkPlanKinds fold off cards;
-- core `GET /api/attention` serves the board as **seven tabs**, each ordered by the SAME Do next
-  scorer the plan ranks with (`db/work-plan.ts` `scoreCards`), with or without AI;
-- the model writes **the sentences only**: a headline and `parked` above the tabs, and one `why`
-  per planned row, shown on that row's card in whichever tab it sits, while `me.ai.enabled`. With
-  AI off the reader gets the entire ordered board with no prose.
-
-The plan still chooses its rows ACROSS kinds (its own per-PR dedup and kind/repo spread, capped at
-`WORK_PLAN_ITEM_CAP`) — that is the evidence the model narrates and the plan hash covers, unchanged.
-The board no longer shows that cross-kind selection as a section; it only carries its lines.
-
-⚠ **A PLAN ROW MUST NAME A CARD THE BOARD LISTS.** `getWorkPlan` folds the board's UNCAPPED
-`getWorkspaceInsights` and draws its rows only from `listedCardIds` (db/pending-tabs.ts — the
-board's own listing rule, `boardListCap` per list group). It used to rank the capped fold (15 per
-kind by severity / newest), and the kind/repo spread then seated low-scoring rows the board did not
-list: on real data up to 10 of 12 `why`s had no card to sit on. `totals` still counts every row.
-
-⚠ **THE TWO FORWARD KINDS INHERIT A NARROWING** the old standalone query did not have: the card
-fold's **90-day ultra-stale gate**. A long-dormant-but-mergeable PR no longer appears — which is the
-point, since a ranked row with no card behind it has nowhere to show its line.
-
-⚠ **`conflicts` IS A CARD, NOT A PLAN ROW — AND THE SEVEN `WorkPlanKind`s ARE UNCHANGED.** The
-Pending board's third merge-state kind falls out of `db/work-plan.ts`'s card→job chain and produces
-nothing, deliberately. A plan row needs a `WorkPlanKind`, and that vocabulary spans **two
-repositories**: the union and `BASE_PROXIMITY` in core (compile-checked) and the platform's prompt,
-which enumerates `merge|update_branch|unblock_ci|review|reply|thread|nudge` as a **STRING**
-(`platform/work-plan/prompt.ts`) that no compiler checks — so an addition on one side only hands the
-model a kind it was never told about. (The board still RANKS conflicts cards inside Needs fixing —
-with a board-only `conflicts` proximity base — but they never become plan rows.) Its PR facts are
-gathered, because the board scores it, and `foldCounts` still ignores it: a kind that builds no plan
-row is counted by no plan figure.
-
-⚠ **AND THE SPRINT REPORT NEEDED A LINE FOR IT, WHICH NOTHING WOULD HAVE CAUGHT.**
-`platform/insights/sprint-report.ts`'s card loop does `bump(repoFullName)` /
-`agg.cards += 1` / `agg.loc += additions + deletions` / `addRef(c)` **before** its if/else chain, so
-a kind matching no branch is not dropped — it is counted into that repo's `importance`
-(cards × 3 + LOC/50) and added to the linkable PR table while contributing zero action items.
-`ConflictsCard extends InsightPrRef`, so every field that code reads EXISTS: no compile error, no
-failing test, just a report that silently re-orders itself around work it never lists. It now has its
-own `continue` beside `ci_failing` and the two forward kinds, and
-`platform/test/sprint-report-kind-coverage.test.ts` scans both source files and fails when an
-`InsightKind` is not named in that loop. `insightsHash`'s `default: return ''` is filtered out (an unmatched kind contributes
-nothing, not an empty slot), `chat.ts`'s if/else chain folds nothing before matching, and
-`preset-prompt.ts` uses per-kind type-guard filters — all three are safe as written.
-
-⚠ **THE DEPENDENCIES TAB'S TWO KINDS FOLLOW THE `conflicts` PRECEDENT EXACTLY** (`security`,
-`dependency_bump`; [BACKEND.md](BACKEND.md) § The Dependencies tab). `scoreCards` scores them for the
-board — into the same `boardOnly` list as `conflicts`, from the base their state names
-(`DEPENDENCY_STATE_BASE`, plus the board-only `security_alert` 0.55 and `waiting` 0.3) — and they
-never become plan rows: `WorkPlanKind` is unchanged, and so is `foldCounts` / `WorkPlanEvidence.counts`.
-The sprint report needed its own `continue` for them, the fourth such line, or both would have been
-counted into repo `importance` and the PR table (`SecurityCard` and `DependencyBumpCard` extend
-`InsightPrRef`, so nothing fails to compile); the kind-coverage test fails without it. `chat.ts` needs
-no code: its chain folds nothing before it matches.  ⚠ **The plan and the sprint report re-key ONCE** per workspace that had dependency
-PRs: those PRs left `stalled_review`, `untouched_thread`, `reviewer_routing` and the forward kinds, so
-the cards both hashes cover changed. Expect one `stale` and one regeneration, not a recurring one —
-nothing `now`-derived entered either hash.
-
-⚠ **MERGE PROXIMITY IS APPROVAL-CONDITIONAL** (0.95 approved / 0.45 not, the latter deliberately
-below `review` 0.55 and `reply` 0.5). A clean PR nobody has reviewed is ready for GitHub, not ready
-for a human — and because the per-PR dedup survivor is chosen by proximity, the old flat 0.95 also
-let a merge row beat that same PR's `review` row, so the head said "nothing is blocking this" while
-the board said "your turn" about one pull request. Measured context: on the reporting account, 9 of
-11 and 7 of 8 merge-ready PRs on two workspaces are bot-authored.
-
-### The division of labour, which is the safety property
-
-**Every figure, id, link and rank is CODE-derived.** The model receives the already-ranked items
-and may only (a) choose which to foreground, (b) order those, (c) write one sentence each about
-why now, plus a headline and an optional "what can wait". It may not invent an item, restate a
-number, or take work off the board — anything it omits still renders, below the divider, in the
-board's own tail.
-
-Enforced three ways, none of them the prompt alone:
-
-- ids the model names are intersected with the evidence; strays are dropped **and counted** into
-  `StoredWorkPlan.droppedIds`, which the board shows when non-zero;
-- the **D4 digit gate** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`, Unicode numerals — the input includes
-  attacker-authored PR titles) runs on the headline, every `why`, and `parked`. A string carrying a
-  digit is **dropped, never rewritten**;
-- the **second-person gate** fires on steps whose item `relevance === 'none'` and nowhere else —
-  second person is a *fact* for `direct`/`maintained` rows and a guess for shared work. This is a
-  deliberate narrowing of the synthesis rule; do not widen it "because the surface is personal" —
-  the reader's DAY is personal, the ROW is not, and this matters MORE now that the narration sits on
-  a board explicitly holding other people's work.
-
-### Alignment with the brief
-
-> THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
-
-**All seven** signals are folded off `getWorkspaceInsights`' `InsightCard[]` — the same fold
-`computeBriefCounts` counts — rather than re-derived, because a second predicate for "an untouched
-thread" is a second number for one population, inches away on screen. (It was six until `merge` and
-`update_branch` became card kinds; the seventh was the standalone open-PR query that made the plan
-a second population.) `WorkPlanEvidence.counts`
-travels on the wire **so the agreement is assertable**; `work-plan.test.ts` pins it field-by-field
-against `getDailyBriefEntry`, and that assertion is mutation-tested.
-
-Two signals the cards never carried come from one query over open non-draft PRs in scope:
-
-| kind | predicate |
-|---|---|
-| `merge` | `READY_MERGE_STATES` (**imported** from `db/triage.ts`, never re-spelled) and `mergeable !== 'conflicting'` |
-| `update_branch` | `mergeStateStatus === 'behind'`, and only that |
-
-⚠ `behindBy` is **not stored** (every read is a live GitHub `/compare`) and is the wrong signal
-anyway — `behindBy > 0` is true of most healthy PRs, while `'behind'` means GitHub is actually
-refusing the merge.
-
-### The rank
-
-`score = w.proximity·proximity + w.stall·stallRisk + w.relevance·relevanceWeight`, with the READER's
-weights (Settings → My Turn; the default, Balanced, is 0.50 / 0.30 / 0.20), sorted descending with a
-**total** tie-break chain, so two ticks over unchanged data produce byte-identical order — a panel
-people read top-down may not reshuffle between polls.
-
-⚠ **MY TURN SETTINGS REACH THE PLAN.** `rankWorkPlan` reads the account's
-weights (`getMyTurnSettings`) exactly as the board's `rankPendingTabs` does, so the plan and the
-tabs rank one way. The platform reads no weight and the plan hash folds no score, but a weight
-change can swap which rows the cap keeps, and promoting `own_thread` or `trunk_red` changes those
-rows' `relevance` (a home untouched-thread row is scored `'none'`; the promoted one is the reader's,
-`'direct'`) — either makes a stored plan read `stale` ONCE; nothing regenerates on its own. A
-promoted row keeps its home row's `WorkPlanKind`, id and facts (`wp:unblock_ci:<prId>`,
-`wp:<merge|update_branch>:<prId>`, `wp:thread:<prId>:<threadId>`, `wp:unblock_ci:trunk:<repoId>`;
-`own_conflicts` stays board-only like `conflicts`) — only `relevance` and `cardId` differ, and the
-SPA joins each `why` by the current `cardId`. `WorkPlanKind`, `WorkPlanItem` and
-`ProHostQueries.getWorkPlan` are unchanged. ⚠ **The sprint report skips a promoted card for the
-same reason it skips its home kind** (`c.reason === 'trunk_red' || MY_TURN_OWN_WORK_REASONS.has(…)`
-— the `trunk_red` literal is REQUIRED: `Set.has` does not narrow the union, and the repo-grained
-`MyTurnTrunkCard` has no `additions` for `bump`). So an own untouched thread leaves that report's
-untouched count while the reader has it promoted — a reading setting, stated.
-`sprint-report-kind-coverage.test.ts` pins the skip.
-
-⚠ **`ageHours`, `stallRisk` and `score` are derived from `now`** and must never enter
-`workPlanPayloadHash`, or a dormant workspace re-bills on a timer *and* the free GET (which
-recomputes the hash from a fresh fold) disagrees with the POST forever: permanently `stale`,
-re-billed on every click.
-
-⚠ **The cap seats one row per non-empty kind before filling by score** (`capWithKindCoverage`). A
-plain `slice(0, CAP)` deletes a whole signal — the relevance weight means a dozen `direct` rows
-out-score every shared-work row — and the panel then tells the reader that nothing is behind trunk.
-The absence looks like a fact; it is an artifact of the cap.
-
-### ⚠ ONE PR IS ONE JOB
-
-Deduping on the item id is **not enough**. The my_turn fold and the merge fold reach the same PR
-under different ids, so an approved, mergeable PR of yours arrived twice — `wp:merge:<id>` saying
-"nothing is blocking this" and `wp:review:<id>` saying "your PR is approved and waiting on you".
-One instruction printed twice, burning two of the twelve slots. It was invisible to every unit
-test, because each fold is individually correct, and was found by looking at the running app.
-
-A second pass therefore keys on `prId`:
-
-- the survivor is the **highest-`proximity`** row (the action furthest along), tie-broken by the
-  time-free `tieRank`;
-- ⚠ **proximity, not score** — score folds `stallRisk`, so choosing by it would let the survivor,
-  and therefore its `reason` (a **hashed** field), change on a timer and re-bill;
-- ⚠ **PR-grained rows only.** Two untouched threads on one PR are two jobs, and a red trunk is
-  repo-grained. The grain is read back off the id (`wp:<kind>:<prId>` ⇒ PR-grained), so a new row
-  kind cannot get the two out of step.
-
-### ⚠ A repo-grained row is about the BRANCH, not a PR
-
-The trunk arm of `unblock_ci` resolves the current red head to the PR that **landed** it. That prId
-is a link target and nothing more — trunk CI is non-monotone, ~21% of commit rows carry `unknown`,
-and roughly one red head in nine is a direct push belonging to no PR. All three of these shipped
-wrong once:
-
-- **the model payload** gets `subject: 'the repository default branch — NOT a pull request'`
-  instead of `number`/`title`. Handed a PR number, the model wrote *"needs this merge to let all
-  pending work build"* and called another row *"the newest blocker"* — causal claims the card
-  refuses to make. The system prompt also forbids naming a cause outright;
-- **the facts** carry only `ciStatus` + `observed` age. Approvals and diff size belong to the
-  landing PR, and "one approval" beside "default branch" is a claim about the wrong object;
-- **the row** leads with "`owner/repo` **default branch**" and demotes the PR to "landed by #N",
-  matching the `ci_failing` card's existing wording on the attention board.
-
-### Routes, storage and cost
-
-`GET /api/pro/work-plan` (free: evidence + cached plan + a `stale` probe, tier `[search, read]`)
-and `POST` (billed, tier `[ai, ai_hourly]`). Both spelled explicitly in `tierFor` **above** the
-`/api/pro/` catch-all, because that catch-all tiers on the verb and this GET re-runs the fold.
-
-Storage is `pro_work_plans`, unique `(accountId, scopeKey)`, `output` TEXT, in
-`eraseProByAccountId` and deliberately **not** in `pruneProByPrIds` (no `pr_id` grain).
-
-The cost gates copy the synthesis seam exactly: a synchronous in-flight claim (no `await` between
-`has()` and `add()`), a min-interval armed only on billed runs, `recordAiUsage` best-effort before the parse can fail, and a stored **empty sentinel**
-so an unparseable answer cannot loop-bill.
-
-⚠ **The POST folds the evidence BEFORE the throttle checks** — a deliberate divergence from
-synthesis. `WorkPlanResponse.evidence` is "always present when enabled" (the deterministic worklist
-renders whatever happens to the narration), so a throttled reply that dropped it would hand the
-panel nothing. The cost is bounded by this route's own `ai` bucket, which is tighter than the free
-GET's `search` bucket running the identical fold.
-
-`ctx.queries.getWorkPlan` is optional on `ProHostQueries` — called `?.()`, absent ⇒
-`{enabled: false}`.
+- the Do next scorer, core `db/work-plan.ts` `scoreCards` — it ranks every Pending tab
+  (`db/pending-tabs.ts`); its working rows keep the `WorkPlanItem` / `WorkPlanKind` / `WorkPlanFacts`
+  names;
+- the table `pro_work_plans` (migration `0028_work_plan.sql`, `platform/work-plan/schema.sqlite.ts`),
+  DORMANT: nothing writes it, account erasure still deletes it (`platform/retention.ts`).
 
 ## Moved from CLAUDE.md (2026-10-26)
 

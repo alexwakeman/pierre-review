@@ -12,7 +12,7 @@
 //      POST) and offer "Assign" for someone already asked.
 //   3. THE BOARD REFRESH WAITS FOR THE LAST REQUEST ON THE PR, AND ONLY A SUCCESS TRIGGERS IT. The
 //      route stamps the request, so a board refetch retires the card and every sibling row's outcome
-//      with it. And the board's three reads — attention-cards, daily-brief, work-plan — move TOGETHER.
+//      with it. And the board's two reads — attention-cards and daily-brief — move TOGETHER.
 //
 // Run by hand (the frontend's tests are not in CI):
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
@@ -141,9 +141,9 @@ describe('request keys', () => {
 
 describe('the board refresh waits for the last request on the PR, and only on success', () => {
   // The last request refreshes through THE ONE WRITE SET (prCacheSync.ts), which carries the board's
-  // three reads together plus the capped fold's copy of the card; a request with a sibling still in
+  // two reads together plus the capped fold's copy of the card; a request with a sibling still in
   // flight refreshes the PR's own detail only.
-  const BOARD = [['attention-cards'], ['daily-brief'], ['work-plan'], ['workspace-insights']];
+  const BOARD = [['attention-cards'], ['daily-brief'], ['workspace-insights']];
   // The live suggestions, and the PR pane's review waits + "Ask someone else" candidate: only a
   // reviewer request moves them, so every request refreshes all three (never the board's job).
   const SUGGESTIONS = [

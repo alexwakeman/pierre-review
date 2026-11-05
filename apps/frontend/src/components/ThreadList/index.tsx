@@ -53,12 +53,15 @@ interface FileBucket {
   newest: string;
 }
 
-function groupByFile(threads: ThreadDetail[]): FileBucket[] {
+// `pathFor` re-homes a thread under its file's RENDERED path (the rename-aware fold,
+// `indexThreadsByPath`); a thread it does not name keeps its own path.
+function groupByFile(threads: ThreadDetail[], pathFor?: ReadonlyMap<number, string> | null): FileBucket[] {
   const byPath = new Map<string, ThreadDetail[]>();
   for (const t of threads) {
-    const arr = byPath.get(t.path) ?? [];
+    const path = pathFor?.get(t.id) ?? t.path;
+    const arr = byPath.get(path) ?? [];
     arr.push(t);
-    byPath.set(t.path, arr);
+    byPath.set(path, arr);
   }
   const buckets: FileBucket[] = [...byPath.entries()].map(([path, ts]) => ({
     path,
@@ -85,6 +88,7 @@ export function ThreadList({
   severityFilter,
   openInChangesFor,
   visibleThreadIds = null,
+  pathFor = null,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
@@ -113,11 +117,17 @@ export function ThreadList({
     thread: ThreadDetail,
   ) => { run: () => void; approximate: boolean; line: number | null } | null;
   /**
-   * The Changes tab's file-tree pick: only these threads are listed (null = every file). A view
+   * A file pick: only these threads are listed (null = every file). A view
    * narrowing, like the pills, so the pill counts stay PR-wide and the collapse state survives
    * moving between files.
    */
   visibleThreadIds?: ReadonlySet<number> | null;
+  /**
+   * Thread id → the file path it is listed under, from the rename-aware fold
+   * (`indexThreadsByPath`): a thread written before a rename groups under the file's current
+   * path. Null = each thread's own path. PrDetail's Threads tab passes it.
+   */
+  pathFor?: ReadonlyMap<number, string> | null;
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
@@ -308,7 +318,7 @@ export function ThreadList({
     if (addressedBotThreadIds.length === 0) setConfirming(false);
   }, [addressedBotThreadIds.length]);
 
-  const buckets = useMemo(() => groupByFile(shown), [shown]);
+  const buckets = useMemo(() => groupByFile(shown, pathFor), [shown, pathFor]);
   const vendor = botFilter ? BOT_VENDOR_META[botFilter] : null;
 
   const runBulkResolve = (): void => {

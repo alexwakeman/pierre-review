@@ -57,7 +57,6 @@ import type {
   MyTurnCard,
   MyTurnOwnWork,
   MyTurnRelevance,
-  MyTurnTrunkCard,
   PrAutomation,
   PrReviewDecision,
   ReviewStanding,
@@ -69,7 +68,6 @@ import type {
 import {
   advisoryChips,
   advisoryParts,
-  asCiFailingCard,
   asConflictsCard,
   asForwardCard,
   checksPageHref,
@@ -718,41 +716,6 @@ function myTurnCard(
   };
 }
 
-/** A red default branch promoted into My turn — the ci_failing trunk arm's fields, as a my_turn. */
-function trunkCard(over: Partial<MyTurnTrunkCard> = {}): MyTurnTrunkCard {
-  return {
-    id: 'myturn:trunk_red:7:abc1234',
-    kind: 'my_turn',
-    reason: 'trunk_red',
-    severity: 'warn',
-    repoId: 7,
-    repoFullName: 'acme/api',
-    branchName: 'main',
-    ciStatus: 'failure',
-    headSha: 'abc1234def',
-    prId: 55,
-    prNumber: 12,
-    prTitle: 'Land the thing',
-    mergedById: 3,
-    viewerMerged: false,
-    maintained: false,
-    observedAt: '2026-08-27T09:00:00.000Z',
-    githubUrl: 'https://github.com/acme/api/commit/abc1234def',
-    detail: 'main is red at abc1234',
-    since: '2026-08-27T09:00:00.000Z',
-    personal: true,
-    relevance: 'direct',
-    threadId: null,
-    authorId: 9,
-    authorIsBot: true,
-    authorBotKind: 'dependabot',
-    automation: { role: 'dependency', kind: 'dependabot', source: 'account' },
-    failingChecks: ['Run Journey Tests / Run Journey Tests', 'build (ubuntu-latest)', 'lint'],
-    failingCheckTotal: 5,
-    ...over,
-  };
-}
-
 describe('the type chip names what you are being asked to do', () => {
   it('says "Pushed since" on its own type — no longer a second reading of "New PR"', () => {
     // Since Settings → My Turn, "somebody pushed after you acted" is its own type with its own
@@ -764,14 +727,15 @@ describe('the type chip names what you are being asked to do', () => {
     ).toBe('New PR');
   });
 
-  it('says "Auto review" on an AI review the workspace started, "AI review" on a clicked one', () => {
+  it('says "Auto review" on an AI review the workspace started, "New AI review" on a clicked one', () => {
     expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'auto' }))).toBe(
       'Auto review',
     );
     expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'manual' }))).toBe(
-      'AI review',
+      'New AI review',
     );
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('AI review');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('New AI review');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'ai_approved_merged' }))).toBe('Merged after approval');
   });
 
   it('says which kind of ready a promoted PR is — the words its home tab uses', () => {
@@ -817,12 +781,11 @@ describe('the type chip names what you are being asked to do', () => {
     );
   });
 
-  it('names every other type from the one map, the trunk card included', () => {
+  it('names every other type from the one map', () => {
     expect(myTurnReasonLabel(myTurnCard({ reason: 'review_request' }))).toBe('Review requested');
     expect(myTurnReasonLabel(myTurnCard({ reason: 'mention' }))).toBe('Mentioned');
     expect(myTurnReasonLabel(myTurnCard({ reason: 'thread_reply' }))).toBe('Reply to you');
     expect(myTurnReasonLabel(myTurnCard({ reason: 'own_ci_red' }))).toBe('Build failed');
-    expect(myTurnReasonLabel(trunkCard())).toBe('Trunk red');
   });
 });
 
@@ -880,50 +843,6 @@ describe('a promoted card, rebuilt as its home card', () => {
     expect(conflictsStateChip(c)).toBeNull();
   });
 
-  it('rebuilds a red default branch as the trunk card, with the landing PR’s byline', () => {
-    const t = trunkCard();
-    const c = asCiFailingCard(t);
-    expect(c).toMatchObject({
-      kind: 'ci_failing',
-      arm: 'trunk',
-      repoId: 7,
-      prId: 55,
-      headSha: 'abc1234def',
-      mergedById: 3,
-      githubUrl: t.githubUrl,
-    });
-    // The four author fields are COPIED — never re-resolved — so the two cards for one red trunk
-    // cannot disagree about who opened the landing PR.
-    expect(landingPrByline(c)).toEqual({ authorId: 9, automation: t.automation });
-    expect(c.authorIsBot).toBe(true);
-    expect(c.authorBotKind).toBe('dependabot');
-    // …and the failing checks are COPIED, both halves — or a promoted red trunk silently loses the
-    // names its home card shows.
-    expect(c.failingChecks).toEqual(t.failingChecks);
-    expect(c.failingCheckTotal).toBe(5);
-  });
-
-  it('carries "no names known" through as null, never an empty list or a zero', () => {
-    const c = asCiFailingCard(trunkCard({ failingChecks: null, failingCheckTotal: null }));
-    expect(c.failingChecks).toBeNull();
-    expect(c.failingCheckTotal).toBeNull();
-  });
-
-  it('names no landing PR when the red head resolved to none — a direct push', () => {
-    const c = asCiFailingCard(
-      trunkCard({ prId: null, prNumber: null, prTitle: null, mergedById: null, authorId: null, authorIsBot: false, authorBotKind: null, automation: null }),
-    );
-    expect(landingPrByline(c)).toBeNull();
-  });
-});
-
-describe('what a red default branch in My turn is called', () => {
-  it('says "Your turn" like any type you added — and never "Review or reply" when muted', () => {
-    expect(cardKindLabel(trunkCard())).toBe('Your turn');
-    expect(cardKindLabel(trunkCard({ relevance: 'none', personal: false, muted: true }))).toBe(
-      'Trunk CI failing',
-    );
-  });
 });
 
 describe('which rows outrank the neutral ones', () => {
@@ -2096,7 +2015,7 @@ describe('mergeRowCardOf — which cards carry a merge row', () => {
         }),
       ),
     ).toBeNull();
-    expect(mergeRowCardOf(trunkCard())).toBeNull();
+    expect(mergeRowCardOf(myTurnCard({ reason: 'ai_approved_merged' }))).toBeNull();
   });
 
   it('every other kind carries none', () => {

@@ -200,7 +200,8 @@ beforeEach(async () => {
   liveReviewList = [];
   liveReviews.mockClear();
   githubTakesAll();
-  await setPost(true, { scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS } });
+  // "Resolve my Limn threads when addressed" (ON by default) is switched on only by the tests of it.
+  await setPost(true, { scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS }, resolveOwnPrs: false });
 });
 
 describe('the pure rules', () => {
@@ -1266,9 +1267,9 @@ describe('auto resolve', () => {
   });
 
   /** A first auto run whose blocker is posted inline (inside a review: no comment id kept), + its synced thread. */
-  async function postedFinding(o: { threadAuthor?: string; marker?: boolean } = {}) {
+  async function postedFinding(o: { threadAuthor?: string; marker?: boolean; prAuthor?: string } = {}) {
     const { findingCommentBody } = await import('../post-review.js');
-    const pr = await makePr({ author: 'me' });
+    const pr = await makePr({ author: o.prAuthor ?? 'me' });
     const first = await run(pr, [{ severity: 'blocker', title: 'Null deref', path: 'src/p.ts' }]);
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: first }, deps(), rdeps());
     const [f] = await findingsOf(first);
@@ -1294,8 +1295,14 @@ describe('auto resolve', () => {
     return { pr, first, finding: f, thread: th };
   }
 
-  async function followUpRun(pr: number, first: number, priorFindingId: number, status: 'addressed' | 'no_longer_applies' | 'not_addressed') {
-    const id = await persist.insertQueuedReview(ctx, pr, 'abcdef1234567', 'claude-opus-5-5' as any, 1, [], 'auto');
+  async function followUpRun(
+    pr: number,
+    first: number,
+    priorFindingId: number,
+    status: 'addressed' | 'no_longer_applies' | 'not_addressed',
+    trigger: 'auto' | 'manual' = 'auto',
+  ) {
+    const id = await persist.insertQueuedReview(ctx, pr, 'abcdef1234567', 'claude-opus-5-5' as any, 1, [], trigger);
     await persist.saveReviewSuccess(ctx, id, {
       scope: 'diff_only',
       summary: 'Looks fixed.',
@@ -1330,7 +1337,7 @@ describe('auto resolve', () => {
     expect(ar.resolvableStatus('partly_addressed')).toBeNull();
   });
 
-  it('off by default: nothing is replied or resolved', async () => {
+  it('the workspace switch is off by default: nothing is replied or resolved', async () => {
     const { pr, first, finding } = await postedFinding();
     const id = await followUpRun(pr, first, finding.id, 'addressed');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
@@ -1688,5 +1695,126 @@ describe('auto resolve', () => {
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: c.pr, reviewId: await replyRun(c.pr, c.first, c.finding.id, 'reply_disputed') }, deps(), rdeps());
     expect(reply).not.toHaveBeenCalled();
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  // ---- "Resolve my Limn threads when addressed" (path B): the reader's own PR, any run ----
+
+  describe('own PRs ("Resolve my Limn threads when addressed")', () => {
+    const ar = () => import('./auto-resolve.js');
+    const rowOf = async (x: { first: number; finding: any }) =>
+      (await findingsOf(x.first)).find((r: any) => r.id === x.finding.id);
+
+    it('is ON by default: a MANUAL run on my own PR replies, THEN resolves, with posting and auto resolve off', async () => {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { resolveOwnPrs: true } });
+      const x = await postedFinding();
+      await setPost(false, { autoResolve: false });
+      // The claim is written BEFORE the GitHub reply.
+      let seenAtReply: any = 'unset';
+      reply.mockImplementation(async () => {
+        seenAtReply = (await rowOf(x)).autoResolve;
+        return { commentId: 'RPL9' };
+      });
+      const id = await followUpRun(x.pr, x.first, x.finding.id, 'addressed', 'manual');
+      const out = await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: x.pr, reviewId: id }, deps(), rdeps());
+      expect(out).toEqual({ resolved: [x.finding.id], failed: [] });
+      expect(seenAtReply).toMatchObject({ status: 'resolving', why: 'own_pr', byReviewId: id });
+      expect(resolve).toHaveBeenCalledWith(1, x.thread.githubNodeId);
+      const body = String(reply.mock.calls[0]![2]);
+      expect(body.startsWith('Addressed in abcdef1.')).toBe(true);
+      expect(body).toContain('Resolved by Limn’s Claude review.');
+      expect(body).not.toContain(AUTO_POST_FOOTER);
+      const { isLimnPostedComment } = await import('../../db/review-threads-for-review.js');
+      expect(isLimnPostedComment({ body, databaseId: null, authorLogin: 'me' }, undefined, 'me')).toBe(true);
+      expect(await rowOf(x)).toMatchObject({ autoResolve: { status: 'resolved', why: 'own_pr', replyCommentId: 'RPL9' } });
+      expect(settle).toHaveBeenCalled();
+      expect(notePrChanged).toHaveBeenCalledWith(1, [x.pr]);
+      // Never twice: a second call (a pair's other half, a later run) writes nothing.
+      const again = await followUpRun(x.pr, id, x.finding.id, 'addressed', 'manual');
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: x.pr, reviewId: again }, deps(), rdeps());
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: x.pr, reviewId: id }, deps(), rdeps());
+      expect(reply).toHaveBeenCalledTimes(1);
+    });
+
+    it('a draft of my own counts too; a closed one does not', async () => {
+      await setPost(true, { resolveOwnPrs: true });
+      const d = await postedFinding();
+      await db.update(schema.pullRequests).set({ isDraft: true }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, d.pr)).execute();
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: d.pr, reviewId: await followUpRun(d.pr, d.first, d.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      expect(reply).toHaveBeenCalledTimes(1);
+      const c = await postedFinding();
+      await db.update(schema.pullRequests).set({ state: 'closed' }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, c.pr)).execute();
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: c.pr, reviewId: await followUpRun(c.pr, c.first, c.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      expect(reply).toHaveBeenCalledTimes(1);
+      expect((await rowOf(c)).autoResolve).toBeNull();
+    });
+
+    it("a teammate's PR, the switch off, or a thread that is not my Limn's: nothing", async () => {
+      await setPost(true, { resolveOwnPrs: true, scope: 'all' });
+      // A teammate's PR (my Limn posted there): a manual run never resolves.
+      const t = await postedFinding({ prAuthor: 'alice' });
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: t.pr, reviewId: await followUpRun(t.pr, t.first, t.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      // My PR, but the thread was started by someone else (a teammate's Limn, same words + marker).
+      const o = await postedFinding({ threadAuthor: 'alice' });
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: o.pr, reviewId: await followUpRun(o.pr, o.first, o.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      // My PR, the switch off.
+      const f = await postedFinding();
+      await setPost(true, { resolveOwnPrs: false });
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: f.pr, reviewId: await followUpRun(f.pr, f.first, f.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      expect(reply).not.toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+      for (const x of [t, o, f]) expect((await rowOf(x)).autoResolve).toBeNull();
+    });
+
+    it('rides every run: an auto run with posting off, and "Review and post" via the post path', async () => {
+      await setPost(false, { resolveOwnPrs: true, autoResolve: false });
+      // Posting off: seed the inline post by hand-claiming it through a pressed run.
+      const x = await postedFindingPressed();
+      await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: x.pr, reviewId: await followUpRun(x.pr, x.first, x.finding.id, 'no_longer_applies') }, deps(), rdeps());
+      expect(reply).toHaveBeenCalledTimes(1);
+      expect(String(reply.mock.calls[0]![2])).toMatch(/^No longer applies as of abcdef1\./);
+      expect((await rowOf(x)).autoResolve).toMatchObject({ status: 'resolved', why: 'own_pr' });
+    });
+
+    it('a failure is recorded and never retried', async () => {
+      await setPost(true, { resolveOwnPrs: true });
+      const x = await postedFinding();
+      reply.mockImplementation(async () => {
+        throw new Error('Resource not accessible by integration');
+      });
+      const id = await followUpRun(x.pr, x.first, x.finding.id, 'addressed', 'manual');
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: x.pr, reviewId: id }, deps(), rdeps());
+      expect((await rowOf(x)).autoResolve).toMatchObject({ status: 'failed', why: 'own_pr', error: 'Resource not accessible by integration' });
+      await (await ar()).maybeAutoResolveFindings(ctx, { accountId: 1, prId: x.pr, reviewId: await followUpRun(x.pr, id, x.finding.id, 'addressed', 'manual') }, deps(), rdeps());
+      expect(reply).toHaveBeenCalledTimes(1);
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    /** postedFinding, posted by a "Review and post" press (works with auto-posting off). */
+    async function postedFindingPressed() {
+      const { findingCommentBody } = await import('../post-review.js');
+      const pr = await makePr({ author: 'me' });
+      const first = await run(pr, [{ severity: 'blocker', title: 'Null deref', path: 'src/p.ts' }], 'pressed');
+      await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: first }, deps(), rdeps());
+      const [f] = await findingsOf(first);
+      expect(f.postedAt).not.toBeNull();
+      const [th] = await db
+        .insert(schema.reviewThreads)
+        .values({ prId: pr, githubNodeId: `RT_r${pr}`, path: 'src/p.ts', isResolved: false, derivedState: 'likely_addressed', createdAt: new Date() })
+        .returning()
+        .execute();
+      await db
+        .insert(schema.reviewComments)
+        .values({
+          prId: pr,
+          threadId: th.id,
+          githubNodeId: `RC_r${pr}`,
+          databaseId: `9${pr}`,
+          authorId: users.me,
+          body: findingCommentBody({ body: f.body, editedBody: null, suggestion: null }, { footer: AUTO_POST_FOOTER }),
+          createdAt: new Date(),
+        })
+        .execute();
+      return { pr, first, finding: f, thread: th };
+    }
   });
 });

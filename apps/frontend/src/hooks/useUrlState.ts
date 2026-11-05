@@ -75,13 +75,13 @@ export function prTabToUrl(tab: PrDetailTab): string {
 }
 
 /**
- * The URL's `prTab` → the store's tab id, or null. Aliases: the retired Threads tab lands on
- * Changes (where the threads live now), and the old `claude_review` spelling still opens AI Review
- * (old links and bookmarks); the reconcile write then rewrites it to `ai_review`.
+ * The URL's `prTab` → the store's tab id, or null. Aliases: the retired Comments tab lands on
+ * Activity (which holds the conversation now), and the old `claude_review` spelling still opens AI
+ * Review (old links and bookmarks); the reconcile write then rewrites either to the current id.
  */
 export function prTabFromUrl(raw: string | null): PrDetailTab | null {
   if (raw == null || raw === '') return null;
-  const id = raw === 'threads' ? 'changes' : raw === 'ai_review' ? 'claude_review' : raw;
+  const id = raw === 'comments' ? 'activity' : raw === 'ai_review' ? 'claude_review' : raw;
   return (PR_DETAIL_TABS as readonly string[]).includes(id) ? (id as PrDetailTab) : null;
 }
 
@@ -100,6 +100,7 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'waiting_on_others',
   'bot_signal',
   'bot_only_review',
+  'ai_review',
 ];
 
 /**
@@ -550,8 +551,8 @@ export function readFromUrl(): Partial<FilterState> {
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
   // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
   // nothing rather than arming a pair for a PR nobody is looking at.
-  // The retired Threads tab lands on Changes, where the threads live now. A `?thread=` beside it
-  // still names the thread: PrDetail's selected-thread effect scrolls to it there.
+  // The retired Comments tab lands on Activity, which holds the conversation now. A `?thread=`
+  // beside any tab still names the thread: PrDetail's selected-thread effect shows it (`showThread`).
   // The AI Review tab is `ai_review` on the wire (agent-agnostic); the old `claude_review` is read
   // as an alias and the load's reconcile write REPLACES it with `ai_review` (`prTabFromUrl`).
   const prTab = prTabFromUrl(p.get('prTab'));

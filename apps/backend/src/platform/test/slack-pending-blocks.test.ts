@@ -128,13 +128,9 @@ describe('buildPendingBlocks', () => {
   });
 
   it('a red default branch is one subject, linked to its repo', () => {
-    const trunk = {
-      id: 't:1', kind: 'my_turn', reason: 'trunk_red', repoId: 10, repoFullName: 'acme/api',
-      branchName: 'main', prId: 55, failingChecks: ['build', 'lint'], failingCheckTotal: 3,
-    } as unknown as InsightCard;
     const ci = { id: 'c:1', kind: 'ci_failing', arm: 'trunk', repoId: 10, repoFullName: 'acme/api', prId: null } as unknown as InsightCard;
     const ci2 = { ...ci, failingChecks: ['build', 'lint'], failingCheckTotal: 3, branchName: 'main' } as unknown as InsightCard;
-    const t = texts(buildPendingBlocks(ctx(), board({ my_turn: { cards: [trunk] }, fixing: { cards: [ci2] } }), mk));
+    const t = texts(buildPendingBlocks(ctx(), board({ fixing: { cards: [ci2] } }), mk));
     expect(t).toEqual([
       `:rotating_light: *Needs fixing* · 1\n:red_circle: <${BASE}/app/?view=activity&workspace=3&activityRepo=10|acme/api main> — Default branch is red: build, lint and 1 more`,
     ]);
@@ -204,14 +200,16 @@ describe('buildPendingBlocks', () => {
     // "Waiting on others" is a PERSONAL tab — never in a team digest, so it has no wording here.
     const boardKinds = PENDING_TABS.filter((t) => t.key !== 'waiting')
       .flatMap((t) => t.kinds)
-      .filter((k) => k !== 'reviewer_load');
+      .filter((k) => k !== 'reviewer_load')
+      // The AI reviews reference list: personal, and built only for the live board.
+      .filter((k) => k !== 'ai_review');
     for (const kind of boardKinds) {
       expect(pendingCardText(pr(`k:${kind}`, kind, 1, { reason: 'mention', arm: 'your_pr', path: 'a.ts' })), kind).not.toBe('');
     }
     const reasons: MyTurnCardReason[] = [
       'review_request', 'mention', 'thread', 'thread_reply', 'comment_reply', 'pushed_since',
-      'own_ci_red', 'own_conflicts', 'trunk_red', 'pr_approved', 'own_ready', 'your_pr',
-      'own_thread', 'claude_review', 'watched_repo_pr',
+      'own_ci_red', 'own_conflicts', 'pr_approved', 'own_ready', 'your_pr',
+      'own_thread', 'claude_review', 'ai_approved_merged', 'watched_repo_pr',
     ];
     expect(Object.keys(MY_TURN_REASON_TEXT).sort()).toEqual([...reasons].sort());
   });
@@ -222,7 +220,7 @@ describe('buildPendingBlocks', () => {
       `Auto review: ${detail}`,
     );
     expect(pendingCardText(pr('m', 'my_turn', 1, { reason: 'claude_review', trigger: 'manual', detail }))).toBe(
-      `AI review: ${detail}`,
+      `New AI review: ${detail}`,
     );
   });
 });

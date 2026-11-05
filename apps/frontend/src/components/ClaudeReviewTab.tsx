@@ -100,6 +100,7 @@ import {
   useUpdateFinding,
   useUpdateReview,
 } from '../hooks/useClaudeReview.js';
+import { useClaudeReviewSeen } from '../hooks/useClaudeReviewSeen.js';
 import { highlightBlock, languageForPath } from '../lib/hljsLines.js';
 import { hunkLineMarker, useHunkHighlight } from './DiffHunk.js';
 import { writeClipboard } from './CopyButton.js';
@@ -2093,6 +2094,9 @@ export function ClaudeReviewTab({
   const ai = useAiCapabilities();
   const { data, isLoading } = useClaudeReview(pr.id);
   const review = data?.review ?? null;
+  // The tab has this finished run on screen: the reader has SEEN it (My Turn's "New AI review"
+  // card retires). Once per run, only while the server says it is unseen.
+  useClaudeReviewSeen(pr.id, review, data?.enabled === true);
 
   // WHICH FILES THIS PR TOUCHES — assembled WITHOUT issuing a request. `pr.files` is the
   // lean metadata list already on the PrDetail payload, and `['pr-files', prId]` is the

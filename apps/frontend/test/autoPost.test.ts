@@ -171,6 +171,12 @@ describe('the mounts', () => {
     expect(s).toContain('const storedPostOn = storedPost?.enabled !== false;');
     expect(s).toContain('const storedVerdict = storedPost?.autoVerdict !== false;');
     expect(s).toContain('Posting and Approve or request changes are on by default.');
+    // "Resolve my Limn threads when addressed": ON unless stored false, sent with the rest, and
+    // outside the posting block (it acts with posting and auto review off).
+    expect(s).toContain('const storedResolveOwn = storedPost?.resolveOwnPrs !== false;');
+    expect(s).toContain('resolveOwnPrs: resolveOwn,');
+    expect(s.indexOf('data-resolve-own')).toBeGreaterThan(s.indexOf('Resolve Limn’s threads once fixed'));
+    expect(s.indexOf('data-resolve-own')).toBeLessThan(s.indexOf('data-teammate-lift'));
   });
 
   it('the Claude Review tab and Story check render the chip and the failure line', () => {

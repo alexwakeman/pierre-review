@@ -21,7 +21,6 @@ import type {
   FlowPointerEvidence,
   PendingBoardSnapshot,
   SprintComparisonMode,
-  WorkPlanEvidence,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
@@ -915,32 +914,11 @@ export interface ProHostQueries {
     window: { fromMs: number; toMs: number },
     opts?: { evidence?: boolean },
   ): Promise<PersonPeriod | null>;
-  // The work-plan fold (core db/work-plan.ts): the workspace's prioritised worklist — every
-  // figure, id, link and RANK code-derived, capped at WORK_PLAN_ITEM_CAP, with the uncapped
-  // per-kind totals beside it. Typed with the SHARED `WorkPlanEvidence` (not `Promise<unknown>`)
-  // for the same reason getSynthesisInput and getDailyBriefCounts are: the plugin's payload hash
-  // folds these very fields, and a cast-and-hope seam is exactly where a hash formula drifts.
-  // ⚠ THE ALIGNMENT CONTRACT rides on this return: `counts` is folded from the SAME
-  // `/api/attention` cards `getDailyBriefCounts` above counts, so the panel can be ASSERTED equal
-  // to the strip above it. A divergence is a defect in ONE fold, not two opinions — so neither
-  // this seam nor the plugin may re-derive a count it could have read from here.
-  // ⚠ `evidence.generatedAt` and any `facts.ageHours` are DERIVED FROM `now`: they must never
-  // enter the plugin's payload hash, or a dormant workspace re-bills on a timer.
-  //
-  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21. This is the `registerAccountErasure?` precedent
-  // (above) applied to a query member: a REQUIRED addition here is the case that would demand a
-  // bump, and a bump is four literals across TWO REPOS whose half-application degrades the ENTIRE
-  // plugin to OSS mode with nothing thrown. Optional degrades in ONE feature instead: a newer
-  // plugin against an older host finds it `undefined` and reports `enabled: false` for the work
-  // plan alone, while every other capability keeps serving. Purely additive — an older plugin
-  // simply never calls it.
-  getWorkPlan?(accountId: number, scope: BotScopeWire): Promise<WorkPlanEvidence>;
-
   // CHRONOLOGY POINTERS: the evidence the plugin's Haiku narration may see (core
   // db/flow-pointers.ts) — the same `getFlowCourts` pass the panel renders, trimmed to bounded
   // rows, plus the slowest and quickest PR per size band with the first thing a reviewer said.
   // ⚠ NO PERSON: no actor ids, and every @handle in the text is masked before it leaves core.
-  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. A newer
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `registerAccountErasure?` precedent verbatim. A newer
   // plugin against an older host finds it `undefined` and reports `enabled:false` for the pointers
   // alone.
   // `opts.reporting` (trailing optional, no bump): measure the workspace's REPORTING WINDOW instead
@@ -971,7 +949,7 @@ export interface ProHostQueries {
   // WORKSPACE MEMBERSHIP, never on a `repoIds` narrowing — a per-seat invoice does not shrink
   // because the reader filtered a chart.
   //
-  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent above, verbatim. A
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `registerAccountErasure?` precedent, verbatim. A
   // required addition is the case that would demand a bump, and a bump is four literals across TWO
   // REPOS whose half-application degrades the ENTIRE plugin to OSS mode with nothing thrown.
   // Optional degrades ONE reading instead: a newer plugin against an older host cannot resolve a
@@ -994,7 +972,7 @@ export interface ProHostQueries {
   // ⚠ CANDIDATES ARE THE CALLER'S — this seam never re-decides who is a bot, and the result is
   // always a subset of what was passed in.
   //
-  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` / `workspaceHumanSeatCount`
+  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `registerAccountErasure?` / `workspaceHumanSeatCount`
   // precedent verbatim. Absent, the plugin hides nothing and the Benchmark behaves exactly as it
   // did before this existed; nothing else degrades.
   dormantBotUserIds?(
@@ -1009,7 +987,7 @@ export interface ProHostQueries {
   // `InsightPrRef.authorIsBot`), with no `claude_reviews` row at all - oldest first, at most
   // `limit`; plus how many AUTO runs this workspace started at or after `dayStartMs`. null = the
   // workspace is not the account's.
-  // ⚠ OPTIONAL ON PURPOSE - apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. Absent, the
+  // ⚠ OPTIONAL ON PURPOSE - apiVersion STAYS 21, the `registerAccountErasure?` precedent verbatim. Absent, the
   // sweeper does nothing.
   getAutoReviewCandidates?(
     accountId: number,
@@ -1029,7 +1007,7 @@ export interface ProHostQueries {
   // the route's two live extras (failing-check names, suggested reviewers): a cron send may not
   // spend GitHub budget. ⚠ LIVE STATE — never part of a payload hash (the sprint report's
   // included), or every send re-bills. ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the
-  // `getWorkPlan` precedent: an older host leaves it undefined and the Pending sections are absent.
+  // `registerAccountErasure?` precedent: an older host leaves it undefined and the Pending sections are absent.
   getPendingBoard?(accountId: number, workspaceId: number): Promise<PendingBoardSnapshot>;
 }
 
@@ -1174,7 +1152,7 @@ export interface ProContext {
   // the model; the HOST owns the hunk, the validators and the suggestion store.
   //
   // ⚠ OPTIONAL, SO apiVersion STAYS 21 — a new optional MEMBER on `ProContext`, the narrow
-  // "additive" test the `appWebUrl` / `registerAccountErasure` / `getWorkPlan` precedents already
+  // "additive" test the `appWebUrl` / `registerAccountErasure` precedents already
   // ride. A plugin built against an older host finds it `undefined` and registers no
   // conflict-assist route at all; nothing else degrades. A REQUIRED member here would be the case
   // that demands a bump, and a bump is four literals across TWO REPOS whose half-application

@@ -1,54 +1,19 @@
-// ── The work plan's CODE-DERIVED EVIDENCE (CORE, deterministic, no AI) ───────────────────────
+// ── THE DO NEXT SCORER (CORE, deterministic, no AI) ─────────────────────────────────────────
 //
-// "What should I work on today", for ONE workspace, as a ranked worklist. The Pro plugin narrates
-// it; NOTHING here is model-touched. Every figure, id, link and rank in `WorkPlanEvidence` is
-// computed by this file, and the model may only foreground, order and annotate what it is handed.
+// `scoreCards` gives every Pending card its Do next score; `db/pending-tabs.ts` ranks each tab by
+// it. NOTHING here is model-touched. The cards come from ONE fold — `getWorkspaceInsights`, which
+// is also what `GET /api/attention` serves — so the scorer re-orders one population and derives
+// none of it.
 //
-// ── WHY THIS FILE CALLS `getWorkspaceInsights` INSTEAD OF DERIVING ANYTHING ──────────────────
-// THE BRIEF SAYS HOW MUCH. THE PLAN SAYS IN WHAT ORDER. THEY ARE ONE POPULATION.
-//
-// The daily-brief strip sits directly above this panel and counts the cards of ONE fold —
-// `getWorkspaceInsights(accountId, undefined, scope)`, which is also what `GET /api/attention`
-// serves. So ALL SEVEN of this plan's signals are read off THOSE CARDS, never re-derived:
-// re-deriving "an untouched thread" here would be a second predicate, and the day it disagreed
-// with the strip the user would be looking at two numbers for one population. `counts` below
-// travels on the wire precisely so that agreement is ASSERTABLE (work-plan.test.ts asserts it
-// field-by-field against `computeBriefCounts`) rather than hoped for.
-//
-// ⚠ THE COUNT LOOP AT THE BOTTOM OF `foldCounts` IS A SECOND SPELLING OF db/daily-brief.ts's.
-// It is deliberately IDENTICAL, predicate for predicate — `personal` for the personal subset, NOT
-// `relevance`, exactly as the brief does it. If you change one, change the other, and the
-// alignment test is what makes forgetting fail rather than ship.
-//
-// ── ALL SEVEN SIGNALS ARE NOW CARD-DERIVED ──────────────────────────────────────────────────
-// "This can land right now" and "GitHub is refusing until you update the branch" USED to come from
-// a standalone open-PR query in this file — which made the ranked list a SECOND POPULATION beside
-// the board it sits on. They are now `merge` / `update_branch` INSIGHT CARDS emitted by
-// `getWorkspaceInsights` (see the emitter there for the predicates and the no-author-filter rule),
-// so this file re-orders one population and derives none of it.
-//
-// ⚠ INHERITED NARROWINGS, BOTH DELIBERATE AND BOTH REAL. The card fold applies an ULTRA-STALE
-// GATE (no activity event in `INSIGHT_MAX_STALE_DAYS` = 90 ⇒ no card), and a row is drawn only
-// from a card the Pending board LISTS (the board's uncapped fold, then `boardListCap` per list
-// group — `listedCardIds`). A long-dormant-but-mergeable PR therefore does not appear here — and
-// that is the point: the plan's `why` is shown on the row's card, so a row with no listed card
-// behind it would be a sentence with nowhere to go.
-//
-// ── THE RANK IS THE CODE'S, NOT THE MODEL'S ─────────────────────────────────────────────────
+// ── THE RANK IS THE CODE'S ──────────────────────────────────────────────────────────────────
 // `score = w.proximity·proximity + w.stall·stallRisk + w.relevance·relevanceWeight`, with the
-// READER's weights (Settings → My Turn; 0.50 / 0.30 / 0.20 until they choose), sorted descending
-// with a TOTAL tie-break chain, so two ticks over unchanged data produce byte-identical order. A
-// sort that could flip under the reader between polls is a defect in a panel people read top-down.
-// The weights are not hashed: changing them can change WHICH rows the capped plan holds (the plan
-// then reads `stale` once), never a hashed field of a row.
+// READER's weights (Settings → My Turn; 0.50 / 0.30 / 0.20 until they choose). Two ticks over
+// unchanged data produce the same scores.
 //
-// ⚠ `ageHours`, `stallRisk` and `score` are DERIVED FROM `now`. They must never enter the
-// plugin's payload hash, or a dormant workspace re-bills on a timer. Everything else on an item —
-// id, kind, ids, url, relevance, `reason`, `proximity` — is stable across ticks for unchanged
-// data, and `reason` is deliberately written WITHOUT relative-time phrasing ("3d ago") so that it
-// stays hashable.
+// (The file keeps its old name: it once also built the "Plan my day" worklist, removed
+// 2026-11-04. The `WorkPlan*` row types are the scorer's working rows.)
 import { and, count, eq, inArray } from 'drizzle-orm';
-import { DO_NEXT_RULES, PENDING_LIMITS } from '@pierre-review/shared';
+import { DO_NEXT_RULES } from '@pierre-review/shared';
 import type {
   CiFailingCard,
   ConflictsCard,
@@ -65,16 +30,13 @@ import type {
   SecurityCard,
   StalledReviewCard,
   UntouchedThreadCard,
-  WorkPlanEvidence,
   WorkPlanFacts,
   WorkPlanItem,
   WorkPlanKind,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
-import { getWorkspaceInsights, mergeCardDetail, type BotScope } from './queries.js';
+import { mergeCardDetail } from './queries.js';
 import { dependencyProximityBase } from './dependency-cards.js';
-import { getMyTurnSettings } from './my-turn-settings.js';
-import { listedCardIds } from './pending-tabs.js';
 import { approvalInfoFromStandings, computeReviewStandingsByPr } from './triage.js';
 
 const { pullRequests, reviewThreads } = schema;
@@ -82,19 +44,6 @@ const { pullRequests, reviewThreads } = schema;
 // ⚠ EVERY NUMBER BELOW IS READ FROM `DO_NEXT_RULES` (packages/shared/src/pending-rules.ts), which
 // the Pending board's info popovers also print. Retune the ranker THERE, never with a local
 // literal, or the app will explain an order it no longer produces.
-
-/** How many rows the panel paints. `totals` carries the UNCAPPED population per kind, so a capped
- *  list can always disclose what it left out — a truncation nobody is told about is a lie about
- *  the size of the day. */
-export const WORK_PLAN_ITEM_CAP = DO_NEXT_RULES.cap;
-
-/**
- * The plan's ranked rows as `InsightCard` ids, in rank order — the join the SPA makes from a
- * narration step to the card it describes (`WorkPlanItem.cardId`).
- */
-export function doNextCardIds(evidence: WorkPlanEvidence): string[] {
-  return evidence.items.map((i) => i.cardId).filter((id): id is string => id != null);
-}
 
 const HOUR_MS = 3_600_000;
 
@@ -205,7 +154,7 @@ function scoreFor(
 }
 
 /** A classic my_turn card's `reason` → the plan's kind. Somebody answered, named or wrote after
- *  you — a reply is owed. Everything else lands on the PR itself, which is review work. (The five
+ *  you — a reply is owed. Everything else lands on the PR itself, which is review work. (The four
  *  promotions never reach here: each scores as its HOME kind did — see the my_turn arm.) */
 function kindForMyTurn(reason: ClassicMyTurnReason): 'review' | 'reply' {
   return reason === 'thread' ||
@@ -219,7 +168,7 @@ function kindForMyTurn(reason: ClassicMyTurnReason): 'review' | 'reply' {
 /** The my_turn reasons that are a summons rather than a promotion of your own work. */
 type ClassicMyTurnReason = Exclude<
   MyTurnCardReason,
-  'own_ci_red' | 'own_conflicts' | 'own_ready' | 'own_thread' | 'trunk_red'
+  'own_ci_red' | 'own_conflicts' | 'own_ready' | 'own_thread'
 >;
 
 /** DEDUP PRIORITY, and it is deliberately TIME-FREE. Several my_turn reasons collapse onto one
@@ -229,7 +178,7 @@ type ClassicMyTurnReason = Exclude<
  *  timer and re-bill a dormant workspace. So the winner is fixed by severity, then by this rank. */
 ///
 /// Every reason, in the product's DEFAULT type order (`MY_TURN_DEFAULT_ORDER`) — fixed, never the
-/// reader's order, because a hashed `reason` must not change with a display preference. The five
+/// reader's order, because a hashed `reason` must not change with a display preference. The four
 /// promotions are never read here (they rank as their home kinds do), but the `Record` forces an
 /// entry. ⚠ The tie rank is `SEVERITY_RANK × 100 + REASON_RANK`: with fifteen reasons a × 10 would
 /// let a reason bleed across a severity band.
@@ -242,12 +191,12 @@ const REASON_RANK: Record<MyTurnCardReason, number> = {
   pushed_since: 5,
   own_ci_red: 6,
   own_conflicts: 7,
-  trunk_red: 8,
-  pr_approved: 9,
-  own_ready: 10,
-  your_pr: 11,
-  own_thread: 12,
-  claude_review: 13,
+  pr_approved: 8,
+  own_ready: 9,
+  your_pr: 10,
+  own_thread: 11,
+  claude_review: 12,
+  ai_approved_merged: 13,
   watched_repo_pr: 14,
 };
 
@@ -277,129 +226,6 @@ function hoursSince(iso: string | null | undefined, now: number): number | undef
 
 const plural = (n: number, one: string, many = `${one}s`): string => (n === 1 ? one : many);
 
-/** The counts half of the evidence — a SECOND SPELLING of db/daily-brief.ts's `computeBriefCounts`
- *  loop, restricted to the six fields `WorkPlanEvidence.counts` carries.
- *
- *  ⚠ PREDICATE FOR PREDICATE IDENTICAL, and `myTurnPersonal` uses `c.personal` for exactly the
- *  reason the brief does: `personal` is the boolean the notification surfaces count, and re-reading
- *  it off `relevance` here would be a third derivation of the same fact. (The ITEM's `relevance`
- *  below deliberately treats an ABSENT field as 'none' instead — a missing field may never invent
- *  an ownership claim in card copy. The two rules answer different questions and both are right.) */
-function foldCounts(
-  insights: Awaited<ReturnType<typeof getWorkspaceInsights>>,
-): WorkPlanEvidence['counts'] {
-  const cards = insights.cards;
-  let myTurn = 0;
-  let myTurnPersonal = 0;
-  let ciFailing = 0;
-  let stalled = 0;
-  let untouchedThreads = 0;
-  let needsReviewer = 0;
-  for (const c of cards) {
-    if (c.kind === 'ci_failing') ciFailing += 1;
-    // A finished Claude review has its own tab; My turn's figures leave it out (as the brief does).
-    else if (c.kind === 'my_turn' && c.reason === 'claude_review') continue;
-    else if (c.kind === 'my_turn') {
-      myTurn += 1;
-      if (c.personal) myTurnPersonal += 1;
-    } else if (c.kind === 'stalled_review') stalled += 1;
-    else if (c.kind === 'untouched_thread') untouchedThreads += 1;
-    else if (c.kind === 'reviewer_routing') needsReviewer += 1;
-  }
-  // The three survey counts are the UNCAPPED populations, exactly as the brief now reports them —
-  // see `computeBriefCounts`. (The Pro plan hash leaves `counts` out, so this moves no stored plan.)
-  const t = insights.kindTotals;
-  // …and the my_turn / ci figures are what the Pending board LISTS, min(total, boardListCap) — the
-  // brief's rule too (see `computeBriefCounts`), so the two stay equal field for field.
-  const listed = (total: number | undefined, fallback: number): number =>
-    total == null ? fallback : Math.min(total, PENDING_LIMITS.boardListCap);
-  return {
-    myTurn: listed(insights.myTurnTotal, myTurn),
-    myTurnPersonal: listed(insights.myTurnPersonalTotal, myTurnPersonal),
-    ciFailing: listed(insights.ciFailingTotal, ciFailing),
-    stalled: t?.stalled_review ?? stalled,
-    untouchedThreads: t?.untouched_thread ?? untouchedThreads,
-    needsReviewer: t?.reviewer_routing ?? needsReviewer,
-  };
-}
-
-function emptyEvidence(workspaceId: number, generatedAt: Date): WorkPlanEvidence {
-  return {
-    workspaceId,
-    generatedAt: generatedAt.toISOString(),
-    items: [],
-    totals: {},
-    counts: {
-      myTurn: 0,
-      myTurnPersonal: 0,
-      ciFailing: 0,
-      stalled: 0,
-      untouchedThreads: 0,
-      needsReviewer: 0,
-    },
-  };
-}
-
-/**
- * THE WORK PLAN'S EVIDENCE — ranked, capped, and entirely code-derived.
- *
- * Takes an ALREADY-RESOLVED `BotScope` (the caller owns `resolveWorkspaceScope`, exactly like
- * every other scoped reader).
- *
- * ⚠ `scope.repoIds.length === 0` IS A REAL ANSWER — "this workspace is empty" — not a licence to
- * widen to the account. It short-circuits to empty evidence (which also dodges the
- * `inArray(col, [])` pitfall), and its all-zero `counts` still agree with the brief, whose fold
- * returns the same zeros for the same workspace.
- */
-export async function getWorkPlan(
-  accountId: number,
-  scope: BotScope,
-): Promise<WorkPlanEvidence> {
-  // ⚠ THE SAME CALL `GET /api/attention` MAKES — same fold, same scope, same DEFAULT window
-  // (`undefined`), and UNCAPPED like the board's. A different window here would silently give the
-  // plan a different population from the strip and the board; the capped fold (15 per kind in
-  // severity / newest order, 50 my_turn cards) would hand the ranker cards the board does not
-  // list, and their `why` would have no card to sit on. `counts` reads `kindTotals` and the
-  // my_turn / ci totals, which are the same number in both folds, so the brief still agrees.
-  //
-  // ⚠ THIS SIGNATURE IS LOAD-BEARING ACROSS TWO REPOSITORIES. It is `ProHostQueries.getWorkPlan`,
-  // and changing its shape is the one thing here that would force an `apiVersion` bump in four
-  // literals spanning the host and the plugin submodule. The split below moves the BODY out; the
-  // signature does not move.
-  const insights = await getWorkspaceInsights(accountId, undefined, scope, { uncapped: true });
-  return rankWorkPlan(accountId, scope, insights);
-}
-
-/**
- * THE RANK ITSELF, over an ALREADY-FOLDED `getWorkspaceInsights` result.
- *
- * Split out of `getWorkPlan` so that `GET /api/attention` — which has just run that exact fold to
- * build the board — can rank the same cards without folding them a second time. Two folds in one
- * request would be two populations one refresh apart, which is the whole class of bug the Pending
- * consolidation exists to remove.
- *
- * ⚠ THE EMPTY-SCOPE SHORT-CIRCUIT LIVES HERE, not in the wrapper, so BOTH callers inherit it.
- */
-export async function rankWorkPlan(
-  accountId: number,
-  scope: BotScope,
-  insights: Awaited<ReturnType<typeof getWorkspaceInsights>>,
-): Promise<WorkPlanEvidence> {
-  const now = Date.now();
-  const generatedAt = new Date(now);
-  if (scope.repoIds.length === 0) return emptyEvidence(scope.workspaceId, generatedAt);
-  const counts = foldCounts(insights);
-  // The READER's weights, the same ones the Pending board ranks by — so the plan and the board
-  // below it order one population one way.
-  const settings = await getMyTurnSettings(accountId);
-  const { candidates, scored } = await scoreCards(accountId, insights.cards, now, settings.weights);
-  // ⚠ A ROW MUST NAME A CARD THE BOARD LISTS. The plan's `why` is shown on its card; a row whose
-  // card sits below a tab's `boardListCap` has nowhere to go, and the kind / repo spread in
-  // `capWithKindCoverage` seats exactly such low-scoring rows. The board's own listing rule decides.
-  const listed = listedCardIds(insights.cards, scored, settings.order);
-  return rankCandidates(scope, generatedAt, counts, candidates, listed);
-}
-
 /** One card's Do next score and its working, as the Pending board lists it. */
 export interface ScoredCard extends PendingCardScore {
   cardId: string;
@@ -407,13 +233,12 @@ export interface ScoredCard extends PendingCardScore {
 }
 
 /**
- * EVERY CARD'S DO NEXT SCORE — the one scorer behind both the Pro work plan's ranked rows and the
- * Pending board's tabs, so the two can never score one card two ways.
+ * EVERY CARD'S DO NEXT SCORE — the one scorer behind the Pending board's tabs.
  *
- * Returns the work-plan `candidates` (the seven signals, with ids / reasons / dedup ranks) and
+ * Returns the scorer's working rows (`candidates`: the seven signals, with ids / reasons) and
  * `scored` — the same score for EVERY scorable card, plus the BOARD-ONLY kinds (`conflicts`,
- * `security`, `dependency_bump`), which the board ranks and the work plan never names. Review load
- * and the bot cards get no score.
+ * `security`, `dependency_bump`), which have no working row. Review load and the bot cards get no
+ * score.
  */
 export async function scoreCards(
   accountId: number,
@@ -423,17 +248,15 @@ export async function scoreCards(
   // can forget it and quietly rank by the product default while the board prints the reader's.
   weights: DoNextWeights,
 ): Promise<{ candidates: Candidate[]; scored: ScoredCard[] }> {
-  // Cards the Pending board ranks and the work plan never names — see the note at the loop's end.
+  // Cards the Pending board ranks that have no working row — see the note at the loop's end.
   const boardOnly: ScoredCard[] = [];
   // ── the shared per-PR facts every PR-grained row wants ────────────────────────────────────
   // Batched over the UNION of PR ids the plan could name, so every row gets the same
   // merge/approval/thread facts for free.
   const cardPrIds = new Set<number>();
   for (const c of cards) {
-    // A red-trunk my_turn card adds nothing: its `prId` is only the landing PR of the branch's
-    // head, and the trunk arm takes no PR facts (see the ci_failing arm below).
     if (c.kind === 'my_turn') {
-      if (c.reason !== 'trunk_red') cardPrIds.add(c.prId);
+      cardPrIds.add(c.prId);
     } else if (
       c.kind === 'stalled_review' ||
       c.kind === 'untouched_thread' ||
@@ -529,9 +352,8 @@ export async function scoreCards(
     id: string,
     tieRank: number,
     parts: {
-      /** The `InsightCard.id` this row came from — the SPA's join key from a narration step to a
-       *  board row. REQUIRED, and every arm can supply one now that all seven signals fold off
-       *  cards; a row without one would be unreachable from the Pending board's head. */
+      /** The `InsightCard.id` this row came from — `ScoredCard.cardId` is read off it. REQUIRED;
+       *  a row without one would score nothing on the board. */
       cardId: string;
       prId: number | null;
       repoId: number;
@@ -628,32 +450,6 @@ export async function scoreCards(
     }
 
     if (card.kind === 'my_turn') {
-      // ⚠ BRANCH ON THE TRUNK CARD FIRST. `kind === 'my_turn'` narrows to a union whose `prId` is
-      // nullable, and a cast to `MyTurnCard` here would hide exactly the repo-grained card the
-      // compiler exists to make every consumer handle.
-      if (card.reason === 'trunk_red') {
-        const c = card;
-        // A PROMOTED red trunk scores EXACTLY as the ci_failing trunk arm below does — same kind,
-        // same id, same repo-only facts — so the plan's evidence is the same whether or not the
-        // reader promoted it. Only `relevance` (theirs now) and `cardId` differ.
-        push('unblock_ci', `wp:unblock_ci:trunk:${c.repoId}`, SEVERITY_RANK[c.severity], {
-          cardId: c.id,
-          prId: c.prId,
-          repoId: c.repoId,
-          repoFullName: c.repoFullName,
-          prNumber: c.prNumber,
-          prTitle: c.prTitle,
-          githubUrl: c.githubUrl,
-          subject: 'repo',
-          relevance: c.relevance ?? 'none',
-          facts: { ciStatus: c.ciStatus, ageHours: hoursSince(c.observedAt, now), clock: 'observed' },
-          reason: c.maintained
-            ? 'Trunk is red in a repo you maintain — every open PR here builds on it'
-            : 'Trunk is red — every open PR here builds on it',
-          proximityBase: 'red_trunk',
-        });
-        continue;
-      }
       const c = card;
       // THE FOUR PR-GRAINED PROMOTIONS score EXACTLY as their home cards did — the same
       // `WorkPlanKind`, the same id, the same facts, the same `reason` sentence — so the Pro plan's
@@ -1057,179 +853,6 @@ function roundAge(hours: number | undefined): number | null {
   return hours == null ? null : Math.round(hours * 10) / 10;
 }
 
-/** The work plan's dedup → rank → cap over already-scored candidates. `listed` is the board's
- *  listed card ids: rows are drawn only from candidates whose card is listed, while `totals` still
- *  counts every row, so the cap disclosure covers what the board left out too. */
-function rankCandidates(
-  scope: BotScope,
-  generatedAt: Date,
-  counts: WorkPlanEvidence['counts'],
-  candidates: Candidate[],
-  listed: ReadonlySet<string>,
-): WorkPlanEvidence {
-  const ranked = dedupAndRank(candidates);
-
-  // The UNCAPPED population per kind, folded off the pre-cap array — the disclosure that keeps
-  // WORK_PLAN_ITEM_CAP from reading as "that is everything".
-  //
-  // ⚠ IT COUNTS ITEMS, NOT CARDS, and is therefore NOT comparable to `counts` above: `counts` is
-  // the brief-aligned CARD population, `totals` is the post-dedup ROW population the capped list
-  // is drawn from. Two different questions; conflating them would make one of the two wrong.
-  const totals: Partial<Record<WorkPlanKind, number>> = {};
-  for (const item of ranked) totals[item.kind] = (totals[item.kind] ?? 0) + 1;
-
-  // ⚠ FILTER BEFORE THE DEDUP, NOT AFTER. A PR's listed `merge` row and its unlisted `review` row
-  // collapse onto one survivor; deduping first could pick the unlisted one and then drop the PR.
-  // Which cards are listed is score-ordered, so on a list group over the cap this is the same
-  // bucket-crossing clock dependence the plugin's hash already accepts for the 12-row cap.
-  const onBoard = dedupAndRank(
-    candidates.filter((c) => c.item.cardId != null && listed.has(c.item.cardId)),
-  );
-
-  return {
-    workspaceId: scope.workspaceId,
-    generatedAt: generatedAt.toISOString(),
-    items: capWithKindCoverage(onBoard),
-    totals,
-    counts,
-  };
-}
-
-/** Dedup by id, then by PR, then rank — the rows the cap selects from. */
-function dedupAndRank(candidates: readonly Candidate[]): WorkPlanItem[] {
-  // ── dedup, rank ───────────────────────────────────────────────────────────────────────────
-  // ⚠ THE ID IS THE MODEL'S JOIN KEY, so it must be unique. Several signals collapse onto one id
-  // (a PR that is both "review requested" and "approved, waiting on you"); the survivor is chosen
-  // by the TIME-FREE `tieRank`, never by score — see REASON_RANK.
-  const byId = new Map<string, Candidate>();
-  for (const c of candidates) {
-    const prev = byId.get(c.item.id);
-    if (prev == null || c.tieRank < prev.tieRank) byId.set(c.item.id, c);
-  }
-
-  // ⚠ AND THEN AGAIN BY PR, BECAUSE ONE PR IS ONE JOB. Deduping on the id alone is not enough:
-  // the my_turn fold and the merge fold reach the same PR under DIFFERENT ids, so an approved,
-  // mergeable PR of yours arrived twice — `wp:merge:<id>` saying "Mergeable now · 1 approval ·
-  // checks green" and `wp:review:<id>` saying "Your PR is approved and waiting on you". That is
-  // one instruction printed twice, and on a real workspace it burned two of the twelve slots and
-  // pushed genuine work off the bottom. Observed on live data, invisible to every unit test,
-  // because each fold is individually correct.
-  //
-  // The survivor is the HIGHEST-PROXIMITY row: proximity is the "how few steps from landing"
-  // axis, so the row that survives is the one naming the action furthest along — "merge it"
-  // beats "it is approved", which is the same sentence with less information.
-  //
-  // ⚠ PROXIMITY, NOT SCORE. Score folds `stallRisk`, which is derived from `now`, so choosing by
-  // score would let the survivor — and therefore its `reason`, a HASHED field — change on a
-  // timer and re-bill a dormant workspace. Proximity is time-free. `tieRank` breaks a tie, also
-  // time-free.
-  //
-  // ⚠ ONLY PR-GRAINED ROWS. Two untouched threads on one PR are two distinct jobs, and a red
-  // TRUNK is repo-grained — its `prId` is merely the landing PR of the current head, which the
-  // card claims nothing about. Collapsing either into a sibling would delete real work.
-  const byPr = new Map<number, Candidate>();
-  const kept: Candidate[] = [];
-  for (const c of byId.values()) {
-    if (!c.prGrained || c.item.prId == null) {
-      kept.push(c);
-      continue;
-    }
-    const prev = byPr.get(c.item.prId);
-    if (
-      prev == null ||
-      c.item.proximity > prev.item.proximity ||
-      (c.item.proximity === prev.item.proximity && c.tieRank < prev.tieRank)
-    ) {
-      byPr.set(c.item.prId, c);
-    }
-  }
-  const ranked = [...kept, ...byPr.values()].map((c) => c.item);
-  ranked.sort(
-    (a, b) =>
-      b.score - a.score ||
-      // Tie-breaks, in order, and the chain is TOTAL: two ticks over unchanged data must produce
-      // byte-identical order or rows flip under the reader between polls.
-      (b.facts.ageHours ?? -1) - (a.facts.ageHours ?? -1) ||
-      (a.prId ?? Number.MAX_SAFE_INTEGER) - (b.prId ?? Number.MAX_SAFE_INTEGER) ||
-      // The last resort: ids are unique by construction above, so this can never tie.
-      a.id.localeCompare(b.id),
-  );
-  return ranked;
-}
-
-/**
- * Cap the ranked list at {@link WORK_PLAN_ITEM_CAP}, but SEAT THE BEST ROW OF EVERY KIND FIRST.
- *
- * ⚠ A PLAIN `.slice(0, CAP)` WOULD FILL THE WHOLE HEAD WITH ONE KIND. The old argument for this
- * pass — that a kind deleted by the cap reads as a fact about the workspace ("nothing is behind
- * trunk") — NO LONGER HOLDS: the head sits on top of the full board, and every displaced row is
- * still on screen, below the divider, in the tail. Keep the pass anyway, for the reason that
- * survives: the head PROMISES a spread of the day's work, and twelve rows of one kind above the
- * fold is the same failure moved one screen higher. The scoring weights `relevance`, so a
- * workspace with a dozen PRs naming the viewer directly out-scores every shared-work row.
- *
- * So: one slot per non-empty kind (highest-scoring member), then fill the remainder strictly by
- * score, then restore score order over the selection. `ranked` is already sorted by the total
- * tie-break chain above, so "first seen" IS "highest scoring", and the whole pass is stable.
- */
-function capWithKindCoverage(ranked: WorkPlanItem[]): WorkPlanItem[] {
-  if (ranked.length <= WORK_PLAN_ITEM_CAP) return ranked;
-
-  const chosen = new Set<string>();
-  const seenKind = new Set<WorkPlanKind>();
-  for (const item of ranked) {
-    if (seenKind.has(item.kind)) continue;
-    seenKind.add(item.kind);
-    chosen.add(item.id);
-    // Defensive: WorkPlanKind has seven members and the cap is twelve, so this cannot fire today.
-    // It is here so that shrinking the cap below the number of kinds degrades to "the top N kinds"
-    // rather than silently dropping the fill pass altogether.
-    if (chosen.size === WORK_PLAN_ITEM_CAP) break;
-  }
-  // ⚠ THE FILL PASS IS LEVELLED BY KIND *AND* BY REPO, and a plain "fill by score" is what it
-  // replaced. Seating one row per kind stops a kind being ABSENT; it does nothing to stop one
-  // kind DOMINATING, and on real data that is the failure that actually shipped:
-  //
-  //     0.725 update_branch none drizzle-team/drizzle-orm #5929
-  //     0.725 update_branch none drizzle-team/drizzle-orm #5938
-  //     …six more, byte-identical scores, same kind, same repo…
-  //
-  // EIGHT of twelve slots, one repo, one instruction — a "plan for the day" that is really one
-  // sentence copied eight times. It happens because the score DEGENERATES on a backlog: every row
-  // older than the top stall bucket carries `stallRisk === 1`, so that term is a constant, and
-  // when a workspace has no `direct` work the relevance term is constant too. What is left is
-  // `proximity`, which is per-KIND — so the ranking collapses into "sort by kind" and the fill
-  // pass takes a run.
-  //
-  // The rule: fill in LEVELS. On level N take the highest-scoring remaining rows whose kind has
-  // fewer than N seats AND whose repo has fewer than N seats. Both counters rise together, so the
-  // head spreads across kinds and repos before it doubles up on either, and it degrades cleanly —
-  // a workspace with one kind in one repo simply reaches its level and fills in score order.
-  // Deterministic, because `ranked` is already totally ordered.
-  const byKind = new Map<WorkPlanKind, number>();
-  const byRepo = new Map<number, number>();
-  for (const item of ranked) {
-    if (!chosen.has(item.id)) continue;
-    byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1);
-    byRepo.set(item.repoId, (byRepo.get(item.repoId) ?? 0) + 1);
-  }
-  for (let level = 2; chosen.size < WORK_PLAN_ITEM_CAP && level <= WORK_PLAN_ITEM_CAP + 1; level++) {
-    for (const item of ranked) {
-      if (chosen.size >= WORK_PLAN_ITEM_CAP) break;
-      if (chosen.has(item.id)) continue;
-      if ((byKind.get(item.kind) ?? 0) >= level) continue;
-      if ((byRepo.get(item.repoId) ?? 0) >= level) continue;
-      chosen.add(item.id);
-      byKind.set(item.kind, (byKind.get(item.kind) ?? 0) + 1);
-      byRepo.set(item.repoId, (byRepo.get(item.repoId) ?? 0) + 1);
-    }
-  }
-  return ranked.filter((i) => chosen.has(i.id));
-}
-
-/** CODE-WRITTEN blockers for the my_turn reasons. ⚠ Deliberately free of relative-time phrasing
- *  (the card's own `detail` says "3d ago"): `reason` is a stable, hashable field and a clock
- *  inside it would re-bill a dormant workspace on a timer. */
 function myTurnReason(reason: ClassicMyTurnReason): string {
   switch (reason) {
     case 'review_request':
@@ -1251,6 +874,8 @@ function myTurnReason(reason: ClassicMyTurnReason): string {
     case 'watched_repo_pr':
       return 'New PR you have not reviewed or commented on';
     case 'claude_review':
-      return 'An AI review has finished and needs actioning';
+      return 'Your Limn finished an AI review you have not read yet';
+    case 'ai_approved_merged':
+      return 'Merged after your Limn approved it — take a quick look';
   }
 }

@@ -66,11 +66,18 @@ describe('opening at a section opens its tab', () => {
   it('focus beats the last tab; the last tab beats the first', () => {
     expect(initialSettingsTab('issue-tracker', 'bots', true)).toBe('integrations');
     expect(initialSettingsTab(null, 'bots', true)).toBe('bots');
-    expect(initialSettingsTab(null, null, true)).toBe('pull-requests');
+    expect(initialSettingsTab(null, null, true)).toBe('appearance');
   });
   it('never opens on a tab that is not shown (AI off)', () => {
-    expect(initialSettingsTab(null, 'ai-review', false)).toBe('pull-requests');
+    expect(initialSettingsTab(null, 'ai-review', false)).toBe('appearance');
     expect(visibleSettingsTabs(false).some((t) => t.aiOnly)).toBe(false);
+  });
+});
+
+describe('Appearance comes first', () => {
+  it('is the first tab and holds the colour scheme', () => {
+    expect(SETTINGS_TABS[0]!.id).toBe('appearance');
+    expect(SETTINGS_TABS[0]!.global).toEqual(['AppearanceSection']);
   });
 });
 
@@ -79,13 +86,14 @@ describe('arrow keys move between tabs', () => {
   it('wraps both ways in both orientations', () => {
     expect(tabForKey('ArrowDown', 'pull-requests', tabs)).toBe('pending');
     expect(tabForKey('ArrowRight', 'pull-requests', tabs)).toBe('pending');
-    expect(tabForKey('ArrowUp', 'pull-requests', tabs)).toBe('bots');
+    expect(tabForKey('ArrowUp', 'pull-requests', tabs)).toBe('appearance');
+    expect(tabForKey('ArrowUp', 'appearance', tabs)).toBe('bots');
     expect(tabForKey('ArrowLeft', 'bots', tabs)).toBe('integrations');
-    expect(tabForKey('ArrowDown', 'bots', tabs)).toBe('pull-requests');
+    expect(tabForKey('ArrowDown', 'bots', tabs)).toBe('appearance');
   });
   it('Home and End jump; other keys do nothing', () => {
     expect(tabForKey('End', 'pending', tabs)).toBe('bots');
-    expect(tabForKey('Home', 'bots', tabs)).toBe('pull-requests');
+    expect(tabForKey('Home', 'bots', tabs)).toBe('appearance');
     expect(tabForKey('Enter', 'bots', tabs)).toBeNull();
   });
 });

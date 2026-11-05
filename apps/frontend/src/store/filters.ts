@@ -128,17 +128,16 @@ export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'bench
 // data-gated) — the store holds the CHOICE, never a computed effective tab.
 // ⚠ ON THE WIRE `claude_review` IS `ai_review` (useUrlState.ts `prTabToUrl` / `prTabFromUrl`; the old
 // spelling is still read). `story` is the PR's linked story (PrStoryTab.tsx).
-// There is NO 'threads' member any more: review threads live in the Changes tab (inline in the
-// diff, or its "Threads only" view). The URL layer reads a legacy `?prTab=threads` as 'changes'.
+// THREADS IS ITS OWN TAB again (2026-11-04): the review threads without the code. Inline in the diff
+// they still live in Changes; "Show in context" moves from Threads to Changes (`openInChanges`).
 //
-// ⚠ `'activity'` IS NO LONGER A TAB IN THE STRIP. The Activity list is a collapsible section at the
-// foot of Overview; the member survives so an old `?prTab=activity` link (and the timeline's
-// commit-popover deep link, which seats it) still means something: Overview, with that section
-// OPEN. PrDetail derives both from it; nothing writes it back to `'overview'`.
+// ACTIVITY IS ITS OWN TAB: every comment, review, commit and lifecycle event, newest first, with
+// the composer. It replaced the Comments tab, so 'comments' is no longer a member: the URL layer
+// (`prTabFromUrl`) and the per-PR view memory read an old `comments` as 'activity'.
 export type PrDetailTab =
   | 'overview'
-  | 'comments'
   | 'activity'
+  | 'threads'
   | 'changes'
   | 'bot_activity'
   | 'claude_review'
@@ -146,8 +145,8 @@ export type PrDetailTab =
   | 'story';
 export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'overview',
-  'comments',
   'activity',
+  'threads',
   'changes',
   'bot_activity',
   'claude_review',
@@ -596,20 +595,20 @@ export interface FilterState {
   // Selection/reading state, so — like `insightsReportKey` — it is NOT in FilterDefaults and
   // "Clear filters" leaves it alone.
   insightsReportGrain: PeriodGrain;
-  // PR-detail threads bot filter: when set, the Changes tab's Threads only view shows ONLY that review
+  // PR-detail threads bot filter: when set, the Threads tab shows ONLY that review
   // vendor's threads (set by clicking a "CodeRabbit · 12 · 3 unresolved" chip in Overview).
   // null = no filter. Transient; cleared when the PR changes / selection clears.
   threadBotFilter: ReviewBotKind | null;
-  // A request to land a PR's detail on its Changes tab's Threads only view, unfiltered (the Open
+  // A request to land a PR's detail on its Threads tab, unfiltered (the Open
   // PRs drawer's "N threads" link). Holds the PR id; PrDetail consumes it once and clears it.
   threadsViewRequest: number | null;
-  // PR-detail Threads only view's derived-STATE filter pills (Untouched/Replied/Likely-addressed/
+  // PR-detail Threads tab's derived-STATE filter pills (Untouched/Replied/Likely-addressed/
   // Resolved), matching the feed's state pills. Empty = all shown. Preset to
   // {likely_addressed} when arriving from the resolvable-bot-threads tab. Transient; cleared
   // when the PR changes / selection clears.
   // Keyed by what the card SHOWS (`ThreadStateBucket`): a Claude-judged thread is 'claude'.
   threadStateFilter: Set<ThreadStateBucket>;
-  // PR-detail Threads only view's ML-SEVERITY filter pills (Critical/Major/Minor/Nit). Empty = all
+  // PR-detail Threads tab's ML-SEVERITY filter pills (Critical/Major/Minor/Nit). Empty = all
   // shown. A thread matches when ANY of its non-summary bot comments carries a selected
   // severity, so the pills read as "show me threads containing a major finding", not "threads
   // whose worst is exactly major". Transient and cleared alongside threadStateFilter — it is
@@ -979,10 +978,10 @@ export interface FilterState {
    * component is rendering — the pair is what keeps one PR's tab out of another's.
    */
   setPrDetailTab: (prId: number, tab: PrDetailTab) => void;
-  // Set/clear the PR-detail Threads only view's bot filter (a ChecksTab bot chip → filter Threads to
+  // Set/clear the PR-detail Threads tab's bot filter (a ChecksTab bot chip → filter Threads to
   // that vendor). Re-selecting the same vendor toggles it off.
   setThreadBotFilter: (kind: ReviewBotKind | null) => void;
-  // Toggle one state pill on the Changes tab's Threads only view (rebuilds the Set so subscribers rerender).
+  // Toggle one state pill on the Threads tab (rebuilds the Set so subscribers rerender).
   toggleThreadStateFilter: (s: ThreadStateBucket) => void;
   setThreadStateFilter: (states: Set<ThreadStateBucket>) => void;
   toggleThreadSeverityFilter: (s: MlSeverity) => void;
@@ -990,11 +989,11 @@ export interface FilterState {
   selectPr: (id: number | null) => void;
   selectThread: (prId: number | null, threadId: number | null) => void;
   clearSelection: () => void;
-  // Open a PR's detail tab landing on its Changes tab's Threads only view with a derived-state pill preset (the
+  // Open a PR's detail tab landing on its Threads tab with a derived-state pill preset (the
   // resolvable-bot-threads row click → the PR's likely-addressed threads). Does NOT touch the
   // Activity rail / feed isolation — navigation goes to the PR detail, not back to the Bots pane.
   openPrThreadsFiltered: (meta: TabMeta, state: DerivedState) => void;
-  // Open a PR's detail tab on its Changes tab's Threads only view with NO pill preset (every
+  // Open a PR's detail tab on its Threads tab with NO pill preset (every
   // thread shown) — the Open PRs drawer's threads link. The filters are reset for the PR the same
   // way openPrThreadsFiltered resets them.
   openPrThreadsView: (meta: TabMeta) => void;
@@ -1706,7 +1705,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       threadStateFilter: new Set<ThreadStateBucket>(),
       threadSeverityFilter: new Set<MlSeverity>(),
       // An unconsumed threads-view request belongs to ITS PR: moving to another drops it, so a
-      // later visit to that PR does not land on Threads only out of nowhere.
+      // later visit to that PR does not land on the Threads tab out of nowhere.
       threadsViewRequest: s.threadsViewRequest === id ? s.threadsViewRequest : null,
     })),
   selectThread: (prId, threadId) =>
@@ -1744,7 +1743,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       timelineFocusPr: id,
       timelineFocusAt: focusAt,
       timelineFocusEvent: event,
-      // Clear a leftover Threads only state preset when focusing a specific thread (see selectThread).
+      // Clear a leftover Threads-tab state preset when focusing a specific thread (see selectThread).
       threadStateFilter: threadId != null ? new Set<ThreadStateBucket>() : s.threadStateFilter,
       threadSeverityFilter:
         threadId != null ? new Set<MlSeverity>() : s.threadSeverityFilter,
@@ -1976,9 +1975,9 @@ export const useFilters = create<FilterState>((set, get) => ({
   },
   openPrThreadsFiltered: (meta, state) => {
     // Open the PR's detail tab (Back returns to the Activity console via fromActivity), then
-    // select the PR + seed the Threads only pill in ONE set() — done together so selectPr's
-    // reset can't race away the preset. PrDetail's threadStateFilter effect opens the Changes
-    // tab's Threads only view. No setActivityRepo / setFeedIsolatedPrId: we go to the PR, not back to the Bots pane.
+    // select the PR + seed the Threads-tab pill in ONE set() — done together so selectPr's
+    // reset can't race away the preset. PrDetail's threadStateFilter effect opens the Threads
+    // tab. No setActivityRepo / setFeedIsolatedPrId: we go to the PR, not back to the Bots pane.
     usePinnedTabs.getState().openPrDetailTab(meta, { fromActivity: true });
     set({
       selectedPrId: meta.id,

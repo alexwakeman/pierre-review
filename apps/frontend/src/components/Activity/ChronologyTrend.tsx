@@ -66,8 +66,8 @@ import {
 // bot it names; the lens compares weeks, not people.
 
 const NOTE = 'text-meta text-ui-mute';
-const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-meta';
-const VEIL = 'fill-white dark:fill-gray-950';
+const AXIS_TEXT = 'fill-ui-faint text-meta';
+const VEIL = 'fill-ui-bg';
 const PAD_L = 124;
 const PAD_R = 12;
 /** Lines in a marker's hover box before "and N more". */
@@ -697,7 +697,7 @@ function GainLine({
                 className={
                   gain.weekly[i] != null
                     ? 'fill-sky-600 dark:fill-sky-400'
-                    : 'fill-white stroke-sky-600 dark:fill-gray-950 dark:stroke-sky-400'
+                    : 'fill-ui-bg stroke-sky-600 dark:stroke-sky-400'
                 }
               />
             ),

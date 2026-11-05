@@ -72,12 +72,12 @@ export const MY_TURN_REASON_TEXT: Record<MyTurnCardReason, string> = {
   pushed_since: 'Pushed since you looked',
   own_ci_red: 'Build failed',
   own_conflicts: 'Merge conflicts',
-  trunk_red: 'Default branch is red',
   pr_approved: 'Approved',
   own_ready: 'Ready to land',
   your_pr: 'Your PR',
   own_thread: 'Unanswered thread',
-  claude_review: 'AI review',
+  claude_review: 'New AI review',
+  ai_approved_merged: 'Merged after your Limn approved',
   watched_repo_pr: 'New PR',
 };
 
@@ -101,9 +101,6 @@ export function pendingCardText(card: InsightCard): string {
     detail != null && detail.trim() !== '' ? `${label}: ${detail.trim()}` : label;
   switch (card.kind) {
     case 'my_turn':
-      if (card.reason === 'trunk_red') {
-        return `${MY_TURN_REASON_TEXT.trunk_red}${checks(card.failingChecks, card.failingCheckTotal)}`;
-      }
       // An auto-started Claude review says so, in the SPA chip's words.
       if (card.reason === 'claude_review' && card.trigger === 'auto') {
         return withDetail('Auto review', card.detail);
@@ -136,6 +133,8 @@ export function pendingCardText(card: InsightCard): string {
     case 'bot_only_review':
     // The reader's own PRs — a personal tab, never in a team digest.
     case 'waiting_on_others':
+    // The AI reviews reference list — personal and the live board's alone.
+    case 'ai_review':
       return '';
   }
 }
@@ -149,7 +148,6 @@ export function isViewerScopedCard(card: InsightCard): boolean {
 /** The subject a card is about — one PR, or one repository's default branch. A PR is mentioned
  *  once per message; a red default branch too. */
 function subjectKey(card: InsightCard): string | null {
-  if (card.kind === 'my_turn' && card.reason === 'trunk_red') return `trunk:${card.repoId}`;
   if (card.kind === 'ci_failing' && card.arm === 'trunk') return `trunk:${card.repoId}`;
   if ('prId' in card && card.prId != null) return `pr:${card.prId}`;
   return null;
@@ -165,9 +163,7 @@ function cardLine(
 ): string | null {
   const what = pendingCardText(card);
   if (what === '') return null;
-  const isTrunk =
-    (card.kind === 'my_turn' && card.reason === 'trunk_red') ||
-    (card.kind === 'ci_failing' && card.arm === 'trunk');
+  const isTrunk = card.kind === 'ci_failing' && card.arm === 'trunk';
   if (isTrunk && 'repoFullName' in card) {
     const branch = 'branchName' in card && card.branchName ? ` ${card.branchName}` : '';
     return `${pendingCardEmoji(card)} ${slackLink(repoLink(ctx, workspaceId, card.repoId), `${card.repoFullName}${branch}`)} — ${escapeSlack(what)}`;

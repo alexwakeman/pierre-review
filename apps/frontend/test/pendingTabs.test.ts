@@ -229,24 +229,25 @@ describe('a response from a server that predates tabs', () => {
     ]);
     expect(tabs.find((t) => t.key === 'land')!.cardIds).toEqual(['m', 'u']);
     expect(tabs.find((t) => t.key === 'review')!.peopleCardIds).toEqual(['l']);
-    // A finished Claude review is listed in its own tab, never in My turn.
-    expect(tabs.find((t) => t.key === 'my_turn')!.cardIds).toEqual(['t']);
-    expect(tabs.find((t) => t.key === 'claude')!.cardIds).toEqual(['c']);
-    expect(tabs.find((t) => t.key === 'claude')!.total).toBe(1);
+    // A new AI review of your Limn's is a My turn card like any other; "AI reviews" lists only the
+    // `ai_review` reference rows.
+    expect(tabs.find((t) => t.key === 'my_turn')!.cardIds).toEqual(['t', 'c']);
+    expect(tabs.find((t) => t.key === 'claude')!.cardIds).toEqual([]);
   });
 });
 
-describe('the Claude reviews tab', () => {
-  it('holds exactly the finished Claude review My Turn cards, and My turn holds every other type', () => {
+describe('the AI reviews tab', () => {
+  it('holds only the AI review reference rows; every My Turn type, AI reviews included, is My turn’s', () => {
     const def = (k: string) => PENDING_TABS.find((t) => t.key === k)!;
     const claude = card('c', 'my_turn', { reason: 'claude_review' });
-    const reply = card('r', 'my_turn', { reason: 'thread_reply' });
-    expect(pendingTabHolds(def('claude'), claude)).toBe(true);
-    expect(pendingTabHolds(def('claude'), reply)).toBe(false);
-    expect(pendingTabHolds(def('my_turn'), claude)).toBe(false);
-    expect(pendingTabHolds(def('my_turn'), reply)).toBe(true);
-    expect(pendingTabOfCard(claude)).toBe('claude');
-    expect(pendingTabOfCard(reply)).toBe('my_turn');
+    const merged = card('g', 'my_turn', { reason: 'ai_approved_merged' });
+    const row = card('a', 'ai_review');
+    expect(pendingTabHolds(def('claude'), claude)).toBe(false);
+    expect(pendingTabHolds(def('claude'), row)).toBe(true);
+    expect(pendingTabHolds(def('my_turn'), claude)).toBe(true);
+    expect(pendingTabOfCard(claude)).toBe('my_turn');
+    expect(pendingTabOfCard(merged)).toBe('my_turn');
+    expect(pendingTabOfCard(row)).toBe('claude');
     expect(TAB_LABEL.claude).toBe('AI reviews');
   });
 });
@@ -400,21 +401,21 @@ describe('the People / Automation lens', () => {
       expect(v.allTotal).toBe(45);
     });
 
-    it('lists a red default branch like any My turn card — on its landing PR’s side of both lenses', () => {
-      // A promoted trunk is kind `my_turn` with no PR of its own. The server puts it on the People /
-      // Automation side of its LANDING PR's author (People when none resolved), and on the relevance
-      // lens by its `relevance` — 'direct' (you added it) unless its repo is muted. The SPA must
-      // file it on the same sides, or a badge counts a card the list never shows.
+    it('lists an AI review card like any My turn card — on its PR’s side of both lenses', () => {
+      // "New AI review" / "Merged after approval" are kind `my_turn`. The server puts each on the
+      // People / Automation side of its PR's author, and on the relevance lens by its `relevance` —
+      // 'direct' (your Limn) unless its repo is muted. The SPA must file it on the same sides, or a
+      // badge counts a card the list never shows.
       const bumpTrunk = card('t1', 'my_turn', {
-        reason: 'trunk_red',
+        reason: 'claude_review',
         prId: 12,
         personal: true,
         relevance: 'direct',
         automation: DEP,
       });
       const pushTrunk = card('t2', 'my_turn', {
-        reason: 'trunk_red',
-        prId: null,
+        reason: 'ai_approved_merged',
+        prId: 13,
         personal: false,
         relevance: 'none',
         muted: true,

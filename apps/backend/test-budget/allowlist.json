@@ -20,10 +20,6 @@
       "fileMs": 12000,
       "reason": "70 cases on one throwaway database, none slow alone (the slowest 355ms). Measured 5.7s for the file."
     },
-    "src/db/work-plan.test.ts": {
-      "fileMs": 12000,
-      "reason": "51 cases on one throwaway database, none slow alone (the slowest 500ms). Measured 5.4s for the file."
-    },
     "src/db/pending-card-source.test.ts": {
       "testMs": 6000,
       "fileMs": 10000,
