@@ -246,7 +246,8 @@ export function CheckRow({
         </button>
       </div>
       {expanded && (
-        <div className="mb-1 mt-1">
+        // `data-ci-log-open` lifts the Overview's reading-width cap while a log is open (ChecksTab).
+        <div className="mb-1 mt-1" data-ci-log-open>
           {logs.isLoading ? (
             <div className="px-1 py-2 text-ui-faint">Loading logs…</div>
           ) : view?.available ? (

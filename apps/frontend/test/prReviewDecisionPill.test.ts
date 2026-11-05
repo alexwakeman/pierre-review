@@ -18,8 +18,8 @@ const ref = (userId: number, standing: PrDetail['reviewStandings'][number]['stan
 });
 
 describe('reviewDecisionFace', () => {
-  it('nothing to say: no decision, no reviewer, nobody asked', () => {
-    expect(reviewDecisionFace(base)).toBeNull();
+  it('no decision, no reviewer, nobody asked: "No reviews yet"', () => {
+    expect(reviewDecisionFace(base)).toEqual({ decision: null, label: 'No reviews yet', lead: null, more: 0 });
   });
 
   it('leads with the newest reviewer whose standing matches the decision', () => {
@@ -84,8 +84,9 @@ describe('ReviewDecisionPill', () => {
   const pr = (over: Partial<PrDetail>): PrDetail =>
     ({ repoId: 1, reviews: [], ...base, ...over }) as unknown as PrDetail;
 
-  it('renders nothing when there is nothing to say', () => {
-    expect(renderToStaticMarkup(createElement(ReviewDecisionPill, { pr: pr({}), usersById: new Map() }))).toBe('');
+  it('with nothing reviewed or asked it still says "No reviews yet"', () => {
+    const html = renderToStaticMarkup(createElement(ReviewDecisionPill, { pr: pr({}), usersById: new Map() }));
+    expect(html.replace(/<[^>]*>/g, '')).toContain('No reviews yet');
   });
 
   it('an approval on a branch with no review rule never sits beside "No review required"', () => {

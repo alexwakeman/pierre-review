@@ -24,7 +24,7 @@ import { AutomatedReviewerBadge, reviewFacts } from './ReviewsRow.js';
 // approving review (most open-source and many team repos), or not synced yet. Reviews are then
 // OPTIONAL, not unwanted, so there is no decision face: the pill leads with the reviewers' own
 // standing (an approval reads "Approved", never "No review required" beside it). With nobody
-// reviewed it reads "No reviews yet" when someone was asked, and is absent otherwise.
+// reviewed it reads "No reviews yet".
 //
 // Nothing fetches: every field is on the PR detail payload.
 
@@ -64,15 +64,12 @@ export interface ReviewDecisionFace {
 
 type FaceFields = Pick<PrDetailT, 'reviewDecision' | 'reviewStandings' | 'reviewerCount' | 'requestedReviewers'>;
 
-/** What the pill shows, or null when there is nothing to say: no decision, no reviewer, nobody
- *  asked. Pure — pinned in test/prReviewDecisionPill.test.ts. */
-export function reviewDecisionFace(pr: FaceFields): ReviewDecisionFace | null {
+/** What the pill shows — always something: with no decision and nobody reviewed, "No reviews yet".
+ *  Pure — pinned in test/prReviewDecisionPill.test.ts. */
+export function reviewDecisionFace(pr: FaceFields): ReviewDecisionFace {
   const decision = pr.reviewDecision ?? null;
   const standings = pr.reviewStandings;
   const unnamed = Math.max(0, pr.reviewerCount - standings.length);
-  if (decision == null && standings.length === 0 && unnamed === 0 && pr.requestedReviewers.length === 0) {
-    return null;
-  }
   // `reviewStandings` is newest first. With no decision, a definite verdict leads over a comment.
   const lead =
     (decision === 'approved' || decision === 'changes_requested'
@@ -100,7 +97,6 @@ export function ReviewDecisionPill({
   usersById: Map<number, User>;
 }): JSX.Element | null {
   const face = reviewDecisionFace(pr);
-  if (face == null) return null;
   const decisionMeta = DECISION_FACE[face.decision ?? 'none'];
   const lead = face.lead;
   const leadUser = lead != null ? usersById.get(lead.userId) : undefined;

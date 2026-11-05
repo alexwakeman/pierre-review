@@ -1,6 +1,6 @@
 import { PrStoryTab } from './pr/PrStoryTab.js';
 import { PrOverviewAiReview } from './pr/PrOverviewAiReview.js';
-import { ReviewDecisionPill, reviewDecisionFace } from './pr/ReviewDecisionPill.js';
+import { ReviewDecisionPill } from './pr/ReviewDecisionPill.js';
 import { PrActivityTab, prConversationCount } from './pr/PrActivityTab.js';
 import { PrThreadsTab } from './pr/PrThreadsTab.js';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
@@ -889,13 +889,6 @@ export function PrDetail({
     void writeClipboard(href).then((ok) => setLinkCopied(ok ? 'copied' : 'failed'));
   };
   const newSince = newSummary(pr.newSinceLastViewed);
-  // The header's third line renders only when it has something on it.
-  const headerLine3 =
-    reviewDecisionFace(pr) != null ||
-    hasHeaderDetails ||
-    pr.isStalled ||
-    (armedIntent != null && pr.state === 'open') ||
-    newSince != null;
   cmdLive.current = {
     tab: (t, story) => {
       if (story != null) setStoryIndex(story);
@@ -1153,8 +1146,8 @@ export function PrDetail({
         </div>
         {/* THE THIRD LINE: GitHub's review decision first (ReviewDecisionPill — GitHub's claim and
             our reviewer fold drawn apart), then size, reach, chips and the state flags. Nothing
-            renders when it would be empty. */}
-        {headerLine3 && (
+            always renders: the pill always says something ("No reviews yet" at least). */}
+        {(
         <div
           className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-ui-mute"
           data-testid="pr-header-review-line"
