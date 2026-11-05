@@ -93,10 +93,8 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // teammates' Limn skips it (team-claim.ts)? ⚠ ON BY DEFAULT since 2026-11-02 (migration 0159 switched
 // every workspace on) — only a stored false is off, in every reader and in the writer.
 //
-// WITHDRAWING LIMN'S APPROVAL ON A PUSH rides the same route as one more column,
-// `withdraw_approval_on_push` (migration 0165): when a PR's head moves off the commit Limn's OWN
-// automatic approval was given on, dismiss it (./approval-withdraw.ts). ⚠ ON BY DEFAULT — only a
-// stored false is off, in every reader and in the writer.
+// ⚠ `withdraw_approval_on_push` (migration 0165) is DORMANT since 2026-11-05: the push path it gated
+// was removed (GitHub's own "dismiss stale approvals" rule does that per repo). Never read or written.
 //
 // AUTOMATIC DESIGN DIAGRAMS ride the same route as one more column, `auto_diagrams_enabled`
 // (migration 0126): may a succeeded review (MANUAL OR AUTO) queue its design diagrams
@@ -236,8 +234,6 @@ interface AutoRow {
   autoDiagramsEnabled: boolean | null;
   // "Mark auto reviews on GitHub" (migration 0134). Only a stored false is off (0159).
   teamClaimsEnabled?: boolean | null;
-  // "Withdraw Limn's approval when new commits are pushed" (migration 0165). Only a stored false is off.
-  withdrawApprovalOnPush?: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
@@ -261,8 +257,6 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
     // ON unless explicitly switched off (0159).
     teamClaimsEnabled: row?.teamClaimsEnabled !== false,
-    // ON unless explicitly switched off (0165).
-    withdrawApprovalOnPush: row?.withdrawApprovalOnPush !== false,
   };
 }
 
@@ -400,7 +394,6 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   autoFixEnabled: w.autoFixEnabled,
   autoDiagramsEnabled: w.autoDiagramsEnabled,
   ...(w.teamClaimsEnabled ? { teamClaimsEnabled: w.teamClaimsEnabled } : {}),
-  ...(w.withdrawApprovalOnPush ? { withdrawApprovalOnPush: w.withdrawApprovalOnPush } : {}),
   dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
@@ -453,7 +446,6 @@ export async function setWorkspaceAutoReview(
     autoFixEnabled,
     autoDiagramsEnabled,
     teamClaimsEnabled,
-    withdrawApprovalOnPush,
     dailyCap,
     autoPost,
     autoFix,
@@ -483,9 +475,6 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0159).
   const claimsWas = existing.teamClaimsEnabled !== false;
   const claims = teamClaimsEnabled ?? claimsWas;
-  // Only a stored false is off (ON by default, 0165).
-  const withdrawWas = existing.withdrawApprovalOnPush !== false;
-  const withdraw = withdrawApprovalOnPush ?? withdrawWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
@@ -539,7 +528,6 @@ export async function setWorkspaceAutoReview(
     autoFixEnabled: fix,
     autoDiagramsEnabled: diagrams,
     teamClaimsEnabled: claims,
-    withdrawApprovalOnPush: withdraw,
     dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
@@ -558,9 +546,6 @@ export async function setWorkspaceAutoReview(
   }
   if (teamClaimsEnabled !== undefined && teamClaimsEnabled !== claimsWas) {
     set.teamClaimsEnabled = teamClaimsEnabled;
-  }
-  if (withdrawApprovalOnPush !== undefined && withdrawApprovalOnPush !== withdrawWas) {
-    set.withdrawApprovalOnPush = withdrawApprovalOnPush;
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
@@ -619,9 +604,6 @@ function settingChanges(
   }
   if ('teamClaimsEnabled' in set) {
     out.push(['auto_review', `Mark auto reviews on GitHub ${onOff(next.teamClaimsEnabled === true)}`]);
-  }
-  if ('withdrawApprovalOnPush' in set) {
-    out.push(['auto_post', `Withdraw Limn's approval when new commits are pushed ${onOff(next.withdrawApprovalOnPush !== false)}`]);
   }
   if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
   if ('autoFixSettings' in set) {
@@ -826,7 +808,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             autoFixEnabled: { type: 'boolean' },
             autoDiagramsEnabled: { type: 'boolean' },
             teamClaimsEnabled: { type: 'boolean' },
-            withdrawApprovalOnPush: { type: 'boolean' },
             autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
             pairStrictness: { type: 'string', enum: ['strict', 'relaxed'] },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
@@ -912,10 +893,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         ) {
           reply.status(400);
           return reply.send({ error: 'BadRequest', message: 'autoFix switches must be true or false' });
-        }
-        if (notBool(raw, 'withdrawApprovalOnPush')) {
-          reply.status(400);
-          return reply.send({ error: 'BadRequest', message: 'withdrawApprovalOnPush must be true or false' });
         }
         if ('dailyCap' in raw && typeof raw.dailyCap !== 'number') {
           reply.status(400);

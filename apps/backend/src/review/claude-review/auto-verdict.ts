@@ -159,11 +159,28 @@ export function safeReasonText(t: string): string {
 /** "Not approved: <text>" — the one shape every reason takes. */
 const sentence = (t: string): string => `Not approved: ${t}`;
 
-/** A model that did not approve, in words: "Codex didn’t approve. <its first sentence>" */
-export function dissentText(run: VerdictRun): string {
-  const lead = run.verdict === 'REQUEST_CHANGES' ? `${run.by} asked for changes.` : `${run.by} didn’t approve.`;
-  const why = firstSentence(run.summary);
-  return why ? `${lead} ${why}` : lead;
+/**
+ * A model that did not approve, in words. REQUEST_CHANGES: "Codex asked for changes. <its first
+ * sentence>" (its summary says why). COMMENT: "Claude left a comment, not an approval." then `tail`,
+ * the plain fact about what is open ("No findings are open.") — ⚠ NEVER its summary: a COMMENT's
+ * summary often reads "The change is sound…", which beside "not approved" only confuses (PR #592).
+ * No verdict at all: "Claude gave no verdict." then `tail`.
+ */
+export function dissentText(run: VerdictRun, tail: string | null = null): string {
+  if (run.verdict === 'REQUEST_CHANGES') {
+    const why = firstSentence(run.summary);
+    const lead = `${run.by} asked for changes.`;
+    return why ? `${lead} ${why}` : lead;
+  }
+  const lead = run.verdict === 'COMMENT' ? `${run.by} left a comment, not an approval.` : `${run.by} gave no verdict.`;
+  return tail ? `${lead} ${tail}` : lead;
+}
+
+/** What is still open once no blocker or warning is: "No findings are open." / "A nit is still open." */
+function minorTail(nits: number, questions: number): string {
+  if (nits + questions === 0) return 'No findings are open.';
+  const t = openText([[nits, 'nit'], [questions, 'question']]);
+  return `${t[0]!.toUpperCase()}${t.slice(1)}`;
 }
 
 /**
@@ -185,6 +202,10 @@ export function findingsNotApproved(
   if (blockers + warnings > 0) {
     return { heldReason: 'open_findings', text: sentence(openText([[blockers, 'blocker'], [warnings, 'warning']])) };
   }
+  const nits = n('nit');
+  const questions = n('question');
+  // No blocker or warning is open here: say so plainly beside a model that only commented.
+  const tail = minorTail(nits, questions);
   if (runs.length >= 2) {
     const [a, b] = runs as [VerdictRun, VerdictRun];
     const folded = pairVerdict(a.verdict, b.verdict, rules.pairStrictness);
@@ -194,20 +215,18 @@ export function findingsNotApproved(
       const held: AutoVerdictHeldReason = rules.pairStrictness === 'strict' ? 'pair_strict' : 'model_comment';
       // ONE half stands in the way: name it, in its own words.
       const lone = askers.length === 1 ? askers[0] : askers.length === 0 && notApproving.length === 1 ? notApproving[0] : null;
-      if (lone != null) return { heldReason: held, text: sentence(dissentText(lone)) };
+      if (lone != null) return { heldReason: held, text: sentence(dissentText(lone, tail)) };
       const names = runs.map((r) => r.by);
       const text =
-        askers.length === 2 ? `${names[0]} and ${names[1]} asked for changes.` : `neither ${names[0]} nor ${names[1]} approved.`;
+        askers.length === 2 ? `${names[0]} and ${names[1]} asked for changes.` : `neither ${names[0]} nor ${names[1]} approved. ${tail}`;
       return { heldReason: 'model_comment', text: sentence(text) };
     }
   } else {
     const only = runs[0];
     if (only == null || only.verdict !== 'APPROVE') {
-      return { heldReason: 'model_comment', text: sentence(dissentText(only ?? { by: 'Claude', verdict: null, summary: null })) };
+      return { heldReason: 'model_comment', text: sentence(dissentText(only ?? { by: 'Claude', verdict: null, summary: null }, tail)) };
     }
   }
-  const nits = n('nit');
-  const questions = n('question');
   const leftNits = leftoverAllowed('nit', rules.approveLeftovers) ? 0 : nits;
   const leftQuestions = leftoverAllowed('question', rules.approveLeftovers) ? 0 : questions;
   if (leftNits + leftQuestions > 0) {
@@ -327,6 +346,10 @@ export function repliesDissent(
       : silent.filter((h) => h.verdict === 'REQUEST_CHANGES');
   if (blocking.length === 0) return null;
   const held: AutoVerdictHeldReason = strictness === 'strict' ? 'pair_strict' : 'model_comment';
-  if (blocking.length === 1) return { heldReason: held, text: sentence(dissentText(blocking[0]!)) };
-  return { heldReason: 'model_comment', text: sentence(`neither ${blocking[0]!.by} nor ${blocking[1]!.by} approved.`) };
+  // A blocking half raised nothing of its own (`raised === 0`): say so.
+  if (blocking.length === 1) return { heldReason: held, text: sentence(dissentText(blocking[0]!, 'It raised no findings.')) };
+  return {
+    heldReason: 'model_comment',
+    text: sentence(`neither ${blocking[0]!.by} nor ${blocking[1]!.by} approved. Neither raised a finding.`),
+  };
 }

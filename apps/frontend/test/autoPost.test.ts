@@ -283,12 +283,12 @@ describe("withdrawing Limn's own approval", () => {
     expect(autoPostFailureLine({ status: 'failed', error: 'Nope.', ...d('withdraw_failed', 'Nope.') })).toBeNull();
   });
 
-  it('is mounted in the Claude Review tab, and the Settings switch is there', () => {
+  it('is mounted in the Claude Review tab, and there is no push switch in Settings (removed 2026-11-05)', () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const tab = readFileSync(join(here, '../src/components/ClaudeReviewTab.tsx'), 'utf8');
     expect(tab).toContain('approvalWithdrawLines(review.autoPost)');
     const section = readFileSync(join(here, '../src/components/settings/AutoReviewSection.tsx'), 'utf8');
-    expect(section).toContain('Withdraw Limn’s approval when new commits are pushed');
-    expect(section).toContain('withdrawApprovalOnPush: withdrawOn');
+    expect(section).not.toContain('Withdraw Limn’s approval when new commits are pushed');
+    expect(section).not.toContain('withdrawApprovalOnPush');
   });
 });

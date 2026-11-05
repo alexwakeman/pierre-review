@@ -165,9 +165,6 @@ export function AutoReviewSection(): JSX.Element {
   // TEAM CLAIMS ("Mark auto reviews on GitHub"): ON unless the workspace switched it off (0159).
   const storedClaims = stored?.teamClaimsEnabled !== false;
   const [claimsOn, setClaimsOn] = useState(storedClaims);
-  // "Withdraw Limn's approval when new commits are pushed": ON unless switched off (migration 0165).
-  const storedWithdraw = stored?.withdrawApprovalOnPush !== false;
-  const [withdrawOn, setWithdrawOn] = useState(storedWithdraw);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
@@ -223,9 +220,6 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setClaimsOn(storedClaims);
   }, [workspaceId, storedClaims]);
-  useEffect(() => {
-    setWithdrawOn(storedWithdraw);
-  }, [workspaceId, storedWithdraw]);
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
@@ -575,27 +569,6 @@ export function AutoReviewSection(): JSX.Element {
               </label>
             ))}
           </fieldset>
-          <div className={`flex items-start gap-1 pl-5 ${verdict ? '' : 'opacity-60'}`} data-withdraw-approval>
-            <label className="flex items-start gap-2 text-ui-ink">
-              <CheckInput
-                className="mt-0.5"
-                checked={withdrawOn}
-                onChange={(e) => setWithdrawOn(e.target.checked)}
-              />
-              <span className="font-medium">Withdraw Limn’s approval when new commits are pushed</span>
-            </label>
-            <InfoButton title="Withdraw Limn’s approval">
-              <p>
-                When the PR gets new commits, Limn dismisses the approval it posted automatically. It
-                never touches an approval you gave yourself or posted with the Post button.
-              </p>
-              <p>
-                A later review that finds problems always withdraws Limn’s approval first, with this
-                on or off.
-              </p>
-              <p>On by default.</p>
-            </InfoButton>
-          </div>
           <label className="flex items-start gap-2">
             <CheckInput
               className="mt-0.5"
@@ -633,17 +606,22 @@ export function AutoReviewSection(): JSX.Element {
       </div>
       <fieldset className="space-y-1 pl-5 text-body" data-teammate-lift>
         <legend className="flex items-center gap-1 font-medium text-ui-ink">
-          Teammates’ Limn blocks
-          <InfoButton title="Teammates’ Limn blocks">
+          Teammates’ Limn “changes requested”
+          <InfoButton title="Teammates’ Limn “changes requested”">
             <p>
-              When a teammate’s Limn requests changes, your Limn checks each of its points on later
-              reviews. Once every point is addressed at the PR’s latest commit, and your own review
-              finds no blocker, your Limn can dismiss their review and post yours: an approval if
-              Approve or request changes allows it, else a comment.
+              These two boxes are about one thing: a review a teammate’s Limn posted as “changes
+              requested”. Neither box dismisses or adds an approval.
             </p>
             <p>
-              Both sides must be on. The teammate turns on the first box, so their posted reviews
-              allow it. You turn on the second. A review someone typed by hand is never dismissed.
+              Your Limn checks each point of that review on later reviews. When every point is fixed
+              at the PR’s latest commit, and your own review finds no blocker, your Limn dismisses the
+              teammate’s “changes requested” review and posts its own review. Whether that review
+              approves is decided by Approve or request changes, as for any review.
+            </p>
+            <p>
+              Both people must turn on their box. The teammate turns on the first box, so your Limn may
+              dismiss their Limn’s review. You turn on the second box, so your Limn does it. A review
+              someone wrote by hand is never dismissed.
             </p>
             <p>
               Dismissing needs write access to the repository, and branch protection can restrict who
@@ -653,11 +631,11 @@ export function AutoReviewSection(): JSX.Element {
         </legend>
         <label className="flex items-start gap-2 text-ui-ink">
           <CheckInput className="mt-0.5" checked={liftConsent} onChange={(e) => setLiftConsent(e.target.checked)} />
-          <span>Teammates’ Limn may lift my Limn’s block once every point is addressed</span>
+          <span>Let a teammate’s Limn dismiss my Limn’s “changes requested” once every point is fixed</span>
         </label>
         <label className="flex items-start gap-2 text-ui-ink">
           <CheckInput className="mt-0.5" checked={liftTeammates} onChange={(e) => setLiftTeammates(e.target.checked)} />
-          <span>Lift a teammate’s Limn block when everything is addressed</span>
+          <span>Dismiss a teammate’s Limn “changes requested” once every point is fixed</span>
         </label>
       </fieldset>
       <div className={`pl-5 text-body ${on ? '' : 'opacity-60'}`}>
@@ -777,7 +755,6 @@ export function AutoReviewSection(): JSX.Element {
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
             claimsOn !== storedClaims ||
-            withdrawOn !== storedWithdraw ||
             providers !== storedProviders ||
             strictness !== storedStrictness ||
             capDirty ||
@@ -791,7 +768,6 @@ export function AutoReviewSection(): JSX.Element {
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
             ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
-            ...(withdrawOn !== storedWithdraw ? { withdrawApprovalOnPush: withdrawOn } : {}),
             ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
             ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),

@@ -3,10 +3,11 @@
 //   1. A later run at a NEW head that does not approve dismisses Limn's own automatic approval FIRST
 //      (COMMENT and REQUEST_CHANGES alike), then posts; the REQUEST_CHANGES goes out.
 //   2. A hand approval, or one posted with the Post button (no auto_post record), is never touched.
-//   3. THE CLAIM: the push path and the run path never both dismiss; a refusal (403) is recorded in
-//      GitHub's words and never retried.
-//   4. The push path runs only when the head moved, auto review + auto-posting are on and the
-//      workspace switch (ON by default) is on; never on the reader's own PR.
+//   3. THE CLAIM: an approval is dismissed at most once (an old stored claim — e.g. a `why: 'push'`
+//      record of the removed push path — stops a run); a refusal (403) is recorded in GitHub's words
+//      and never retried.
+//   4. THERE IS NO PUSH PATH (removed 2026-11-05): nothing withdraws on a moved head alone, and the
+//      setting is gone from the route.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/approval-withdraw
 import { rmSync } from 'node:fs';
@@ -48,13 +49,6 @@ const deps = () => ({
   settle,
   dismissReview,
   impactLevel: vi.fn(async () => 'low' as const),
-});
-const pushDeps = () => ({
-  accountLogin: async () => 'me',
-  accountUserId: async () => users.me!,
-  liveReviews,
-  dismissReview,
-  settle,
 });
 
 async function makePr(author = 'alice'): Promise<number> {
@@ -188,7 +182,6 @@ beforeEach(async () => {
   liveReviews.mockClear();
   await settings.setWorkspaceAutoReview(ctx, 1, wsId, {
     enabled: true,
-    withdrawApprovalOnPush: true,
     autoPost: { enabled: true, scope: 'all', autoVerdict: true },
   });
 });
@@ -200,7 +193,6 @@ describe('the pure pieces', () => {
       'Limn withdrew its approval: 1 blocker and 1 warning found at 91482c8.',
     );
     expect(aw.withdrawMessageForRun({ blockers: 0, warnings: 0 }, H2)).toBe('Limn withdrew its approval: not approved at 91482c8.');
-    expect(aw.withdrawMessageForPush(H2)).toBe('Limn withdrew its approval: new commits since it approved (91482c8).');
   });
 
   it("the standing review is Limn's only by a stored id; the gate lets a request for changes out over it", () => {
@@ -294,9 +286,6 @@ describe('a later run withdraws it', () => {
     expect(dismissReview).not.toHaveBeenCalled();
     expect(await rec(b)).toMatchObject({ verdict: { submitted: 'COMMENT', heldReason: 'prior_review' } });
     expect((await rec(b)).withdrewApproval).toBeUndefined();
-    // The push path never touches it either.
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('none');
-    expect(dismissReview).not.toHaveBeenCalled();
   });
 
   it('a 403 is recorded in GitHub’s words on both runs and never retried; the review still posts', async () => {
@@ -310,11 +299,10 @@ describe('a later run withdraws it', () => {
       withdrewApproval: { how: 'withdraw_failed', error: 'Must have admin rights to Repository.' },
     });
     expect((await rec(a)).approvalWithdrawal).toMatchObject({ status: 'failed', error: 'Must have admin rights to Repository.' });
-    // Never again: not by a later run, not by a push.
+    // Never again, not by a later run.
     const c = await run(pr, '3333333333333333333333333333333333333333', [{ severity: 'warning', title: 'W2' }], 'COMMENT');
     liveHead = '3333333333333333333333333333333333333333';
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: c }, deps());
-    await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: '4444444444444444444444444444444444444444' }, pushDeps());
     expect(dismissReview).toHaveBeenCalledTimes(1);
   });
 
@@ -332,100 +320,43 @@ describe('a later run withdraws it', () => {
 });
 
 describe('the claim', () => {
-  it('push first, then the run: one dismissal', async () => {
+  it("an old push-path claim (why: 'push') stops the run: no second dismissal, and it still reads", async () => {
     const { pr, a } = await approvedPr();
-    const out = await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps());
-    expect(out).toMatchObject({ kind: 'done', record: { status: 'withdrawn', why: 'push' } });
-    expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: new commits since it approved (91482c8).');
-    expect((await rec(a)).approvalWithdrawal).toMatchObject({ status: 'withdrawn', why: 'push' });
-    expect(settle).toHaveBeenCalledTimes(1);
+    // A record the removed push path wrote before 2026-11-05.
+    expect(await aw.claimApprovalWithdrawal(ctx, 1, a, { why: 'push', headSha: H2, message: 'old' })).toBe(true);
+    await aw.settleApprovalWithdrawal(ctx, 1, a, {
+      why: 'push',
+      headSha: H2,
+      message: 'Limn withdrew its approval: new commits since it approved (91482c8).',
+      status: 'withdrawn',
+      at: new Date().toISOString(),
+      error: null,
+    });
+    expect(persist.autoPostWireOf(await rec(a))?.approvalWithdrawal).toMatchObject({ status: 'withdrawn', why: 'push' });
     // GitHub still shows it (a stale read): the run must not dismiss it again.
     const b = await run(pr, H2, [{ severity: 'warning', title: 'W' }], 'COMMENT');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
-    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(dismissReview).not.toHaveBeenCalled();
     expect(postReview).toHaveBeenCalledTimes(1);
     expect((await rec(b)).withdrewApproval).toBeUndefined();
   });
 
-  it('the run first, then the push: one dismissal; and the claim itself holds once', async () => {
+  it('the run claims once: a second claim on the same approval is refused', async () => {
     const { pr, a } = await approvedPr();
     const b = await run(pr, H2, [{ severity: 'warning', title: 'W' }], 'COMMENT');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
     expect(dismissReview).toHaveBeenCalledTimes(1);
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('none');
-    expect(dismissReview).toHaveBeenCalledTimes(1);
-    expect(await aw.claimApprovalWithdrawal(ctx, 1, a, { why: 'push', headSha: H2, message: 'x' })).toBe(false);
+    expect(await aw.claimApprovalWithdrawal(ctx, 1, a, { why: 'run', headSha: H2, message: 'x' })).toBe(false);
   });
 });
 
-describe('the push path', () => {
-  it('skipped when the head did not move', async () => {
-    const { pr } = await approvedPr();
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H1 }, pushDeps())).kind).toBe('none');
-    expect(liveReviews).not.toHaveBeenCalled();
-    expect(dismissReview).not.toHaveBeenCalled();
-  });
-
-  it('skipped when auto review is off, or auto-posting is off', async () => {
-    const { pr } = await approvedPr();
-    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { enabled: false });
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('off');
-    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { enabled: true, autoPost: { enabled: false } });
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('off');
-    expect(dismissReview).not.toHaveBeenCalled();
-  });
-
-  it('the setting: ON by default; off skips the push path (a later run still withdraws)', async () => {
-    const fresh = settings.autoReviewOf(null);
-    expect(fresh.withdrawApprovalOnPush).toBe(true);
-    const { pr } = await approvedPr();
-    const off = await settings.setWorkspaceAutoReview(ctx, 1, wsId, { withdrawApprovalOnPush: false });
-    expect(off?.withdrawApprovalOnPush).toBe(false);
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, wsId))?.withdrawApprovalOnPush).toBe(false);
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('off');
-    expect(dismissReview).not.toHaveBeenCalled();
-    const b = await run(pr, H2, [{ severity: 'warning', title: 'W' }], 'COMMENT');
-    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
-    expect(dismissReview).toHaveBeenCalledTimes(1);
-    const on = await settings.setWorkspaceAutoReview(ctx, 1, wsId, { withdrawApprovalOnPush: true });
-    expect(on?.withdrawApprovalOnPush).toBe(true);
-  });
-
-  it('skipped when the approval no longer stands live (a later review of the reader, or dismissed)', async () => {
-    const { pr } = await approvedPr();
-    liveReviewList = [
-      { id: 'R1', login: 'me', state: 'APPROVED' },
-      { id: 'R5', login: 'me', state: 'CHANGES_REQUESTED' },
-    ];
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('not_standing');
-    liveReviewList = [{ id: 'R1', login: 'me', state: 'DISMISSED' }];
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('not_standing');
-    expect(dismissReview).not.toHaveBeenCalled();
-  });
-
-  it("never on the reader's own PR", async () => {
-    const pr = await makePr('me');
-    // Seed an approval record by hand (GitHub would refuse one on your own PR).
-    const a = await run(pr, H1, [], 'APPROVE');
-    const { eq } = await import('drizzle-orm');
-    await db
-      .update(schema.claudeReviews)
-      .set({
-        autoPost: {
-          status: 'posted',
-          at: new Date().toISOString(),
-          reason: null,
-          error: null,
-          findingIds: [],
-          postedFindingIds: [],
-          githubReviewId: 'R1',
-          verdict: { wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null },
-        },
-      })
-      .where(eq(schema.claudeReviews.id, a))
-      .execute();
-    liveReviewList = [{ id: 'R1', login: 'me', state: 'APPROVED' }];
-    expect((await aw.maybeWithdrawApprovalOnPush(ctx, { accountId: 1, prId: pr, headSha: H2 }, pushDeps())).kind).toBe('none');
-    expect(dismissReview).not.toHaveBeenCalled();
+describe('no push path (removed 2026-11-05)', () => {
+  it('nothing withdraws on a moved head alone, and the setting left the route', async () => {
+    expect('maybeWithdrawApprovalOnPush' in aw).toBe(false);
+    expect('withdrawMessageForPush' in aw).toBe(false);
+    const { readFileSync } = await import('node:fs');
+    const upsert = readFileSync(new URL('../../sync/upsert.ts', import.meta.url), 'utf8');
+    expect(upsert).not.toContain('approval-withdraw');
+    expect('withdrawApprovalOnPush' in settings.autoReviewOf(null)).toBe(false);
   });
 });

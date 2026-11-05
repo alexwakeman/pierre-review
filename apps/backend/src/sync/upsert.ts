@@ -37,7 +37,6 @@ import {
 import { ensureLimnBotUser, ensureLimnReviewerRow } from '../db/limn-bots.js';
 import { syncLimnFindingLabels } from '../db/limn-finding-labels.js';
 import { importTeammateReviews } from '../db/teammate-reviews-import.js';
-import type { WithdrawCtx } from '../review/claude-review/approval-withdraw.js';
 import { checkContextState } from '../github/check-context-state.js';
 
 const {
@@ -787,9 +786,6 @@ export async function persistPr(
   let liveMergePrId: number | null = null;
   // The PR's local id, for the teammate-review import after the commit.
   let persistedPrId: number | null = null;
-  // Set inside the transaction when an OPEN PR's head moved off a stored head: the new head, for the
-  // approval withdrawal after the commit (review/claude-review/approval-withdraw.ts).
-  let headMovedTo: string | null = null;
   await runTransaction(async (tx) => {
     const authorId = await resolver.resolve(tx, pr.author);
     // The actual merger (null for non-merged PRs / when GitHub omits the actor).
@@ -907,9 +903,6 @@ export async function persistPr(
           )
           .execute()
       )[0] ?? null;
-    if (prev?.headSha != null && headSha != null && prev.headSha !== headSha && prState(pr.state) === 'open') {
-      headMovedTo = headSha;
-    }
     boardMoved = boardVisibleMoved(prev, {
       state: prState(pr.state),
       isDraft: pr.isDraft,
@@ -1518,20 +1511,9 @@ export async function persistPr(
   });
   if (boardMoved) notePrChanged(accountId, repoId);
   if (liveMergePrId != null) emitPullRequestMerged({ accountId, repoId, prId: liveMergePrId });
-  // WITHDRAWING LIMN'S OWN APPROVAL ON A PUSH (docs/CLAUDE-REVIEW.md § Withdrawing Limn's approval):
-  // the head moved, so an automatic approval of the old head may have to go. FIRE-AND-FORGET, after
-  // the commit (never a GitHub call under the write lock): it never fails or slows the walk.
-  if (headMovedTo != null && persistedPrId != null) {
-    const moved = { accountId, prId: persistedPrId as number, headSha: headMovedTo as string };
-    void import('../review/claude-review/approval-withdraw.js')
-      .then((m) =>
-        m.maybeWithdrawApprovalOnPush(
-          { db, schema: schema as unknown as WithdrawCtx['schema'], log: { warn: (msg) => console.warn(msg) } },
-          moved,
-        ),
-      )
-      .catch(() => undefined);
-  }
+  // ⚠ NO APPROVAL WITHDRAWAL ON A PUSH (removed 2026-11-05): GitHub's own "dismiss stale approvals"
+  // rule does that per repo/branch; Limn never overrides a repo that keeps approvals. Only a later
+  // Limn RUN withdraws Limn's approval (docs/CLAUDE-REVIEW.md § Withdrawing Limn's approval).
   // TEAMMATES' POSTED REVIEWS (db/teammate-reviews.ts): a Limn review summary on the PR (anyone's —
   // the import leaves the reader's own out) is imported read-only, AFTER the commit above so the
   // finding comments are already re-attributed to their poster. DB-only. ⚠ NON-FATAL: a failure

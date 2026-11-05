@@ -193,10 +193,11 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   default**; only a stored false is off (`autoReviewOf`, `diagramsSwitchedOnForPr`). Off stops only
   the automatic draw (review/diagrams/trigger.ts); Draw / Redraw still works. The ONE writer is
   `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Design diagrams.
-- **WITHDRAW LIMN'S APPROVAL ON A PUSH** (migration `0165`, docs/CLAUDE-REVIEW.md § Auto-posting):
-  `workspaces.withdrawApprovalOnPush` (`withdraw_approval_on_push`, nullable — NULL reads ON, only a
-  stored false is off; the ONE writer is `setWorkspaceAutoReview`). The claim and outcome of each
-  withdrawal ride the approving run's `claudeReviews.autoPost` JSON (`approvalWithdrawal`).
+- **WITHDRAWING LIMN'S APPROVAL** (docs/CLAUDE-REVIEW.md § Auto-posting): the claim and outcome of
+  each withdrawal ride the approving run's `claudeReviews.autoPost` JSON (`approvalWithdrawal`).
+  ⚠ `workspaces.withdrawApprovalOnPush` (`withdraw_approval_on_push`, migration `0165`) is **DORMANT
+  since 2026-11-05**: it gated the PUSH path, which was removed (GitHub's own "dismiss stale
+  approvals" rule does that per repo). Never read or written; kept, never dropped.
 - **TEAM CLAIMS** (migration `0134`, docs/CLAUDE-REVIEW.md § Team claims): `workspaces.teamClaimsEnabled`
   (`team_claims_enabled`, nullable, no default — ⚠ since `0159` NULL reads ON, only a stored false is off
   (`0159` set every existing row to 1); the ONE

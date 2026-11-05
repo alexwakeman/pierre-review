@@ -1495,6 +1495,11 @@ run's existing `claude_reviews.auto_post` JSON (`approvalWithdrawal`, written by
 compare-and-set), so no other DDL ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Withdrawing Limn's
 approval). Additive and nullable, no backfill. Journal `idx` 165, `when` sqlite `1792224073016`.
 
+⚠ **DORMANT since 2026-11-05**: the push path this column gated was REMOVED (GitHub's own "dismiss
+stale approvals" rule does that per repo/branch; Limn never overrides a repo that keeps approvals).
+The column is never read or written, kept rather than dropped; the setting left the route, the wire
+type and Settings. `approvalWithdrawal` records with `why: 'push'` still read and render.
+
 ### `0166_team_claim_skip_lines` — the skipped line, once per head
 
 A NEW table `team_claim_skip_lines` (one row per `(account_id, pr_id, head_sha, provider, reason)`,

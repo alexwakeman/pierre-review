@@ -153,6 +153,73 @@ describe('decideTeamClaim (the one fold)', () => {
   });
 });
 
+describe("a holder whose review is already on GitHub has FINISHED (PR #592, 2026-11-05)", () => {
+  // robin-dunn's Limn posted its review at 12:02 but never wrote "reviewed": the reader waited for the
+  // lease. Their posted review at this head now counts as their success line.
+  const robinLive = [line('robin', 'pending', NOW - 12 * MIN), line('robin', 'pending', NOW - 4 * MIN)];
+  const postedAt = NOW - 3 * MIN;
+
+  it('a live pending line whose claimant posted since the claim began ⇒ "already reviewed", not a wait', () => {
+    expect(decideTeamClaim(robinLive, 'me', NOW)).toMatchObject({ kind: 'reviewing', login: 'robin' }); // the contrast
+    expect(decideTeamClaim(robinLive, 'me', NOW, null, [{ login: 'Robin', postedAtMs: postedAt }])).toEqual({
+      kind: 'reviewed',
+      login: 'robin',
+      atMs: postedAt,
+      description: 'robin reviewed · posted on GitHub',
+    });
+  });
+
+  it('a renew line after the post still settles at the newest line (one claim)', () => {
+    const d = decideTeamClaim(robinLive, 'me', NOW, null, [{ login: 'robin', postedAtMs: NOW - 8 * MIN }]);
+    expect(d).toMatchObject({ kind: 'reviewed', login: 'robin', atMs: NOW - 4 * MIN });
+  });
+
+  it('past the lease too: still "already reviewed", never free (the recheck must not run it after all)', () => {
+    const lapsed = [line('robin', 'pending', NOW - 40 * MIN)];
+    expect(decideTeamClaim(lapsed, 'me', NOW).kind).toBe('free'); // the contrast
+    expect(decideTeamClaim(lapsed, 'me', NOW, null, [{ login: 'robin', postedAtMs: NOW - 35 * MIN }])).toMatchObject({
+      kind: 'reviewed',
+      login: 'robin',
+    });
+    // …and so it is not stale: no "claim expired" line over it.
+    expect(staleTeammateLine(lapsed, 'me', NOW)).toEqual({ login: 'robin' });
+    expect(staleTeammateLine(lapsed, 'me', NOW, [{ login: 'robin', postedAtMs: NOW - 35 * MIN }])).toBeNull();
+  });
+
+  it('a review posted BEFORE the claim began (an earlier review) settles nothing', () => {
+    expect(decideTeamClaim(robinLive, 'me', NOW, null, [{ login: 'robin', postedAtMs: NOW - 20 * MIN }])).toMatchObject({
+      kind: 'reviewing',
+      login: 'robin',
+    });
+  });
+
+  it("someone else's review, or a review with no claim of theirs, changes nothing", () => {
+    expect(decideTeamClaim(robinLive, 'me', NOW, null, [{ login: 'bob', postedAtMs: postedAt }])).toMatchObject({ kind: 'reviewing', login: 'robin' });
+    expect(decideTeamClaim([], 'me', NOW, null, [{ login: 'robin', postedAtMs: postedAt }])).toEqual({ kind: 'free' });
+    // Their line already settled (a release): stays free.
+    const released = [line('robin', 'pending', NOW - 12 * MIN), line('robin', 'success', NOW - 2 * MIN, unfinishedLine('robin'))];
+    expect(decideTeamClaim(released, 'me', NOW, null, [{ login: 'robin', postedAtMs: postedAt }]).kind).toBe('free');
+  });
+
+  it('a later line still wins: a Clear frees it; a newer live claim holds it', () => {
+    const cleared = [...robinLive, line('carol', 'success', NOW - MIN, clearedLine('carol'))];
+    expect(decideTeamClaim(cleared, 'me', NOW, null, [{ login: 'robin', postedAtMs: postedAt }]).kind).toBe('free');
+    const reclaimed = [...robinLive, line('bob', 'pending', NOW - MIN)];
+    expect(decideTeamClaim(reclaimed, 'me', NOW, null, [{ login: 'robin', postedAtMs: postedAt }])).toMatchObject({ kind: 'reviewing', login: 'bob' });
+  });
+
+  it("in a race, the finished winner's review settles it: the head reads reviewed", () => {
+    const race = [line('robin', 'pending', NOW - 10 * MIN), line('me', 'pending', NOW - 9 * MIN, 'me is reviewing with Claude')];
+    expect(decideTeamClaim(race, 'me', NOW, null, [{ login: 'robin', postedAtMs: postedAt }])).toMatchObject({ kind: 'reviewed', login: 'robin' });
+  });
+
+  it("the PR AUTHOR's lines still never hold, posted or not; the reader's own post is not read", () => {
+    expect(decideTeamClaim(robinLive, 'me', NOW, 'robin', [{ login: 'robin', postedAtMs: postedAt }])).toEqual({ kind: 'free' });
+    const mine = [line('me', 'pending', NOW - 5 * MIN, 'me is reviewing with Claude')];
+    expect(decideTeamClaim(mine, 'me', NOW, null, [{ login: 'me', postedAtMs: postedAt }]).kind).toBe('mine');
+  });
+});
+
 // ---- the lifecycle, over a real DB ----
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -323,6 +390,54 @@ describe('claimBeforeAutoRun', () => {
     f.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(r).toMatchObject({ kind: 'skip', skip: { kind: 'reviewed', login: 'bob' } });
+  });
+
+  it("a teammate's live claim whose review is already imported ⇒ 'already reviewed' at once, even over a remembered wait", async () => {
+    const f = fakeGh();
+    f.seed('limn/review-claude', line('robin', 'pending', NOW - 12 * MIN));
+    // First: no review yet ⇒ "being reviewed", held until the lease ends.
+    const first = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    expect(first).toMatchObject({ kind: 'skip', skip: { kind: 'reviewing', login: 'robin' } });
+    expect(await tc.teamClaimHeldHeadNow(ctx, 1, prId, NOW)).toBe('head1');
+    // Then robin's Limn posts its review; the sync import stores it (kind 'teammate', the marker's head).
+    const [robin] = await db
+      .insert(schema.users)
+      .values({ githubNodeId: 'U_robin_poster', githubLogin: 'robin' })
+      .onConflictDoUpdate({ target: schema.users.githubNodeId, set: { githubLogin: 'robin' } })
+      .returning()
+      .execute();
+    const teammate = (provider: string, headInferred = false) => ({
+      githubReviewId: '1',
+      run: 'auto',
+      pair: false,
+      runs: [{ provider, model: null, effort: null }],
+      limnVersion: null,
+      headInferred,
+    });
+    const [codexRow] = await db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha: 'head1', status: 'succeeded', model: 'm', provider: 'codex', kind: 'teammate', sourceUserId: robin.id, postedAt: new Date(NOW - 2 * MIN), teammate: teammate('codex') })
+      .returning()
+      .execute();
+    // A Codex review does not settle the Claude line.
+    expect(await tc.postedTeammateReviewsAtHead(ctx, 1, prId, 'head1', 'claude')).toEqual([]);
+    expect(await tc.teamClaimHeldHeadNow(ctx, 1, prId, NOW)).toBe('head1');
+    const [claudeRow] = await db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha: 'head1', status: 'succeeded', model: 'm', provider: 'claude', kind: 'teammate', sourceUserId: robin.id, postedAt: new Date(NOW - 2 * MIN), teammate: teammate('claude') })
+      .returning()
+      .execute();
+    try {
+      expect(await tc.postedTeammateReviewsAtHead(ctx, 1, prId, 'head1', 'claude')).toEqual([{ login: 'robin', postedAtMs: NOW - 2 * MIN }]);
+      // The sweeper no longer holds the PR, and the claim reads it again: "already reviewed".
+      expect(await tc.teamClaimHeldHeadNow(ctx, 1, prId, NOW + MIN)).toBeNull();
+      const again = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW + MIN }, f.gh);
+      expect(again).toMatchObject({ kind: 'skip', skip: { kind: 'reviewed', login: 'robin', description: 'robin reviewed · posted on GitHub' } });
+      expect(f.posts).toEqual([]);
+    } finally {
+      const { inArray } = await import('drizzle-orm');
+      await db.delete(schema.claudeReviews).where(inArray(schema.claudeReviews.id, [codexRow.id, claudeRow.id])).execute();
+    }
   });
 
   it("the PR author's own line ⇒ runs and claims (their own review never holds a head)", async () => {

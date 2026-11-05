@@ -40,8 +40,8 @@
 //   3b'. THE WITHDRAWAL (./approval-withdraw.ts, always on): a run at a NEW head that does not approve
 //      while Limn's OWN earlier AUTOMATIC APPROVE still stands (an earlier run's `githubReviewId` —
 //      never the marker) DISMISSES it before the post ("Limn withdrew its approval: 3 warnings found
-//      at 91482c8."), claimed on the approving run's record (`approvalWithdrawal`) so the push path
-//      and this never both dismiss; recorded as `withdrewApproval`, never retried. Its REQUEST_CHANGES
+//      at 91482c8."), claimed on the approving run's record (`approvalWithdrawal`) so it is
+//      dismissed at most once (a push alone never withdraws it — GitHub's own rule does that); recorded as `withdrewApproval`, never retried. Its REQUEST_CHANGES
 //      then goes out (the gate's 'LIMN_AUTO_APPROVED' is not the reader's verdict);
 //   3c. THE REASON (only with `autoVerdict` on): a run that does not end in an APPROVE gets ONE
 //      plain-English "Not approved: …" line (`findingsNotApproved` + the gate's `heldReason`,
@@ -1107,7 +1107,7 @@ async function autoPostReview(
   // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
   const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
   // Limn's own automatic approval of an OLDER head still stands and this run does not approve:
-  // withdraw it — unless the push path (or an earlier attempt) already claimed it.
+  // withdraw it — unless an earlier attempt (or an old push-path record) already claimed it.
   const standingApproval =
     standing.state === 'LIMN_AUTO_APPROVED' && standing.reviewId != null ? limnApprovals.get(standing.reviewId) : undefined;
   const withdrawFrom: LimnAutoApproval | null =
@@ -1175,7 +1175,7 @@ async function autoPostReview(
           ? deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, id, msg)
           : Promise.resolve({ ok: false as const, message: 'Dismissing is not available.' }),
     );
-    // null = the push path (or an earlier attempt) has it: nothing more to do here.
+    // null = an earlier attempt (or an old push-path record) has it: nothing more to do here.
     if (w != null) {
       withdrew = w.status === 'withdrawn';
       record.withdrewApproval = {
@@ -1374,7 +1374,7 @@ async function autoPostReview(
   }
 
   // A run whose only write was the lift or the withdrawal: posted when it took, failed (GitHub's
-  // words) when not. A withdrawal the push path had already claimed left nothing to do: skipped.
+  // words) when not. A withdrawal already claimed earlier left nothing to do: skipped.
   const liftOnly = !sendsReview;
   const otherWriteOk = dismissed || withdrew;
   const nothingDone = liftOnly && liftId == null && record.withdrewApproval == null && teammateLifts.length === 0;

@@ -20,7 +20,7 @@ import { repliesCheckLine } from '../src/lib/repliesCheck.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (p: string): string => readFileSync(join(here, '../src', p), 'utf8');
 
-const REASON = 'Not approved: Codex didn’t approve. The binary fixture change cannot be verified from this diff.';
+const REASON = 'Not approved: Codex left a comment, not an approval. No findings are open.';
 
 describe('the not-approved line', () => {
   it('prefers the server’s reason; nothing on an approval', () => {

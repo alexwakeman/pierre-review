@@ -95,7 +95,7 @@
 //
 // TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts). When on, the lane checks the head's
 // `limn/review-<provider>` status before a run's row is written: a teammate's Limn holding it drops
-// the item with NO row (not a failure). The sweeper then holds that PR (`teamClaimHeldHead`) until
+// the item with NO row (not a failure). The sweeper then holds that PR (`teamClaimHeldHeadNow`) until
 // the remembered skip's recheck time, unless the synced head moved; a press reads GitHub afresh.
 //
 // AUTO FIX. When an auto run succeeds on the reader's OWN PR, manager.ts hands it to
@@ -119,7 +119,7 @@ import {
 import { usageLockout } from '../../ai/usage-lockout.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
-import { teamClaimHeldHead } from './team-claim.js';
+import { teamClaimHeldHeadNow } from './team-claim.js';
 import { REPLIES_PASS_AUTO_DAILY_CAP } from './replies-pass.js';
 import {
   autoLaneRoom,
@@ -478,7 +478,8 @@ export async function runAutoReviewSweep(
       // without taking a lane place (team-claim.ts). A press reads GitHub afresh.
       const heldByTeammate = async (prId: number, headSha?: string | null): Promise<boolean> => {
         if (pressed) return false;
-        const held = teamClaimHeldHead(ws.accountId, prId, nowMs);
+        // ⚠ The DB-aware hold: a holder whose review is already on GitHub stops holding at once.
+        const held = await teamClaimHeldHeadNow(ctx, ws.accountId, prId, nowMs);
         if (held == null) return false;
         const head = headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId));
         return head === held;
@@ -805,7 +806,7 @@ async function dueHeadsHeld(
   if (!res) return [];
   const retrying = new Set((res.retry ?? []).map((r) => r.prId));
   const held = async (prId: number, headSha: string | null): Promise<boolean> => {
-    const h = teamClaimHeldHead(ws.accountId, prId, nowMs);
+    const h = await teamClaimHeldHeadNow(ctx, ws.accountId, prId, nowMs);
     if (h == null) return false;
     return (headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId))) === h;
   };

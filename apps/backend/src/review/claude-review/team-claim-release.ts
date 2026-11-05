@@ -41,6 +41,7 @@ import {
   expiredReviewingSkips,
   forgetTeamClaimSkip,
   newestLine,
+  postedTeammateReviewsAtHead,
   prAuthorLogin,
   releasedLine,
   sameGithubLogin,
@@ -302,11 +303,13 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       if (!where || !me) continue;
       const context = teamClaimContext(skip.provider);
       const lines = await gh.listLines(accountId, where.owner, where.name, skip.headSha, context);
-      const stale = staleTeammateLine(lines, me, nowMs);
+      // A holder whose review is already on GitHub finished: never "claim expired" (team-claim.ts).
+      const posted = await postedTeammateReviewsAtHead(ctx, accountId, prId, skip.headSha, skip.provider);
+      const stale = staleTeammateLine(lines, me, nowMs, posted);
       if (!stale) {
         // Settled (or claimed again): nothing to release. The tab's durable line follows what the head
         // says now: their review ⇒ "reviewed" with their line; a free line ⇒ none.
-        const now = decideTeamClaim(lines, me, nowMs, await prAuthorLogin(ctx, accountId, prId));
+        const now = decideTeamClaim(lines, me, nowMs, await prAuthorLogin(ctx, accountId, prId), posted);
         if (now.kind === 'reviewed' || now.kind === 'reviewing') {
           await recordTeammateLine(ctx, accountId, prId, {
             provider: skip.provider,

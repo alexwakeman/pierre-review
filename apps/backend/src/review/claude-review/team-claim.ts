@@ -33,6 +33,14 @@
 // ⚠ THE PR AUTHOR'S OWN LINES ARE LEFT OUT (2026-11-03): the author cannot approve their own PR, so
 //   their Limn reviewing it holds nothing and the reader's Limn still reviews (a follow-up on the
 //   author's posted review). Only when the reader is not the author.
+// ⚠ A HOLDER WHOSE REVIEW IS ALREADY ON GITHUB HAS FINISHED (2026-11-05): a teammate's Limn can post
+//   its review and still never write its final "reviewed" line (PR #592: robin-dunn's review landed at
+//   12:02, the reader's Limn waited for the lease until 12:27). The teammate's Limn-marked review AT
+//   THIS HEAD for this provider, already imported from sync (`claude_reviews.kind = 'teammate'`, the
+//   marker's own `h=`, posted at or after their pending line began — `postedTeammateReviewsAtHead`, DB
+//   only), counts as their success line (`withPostedReviews`): the reader's Limn stands down at once as
+//   "already reviewed by @x", exactly as for a real success line. The PR author's lines still never
+//   hold, and a later line (a Clear, another claim) still wins.
 // ⚠ ONE PURE FOLD decides (`decideTeamClaim`): the newest line settles it — a success by someone else
 //   is "already reviewed" (a Clear is free), a failure/error is free; under a pending line, the
 //   claimants since the last settling line race: among those whose newest line is inside the lease,
@@ -198,6 +206,67 @@ export type TeamClaimDecision =
       description: string | null;
     };
 
+/** A teammate's Limn review already on GitHub at this head, for this provider (from the sync import). */
+export interface PostedTeammateReview {
+  login: string;
+  postedAtMs: number;
+}
+
+/** The description of a success line made from a posted review (never posted; read by the tab). */
+export function postedReviewLine(login: string): string {
+  return clamp(`${login} reviewed · posted on GitHub`);
+}
+
+/**
+ * A POSTED REVIEW SETTLES ITS POSTER'S CLAIM (pure). For each teammate (never `me`, never the PR
+ * `author`) whose OPEN claim — their pending lines after their own last settling line — began at or
+ * before their review was posted at this head, add their success line, placed right after the later
+ * of the post and their newest line: their claim is finished, the same as if their Limn had written
+ * "reviewed". A claimant with no open claim, or a review posted before the claim began (an earlier
+ * review), adds nothing. Lines by others after it still decide as usual (a Clear frees the head).
+ */
+export function withPostedReviews(
+  lines: readonly TeamClaimLine[],
+  posted: readonly PostedTeammateReview[],
+  me: string | null,
+  author: string | null = null,
+): TeamClaimLine[] {
+  if (posted.length === 0) return [...lines];
+  const sorted = [...lines].sort(order);
+  const out = [...lines];
+  const done = new Set<string>();
+  for (const p of posted) {
+    const k = p.login.toLowerCase();
+    if (done.has(k) || sameLogin(p.login, me) || sameLogin(p.login, author)) continue;
+    const theirs = sorted.filter((l) => sameLogin(l.login, p.login));
+    let lastSettled = -1;
+    for (let i = theirs.length - 1; i >= 0; i -= 1) {
+      if (settles(theirs[i]!)) {
+        lastSettled = i;
+        break;
+      }
+    }
+    const open = theirs.slice(lastSettled + 1);
+    if (open.length === 0) continue;
+    // Every review of theirs at this head posted since the claim began counts; the first one settles it.
+    const claimStart = open[0]!.createdAtMs;
+    const settling = posted
+      .filter((x) => sameLogin(x.login, p.login) && x.postedAtMs >= claimStart)
+      .sort((a, b) => a.postedAtMs - b.postedAtMs)[0];
+    if (!settling) continue;
+    done.add(k);
+    out.push({
+      // After every real line at the same millisecond.
+      id: Number.MAX_SAFE_INTEGER - out.length,
+      state: 'success',
+      description: postedReviewLine(open[0]!.login ?? p.login),
+      createdAtMs: Math.max(settling.postedAtMs, open[open.length - 1]!.createdAtMs),
+      login: open[0]!.login ?? p.login,
+    });
+  }
+  return out;
+}
+
 /**
  * THE ONE FOLD over one context's history (any order). Pure. `me` is the reader's GitHub login.
  *
@@ -206,15 +275,21 @@ export type TeamClaimDecision =
  * fold and the reader's Limn still reviews — a follow-up on the author's posted review (manager.ts,
  * teammate-anchor.ts). A non-author teammate's lines hold exactly as before. When the READER is the
  * author, nothing is left out (their own lines are the race they are in).
+ *
+ * `posted`: teammates' Limn reviews already on GitHub at this head for this provider. A claimant's
+ * posted review FINISHES their open claim (`withPostedReviews`) — "already reviewed", never a wait for
+ * the lease.
  */
 export function decideTeamClaim(
   lines: readonly TeamClaimLine[],
   me: string | null,
   nowMs: number,
   author: string | null = null,
+  posted: readonly PostedTeammateReview[] = [],
 ): TeamClaimDecision {
   if (author != null && !sameLogin(author, me)) lines = lines.filter((l) => !sameLogin(l.login, author));
   if (lines.length === 0) return { kind: 'free' };
+  if (posted.length > 0) lines = withPostedReviews(lines, posted, me, author);
   const sorted = [...lines].sort(order);
   const last = sorted[sorted.length - 1]!;
   if (last.state === 'success') {
@@ -269,12 +344,18 @@ export function sameGithubLogin(a: string | null, b: string | null): boolean {
  * head — past its lease, or an older Limn's pending "free to claim". Its claimant's login, else null
  * (settled, live, or the reader's own).
  */
-export function staleTeammateLine(lines: readonly TeamClaimLine[], me: string | null, nowMs: number): { login: string } | null {
+export function staleTeammateLine(
+  lines: readonly TeamClaimLine[],
+  me: string | null,
+  nowMs: number,
+  posted: readonly PostedTeammateReview[] = [],
+): { login: string } | null {
   if (lines.length === 0) return null;
   const last = [...lines].sort(order)[lines.length - 1]!;
   if (last.state !== 'pending' || last.login == null || sameLogin(last.login, me)) return null;
   if (isFreeLine(last)) return { login: last.login };
-  return decideTeamClaim(lines, me, nowMs).kind === 'free' ? { login: last.login } : null;
+  // A claimant whose review is already on GitHub finished: not stale, never "claim expired".
+  return decideTeamClaim(lines, me, nowMs, null, posted).kind === 'free' ? { login: last.login } : null;
 }
 
 // ---- GitHub ----
@@ -516,6 +597,71 @@ export async function prAuthorLogin(ctx: AgentContext, accountId: number, prId: 
   }
 }
 
+/**
+ * Teammates' Limn reviews ALREADY ON GITHUB at `headSha` for `provider` (DB only — the sync import,
+ * db/teammate-reviews-import.ts; `claude_reviews.kind = 'teammate'`): the poster's login and when it
+ * was posted. Only a review whose marker named the head (`h=`, never an inferred head) and whose run(s)
+ * include the provider (a pair covers both). The import leaves the reader's own out. [] on any error:
+ * the fold then decides from the lines alone, as before. Never throws.
+ */
+export async function postedTeammateReviewsAtHead(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+  provider: AiProviderId,
+): Promise<PostedTeammateReview[]> {
+  try {
+    const { claudeReviews: cr, users } = ctx.schema;
+    if (!cr?.sourceUserId || !users?.githubLogin) return [];
+    const rows = (await ctx.db
+      .select({ login: users.githubLogin, postedAt: cr.postedAt, teammate: cr.teammate })
+      .from(cr)
+      .innerJoin(users, eq(users.id, cr.sourceUserId))
+      .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), eq(cr.kind, 'teammate')))
+      .execute()) as Array<{
+      login: string | null;
+      postedAt: Date | number | null;
+      teammate: { headInferred?: boolean; runs?: Array<{ provider: string | null }> } | null;
+    }>;
+    const out: PostedTeammateReview[] = [];
+    for (const r of rows) {
+      if (!r.login || r.postedAt == null || r.teammate == null || r.teammate.headInferred !== false) continue;
+      if (!(r.teammate.runs ?? []).some((x) => x.provider === provider)) continue;
+      const at = r.postedAt instanceof Date ? r.postedAt.getTime() : Number(r.postedAt);
+      if (Number.isFinite(at)) out.push({ login: r.login, postedAtMs: at });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Has the holder of a remembered "being reviewed" skip already posted their review at its head (DB
+ * only)? Then the skip must not wait out the lease: the claim is read again and folds as "reviewed".
+ */
+async function holderPosted(ctx: AgentContext, accountId: number, prId: number, skip: ClaudeTeamClaimSkip): Promise<boolean> {
+  if (skip.kind !== 'reviewing') return false;
+  const since = Date.parse(skip.at);
+  const posted = await postedTeammateReviewsAtHead(ctx, accountId, prId, skip.headSha, skip.provider);
+  return posted.some((p) => sameLogin(p.login, skip.login) && (!Number.isFinite(since) || p.postedAtMs >= since));
+}
+
+/**
+ * `teamClaimHeldHead`, unless the holder of a "being reviewed" skip has already posted their review at
+ * that head: then null, so the sweeper takes the PR now and the claim folds it as "reviewed" (one
+ * GitHub read) instead of waiting for the lease to end. DB + memory. Never throws.
+ */
+export async function teamClaimHeldHeadNow(ctx: AgentContext, accountId: number, prId: number, nowMs: number): Promise<string | null> {
+  const e = skipsOfPr(accountId, prId).find((x) => nowMs < x.recheckAtMs);
+  if (!e) return null;
+  for (const x of skipsOfPr(accountId, prId)) {
+    if (nowMs < x.recheckAtMs && (await holderPosted(ctx, accountId, prId, x.skip).catch(() => false))) return null;
+  }
+  return e.skip.headSha;
+}
+
 /** A claim this run holds (or a run that went ahead without one: `record.state === 'unmarked'`). */
 export interface TeamClaimHandle {
   target: TeamClaimTarget;
@@ -615,9 +761,10 @@ export async function claimBeforeAutoRun(
   });
 
   // A remembered skip at this head and provider, still inside its wait: skip without a GitHub read.
+  // ⚠ Not when the holder of a "being reviewed" skip has posted their review since: read it again.
   const mem = skips.get(skipKey(accountId, prId, provider));
   if (mem && mem.skip.headSha === headSha && !opts.pressed && now() < mem.recheckAtMs) {
-    return { kind: 'skip', skip: mem.skip };
+    if (!(await holderPosted(ctx, accountId, prId, mem.skip))) return { kind: 'skip', skip: mem.skip };
   }
 
   let login: string | null = null;
@@ -645,7 +792,9 @@ export async function claimBeforeAutoRun(
   }
   // The PR author's own lines never hold the head (`decideTeamClaim`).
   const author = target.authorLogin !== undefined ? target.authorLogin : await prAuthorLogin(ctx, accountId, prId);
-  const first = decideTeamClaim(lines, login, now(), author);
+  // A teammate whose review is already on GitHub here has finished, whatever their line says.
+  const posted = await postedTeammateReviewsAtHead(ctx, accountId, prId, headSha, provider);
+  const first = decideTeamClaim(lines, login, now(), author, posted);
   const skipOf = (d: Extract<TeamClaimDecision, { kind: 'reviewed' | 'reviewing' }>): TeamClaimStart => {
     const skip: ClaudeTeamClaimSkip = {
       provider,
@@ -721,7 +870,7 @@ export async function claimBeforeAutoRun(
   } catch {
     return marked(); // our line is up; nothing says anyone else's is earlier
   }
-  const second = decideTeamClaim(after, login, now(), author);
+  const second = decideTeamClaim(after, login, now(), author, posted);
   if (second.kind !== 'reviewing' && second.kind !== 'reviewed') return marked();
   // We lost: stand down. Under a pending race, re-post the winner's line so GitHub's displayed
   // latest line names them (a success that landed after ours is already the latest line). Our row is

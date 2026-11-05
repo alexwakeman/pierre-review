@@ -2198,9 +2198,9 @@ export const workspaces = sqliteTable(
     // PR's head so teammates' Limn skips a commit someone is already reviewing with the same
     // provider. NULL/false = OFF, the default. The ONE writer is `setWorkspaceAutoReview`.
     teamClaimsEnabled: integer('team_claims_enabled', { mode: 'boolean' }),
-    // "Withdraw Limn's approval when new commits are pushed" (migration 0165; docs/CLAUDE-REVIEW.md
-    // § Withdrawing Limn's approval). NULL = ON, the default; only a stored false is off. The ONE
-    // writer is `setWorkspaceAutoReview`.
+    // ⚠ DORMANT since 2026-11-05 (migration 0165): gated the removed PUSH path of "withdraw Limn's
+    // approval" (docs/CLAUDE-REVIEW.md § Withdrawing Limn's approval). Never read or written; kept,
+    // never dropped.
     withdrawApprovalOnPush: integer('withdraw_approval_on_push', { mode: 'boolean' }),
     // WHO RUNS AUTO REVIEWS (migration 0135): NULL = the default provider (Settings → AI); 'both' =
     // Claude then Codex as one pair (docs/CLAUDE-REVIEW.md § Claude + Codex). The ONE writer is

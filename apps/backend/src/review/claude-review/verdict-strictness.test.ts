@@ -46,7 +46,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 const CLAUDE_SUMMARY = 'The fixture update matches the metric change. Nothing else moved.';
 const CODEX_SUMMARY =
   'The code change is small, but the binary fixture change cannot be verified from this diff. A deeper worktree review is recommended to inspect the changed GeoPackage records.';
-const CODEX_REASON = 'Not approved: Codex didn’t approve. The code change is small, but the binary fixture change cannot be verified from this diff.';
+const CODEX_REASON = 'Not approved: Codex left a comment, not an approval. No findings are open.';
 
 const STRICT: VerdictRules = { pairStrictness: 'strict', approveLeftovers: 'nits_questions' };
 const RELAXED: VerdictRules = { pairStrictness: 'relaxed', approveLeftovers: 'nits_questions' };
@@ -95,13 +95,36 @@ describe('the rules, pure', () => {
       heldReason: 'model_comment',
       text: 'Not approved: Codex asked for changes. The code change is small, but the binary fixture change cannot be verified from this diff.',
     });
-    expect(findingsNotApproved(runs('COMMENT', 'COMMENT'), [], RELAXED)?.text).toBe('Not approved: neither Claude nor Codex approved.');
+    expect(findingsNotApproved(runs('COMMENT', 'COMMENT'), [], RELAXED)?.text).toBe(
+      'Not approved: neither Claude nor Codex approved. No findings are open.',
+    );
   });
 
-  it('a single run that did not approve: the model’s own first sentence', () => {
-    expect(findingsNotApproved([{ by: 'Claude', verdict: 'COMMENT', summary: '- a list\nLooks risky. More.' }], [], STRICT)).toEqual({
+  it('a single run that only commented: said plainly, with what is open — never its summary (PR #592)', () => {
+    // robin-dunn's review on #592: COMMENT, nothing open, a summary saying the change is sound.
+    const sound = [{ by: 'Claude', verdict: 'COMMENT' as const, summary: 'The change is sound: the guard covers every caller.' }];
+    expect(findingsNotApproved(sound, [], STRICT)).toEqual({
       heldReason: 'model_comment',
-      text: 'Not approved: Claude didn’t approve. Looks risky.',
+      text: 'Not approved: Claude left a comment, not an approval. No findings are open.',
+    });
+    // Praise and reader-ignored findings are not open.
+    expect(findingsNotApproved(sound, [f('praise'), { ...f('nit'), included: false }], STRICT)?.text).toBe(
+      'Not approved: Claude left a comment, not an approval. No findings are open.',
+    );
+    expect(findingsNotApproved(sound, [f('nit'), f('question'), f('question')], STRICT)?.text).toBe(
+      'Not approved: Claude left a comment, not an approval. A nit and 2 questions are still open.',
+    );
+    expect(findingsNotApproved([{ by: 'Codex', verdict: 'COMMENT', summary: null }], [f('nit')], STRICT)?.text).toBe(
+      'Not approved: Codex left a comment, not an approval. A nit is still open.',
+    );
+    // No verdict at all.
+    expect(findingsNotApproved([{ by: 'Claude', verdict: null, summary: 'x.' }], [], STRICT)?.text).toBe(
+      'Not approved: Claude gave no verdict. No findings are open.',
+    );
+    // Asking for changes keeps the model's own first sentence (it says why).
+    expect(findingsNotApproved([{ by: 'Claude', verdict: 'REQUEST_CHANGES', summary: '- a list\nLooks risky. More.' }], [], STRICT)).toEqual({
+      heldReason: 'model_comment',
+      text: 'Not approved: Claude asked for changes. Looks risky.',
     });
   });
 
@@ -147,7 +170,7 @@ describe('the rules, pure', () => {
       { by: 'Codex', verdict: 'COMMENT' as const, summary: CODEX_SUMMARY, raised: 0 },
     ];
     const strict = repliesDissent(halves, 'strict');
-    expect(strict).toEqual({ heldReason: 'pair_strict', text: CODEX_REASON });
+    expect(strict).toEqual({ heldReason: 'pair_strict', text: 'Not approved: Codex left a comment, not an approval. It raised no findings.' });
     expect(repliesVerdict({ ...base, open: [], dissent: strict })).toBeNull();
     expect(repliesNotApproved({ ...base, open: [], dissent: strict })).toEqual({ reason: strict, held: true });
     expect(repliesDissent(halves, 'relaxed')).toBeNull();
@@ -436,7 +459,7 @@ describe('the reason on read', () => {
     const theirs = await makePr();
     const b = await run(theirs, 'claude', [], 'COMMENT', CODEX_SUMMARY, null, 'manual');
     expect((await na.notApprovedForView(ctx, 1, await persist.getReviewView(ctx, b, 1)))?.text).toBe(
-      'Not approved: Claude didn’t approve. The code change is small, but the binary fixture change cannot be verified from this diff.',
+      'Not approved: Claude left a comment, not an approval. No findings are open.',
     );
   });
 

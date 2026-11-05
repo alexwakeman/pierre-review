@@ -4412,8 +4412,6 @@ export interface SetWorkspaceAutoReviewBody {
   dailyCap?: number;
   // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
   teamClaimsEnabled?: boolean;
-  // `WorkspaceAutoReviewSettings.withdrawApprovalOnPush`.
-  withdrawApprovalOnPush?: boolean;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
   // keeps its stored value.
   autoPost?: {
@@ -4488,11 +4486,6 @@ export interface WorkspaceAutoReviewSettings {
   // so teammates' Limn skips a commit someone is already reviewing with the same provider. OFF by
   // default (only a stored true is on). Needs write access to the repo. Absent on older servers.
   teamClaimsEnabled?: boolean;
-  // "Withdraw Limn's approval when new commits are pushed" (`workspaces.withdraw_approval_on_push`,
-  // migration 0165). When a PR's head moves off the commit Limn's OWN automatic approval was given
-  // on, Limn dismisses that approval (never a person's approval, never one posted by hand). ON by
-  // default (only a stored false is off). Absent on older servers.
-  withdrawApprovalOnPush?: boolean;
 }
 
 // Who runs a workspace's auto reviews: the default provider, or Claude then Codex as one pair.
@@ -4585,11 +4578,11 @@ export interface WorkspaceAutoPostSettings {
   resolveOwnPrs: boolean;
   // LIFTING A TEAMMATE'S LIMN BLOCK (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). TWO
   // opt-ins, both OFF by default, both needed:
-  //  - `teamLiftConsent` — the BLOCKED side: "Teammates' Limn may lift my Limn's block once every
-  //    point is addressed". Carried as `lift=1` in the hidden marker of every review this reader
+  //  - `teamLiftConsent` — the BLOCKED side: "Let a teammate's Limn dismiss my Limn's “changes
+  //    requested” once every point is fixed". Carried as `lift=1` in the hidden marker of every review this reader
   //    posts while it is on (a teammate's Limn can only read GitHub).
-  //  - `liftTeammateBlocks` — the LIFTING side: "Lift a teammate's Limn block when everything is
-  //    addressed". With it on, a run that follows up on a consented, standing teammate block and
+  //  - `liftTeammateBlocks` — the LIFTING side: "Dismiss a teammate's Limn “changes requested” once
+  //    every point is fixed". Neither ever dismisses an approval. With it on, a run that follows up on a consented, standing teammate block and
   //    finds every point behind it settled dismisses that block and posts its own review.
   teamLiftConsent: boolean;
   liftTeammateBlocks: boolean;
@@ -4772,7 +4765,8 @@ export interface ClaudeAutoPostRecord {
   withdrewApproval?: ClaudeWithdrewApprovalRecord | null;
 }
 // Limn withdrawing its OWN earlier automatic APPROVE (matched by that run's `githubReviewId`, never by
-// marker): 'push' = new commits since it approved; 'run' = a later run at a new head did not approve.
+// marker): 'run' = a later run at a new head did not approve; 'push' = new commits since it approved
+// (written only by the push path REMOVED 2026-11-05 — old records still read and render).
 // 'failed' carries GitHub's words in `error`; never retried. A 'withdrawing' left by a crash stays.
 export interface ClaudeApprovalWithdrawal {
   status: 'withdrawing' | 'withdrawn' | 'failed';

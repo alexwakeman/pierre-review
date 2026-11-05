@@ -2658,6 +2658,28 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   review). A non-author teammate's lines hold as before. When the reader IS the author nothing is left
   out. `staleTeammateLine` still sees the author's live line (it is never released as expired), and the
   reconciler's tab refresh folds with the author too, so no "Carol reviewed this commit" row is kept.
+  ⚠ **A HOLDER WHOSE REVIEW IS ALREADY ON GITHUB HAS FINISHED** (2026-11-05; `decideTeamClaim`'s
+  `posted`, `withPostedReviews`). Real: PR 207914 (DEFRA/bng-metric-backend#592, head 9fbcc68) —
+  robin-dunn's Limn POSTED its review at 12:02 but never wrote its "reviewed" line, so our Limn waited
+  for the lease until 12:27. Now a teammate's Limn review AT THIS HEAD for this provider that sync has
+  already imported (`postedTeammateReviewsAtHead`: `claude_reviews.kind = 'teammate'`, the marker's own
+  `h=` — never an inferred head —, `runs` naming the provider, a pair covering both; DB only, no GitHub
+  call) counts as their success line when it was posted at or after their OPEN claim began (their
+  pending lines since their own last settling line). It is placed after the later of the post and
+  their newest line, so the fold reads "already reviewed by @x" — the SAME consequence as their real
+  success line: our Limn stands down at once (it does not run, it does not wait), and the tab says
+  "Robin Dunn reviewed this commit with Claude · posted on GitHub" (`postedReviewLine`). Chosen over
+  "free" because their review IS the team's review of that head, exactly as if their final line had
+  landed; over "keep waiting" because the review is provably done. Unchanged: the PR author's lines
+  never hold (author first), the reader's own post is not read, a review posted before the claim began
+  settles nothing, and any LATER line still wins (a Clear frees the head; a newer live claim holds it).
+  It applies past the lease too, so the 30-minute "reviewed" recheck never turns it free, and
+  `staleTeammateLine` takes `posted` too, so the reconciler never posts "claim expired" over a finished
+  claim (it records their line as reviewed instead). The remembered "being reviewed" wait is cut short:
+  the sweeper asks `teamClaimHeldHeadNow` (DB-aware: a holder whose review is imported stops holding)
+  and `claimBeforeAutoRun` skips its no-read shortcut for such a skip, so the next tick re-reads the
+  head ONCE and folds it as reviewed — within a sync walk of the post, not 25 minutes. Pinned by
+  `team-claim.test.ts`.
 - **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
   re-posts the winner's description, so GitHub's displayed latest line names the winner.
 - **THE TEAMMATE'S LINE ON THE TAB** (2026-11-02, migration 0159, `team-claim-seen.ts`). Real: PR
@@ -2833,8 +2855,8 @@ too, but post nothing.
 Settings → Workspace → Auto Claude review → **Post Claude reviews to GitHub automatically**. **ON by
 default since 2026-11-04** (the owner: auto-post and the auto verdict on by default) for every
 workspace, existing and new: `workspaces.auto_post_enabled` NULL reads ON and only a stored false is
-off — in `resolveAutoPostSettings`, the writer (`setWorkspaceAutoReview` compares against `!== false`)
-and approval-withdraw's read; no migration (before: NULL/false = off, migration `0087`). It acts on AUTO
+off — in `resolveAutoPostSettings` and the writer (`setWorkspaceAutoReview` compares against
+`!== false`); no migration (before: NULL/false = off, migration `0087`). It acts on AUTO
 runs only, and auto review itself stays OFF per workspace until switched on, so the default matters only
 where auto review is on. ⚠ A ticket review's member PR also needs auto review ON in ITS own workspace
 (`readWorkspaceAutoPostForPr().autoReviewOn`): a ticket review started elsewhere never posts on a PR whose
@@ -2968,10 +2990,15 @@ auto-posting: claim before any GitHub write, never retried.
   that does not end in an APPROVE gets ONE plain-English line, "Not approved: …":
   - from the findings and the model(s) (`findingsNotApproved`, pure — null EXACTLY when
     `autoVerdictFor` would approve), in order: blockers / warnings still open ("Not approved: 2
-    warnings are still open."); the model(s) ("Not approved: Codex didn’t approve. <its summary's first
-    sentence, clipped at a sentence end>" — `pair_strict` in a strict pair, `model_comment` for a
-    single run, a relaxed pair's asker, or "neither Claude nor Codex approved"); leftovers the rule
-    forbids ("Not approved: a question is still open.");
+    warnings are still open."); the model(s) — a model that asked for changes: "Not approved: Codex
+    asked for changes. <its summary's first sentence, clipped at a sentence end>"; one that only
+    COMMENTED: "Not approved: Claude left a comment, not an approval." plus what is open, "No findings
+    are open." / "A nit is still open." — ⚠ NEVER its summary (since 2026-11-05: a COMMENT's summary
+    often says "The change is sound", which beside "didn’t approve" confused readers on PR #592); no
+    verdict: "Claude gave no verdict." (`pair_strict` in a strict pair, `model_comment` for a single
+    run, a relaxed pair's asker, or "neither Claude nor Codex approved. No findings are open."; the
+    replies outcome's silent half: "… It raised no findings."); leftovers the rule forbids ("Not
+    approved: a question is still open.");
   - or the GATE'S, when a wanted APPROVE was held (`heldReasonText`): "your own pull request.",
     "your own review on GitHub still stands.", "the earlier request for changes still
     stands.", "couldn’t read the earlier reviews on GitHub.", "High impact." / "impact unknown.",
@@ -3032,7 +3059,7 @@ auto-posting: claim before any GitHub write, never retried.
 - ⚠ **WITHDRAWING LIMN'S APPROVAL** (2026-11-04; `review/claude-review/approval-withdraw.ts`). An
   automatic APPROVE judges ONE head; it used to stay in force after a push and after a later run found
   problems (PR #591: approved at 312c22e, 3 warnings at 91482c8 posted as COMMENT, the approval stood
-  until withdrawn by hand). Now:
+  until withdrawn by hand). Now a later RUN withdraws it; a push alone never does (below):
   - Limn's own approval is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
     whose `verdict.submitted` is APPROVE (`loadLimnAutoApprovals`, the twin of `loadLimnAutoBlockIds`;
     a pair's claim row is the half without `viaPairReviewId`) — ⚠ NEVER by marker or body: a hand
@@ -3044,21 +3071,19 @@ auto-posting: claim before any GitHub write, never retried.
     counted; none ⇒ "not approved at …"), then posts as before. The gate reads `LIMN_AUTO_APPROVED` as
     not the reader's: a REQUEST_CHANGES goes out, a new APPROVE supersedes it. A run at the SAME head
     never withdraws. Recorded on the later run as `withdrewApproval` (`withdrawn` / `withdraw_failed`);
-    a run whose only write is the withdrawal is `posted` / `failed` by it alone, and `skipped` when the
-    push path had already claimed it.
-  - **The push path** (`maybeWithdrawApprovalOnPush`): `persistPr` (every walk, the viewed-PR refresh
-    included) sees an OPEN PR's head move and, AFTER its transaction, fire-and-forget (every error
-    caught; never under the write lock), dismisses the newest unwithdrawn approval of another head
-    with "Limn withdrew its approval: new commits since it approved (<new short sha>)." Only with auto
-    review AND auto-posting on in the PR's workspace and the switch **"Withdraw Limn's approval when
-    new commits are pushed"** on (`workspaces.withdraw_approval_on_push`, migration 0165, ON by
-    default — only a stored false is off), never on the reader's own PR. DB pre-checks first, so an
-    ordinary walk makes no GitHub call. Success stamps the local review `dismissed` and settles.
+    a run whose only write is the withdrawal is `posted` / `failed` by it alone, and `skipped` when an
+    earlier claim already holds it.
+  - ⚠ **THERE IS NO PUSH PATH** (removed 2026-11-05). A push alone NEVER withdraws Limn's approval:
+    GitHub's own rule (a ruleset's `dismiss_stale_reviews_on_push`, or classic branch protection's
+    "Dismiss stale pull request approvals when new commits are pushed") does that per repo/branch,
+    and Limn must not override a repo that keeps approvals. The switch "Withdraw Limn's approval when
+    new commits are pushed" is gone; `workspaces.withdraw_approval_on_push` (0165) is DORMANT. Old
+    `approvalWithdrawal` records with `why: 'push'` still read and render.
   - ⚠ **THE CLAIM**: `approvalWithdrawal` on the APPROVING run's `auto_post` JSON
     (`{status: withdrawing|withdrawn|failed, why: push|run, headSha, message, byReviewId?, error}`),
     written by a `json_set` compare-and-set guarded by `json_extract(…) IS NULL` BEFORE the GitHub
-    write. Whichever path claims first dismisses; the other does nothing. A refusal (403/422) is
-    recorded in GitHub's words and NEVER retried, by either path. Both fields ride the wire
+    write. Whichever run claims first dismisses; another does nothing. A refusal (403/422) is
+    recorded in GitHub's words and NEVER retried. Both fields ride the wire
     (`ClaudeAutoPostWire`); the tab prints the message (approving run) or "Withdrew Limn’s earlier
     approval." / "Couldn’t withdraw …: <why>" (`approvalWithdrawLines`). The replies pass does not
     withdraw (it runs at the same head). Pinned by `approval-withdraw.test.ts`.
@@ -3485,16 +3510,19 @@ may DISMISS that review and post its own (`review/claude-review/teammate-lift.ts
 The reader's OWN block is the other path (§ Auto-posting, the lift).
 
 - **Two opt-ins, both OFF by default, per workspace** (overrides JSON `workspaces.auto_post_settings`,
-  no column; Settings → Auto review → "Teammates' Limn blocks", ⓘ): (a) THE BLOCKED SIDE'S CONSENT,
-  `teamLiftConsent` — "Teammates' Limn may lift my Limn's block once every point is addressed" —
+  no column; Settings → Auto review → "Teammates' Limn “changes requested”", ⓘ — reworded 2026-11-05:
+  the owner read "block" as an approval, so each label names what is dismissed (a Limn "changes
+  requested" review, never an approval), by whom and when): (a) THE BLOCKED SIDE'S CONSENT,
+  `teamLiftConsent` — "Let a teammate's Limn dismiss my Limn's “changes requested” once every point is
+  fixed" —
   written as `lift=1` in the marker of a review that reader's AUTO-POSTING sends while it is on (an
   auto run, or "Review and post": Limn's own computed verdict), imported as `teammate.liftConsent`.
   ⚠ The manual Post button NEVER writes it: the person chose that verdict and body, and a review a
   person chose is never dismissed. ⚠ Nor does a post whose comments leave out a BLOCKER its verdict
   counts (`blockersAllInPost`: the blocker was already on GitHub from an earlier post, so the re-post
   omits it yet still requests changes): the other side reads the points from the post's own comments
-  only. (b) THE LIFTING SIDE'S SETTING, `liftTeammateBlocks` — "Lift a teammate's Limn block when
-  everything is addressed". A post made with (a) off carries no consent, whatever the setting says later.
+  only. (b) THE LIFTING SIDE'S SETTING, `liftTeammateBlocks` — "Dismiss a teammate's Limn
+  “changes requested” once every point is fixed". A post made with (a) off carries no consent, whatever the setting says later.
 - **The rule** (`teammateLiftHold`, pure, first failure decides): (b) on; not the reader's own PR; the
   block is a teammate's (never the reader's — standings `you: false` AND the live login); still in
   force (DB standings, then the LIVE review list: the poster's newest decisive review is this
