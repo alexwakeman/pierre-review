@@ -14,11 +14,10 @@
 //      bot-collapse applied inside the fold would move the count silently; both belong to the
 //      caller, and the fold returns the FULL list to make that the only option.
 //
-// The rule itself is three tiers: latest VERDICT (approved / changes_requested) if the reviewer
-// ever filed one, else latest dismissal, else latest comment. Tier beats clock, which is what
-// makes it a strict superset of the old rule — and is also where it deliberately parts company
-// with ChecksTab's "latest non-pending wins" (59 disagreeing reviewer-PR pairs on this repo's real
-// open PRs) and with a dismissed approval (2 pairs). Both are pinned below.
+// The rule itself is GitHub's, in two tiers: the latest VERDICT-SHAPED review (approved /
+// changes_requested / dismissed), else the latest comment. Tier beats clock — a later comment
+// never hides a verdict, which is where it parts company with ChecksTab's "latest non-pending
+// wins" — and a dismissal never hands back an older verdict it superseded. Both are pinned below.
 //
 //   cd apps/backend && ./node_modules/.bin/vitest run src/db/triage-reviewers.test.ts
 //
@@ -85,14 +84,17 @@ const FIXTURES: Record<string, Spec[]> = {
   ],
   // A dismissal with no verdict behind it: a real standing, and it counts for nothing.
   'dismissed-only': [['dave', 'dismissed', 2]],
-  // ⚠ THE KNOWN DIVERGENCE, PINNED AS-IS. A revoked approval (GitHub files a fresh review node
-  // whose state is DISMISSED) still reads `approved`, because demoting it would also drop the
-  // approval and move the hashed count. 2 such pairs exist in this repo's real data, 1 on an open
-  // PR. Changing this is a decision with a re-billing cost, not a patch — see the tier table in
-  // triage.ts.
+  // A revoked approval: the newer dismissal is the standing, and it is no approval.
   'approval-then-dismissal': [
     ['alice', 'approved', 4],
     ['alice', 'dismissed', 1],
+  ],
+  // ⚠ PR #454 (2026-11-05): changes requested, then two approvals that were each dismissed. GitHub
+  // reads "review required"; the old fold resurrected the lifted block as "requested changes".
+  'block-then-dismissed-approvals': [
+    ['robin', 'changes_requested', 5],
+    ['robin', 'dismissed', 3],
+    ['robin', 'dismissed', 1],
   ],
   // A dismissal then a drive-by comment: `dismissed` outranks `commented`, so a reviewer who was
   // dismissed does not read as though they had merely chatted.
@@ -152,7 +154,7 @@ beforeAll(async () => {
     .returning()
     .execute();
 
-  for (const login of ['alice', 'bob', 'carol', 'dave', 'erin']) {
+  for (const login of ['alice', 'bob', 'carol', 'dave', 'erin', 'robin']) {
     const [u] = await db
       .insert(users)
       .values({ githubLogin: login, githubNodeId: `U_${login}`, isBot: false })
@@ -202,13 +204,16 @@ afterAll(async () => {
 });
 
 describe('the approval counts do not move', () => {
-  it('⚠ agrees with the OLD rule on every fixture PR', async () => {
+  it('⚠ agrees with the OLD rule on every fixture PR but where a dismissal is the newest verdict', async () => {
     // The predecessor, transcribed verbatim from the fold this replaced: the latest row per
     // (pr, author) whose state is `approved` or `changes_requested`, every other row skipped.
     // If this ever disagrees, the Do next order has moved.
     const { reviews } = schema;
     const { inArray } = await import('drizzle-orm');
-    const ids = [...prIdByKey.values()];
+    // The ONE intended difference (2026-11-05): a newest DISMISSED review ends the reviewer's
+    // verdict, as on GitHub; the old rule skipped it and resurrected the verdict before it.
+    const DISMISSAL_WINS = new Set(['approval-then-dismissal', 'block-then-dismissed-approvals']);
+    const ids = [...prIdByKey.entries()].filter(([k]) => !DISMISSAL_WINS.has(k)).map(([, id]) => id);
     const rows = await db
       .select({
         prId: reviews.prId,
@@ -325,16 +330,21 @@ describe('a dismissal is a standing, and it is not an approval', () => {
     expect(await standingsOf('dismissal-then-comment')).toEqual({ dave: 'dismissed' });
   });
 
-  it('⚠ but a dismissed APPROVAL still reads approved — the known divergence, pinned', async () => {
-    // Honest would be `dismissed`. Honest would also drop the approval and move a hashed count on
-    // 1 live open PR (sourcery-ai) plus 1 merged one. Flip the tier of `dismissed` to 0 in
-    // triage.ts to change it, knowing every stored plan on an affected workspace re-bills.
-    expect(await standingsOf('approval-then-dismissal')).toEqual({ alice: 'approved' });
+  it('a dismissed APPROVAL reads dismissed and counts for nothing, as on GitHub', async () => {
+    expect(await standingsOf('approval-then-dismissal')).toEqual({ alice: 'dismissed' });
     expect(
-      (await computeApprovalInfoByPr([prId('approval-then-dismissal')])).get(
-        prId('approval-then-dismissal'),
-      ).approvals,
-    ).toBe(1);
+      (await computeApprovalInfoByPr([prId('approval-then-dismissal')])).get(prId('approval-then-dismissal'))
+        ?.approvals ?? 0,
+    ).toBe(0);
+  });
+
+  it('⚠ a dismissal never resurrects an older block it superseded (PR #454)', async () => {
+    expect(await standingsOf('block-then-dismissed-approvals')).toEqual({ robin: 'dismissed' });
+    expect(
+      (await computeApprovalInfoByPr([prId('block-then-dismissed-approvals')])).get(
+        prId('block-then-dismissed-approvals'),
+      )?.changesRequested ?? false,
+    ).toBe(false);
   });
 });
 

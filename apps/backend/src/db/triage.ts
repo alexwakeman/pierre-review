@@ -99,17 +99,17 @@ export interface PrReviewStandings {
   total: number;
 }
 
-/** Tier of a review state for the standing pick — LOWER WINS, regardless of timestamp.
+/** Tier of a review state for the standing pick — LOWER WINS, regardless of timestamp; within a
+ *  tier the LATEST wins.
  *
- *  Tier 0 is the VERDICT tier and is the ONLY tier the approval count reads, which is what makes
- *  this rule a strict superset of its predecessor (below). Tiers 1 and 2 exist so a reviewer who
- *  never filed a verdict still appears on the card with an honest label instead of vanishing.
- *  A dismissal outranks a bare comment: it is a verdict-shaped fact about the review, and a
- *  reviewer who was dismissed and then commented has not gone back to saying nothing. */
-function standingTier(state: string): 0 | 1 | 2 | null {
-  if (state === 'approved' || state === 'changes_requested') return 0;
-  if (state === 'dismissed') return 1;
-  if (state === 'commented') return 2;
+ *  Tier 0 is the VERDICT tier: approved, changes_requested AND dismissed, as GitHub reads it — a
+ *  reviewer's newest verdict-shaped review decides, and a DISMISSED one (a revoked approval or
+ *  block; GitHub flips the original review's state) leaves them with NO standing verdict. It never
+ *  hands the reviewer back an older verdict it superseded. Tier 1 (a bare comment) exists so a
+ *  reviewer who never filed a verdict still appears on the card with an honest label. */
+function standingTier(state: string): 0 | 1 | null {
+  if (state === 'approved' || state === 'changes_requested' || state === 'dismissed') return 0;
+  if (state === 'commented') return 1;
   // 'pending' — a review draft that was never submitted. Not a review; it says nothing about
   // where the reviewer stands, and showing it as one would name someone who has not spoken.
   return null;
@@ -119,24 +119,16 @@ function standingTier(state: string): 0 | 1 | 2 | null {
  * Per-PR reviewer standings: ONE indexed read of `reviews` over the given PR ids, grouped per
  * (pr, author) in memory.
  *
- * THE RULE — a reviewer's standing is their latest VERDICT (approved / changes_requested) if they
- * ever filed one; failing that their latest dismissal; failing that their latest comment.
+ * THE RULE — GitHub's: a reviewer's standing is their latest VERDICT-SHAPED review (approved /
+ * changes_requested / dismissed); failing that their latest comment. A `dismissed` standing counts
+ * for nothing (`approvalInfoFromStandings`).
  *
- * ⚠ THIS IS A STRICT SUPERSET OF THE OLD APPROVAL FOLD, BY CONSTRUCTION, AND HAS TO STAY ONE.
- * `approvals` drives the Do next merge proximity (`db/work-plan.ts`), so a count that moves
- * re-orders every Pending tab on an affected workspace. The predecessor picked the latest row whose state was `approved` or
- * `changes_requested` and ignored every other row; tier 0 is that pick, unchanged, and tiers 1-2
- * can only add reviewers the old rule dropped entirely — reviewers who count for nothing. Pinned
- * in `triage-reviewers.test.ts`.
- *
- * ⚠ KNOWN DIVERGENCE FROM THE STANDING A HUMAN WOULD READ, KEPT DELIBERATELY: a reviewer who
- * approved and was LATER DISMISSED (a fresh review node whose state is DISMISSED, which is how
- * GitHub records a revoked approval) still reads `approved`, because tier 0 outranks tier 1
- * whatever the clock says. Demoting them would be the honest label — and would also drop the
- * approval, moving the hashed count. MEASURED on this repo's real data: 2 reviewer-PR pairs
- * account-wide, 1 of them on an open PR (sourcery-ai). So it is a decision to take with the hash
- * consequence in hand, not a patch: change the tier of `dismissed` to 0 and every stored plan on
- * an affected workspace re-bills.
+ * ⚠ A DISMISSAL NEVER RESURRECTS AN OLDER VERDICT (2026-11-05). The old fold ranked dismissed
+ * BELOW approved/changes_requested whatever the clock said, so "requested changes → approved →
+ * approval dismissed" read as "requested changes" — a block the reviewer had already lifted, shown
+ * on PR #454 while GitHub's own decision read "review required". `approvals` drives the Do next
+ * merge proximity (`db/work-plan.ts`); the narration hash that once made this count expensive to
+ * move went with Plan my day. Pinned in `triage-reviewers.test.ts`.
  *
  * ⚠ A NULL `authorId` IS ONE PSEUDO-REVIEWER PER PR, AND IT COUNTS. `reviews.authorId` is
  * nullable (a deleted GitHub account), the old key was the string `${prId}:${authorId}`, so every
@@ -175,7 +167,7 @@ export async function computeReviewStandingsByPr(
   // making this deterministic moves no count today — it just stops the day one would.
   const best = new Map<
     string,
-    { prId: number; userId: number | null; tier: 0 | 1 | 2; state: string; at: Date; id: number }
+    { prId: number; userId: number | null; tier: 0 | 1; state: string; at: Date; id: number }
   >();
   for (const r of rows) {
     const tier = standingTier(r.state);

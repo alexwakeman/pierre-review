@@ -302,13 +302,10 @@ export async function scoreCards(
   // the card's cannot disagree — the two used to be `computeApprovalInfoByPr` and nothing, and a
   // second fold over `reviews` is exactly how they would drift.
   //
-  // ⚠ `approvals` IS HASHED (`payloadHashFor`), and this rewrite deliberately does not move it.
   // `approvalInfoFromStandings` is the projection `computeApprovalInfoByPr` already was: the two
   // differ only in EMISSION — the old map had no entry for a PR whose reviews are all comments,
   // where this one does, with `approvals: 0`. `sharedFacts` reads `?.approvals ?? 0`, so the value
-  // is identical either way. Nothing else from the standings enters `WorkPlanFacts`: a reviewer's
-  // `standingAt` is a Date that moves without the work moving, and a hashed field that drifts on
-  // its own re-bills every stored plan on the workspace.
+  // is identical either way. (The narration hash that once covered `approvals` went with Plan my day.)
   const approvalByPr = new Map(
     [...(await computeReviewStandingsByPr(factPrIds))].map(([prId, st]) => [
       prId,
