@@ -117,12 +117,15 @@ test.describe('Activity Feed / click-to-detail flows', () => {
       .poll(() =>
         page
           .getByTestId('sidebar')
-          .locator('nav[aria-label="Main"] button[data-testid^="nav-"]')
+          // Pending and Open pull requests are pinned in their own nav ("Main") above the rest ("More").
+          .locator('nav[aria-label="Main"] button[data-testid^="nav-"], nav[aria-label="More"] button[data-testid^="nav-"]')
           .evaluateAll((els) => els.map((el) => (el.querySelector('.nav-label')?.textContent ?? '').trim())),
       )
       .toEqual(['Pending', 'Open pull requests', 'This Sprint', 'Timeline', 'Feed', 'Reports', 'Bots Monitoring']);
     // No fixed views in the tab strip any more: with no PR open it is not there at all.
     await expect(tabs(page)).toHaveCount(0);
+    // The two pinned entries sit outside the scrolling middle.
+    await expect(page.getByTestId('sidebar-pinned').locator('button[data-testid^="nav-"]')).toHaveCount(2);
   });
 
   test('This Sprint is a sidebar destination, opening on Theme, with Critical path and People', async ({ page }) => {
