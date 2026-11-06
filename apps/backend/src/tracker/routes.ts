@@ -48,6 +48,7 @@ import { registerTicketPrsRoute } from './ticket-prs.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
 import { registerTicketStatusRoutes } from './status-change.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
+import { registerAcFieldSettingsRoutes } from './ac-field-settings.js';
 
 const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear', notion: 'Notion' };
 
@@ -318,6 +319,7 @@ export function registerTrackerRoutes(
   registerTicketPrsRoute(app, ctx);
   registerManualTicketLinkRoute(app, ctx, opts);
   registerTicketStatusRoutes(app, ctx, opts);
+  registerAcFieldSettingsRoutes(app, ctx);
 
   const idParams = {
     type: 'object',

@@ -1,4 +1,6 @@
 import type {
+  JiraAcFieldSettingsBody,
+  JiraAcFieldSettingsResponse,
   ReferenceDocMutationResponse,
   ReferenceDocSectionResponse,
   DocsSearchResponse,
@@ -1288,6 +1290,14 @@ export const api = {
   updateWorkspaceTracker: (workspaceId: number, patch: WorkspaceTrackerUpdate) =>
     fetch(`/api/workspaces/${workspaceId}/tracker`, jsonBody('PUT', patch)).then((r) =>
       handle<WorkspaceTrackerSettings>(r),
+    ),
+  // Settings → Trackers: the acceptance-criteria field per Jira issue type, from the stored tickets
+  // (DB only, no Jira call). PUT sets one type's field (null = Limn's own pick) and answers the list.
+  jiraAcFieldSettings: (workspaceId: number) =>
+    get<JiraAcFieldSettingsResponse>(`/api/workspaces/${workspaceId}/tracker/ac-fields`),
+  setJiraAcFieldSetting: (workspaceId: number, body: JiraAcFieldSettingsBody) =>
+    fetch(`/api/workspaces/${workspaceId}/tracker/ac-fields`, jsonBody('PUT', body)).then((r) =>
+      handle<JiraAcFieldSettingsResponse>(r),
     ),
   // The Settings connection check: lists the Jira site's custom fields with the SAVED token.
   // Click-gated (one call to the customer's Jira).

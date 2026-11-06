@@ -135,6 +135,11 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
   WORKSPACE off for 30 min (a 429 for 5), keyed on a fingerprint of (provider, site, email, token),
   so a new token ends it at once. A person pressing Refresh bypasses it. Logs carry account +
   workspace + the error CODE only.
+- **The criteria field is chosen in Settings → Integrations** ("Acceptance criteria field",
+  `components/settings/JiraAcFieldSettings.tsx`, `tracker/ac-field-settings.ts`, 2026-11-06): one row
+  per issue type with stored tickets, a menu of their text fields, "Limn picks" = the name match. The
+  story view and the Story check show "Criteria from: <field> · Change in Settings" — the per-ticket
+  picker is gone (`PUT …/tracker-ticket/ac-field` stays for API callers).
 - **The criteria field is server-side**: `deriveAc` = the workspace's field for the issue type when
   the ticket has it, else the STRONG name match, else none — ONE rule for the worker, the route and
   the re-derivation. "None of these" stays a per-tab choice, never stored.
@@ -802,6 +807,7 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `GET /api/prs/:id/tracker-ticket?key=` | one detected ticket's STORED row (read once if never reached) | `search` |
 | `POST /api/prs/:id/tracker-ticket/refresh` | re-read now (backoff bypassed) | `search` |
 | `PUT /api/prs/:id/tracker-ticket/ac-field` | the criteria field for the ticket's issue type | `search` |
+| `GET`/`PUT /api/workspaces/:id/tracker/ac-fields` | Settings: the criteria field per issue type (DB only) | `read` |
 | `POST /api/ticket-links` | the Open PRs ticket row, ONE request per board | `search` |
 | `GET /api/ticket-merged-prs?workspace=&keys=` | the stacks' "Merged (n)" panel, DB-only | `read` |
 | `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |

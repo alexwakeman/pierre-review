@@ -641,3 +641,61 @@ describe('6. notion — the mapping PUT and the schema read', () => {
   });
 });
 
+
+describe('7. Settings: the criteria field per issue type (ac-fields)', () => {
+  const STORY = {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      key: 'ENG-7',
+      names: { customfield_10400: 'Acceptance Criteria', customfield_10600: 'Notes' },
+      fields: {
+        summary: 'Export',
+        description: 'As a user',
+        issuetype: { id: '10001', name: 'Story' },
+        customfield_10400: '* CSV downloads',
+        customfield_10600: 'Talk to ops',
+      },
+    }),
+  } as const;
+  const list = (ws: number) => app.inject({ method: 'GET', url: `/api/workspaces/${ws}/tracker/ac-fields` });
+  const set = (ws: number, body: unknown) =>
+    app.inject({ method: 'PUT', url: `/api/workspaces/${ws}/tracker/ac-fields`, payload: body as Record<string, unknown> });
+
+  beforeEach(async () => {
+    await put(WS, { jira: { token: TOKEN } });
+  });
+
+  it('lists each issue type from the stored tickets, with its fields; a choice re-derives the criteria', async () => {
+    nextResponse = STORY;
+    expect((await ticket(10, 'eng-7')).statusCode).toBe(200);
+    const before = (await list(WS)).json();
+    const story = before.types.find((t: { issueTypeId: string }) => t.issueTypeId === '10001');
+    expect(story).toMatchObject({ issueTypeName: 'Story', chosen: null, inUse: { id: 'customfield_10400' } });
+    expect(story.fields.map((f: { id: string }) => f.id)).toEqual(expect.arrayContaining(['customfield_10400', 'customfield_10600']));
+
+    const calls0 = calls.length;
+    const res = await set(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', fieldId: 'customfield_10600' });
+    expect(res.statusCode).toBe(200);
+    expect(calls.length).toBe(calls0); // no Jira call
+    const after = res.json().types.find((t: { issueTypeId: string }) => t.issueTypeId === '10001');
+    expect(after).toMatchObject({ chosen: { id: 'customfield_10600', name: 'Notes' }, inUse: { id: 'customfield_10600' } });
+
+    // Back to Limn's pick.
+    const reset = await set(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', fieldId: null });
+    expect(reset.json().types.find((t: { issueTypeId: string }) => t.issueTypeId === '10001')).toMatchObject({
+      chosen: null,
+      inUse: { id: 'customfield_10400' },
+    });
+  });
+
+  it('refuses a field no ticket of the type has (400), an unknown type and another tenant’s workspace (404)', async () => {
+    nextResponse = STORY;
+    expect((await ticket(10, 'eng-7')).statusCode).toBe(200);
+    const story = (await list(WS)).json().types.find((t: { issueTypeId: string }) => t.issueTypeId === '10001');
+    expect((await set(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', fieldId: 'customfield_99999' })).statusCode).toBe(400);
+    expect((await set(WS, { apiRoot: story.apiRoot, issueTypeId: '424242', fieldId: null })).statusCode).toBe(404);
+    expect((await list(90)).statusCode).toBe(404);
+    expect((await set(90, { apiRoot: story.apiRoot, issueTypeId: '10001', fieldId: null })).statusCode).toBe(404);
+  });
+});

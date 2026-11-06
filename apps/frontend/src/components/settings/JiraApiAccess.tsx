@@ -14,9 +14,9 @@ const SECONDARY_BTN =
  * title, status and assignee on the Open PRs cards, and the story (description + acceptance
  * criteria) the ticket review and Claude Review read. CORE and free, in both modes.
  *
- * ⚠ THERE IS NO ACCEPTANCE-CRITERIA FIELD PICKER HERE ANY MORE. A site can carry several fields
- * named "Acceptance Criteria" and the one in use varies by issue type, so the field is chosen per
- * ticket in the Claude Review panel, from that ticket's own fields.
+ * The acceptance-criteria field is chosen PER ISSUE TYPE in its own block just below this one
+ * (JiraAcFieldSettings.tsx): a site can carry several fields named "Acceptance Criteria" and the one
+ * in use varies by issue type.
  *
  * ⚠ THE TOKEN IS WRITE-ONLY. The server never returns it (`hasToken` only), so the input starts
  * empty every time; a saved token shows "Saved" with Replace / Remove. Saving without typing a

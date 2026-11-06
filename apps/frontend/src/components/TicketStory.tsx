@@ -3,7 +3,7 @@
 //   StoryDisclosure  — the collapsible "Story" in each Story check block (TicketCoverage.tsx) and the
 //                      "As written in Jira" of the Story section (Activity/TicketStorySection.tsx):
 //                      the key linked to Jira, the title, description and acceptance criteria, and
-//                      for a Jira ticket the field the criteria come from, with the picker, and the
+//                      for a Jira ticket the field the criteria come from (chosen in Settings → Integrations), and the
 //                      people's comments, collapsed (TicketComments.tsx).
 //   (The Open PRs ticket-key modal is GONE, 2026-10-18: the key opens the story view instead,
 //    whose Story section carries this disclosure.)
@@ -19,8 +19,8 @@ import { pulledAcField, jiraStoryFromDetails, acFieldText } from '../lib/storyTa
 import { ticketDraftFromStored } from '../lib/claudeReviewFollowUp.js';
 import { storySourceOf } from '../lib/ticketStory.js';
 import { safeExternalUrl } from '../lib/ui.js';
-import { useSetJiraAcField, useStoredJiraTicket } from '../hooks/useJiraTicket.js';
-import { AcFieldPicker } from './ClaudeReviewFollowUp.js';
+import { useStoredJiraTicket } from '../hooks/useJiraTicket.js';
+import { useSettingsModal } from '../store/settingsModal.js';
 import { JiraStoryView, StoryText } from './ClaudeReviewTickets.js';
 import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { TicketComments } from './TicketComments.js';
@@ -44,8 +44,7 @@ function JiraStory({
   linkKey: boolean;
 }): JSX.Element {
   const { data, isLoading, isError, error } = useStoredJiraTicket(prId, jiraRef.key, true);
-  const setField = useSetJiraAcField(prId, jiraRef.key);
-  const [picking, setPicking] = useState(false);
+  const openSettings = useSettingsModal((st) => st.openSettings);
   // GitHub Issues: the criteria come from a fixed place (sub-issues, a task list, a section), so
   // there is no field to change.
   const fixedSource = hasFixedAcSource(jiraRef);
@@ -69,48 +68,14 @@ function JiraStory({
         draft={draft}
         linkKey={linkKey}
         fieldControl={
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-              <span className={MUTED}>Criteria from:</span>
-              <span className="font-medium text-ui-ink">{acFieldText(draft)}</span>
-              {!fixedSource && (
-              <button
-                type="button"
-                onClick={() => setPicking((p) => !p)}
-                disabled={setField.isPending}
-                aria-expanded={picking}
-                className={LINK_BTN}
-              >
-                Change
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
+            <span className={MUTED}>Criteria from:</span>
+            <span className="font-medium text-ui-ink">{acFieldText(draft)}</span>
+            {/* The field is chosen per issue type in Settings → Integrations (JiraAcFieldSettings). */}
+            {!fixedSource && (
+              <button type="button" onClick={() => openSettings('issue-tracker')} className={LINK_BTN}>
+                Change in Settings
               </button>
-              )}
-              {setField.isPending && <span className={MUTED}>Saving…</span>}
-            </div>
-            {picking && (
-              <div className="rounded-ui border border-ui-line p-2">
-                <AcFieldPicker
-                  fetched={{ details: data, site: jiraSiteOf(jiraRef.url), chosen }}
-                  allowNone={false}
-                  disabled={setField.isPending}
-                  onChoose={(id) => {
-                    if (id === '' || id === chosen) return;
-                    setField.mutate(id, { onSuccess: () => setPicking(false) });
-                  }}
-                />
-                {data.acFieldSource === 'setting' && (
-                  <button
-                    type="button"
-                    onClick={() => setField.mutate(null, { onSuccess: () => setPicking(false) })}
-                    disabled={setField.isPending}
-                    className={`mt-1.5 ${BTN}`}
-                  >
-                    Reset to default
-                  </button>
-                )}
-              </div>
-            )}
-            {setField.isError && (
-              <p className={`text-meta ${ERROR_TEXT}`}>{setField.error.message || 'Could not save the field.'}</p>
             )}
           </div>
         }

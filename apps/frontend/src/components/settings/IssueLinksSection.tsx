@@ -8,6 +8,7 @@ import {
 } from '@pierre-review/shared';
 import { useUpdateWorkspaceTracker, useWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { JiraApiAccess } from './JiraApiAccess.js';
+import { JiraAcFieldSettings } from './JiraAcFieldSettings.js';
 import { LinearApiAccess } from './LinearApiAccess.js';
 import { NotionTrackerSetup } from './NotionTrackerSetup.js';
 import { InfoButton } from '../InfoModal.js';
@@ -261,6 +262,10 @@ export function IssueLinksSection(): JSX.Element {
       {saved.provider === 'jira' &&
         provider === 'jira' &&
         (saved.baseUrl ?? '') !== '' && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
+      {/* The criteria field per issue type, once a token lets Limn read tickets. */}
+      {saved.provider === 'jira' && provider === 'jira' && data.jira.hasToken && (
+        <JiraAcFieldSettings workspaceId={workspaceId} />
+      )}
       {/* The same rule for Linear: the key belongs to the SAVED workspace URL. */}
       {saved.provider === 'linear' && provider === 'linear' && (saved.baseUrl ?? '') !== '' && (
         <LinearApiAccess workspaceId={workspaceId} jira={data.jira} baseUrl={saved.baseUrl ?? ''} />

@@ -91,7 +91,7 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'integrations',
-    label: 'Integrations', summary: 'Issue tracker, SonarCloud, Slack',
+    label: 'Integrations', summary: 'Issue tracker, acceptance criteria field, SonarCloud, Slack',
     global: [],
     workspace: ['IssueLinksSection', 'SonarSection', 'SlackSection'],
   },

@@ -100,6 +100,7 @@ import {
 } from '../lib/claudeReviewFollowUp.js';
 import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
+import { useSettingsModal } from '../store/settingsModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
 import { ReviewSection } from './ReviewSection.js';
 import { Select } from './ui/index.js';
@@ -353,7 +354,7 @@ export function ClaudeReviewTicketPanel({
   };
   const [pulling, setPulling] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
-  const [fieldEditing, setFieldEditing] = useState<string | null>(null);
+  const openSettings = useSettingsModal((st) => st.openSettings);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // The list as it is when an answer lands, not when a button was pressed.
   const latest = useRef(value);
@@ -457,31 +458,6 @@ export function ClaudeReviewTicketPanel({
     }
   };
 
-  // The OTHER tabs of the same issue type: the field choice is per issue type, so their criteria
-  // moved too. Re-read their stored rows (no Jira call) and rebuild them.
-  const refreshSameType = async (key: string, issueTypeId: string | null | undefined): Promise<void> => {
-    if (issueTypeId == null) return;
-    const others = latest.current.filter(
-      (d) => isJiraDraft(d) && d.key != null && d.key !== key && d.issueTypeId === issueTypeId,
-    );
-    for (const d of others) {
-      const k = d.key as string;
-      const ref = refFor(k);
-      if (ref == null) continue;
-      try {
-        await qc.invalidateQueries({ queryKey: ticketKey(k) });
-        const details = await fetchTicket(k);
-        if (!alive.current) return;
-        const story = jiraStoryFromDetails(ref, details, pulledAcField(details));
-        const cur = latest.current;
-        const at = cur.findIndex((x) => isJiraDraft(x) && x.key === k);
-        if (at >= 0) onChange(cur.map((x, j) => (j === at ? story : x)));
-        setFetched({ ...fetchedRef.current, [k]: { details, site: jiraSiteOf(ref.url), chosen: pulledAcField(details) } });
-      } catch {
-        /* that tab keeps what it had; its own Refresh is there */
-      }
-    }
-  };
 
   // Refresh: Jira is read again NOW, server-side (the worker's path), and the stored row answered.
   const refresh = (d: TicketDraft): void => {
@@ -489,55 +465,6 @@ export function ClaudeReviewTicketPanel({
     if (key == null) return;
     void refetchOne(key, () => api.refreshJiraTicket(prId, key));
   };
-  // A field picked by hand: saved for this ticket's ISSUE TYPE in the PR's workspace, so the worker,
-  // the auto review and every other ticket of the type use it. "None of these" ('') is this tab only.
-  const changeField = (key: string, id: string): void => {
-    setFieldEditing(null);
-    if (id === '') {
-      const cached = fetchedRef.current[key]?.details;
-      if (cached != null) void refetchOne(key, async () => cached, '');
-      return;
-    }
-    void refetchOne(key, () => api.setJiraAcField(prId, key, id)).then((details) =>
-      refreshSameType(key, details?.issueType?.id),
-    );
-  };
-  // Back to the default: the workspace's choice for the issue type is cleared; the name match decides.
-  const resetField = (d: TicketDraft): void => {
-    const key = d.key;
-    if (key == null) return;
-    setFieldEditing(null);
-    void refetchOne(key, () => api.setJiraAcField(prId, key, null)).then((details) =>
-      refreshSameType(key, details?.issueType?.id),
-    );
-  };
-  // "Change": open the picker, reading the ticket's fields first when this session has not.
-  const openFieldPicker = async (d: TicketDraft): Promise<void> => {
-    const key = d.key;
-    if (key == null) return;
-    if (fieldEditing === key) {
-      setFieldEditing(null);
-      return;
-    }
-    setFieldEditing(key);
-    if (fetchedRef.current[key] != null) return;
-    const ref = refFor(key);
-    if (ref == null) return;
-    try {
-      const details = await fetchTicket(key);
-      if (!alive.current) return;
-      setFetched({
-        ...fetchedRef.current,
-        [key]: { details, site: jiraSiteOf(ref.url), chosen: d.acField?.id ?? '' },
-      });
-    } catch (e) {
-      if (alive.current) {
-        setFieldEditing(null);
-        setNote(pullNote([{ key, message: e instanceof Error ? e.message : String(e) }], []));
-      }
-    }
-  };
-
   // A removed Jira story: never auto-pulled again this session. (The criteria-field choice is the
   // workspace's, per issue type — removing one story does not clear it; "Reset to default" does.)
   const forgetJira = (ds: readonly TicketDraft[]): void => {
@@ -547,7 +474,6 @@ export function ClaudeReviewTicketPanel({
     const next = { ...fetchedRef.current };
     for (const k of keys) delete next[k];
     setFetched(next);
-    if (fieldEditing != null && keys.includes(fieldEditing)) setFieldEditing(null);
   };
   const removeAt = (i: number): void => {
     const d = latest.current[i];
@@ -642,7 +568,6 @@ export function ClaudeReviewTicketPanel({
       onChange(next);
       setSelected(clampTab(selected, next.length));
     }
-    setFieldEditing(null);
     setOpen(false);
     onClose?.();
   };
@@ -820,36 +745,14 @@ export function ClaudeReviewTicketPanel({
                     ) : undefined
                   }
                   fieldControl={
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-                        <span className={MUTED}>Criteria from:</span>
-                        <span className="font-medium text-ui-ink">{acFieldText(current)}</span>
-                        {current.key != null && refFor(current.key) != null && (
-                          <button
-                            type="button"
-                            onClick={() => void openFieldPicker(current)}
-                            disabled={busy}
-                            aria-expanded={fieldEditing === current.key}
-                            className={LINK_BTN}
-                          >
-                            Change
-                          </button>
-                        )}
-                      </div>
-                      {fieldEditing != null && fieldEditing === current.key && (
-                        fetched[current.key] != null ? (
-                          <div className="rounded-ui bg-ui-raise p-2">
-                            <AcFieldPicker
-                              fetched={fetched[current.key]!}
-                              onChoose={(id) => changeField(current.key as string, id)}
-                            />
-                            <button type="button" onClick={() => resetField(current)} disabled={busy} className={`mt-1.5 ${BTN}`}>
-                              Reset to default
-                            </button>
-                          </div>
-                        ) : (
-                          <p className={`text-meta ${MUTED}`}>Reading {current.key}…</p>
-                        )
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
+                      <span className={MUTED}>Criteria from:</span>
+                      <span className="font-medium text-ui-ink">{acFieldText(current)}</span>
+                      {/* Chosen per issue type in Settings → Integrations (JiraAcFieldSettings). */}
+                      {current.key != null && refFor(current.key) != null && (
+                        <button type="button" onClick={() => openSettings('issue-tracker')} className={LINK_BTN}>
+                          Change in Settings
+                        </button>
                       )}
                     </div>
                   }

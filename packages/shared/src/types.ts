@@ -5081,6 +5081,37 @@ export interface JiraAcFieldBody {
 }
 
 /**
+ * Settings → Trackers: the acceptance-criteria field per Jira issue type in one workspace
+ * (`GET`/`PUT /api/workspaces/:id/tracker/ac-fields`, tracker/ac-field-settings.ts). One row per
+ * (site, issue type) Limn has stored tickets for; DB only, never a Jira call.
+ */
+export interface JiraAcFieldTypeRow {
+  apiRoot: string;
+  issueTypeId: string;
+  issueTypeName: string;
+  /** Stored tickets of this type in the workspace. */
+  ticketCount: number;
+  /** The field chosen in Settings, or null = Limn picks by name. */
+  chosen: { id: string; name: string } | null;
+  /** The field the stored tickets read now (the most common one), or null when none has one. */
+  inUse: { id: string; name: string } | null;
+  /** Every text field seen on this type's tickets, most common first. */
+  fields: Array<{ id: string; name: string; ticketCount: number }>;
+}
+
+export interface JiraAcFieldSettingsResponse {
+  workspaceId: number;
+  types: JiraAcFieldTypeRow[];
+}
+
+export interface JiraAcFieldSettingsBody {
+  apiRoot: string;
+  issueTypeId: string;
+  /** null = back to Limn's own pick. */
+  fieldId: string | null;
+}
+
+/**
  * @deprecated TRANSITIONAL NAME. Renamed to `WorkspaceProSettings` when the issue tracker joined
  * the row; the three fields below are the RETIRED account-fallback disclosure and are now NEVER
  * EMITTED (a reader gets `undefined`). DELETE this alias, and the frontend's reads of `source` /
