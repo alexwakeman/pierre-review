@@ -172,3 +172,72 @@ describe('PrActivityTab render', () => {
     expect(html).toContain('>Reply<');
   });
 });
+
+describe('resolved threads', () => {
+  const thread = (id: number, over: Record<string, unknown> = {}) => ({
+    id,
+    prId: 7,
+    path: 'src/pay.ts',
+    line: 42,
+    isResolved: true,
+    isOutdated: false,
+    derivedState: 'resolved',
+    addressedConfidence: 'none',
+    addressedReason: null,
+    originalCommenterId: 2,
+    createdAt: '2026-11-01T11:30:00.000Z',
+    resolvedAt: '2026-11-01T17:00:00.000Z',
+    resolvedByLogin: 'robin',
+    url: 'https://github.com/acme/web/pull/7#discussion_r1',
+    comments: [
+      { id: 91, authorId: 2, body: '**Guard** the `empty` list.\n\nIt can throw.', diffHunk: null, createdAt: '2026-11-01T11:30:00.000Z', url: null },
+      { id: 92, authorId: 1, body: 'Fixed in the next commit.', diffHunk: null, createdAt: '2026-11-01T12:30:00.000Z', url: null },
+    ],
+    ...over,
+  });
+  const withThreads = (): PrDetail =>
+    pr({
+      threads: [
+        thread(81),
+        thread(82, { isResolved: false, resolvedAt: null, resolvedByLogin: null }),
+        thread(83, { resolvedAt: null }), // resolved before Limn first synced it: no known time
+      ],
+    } as unknown as Partial<PrDetail>);
+
+  it('is an event of its own, at the time it was resolved; an undated or open thread is not', () => {
+    const rows = buildPrActivity(withThreads()).filter((r) => r.kind === 'resolved');
+    expect(rows).toEqual([
+      expect.objectContaining({ key: 'resolved:81', at: '2026-11-01T17:00:00.000Z', threadId: 81, resolvedByLogin: 'robin', event: { type: 'thread_resolved', refId: 81 } }),
+    ]);
+    expect(buildPrActivity(withThreads())[0]!.key).toBe('resolved:81');
+    expect(activityMarker(rows[0]!).label).toBe('Thread resolved');
+  });
+
+  it('renders collapsed: the heading as plain text, where, the replies; no comment bodies until opened', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(PrActivityTab, {
+          pr: withThreads(),
+          usersById: new Map([[9, { id: 9, githubLogin: 'robin', name: null, avatarUrl: null, isBot: false } as never]]),
+          since: null,
+          onClearSince: () => {},
+          focusEvent: null,
+          onEventFocusConsumed: () => {},
+          focusKey: null,
+          onCommentFocusConsumed: () => {},
+          selectedCommentId: null,
+          onShowInThreads: () => {},
+        }),
+      ),
+    );
+    expect(html.match(/data-testid="activity-resolved-thread"/g)).toHaveLength(1);
+    expect(html).toContain('resolved a thread');
+    expect(html).toContain('>Guard the empty list.<');
+    expect(html).toContain('src/pay.ts:42');
+    expect(html).toContain('1 reply');
+    expect(html).not.toContain('data-testid="activity-resolved-comments"');
+    expect(html).not.toContain('Fixed in the next commit.');
+  });
+});

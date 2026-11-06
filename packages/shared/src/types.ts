@@ -5604,6 +5604,11 @@ export interface ThreadDetail {
   addressedReason: string | null;
   originalCommenterId: number | null;
   createdAt: string;
+  // When Limn first SAW the thread resolved (sync-observation time; GitHub keeps no resolve time) and
+  // who resolved it. Null while unresolved, and for a thread already resolved when first synced — that
+  // resolution has no known time. OPTIONAL, so no apiVersion bump (PR detail's Activity tab).
+  resolvedAt?: string | null;
+  resolvedByLogin?: string | null;
   comments: CommentDetail[];
   // Deep link to the thread on GitHub (its first comment's #discussion_r anchor);
   // null until synced.

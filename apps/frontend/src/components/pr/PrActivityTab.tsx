@@ -22,6 +22,7 @@ import { ReactionBar } from '../ReactionBar.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { isNewComment, NewTag } from '../ThreadView/index.js';
 import { cx, FOCUS_RING } from '../ui/index.js';
+import { ResolvedThreadCard } from './ResolvedThreadCard.js';
 import {
   CheckCircleIcon,
   ChevronIcon,
@@ -34,6 +35,7 @@ import {
   PullRequestIcon,
   ReopenIcon,
   RequestChangesIcon,
+  ResolveIcon,
   ReviewIcon,
   SparkleIcon,
 } from '../Icons.js';
@@ -58,7 +60,8 @@ export type ActivityKind =
   | 'comment'
   | 'reopened'
   | 'merged'
-  | 'closed';
+  | 'closed'
+  | 'resolved';
 
 export interface ActivityEntry {
   /** `comment:<id>` / `review:<id>` (the comment-focus keys), `commit:<id>`, or the lifecycle kind. */
@@ -67,8 +70,9 @@ export interface ActivityEntry {
   at: string;
   /** Null where the event log does not know who did it (closed, reopened) — never guessed. */
   actorId: number | null;
-  /** The timeline event this entry maps to — what an `activityFocus` deep link names. */
-  event: { type: EventType; refId: number | null };
+  /** The timeline event this entry maps to — what an `activityFocus` deep link names. A thread
+   *  resolution has no timeline event of its own: `thread_resolved` is this tab's alone. */
+  event: { type: EventType | 'thread_resolved'; refId: number | null };
   body?: string | null;
   url?: string | null;
   reviewState?: ReviewState;
@@ -79,6 +83,9 @@ export interface ActivityEntry {
   /** The newest review Limn posted on its own (an auto review). */
   autoLatest?: boolean;
   limnSeverity?: LimnSeverity | null;
+  /** A resolution: the thread, and the GitHub login that resolved it (no user id is stored). */
+  threadId?: number;
+  resolvedByLogin?: string | null;
 }
 
 /** Whether a review is Limn's: the stored kind, else the summary marker on its body. */
@@ -163,6 +170,20 @@ export function buildPrActivity(pr: PrDetailT): ActivityEntry[] {
       limnSeverity: c.limnSeverity ?? null,
     });
   }
+  // A thread resolution, at the time Limn first SAW it resolved. A thread already resolved when it
+  // was first synced has no known time and is left out (it is still on the Threads tab).
+  for (const t of pr.threads) {
+    if (!t.isResolved || !t.resolvedAt) continue;
+    rows.push({
+      key: `resolved:${t.id}`,
+      kind: 'resolved',
+      at: t.resolvedAt,
+      actorId: null,
+      event: { type: 'thread_resolved', refId: t.id },
+      threadId: t.id,
+      resolvedByLogin: t.resolvedByLogin ?? null,
+    });
+  }
   if (pr.mergedAt) {
     rows.push({
       key: 'merged',
@@ -231,6 +252,8 @@ export function activityMarker(e: ActivityEntry): { icon: JSX.Element; tone: str
       return { icon: <MergeIcon size={s} />, tone: 'text-ui-accent', label: 'Merged' };
     case 'closed':
       return { icon: <PullRequestClosedIcon size={s} />, tone: 'text-ui-danger', label: 'Closed' };
+    case 'resolved':
+      return { icon: <ResolveIcon size={s} />, tone: 'text-ui-success', label: 'Thread resolved' };
     case 'review':
       return e.reviewState === 'approved'
         ? { icon: <CheckCircleIcon size={s} />, tone: 'text-ui-success', label: 'Approved' }
@@ -257,6 +280,8 @@ function entryVerb(e: ActivityEntry): string {
       return e.actorId != null ? 'merged this pull request' : 'Merged';
     case 'closed':
       return 'Closed without merging';
+    case 'resolved':
+      return 'resolved a thread';
     case 'review':
       return e.reviewState === 'approved'
         ? 'approved'
@@ -295,6 +320,7 @@ export function PrActivityTab({
   focusKey,
   onCommentFocusConsumed,
   selectedCommentId,
+  onShowInThreads,
 }: {
   pr: PrDetailT;
   usersById: Map<number, User>;
@@ -309,8 +335,16 @@ export function PrActivityTab({
   onCommentFocusConsumed: () => void;
   /** The selected PR comment keeps a permanent ring (mirrors a selected thread) and starts open. */
   selectedCommentId: number | null;
+  /** A resolved thread's "Show in Threads": the Threads tab with that thread selected. */
+  onShowInThreads?: (threadId: number) => void;
 }): JSX.Element {
   const all = useMemo(() => buildPrActivity(pr), [pr]);
+  const threadsById = useMemo(() => new Map(pr.threads.map((t) => [t.id, t])), [pr.threads]);
+  const usersByLogin = useMemo(() => {
+    const m = new Map<string, User>();
+    for (const u of usersById.values()) if (u.githubLogin) m.set(u.githubLogin.toLowerCase(), u);
+    return m;
+  }, [usersById]);
   const rows = since ? all.filter((r) => r.at > since) : all;
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -392,6 +426,7 @@ export function PrActivityTab({
           const marker = activityMarker(e);
           const isCard = e.body != null;
           const open = isCard && expanded.has(e.key);
+          const thread = e.kind === 'resolved' && e.threadId != null ? threadsById.get(e.threadId) : undefined;
           return (
             <li
               key={e.key}
@@ -413,7 +448,18 @@ export function PrActivityTab({
                 <span className="sr-only">{marker.label}</span>
               </span>
               <div className="min-w-0 flex-1">
-                {isCard ? (
+                {thread ? (
+                  <ResolvedThreadCard
+                    pr={pr}
+                    thread={thread}
+                    resolver={e.resolvedByLogin ? usersByLogin.get(e.resolvedByLogin.toLowerCase()) : undefined}
+                    resolverLogin={e.resolvedByLogin ?? null}
+                    at={e.at}
+                    usersById={usersById}
+                    flashing={e.key === flashKey}
+                    onShowInThreads={onShowInThreads}
+                  />
+                ) : isCard ? (
                   <ConversationCard
                     pr={pr}
                     entry={e}

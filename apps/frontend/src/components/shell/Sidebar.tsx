@@ -73,7 +73,8 @@ import {
 // strip and the header's right-hand controls. Top to bottom:
 //
 //   wordmark · workspace picker · "Search or jump ⌘K"
-//   Pending · Open pull requests · This Sprint · Timeline          (primary; the phone's bottom bar)
+//   Pending · Open pull requests                                   (PINNED: above the scrolling middle)
+//   This Sprint · Timeline                                         (primary, with the two above; the phone's bottom bar)
 //   Needs you                                                      (other workspaces' My Turn)
 //   Library: Docs · Feed      Insights: Reports · Bots Monitoring
 //   Repositories (collapsible): the top four repos, "Show all" for the rest
@@ -164,7 +165,21 @@ function GroupHeading({ children }: { children: ReactNode }): JSX.Element {
 }
 
 /** The destinations, with the two counts the shell owns. */
-function Destinations({ location }: { location: ReturnType<typeof currentLocation> }): JSX.Element {
+/**
+ * PINNED: Pending and Open pull requests sit ABOVE the scrolling middle, so they stay in reach after
+ * scrolling down to the repositories and open tabs. The rest of the primary group (This Sprint,
+ * Timeline) scrolls with the other groups. The drawer below lg scrolls as a whole, as before.
+ */
+const PINNED_DESTINATIONS: ReadonlySet<DestinationId> = new Set<DestinationId>(['attention', 'open-prs']);
+
+function Destinations({
+  location,
+  part,
+}: {
+  location: ReturnType<typeof currentLocation>;
+  /** `pinned`: only the pinned entries; `rest`: every group without them. */
+  part: 'pinned' | 'rest';
+}): JSX.Element {
   const gates = useNavGates();
   // Open PRs: NON-DRAFT open PRs, blank (never 0) until it answers or while the previous
   // workspace's placeholder is showing (lib/openPrsTab.ts). The palette reads the same key.
@@ -200,11 +215,11 @@ function Destinations({ location }: { location: ReturnType<typeof currentLocatio
   }
   if (openPrsCount != null) counts['open-prs'] = { node: openPrsCount, title: 'Open pull requests, drafts not counted' };
 
-  const groups: NavGroup[] = ['primary', 'library', 'insights'];
+  const groups: NavGroup[] = part === 'pinned' ? ['primary'] : ['primary', 'library', 'insights'];
   return (
-    <nav aria-label="Main">
+    <nav aria-label={part === 'pinned' ? 'Main' : 'More'}>
       {groups.map((g) => {
-        const items = shownDestinations(gates).filter((d) => d.group === g);
+        const items = shownDestinations(gates).filter((d) => d.group === g && PINNED_DESTINATIONS.has(d.id) === (part === 'pinned'));
         if (items.length === 0) return null;
         return (
           <div key={g}>
@@ -229,7 +244,7 @@ function Destinations({ location }: { location: ReturnType<typeof currentLocatio
                 );
               })}
             </div>
-            {g === 'primary' && <NeedsYou onNavigate={() => useShell.getState().setDrawerOpen(false)} />}
+            {g === 'primary' && part === 'rest' && <NeedsYou onNavigate={() => useShell.getState().setDrawerOpen(false)} />}
           </div>
         );
       })}
@@ -956,6 +971,9 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
             <span className="min-w-0 flex-1 truncate">Search or jump</span>
             <Kbd>{`${modKeyLabel()}K`}</Kbd>
           </button>
+          <div className="pt-3" data-testid="sidebar-pinned">
+            <Destinations location={location} part="pinned" />
+          </div>
         </div>
         {/* In the drawer the WHOLE aside scrolls, foot included: a pinned foot left the middle so
             short that Insights' items sat below the fold with nothing saying so. The foot stays at
@@ -970,10 +988,10 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
           // aside, sit at their in-list y (thousands of px with many tabs), escape this clip and
           // stretch the DOCUMENT's scroll range, so a wheel over Open PRs scrolled the whole shell —
           // sidebar included — up the page (pinned by e2e/shell-scroll.spec.ts).
-          className={cx('relative px-2 pb-3 pt-3', drawer ? 'shrink-0' : 'scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain')}
+          className={cx('relative px-2 pb-3 pt-1', drawer ? 'shrink-0' : 'scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain')}
         >
           <div>
-            <Destinations location={location} />
+            <Destinations location={location} part="rest" />
             <Repositories location={location} />
             <OpenTabs />
           </div>

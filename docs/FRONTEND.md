@@ -149,7 +149,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 
 - **`Sidebar`** (`components/shell/Sidebar.tsx`) — top to bottom: the wordmark (the `h1`), the
   **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
-  (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests · This Sprint · Timeline;
+  (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests — ⚠ PINNED above the scrolling
+  middle (`PINNED_DESTINATIONS`, `data-testid="sidebar-pinned"`; the drawer still scrolls whole) — ·
+  This Sprint · Timeline;
   Library: Docs (AI only; its search is a row in Docs' own Library panel) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
   Welcome-back strip), **Repositories** (collapsible, remembered in `localStorage`; the top FOUR
   rows, "Show all" for the rest; each repo opens its console; the thread-state legend is behind the
@@ -876,6 +878,14 @@ nested. A check with no log stays one whole link.
   the summary marker) and every Limn PR-level finding wears a small **"Limn"** chip; the NEWEST Limn
   AUTO review (marker `k=auto`, else the auto-post footer on an older post) adds **"Auto review ·
   latest"**. No per-row timeline magnifier and no per-row GitHub link.
+  - **A RESOLVED THREAD is an entry of its own** (`kind: 'resolved'`, `ResolveIcon`), at
+    `ThreadDetail.resolvedAt` — when Limn first SAW it resolved (GitHub keeps no resolve time), by
+    `resolvedByLogin` (matched to a user by login, else shown as `@login`). ⚠ A thread already resolved
+    when first synced has no time and is LEFT OUT (never placed at a guessed time); it stays on the
+    Threads tab. It draws `pr/ResolvedThreadCard.tsx`, deliberately light: collapsed it is PLAIN TEXT
+    only (`threadHeading`: a Limn finding's title, else the first comment's first line without markdown;
+    `path:line`; the reply count) — the comments' Markdown mounts only when opened, with "Show in
+    Threads" (PrDetail `showThreadInList`, the Threads tab with it selected) and View on GitHub.
   - A PR comment or a review with a body is a **card**: the header (avatar, name, state pill, chips,
     time, New, Limn severity, ML badge, Copy, the expand chevron) and the body as **Markdown clamped
     to ~6 lines** (`max-h-[7.5rem]`, a fade when it overflows; images such as SonarCloud's render

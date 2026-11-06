@@ -9369,6 +9369,8 @@ export async function getPrDetail(
       addressedReason: t.addressedReason,
       originalCommenterId: t.originalCommenterId,
       createdAt: t.createdAt.toISOString(),
+      resolvedAt: t.isResolved && t.resolvedAt ? t.resolvedAt.toISOString() : null,
+      resolvedByLogin: t.isResolved ? (t.resolvedByLogin ?? null) : null,
       comments: tComments.map((c) => ({
         id: c.id,
         authorId: c.authorId,
@@ -9828,6 +9830,8 @@ export async function getThreadDetail(
     addressedReason: t.addressedReason,
     originalCommenterId: t.originalCommenterId,
     createdAt: t.createdAt.toISOString(),
+    resolvedAt: t.isResolved && t.resolvedAt ? t.resolvedAt.toISOString() : null,
+    resolvedByLogin: t.isResolved ? (t.resolvedByLogin ?? null) : null,
     comments: comments.map((c) => ({
       id: c.id,
       authorId: c.authorId,

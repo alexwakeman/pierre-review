@@ -436,6 +436,10 @@ export function PrDetail({
       jump.run();
       return;
     }
+    showThreadInList(threadId);
+  };
+  /** The Threads tab with this thread selected (the Activity tab's resolved threads). */
+  const showThreadInList = (threadId: number): void => {
     handledThreadRef.current = threadId;
     cancelScrollRestore();
     // `selectThread` also clears the state/severity pill presets that could filter it out.
@@ -1329,6 +1333,7 @@ export function PrDetail({
             focusKey={commentFocusForPr}
             onCommentFocusConsumed={consumeCommentFocus}
             selectedCommentId={selectedCommentId}
+            onShowInThreads={showThreadInList}
           />
         ) : effectiveTab === 'threads' ? (
           // The review threads without the code; "Show in context" moves to Changes.
