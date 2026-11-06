@@ -96,7 +96,7 @@ describe('the row', () => {
 describe('the keys', () => {
   it('`e` (and the row’s Dismiss) dismisses every My turn card by its PR, and nothing else', () => {
     expect(dismissTargetOf(myTurn('review_request'))).toEqual({ target: { kind: 'pr', id: 7 }, label: 'acme/api #12' });
-    for (const reason of ['claude_review', 'ai_approved_merged', 'own_ci_red', 'your_pr'] as const) {
+    for (const reason of ['own_ci_red', 'own_ready', 'pushed_since', 'watched_repo_pr'] as const) {
       expect(dismissTargetOf(myTurn(reason))?.target).toEqual({ kind: 'pr', id: 7 });
     }
     expect(dismissTargetOf(card({ kind: 'merge' }))).toBeNull();

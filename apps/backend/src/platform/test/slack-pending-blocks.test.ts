@@ -208,19 +208,9 @@ describe('buildPendingBlocks', () => {
     }
     const reasons: MyTurnCardReason[] = [
       'review_request', 'mention', 'thread', 'thread_reply', 'comment_reply', 'pushed_since',
-      'own_ci_red', 'own_conflicts', 'pr_approved', 'own_ready', 'your_pr',
-      'own_thread', 'claude_review', 'ai_approved_merged', 'watched_repo_pr',
+      'own_ci_red', 'own_conflicts', 'pr_approved', 'own_ready',
+      'own_thread', 'watched_repo_pr',
     ];
     expect(Object.keys(MY_TURN_REASON_TEXT).sort()).toEqual([...reasons].sort());
-  });
-
-  it('labels an auto-started AI review "Auto review"', () => {
-    const detail = 'AI review ready · COMMENT';
-    expect(pendingCardText(pr('a', 'my_turn', 1, { reason: 'claude_review', trigger: 'auto', detail }))).toBe(
-      `Auto review: ${detail}`,
-    );
-    expect(pendingCardText(pr('m', 'my_turn', 1, { reason: 'claude_review', trigger: 'manual', detail }))).toBe(
-      `New AI review: ${detail}`,
-    );
   });
 });

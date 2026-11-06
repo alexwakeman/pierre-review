@@ -132,6 +132,7 @@ import {
   useConflictResolverEntry,
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import type { MyTurnSection } from './pendingTabs.js';
 import { PrChips } from './PrChips.js';
 import {
   Button,
@@ -1407,20 +1408,14 @@ function RoutingReviewerRow({
   );
 }
 
-// Dismiss — the LAST item in a my_turn card's left-aligned action row, as quiet text. (The 'your_pr'
-// clearing rule, "clears when you open it", is a clause of that card's action line now.)
+// Dismiss — the LAST item in a my_turn card's left-aligned action row, as quiet text.
 //
 // ⚠ DISMISS IS NOT THE "Done" BUTTON THAT USED TO LIVE HERE. That one stored an acknowledgement
 // that never expired, so it hid work that had come back. This one sets the entry down only until
 // something newer happens on it, and the server drops the dismissal once the PR leaves your plate
 // (db/my-turn-dismissals.ts). Acting on the PR is still what clears a card; Dismiss is for the one
-// you cannot act on now — or ever. It is keyed on the SUBJECT (the PR, or a red branch's repo),
-// never the card: the board lists one card per PR, and dismissing it must not surface the next.
-//
-// The 'your_pr' clause promises the card clears when you open the PR, not "on the next refresh", because
-// `markViewed.onSuccess` invalidates ['attention-cards'] + ['daily-brief'] at the prefix — the
-// board is already refetching while the user is still in the PR. If that invalidation is ever
-// dropped, this sentence becomes a lie with a 60s staleTime behind it.
+// you cannot act on now — or ever. It is keyed on the SUBJECT (the PR), never the card: the board
+// lists one card per PR, and dismissing it must not surface the next.
 /**
  * RESOLVE, ON THE CARD — the second half of "Reply or resolve". It resolves BY THREAD ID on the
  * click and mounts nothing that fetches (the thread's conversation stays behind Details). Always
@@ -2145,9 +2140,8 @@ export function landingPrByline(
 
 // ── A PROMOTED CARD KEEPS ITS CONTROLS ────────────────────────────────────────────────────────
 //
-// Settings → My Turn can MOVE the reader's own work into My turn — a red build, a conflict, a PR
-// ready to land, an unanswered thread, a red default branch. The card moves; its actions must not
-// be lost on the way. So a promoted card carries its home kind's fields (`MyTurnCard.own`, or the
+// My turn holds the reader's own work — a red build, a conflict, a PR ready to land, an unanswered
+// thread — moved out of its home tab. The card moves; its actions must not be lost on the way. So a promoted card carries its home kind's fields (`MyTurnCard.own`, or the
 // trunk card's own), and these adapters rebuild the home card's shape so the SAME components render
 // its controls: `PendingMergeActions`, `PendingConflictActions`, the trunk card's body. Nothing is
 // re-spelled, and nothing fetches on mount — those components' own click-gated rule holds.
@@ -2297,8 +2291,6 @@ export function pendingActivation(
         return prRef != null ? () => board.openComment(prRef, event.comment) : undefined;
       case 'pr':
         return prRef != null ? () => board.openPr(prRef, event.tab) : undefined;
-      case 'claude_review':
-        return prRef != null ? () => board.openReview(prRef) : undefined;
       case 'landing_pr':
         return landing != null ? () => board.openCi(landing, card.id) : undefined;
       case 'trunk':
@@ -2342,17 +2334,6 @@ function ActionLine({
 }): JSX.Element {
   const items: ReactNode[] = [];
   if (line.label != null) items.push(<span className="text-ui-mute">{line.label}</span>);
-  if (line.muted) {
-    items.push(
-      // EXPLANATION, NOT ARITHMETIC — why this card carries the neutral label. Nothing counts it.
-      <span
-        className="text-ui-mute"
-        title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
-      >
-        muted
-      </span>,
-    );
-  }
   if (line.verb != null) {
     items.push(<span className="font-medium text-ui-ink">{line.verb}</span>);
   }
@@ -2859,9 +2840,6 @@ function PendingCard({
           }
           break;
         }
-        case 'claude_review':
-          primary('Read the review', () => board.openReview(card));
-          break;
         case 'own_ready':
           if (card.own?.kind === 'ready') {
             buttons.push(<PendingMergeActions key="merge" card={asForwardCard(card, card.own)} />);
@@ -3061,10 +3039,8 @@ function PendingCard({
       <ClaudeReviewLine
         prId={prRef.prId}
         state={claudeState}
-        omitVerdict={card.kind === 'my_turn' && card.reason === 'claude_review'}
         ci={isCiCard}
         ciState={board.ciStates.get(prRef.prId)}
-        reviewedAt={card.kind === 'my_turn' && card.reason === 'claude_review' ? (card.since ?? null) : null}
         onOpenReview={() => board.openReview(prRef)}
       />
     ) : null;
@@ -3078,7 +3054,7 @@ function PendingCard({
         onOpenFix={() => board.openFix(metaFor(prRef, board.usersById))}
         offerStart={offersClaudeStart(card)}
         offerFix={isCiCard}
-        withOpen={!(card.kind === 'my_turn' && card.reason === 'claude_review')}
+        withOpen
         buttonClass={CARD_SECONDARY_BUTTON}
       />
     );
@@ -3285,9 +3261,13 @@ export function AttentionCards({
   before,
   after,
   focusRequest,
+  sections,
 }: {
   /** The list on screen, highest score first. Do next is its first `doNextCount` cards. */
   cards: InsightCard[];
+  /** My turn's fixed groups (`myTurnSections`), painted as headings instead of Do next /
+   *  Everything else. A `collapsible` group ("Older") is closed until the reader opens it. */
+  sections?: MyTurnSection[];
   users: User[] | undefined;
   /** How many leading cards are Do next (0 = no split, e.g. a response predating scores). */
   doNextCount?: number;
@@ -3314,6 +3294,8 @@ export function AttentionCards({
   const allRows = useMemo(() => [...(people ?? []), ...cards], [people, cards]);
   const { visible, isLeaving } = useOptimisticList(PENDING_UNDO_SCOPE, allRows, (c) => c.id);
   const split = doNextCount ?? 0;
+  // "Older (N)" on My turn: closed until opened. A ⌘K request for a card inside it opens it (below).
+  const [olderOpen, setOlderOpen] = useState(false);
   const groups = useMemo(() => {
     const peopleIds = new Set((people ?? []).map((c) => c.id));
     const doNextIds = new Set(cards.slice(0, split).map((c) => c.id));
@@ -3321,10 +3303,20 @@ export function AttentionCards({
     const ranked = visible.filter((c) => !peopleIds.has(c.id));
     const doNextRows = ranked.filter((c) => doNextIds.has(c.id));
     const restRows = ranked.filter((c) => !doNextIds.has(c.id));
-    // The flat order the keys walk — exactly the order painted below.
-    return { peopleRows, ranked, doNextRows, restRows, flat: [...peopleRows, ...doNextRows, ...restRows] };
-  }, [visible, people, cards, split]);
-  const { peopleRows, ranked, doNextRows, restRows, flat } = groups;
+    // My turn's headings, each holding the visible rows of its group (server order kept).
+    const sectionRows = (sections ?? []).map((s) => {
+      const ids = new Set(s.cardIds);
+      return { ...s, rows: ranked.filter((c) => ids.has(c.id)), open: !s.collapsible || olderOpen };
+    });
+    // The flat order the keys walk — exactly the order painted below (a closed group's rows are
+    // not painted, so the keys skip them).
+    const flat =
+      sections != null
+        ? [...peopleRows, ...sectionRows.flatMap((s) => (s.open ? s.rows : []))]
+        : [...peopleRows, ...doNextRows, ...restRows];
+    return { peopleRows, ranked, doNextRows, restRows, sectionRows, flat };
+  }, [visible, people, cards, split, sections, olderOpen]);
+  const { peopleRows, ranked, doNextRows, restRows, sectionRows, flat } = groups;
 
   // ── selection: by id, falling back to the same slot when the selected row leaves ──
   // NOTHING is selected on arrival (index null): the board opens unhighlighted; a click, j/k or an
@@ -3380,13 +3372,19 @@ export function AttentionCards({
     setSel({ id: null, index: null });
   }, [tabOnScreen]);
 
-  // The command palette asked for one card: select it and open its panel.
+  // The command palette asked for one card: select it and open its panel — opening "Older" first
+  // when the card is inside it (the effect runs again once its rows are painted).
   useEffect(() => {
     if (focusRequest == null) return;
+    if (!olderOpen && (sections ?? []).some((s) => s.collapsible && s.cardIds.includes(focusRequest.id))) {
+      setOlderOpen(true);
+      return;
+    }
     const i = flatRef.current.findIndex((c) => c.id === focusRequest.id);
     if (i < 0) return;
     setSel({ id: focusRequest.id, index: i });
     setPanelOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest, flat.length]);
 
   // Nothing left to show → nothing to keep open.
@@ -3932,20 +3930,51 @@ export function AttentionCards({
             {status ?? ''}
           </p>
           {before}
-          {flat.length > 0 && (
+          {(flat.length > 0 || sectionRows.some((s) => s.rows.length > 0)) && (
             <List id={LIST_ID} label="Pending items" selected={selIndex} listRef={listRef}>
               {peopleRows.length > 0 && (
                 <ListGroup label="Reviews waiting on people" hint={<span>not ranked</span>}>
                   {peopleRows.map(renderRow)}
                 </ListGroup>
               )}
-              {split > 0 && doNextRows.length > 0 && <ListGroup label="Do next">{doNextRows.map(renderRow)}</ListGroup>}
-              {restRows.length > 0 &&
-                (split > 0 && shouldShowDivider(split, ranked.length + (cards.length - ranked.length)) ? (
-                  <ListGroup label="Everything else">{restRows.map(renderRow)}</ListGroup>
-                ) : (
-                  restRows.map(renderRow)
-                ))}
+              {sections != null ? (
+                // MY TURN'S FIXED GROUPS. "Older" is closed until opened; its count is always shown.
+                sectionRows.map((s) =>
+                  s.rows.length === 0 ? null : s.collapsible ? (
+                    <li role="presentation" key={s.group}>
+                      <button
+                        type="button"
+                        aria-expanded={olderOpen}
+                        onClick={() => setOlderOpen((o) => !o)}
+                        data-testid="pending-my-turn-older"
+                        className="flex items-center gap-1 rounded-ui px-3 pb-1 pt-4 text-meta font-medium text-ui-mute outline-none hover:text-ui-ink focus-visible:ring-2 focus-visible:ring-ui-accent"
+                      >
+                        <ChevronIcon dir={olderOpen ? 'down' : 'right'} size={10} />
+                        {s.label} ({s.rows.length})
+                      </button>
+                      {olderOpen && (
+                        <ul role="group" aria-label={s.label} className="m-0 list-none p-0">
+                          {s.rows.map(renderRow)}
+                        </ul>
+                      )}
+                    </li>
+                  ) : (
+                    <ListGroup key={s.group} label={s.label}>
+                      {s.rows.map(renderRow)}
+                    </ListGroup>
+                  ),
+                )
+              ) : (
+                <>
+                  {split > 0 && doNextRows.length > 0 && <ListGroup label="Do next">{doNextRows.map(renderRow)}</ListGroup>}
+                  {restRows.length > 0 &&
+                    (split > 0 && shouldShowDivider(split, ranked.length + (cards.length - ranked.length)) ? (
+                      <ListGroup label="Everything else">{restRows.map(renderRow)}</ListGroup>
+                    ) : (
+                      restRows.map(renderRow)
+                    ))}
+                </>
+              )}
             </List>
           )}
           {after}

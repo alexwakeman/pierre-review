@@ -50,15 +50,11 @@ function sameSet(a: readonly number[], b: ReadonlySet<number>): boolean {
  * deployment modes. The first free section under the modal's "Workspace" heading, and the reason
  * that heading now renders without a plugin at all.
  *
- * ── WHAT A MUTE DOES, AND WHY THE COPY LEADS WITH WHAT IT DOESN'T ────────────────────────────
- * A muted repo's items STAY ON THE PENDING BOARD. What stops is the ownership claim: the server
- * downgrades those rows to the neutral relevance, so the card reads "Review or reply" instead of
- * "Your turn"/"In your repos", the browser notification stops firing, and the "N need your
- * attention" figures (the welcome-back banner, the workspace badges) drop it
- * into the broader "review or reply" count. "The work is real, it is just not yours" is the rule
- * the whole board is built on — a control that HID the work would be a different, worse feature,
- * and a reader who thinks that is what this does will not use it. Hence the description says so
- * before it says anything else.
+ * ── WHAT A MUTE DOES ───────────────────────────────────────────────────────────────────────────
+ * A muted repository's items LEAVE MY TURN (since 2026-11-06): the server drops them from
+ * `getMyTurn`'s seeds, so they never appear in My turn, never count and never notify. The other
+ * Pending tabs are not affected — your own red build in a muted repository goes back to Needs
+ * fixing — and the repository is still shown everywhere else.
  *
  * ── TWO SWITCHES, NOT A PARENT AND A CHILD ───────────────────────────────────────────────────
  * ⚠ THE WORKSPACE TOGGLE AND THE REPO LIST ARE A UNION, NEVER A FALLBACK. A repo is muted when
@@ -131,24 +127,13 @@ export function PendingMuteSection(): JSX.Element {
   return (
     <SectionShell
       title="Pending mute"
-      desc={
-        <>
-          Muted items <span className="font-medium">stay on the board</span> but stop claiming
-          your turn and notifying you.
-        </>
-      }
+      desc="Muted repositories never appear in My turn and never notify you."
       info={
         <InfoButton title="Pending mute">
-          <p>A muted repository’s My turn cards stay in the My turn tab. Each one:</p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li>reads “Review or reply” instead of “Your turn” or “In your repos”;</li>
-            <li>leaves the “Only yours” view and stops sending browser notifications;</li>
-            <li>ranks lower in its tab.</li>
-          </ul>
+          <p>Muted repositories never appear in My turn and never notify you.</p>
           <p>
             The other tabs (Needs fixing, Waiting on review, Unanswered threads, Ready to land,
-            Dependencies) are not affected. Types you moved into My turn in Settings are muted
-            like the rest.
+            Dependencies) are not affected. Your own PRs in a muted repository show there instead.
           </p>
           <p>
             A muted repository is still shown everywhere else. Muting a repository follows the

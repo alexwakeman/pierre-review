@@ -1,233 +1,106 @@
-// The My Turn settings RULES — resolve, validate, compact — pure, no database.
+// The My Turn settings RULES — resolve, store, group — pure, no database.
 //
-// They live in packages/shared (my-turn-settings.ts) because the Settings form and the server must
-// answer every one of these questions identically: the form builds its body with
-// `compactMyTurnSettings` and shows `validateMyTurnSettings`' sentence before it sends, and the
-// server applies both again before it stores. The shared package has no test runner of its own, so
-// the rules are pinned here, beside the backend reader that resolves them.
+// They live in packages/shared (my-turn-settings.ts, pending-rules.ts) because the Settings section,
+// the board and the server must answer every one of these questions identically. The shared
+// package has no test runner of its own, so the rules are pinned here.
 //
 // WHAT EACH PIN GUARDS, and why it would fail silently otherwise:
-//   1. A STORED ROW DEGRADES PART BY PART. A malformed part (a bad scope, an unknown or repeated
-//      order entry, weights that do not sum to 100) falls back to its default ALONE — a resolver
-//      that threw, or discarded the whole row, would reset a reader's other choices with no error.
-//   2. OVERRIDES ONLY. A save of the defaults stores NULL, so a later change to a default reaches
-//      everyone who never changed it; a compaction that kept a default would freeze it forever.
-//   3. `configKey` CHANGES WITH WHAT IS SHOWN, NEVER WITH ORDER OR WEIGHTS. The notification watcher
-//      re-baselines on it; one that moved on a re-order would swallow a real notification, and one
-//      that did not move on a switch would fire the whole backlog of a type just switched on.
+//   1. ONE SWITCH, READ FROM ANY STORED SHAPE. Only `show.watched_repo_pr === true` turns the
+//      survey on; an older blob's other type switches, its order and its weights are IGNORED, and
+//      garbage resolves to the default instead of throwing.
+//   2. `configKey` CHANGES WITH WHAT IS SHOWN. The notification watcher re-baselines on it; one that
+//      did not move on the switch would fire the survey's whole backlog.
+//   3. THE ORDER AND GROUPS ARE FIXED: Waiting on you, Re-review, Your PRs, then the survey.
 import { describe, expect, it } from 'vitest';
 import {
-  DO_NEXT_PRESETS,
-  DO_NEXT_PRESET_ORDER,
   DO_NEXT_RULES,
-  MY_TURN_DEFAULT_ORDER,
-  compactMyTurnSettings,
-  presetOf,
+  MY_TURN_GROUP_LABEL,
+  MY_TURN_GROUP_OF,
+  MY_TURN_GROUPS,
+  MY_TURN_OLDER_DAYS,
+  MY_TURN_ORDER,
+  myTurnGroupOf,
   resolveMyTurnSettings,
-  validateMyTurnSettings,
-  type MyTurnCardReason,
-  type MyTurnSettings,
+  storedMyTurnSettings,
 } from '@pierre-review/shared';
 
-/** The five types that are off before anyone changes anything, in the default order. */
-const DEFAULT_OFF: MyTurnCardReason[] = [
-  'own_ci_red',
-  'own_conflicts',
-  'own_ready',
-  'own_thread',
-  'watched_repo_pr',
-];
-
-/** A stored value that did not come through the validator (an old row, a hand edit). */
-const stored = (v: unknown): MyTurnSettings => v as MyTurnSettings;
-
 describe('resolveMyTurnSettings', () => {
-  it('resolves NULL to the product defaults', () => {
+  it('resolves NULL to the default: the survey off', () => {
     const r = resolveMyTurnSettings(null);
-    expect(r.order).toEqual([...MY_TURN_DEFAULT_ORDER]);
-    expect(r.off).toEqual(DEFAULT_OFF);
-    expect(r.preset).toBe('balanced');
-    expect(r.weightsPct).toEqual(DO_NEXT_PRESETS.balanced);
-    expect(r.weights).toEqual({ proximity: 0.5, stall: 0.3, relevance: 0.2 });
-    expect(r.defaults).toEqual({ show: true, order: true, weights: true });
-    // The AI review types are on.
-    expect(r.show.claude_review).toBe(true);
-    expect(r.show.ai_approved_merged).toBe(true);
-    // The summonses are on; the survey and the promotions are off.
-    expect(r.show.review_request).toBe(true);
-    expect(r.show.mention).toBe(true);
-    expect(r.show.pushed_since).toBe(true);
-    expect(r.show.watched_repo_pr).toBe(false);
-    expect(r.show.own_ci_red).toBe(false);
+    expect(r.showNewPrs).toBe(false);
+    expect(r.order).toEqual([...MY_TURN_ORDER]);
+    expect(r.off).toEqual(['watched_repo_pr']);
   });
 
-  it('degrades each malformed part ALONE, keeping the others', () => {
-    const r = resolveMyTurnSettings(
-      stored({
-        show: { mention: false, watched_repo_pr: 'yes', nonsense: true },
-        trunkScope: 'everywhere',
-        order: ['your_pr', 'nonsense', 'your_pr', 'mention'],
-        weights: { proximity: 50, stall: 30, relevance: 10 },
-      }),
-    );
-    // A valid toggle survives beside an invalid one, which falls back to its default.
-    expect(r.show.mention).toBe(false);
-    expect(r.show.watched_repo_pr).toBe(false);
-    // Unknown and repeated entries are dropped; the rest keep their stored order.
-    expect(r.order.slice(0, 2)).toEqual(['your_pr', 'mention']);
-    expect(new Set(r.order).size).toBe(MY_TURN_DEFAULT_ORDER.length);
-    // 50 + 30 + 10 = 90: the weights fall back, and nothing else does.
-    expect(r.weightsPct).toEqual(DO_NEXT_PRESETS.balanced);
-    expect(r.off).toContain('mention');
+  it('reads the survey from `show.watched_repo_pr`', () => {
+    const r = resolveMyTurnSettings({ show: { watched_repo_pr: true } });
+    expect(r.showNewPrs).toBe(true);
+    expect(r.off).toEqual([]);
   });
 
-  it('completes a partial order in the default order', () => {
-    const r = resolveMyTurnSettings({ order: ['watched_repo_pr', 'claude_review'] });
-    expect(r.order).toEqual([
-      'watched_repo_pr',
-      'claude_review',
-      ...MY_TURN_DEFAULT_ORDER.filter((x) => x !== 'watched_repo_pr' && x !== 'claude_review'),
-    ]);
-    expect(r.defaults.order).toBe(false);
-  });
-
-  it('ignores a stored red-branch scope and a stored trunk_red order entry (the retired type)', () => {
-    const r = resolveMyTurnSettings(stored({ trunkScope: 'all', order: ['trunk_red', 'mention'] }));
-    expect(r.order).not.toContain('trunk_red');
-    expect(r.order[0]).toBe('mention');
-    expect(r.off).not.toContain('trunk_red');
-    expect(compactMyTurnSettings(stored({ trunkScope: 'all' }))).toBeNull();
-  });
-
-  it('derives the preset from the weights — an exact match, else custom', () => {
-    for (const p of DO_NEXT_PRESET_ORDER) {
-      expect(resolveMyTurnSettings({ weights: DO_NEXT_PRESETS[p] }).preset).toBe(p);
-      expect(presetOf(DO_NEXT_PRESETS[p])).toBe(p);
-    }
-    expect(presetOf({ proximity: 40, stall: 30, relevance: 30 })).toBe('custom');
-    expect(resolveMyTurnSettings({ weights: { proximity: 30, stall: 10, relevance: 60 } }).weights).toEqual(
-      { proximity: 0.3, stall: 0.1, relevance: 0.6 },
-    );
-  });
-});
-
-describe('validateMyTurnSettings — one plain sentence per problem', () => {
-  const cases: [string, unknown, string][] = [
-    ['an unknown type in show', { show: { nonsense: true } }, '“nonsense” is not a My Turn card type.'],
-    [
-      'trunk_red in show (no longer a My Turn type)',
-      { show: { trunk_red: true } },
-      '“trunk_red” is not a My Turn card type.',
-    ],
-    ['a non-boolean switch', { show: { mention: 'on' } }, 'Each card type must be on or off.'],
-    ['an order that is not a list', { order: 'mention' }, 'The order must be a list of card types.'],
-    ['an unknown order entry', { order: ['mention', 'nope'] }, '“nope” is not a My Turn card type.'],
-    [
-      'a repeated order entry',
-      { order: ['mention', 'mention'] },
-      'Each card type can appear in the order once.',
-    ],
-    ['a missing weight', { weights: { proximity: 50, stall: 50 } }, 'Set all three weights.'],
-    [
-      'a weight off the 10% steps',
-      { weights: { proximity: 55, stall: 25, relevance: 20 } },
-      'Each weight must be 0 to 100%, in steps of 10.',
-    ],
-    [
-      'a weight out of range',
-      { weights: { proximity: 110, stall: -10, relevance: 0 } },
-      'Each weight must be 0 to 100%, in steps of 10.',
-    ],
-    [
-      'weights that do not add up',
-      { weights: { proximity: 50, stall: 30, relevance: 10 } },
-      'The three weights must add up to 100%.',
-    ],
-  ];
-  for (const [name, value, sentence] of cases) {
-    it(`rejects ${name}`, () => {
-      expect(validateMyTurnSettings(stored(value))).toBe(sentence);
+  it('ignores an older blob’s other switches, its order and its weights', () => {
+    const r = resolveMyTurnSettings({
+      show: { review_request: false, own_ci_red: true, your_pr: false, watched_repo_pr: false },
+      order: ['watched_repo_pr', 'claude_review', 'mention'],
+      weights: { proximity: 30, stall: 10, relevance: 60 },
     });
-  }
-
-  it('accepts every valid part, and the empty object', () => {
-    expect(validateMyTurnSettings({})).toBeNull();
-    expect(
-      validateMyTurnSettings({
-        show: { watched_repo_pr: true, mention: false },
-        order: ['mention', 'review_request'],
-        weights: DO_NEXT_PRESETS.mine_first,
-      }),
-    ).toBeNull();
-  });
-});
-
-describe('compactMyTurnSettings — overrides only', () => {
-  it('stores nothing for the defaults, however they are spelled', () => {
-    expect(compactMyTurnSettings(null)).toBeNull();
-    expect(compactMyTurnSettings({})).toBeNull();
-    expect(
-      compactMyTurnSettings({
-        show: { mention: true, watched_repo_pr: false },
-        order: [...MY_TURN_DEFAULT_ORDER],
-        weights: DO_NEXT_PRESETS.balanced,
-      }),
-    ).toBeNull();
+    expect(r.showNewPrs).toBe(false);
+    expect(r.order).toEqual([...MY_TURN_ORDER]);
+    expect(r.off).toEqual(['watched_repo_pr']);
+    // Nothing the resolver returns carries weights: the ranker reads the fixed ones.
+    expect(r).not.toHaveProperty('weights');
+    expect(DO_NEXT_RULES.weights).toEqual({ proximity: 0.5, stall: 0.3, relevance: 0.2 });
   });
 
-  it('keeps one changed switch and nothing else', () => {
-    expect(compactMyTurnSettings({ show: { watched_repo_pr: true, mention: true } })).toEqual({
-      show: { watched_repo_pr: true },
-    });
-  });
-
-  it('stores a changed order as every type', () => {
-    const out = compactMyTurnSettings({ order: ['your_pr'] });
-    expect(out?.order).toHaveLength(MY_TURN_DEFAULT_ORDER.length);
-    expect(out?.order?.[0]).toBe('your_pr');
-  });
-
-  it('keeps non-Balanced weights', () => {
-    expect(compactMyTurnSettings({ weights: DO_NEXT_PRESETS.quick_wins })).toEqual({
-      weights: DO_NEXT_PRESETS.quick_wins,
-    });
-  });
-
-  it('serialises two equal settings identically, whatever order their keys arrived in', () => {
-    const a = compactMyTurnSettings({ weights: DO_NEXT_PRESETS.mine_first, show: { mention: false } });
-    const b = compactMyTurnSettings({ show: { mention: false }, weights: DO_NEXT_PRESETS.mine_first });
-    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-  });
-});
-
-describe('the weights', () => {
-  it('keeps the product default and the Balanced preset one number', () => {
-    const w = DO_NEXT_RULES.weights;
-    expect({
-      proximity: Math.round(w.proximity * 100),
-      stall: Math.round(w.stall * 100),
-      relevance: Math.round(w.relevance * 100),
-    }).toEqual(DO_NEXT_PRESETS.balanced);
-  });
-
-  it('gives every preset whole 10% steps that add up to 100%', () => {
-    for (const p of DO_NEXT_PRESET_ORDER) {
-      expect(validateMyTurnSettings({ weights: DO_NEXT_PRESETS[p] })).toBeNull();
+  it('never throws on garbage, and never reads a truthy non-boolean as on', () => {
+    for (const raw of [undefined, 'yes', 42, [], { show: 'all' }, { show: { watched_repo_pr: 'true' } }, { show: null }]) {
+      expect(resolveMyTurnSettings(raw).showNewPrs).toBe(false);
     }
   });
+
+  it('changes `configKey` exactly with the switch', () => {
+    const off = resolveMyTurnSettings(null).configKey;
+    expect(resolveMyTurnSettings({ show: { watched_repo_pr: true } }).configKey).not.toBe(off);
+    expect(resolveMyTurnSettings({ weights: { proximity: 80, stall: 10, relevance: 10 } }).configKey).toBe(off);
+  });
 });
 
-describe('configKey', () => {
-  const key = (s: MyTurnSettings | null) => resolveMyTurnSettings(s).configKey;
+describe('storedMyTurnSettings', () => {
+  it('stores the switch in the shape the resolver reads, and NULL for the default', () => {
+    expect(storedMyTurnSettings({ showNewPrs: false })).toBeNull();
+    const on = storedMyTurnSettings({ showNewPrs: true });
+    expect(resolveMyTurnSettings(on).showNewPrs).toBe(true);
+  });
+});
 
-  it('changes when a type is switched', () => {
-    expect(key({ show: { watched_repo_pr: true } })).not.toBe(key(null));
-    expect(key({ show: { mention: false } })).not.toBe(key(null));
-    expect(key({ show: { ai_approved_merged: false } })).not.toBe(key(null));
+describe('the fixed order and groups', () => {
+  it('lists every type once, groups in order: Waiting on you, Re-review, Your PRs, then the survey', () => {
+    expect(new Set(MY_TURN_ORDER).size).toBe(MY_TURN_ORDER.length);
+    expect(Object.keys(MY_TURN_GROUP_OF).sort()).toEqual([...MY_TURN_ORDER].sort());
+    const groupIdx = MY_TURN_ORDER.map((r) => MY_TURN_GROUPS.indexOf(MY_TURN_GROUP_OF[r]));
+    for (let i = 1; i < groupIdx.length; i++) expect(groupIdx[i - 1]!).toBeLessThanOrEqual(groupIdx[i]!);
+    expect(MY_TURN_GROUPS[MY_TURN_GROUPS.length - 1]).toBe('older');
+    expect(MY_TURN_GROUP_LABEL).toMatchObject({
+      waiting: 'Waiting on you',
+      rereview: 'Re-review',
+      yours: 'Your PRs',
+      older: 'Older',
+    });
   });
 
-  it('does NOT change with the order or the weights', () => {
-    expect(key({ order: ['watched_repo_pr', 'mention'] })).toBe(key(null));
-    expect(key({ weights: DO_NEXT_PRESETS.oldest_first })).toBe(key(null));
+  it('holds no removed type', () => {
+    for (const gone of ['your_pr', 'claude_review', 'ai_approved_merged']) {
+      expect((MY_TURN_ORDER as readonly string[]).includes(gone)).toBe(false);
+    }
+  });
+
+  it('puts a card older than MY_TURN_OLDER_DAYS under Older, and one with no clock in its group', () => {
+    const now = Date.UTC(2026, 10, 6);
+    const days = (d: number) => new Date(now - d * 86_400_000).toISOString();
+    expect(MY_TURN_OLDER_DAYS).toBe(14);
+    expect(myTurnGroupOf({ reason: 'mention', since: days(14) }, now)).toBe('waiting');
+    expect(myTurnGroupOf({ reason: 'mention', since: days(15) }, now)).toBe('older');
+    expect(myTurnGroupOf({ reason: 'own_ready', since: null }, now)).toBe('yours');
+    expect(myTurnGroupOf({ reason: 'watched_repo_pr', since: days(1) }, now)).toBe('new_prs');
   });
 });

@@ -16,7 +16,6 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CARD_EXCERPT_MAX_CHARS,
-  YOUR_PR_NEW_ACTORS_SHOWN,
   type InsightCard,
   type MyTurnCard,
   type UntouchedThreadCard,
@@ -582,13 +581,10 @@ describe('each fact lands on its card (board fold)', () => {
     });
   });
 
-  it('your_pr: who is new, newest first, me excluded, capped with a total', async () => {
-    const card = myTurnByKey((await insights(true)).cards).get('your-pr')!;
-    expect(card.reason).toBe('your_pr');
-    // carol (newest commit) · dave · bob · the bot; alice was before the view, I am never news.
-    expect(card.newActorTotal).toBe(4);
-    expect(card.newActorIds).toHaveLength(YOUR_PR_NEW_ACTORS_SHOWN);
-    expect(card.newActorIds).toEqual([carolId, daveId, bobId]);
+  it('your own PR with new activity since you opened it is no longer a My Turn card', async () => {
+    // The `your_pr` type was removed: activity on your PR is not, by itself, someone waiting on you.
+    const card = myTurnByKey((await insights(true)).cards).get('your-pr');
+    expect(card?.reason).not.toBe('your_pr');
   });
 });
 
@@ -628,8 +624,6 @@ describe('board only, display only', () => {
           'threadLine',
           'committerId',
           'firstComment',
-          'newActorIds',
-          'newActorTotal',
           'requesterId',
         ]) {
           expect(c).not.toHaveProperty(k);

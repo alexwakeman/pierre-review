@@ -7,7 +7,7 @@
 //
 // ── THE RANK IS THE CODE'S ──────────────────────────────────────────────────────────────────
 // `score = w.proximity·proximity + w.stall·stallRisk + w.relevance·relevanceWeight`, with the
-// READER's weights (Settings → My Turn; 0.50 / 0.30 / 0.20 until they choose). Two ticks over
+// FIXED weights `DO_NEXT_RULES.weights` (0.50 / 0.30 / 0.20; there is no setting). Two ticks over
 // unchanged data produce the same scores.
 //
 // (The file keeps its old name: it once also built the "Plan my day" worklist, removed
@@ -136,10 +136,7 @@ function stallRiskFor(ageHours: number | null | undefined): number {
   return DO_NEXT_RULES.stallBase;
 }
 
-/** THE SCORE. `w` is the READER's resolved weights (Settings → My Turn; `DO_NEXT_PRESETS.balanced`
- *  until they choose), never `DO_NEXT_RULES.weights` read directly — that field is the product
- *  default and the resolver's input, and a scorer reading it would rank by numbers the board's
- *  explanation no longer prints. */
+/** THE SCORE. `w` is `DO_NEXT_RULES.weights` (fixed); a test may pass others. */
 function scoreFor(
   proximity: number,
   stallRisk: number,
@@ -177,11 +174,10 @@ type ClassicMyTurnReason = Exclude<
  *  choice depend on `ageHours`, which would in turn make `reason` — a hashed field — drift on a
  *  timer and re-bill a dormant workspace. So the winner is fixed by severity, then by this rank. */
 ///
-/// Every reason, in the product's DEFAULT type order (`MY_TURN_DEFAULT_ORDER`) — fixed, never the
-/// reader's order, because a hashed `reason` must not change with a display preference. The four
-/// promotions are never read here (they rank as their home kinds do), but the `Record` forces an
-/// entry. ⚠ The tie rank is `SEVERITY_RANK × 100 + REASON_RANK`: with fifteen reasons a × 10 would
-/// let a reason bleed across a severity band.
+/// Every reason, in the fixed type order (`MY_TURN_ORDER`). The four own-work types are never read
+/// here (they rank as their home kinds do), but the `Record` forces an entry. ⚠ The tie rank is
+/// `SEVERITY_RANK × 100 + REASON_RANK`: with twelve reasons a × 10 would let a reason bleed across
+/// a severity band.
 const REASON_RANK: Record<MyTurnCardReason, number> = {
   review_request: 0,
   mention: 1,
@@ -193,11 +189,8 @@ const REASON_RANK: Record<MyTurnCardReason, number> = {
   own_conflicts: 7,
   pr_approved: 8,
   own_ready: 9,
-  your_pr: 10,
-  own_thread: 11,
-  claude_review: 12,
-  ai_approved_merged: 13,
-  watched_repo_pr: 14,
+  own_thread: 10,
+  watched_repo_pr: 11,
 };
 
 const SEVERITY_RANK: Record<'high' | 'warn' | 'info', number> = { high: 0, warn: 1, info: 2 };
@@ -244,9 +237,8 @@ export async function scoreCards(
   accountId: number,
   cards: InsightCard[],
   now: number,
-  // The reader's resolved weights (`getMyTurnSettings(accountId).weights`). REQUIRED, so no caller
-  // can forget it and quietly rank by the product default while the board prints the reader's.
-  weights: DoNextWeights,
+  // The weights — fixed in the product (`DO_NEXT_RULES.weights`); a parameter only for tests.
+  weights: DoNextWeights = DO_NEXT_RULES.weights,
 ): Promise<{ candidates: Candidate[]; scored: ScoredCard[] }> {
   // Cards the Pending board ranks that have no working row — see the note at the loop's end.
   const boardOnly: ScoredCard[] = [];
@@ -866,13 +858,7 @@ function myTurnReason(reason: ClassicMyTurnReason): string {
       return 'New commits since your last review or comment';
     case 'pr_approved':
       return 'Your PR is approved and waiting on you';
-    case 'your_pr':
-      return 'Your PR has new activity since you last opened it';
     case 'watched_repo_pr':
       return 'New PR you have not reviewed or commented on';
-    case 'claude_review':
-      return 'Your Limn finished an AI review you have not read yet';
-    case 'ai_approved_merged':
-      return 'Merged after your Limn approved it — take a quick look';
   }
 }

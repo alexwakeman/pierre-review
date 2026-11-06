@@ -298,15 +298,15 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
   one stored thing is a per-SUBJECT DISMISSAL timestamp, applied inside `getMyTurn`. ⚠ **No bot
   action returns the ball, including a push**; bot-ness via `globalAutomationUserIds`, NEVER
-  `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array.** One card per PR
-  (`onePerPr`), except Claude reviews. Exceptions, SEEN-based: an unseen own AI review, a PR merged
-  after your Limn approved it. Every card is dismissable; a red trunk is never My Turn.
+  `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array** (drafts and muted repos
+  too). FIXED groups (Waiting on you, Re-review, Your PRs — always on; `MY_TURN_ORDER`), oldest
+  first, "Older" past 14 days; one card per PR (`onePerPr`). The ONE setting is the opt-in survey.
+  Every card is dismissable; a red trunk is never My Turn.
 - **A surface that NOTIFIES counts `myTurnPersonal`; one you OPEN counts `myTurn`.**
   `attentionRelevance` is three-valued and every entry point SEATS it; `myTurnOther` is never
   `myTurn - myTurnPersonal`; `?attnRel=` is the only key emitted.
-- **THE PENDING MUTE rides `relevance`, once, inside `getMyTurn`** (`db/pending-mute.ts`): a muted
-  repo's rows become `relevance: 'none'`; no population changes. ⚠ The write must scope its delete
-  to the named workspace's membership.
+- **THE PENDING MUTE removes a repo from My Turn, inside `getMyTurn`** (`db/pending-mute.ts`); other
+  tabs are unaffected. ⚠ The write must scope its delete to the named workspace's membership.
 - **Visible sub-tabs are DERIVED, never written back** (`effectiveTab`s) — a corrective `set…`
   permanently forgets the choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()`** (shared `blast-radius.ts`); the wire carries

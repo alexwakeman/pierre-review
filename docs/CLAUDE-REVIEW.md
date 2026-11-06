@@ -708,9 +708,8 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   provider, and the outcome re-check counts the open findings of BOTH succeeded halves (the
   consolidated set: merged-away duplicates are never read).
 - **Elsewhere the pair is one review too**: the Open PRs column (`getLatestReviewStates`: the pair's
-  status and verdict, both halves' counts and "Earlier: …" items), My Turn's "New AI review" card
-  (`getUnseenOwnAiReviews`: seen when either half was, the pair's verdict) and
-  the history's finding counts all leave merged-away duplicates out.
+  status and verdict, both halves' counts and "Earlier: …" items), the AI reviews tab (the pair's
+  one verdict) and the history's finding counts all leave merged-away duplicates out.
 
 ### The finding check (tried 2026-11-01, REMOVED)
 

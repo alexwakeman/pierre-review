@@ -6,7 +6,7 @@
 //      once. A type that falls through to a generic heading is the "the card does not say why the
 //      ball is yours" defect, so each reason has its own assertion.
 //   2. ABSENT IS "NOT KNOWN". Every optional heading fact (`mentionExcerpt`, `threadPath`,
-//      `committerId`, `firstComment`, `newActorIds`, `requesterId`) drops its clause; nothing prints a placeholder,
+//      `committerId`, `firstComment`, `requesterId`) drops its clause; nothing prints a placeholder,
 //      an @login or "user 12". An unknown actor is "Someone".
 //   3. THE RELEVANCE LABEL. Inside My turn, "Your turn" is dropped (the tab says it); "In your
 //      repos" and the neutral label stay; an ABSENT relevance is neutral even with `personal: true`.
@@ -361,24 +361,6 @@ describe('My turn — people events', () => {
 });
 
 describe('My turn — your own PR', () => {
-  it('your_pr: the counts, who did them, and the clearing rule', () => {
-    const card = myTurn({
-      reason: 'your_pr',
-      detail: '3 new comments · 1 new commit',
-      newActorIds: [2, 3],
-      newActorTotal: 4,
-    });
-    expect(lead(card)).toBe('3 new comments and 1 new commit on your PR');
-    expect(pendingActionLine(card, ctx()).where).toEqual([
-      { text: 'from David Buckley, Robin Dunn and 2 others' },
-      { text: 'clears when you open it' },
-    ]);
-    // No actors on the wire: the "from" clause is dropped.
-    expect(pendingActionLine({ ...card, newActorIds: undefined }, ctx()).where).toEqual([
-      { text: 'clears when you open it' },
-    ]);
-  });
-
   it('pr_approved: the approvers by name, and the standing is not repeated in the fact line', () => {
     const card = myTurn({
       reason: 'pr_approved',
@@ -439,21 +421,6 @@ describe('My turn — your own PR', () => {
     ).toBe('CodeRabbit’s comment on app/x.ts has no reply');
   });
 
-  it('claude_review: the verdict in words, never the raw enum; the feature, never a provider it cannot know', () => {
-    expect(lead(myTurn({ reason: 'claude_review', detail: 'AI review ready · REQUEST_CHANGES' }))).toBe(
-      'AI review: Request changes',
-    );
-    expect(lead(myTurn({ reason: 'claude_review', trigger: 'auto', detail: 'AI review ready · COMMENT' }))).toBe(
-      'Auto review: Comment',
-    );
-    expect(lead(myTurn({ reason: 'claude_review', detail: 'AI review ready' }))).toBe('AI review finished');
-    // An older server's detail still reads the verdict.
-    expect(lead(myTurn({ reason: 'claude_review', detail: 'Claude review ready · APPROVE' }))).toBe('AI review: Approve');
-    expect(
-      pendingActionLine(myTurn({ reason: 'claude_review', detail: 'Claude review ready · COMMENT · head moved since' }), ctx())
-        .where,
-    ).toEqual([{ text: 'new commits since this review' }]);
-  });
 });
 
 describe('a red default branch is a repository, not a PR', () => {
@@ -597,10 +564,10 @@ describe('the relevance label on line two', () => {
     expect(pendingRelevanceLabel(card, 'my_turn')).toBe('Review or reply');
   });
 
-  it('muted is one word on line two, and display only', () => {
-    const line = pendingActionLine(myTurn({ reason: 'watched_repo_pr', relevance: 'none', muted: true }), ctx());
-    expect(line.muted).toBe(true);
+  it('a "none" card says "Review or reply" on line two, and nothing about muting', () => {
+    const line = pendingActionLine(myTurn({ reason: 'watched_repo_pr', relevance: 'none' }), ctx());
     expect(line.label).toBe('Review or reply');
+    expect(line).not.toHaveProperty('muted');
   });
 });
 
@@ -715,13 +682,11 @@ describe('the other tabs', () => {
 });
 
 describe('what a whole-card click opens — the event', () => {
-  it('a thread card opens its thread, commits open Activity, a Claude card opens the review', () => {
+  it('a thread card opens its thread, commits open Activity, a review request opens Changes', () => {
     expect(pendingCardEvent(myTurn({ reason: 'thread_reply', threadId: 9 }))).toEqual({ kind: 'thread', threadId: 9 });
     expect(pendingCardEvent(myTurn({ reason: 'pushed_since' }))).toEqual({ kind: 'pr', tab: 'activity' });
-    expect(pendingCardEvent(myTurn({ reason: 'claude_review' }))).toEqual({ kind: 'claude_review' });
     expect(pendingCardEvent(myTurn({ reason: 'review_request' }))).toEqual({ kind: 'pr', tab: 'changes' });
-    // "3 new comments and 1 new commit on your PR" — the new things live on Activity.
-    expect(pendingCardEvent(myTurn({ reason: 'your_pr' }))).toEqual({ kind: 'pr', tab: 'activity' });
+    expect(pendingCardEvent(myTurn({ reason: 'pr_approved' }))).toEqual({ kind: 'pr', tab: 'overview' });
   });
 });
 

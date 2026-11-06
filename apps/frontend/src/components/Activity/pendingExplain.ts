@@ -1,11 +1,10 @@
 import {
   DO_NEXT_RULES,
-  MY_TURN_OWN_WORK_REASONS,
+  MY_TURN_OLDER_DAYS,
   PENDING_DO_NEXT_SIZE,
   PENDING_SEVERITY,
   PENDING_TABS,
   type DoNextAdjustment,
-  type DoNextPreset,
   type DoNextProximityBase,
   type DoNextWeights,
   type InsightCard,
@@ -18,7 +17,7 @@ import {
   type WorkPlanFacts,
 } from '@pierre-review/shared';
 import { KIND_LABEL } from './pendingLabels.js';
-import { PRESET_LABEL, WEIGHT_LABEL } from '../settings/myTurnSettingsForm.js';
+import { WEIGHT_LABEL } from '../settings/myTurnSettingsForm.js';
 
 // WHY IS THIS CARD HERE, AND WHY HERE — the Pending board's info popovers, as plain sentences.
 //
@@ -26,11 +25,8 @@ import { PRESET_LABEL, WEIGHT_LABEL } from '../settings/myTurnSettingsForm.js';
 // with. None is typed here. An explanation that quoted a threshold the ranker had since moved away
 // from would be a confident false statement on the one screen whose job is to be believed.
 //
-// ⚠ AND THE WEIGHTS AND THE MY TURN ORDER ARE THE READER'S, READ OFF THE RESPONSE. Settings → My
-// Turn lets each reader re-weight the score and re-order My turn's types, so the only true account
-// of a list's order is the `rules` the server sent WITH that list (`AttentionCardsResponse.rules`).
-// `DO_NEXT_RULES.weights` is the product default, and is read here only for a response that
-// predates `rules`.
+// The weights are fixed (`DO_NEXT_RULES.weights`); the response still carries them in `rules`, and
+// the score rows read that copy so they always add up to the score the server printed.
 //
 // ⚠ EXPLANATION ONLY. Nothing here sorts, filters or counts; the board's order comes from the
 // server (each tab's `cardIds`, score order) and this module only describes it. It never
@@ -156,11 +152,6 @@ export interface ScoreBreakdown {
   rows: ScoreRow[];
 }
 
-/** The weights' name, for a sentence: "Mine first", or "your own" when they match no preset. */
-export function weightsName(preset: DoNextPreset | 'custom'): string {
-  return preset === 'custom' ? 'your own' : PRESET_LABEL[preset];
-}
-
 /** Hours since an ISO instant — for a sentence, so an unreadable one reads as no time at all. */
 function hoursSince(iso: string): number {
   const t = Date.parse(iso);
@@ -206,8 +197,7 @@ export function scoreBreakdown(p: PendingCardScore, w: DoNextWeights): ScoreBrea
   return {
     total: outOf100(p.score),
     rows: [
-      // Named as the Settings sliders name them (WEIGHT_LABEL), so the row a reader sees here is
-      // the slider they move there.
+      // Named as every explanation names them (WEIGHT_LABEL).
       row('proximity', WEIGHT_LABEL.proximity, p.proximity, w.proximity, proximityNote),
       row('stall', WEIGHT_LABEL.stall, p.stallRisk, w.stall, stallNote),
       row('relevance', WEIGHT_LABEL.relevance, rel, w.relevance, RELEVANCE_PHRASE[p.relevance]),
@@ -246,17 +236,11 @@ export function whyHere(card: InsightCard): string {
           return card.own?.kind === 'ready' && card.own.forward === 'update_branch'
             ? 'GitHub will not merge your PR until its branch is updated.'
             : 'GitHub will merge your PR now.';
-        case 'your_pr':
-          return 'Your PR has new commits, comments or reviews since you last opened it here. Opening it clears this.';
         case 'own_thread':
           if (card.own?.kind === 'thread' && card.own.stillOpen != null) {
             return 'A Limn review found this earlier comment not addressed. It goes away when you push a fix, reply on the thread or resolve it.';
           }
           return `A review comment on your PR has had no reply and no later commit for ${agePhrase(hoursSince(card.since))}.`;
-        case 'claude_review':
-          return 'Your Limn finished an AI review you have not read. It goes away when you open the PR’s AI Review tab.';
-        case 'ai_approved_merged':
-          return 'Your Limn approved this PR and it has since merged. It goes away when you open the PR.';
         case 'watched_repo_pr':
           return 'A new PR you have not reviewed, commented on or pushed to. It goes away when you do one of those.';
         default: {
@@ -307,12 +291,6 @@ export function whyHere(card: InsightCard): string {
 /** Whose this card is, when `whyHere` has not already said. Null when it has. */
 export function whoseItIs(card: InsightCard): string | null {
   if (card.kind === 'my_turn') {
-    if (card.muted === true) {
-      return 'Its repo is muted for Pending, so it does not claim your turn or notify you.';
-    }
-    // Your own work that you moved into My turn — not a summons, so say
-    // how it got here.
-    if (MY_TURN_OWN_WORK_REASONS.has(card.reason)) return 'You added this type to My Turn in Settings.';
     if (card.relevance === 'direct') return null;
     if (card.relevance === 'maintained') {
       return 'It counts as “In your repos”: you can push to this repo, or have merged a PR into it.';
@@ -358,14 +336,9 @@ export function colourReason(card: InsightCard): string {
         case 'own_conflicts':
           return 'your PR cannot merge';
         case 'pr_approved':
-        case 'your_pr':
         case 'own_ready':
         case 'own_thread':
           return 'it is your own PR';
-        case 'claude_review':
-          return 'you have not read it yet';
-        case 'ai_approved_merged':
-          return 'your Limn approved it';
         case 'watched_repo_pr':
           return 'nobody asked you directly';
         default: {
@@ -450,18 +423,15 @@ export interface CardExplanation {
 /**
  * HOW THE LIST ON SCREEN IS ORDERED, in one sentence. A strict-group tab says its groups first,
  * because "listed by score" alone would be false there: a low-scoring security item still sits
- * above every bump, and on My turn a low-scoring review request above every approved PR.
- *
- * My turn is grouped in the READER's type order, which only a response carrying `rules` ranked by;
- * without them the tab is one scored list, and the last sentence is the true one.
+ * above every bump. My turn is not ordered by score at all: its fixed groups, longest waiting first.
  */
 export function orderSentence(
   tab: PendingTabKey,
   scored: boolean,
   rules?: PendingRankRules,
 ): string {
-  if (tab === 'my_turn' && scored && rules != null) {
-    return `Grouped by type in your order, then by Do next score. The top ${PENDING_DO_NEXT_SIZE} are Do next.`;
+  if (tab === 'my_turn') {
+    return `Waiting on you, then Re-review, then Your PRs. Longest waiting first in each. Anything older than ${MY_TURN_OLDER_DAYS} days is under Older.`;
   }
   if (PENDING_TABS.find((t) => t.key === tab)?.byWait === true) {
     return 'Longest wait first, in working hours. Not scored: nothing here is your next step.';
@@ -475,9 +445,9 @@ export function orderSentence(
 
 /**
  * THE LINE UNDER A LIST THE CAP CUT. "The rest score lower" is true only of a purely scored list. On
- * a strict-group tab (My turn in the reader's type order, Dependencies security-first) the list is
- * cut in GROUP order, so what is cut is the last groups — which can outscore what is shown. Same
- * test as `orderSentence`: a kind chip on Dependencies makes the list purely scored again.
+ * a strict-group tab (My turn in its fixed groups, Dependencies security-first) the list is cut in
+ * GROUP order, so what is cut is the last groups — which can outscore what is shown. Same test as
+ * `orderSentence`: a kind chip on Dependencies makes the list purely scored again.
  */
 export function capSentence(
   tab: PendingTabKey,
@@ -487,8 +457,7 @@ export function capSentence(
   rules?: PendingRankRules,
 ): string {
   const def = PENDING_TABS.find((t) => t.key === tab);
-  const grouped =
-    kind == null && (def?.groupByKind === true || (def?.groupByReason === true && rules != null));
+  const grouped = kind == null && (def?.groupByKind === true || def?.groupByReason === true);
   return grouped
     ? `Showing the first ${shown} of ${total}.`
     : `Showing the top ${shown} of ${total}. The rest score lower.`;

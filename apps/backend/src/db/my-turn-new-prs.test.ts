@@ -141,11 +141,9 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
-  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
-  // is built on them, so it switches them back on rather than lose what it pins.
-  await (await import('../auth/account.js')).setMyTurnSettings(1, {
-    show: { watched_repo_pr: true },
-  });
+  // Untouched "New PRs" are OFF by default (Settings → Pending, "Also show new PRs nobody asked you
+  // about"). This fixture's My Turn population is built on them, so it switches them on.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, { showNewPrs: true });
   ({ getMyTurn } = await import('./queries.js'));
 
   const { accounts, repos, pullRequests, users } = schema;

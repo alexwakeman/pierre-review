@@ -198,10 +198,9 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
   // same cards Pro Insights computes in core getWorkspaceInsights), for the **Pending** rail
   // entry. The bot cards are excluded (they live in the free Bots console).
   //
-  // SERVED AS SIX TABS (`db/pending-tabs.ts`), each a scored list with its uncapped count — My
-  // turn grouped by the reader's type order and Dependencies by kind (security, then bumps) — free
-  // on every tier. The rank is code, with the reader's weights; only the Pro plan's NARRATION is
-  // paid.
+  // SERVED AS TABS (`db/pending-tabs.ts`), each with its uncapped count — My turn in its fixed
+  // groups (longest waiting first), Dependencies by kind (security, then bumps), the rest by score.
+  // The rank is code, with fixed weights.
   //
   // ⚠ THE TABS ARE AN ALLOW-LIST (`PENDING_TABS`), so a NEW InsightKind reaches this board only
   // once it is given a tab — otherwise it is folded, counted and never listed. pending-tabs.test.ts

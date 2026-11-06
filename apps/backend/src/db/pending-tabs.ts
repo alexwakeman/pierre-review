@@ -1,10 +1,11 @@
 // ── THE PENDING BOARD'S TABS (CORE, deterministic, no AI) ───────────────────────────────────
 //
 // Eight tabs (`PENDING_TABS` in packages/shared/src/pending-rules.ts), each a scored list: every PR
-// card is scored by the one Do next scorer (`scoreCards`, db/work-plan.ts), with the READER's
-// weights (Settings → My Turn), and each tab lists its cards highest score first — except the two
-// STRICT-GROUP tabs, whose groups come first: My turn by card type in the READER's order
-// (`groupByReason`) and Dependencies security before bumps (`groupByKind`), each scored within.
+// card is scored by the one Do next scorer (`scoreCards`, db/work-plan.ts), with the FIXED weights
+// (`DO_NEXT_RULES.weights`), and each tab lists its cards highest score first — except the two
+// STRICT-GROUP tabs, whose groups come first: My turn in its fixed groups (`groupByReason`,
+// `myTurnGroupOf`: Waiting on you, Re-review, Your PRs, New PRs, Older), LONGEST WAITING FIRST
+// within a group, and Dependencies security before bumps (`groupByKind`), scored within.
 // The one UNSCORED tab, "Waiting on others" (`byWait`), lists the longest wait first instead
 // (`listByWait`): the reader cannot act on it, so there is nothing to score.
 // There is no severity-first sort and no cross-kind spread rule — a card competes only with the
@@ -13,8 +14,8 @@
 // "AI reviews" is the second UNSCORED tab (`newestFirst`): a stable reference list of the newest AI
 // review on each PR (`listNewestFirst`), with a `newTotal` badge of the rows since the last look.
 //
-// ⚠ THE RULES RIDE THE RESPONSE (`PendingBoard.rules`). The board's info popovers and guide explain
-// the order the reader actually got — their weights and their type order — never the constants.
+// THE RULES RIDE THE RESPONSE (`PendingBoard.rules`): the weights, the type order and which types
+// are not shown (the survey while it is off), for the board's info popovers and guide.
 //
 // ⚠ IT RANKS THE UNCAPPED FOLD, THEN CAPS. The caller passes `getWorkspaceInsights(…, { uncapped:
 // true })`; a per-kind cap applied first (in severity / newest order) would hand this ranker the
@@ -38,7 +39,8 @@ import {
   type PendingBoardSnapshot,
   pendingAuthorSideOf,
   type InsightCard,
-  type MyTurnCardReason,
+  myTurnGroupOf,
+  MY_TURN_GROUPS,
   type PendingAuthorSplit,
   type PendingCardScore,
   type PendingRankRules,
@@ -102,23 +104,27 @@ export function listGroupOf(card: InsightCard): string {
 }
 
 /** The strict-group rank inside a tab — ONE comparator for both strict-group tabs:
- *   • My turn (`groupByReason`): the index of the card's `reason` in the READER'S type order
- *     (Settings → My Turn), so their first type is listed first whatever the scores;
+ *   • My turn (`groupByReason`): the index of the card's group (`myTurnGroupOf` — Waiting on you,
+ *     Re-review, Your PRs, New PRs, then Older for a clock past `MY_TURN_OLDER_DAYS`);
  *   • Dependencies (`groupByKind`): the kind's index in `def.kinds` — security before bumps;
  *   • every other tab: 0 (purely scored). */
-export function tabGroupRank(
-  def: PendingTabDef,
-  card: InsightCard,
-  myTurnOrderIdx: ReadonlyMap<MyTurnCardReason, number>,
-): number {
+export function tabGroupRank(def: PendingTabDef, card: InsightCard, now: number): number {
   if (def.groupByReason === true && card.kind === 'my_turn') {
-    return myTurnOrderIdx.get(card.reason) ?? Number.MAX_SAFE_INTEGER;
+    return MY_TURN_GROUPS.indexOf(myTurnGroupOf(card, now));
   }
   return def.groupByKind === true ? def.kinds.indexOf(card.kind) : 0;
 }
 
+/** Within one My turn group: LONGEST WAITING FIRST (the oldest clock), then the scorer's order. */
+function sinceMsOf(card: InsightCard): number {
+  if (card.kind !== 'my_turn') return 0;
+  const ms = Date.parse(card.since);
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
 /** THE LISTING RULE, pure and network-free: one tab's scored cards in the order the tab shows them
- *  (in a strict-group tab by group first, then highest score first), each LIST GROUP
+ *  (in a strict-group tab by group first; then, in My turn, longest waiting first; then highest
+ *  score first), each LIST GROUP
  *  (`listGroupOf`) cut to `boardListCap`. `rankPendingTabs` lists with it, and the Pro work plan
  *  draws its rows only from what it lists (`listedCardIds`), so the two cannot disagree about
  *  which cards are on the board. */
@@ -126,18 +132,22 @@ export function listTab(
   def: PendingTabDef,
   scored: readonly ScoredCard[],
   byId: ReadonlyMap<string, InsightCard>,
-  myTurnOrderIdx: ReadonlyMap<MyTurnCardReason, number>,
+  now: number,
 ): ScoredCard[] {
   const inTab = scored
     .filter((s) => {
       const card = byId.get(s.cardId);
       return card != null && pendingTabHolds(def, card);
     })
-    .sort(
-      (a, b) =>
-        tabGroupRank(def, byId.get(a.cardId)!, myTurnOrderIdx) -
-          tabGroupRank(def, byId.get(b.cardId)!, myTurnOrderIdx) || compareScored(a, b),
-    );
+    .sort((a, b) => {
+      const ca = byId.get(a.cardId)!;
+      const cb = byId.get(b.cardId)!;
+      return (
+        tabGroupRank(def, ca, now) - tabGroupRank(def, cb, now) ||
+        (def.groupByReason === true ? sinceMsOf(ca) - sinceMsOf(cb) : 0) ||
+        compareScored(a, b)
+      );
+    });
   // The cap is per LIST GROUP (`listGroupOf`): the card's kind, for My turn also which side of
   // "Only yours" it falls on, and who opened it. Each view the board can show — the whole tab,
   // one kind's chip, My turn's "Only yours" / its complement, People / Automation — is then its
@@ -190,18 +200,17 @@ export function listNewestFirst(def: PendingTabDef, cards: readonly InsightCard[
     .slice(0, AI_REVIEWS_LIST_CAP);
 }
 
-/** Every card id any tab lists, for these cards, scores and My turn type order — the population
- *  the Pro work plan may name. A plan row whose card the board does not list would put its
- *  sentence on a card the reader cannot find. */
+/** Every card id any tab lists, for these cards and scores — the population the Pro work plan may
+ *  name. A plan row whose card the board does not list would put its sentence on a card the reader
+ *  cannot find. */
 export function listedCardIds(
   cards: readonly InsightCard[],
   scored: readonly ScoredCard[],
-  myTurnOrder: readonly MyTurnCardReason[],
+  now: number = Date.now(),
 ): Set<string> {
   const byId = new Map(cards.map((c) => [c.id, c]));
-  const orderIdx = new Map(myTurnOrder.map((r, i) => [r, i] as const));
   const ids = new Set<string>();
-  for (const def of PENDING_TABS) for (const s of listTab(def, scored, byId, orderIdx)) ids.add(s.cardId);
+  for (const def of PENDING_TABS) for (const s of listTab(def, scored, byId, now)) ids.add(s.cardId);
   return ids;
 }
 
@@ -222,13 +231,12 @@ export async function rankPendingTabs(
   opts: { suggestReviewers?: boolean } = {},
 ): Promise<PendingBoard> {
   const byId = new Map(insights.cards.map((c) => [c.id, c]));
-  // The reader's weights and type order, read once for the whole board.
+  // The reader's one switch (the survey), for the rules the response carries.
   const settings = await getMyTurnSettings(accountId);
-  const orderIdx = new Map(settings.order.map((r, i) => [r, i] as const));
   const { scored } =
     scope.repoIds.length === 0
       ? { scored: [] as ScoredCard[] }
-      : await scoreCards(accountId, insights.cards, now, settings.weights);
+      : await scoreCards(accountId, insights.cards, now);
   const totals = insights.kindTotals ?? {};
 
   const tabs: PendingTab[] = [];
@@ -247,7 +255,7 @@ export async function rankPendingTabs(
         listed.push(c);
       }
     } else {
-      for (const s of listTab(def, scored, byId, orderIdx)) {
+      for (const s of listTab(def, scored, byId, now)) {
         ids.push(s.cardId);
         listed.push(byId.get(s.cardId)!);
         const { cardId: _cardId, prId: _prId, ...score } = s;
@@ -411,7 +419,7 @@ export async function buildPendingBoard(
     tabs: board.tabs,
     scores: board.scores,
     // The weights and My turn type order the scores and the order above were built with — what
-    // the board's explanations print, so they describe THIS reader's ranking.
+    // the board's explanations print.
     rules: board.rules,
     // Out of every tab and count — listed under My turn with a way back.
     myTurnDismissed: insights.myTurnDismissed ?? [],

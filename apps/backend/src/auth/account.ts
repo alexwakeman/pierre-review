@@ -7,9 +7,9 @@ import type {
   BlastThresholds,
   FeatureSettings,
   LocalUser,
-  MyTurnSettings,
+  StoredMyTurnSettings,
 } from '@pierre-review/shared';
-import { compactFeatureSettings, compactMyTurnSettings } from '@pierre-review/shared';
+import { compactFeatureSettings, storedMyTurnSettings, type MyTurnSettings } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
 
@@ -31,12 +31,10 @@ export interface Account {
   // are not mirrored on this side). Same account grain and same two-state rule as the threshold
   // above.
   blastRadiusConfig: BlastRadiusConfig | null;
-  // MY TURN settings — which card types count as your turn, their order, and the Do next weights
-  // — as the STORED overrides, or null when the user has never changed anything (→ the product
-  // defaults; resolve through `resolveMyTurnSettings`). Same account grain and same two-state rule
-  // as the two settings above. Optional only so the auth hook's no-account-yet fallback literal
-  // (api/plugins/auth.ts) needs no entry: absent reads exactly as null.
-  myTurnSettings?: MyTurnSettings | null;
+  // MY TURN settings as STORED (the survey switch; an older blob's other keys are ignored), or null
+  // (→ the default; resolve through `resolveMyTurnSettings`). Optional only so the auth hook's
+  // no-account-yet fallback literal (api/plugins/auth.ts) needs no entry: absent reads as null.
+  myTurnSettings?: StoredMyTurnSettings | null;
   // SETTINGS → FEATURES: the stored switches (overrides only; null = every default) and whether the
   // account is an EXISTING install (migration 0153; everything shown by default). Optional for the
   // same fallback-literal reason as `myTurnSettings`.
@@ -342,29 +340,23 @@ export async function setBlastRadiusConfig(
 }
 
 /**
- * Set (or clear) an account's MY TURN settings, and return what was STORED.
- *
- * The value is COMPACTED first (`compactMyTurnSettings`, the ONE definition of "an override" the
- * Settings form builds its body with too), so a default is never frozen into the row — `null`, or
- * anything that compacts to nothing, stores NULL and the account follows the product defaults
- * again. Validate BEFORE calling: compaction drops a malformed part silently, which is right for a
- * stored value and wrong for a request.
+ * Set an account's MY TURN settings — the one survey switch — and return them. Off stores NULL, so
+ * an older blob (type switches, an order, weights) is cleared by the first save.
  */
 export async function setMyTurnSettings(
   accountId: number,
-  settings: MyTurnSettings | null,
-): Promise<MyTurnSettings | null> {
+  settings: MyTurnSettings,
+): Promise<MyTurnSettings> {
   const { accounts } = schema;
-  const value = compactMyTurnSettings(settings);
   await db
     .update(accounts)
-    .set({ myTurnSettings: value })
+    .set({ myTurnSettings: storedMyTurnSettings(settings) })
     .where(eq(accounts.id, accountId))
     .execute();
   // ⚠ Same rule as the two settings above, and the same failure without it: Settings would save,
   // then `/api/me` would hand the old value back and revert the form.
   await refreshLocalAccountCache(accountId);
-  return value;
+  return { showNewPrs: settings.showNewPrs };
 }
 
 /**

@@ -630,3 +630,39 @@ describe('the active-Workspace badge', () => {
     expect(activeWorkspaceBadge(null)).toBeNull();
   });
 });
+
+// ── MY TURN'S FIXED GROUPS AND ITS EMPTY STATE (2026-11-06) ──────────────────────────────────
+import { myTurnSections, waitingForReviewerCount } from '../src/components/Activity/pendingTabs.js';
+import { MY_TURN_OLDER_DAYS, type PendingTab as PendingTabWire } from '@pierre-review/shared';
+
+describe('My turn’s headings', () => {
+  const NOW = Date.UTC(2026, 10, 6, 12);
+  const ago = (days: number) => new Date(NOW - days * 86_400_000).toISOString();
+  const mt = (id: string, reason: string, since: string) =>
+    ({ id, kind: 'my_turn', reason, since }) as unknown as InsightCard;
+
+  it('cuts the server’s list into Waiting on you, Re-review, Your PRs, then Older — empty groups dropped', () => {
+    const cards = [
+      mt('a', 'review_request', ago(3)),
+      mt('b', 'mention', ago(1)),
+      mt('c', 'pushed_since', ago(2)),
+      mt('d', 'own_ci_red', ago(4)),
+      mt('e', 'review_request', ago(MY_TURN_OLDER_DAYS + 1)),
+    ];
+    const s = myTurnSections(cards, NOW);
+    expect(s.map((x) => [x.label, x.cardIds, x.collapsible])).toEqual([
+      ['Waiting on you', ['a', 'b'], false],
+      ['Re-review', ['c'], false],
+      ['Your PRs', ['d'], false],
+      ['Older', ['e'], true],
+    ]);
+    expect(myTurnSections([mt('x', 'own_ready', ago(1))], NOW).map((x) => x.label)).toEqual(['Your PRs']);
+  });
+
+  it('points an empty My turn at Waiting on review only when it holds something — its own badge figure', () => {
+    const tab = (key: string, total: number) => ({ key, total, kindTotals: {}, cardIds: [] }) as unknown as PendingTabWire;
+    expect(waitingForReviewerCount([tab('my_turn', 0), tab('review', 7)], null)).toBe(7);
+    expect(waitingForReviewerCount([tab('my_turn', 0), tab('review', 0)], null)).toBeNull();
+    expect(waitingForReviewerCount([tab('my_turn', 0)], null)).toBeNull();
+  });
+});

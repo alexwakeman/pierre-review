@@ -269,6 +269,12 @@ beforeAll(async () => {
   await q.assignReposToWorkspace(capWs.id, 1, [capRepo]);
   scope = await q.resolveWorkspaceScope(1, null);
   capScope = await q.resolveWorkspaceScope(1, capWs.id);
+  // ⚠ MY TURN TAKES THE VIEWER'S OWN CONFLICTING PR (`own_conflicts`, always on), so its home card
+  // is built only where My Turn does not hold it. Muting both workspaces for Pending removes My
+  // Turn's rows and leaves every other tab as it is — exactly the cards this file pins.
+  const mute = await import('./pending-mute.js');
+  await mute.setWorkspacePendingMute(1, scope.workspaceId, { muted: true });
+  await mute.setWorkspacePendingMute(1, capWs.id, { muted: true });
 });
 
 afterAll(async () => {

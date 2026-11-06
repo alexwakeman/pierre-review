@@ -86,7 +86,7 @@ export const FINDINGS = {
 
 /** The Pending board's tabs, as the app names them (Activity/pendingTabs.ts TAB_LABEL). */
 export type PendingTabId = 'my_turn' | 'claude' | 'fixing' | 'land' | 'waiting';
-export type PendingCardId = 'settings' | 'reply' | 'refunds' | 'flaky' | 'land' | 'waiting';
+export type PendingCardId = 'settings' | 'reply' | 'flaky' | 'land' | 'waiting';
 
 export type PendingCard = {
   pr: Pr;
@@ -126,13 +126,6 @@ export const PENDING = {
       why: 'Priya replied to your thread',
       detail: ['“Kept the old table name as a view until the nightly job is retired.”'],
     },
-    refunds: {
-      pr: PRS.refunds,
-      chip: 'New AI review',
-      tone: 'amber',
-      why: 'Your Limn finished 4 min ago · criteria 3/4',
-      high: '2 major',
-    },
     flaky: {
       pr: PRS.webhooks,
       chip: 'CI failing',
@@ -154,7 +147,8 @@ export const PENDING = {
   } as Record<PendingCardId, PendingCard>,
   /** Which cards sit in which tab. A tab's count is its length. */
   byTab: {
-    my_turn: ['settings', 'reply', 'refunds'],
+    // My turn is "a person is waiting on you": both sit in its first group, Waiting on you.
+    my_turn: ['settings', 'reply'],
     claude: [],
     fixing: ['flaky'],
     land: ['land'],

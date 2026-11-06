@@ -440,15 +440,14 @@ describe('passesLens (the one predicate the tabs, the server cap and /api/daily-
     }
   });
 
-  it('an AI review card in My turn is one more card in the SAME pair — no second predicate', () => {
-    // My Turn's two AI review types ("New AI review", "Merged after approval") are kind `my_turn`,
-    // and the server counts them in `myTurnPersonal` / `myTurnOther` by `relevance` alone — so the
-    // board's two halves must claim them by the same predicate, or the displayed figure and the
-    // brief's figure stop being one population and every cap disclosure goes silent.
+  it('every My turn type is one more card in the SAME pair — no second predicate', () => {
+    // The server counts every my_turn card in `myTurnPersonal` / `myTurnOther` by `relevance`
+    // alone — so the board's two halves must claim them by the same predicate, or the displayed
+    // figure and the brief's figure stop being one population and every cap disclosure goes silent.
     const board = [
       { kind: 'my_turn', reason: 'review_request', prId: 4, relevance: 'direct', personal: true },
-      { kind: 'my_turn', reason: 'claude_review', prId: 6, relevance: 'direct', personal: true },
-      { kind: 'my_turn', reason: 'ai_approved_merged', prId: 5, relevance: 'none', personal: false, muted: true },
+      { kind: 'my_turn', reason: 'own_ci_red', prId: 6, relevance: 'direct', personal: true },
+      { kind: 'my_turn', reason: 'watched_repo_pr', prId: 5, relevance: 'none', personal: false },
     ] as unknown as InsightCard[];
     const mine = board.filter((c) => passesLens(c, 'mine')).length;
     const others = board.filter((c) => passesLens(c, 'others')).length;

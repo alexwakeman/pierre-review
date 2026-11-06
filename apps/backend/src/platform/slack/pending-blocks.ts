@@ -74,10 +74,7 @@ export const MY_TURN_REASON_TEXT: Record<MyTurnCardReason, string> = {
   own_conflicts: 'Merge conflicts',
   pr_approved: 'Approved',
   own_ready: 'Ready to land',
-  your_pr: 'Your PR',
   own_thread: 'Unanswered thread',
-  claude_review: 'New AI review',
-  ai_approved_merged: 'Merged after your Limn approved',
   watched_repo_pr: 'New PR',
 };
 
@@ -101,10 +98,6 @@ export function pendingCardText(card: InsightCard): string {
     detail != null && detail.trim() !== '' ? `${label}: ${detail.trim()}` : label;
   switch (card.kind) {
     case 'my_turn':
-      // An auto-started Claude review says so, in the SPA chip's words.
-      if (card.reason === 'claude_review' && card.trigger === 'auto') {
-        return withDetail('Auto review', card.detail);
-      }
       return withDetail(MY_TURN_REASON_TEXT[card.reason], card.detail);
     case 'ci_failing':
       return `${card.arm === 'trunk' ? 'Default branch is red' : 'CI failing'}${checks(card.failingChecks, card.failingCheckTotal)}`;

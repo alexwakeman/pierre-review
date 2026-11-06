@@ -570,18 +570,19 @@ workspace that never overrode it — the `accounts.blast_radius_config` preceden
 because two teams in two zones in one account work different hours. Written only by
 `PUT /api/workspaces/:id/flow-settings`, which replaces the whole set.
 
-## `accounts.my_turn_settings` (CORE — Settings → My Turn)
+## `accounts.my_turn_settings` (CORE — Settings → Pending → My Turn)
 
-JSON (`text` json, migration `0068`) holding OVERRIDES ONLY:
-which My Turn card types are shown (`show`), the type order (`order`, stored as every type once
-changed; a retired `trunkScope` or `trunk_red` entry in an old row is ignored on read) and the Do next weights (`weights`, integer
-percents in steps of 10 summing to 100). NULL until the reader changes something, and never a
-stored default: `compactMyTurnSettings` drops anything equal to the product default, on the SPA's
-side and again on the server's. Every reader resolves through `resolveMyTurnSettings`
-(`packages/shared/src/my-turn-settings.ts`), which degrades a malformed part to its default alone.
-Per ACCOUNT, not per workspace: one account is one reader. Written only by
+JSON (`text` json, migration `0068`). Since 2026-11-06 it holds ONE switch, "Also show new PRs nobody
+asked you about": `{"show": {"watched_repo_pr": true}}` when on, NULL when off. Every reader resolves
+through `resolveMyTurnSettings` (`packages/shared/src/my-turn-settings.ts`), which reads ONLY
+`show.watched_repo_pr === true`: a row written earlier — with type switches, an `order` and `weights`
+— is read for that one key and its other keys are IGNORED (not migrated; the first save rewrites the
+row). Per ACCOUNT, not per workspace: one account is one reader. Written only by
 `PUT /api/me/my-turn-settings`; exported with the account; erased with the `accounts` row. Contract:
-[BACKEND.md](BACKEND.md) § My Turn — Settings: gates and promotions.
+[BACKEND.md](BACKEND.md) § My Turn — The fixed shape and the one switch.
+
+`accounts.approved_merged_since` (migration `0169`) is DORMANT since the same day: it gated the
+removed "Merged after your Limn approved" My Turn type. Nothing reads or writes it; never dropped.
 
 ## `repos.first_onboarding` + `accounts.review_suggestion_dismissed_at` (CORE — Pending's first landing)
 
@@ -833,8 +834,8 @@ replies point to, its `auto_post` the record of that outcome's ONE review. NULL 
 pass is NOT a review: every "latest review" / "run at this head" reader filters `kind IS NULL`.
 
 `claude_reviews.seen_at` (migration `0168`): when the reader first had the finished run on screen in
-the PR's AI Review tab (every half of a Claude + Codex pair is stamped). NULL = not seen: the newest
-such run on an open PR is My Turn's "New AI review" card (`getUnseenOwnAiReviews`). One writer,
+the PR's AI Review tab (every half of a Claude + Codex pair is stamped). NULL = not seen; it rides
+`ClaudeReview.seenAt`. (It once drove My Turn's "New AI review" card, removed 2026-11-06.) One writer,
 `db/claude-review-seen.ts` `markClaudeReviewSeen` (`POST /api/prs/:id/claude-review/seen`), which
 stamps only a NULL row. The migration stamped every run that had already succeeded.
 

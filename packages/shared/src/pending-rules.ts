@@ -94,12 +94,6 @@ export const MY_TURN_REPLY_MAX_CHARS = 1500;
 export const CARD_EXCERPT_MAX_CHARS = 200;
 
 /**
- * How many people a "new activity on your PR" card names (`MyTurnCard.newActorIds`), newest
- * activity first. `newActorTotal` counts all of them, so "and N others" has its own denominator.
- */
-export const YOUR_PR_NEW_ACTORS_SHOWN = 3;
-
-/**
  * THE ONE SENTENCE a Pending card's detail says while GitHub's merge queue holds its PR — on a
  * `merge` / `update_branch` card and your own ready PR in My turn (`mergeCardDetail`), on a
  * Dependencies card (`dependencyStateDetail`), and as the Do next row's `reason`, which the same
@@ -133,10 +127,8 @@ export const PENDING_SEVERITY = {
 
 /**
  * THE COLOUR OF EACH MY TURN TYPE. Somebody waiting on you, or a failing build or a conflict on
- * your own PR, is red; new code to re-read, a red default branch, your own PR's good news or
- * unanswered threads, or findings you have not posted, is amber; a PR nobody asked you about is
- * blue. A red default branch turns red when you merged the PR that landed its head (the card
- * builder's rule, as on the ci_failing trunk card).
+ * your own PR, is red; new code to re-read, or your own PR's good news or unanswered threads, is
+ * amber; a PR nobody asked you about is blue.
  */
 export const MY_TURN_SEVERITY: Record<MyTurnCardReason, InsightSeverity> = {
   review_request: 'high',
@@ -149,12 +141,81 @@ export const MY_TURN_SEVERITY: Record<MyTurnCardReason, InsightSeverity> = {
   own_conflicts: 'high',
   pr_approved: 'warn',
   own_ready: 'warn',
-  your_pr: 'warn',
   own_thread: 'warn',
-  claude_review: 'warn',
-  ai_approved_merged: 'info',
   watched_repo_pr: 'info',
 };
+
+// ── MY TURN'S FIXED SHAPE (docs/BACKEND.md § My Turn) ────────────────────────────────────────
+//
+// My Turn is "a person is waiting on you", in THREE FIXED GROUPS, in this order, then the opt-in
+// survey, then everything older than `MY_TURN_OLDER_DAYS` in one collapsed "Older" group. Nothing
+// here is a setting: the reader's one switch is the survey (`MyTurnSettings.showNewPrs`).
+
+/** Every My Turn card type, in the ONE fixed order: the groups in order, and within a group the
+ *  order the one-card-per-PR rule (`onePerPr`) prefers when a PR holds two jobs. */
+export const MY_TURN_ORDER: readonly MyTurnCardReason[] = [
+  // Waiting on you
+  'review_request',
+  'mention',
+  'thread',
+  'thread_reply',
+  'comment_reply',
+  // Re-review
+  'pushed_since',
+  // Your PRs
+  'own_ci_red',
+  'own_conflicts',
+  'pr_approved',
+  'own_ready',
+  'own_thread',
+  // The opt-in survey
+  'watched_repo_pr',
+];
+
+/** A My Turn group, in display order (`MY_TURN_GROUPS`). */
+export type MyTurnGroup = 'waiting' | 'rereview' | 'yours' | 'new_prs' | 'older';
+
+export const MY_TURN_GROUPS: readonly MyTurnGroup[] = ['waiting', 'rereview', 'yours', 'new_prs', 'older'];
+
+/** The group each card type belongs to while it is younger than `MY_TURN_OLDER_DAYS`. */
+export const MY_TURN_GROUP_OF: Record<MyTurnCardReason, Exclude<MyTurnGroup, 'older'>> = {
+  review_request: 'waiting',
+  mention: 'waiting',
+  thread: 'waiting',
+  thread_reply: 'waiting',
+  comment_reply: 'waiting',
+  pushed_since: 'rereview',
+  own_ci_red: 'yours',
+  own_conflicts: 'yours',
+  pr_approved: 'yours',
+  own_ready: 'yours',
+  own_thread: 'yours',
+  watched_repo_pr: 'new_prs',
+};
+
+/** The heading each group shows on the My turn tab. */
+export const MY_TURN_GROUP_LABEL: Record<MyTurnGroup, string> = {
+  waiting: 'Waiting on you',
+  rereview: 'Re-review',
+  yours: 'Your PRs',
+  new_prs: 'New PRs',
+  older: 'Older',
+};
+
+/** A card whose clock (`MyTurnCard.since`) is more than this many days old is listed in the
+ *  collapsed "Older" group at the foot of My turn. It is still counted everywhere. */
+export const MY_TURN_OLDER_DAYS = 14;
+
+/** THE ONE GROUPING RULE for a My Turn card — the server's listing order and the SPA's headings
+ *  both read it. A card with no readable clock stays in its type's group. */
+export function myTurnGroupOf(
+  card: { reason: MyTurnCardReason; since?: string | null },
+  nowMs: number,
+): MyTurnGroup {
+  const ms = card.since == null ? Number.NaN : Date.parse(card.since);
+  if (Number.isFinite(ms) && nowMs - ms > MY_TURN_OLDER_DAYS * 86_400_000) return 'older';
+  return MY_TURN_GROUP_OF[card.reason];
+}
 
 /**
  * THE "EVERYTHING ELSE" ORDER WITHIN ONE COLOUR. The board sorts by severity first (red, amber,
@@ -196,9 +257,7 @@ export const PENDING_KIND_RANK: Record<InsightKind, number> = {
 export const DO_NEXT_RULES = {
   /** How many rows the head seats. */
   cap: 12,
-  /** The product default (= `DO_NEXT_PRESETS.balanced`). The ranker reads the ACCOUNT's resolved
-   *  weights (`resolveMyTurnSettings`); nothing may read this field except the resolver and its
-   *  test. */
+  /** The weights every scored Pending tab ranks by. FIXED — there is no setting for them. */
   weights: { proximity: 0.5, stall: 0.3, relevance: 0.2 },
   /**
    * Proximity by the row's next step. `merge` splits on approval: a clean PR nobody has approved is
@@ -252,36 +311,12 @@ export const DO_NEXT_RULES = {
   >,
 } as const;
 
-/** Integer percentages, multiples of 10, summing to exactly 100 — what Settings → My Turn stores.
- *  Every proximity / stall / relevance value is a multiple of 0.05, so value × weight is exact at
- *  one decimal only when the weight is a multiple of 0.1; that keeps every printed working exact. */
-export interface DoNextWeightsPct {
-  proximity: number;
-  stall: number;
-  relevance: number;
-}
-/** The same three weights as fractions (0..1, summing to 1) — what the ranker multiplies by. */
+/** The three Do next weights as fractions (0..1, summing to 1) — what the ranker multiplies by. */
 export interface DoNextWeights {
   proximity: number;
   stall: number;
   relevance: number;
 }
-export type DoNextPreset = 'balanced' | 'mine_first' | 'oldest_first' | 'quick_wins';
-
-/** The four named weightings Settings offers. A preset is DERIVED from the stored weights (an
- *  exact match on all three), never stored — Balanced stores nothing at all. */
-export const DO_NEXT_PRESETS: Record<DoNextPreset, DoNextWeightsPct> = {
-  balanced: { proximity: 50, stall: 30, relevance: 20 },
-  mine_first: { proximity: 30, stall: 10, relevance: 60 },
-  oldest_first: { proximity: 20, stall: 70, relevance: 10 },
-  quick_wins: { proximity: 80, stall: 10, relevance: 10 },
-};
-export const DO_NEXT_PRESET_ORDER: readonly DoNextPreset[] = [
-  'balanced',
-  'mine_first',
-  'oldest_first',
-  'quick_wins',
-];
 
 /** Which proximity row a scored card started from — one key of `DO_NEXT_RULES.proximity`. */
 export type DoNextProximityBase = keyof typeof DO_NEXT_RULES.proximity;
@@ -333,15 +368,12 @@ export type PendingTabKey =
 /** "AI reviews" lists at most this many rows: the newest AI review on each PR, newest first. */
 export const AI_REVIEWS_LIST_CAP = 100;
 
-/** A PR merged after the reader's Limn approved it (`ai_approved_merged`) is a My Turn card only for
- *  this many days after the merge. */
-export const APPROVED_MERGED_DAYS = 7;
-
 /** One tab's definition — see `PENDING_TABS`. */
 export interface PendingTabDef {
   key: PendingTabKey;
   kinds: readonly InsightKind[];
   groupByKind?: true;
+  /** My turn: grouped by `myTurnGroupOf`, longest waiting first within a group. */
   groupByReason?: true;
   /** AN UNSCORED TAB: its cards get no Do next score and are listed LONGEST WAIT FIRST
    *  (`WaitingOnOthersCard.waitHours`), with no "Do next" head. Only "Waiting on others". */
@@ -359,12 +391,11 @@ export interface PendingTabDef {
  * `reviewer_load` sits in 'review' but is not ranked with the PR cards — it is the "who has reviews
  * waiting" strip at the top of that tab, and it is not in the tab's count.
  *
- * Every tab is one scored list, except the two STRICT-GROUP tabs, whose groups come first and are
- * each scored within, whatever the scores:
- *   • `groupByReason` — My turn, grouped by card type (`MyTurnCard.reason`) in the READER'S order
- *     (Settings → My Turn; `PendingRankRules.myTurnOrder` on the response).
+ * Every tab is one scored list, except the two STRICT-GROUP tabs, whose groups come first:
+ *   • `groupByReason` — My turn, in its fixed groups (`myTurnGroupOf`: Waiting on you, Re-review,
+ *     Your PRs, New PRs, Older), LONGEST WAITING FIRST within a group — not by score.
  *   • `groupByKind` — Dependencies, grouped by kind in the order listed: every security item before
- *     every bump.
+ *     every bump, scored within.
  * Both are read by the ONE group comparator (`tabGroupRank`, db/pending-tabs.ts), never a second
  * sort chosen by tab key.
  */

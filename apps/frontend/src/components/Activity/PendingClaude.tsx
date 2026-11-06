@@ -44,8 +44,8 @@ import { ciCardPill } from '../../lib/ciReview.js';
 /** One Pending card's Claude line, or nothing when Claude has not looked (an offer is a button in
  *  the action row, not a line). `omitVerdict` on a card whose heading already names the verdict;
  *  `ci` on a red-build card, where the diagnosis is what matters. A finished run always says how
- *  long ago it ran; `reviewedAt` is the card's own copy of that time (a `claude_review` My Turn
- *  card's `since`), used only when the batched state carries none. */
+ *  long ago it ran; `reviewedAt` is a caller's own copy of that time, used only when the batched
+ *  state carries none. */
 export function ClaudeReviewLine({
   prId,
   state,

@@ -32,8 +32,8 @@
 //   7. A DEPENDENCIES CARD LANDS LIKE A FORWARD CARD. One card per dependency PR carries its merge
 //      actions, decided by the same `mergeVerdict`; a person's PR a security tool flagged carries
 //      none (its own cards do).
-//   8. A PROMOTED MY TURN CARD KEEPS ITS CONTROLS. Settings → My Turn can move your own work into
-//      My turn; the adapters rebuild the home card's shape so the same merge row, resolver entry
+//   8. A PROMOTED MY TURN CARD KEEPS ITS CONTROLS. My Turn holds your own work, moved out of its
+//      home tab; the adapters rebuild the home card's shape so the same merge row, resolver entry
 //      and trunk body render it — and the same gate decides what they offer.
 //
 //   ⚠ AND THE WHOLE POINT OF THE GATE BEING PURE: it is fed the card's OWN synced fields and
@@ -718,24 +718,12 @@ function myTurnCard(
 
 describe('the type chip names what you are being asked to do', () => {
   it('says "Pushed since" on its own type — no longer a second reading of "New PR"', () => {
-    // Since Settings → My Turn, "somebody pushed after you acted" is its own type with its own
-    // switch, so the chip is the map. The regression it replaced: a PR the reader had approved
+    // "Somebody pushed after you acted" is its own type, so the chip is the map. The regression it replaced: a PR the reader had approved
     // wore "New PR" beside "You approved · @robin-dunn pushed 2 commits since".
     expect(myTurnReasonLabel(myTurnCard({ reason: 'pushed_since' }))).toBe('Pushed since');
     expect(
       myTurnReasonLabel(myTurnCard({ reason: 'watched_repo_pr', ball: { kind: 'untouched' } })),
     ).toBe('New PR');
-  });
-
-  it('says "Auto review" on an AI review the workspace started, "New AI review" on a clicked one', () => {
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'auto' }))).toBe(
-      'Auto review',
-    );
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'manual' }))).toBe(
-      'New AI review',
-    );
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('New AI review');
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'ai_approved_merged' }))).toBe('Merged after approval');
   });
 
   it('says which kind of ready a promoted PR is — the words its home tab uses', () => {

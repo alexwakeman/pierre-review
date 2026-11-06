@@ -23,28 +23,22 @@
 // ── 2. ONE CARD PER PR ON THE BOARD (`onePerPr`) ─────────────────────────────────────────────
 //
 // A PR can hold several My Turn jobs at once (a review requested of you AND a reply in your thread
-// AND your own unanswered thread). The My turn tab shows ONE: the job highest in the READER'S type
-// order (Settings → My Turn — the tab's own grouping), and within one type the one that has waited
-// longest (the scorer's pick too: same PR, same type ⇒ same proximity and relevance, so the older
-// clock scores higher and wins `compareScored`'s age tie-break). Ties beyond that break on the
+// AND your own unanswered thread). The My turn tab shows ONE: the job highest in the FIXED type
+// order (`MY_TURN_ORDER` — Waiting on you types first, then Re-review, then Your PRs, then the
+// survey), and within one type the one that has waited longest. Ties beyond that break on the
 // item's own id, so two reads of unchanged data keep the same card.
-//
-// ⚠ A CLAUDE REVIEW IS EXEMPT: it never competes for the PR's one card and is never removed by
-// it. A finished run, and above all an auto RE-review on a PR that already holds another job (a
-// reply in your thread), is new work of its own; folding it under that job hid every re-review on
-// a busy PR. Each run is its own item (its own id and `finishedAt` clock), so a newer run shows
-// even after an older one's card was dismissed.
 //
 // ⚠ IT IS A BOARD RULE, NOT A NOTIFICATION RULE. `getWorkspaceInsights` asks for it; the
 // account-wide `GET /api/my-turn` does not, because the browser-notification watcher diffs item
 // ids — a deduplicated list would flip the winner whenever the top job cleared and announce the
 // runner-up as "new".
 import { and, eq, inArray } from 'drizzle-orm';
-import type {
-  MyTurnCardReason,
-  MyTurnDismissedItem,
-  MyTurnDismissTarget,
-  MyTurnResponse,
+import {
+  MY_TURN_ORDER,
+  type MyTurnCardReason,
+  type MyTurnDismissedItem,
+  type MyTurnDismissTarget,
+  type MyTurnResponse,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 
@@ -246,7 +240,7 @@ export class MyTurnDismissalFilter {
 
 // ── ONE CARD PER PR ──────────────────────────────────────────────────────────────────────────
 
-/** The fifteen sections of a `MyTurnResponse` — everything `onePerPr` reads and rewrites. */
+/** The twelve sections of a `MyTurnResponse` — everything `onePerPr` reads and rewrites. */
 export type MyTurnSections = Omit<MyTurnResponse, 'users' | 'order' | 'off' | 'configKey' | 'dismissed'>;
 
 interface Candidate {
@@ -270,7 +264,7 @@ const clockMsOf = (iso: string | null | undefined): number => {
  */
 export function onePerPr(
   mt: MyTurnSections,
-  order: readonly MyTurnCardReason[],
+  order: readonly MyTurnCardReason[] = MY_TURN_ORDER,
 ): MyTurnSections {
   const orderIdx = new Map(order.map((r, i) => [r, i] as const));
   const rank = (r: MyTurnCardReason): number => orderIdx.get(r) ?? Number.MAX_SAFE_INTEGER;
@@ -302,8 +296,6 @@ export function onePerPr(
     ownConflicts: pr<MyTurnSections['ownConflicts'][number]>('own_conflicts'),
     approvedPrs: pr<MyTurnSections['approvedPrs'][number]>('pr_approved'),
     ownReady: pr<MyTurnSections['ownReady'][number]>('own_ready'),
-    yourPrs: pr<MyTurnSections['yourPrs'][number]>('your_pr'),
-    approvedMerged: pr<MyTurnSections['approvedMerged'][number]>('ai_approved_merged'),
     watchedRepoPrs: pr<MyTurnSections['watchedRepoPrs'][number]>('watched_repo_pr'),
   };
   const thread = (reason: MyTurnCardReason) => ({
@@ -332,8 +324,6 @@ export function onePerPr(
   for (const i of mt.ownConflicts) offer(S.ownConflicts.of(i));
   for (const i of mt.approvedPrs) offer(S.approvedPrs.of(i));
   for (const i of mt.ownReady) offer(S.ownReady.of(i));
-  for (const i of mt.yourPrs) offer(S.yourPrs.of(i));
-  for (const i of mt.approvedMerged) offer(S.approvedMerged.of(i));
   for (const i of mt.watchedRepoPrs) offer(S.watchedRepoPrs.of(i));
   for (const i of mt.threadsAwaiting) offer(threadsAwaiting.of(i));
   for (const i of mt.threadReplies) offer(threadReplies.of(i));
@@ -348,13 +338,9 @@ export function onePerPr(
     ownConflicts: mt.ownConflicts.filter((i) => winnerIs(S.ownConflicts.of(i))),
     approvedPrs: mt.approvedPrs.filter((i) => winnerIs(S.approvedPrs.of(i))),
     ownReady: mt.ownReady.filter((i) => winnerIs(S.ownReady.of(i))),
-    yourPrs: mt.yourPrs.filter((i) => winnerIs(S.yourPrs.of(i))),
     watchedRepoPrs: mt.watchedRepoPrs.filter((i) => winnerIs(S.watchedRepoPrs.of(i))),
     threadsAwaiting: mt.threadsAwaiting.filter((i) => winnerIs(threadsAwaiting.of(i))),
     threadReplies: mt.threadReplies.filter((i) => winnerIs(threadReplies.of(i))),
     ownThreads: mt.ownThreads.filter((i) => winnerIs(ownThreads.of(i))),
-    // Exempt (header, rule 2): every Claude review keeps its own card.
-    claudeReviewsToAction: mt.claudeReviewsToAction,
-    approvedMerged: mt.approvedMerged.filter((i) => winnerIs(S.approvedMerged.of(i))),
   };
 }

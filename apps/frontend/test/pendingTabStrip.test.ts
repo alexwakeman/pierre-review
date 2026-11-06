@@ -44,7 +44,7 @@ describe('the Pending tab strip', () => {
 describe('My turn', () => {
   it('shows one plain sentence, on its own tab only', () => {
     expect(view).toMatch(
-      /tabKey === 'my_turn' && \(\s*<p[^>]*data-testid="pending-my-turn-purpose"[^>]*>\s*Pull requests where the next move is yours\.\s*<\/p>/,
+      /tabKey === 'my_turn' && \(\s*<p[^>]*data-testid="pending-my-turn-purpose"[^>]*>\s*Pull requests where a person is waiting on you\.\s*<\/p>/,
     );
   });
 });

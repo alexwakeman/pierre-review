@@ -461,7 +461,8 @@ describe('a dependency PR is listed only in Dependencies', () => {
 
   it('⚠ takes a red Snyk fix under the viewer’s own account off ci_failing — via the marker', async () => {
     const { insights } = await board();
-    expect(cardsFor(insights.cards, 'mine-red')).toContain(`cifail:pr:${pr('mine-red')}`);
+    // The viewer's own red PR (no marker) is My Turn's (`own_ci_red`, always on); the Snyk fix is not.
+    expect(cardsFor(insights.cards, 'mine-red')).toContain(`myturn:own_ci_red:${pr('mine-red')}`);
     expect(cardsFor(insights.cards, 'snyk-mine')).toEqual([`security:${pr('snyk-mine')}`]);
     const c = card<SecurityCard>(insights.cards, `security:${pr('snyk-mine')}`);
     expect(c.automation).toEqual({ role: 'dependency', kind: 'snyk', source: 'marker' });
@@ -608,7 +609,7 @@ describe('who opened it', () => {
     const { insights } = await board(soloScope);
     const { users } = insights as unknown as { users: { id: number; githubLogin: string }[] };
     expect(insights.cards.map((c) => [c.id, (c as { authorId: number | null }).authorId])).toEqual([
-      [`cifail:pr:${pr('solo-mine-red')}`, ids.viewer],
+      [`myturn:own_ci_red:${pr('solo-mine-red')}`, ids.viewer],
     ]);
     // The byline resolves through `users[]`; without the viewer there it reads as a bare id.
     expect(users.map((u) => [u.id, u.githubLogin])).toEqual([[ids.viewer, VIEWER_LOGIN]]);
@@ -721,8 +722,7 @@ describe('a ready PR in GitHub’s merge queue says so', () => {
       }
     };
     const reasons = async (cards: InsightCard[]): Promise<Map<string, string>> => {
-      const { weights } = await getMyTurnSettings(1);
-      const { candidates } = await wp.scoreCards(1, cards, Date.now(), weights);
+      const { candidates } = await wp.scoreCards(1, cards, Date.now());
       return new Map(candidates.map((c: any) => [c.item.id, c.item.reason]));
     };
     const mergeId = `wp:merge:${pr('human-unstable')}`;

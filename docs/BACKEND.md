@@ -321,9 +321,25 @@ event discharges it.** Derived on every read from `reviews`, `review_comments`, 
 `commits` and the mention scanner's `pr_mentions` (plus, for the promotions below, the PR's own
 merge and CI columns and `repos`' default-branch columns). Nothing about a CARD is stored: there is
 no "done" state and no tombstone. A card appears when the state says so and vanishes when the state
-says so. What IS stored is the reader's choice of which TYPES exist (§ Settings: gates and
-promotions) and — since migration `0069` — a per-SUBJECT dismissal whose only power is to
+says so. What IS stored is the reader's ONE switch, the survey (§ The fixed shape and the one
+switch), and — since migration `0069` — a per-SUBJECT dismissal whose only power is to
 hide what happened BEFORE it (§ Dismissals and one card per PR).
+
+**My Turn = a person is waiting on you** (redesigned 2026-11-06). Three FIXED groups, in this order,
+then the opt-in survey, then "Older":
+
+| Group | Types |
+|---|---|
+| **Waiting on you** | `review_request`, `mention`, `thread`, `thread_reply`, `comment_reply` |
+| **Re-review** | `pushed_since` |
+| **Your PRs** — always on | `pr_approved`, `own_ready`, `own_ci_red`, `own_conflicts`, `own_thread` |
+| **New PRs** — only with the survey on | `watched_repo_pr` |
+| **Older** — collapsed | any card whose clock (`since`) is more than `MY_TURN_OLDER_DAYS` (14) old; still counted |
+
+The order and grouping are code (`MY_TURN_ORDER`, `MY_TURN_GROUP_OF`, `myTurnGroupOf` in
+`packages/shared/src/pending-rules.ts`). **A draft never summons** and **a muted repository leaves My
+Turn entirely**: both are dropped from the seeds (`getMyTurn`'s open-PR list and `getThreadTurns`'
+query), so the list, every count, the brief and the notifications move together.
 
 ### The first-onboarding lookback (`db/my-turn-floor.ts`, migration `0154`)
 
@@ -354,35 +370,15 @@ are bots), so like every bot action it never counts as the reader acting. One ex
 summons them, and the reader's own Limn finding on their own PR is never an unanswered thread.
 Participation ("did I take part") reads the TRUE poster (`limn_posted_by_user_id`).
 
-### My Turn's two AI review types (SEEN-based, not the ball rule)
+### Removed types (2026-11-06)
 
-Both are ordinary My turn cards — listed in the My turn tab, counted in every My turn total
-(`myTurnTotal`, `myTurnPersonal`, the brief, the badges, `GET /api/my-turn`, the notification
-watcher), each with its own switch in Settings → My Turn (both ON by default, offered only where AI
-review runs), and both dismissable like every other type.
-
-- **`claude_review` — "New AI review by your Limn"** (`getUnseenOwnAiReviews`, S4 below): the NEWEST
-  succeeded full run (`kind IS NULL`, not a router skip) of the reader's own Limn on each OPEN PR,
-  while `claude_reviews.seen_at` is NULL on every half of the run (a Claude + Codex pair is one
-  review). **SEEN** = the PR's AI Review tab had that finished run on screen: the tab sends
-  `POST /api/prs/:id/claude-review/seen {reviewId}` ONCE per run, only while the run's `seenAt` is
-  null (`hooks/useClaudeReviewSeen.ts`); the one writer, `db/claude-review-seen.ts`
-  `markClaudeReviewSeen`, stamps every half where `seen_at` is still NULL (idempotent, account- and
-  PR-scoped; migration 0168). Seen or a dismissal retires the card; a newer run is a new row with its
-  own NULL and comes back on its own. ⚠ **Acting on the PR does NOT retire it, and neither does
-  posting:** auto-posting posts most runs under the reader's own account, so the old "un-posted
-  findings + no action since it finished" rule removed the card before the reader ever read the run.
-  An auto run is owned like a manual one (`trigger` is the "Auto review" label only). Migration 0168
-  stamped every run that had already finished, so an upgrade does not flood My turn.
-- **`ai_approved_merged` — "Merged after your Limn approved"** (`getApprovedThenMerged`, S7 below): a
-  MERGED PR in scope, merged within `APPROVED_MERGED_DAYS` (7), at or after the repo's onboarding
-  floor AND at or after `accounts.approved_merged_since` (⚠ GOING FORWARD ONLY: the upgrade's moment,
-  NULL = the account's `created_at` — never a retrospective flood), on which an own run's `auto_post` LANDED a review SENT as APPROVE (`githubReviewId` set,
-  `verdict.submitted = 'APPROVE'`, status posted / partial) BEFORE the merge, and that approval still
-  STANDS — the synced `reviews` row with that `database_id` is `approved` (a Limn withdrawal or a
-  dismissal makes it `dismissed`); with no synced row yet, no withdrawal is recorded on the run. It
-  stays until the reader OPENS the PR after the merge (`pr_views.last_viewed_at >= merged_at`, the
-  PR pane's own mark-viewed) or dismisses it. Clock: the merge. DB only, no GitHub call.
+`your_pr` ("new activity on your PR"), `claude_review` ("New AI review by your Limn") and
+`ai_approved_merged` ("Merged after your Limn approved") are gone from the fold, the wire, the board
+and the CLI: none is a person waiting on you. A new AI review is the AI reviews tab's own badge
+(below). `getUnseenOwnAiReviews` and `getApprovedThenMerged` were deleted; `claude_reviews.seen_at`
+is still written by the AI Review tab (`markClaudeReviewSeen`) and served as `ClaudeReview.seenAt`,
+and `accounts.approved_merged_since` is DORMANT (kept, never dropped). A stored dismissal or setting
+that names a removed type is ignored on read.
 
 ### The AI reviews list — the newest AI review per PR (`db/ai-reviews-seen.ts`)
 
@@ -424,9 +420,7 @@ cannot act on now, or ever. It is built so that it cannot repeat the retired Don
 - `getMyTurn` passes EVERY candidate item through `MyTurnDismissalFilter.keep` BEFORE anything else
   looks at it — in particular before the fixed-precedence claim, or a dismissed review request would
   claim the PR and swallow the newer mention that should bring it back. An item is hidden only while
-  its OWN clock (the section's `since`; a thread's `lastReplyAt`; a Claude run's `finishedAt`; a
-  merged-after-approval PR's merge) is at or before
-  `dismissed_at`. Anything later shows, ALONE: a new reply comes back as a reply, not as the review
+  its OWN clock (the section's `since`; a thread's `lastReplyAt`) is at or before `dismissed_at`. Anything later shows, ALONE: a new reply comes back as a reply, not as the review
   request that was set down. An item with no clock cannot prove it is newer and stays hidden.
 - ⚠ **A subject with NO item at all DISCHARGES its row** (`dischargeable`, then
   `dischargeMyTurnDismissals`) — you acted, it closed, the request was withdrawn. So a later summons
@@ -444,18 +438,14 @@ cannot act on now, or ever. It is built so that it cannot repeat the retired Don
 **Every My turn card has Dismiss** — the row's ✕ (on hover, the selected row, or always on touch),
 the panel's button and `e` — all the same `PUT /api/my-turn/dismissals/pr/:id`.
 
-**A Claude review is exempt from one card per PR.** Every unseen run keeps its own card, even when the PR already holds another job. Folding it under that job hid every auto re-review on a busy PR. Each run has its own id and `finishedAt` clock, so a newer run shows even after an older card was dismissed.
-
 **One card per PR, on the board only** (`onePerPr`, `getMyTurn(…, { onePerPr: true })`, passed only
 by `getWorkspaceInsights`). With it the fixed claim is skipped, every section is built in full, and
-each PR keeps ONE item: the lowest index in the reader's type order, then the OLDEST clock (the
-scorer's pick too — same PR and type means the same proximity and relevance, so the longer wait
-scores higher and wins `compareScored`'s age tie-break), then the item's own id. Applied before the
-promoted sets, so a promotion that loses to another job on its PR stays on its home tab. ⚠ **`GET /api/my-turn` does NOT pass it** and keeps the fixed
-precedence: the notification watcher diffs item ids, and a deduplicated list would flip the winner
-whenever a PR's top job cleared, announcing the runner-up as "new". A consequence the reader chose:
-which card represents a PR now depends on the type order, so reordering can change a card's reason
-(pinned in `my-turn-settings.test.ts`).
+each PR keeps ONE item: the lowest index in the FIXED type order (`MY_TURN_ORDER` — Waiting on you
+types, then Re-review, then Your PRs, then the survey), then the OLDEST clock, then the item's own
+id. Applied before the promoted sets, so an own-work item that loses to another job on its PR (your
+unanswered thread on your own red PR) stays on its home tab. ⚠ **`GET /api/my-turn` does NOT pass
+it** and keeps the fixed precedence: the notification watcher diffs item ids, and a deduplicated
+list would flip the winner whenever a PR's top job cleared, announcing the runner-up as "new".
 
 ### What the predecessor did, and why it was wrong
 
@@ -481,28 +471,26 @@ author id that is known, is not you, and is not in the global automation set (be
 | # | Rule | Type · section | Clock (`since`) |
 |---|---|---|---|
 | S1 | A review is outstanding from you (`review_requests` row with `user_id = me`) | `review_request` · `awaitingReview` | when it was requested |
-| S2 | A PR in a repo you added that you have **never touched** (`mineLast == null`). **Off by default** — a survey of the workspace, not a summons | `watched_repo_pr` · `watchedRepoPrs` | `openedAt` |
+| S2 | A PR in a repo you added, OPENED at or after its floor, that you have **never touched** (`mineLast == null`). **Only with the survey on** ("Also show new PRs nobody asked you about") — a survey of the workspace, not a summons | `watched_repo_pr` · `watchedRepoPrs` | `openedAt` |
 | S3a | The newest **human** comment in a thread you opened is not yours, and the thread is unresolved. A bot reply never counts | `thread` · `threadsAwaiting` (`getThreadTurns`) | that comment |
 | S3b | You had the last human word in a thread you opened, and it has gone **`likely_addressed`** | `thread` (`awaitingKind: 'likely_addressed'`) | your comment |
-| S3c | A human **commit** after your last action — new code makes your review stale | `pushed_since` · `pushedSince` (`NewPrBall.kind === 'commits_after'`) | that commit |
+| S3c | A human **commit** after your last action AND at or after the repo's floor — new code makes your review stale. The PR's own age does not matter: a PR opened before the repo was added qualifies once a person pushes to it after the floor | `pushed_since` · `pushedSince` (`NewPrBall.kind === 'commits_after'`) | the newest such commit |
 | S3d | In a thread SOMEBODY ELSE opened that you commented in, the newest human comment is someone else's, after your newest comment there, unresolved | `thread_reply` · `threadReplies` (`getThreadTurns`) | that comment |
-| S4 | The newest finished AI review of YOUR Limn on an open PR, not yet SEEN in its AI Review tab (§ My Turn's two AI review types — seen-based, not the ball rule). An AUTO run counts exactly like a manual one | `claude_review` · `claudeReviewsToAction` | when the run finished |
-| S5 | Your newest action on the PR is a **PR-level comment**, and a human commented at PR level after it | `comment_reply` · `commentReplies` | the FIRST such comment (when the ball came back) |
+| S5 | Your newest action on the PR is a **PR-level comment** or a **review with a non-blank body**, and a human commented at PR level after it | `comment_reply` · `commentReplies` | the FIRST such comment (when the ball came back) |
 | S6 | A human **@-mentioned** you on an open PR after your last action on it | `mention` · `mentions` | `pr_mentions.mentioned_at` |
-| S7 | A PR **merged after your Limn's standing automatic approval**, not opened by you since the merge (§ My Turn's two AI review types) | `ai_approved_merged` · `approvedMerged` | the merge |
 
 A red default branch is NOT a My Turn type (removed 2026-11-04: it showed under both lenses and is
 not something the reader owes). It is the `ci_failing` trunk arm in Needs fixing, the trunk strip and
 the brief's red-trunk line — informational, as CLAUDE.md § Merge says.
 
 - **S3c, S5 and S6 are `direct`**, like every rule but S2: each needs you to have been involved.
-  S3c used to share S2's section and relevance; it is its own type now, so the two have separate
-  switches and S2 alone keeps the maintainer test (`'maintained'` / `'none'`).
+  S2 alone keeps the maintainer test (`'maintained'` / `'none'`).
 - **The onboarding floor reaches the new sources.** S3d, S5 and S6 need the summoning event at or
   after the repo's floor (its `createdAt`, a week earlier for a first-onboarding repo — § The
   first-onboarding lookback); without it, adding a repo and its 90-day backfill would surface two
-  months of old replies and mentions at once. (S2 and S3c already read it through
-  `getAddedRepoActionablePrIds`.)
+  months of old replies and mentions at once. S2 and S3c read it in `getAddedRepoActionablePrIds`,
+  per half: S2 by the PR's open time, S3c by the COMMITS it counts (narrowed once, so the count,
+  the listed commits, the clock and `GET /api/my-turn/pushed-since/:prId` agree).
 - **S6 reads a clock the scanner stamps** (`sync/mention-scan.ts`, [SYNC.md](SYNC.md) § "@mention
   derivation"): the newest mention of you by a human on each PR. A row with a NULL `mentioned_at`
   (the scanner has not restamped it since migration `0068`) shows no card — under-notifying is the
@@ -514,13 +502,12 @@ the brief's red-trunk line — informational, as CLAUDE.md § Merge says.
   it brings the thread back. ⚠ REPLY cards only: a `likely_addressed` card on your own thread is
   a commit after YOUR comment, so an approval later than that comment may still precede the fix —
   it is never dropped by an approval. Pinned by `db/my-turn-approval.test.ts`.
-- **S3d, S5 and S6 include drafts and automation-authored PRs**: conversations happen on drafts,
-  and a colleague can name you on a Dependabot PR.
+- **A draft never summons** — no type reads a draft PR (they include automation-authored PRs: a
+  colleague can name you on a Dependabot PR).
 - **One PR, one summons.** The PR-grained types claim PRs in a FIXED precedence —
-  `review_request > pr_approved > your_pr > mention > comment_reply > pushed_since > watched_repo_pr`
-  — and each drops what an earlier SHOWN type claimed. ⚠ Fixed, never the reader's display order:
-  which card exists must not depend on a display preference. Thread-grained, own-work, Claude and
-  red-trunk cards coexist with everything (each is a different job).
+  `review_request > pr_approved > mention > comment_reply > pushed_since > watched_repo_pr`
+  — and each drops what an earlier type claimed. Thread-grained and own-work cards coexist with
+  everything (each is a different job); the board then keeps one card per PR (`onePerPr`).
 
 ### What does NOT return the ball
 
@@ -528,9 +515,10 @@ the brief's red-trunk line — informational, as CLAUDE.md § Merge says.
 you back: a PR-level comment after your review, a comment in a thread you never wrote in. This is
 the difference between the rule as specified and a naive "anything after me" rule, and it is what
 stops a teammate's side-comment re-summoning you. ⚠ **S5 is narrow on purpose**: it fires only when
-your LAST action on the PR was itself a PR-level comment — the narrowest reading in which the next
-person's comment is plausibly a reply to yours. It can still fire on a courtesy "thanks, merged"
-after your "LGTM"; the type's switch is the escape, not a wider or cleverer rule.
+your LAST action on the PR was itself something said on the conversation — a PR-level comment, or a
+review with a non-blank body (`lastActionClocks.mineLastHasBody`). A bare approval or a bodiless
+`commented` review is not. It can still fire on a courtesy "thanks, merged" after your "LGTM";
+Dismiss is the escape, not a wider or cleverer rule.
 
 ⚠ **NO BOT ACTION EVER RETURNS THE BALL — INCLUDING A PUSH.** This **deliberately diverges** from
 Chronology (`db/pr-intervals.ts`), which counts *every* commit regardless of author because a push is
@@ -587,22 +575,8 @@ the CLI move together. (`getAddedRepoActionablePrIds` once had a second caller,
 threads, every one on a PR that had already merged or closed — each previously hand-dismissed.
 Deleting the button without this makes the board strictly worse.
 
-⚠ *(History — superseded 2026-11-04 by the SEEN rule, § My Turn's two AI review types.)* The card
-once retired on posted FINDINGS: the per-finding post route stamps `claude_review_findings.posted_at`
-and never the parent, so a run-only test made the card immortal.
-
-⚠ *(History — superseded 2026-11-04: auto-posting under the reader's account made the ball rule
-retire the card before the reader read the run; it is SEEN-based now.)* **The Claude card obeyed the
-ball rule from 2026-09-30.** It retired only on
-Claude-Review-internal stamps, so approving the PR (in the pane or on github.com) left it up — real
-cases: PR #335 approved a minute after run 110 finished, PR #19 whose findings were posted as five
-review comments while one ticked finding stayed unposted. `getMyTurn` now filters the SEED rows
-with `lastActionClocks`: a review of any state, review comment, PR comment or own commit at or after
-`finishedAt` discharges it; a bot action never does; a newer run re-summons by its later
-`finishedAt`. The posted-findings rule above still applies as well. An AUTO run (`claude_reviews.trigger
-= 'auto'`) follows the SAME rule as a manual one: the row is account-scoped and the account's own
-workspace setting started it, so there is no author / requested-reviewer test. `trigger` rides the
-card (`MyTurnCard.trigger`) for the "Auto review" chip only — see docs/CLAUDE-REVIEW.md § Auto review.
+*(History: a "Claude review ready" My Turn type lived here from 2026-09 — first on the ball rule,
+then SEEN-based from 2026-11-04 — and was removed 2026-11-06, § Removed types.)*
 
 ### The card must explain itself
 
@@ -665,7 +639,6 @@ optional facts that `db/my-turn-card-facts.ts` adds to the cards:
 | `threadPath`, `threadLine` | `thread`, `thread_reply`, `own_thread` | the thread row the section already carries |
 | `committerId` | `thread` with a `likely_addressed` ball | the author of the FIRST commit after your comment whose `commit_files` list holds the path (the `derive-thread-state.ts` predicate), passing over bots (`globalAutomationUserIds`), you and unattributed commits — the ball rule's exclusions |
 | `firstComment` | `own_thread`, `untouched_thread` (+ `line`) | the thread's oldest stored review comment (one body read per thread; a blank one moves on to the next) |
-| `newActorIds`, `newActorTotal` | `your_pr` | the events `newSinceLastViewed` counts (which never include your own — `computeTriage` skips them), actors other than you, newest first, capped at `YOUR_PR_NEW_ACTORS_SHOWN` (3) with an uncapped total |
 | `requesterId` | `review_request` | `review_request_events.requester_user_id` of the NEWEST stored event naming you, when it is a `requested` one (`reviewRequesters`). Absent when that newest event is a withdrawal, the requester is NULL (pre-`0081` row, ghost) or is you, or the PR's history is at the selection's 25-event cap (the real newest request may be past it). The card qualifies only on a personal request (`review_requests.user_id`), so team requests are not read. The SPA heads the card "<name> asked you to review" and drops the action line's "by <author>" when the author asked |
 
 Quotes are `CardExcerpt`s: plain text (markdown and HTML stripped), at most
@@ -687,65 +660,56 @@ comment is brought into view with a leading "…".
   who asked: `REVIEW_REQUEST_HISTORY_NODE` selects no `actor`. Adding it needs the selection, a
   column on `review_request_events` and a backfill.
 
-### Settings: gates and promotions
+### The fixed shape and the one switch
 
-The reader decides which types exist, how My turn orders them and how Pending ranks cards
-(Settings → My Turn). PER ACCOUNT: one account is one reader, and the
-same settings apply in every workspace.
+Nothing about My Turn's types, groups, order or ranking is a setting any more (2026-11-06). The
+reader has ONE switch, in Settings → Pending → My Turn: **"Also show new PRs nobody asked you
+about"** (the survey, S2). PER ACCOUNT: one account is one reader, in every workspace.
 
-- **Storage is overrides only.** `accounts.my_turn_settings` is NULL until the reader changes
-  something ([DATA-MODEL.md](DATA-MODEL.md)). Every reader resolves it through ONE shared function,
-  `resolveMyTurnSettings` (`packages/shared/src/my-turn-settings.ts`); a malformed part falls back
-  to its default alone. `compactMyTurnSettings` is the one definition of "an override", used by the
-  SPA to build the body and again by the server before it stores, so a Save never freezes a default.
-  The server-side read is `getMyTurnSettings` (`db/my-turn-settings.ts`), straight from `accounts`,
-  never from the local-account cache. The one writer is `PUT /api/me/my-turn-settings`
-  ([API.md](API.md)); its setter refreshes the local-account cache, or `/api/me` would hand the
-  Settings form the old value in local mode.
-- **A type switched off is REMOVED, not hidden.** The gate runs inside `getMyTurn`, and a
-  switched-off section is not computed at all (its queries are skipped). So the list, every count,
-  the daily-brief counts, the browser notifications and the CLI shrink together, in the scoped and the
-  unscoped call alike. A switched-off type claims nothing, so a PR it would have held falls through
-  to the next shown type in the precedence above. Defaults: every summons on except S2
-  (`watched_repo_pr`); every promotion off.
-- **Four PROMOTIONS move a card from another tab into My turn**, all about your own PRs:
-  `own_ci_red` (a red build), `own_conflicts` (a conflict, in a repo you can push to), `own_ready`
-  (GitHub will merge it now, or once the branch is updated) and `own_thread` (a review thread with
-  no reply and no later commit for a day — or, since 2026-11-05, one a Limn, yours or a teammate's,
-  holds STILL OPEN at the PR's current head with no reply from you since: `own.stillOpen`,
-  `db/still-open-threads.ts`, docs/CLAUDE-REVIEW.md § Still-open points). Each is `direct`. (The fifth, `trunk_red`, a red default
-  branch, was removed 2026-11-04 with its `trunkScope` setting; a stored scope or order entry is
-  ignored, and migration 0168 deleted its repository-subject dismissals.)
+- **Storage.** `accounts.my_turn_settings` is `{ show: { watched_repo_pr: true } }` when the survey
+  is on and NULL when off ([DATA-MODEL.md](DATA-MODEL.md)). Every reader resolves it through ONE
+  shared function, `resolveMyTurnSettings` (`packages/shared/src/my-turn-settings.ts`), which reads
+  only `show.watched_repo_pr === true` — an older blob's type switches, order and weights are
+  IGNORED (never migrated), and garbage resolves to off. The server-side read is
+  `getMyTurnSettings` (`db/my-turn-settings.ts`), straight from `accounts`, never from the
+  local-account cache. The one writer is `PUT /api/me/my-turn-settings` ([API.md](API.md)), whose
+  setter refreshes the local-account cache and stores NULL when off.
+- **The survey is REMOVED, not hidden, while off.** Its section is not computed, so the list, every
+  count, the brief, the notifications and the CLI shrink together. `configKey` (on `GET
+  /api/my-turn`) changes with it, so the notification watcher re-baselines instead of announcing the
+  backlog.
+- **Your PRs are always in My Turn and MOVE from their home tab**: `own_ci_red` (a red build),
+  `own_conflicts` (a conflict, in a repo you can push to), `own_ready` (GitHub will merge it now, or
+  once the branch is updated) and `own_thread` (a review thread with no reply and no later commit for
+  a day — or one a Limn, yours or a teammate's, holds STILL OPEN at the PR's current head with no
+  reply from you since: `own.stillOpen`, `db/still-open-threads.ts`, docs/CLAUDE-REVIEW.md
+  § Still-open points). Each is `direct`.
   - ⚠ **A PROMOTED CARD MOVES, IT IS NEVER LISTED TWICE.** `getWorkspaceInsights` builds
     `promotedCi` / `promotedConflicts` / `promotedReady` / `promotedThreads`
-    from the one `getMyTurn` result, and each home builder (`ci_failing` both arms, `merge` /
-    `update_branch`, `conflicts`, `untouched_thread`) drops those ids from its SEED list before its
-    `kindTotals`, beside the Dependencies `depPrIds` test. The tab counts move with their lists.
+    from the one `getMyTurn` result (after `onePerPr`), and each home builder (`ci_failing` your-PR
+    arm, `merge` / `update_branch`, `conflicts`, `untouched_thread`) drops those ids from its SEED
+    list before its `kindTotals`. Needs fixing, Ready to land and Unanswered threads therefore hold
+    everyone else's PRs — and yours only when My Turn does not (its repo is muted, or the item lost
+    one card per PR).
   - **The population is the home card's exactly**: your own open PR, non-draft, with an activity
     event inside `maxQuietDays`, classified by the same functions (`db/pending-classify.ts`:
     `isRedCiStatus`, `isConflicting`, `forwardKindOf`). `own_conflicts` keeps the `conflicts` write
     gate; a thread you started on your own PR stays on its home tab.
   - ⚠ **A PR carrying a dependency tool's marker is never promoted**, even under your own login
     (a Snyk fix pushed with your token): it is a dependency PR and lives in the Dependencies tab.
-  - `own_ready` takes `pr_approved`'s claim when both are shown: the ready card carries the approval
-    standing and the Merge button, and dropping the approval card without its claim would let the
-    PR fall through to `your_pr` and turn one card into two.
-- **The Pending mute still rides `relevance`** for every new type (`relevanceFor`), so a muted
-  repo's rows stay listed as `'none'`; a mute never removes a row. A switched-off type does.
-- **The ranking settings.** The type ORDER groups My turn (`tabGroupRank`, `groupByReason`), and the
-  three Do next WEIGHTS (integer percents, steps of 10, summing to 100; presets Balanced 50/30/20,
-  Mine first 30/10/60, Oldest first 20/70/10, Quick wins 80/10/10) reach `scoreCards` for every tab
-  and for the work plan. `rankPendingTabs` returns them as `rules` on `/api/attention`, so the
-  board explains the order the reader actually got ([FRONTEND.md](FRONTEND.md) § The Pending tabs).
-  Measured on the dev DB before the build (773 listed cards): under Balanced, 401 of them outrank a
-  fresh direct review request; under Mine first, none do. Balanced stays the default, so nobody's
-  order moves until they choose.
+  - `own_ready` takes `pr_approved`'s claim: the ready card carries the approval standing and the
+    Merge button, so one job is one card.
+- **The Pending mute removes a repository from My Turn** (db/pending-mute.ts): `getMutedPendingRepoIds`
+  is read once and its repos are dropped from the open-PR list and the thread query. Other tabs are
+  unaffected — your own red build in a muted repo goes back to Needs fixing.
+- **The ranking is fixed.** Every scored Pending tab uses `DO_NEXT_RULES.weights` (proximity 50,
+  stall 30, relevance 20); `rankPendingTabs` still returns them as `rules` with the fixed type order
+  and `myTurnOff`. My turn itself is NOT ordered by score: `listTab` sorts it by group
+  (`tabGroupRank` → `myTurnGroupOf`, "Older" last), then LONGEST WAITING FIRST (the oldest `since`),
+  then `compareScored`. The cap per list group then cuts from the end, so "Older" goes first.
 - **The brief counts a promoted red build once**: `ciFailing` counts only the `ci_failing` cards
-  that were not promoted (every red trunk stays on the `trunkRed` line). A save drops the account's cached roll-up counts
-  (`clearDailyBriefCountsFor`), so the banner and Workspace badges never count a type the reader just removed.
-- On the dev account (an observer with no PRs of its own) the defaults leave ONE card on My turn —
-  three.js #34066, a `comment_reply` — where it held 551 before. With the app now opening on
-  Pending, that account's cold open is an almost empty My turn.
+  that were not promoted (every red trunk stays on the `trunkRed` line). A save drops the account's
+  cached roll-up counts (`clearDailyBriefCountsFor`).
 
 ## Waiting on others, and the review target (CORE)
 
@@ -769,8 +733,9 @@ WORKING hours ("With sam · 6h"). It is READ-ONLY information.
 - ⚠ **NOT THE READER'S TURN, BY THE BALL RULE.** A PR with ANY My Turn card in the same fold (one
   per PR on the board — a mention, a reply, new activity…) or a live dismissal (`myTurnDismissed`) is
   left out: the reader owes something there. So is a PR where a PERSON (not a bot, not the reader)
-  asked for changes after both the last push and the newest request — the author's move. A switched-
-  off My Turn type therefore lets its PRs through: the reader's own ball rule decides.
+  asked for changes after both the last push and the newest request — the author's move. A muted
+  repository's PRs have no My Turn card, so they can be listed here: the reader's own ball rule
+  decides.
 - **The clock.** Per holder: the NEWEST stored `requested` event naming them (a re-request — and a
   Nudge — restarts it), else the PR's `firstReviewRequestedAt`, else `openedAt`, clamped to the PR's
   life; a team is matched to its events by slug (`teamSlugOf`, and `owner/slug` for a locally stamped

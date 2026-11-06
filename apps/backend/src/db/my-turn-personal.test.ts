@@ -110,11 +110,9 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
-  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
-  // is built on them, so it switches them back on rather than lose what it pins.
-  await (await import('../auth/account.js')).setMyTurnSettings(1, {
-    show: { watched_repo_pr: true },
-  });
+  // Untouched "New PRs" are OFF by default (Settings → Pending, "Also show new PRs nobody asked you
+  // about"). This fixture's My Turn population is built on them, so it switches them on.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, { showNewPrs: true });
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
 
@@ -315,10 +313,10 @@ describe('My Turn personal-relevance flag', () => {
     const rows = [
       ...res.watchedRepoPrs,
       ...res.awaitingReview,
-      ...res.yourPrs,
       ...res.approvedPrs,
       ...res.threadsAwaiting,
-      ...res.claudeReviewsToAction,
+      ...res.ownCiRed,
+      ...res.ownReady,
     ];
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows as { relevance?: string; personal?: boolean }[]) {

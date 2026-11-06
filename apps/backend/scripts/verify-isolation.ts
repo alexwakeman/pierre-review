@@ -3070,20 +3070,16 @@ check(
   const bOwn = await mkPr(2, B.repoId, 'b-own', viewerB, 'failure');
 
   // THE SETTING IS PER ACCOUNT. A saves; B still reads the product default.
-  await setMyTurnSettings(1, { show: { own_ci_red: true } });
+  await setMyTurnSettings(1, { showNewPrs: true });
   const settingsA = await getMyTurnSettings(1);
   const settingsB = await getMyTurnSettings(2);
-  check(
-    "getMyTurnSettings(A) holds A's saved switches",
-    settingsA.show.own_ci_red,
-  );
+  check("getMyTurnSettings(A) holds A's saved switch", settingsA.showNewPrs);
   check(
     "getMyTurnSettings(B) is the product default after A saves",
-    settingsB.configKey === resolveMyTurnSettings(null).configKey &&
-      Object.values(settingsB.defaults).every(Boolean),
+    settingsB.configKey === resolveMyTurnSettings(null).configKey && !settingsB.showNewPrs,
   );
-  // …and B switches the same types on, so a leak would have somewhere to land.
-  await setMyTurnSettings(2, { show: { own_ci_red: true } });
+  // …and B switches the survey on too, so a leak would have somewhere to land.
+  await setMyTurnSettings(2, { showNewPrs: true });
 
   const mtA = await q.getMyTurn(1);
   check("getMyTurn(A) has A's mention", mtA.mentions.some((m) => m.prId === aMention));

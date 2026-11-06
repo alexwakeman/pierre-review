@@ -1,5 +1,8 @@
 import {
   DO_NEXT_UNSCORED_KINDS,
+  MY_TURN_GROUP_LABEL,
+  MY_TURN_GROUPS,
+  myTurnGroupOf,
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
   PENDING_TABS,
@@ -9,6 +12,7 @@ import {
   type AttentionCardsResponse,
   type InsightCard,
   type InsightKind,
+  type MyTurnGroup,
   type PendingAuthorLens,
   type PendingAuthorSplit,
   type PendingTab,
@@ -21,10 +25,11 @@ import { pendingTabBadge } from '../../lib/pendingFirstLanding.js';
 // ends, and the counts. Pure and JSX-free so `test/pendingTabs.test.ts` can pin it.
 //
 // ⚠ THE ORDER IS THE SERVER'S. `tab.cardIds` arrive highest score first — except the two
-// strict-group tabs: My turn (grouped by type in the reader's order from Settings → My Turn) and
+// strict-group tabs: My turn (its fixed groups, `myTurnGroupOf`, longest waiting first in each) and
 // Dependencies (security first, then bumps). This module only FILTERS (a kind chip, My turn's "Only
 // yours", the People / Automation lens) and CAPS, never re-sorts, so a filtered view keeps the
-// groups. The first `PENDING_DO_NEXT_SIZE` of whatever list is on screen are Do next.
+// groups. The first `PENDING_DO_NEXT_SIZE` of whatever list is on screen are Do next — except on
+// My turn, whose groups are its headings (`myTurnSections`) and which has no Do next.
 
 export const TAB_LABEL: Record<PendingTabKey, string> = {
   my_turn: 'My turn',
@@ -190,8 +195,8 @@ export function buildPendingView(
     cards,
     // An unscored tab ("Waiting on others", `byWait`) has no Do next head: nothing in it is the
     // reader's next step. Nor does a tab's unscored group ("AI reviews"' `ai_review` cards, listed
-    // after the scored ones): only scored cards are counted.
-    doNextCount: PENDING_TABS.find((d) => d.key === tab.key)?.byWait === true
+    // after the scored ones): only scored cards are counted. My turn has its fixed groups instead.
+    doNextCount: PENDING_TABS.find((d) => d.key === tab.key)?.byWait === true || tab.key === 'my_turn'
       ? 0
       : Math.min(PENDING_DO_NEXT_SIZE, cards.filter((c) => !DO_NEXT_UNSCORED_KINDS.has(c.kind)).length),
     shown: cards.length,
@@ -227,4 +232,50 @@ export function offerOnlyYours(
   if (lens != null) return true;
   const r = tab?.relevanceTotals;
   return r != null && r.mine > 0 && r.others > 0;
+}
+
+/** One My turn group as the list paints it: its heading and its cards, in the server's order. */
+export interface MyTurnSection {
+  group: MyTurnGroup;
+  label: string;
+  cardIds: string[];
+  /** "Older" — closed until the reader opens it. */
+  collapsible: boolean;
+}
+
+/**
+ * MY TURN'S HEADINGS — the cards on screen split into the fixed groups (`myTurnGroupOf`, the rule
+ * the server listed them by), in group order, empty groups dropped. The server already sent them
+ * grouped, so this only cuts the list where the group changes; it never re-sorts.
+ */
+export function myTurnSections(cards: readonly InsightCard[], nowMs: number): MyTurnSection[] {
+  const by = new Map<MyTurnGroup, string[]>();
+  for (const c of cards) {
+    if (c.kind !== 'my_turn') continue;
+    const g = myTurnGroupOf(c, nowMs);
+    const list = by.get(g) ?? [];
+    list.push(c.id);
+    by.set(g, list);
+  }
+  return MY_TURN_GROUPS.flatMap((g) => {
+    const cardIds = by.get(g);
+    return cardIds == null
+      ? []
+      : [{ group: g, label: MY_TURN_GROUP_LABEL[g], cardIds, collapsible: g === 'older' }];
+  });
+}
+
+/**
+ * MY TURN'S EMPTY STATE: the "Waiting on review" tab's own badge figure, when it holds something,
+ * so the empty tab can point there ("N pull requests wait for a reviewer"). Read off the response
+ * the board already has — nothing fetches. Null when there is nothing to point at.
+ */
+export function waitingForReviewerCount(
+  tabs: readonly PendingTab[],
+  lens: PendingAuthorLens | null,
+): number | null {
+  const t = tabs.find((x) => x.key === 'review');
+  if (t == null) return null;
+  const n = tabBadgeCount(t, lens);
+  return n > 0 ? n : null;
 }

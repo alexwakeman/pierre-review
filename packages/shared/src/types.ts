@@ -8,7 +8,6 @@ import type { ClaudeThreadStillOpen } from './still-open.js';
 
 import type {
   DoNextAdjustment,
-  DoNextPreset,
   DoNextProximityBase,
   DoNextWeights,
   PendingTabKey,
@@ -2512,9 +2511,9 @@ export interface Workspace {
   isDefault: boolean;
   createdAt: string; // ISO-8601
   // ── PENDING MUTE: TWO INDEPENDENT FACTS, OR-ed. NEVER A CHAIN. ────────────────────────────
-  // A muted repo's "your turn"-shaped rows are downgraded to `relevance: 'none'` — they stay on
-  // the Pending board and in the broad `myTurn` count, they just stop claiming the reader's turn
-  // and stop reaching the notification surfaces. See `MyTurnRelevance` and `MyTurnPr.muted`.
+  // A muted repo's rows never appear in My turn and never notify the reader: they are dropped from
+  // `getMyTurn`'s seeds, so every My Turn count moves with the list. Other Pending tabs are
+  // unaffected. See db/pending-mute.ts.
   //
   // ⚠ THE TWO FIELDS ARE A UNION, NOT A FALLBACK. `pendingMuted` mutes every repo in the
   // workspace; `mutedRepoIds` mutes named ones. A repo is muted when EITHER says so, and clearing
@@ -4006,26 +4005,25 @@ export interface MeResponse {
   // SAML SSO. Populated by the sync when it hits the SAML wall; drives the global banner. Empty
   // in the normal case.
   authNotices: AuthNotice[];
-  // The reader's My Turn settings (Settings → My Turn): which card types show, the type order and
-  // the Do next weights. RAW STORED OVERRIDES — `null` means "never changed anything", and the SPA
-  // resolves through the ONE `resolveMyTurnSettings` (the `blastRadius` precedent above).
-  myTurnSettings: MyTurnSettings | null;
+  // The reader's My Turn settings (Settings → Pending), RESOLVED: the one switch, "Also show new
+  // PRs nobody asked you about".
+  myTurnSettings: MyTurnSettings;
   // SETTINGS → FEATURES (shared features.ts): which sidebar destinations show, RESOLVED (the stored
   // switch, else the default for this install). Visibility only — a deep link still opens a hidden
   // one. Optional: an older server omits it and every destination shows.
   features?: FeaturesStatus;
 }
 
-/** Body of PUT /api/me/my-turn-settings. `null` resets everything to the product default. */
+/** Body of PUT /api/me/my-turn-settings. */
 export interface MyTurnSettingsBody {
-  settings: MyTurnSettings | null;
+  settings: MyTurnSettings;
 }
 
 /** Response of PUT /api/me/my-turn-settings — what was STORED (compacted to overrides only), so
  *  Settings renders what the database holds rather than what it sent. */
 export interface MyTurnSettingsResponse {
   status: 'ok';
-  myTurnSettings: MyTurnSettings | null;
+  myTurnSettings: MyTurnSettings;
 }
 
 // ---- Pro per-account settings (packages/pro `pro_settings`; via GET/PUT /api/pro/settings) ----
@@ -5967,9 +5965,8 @@ export interface AuthNotice {
  * genuinely different relationships and the card copy has to tell them apart.
  *
  *   • `'direct'`     — the work is tied to YOU: a review was requested of you, somebody
- *                      @-mentioned you, replied to you or pushed since your review, it is your PR,
- *                      your PR was approved, you asked for the Claude run — or you added the type
- *                      to My Turn in Settings (the own-work promotions and a red default branch).
+ *                      @-mentioned you, replied to you or pushed since your review, or it is your
+ *                      own PR (approved, ready, failing, conflicting, an unanswered thread).
  *                      ⚠ Holds EVEN IN A REPO YOU ONLY READ, which is why none of it is folded into
  *                      the maintainer test below. Card copy: "YOUR TURN".
  *   • `'maintained'` — a NEW PR by somebody else in a repo you maintain (WRITE/MAINTAIN/ADMIN on
@@ -5979,20 +5976,10 @@ export interface AuthNotice {
  *                      it still paints; it just may not interrupt you. Card copy: "REVIEW OR
  *                      REPLY".
  *
- * ⚠ THIS NARROWS NOTHING, ANYWHERE. Every row and every card still ships; relevance decides how a
- * card is LABELLED and which count it lands in, never whether it exists. Narrowing the population
- * by it would delete work rather than route it. (What DOES remove rows is the reader switching a
- * card TYPE off in Settings → My Turn — a separate gate, applied inside `getMyTurn` so every
- * surface shrinks together; see `MyTurnSettings`.)
- *
- * ⚠ IT IS ALSO THE CARRIER OF THE PENDING MUTE, and that is deliberate rather than an overload of
- * convenience. Muting a workspace or a repo (`Workspace.pendingMuted` / `.mutedRepoIds`) forces
- * every one of its rows to `'none'` inside `getMyTurn`, at the ONE place `personal` is folded from
- * `relevance` — so the card relabels, the notification stops, the `myTurnPersonal` figures drop it
- * and the broad `myTurn` population is untouched, all from one write. A second boolean AND-ed into
- * five notification surfaces would have been five predicates that can disagree with each other,
- * which is the drift this single fold exists to prevent. `muted` rides alongside as an
- * EXPLANATION only (see `MyTurnPr.muted`): nothing counts it, nothing filters on it.
+ * ⚠ RELEVANCE NARROWS NOTHING. Every row and every card still ships; relevance decides how a card
+ * is LABELLED and which count it lands in, never whether it exists. (What DOES remove rows: a
+ * repository muted for Pending — its rows never enter `getMyTurn` — and the survey switch,
+ * `MyTurnSettings.showNewPrs`.)
  */
 export type MyTurnRelevance = 'direct' | 'maintained' | 'none';
 
@@ -6043,26 +6030,11 @@ export interface MyTurnPr {
   // `personal` (`true` ⇒ 'direct', `false` ⇒ 'none'): a response predating this field cannot
   // distinguish 'maintained', and only the "New PRs" section can ever be that value.
   relevance?: MyTurnRelevance;
-  // ⚠ DISPLAY ONLY, AND NO COUNTER MAY EVER READ IT. This row's repo is muted for Pending
-  // (`Workspace.pendingMuted` or `.mutedRepoIds`), which is WHY its `relevance` is `'none'` —
-  // the downgrade has already happened upstream and every figure, lens and label follows from
-  // `relevance` alone. The flag exists so a screen can say "muted" instead of silently demoting a
-  // card the reader last saw as theirs; the moment something counts it, there are two answers to
-  // "is this personal?" and they can disagree.
-  //
-  // Absent ⇒ not muted. Set only when true, so a normal response carries nothing new.
-  muted?: boolean;
 }
 
 export interface AwaitingReviewItem extends MyTurnPr {
   // Other reviewers still pending alongside you, for context.
   alsoRequested: number;
-}
-
-export interface YourPrActivityItem extends MyTurnPr {
-  newSinceLastViewed: NewSinceLastViewed;
-  // Human-readable summary of what's new, e.g. "3 new comments · 1 new commit".
-  summary: string;
 }
 
 // A PR you authored that is still open and has a standing approval — at least one
@@ -6228,7 +6200,7 @@ export interface MentionItem extends MyTurnPr {
   mentionedById: number | null;
 }
 
-/** Promotion (Settings → My Turn): your own open, non-draft, recently active PR whose head CI is
+/** Your PRs: your own open, non-draft, recently active PR whose head CI is
  *  red. It MOVES here from the Needs fixing tab — never listed twice. */
 export interface OwnCiRedItem extends MyTurnPr {
   ciStatus: CiStatus;
@@ -6272,10 +6244,9 @@ export interface OwnThreadItem {
   /** ISO — the thread's own createdAt (a still-open one: when the Limn judged it). */
   since: string;
   githubUrl: string;
-  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. */
+  /** See `MyTurnPr.personal` / `.relevance`. */
   personal?: boolean;
   relevance?: MyTurnRelevance;
-  muted?: boolean;
   /** A Limn — yours or a teammate's — holds this thread's point OPEN at the PR's current head
    *  (docs/CLAUDE-REVIEW.md § Still-open points). Absent = an unanswered thread. */
   stillOpen?: ClaudeThreadStillOpen;
@@ -6316,64 +6287,8 @@ export interface ThreadAwaitingItem {
    *  Carried anyway so a notification surface can read ONE field across every section instead of
    *  knowing which sections are exempt. */
   personal?: boolean;
-  /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason —
-   *  UNLESS the thread's repo is muted for Pending, which downgrades it to `'none'` like every
-   *  other section. */
+  /** See `MyTurnPr.relevance`. Always `'direct'` here, for the same by-construction reason. */
   relevance?: MyTurnRelevance;
-  /** See `MyTurnPr.muted`. DISPLAY ONLY; no counter reads it. */
-  muted?: boolean;
-}
-
-// A finished AI review your OWN Limn ran that you have NOT SEEN yet (`claude_reviews.seen_at` is
-// NULL on every half: you have not opened the PR's AI Review tab on it since it finished) — the
-// newest succeeded full run on each OPEN PR. Seen or dismissed retires it; a newer run brings a
-// card of its own. headStale = the reviewed head no longer matches the PR's head.
-export interface ClaudeReviewToAction {
-  reviewId: number;
-  prId: number;
-  repoFullName: string;
-  prNumber: number;
-  prTitle: string;
-  verdict: ClaudeReviewVerdict | null;
-  finishedAt: string | null;
-  headStale: boolean;
-  githubUrl: string;
-  /** See `MyTurnPr.personal`. Always true here — you asked for the run. */
-  personal?: boolean;
-  /** See `MyTurnPr.relevance`. Always `'direct'` here — you asked for the run — UNLESS the run's
-   *  repo is muted for Pending, which downgrades it to `'none'` like every other section. */
-  relevance?: MyTurnRelevance;
-  /** See `MyTurnPr.muted`. DISPLAY ONLY; no counter reads it. */
-  muted?: boolean;
-  /** Who started the run. Label only: an `'auto'` run reaches My Turn exactly like a manual one
-   *  (the account's own workspace switched it on). Absent on older servers = `'manual'`. */
-  trigger?: ClaudeReviewTrigger;
-}
-
-/** A PR MERGED after your Limn's automatic approval stood on it (`ai_approved_merged`) — a quick
- *  look after the fact. The approval: an own run's `auto_post` landed a review SENT as APPROVE
- *  before the merge, and GitHub still records it as approved (not withdrawn or dismissed). Listed
- *  until you open the PR after the merge (`pr_views.last_viewed_at`) or dismiss it; merges older
- *  than `APPROVED_MERGED_DAYS` (or before the repo's onboarding floor) never are. `since` is the
- *  merge time. */
-export interface ApprovedMergedItem {
-  /** The run whose auto-post approved. */
-  reviewId: number;
-  prId: number;
-  repoFullName: string;
-  prNumber: number;
-  prTitle: string;
-  authorId: number | null;
-  mergedById: number | null;
-  /** ISO — when the approval was posted. */
-  approvedAt: string;
-  /** ISO — the merge. */
-  since: string;
-  githubUrl: string;
-  /** See `MyTurnPr.personal` / `.relevance` / `.muted`. DIRECT — your Limn approved it. */
-  personal?: boolean;
-  relevance?: MyTurnRelevance;
-  muted?: boolean;
 }
 
 // ── Dismissing a My Turn entry (Pending → My turn → "Dismiss") ──
@@ -6403,7 +6318,7 @@ export interface MyTurnDismissedItem {
   prNumber: number | null;
   /** The PR's title; null when not known. */
   title: string | null;
-  /** The highest-priority job the hidden entry holds, in the reader's type order. */
+  /** The highest-priority job the hidden entry holds, in the fixed type order (`MY_TURN_ORDER`). */
   reason: MyTurnCardReason;
   githubUrl: string;
   /** ISO. */
@@ -6417,51 +6332,44 @@ export interface MyTurnDismissResponse {
 }
 
 export interface MyTurnResponse {
+  // ── WAITING ON YOU ──
   awaitingReview: AwaitingReviewItem[];
-  yourPrs: YourPrActivityItem[];
-  // Your authored, open PRs with a standing approval (ready to merge). Deduped
-  // against `yourPrs` — an approved PR shows here, not under "new activity".
-  approvedPrs: ApprovedPrItem[];
-  threadsAwaiting: ThreadAwaitingItem[];
-  // New open PRs by others you have never acted on, opened at or after their repo was added
-  // (deduped against the sections above). Untouched rows only — see `pushedSince`. Empty when the
-  // account has no repos, or when the type is switched off (it is OFF by default).
-  watchedRepoPrs: WatchedRepoPrItem[];
-  // Completed Claude reviews awaiting action (empty when Claude Review is disabled).
-  claudeReviewsToAction: ClaudeReviewToAction[];
-  // Users referenced by any row, for client-side lookup.
-  users: User[];
-  // ── Every section below is EMPTY when its type is switched off in Settings → My Turn: the gate
-  // runs inside `getMyTurn`, so this response, the board, the brief and notifications shrink
-  // together. The SPA still reads each with `?? []` (a response predating the field). ──
   /** S6 — see MentionItem. */
   mentions: MentionItem[];
+  /** S3a/S3b — threads you opened. */
+  threadsAwaiting: ThreadAwaitingItem[];
   /** S3d — replies to your comment in a review thread SOMEONE ELSE started. Same shape as
    *  `threadsAwaiting`; `lastReply*` is the other person's comment, `awaitingKind` is always
    *  'reply'. */
   threadReplies: ThreadAwaitingItem[];
   /** S5 — see CommentReplyItem. */
   commentReplies: CommentReplyItem[];
-  /** S3c — the "pushed since you reviewed" rows, split OUT of `watchedRepoPrs`. Every row's
-   *  `ball.kind === 'commits_after'`. */
+  // ── RE-REVIEW ──
+  /** S3c — a person pushed after your last action. Every row's `ball.kind === 'commits_after'`. */
   pushedSince: WatchedRepoPrItem[];
-  /** The four own-work promotions — OFF by default. When on, each item MOVES here from its own tab
-   *  (the home card is not built), so nothing is listed twice. A red default branch is NOT a My Turn
-   *  type: it stays in Needs fixing (`ci_failing`, trunk arm). */
+  // ── YOUR PRs — always on: each item MOVES here from its own tab (the home card is not built),
+  // so nothing is listed twice. A red default branch is NOT a My Turn type: it stays in Needs
+  // fixing (`ci_failing`, trunk arm). ──
   ownCiRed: OwnCiRedItem[];
   ownConflicts: OwnConflictsItem[];
+  // Your authored, open PRs with a standing approval. A PR "ready to land" (`ownReady`) holds
+  // instead of this.
+  approvedPrs: ApprovedPrItem[];
   ownReady: OwnReadyItem[];
   ownThreads: OwnThreadItem[];
-  /** A PR MERGED after your Limn's automatic approval stood on it, not opened by you since the merge
-   *  (see `ApprovedMergedItem`). Empty when AI review is off or the type is switched off. */
-  approvedMerged: ApprovedMergedItem[];
-  /** The reader's resolved type order (all fifteen) — the CLI prints its sections in this order. */
+  // ── THE OPT-IN SURVEY ──
+  // New open PRs by others you have never acted on, opened at or after their repo was added
+  // (deduped against the sections above). EMPTY unless the reader switched on "Also show new PRs
+  // nobody asked you about" (`MyTurnSettings.showNewPrs`).
+  watchedRepoPrs: WatchedRepoPrItem[];
+  // Users referenced by any row, for client-side lookup.
+  users: User[];
+  /** Every card type, in the fixed order (`MY_TURN_ORDER`) — the CLI prints its sections in it. */
   order: MyTurnCardReason[];
-  /** The types switched off, in `order`. */
+  /** The types not shown: the survey while it is off. */
   off: MyTurnCardReason[];
-  /** Changes exactly when WHICH TYPES ARE SHOWN changes (`off`) — never with the
-   *  order or the weights. The notification watcher re-baselines on it, or switching a type on
-   *  would announce its whole existing backlog. */
+  /** Changes exactly when WHICH TYPES ARE SHOWN changes (`off`). The notification watcher
+   *  re-baselines on it, or switching the survey on would announce its whole existing backlog. */
   configKey: string;
   /** Subjects hidden by a live dismissal in this fold (see `MyTurnDismissedItem`). Trailing
    *  optional: a response predating dismissals has none. */
@@ -6648,39 +6556,34 @@ export interface PrRefreshResponse {
   updatedAt: string; // ISO-8601, the row's updatedAt after the refresh
 }
 
-// WHY an item is on your plate — the fifteen sections of GET /api/my-turn, one value each, carried
-// by `MyTurnCard.reason`. Each value is ONE user-facing type:
-// one switch and one row in the order list in Settings → My Turn, one chip, one notification bit.
-// The union's order below is the product's default type order (`MY_TURN_DEFAULT_ORDER`).
+// WHY an item is on your plate — the twelve sections of GET /api/my-turn, one value each, carried
+// by `MyTurnCard.reason`. Each value is ONE user-facing type. Their order and grouping is FIXED
+// (`MY_TURN_ORDER`, `MY_TURN_GROUP_OF` in pending-rules.ts).
 //
-// These used to be five dismissal kinds plus `'your_pr'`: five sections you could press "Done" on,
-// and one that cleared itself when you opened the PR. THE DISMISSAL SUBSYSTEM IS GONE — the table,
-// the routes and the button — because a card now leaves this board when you ACT on the PR, which
-// is what the reader meant by "done" in the first place. A stored dismissal was manual
-// compensation for a predicate the fold did not have; it never expired, so an item you pressed
-// once stayed pressed while the work came back. These strings are computed and rendered — and,
-// since Settings → My Turn, STORED as keys and order entries of `accounts.my_turn_settings`, so a
-// rename now needs a data migration.
+// Removed types (2026-11-06): 'your_pr' (new activity on your PR), 'claude_review' (the AI reviews
+// tab's own badge covers a new AI review) and 'ai_approved_merged'. A stored setting or dismissal
+// naming one is ignored on read.
 //
 // ⚠ NOT `MyTurnReason`, which is a DIFFERENT, older union ('requested' | 'authored' | 'merged' |
 // 'reviewed' | 'commented'): that one says how you PARTICIPATE in a feed row, this one says which
 // My Turn SECTION an item came from. They are one `sed` away from each other and mean opposite
 // things — the `-Card-` infix is load-bearing.
 export type MyTurnCardReason =
+  // Waiting on you
   | 'review_request'
   | 'mention'
   | 'thread'
   | 'thread_reply'
   | 'comment_reply'
+  // Re-review
   | 'pushed_since'
+  // Your PRs
   | 'own_ci_red'
   | 'own_conflicts'
   | 'pr_approved'
   | 'own_ready'
-  | 'your_pr'
   | 'own_thread'
-  | 'claude_review'
-  | 'ai_approved_merged'
+  // The opt-in survey ("Also show new PRs nobody asked you about")
   | 'watched_repo_pr';
 
 export interface UpdateUserBody {
@@ -10476,21 +10379,11 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
    *  Trailing-optional for wire tolerance only (an e2e mock, a response predating the field);
    *  `getWorkspaceInsights` always sets it. Absent ⇒ fall back to `personal`. */
   relevance?: MyTurnRelevance;
-  /** THIS CARD'S REPO IS MUTED FOR PENDING — see `MyTurnPr.muted`, which this is READ off (never
-   *  re-derived here, the `since`/`relevance` rule applied a third time).
-   *
-   *  ⚠ DISPLAY ONLY. It explains a `relevance` of `'none'` the reader deliberately caused; it is
-   *  not an input to `personal`, to any brief count, to the relevance lens or to the ranker, all
-   *  of which read `relevance`. Set only when true. */
-  muted?: boolean;
-  /** Set ONLY on the four PR-grained promotions (`own_ci_red`, `own_conflicts`, `own_ready`,
+  /** Set ONLY on the four PR-grained own-work types (`own_ci_red`, `own_conflicts`, `own_ready`,
    *  `own_thread`). It carries exactly the fields the card's HOME kind carried, so the SPA renders
    *  the same controls (the merge row, the resolver button) — a promoted card moves, it does not
    *  lose its actions. */
   own?: MyTurnOwnWork;
-  /** Set ONLY on `claude_review` cards: who started the run. `'auto'` makes the chip read
-   *  "Auto review". A label only — an auto run is owned exactly like a manual one. */
-  trigger?: ClaudeReviewTrigger;
   /** THE ANSWER ITSELF, on the reply-type cards: `thread` (only when somebody replied — never on a
    *  `likely_addressed` row, whose stored comment is YOUR OWN), `thread_reply` and `comment_reply`.
    *  Only the reply, never the thread. Folded from data `getMyTurn` already loads, so the board
@@ -10527,13 +10420,7 @@ export interface MyTurnCard extends InsightCardBase, InsightPrRef {
   /** `own_thread` only: the thread's opening comment, so the card can quote it without fetching
    *  the thread. */
   firstComment?: CardThreadComment;
-  /** `your_pr` only: who did the new things (comments, reviews, commits since you last opened the
-   *  PR — the events `detail` counts), newest activity first, you excluded, at most
-   *  `YOUR_PR_NEW_ACTORS_SHOWN`. Bots included: a CodeRabbit comment is news on your PR. */
-  newActorIds?: number[];
-  /** With `newActorIds`: how many distinct people that is, uncapped — "and N others" is
-   *  `newActorTotal - newActorIds.length`, computed here, never by the client. */
-  newActorTotal?: number;  /** `review_request` only: who ASKED you to review — the requester (`review_request_events
+  /** `review_request` only: who ASKED you to review — the requester (`review_request_events
    *  .requester_user_id`, the event's `actor`) of the NEWEST synced request naming you, when no
    *  later withdrawal of you follows it. ⚠ Absent is ordinary: history synced before the column
    *  existed (filled by a one-time re-read), a ghost actor, a history at its 25-event cap (the
@@ -11227,10 +11114,10 @@ export interface AttentionCardsResponse {
    *
    * ⚠ THE ORDER IS THE SERVER'S. Every PR card is scored by `db/work-plan.ts`'s Do next formula and
    * each tab lists its cards highest score first — no severity-first sort and no cross-kind spread
-   * rule — except the two STRICT-GROUP tabs, whose groups come first and are each listed by score:
-   * My turn (`groupByReason` — the reader's type order, `rules.myTurnOrder`) and Dependencies
-   * (`groupByKind` — security, then bumps). The first `PENDING_DO_NEXT_SIZE` of whatever the reader
-   * is looking at are "Do next".
+   * rule — except the two STRICT-GROUP tabs, whose groups come first: My turn (`groupByReason` —
+   * its fixed groups, `myTurnGroupOf`, longest waiting first within each) and Dependencies
+   * (`groupByKind` — security, then bumps, by score). The first `PENDING_DO_NEXT_SIZE` of whatever
+   * the reader is looking at are "Do next" — on every tab but My turn, whose groups ARE its order.
    *
    * `cards` carries only what the tabs list (the top `boardListCap` of each list group — the kind,
    * split by My turn's "Only yours" side and by who opened it — plus the review-load strip), so a
@@ -11243,9 +11130,9 @@ export interface AttentionCardsResponse {
   /** Each listed PR card's Do next score and its working, keyed by card id — for the cards' info
    *  popovers. Explanation only: nothing on the client may sort or filter by it. */
   scores?: Record<string, PendingCardScore>;
-  /** The ranking rules the server used for THIS response — the reader's weights and My Turn type
-   *  order. Every explanation prints these, never the product constants. Trailing optional: a
-   *  response predating the field explains with `DO_NEXT_RULES.weights`. */
+  /** The ranking rules the server used for THIS response — the fixed weights and My Turn type
+   *  order, and which types are not shown. Trailing optional: a response predating the field
+   *  explains with `DO_NEXT_RULES.weights`. */
   rules?: PendingRankRules;
   /** Entries the reader dismissed from My turn that are still on their plate with nothing new —
    *  the tab lists them under "Dismissed" with a way back. NOT counted in any tab, chip or lens:
@@ -11332,16 +11219,14 @@ export interface PendingBoardSnapshot extends AttentionCardsResponse {
   viewerLogin: string | null;
 }
 
-/** The ranking the server actually used for one /api/attention response (Settings → My Turn,
- *  resolved). ACCOUNT grain: one reader, every workspace. */
+/** The ranking one /api/attention response was built with. Fixed in code; the reader's one My
+ *  Turn switch (the survey) only moves `myTurnOff`. */
 export interface PendingRankRules {
-  /** 0..1, summing to 1, multiples of 0.1. Every `scores[id].score` on the response used these. */
+  /** 0..1, summing to 1 — the fixed `DO_NEXT_RULES.weights`. Every `scores[id].score` used these. */
   weights: DoNextWeights;
-  /** Derived from the weights — an exact match on all three, else 'custom'. Never stored. */
-  preset: DoNextPreset | 'custom';
-  /** All fifteen types, in the reader's order. My turn is grouped by this. */
+  /** Every My Turn type, in the fixed order (`MY_TURN_ORDER`). */
   myTurnOrder: MyTurnCardReason[];
-  /** Types switched off in Settings, in `myTurnOrder` (the guide's "not shown" line). */
+  /** Types not shown (the survey while it is off), in `myTurnOrder`. */
   myTurnOff: MyTurnCardReason[];
 }
 
@@ -11362,8 +11247,8 @@ export interface PendingTab {
   /** Uncapped count per card kind in the tab — the kind chips' figures. */
   kindTotals: Partial<Record<InsightKind, number>>;
   /** Listed card ids, highest score first (ties: longer waiting, then PR id, then card id); in a
-   *  strict-group tab, by group first, then score (My turn: the reader's type order; Dependencies:
-   *  kind). At most `boardListCap` of EACH
+   *  strict-group tab, by group first (My turn: `myTurnGroupOf`, then longest waiting first;
+   *  Dependencies: kind, then score). At most `boardListCap` of EACH
    *  list group (kind × My turn's "Only yours" side × who opened it), so every view the board can
    *  show — tab, kind chip, relevance lens, author lens — is its own true top. */
   cardIds: string[];

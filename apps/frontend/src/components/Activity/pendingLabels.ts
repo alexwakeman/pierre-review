@@ -74,9 +74,8 @@ export function chipLabel(_tab: PendingTabKey, kind: InsightCard['kind']): strin
  * relationships:
  *
  *   'direct'     → "Your turn"      — you authored it, you were asked for the review, your
- *                                     thread or comment got a reply, your Claude run finished, you
- *                                     were @-mentioned (even in a repo you only read), or you
- *                                     added its type in Settings → My Turn.
+ *                                     thread or comment got a reply, someone pushed since your
+ *                                     review, or you were @-mentioned (even in a repo you only read).
  *   'maintained' → "In your repos"  — somebody else opened a PR in a repo you maintain. That is
  *                                     ORBIT, not ownership: nobody named you, and calling it
  *                                     "Your turn" is precisely the over-claim the reporter
@@ -95,9 +94,9 @@ export function cardKindLabel(card: InsightCard): string {
   if (card.kind === 'my_turn') {
     if (card.relevance === 'direct') return 'Your turn';
     if (card.relevance === 'maintained') return 'In your repos';
-    // A type the reader ADDED to My Turn (Settings → Add to My Turn), in a muted repo: the neutral
-    // KIND label says "Review or reply", which is never true of a branch, a failing build, a
-    // conflict or a PR that is ready. Name what it is instead — as its home tab names it.
+    // Your own work with no relevance (an older server's muted row): the neutral KIND label says
+    // "Review or reply", which is never true of a failing build, a conflict or a PR that is ready.
+    // Name what it is instead — as its home tab names it.
     switch (card.reason) {
       case 'own_ci_red':
         return 'CI failing on your PR';
@@ -206,10 +205,9 @@ export const SECURITY_ALERT_SOURCE_LABEL: Record<Exclude<SecurityAlertSource, 'r
 };
 
 // WHICH My Turn type put this card on your plate — the card's chip. ⚠ Keyed on
-// `MyTurnCardReason` (the fifteen types of GET /api/my-turn and Settings → My Turn), NOT the older
-// `MyTurnReason` participation union that lib/ui.ts's MY_TURN_REASON_META covers — they are one
-// `sed` apart and mean opposite things. Settings names the same types in longer words
-// (`MY_TURN_SETTING_LABEL`); this is the short form a chip can carry.
+// `MyTurnCardReason` (the twelve types of GET /api/my-turn), NOT the older `MyTurnReason`
+// participation union that lib/ui.ts's MY_TURN_REASON_META covers — they are one `sed` apart and
+// mean opposite things.
 /** The label for a Claude review run the workspace's auto review started (`trigger: 'auto'`) —
  *  the Pending chip and the Claude Review tab both print it. */
 export const AUTO_REVIEW_LABEL = 'Auto review';
@@ -227,10 +225,7 @@ export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
   own_conflicts: 'Merge conflicts',
   pr_approved: 'Approved',
   own_ready: 'Ready to land',
-  your_pr: 'Your PR',
   own_thread: 'Unanswered thread',
-  claude_review: 'New AI review',
-  ai_approved_merged: 'Merged after approval',
   watched_repo_pr: 'New PR',
 };
 
@@ -240,13 +235,10 @@ export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
  * "Behind trunk", the words its home tab uses — because the two ask for different clicks.
  *
  * "Pushed since" used to be a second reading of `watched_repo_pr` (off `ball.kind`). It is its own
- * type now (`pushed_since`, with its own switch in Settings), so the chip is the map and nothing
- * here has to guess.
+ * type now (`pushed_since`), so the chip is the map and nothing here has to guess.
  */
 export function myTurnReasonLabel(card: MyTurnCard): string {
   if (card.reason === 'own_ready' && card.own?.kind === 'ready') return KIND_LABEL[card.own.forward];
-  // A run the workspace's auto review started says so; a clicked one keeps "Claude review".
-  if (card.reason === 'claude_review' && card.trigger === 'auto') return AUTO_REVIEW_LABEL;
   return MY_TURN_REASON_LABEL[card.reason];
 }
 

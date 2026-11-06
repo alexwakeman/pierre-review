@@ -945,12 +945,9 @@ export const api = {
       '/api/me/blast-radius-config',
       jsonBody('PUT', { config } as BlastRadiusConfigBody),
     ).then((r) => handle<BlastRadiusConfigResponse>(r)),
-  // The reader's MY TURN settings (Settings → My Turn): which card types show, the type order and
-  // the Do next weights. ACCOUNT-GRAINED and unscoped like the two above. A PUT of the WHOLE
-  // overrides object; `null` RESETS to the product defaults. Build the body with
-  // `compactMyTurnSettings` (the server applies it again), and render the ECHO — it is what the
-  // database holds.
-  setMyTurnSettings: (settings: MyTurnSettings | null) =>
+  // The reader's MY TURN settings (Settings → Pending): the one survey switch. ACCOUNT-GRAINED and
+  // unscoped like the two above. Echoes what was stored.
+  setMyTurnSettings: (settings: MyTurnSettings) =>
     fetch(
       '/api/me/my-turn-settings',
       jsonBody('PUT', { settings } as MyTurnSettingsBody),

@@ -12,7 +12,6 @@
 //   • `committerId`      — who wrote the first commit after your comment that
 //                          changed the thread's file                               (thread, likely_addressed)
 //   • `firstComment`     — the opening comment of an unanswered thread            (own_thread, untouched_thread)
-//   • `newActorIds/Total`— who did the new things on your PR                       (your_pr)
 //   • `requesterId`      — who asked you to review                                 (review_request)
 //
 // (`threadPath`, `threadLine` and `mentionedById` need no read: they ride the My Turn rows already.)
@@ -29,7 +28,6 @@
 import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import {
   CARD_EXCERPT_MAX_CHARS,
-  YOUR_PR_NEW_ACTORS_SHOWN,
   type CardExcerpt,
   type CardThreadComment,
   type MyTurnCommentRef,
@@ -44,8 +42,6 @@ const {
   reviews,
   commits,
   commitFiles,
-  events,
-  prViews,
   reviewRequestEvents,
 } = schema;
 
@@ -404,63 +400,6 @@ export async function threadFirstComments(
     }
     pending = blank;
     round += 1;
-  }
-  return out;
-}
-
-/**
- * Who did the new things on each of your PRs since you last opened it — the SAME events
- * `computeTriage` counts into `newSinceLastViewed` (comments, review comments, reviews and commit
- * pushes strictly after `pr_views.last_viewed_at`), you excluded, distinct actors ordered by their
- * newest such event. `ids` is capped at `YOUR_PR_NEW_ACTORS_SHOWN`; `total` is every one of them.
- * A PR whose new activity is all yours (or unattributed) is absent.
- */
-export async function yourPrNewActors(
-  accountId: number,
-  prIds: readonly number[],
-  viewerUserId: number | null,
-): Promise<Map<number, { ids: number[]; total: number }>> {
-  const out = new Map<number, { ids: number[]; total: number }>();
-  const unique = [...new Set(prIds)];
-  if (unique.length === 0) return out;
-  const viewedAt = new Map<number, number>();
-  for (const ids of chunks(unique)) {
-    for (const r of await db
-      .select({ prId: prViews.prId, at: prViews.lastViewedAt })
-      .from(prViews)
-      .where(inArray(prViews.prId, ids))
-      .execute()) {
-      viewedAt.set(r.prId, r.at.getTime());
-    }
-  }
-  if (viewedAt.size === 0) return out;
-  const minViewed = new Date(Math.min(...viewedAt.values()));
-  const newest = new Map<number, Map<number, number>>();
-  for (const ids of chunks([...viewedAt.keys()])) {
-    const rows = await db
-      .select({ prId: events.prId, actorId: events.actorId, at: events.occurredAt })
-      .from(events)
-      .where(
-        and(
-          eq(events.accountId, accountId),
-          inArray(events.prId, ids),
-          inArray(events.type, ['commit_pushed', 'pr_comment', 'review_comment', 'review_submitted']),
-          gt(events.occurredAt, minViewed),
-        ),
-      )
-      .execute();
-    for (const r of rows) {
-      if (r.prId == null || r.actorId == null || r.actorId === viewerUserId) continue;
-      const threshold = viewedAt.get(r.prId);
-      if (threshold == null || r.at.getTime() <= threshold) continue;
-      const m = newest.get(r.prId) ?? new Map<number, number>();
-      m.set(r.actorId, Math.max(m.get(r.actorId) ?? 0, r.at.getTime()));
-      newest.set(r.prId, m);
-    }
-  }
-  for (const [prId, m] of newest) {
-    const ordered = [...m.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([id]) => id);
-    out.set(prId, { ids: ordered.slice(0, YOUR_PR_NEW_ACTORS_SHOWN), total: ordered.length });
   }
   return out;
 }

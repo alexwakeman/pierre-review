@@ -82,8 +82,7 @@ const itemFor = (ev: Scored, id: string): WorkPlanItem | undefined =>
 async function plan(s: any = planScope): Promise<Scored> {
   const insights = await q.getWorkspaceInsights(1, undefined, s, { uncapped: true });
   const { getMyTurnSettings } = await import('./my-turn-settings.js');
-  const { weights } = await getMyTurnSettings(1);
-  const { candidates } = await workPlan.scoreCards(1, insights.cards, Date.now(), weights);
+  const { candidates } = await workPlan.scoreCards(1, insights.cards, Date.now());
   const items = (candidates as { item: WorkPlanItem }[])
     .map((c) => c.item)
     .sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -98,11 +97,9 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
-  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
-  // is built on them, so it switches them back on rather than lose what it pins.
-  await (await import('../auth/account.js')).setMyTurnSettings(1, {
-    show: { watched_repo_pr: true },
-  });
+  // Untouched "New PRs" are OFF by default (Settings → Pending, "Also show new PRs nobody asked you
+  // about"). This fixture's My Turn population is built on them, so it switches them on.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, { showNewPrs: true });
   q = await import('./queries.js');
   brief = await import('./daily-brief.js');
   workPlan = await import('./work-plan.js');
@@ -801,8 +798,7 @@ describe('the Dependencies kinds are CARDS, never scorer rows', () => {
   it('start from the base their state names', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, planScope, { uncapped: true });
     const { getMyTurnSettings } = await import('./my-turn-settings.js');
-    const { weights } = await getMyTurnSettings(1);
-    const { scored } = await workPlan.scoreCards(1, insights.cards, Date.now(), weights);
+    const { scored } = await workPlan.scoreCards(1, insights.cards, Date.now());
     const base = (id: string) => scored.find((s: { cardId: string }) => s.cardId === id)?.proximityBase;
     expect(base(`deps:${pr('dep-behind')}`)).toBe('update_branch');
     // Nobody approved it: ready for GitHub, not for a person — the merge card's rule.
@@ -865,21 +861,31 @@ describe('the Pending tabs', () => {
       let checked = 0;
       for (const t of tabs) {
         const def = PENDING_TABS.find((d) => d.key === t.key)!;
-        // Dependencies groups by kind; My turn by the card type's place in the READER's order
-        // (`rules.myTurnOrder`, Settings → My Turn); every other tab is one scored list.
+        // Dependencies groups by kind, scored within; My turn by its fixed group (`myTurnGroupOf`),
+        // LONGEST WAITING FIRST within; every other tab is one scored list.
+        const { MY_TURN_GROUPS, myTurnGroupOf } = await import('@pierre-review/shared');
+        expect(rules.weights).toBeDefined();
         const rank = (id: string): number => {
           const card = byId.get(id)!;
           if (def.groupByReason && card.kind === 'my_turn') {
-            return rules.myTurnOrder.indexOf(card.reason);
+            return MY_TURN_GROUPS.indexOf(myTurnGroupOf(card, Date.now()));
           }
           return def.groupByKind ? def.kinds.indexOf(card.kind as never) : 0;
         };
         for (let i = 1; i < t.cardIds.length; i++) {
           const [a, b] = [t.cardIds[i - 1]!, t.cardIds[i]!];
-          // The group never goes backwards, and within one group the score never rises.
+          // The group never goes backwards; within one group the score never rises — or, on My
+          // turn, the clock never gets older.
           expect(rank(a)).toBeLessThanOrEqual(rank(b));
-          if (rank(a) === rank(b)) expect(scores[a]!.score).toBeGreaterThanOrEqual(scores[b]!.score);
-          else grouped += 1;
+          if (rank(a) === rank(b)) {
+            const ca = byId.get(a)!;
+            const cb = byId.get(b)!;
+            if (def.groupByReason && ca.kind === 'my_turn' && cb.kind === 'my_turn') {
+              expect(Date.parse(ca.since)).toBeLessThanOrEqual(Date.parse(cb.since));
+            } else {
+              expect(scores[a]!.score).toBeGreaterThanOrEqual(scores[b]!.score);
+            }
+          } else grouped += 1;
           checked += 1;
         }
       }

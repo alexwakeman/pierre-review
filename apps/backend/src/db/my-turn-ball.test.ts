@@ -420,10 +420,10 @@ beforeAll(async () => {
   // `ensureRepoMemberships` that puts a repo inserted straight into `repos` into the account's
   // Default workspace. Hand-build it and the repo belongs to no workspace and every fold is 0.
   scope = await q.resolveWorkspaceScope(1, null);
-  // Untouched "New PRs" are OFF by default (Settings → My Turn); this file pins the ball rule over
-  // them, so it keeps its population by switching them on. Pushed-since rows are on by default.
+  // Untouched "New PRs" are OFF by default (the survey switch); this file pins the ball rule over
+  // them, so it keeps its population by switching them on.
   const { setMyTurnSettings } = await import('../auth/account.js');
-  await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
+  await setMyTurnSettings(1, { showNewPrs: true });
 });
 
 afterAll(async () => {
@@ -585,9 +585,10 @@ describe('dropping seeds keeps the cap disclosure arithmetically true', () => {
   it('moves myTurnTotal with the population, and it equals the cards painted', async () => {
     const insights = await q.getWorkspaceInsights(1, undefined, scope);
     const painted = (insights.cards as InsightCard[]).filter((c) => c.kind === 'my_turn').length;
-    // Four survivors: the untouched PR, the human-pushed-after PR, the likely_addressed thread and
-    // the unseen AI review (S4). Every other fixture is a negative.
-    expect(painted).toBe(4);
+    // Three survivors: the untouched PR, the human-pushed-after PR and the likely_addressed thread.
+    // Every other fixture is a negative — the unseen AI review too: a finished AI review is not a
+    // My Turn card any more (the AI reviews tab carries it).
+    expect(painted).toBe(3);
     // ⚠ THE WHOLE POINT OF FILTERING SEEDS RATHER THAN CARDS. `myTurnTotal` is measured after
     // seed assembly and before the 50-slice, so a dropped seed leaves numerator and denominator
     // in step. Under the cap this is an equality; above it, it is what makes "50 of 148" true.
@@ -598,24 +599,6 @@ describe('dropping seeds keeps the cap disclosure arithmetically true', () => {
         (insights.myTurnMaintainedTotal ?? 0) +
         (insights.myTurnOtherTotal ?? 0),
     ).toBe(insights.myTurnTotal);
-  });
-});
-
-describe('a finished AI review of your Limn retires once SEEN (S4)', () => {
-  const runsByPr = async (): Promise<Map<string, boolean>> => {
-    const rows = await q.getUnseenOwnAiReviews(1);
-    const live = new Set<number>(rows.map((r: any) => r.prId));
-    const out = new Map<string, boolean>();
-    for (const key of ['claude-fresh', 'claude-worked']) out.set(key, live.has(prIdByKey.get(key)!));
-    return out;
-  };
-
-  it('keeps a run you have not seen, though its findings were posted and you acted on the PR', async () => {
-    expect((await runsByPr()).get('claude-fresh')).toBe(true);
-  });
-
-  it('retires a run you saw, though a ticked finding is still unposted', async () => {
-    expect((await runsByPr()).get('claude-worked')).toBe(false);
   });
 });
 

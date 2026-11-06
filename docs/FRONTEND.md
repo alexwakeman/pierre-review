@@ -3127,7 +3127,7 @@ repository name written out in full on the left, a stacked bar per measure, ever
 
 The two FORWARD kinds (`merge`, `update_branch`) carry Merge · Merge-when-ready · Cancel · Update
 branch, and so does a Dependencies card whose PR is a dependency update, and a My Turn `own_ready`
-card (your ready PR, promoted in Settings → My Turn — the same row through `asForwardCard`).
+card (your ready PR, which My turn holds instead of Ready to land — the same row through `asForwardCard`).
 Nothing else does — a `my_turn` "review this" card gets no Merge button.
 
 ⚠ **A DEPENDENCIES CARD IS MINTED BY WHO OPENED THE PR, NOT BY ITS MERGE STATE**, so
@@ -3308,8 +3308,8 @@ nothing fetches on mount, and the Slack snapshot carries none of them (`buildPen
 ### The Pending tabs (`AttentionView.tsx`, `pendingTabs.ts`, `db/pending-tabs.ts`)
 
 Pending is eight tabs (`PENDING_TABS` in `packages/shared/src/pending-rules.ts`) — six scored ones and
-two unscored read-only ones (`pendingTabIsReference`): **My turn** (every My Turn type, the two AI
-review types — "New AI review", "Merged after approval" — included) ·
+two unscored read-only ones (`pendingTabIsReference`): **My turn** (a person is waiting on you —
+§ My turn's groups below) ·
 **AI reviews** (key `claude`, unscored: the newest AI review on each PR, yours and your teammates',
 newest first, up to 100 — § The AI reviews list) ·
 **Needs fixing** (CI failing, merge conflicts) · **Waiting on review** (stalled review, needs a
@@ -3317,11 +3317,9 @@ reviewer; review load as a "Reviews waiting on people" strip above the list, unr
 · **Unanswered threads** · **Ready to land** (ready to merge, behind trunk) · **Dependencies**
 (Security, Bumps). Each is a SCORED list — the server's order, highest Do next score first — and the
 first `PENDING_DO_NEXT_SIZE` (5) of whatever view is on screen sit under "Do next", the rest under
-"Everything else". ⚠ **My turn and Dependencies are STRICT-GROUP tabs**, whatever the scores: My
-turn lists its cards by type in the READER's order (`groupByReason`, Settings → My Turn), and
-Dependencies puts every security card before every bump (`groupByKind`); each group is scored
-within. There are no group headings — each card's type chip names its group, and "Do next" /
-"Everything else" stay the only dividers. A PR a dependency bot opened is listed ONLY in
+"Everything else". ⚠ **My turn and Dependencies are STRICT-GROUP tabs**, whatever the scores:
+Dependencies puts every security card before every bump (`groupByKind`), scored within, under the
+same two dividers; My turn is § My turn's groups below. A PR a dependency bot opened is listed ONLY in
 Dependencies (plus My turn for a direct summons); the server contract is [BACKEND.md](BACKEND.md)
 § The Dependencies tab, and My Turn's is § My Turn — the ball rule.
 
@@ -3342,8 +3340,8 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   (`aiReviewsStampToSend`); the refetch that follows carries exactly that stamp, so it sends nothing,
   and an empty list sends nothing. It refetches `['attention-cards']` only (the brief never counts
   these). Nothing is sent from another tab, or under the Automation lens (`ai_review` rows are always
-  the People side). ⌘K and the liveness sweep skip `ai_review` cards (and a merged
-  "Merged after approval" PR). The tab never keeps the board from reading as empty.
+  the People side). ⌘K and the liveness sweep skip `ai_review` cards. The tab never keeps the board
+  from reading as empty.
 - **Every My turn row has Dismiss** — a ✕ `IconButton` at the row's end (`dismissTargetOf`, the same
   per-PR dismissal as the panel's Dismiss and `e`), shown on hover or on the selected row with a
   pointer, always on touch; rendered only where it applies, never disabled; nothing fetches until it
@@ -3351,8 +3349,8 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
 - **The AI Review tab marks a run SEEN** (`hooks/useClaudeReviewSeen.ts`): while it has a finished,
   read (not a router skip) run whose `seenAt` is null, it posts `POST /api/prs/:id/claude-review/seen
   {reviewId}` once per run, writes `seenAt` into the cached review, and refetches the board, the
-  brief and My Turn — the "New AI review" My Turn card leaves. An older server (no `seenAt`) gets
-  nothing.
+  brief and My Turn. (It once retired a "New AI review" My Turn card; that type was removed
+  2026-11-06.) An older server (no `seenAt`) gets nothing.
 - **Every card leads with its type's mark** (`PendingCardIcon`, on `PrCardEventHeading`'s `icon`),
   every tab and kind chip with its own (`PendingTabIcon` / `PendingKindIcon`), and the guide's tab and
   My Turn tables carry them too. The marks are purpose-built `Pending*Icon`s in `Icons.tsx`; the maps
@@ -3365,6 +3363,17 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   has gaps) and says "Showing the top 50 of 176. The rest score lower." when it cuts — or, on a
   strict-group view (My turn, Dependencies with no chip), "Showing the first 50 of 65.", because
   there the cut is the LAST GROUPS, which can outscore what is shown (`capSentence`).
+- **My turn's groups** (`myTurnSections`, `pendingTabs.ts`; server: [BACKEND.md](BACKEND.md) § My
+  Turn). The server lists My turn by group (`myTurnGroupOf`), longest waiting first within each — not
+  by score — and `buildPendingView` gives it NO Do next (`doNextCount` 0). The SPA cuts the list
+  where the group changes and `AttentionCards` paints each as a `ListGroup` heading: **Waiting on
+  you**, **Re-review**, **Your PRs**, **New PRs** (only with the survey on), then **Older** — every
+  card whose clock is past `MY_TURN_OLDER_DAYS` (14), CLOSED by default behind an "Older (N)" toggle
+  (`data-testid="pending-my-turn-older"`); its rows are still counted and leave the key walk while
+  closed, and a ⌘K request for one opens it first. Empty groups are dropped.
+- **An empty My turn** says "Nothing is waiting on you." and, when Waiting on review holds
+  something, offers "N pull requests wait for a reviewer" — that tab's own badge figure
+  (`waitingForReviewerCount`), switching to it. Nothing fetches.
 - **Every view's count is its own population**: tab → `tab.total`, chip → `tab.kindTotals[kind]`,
   lens → `tab.relevanceTotals[lens]`, author lens → `tab.authorTotals` / `kindAuthorTotals[kind]` /
   `relevanceAuthorTotals[lens]`. `GET /api/daily-brief` returns the same figures (the banner and
@@ -3409,15 +3418,11 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
 - **Liveness** sweeps merge-state cards first (ready to merge, behind trunk, conflicts, every
   dependency update, which carries its own merge row, and a My Turn `own_ready` / `own_conflicts`
   card, which carries the same rows), then the view on screen, then the rest.
-- **The order is the READER's, and the response says which.** `GET /api/attention` carries
-  `rules` (`PendingRankRules`: the weights, their preset or `custom`, the My turn type order, the
-  types switched off) — what the server ranked THIS response with. Every explanation reads it:
-  `scoreBreakdown` multiplies by `rules.weights`, the header ⓘ adds "My turn groups its cards by
-  type first, in the order set in Settings." and, off Balanced, "Weights: <preset>.", and the guide
-  prints the reader's weights and "Switched off in Settings: …". `DO_NEXT_RULES.weights` is only the
-  fallback for a response predating `rules`. ⚠ **There is deliberately no "resolved settings" hook
-  for the board**: between a Settings save and the board's refetch the two differ, and an
-  explanation must describe the list on screen.
+- **The response says how it ranked.** `GET /api/attention` carries `rules` (`PendingRankRules`: the
+  fixed weights, the fixed My turn type order, the types not shown — the survey while it is off).
+  `scoreBreakdown` multiplies by `rules.weights`, so the working adds up to the score printed;
+  `DO_NEXT_RULES.weights` is only the fallback for a response predating `rules`. There are no
+  presets and no ranking settings.
 - **"Customise"** (My turn's Cards view only) opens Settings on its Pending tab, at the My Turn section
   (`useSettingsModal().openSettings('my-turn')`, `store/settingsModal.ts`). It sits at the right end
   of the controls row, after the People / Automation pills, inside ONE right-aligned wrapper — two
@@ -3427,7 +3432,7 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   (pinned in `pendingCardControls.test.ts`): `own_ready` → `PendingMergeActions` (`asForwardCard`),
   `own_conflicts` → `PendingConflictActions` (`asConflictsCard`), and `own_thread` a
   `BotVendorPill` when a bot opened the thread. Nothing new fetches on mount. The chip is
-  `myTurnReasonLabel` (fifteen short labels, `MY_TURN_REASON_LABEL`; a ready card says "Ready to
+  `myTurnReasonLabel` (twelve short labels, `MY_TURN_REASON_LABEL`; a ready card says "Ready to
   merge" or "Behind trunk"). ⚠ **The `my_turn` case is an EXHAUSTIVE inner `switch (card.reason)`
   ending in `never`**: the outer `default: return null` would hide a new type while the tab still
   counted it — how `my_turn` once shipped invisible. Every `my_turn` card names a PR (the
@@ -3501,9 +3506,8 @@ modal (tabs, inside a tab, the score, colours, when it is your turn).
 
 - ⚠ **EVERY NUMBER IN THE COPY IS READ FROM `pending-rules.ts`** — the table `db/queries.ts`
   (admission floors, caps, colour thresholds, My Turn section colours) and `db/work-plan.ts` (bases
-  incl. the board-only `conflicts` base, adjustments, stall buckets, the weight presets) fold with.
-  Retune THERE. The one exception is the weights themselves, which are the reader's and come from
-  the response's `rules`.
+  incl. the board-only `conflicts` base, adjustments, stall buckets, the fixed weights) fold with.
+  Retune THERE. The weights printed come from the response's `rules` (the same fixed values).
 - **The per-card working rides `GET /api/attention` as `scores`**, off the same pass that ordered the
   tabs. Nothing on the client may sort or filter by it.
 - ⚠ **NOTHING FETCHES, AND IT IS A CLICK, NEVER A HOVER.** The popover is a `FloatingPortal` carrying
@@ -3607,7 +3611,7 @@ Every Pending card, on all seven tabs, reads top to bottom in one order, everyth
    quote-reply lines stripped, cut at ~120 chars on a word boundary), the time ONCE at the end.
    ⚠ NO CSS line clamp — it hid the age whenever the heading wrapped to a third line; the quote's
    character cap is the bound, and it is what `replyBlockShown` reads.
-2. **The action line — what to do, and where.** `[In your repos] [muted]` **verb** · where (path,
+2. **The action line — what to do, and where.** `[In your repos]` **verb** · where (path,
    sha) · on <PR title> (a button → Overview) · `repo#N` (org dropped when every card on the board
    shares it) · ↗ · ⓘ. Inside My turn "Your turn" is NOT printed (the tab says it); "In your repos"
    and the neutral label stay, and an ABSENT `relevance` is neutral.
@@ -4504,51 +4508,29 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
   account's Default.
 - ⚠ **The HEADING renders on the scope alone** and no section waits on a request it does not read.
 
-### `MyTurnSection` — Settings → My Turn
+### `MyTurnSection` — Settings → Pending → My Turn
 
-What counts as your turn, the order My turn lists the types in, and the Do next weights every
-Pending tab ranks by. ACCOUNT-grained (one account is one reader, every workspace), carried RAW by
-`/api/me` (`myTurnSettings`), so it sits in the global half above the `pro_settings` gate like its
-two neighbours. One Save for the section. The server contract is [BACKEND.md](BACKEND.md) § My Turn
-— Settings: gates and promotions; the route is `PUT /api/me/my-turn-settings`.
+ONE checkbox, **"Also show new PRs nobody asked you about"** (hint: "Open PRs in your repositories
+that nobody asked you about."), with an ⓘ that says what My turn shows (the three groups, Older after
+`MY_TURN_OLDER_DAYS` days, drafts never, muted repositories never). ACCOUNT-grained, carried RESOLVED
+by `/api/me` (`myTurnSettings: { showNewPrs }`). The switch saves on change
+(`PUT /api/me/my-turn-settings`, `useSetMyTurnSettings`); there is nothing else on the section to
+batch it with. The server contract is [BACKEND.md](BACKEND.md) § My Turn — The fixed shape and the
+one switch. The type switches, the type order, the ranking presets and sliders and Reset were
+removed 2026-11-06 (with `myTurnSettingsForm.ts`' form logic; the file keeps only `WEIGHT_LABEL` /
+`weightPhrase`, the explanations' one spelling of the weights).
 
-- **Four parts**: "Show in My Turn" (a checkbox per summons type, each with a one-line hint;
-  "New AI reviews by your Limn" and "Merged after your Limn approved" only where `me.ai.enabled`),
-  "Add to My Turn" (the four own-work promotions),
-  "Order of My turn" (an ordered list with up / down buttons) and "How Pending ranks cards" (preset
-  pills, three range sliders, Reset). Type names come from the shared `MY_TURN_SETTING_LABEL`, the
-  one spelling Settings, the CLI and the guide use. The copy says "Show in My Turn", never "mute":
-  the Pending mute is a different control that KEEPS a card.
-- **Pure form logic in `myTurnSettingsForm.ts`**, pinned by `test/myTurnSettingsForm.test.ts` (the
-  `flowSettingsForm.ts` pattern). The body is built with the shared `compactMyTurnSettings`, so a
-  Save of untouched defaults sends `null` and nothing is frozen into the account; "unsaved changes"
-  compares two compactions. The form re-seeds only when the STORED value changes (keyed on its
-  compaction), never on a refetch that would throw away a half-made edit. Errors are the shared
-  validator's sentence, shown before the request is sent.
-- ⚠ **The weights are whole tens that add up to 100**, because every Do next part is a multiple of
-  0.05 and the info popover's working must add up to the score. Moving one slider re-shares the rest
-  between the other two in proportion (`rebalanceWeights`), and ALWAYS from the weights the slide
-  STARTED from (`slideWeight`) — re-sharing already-rounded weights drifted 50/30/20 → 80 → back to
-  50/40/10 and flipped the preset to Custom. A slide continues only while the same slider moves and
-  the weights are still what it last produced; a preset, Reset, another slider or a re-seed starts a
-  new one. The preset is DERIVED from the weights (`presetOf`), never stored; a "Custom" pill appears
-  only when the sliders match no preset, and cannot be clicked. Reset restores the order and the weights and leaves the switches alone.
-- **Reordering is buttons, not drag** — keyboard- and touch-native, no dependency. A hidden type
-  (Claude reviews where agentic AI is off) keeps its place and a move steps over it. After a move,
-  focus returns to the same button of the moved row (or its other button at an end), and a
-  visually hidden `aria-live` line says where it went ("“@mentions of you” moved to 1 of 15"),
-  counting only the rows on screen.
 - **Opening straight to it**: `store/settingsModal.ts` (zustand, not persisted, not in the URL)
   holds the modal's open state and a `focus`, so Pending's "Customise" can open it from deep in the
   Activity console. With `focus: 'my-turn'` the modal opens on the Pending tab, scrolls the
-  section's heading into view and focuses it, one frame after mount. ⚠ `closeSettings` is a store action, so it is referentially
+  section's heading (`MY_TURN_SECTION_HEADING_ID`, through `SectionShell`'s `headingId`) into view
+  and focuses it, one frame after mount. ⚠ `closeSettings` is a store action, so it is referentially
   stable and SettingsModal's capture-phase Escape handler registers once — never pass an inline
   arrow.
-- **One save moves five reads, together** (`useSetMyTurnSettings`): `['me']` (seeded at once from
+- **One save moves four reads, together** (`useSetMyTurnSettings`): `['me']` (seeded at once from
   what the server stored), `['my-turn']`, and the two board keys `['attention-cards']`,
-  `['daily-brief']`. The notification watcher then RE-BASELINES on the new
-  `configKey` rather than announcing the backlog of a type just switched on (§ Per-workspace "My
-  Turn" below).
+  `['daily-brief']`. The notification watcher then RE-BASELINES on the new `configKey` rather than
+  announcing the survey's backlog (§ Per-workspace "My Turn" below).
 
 ### `PendingMuteSection` — the Pending mute (CORE)
 
@@ -4557,12 +4539,10 @@ One workspace switch plus a checkbox list of that workspace's repositories, one 
 (`pendingMuted` + `mutedRepoIds`), so there is no GET and the existing `['workspaces']` query is
 the source.
 
-- ⚠ **IT MUTES NOTHING ON SCREEN, AND THE COPY LEADS WITH THAT.** A muted repo's items STAY on the
-  Pending board and in the broad `myTurn` count; what stops is the ownership claim — the server
-  downgrades those rows to `relevance: 'none'`, so `cardKindLabel` prints the neutral
-  "Review or reply", the browser notification stops firing and every `myTurnPersonal` figure drops
-  them into the "review or reply" line. A reader who thinks this HIDES work will not use it, and
-  hiding work would be the different, worse feature the board's broad-population rule forbids.
+- **A MUTED REPOSITORY LEAVES MY TURN** (since 2026-11-06): its rows are dropped from `getMyTurn`'s
+  seeds, so they never appear in My turn, never count and never notify. The other tabs are not
+  affected (your own red build in a muted repo goes back to Needs fixing). The ⓘ says: “Muted
+  repositories never appear in My turn and never notify you.”
 - ⚠ **THE TWO CONTROLS ARE A UNION, NOT A PARENT AND A CHILD.** A repo is muted when the workspace
   switch OR its own checkbox says so. The checkboxes therefore stay ENABLED and keep their values
   while the workspace switch is on (a note says they are already covered) — disabling or clearing
@@ -4577,10 +4557,6 @@ the source.
 - The mutation reuses `useWorkspaceMutations`' shared invalidation set: `['my-turn']` (the
   account-wide inbox the notification watcher reads) plus `['attention-cards']` / `['daily-brief']`,
   the two reads of the one fold whose whole contract is that they agree.
-- On the board, a muted `my_turn` card carries a `muted` chip beside its label
-  (`AttentionCards.tsx`). ⚠ **DISPLAY ONLY — no counter, lens or ranker reads it**; they all read
-  `relevance`, which has already absorbed the mute. It exists so a card the reader last saw as
-  theirs does not silently demote itself with no explanation.
 - **Deleted, and neither returns:** `AnthropicKeySection` (the stored BYO key is retired — local
   Claude Review is an ambient Claude session, else `ANTHROPIC_API_KEY`; the routes and the three
   `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
@@ -5114,13 +5090,12 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   consume a real diff and swallow the notification.
   ⚠ It fires **only for `personal !== false` rows** (an OS banner is the most interrupting surface
   there is), but the **baseline still tracks EVERY id** — dropping the others would re-diff them
-  as new on every poll, and a row that later becomes personal (its repo is un-muted) would fire as
-  if it had just appeared.
+  as new on every poll, and a row that later becomes personal would fire as if it had just appeared.
   ⚠ **It RE-BASELINES, WITHOUT FIRING, when `configKey` changes** — which it does exactly when WHICH
-  types are shown changes (Settings → My Turn), never for a new order or new weights. Otherwise
-  switching on "Unanswered threads on your PRs" would announce every existing one at once. Each
-  section has its own id prefix and sentence bit (`mention:`, `treply:`, `creply:`, `push:`, `ci:`,
-  `conflict:`, `land:`, `othread:`, `trunk:`, beside the older one-letter `r:`/`t:`/`p:`/`a:`/`w:`);
+  types are shown changes (the survey switch, Settings → Pending). Otherwise switching on "Also show
+  new PRs nobody asked you about" would announce every existing one at once. Each section has its own
+  id prefix and sentence bit (`mention:`, `treply:`, `creply:`, `push:`, `ci:`, `conflict:`, `land:`,
+  `othread:`, beside the older one-letter `r:`/`t:`/`a:`/`w:`);
   every prefix is a word, so `startsWith('p:')` never matches `push:`. `w:` now counts untouched New
   PRs only.
 
@@ -5148,16 +5123,9 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
   reads them) but the banner no longer does.
 - The dropdown badge keeps the summed figure and carries the split in its **tooltip only**, where
   it costs no layout.
-- ⚠ **`relevance` IS ALSO THE CARRIER OF THE PENDING MUTE.** Muting a workspace or a repo
-  (Settings → Workspace → Pending mute) forces every one of its my-turn rows to `'none'` inside
-  `getMyTurn`, so all of the above follows with no client change: the card relabels to the neutral
-  string, the row leaves "Only yours", the
-  banner split and the dropdown badges drop it, and `useMyTurnNotifications` stops firing for it.
-  Nothing on the client tests for a mute. The one visible addition is a `muted` chip on the card —
-  **DISPLAY ONLY**, off `MyTurnCard.muted`, so a card the reader last saw as theirs does not demote
-  itself with no explanation. ⚠ **No counter, lens, cap disclosure or ranker may read that field**;
-  a second classifier beside `relevance` is exactly the drift the single server-side fold exists to
-  prevent.
+- **The Pending mute no longer rides `relevance`** (2026-11-06): a muted repository's rows are
+  dropped from `getMyTurn`'s seeds, so they leave My turn, every count and the notifications at
+  once, with no client change. Nothing on the client tests for a mute; `MyTurnCard.muted` is gone.
 
 ## `ci_failing` — the red-build card, and the two SILENT lists a new InsightKind must reach
 
@@ -6019,7 +5987,7 @@ picks the first row, and Enter/a/m/e act only on a selection.
 `AttentionView.tsx` is one page header (title + ⓘ), the shared `Tabs` (`1`–`7`) drawn as PR
 detail's BUTTON tabs (`variant="boxed"`, same strip classes and 14px icons, no icon colour of
 its own — `test/pendingTabStrip.test.ts`), on My turn ONE visible sentence ("Pull requests where
-the next move is yours."; the rest stays behind the ⓘ), the controls row, then `AttentionCards` — now a
+a person is waiting on you."; the rest stays behind the ⓘ), the controls row, then `AttentionCards` — now a
 `List` of one-line rows (`pendingRow.ts`: tone mark, reason, title + repo#N, size,
 author, age) beside a `SidePanel` that renders the WHOLE card (`PendingCard`): heading, action
 line, content, fact line, AI line, Details, and every button in the footer. Nothing was

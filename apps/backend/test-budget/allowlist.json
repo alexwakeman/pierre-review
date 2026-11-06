@@ -1,11 +1,6 @@
 {
   "$comment": "Fast-project files allowed over the time budget (test-budget/reporter.ts, docs/TESTING.md § The time budget). Each entry RAISES the budget for one file (testMs: any one test; fileMs: the file's run time) and says why; never unlimited, so an exempt file still cannot quietly get slower. Budgets are about twice what the file measured on 2026-10-30 (12-core macOS, load average ~30). None of these spawns a process: each is in-process work, slow for the reason given, so it stays in `fast` and is a candidate to make quicker. Remove an entry once its file fits the default budget (the reporter says so).",
   "files": {
-    "src/db/my-turn-settings.test.ts": {
-      "testMs": 20000,
-      "fileMs": 40000,
-      "reason": "Exhaustive by design: every combination of the four promotion switches and three trunk scopes (48), two board folds each, and a full fold plus the daily brief per switched-off type. Measured 9.8s for the sweep, 20.9s for the file."
-    },
     "src/platform/test/benchmark-rollup.test.ts": {
       "testMs": 20000,
       "fileMs": 20000,

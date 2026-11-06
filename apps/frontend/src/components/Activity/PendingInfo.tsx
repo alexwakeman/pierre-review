@@ -11,8 +11,10 @@ import {
 import { usePlacedFloating } from '../ui/floating.js';
 import {
   DO_NEXT_RULES,
-  MY_TURN_DEFAULT_ORDER,
-  MY_TURN_SETTING_LABEL,
+  MY_TURN_GROUP_LABEL,
+  MY_TURN_GROUP_OF,
+  MY_TURN_OLDER_DAYS,
+  MY_TURN_ORDER,
   MY_TURN_SEVERITY,
   PENDING_DO_NEXT_SIZE,
   PENDING_LIMITS,
@@ -33,7 +35,6 @@ import {
   RELEVANCE_PHRASE,
   SEVERITY_WORD,
   adjustmentLabel,
-  weightsName,
   type CardExplanation,
   type PendingBoardState,
 } from './pendingExplain.js';
@@ -50,9 +51,8 @@ import { WEIGHT_LABEL, weightPhrase } from '../settings/myTurnSettingsForm.js';
 // folds with. The board forbids fetch-on-mount (fifty cards) and a popover that fetched on OPEN
 // would still be a request per curious click for data the page already holds.
 //
-// ⚠ THE WEIGHTS AND THE MY TURN ORDER ARE THE READER'S, FROM THE RESPONSE (`rules`). Settings → My
-// Turn changes both, so quoting `DO_NEXT_RULES.weights` would describe somebody else's board. The
-// constant is the fallback for a response that predates `rules` — which was ranked by exactly it.
+// The weights are fixed; they are read from the response's `rules` (the constant is the fallback
+// for a response that predates it), so the guide prints what the server scored with.
 //
 // ⚠ A CLICK, NEVER A HOVER. A `title=` tooltip cannot be reached by touch or keyboard, and this is
 // the explanation of the whole screen. The button is a real <button>; the popover is dismissed by
@@ -189,16 +189,17 @@ export function PendingOrderInfo({
             security first.
           </p>
           <p className="mt-1.5">
-            Each tab lists its cards by score, highest first. The score weighs{' '}
+            My turn lists what a person is waiting on you for: Waiting on you, then Re-review, then
+            Your PRs, longest waiting first. Anything older than {MY_TURN_OLDER_DAYS} days is under
+            Older.
+          </p>
+          <p className="mt-1.5">
+            Every other tab lists its cards by score, highest first. The score weighs{' '}
             {weightPhrase('proximity')} ({Math.round(w.proximity * 100)}%), {weightPhrase('stall')} (
             {Math.round(w.stall * 100)}%) and {weightPhrase('relevance')} (
             {Math.round(w.relevance * 100)}%). The top{' '}
             {PENDING_DO_NEXT_SIZE} are <span className="font-semibold">Do next</span>.
-            {rules != null && rules.preset !== 'balanced' && ` Weights: ${weightsName(rules.preset)}.`}
           </p>
-          {rules != null && (
-            <p className="mt-1.5">My turn groups its cards by type first, in the order set in Settings.</p>
-          )}
           <p className="mt-1.5">
             The{' '}
             <InfoIcon size={12} title="info" className="inline-block align-[-0.15em]" /> button on a
@@ -366,7 +367,7 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     goes: 'You reply, or the thread is resolved.',
   },
   comment_reply: {
-    appears: 'Someone comments on a PR after your last comment there.',
+    appears: 'Someone comments on a PR after your last comment or review there.',
     goes: 'You review, comment or push on it.',
   },
   pushed_since: {
@@ -374,11 +375,11 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     goes: 'You review, comment or push.',
   },
   own_ci_red: {
-    appears: 'The latest build on your open PR failed. Only if added in Settings.',
+    appears: 'The latest build on your open PR failed.',
     goes: 'The build passes.',
   },
   own_conflicts: {
-    appears: 'Your PR conflicts with its base. Only if added in Settings.',
+    appears: 'Your PR conflicts with its base.',
     goes: 'The conflict is resolved.',
   },
   pr_approved: {
@@ -386,28 +387,16 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     goes: 'It is merged or closed.',
   },
   own_ready: {
-    appears: 'GitHub will merge your PR, or wants the branch updated. Only if added in Settings.',
+    appears: 'GitHub will merge your PR, or wants the branch updated.',
     goes: 'It merges, or stops being ready.',
   },
-  your_pr: {
-    appears: 'Your PR has new commits, comments or reviews since you last opened it here.',
-    goes: 'You open it.',
-  },
   own_thread: {
-    appears: `A review comment on your PR has had no reply for ${hoursPhrase(PENDING_LIMITS.untouchedThreadMinHours)}. Only if added in Settings.`,
+    appears: `A review comment on your PR has had no reply for ${hoursPhrase(PENDING_LIMITS.untouchedThreadMinHours)}.`,
     goes: 'Someone replies or pushes to its file.',
-  },
-  claude_review: {
-    appears: 'Your Limn finished an AI review you have not read yet.',
-    goes: 'You open the PR’s AI Review tab, or dismiss it.',
-  },
-  ai_approved_merged: {
-    appears: 'A PR your Limn approved has merged.',
-    goes: 'You open the PR, or dismiss it.',
   },
   watched_repo_pr: {
     appears:
-      'Someone else’s PR you have not touched, opened since the repo was added. Off unless turned on.',
+      'Someone else’s PR you have not touched, opened since the repo was added. Only with “Also show new PRs nobody asked you about” on.',
     goes: 'You review, comment or push.',
   },
 };
@@ -439,10 +428,10 @@ export function PendingGuideModal({
   }, [onClose]);
 
   const R = DO_NEXT_RULES;
-  // The reader's weights and type order, as the server ranked this board — never the constants.
+  // The weights the server scored this board with (fixed; the constant for an older response).
   const weights = rules?.weights ?? R.weights;
-  const myTurnOrder = rules?.myTurnOrder ?? MY_TURN_DEFAULT_ORDER;
-  const switchedOff = rules?.myTurnOff ?? [];
+  const switchedOff = new Set(rules?.myTurnOff ?? ['watched_repo_pr']);
+  const myTurnOrder = MY_TURN_ORDER.filter((r) => !switchedOff.has(r));
   const pct = (n: number): string => `${Math.round(n * 100)}%`;
   const bases = (Object.keys(R.proximity) as (keyof typeof R.proximity)[])
     .slice()
@@ -527,22 +516,26 @@ export function PendingGuideModal({
 
           <GuideSection title="Inside a tab">
             <p>
-              Cards are listed by score, highest first, except in two tabs that list in groups
-              first. The top {PENDING_DO_NEXT_SIZE} are <strong>Do next</strong>; the rest are{' '}
-              <strong>Everything else</strong>.
+              Cards are listed by score, highest first, except in {TAB_LABEL.my_turn} and{' '}
+              {TAB_LABEL.deps}. The top {PENDING_DO_NEXT_SIZE} are <strong>Do next</strong>; the rest
+              are <strong>Everything else</strong>.
             </p>
             <p>
-              {TAB_LABEL.my_turn} groups its cards by type, in the order set in Settings → My Turn.{' '}
-              {TAB_LABEL.deps} puts every security item before every bump. Inside each group, cards
-              are listed by score. A PR a dependency bot opened is listed only in {TAB_LABEL.deps},
-              unless it is also your turn on it in {TAB_LABEL.my_turn}.
+              {TAB_LABEL.my_turn} is not scored. It has fixed groups — {MY_TURN_GROUP_LABEL.waiting},{' '}
+              {MY_TURN_GROUP_LABEL.rereview}, {MY_TURN_GROUP_LABEL.yours} — with the longest waiting
+              first in each. A card older than {MY_TURN_OLDER_DAYS} days moves to a closed{' '}
+              {MY_TURN_GROUP_LABEL.older} group at the end, and still counts. {TAB_LABEL.deps} puts
+              every security item before every bump, by score inside each. A PR a dependency bot
+              opened is listed only in {TAB_LABEL.deps}, unless it is also your turn on it in{' '}
+              {TAB_LABEL.my_turn}.
             </p>
             <p>
               A card is only compared with the cards in its own tab. So a PR with two jobs appears
               twice, once in each job’s tab — a PR you were asked to review is in {TAB_LABEL.my_turn}{' '}
               (“{MY_TURN_REASON_LABEL.review_request}”) and, if a thread on it is unanswered, in{' '}
-              {TAB_LABEL.threads}. A type added under Settings → My Turn → Add to My Turn moves into{' '}
-              {TAB_LABEL.my_turn} instead, so it is listed once.
+              {TAB_LABEL.threads}. Your own PR’s failing build, conflict, readiness to land and
+              unanswered threads are listed in {TAB_LABEL.my_turn} instead of their own tab, so
+              each is listed once.
             </p>
           </GuideSection>
 
@@ -580,14 +573,6 @@ export function PendingGuideModal({
                 </tr>
               </tbody>
             </table>
-            {rules != null && rules.preset !== 'balanced' && (
-              <p>
-                {rules.preset === 'custom'
-                  ? 'These are your own weights.'
-                  : `These are your weights (${weightsName(rules.preset)}).`}{' '}
-                Change them in Settings → My Turn.
-              </p>
-            )}
             <p>
               Cards in one tab usually share their next step, so the order mostly comes down to how
               long each has waited and how small the change is.
@@ -729,9 +714,9 @@ export function PendingGuideModal({
 
           <GuideSection title="When it is your turn">
             <p>
-              A My turn card means you owe an action. These put one on the board, in the order My
-              turn groups them. Every card has Dismiss: it sets the card down until something new
-              happens on its PR.
+              A My turn card means a person is waiting on you. These put one on the board, in the
+              order My turn lists them. Draft PRs never do. Every card has Dismiss: it sets the
+              card down until something new happens on its PR.
             </p>
             <table className="w-full border-collapse text-body">
               <thead>
@@ -750,6 +735,9 @@ export function PendingGuideModal({
                         <PendingReasonIcon reason={reason} className="shrink-0 text-ui-mute" />
                         {MY_TURN_REASON_LABEL[reason]}
                       </span>
+                      <span className="block text-meta font-normal text-ui-mute">
+                        {MY_TURN_GROUP_LABEL[MY_TURN_GROUP_OF[reason]]}
+                      </span>
                     </td>
                     <td className={td}>{MY_TURN_GUIDE[reason].appears}</td>
                     <td className={td}>{MY_TURN_GUIDE[reason].goes}</td>
@@ -760,23 +748,22 @@ export function PendingGuideModal({
                 ))}
               </tbody>
             </table>
-            {switchedOff.length > 0 && (
+            {switchedOff.has('watched_repo_pr') && (
               <p>
-                Switched off in Settings:{' '}
-                {switchedOff.map((r) => MY_TURN_SETTING_LABEL[r]).join(', ')}.
+                “{MY_TURN_REASON_LABEL.watched_repo_pr}” shows only with “Also show new PRs nobody
+                asked you about” on, in Settings → Pending.
               </p>
             )}
             <p>
-              Only real actions count: a review, a comment or a commit. Viewing a PR does not, except
-              for “{MY_TURN_REASON_LABEL.your_pr}”. Bot comments and bot pushes never make it your
-              turn again.
+              Only real actions count: a review, a comment or a commit. Viewing a PR does not. Bot
+              comments and bot pushes never make it your turn again.
             </p>
             <p>
               The label on a card says how it relates to you. <strong>Your turn</strong>: it names
-              you — you were asked, mentioned or answered, it is your PR or thread, or you added its
-              type in Settings. <strong>In your repos</strong>: a new PR in a repo you can push to or
-              have merged a PR into. <strong>Review or reply</strong>: neither. Muting a repo in
-              Settings keeps its cards on the board but stops them claiming your turn.
+              you — you were asked, mentioned or answered, or it is your PR or thread.{' '}
+              <strong>In your repos</strong>: a new PR in a repo you can push to or have merged a PR
+              into. <strong>Review or reply</strong>: neither. A muted repository’s cards never
+              appear in {TAB_LABEL.my_turn} and never notify you.
             </p>
           </GuideSection>
         </div>

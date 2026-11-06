@@ -325,6 +325,11 @@ beforeAll(async () => {
   await log(green, writable, 'h-gn', 'success', [], now - HOUR);
 
   scope = await q.resolveWorkspaceScope(1, null);
+  // ⚠ MY TURN TAKES THE VIEWER'S OWN RED BUILD (`own_ci_red`, always on); this file pins the
+  // 'your_pr' ci_failing card, built only where My Turn does not hold it. Muting the workspace for
+  // Pending removes My Turn's rows and leaves the other tabs as they are.
+  const mute = await import('./pending-mute.js');
+  await mute.setWorkspacePendingMute(1, scope.workspaceId, { muted: true });
 });
 
 afterAll(async () => {

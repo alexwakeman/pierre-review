@@ -66,7 +66,7 @@ import type {
   ClaudeTicketAssessment,
   FlowSettings,
   Label,
-  MyTurnSettings,
+  StoredMyTurnSettings,
   ReviewRouteReason,
   StoredPrFile,
   StoredTicketPrCard,
@@ -142,9 +142,8 @@ export const accounts = sqliteTable('accounts', {
   // a positive integer the user typed (the route rejects anything else), so a reader that sees
   // null knows the user never expressed an opinion, rather than guessing at a sentinel.
   largePrCodeLocThreshold: integer('large_pr_code_loc_threshold'),
-  // MY TURN "Merged after your Limn approved" starts HERE, never retrospectively: only merges at or
-  // after this moment make a card. Migration 0169 stamps existing accounts with the upgrade time;
-  // NULL (an account created later) reads as the account's own `createdAt`.
+  // DORMANT since 2026-11-06: the My Turn "Merged after your Limn approved" type it gated was
+  // removed. Nothing reads or writes it; kept, never dropped.
   approvedMergedSince: integer('approved_merged_since', { mode: 'timestamp' }),
   // BLAST RADIUS reading settings: `{sensitivity, surfacesOff[], overrides?}` — the dial, the
   // per-account surface opt-out, and (stored, honoured, no UI in v1) numeric overrides. Same
@@ -157,11 +156,11 @@ export const accounts = sqliteTable('accounts', {
   // table across three dial positions and `shared` is types-only on this side (PACKAGING), so
   // the SPA resolves — `/api/me` echoes this column RAW, nulls and all.
   blastRadiusConfig: text('blast_radius_config', { mode: 'json' }).$type<BlastRadiusConfig>(),
-  // MY TURN settings — which card types show, their order, and the Do next weights. OVERRIDES
-  // ONLY, NULL = the product defaults. One writer (PUT /api/me/my-turn-settings, which compacts
-  // before storing), resolved by packages/shared `resolveMyTurnSettings`. ACCOUNT grain: one
-  // account = one reader.
-  myTurnSettings: text('my_turn_settings', { mode: 'json' }).$type<MyTurnSettings>(),
+  // MY TURN settings — the one switch, "Also show new PRs nobody asked you about", stored as
+  // `{ show: { watched_repo_pr: true } }` when on and NULL when off. An older blob (type switches,
+  // an order, weights) is IGNORED on read, never migrated. One writer (PUT
+  // /api/me/my-turn-settings), resolved by packages/shared `resolveMyTurnSettings`. ACCOUNT grain.
+  myTurnSettings: text('my_turn_settings', { mode: 'json' }).$type<StoredMyTurnSettings>(),
   // THE CLAUDE SPEND BUDGET (packages/shared ai-budget.ts, ai/budget.ts). ACCOUNT grain = one per
   // machine: the Claude login / API key it guards is the machine's, never a workspace's. NULL =
   // never set (off, the SPA suggests the defaults). One writer: PUT /api/ai/budget (validated).
@@ -1370,9 +1369,8 @@ export const claudeReviews = sqliteTable(
     // no earlier review with findings to check.
     followUp: text('follow_up', { mode: 'json' }).$type<ClaudeReviewFollowUpRecord>(),
     // WHO STARTED THE RUN: 'manual' (a click) or 'auto' (the Pro per-workspace auto-review sweeper,
-    // for a newly opened human PR). Core because `getUnseenOwnAiReviews` carries it to the My
-    // Turn card's "Auto review" label (an auto run is owned like a manual one). Migration 0071
-    // (pg 0058); existing rows are 'manual'.
+    // for a newly opened human PR). Core because the AI reviews tab labels an auto run (an auto
+    // run is owned like a manual one). Migration 0071 (pg 0058); existing rows are 'manual'.
     trigger: text('trigger', { enum: ['manual', 'auto'] }).notNull().default('manual'),
     // Every OTHER open review thread on the PR (people and other review bots — never Limn's own
     // posted findings, which the follow-up covers) and what the run found: is the comment right,

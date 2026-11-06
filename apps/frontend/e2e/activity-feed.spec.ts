@@ -86,7 +86,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // Unknown is never zero: the badges wait, and the board does not say My turn is empty.
     const myTurn = board.getByRole('tab', { name: /My turn/ });
     await expect(myTurn).toContainText('…');
-    await expect(board.getByText('Nothing is your turn right now.')).toHaveCount(0);
+    await expect(board.getByText('Nothing is waiting on you.')).toHaveCount(0);
     release();
     await expect(myTurn).not.toContainText('…');
   });

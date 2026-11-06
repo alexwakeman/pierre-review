@@ -8,11 +8,9 @@ import type {
   MyLastAction,
   MyTurnCard,
   PrAutomation,
-  ClaudeReviewVerdict,
 } from '@pierre-review/shared';
 import { stillOpenLabel } from '@pierre-review/shared';
 import { automatedReviewerMeta } from './ui.js';
-import { CLAUDE_VERDICT_LABEL } from './claudeReviewColumn.js';
 import { waitingHeading } from './reviewWaits.js';
 import {
   cardKindLabel,
@@ -25,7 +23,7 @@ import {
 //   1. THE HEADING — what happened, who did it, the quote when there is one, and the time ONCE:
 //        David Buckley replied: "that probably makes sense…" · 2d
 //   2. THE ACTION LINE — what to do and where:
-//        [In your repos] [muted] Reply or resolve · your comment on app/x.ts · on <PR title> · repo#352
+//        [In your repos] Reply or resolve · your comment on app/x.ts · on <PR title> · repo#352
 //
 // ⚠ PURE AND FED ONLY THE CARD. Nothing here fetches, and nothing reads a store: the board may not
 // fetch on mount, and a heading that needed a request would be a heading that flickers.
@@ -37,7 +35,7 @@ import {
 // fact out — never printed whole, because it carries an @login and a second clock.
 //
 // ⚠ ABSENT IS "NOT KNOWN". Every optional heading fact (`mentionExcerpt`, `threadPath`,
-// `committerId`, `firstComment`, `newActorIds`, `requesterId`) drops the clause that needed it. Nothing prints a
+// `committerId`, `firstComment`, `requesterId`) drops the clause that needed it. Nothing prints a
 // placeholder, and a missing actor reads "Someone", never "user 12" and never an @login.
 //
 // ⚠ A REPO-GRAINED CARD IS NOT A PR. A red default branch (`ci_failing`'s trunk arm)
@@ -96,8 +94,6 @@ export interface ActionClause {
 export interface PendingActionLine {
   /** "In your repos" / the neutral kind label / "Your turn" outside My turn; null for none. */
   label: string | null;
-  /** The repo is muted for Pending: one grey word. Display only. */
-  muted: boolean;
   /** The bold action verb ("Reply or resolve"). null on a card with nothing to do (review load). */
   verb: string | null;
   /** Clauses after the verb, before the PR, each separated by "·". */
@@ -299,20 +295,6 @@ function trunkBranch(detail: string): string | null {
 function alsoRequested(detail: string): number {
   const m = /· (\d+) other reviewers? also requested/.exec(detail);
   return m == null ? 0 : Number(m[1]);
-}
-
-/** The verdict a "Claude review ready · COMMENT · head moved since" sentence names. */
-function claudeVerdictOf(detail: string): string | null {
-  const parts = detail.split(' · ').slice(1);
-  const v = parts.find((p) => p !== 'head moved since');
-  if (v == null) return null;
-  return CLAUDE_VERDICT_LABEL[v as ClaudeReviewVerdict] ?? v;
-}
-
-/** "3 new comments · 1 new review · 2 new commits" → "3 new comments, 1 new review and 2 new commits". */
-function joinSummary(summary: string): string {
-  const parts = summary.split(' · ').map((s) => s.trim()).filter((s) => s !== '');
-  return joinNames(parts);
 }
 
 /**
@@ -578,10 +560,6 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
     }
     case 'watched_repo_pr':
       return plain(`${authorName(card, ctx.nameOf) ?? SOMEONE} opened a new PR`, card.since);
-    case 'your_pr': {
-      const what = joinSummary(card.detail);
-      return plain(what !== '' ? `${what} on your PR` : 'New activity on your PR', card.since);
-    }
     case 'pr_approved': {
       const approvers = card.reviewers
         .filter((r) => r.standing === 'approved')
@@ -630,19 +608,6 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
         card.since,
       );
     }
-    case 'claude_review': {
-      const verdict = claudeVerdictOf(card.detail);
-      const auto = card.trigger === 'auto';
-      const lead =
-        verdict != null
-          ? `${auto ? 'Auto review' : 'AI review'}: ${verdict}`
-          : auto
-            ? 'Auto review finished'
-            : 'AI review finished';
-      return plain(lead, card.since);
-    }
-    case 'ai_approved_merged':
-      return plain('Merged after your Limn approved it', card.since);
     default: {
       const _x: never = card.reason;
       return plain(card.detail, card.since);
@@ -686,7 +651,6 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
   const now = ctx.now ?? Date.now();
   const base: PendingActionLine = {
     label: null,
-    muted: false,
     verb: null,
     where: [],
     showTitle: true,
@@ -706,8 +670,7 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
   switch (card.kind) {
     case 'my_turn': {
       const label = pendingRelevanceLabel(card, ctx.tab);
-      const muted = card.muted === true;
-      const line = { ...base, label, muted };
+      const line = { ...base, label };
       const path = threadPathOf(card);
       const pathClause = (prefix: string): ActionClause[] =>
         path != null
@@ -743,13 +706,6 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
           return { ...line, verb: 'Re-review the new commits' };
         case 'watched_repo_pr':
           return { ...line, verb: 'Take a first look', titleOn: false };
-        case 'your_pr': {
-          const ids = card.newActorIds ?? [];
-          const names = ids.map((id) => ctx.nameOf(id)).filter((n): n is string => n != null);
-          const from =
-            names.length > 0 ? [{ text: `from ${joinNames(names, card.newActorTotal ?? names.length)}` }] : [];
-          return { ...line, verb: 'Read what’s new', where: [...from, { text: 'clears when you open it' }] };
-        }
         case 'pr_approved':
           return { ...line, verb: 'Open to merge' };
         case 'own_ready': {
@@ -768,14 +724,6 @@ export function pendingActionLine(card: InsightCard, ctx: HeadingContext): Pendi
           return { ...line, verb: 'Fix the build' };
         case 'own_thread':
           return { ...line, verb: 'Reply on your PR' };
-        case 'claude_review':
-          return {
-            ...line,
-            verb: 'Read the review',
-            where: card.detail.includes('head moved since') ? [{ text: 'new commits since this review' }] : [],
-          };
-        case 'ai_approved_merged':
-          return { ...line, verb: 'Take a quick look', where: [{ text: 'clears when you open it' }] };
         default: {
           const _x: never = card.reason;
           return line;
@@ -950,7 +898,6 @@ export type PendingCardEvent =
   // line of code in Changes (its thread opened), a conversation comment on the Activity tab.
   | { kind: 'comment'; comment: MyTurnCommentRef }
   | { kind: 'pr'; tab: 'overview' | 'activity' | 'changes' }
-  | { kind: 'claude_review' }
   | { kind: 'trunk'; repoId: number }
   | { kind: 'external' }
   | { kind: 'landing_pr' }
@@ -965,8 +912,6 @@ export function pendingDestinationLabel(event: PendingCardEvent): string | null 
       return 'Open comment';
     case 'pr':
       return event.tab === 'changes' ? 'Open changes' : 'Open PR';
-    case 'claude_review':
-      return 'Open review';
     case 'trunk':
       return 'Open default branch';
     case 'landing_pr':
@@ -987,7 +932,6 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
       ) {
         return { kind: 'thread', threadId: card.threadId };
       }
-      if (card.reason === 'claude_review') return { kind: 'claude_review' };
       // A review asked of you: the diff is the work.
       if (card.reason === 'review_request') return { kind: 'pr', tab: 'changes' };
       if ((card.reason === 'mention' || card.reason === 'comment_reply') && card.comment != null) {
@@ -997,13 +941,7 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
       if (card.reason === 'comment_reply' || card.reason === 'mention') {
         return { kind: 'pr', tab: 'activity' };
       }
-      if (
-        card.reason === 'pushed_since' ||
-        // The heading announces new comments, reviews and commits — they live on Activity.
-        card.reason === 'your_pr'
-      ) {
-        return { kind: 'pr', tab: 'activity' };
-      }
+      if (card.reason === 'pushed_since') return { kind: 'pr', tab: 'activity' };
       return { kind: 'pr', tab: 'overview' };
     case 'ci_failing':
       if (card.arm === 'trunk') return { kind: 'trunk', repoId: card.repoId };

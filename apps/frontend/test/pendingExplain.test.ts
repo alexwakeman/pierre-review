@@ -12,20 +12,18 @@
 //   3. A CARD'S PLACE IS ITS RANK IN THE VIEW ON SCREEN — "4th of 176 in Waiting on review" — with
 //      Do next marked, and a card with no score says so rather than inventing one.
 //   4. A STRICT-GROUP TAB SAYS SO. In Dependencies a low-scoring security item still sits above every
-//      bump, so "listed by score" alone would be false there; My turn is grouped by type in the
-//      READER'S order.
-//   5. THE WEIGHTS ARE THE READER'S. Settings → My Turn re-weights the score, so the working is
-//      printed with the weights the server scored with (`rules.weights` on the response), and must
-//      still add up under every preset.
+//      bump, so "listed by score" alone would be false there; My turn is its fixed groups, longest
+//      waiting first.
+//   5. THE WORKING IS PRINTED WITH THE WEIGHTS THE SERVER SCORED WITH (`rules.weights` on the
+//      response) — fixed today, and the arithmetic must still add up under any weights.
 //
 // Run by hand (the frontend's tests are not in CI):
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
 import {
-  DO_NEXT_PRESET_ORDER,
-  DO_NEXT_PRESETS,
   DO_NEXT_RULES,
-  MY_TURN_DEFAULT_ORDER,
+  MY_TURN_OLDER_DAYS,
+  MY_TURN_ORDER,
   PENDING_DO_NEXT_SIZE,
   PENDING_SEVERITY,
   type DoNextAdjustment,
@@ -47,7 +45,6 @@ import {
   orderSentence,
   ordinal,
   scoreBreakdown,
-  weightsName,
   whoseItIs,
   whyHere,
   type PendingBoardState,
@@ -68,22 +65,19 @@ const placement = (over: Partial<PendingCardScore> = {}): PendingCardScore => ({
   ...over,
 });
 
-/** A preset's weights as the ranker multiplies by them — `resolveMyTurnSettings`' division. */
-const weightsOf = (p: keyof typeof DO_NEXT_PRESETS): DoNextWeights => ({
-  proximity: DO_NEXT_PRESETS[p].proximity / 100,
-  stall: DO_NEXT_PRESETS[p].stall / 100,
-  relevance: DO_NEXT_PRESETS[p].relevance / 100,
-});
-const BALANCED = weightsOf('balanced');
-const MINE_FIRST = weightsOf('mine_first');
+/** The fixed weights, and three other weightings the arithmetic must still add up under. */
+const BALANCED: DoNextWeights = { ...DO_NEXT_RULES.weights };
+const MINE_FIRST: DoNextWeights = { proximity: 0.3, stall: 0.1, relevance: 0.6 };
+const WEIGHTINGS: [string, DoNextWeights][] = [
+  ['fixed', BALANCED],
+  ['relevance-heavy', MINE_FIRST],
+  ['stall-heavy', { proximity: 0.2, stall: 0.7, relevance: 0.1 }],
+  ['proximity-heavy', { proximity: 0.8, stall: 0.1, relevance: 0.1 }],
+];
 
-/** The ranking rules a response carries, for the reader with these weights. */
-function rulesOf(
-  w: DoNextWeights,
-  preset: PendingRankRules['preset'],
-  myTurnOrder: MyTurnCardReason[] = [...MY_TURN_DEFAULT_ORDER],
-): PendingRankRules {
-  return { weights: w, preset, myTurnOrder, myTurnOff: [] };
+/** The ranking rules a response carries. */
+function rulesOf(w: DoNextWeights): PendingRankRules {
+  return { weights: w, myTurnOrder: [...MY_TURN_ORDER], myTurnOff: ['watched_repo_pr'] };
 }
 
 /** The server's score, spelled exactly as db/work-plan.ts spells it. */
@@ -114,7 +108,7 @@ function boardOf(
 }
 
 describe('the score working adds up to the score', () => {
-  it('for every base, adjustment set, stall value and relevance tier — under every preset', () => {
+  it('for every base, adjustment set, stall value and relevance tier — under any weights', () => {
     const bases = Object.keys(DO_NEXT_RULES.proximity) as DoNextProximityBase[];
     const adjs = Object.keys(DO_NEXT_RULES.adjustments) as DoNextAdjustment[];
     const subsets: DoNextAdjustment[][] = [[]];
@@ -122,8 +116,7 @@ describe('the score working adds up to the score', () => {
     const stalls = [DO_NEXT_RULES.stallBase, ...DO_NEXT_RULES.stallBuckets.map((b) => b.risk)];
     const rels: MyTurnRelevance[] = ['direct', 'maintained', 'none'];
     let checked = 0;
-    for (const preset of DO_NEXT_PRESET_ORDER) {
-      const w = weightsOf(preset);
+    for (const [preset, w] of WEIGHTINGS) {
       for (const base of bases) {
         for (const set of subsets) {
           let raw: number = DO_NEXT_RULES.proximity[base];
@@ -152,11 +145,11 @@ describe('the score working adds up to the score', () => {
       }
     }
     expect(checked).toBe(
-      DO_NEXT_PRESET_ORDER.length * bases.length * subsets.length * stalls.length * rels.length,
+      WEIGHTINGS.length * bases.length * subsets.length * stalls.length * rels.length,
     );
   });
 
-  it('prints the weights it is given — the reader’s, never the product default', () => {
+  it('prints the weights it is given', () => {
     expect(scoreBreakdown(placement(), MINE_FIRST).rows.map((r) => r.weight)).toEqual([30, 10, 60]);
     expect(scoreBreakdown(placement(), BALANCED).rows.map((r) => r.weight)).toEqual([
       Math.round(DO_NEXT_RULES.weights.proximity * 100),
@@ -165,15 +158,10 @@ describe('the score working adds up to the score', () => {
     ]);
   });
 
-  it('names each part as the Settings slider names it — the row a reader sees is the slider they move', () => {
+  it('names each part by its one spelling (WEIGHT_LABEL)', () => {
     const rows = scoreBreakdown(placement(), BALANCED).rows;
     expect(rows.map((r) => r.key)).toEqual([...WEIGHT_KEYS]);
     expect(rows.map((r) => r.label)).toEqual(WEIGHT_KEYS.map((k) => WEIGHT_LABEL[k]));
-  });
-
-  it('names the weights: a preset by its name, anything else as the reader’s own', () => {
-    expect(weightsName('mine_first')).toBe('Mine first');
-    expect(weightsName('custom')).toBe('your own');
   });
 
   it('names the clock the age is measured from, and a trunk’s as our last look', () => {
@@ -240,7 +228,7 @@ describe('where a card sits', () => {
 
   it('prints the working with the response’s weights — and the default only without them', () => {
     const board = (rules?: PendingRankRules): PendingBoardState => boardOf(cards, { scores, rules });
-    expect(explainCard(cards[0]!, board(rulesOf(MINE_FIRST, 'mine_first'))).score!.rows.map((r) => r.weight)).toEqual(
+    expect(explainCard(cards[0]!, board(rulesOf(MINE_FIRST))).score!.rows.map((r) => r.weight)).toEqual(
       [30, 10, 60],
     );
     // A response predating `rules` was ranked by the product default, so that is its true working.
@@ -260,15 +248,15 @@ describe('what a card means', () => {
   const mt = (reason: MyTurnCardReason, over: Record<string, unknown> = {}) =>
     card({ id: `myturn:${reason}:1`, kind: 'my_turn', reason, severity: 'high', relevance: 'direct', ...over });
 
-  it('has a sentence for every one of the fifteen My Turn types', () => {
+  it('has a sentence for every one of the twelve My Turn types', () => {
     const seen = new Set<string>();
-    for (const reason of MY_TURN_DEFAULT_ORDER) {
+    for (const reason of MY_TURN_ORDER) {
       const why = whyHere(mt(reason, { since: '2026-08-27T09:00:00.000Z', maintained: true }));
       expect(why.length).toBeGreaterThan(20);
       seen.add(why);
     }
     // Each type says something of its own — none falls back to a shared, vaguer line.
-    expect(seen.size).toBe(MY_TURN_DEFAULT_ORDER.length);
+    expect(seen.size).toBe(MY_TURN_ORDER.length);
   });
 
   it('says what clears each new summons', () => {
@@ -308,30 +296,10 @@ describe('what a card means', () => {
     );
   });
 
-  it('says what the two AI review types ask, and what clears them', () => {
-    expect(whyHere(mt('claude_review'))).toBe(
-      'Your Limn finished an AI review you have not read. It goes away when you open the PR’s AI Review tab.',
-    );
-    expect(whyHere(mt('ai_approved_merged'))).toBe(
-      'Your Limn approved this PR and it has since merged. It goes away when you open the PR.',
-    );
-  });
-
-  it('never names "Your PR" as clearing by action — it clears by opening, and says so', () => {
-    expect(whyHere(card({ id: 'x', kind: 'my_turn', reason: 'your_pr', severity: 'warn' }))).toContain(
-      'Opening it clears this',
-    );
-  });
-
-  it('says a promoted card is here because the reader added its type — unless its repo is muted', () => {
-    for (const reason of ['own_ci_red', 'own_conflicts', 'own_ready', 'own_thread'] as const) {
-      expect(whoseItIs(mt(reason))).toBe('You added this type to My Turn in Settings.');
+  it('needs no second sentence on your own PR or a direct summons — the type already says it', () => {
+    for (const reason of ['own_ci_red', 'own_conflicts', 'own_ready', 'own_thread', 'mention'] as const) {
+      expect(whoseItIs(mt(reason))).toBeNull();
     }
-    expect(whoseItIs(mt('own_ci_red', { relevance: 'none', muted: true }))).toBe(
-      'Its repo is muted for Pending, so it does not claim your turn or notify you.',
-    );
-    // A direct summons needs no second sentence: its `whyHere` already says who asked.
-    expect(whoseItIs(mt('mention'))).toBeNull();
     expect(whoseItIs(mt('watched_repo_pr', { relevance: 'maintained' }))).toBe(
       'It counts as “In your repos”: you can push to this repo, or have merged a PR into it.',
     );
@@ -346,45 +314,33 @@ describe('what a card means', () => {
     expect(colourReason(mt('own_conflicts'))).toBe('your PR cannot merge');
     expect(colourReason(mt('own_ready', { severity: 'warn' }))).toBe('it is your own PR');
     expect(colourReason(mt('own_thread', { severity: 'warn' }))).toBe('it is your own PR');
-    expect(colourReason(mt('claude_review', { severity: 'warn' }))).toBe('you have not read it yet');
-    expect(colourReason(mt('ai_approved_merged', { severity: 'info' }))).toBe('your Limn approved it');
   });
 });
 
 describe('My turn’s order, explained', () => {
   const c = card({ id: 'myturn:mention:1', kind: 'my_turn', reason: 'mention', severity: 'high', relevance: 'direct' });
 
-  it('says My turn is grouped by type in the reader’s order', () => {
-    expect(orderSentence('my_turn', true, rulesOf(BALANCED, 'balanced'))).toBe(
-      `Grouped by type in your order, then by Do next score. The top ${PENDING_DO_NEXT_SIZE} are Do next.`,
-    );
+  it('says My turn is its fixed groups, longest waiting first — scored or not', () => {
+    const sentence = `Waiting on you, then Re-review, then Your PRs. Longest waiting first in each. Anything older than ${MY_TURN_OLDER_DAYS} days is under Older.`;
+    expect(orderSentence('my_turn', true, rulesOf(BALANCED))).toBe(sentence);
+    expect(orderSentence('my_turn', false)).toBe(sentence);
     const x = explainCard(
       c,
-      boardOf([c], { tab: 'my_turn', scores: { [c.id]: placement() }, rules: rulesOf(BALANCED, 'balanced') }),
+      boardOf([c], { tab: 'my_turn', scores: { [c.id]: placement() }, rules: rulesOf(BALANCED) }),
     );
-    expect(x.order).toContain('Grouped by type in your order');
-  });
-
-  it('says a plain scored list for a response that predates the groups — that is how it was ranked', () => {
-    expect(orderSentence('my_turn', true)).toBe(
-      `Listed by Do next score, highest first. The top ${PENDING_DO_NEXT_SIZE} are Do next.`,
-    );
-    expect(orderSentence('my_turn', false, rulesOf(BALANCED, 'balanced'))).toBe(
-      'Listed in the order the server sent.',
-    );
+    expect(x.order).toBe(sentence);
   });
 
   it('leaves the Dependencies sentence alone when rules are present', () => {
-    expect(orderSentence('deps', true, rulesOf(MINE_FIRST, 'mine_first'))).toBe(
+    expect(orderSentence('deps', true, rulesOf(MINE_FIRST))).toBe(
       `Security first, then bumps. Each is listed by Do next score, highest first. The top ${PENDING_DO_NEXT_SIZE} are Do next.`,
     );
   });
 
   it('a grouped list the cap cut never claims "the rest score lower" — the cut is the last groups', () => {
-    const rules = rulesOf(BALANCED, 'balanced');
-    // 60 review requests at ~0.33 above 5 approved PRs at 0.9: the cap keeps 50 requests and cuts
-    // every approved PR, so the rest do NOT score lower.
+    const rules = rulesOf(BALANCED);
     expect(capSentence('my_turn', null, 50, 65, rules)).toBe('Showing the first 50 of 65.');
+    expect(capSentence('my_turn', null, 50, 65)).toBe('Showing the first 50 of 65.');
     expect(capSentence('deps', null, 50, 70, rules)).toBe('Showing the first 50 of 70.');
     // A kind chip makes Dependencies one scored list again; the other tabs always are.
     expect(capSentence('deps', 'dependency_bump', 50, 70, rules)).toBe(
@@ -393,8 +349,6 @@ describe('My turn’s order, explained', () => {
     expect(capSentence('review', null, 50, 176, rules)).toBe(
       'Showing the top 50 of 176. The rest score lower.',
     );
-    // A response with no rules ranked My turn as one scored list — the orderSentence rule.
-    expect(capSentence('my_turn', null, 50, 65)).toBe('Showing the top 50 of 65. The rest score lower.');
   });
 });
 

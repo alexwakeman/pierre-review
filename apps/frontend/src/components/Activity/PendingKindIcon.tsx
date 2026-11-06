@@ -1,7 +1,6 @@
 import type { InsightCard, InsightKind, MyTurnCardReason, PendingTabKey } from '@pierre-review/shared';
 import {
   BotIcon,
-  PendingActivityIcon,
   PendingApprovedIcon,
   PendingBallIcon,
   PendingBehindIcon,
@@ -64,10 +63,7 @@ const REASON_ICON: Record<MyTurnCardReason, IconComponent> = {
   own_conflicts: PendingConflictsIcon,
   pr_approved: PendingApprovedIcon,
   own_ready: PendingLandIcon,
-  your_pr: PendingActivityIcon,
   own_thread: PendingUnansweredIcon,
-  claude_review: PendingClaudeReviewIcon,
-  ai_approved_merged: PendingLandIcon,
   watched_repo_pr: PendingNewPrIcon,
 };
 

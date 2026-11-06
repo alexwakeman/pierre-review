@@ -449,6 +449,10 @@
 .lb .mk-purpose {
   margin: -4px 0 8px;
 }
+.lb .mk-group {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
 .lb .mk-ok {
   font-size: 12.5px;
   color: #8fd2bf;

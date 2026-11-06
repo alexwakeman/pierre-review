@@ -120,12 +120,11 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             Everything waiting on you or your Workspace, in one list: items on your plate, red
             builds you are on the hook for, stalled reviews, untouched threads, un-assigned PRs,
             PRs that are simply ready to land, and dependency updates and security alerts — in six
-            tabs, each showing how many it holds. Every tab lists its cards by a score that weighs{' '}
-            {weightPhrase('proximity')}, {weightPhrase('stall')} and {weightPhrase('relevance')} (My
-            turn groups by type in the order you set, and Dependencies lists security items first);
-            the top five are{' '}
-            <strong>Do next</strong>. <strong>Settings → My Turn</strong> chooses what counts as
-            your turn and how the three are weighed. The{' '}
+            tabs, each showing how many it holds. My turn lists what a person is waiting on you
+            for — Waiting on you, Re-review, Your PRs — longest waiting first. Every other tab lists
+            its cards by a score that weighs {weightPhrase('proximity')}, {weightPhrase('stall')}{' '}
+            and {weightPhrase('relevance')} (Dependencies lists security items first); the top five
+            are <strong>Do next</strong>. The{' '}
             <strong>i</strong> beside the title, and on every card, explains the order.
           </Section>
 

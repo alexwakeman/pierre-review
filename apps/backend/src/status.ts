@@ -9,7 +9,6 @@ import { getMyTurn, listRepos } from './db/queries.js';
 import { runMigrations } from './db/run-migrations.js';
 import type { Logger } from './sync/sync-repo.js';
 import type { MyTurnCardReason, MyTurnResponse, User } from '@pierre-review/shared';
-import { MY_TURN_SETTING_LABEL } from '@pierre-review/shared';
 
 // ── tiny ANSI helpers (degrade gracefully when not a TTY) ──────────────────────
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
@@ -91,8 +90,8 @@ function render(
   const keys = new Set<string>();
   const lines: string[] = [];
 
-  // Every section the fold returned — a type switched off in Settings comes back EMPTY, so it adds
-  // nothing here and prints nothing below.
+  // Every section the fold returned — the survey, while off, comes back EMPTY, so it adds nothing
+  // here and prints nothing below.
   const total =
     data.awaitingReview.length +
     data.mentions.length +
@@ -104,22 +103,18 @@ function render(
     data.ownConflicts.length +
     data.approvedPrs.length +
     data.ownReady.length +
-    data.yourPrs.length +
     data.ownThreads.length +
-    data.approvedMerged.length +
     data.watchedRepoPrs.length;
 
   lines.push('');
   lines.push(`  ${bold(cyan('pierre status'))}${dim('  ·  your turn across all repos')}`);
   lines.push('');
 
-  // Which types the reader switched off (Settings → My Turn), named with the SAME labels Settings
-  // uses — said once at the foot, so an empty section never reads as "nothing happened".
+  // The one switch (Settings → Pending): said once at the foot when it is on, so a "New PRs"
+  // section is never a surprise. Off is the default and needs no line.
   const offFooter = (): void => {
-    if (data.off.length === 0) return;
-    lines.push(
-      `  ${dim(`Not shown (switched off in Settings → My Turn): ${data.off.map((r) => MY_TURN_SETTING_LABEL[r]).join(', ')}`)}`,
-    );
+    if (data.off.includes('watched_repo_pr')) return;
+    lines.push(`  ${dim('Also showing new PRs nobody asked you about (Settings → Pending).')}`);
     lines.push('');
   };
 
@@ -175,8 +170,8 @@ function render(
     return login ? `@${login}` : null;
   };
 
-  // ONE PRINTER PER TYPE, run in the READER's order (`data.order`, Settings → My Turn) — the order
-  // My turn groups its cards in on the board. A type with nothing in it prints nothing.
+  // ONE PRINTER PER TYPE, run in the fixed type order (`data.order`, `MY_TURN_ORDER`) — the order
+  // of My turn's groups on the board. A type with nothing in it prints nothing.
   const printers: Record<MyTurnCardReason, () => void> = {
     review_request: () => {
       if (data.awaitingReview.length === 0) return;
@@ -343,23 +338,6 @@ function render(
       }
       lines.push('');
     },
-    // Your open PRs with new activity since you last looked.
-    your_pr: () => {
-      if (data.yourPrs.length === 0) return;
-      section('Your PRs — new activity', data.yourPrs.length);
-      for (const it of data.yourPrs) {
-        row(
-          `yours:${it.prId}`,
-          `${it.repoFullName}#${it.number}`,
-          it.githubUrl,
-          it.title,
-          it.openedAt,
-          null,
-        );
-        if (it.summary) lines.push(`      ${dim(sanitize(it.summary))}`);
-      }
-      lines.push('');
-    },
     own_thread: () => {
       if (data.ownThreads.length === 0) return;
       section('Unanswered threads on your PRs', data.ownThreads.length);
@@ -371,23 +349,6 @@ function render(
           it.path,
           it.since,
           by(it.originalCommenterId),
-        );
-      }
-      lines.push('');
-    },
-    // Finished Claude reviews are a local, in-app action; the terminal board has never listed them.
-    claude_review: () => {},
-    ai_approved_merged: () => {
-      if (data.approvedMerged.length === 0) return;
-      section('Merged after your Limn approved', data.approvedMerged.length);
-      for (const it of data.approvedMerged) {
-        row(
-          `approved-merged:${it.prId}`,
-          `${it.repoFullName}#${it.prNumber}`,
-          it.githubUrl,
-          it.prTitle,
-          it.since,
-          null,
         );
       }
       lines.push('');

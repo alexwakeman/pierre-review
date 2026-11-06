@@ -323,7 +323,7 @@ describe('the Waiting on others tab', () => {
     expect(tab.cardIds[tab.cardIds.length - 1]).toBe(`waiting:${pr('fresh')}`);
     for (const id of tab.cardIds) expect(board.scores[id]).toBeUndefined();
     // Never named by the work plan: it may only name scored, listed cards.
-    const listed = tabs.listedCardIds(insights.cards, [], []);
+    const listed = tabs.listedCardIds(insights.cards, []);
     for (const id of tab.cardIds) expect(listed.has(id)).toBe(false);
   });
 });

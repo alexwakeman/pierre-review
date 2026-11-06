@@ -132,15 +132,6 @@ describe('My turn', () => {
   it('new commits on a PR you reviewed → the Activity tab', () => {
     expect(go(myTurn('pushed_since')).call).toEqual(['openPr', 'activity']);
   });
-  it('merged after your Limn approved → the PR, Overview (opening it clears the card)', () => {
-    expect(go(myTurn('ai_approved_merged'))).toEqual({ label: 'Open PR', call: ['openPr', 'overview'] });
-  });
-});
-
-describe('AI reviews', () => {
-  it('an AI review → the AI Review tab', () => {
-    expect(go(myTurn('claude_review'))).toEqual({ label: 'Open review', call: ['openReview'] });
-  });
 });
 
 describe('Needs fixing', () => {

@@ -7,7 +7,7 @@ import { installMockApi } from './mock-api.js';
 //   • Settings opened with Enter on "Customise" closes the board popover that was open — it used to
 //     stay drawn ABOVE the modal and take its first Escape (lib/activePopover.ts)
 //   • closing Settings hands focus back to "Customise", not to <body>
-//   • "Ranking preset" is a real radio group: one Tab stop, arrows move AND apply a preset
+//   • the one My Turn switch is a real checkbox that saves on Space
 
 async function gotoPending(page: Page): Promise<void> {
   await installMockApi(page);
@@ -43,34 +43,31 @@ test.describe('Pending → Settings from the keyboard', () => {
     await page.getByRole('button', { name: 'Customise' }).click();
     const pendingTab = settings(page).getByRole('tab', { name: 'Pending', exact: true });
     await expect(pendingTab).toHaveAttribute('aria-selected', 'true');
-    await expect(settings(page).getByRole('radiogroup', { name: 'Ranking preset' })).toBeVisible();
+    const survey = settings(page).getByRole('checkbox', { name: /Also show new PRs nobody asked you about/ });
+    await expect(survey).toBeVisible();
 
     await pendingTab.focus();
     await page.keyboard.press('ArrowUp');
     const prTab = settings(page).getByRole('tab', { name: 'Pull requests', exact: true });
     await expect(prTab).toHaveAttribute('aria-selected', 'true');
     await expect(prTab).toBeFocused();
-    await expect(settings(page).getByRole('radiogroup', { name: 'Ranking preset' })).toBeHidden();
+    await expect(survey).toBeHidden();
   });
 
-  test('the ranking preset is one Tab stop, and an arrow key applies the next preset', async ({
-    page,
-  }) => {
+  test('the My Turn switch is one checkbox, off by default, and Space saves it', async ({ page }) => {
     await gotoPending(page);
+    let sent: unknown = null;
+    await page.route('**/api/me/my-turn-settings', async (route) => {
+      sent = route.request().postDataJSON();
+      await route.fulfill({ json: { status: 'ok', myTurnSettings: { showNewPrs: true } } });
+    });
     await page.getByRole('button', { name: 'Customise' }).click();
-    const group = settings(page).getByRole('radiogroup', { name: 'Ranking preset' });
-    const radios = group.getByRole('radio');
-    await expect(radios).toHaveCount(4);
-    await expect(group.getByRole('radio', { name: 'Balanced' })).toBeChecked();
-
-    await group.getByRole('radio', { name: 'Balanced' }).focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(group.getByRole('radio', { name: 'Mine first' })).toBeChecked();
-    await expect(group.getByRole('radio', { name: 'Mine first' })).toBeFocused();
-    await expect(settings(page).locator('#my-turn-weight-relevance')).toHaveValue('60');
-
-    // One Tab stop: the next Tab leaves the group for the first weight slider.
-    await page.keyboard.press('Tab');
-    await expect(settings(page).locator('#my-turn-weight-proximity')).toBeFocused();
+    const survey = settings(page).getByRole('checkbox', { name: /Also show new PRs nobody asked you about/ });
+    await expect(survey).not.toBeChecked();
+    // The sliders and presets are gone.
+    await expect(settings(page).getByRole('radiogroup', { name: 'Ranking preset' })).toHaveCount(0);
+    await survey.focus();
+    await page.keyboard.press('Space');
+    await expect.poll(() => sent).toEqual({ settings: { showNewPrs: true } });
   });
 });

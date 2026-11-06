@@ -2,11 +2,9 @@
 //
 // WHAT THIS PINS, and every item is a decision somebody could reasonably undo by accident:
 //
-//   1. A MUTE NEVER REMOVES A ROW. Every section still returns exactly the same items; only
-//      `relevance` / `personal` / `muted` change. "The work is real, it is just not yours, and
-//      hiding it would delete work rather than route it" is the rule the whole Pending board is
-//      built on — a fixture that only counted the narrow figure would not notice the section
-//      being filtered instead of flagged.
+//   1. A MUTED REPOSITORY LEAVES MY TURN ENTIRELY. Its rows are dropped from `getMyTurn`'s seeds —
+//      review requests, "New PRs" and threads alike — so the list, every count and the
+//      notifications move together. (Before 2026-11-06 a mute only relabelled the rows.)
 //   2. THE TWO GRAINS ARE A UNION, NOT A CHAIN. Muting the workspace does not overwrite the repo
 //      rows, and un-muting it does not clear them — the repo-muted repo stays muted throughout.
 //      `null`-means-inherit is a named bug class in this codebase; this is the test that would
@@ -14,19 +12,9 @@
 //   3. IT REACHES THE UNSCOPED, ACCOUNT-WIDE `getMyTurn` — the call the browser-notification
 //      watcher makes with no `?workspace=`. A mute applied only in the scoped form would leave
 //      the most interrupting surface in the product firing.
-//   4. THE THREAD SECTION IS MUTED TOO. `ThreadAwaitingItem` carries no repo id, so it resolves
-//      through a `prId → repoId` map; a thread on a CLOSED PR (not in `openRows`) exercises the
-//      path that a naive "look it up in the open list" implementation would miss.
-//   5. THE COUNTS STAY ARITHMETICALLY COHERENT: `direct + maintained + other === myTurnTotal`
+//   4. THE COUNTS STAY ARITHMETICALLY COHERENT: `direct + maintained + other === myTurnTotal`
 //      and `direct + maintained === myTurnPersonalTotal`, before and after.
-//   6. THE TWO FORWARD KINDS ARE EXEMPT. `merge` / `update_branch` carry `relevance` for the
-//      ranker's weight and the severity accent, not as an ownership claim, and are counted by no
-//      notification surface — muting them would re-colour "you can land this now" cards and
-//      suppress nothing.
-//   7. THE RANK MOVES, DELIBERATELY. `score = … + 0.20 · RELEVANCE_WEIGHT[relevance]`, so a muted
-//      item slides down the "Do next" head. That is accepted rather than insulated (two relevance
-//      values in flight would be two answers to one question) — and it is invisible on screen, so
-//      it is pinned here as a decision rather than left as an emergent surprise.
+//   5. OTHER TABS ARE UNAFFECTED. A `merge` card in a muted repo stays, unchanged and scored.
 //
 // DATABASE_URL is set BEFORE importing config/client (they open the connection at module load),
 // and EVERY import below is dynamic for the same reason — a static value import is hoisted and
@@ -72,11 +60,9 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
-  // Untouched "New PRs" are OFF by default (Settings → My Turn). This fixture's My Turn population
-  // is built on them, so it switches them back on rather than lose what it pins.
-  await (await import('../auth/account.js')).setMyTurnSettings(1, {
-    show: { watched_repo_pr: true },
-  });
+  // Untouched "New PRs" are OFF by default (Settings → Pending, "Also show new PRs nobody asked you
+  // about"). This fixture's My Turn population is built on them, so it switches them on.
+  await (await import('../auth/account.js')).setMyTurnSettings(1, { showNewPrs: true });
   q = await import('./queries.js');
   mute = await import('./pending-mute.js');
   workPlan = await import('./work-plan.js');
@@ -264,12 +250,10 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-/** Every my-turn row's (relevance, personal, muted), keyed by a stable label. */
-async function rowsByLabel(): Promise<
-  Map<string, { relevance?: string; personal?: boolean; muted?: boolean }>
-> {
+/** Every my-turn row's (relevance, personal), keyed by a stable label. */
+async function rowsByLabel(): Promise<Map<string, { relevance?: string; personal?: boolean }>> {
   const res = await q.getMyTurn(1);
-  const out = new Map<string, { relevance?: string; personal?: boolean; muted?: boolean }>();
+  const out = new Map<string, { relevance?: string; personal?: boolean }>();
   for (const r of res.awaitingReview) out.set(`req:${r.prId}`, r);
   for (const r of res.watchedRepoPrs) out.set(`new:${r.prId}`, r);
   for (const r of res.threadsAwaiting) out.set(`thread:${r.threadId}`, r);
@@ -277,7 +261,7 @@ async function rowsByLabel(): Promise<
 }
 
 describe('the Pending mute', () => {
-  it('leaves everything personal when nothing is muted (the fixture is not vacuous)', async () => {
+  it('leaves everything in place when nothing is muted (the fixture is not vacuous)', async () => {
     const rows = await rowsByLabel();
     for (const key of REPO_KEYS) {
       expect(rows.get(`req:${requestedPr[key]}`)?.relevance, key).toBe('direct');
@@ -285,11 +269,9 @@ describe('the Pending mute', () => {
       expect(rows.get(`new:${newPr[key]}`)?.personal, key).toBe(true);
     }
     expect(rows.get(`thread:${betaThreadId}`)?.relevance).toBe('direct');
-    // Nothing carries the flag while nothing is muted — `muted` is set only when true.
-    for (const [, v] of rows) expect(v.muted).toBeUndefined();
   });
 
-  it('downgrades a REPO-muted repo — and removes nothing', async () => {
+  it('removes a REPO-muted repo’s rows from My Turn — and nothing else', async () => {
     const before = await rowsByLabel();
     expect(
       await mute.setWorkspacePendingMute(1, defaultScope.workspaceId, {
@@ -297,29 +279,25 @@ describe('the Pending mute', () => {
       }),
     ).toBe(true);
     const after = await rowsByLabel();
-
-    // RULE 1: identical population. A filter instead of a flag fails here, not in the counts.
-    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
-
-    for (const label of [`req:${requestedPr.beta}`, `new:${newPr.beta}`, `thread:${betaThreadId}`]) {
-      expect(after.get(label)?.relevance, label).toBe('none');
-      expect(after.get(label)?.personal, label).toBe(false);
-      expect(after.get(label)?.muted, label).toBe(true);
+    const gone = [`req:${requestedPr.beta}`, `new:${newPr.beta}`, `thread:${betaThreadId}`];
+    for (const label of gone) {
+      expect(before.has(label), label).toBe(true);
+      expect(after.has(label), label).toBe(false);
     }
+    expect([...after.keys()].sort()).toEqual([...before.keys()].filter((k) => !gone.includes(k)).sort());
     // The controls are untouched — including gamma, in a different workspace.
     expect(after.get(`req:${requestedPr.alpha}`)?.relevance).toBe('direct');
     expect(after.get(`new:${newPr.alpha}`)?.relevance).toBe('maintained');
     expect(after.get(`req:${requestedPr.gamma}`)?.relevance).toBe('direct');
   });
 
-  it('downgrades a WORKSPACE-muted workspace through the UNSCOPED, account-wide call', async () => {
+  it('removes a WORKSPACE-muted workspace’s rows through the UNSCOPED, account-wide call', async () => {
     expect(await mute.setWorkspacePendingMute(1, quietWorkspaceId, { muted: true })).toBe(true);
     // `getMyTurn(1)` with NO scope — the call GET /api/my-turn and the notification watcher make.
     const rows = await rowsByLabel();
-    expect(rows.get(`req:${requestedPr.gamma}`)?.relevance).toBe('none');
-    expect(rows.get(`req:${requestedPr.gamma}`)?.personal).toBe(false);
-    expect(rows.get(`new:${newPr.gamma}`)?.muted).toBe(true);
-    // alpha is still loud.
+    expect(rows.has(`req:${requestedPr.gamma}`)).toBe(false);
+    expect(rows.has(`new:${newPr.gamma}`)).toBe(false);
+    // alpha is still there.
     expect(rows.get(`req:${requestedPr.alpha}`)?.personal).toBe(true);
   });
 
@@ -328,16 +306,13 @@ describe('the Pending mute', () => {
     const rows = await rowsByLabel();
     // gamma comes back…
     expect(rows.get(`req:${requestedPr.gamma}`)?.relevance).toBe('direct');
-    expect(rows.get(`req:${requestedPr.gamma}`)?.muted).toBeUndefined();
     // …and beta, muted by its own row, does not.
-    expect(rows.get(`req:${requestedPr.beta}`)?.relevance).toBe('none');
-    expect(rows.get(`req:${requestedPr.beta}`)?.muted).toBe(true);
+    expect(rows.has(`req:${requestedPr.beta}`)).toBe(false);
   });
 
-  it('keeps the card counts arithmetically coherent, and moves the personal total only', async () => {
+  it('moves every My Turn count with the list, and keeps them arithmetically coherent', async () => {
     // Baseline with beta muted (the state the previous test left).
     const muted = await q.getWorkspaceInsights(1, undefined, defaultScope);
-    // Now clear it and compare — same population, different split.
     await mute.setWorkspacePendingMute(1, defaultScope.workspaceId, { mutedRepoIds: [] });
     const loud = await q.getWorkspaceInsights(1, undefined, defaultScope);
 
@@ -347,73 +322,36 @@ describe('the Pending mute', () => {
       ).toBe(ins.myTurnTotal);
       expect(ins.myTurnDirectTotal + ins.myTurnMaintainedTotal).toBe(ins.myTurnPersonalTotal);
     }
-    // ⚠ THE BROAD POPULATION NEVER MOVES — that is the whole promise of "it stays on the board".
-    expect(muted.myTurnTotal).toBe(loud.myTurnTotal);
-    // The narrow one does: beta contributes a review request, a "New PR" and a thread.
-    expect(muted.myTurnPersonalTotal).toBe(loud.myTurnPersonalTotal - 3);
-    expect(muted.myTurnOtherTotal).toBe(loud.myTurnOtherTotal + 3);
+    // Every My Turn card in beta — a review request, a "New PR", the reader's own ready PR — leaves.
+    const betaCards = (loud.cards as MyTurnCard[]).filter(
+      (c) => c.kind === 'my_turn' && c.repoId === repoId.beta,
+    ).length;
+    expect(betaCards).toBeGreaterThan(0);
+    expect(muted.myTurnTotal).toBe(loud.myTurnTotal - betaCards);
+    expect(muted.myTurnPersonalTotal).toBe(loud.myTurnPersonalTotal - betaCards);
+    expect(muted.myTurnOtherTotal).toBe(loud.myTurnOtherTotal);
 
-    // Restore the mute for the two tests below.
+    // Restore the mute for the test below.
     await mute.setWorkspacePendingMute(1, defaultScope.workspaceId, {
       mutedRepoIds: [repoId.beta!],
     });
   });
 
-  it('carries `muted` onto the card, and never onto a card the reader did not mute', async () => {
-    const ins = await q.getWorkspaceInsights(1, undefined, defaultScope);
-    const myTurn = ins.cards.filter((c: InsightCard) => c.kind === 'my_turn') as MyTurnCard[];
-    const betaCards = myTurn.filter((c) => c.prId === requestedPr.beta);
-    const alphaCards = myTurn.filter((c) => c.prId === requestedPr.alpha);
-    expect(betaCards.length).toBe(1);
-    expect(alphaCards.length).toBe(1);
-    expect(betaCards[0]!.muted).toBe(true);
-    expect(betaCards[0]!.relevance).toBe('none');
-    // DERIVED, never carried alongside: `personal` and `relevance` cannot disagree.
-    expect(betaCards[0]!.personal).toBe(false);
-    expect(alphaCards[0]!.muted).toBeUndefined();
-    expect(alphaCards[0]!.personal).toBe(true);
-  });
-
-  it('leaves the two FORWARD kinds alone — a mute is about interruption, and they do not interrupt', async () => {
-    const ins = await q.getWorkspaceInsights(1, undefined, defaultScope);
+  it('leaves the other tabs alone — a muted repo’s own ready PR goes back to Ready to land, scored', async () => {
+    const ins = await q.getWorkspaceInsights(1, undefined, defaultScope, { uncapped: true });
     const merge = ins.cards.find(
       (c: InsightCard) => c.kind === 'merge' && c.prId === mergePrId,
-    ) as { relevance: string; severity: string } | undefined;
+    ) as { id: string; relevance: string; severity: string } | undefined;
+    // Your own ready PR is a My Turn card while beta is loud; muted, it is the Ready to land card.
     expect(merge).toBeDefined();
-    // beta IS muted, and this card is in beta. Its relevance drives the ranker weight and the
-    // severity ACCENT, not an ownership claim — muting it would re-colour "you can land this
-    // now" and suppress nothing (no notification surface counts a forward card).
     expect(merge!.relevance).toBe('direct');
     expect(merge!.severity).toBe('warn');
-  });
-
-  it('DOES lower the "Do next" rank of a muted item — accepted, and pinned so it is a decision', async () => {
-    const { getMyTurnSettings } = await import('./my-turn-settings.js');
-    const { weights } = await getMyTurnSettings(1);
-    const scoredNow = async (): Promise<{ prId: number | null; score: number }[]> => {
-      const ins = await q.getWorkspaceInsights(1, undefined, defaultScope, { uncapped: true });
-      return (await workPlan.scoreCards(1, ins.cards, Date.now(), weights)).scored;
-    };
-    const planMuted = await scoredNow();
+    const { scored } = await workPlan.scoreCards(1, ins.cards, Date.now());
+    expect(scored.some((s: { cardId: string }) => s.cardId === merge!.id)).toBe(true);
+    // …and no My Turn card of beta's is there to score.
+    expect(
+      (ins.cards as MyTurnCard[]).some((c) => c.kind === 'my_turn' && c.prId === requestedPr.beta),
+    ).toBe(false);
     await mute.setWorkspacePendingMute(1, defaultScope.workspaceId, { mutedRepoIds: [] });
-    const planLoud = await scoredNow();
-
-    // The PR's best card score — what its place in a tab is ranked by.
-    const scoreFor = (scored: { prId: number | null; score: number }[], prId: number): number | undefined => {
-      const mine = scored.filter((c) => c.prId === prId).map((c) => c.score);
-      return mine.length > 0 ? Math.max(...mine) : undefined;
-    };
-
-    const betaMuted = scoreFor(planMuted, requestedPr.beta!);
-    const betaLoud = scoreFor(planLoud, requestedPr.beta!);
-    expect(betaMuted).toBeDefined();
-    expect(betaLoud).toBeDefined();
-    // score = 0.50·proximity + 0.30·stallRisk + 0.20·RELEVANCE_WEIGHT[relevance], and
-    // RELEVANCE_WEIGHT drops 1.0 → 0.25 on a downgrade to 'none'. Insulating the ranker would
-    // mean two relevance values in flight — two answers to one question — so the coupling is
-    // accepted; it is asserted here because nothing on screen says the head re-ordered.
-    expect(betaMuted!).toBeLessThan(betaLoud!);
-    // ⚠ AND IT IS A RE-ORDERING, NEVER A FILTER: the item is still scored either way.
-    expect(scoreFor(planMuted, requestedPr.alpha!)).toBe(scoreFor(planLoud, requestedPr.alpha!));
   });
 });

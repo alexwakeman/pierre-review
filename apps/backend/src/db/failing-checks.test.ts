@@ -10,8 +10,8 @@
 //      `repoId IN × sha IN`. Both key on the PAIR in JS; a decoy row for a sha nobody asked about
 //      in THAT repo/PR must never be named.
 //   3. ANOTHER ACCOUNT'S ROWS NEVER LEAK — even a newer row for the same (PR, head) pair.
-//   4. EVERY RED CARD KIND GETS THE NAMES, THROUGH TWO FOLDS. A my_turn seed on a DRAFT is not in the
-//      open-PR select, so a names fold run only there would leave that card bare. Untouched threads
+//   4. EVERY RED CARD KIND GETS THE NAMES, THROUGH TWO FOLDS. A my_turn seed on an ULTRA-STALE PR
+//      (no activity event in the window) is not in the open-PR select, so a names fold run only there would leave that card bare. Untouched threads
 //      call `prRef` with `{...t, id: t.prId}`; the Dependencies cards and a `merge` card whose red is
 //      non-required checks go through it too.
 //   5. THE TRUNK ARM NAMES A DIRECT PUSH. No landing PR resolves, and the names still come from the
@@ -30,7 +30,6 @@ import type {
   DependencyBumpCard,
   InsightCard,
   InsightPrRef,
-  MyTurnSettings,
 } from '@pierre-review/shared';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-failing-checks-test.sqlite`;
@@ -44,7 +43,7 @@ let closeDb: (() => Promise<void>) | undefined;
 let q: any;
 let fc: typeof import('./failing-checks.js');
 let bq: typeof import('./branch-queries.js');
-let setMyTurnSettings: (id: number, s: MyTurnSettings | null) => Promise<unknown>;
+let setMyTurnSettings: (id: number, s: { showNewPrs: boolean }) => Promise<unknown>;
 let scope: any;
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -336,13 +335,15 @@ beforeAll(async () => {
   await csEvent(leak, 'h-l', 'failure', ['mine-check'], now - 2 * DAY);
   await csEvent(leak, 'h-l', 'failure', ['theirs-check'], now - HOUR, account2);
 
-  // (7) a DRAFT with a review requested of the viewer: a my_turn card, and NOT in the open-PR
-  // select — so only the my_turn fold can give it names.
-  const draft = await insertPr('draft-requested', aliceId, {
-    ciStatus: 'failure',
-    headSha: 'h-d',
-    isDraft: true,
-  });
+  // (7) an ULTRA-STALE PR (no activity event) with a review requested of the viewer: a my_turn
+  // card, and NOT in the open-PR select — so only the my_turn fold can give it names. (A draft
+  // used to stand here; drafts never summon any more.)
+  const draft = await insertPr(
+    'draft-requested',
+    aliceId,
+    { ciStatus: 'failure', headSha: 'h-d' },
+    false,
+  );
   await db.insert(reviewRequests).values({ prId: draft, userId: viewerId }).execute();
   await csEvent(draft, 'h-d', 'failure', ['draft-check'], now - DAY);
 
@@ -376,7 +377,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await setMyTurnSettings?.(1, null);
+  await setMyTurnSettings?.(1, { showNewPrs: false });
   await closeDb?.();
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
@@ -508,7 +509,7 @@ describe('the Pending board carries the names on every red card', () => {
     }
   });
 
-  it('a my_turn card on a DRAFT gets them through the second fold', async () => {
+  it('a my_turn card on an ultra-stale PR gets them through the second fold', async () => {
     const cards = (await boardFold()).cards as InsightCard[];
     const onDraft = prCardsFor(cards, P('draft-requested'));
     expect(onDraft.map((c) => c.kind)).toEqual(['my_turn']);

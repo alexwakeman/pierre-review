@@ -719,9 +719,8 @@ addition.
   LABELS a row; a card that writes "YOUR TURN" off `personal` claims ownership of a stranger's
   work in a repo you happen to have write on — the defect the split exists to end.
 - **The rule lives in `getMyTurn`, once.** Every section but "New PRs" is `'direct'` by
-  construction — it exists only because the viewer is involved, or because they added the type in
-  Settings → My Turn (the own-work promotions) — and is stamped through
-  `relevanceFor`. "New PRs" (`watched_repo_pr`, off by default) is the one section that needs a
+  construction — it exists only because the viewer is involved, or it is their own PR — and is
+  stamped through `relevanceFor`. "New PRs" (`watched_repo_pr`, the opt-in survey) is the one section that needs a
   test: the MAINTAINER test (`viewerMaintainedRepoIds`) asks *is this your patch of ground* —
   `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN **∪** the repos `getMergers` says the viewer has
   landed a PR on (default branch only) — and yields **`'maintained'`**, else `'none'`. The MENTION
@@ -799,9 +798,8 @@ card. **TWO ARMS, carried on one kind by `CiFailingCard.arm`:**
   in the workspace; `ciFailing` counts the subset that is YOURS plus your own red PRs (the
   `ci_failing` cards). Folding either into the other gives one of them a number its list does not
   match. (Both are still sent on the daily brief with no SPA reader since its Feed strip was
-  deleted.) What the reader PROMOTED into My Turn
-  (Settings → My Turn) leaves them: a promoted red build leaves `ciFailing` and is counted once, in
-  `myTurn`. A red trunk is never a My Turn card (`trunkRed` lists every one).
+  deleted.) Your own red build is in My Turn (always, unless its repo is muted) and leaves
+  `ciFailing`: it is counted once, in `myTurn`. A red trunk is never a My Turn card (`trunkRed` lists every one).
 - **Cap:** it shares `INSIGHT_CARD_CAP` (15) with the survey kinds but, like `my_turn`, DISCLOSES
   it (`ciFailingTotal`; the board states its cut with `capSentence` — the brief-line rule was
   deleted with the strip) — a worklist the viewer clears may not be

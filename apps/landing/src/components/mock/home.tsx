@@ -125,21 +125,6 @@ function ReviewFindingsByState({ onTouch }: { onTouch: () => void }): JSX.Elemen
 
 function PendingCardBody({ id }: { id: PendingCardId }): JSX.Element | null {
   const c = PENDING.cards[id];
-  if (id === 'refunds') {
-    return (
-      <>
-        <FindingRow chip={FINDINGS.storyMajor.sev} tone="red">
-          <b>{FINDINGS.storyMajor.head}</b> {FINDINGS.storyMajor.text}
-        </FindingRow>
-        <FindingRow chip={FINDINGS.docsMajor.sev} tone="red">
-          <b>{FINDINGS.docsMajor.head}</b> <code>amount</code> is a float; money is whole pence.
-        </FindingRow>
-        <div className="mk-end">
-          <RunButton words={ACTIONS.fixItems} tone="gold" />
-        </div>
-      </>
-    );
-  }
   if (id === 'flaky') {
     return (
       <>
@@ -185,8 +170,14 @@ function PendingCards({
 }): JSX.Element {
   return (
     <>
-      {/* My turn's one visible sentence (AttentionView.tsx). */}
-      {tab === 'my_turn' ? <p className="mk-muted mk-purpose">Pull requests where the next move is yours.</p> : null}
+      {/* My turn's one visible sentence, then its first group's heading (AttentionView.tsx,
+          pendingTabs.ts myTurnSections). */}
+      {tab === 'my_turn' ? (
+        <>
+          <p className="mk-muted mk-purpose">Pull requests where a person is waiting on you.</p>
+          <p className="mk-muted mk-group">Waiting on you</p>
+        </>
+      ) : null}
       {PENDING.byTab[tab].map((id) => {
         const c = PENDING.cards[id];
         const open = openId === id;

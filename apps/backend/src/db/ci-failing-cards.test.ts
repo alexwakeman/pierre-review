@@ -339,6 +339,11 @@ beforeAll(async () => {
   // Default workspace. Hand-build it and every count is 0 and the fixture asserts nothing.
   scope = await q.resolveWorkspaceScope(1, null);
   quietScope = await q.resolveWorkspaceScope(1, quietWorkspaceId);
+  // ⚠ MY TURN TAKES THE VIEWER'S OWN RED BUILD (`own_ci_red`, always on), so the 'your_pr' arm is
+  // built only where My Turn does not hold it. Muting the Pending workspace removes My Turn's rows
+  // and leaves every other tab as it is — exactly the arm this file pins.
+  const mute = await import('./pending-mute.js');
+  await mute.setWorkspacePendingMute(1, scope.workspaceId, { muted: true });
 });
 
 afterAll(async () => {

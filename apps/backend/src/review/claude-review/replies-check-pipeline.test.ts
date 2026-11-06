@@ -336,8 +336,6 @@ describe('a manual pass', () => {
     await db.update(cr).set({ headSha: 'f'.repeat(40) }).where(eq(cr.id, passId)).execute();
     expect(await persist.hasReviewAtHead(ctx, pr, 1, 'f'.repeat(40))).toBe(false);
     await db.update(cr).set({ headSha: HEAD }).where(eq(cr.id, passId)).execute();
-    const q = await import('../../db/queries.js');
-    expect((await q.getUnseenOwnAiReviews(1)).some((c) => c.reviewId === passId)).toBe(false);
   });
 
   it('⚠ the next FULL review anchors on the full review, not the pass — and the accepted one is settled', async () => {

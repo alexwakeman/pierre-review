@@ -6,7 +6,7 @@ import { useWorkspaces } from './useWorkspaces.js';
 import { dateTime } from '../lib/ui.js';
 
 // Fire a browser notification when a NEW item enters your My Turn inbox (a review
-// requested, a thread awaiting you, or your PR getting fresh activity). Watches the
+// requested, a reply to you, new commits to re-review, or news about your own PR). Watches the
 // My Turn query — which refetches when a sync lands — and diffs the item id set
 // across changes. The first data load only seeds the baseline (never fires), so you
 // aren't notified about the backlog that was already there when you opened the tab.
@@ -31,11 +31,10 @@ import { dateTime } from '../lib/ui.js';
 // ids from the baseline would re-diff them as "new" on every poll, and a row that later BECOMES
 // personal (you get @-mentioned on it) would then fire as if it had just appeared.
 //
-// ⚠ SWITCHING A TYPE ON IN SETTINGS MUST NOT ANNOUNCE ITS BACKLOG. Settings → My Turn can add a
-// whole type at once ("Unanswered threads on your PRs" on an account with forty of them), and every
-// one of those rows would diff as "new". So the watcher RE-BASELINES, without firing, whenever the
-// response's `configKey` changes — which it does exactly when WHICH TYPES ARE SHOWN changes, and
-// never for a new order or new weights, so re-ranking cannot swallow a real arrival.
+// ⚠ SWITCHING THE SURVEY ON MUST NOT ANNOUNCE ITS BACKLOG. "Also show new PRs nobody asked you
+// about" adds a whole type at once, and every one of those rows would diff as "new". So the watcher
+// RE-BASELINES, without firing, whenever the response's `configKey` changes — which it does exactly
+// when WHICH TYPES ARE SHOWN changes.
 //
 // ⚠ AND IT KEEPS READING `personal`, NOT the three-valued `MyTurnRelevance` that now splits it.
 // The board LABELS those two halves apart ("Your turn" vs "In your repos") and the brief SPLITS
@@ -96,11 +95,6 @@ export function useMyTurnNotifications(enabled: boolean): void {
       repoOf.set(`r:${r.prId}`, r.repoFullName);
       isPersonal.set(`r:${r.prId}`, r.personal !== false);
     }
-    for (const p of data.yourPrs) {
-      at.set(`p:${p.prId}`, p.since ?? p.openedAt);
-      repoOf.set(`p:${p.prId}`, p.repoFullName);
-      isPersonal.set(`p:${p.prId}`, p.personal !== false);
-    }
     for (const a of data.approvedPrs ?? []) {
       at.set(`a:${a.prId}`, a.since ?? a.openedAt);
       repoOf.set(`a:${a.prId}`, a.repoFullName);
@@ -117,8 +111,7 @@ export function useMyTurnNotifications(enabled: boolean): void {
       // The one section the flag actually narrows: a new PR in a repo you do not maintain.
       isPersonal.set(`w:${w.prId}`, w.personal !== false);
     }
-    // The sections Settings → My Turn added. Each is EMPTY while its type is switched off (the gate
-    // is server-side), and each is read with `?? []` so a response predating it still diffs.
+    // The later sections, each read with `?? []` so a response predating it still diffs.
     // ⚠ The prefixes are words, never a one-letter one: `startsWith('p:')` must not match `push:`.
     const note = (id: string, clock: string, repo: string, personal: boolean | undefined): void => {
       at.set(id, clock);
@@ -148,12 +141,6 @@ export function useMyTurnNotifications(enabled: boolean): void {
     }
     for (const t of data.ownThreads ?? []) {
       note(`othread:${t.threadId}`, t.since, t.repoFullName, t.personal);
-    }
-    for (const c of data.claudeReviewsToAction ?? []) {
-      note(`airev:${c.reviewId}`, c.finishedAt ?? '', c.repoFullName, c.personal);
-    }
-    for (const a of data.approvedMerged ?? []) {
-      note(`aimerged:${a.prId}`, a.since, a.repoFullName, a.personal);
     }
 
     const prev = prevRef.current;
@@ -185,7 +172,6 @@ export function useMyTurnNotifications(enabled: boolean): void {
 
     const reviews = added.filter((id) => id.startsWith('r:')).length;
     const threads = added.filter((id) => id.startsWith('t:')).length;
-    const yours = added.filter((id) => id.startsWith('p:')).length;
     const approved = added.filter((id) => id.startsWith('a:')).length;
     // `w:` and the wire field `watchedRepoPrs` keep their historical names (see the note on
     // `WatchedRepoPrItem` in shared/types.ts — the stored dismissal kind pins them); the SECTION
@@ -201,7 +187,6 @@ export function useMyTurnNotifications(enabled: boolean): void {
     const conflicts = n('conflict:');
     const ready = n('land:');
     const ownThreads = n('othread:');
-    const trunks = n('trunk:');
     const bits: string[] = [];
     if (reviews) bits.push(`${reviews} review${s(reviews)} requested`);
     if (mentions) bits.push(`${mentions} mention${s(mentions)}`);
@@ -213,8 +198,6 @@ export function useMyTurnNotifications(enabled: boolean): void {
     if (pushed) bits.push(`${pushed} PR${s(pushed)} pushed since your review`);
     if (ciRed) bits.push(`${ciRed} of your builds failed`);
     if (conflicts) bits.push(`${conflicts} of your PRs ${conflicts === 1 ? 'has' : 'have'} conflicts`);
-    if (trunks) bits.push(`${trunks} default branch${trunks === 1 ? '' : 'es'} red`);
-    if (yours) bits.push(`${yours} of your PRs active`);
     if (approved) bits.push(`${approved} of your PRs approved`);
     if (ready) bits.push(`${ready} of your PRs ready to land`);
     if (ownThreads) bits.push(`${ownThreads} unanswered thread${s(ownThreads)} on your PRs`);

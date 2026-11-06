@@ -183,8 +183,14 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
+/** Store a raw `order`, as an older version of Limn did — it must be ignored now. */
 const setOrder = async (order: MyTurnCardReason[] | undefined): Promise<void> => {
-  await account.setMyTurnSettings(1, order == null ? null : { order });
+  const { eq } = await import('drizzle-orm');
+  await db
+    .update(schema.accounts)
+    .set({ myTurnSettings: order == null ? null : { order } })
+    .where(eq(schema.accounts.id, 1))
+    .execute();
 };
 
 /** Every PR the response names, per section — enough to see duplicates and absences. */
@@ -207,7 +213,7 @@ describe('one card per PR', () => {
     expect(prsIn(res).thread).toEqual([bothPr]);
   });
 
-  it('the board lists ONE card for a PR with two jobs — the reader’s highest type', async () => {
+  it('the board lists ONE card for a PR with two jobs — the highest in the fixed order', async () => {
     const both = await boardCardsFor(bothPr);
     // Default order: review_request before thread.
     expect(both.reasons).toEqual(['review_request']);
@@ -215,13 +221,13 @@ describe('one card per PR', () => {
     expect(both.total).toBe(2);
   });
 
-  it('follows the READER’S order, not a fixed precedence', async () => {
+  it('follows the FIXED order — an order stored by an older version is ignored', async () => {
     await setOrder(['thread', 'review_request']);
     try {
-      expect((await boardCardsFor(bothPr)).reasons).toEqual(['thread']);
+      expect((await boardCardsFor(bothPr)).reasons).toEqual(['review_request']);
       const res = await q.getMyTurn(1, scope, { onePerPr: true });
-      expect(prsIn(res).review).toEqual([reqPr]);
-      expect(prsIn(res).thread).toEqual([bothPr]);
+      expect(prsIn(res).review).toEqual(expect.arrayContaining([bothPr, reqPr]));
+      expect(prsIn(res).thread).toEqual([]);
     } finally {
       await setOrder(undefined);
     }
@@ -353,8 +359,8 @@ describe('the pure fold', () => {
     const t = (threadId: number, lastReplyAt: string) => ({ threadId, prId: 5, lastReplyAt }) as any;
     const empty = {
       awaitingReview: [], mentions: [], commentReplies: [], pushedSince: [], ownCiRed: [],
-      ownConflicts: [], approvedPrs: [], ownReady: [], yourPrs: [], watchedRepoPrs: [],
-      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], approvedMerged: [],
+      ownConflicts: [], approvedPrs: [], ownReady: [], watchedRepoPrs: [],
+      threadReplies: [], ownThreads: [],
     };
     const out = dz.onePerPr(
       {
@@ -369,21 +375,23 @@ describe('the pure fold', () => {
     expect(out.threadsAwaiting.map((x: any) => x.threadId)).toEqual([2]);
   });
 
-  it('never folds a Claude review under another job on the same PR (auto re-reviews stay visible)', () => {
+  it('by default, Waiting on you beats Re-review beats Your PRs on the same PR', () => {
     const empty = {
       awaitingReview: [], mentions: [], commentReplies: [], pushedSince: [], ownCiRed: [],
-      ownConflicts: [], approvedPrs: [], ownReady: [], yourPrs: [], watchedRepoPrs: [],
-      threadReplies: [], ownThreads: [], claudeReviewsToAction: [], approvedMerged: [],
+      ownConflicts: [], approvedPrs: [], ownReady: [], watchedRepoPrs: [],
+      threadReplies: [], ownThreads: [], threadsAwaiting: [],
     };
-    const out = dz.onePerPr(
-      {
-        ...empty,
-        threadsAwaiting: [{ threadId: 1, prId: 5, lastReplyAt: new Date(now - DAY).toISOString() } as any],
-        claudeReviewsToAction: [{ reviewId: 9, prId: 5, finishedAt: new Date(now - HOUR).toISOString(), trigger: 'auto' } as any],
-      },
-      ['thread', 'claude_review'],
-    );
-    expect(out.threadsAwaiting.map((x: any) => x.threadId)).toEqual([1]);
-    expect(out.claudeReviewsToAction.map((x: any) => x.reviewId)).toEqual([9]);
+    const at = new Date(now - DAY).toISOString();
+    const out = dz.onePerPr({
+      ...empty,
+      approvedPrs: [{ prId: 5, since: at } as any],
+      pushedSince: [{ prId: 5, since: at } as any, { prId: 6, since: at } as any],
+      mentions: [{ prId: 5, since: new Date(now - HOUR).toISOString() } as any],
+      ownCiRed: [{ prId: 6, since: at } as any],
+    });
+    expect(out.mentions.map((x: any) => x.prId)).toEqual([5]);
+    expect(out.approvedPrs).toEqual([]);
+    expect(out.pushedSince.map((x: any) => x.prId)).toEqual([6]);
+    expect(out.ownCiRed).toEqual([]);
   });
 });

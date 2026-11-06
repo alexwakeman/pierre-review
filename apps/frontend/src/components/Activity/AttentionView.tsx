@@ -19,12 +19,14 @@ import { useSettingsModal } from '../../store/settingsModal.js';
 import {
   buildPendingView,
   effectivePendingTab,
+  myTurnSections,
   offerAuthorLens,
   offerOnlyYours,
   relevancePillCount,
   tabBadgeCount,
   tabsOf,
   TAB_LABEL,
+  waitingForReviewerCount,
 } from './pendingTabs.js';
 import { CheckCircleIcon, GearIcon } from '../Icons.js';
 import { PendingKindIcon, PendingTabIcon } from './PendingKindIcon.js';
@@ -195,7 +197,7 @@ export const LENS_COPY: Record<
 };
 
 const TAB_EMPTY: Record<PendingTabKey, string> = {
-  my_turn: 'Nothing is your turn right now.',
+  my_turn: 'Nothing is waiting on you.',
   claude: 'No AI reviews yet.',
   fixing: 'No failing builds or merge conflicts are yours to fix.',
   review: 'No reviews are waiting.',
@@ -340,11 +342,9 @@ export function AttentionView(): JSX.Element {
   // ⚠ `prId` IS NULLABLE ON SOME KINDS. A `ci_failing` 'trunk' card names a PR only when the red
   // head's landing PR resolved, and review-load cards name none — nothing for a PR probe to ask.
   const livenessPrIds = useMemo(() => {
-    // An AI review names a PR (often closed) but claims nothing about its state: never swept. Nor is
-    // a merged PR ("Merged after your Limn approved").
+    // An AI review names a PR (often closed) but claims nothing about its state: never swept.
     const prIdOf = (c: InsightCard): number | null =>
       c.kind !== 'ai_review' &&
-      !(c.kind === 'my_turn' && c.reason === 'ai_approved_merged') &&
       'prId' in c &&
       typeof c.prId === 'number'
         ? c.prId
@@ -389,8 +389,8 @@ export function AttentionView(): JSX.Element {
       : attentionAuthorLens === 'automation'
         ? ', automation only'
         : '');
-  // `rules` is what the server ranked THIS response with — the reader's weights and My Turn type
-  // order — so every popover explains the list on screen, never the product constants.
+  // `rules` is what the server ranked THIS response with — the fixed weights and My Turn type
+  // order — so every popover explains the list on screen.
   const explain = useMemo(
     () => ({
       tab: view.tab,
@@ -402,7 +402,7 @@ export function AttentionView(): JSX.Element {
     }),
     [view.tab, data?.rules, data?.scores, viewName, view.total, openGuide],
   );
-  // Settings → My Turn, opened straight to its section — the "Customise" link on My turn.
+  // Settings → Pending → My Turn, opened straight to its section — the "Customise" link on My turn.
   const openSettings = useSettingsModal((s) => s.openSettings);
   // Offer the People / Automation pills only where they would change the list (both sides
   // non-empty), or when the lens is already on — so it can always be turned off.
@@ -430,6 +430,14 @@ export function AttentionView(): JSX.Element {
   const boardEmpty = !isLoading && !isError && data?.ownOpenPrs != null && pendingBoardEmpty(tabs);
   const suggestion = !isLoading && !isError ? (data?.reviewSuggestion ?? null) : null;
   const docsOffers = !isLoading && !isError ? (data?.docsOffers ?? null) : null;
+  // My turn's empty state points at Waiting on review when it holds something.
+  const reviewWaiting = waitingForReviewerCount(tabs, attentionAuthorLens);
+  // My turn's fixed groups as headings (Waiting on you, Re-review, Your PRs, New PRs, Older) — not
+  // under a kind chip (My turn has none) and nowhere else.
+  const sections = useMemo(
+    () => (tabKey === 'my_turn' ? myTurnSections(listCards, Date.now()) : undefined),
+    [tabKey, listCards],
+  );
   const emptyNote = empty != null && (
     <div className="flex flex-col items-center gap-3 px-6 py-12 text-center text-body text-ui-mute">
       <p className="flex items-center gap-2">
@@ -444,6 +452,13 @@ export function AttentionView(): JSX.Element {
       {empty.emptiedBy == null && lensOn != null && (
         <Button size="sm" onClick={() => setAttentionRelevance(null)}>
           Show everyone’s
+        </Button>
+      )}
+      {/* An empty My turn points at the reviews nobody has picked up — the tab's own figure,
+          from this response (nothing fetches). */}
+      {tabKey === 'my_turn' && empty.emptiedBy == null && lensOn == null && reviewWaiting != null && (
+        <Button size="sm" onClick={() => setAttentionTab('review')} data-testid="pending-my-turn-empty-review">
+          {reviewWaiting} pull request{reviewWaiting === 1 ? '' : 's'} wait{reviewWaiting === 1 ? 's' : ''} for a reviewer
         </Button>
       )}
     </div>
@@ -493,7 +508,7 @@ export function AttentionView(): JSX.Element {
   const pageCommandsKey = `${tabKey}|${attentionRelevance ?? ''}|${attentionAuthorLens ?? ''}`;
   const pageCommands = useMemo<Command[]>(() => {
     const out: Command[] = [
-      { id: 'pending:customise', group: 'Settings', title: 'Customise My turn', keywords: ['pending', 'settings', 'weights', 'order'], run: () => openSettings('my-turn') },
+      { id: 'pending:customise', group: 'Settings', title: 'Customise My turn', keywords: ['pending', 'settings', 'new prs'], run: () => openSettings('my-turn') },
       { id: 'pending:guide', group: 'Help', title: 'How Pending works', keywords: ['order', 'score', 'colours'], run: openGuide },
       {
         id: 'pending:only-yours',
@@ -590,7 +605,7 @@ export function AttentionView(): JSX.Element {
         {/* My turn's one visible sentence; the rest of the explanation stays behind the ⓘ. */}
         {tabKey === 'my_turn' && (
           <p className="mt-1.5 text-meta text-ui-mute" data-testid="pending-my-turn-purpose">
-            Pull requests where the next move is yours.
+            Pull requests where a person is waiting on you.
           </p>
         )}
 
@@ -660,8 +675,8 @@ export function AttentionView(): JSX.Element {
                   </div>
                 )}
                 {tabKey === 'my_turn' && (
-                  // What counts as your turn, the type order and the ranking weights all live in
-                  // Settings → My Turn; this opens the modal on that section.
+                  // Settings → Pending → My Turn (the one switch, and how My turn works); this opens
+                  // the modal on that section.
                   <button
                     type="button"
                     aria-haspopup="dialog"
@@ -700,6 +715,7 @@ export function AttentionView(): JSX.Element {
             people={empty?.placement === 'alone' ? [] : view.people}
             explain={explain}
             focusRequest={focusRequest}
+            sections={sections}
             before={
               <>
                 {/* ⚠ A NARROWED view with no cards still lists the review-load group — it counts

@@ -1,331 +1,67 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  compactMyTurnSettings,
-  DO_NEXT_PRESET_ORDER,
-  MY_TURN_DEFAULT_ORDER,
-  MY_TURN_SETTING_LABEL,
-  presetOf,
-  type MyTurnCardReason,
-  type MyTurnToggle,
-} from '@pierre-review/shared';
+import { MY_TURN_OLDER_DAYS } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useSetMyTurnSettings } from '../../hooks/useMyTurnSettings.js';
-import { ArrowIcon } from '../Icons.js';
-import { SaveButton, CheckInput } from './ui.js';
-import {
-  ADD_ROWS,
-  buildMyTurnSettingsBody,
-  isOff,
-  moveType,
-  movedTypeAnnouncement,
-  myTurnFormDirty,
-  myTurnFormProblem,
-  presetWeights,
-  PRESET_DESC,
-  PRESET_LABEL,
-  resetOrderAndWeights,
-  seedMyTurnForm,
-  SHOW_ROWS,
-  slideWeight,
-  WEIGHT_KEYS,
-  WEIGHT_LABEL,
-  type MyTurnForm,
-  type WeightSlide,
-} from './myTurnSettingsForm.js';
+import { InfoButton } from '../InfoModal.js';
+import { CheckInput, SectionShell } from './ui.js';
 
-// SETTINGS → MY TURN — CORE / free, both deployment modes, every tier. ACCOUNT-grained (one account
-// is one reader), stored on the account row and carried by /api/me, so like the blast-radius
-// section above it this renders ABOVE SettingsModal's pro-settings loading gate.
+// SETTINGS → PENDING → MY TURN — CORE / free, every install. ACCOUNT-grained (one account is one
+// reader), stored on the account row and carried by /api/me.
 //
-// ⚠ A TYPE SWITCHED OFF IS REMOVED, NOT HIDDEN. The server gates it inside `getMyTurn`, so the list,
-// every count, the brief lines and the notifications shrink together — the copy says so, and says
-// "Show in My Turn", never "mute": the Pending mute is a different control that KEEPS a card.
+// ONE SWITCH: "Also show new PRs nobody asked you about". Everything else about My Turn is fixed
+// (docs/BACKEND.md § My Turn): its groups, their order, and the ranking every other tab uses. The
+// switch saves as soon as it changes — there is nothing else on the section to batch it with.
 //
-// ⚠ THE ID AND THE FOCUSABLE HEADING ARE LOAD-BEARING. Pending's "Customise" link opens Settings
-// with `focus: 'my-turn'`, and the modal scrolls to `#settings-my-turn` and focuses its heading.
-// That is why this section writes its own shell rather than `SectionShell`, whose title cannot
-// take focus.
+// ⚠ THE HEADING ID IS LOAD-BEARING. Pending's "Customise" link opens Settings with
+// `focus: 'my-turn'`, and the modal scrolls to and focuses this heading.
 
-const SECTION_ID = 'settings-my-turn';
 export const MY_TURN_SECTION_HEADING_ID = 'settings-my-turn-heading';
-
-const sub = 'text-meta font-medium text-ui-mute';
-const hint = 'text-meta text-ui-mute';
-const pill = (on: boolean): string =>
-  `inline-flex h-7 items-center rounded-ui px-2.5 text-body font-medium transition-colors touch:h-10 ${
-    on ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
-  }`;
 
 export function MyTurnSection(): JSX.Element {
   const { data: me } = useMe();
-  const claudeReview = useAiCapabilities().enabled;
   const save = useSetMyTurnSettings();
-  const stored = me?.myTurnSettings ?? null;
-
-  const [form, setForm] = useState<MyTurnForm>(() => seedMyTurnForm(stored));
-  // Re-seed when the STORED value changes (first load, after a save) — keyed on the compacted
-  // overrides, never the object React Query hands back on every refetch, which would throw away a
-  // half-made edit.
-  const storedKey = JSON.stringify(compactMyTurnSettings(stored));
-  useEffect(() => {
-    setForm(seedMyTurnForm(stored));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storedKey]);
-
-  // The two AI review types exist only where the capability is on; elsewhere they are neither offered
-  // nor listed — but it keeps its place in the stored order, and a move steps over it.
-  const hidden = useMemo(
-    () => new Set<MyTurnCardReason>(claudeReview ? [] : ['claude_review', 'ai_approved_merged']),
-    [claudeReview],
-  );
-  const showRows = SHOW_ROWS.filter((r) => !hidden.has(r.reason));
-  const visibleOrder = form.order.filter((r) => !hidden.has(r));
-
-  // After a move the row's DOM node is re-inserted, which drops focus. Put it back on the same
-  // button of the moved row — or its other button, once the row reaches an end. Focus alone tells a
-  // screen reader nothing (the row's number is not in either button's name, and at an end focus
-  // jumps to the other button), so the move is also said in the live region under the list.
-  const moveButtons = useRef(new Map<string, HTMLButtonElement>());
-  const pendingFocus = useRef<{ reason: MyTurnCardReason; dir: -1 | 1 } | null>(null);
-  const [moved, setMoved] = useState('');
-  useEffect(() => {
-    const p = pendingFocus.current;
-    if (p == null) return;
-    pendingFocus.current = null;
-    const same = moveButtons.current.get(`${p.reason}:${p.dir}`);
-    const other = moveButtons.current.get(`${p.reason}:${-p.dir}`);
-    (same != null && !same.disabled ? same : other)?.focus();
-    setMoved(movedTypeAnnouncement(form.order, p.reason, MY_TURN_SETTING_LABEL[p.reason], hidden));
-  }, [form.order, hidden]);
-
-  // Each slider drag re-shares from where it began, or the rounding drifts the other two.
-  const slide = useRef<WeightSlide | null>(null);
-
-  const move = (reason: MyTurnCardReason, dir: -1 | 1): void => {
-    pendingFocus.current = { reason, dir };
-    setForm((f) => ({ ...f, order: moveType(f.order, reason, dir, hidden) }));
-  };
-  const setShow = (reason: MyTurnToggle, on: boolean): void =>
-    setForm((f) => ({ ...f, show: { ...f.show, [reason]: on } }));
-
-  const preset = presetOf(form.weights);
-  const problem = myTurnFormProblem(form);
-  const dirty = myTurnFormDirty(form, stored);
-  const atDefaultRanking =
-    preset === 'balanced' && form.order.every((r, i) => r === MY_TURN_DEFAULT_ORDER[i]);
+  // While a save is in flight, show what the reader just chose.
+  const on = save.isPending ? (save.variables?.showNewPrs ?? false) : (me?.myTurnSettings?.showNewPrs ?? false);
 
   return (
-    <section
-      id={SECTION_ID}
-      aria-labelledby={MY_TURN_SECTION_HEADING_ID}
-      className="pb-6 text-body text-ui-ink last:pb-0"
+    <SectionShell
+      title="My Turn"
+      headingId={MY_TURN_SECTION_HEADING_ID}
+      desc="Applies to every workspace."
+      info={
+        <InfoButton title="My Turn">
+          <p>
+            My turn lists pull requests where a person is waiting on you, in three groups: Waiting
+            on you (review requests, mentions and replies to you), Re-review (someone pushed after
+            your review or comment) and Your PRs (approved, ready to land, failing, conflicting, or
+            with an unanswered thread).
+          </p>
+          <p>
+            An item that has waited more than {MY_TURN_OLDER_DAYS} days moves to a closed “Older”
+            group at the end of the list. It still counts.
+          </p>
+          <p>Draft PRs never show. Muted repositories never appear in My turn and never notify you.</p>
+        </InfoButton>
+      }
     >
-      <h3
-        id={MY_TURN_SECTION_HEADING_ID}
-        tabIndex={-1}
-        className="scroll-mt-4 text-title text-ui-ink outline-none"
-      >
-        My Turn
-      </h3>
-      <p className="mt-0.5 text-meta text-ui-mute">
-        What counts as your turn, and how Pending orders cards. Applies to every workspace.
-      </p>
-
-      <div className="mt-2.5 space-y-4">
-        {/* ── Show in My Turn ─────────────────────────────────────────────────────────────── */}
-        <fieldset className="space-y-1.5">
-          <legend className={sub}>Show in My Turn</legend>
-          <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
-            {showRows.map(({ reason, hint: line }) => (
-              <label key={reason} className="flex cursor-pointer items-start gap-2">
-                <CheckInput
-                  className="mt-0.5"
-                  checked={form.show[reason]}
-                  onChange={(e) => setShow(reason, e.target.checked)}
-                />
-                <span className="min-w-0">
-                  <span className="block text-meta font-medium text-ui-ink">
-                    {MY_TURN_SETTING_LABEL[reason]}
-                  </span>
-                  <span className={`block ${hint}`}>{line}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <p className={hint}>
-            Switching a type off removes it from My Turn, its counts and its notifications. Review
-            requests and new PRs can still show in Waiting on review.
-          </p>
-        </fieldset>
-
-        {/* ── Add to My Turn ──────────────────────────────────────────────────────────────── */}
-        <fieldset className="space-y-1.5">
-          <legend className={sub}>Add to My Turn</legend>
-          <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
-            {ADD_ROWS.map((reason) => (
-              <label key={reason} className="flex cursor-pointer items-center gap-2 text-body">
-                <CheckInput
-                  checked={form.show[reason]}
-                  onChange={(e) => setShow(reason, e.target.checked)}
-                />
-                <span className="text-ui-ink">
-                  {MY_TURN_SETTING_LABEL[reason]}
-                </span>
-              </label>
-            ))}
-          </div>
-          <p className={hint}>
-            These move out of their own tab into My turn, and notify you unless the repo is muted.
-          </p>
-        </fieldset>
-
-        {/* ── Order of My turn ────────────────────────────────────────────────────────────── */}
-        <div className="space-y-1.5">
-          <h4 className={sub}>Order of My turn</h4>
-          <p className={hint}>My turn groups cards by type, in this order.</p>
-          {/* Up/down buttons, not drag: keyboard- and touch-native, no dependency, and a list of
-              fifteen does not need drag. */}
-          <ol className="space-y-0.5">
-            {visibleOrder.map((reason, i) => {
-              const label = MY_TURN_SETTING_LABEL[reason];
-              return (
-                <li
-                  key={reason}
-                  className="flex items-center gap-2 rounded-ui px-1 text-meta hover:bg-ui-hover"
-                >
-                  <span className="w-5 shrink-0 text-right tabular-nums text-ui-mute">
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 text-ui-ink">
-                    {label}
-                    {isOff(form, reason) && (
-                      <span className="ml-1 text-ui-mute">(off)</span>
-                    )}
-                  </span>
-                  {([-1, 1] as const).map((dir) => (
-                    <button
-                      key={dir}
-                      type="button"
-                      ref={(el) => {
-                        const k = `${reason}:${dir}`;
-                        if (el) moveButtons.current.set(k, el);
-                        else moveButtons.current.delete(k);
-                      }}
-                      onClick={() => move(reason, dir)}
-                      disabled={dir === -1 ? i === 0 : i === visibleOrder.length - 1}
-                      aria-label={`Move “${label}” ${dir === -1 ? 'up' : 'down'}`}
-                      className="hit rounded-ui p-1.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
-                    >
-                      <ArrowIcon dir={dir === -1 ? 'up' : 'down'} size={12} />
-                    </button>
-                  ))}
-                </li>
-              );
-            })}
-          </ol>
-          <p aria-live="polite" className="sr-only">
-            {moved}
-          </p>
-        </div>
-
-        {/* ── How Pending ranks cards ─────────────────────────────────────────────────────── */}
-        <div className="space-y-2">
-          <h4 className={sub}>How Pending ranks cards</h4>
-          <p className={hint}>
-            Every Pending tab ranks its cards by these three. In My turn they rank cards within each
-            type.
-          </p>
-          {/* NATIVE RADIOS drawn as pills, like the red-default-branch group above: one Tab stop,
-              and the arrow keys move AND apply a preset — what a screen reader's "radio button, 1
-              of 4" promises. Buttons wearing role="radio" announced that and did neither. */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div role="radiogroup" aria-label="Ranking preset" className="flex flex-wrap gap-1.5">
-              {DO_NEXT_PRESET_ORDER.map((p) => (
-                <label
-                  key={p}
-                  className={`${pill(preset === p)} relative cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ui-accent`}
-                >
-                  <input
-                    type="radio"
-                    name="my-turn-preset"
-                    className="sr-only"
-                    checked={preset === p}
-                    onChange={() => setForm((f) => ({ ...f, weights: presetWeights(p) }))}
-                  />
-                  {PRESET_LABEL[p]}
-                </label>
-              ))}
-            </div>
-            {/* Not a choice you can make — what the sliders say when they match no preset. A status,
-                OUTSIDE the group: no radio is checked then. */}
-            {preset === 'custom' && <span className={pill(true)}>Custom</span>}
-          </div>
-          {preset !== 'custom' && <p className={hint}>{PRESET_DESC[preset]}</p>}
-          <div className="space-y-1">
-            {WEIGHT_KEYS.map((k) => {
-              const id = `my-turn-weight-${k}`;
-              const v = form.weights[k];
-              return (
-                <div key={k} className="flex items-center gap-2">
-                  <label
-                    htmlFor={id}
-                    className="w-36 shrink-0 text-meta text-ui-ink sm:w-44"
-                  >
-                    {WEIGHT_LABEL[k]}
-                  </label>
-                  <input
-                    id={id}
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={10}
-                    value={v}
-                    aria-valuetext={`${v} percent`}
-                    onChange={(e) => {
-                      const s = slideWeight(slide.current, form.weights, k, Number(e.target.value));
-                      slide.current = s;
-                      setForm((f) => ({ ...f, weights: s.to }));
-                    }}
-                    className="budget-range min-w-0 flex-1"
-                  />
-                  <output
-                    htmlFor={id}
-                    className="w-10 shrink-0 text-right text-body tabular-nums text-ui-ink"
-                  >
-                    {v}%
-                  </output>
-                </div>
-              );
-            })}
-          </div>
-          <p className={hint}>They always add up to 100%.</p>
-          <button
-            type="button"
-            onClick={() => setForm(resetOrderAndWeights)}
-            disabled={atDefaultRanking}
-            className="inline-flex h-7 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 disabled:cursor-default disabled:opacity-40"
-          >
-            Reset
-          </button>
-        </div>
-
-        {problem != null && (
-          <p className="text-meta text-ui-danger" role="alert">
-            {problem}
-          </p>
-        )}
-        <SaveButton
-          dirty={dirty && problem == null}
-          saving={save.isPending}
-          onClick={() => save.mutate(buildMyTurnSettingsBody(form))}
+      <label className="flex cursor-pointer items-start gap-2 text-body">
+        <CheckInput
+          className="mt-0.5"
+          checked={on}
+          disabled={me == null || save.isPending}
+          onChange={(e) => save.mutate({ showNewPrs: e.target.checked })}
         />
-        {save.isError && (
-          <p className="text-meta text-ui-danger" role="alert">
-            {save.error?.message ?? 'Couldn’t save your My Turn settings.'}
-          </p>
-        )}
-      </div>
-    </section>
+        <span>
+          <span className="font-medium text-ui-ink">Also show new PRs nobody asked you about</span>
+          <span className="mt-0.5 block text-meta text-ui-mute">
+            Open PRs in your repositories that nobody asked you about.
+          </span>
+        </span>
+      </label>
+      {save.isError && (
+        <p className="text-meta text-ui-danger" role="alert">
+          {save.error?.message ?? 'Couldn’t save your My Turn setting.'}
+        </p>
+      )}
+    </SectionShell>
   );
 }

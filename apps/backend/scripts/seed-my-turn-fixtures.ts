@@ -3,8 +3,8 @@
 // WHY THIS EXISTS. The dev account is an observer: on the real data it has no open PR of its own, no
 // review request, no thread reply and no mention on an open PR, so almost every My Turn type is
 // invisible to a person clicking through the app. This writes one of each onto real PRs of one
-// workspace, so Settings → My Turn can be exercised end to end: switch a type off and watch its
-// card, its count and its brief line go; add own work and watch it MOVE out of its home tab.
+// workspace, so My Turn can be exercised end to end: its groups, its counts and its brief line, and
+// your own work MOVED out of its home tab.
 //
 // ⚠ IT REWRITES REAL ROWS (it makes the viewer the author of three PRs), so it REFUSES to run
 // unless DATABASE_URL names a COPY — never the default dev database:

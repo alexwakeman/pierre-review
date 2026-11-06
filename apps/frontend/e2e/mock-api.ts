@@ -92,6 +92,7 @@ import type {
 import {
   AI_BUDGET_DEFAULTS,
   aiKindsAll,
+  DO_NEXT_RULES,
   LARGE_PR_CODE_LOC_DEFAULT,
   PENDING_TABS,
   pendingTabHolds,
@@ -402,7 +403,7 @@ const ME_RESPONSE: MeResponse = {
   largePrCodeLocThresholdIsDefault: true,
   blastRadius: null,
   // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
-  myTurnSettings: null,
+  myTurnSettings: { showNewPrs: false },
   // Settings → Features: an existing install, so every destination shows (specs navigate to all of
   // them through the sidebar).
   features: resolveFeatures(null, { existingInstall: true, reportsReady: true, sprintSource: true }),
@@ -612,11 +613,9 @@ const ATTENTION: AttentionCardsResponse = {
     };
   }),
   scores: {},
-  // The ranking the server used — the product defaults, as a reader who never opened Settings
-  // gets them.
+  // The ranking the server used — the fixed weights, and the survey off (the default).
   rules: {
-    weights: MY_TURN_DEFAULTS.weights,
-    preset: MY_TURN_DEFAULTS.preset,
+    weights: { ...DO_NEXT_RULES.weights },
     myTurnOrder: MY_TURN_DEFAULTS.order,
     myTurnOff: MY_TURN_DEFAULTS.off,
   },
@@ -1052,16 +1051,14 @@ const MY_TURN: MyTurnResponse = {
     ...myTurnPr(id),
     alsoRequested: 0,
   })),
-  yourPrs: [],
   approvedPrs: [],
   threadsAwaiting: [],
   // New open PRs by others in your Watched repos — a separate inbox section that My Turn
   // Focus Mode must also show on the board (regression #54).
   watchedRepoPrs: WATCHED_IDS.map((id): WatchedRepoPrItem => myTurnPr(id)),
-  claudeReviewsToAction: [],
   users: USERS,
-  // The sections Settings → My Turn added, empty here, and the reader's resolved settings. The
-  // three settings fields come FROM the shared resolver, so the fixture cannot drift from it.
+  // The other sections, empty here, and the reader's resolved settings. The three settings fields
+  // come FROM the shared resolver, so the fixture cannot drift from it.
   mentions: [],
   threadReplies: [],
   commentReplies: [],
@@ -1070,7 +1067,6 @@ const MY_TURN: MyTurnResponse = {
   ownConflicts: [],
   ownReady: [],
   ownThreads: [],
-  approvedMerged: [],
   order: MY_TURN_DEFAULTS.order,
   off: MY_TURN_DEFAULTS.off,
   configKey: MY_TURN_DEFAULTS.configKey,

@@ -310,7 +310,7 @@ describe('the mention scanner', () => {
 
   it('lists a PR once — a mentioned PR is a mention card, never also a "New PR"', async () => {
     const { setMyTurnSettings } = await import('../auth/account.js');
-    await setMyTurnSettings(1, { show: { watched_repo_pr: true } });
+    await setMyTurnSettings(1, { showNewPrs: true });
     try {
       const res = await q.getMyTurn(1);
       const mentioned = new Set(res.mentions.map((m: { prId: number }) => m.prId));
@@ -322,7 +322,7 @@ describe('the mention scanner', () => {
       // to 'direct' is gone, because a mention is its own type now.
       for (const r of res.watchedRepoPrs) expect(r.relevance).toBe('none');
     } finally {
-      await setMyTurnSettings(1, null);
+      await setMyTurnSettings(1, { showNewPrs: false });
     }
   });
 

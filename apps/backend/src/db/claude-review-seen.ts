@@ -1,10 +1,10 @@
-// MY TURN → "NEW AI REVIEWS BY YOUR LIMN": THE ONE SEEN WRITER (docs/BACKEND.md § My Turn).
+// THE ONE "SEEN" WRITER for a finished run of the reader's own Limn (`claude_reviews.seen_at`).
 //
 // The reader had a finished run of their own Limn on screen in the PR's AI Review tab
 // (`POST /api/prs/:id/claude-review/seen`, sent by the tab once per run while `seenAt` is null). The
 // run — and, for a Claude + Codex pair, every half — is stamped only where `seen_at` is still NULL,
-// so a repeat is a no-op and the stamp never moves. A stamped run is no longer a `claude_review` My
-// Turn card (`getUnseenOwnAiReviews`). ⚠ This module opens NO database at import (it takes an
+// so a repeat is a no-op and the stamp never moves. It rides `ClaudeReview.seenAt`; since the My
+// Turn `claude_review` type was removed (2026-11-06) no Pending card reads it. ⚠ This module opens NO database at import (it takes an
 // executor): the review routes import it.
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Executor } from './client.js';
