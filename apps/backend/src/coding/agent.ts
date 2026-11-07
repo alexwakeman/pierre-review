@@ -146,8 +146,6 @@ interface AgentRunOptions {
    * reference library). Absent ⇒ none — every AI Fix run.
    */
   readOnlyRoots?: string[];
-  /** The build's write deny-list (review/write-deny.ts; a story build). Absent ⇒ off. */
-  protectWrites?: boolean;
   maxTurns: number;
   maxBudgetUsd: number;
   abortController: AbortController;
@@ -259,7 +257,6 @@ export async function runAgentInWorktree(
     roots: [],
     readOnlyRoots: opts.readOnlyRoots ?? [],
     writeRoots: opts.writes ? [opts.worktreePath] : [],
-    ...(opts.protectWrites && opts.writes ? { protectWrites: true } : {}),
     tools: opts.tools,
     ...(opts.checks ? { checks: opts.checks } : {}),
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
@@ -411,8 +408,6 @@ export interface BuildInWorktreeArgs {
   effort?: AiEffort;
   /** Folders the build may read but never write. Absent ⇒ none (AI Fix). */
   readOnlyRoots?: string[];
-  /** The build's write deny-list (a story build). Absent ⇒ off (AI Fix). */
-  protectWrites?: boolean;
 }
 
 export type BuildInWorktreeResult =
@@ -538,7 +533,6 @@ export async function buildInWorktree(args: BuildInWorktreeArgs): Promise<BuildI
         ...(checkTool ? { checks: checkTool } : {}),
         writes: true,
         ...(args.readOnlyRoots && args.readOnlyRoots.length > 0 ? { readOnlyRoots: args.readOnlyRoots } : {}),
-        ...(args.protectWrites ? { protectWrites: true } : {}),
         maxTurns: args.maxTurns,
         maxBudgetUsd: budgetUsd,
         abortController,

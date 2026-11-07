@@ -1073,11 +1073,18 @@ export function tapQuery<Q extends object>(q: Q): Q {
   return proxy;
 }
 
+/** A query's params with `persistSession: false` forced (ai/agent-isolation.ts `NO_SESSION_FILES`):
+ *  no run, whatever its call site sent, saves a transcript under `~/.claude/projects`. */
+export function withoutSessionFiles<P extends { options?: object }>(params: P): P {
+  return { ...params, options: { ...(params.options ?? {}), persistSession: false } };
+}
+
 const tappedSdks = new WeakMap<object, AgentSdk>();
 function tapAgentSdk(mod: AgentSdk): AgentSdk {
   const hit = tappedSdks.get(mod);
   if (hit) return hit;
-  const query = ((params: Parameters<AgentSdk['query']>[0]) => tapQuery(mod.query(params))) as AgentSdk['query'];
+  const query = ((params: Parameters<AgentSdk['query']>[0]) =>
+    tapQuery(mod.query(withoutSessionFiles(params)))) as AgentSdk['query'];
   const tapped = { ...mod, query } as AgentSdk;
   tappedSdks.set(mod, tapped);
   return tapped;

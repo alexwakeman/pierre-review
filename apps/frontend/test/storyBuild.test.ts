@@ -2,10 +2,7 @@
 // build — `storyViewBuildEntry` and its inputs) and the sprint card's build mark (components/TicketCard.tsx)
 // — "Implement story", docs/STORY-BUILD.md.
 //
-// Pins: the step line ("Assess · Plan · Docs · Build · Push", the current step), the docs groups and
-// their defaults (suggestions ticked, superseded unticked, grounded no box — owner decision 6), the
-// "not in the plan yet" count, the Accept body (branch checks, at least one repository), push gating
-// (ready + a patch; Push all from two), the story view's entry: Implement ONLY on a not-started story
+// Pins: push gating (ready + a patch; Push all from two), the error words, the story view's entry: Implement ONLY on a not-started story
 // with no PR and no session (owner decision 4), Fill gaps on a STARTED one whose CURRENT story check found
 // gaps, Open build once a session is open; and the card: NO build button, only the mark in words and in
 // the accessible name.
@@ -14,21 +11,13 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { SprintGraphNode, StoryBuild, StoryBuildDocs, StoryBuildRepo, TicketReview, TicketReviewState } from '@pierre-review/shared';
+import type { SprintGraphNode, StoryBuild, StoryBuildRepo, TicketReview, TicketReviewState } from '@pierre-review/shared';
 import {
-  acceptBody,
-  branchNameProblem,
   canPushRepo,
-  canRetryRepo,
-  docsItemIncluded,
-  docsPointsNotInPlan,
   pushAllOffered,
-  storyBuildCancellable,
-  storyBuildDocsGroups,
   storyBuildErrorText,
   storyBuildActionLabel,
   storyBuildActionOf,
-  storyBuildSteps,
   sprintNodeBuildOf,
   storyStageOfCategory,
   storyViewBuildEntry,
@@ -72,17 +61,6 @@ const repo = (repoId: number, o: Partial<StoryBuildRepo> = {}): StoryBuildRepo =
   completedAt: null,
   ...o,
 });
-
-const docs: StoryBuildDocs = {
-  summary: 'Two points.',
-  nothingGrounded: false,
-  planRevision: 1,
-  items: [
-    { id: 'D1', kind: 'suggestion', about: 'AC1', note: 'n', suggestion: 's', refs: [] },
-    { id: 'D2', kind: 'superseded', about: 'story', note: 'n', suggestion: null, refs: [] },
-    { id: 'D3', kind: 'grounded', about: 'R1:step 1', note: 'n', suggestion: null, refs: [] },
-  ],
-};
 
 const build = (o: Partial<StoryBuild> = {}): StoryBuild => ({
   id: 7,
@@ -131,85 +109,7 @@ const build = (o: Partial<StoryBuild> = {}): StoryBuild => ({
   ...o,
 });
 
-const current = (b: StoryBuild | null, wantDocs?: boolean): string | undefined => storyBuildSteps(b, wantDocs).find((s) => s.state === 'current')?.word;
-
-describe('the step line', () => {
-  it('lists Docs only when the reader asked for it', () => {
-    expect(storyBuildSteps(null).map((s) => s.word)).toEqual(['Assess', 'Plan', 'Build', 'Push']);
-    expect(storyBuildSteps(null, true).map((s) => s.word)).toEqual(['Assess', 'Plan', 'Docs', 'Build', 'Push']);
-    expect(storyBuildSteps(build({ wantDocs: true })).map((s) => s.word)).toContain('Docs');
-  });
-
-  it('marks the step the session is on', () => {
-    expect(current(null)).toBeUndefined();
-    expect(current(build({ status: 'assessing', phase: 'reading_story', planRevision: 0, plan: null }))).toBe('Assess');
-    expect(current(build({ status: 'planning', phase: 'checking_out', planRevision: 0, plan: null }))).toBe('Assess');
-    expect(current(build({ status: 'planning', phase: 'planning', planRevision: 1 }))).toBe('Plan');
-    expect(current(build({ status: 'plan_ready' }))).toBe('Plan');
-    expect(current(build({ status: 'plan_ready', wantDocs: true, docsStatus: 'running' }))).toBe('Docs');
-    expect(current(build({ status: 'building' }))).toBe('Build');
-    expect(current(build({ status: 'ready' }))).toBe('Push');
-    const pushed = storyBuildSteps(build({ status: 'ready', pushedAll: true }));
-    expect(pushed.every((s) => s.state === 'done')).toBe(true);
-  });
-});
-
-describe('the docs', () => {
-  it('groups by kind; suggestions ticked, superseded unticked by default', () => {
-    const g = storyBuildDocsGroups(docs);
-    expect(g.suggestions.map((i) => i.id)).toEqual(['D1']);
-    expect(g.superseded.map((i) => i.id)).toEqual(['D2']);
-    expect(g.grounded.map((i) => i.id)).toEqual(['D3']);
-    expect(docsItemIncluded(docs.items[0]!, {})).toBe(true);
-    expect(docsItemIncluded(docs.items[1]!, {})).toBe(false);
-    expect(docsItemIncluded(docs.items[1]!, { D2: 'include' })).toBe(true);
-    expect(docsItemIncluded(docs.items[0]!, { D1: 'ignore' })).toBe(false);
-  });
-
-  it('counts the ticked points the current plan has not seen', () => {
-    expect(docsPointsNotInPlan(build({ docs, docsDecisions: { D1: 'include', D2: 'ignore' } }))).toBe(1);
-    expect(docsPointsNotInPlan(build({ docs, docsDecisions: { D1: 'include', D2: 'include' } }))).toBe(2);
-    // A plan pass ran after the docs: it had the ticks.
-    expect(docsPointsNotInPlan(build({ docs, planRevision: 2, docsDecisions: { D1: 'include' } }))).toBe(0);
-  });
-});
-
-describe('Accept', () => {
-  it('sends the plan revision and every planned repository with its branch', () => {
-    const r = acceptBody(build(), new Map([[2, { include: false }]]));
-    expect('body' in r && r.body).toEqual({
-      planRevision: 1,
-      repos: [
-        { repoId: 1, include: true, branch: 'PLAT-310-retry-budget', checks: [] },
-        { repoId: 2, include: false, branch: 'PLAT-310-paused-chip', checks: [] },
-      ],
-    });
-  });
-
-  it('refuses no repository, and a bad branch name', () => {
-    const none = acceptBody(build(), new Map([[1, { include: false }], [2, { include: false }]]));
-    expect('problem' in none && none.problem).toBe('Include at least one repository.');
-    const bad = acceptBody(build(), new Map([[1, { branch: 'has space' }]]));
-    expect('problem' in bad).toBe(true);
-    expect(branchNameProblem('')).toBe('Name the branch.');
-    expect(branchNameProblem('a..b')).not.toBeNull();
-    expect(branchNameProblem('PLAT-310/retry')).toBeNull();
-  });
-});
-
-describe('Cancel', () => {
-  it('is offered while a plan or build pass runs, and while ONLY the docs run (⌘K Cancel stops it)', () => {
-    expect(storyBuildCancellable(build({ status: 'planning' }))).toBe(true);
-    expect(storyBuildCancellable(build({ status: 'plan_ready', docsStatus: 'running' }))).toBe(true);
-    expect(storyBuildCancellable(build({ status: 'plan_ready', docsStatus: 'ready' }))).toBe(false);
-  });
-
-  it('a stale docs tick reads in words', () => {
-    expect(storyBuildErrorText({ code: 'DocsMoved', message: 'x' })).toBe('The docs points changed since you looked. Tick them again.');
-  });
-});
-
-describe('push and retry', () => {
+describe('push', () => {
   it('pushes a ready repository with a patch, whatever its tests say', () => {
     expect(canPushRepo(repo(1, { status: 'ready', hasPatch: true }))).toBe(true);
     expect(canPushRepo(repo(1, { status: 'ready', hasPatch: false }))).toBe(false);
@@ -222,14 +122,8 @@ describe('push and retry', () => {
     expect(pushAllOffered(build({ repos: [repo(1, { status: 'ready', hasPatch: true }), repo(2, { status: 'ready', hasPatch: true })] }))).toBe(true);
   });
 
-  it('retries a failed repository only while nothing else runs', () => {
-    const failed = repo(2, { status: 'failed' });
-    expect(canRetryRepo(build({ status: 'ready', repos: [repo(1, { status: 'ready' }), failed] }), failed)).toBe(true);
-    expect(canRetryRepo(build({ status: 'building', repos: [repo(1, { status: 'building' }), failed] }), failed)).toBe(false);
-  });
-
   it('words a known error code, else the server message', () => {
-    expect(storyBuildErrorText({ code: 'PlanMoved', message: 'x' })).toBe('The plan changed. Read the new one, then accept it.');
+    expect(storyBuildErrorText({ code: 'NotReady', message: 'x' })).toBe('Wait for the current step to finish.');
     expect(storyBuildErrorText({ code: 'Other', message: 'From the server.' })).toBe('From the server.');
   });
 });
@@ -298,8 +192,8 @@ describe('the sprint card: a build MARK, never a build button', () => {
     expect(html).toContain('data-build="ready_to_push"');
     expect(html).toContain('Ready to push');
     expect(html).toContain('build: Ready to push');
-    expect(card(node({ build: { id: 3, status: 'building', readyRepos: 0, pushedRepos: 0 } }))).toContain('Building…');
-    expect(card(node({ build: { id: 3, status: 'plan_ready', readyRepos: 0, pushedRepos: 0 } }))).toContain('Plan ready');
+    expect(card(node({ build: { id: 3, status: 'building', readyRepos: 0, pushedRepos: 0 } }))).toContain('Working…');
+    expect(card(node({ build: { id: 3, status: 'plan_ready', readyRepos: 0, pushedRepos: 0 } }))).toContain('Waiting for you');
     expect(card(node())).not.toContain('data-build=');
   });
 });

@@ -35,7 +35,6 @@ similarity score is never evidence.
 | Surface | How it finds text now | The gap |
 |---|---|---|
 | Check against the docs (`review/story-docs/manager.ts` → `shortlist.ts`) | Whole library inline when ≤ 48k chars (`wholeLibraryShortlist`); else `prefilterSections`: BM25 over each section's TITLE, trail, headings, one-line summary and document title (never the body) → top 30 → Haiku picks ≤ 8 | Body text is never searched. A story that shares no word with a title or summary scores nothing; then Haiku gets INDEX + every CONTENTS.md (≤ 60k chars) and guesses. |
-| Implement story's docs pass (`coding/story-build/docs.ts`) | The same `wholeLibraryShortlist` / `prefilterSections` → `runShortlist` | The same gap. |
 | Docs chat (`reference-docs/chat.ts`) | The agent walks INDEX → CONTENTS → sections with Read/Glob/Grep (≤ 30 turns, $1) | Every answer pays for the walk in turns and tokens; Grep finds only exact words. |
 | Reviews with the library on (`review-refs.ts`) | The same walk, inside the review run | The walk costs turns a diff-only review barely has (`DIFF_ONLY_DOCS_MIN_TURNS`). |
 
@@ -233,9 +232,9 @@ dropped after 10 idle minutes.
 
 ### Surfaces
 
-1. **Check against the docs** (`review/story-docs/manager.ts`) and **Implement story's docs pass**
-   (`coding/story-build/docs.ts`): both call `prefilterSections` today, so both switch to
-   `retrieve(..., k: 30)` together, behind one function in `shortlist.ts` so they cannot drift. The
+1. **Check against the docs** (`review/story-docs/manager.ts`; Implement story's docs pass used it too
+   until it was removed, 2026-11-07): it called `prefilterSections`, and switches to
+   `retrieve(..., k: 30)` behind one function in `shortlist.ts`. The
    query is the story title, description and criteria; the candidates stay in plain rank order;
    Haiku's pick is unchanged. The INDEX + CONTENTS fallback stays ONLY for a library with no chunks
    yet. The `wholeLibraryShortlist` short cut (≤ 48k chars) is unchanged.

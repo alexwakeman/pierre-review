@@ -942,9 +942,9 @@ the sprint brief / story passes (above).
 
 ## Check a story against the docs (`review/story-docs/`; migration `0121`)
 
-> **Its `build` mode** ("Implement story" → docs consideration: `submit_build_docs`, `build-prompts.ts`,
-> `build-validate.ts`) is the same read weighed against a story build's PLAN, where THE STORY WINS. It stores on
-> the build's own row, never here: [STORY-BUILD.md § Docs consideration](STORY-BUILD.md#docs-consideration-wp3).
+> Its old `build` mode (Implement story's docs consideration, `submit_build_docs`) was REMOVED with the
+> plan/build flow (2026-11-07): a workspace session's agent reads the library through the seed instead
+> ([STORY-BUILD.md](STORY-BUILD.md)).
 
 A per-story button in the Story section (Open PRs ticket stack and the story view). MANUAL ONLY — never
 automatic, never on view. `registerAgenticRoutes` registers the two routes (docs/API.md

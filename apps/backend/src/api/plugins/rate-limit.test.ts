@@ -105,30 +105,44 @@ describe('tierFor — ticket review', () => {
   });
 });
 
-// IMPLEMENT STORY: agent starts on the AI pair, the two pushes on the GitHub write bucket, the checks picker
-// on `search`, and every DB-only route DECIDED as `read` — a PUT on decisions or a POST cancel must never
-// inherit `ai`, and a push must never sit on the 600/min blanket.
+// IMPLEMENT STORY: a session boot and every agent turn on the AI pair, the two pushes on the GitHub write
+// bucket, and every DB-only route DECIDED as `read` — a POST discard must never inherit `ai`, and a push
+// must never sit on the 600/min blanket.
 describe('tierFor — implement story', () => {
-  it('bills every agent start as AI generation', () => {
+  it('bills a session start as AI generation', () => {
     expect(tiers('POST', '/api/story-builds')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/story-builds/7/plan/message')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/story-builds/7/docs')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/story-builds/7/accept')).toEqual(['ai', 'ai_hourly']);
-    expect(tiers('POST', '/api/story-builds/7/repos/3/retry')).toEqual(['ai', 'ai_hourly']);
+    // The removed plan/build routes are no longer billed (nothing answers them).
+    expect(tiers('POST', '/api/story-builds/7/accept')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/repos/3/retry')).toEqual(['read']);
   });
   it('puts both pushes on the GitHub write bucket', () => {
     expect(tiers('POST', '/api/story-builds/7/repos/3/push')).toEqual(['github_write']);
     expect(tiers('POST', '/api/story-builds/7/push')).toEqual(['github_write']);
   });
-  it('reads the checks picker from GitHub on search, and keeps the rest on read', () => {
-    expect(tiers('GET', '/api/story-builds/7/repos/3/checks')).toEqual(['search', 'read']);
+  it('keeps the DB-only routes on read', () => {
     expect(tiers('GET', '/api/story-builds')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/7')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/7/stream')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/7/repos/3/diff')).toEqual(['read']);
-    expect(tiers('PUT', '/api/story-builds/7/docs/decisions')).toEqual(['read']);
-    expect(tiers('POST', '/api/story-builds/7/cancel')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/discard')).toEqual(['read']);
+  });
+  it('bills a workspace session turn, Start build and Resume as AI; Stop, Allow and the diff are read', async () => {
+    expect(tiers('POST', '/api/story-builds/7/messages')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/build')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/resume')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/interrupt')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/network/allow')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/7/diff')).toEqual(['read']);
+    // MUTATION: a near-miss path is not billed as a turn.
+    expect(tiers('POST', '/api/story-builds/7/messages/x')).toEqual(['read']);
+  });
+  it('decides every shared session path', async () => {
+    const { SANDBOX_SESSION_API, sandboxSessionPath } = await import('@pierre-review/shared');
+    for (const route of Object.keys(SANDBOX_SESSION_API) as Array<keyof typeof SANDBOX_SESSION_API>) {
+      const path = sandboxSessionPath(route, 7);
+      expect(path.startsWith('/api/story-builds/7/')).toBe(true);
+      expect(tiers(route === 'diff' ? 'GET' : 'POST', path).length).toBeGreaterThan(0);
+    }
   });
   it('spells every shared route path into a decided tier', async () => {
     const { STORY_BUILD_API, storyBuildPath } = await import('@pierre-review/shared');
@@ -498,6 +512,19 @@ describe('tierFor — GitHub quota spenders', () => {
   it('puts the Chronology working-hours settings on the workspace-CRUD read tier', () => {
     expect(tiers('PUT', '/api/workspaces/3/flow-settings')).toEqual(['read']);
     expect(tiers('PUT', '/api/workspaces/3/flow-settings')).not.toContain('github_write');
+  });
+
+  // Settings → Workspace → Sandbox (api/routes/sandbox-settings.ts). FOLLOWING THE TOKEN: the setting
+  // is one row, the hosts one row each, and the check walks a local folder (bounded: depth, 20,000
+  // folders, 5 s) and reads git config files as text — no git process, no GitHub, no model.
+  it('puts the sandbox settings and the folder check on the workspace-CRUD read tier', () => {
+    expect(tiers('GET', '/api/workspaces/3/sandbox')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/sandbox')).toEqual(['read']);
+    expect(tiers('POST', '/api/workspaces/3/sandbox/check')).toEqual(['read']);
+    expect(tiers('POST', '/api/workspaces/3/sandbox/allowed-hosts')).toEqual(['read']);
+    expect(tiers('DELETE', '/api/workspaces/3/sandbox/allowed-hosts')).toEqual(['read']);
+    // The runtime status (`docker version` + `info`, cached 10 s server-side): `read`, decided, EXACT.
+    expect(tiers('GET', '/api/sandbox/runtime')).toEqual(['read']);
   });
 
   // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called

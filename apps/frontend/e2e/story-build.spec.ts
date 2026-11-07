@@ -1,14 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi, prDetailFor, STORY_BUILD_DOCS_RUNNING, STORY_BUILD_PLAN_READY_DOCS } from './mock-api.js';
-import type { PrDetail, StoryBuild, StoryBuildDocsDecisionsBody, TicketPrsResponse, TicketReviewStatesResponse, WorkspaceTrackerSettings } from '@pierre-review/shared';
+import { fixtures, installMockApi, prDetailFor, SANDBOX_RUNTIME_NONE, STORY_SESSION_CLOSED, STORY_SESSION_READY } from './mock-api.js';
+import type { PrDetail, SandboxNetworkAllowBody, SandboxRuntimeStatus, StoryBuild, TicketPrsResponse, TicketReviewStatesResponse, WorkspaceTrackerSettings } from '@pierre-review/shared';
 
-// "Implement story" (docs/STORY-BUILD.md) against the mocked API (mock-api.ts keeps ACME-1's session
-// per page). The entry is the STORY VIEW's action (§ Entry points), never a sprint card: the card carries
-// only the build mark; a click opens the story tray, whose action group offers "Implement" on the
-// not-started ticket with no pull request (owner decision 4) — opening the build tab, where Start makes a
-// plan, Accept builds, Push pushes one repository — and "Fill gaps" on ACME-2 (started, its current story
-// check found gaps), whose tab lists them up front. The story tab and the PR view's Story tab offer the
-// same action from their own facts.
+// "Implement story" as a WORKSPACE SESSION (docs/SANDBOX.md § Sessions) against the mocked API (mock-api.ts
+// keeps ACME-1's session per page). The entry is the STORY VIEW's action (docs/STORY-BUILD.md § Entry
+// points), never a sprint card: the card carries only the build mark; a click opens the story tray, whose
+// action group offers "Implement" on the not-started ticket with no pull request (owner decision 4) —
+// opening the build tab, where Start boots a sandbox, Send talks to the agent, Start build builds and Push
+// pushes one repository — and "Fill gaps" on ACME-2 (started, its current story check found gaps), whose
+// tab lists them up front. The story tab and the PR view's Story tab offer the same action from their own
+// facts. With no container runtime the tab says so in one line, with "How to set up".
 
 const ACME_1 = 'jira:https://acme.atlassian.net#ACME-1';
 const ACME_2 = 'jira:https://acme.atlassian.net#ACME-2';
@@ -37,8 +38,8 @@ function ticketPrsFor(ident: string): TicketPrsResponse {
 
 /** The fixtures keep AI dark; this feature needs it on (`me.ai.enabled`). Every story view gets its PR
  *  read, and ACME-2's story check (run 501, `ACME_2_CHECK`) is current. */
-async function withAi(page: Page, storyBuild?: StoryBuild): Promise<void> {
-  await installMockApi(page, storyBuild != null ? { storyBuild } : {});
+async function withAi(page: Page, storyBuild?: StoryBuild, runtime?: SandboxRuntimeStatus): Promise<void> {
+  await installMockApi(page, { ...(storyBuild != null ? { storyBuild } : {}), ...(runtime != null ? { runtime } : {}) });
   const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
   await page.route(
     (u) => u.pathname.endsWith('/api/me'),
@@ -136,7 +137,7 @@ test.describe('Implement story', () => {
     await expect(view.getByTestId('story-build-start-button')).toHaveText('Fill gaps');
   });
 
-  test('open from the story, start, accept, push', async ({ page }) => {
+  test('open from the story, start, talk, start build, push', async ({ page }) => {
     await gotoSprint(page);
     const tray = await openTray(page, 'ACME-1');
     await tray.getByRole('button', { name: 'Implement ACME-1' }).click();
@@ -145,20 +146,39 @@ test.describe('Implement story', () => {
     await expect(view).toBeVisible();
     await expect(page).toHaveURL(/view=story-build%3A/);
     await expect(view.getByTestId('story-build-start')).toBeVisible();
+    await expect(view.getByTestId('sandbox-runtime-line')).toContainText('Colima 0.8.1');
 
     await view.getByTestId('story-build-start-button').click();
-    await expect(view.getByTestId('story-build-summary')).toContainText('CSV endpoint');
-    await expect(view.getByTestId('story-build-plan-repo')).toHaveCount(2);
-    // Every gap the plan closes is listed under "Already done".
-    await expect(view.getByTestId('story-build-criterion')).toHaveCount(3);
+    const session = view.getByTestId('story-session');
+    await expect(session).toHaveAttribute('data-phase', 'ready');
+    await expect(view.getByTestId('story-build-steps').locator('[aria-current="step"]')).toHaveText('Talk');
+    // The rail: the ticket the agent was told, every repository at its path, the network log.
+    await expect(view.getByTestId('story-session-ticket')).toContainText('Download CSV button');
+    await expect(view.getByTestId('story-session-ticket')).toContainText('Open points (1)');
+    await expect(view.getByTestId('story-session-repos')).toContainText('/Users/me/acme/web');
+    await expect(view.getByTestId('story-session-network')).toContainText('1 blocked');
 
-    // The steps sit behind Details.
-    await view.getByTestId('story-build-plan-repo').first().getByRole('button', { name: 'Details' }).click();
-    await expect(view.getByTestId('story-build-steps-detail')).toContainText('Stream a report as CSV');
+    // A blocked host: the reader's Allow click, for this session.
+    const allow = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/network/allow'));
+    await view.getByTestId('story-session-network').getByRole('button', { name: 'Allow for this session' }).click();
+    expect((await allow).postDataJSON() as SandboxNetworkAllowBody).toEqual({ rule: 'telemetry.example.com', scope: 'session' });
 
-    await view.getByRole('button', { name: 'Accept plan and build' }).click();
+    // A chat turn: the reader on the right, the tool row (it opens to its output), the agent's answer.
+    await view.getByRole('textbox', { name: 'Message the agent' }).fill('Where are the reports?');
+    await view.getByRole('button', { name: 'Send' }).click();
+    const convo = view.getByTestId('story-session-conversation');
+    await expect(convo.locator('[data-kind="reader"]')).toContainText('Where are the reports?');
+    await expect(convo.locator('[data-kind="agent"]')).toContainText('src/reports/index.ts');
+    await convo.locator('[data-kind="tool"]').getByRole('button').click();
+    await expect(convo.locator('[data-kind="tool"]')).toContainText('ReportHeader.tsx');
+
+    await view.getByRole('button', { name: 'Start build' }).click();
+    await expect(session).toHaveAttribute('data-phase', 'built');
     await expect(view.getByTestId('story-build-repo')).toHaveCount(2);
     await expect(view.getByRole('button', { name: 'Push all' })).toBeVisible();
+    await expect(view.getByRole('button', { name: 'Start build' })).toHaveCount(0);
+    // The agent ran the tests in the sandbox: no "Not built or tested here", no Retry.
+    await expect(view.getByText('Not built or tested here.')).toHaveCount(0);
 
     // The diff is read only when opened.
     const api = view.locator('[data-testid="story-build-repo"][data-repo="acme/api"]');
@@ -168,6 +188,47 @@ test.describe('Implement story', () => {
     await api.getByRole('button', { name: 'Push as draft' }).click();
     await expect(api).toHaveAttribute('data-status', 'pushed');
     await expect(api.getByTestId('story-build-pushed-pr')).toContainText('#77');
+  });
+
+  test('with no container runtime, the tab says so and how to set one up', async ({ page }) => {
+    await withAi(page, undefined, SANDBOX_RUNTIME_NONE);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    const line = view.getByTestId('sandbox-runtime-line');
+    await expect(line).toHaveAttribute('data-available', 'false');
+    await expect(line).toContainText('No container runtime is installed');
+    await line.getByRole('button', { name: 'How to set up a container runtime' }).click();
+    await expect(page.getByText('brew install colima docker')).toBeVisible();
+    // The button stays (one path, owner decision Q2); a press says why in one line.
+    await page.keyboard.press('Escape');
+    await view.getByTestId('story-build-start-button').click();
+    await expect(view.getByTestId('story-build-start-error')).toContainText('No container runtime is installed');
+  });
+
+  test('a closed session keeps its changes: Resume, and Push still works', async ({ page }) => {
+    await withAi(page, STORY_SESSION_CLOSED);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    await expect(view.getByTestId('story-build-status')).toContainText('The changes are kept');
+    await expect(view.getByTestId('story-session-closed')).toBeVisible();
+    await expect(view.getByRole('button', { name: 'Push all' })).toBeVisible();
+    const resume = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/resume'));
+    await view.getByRole('button', { name: 'Resume' }).click();
+    await resume;
+    await expect(view.getByTestId('story-session-composer')).toBeVisible();
+  });
+
+  test('Discard asks once, then ends the session', async ({ page }) => {
+    await withAi(page, STORY_SESSION_READY);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    await view.getByRole('button', { name: 'Discard' }).click();
+    await expect(view.getByText('Stop the agent and remove the sandbox?')).toBeVisible();
+    const discard = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/discard'));
+    await view.locator('[data-story-build-action="discard-confirm"]').click();
+    await discard;
+    await expect(view.getByTestId('story-build-start')).toBeVisible();
+    await expect(view.getByTestId('story-build-last')).toContainText('Discarded.');
   });
 
   test('the story tab offers Implement from its own facts, and ⌘K names it', async ({ page }) => {
@@ -184,10 +245,10 @@ test.describe('Implement story', () => {
   });
 
   test('an open session shows Open build with its mark', async ({ page }) => {
-    await withAi(page, STORY_BUILD_PLAN_READY_DOCS);
+    await withAi(page, STORY_SESSION_READY);
     await page.goto(`/app/?view=${encodeURIComponent(`ticket:${ACME_1}`)}`);
     const tab = page.getByTestId('ticket-tab-view');
-    const open = tab.getByRole('button', { name: "Open ACME-1's build: Plan ready" });
+    const open = tab.getByRole('button', { name: "Open ACME-1's build: Waiting for you" });
     await expect(open).toBeVisible();
     await expect(tab.getByRole('button', { name: 'Implement ACME-1' })).toHaveCount(0);
     await open.click();
@@ -243,34 +304,6 @@ test.describe('Implement story', () => {
     await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
     await expect(page.getByTestId('story-build-overlay')).toBeVisible();
     await expect(page.getByTestId('story-build-header')).toContainText('ACME-1');
-  });
-
-  test('a docs tick names the docs run it was aimed at', async ({ page }) => {
-    await withAi(page, STORY_BUILD_PLAN_READY_DOCS);
-    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
-    const docs = page.getByTestId('story-build-docs');
-    await expect(docs).toContainText('Suggestions from the docs (2)');
-    await expect(docs).toContainText('This story changes the docs (1)');
-    await expect(docs).toContainText('Grounded in the docs (2)');
-    const put = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/docs/decisions'));
-    await docs.locator('[data-testid="story-build-docs-item"][data-kind="suggestion"]').first().getByRole('checkbox').click();
-    const body = (await put).postDataJSON() as StoryBuildDocsDecisionsBody;
-    expect(body).toMatchObject({ planRevision: 1, runId: 'run-a', decisions: { D4: 'ignore', D5: 'include' } });
-  });
-
-  test('Cancel stops a docs-only run, from the docs section and from ⌘K', async ({ page }) => {
-    await withAi(page, STORY_BUILD_DOCS_RUNNING);
-    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
-    const docs = page.getByTestId('story-build-docs');
-    await expect(docs).toContainText('Reading the docs');
-    await expect(docs.getByRole('button', { name: 'Cancel' })).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+k');
-    const option = page.getByRole('option', { name: /Cancel the build of ACME-1/ });
-    await expect(option).toBeVisible();
-    const cancel = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/cancel'));
-    await option.click();
-    await cancel;
-    await expect(docs).toContainText('Couldn’t check the docs.');
   });
 
   test('a build tab URL for a ticket the board does not offer cannot start one', async ({ page }) => {

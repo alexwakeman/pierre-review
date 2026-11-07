@@ -31,7 +31,17 @@ import { AiRunGate } from './AiSetup.js';
 import { aiProviderName, type AiProviderId } from '@pierre-review/shared';
 import { useFollowUpProvider } from '../hooks/useModelPick.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { REVIEW_ANCHOR_MUTED, REVIEW_ITEM_CARD, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
+import {
+  CHAT_AI_BUBBLE,
+  CHAT_AI_LABEL,
+  CHAT_AI_ROW,
+  CHAT_YOU_BUBBLE,
+  CHAT_YOU_LABEL,
+  CHAT_YOU_ROW,
+  REVIEW_ANCHOR_MUTED,
+  REVIEW_ITEM_CARD,
+  REVIEW_SUBHEAD,
+} from '../lib/reviewStyles.js';
 
 // Claude Review chat: ONE thread per review, about the whole review and any of its findings. The
 // per-finding "Ask Claude" threads were removed from the screen (the review thread covers them);
@@ -60,12 +70,13 @@ const PILL =
 // WHO SAID IT, AT A GLANCE: the reader's turns sit on the RIGHT in a selected-tone bubble under "You";
 // the answers sit on the LEFT on the AI surface under the provider and model that answered. Both inks
 // are measured on these grounds in every colour scheme (designTokens + colorSchemes tests).
-const YOU_ROW = 'flex justify-end';
-const YOU_BUBBLE = 'max-w-[85%] rounded-ui bg-ui-sel px-3 py-2 text-body text-ui-ink';
-const YOU_LABEL = 'text-meta font-medium text-ui-mute';
-const AI_ROW = 'flex justify-start';
-const AI_BUBBLE = 'w-full max-w-[95%] rounded-ui border border-ai-border bg-ai-surface px-3 py-2 text-body text-ai-ink';
-const AI_LABEL = 'mb-1 text-meta font-semibold text-ai-signal';
+// (The classes are shared with the build tab's conversation: lib/reviewStyles.ts CHAT_*.)
+const YOU_ROW = CHAT_YOU_ROW;
+const YOU_BUBBLE = CHAT_YOU_BUBBLE;
+const YOU_LABEL = CHAT_YOU_LABEL;
+const AI_ROW = CHAT_AI_ROW;
+const AI_BUBBLE = CHAT_AI_BUBBLE;
+const AI_LABEL = CHAT_AI_LABEL;
 
 /** One of the reader's turns: their words and any items they sent. */
 function YouTurn({ text, pins }: { text: string; pins: readonly { key: string; label: string }[] }): JSX.Element {

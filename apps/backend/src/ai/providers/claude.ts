@@ -5,11 +5,11 @@
 //
 // What `runAgent` puts on EVERY run, exactly as each call site did:
 //   • `permissionMode: 'bypassPermissions'`, `settingSources: []` (no host .claude settings,
-//     CLAUDE.md or skills), `ISOLATED_MCP` (no claude.ai connectors), the LIMN_CLAUDE_PATH
+//     CLAUDE.md or skills), `ISOLATED_MCP` (no claude.ai connectors), `NO_SESSION_FILES` (no
+//     transcript under ~/.claude/projects), the LIMN_CLAUDE_PATH
 //     executable and the credential ladder's environment (`agentAuthOptions()`);
 //   • ⚠ THE PATH GUARD as the FIRST PreToolUse hook — `createPathGuard(cwd, roots, {readOnlyRoots})`
-//     — then `ownToolsOnlyHook(<the run's own server>)`, then (a story build, `spec.protectWrites`) the
-//     write deny-list (review/write-deny.ts), then the run's extra hooks (the specialist cap, the docs
+//     — then `ownToolsOnlyHook(<the run's own server>)`, then the run's extra hooks (the specialist cap, the docs
 //     build's sections-write guard). Under bypassPermissions a PreToolUse deny is the only thing that
 //     confines an absolute path, and the prompt is attacker-authored;
 //   • `additionalDirectories` = roots + read-only roots, only when there are any (the SDK adds one
@@ -20,12 +20,11 @@
 // every message still reaches the spend budget's observer.
 import { loadAgentSdk, loadAnthropicSdk, loadZod, claudeExecutableOptions, getAiRuntimeStatus } from '../runtime.js';
 import { agentAuthOptions, agentSdkEnv, resolveAiCredential, type AiCredential } from '../credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../agent-isolation.js';
+import { ISOLATED_MCP, NO_SESSION_FILES, ownToolsOnlyHook } from '../agent-isolation.js';
 import { config } from '../../config.js';
 import { NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { sdkModelOptions } from '../../review/model-options.js';
 import { createPathGuard, pathGuardHook } from '../../review/path-guard.js';
-import { protectedWriteHook } from '../../review/write-deny.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../../review/usage.js';
 import { CHECKS_TOOL_SERVER, RUN_CHECK_TOOL } from '../check-tool.js';
 import type {
@@ -132,8 +131,6 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
         PreToolUse: [
           pathGuardHook(guard),
           ownToolsOnlyHook(ownServers),
-          // The build's write deny-list (review/write-deny.ts), only on a run that asks for it.
-          ...(spec.protectWrites && spec.writeRoots.length > 0 ? [protectedWriteHook(spec.writeRoots, spec.cwd)] : []),
           ...(c.extraPreToolUse ?? []),
         ] as never,
       },
@@ -141,6 +138,7 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
       // Don't inherit the host's .claude settings / CLAUDE.md / skills.
       settingSources: [],
       ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
       ...(ownServers.length > 0 ? { mcpServers: mcpServers as never } : {}),
       abortController: spec.abortController,
       // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
@@ -306,6 +304,7 @@ async function agentComplete(
       settingSources: [],
       // No tools at all: the account's claude.ai connectors must not reach a plain completion.
       ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
       hooks: { PreToolUse: [ownToolsOnlyHook([])] },
       ...claudeExecutableOptions(),
       // The login pays: any ANTHROPIC_API_KEY is hidden from this run (ai/credentials.ts).
@@ -401,6 +400,7 @@ async function describeImage(req: DescribeImageRequest): Promise<CompleteResult>
       permissionMode: 'bypassPermissions',
       settingSources: [],
       ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
       hooks: { PreToolUse: [ownToolsOnlyHook([])] },
       ...claudeExecutableOptions(),
       env: agentSdkEnv(process.env, credential),
@@ -461,6 +461,7 @@ async function sdkUsageProbe(): Promise<unknown> {
       allowedTools: [],
       settingSources: [],
       ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
       ...claudeExecutableOptions(),
       ...agentAuthOptions(),
     },

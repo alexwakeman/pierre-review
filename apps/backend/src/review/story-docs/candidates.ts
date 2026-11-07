@@ -3,8 +3,7 @@ import { retrieveSections, type RetrievedSection } from '../../reference-docs/re
 import type { StoryText } from './inputs.js';
 import { prefilterSections, type ShortlistCandidate, type ShortlistDoc } from './shortlist.js';
 
-// THE SHORTLIST'S CANDIDATES — for BOTH Check against the docs (manager.ts) and Implement story's docs
-// pass (coding/story-build/docs.ts), so they cannot drift. Full-text search over the sections' TEXT
+// THE SHORTLIST'S CANDIDATES for Check against the docs (manager.ts). Full-text search over the sections' TEXT
 // (reference-docs/retrieve.ts, FTS5) in plain rank order — no per-document cap: these 30 go to Haiku,
 // and a cap measurably lost sections there (docs/DOCS-RAG.md § Crowding). A library with no passages
 // yet (built before migration 0152, until the boot backfill reaches it) keeps the old prefilter over

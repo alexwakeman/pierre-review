@@ -312,6 +312,9 @@
   --lh-title: 24px;
   --fs-display: 25px;
   --lh-display: 32px;
+  /* A headline FIGURE (one big number, e.g. Chronology's approved-first-time count) — never prose. */
+  --fs-figure: 44px;
+  --lh-figure: 44px;
 }
 .type-compact {
   --fs-meta: 12px;

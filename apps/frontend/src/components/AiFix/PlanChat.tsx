@@ -1,8 +1,7 @@
 import type { AiFixPlanMessage } from '@pierre-review/shared';
 
-// THE PLAN CHAT — shared by AI Fix's "Plan first" (`PlanPanel.tsx`) and the story build's plan
-// (`StoryBuild/PlanSection.tsx`). The reader steers a READ-ONLY planning pass by message; each message
-// runs a fresh pass with the whole conversation. Two pieces, because each host puts its progress bar
+// THE PLAN CHAT — AI Fix's "Plan first" (`PlanPanel.tsx`). The reader steers a READ-ONLY planning pass by message; each message
+// runs a fresh pass with the whole conversation. Two pieces, because the host puts its progress bar
 // between them: the transcript, and the message box with its "Update plan" button. The host wraps the
 // box in its own `AiRunGate` (the pass's kind and provider) and owns the mutation.
 

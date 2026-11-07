@@ -183,6 +183,14 @@ developer and their agent can chase it; they never move a verdict ([CLAUDE-REVIE
   second half, a quick re-run). ⚠ NON-FATAL: a failed read keeps the stored content (state `ok` +
   `error_code`), the points come from that copy and are marked `fresh: false`; the review says "from
   Limn's stored copy". Never throws. The TICKET review does not use open points yet.
+- ⚠ **A WORKSPACE SESSION'S START READS ITS TICKET AGAIN — the same exception, for one ticket**
+  (`open-points-ticket.ts` `refreshTicketForSession`, called LAZILY by `sandbox/workspace/ticket.ts`;
+  [SANDBOX.md](SANDBOX.md) § The workspace mirror). A session is a RUN the reader started, never a view.
+  With PRs: `openPointsForPr(…, {refresh: true})` on at most TWO of the ticket's PRs (open first), the
+  ticket's own key picked. With none (a not-started ticket): the workspace's sprint list read, marked due
+  and run now (the `POST /api/sprint-stories/refresh` path, waited for ≤ 20 s), the points derived from
+  the refreshed `sprint_tickets` row under the workspace's choice. Never throws; a failed read is the
+  stored copy (`fresh: false`).
 
 ## Ticket comments — read in the same issue read (`tracker/comments.ts`, `tracker_ticket_comments`)
 

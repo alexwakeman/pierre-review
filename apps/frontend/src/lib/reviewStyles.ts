@@ -33,3 +33,13 @@ export const REVIEW_CHIP = 'inline-flex shrink-0 items-center gap-1 rounded-ui p
 export const REVIEW_ANCHOR = 'break-all text-left font-mono text-meta text-ui-ink hover:underline text-link-phone';
 export const REVIEW_ANCHOR_MUTED = 'break-all font-mono text-meta text-ui-mute';
 export const REVIEW_SUBHEAD = 'text-meta font-medium text-ui-mute';
+
+// THE CHAT LOOK (the review chat, the build tab's conversation): the reader's turns sit on the RIGHT in a
+// selected-tone bubble under "You"; the agent's on the LEFT on the AI surface under who answered. Both
+// inks are measured on these grounds in every colour scheme (designTokens + colorSchemes tests).
+export const CHAT_YOU_ROW = 'flex justify-end';
+export const CHAT_YOU_BUBBLE = 'max-w-[85%] rounded-ui bg-ui-sel px-3 py-2 text-body text-ui-ink';
+export const CHAT_YOU_LABEL = 'text-meta font-medium text-ui-mute';
+export const CHAT_AI_ROW = 'flex justify-start';
+export const CHAT_AI_BUBBLE = 'w-full max-w-[95%] rounded-ui border border-ai-border bg-ai-surface px-3 py-2 text-body text-ai-ink';
+export const CHAT_AI_LABEL = 'mb-1 text-meta font-semibold text-ai-signal';

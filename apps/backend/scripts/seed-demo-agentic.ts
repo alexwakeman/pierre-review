@@ -1710,29 +1710,20 @@ async function seedStoryDocs(base: any, c: AgenticSeedCtx): Promise<string> {
 
 // ── "IMPLEMENT STORY" (docs/STORY-BUILD.md) ─────────────────────────────────────────────────────────
 //
-// Sessions on NOT-STARTED sprint tickets with no pull request (the only tickets the sprint card offers
-// Implement on, owner decision 4), written through the session's own persist module
-// (coding/story-build/persist.ts — the claim, then the row updates the manager makes):
-//   PLAT-310  a READY two-repository build: acme/api PUSHED as a draft pull request (#143, its row seeded
-//             below, by the reader), acme/web-app READY with tests (3 passed, 1 failed, and the hook).
-//   PLAT-312  PLAN READY: a plan with a design, a two-turn chat, and the docs weighed (2 grounded,
-//             1 superseded, 2 suggestions — the suggestions not in the plan yet).
+// A WORKSPACE SESSION on a NOT-STARTED sprint ticket with no pull request (the only tickets the sprint
+// card offers Implement on, owner decision 4), written through the session's own persist module
+// (coding/story-build/persist.ts — the claim, then the row updates the session manager makes). A demo
+// has no sandbox, so the session is stored CLOSED with its patches kept (phase `built`):
+//   PLAT-310  a two-repository build: acme/api PUSHED as a draft pull request (#143, its row seeded
+//             below, by the reader), acme/web-app READY to push; the conversation, the Network panel
+//             (one host blocked) and Resume show in the tab.
+//   PLAT-312  no session: its card shows the Implement button.
 //   PLAT-318  no session: its card shows the Implement button.
 //   PLAT-301  no session, IN PROGRESS with a PR: its story check below (TICKET_SCRIPTS — current, one
 //             criterion not met, one partly met) makes its card offer "Fill gaps", and the build tab lists
 //             those gaps. Keep that check current and gapped.
-// No model ran: these rows are the answers the passes would have stored. The pushed draft is not linked to
+// No model ran: these rows are what a session would have stored. The pushed draft is not linked to
 // the ticket (the tracker seed lists PLAT-310 with no PR), so the sprint card keeps its build mark.
-
-const docRef = (ws: number, docSlug: string, docTitle: string, file: string, sectionTitle: string, quote: string) => ({
-  path: `${docSlug}/sections/${file}`,
-  workspaceId: ws,
-  anchor: null,
-  docSlug,
-  docTitle,
-  sectionTitle,
-  quote,
-});
 
 const PATCH_API = [
   'diff --git a/src/sync/budget.ts b/src/sync/budget.ts',
@@ -1824,7 +1815,9 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
   const SHA_WEB = 'c0ffee15b2d4c6e8a0b1c3d5e7f9a1b3c5d7e9f2';
   const out: Record<string, number> = {};
 
-  // ---- PLAT-310: a ready build — acme/api pushed as a draft, acme/web-app ready to push ----
+  // ---- PLAT-310: a WORKSPACE SESSION that built (docs/SANDBOX.md § Sessions), now closed with its patches
+  //      kept — acme/api pushed as a draft, acme/web-app ready to push. A demo has no sandbox, so the
+  //      session is stored closed (`built`, not live): the tab shows its conversation, Changes and Resume. ----
   {
     const ident = ticketIdent('PLAT-310');
     const claim = await persist.insertStoryBuild(ctx, {
@@ -1868,51 +1861,78 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         { ref: 'R2', repoId: WEB_REPO, fullName: 'acme/web-app', source: 'picked', baseRef: 'main', baseSha: SHA_WEB, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
         { ref: 'R3', repoId: INFRA_REPO, fullName: 'acme/infrastructure', source: 'related', baseRef: 'main', baseSha: SHA_INFRA, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
       ],
-      planJson: {
-        revision: 1,
-        summary:
-          'The sync waits for the GitHub budget to refill instead of failing, and marks the repository paused until then. The web app shows the pause with the time it ends.',
+      sessionPhase: 'built',
+      runtime: 'Docker Desktop 29.6.2',
+      sessionJson: {
+        version: 1,
+        action: 'implement',
+        runtimeNote: null,
+        boot: (
+          [
+            ['runtime', 'Checking the container runtime'],
+            ['image', 'Getting the sandbox image'],
+            ['ticket', 'Reading the ticket'],
+            ['network', 'Making the private network'],
+            ['proxy', 'Starting the network proxy'],
+            ['sandbox', 'Starting the sandbox'],
+            ['repos', 'Cloning the repositories'],
+            ['services', 'Starting services'],
+            ['agent', 'Starting the agent'],
+          ] as const
+        ).map(([key, label]) => ({ key, label, state: key === 'services' ? 'skipped' : 'done', detail: key === 'services' ? 'No compose files are picked for this workspace.' : null })),
+        notes: [],
+        conversation: [
+          { kind: 'reader', id: 'c1', text: 'Look at how the sync walk checks the budget first, then tell me your plan.', at: at(5.5).toISOString(), build: false },
+          { kind: 'tool', id: 'c2', tool: 'Read', summary: 'acme/api/src/sync/budget.ts', ok: true, output: null, at: at(5.5).toISOString() },
+          { kind: 'tool', id: 'c3', tool: 'Grep', summary: 'assertBudget in acme/api/src', ok: true, output: null, at: at(5.5).toISOString() },
+          {
+            kind: 'agent',
+            id: 'c4',
+            text: 'The walk calls `assertBudget` before each page and throws when the budget is empty. My plan:\n\n1. In `acme/api`, wait for the reset instead of throwing, and store the resume time (AC1, AC3).\n2. Report the paused state and resume time on the status endpoint (AC2).\n3. In `acme/web-app`, show "Paused until <time>" on the repository list (AC2).',
+            at: at(5.4).toISOString(),
+          },
+          { kind: 'turn', id: 'c5', turn: 1, mode: 'chat', outcome: 'done', costUsd: 0.42, at: at(5.4).toISOString() },
+          { kind: 'reader', id: 'c6', text: 'Good. Build it and run the tests.', at: at(5.2).toISOString(), build: true },
+          { kind: 'tool', id: 'c7', tool: 'Edit', summary: 'acme/api/src/sync/budget.ts', ok: true, output: null, at: at(5.0).toISOString() },
+          { kind: 'tool', id: 'c8', tool: 'Bash', summary: 'pnpm test (acme/api)', ok: true, output: '✓ src/sync/budget.test.ts (6 tests)\n✓ src/sync/walk.test.ts (11 tests)', at: at(4.8).toISOString() },
+          { kind: 'tool', id: 'c9', tool: 'Bash', summary: 'pnpm test (acme/web-app)', ok: true, output: '✓ src/routes/sync/RepoStatus.test.tsx (5 tests)', at: at(4.4).toISOString() },
+          {
+            kind: 'agent',
+            id: 'c10',
+            text: 'Done. AC1, AC2 and AC3 are met; the tests pass in both repositories.',
+            at: at(4.2).toISOString(),
+          },
+          { kind: 'turn', id: 'c11', turn: 2, mode: 'build', outcome: 'done', costUsd: 4.18, at: at(4.2).toISOString() },
+          { kind: 'notice', id: 'c12', text: 'The sandbox closed after 60 minutes with nothing to do. Its changes are kept.', at: at(3.2).toISOString() },
+        ],
         repos: [
-          {
-            ref: 'R1',
-            repoId: API_REPO,
-            why: 'The sync walk and the budget check live here.',
-            branchSlug: 'wait-for-budget',
-            steps: [
-              { title: 'Wait for the budget instead of failing', files: ['src/sync/budget.ts', 'src/sync/walk.ts'], change: 'Replace the throwing check with a wait until the budget resets, cancellable by the sync signal.', refs: ['AC1', 'AC3'] },
-              { title: 'Mark the repository paused', files: ['src/sync/budget.ts'], change: 'Store the resume time while the walk waits and clear it after; the status endpoint reads it.', refs: ['AC2'] },
-              { title: 'Pick the wait from the audit', files: ['src/sync/budget.ts'], change: 'A page costs about 12 points (PLAT-275), so wait once fewer than that remain.', refs: ['M1'] },
-            ],
-            tests: ['A walk with an empty budget waits and resumes.', 'No request is sent while the budget is empty.'],
-          },
-          {
-            ref: 'R2',
-            repoId: WEB_REPO,
-            why: 'The repository list shows each sync’s state.',
-            branchSlug: 'show-paused-sync',
-            steps: [
-              { title: 'Show a paused sync with its resume time', files: ['src/routes/sync/RepoStatus.tsx', 'src/api/types.ts'], change: 'A "Paused until 14:05" badge from the new status and resume time.', refs: ['AC2'] },
-            ],
-            tests: ['A paused repository shows the time it resumes.'],
-          },
+          { repoId: API_REPO, fullName: 'acme/api', path: '/Users/morgan/src/acme/api', branch: 'limn/PLAT-310', baseSha: SHA_API },
+          { repoId: WEB_REPO, fullName: 'acme/web-app', path: '/Users/morgan/src/acme/web-app', branch: 'limn/PLAT-310', baseSha: SHA_WEB },
+          { repoId: INFRA_REPO, fullName: 'acme/infrastructure', path: '/Users/morgan/src/acme/infrastructure', branch: 'limn/PLAT-310', baseSha: SHA_INFRA },
         ],
-        readOnlyRepos: [{ ref: 'R3', repoId: INFRA_REPO, why: 'The sync alarms read the same status; none needs to change.' }],
+        startDir: '/Users/morgan/src/acme/api',
+        credentialLine: 'Your Claude sign-in stays on this computer: the proxy adds it to each request.',
+        mode: 'build',
         criteria: [
-          { ref: 'AC1', how: 'planned', repo: 'R1', reason: null },
-          { ref: 'AC2', how: 'planned', repo: 'R1', reason: null },
-          { ref: 'AC3', how: 'planned', repo: 'R1', reason: null },
-          { ref: 'M1', how: 'planned', repo: 'R1', reason: null },
+          'AC1: A sync that runs out of budget waits and resumes instead of failing.',
+          'AC2: The repository shows "paused" with the time it will resume.',
+          'AC3: No retry is sent while the budget is empty.',
         ],
-        risks: ['A sync that waits holds its worker; a long reset can back up the queue.'],
+        openPoints: ['Use the numbers from the PLAT-275 audit to pick the wait.'],
+        services: null,
+        network: [
+          { key: 'sandbox|api.anthropic.com|443|1', source: 'sandbox', host: 'api.anthropic.com', port: 443, allowed: true, reason: null, via: 'anthropic', count: 58, up: 1_240_000, down: 310_000, lastStatus: 200, firstAt: at(5.5).toISOString(), lastAt: at(4.2).toISOString() },
+          { key: 'sandbox|registry.npmjs.org|443|1', source: 'sandbox', host: 'registry.npmjs.org', port: 443, allowed: true, reason: null, via: 'forward', count: 212, up: 96_000, down: 41_800_000, lastStatus: 200, firstAt: at(5.0).toISOString(), lastAt: at(4.9).toISOString() },
+          { key: 'sandbox|telemetry.example.dev|443|0', source: 'sandbox', host: 'telemetry.example.dev', port: 443, allowed: false, reason: 'Not on the allow-list.', via: 'forward', count: 3, up: 0, down: 0, lastStatus: null, firstAt: at(4.9).toISOString(), lastAt: at(4.8).toISOString() },
+        ],
+        seq: 13,
       },
-      planRevision: 1,
-      transcriptJson: [],
-      acceptedRevision: 1,
-      acceptedDocsJson: null,
-      planCostUsd: 2.21,
-      inputTokens: 174_000,
-      outputTokens: 7_600,
-      numTurns: 27,
+      buildCostUsd: 4.18,
+      lastActiveAt: at(4.2),
+      planCostUsd: 0.42,
+      inputTokens: 562_000,
+      outputTokens: 21_800,
+      numTurns: 63,
       createdAt: at(5.6),
       startedAt: at(5.6),
       completedAt: at(4.2),
@@ -1934,7 +1954,7 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         authorId: 1,
         mergedById: null,
         baseRefName: 'main',
-        headRefName: 'PLAT-310-wait-for-budget',
+        headRefName: 'limn/PLAT-310',
         state: 'open',
         isDraft: true,
         openedAt: at(3.9),
@@ -1958,7 +1978,7 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
       })
       .execute();
 
-    const apiRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: API_REPO, ref: 'R1', buildOrder: 0, include: true, status: 'pushed', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, branch: 'PLAT-310-wait-for-budget' });
+    const apiRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: API_REPO, ref: 'R1', buildOrder: 0, include: true, status: 'pushed', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, branch: 'limn/PLAT-310' });
     await persist.updateStoryBuildRepo(ctx, 1, apiRow, {
       patch: PATCH_API,
       filesChangedJson: ['src/sync/budget.ts', 'src/sync/walk.ts'],
@@ -1972,23 +1992,8 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         unaddressed: [],
         notReported: [],
       },
-      checksWantedJson: ['lint', 'test'],
-      checksJson: {
-        requested: ['lint', 'test'],
-        ran: true,
-        note: null,
-        sandbox: 'seatbelt',
-        install: [{ name: 'install', kind: 'check', command: 'pnpm install --frozen-lockfile --ignore-scripts', status: 'passed', exitCode: 0, durationMs: 21_400, output: '', truncated: false, note: null }],
-        results: [
-          { name: 'lint', kind: 'lint', command: 'pnpm lint', status: 'passed', exitCode: 0, durationMs: 6_100, output: '', truncated: false, note: null },
-          { name: 'test', kind: 'test', command: 'pnpm test', status: 'passed', exitCode: 0, durationMs: 38_200, output: '✓ src/sync/budget.test.ts (6 tests)\n✓ src/sync/walk.test.ts (11 tests)', truncated: false, note: null },
-        ],
-        hook: null,
-        hookAttempts: 0,
-        agentRuns: 2,
-      } as never,
       prTitle: 'PLAT-310: Retry GitHub calls within the rate-limit budget',
-      pushedBranch: 'PLAT-310-wait-for-budget',
+      pushedBranch: 'limn/PLAT-310',
       pushedPrNumber: PR_NUMBER,
       pushedPrUrl: `https://github.com/acme/api/pull/${PR_NUMBER}`,
       pushedCommitSha: pushedSha,
@@ -2002,7 +2007,7 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
       startedAt: at(5.0),
       completedAt: at(4.6),
     } as never);
-    const webRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: WEB_REPO, ref: 'R2', buildOrder: 1, include: true, status: 'ready', baseRef: 'main', baseSha: SHA_WEB, stackedOnPrId: null, branch: 'PLAT-310-show-paused-sync' });
+    const webRow = await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: WEB_REPO, ref: 'R2', buildOrder: 1, include: true, status: 'ready', baseRef: 'main', baseSha: SHA_WEB, stackedOnPrId: null, branch: 'limn/PLAT-310' });
     await persist.updateStoryBuildRepo(ctx, 1, webRow, {
       patch: PATCH_WEB,
       filesChangedJson: ['src/routes/sync/RepoStatus.tsx', 'src/api/types.ts'],
@@ -2016,33 +2021,6 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         unaddressed: [],
         notReported: [],
       },
-      checksWantedJson: ['lint', 'typecheck', 'test', 'e2e'],
-      checksJson: {
-        requested: ['lint', 'typecheck', 'test', 'e2e'],
-        ran: true,
-        note: null,
-        sandbox: 'seatbelt',
-        install: [{ name: 'install', kind: 'check', command: 'pnpm install --frozen-lockfile --ignore-scripts', status: 'passed', exitCode: 0, durationMs: 18_700, output: '', truncated: false, note: null }],
-        results: [
-          { name: 'lint', kind: 'lint', command: 'pnpm lint', status: 'passed', exitCode: 0, durationMs: 5_400, output: '', truncated: false, note: null },
-          { name: 'typecheck', kind: 'typecheck', command: 'pnpm typecheck', status: 'passed', exitCode: 0, durationMs: 9_800, output: '', truncated: false, note: null },
-          { name: 'test', kind: 'test', command: 'pnpm test', status: 'passed', exitCode: 0, durationMs: 14_100, output: '✓ src/routes/sync/RepoStatus.test.tsx (5 tests)', truncated: false, note: null },
-          {
-            name: 'e2e',
-            kind: 'test',
-            command: 'pnpm e2e',
-            status: 'failed',
-            exitCode: 1,
-            durationMs: 41_300,
-            output: '✘ sync.spec.ts › a paused repository shows its resume time\n  Expected "Paused until 14:05", received "Paused until 2:05 PM"\n  (the e2e browser runs with the en-US locale)',
-            truncated: false,
-            note: null,
-          },
-        ],
-        hook: { name: 'pre-commit hook', kind: 'hook', command: 'git commit (.husky/pre-commit)', status: 'passed', exitCode: 0, durationMs: 4_200, output: 'lint-staged: 2 files formatted', truncated: false, note: null },
-        hookAttempts: 1,
-        agentRuns: 3,
-      } as never,
       provider: 'claude',
       model: 'claude-opus-5-5',
       costUsd: 1.18,
@@ -2054,114 +2032,5 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
     } as never);
   }
 
-  // ---- PLAT-312: a plan waiting for Accept, with a design, a chat and the docs weighed ----
-  {
-    const ident = ticketIdent('PLAT-312');
-    const claim = await persist.insertStoryBuild(ctx, {
-      accountId: 1,
-      workspaceId: ws,
-      ident,
-      ticketKey: 'PLAT-312',
-      ticketTitle: 'Report sync health on the health endpoint',
-      wantDiagram: true,
-      wantDocs: true,
-      provider: 'codex',
-      model: 'gpt-6.1-sol',
-    });
-    const id = claim.id;
-    out.planReady = id;
-    const runbook = (file: string, title: string, quote: string) => docRef(ws, 'sync-runbook', 'Sync service runbook', file, title, quote);
-    const conventions = (file: string, title: string, quote: string) => docRef(ws, 'api-conventions', 'Platform API conventions', file, title, quote);
-    await persist.updateStoryBuild(ctx, 1, id, {
-      status: 'plan_ready',
-      phase: null,
-      criteriaSource: 'ticket',
-      coverageJson: {
-        state: 'none',
-        ticketReviewId: null,
-        checkedAt: null,
-        criteria: [
-          { ref: 'AC1', text: '/api/health reports the age of the oldest running sync.', verdict: 'not_checked', coveredByPrIds: [] },
-          { ref: 'AC2', text: 'It reports how many repositories are in error.', verdict: 'not_checked', coveredByPrIds: [] },
-          { ref: 'AC3', text: 'It answers in under 50 ms.', verdict: 'not_checked', coveredByPrIds: [] },
-        ],
-        missing: [],
-        existingPrs: [],
-        note: null,
-      },
-      candidatesJson: [
-        { ref: 'R1', repoId: API_REPO, fullName: 'acme/api', source: 'picked', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
-        { ref: 'R2', repoId: INFRA_REPO, fullName: 'acme/infrastructure', source: 'picked', baseRef: 'main', baseSha: SHA_INFRA, stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
-      ],
-      planJson: {
-        revision: 2,
-        summary: 'The health endpoint gains two fields read from the sync tables in one indexed query. The infrastructure health check is unchanged: it only reads the status code.',
-        repos: [
-          {
-            ref: 'R1',
-            repoId: API_REPO,
-            why: 'The health endpoint and the sync tables live here.',
-            branchSlug: 'health-sync-fields',
-            steps: [
-              { title: 'Read the oldest running sync and the error count', files: ['src/db/sync-health.ts'], change: 'One query over sync_state with the existing (status, started_at) index.', refs: ['AC1', 'AC2', 'AC3'] },
-              { title: 'Add the two fields to /api/health', files: ['src/api/routes/health.ts'], change: 'oldestRunningSyncMs and reposInError, both whole numbers.', refs: ['AC1', 'AC2'] },
-            ],
-            tests: ['The health answer carries both fields.', 'An empty sync table reports zero and null.'],
-          },
-        ],
-        readOnlyRepos: [{ ref: 'R2', repoId: INFRA_REPO, why: 'The load balancer reads /api/health; its check only needs a 200.' }],
-        criteria: [
-          { ref: 'AC1', how: 'planned', repo: 'R1', reason: null },
-          { ref: 'AC2', how: 'planned', repo: 'R1', reason: null },
-          { ref: 'AC3', how: 'planned', repo: 'R1', reason: null },
-        ],
-        risks: ['A slow health answer fails the load balancer check; the query must stay on its index.'],
-      },
-      planRevision: 2,
-      transcriptJson: [
-        { role: 'reader', text: 'Leave the load balancer check alone. Does it need anything new from the endpoint?', revision: 1, at: at(1.2).toISOString() },
-        { role: 'claude', text: 'No. The check reads only the status code, so acme/infrastructure stays read-only and the two fields are additive.', revision: 2, at: at(1.1).toISOString() },
-      ],
-      // The planned data flow (participants and steps name repo refs, never PRs).
-      designJson: {
-        participants: [
-          { id: 'lb', kind: 'external', label: 'Load balancer check', change: 'unchanged', pr: null },
-          { id: 'route', kind: 'api', label: 'GET /api/health', change: 'changed', pr: 'R1' },
-          { id: 'q', kind: 'service', label: 'Sync health query', change: 'new', pr: 'R1' },
-          { id: 'db', kind: 'db', label: 'sync_state table', change: 'unchanged', pr: null },
-        ],
-        steps: [
-          { n: 1, from: 'lb', to: 'route', kind: 'call', label: 'health request', pr: null, files: [] },
-          { n: 2, from: 'route', to: 'q', kind: 'call', label: 'ask for the sync figures', pr: 'R1', files: ['src/api/routes/health.ts'] },
-          { n: 3, from: 'q', to: 'db', kind: 'read', label: 'oldest running sync and error count, one query', pr: 'R1', files: ['src/db/sync-health.ts'] },
-          { n: 4, from: 'q', to: 'route', kind: 'return', label: 'age in ms and repositories in error', pr: 'R1', files: ['src/db/sync-health.ts'] },
-          { n: 5, from: 'route', to: 'lb', kind: 'return', label: 'two new fields on the answer', pr: 'R1', files: ['src/api/routes/health.ts'] },
-        ],
-      },
-      docsStatus: 'ready',
-      docsJson: {
-        summary: 'The API conventions already fix how the new duration is named, and the error shape the route keeps. The runbook alarms on age rather than counts, which the story changes for errors; two points in the docs are not in the plan yet.',
-        nothingGrounded: false,
-        planRevision: 2,
-        runId: 'demo-plat-312-docs',
-        items: [
-          { id: 'D1', kind: 'grounded', about: 'R1:step 2', note: 'A duration in whole milliseconds, named for its unit, is the conventions’ own rule.', suggestion: null, refs: [conventions('03-pagination-and-time.md', 'Pagination and time', 'Durations are whole milliseconds and say so in their name.')] },
-          { id: 'D2', kind: 'grounded', about: 'R1:step 2', note: 'The route keeps the one error shape.', suggestion: null, refs: [conventions('01-errors.md', 'Errors', 'Every error answers `{ error, message }`.')] },
-          { id: 'D3', kind: 'superseded', about: 'AC2', note: 'The runbook watches the age of the oldest failure, not a count. The story asks for the number of repositories in error.', suggestion: null, refs: [runbook('05-the-sync-queue.md', 'The sync queue', 'Alarm on the age of the oldest dead-letter message, not the count.')] },
-          { id: 'D4', kind: 'suggestion', about: 'R1:step 1', note: 'The runbook keeps reads out of write transactions: SQLite allows one writer.', suggestion: 'Read the health figures outside any write transaction.', refs: [runbook('02-transactions.md', 'Transactions', 'SQLite allows one writer at a time')] },
-          { id: 'D5', kind: 'suggestion', about: 'AC1', note: 'Times on the wire are ISO-8601 in UTC.', suggestion: 'Also report when the oldest sync started, as an ISO time.', refs: [conventions('03-pagination-and-time.md', 'Pagination and time', 'Timestamps on the wire are ISO-8601 in UTC.')] },
-        ],
-      } as never,
-      docsDecisionsJson: null,
-      docsCostUsd: 0.27,
-      planCostUsd: 0,
-      inputTokens: 141_000,
-      outputTokens: 4_700,
-      numTurns: 22,
-      createdAt: at(1.4),
-      startedAt: at(1.4),
-    } as never);
-    await persist.upsertStoryBuildRepo(ctx, { accountId: 1, buildId: id, repoId: API_REPO, ref: 'R1', buildOrder: 0, include: true, status: 'planned', baseRef: 'main', baseSha: SHA_API, stackedOnPrId: null, branch: 'PLAT-312-health-sync-fields' });
-  }
   return out;
 }

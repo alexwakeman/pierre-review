@@ -3,37 +3,30 @@ import { useIsMutating } from '@tanstack/react-query';
 import {
   aiRunProviderName,
   type StoryBuild,
-  type StoryBuildProgress,
   type StoryBuildRepo,
   type StoryBuildRepoPushResult,
 } from '@pierre-review/shared';
 import { api, ApiError } from '../../api/client.js';
-import { useFollowUpProvider } from '../../hooks/useModelPick.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
-import { storyBuildMutationKey, useStoryBuildDiff, useStoryBuildPush, useStoryBuildRetry } from '../../hooks/useStoryBuild.js';
-import { STORY_BUILD_PHASE_LABEL, storyBuildProgressPct } from '../../lib/aiFixProgress.js';
+import { storyBuildMutationKey, useStoryBuildDiff, useStoryBuildPush } from '../../hooks/useStoryBuild.js';
 import { parseGitPatch } from '../../lib/diff.js';
-import { canPushRepo, canRetryRepo, repoIsRunning, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText } from '../../lib/storyBuild.js';
+import { canPushRepo, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
-import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
 import { PrCardChips, PrCardFrame, PrCardMeta, PrCardTitle, CARD_NEUTRAL_CHIP, CARD_RED_CHIP, CARD_TONE_CHIP } from '../Activity/PrCardShell.js';
 import { ChangeReportSections, CHANGE_REPORT_CHIP } from '../AiFix/ChangeReport.js';
 import { ChecksReport, ChecksStatus } from '../AiFix/RunTests.js';
-import { AiRunGate } from '../AiSetup.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from '../diff/FileDiffView.js';
 import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
-import { storyBuildRefAnchor } from './CoverageSection.js';
-import { AgentActivityLog } from '../AgentActivityLog.js';
 
-// THE BUILD: one card per included repository, in build order (the One PR card shell look). Each card:
-// its status (and the live step while it runs, the AI Fix banner's bar), what the AI says it changed
-// (`ChangeReportSections`, the refs jump to "Already done"), Limn's own test run (`ChecksReport`), the
-// diff — fetched only when opened, drawn exactly as AI Fix draws one — and, at the foot, the tests'
-// one-line status BESIDE Push (`ChecksStatus`). Retry on a failed repository. Pushed: the new pull
-// request, which opens its PR tab. Nothing here pushes without the reader pressing Push.
+// THE CHANGES: one card per repository with stored work, in build order (the One PR card shell look).
+// Each card: its status, what the agent says it changed (`ChangeReportSections`; the refs jump to the
+// criterion in the Ticket panel), the diff — fetched only when opened, drawn exactly as AI Fix draws one —
+// and Push. Pushed: the new pull request, which opens its PR tab. Nothing here pushes without the reader
+// pressing Push. A row of the removed plan/build flow (no `session`) shows the same card, plus the test
+// run it stored (`ChecksReport`) and "Not built or tested here." when it ran none.
 
 function errorOf(err: unknown): string | null {
   if (err == null) return null;
@@ -48,14 +41,15 @@ function pushFailure(r: StoryBuildRepoPushResult | undefined): string | null {
 
 export function BuildSection({
   build,
-  progress,
   draft,
 }: {
   build: StoryBuild;
-  progress: StoryBuildProgress | null;
   /** Open new pull requests as drafts (owner decision 2: the default). */
   draft: boolean;
 }): JSX.Element {
+  // A WORKSPACE SESSION's repositories (docs/SANDBOX.md § Sessions): the agent ran the tests itself in
+  // the sandbox, so no "Not built or tested here".
+  const session = build.session != null;
   const push = useStoryBuildPush(build.workspaceId, build.ident);
   const results = new Map((push.data?.results ?? []).map((r) => [r.repoId, r] as const));
   const repos = build.repos.filter((r) => r.include || r.status === 'pushed').sort((a, b) => a.order - b.order);
@@ -66,8 +60,8 @@ export function BuildSection({
           key={r.repoId}
           build={build}
           repo={r}
-          progress={progress != null && progress.repoId === r.repoId ? progress : null}
           draft={draft}
+          session={session}
           onPush={() => push.mutate({ id: build.id, repoId: r.repoId, draft })}
           pushError={pushFailure(results.get(r.repoId)) ?? (push.variables?.repoId === r.repoId ? errorOf(push.error) : null)}
         />
@@ -79,25 +73,22 @@ export function BuildSection({
 function BuildRepoCard({
   build,
   repo,
-  progress,
   draft,
+  session,
   onPush,
   pushError,
 }: {
   build: StoryBuild;
   repo: StoryBuildRepo;
-  progress: StoryBuildProgress | null;
   draft: boolean;
+  session: boolean;
   onPush: () => void;
   pushError: string | null;
 }): JSX.Element {
   const titleId = useId();
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
-  const retry = useStoryBuildRetry(build.workspaceId, build.ident);
-  const retryProvider = useFollowUpProvider(build.provider ?? null, 'story_build');
   const costText = useRunCostText();
   const [diffOpen, setDiffOpen] = useState(false);
-  const running = repoIsRunning(repo);
   const by = aiRunProviderName(repo.model != null ? repo : build);
   const cost = costText(repo.costUsd, repo.provider ?? build.provider ?? null);
   const pushedUrl = safeExternalUrl(repo.pushedPrUrl) ?? null;
@@ -124,14 +115,6 @@ function BuildRepoCard({
           ]}
         />
         {repo.baseNote != null && <p className="mt-1 text-meta text-ui-mute">{repo.baseNote}</p>}
-        {running && (
-          <div className="mt-2">
-            <RegenProgressBar active label={`Building ${repo.fullName}`} value={storyBuildProgressPct(progress)} timeConstantSec={90} />
-            <p className="mt-1 text-meta text-ui-mute">{progress != null ? STORY_BUILD_PHASE_LABEL[progress.phase] : STORY_BUILD_REPO_STATUS_WORDS[repo.status]}</p>
-            <AgentActivityLog lines={progress?.recentActivity} tone="raise" className="mt-1" />
-          </div>
-        )}
-        {repo.status === 'queued' && <p className="mt-1 text-meta text-ui-mute">Waits for the repositories before it.</p>}
         {repo.error != null && (repo.status === 'failed' || repo.status === 'cancelled') && (
           <p className="mt-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-danger">{repo.error}</p>
         )}
@@ -142,7 +125,7 @@ function BuildRepoCard({
               report={repo.changeReport}
               filesChanged={repo.filesChanged}
               by={by}
-              refsInfo={<p>Each tag is a criterion or ask from the story. It scrolls to it under Already done.</p>}
+              refsInfo={<p>Each tag is a criterion from the story. It scrolls to it in the Ticket panel.</p>}
               renderRef={(r) => (
                 <button
                   key={r}
@@ -169,36 +152,26 @@ function BuildRepoCard({
               <ChevronIcon dir={diffOpen ? 'down' : 'right'} />
               Diff
             </button>
-            {diffOpen && <RepoDiff build={build} repo={repo} />}
+            {diffOpen && <RepoDiff build={build} repo={repo} session={session} />}
           </div>
         )}
-        {(canPushRepo(repo) || canRetryRepo(build, repo)) && (
+        {canPushRepo(repo) && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
-            {canPushRepo(repo) && (
-              <Button
-                variant="primary"
-                size="sm"
-                icon={<PullRequestIcon size={12} />}
-                disabled={busy}
-                data-story-build-action={`push-${repo.repoId}`}
-                onClick={onPush}
-              >
-                {draft ? 'Push as draft' : 'Push'}
-              </Button>
-            )}
-            {canPushRepo(repo) && <ChecksStatus checks={repo.checks} />}
-            {canPushRepo(repo) && !repo.checks?.ran && <span className="text-meta text-ui-mute">Not built or tested here.</span>}
-            {canRetryRepo(build, repo) && (
-              <AiRunGate kind="story_build" meter={false} followUp provider={retryProvider}>
-                <Button size="sm" data-ai-run disabled={busy} onClick={() => retry.mutate({ id: build.id, repoId: repo.repoId })}>
-                  Retry
-                </Button>
-              </AiRunGate>
-            )}
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<PullRequestIcon size={12} />}
+              disabled={busy}
+              data-story-build-action={`push-${repo.repoId}`}
+              onClick={onPush}
+            >
+              {draft ? 'Push as draft' : 'Push'}
+            </Button>
+            <ChecksStatus checks={repo.checks} />
+            {!session && !repo.checks?.ran && <span className="text-meta text-ui-mute">Not built or tested here.</span>}
           </div>
         )}
         {(pushError ?? repo.pushError) != null && <p className="mt-1 text-meta text-ui-danger">{pushError ?? repo.pushError}</p>}
-        {retry.error != null && <p className="mt-1 text-meta text-ui-danger">{errorOf(retry.error)}</p>}
       </div>
     </PrCardFrame>
   );
@@ -256,7 +229,7 @@ function PushedPrLink({ repo, url }: { repo: StoryBuildRepo; url: string | null 
 }
 
 /** The stored patch, read when the reader opens it, drawn as AI Fix draws its changeset. */
-function RepoDiff({ build, repo }: { build: StoryBuild; repo: StoryBuildRepo }): JSX.Element {
+function RepoDiff({ build, repo, session }: { build: StoryBuild; repo: StoryBuildRepo; session: boolean }): JSX.Element {
   const diff = useStoryBuildDiff(build.id, repo.repoId, true, repo.completedAt ?? '');
   const files = useMemo<DiffFile[]>(() => parseGitPatch(diff.data?.patch ?? null), [diff.data?.patch]);
   if (diff.isLoading) return <p className="mt-1 text-meta text-ui-mute">Loading the diff…</p>;
@@ -267,7 +240,7 @@ function RepoDiff({ build, repo }: { build: StoryBuild; repo: StoryBuildRepo }):
       <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-meta text-ui-mute">
         <span>
           {files.length} file{files.length === 1 ? '' : 's'} changed
-          {!repo.checks?.ran && ' · Not built or tested here.'}
+          {!session && !repo.checks?.ran && ' · Not built or tested here.'}
         </span>
         <DiffWrapToggle />
       </div>

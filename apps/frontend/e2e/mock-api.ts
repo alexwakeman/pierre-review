@@ -68,21 +68,21 @@ import type {
   SprintGraphResponse,
   SprintGraphTokenResponse,
   StoryBuild,
-  StoryBuildActionResponse,
-  StoryBuildCancelResponse,
-  StoryBuildChecksPreview,
   StoryBuildDiffResponse,
   StoryBuildDiscardResponse,
   PrReviewWaitsResponse,
   ReviewerCandidateResponse,
-  StoryBuildDocsDecisionsBody,
-  StoryBuildDocsDecisionsResponse,
-  StoryBuildDocsResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushResponse,
   StoryBuildRepo,
+  StoryBuildSession,
   StoryBuildStartResponse,
-  StoryBuildStreamEvent,
+  SandboxNetworkAllowResponse,
+  SandboxRuntimeStatus,
+  SandboxSessionActionResponse,
+  SandboxSessionDiffResponse,
+  SandboxSessionStreamEvent,
+  SandboxWorkspaceSettings,
   WorkspaceProSettings,
   WorkspaceSlackTargetResponse,
   RepoDocsCheckResponse,
@@ -101,6 +101,7 @@ import {
   pendingAuthorSideOf,
   resolveFeatures,
   resolveMyTurnSettings,
+  SANDBOX_SESSION_API,
   STORY_BUILD_API,
 } from '@pierre-review/shared';
 
@@ -815,9 +816,10 @@ const SPRINT_GRAPH: SprintGraphResponse = {
   ],
 };
 
-// "Implement story" (docs/STORY-BUILD.md): ACME-1's build session, in the states story-build.spec.ts
-// walks — none → plan_ready (Start) → building → ready (Accept) → one repository pushed (Push). Typed
-// so `pnpm typecheck` covers the wire shape. The route below keeps the state per page.
+// "Implement story" as a WORKSPACE SESSION (docs/SANDBOX.md § Sessions): ACME-1's session in the states
+// story-build.spec.ts walks — none → ready (Start; the boot is over at once in the mock) → a chat turn
+// (Send) → built (Start build) → one repository pushed (Push). Typed so `pnpm typecheck` covers the wire
+// shape. The route below keeps the state per page.
 const ACME_1 = 'jira:https://acme.atlassian.net#ACME-1';
 
 function storyBuildRepo(repoId: number, fullName: string, order: number, o: Partial<StoryBuildRepo> = {}): StoryBuildRepo {
@@ -833,7 +835,7 @@ function storyBuildRepo(repoId: number, fullName: string, order: number, o: Part
     baseSha: 'b'.repeat(40),
     stackedOnPrId: null,
     baseNote: null,
-    branch: null,
+    branch: 'limn/ACME-1',
     summary: null,
     commitMessage: null,
     filesChanged: [],
@@ -860,7 +862,55 @@ function storyBuildRepo(repoId: number, fullName: string, order: number, o: Part
   };
 }
 
-export const STORY_BUILD_PLAN_READY: StoryBuild = {
+const BOOT_DONE: StoryBuildSession['boot'] = (
+  [
+    ['runtime', 'Finding the container runtime'],
+    ['image', 'Getting the sandbox image'],
+    ['ticket', 'Reading the ticket'],
+    ['network', 'Making the private network'],
+    ['proxy', 'Starting the network filter'],
+    ['sandbox', 'Starting the sandbox'],
+    ['repos', 'Cloning the repositories'],
+    ['services', 'Getting the services ready'],
+    ['agent', 'Starting the agent'],
+  ] as const
+).map(([key, label]) => ({ key, label, state: key === 'services' ? ('skipped' as const) : ('done' as const), detail: null }));
+
+/** A session that has just booted: the agent waits for the reader. */
+export const STORY_SESSION_READY_SESSION: StoryBuildSession = {
+  phase: 'ready',
+  runtime: 'docker',
+  runtimeNote: null,
+  provider: 'claude',
+  model: 'claude-opus-5-5',
+  effort: null,
+  agentState: 'ready',
+  mode: 'chat',
+  live: true,
+  resumable: false,
+  boot: BOOT_DONE,
+  notes: ['acme/infra is in your folder but not in this workspace, so it is left out.'],
+  conversation: [],
+  repos: [
+    { repoId: 11, fullName: 'acme/api', path: '/Users/me/acme/api', branch: 'limn/ACME-1', baseSha: 'b'.repeat(40) },
+    { repoId: 10, fullName: 'acme/web', path: '/Users/me/acme/web', branch: 'limn/ACME-1', baseSha: 'c'.repeat(40) },
+  ],
+  startDir: '/Users/me/acme/api',
+  credentialLine: 'The model’s sign-in stays on your computer: Limn adds it to each request on the way out.',
+  services: null,
+  network: [
+    { key: 'agent|api.anthropic.com|443|1', source: 'agent', host: 'api.anthropic.com', port: 443, allowed: true, reason: null, via: 'anthropic', count: 6, up: 4200, down: 81000, lastStatus: 200, firstAt: iso(0.01), lastAt: iso(0.001) },
+    { key: 'agent|telemetry.example.com|443|0', source: 'agent', host: 'telemetry.example.com', port: 443, allowed: false, reason: 'Not on the allow-list', via: 'forward', count: 2, up: 0, down: 0, lastStatus: null, firstAt: iso(0.01), lastAt: iso(0.001) },
+  ],
+  spend: { costUsd: 0.04, inputTokens: 1200, outputTokens: 300, turns: 0 },
+  idleCloseAt: null,
+  ticket: {
+    criteria: ['AC1: Every report has a Download CSV button.', 'AC2: The file opens in a spreadsheet with one header row.', 'AC3: Large reports stream instead of timing out.'],
+    openPoints: ['Which reports are in scope for the first release?'],
+  },
+};
+
+export const STORY_SESSION_READY: StoryBuild = {
   id: 41,
   workspaceId: WORKSPACE.id,
   ident: ACME_1,
@@ -875,55 +925,10 @@ export const STORY_BUILD_PLAN_READY: StoryBuild = {
   wantDiagram: false,
   wantDocs: false,
   criteriaSource: 'brief',
-  coverage: {
-    state: 'none',
-    ticketReviewId: null,
-    checkedAt: null,
-    criteria: [
-      { ref: 'AC1', text: 'Every report has a Download CSV button.', verdict: 'not_checked', coveredByPrIds: [] },
-      { ref: 'AC2', text: 'The file opens in a spreadsheet with one header row.', verdict: 'not_checked', coveredByPrIds: [] },
-      { ref: 'AC3', text: 'Large reports stream instead of timing out.', verdict: 'not_checked', coveredByPrIds: [] },
-    ],
-    missing: [],
-    existingPrs: [],
-    note: null,
-  },
-  candidates: [
-    { ref: 'R1', repoId: 11, fullName: 'acme/api', source: 'picked', baseRef: 'main', baseSha: 'b'.repeat(40), stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
-    { ref: 'R2', repoId: 10, fullName: 'acme/web', source: 'picked', baseRef: 'main', baseSha: 'c'.repeat(40), stackedOnPrId: null, stackedOnPrNumber: null, baseNote: null },
-  ],
-  plan: {
-    revision: 1,
-    summary: 'The API gets a CSV endpoint that streams each report. The web app adds a Download CSV button to every report page.',
-    repos: [
-      {
-        ref: 'R1',
-        repoId: 11,
-        why: 'The reports endpoint lives here.',
-        branchSlug: 'reports-csv-endpoint',
-        steps: [
-          { title: 'Stream a report as CSV', files: ['src/reports/csv.ts'], change: 'Write rows as they are read, with one header row.', refs: ['AC2', 'AC3'] },
-        ],
-        tests: ['A 10,000-row report streams without buffering.'],
-      },
-      {
-        ref: 'R2',
-        repoId: 10,
-        why: 'The report pages live here.',
-        branchSlug: 'download-csv-button',
-        steps: [{ title: 'Add the Download CSV button', files: ['src/reports/ReportHeader.tsx'], change: 'A button that links to the new endpoint.', refs: ['AC1'] }],
-        tests: [],
-      },
-    ],
-    readOnlyRepos: [],
-    criteria: [
-      { ref: 'AC1', how: 'planned', repo: 'R2', reason: null },
-      { ref: 'AC2', how: 'planned', repo: 'R1', reason: null },
-      { ref: 'AC3', how: 'planned', repo: 'R1', reason: null },
-    ],
-    risks: ['A report over a million rows may still take minutes to download.'],
-  },
-  planRevision: 1,
+  coverage: null,
+  candidates: [],
+  plan: null,
+  planRevision: 0,
   transcript: [],
   flow: null,
   design: null,
@@ -933,105 +938,133 @@ export const STORY_BUILD_PLAN_READY: StoryBuild = {
   docsDecisions: {},
   acceptedRevision: null,
   acceptedDocs: null,
-  repos: [
-    storyBuildRepo(11, 'acme/api', 0, { branch: 'ACME-1-reports-csv-endpoint' }),
-    storyBuildRepo(10, 'acme/web', 1, { branch: 'ACME-1-download-csv-button' }),
-  ],
-  planCostUsd: 1.2,
+  repos: [storyBuildRepo(11, 'acme/api', 0), storyBuildRepo(10, 'acme/web', 1)],
+  planCostUsd: 0.04,
   docsCostUsd: null,
-  totalCostUsd: 1.2,
+  totalCostUsd: 0.04,
   sessionBudgetUsd: 30,
   pushedAll: false,
+  session: STORY_SESSION_READY_SESSION,
   createdAt: iso(0.01),
   startedAt: iso(0.01),
   completedAt: null,
 };
 
-/** The same session once both repositories are built (Accept). */
-export const STORY_BUILD_READY: StoryBuild = {
-  ...STORY_BUILD_PLAN_READY,
-  status: 'ready',
-  acceptedRevision: 1,
-  acceptedDocs: {},
-  totalCostUsd: 6.4,
-  repos: STORY_BUILD_PLAN_READY.repos.map((r) => ({
-    ...r,
-    status: 'ready',
-    hasPatch: true,
-    model: 'claude-opus-5-5',
-    costUsd: 2.6,
-    filesChanged: r.repoId === 11 ? ['src/reports/csv.ts'] : ['src/reports/ReportHeader.tsx'],
-    summary: r.repoId === 11 ? 'Adds GET /reports/:id.csv, streamed.' : 'Adds the Download CSV button.',
-    changeReport: {
-      changes: [
-        r.repoId === 11
-          ? { path: 'src/reports/csv.ts', summary: 'Streams the rows with one header row.', refs: ['AC2', 'AC3'] }
-          : { path: 'src/reports/ReportHeader.tsx', summary: 'The button links to the endpoint.', refs: ['AC1'] },
+/** The session after one chat turn. */
+export function withChatTurn(b: StoryBuild, text: string): StoryBuild {
+  const s = b.session!;
+  const n = s.conversation.length;
+  return {
+    ...b,
+    session: {
+      ...s,
+      spend: { ...s.spend, turns: s.spend.turns + 1 },
+      conversation: [
+        ...s.conversation,
+        { kind: 'reader', id: `r${n}`, text, at: iso(0), build: false },
+        { kind: 'tool', id: `t${n}`, tool: 'Bash', summary: 'rg -l "export" src/reports', ok: true, output: 'src/reports/index.ts\nsrc/reports/ReportHeader.tsx', at: iso(0) },
+        { kind: 'agent', id: `m-${n}`, text: 'The reports endpoint is in **acme/api** `src/reports/index.ts`. I would add a streamed CSV route there and a button in acme/web.', at: iso(0) },
+        { kind: 'turn', id: `e${n}`, turn: s.spend.turns + 1, mode: 'chat', outcome: 'completed', costUsd: 0.06, at: iso(0) },
       ],
-      unaddressed: [],
-      notReported: [],
     },
-    completedAt: iso(0.005),
-  })),
+  };
+}
+
+/** The same session once Start build ran: both repositories have a stored patch. */
+export function builtFrom(b: StoryBuild): StoryBuild {
+  const s = b.session!;
+  return {
+    ...b,
+    status: 'ready',
+    totalCostUsd: 0.9,
+    repos: b.repos.map((r) => ({
+      ...r,
+      status: 'ready',
+      hasPatch: true,
+      model: 'claude-opus-5-5',
+      filesChanged: r.repoId === 11 ? ['src/reports/csv.ts'] : ['src/reports/ReportHeader.tsx'],
+      summary: r.repoId === 11 ? 'Adds GET /reports/:id.csv, streamed.' : 'Adds the Download CSV button.',
+      commitMessage: r.repoId === 11 ? 'Stream reports as CSV' : 'Add the Download CSV button',
+      completedAt: iso(0.001),
+    })),
+    session: {
+      ...s,
+      phase: 'built',
+      mode: 'build',
+      spend: { ...s.spend, costUsd: 0.9, turns: s.spend.turns + 1 },
+      conversation: [
+        ...s.conversation,
+        { kind: 'reader', id: 'rb', text: 'Start the build.', at: iso(0), build: true },
+        { kind: 'tool', id: 'tb', tool: 'Bash', summary: 'pnpm test', ok: true, output: '12 passed', at: iso(0) },
+        { kind: 'agent', id: 'm-b', text: 'AC1, AC2 and AC3 are done. Tests pass in both repositories.', at: iso(0) },
+        { kind: 'turn', id: 'eb', turn: s.spend.turns + 1, mode: 'build', outcome: 'completed', costUsd: 0.8, at: iso(0) },
+      ],
+    },
+  };
+}
+
+export const STORY_SESSION_BUILT: StoryBuild = builtFrom(STORY_SESSION_READY);
+
+/** A session closed by the idle teardown, with its changes kept: Resume and Push. */
+export const STORY_SESSION_CLOSED: StoryBuild = {
+  ...STORY_SESSION_BUILT,
+  session: { ...STORY_SESSION_BUILT.session!, live: false, resumable: true, agentState: null },
 };
 
-const docsRef = (docSlug: string, file: string, sectionTitle: string, quote: string) => ({
-  path: `${docSlug}/sections/${file}`,
+/** The computer's container runtime (`GET /api/sandbox/runtime`). */
+export const SANDBOX_RUNTIME_OK: SandboxRuntimeStatus = {
+  available: true,
+  kind: 'docker',
+  label: 'Colima 0.8.1',
+  licenceNote: null,
+  problem: null,
+  cpus: 4,
+  memoryGb: 8,
+};
+export const SANDBOX_RUNTIME_NONE: SandboxRuntimeStatus = {
+  available: false,
+  kind: null,
+  label: null,
+  licenceNote: null,
+  problem: 'No container runtime is installed. Limn needs one to run the AI in a sandbox.',
+  cpus: null,
+  memoryGb: null,
+};
+
+const SANDBOX_SETTINGS: SandboxWorkspaceSettings = {
   workspaceId: WORKSPACE.id,
-  anchor: null,
-  docSlug,
-  docTitle: docSlug === 'api-conventions' ? 'API conventions' : 'Reports handbook',
-  sectionTitle,
-  quote,
-});
-
-/** The plan with the docs weighed (2 grounded, 1 superseded, 2 suggestions) — the docs section's states. */
-export const STORY_BUILD_PLAN_READY_DOCS: StoryBuild = {
-  ...STORY_BUILD_PLAN_READY,
-  wantDocs: true,
-  docsStatus: 'ready',
-  docs: {
-    summary: 'The conventions already fix the CSV header and the streaming rule. One point changes what the handbook says; two are not in the plan yet.',
-    nothingGrounded: false,
-    planRevision: 1,
-    runId: 'run-a',
-    items: [
-      { id: 'D1', kind: 'grounded', about: 'AC2', note: 'One header row is the conventions’ own rule.', suggestion: null, refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Every export starts with exactly one header row.')] },
-      { id: 'D2', kind: 'grounded', about: 'AC3', note: 'Large exports stream.', suggestion: null, refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Exports over a thousand rows are streamed.')] },
-      { id: 'D3', kind: 'superseded', about: 'AC1', note: 'The handbook puts downloads in the report menu; the story asks for a button.', suggestion: null, refs: [docsRef('reports-handbook', '01-layout.md', 'Layout', 'Downloads live in the report menu.')] },
-      { id: 'D4', kind: 'suggestion', about: 'R1:step 1', note: 'Exports name their file after the report and the date.', suggestion: 'Name the file after the report and the date.', refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Name the file after the report and the date.')] },
-      { id: 'D5', kind: 'suggestion', about: 'story', note: 'Every export is logged.', suggestion: 'Log each CSV download.', refs: [docsRef('api-conventions', '03-audit.md', 'Audit', 'Every export is written to the audit log.')] },
-    ],
-  },
-  docsDecisions: { D3: 'ignore', D4: 'include', D5: 'include' },
-  docsCostUsd: 0.2,
+  localFolder: null,
+  memoryProjects: null,
+  userClaudeMd: true,
+  userSkills: false,
+  startDir: null,
+  globalProxyEnv: false,
+  resources: { cpus: null, memoryGb: null, diskGb: null },
+  services: [],
+  alwaysAllowedHosts: [],
 };
 
-/** The same plan while ONLY the docs run (the plan pass is done): the docs section's own Cancel. */
-export const STORY_BUILD_DOCS_RUNNING: StoryBuild = { ...STORY_BUILD_PLAN_READY, wantDocs: true, docsStatus: 'running' };
+const CSV_PATCH = [
+  'diff --git a/src/reports/csv.ts b/src/reports/csv.ts',
+  'new file mode 100644',
+  '--- /dev/null',
+  '+++ b/src/reports/csv.ts',
+  '@@ -0,0 +1,3 @@',
+  '+export function csvHeader(cols: string[]): string {',
+  "+  return cols.join(',');",
+  '+}',
+  '',
+].join('\n');
 
 const STORY_BUILD_DIFF: StoryBuildDiffResponse = {
   repoId: 11,
   baseSha: 'b'.repeat(40),
-  patch: [
-    'diff --git a/src/reports/csv.ts b/src/reports/csv.ts',
-    'new file mode 100644',
-    '--- /dev/null',
-    '+++ b/src/reports/csv.ts',
-    '@@ -0,0 +1,3 @@',
-    '+export function csvHeader(cols: string[]): string {',
-    "+  return cols.join(',');",
-    '+}',
-    '',
-  ].join('\n'),
+  patch: CSV_PATCH,
   filesChanged: ['src/reports/csv.ts'],
 };
 
-const STORY_BUILD_CHECKS: StoryBuildChecksPreview = {
-  sandbox: 'seatbelt',
-  unavailable: null,
-  unsandboxed: false,
-  checks: [{ name: 'test', kind: 'test', command: 'pnpm test', source: 'package.json script "test"', defaultOn: true, needsDocker: false, refused: null }],
+const SESSION_DIFF: SandboxSessionDiffResponse = {
+  repos: [{ repoId: 11, fullName: 'acme/api', baseSha: 'b'.repeat(40), patch: CSV_PATCH, filesChanged: ['src/reports/csv.ts'], insertions: 3, deletions: 0 }],
 };
 
 function myTurnPr(id: number): MyTurnPr {
@@ -1422,53 +1455,58 @@ const AI_BUDGET: AiBudgetResponse = {
   others: [],
 };
 
-export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild | null } = {}): Promise<void> {
+export async function installMockApi(
+  page: Page,
+  opts: { storyBuild?: StoryBuild | null; runtime?: SandboxRuntimeStatus } = {},
+): Promise<void> {
   // "Implement story": ACME-1's session, advanced by the writes below (one per page). A spec may start
-  // from a session (`opts.storyBuild`).
+  // from a session (`opts.storyBuild`) and name the container runtime (`opts.runtime`).
   let storyBuild: StoryBuild | null = opts.storyBuild ?? null;
+  const runtime = opts.runtime ?? SANDBOX_RUNTIME_OK;
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
     async (route) => {
       const path = new URL(route.request().url()).pathname;
       const method = route.request().method();
 
+      // The container runtime and Settings → Sandbox (boot-time reads of the build tab and the modal).
+      if (path === '/api/sandbox/runtime') return json(route, runtime);
+      if (/\/api\/workspaces\/\d+\/sandbox$/.test(path)) return json(route, SANDBOX_SETTINGS);
+
       if (path.startsWith(STORY_BUILD_API.list)) {
+        const id = storyBuild?.id ?? STORY_SESSION_READY.id;
+        const at = (route: keyof typeof SANDBOX_SESSION_API): boolean => path === SANDBOX_SESSION_API[route].replace(':id', String(id));
         if (path === STORY_BUILD_API.list && method === 'GET') {
           return json(route, { workspaceId: WORKSPACE.id, build: storyBuild, earlier: [] } satisfies StoryBuildForTicketResponse);
         }
         if (path === STORY_BUILD_API.list && method === 'POST') {
-          storyBuild = STORY_BUILD_PLAN_READY;
-          return route.fulfill({
-            status: 202,
-            contentType: 'application/json',
-            body: JSON.stringify({ outcome: 'started', buildId: STORY_BUILD_PLAN_READY.id } satisfies StoryBuildStartResponse),
-          });
+          if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);
+          // The boot is over at once in the mock: the session opens ready.
+          storyBuild = STORY_SESSION_READY;
+          return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
         }
-        if (path.endsWith('/accept')) {
-          storyBuild = STORY_BUILD_READY;
-          return json(route, { buildId: STORY_BUILD_READY.id } satisfies StoryBuildActionResponse, 202);
+        if (at('messages')) {
+          const body = route.request().postDataJSON() as { text: string };
+          if (storyBuild != null) storyBuild = withChatTurn(storyBuild, body.text);
+          return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
         }
-        if (path.endsWith('/plan/message') || /\/repos\/\d+\/retry$/.test(path)) {
-          return json(route, { buildId: storyBuild?.id ?? STORY_BUILD_PLAN_READY.id } satisfies StoryBuildActionResponse, 202);
+        if (at('build')) {
+          if (storyBuild != null) storyBuild = builtFrom(storyBuild);
+          return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
         }
-        if (path.endsWith('/docs/decisions') && method === 'PUT') {
-          // The PUT names the docs run it was aimed at; another run's is 409 DocsMoved (docs/STORY-BUILD.md).
-          const body = route.request().postDataJSON() as StoryBuildDocsDecisionsBody;
-          const docs = storyBuild?.docs ?? null;
-          if (docs == null || body.planRevision !== docs.planRevision || body.runId !== (docs.runId ?? null)) {
-            return json(route, { error: 'DocsMoved', message: 'The docs points changed since you looked. Tick them again.' }, 409);
+        if (at('interrupt')) return json(route, { status: 'idle' });
+        if (at('networkAllow')) {
+          const body = route.request().postDataJSON() as { rule: string; scope: 'session' | 'workspace' };
+          if (storyBuild?.session != null) {
+            const network = storyBuild.session.network.map((n) => (n.host === body.rule ? { ...n, allowed: true, reason: null } : n));
+            storyBuild = { ...storyBuild, session: { ...storyBuild.session, network } };
           }
-          const decisions = { ...storyBuild!.docsDecisions, ...body.decisions };
-          storyBuild = { ...storyBuild!, docsDecisions: decisions };
-          return json(route, { decisions } satisfies StoryBuildDocsDecisionsResponse);
+          return json(route, { rule: body.rule, scope: body.scope } satisfies SandboxNetworkAllowResponse);
         }
-        if (path.endsWith('/docs') && method === 'POST') {
-          return json(route, { outcome: 'current', buildId: storyBuild?.id ?? STORY_BUILD_PLAN_READY.id, message: null } satisfies StoryBuildDocsResponse);
-        }
-        if (path.endsWith('/cancel')) {
-          const was = storyBuild;
-          if (was != null && was.docsStatus === 'running') storyBuild = { ...was, docsStatus: 'failed', docsError: 'Stopped.' };
-          return json(route, { status: was?.docsStatus === 'running' ? 'cancelling' : 'idle' } satisfies StoryBuildCancelResponse);
+        if (at('diff')) return json(route, SESSION_DIFF);
+        if (at('resume')) {
+          if (storyBuild?.session != null) storyBuild = { ...storyBuild, session: { ...storyBuild.session, live: true, resumable: false, agentState: 'ready' } };
+          return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
         }
         if (/\/repos\/\d+\/push$/.test(path)) {
           const repoId = Number(path.split('/').at(-2));
@@ -1479,24 +1517,27 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
                 ? { ...r, status: 'pushed' as const, pushedPrNumber: prNumber, pushedPrUrl: `https://github.com/${r.fullName}/pull/${prNumber}`, pushedAt: iso(0) }
                 : r,
             );
-            storyBuild = { ...storyBuild, repos, pushedAll: repos.filter((r) => r.include).every((r) => r.status === 'pushed') };
+            storyBuild = { ...storyBuild, repos, pushedAll: repos.filter((r) => r.include).every((r) => r.status === 'pushed' || !r.hasPatch) };
           }
           return json(route, {
             results: [{ repoId, outcome: 'pushed', prNumber, prUrl: `https://github.com/acme/api/pull/${prNumber}`, code: null, error: null }],
           } satisfies StoryBuildPushResponse);
         }
         if (/\/repos\/\d+\/diff$/.test(path)) return json(route, STORY_BUILD_DIFF);
-        if (/\/repos\/\d+\/checks$/.test(path)) return json(route, STORY_BUILD_CHECKS);
         if (path.endsWith('/stream')) {
-          // Nothing runs in the mock: the pass is over at once (one `done` frame, then the end).
-          const done: StoryBuildStreamEvent = { type: 'done' };
-          return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify(done)}\n\n` });
+          // Nothing runs in the mock, so a live session's stream sends nothing and ends (the tab opens it
+          // again after a pause; the query's read is the truth — the fold itself is pinned by
+          // test/sandboxSession.test.ts). A closed session gets its snapshot and `done`.
+          const frames: SandboxSessionStreamEvent[] =
+            storyBuild?.session == null ? [{ type: 'done' }] : storyBuild.session.live ? [] : [{ type: 'snapshot', session: storyBuild.session }, { type: 'done' }];
+          return route.fulfill({ status: 200, contentType: 'text/event-stream', body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('') });
         }
         if (path.endsWith('/discard')) {
-          storyBuild = storyBuild != null ? { ...storyBuild, status: 'discarded' } : null;
+          storyBuild =
+            storyBuild != null ? { ...storyBuild, status: 'discarded', session: storyBuild.session != null ? { ...storyBuild.session, phase: 'discarded', live: false } : null } : null;
           return json(route, { status: 'discarded' } satisfies StoryBuildDiscardResponse);
         }
-        if (/\/api\/story-builds\/\d+$/.test(path)) return json(route, storyBuild ?? STORY_BUILD_PLAN_READY);
+        if (/\/api\/story-builds\/\d+$/.test(path)) return json(route, storyBuild ?? STORY_SESSION_READY);
         return json(route, { status: 'ok' });
       }
       const prDetailMatch = path.match(/\/api\/prs\/(\d+)$/);

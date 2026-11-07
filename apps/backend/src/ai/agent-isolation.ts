@@ -17,6 +17,13 @@ import type { DispatchDecision } from '../review/claude-review/specialists.js';
 
 export const ISOLATED_MCP = { strictMcpConfig: true } as const;
 
+// NO SESSION FILES. By default the Claude Code CLI saves every run's transcript under
+// `~/.claude/projects/<encoded cwd>/`. Limn never resumes an SDK session, and its runs work in
+// temporary worktrees, so each run left a new directory there (~2,000 / 3.5 GB measured on one
+// machine). EVERY `query({ options })` spreads this too; `ai/runtime.ts` also forces it on the tapped
+// `query`, so a call site that forgets it still writes nothing. Old litter: ai/session-litter.ts.
+export const NO_SESSION_FILES = { persistSession: false } as const;
+
 /** The MCP server a tool name belongs to (`mcp__<server>__<tool>`), or null for a built-in tool. */
 export function mcpServerOf(toolName: string): string | null {
   if (!toolName.startsWith('mcp__')) return null;

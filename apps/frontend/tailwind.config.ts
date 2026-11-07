@@ -18,6 +18,8 @@ export default {
         body: ['var(--fs-body)', { lineHeight: 'var(--lh-body)' }],
         title: ['var(--fs-title)', { lineHeight: 'var(--lh-title)', fontWeight: '600' }],
         display: ['var(--fs-display)', { lineHeight: 'var(--lh-display)', fontWeight: '600', letterSpacing: '-0.01em' }],
+        // A headline figure: one big number, never prose (docs/redesign/DESIGN.md § 2).
+        figure: ['var(--fs-figure)', { lineHeight: 'var(--lh-figure)', fontWeight: '600', letterSpacing: '-0.02em' }],
       },
       borderRadius: {
         ui: '6px',

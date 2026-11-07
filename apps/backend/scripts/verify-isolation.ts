@@ -2721,6 +2721,30 @@ check(
   await q.deleteRepo(a2!.id, 1);
 }
 
+// ── SANDBOX WORKSPACE SETTINGS (db/sandbox-settings.ts) ─────────────────────────────────────────
+// The workspace id arrives in a request PATH (Settings → Workspace → Sandbox). Positive first, so a
+// writer that refused everything fails; then B against A's workspace on every reader and writer.
+{
+  const sb = await import('../src/db/sandbox-settings.js');
+  const wsA = (await q.resolveWorkspaceScope(1, null)).workspaceId;
+  check('writeSandboxSettings(A, A’s workspace) stores', (await sb.writeSandboxSettings(1, wsA, { localFolder: '/Users/a/src' })) === true);
+  check('readSandboxSettings(A) reads it back (mutation check)', (await sb.readSandboxSettings(1, wsA))?.localFolder === '/Users/a/src');
+  check('writeSandboxSettings(B, A’s workspace) refuses (IDOR blocked)', (await sb.writeSandboxSettings(2, wsA, { localFolder: '/Users/b' })) === false);
+  check('readSandboxSettings(B, A’s workspace) is null (IDOR blocked)', (await sb.readSandboxSettings(2, wsA)) === null);
+  check('getSandboxSettings(B, A’s workspace) is null (IDOR blocked)', (await sb.getSandboxSettings(2, wsA)) === null);
+  check('sandboxWorkspaceRepos(A) lists A’s repos (mutation check)', ((await sb.sandboxWorkspaceRepos(1, wsA)) ?? []).some((r) => r.repoId === A.repoId));
+  check('sandboxWorkspaceRepos(B, A’s workspace) is null (IDOR blocked)', (await sb.sandboxWorkspaceRepos(2, wsA)) === null);
+  check('A’s setting is unchanged by B', (await sb.readSandboxSettings(1, wsA))?.localFolder === '/Users/a/src');
+  let fkRefused = false;
+  try {
+    await db.insert(schema.sandboxWorkspaceSettings).values({ accountId: 2, workspaceId: wsA }).execute();
+  } catch {
+    fkRefused = true;
+  }
+  check('a sandbox setting naming A’s workspace under account B is refused by the composite FK', fkRefused);
+  await db.delete(schema.sandboxWorkspaceSettings).where(inArray(schema.sandboxWorkspaceSettings.accountId, [1, 2])).execute();
+}
+
 // ── MY TURN DISMISSALS (db/my-turn-dismissals.ts) ──────────────────────────────
 // Two id-addressed writes whose ids arrive in a request PATH, and a read every My Turn fold makes.
 // Checked non-vacuously: the positive direction first, so a writer that refused EVERYTHING would
@@ -4674,7 +4698,6 @@ check(
 {
   console.log('\nstory_builds (Implement story)');
   const sbp = await import('../src/coding/story-build/persist.js');
-  const { registerStoryBuildRoutes } = await import('../src/coding/story-build/routes.js');
   const { sprintBuildsFor } = await import('../src/db/sprint-builds.js');
   const dc = { db, schema: schema as unknown as Record<string, any> };
   const IDENT = 'jira:https://acme.atlassian.net#ISOBUILD-1';
@@ -4713,51 +4736,47 @@ check(
   check("sprintBuildsFor(A, B's workspace) is empty", (await sprintBuildsFor(1, defaultB, [IDENT])).size === 0);
 
   const Fastify = (await import('fastify')).default;
-  const bapp = Fastify({ logger: false });
-  registerStoryBuildRoutes(bapp, {
-    ...dc,
-    accountIdOf: () => 1,
-    log: { info() {}, warn() {}, error() {} },
-    llm: { detectAuth: () => ({ status: 'ok' }) },
-    recordAiUsage: async () => {},
-    // Answers for anyone: a 404 on the checks preview is then the tenancy check, never a missing seam.
-    github: { fetchRepoFiles: async () => ({ 'package.json': '{"scripts":{"test":"vitest"}}' }) },
-  } as any);
-  await bapp.ready();
+
+  // THE WORKSPACE SESSION routes (sandbox/session/routes.ts, with the push + diff routes of
+  // coding/story-build/routes-build.ts). Every `:id` route as A on B's session → 404; the same read as
+  // B answers (mutation check).
+  const { registerSandboxSessionRoutes } = await import('../src/sandbox/session/routes.js');
+  const sctx = (acct: number) => ({ ...dc, accountIdOf: () => acct, log: { info() {}, warn() {}, error() {} }, llm: { detectAuth: () => ({ status: 'ok' }) }, recordAiUsage: async () => {}, github: {} }) as any;
+  const sapp = Fastify({ logger: false });
+  registerSandboxSessionRoutes(sapp, sctx(1));
+  await sapp.ready();
   for (const [method, url, payload] of [
     ['GET', `/api/story-builds/${b}`, undefined],
     ['GET', `/api/story-builds/${b}/stream`, undefined],
-    ['POST', `/api/story-builds/${b}/plan/message`, { text: 'x' }],
-    ['POST', `/api/story-builds/${b}/accept`, { planRevision: 0, repos: [] }],
-    ['POST', `/api/story-builds/${b}/cancel`, {}],
+    ['POST', `/api/story-builds/${b}/messages`, { text: 'x' }],
+    ['POST', `/api/story-builds/${b}/interrupt`, {}],
+    ['POST', `/api/story-builds/${b}/build`, {}],
+    ['POST', `/api/story-builds/${b}/network/allow`, { rule: 'example.com', scope: 'session' }],
+    ['GET', `/api/story-builds/${b}/diff`, undefined],
+    ['POST', `/api/story-builds/${b}/resume`, {}],
     ['POST', `/api/story-builds/${b}/discard`, {}],
-    ['POST', `/api/story-builds/${b}/docs`, {}],
-    ['PUT', `/api/story-builds/${b}/docs/decisions`, { decisions: {}, planRevision: 1, runId: null }],
-    ['GET', `/api/story-builds/${b}/repos/${B.repoId}/checks`, undefined],
     ['GET', `/api/story-builds/${b}/repos/${B.repoId}/diff`, undefined],
-    ['POST', `/api/story-builds/${b}/repos/${B.repoId}/retry`, {}],
     ['POST', `/api/story-builds/${b}/repos/${B.repoId}/push`, { draft: true }],
     ['POST', `/api/story-builds/${b}/push`, { draft: true }],
   ] as const) {
-    const r = await bapp.inject({ method, url, ...(payload ? { payload } : {}) });
-    check(`${method} ${url.replace(String(b), "<B's>")} as A → 404`, r.statusCode === 404);
+    const r = await sapp.inject({ method, url, ...(payload ? { payload } : {}) });
+    check(`session route ${method} ${url.replace(String(b), "<B's>")} as A → 404`, r.statusCode === 404);
   }
-  // MUTATION: B's own repository routes answer B (the 404s above are tenancy, not a dead route).
   {
     const own = Fastify({ logger: false });
-    registerStoryBuildRoutes(own, { ...dc, accountIdOf: () => 2, log: { info() {}, warn() {}, error() {} }, llm: { detectAuth: () => ({ status: 'ok' }) }, recordAiUsage: async () => {}, github: { fetchRepoFiles: async () => ({ 'package.json': '{"scripts":{"test":"vitest"}}' }) } } as any);
+    registerSandboxSessionRoutes(own, sctx(2));
     await own.ready();
-    const r = await own.inject({ method: 'GET', url: `/api/story-builds/${b}/repos/${B.repoId}/checks` });
-    check("GET /api/story-builds/<B's>/repos/<B's>/checks as B → 200 (mutation check)", r.statusCode === 200);
+    const r = await own.inject({ method: 'GET', url: `/api/story-builds/${b}` });
+    check("session route GET /api/story-builds/<B's> as B → 200 (mutation check)", r.statusCode === 200 && r.json().id === b);
     await own.close();
   }
-  const list = await bapp.inject({ method: 'GET', url: `/api/story-builds?workspace=${defaultB}&ident=${encodeURIComponent(IDENT)}` });
+  const slist = await sapp.inject({ method: 'GET', url: `/api/story-builds?workspace=${defaultB}&ident=${encodeURIComponent(IDENT)}` });
   check(
-    "GET /api/story-builds?workspace=<B's> as A → A's default and A's session, never B's",
-    list.statusCode === 200 && list.json().workspaceId === defaultA && list.json().build?.id === a,
+    "session route GET /api/story-builds?workspace=<B's> as A → A's default and A's session, never B's",
+    slist.statusCode === 200 && slist.json().workspaceId === defaultA && slist.json().build?.id === a,
   );
-  check("B's session survives A's discard", (await sbp.getStoryBuildRow(dc, 2, b))?.status === 'plan_ready');
-  await bapp.close();
+  check("B's session survives A's session-route discard", (await sbp.getStoryBuildRow(dc, 2, b))?.status === 'plan_ready');
+  await sapp.close();
 }
 
 // ── SETTINGS → FEATURES: the default facts (db/feature-gates.ts) ─────────────────────────────────

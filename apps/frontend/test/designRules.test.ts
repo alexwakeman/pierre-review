@@ -41,7 +41,7 @@ describe('the four type sizes', () => {
         for (const m of line.matchAll(re)) bad.push(`${f.replace(SRC, 'src')}:${i + 1} ${m[0]}`);
       });
     }
-    expect(bad, 'use text-meta (12) / text-body (13) / text-title (15) / text-display (22)').toEqual([]);
+    expect(bad, 'use text-meta (12) / text-body (13) / text-title (15) / text-display (22), or text-figure (44) for one headline number').toEqual([]);
   });
 });
 

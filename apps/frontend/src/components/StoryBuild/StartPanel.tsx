@@ -1,130 +1,91 @@
-import { useIsMutating, useQuery } from '@tanstack/react-query';
-import { skipToken } from '@tanstack/react-query';
-import {
-  DEFAULT_AI_FIX_MODEL,
-  STORY_MISSING_HEADING,
-  TICKET_CRITERION_STATUS_LABEL,
-  storyBuildGapsOf,
-  storyBuildOffered,
-  type StoryBuild,
-  type StoryBuildGap,
-} from '@pierre-review/shared';
-import { api, ApiError } from '../../api/client.js';
+import { useIsMutating } from '@tanstack/react-query';
+import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
+import { ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
-import { referenceDocsKey } from '../../hooks/useReferenceDocs.js';
-import { storyBuildMutationKey, useStartStoryBuild } from '../../hooks/useStoryBuild.js';
+import { storyBuildMutationKey, useSandboxRuntime, useStartStorySession } from '../../hooks/useStoryBuild.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import { TICKET_CRITERION_STATUS_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
+import { sessionErrorText, sessionStatusLine } from '../../lib/sandboxSession.js';
 import { useSprintGraph } from '../../hooks/useSprintStories.js';
 import type { TabTicketMeta } from '../../store/pinnedTabs.js';
-import { storyBuildErrorText, storyBuildStatusLine } from '../../lib/storyBuild.js';
+import { storyBuildStatusLine } from '../../lib/storyBuild.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
 import { WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
-import { CheckboxBox } from '../ui/FormControls.js';
+import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
 
-// THE START STATE (no open session): the model menu (kind `story_plan`, opening on the deep model —
-// owner decision 7), "Draw a design", "Check against docs" (only when the workspace's library has a
-// document), and Start inside the ONE `AiRunGate` (its `OverBudgetConfirm` asks before a run over the
-// budget). A failed / cancelled / discarded session reads as one line above it.
+// THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences,
+// the container runtime's ONE line (`GET /api/sandbox/runtime`; with none, what is wrong + "How to set
+// up" — the button stays, owner decision Q2: there is no other path), the model menu (kind
+// `story_build`, opening on the deep model) and Start inside the ONE `AiRunGate`. A failed / discarded
+// session reads as one line above it.
 //
 // "FILL GAPS" (a started ticket whose current story check found gaps — shared `storyBuildOffered`): the
-// same start, worded for the gaps, which are listed UP FRONT from that check (`check.reviewId`, one read
-// of the run when the tab opens — never on the board). The backend builds only the gaps whenever the
-// ticket has pull requests, re-checking first if the check went out of date.
+// same start, worded for the gaps, listed UP FRONT from that check (`check.reviewId`, one read of the
+// run when the tab opens — never on the board). The session tells the agent those verdicts.
 
 export function StartPanel({
   workspaceId,
   ident,
   last,
   offer = null,
-  wantDiagram,
-  setWantDiagram,
-  wantDocs,
-  setWantDocs,
 }: {
   workspaceId: number;
   ident: string;
-  /** The latest session when it is closed (failed / cancelled / discarded); null otherwise. */
+  /** The latest session when it is closed (failed / discarded, or a row of the old flow); null otherwise. */
   last: StoryBuild | null;
   /** What the story view offered when it opened this tab (`TabTicketMeta.buildOffer`); used only while
    *  the ticket is not a sprint board node (a story outside the sprint). */
   offer?: TabTicketMeta['buildOffer'];
-  wantDiagram: boolean;
-  setWantDiagram: (v: boolean) => void;
-  wantDocs: boolean;
-  setWantDocs: (v: boolean) => void;
 }): JSX.Element {
-  // Deep by default for the plan (owner decision 7): the picker opens on each provider's deep model.
-  const pick = useModelPick('story_plan', DEFAULT_AI_FIX_MODEL);
-  const start = useStartStoryBuild(workspaceId, ident);
+  const pick = useModelPick('story_build', DEFAULT_CLAUDE_REVIEW_MODEL);
+  const start = useStartStorySession(workspaceId, ident);
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(ident) }) > 0;
-  // The library list (DB only): "Check against docs" shows only when it holds a ready document.
-  const docs = useQuery({
-    queryKey: referenceDocsKey(workspaceId),
-    queryFn: workspaceId != null ? () => api.referenceDocs(workspaceId) : skipToken,
-    staleTime: 60_000,
-  });
-  const hasDocs = (docs.data?.docs ?? []).some((d) => d.status === 'ready');
+  const runtime = useSandboxRuntime();
   // THE ENTRY GATE holds here too (owner decision 4, shared `storyBuildOffered`): a tab rebuilt from a
   // URL may name any ticket, but a NEW session starts only for a ticket the gate offers it on. A sprint
-  // ticket is judged from its board node (the sprint graph is the board's own DB-only query, usually
-  // cached); a story outside the sprint by what its story view offered when it opened this tab
-  // (`offer`, the same gate over the view's own facts). A closed session is no open session, so `build`
-  // is ignored.
+  // ticket is judged from its board node; a story outside the sprint by what its story view offered
+  // when it opened this tab. A closed session is no open session, so `build` is ignored.
   const graph = useSprintGraph(workspaceId);
   const node = graph.data?.nodes.find((n) => n.ident === ident);
   const offered = node != null ? storyBuildOffered({ ...node, build: null }) : (offer?.action ?? null);
   const fill = offered === 'fill_gaps';
   const go = (): void => {
-    start.mutate({
-      provider: pick.chosen.provider,
-      model: pick.chosen.model,
-      diagram: wantDiagram,
-      docs: hasDocs && wantDocs,
-    });
+    start.mutate({ action: fill ? 'fill_gaps' : 'implement', provider: pick.chosen.provider, model: pick.chosen.model });
   };
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
+  const lastLine = last == null ? null : last.session != null ? sessionStatusLine(last.session, last.error) : storyBuildStatusLine(last);
   return (
     <section data-testid="story-build-start" className="mt-5 rounded-ui bg-ui-surface p-4">
-      {last != null && (
+      {lastLine != null && (
         <p data-testid="story-build-last" className="mb-3 text-meta text-ui-mute">
-          The last build: {storyBuildStatusLine(last)}
+          The last session: {lastLine}
         </p>
       )}
       {fill ? (
         <>
           <p className="text-body text-ui-ink">
-            The AI reads the story, its pull requests and the code, then plans only what the story check found missing. Nothing is
-            built until you accept the plan, and nothing is pushed until you press Push.
+            The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. Talk
+            to it first, then press Start build. Nothing is pushed until you press Push.
           </p>
           <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
-          The AI reads the story and the code, then writes a plan. Nothing is built until you accept the plan, and nothing is pushed
-          until you press Push.
+          The AI gets a sandbox with every repository in this workspace and the ticket. Talk to it first, then press Start build.
+          Nothing is pushed until you press Push.
         </p>
       )}
-      <div className="mt-3 flex flex-col gap-2">
-        <label className="flex cursor-pointer items-center gap-2 text-meta text-ui-ink">
-          <CheckboxBox checked={wantDiagram} disabled={busy} onChange={(e) => setWantDiagram(e.target.checked)} />
-          Draw a design
-        </label>
-        {hasDocs && (
-          <label className="flex cursor-pointer items-center gap-2 text-meta text-ui-ink">
-            <CheckboxBox checked={wantDocs} disabled={busy} onChange={(e) => setWantDocs(e.target.checked)} />
-            Check against docs
-          </label>
-        )}
+      <div className="mt-3">
+        <SandboxRuntimeLine status={runtime.data} loading={runtime.isLoading} />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {offered != null ? (
           <>
             <ModelPicker state={pick} onPick={pick.pick} disabled={busy} />
-            <AiRunGate kind="story_plan" anyProvider provider={pick.chosen.provider}>
+            <AiRunGate kind="story_build" anyProvider provider={pick.chosen.provider}>
               <Button
                 variant="primary"
                 data-ai-run
@@ -142,12 +103,16 @@ export function StartPanel({
           <p className="text-meta text-ui-mute">Loading…</p>
         ) : (
           <p data-testid="story-build-not-offered" className="text-meta text-ui-mute">
-            A build starts only for a story that is not started and has no pull request, or a started one whose story check
+            A session starts only for a story that is not started and has no pull request, or a started one whose story check
             found gaps.
           </p>
         )}
       </div>
-      {err != null && <p className="mt-2 text-meta text-ui-danger">{storyBuildErrorText(err)}</p>}
+      {err != null && (
+        <p data-testid="story-build-start-error" className="mt-2 text-meta text-ui-danger">
+          {sessionErrorText(err)}
+        </p>
+      )}
     </section>
   );
 }

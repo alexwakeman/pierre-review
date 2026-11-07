@@ -48,3 +48,7 @@ export * from './flaky-checks.js';
 export * from './pr-chips.js';
 export * from './still-open.js';
 export * from './push-summaries.js';
+export * from './sandbox-agent.js';
+export * from './sandbox-workspace.js';
+export * from './sandbox-services.js';
+export * from './sandbox-session.js';

@@ -4,17 +4,19 @@ import { STORY_BUILD_ACTION_WORDS, type SprintGraphResponse, type StoryBuild, ty
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
-import { storyBuildActionOf, storyBuildStatusLine, storyBuildSteps } from '../../lib/storyBuild.js';
+import { storyBuildActionOf } from '../../lib/storyBuild.js';
+import { sessionStatusLine, sessionSteps } from '../../lib/sandboxSession.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { InfoButton } from '../InfoModal.js';
 import { TrackerLinkOut } from '../TrackerLinkOut.js';
 import { cx } from '../ui/cx.js';
 import { PageHeader } from '../ui/PageHeader.js';
 
-// THE BUILD TAB'S HEADER: what the tab does ("Implement" or "Fill gaps", `storyBuildActionOf`), the ticket key, "Open story", "Open in <tracker>", the title, who ran it, what
-// it cost so far (ONE formatter, `useRunCostText` — US$ on an API key, a share of the week on a
-// subscription), the quiet step line ("Assess · Plan · Docs · Build · Push", the current step in words
-// AND weight — never colour alone), the status sentence, and the end slot (Push all, Cancel).
+// THE BUILD TAB'S HEADER: what the tab does ("Implement" or "Fill gaps", `storyBuildActionOf`), the
+// ticket key, "Open ticket", "Open in <tracker>", the title, who runs it, what it cost so far (ONE
+// formatter, `useRunCostText` — US$ on an API key, a share of the week on a subscription), the quiet
+// step line ("Set up · Talk · Build · Push", the current step in words AND weight — never colour
+// alone), the status sentence, and the end slot (Draft, Push all, Stop, Discard).
 
 export function StoryBuildHeader({
   workspaceId,
@@ -22,7 +24,7 @@ export function StoryBuildHeader({
   ticketKey,
   title,
   build,
-  wantDocs,
+  error = null,
   offered = null,
   actions,
 }: {
@@ -30,9 +32,10 @@ export function StoryBuildHeader({
   ident: string;
   ticketKey: string;
   title: string | null;
+  /** The open session (its `session` drawn from the stream when one is open), or null before a start. */
   build: StoryBuild | null;
-  /** Before a start: whether the reader ticked "Check against docs" (the step line shows Docs). */
-  wantDocs: boolean;
+  /** The stream's latest error line (a failed boot). */
+  error?: string | null;
   /** What the story view offered when it opened the tab (used only with no sprint node in memory). */
   offered?: StoryBuildAction | null;
   actions?: ReactNode;
@@ -42,8 +45,9 @@ export function StoryBuildHeader({
   // The ticket's tracker link, from the sprint read already in memory (never a fetch of its own).
   const qc = useQueryClient();
   const node = qc.getQueryData<SprintGraphResponse>(sprintGraphKey(workspaceId))?.nodes.find((n) => n.ident === ident) ?? null;
-  const steps = storyBuildSteps(build, wantDocs);
-  const cost = build != null ? costText(build.totalCostUsd, build.provider ?? null) : null;
+  const session = build?.session ?? null;
+  const steps = sessionSteps(session);
+  const cost = session != null ? costText(session.spend.costUsd, session.provider ?? build?.provider ?? null) : null;
   const shownTitle = build?.ticketTitle ?? title ?? (node != null && node.title !== '' ? node.title : null);
   const action = storyBuildActionOf(build, node, offered);
   const fill = action === 'fill_gaps';
@@ -56,24 +60,20 @@ export function StoryBuildHeader({
       title={shownTitle ?? ticketKey}
       info={
       <InfoButton title={fill ? 'Fill the gaps in this ticket' : 'Implement this ticket'}>
-        {fill ? (
-          <p>
-            The story check found criteria the pull requests do not meet yet. The AI plans only those gaps, across up to four
-            repositories, and builds each one on its own branch, in plan order. A criterion the check could not judge counts as a
-            gap. You can change the plan by chat before anything is built.
-          </p>
-        ) : (
-          <p>
-            The AI reads the story and the code, writes a plan across up to four repositories, and builds each one on its own
-            branch, in plan order. You can change the plan by chat before anything is built.
-          </p>
-        )}
-        <p>Nothing is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.</p>
         <p>
-          If you ask it to check the docs, the story wins: where the docs say something else, the point is listed as
-          changed by the story, never as a fix to the story.
+          Limn starts a sandbox on this computer with every repository in this workspace, the ticket and your Claude notes for
+          these folders. The AI there has a full shell, but no GitHub access and no route to the internet except the hosts the
+          Network panel shows.
         </p>
-        <p>The AI has no shell. It can run the project&rsquo;s own tests only when you tick Run tests.</p>
+        {fill ? (
+          <p>It is told what the story check found missing, and works only on those gaps.</p>
+        ) : (
+          <p>Ask it anything first: a plan, a question, where to look. Nothing changes until you press Start build.</p>
+        )}
+        <p>
+          Start build lets it change the code and run the tests. When it stops, each repository’s changes are shown here. Nothing
+          is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.
+        </p>
       </InfoButton>
       }
       actions={actions}
@@ -114,15 +114,15 @@ export function StoryBuildHeader({
           </li>
         ))}
       </ol>
-      {build != null && (
-        <p data-testid="story-build-status" className="mt-1 flex flex-wrap items-center gap-x-2 text-meta text-ui-mute">
-          <span>{storyBuildStatusLine(build)}</span>
-          {build.model != null && (
+      {build != null && session != null && (
+        <p data-testid="story-build-status" data-phase={session.phase} className="mt-1 flex flex-wrap items-center gap-x-2 text-meta text-ui-mute">
+          <span>{sessionStatusLine(session, error ?? build.error)}</span>
+          {session.model != null && (
             <>
               <span aria-hidden className="decorative-mark">
                 ·
               </span>
-              <AiRunLabel provider={build.provider} model={build.model} />
+              <AiRunLabel provider={session.provider ?? build.provider} model={session.model} />
             </>
           )}
           {cost != null && (
@@ -130,7 +130,7 @@ export function StoryBuildHeader({
               <span aria-hidden className="decorative-mark">
                 ·
               </span>
-              <span>{cost}</span>
+              <span data-testid="story-build-cost">{cost}</span>
             </>
           )}
         </p>

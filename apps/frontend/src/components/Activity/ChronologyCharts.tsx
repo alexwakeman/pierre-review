@@ -682,7 +682,7 @@ export function BalanceTarget({
 export function FirstReviewCount({ passed, measured }: { passed: number; measured: number }): JSX.Element {
   return (
     <div data-testid="chronology-first-review-count">
-      <p className="text-[44px] font-semibold leading-none tabular-nums text-ui-success">{formatCount(passed)}</p>
+      <p className="text-figure tabular-nums text-ui-success">{formatCount(passed)}</p>
       <p className="mt-1.5 max-w-[16rem] text-body text-ui-ink">approved on the first review</p>
       <p className="mt-0.5 text-meta text-ui-mute">of {formatCount(measured)} merged pull requests</p>
     </div>

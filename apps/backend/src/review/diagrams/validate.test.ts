@@ -215,14 +215,11 @@ describe('validateDesign — refuses with what to fix', () => {
     expect(refused(raw, STORY)).toMatch(/participant "a" names pr "PR9"; use one of: PR1, PR2, or null/);
   });
 
-  it('a decline with steps, a decline too long, and a decline on a PLANNED design are refused', () => {
+  it('a decline with steps and a decline too long are refused', () => {
     const both = base();
     both.noDiagram = 'this change only edits copy';
     expect(refused(both)).toMatch(/noDiagram is set but participants or steps are not empty/);
     expect(refused({ participants: [], steps: [], noDiagram: 'x'.repeat(FLOW_DECLINE_MAX + 1) })).toMatch(/noDiagram is/);
-    expect(refused({ participants: [], steps: [], noDiagram: 'nothing moves' }, { kind: 'planned', prs: [] })).toMatch(
-      /noDiagram is not allowed here/,
-    );
   });
 
   it('flowRelevantFile: code yes; tests, docs and lockfiles no (the existing classifiers)', () => {

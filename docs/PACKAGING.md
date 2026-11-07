@@ -74,7 +74,9 @@ browser (built-in, no dep) unless `--no-open`. **`limn ai install` / `limn ai st
 same AI-runtime download Limn starts by itself on the first boot (below); refused under
 `LIMN_AI_DISABLED=true`. `limn ai install codex` adds the Codex CLI; **`limn ai login codex`**
 (`--device-auth` on a headless machine) / **`limn ai logout codex`** sign Limn's own Codex home in and
-out (§ The Codex CLI). **`limn ml install`** downloads the bot-comment severity model
+out (§ The Codex CLI). **`limn ai clean-sessions`** (`--dry-run` lists first) deletes the
+`~/.claude/projects` folders older Limn runs left (the same one-off cleanup the boot runs once;
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The provider seam). **`limn ml install`** downloads the bot-comment severity model
 ([ML-SEVERITY.md](ML-SEVERITY.md)).
 
 **The data directory is `~/.limn`** (`data-dir.ts`; `LIMN_DATA_DIR` overrides; `config.dataDir`).
@@ -185,6 +187,26 @@ missing from one source falls through to the other (the `<dataDir>/ai-runtime` i
   `ai/runtime.ts` (`loadMammoth` / `loadTurndown` / `loadTurndownGfm` — the dist grep covers them). ⚠ A
   runtime installed BEFORE them is **stale, not absent** (`AI_RUNTIME_LATER_PACKAGES`): every agent
   still loads, the status says "Set up AI again", and only a Word or web-page build refuses until then.
+
+### The sandbox image (never in the package)
+
+The Implement sandbox's image (docs/SANDBOX.md § The image) is pulled from GHCR or built locally; the
+package carries only what that needs:
+
+- **`release/dist/sandbox-image/`** (`Dockerfile`, `limn-svc`, `limn-svcd.cjs`), the whole folder
+  copied by `build-release.mjs` (step 6d; `mustExist` names all three): the local-build fallback, read by
+  `dist/sandbox/runtime/image.js`. The recipe hashes every file in the folder, so a change to `limn-svc`
+  rebuilds the image.
+- **`limnSandboxImage`**, a NON-dependency manifest field: `{recipe, buildArgs}` always, plus
+  `{repository, tag, digest}` when CI pushed the image for this release (docs/RELEASE.md § The sandbox
+  image). The recipe is computed by the compiled `image.js`, never a copy of its formula, and checked
+  against the shipped Dockerfile.
+- **`dist/sandbox/proxy/server.js`** — the egress proxy's whole program, run in the proxy container with
+  `node -e` (and, on microsandbox, as a host child process on unix sockets). `build-release.mjs` loads it
+  through `dist/sandbox/proxy/source.js`, which refuses any import that is not a `node:` built-in.
+- **No container runtime is installed or bundled.** The reader brings Docker, Colima, Podman or
+  microsandbox (docs/SANDBOX.md § Setting up a runtime); Limn drives their CLI and adds no npm
+  dependency for it. `limn sandbox prune [--dry-run]` (`src/cli.ts`) removes leftovers.
 
 ### The Codex CLI (downloaded with Claude's packages)
 

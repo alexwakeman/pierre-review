@@ -25,6 +25,7 @@ export type SettingsTabId =
   | 'ai'
   | 'ai-review'
   | 'docs'
+  | 'sandbox'
   | 'reports'
   | 'integrations'
   | 'bots';
@@ -83,6 +84,15 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     global: [],
     workspace: ['ReferenceDocsSection', 'ConfluenceSection', 'NotionSection'],
   },
+  // WHERE "IMPLEMENT" RUNS (docs/SANDBOX.md): the container runtime on this computer (global), then the
+  // workspace's local folder, notes, services, allowed hosts and resources.
+  {
+    id: 'sandbox',
+    label: 'Sandbox', summary: 'Where Implement runs: runtime, folder, notes, services',
+    aiOnly: true,
+    global: ['SandboxRuntimeSection'],
+    workspace: ['SandboxSection'],
+  },
   {
     id: 'reports',
     label: 'Reports and sprint', summary: 'Working hours, budgets, sprint cadence',
@@ -117,6 +127,7 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   'auto-review': 'ai-review',
   'ai-effort': 'ai',
   bots: 'bots',
+  sandbox: 'sandbox',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

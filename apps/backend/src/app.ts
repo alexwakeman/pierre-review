@@ -23,6 +23,7 @@ import { registerTracker } from './tracker/index.js';
 import { registerSonar } from './sonar/index.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
+import { sandboxSettingsRoutes } from './api/routes/sandbox-settings.js';
 import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
 import { prRoutes } from './api/routes/prs.js';
@@ -233,6 +234,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Settings → AI → Disk space: the clone cache and its per-run checkouts (review/worktree-gc.ts).
   // Same gate — the checkouts are the agentic runs'.
   if (config.aiEnabled) await app.register(storageRoutes);
+  // Settings → Workspace → Sandbox and its folder / memory check (docs/SANDBOX.md § The workspace
+  // mirror). Same gate: a workspace session is an agentic feature.
+  if (config.aiEnabled) await app.register(sandboxSettingsRoutes);
   // "Set up" for local bot-comment scoring (ml/runtime.ts). Not registered under LIMN_ML_DISABLED.
   if (config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
   // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review) and AI

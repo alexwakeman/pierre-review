@@ -12,6 +12,7 @@
 import type { DesignDiagram, FlowDiagram } from './sequence-diagrams.js';
 import type { SprintStage } from './sprint-stories.js';
 import type { SprintTicketCheck } from './sprint-graph.js';
+import type { StoryBuildSession } from './sandbox-session.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
 import type {
   AiFixChangeReport,
@@ -140,7 +141,7 @@ export const STORY_BUILD_REPO_RUNNING_STATUSES: readonly StoryBuildRepoStatus[] 
 
 export type StoryBuildDocsStatus = 'none' | 'running' | 'ready' | 'failed' | 'refused';
 
-/** The live step word (SSE `StoryBuildProgress.phase`, and `StoryBuild.phase` while running). */
+/** The step word of a row of the REMOVED plan/build flow (`StoryBuild.phase`; a session has `session.phase`). */
 export type StoryBuildPhase =
   | 'reading_story'
   | 'checking_coverage'
@@ -221,7 +222,7 @@ export interface StoryBuildCandidate {
   baseNote: string | null;
 }
 
-// ---- the plan (the `story_plan` agent's accepted `submit_story_plan`, normalised) -----------------
+// ---- the plan of the REMOVED plan/build flow (old rows still carry one; read-only on the wire) ----
 
 export interface StoryBuildPlanStep {
   /** ≤ STORY_BUILD_STEP_TITLE_MAX. */
@@ -450,6 +451,8 @@ export interface StoryBuild {
   sessionBudgetUsd: number;
   /** Derived: every ready repository is pushed (status stays `ready`). */
   pushedAll: boolean;
+  /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
+  session?: StoryBuildSession | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -469,39 +472,8 @@ export interface StoryBuildForTicketResponse {
   earlier: StoryBuildSummary[];
 }
 
-/** SSE `GET /api/story-builds/:id/stream`. `repoId` set during a repository's build/push. */
-export interface StoryBuildProgress {
-  phase: StoryBuildPhase;
-  repoId?: number;
-  message?: string;
-  recentActivity?: string[];
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-    estCostUsd: number;
-  };
-}
-
-/**
- * One SSE frame of `GET /api/story-builds/:id/stream` (`data: <JSON>`): a step of the pass in flight, or
- * `done` — the pass ended (the server then closes the stream). A stream opened when nothing runs closes
- * at once with no frame. The SPA re-reads the session on every new step and on the end.
- */
-export type StoryBuildStreamEvent = { type: 'progress'; progress: StoryBuildProgress } | { type: 'done' };
 
 // ---- request / response bodies -----------------------------------------------------------------------
-
-/** `POST /api/story-builds`. `provider`/`model` = the reader's manual pick (absent ⇒ the default, deep). */
-export interface StoryBuildStartBody {
-  workspaceId: number;
-  ident: string;
-  provider?: AiProviderId;
-  model?: string;
-  diagram: boolean;
-  docs: boolean;
-}
 
 /** 202 `{outcome:'started'}` · 200 `{outcome:'already_open'}` (one open session per ticket). */
 export interface StoryBuildStartResponse {
@@ -509,74 +481,14 @@ export interface StoryBuildStartResponse {
   buildId: number;
 }
 
-/** `POST /api/story-builds/:id/plan/message`. ≤ STORY_BUILD_MESSAGE_MAX characters. */
-export interface StoryBuildPlanMessageBody {
-  text: string;
-}
-
-/** `POST /api/story-builds/:id/docs`. */
-export interface StoryBuildDocsBody {
-  force?: boolean;
-}
-
-/**
- * The answer to `POST …/docs`:
- *   started          202 — the run is queued (follow the session: `docsStatus` goes `running` → `ready`)
- *   already_running  200 — a docs run of this session is queued or running
- *   current          200 — the stored docs were weighed against the current plan revision (send `force`)
- *   refused          200 — nothing to weigh (no built docs in the workspace); `message` says so and the
- *                    session reads `docsStatus: 'refused'`
- */
-export interface StoryBuildDocsResponse {
-  outcome: 'started' | 'already_running' | 'current' | 'refused';
-  buildId: number;
-  message: string | null;
-}
-
-/** `PUT /api/story-builds/:id/docs/decisions` (DB only). Ids not in the current docs (and grounded items,
- *  which carry no decision) are dropped; the rest MERGE over the stored decisions.
- *  ⚠ `planRevision` + `runId` name the docs run the reader was looking at (`StoryBuildDocs`): a newer run
- *  reuses the ids D1… for different points, so a PUT naming another run is refused `409 DocsMoved` and the
- *  SPA re-reads the session. */
-export interface StoryBuildDocsDecisionsBody {
-  decisions: StoryBuildDocsDecisions;
-  planRevision: number;
-  runId: string | null;
-}
-
-/** The answer to the decisions PUT: the decisions now in force (`storyBuildDocsEffectiveDecisions`). */
-export interface StoryBuildDocsDecisionsResponse {
-  decisions: StoryBuildDocsDecisions;
-}
-
-/** 202 — a pass was queued: `POST …/plan/message`, `POST …/accept`, `POST …/repos/:repoId/retry`. Follow
- *  the session (its SSE and its row). */
+/** 202 — an action was queued (a session's message, Start build, Resume). Follow the session's stream. */
 export interface StoryBuildActionResponse {
   buildId: number;
-}
-
-/** `POST …/cancel`: `cancelling` — a pass (plan, build or docs run) was told to stop; `idle` — nothing ran. */
-export interface StoryBuildCancelResponse {
-  status: 'cancelling' | 'idle';
 }
 
 /** `POST …/discard` (409 `NotReady` while anything runs). */
 export interface StoryBuildDiscardResponse {
   status: 'discarded';
-}
-
-export interface StoryBuildAcceptRepo {
-  repoId: number;
-  include: boolean;
-  branch: string;
-  /** Check names ticked in the picker (empty ⇒ no tests). */
-  checks: string[];
-}
-
-/** `POST /api/story-builds/:id/accept`. 409 `PlanMoved` when `planRevision` is not the latest. */
-export interface StoryBuildAcceptBody {
-  planRevision: number;
-  repos: StoryBuildAcceptRepo[];
 }
 
 /** `POST …/repos/:repoId/push` and `POST …/push`. Draft unless `draft === false` (owner decision 2). */
@@ -613,19 +525,7 @@ export interface StoryBuildDiffResponse {
 }
 
 /** Error codes the routes answer (`{ error: code, message }`). */
-export type StoryBuildErrorCode =
-  | 'NoClaudeAuth'
-  | 'ModelNotOnProvider'
-  | 'NoStory'
-  | 'Busy'
-  | 'NotReady'
-  | 'PlanRevisionCap'
-  | 'PlanBudgetSpent'
-  | 'SessionBudgetSpent'
-  | 'PlanMoved'
-  | 'DocsMoved'
-  | 'BadRequest'
-  | 'NotFound';
+export type StoryBuildErrorCode = 'NoClaudeAuth' | 'ModelNotOnProvider' | 'NoStory' | 'NotReady' | 'BadRequest' | 'NotFound';
 
 // ---- the routes (one spelling for the backend's registration, the client and the rate-limit tiers) ----
 
@@ -633,15 +533,8 @@ export const STORY_BUILD_API = {
   list: '/api/story-builds',
   one: '/api/story-builds/:id',
   stream: '/api/story-builds/:id/stream',
-  planMessage: '/api/story-builds/:id/plan/message',
-  docs: '/api/story-builds/:id/docs',
-  docsDecisions: '/api/story-builds/:id/docs/decisions',
-  accept: '/api/story-builds/:id/accept',
   pushAll: '/api/story-builds/:id/push',
-  cancel: '/api/story-builds/:id/cancel',
   discard: '/api/story-builds/:id/discard',
-  repoChecks: '/api/story-builds/:id/repos/:repoId/checks',
-  repoRetry: '/api/story-builds/:id/repos/:repoId/retry',
   repoDiff: '/api/story-builds/:id/repos/:repoId/diff',
   repoPush: '/api/story-builds/:id/repos/:repoId/push',
 } as const;
@@ -682,10 +575,12 @@ export function storyBuildMark(b: SprintNodeBuild | null | undefined): StoryBuil
   return b.pushedRepos > 0 ? 'pushed' : 'building';
 }
 
-/** The words for a mark (card, `BorderKey`, accessible name). */
+/** The words for a mark (card, `BorderKey`, accessible name). A workspace session's phases map onto
+ *  the same marks (`sandboxSessionStatus`): booting, a chat turn and a build turn are `building`
+ *  ("Working…"); an agent waiting for the reader is `plan_ready` ("Waiting for you"). */
 export const STORY_BUILD_MARK_WORDS: Readonly<Record<StoryBuildMark, string>> = {
-  building: 'Building…',
-  plan_ready: 'Plan ready',
+  building: 'Working…',
+  plan_ready: 'Waiting for you',
   ready_to_push: 'Ready to push',
   pushed: 'Pushed',
 };

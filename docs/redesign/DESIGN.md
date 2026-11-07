@@ -17,7 +17,7 @@ Normative. New and redesigned UI follows this file; the primitives in
 5. **Instant.** Act, show the result at once, offer Undo; repair on failure, never hide it.
 6. **Nothing lost.** Moving information is fine; deleting it is not (LEDGER.md).
 
-## 2. Type — four sizes
+## 2. Type — four sizes (and one figure size)
 
 | Token (Tailwind) | Size / line | Use |
 |---|---|---|
@@ -25,6 +25,7 @@ Normative. New and redesigned UI follows this file; the primitives in
 | `text-body` | 13 / 20 | everything else: rows, buttons, inputs, prose, menus |
 | `text-title` | 15 / 22, 600 | side-panel title, section heading, dialog title, palette input |
 | `text-display` | 22 / 28, 600 | the page title in the page header — once per page |
+| `text-figure` | 44 / 44, 600 | ONE headline number in a chart block (Chronology's approved-first-time count) — never prose, never a label |
 
 - **Nothing under 11px, anywhere** (`designTokens.test.ts` fails the build). The four tokens are
   the ONLY sizes: `test/designRules.test.ts` fails on any `text-[Npx]` or `text-xs/sm/base/lg` in

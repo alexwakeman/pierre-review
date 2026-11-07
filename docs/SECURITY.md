@@ -132,8 +132,7 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
 The fixer may run the project's OWN tests, lint and type checks. The agent still has **no shell**:
 it gets ONE tool, `run_check(name)` (Claude `mcp__checks__run_check`, in-process; Codex
 `mcp__workspace__run_check`, Limn's workspace MCP server), and a NAME is all it can send. Limn
-decides everything else, and runs every step in an OS sandbox. A reusable module (a story build will
-use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `restoreGit()` / `close()`.
+decides everything else, and runs every step in an OS sandbox. A reusable module: `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `restoreGit()` / `close()`.
 
 - **THE ALLOW-LIST IS DERIVED, NEVER TYPED** (`discover.ts`): package.json scripts named `test`,
   `test:*`, `lint`, `lint:*`, `typecheck`, `check`… (never `*:watch`, `*:fix`, `dev`, `start`…) run
@@ -202,25 +201,26 @@ use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `rest
   per-run `core.excludesFile` (known output names + every path that appeared during Limn's own
   install / final run). Tracked files are never excluded; the reader sees the diff before Push.
 
-### Implement story — an untrusted spec driving a WRITE agent (`coding/story-build/`, WP2)
+### Workspace sessions — "Implement story" (`sandbox/`, 2026-11-07)
 
-The build agent (`story_build`) writes code from a ticket, its comments, other people's PR cards and the
-docs — all attacker-reachable text. Its boundary, beside the fences and the prompt's rules:
-- **No shell, ever** (`STORY_BUILD_TOOLS`; `Bash` and `NotebookEdit` denied outright; `buildInWorktree`
-  refuses a deny list without Bash). "Run tests" is the sandboxed checks above, by NAME.
-- **The path guard**: writes only in its own worktree; the earlier repositories' worktrees and the
-  library are READ-ONLY roots.
-- **THE WRITE DENY-LIST** (`review/write-deny.ts`, `AgentRunSpec.protectWrites`): no write to CI and
-  automation config, git's own files (`.git*`), hook managers, package-manager config, lockfiles or agent
-  settings (`.claude/`, `CLAUDE.md`, `AGENTS.md` …), at any depth, judged as named AND with symlinks
-  followed. Claude enforces it as a PreToolUse hook; Codex in its guard process (`GuardRoots.protect`,
-  inside the ALLOW-list). A workflow or a hook the agent could write would run on GitHub or on the next
-  person's commit. Names compare case-insensitively, and the rule runs again on the captured result
-  (checks and the pre-commit hook are repository code in the same tree).
-- **Text it writes to GitHub is quoted, never obeyed**: `push.ts defangGithubText` breaks closing
-  keywords before an issue reference and `@mentions` in the PR body and commit message.
-- **Nothing reaches GitHub until the reader presses Push**: a NEW branch, never forced, the default branch
-  and a stacked PR's head protected, a DRAFT PR by default. Rate tier `github_write` (C0).
+A session runs a full Claude Code or Codex agent **with a shell** from attacker-reachable text (the
+ticket, its comments, other people's PRs, the repositories). It is the ONE place an agent has a shell, and
+only inside a sandbox `sandbox/runtime` started; AI Fix, every review and every chat keep the no-shell
+rule above. Full design and per-OS setup: [SANDBOX.md](SANDBOX.md) (§ Threat model is the long form).
+
+| Threat | What stops it |
+|---|---|
+| The text tells the agent to send data out | The sandbox's network is `--internal` (no route out); the ONLY way out is Limn's allow-list proxy, every request logged in the Network panel, a blocked host opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the sandbox holds a per-session placeholder and the proxy swaps the real one in (`sandbox/proxy/credentials.ts`). Loopback, link-local (cloud metadata), multicast and reserved addresses are always refused. Claude Code's web search and web fetch are off (they run past the proxy). |
+| The agent damages the host | No writable host mount (a bind mount is read-only BY TYPE), no Docker socket (`spec.ts` refuses it, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources, even read-only); non-root, `--cap-drop ALL`, `no-new-privileges`, CPU / memory / process caps. Docker for Mac and Windows add the VM as a second boundary; ⚠ **on Linux Docker the kernel is shared**. microsandbox (a microVM) is built but untested. |
+| A repository's compose file escalates | Limn runs compose on the HOST from a POLICED model (`sandbox/services/policy.ts`, checked on every `up`): the whole file is refused for privileged mode, capabilities, devices, host namespaces, host mounts (the socket included), loosened security options, outside builds or unlisted registries. Services join only the session network. |
+| Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press (a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default). `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. Rate tier `github_write`. |
+| The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills, copied as files, size-capped, symlinks skipped. Past sessions are NEVER imported (no transcript is copied or resumed; Claude Code runs with `--no-session-persistence`). |
+| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer, idle teardown; Limn labels on every resource, swept at boot and on discard (`limn sandbox prune`); every turn is a reader's press, its usage recorded per turn. |
+
+Routes and tiers: `api/plugins/rate-limit.ts` (a session start, a message, Start build and Resume `ai` +
+`ai_hourly`; the pushes `github_write`; the rest `read`). The removed shell-less plan and build agents
+(`coding/story-build/plan-agent.ts`, `build.ts`) and their write deny-list (`review/write-deny.ts`,
+`AgentRunSpec.protectWrites`) are gone.
 
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so

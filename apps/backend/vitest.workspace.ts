@@ -32,7 +32,6 @@ export const SLOW_TESTS = [
   'src/review/worktree-gc.test.ts',
   'src/coding/checks/session.test.ts',
   // A story build on a real scratch worktree per case (git init/add/commit/diff, ~1.5 s each).
-  'src/coding/story-build/build.test.ts',
   'src/coding/story-build/push-branch.test.ts',
   // The fake Codex CLI: one node process per run (two on a retry), many on real git worktrees.
   'src/coding/codex-fix.test.ts',
@@ -56,6 +55,19 @@ export const SLOW_TESTS = [
   'src/coding/story-build/base-refs.test.ts',
   // Moved 2026-10-30 by the time budget: the fake Codex CLI, one node process per sign-in call, like the other Codex suites; measured 2.0s, 1.6s for one case
   'src/api/routes/ai-codex.test.ts',
+  // A real container daemon: builds (once) and runs the sandbox image, the proxy and an internal network;
+  // skipped with its reason when no daemon answers.
+  'src/sandbox/runtime/docker-real.test.ts',
+  // A real microVM (msb): the same checks on microsandbox. Skips, saying why, where `msb doctor`
+  // fails (an Intel Mac, Linux without /dev/kvm); CI runs it only on a KVM runner.
+  'src/sandbox/runtime/microsandbox-real.test.ts',
+  // The services relay as real Node processes (the shipped limn-svcd + limn-svc, a unix socket, TCP
+  // forwards); and services on a real daemon (compose, builds, the real BNG backend file when cloned).
+  'src/sandbox/services/relay.test.ts',
+  'src/sandbox/services/services-real.test.ts',
+  // Real git (a blobless cache, worktrees, shallow fetches) and a real daemon: the workspace mirror end to
+  // end; its Docker part is skipped with its reason when no daemon answers.
+  'src/sandbox/workspace/mirror-real.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every
@@ -63,14 +75,19 @@ export const SLOW_TESTS = [
 // their own project, run by hand: `pnpm --filter @pierre-review/backend test:live`.
 export const LIVE_TESTS = ['src/**/*.live.test.ts', 'src/**/*-live.test.ts', 'src/ai/codex/live.test.ts'];
 
+// The sandbox spikes (scripts/sandbox-spikes/) are throwaway proofs run with `node --test`, not
+// vitest; their `*.test.mjs` would otherwise match vitest's default include and fail as "No test
+// suite found".
+const NODE_TEST_SCRIPTS = ['scripts/sandbox-spikes/**'];
+
 export default defineWorkspace([
   {
     extends: './vitest.config.ts',
-    test: { name: 'fast', exclude: [...defaultExclude, ...SLOW_TESTS, ...LIVE_TESTS] },
+    test: { name: 'fast', exclude: [...defaultExclude, ...NODE_TEST_SCRIPTS, ...SLOW_TESTS, ...LIVE_TESTS] },
   },
   {
     extends: './vitest.config.ts',
-    test: { name: 'slow', include: SLOW_TESTS, exclude: [...defaultExclude, ...LIVE_TESTS] },
+    test: { name: 'slow', include: SLOW_TESTS, exclude: [...defaultExclude, ...NODE_TEST_SCRIPTS, ...LIVE_TESTS] },
   },
   {
     extends: './vitest.config.ts',

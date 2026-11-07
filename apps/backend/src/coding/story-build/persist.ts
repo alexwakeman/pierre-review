@@ -155,6 +155,8 @@ export interface InsertStoryBuildArgs {
   /** What the first pass is expected to run on (`expectedRanOn` / the manual pick). */
   provider: string | null;
   model: string | null;
+  /** A WORKSPACE SESSION (docs/SANDBOX.md § Sessions): inserted `booting`, with no plan phase. */
+  session?: { effort: string | null; lastActiveAt: Date };
 }
 
 export type InsertStoryBuildOutcome = { outcome: 'started'; id: number } | { outcome: 'already_open'; id: number };
@@ -178,9 +180,10 @@ export async function insertStoryBuild(ctx: Ctx, a: InsertStoryBuildArgs): Promi
         ticketKey: a.ticketKey,
         ticketTitle: a.ticketTitle,
         status: 'assessing' satisfies StoryBuildStatus,
-        phase: 'reading_story' satisfies StoryBuildPhase,
+        phase: a.session ? null : ('reading_story' satisfies StoryBuildPhase),
         provider: a.provider,
         model: a.model,
+        ...(a.session ? { sessionPhase: 'booting', effort: a.session.effort, lastActiveAt: a.session.lastActiveAt } : {}),
         wantDiagram: a.wantDiagram,
         wantDocs: a.wantDocs,
         createdAt: new Date(),
@@ -398,7 +401,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     repos,
     planCostUsd: row.planCostUsd ?? null,
     docsCostUsd: row.docsCostUsd ?? null,
-    totalCostUsd: sumOrNull([row.planCostUsd, row.docsCostUsd, ...repoRows.map((r) => r.costUsd)]),
+    totalCostUsd: sumOrNull([row.planCostUsd, row.docsCostUsd, row.buildCostUsd, ...repoRows.map((r) => r.costUsd)]),
     sessionBudgetUsd: opts.sessionBudgetUsd,
     pushedAll: built.length > 0 && built.every((r) => r.status === 'pushed'),
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),

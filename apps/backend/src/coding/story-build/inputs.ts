@@ -181,18 +181,3 @@ export async function commentsText(comments: readonly TicketComment[]): Promise<
   const block = ticketCommentsBlock(comments);
   return block.body.trim() === '' ? null : block.body;
 }
-
-/** THE FROZEN SEED (`story_builds.seed_json`). Never on the wire. */
-export async function seedOf(inputs: StoryBuildInputs): Promise<StoryBuildSeed> {
-  const s = inputs.story;
-  const text = [s.description.trim(), s.acceptanceCriteria.trim() !== '' ? `Acceptance criteria:\n${s.acceptanceCriteria.trim()}` : '']
-    .filter(Boolean)
-    .join('\n\n');
-  return {
-    version: 1,
-    story: { key: inputs.ticketKey, title: s.title ?? inputs.title ?? '', text, url: inputs.url },
-    criteria: inputs.criteria,
-    comments: await commentsText(inputs.comments),
-    cards: inputs.cards,
-  };
-}

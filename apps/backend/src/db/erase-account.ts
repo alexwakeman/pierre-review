@@ -57,6 +57,8 @@ const {
   myTurnDismissals,
   repoFileCoupling,
   repoRelations,
+  sandboxAllowedHosts,
+  sandboxWorkspaceSettings,
 } = schema;
 
 /**
@@ -144,6 +146,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // Related repos (migration 0131). Every composite FK cascades; explicit for the same
     // dialect-agnostic reason, and BEFORE `workspaces`.
     await tx.delete(repoRelations).where(eq(repoRelations.accountId, accountId)).execute();
+    // Sandbox "Always allow" hosts (migration 0173). The workspace FK cascades; explicit, BEFORE
+    // `workspaces`, for the same dialect-agnostic reason — each row is a host the user typed or allowed.
+    await tx.delete(sandboxAllowedHosts).where(eq(sandboxAllowedHosts.accountId, accountId)).execute();
+    // Sandbox workspace settings (migration 0174): a local folder path and memory choices the user
+    // saved. The workspace FK cascades; explicit, BEFORE `workspaces`, for the same reason.
+    await tx.delete(sandboxWorkspaceSettings).where(eq(sandboxWorkspaceSettings.accountId, accountId)).execute();
     // My Turn dismissals (migration 0069 / pg 0056). Both composite FKs cascade and the repo loop
     // has normally taken every row; explicit for the same dialect-agnostic reason.
     await tx
@@ -543,6 +551,10 @@ export function accountScopedTables(): {
     { name: 'pendingMutedRepos', col: pendingMutedRepos.accountId, table: pendingMutedRepos },
     // Related repos (migration 0131) — the pairs the user chose.
     { name: 'repoRelations', col: repoRelations.accountId, table: repoRelations },
+    // Sandbox "Always allow" hosts (migration 0173) — hosts the user allowed for a workspace's sessions.
+    { name: 'sandboxAllowedHosts', col: sandboxAllowedHosts.accountId, table: sandboxAllowedHosts },
+    // Sandbox workspace settings (migration 0174) — the local folder and the memory choices.
+    { name: 'sandboxWorkspaceSettings', col: sandboxWorkspaceSettings.accountId, table: sandboxWorkspaceSettings },
     // My Turn dismissals (migration 0069 / pg 0056) — one timestamp per dismissed PR or red branch.
     { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
     // The blast-radius co-change index (migration 0063 / pg 0050). Purely DERIVED — erasing it

@@ -4209,7 +4209,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   shows until that read answers. ⌘K: the entry registers the same action ("Implement KEY · title" /
   "Fill gaps in KEY · title" / "Open KEY's build: …") while its story view is mounted; the sprint board
   registers none. The **sprint card** carries NO build button — only the MARK beside its key
-  (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — words, in the accessible name and
+  (`storyBuildMark`: Working… / Waiting for you / Ready to push / Pushed — words, in the accessible name and
   the board's `BorderKey`; the server sends no session with AI off); a click opens the tray. Not on Open
   PRs or Reports. ⚠ A tab rebuilt from a URL may name ANY ticket, so `StartPanel` applies the SAME gate
   (`storyBuildOffered` on the cached sprint-graph node, `build` ignored; with no node, the story view's
@@ -4220,46 +4220,75 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   with an open or merged PR; with no node in memory, the story view's `buildOffer`) and words its ⓘ for
   the gaps. The start state lists the gaps UP FRONT from the check the gate read (`check.reviewId`, else
   `buildOffer.reviewId` → `useTicketReviewById`, ONE read when the tab opens, never on the board; shared `storyBuildGapsOf`, the gap fold's own rule: criteria not met, then the missing
-  items) and its button reads "Fill gaps". Same session, same routes: the backend's gap fold builds only
-  the gaps whenever the ticket has PRs.
-- **Plan choices** (include, branch, tests) live in the tab, reset on a new plan revision or session —
-  EXCEPT the ticked tests: each card reports them from its own effect, which runs BEFORE the tab's
-  reset in the same commit, so wiping them would Accept with no checks while Run tests reads ticked.
+  items) and its button reads "Fill gaps". Same session, same routes: the session folds the stored check
+  into TICKET.md, so the agent builds the gaps (docs/STORY-BUILD.md § Fill gaps).
+- **A WORKSPACE SESSION (2026-11-07; [SANDBOX.md](SANDBOX.md) § Sessions).** The tab drives the session
+  routes only. The old plan/build sections (`PlanSection`, `BuildDocsSection`, `CoverageSection`), their
+  hooks (plan message, docs, accept, retry, cancel, checks) and pure helpers (the step line, the docs
+  groups, the Accept body, Retry) are DELETED; `storyBuildRefAnchor` lives in `lib/storyBuild.ts` (the
+  change report's tags scroll to the criterion in the Ticket panel). A row of the removed flow (`session:
+  null`) reads as closed: the start state, with its patches still pushable when ready
+  (`BuildSection` shows its stored test run and "Not built or tested here." when none ran).
 - **Server state** (`hooks/useStoryBuild.ts`): ONE query per ticket, `['story-build-for', ws:<id>,
-  ident]` → `StoryBuildForTicketResponse`, polled at 2 s ONLY while `storyBuildActive`; the SSE stream
-  (`useStoryBuildStream`) opens only then and refetches per step and at its end. Every billed action
-  shares `storyBuildMutationKey(ident)` (read with `useIsMutating`). Docs ticks are DB-only, their own
-  mutation, patched optimistically. The diff (`…/diff`) is fetched only when a card's Diff opens; the
-  checks list (`…/checks`) only once Run tests is ticked. A push sweeps `invalidateAfterPrWrite(qc,
-  null)` + `['ticket-prs']` + the sprint graph/token.
-- **The screen**, top to bottom: header (key, Open story, Open in <tracker> from the sprint read in
-  memory — never a fetch, title + ⓘ, the step line "Assess · Plan · Docs · Build · Push" with the
-  current step underlined and `aria-current`, status sentence, `AiRunLabel`, cost via
-  `useRunCostText`; end slot: Draft, Push all (≥ 2 pushable), Cancel while building, Discard) → start
-  state (no session, or the last one closed: `ModelPicker` on `story_plan` opening deep, Draw a design,
-  Check against docs only when the library has a ready document, Start inside `AiRunGate kind=
-  "story_plan" anyProvider`) → Already done (the gap fold; rows anchored `story-build-ref-<ref>`) →
-  Plan (summary, one One-PR-card-shell card per changed repository in build order: why, base note,
-  branch field, Include, `RunTestsOption`, steps behind Details; read-only repositories; not planned;
-  risks; the planned `FlowDiagram` (an older plan's `DesignGrid`) with `refNames`, steps not clickable; the shared `AiFix/PlanChat`
-  gated `story_plan` follow-up) → Docs (suggestions ticked, superseded unticked "the story wins",
-  grounded collapsed; `StoryDocsRefLinks` citations; gated `story_docs`) → action bar ("Accept plan and
-  build" in `AiRunGate kind="story_build" followUp`, Discard; `lib/storyBuild.ts acceptBody` checks
-  the branches) → Build (per repository: status, live step, `ChangeReportSections` with refs that
-  scroll to Already done, `ChecksReport`, lazy diff via `FileDiffView`, `ChecksStatus` BESIDE Push,
-  "Not built or tested here." only when no check ran, Retry, the pushed PR chip — resolved to its PR
-  tab on click, else GitHub).
-- **Shared with AI Fix, no behaviour change there:** `AiFix/PlanChat.tsx` (`PlanTranscript`,
-  `PlanMessageBox`), `AiFix/ChangeReport.tsx`, `RunTests` (`useRunTestsMemory` + `runTestsState`
-  take any checks query; `ChecksReport`/`ChecksStatus` take a `CheckRunReport`).
-- **⌘K inside the tab:** Accept plan, Push all, Cancel — each registered only while its button is on
+  ident]`, its fallback poll (`SESSION_POLL_MS`, 5 s) only while the session boots or a turn runs.
+  While `session.live`, ONE SSE stream (`useStorySessionStream`, `GET …/stream`) is folded by the PURE
+  `lib/sandboxSession.ts` `applySessionEvent` (a `snapshot`, then `phase` / `boot` / `item` / `network`
+  / `services` upserts by key; `agent` partial text kept apart by message id and dropped when the whole
+  message arrives as an `m-<id>` item or the turn ends; `done` closes). The fold is tagged with its
+  build id (another session's frames never show). A phase, a turn's end and `done` re-read the query
+  (`sessionEventNeedsRefetch`); a stream that drops while live opens again after
+  `SESSION_STREAM_RETRY_MS`. ⚠ **`mergeSessionViews`**: the STREAM owns what it streams (phase, boot,
+  conversation, network, services, agent state, mode) while the READ says live; the read owns spend,
+  repositories, the ticket, the idle clock and `resumable`, and a read that says closed wins outright.
+  Start / Send / Start build / Resume / Discard / Push share `storyBuildMutationKey(ident)`; **Stop and
+  Allow have their OWN mutations** (Stop must never wait behind the press it stops). The diff is
+  fetched only when a repository's Diff opens. A push sweeps `invalidateAfterPrWrite(qc, null)` +
+  `['ticket-prs']` + the sprint graph/token.
+- **The screen**, top to bottom: header (key, Open ticket, Open in <tracker>, title + ⓘ, the step line
+  "Set up · Talk · Build · Push" from the PHASE (`sessionSteps`) with the current step underlined and
+  `aria-current`, `sessionStatusLine`, `AiRunLabel`, the spend via `useRunCostText`; end slot: Draft,
+  Push all (≥ 2 pushable), Stop while a turn runs, Discard — asking once, "Stop the agent and remove the
+  sandbox?") → the START STATE (`StartPanel`: two sentences, the container runtime's ONE line from
+  `GET /api/sandbox/runtime` — with none, its problem + **How to set up** (`SandboxSetupHelp.tsx`, the
+  free runtimes per OS, Docker Desktop's licence line) and the button STAYS (owner decision Q2: one
+  path; a press answers `409 NoRuntime` in one line) — `ModelPicker` on `story_build` opening deep,
+  Start / Fill gaps in `AiRunGate kind="story_build" anyProvider`; Fill gaps lists the gaps first) →
+  while `booting`, the boot steps (`SessionView` `SessionBoot`, each step's state in a mark AND words)
+  → then TWO PANES (`lg:` grid; one column below): the CONVERSATION (the reader right, the agent left —
+  the review chat's look, shared `lib/reviewStyles.ts CHAT_*`; tool calls as compact rows that open to
+  their clipped output; each turn's end a quiet divider with its cost; notices and errors as lines; the
+  agent's words as they arrive; it follows the newest row only while the reader is at the bottom) and
+  the composer (Send — `AiRunGate` `story_plan` in chat mode, `story_build` in build mode, `followUp`
+  on the session's provider; ⌘/Ctrl+Enter sends; **Start build** once, in chat mode while the agent
+  waits, the box's words going with it; Stop; the idle-close time; a CLOSED session shows "The sandbox is
+  closed." and, when resumable, Resume) beside the RAIL: Ticket (`session.ticket`: the `AC<n>` lines,
+  anchored `story-build-ref-AC<n>` so the change report's chips still scroll there, and the open
+  points), Repositories (path, branch, base, changes so far, the starting folder, the boot's notes),
+  Services (each picked compose file's state, its reasons and notes; none ⇒ a link to Settings →
+  Sandbox), Network (`credentialLine`, then BLOCKED rows first with **Allow for this session** /
+  **Always allow** — a reader's click, never automatic), Spend → **Changes** (`BuildSection`, the old
+  per-repository cards in SESSION mode: no Retry, no live step, no "Not built or tested here." — the
+  agent ran the tests in the sandbox; lazy diff; Push / Push as draft; the pushed PR chip).
+- **The card mark** for a session reads `STORY_BUILD_MARK_WORDS`: Working… (booting or a turn running)
+  / Waiting for you (the agent waits) / Ready to push / Pushed.
+- **Settings → Sandbox** (`settings/SandboxRuntimeSection.tsx` GLOBAL + `settings/SandboxSection.tsx`
+  per WORKSPACE; `SettingsFocus 'sandbox'`, AI-only tab): the runtime line + Check again + How to set
+  up; then the local folder and its **Check** (CLICK-GATED: a bounded walk; found / not in your folder
+  → where it goes / left out, not in this workspace), the Claude notes to bring (the check's projects;
+  the first change turns the default into an explicit list, `sandboxSettingsForm.ts
+  sandboxMemoryTicks`), ~/.claude/CLAUDE.md and skills, the starting folder, the services (repository +
+  compose file + the services allowed online), the always-allowed hosts (saved at once, through the
+  proxy's parser), the proxy-variables switch and the resources. ⚠ The PUT REPLACES the setting, so
+  Save sends the WHOLE draft (`sandboxBodyOf`).
+- **⌘K inside the tab:** Start build, Push all, Stop — each registered only while its button is on
   screen, and each PRESSES that button (`data-story-build-action`), so `OverBudgetConfirm` still asks.
-- Tests: `test/storyBuildTab.test.ts`, `test/storyBuild.test.ts` (steps, docs defaults, Accept,
-  push gating, the card's mark, the story view's entry and its inputs, Fill gaps),
-  `e2e/story-build.spec.ts` (the tray, the story tab and the PR Story tab; ACME-2 is the Fill gaps
-  ticket). Demo: `seed-demo-agentic.ts seedStoryBuilds` (PLAT-310 finished, PLAT-312 plan ready;
-  PLAT-301's story check from `seedTicketReviews` makes it the Fill gaps ticket; PLAT-318 offers
-  Implement).
+- Tests: `test/sandboxSession.test.ts` (the fold, the merge, the words and buttons, the Network rows,
+  the settings form), `test/storyBuildTab.test.ts`, `test/storyBuild.test.ts` (push gating, the card's
+  mark, the story view's entry, Fill gaps), `e2e/story-build.spec.ts` (start → talk → Allow → Start
+  build → diff → Push; no runtime + How to set up; a closed session's Resume; Discard; the entries in
+  the tray, the story tab and the PR Story tab; ACME-2 is the Fill gaps ticket). The mock's live
+  stream sends nothing (the read is the truth there). Demo: `seed-demo-agentic.ts seedStoryBuilds`
+  still seeds OLD-flow rows (they read as closed sessions) — WP10.
 
 ## The merge-conflict resolver (`components/conflicts/`, CORE)
 
@@ -5693,8 +5722,7 @@ test/dataFlow.test.ts).
   arrowheads are `aria-hidden`.
 - **Old rows**: a succeeded row drawn before the data flows serves `design` (the grid) instead of
   `flow`; `DiagramSlotView` draws it with `DesignGrid` under "Drawn in the earlier layout. Redraw it to
-  see how data flows." (the slot's Redraw is right there). A plan stored with a grid does the same in
-  `StoryBuild/PlanSection.tsx`.
+  see how data flows." (the slot's Redraw is right there).
 - **No diagram**: a refused run's line comes from shared `sequenceDiagramRefusalText(refusal, by,
   refusalDetail)` — "No diagram: this change only edits copy." (pre-check) or "No diagram: <the
   model's reason>." (`no_flow`). Draw / Redraw stays, and a manual draw skips the soft pre-checks.

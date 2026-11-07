@@ -23,7 +23,7 @@ import type { SettingsTabId } from '../components/settings/settingsTabs.js';
  *  budget meter beside a Run button, the over-budget toast), the workspace's auto review and the AI
  *  section's effort (Reports → AI usage's suggestions), and the Bots tab (where a bot's category and
  *  price are set; it opens on the tab, with no section scroll). */
-export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort' | 'bots';
+export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort' | 'bots' | 'sandbox';
 
 interface SettingsModalState {
   open: boolean;

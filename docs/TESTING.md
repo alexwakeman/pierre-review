@@ -27,7 +27,7 @@ loop while iterating, and the plain form is the check before pushing.
   PROCESSES, not on running Limn's code.
   - Real `git`: `conflict/land*.test.ts`, `conflict/model*.test.ts`, `conflict/janitor`,
     `review/clone-hygiene`, `review/worktree-gc`, `coding/git` (`applyPatchToWorktree`),
-    `coding/merge`, `coding/story-build/{build,push-branch,base-refs}`.
+    `coding/merge`, `coding/story-build/{push-branch,base-refs}`.
   - The fake Codex CLI (a node script per `codex exec`, one more per `exec resume` retry):
     `coding/codex-fix`, `ai/providers/codex`, `ai/codex/{app-server,run,hook-process,threads}`,
     `ai/codex/kinds/*`, `review/codex-review-runs`, `api/routes/ai-codex` (the sign-in routes).
@@ -36,10 +36,29 @@ loop while iterating, and the plain form is the check before pushing.
     `coding/checks/session` (the "Run tests" sandbox).
   - The runtime installer (a stand-in npm per case): `ai/runtime-install`.
   - The ONNX scorer (only where `packages/ml` holds the weights): `ml/local-scorer`, `ml/model`.
+  - A real container daemon: `sandbox/runtime/docker-real` (the sandbox image, the egress proxy and
+    an internal network; builds the image once, needs the internet; skipped with its reason when no
+    daemon answers — [SANDBOX.md](SANDBOX.md) § Testing); `sandbox/workspace/mirror-real` (real git on a
+    blobless cache, then the workspace mirror end to end in a real sandbox; its Docker part skips the
+    same way); `sandbox/services/services-real` (services on a real daemon: a refused file, a build from
+    the sandbox, `limn-svc` from inside, and the BNG backend file when its clone is on the machine —
+    [SANDBOX.md](SANDBOX.md) § Services).
+  - A real microVM: `sandbox/runtime/microsandbox-real` (the docker-real checks on microsandbox; ⚠ never
+    run yet). Skipped with its reason wherever `msb doctor` fails (an Intel Mac, Linux without
+    `/dev/kvm`); `.github/workflows/microsandbox.yml` runs it on a Linux runner only when `/dev/kvm`
+    exists, with `LIMN_MSB_REQUIRED=1` so a skip there fails ([SANDBOX.md](SANDBOX.md) § microsandbox).
+  - Real Node processes for the services relay: `sandbox/services/relay` (the shipped `limn-svcd.cjs`
+    and `limn-svc`, a unix socket, a TCP forward).
 - **`live`** — `LIVE_TESTS`: the `*.live.test.ts` / `*-live.test.ts` files and
   `ai/codex/live.test.ts`. A real `codex` binary and a real ChatGPT sign-in, spending real usage;
   every case skips without `LIMN_CODEX_LIVE=1`. Neither `pnpm test`, `test:all` nor CI runs them
-  (they used to sit in `fast`, paying their imports to skip).
+  (they used to sit in `fast`, paying their imports to skip). `sandbox/drivers/drivers.live.test.ts`
+  (a real daemon and a real model through the sandbox drivers) skips unless `LIMN_SANDBOX_LIVE` names
+  the provider (`claude`, `codex`) — [SANDBOX.md](SANDBOX.md) § Agent drivers.
+  `sandbox/session/session.live.test.ts` (one whole session through the routes on a real daemon and
+  the real Claude Code: boot, a chat turn, Start build, the patch, discard) skips unless
+  `LIMN_SANDBOX_LIVE_SESSION=1` and `CLAUDE_CODE_OAUTH_TOKEN` are set — [SANDBOX.md](SANDBOX.md) §
+  Sessions.
 
 ⚠ **A file joins `slow` only for a MEASURED reason** (spawn-bound, seconds per case). A file that
 is slow because it seeds too much stays in `fast` and gets faster. When a file mixes cheap
@@ -136,7 +155,7 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 |---|---|---|
 | Cross-account isolation (every query filters on `accountId`; id getters 404) | `platform/test/isolation.test.ts`, `ai/agent-isolation.test.ts`, and `pnpm --filter @pierre-review/backend verify:isolation` (a script, not vitest) | fast |
 | Rate-limit tiers (`tierFor`, exact path segments in `hitsGithub`) | `api/plugins/rate-limit.test.ts` | fast |
-| The fixer has no shell (`DISALLOWED_TOOLS`, `WORKTREE_RULES` change together) | `coding/ai-fix/no-shell.test.ts`, `coding/story-build/no-shell.test.ts` | fast |
+| The fixer has no shell (`DISALLOWED_TOOLS`, `WORKTREE_RULES` change together) | `coding/ai-fix/no-shell.test.ts` | fast |
 | Every model call through `ai/provider.ts` | `ai/provider-seam.test.ts` | fast |
 | Claude's prompts byte-identical (`prompt-golden.json`) | `review/claude-review/prompts.test.ts`, `ai/prompt-tools.test.ts` | fast |
 | Auto-post: claimed (compare-and-set) BEFORE any GitHub write, never retried; the hidden marker | `review/claude-review/auto-post.test.ts`, `review/claude-review/pair-auto-post.test.ts`, `review/ticket-review/auto-post.test.ts`, `coding/ai-fix/auto-push.test.ts` | fast |

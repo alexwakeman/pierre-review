@@ -29,7 +29,7 @@ import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
 import { registerStoryDocsRoutes } from './story-docs/routes.js';
 import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
-import { registerStoryBuildRoutes } from '../coding/story-build/routes.js';
+import { registerSandboxSessionRoutes } from '../sandbox/session/routes.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -80,9 +80,11 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // CHECK A STORY AGAINST THE DOCS: on a click only, a Haiku shortlist of library sections, then a
   // Sonnet read of ONLY those documents (review/story-docs/). Agentic and local-only.
   registerStoryDocsRoutes(app, ctx);
-  // IMPLEMENT STORY (coding/story-build/, docs/STORY-BUILD.md): plan a not-started sprint ticket across
-  // its repositories (read-only), build each one in its own worktree (no shell), push on a click only.
-  registerStoryBuildRoutes(app, ctx);
+  // IMPLEMENT STORY as a WORKSPACE SESSION (sandbox/session/, docs/SANDBOX.md § Sessions): a disposable
+  // sandbox with every workspace repository, the ticket and the reader's notes; the reader talks to the
+  // agent, starts the build, and pushes on a click only (the push routes are coding/story-build's). The
+  // old plan/build flow's routes are no longer mounted (its code goes in WP10).
+  registerSandboxSessionRoutes(app, ctx);
   return ctx;
 }
 
@@ -164,9 +166,13 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     app.log.warn({ err }, 'story docs: startup reconcile failed');
   }
   try {
-    // "Implement story": a plan pass or a build a restart cut off never stays "running".
-    const { reconcileStoryBuildsOnStartup } = await import('../coding/story-build/manager.js');
-    await reconcileStoryBuildsOnStartup(ctx);
+    // "Implement story": a workspace session a restart cut off is closed (kept when it stored patches);
+    // a row of the removed plan/build flow still marked running is settled (it reads only
+    // `session_phase IS NULL`, so it never sees a session row).
+    const { reconcileSessionsOnStartup } = await import('../sandbox/session/manager.js');
+    await reconcileSessionsOnStartup(ctx);
+    const { reconcileLegacyStoryBuildsOnStartup } = await import('../coding/story-build/legacy.js');
+    await reconcileLegacyStoryBuildsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'story builds: startup reconcile failed');
   }

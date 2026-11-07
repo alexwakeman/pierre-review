@@ -1,0 +1,36 @@
+// A WORKSPACE SESSION'S LIMITS (docs/SANDBOX.md § Sessions). The defaults are spelled once in
+// packages/shared; the environment overrides them, read AT CALL TIME. An unset, unparseable or
+// non-positive value falls back to the default.
+//
+//   LIMN_SANDBOX_MAX_SESSIONS   sandboxes running at once on this machine (default 2)
+//   LIMN_SANDBOX_IDLE_MINUTES   a session with no turn and no reader action is closed after this long (60)
+//   STORY_BUILD_PATCH_MAX_BYTES one repository's stored patch (the old flow's cap, 4 MB)
+//   STORY_BUILD_MAX_TURNS       model turns per reader message (Claude's --max-turns)
+//
+// ONE BUILD AT A TIME per machine (owner decision 3 of STORY-BUILD) is not a knob.
+import { SANDBOX_IDLE_MINUTES_DEFAULT, SANDBOX_MAX_OPEN_SESSIONS_DEFAULT } from '@pierre-review/shared';
+import { storyBuildLimits } from '../../coding/story-build/limits.js';
+
+export interface SessionLimits {
+  maxOpen: number;
+  idleMs: number;
+  patchMaxBytes: number;
+  maxTurns: number;
+}
+
+function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export function sessionLimits(env: NodeJS.ProcessEnv = process.env): SessionLimits {
+  const story = storyBuildLimits(env);
+  return {
+    maxOpen: Math.floor(positiveInt(env, 'LIMN_SANDBOX_MAX_SESSIONS', SANDBOX_MAX_OPEN_SESSIONS_DEFAULT)),
+    idleMs: positiveInt(env, 'LIMN_SANDBOX_IDLE_MINUTES', SANDBOX_IDLE_MINUTES_DEFAULT) * 60_000,
+    patchMaxBytes: story.patchMaxBytes,
+    maxTurns: story.buildMaxTurns,
+  };
+}

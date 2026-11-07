@@ -15,8 +15,7 @@ import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { STORY_DOCS_EFFORT, STORY_DOCS_TOOL_NAME } from './prompts.js';
 export { storyDocsRoots, storyDocsTurnCap } from './prompts.js';
-import { SUBMIT_BUILD_DOCS_TOOL_NAME, submitAlignmentShape, submitBuildDocsShape } from './schema.js';
-import { buildDocsShapeProblems, type BuildDocsContext } from './build-validate.js';
+import { submitAlignmentShape } from './schema.js';
 import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
 
 // THE STORY DOCS READ — the SDK half (a copy of diagrams/agent.ts). Reached ONLY through a lazy
@@ -126,45 +125,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
   });
 }
 
-// ---- the BUILD mode ("Implement story" → docs consideration; docs/STORY-BUILD.md) ------------------
-//
-// The SAME read (kind `story_docs`, the same confinement, effort and turn caps), answering
-// `submit_build_docs` (schema.ts) judged by build-validate.ts. Its spend is the story build's: the caller
-// passes the session's remaining budget (never above STORY_DOCS_ALIGNMENT_BUDGET_USD).
-
-export const BUILD_DOCS_TOOL = `mcp__storydocs__${SUBMIT_BUILD_DOCS_TOOL_NAME}`;
-
-/** The build mode's tool policy (Read/Glob/Grep + its own submit; no shell, no write, no dispatch). */
-export function buildDocsToolPolicy(): { allowedTools: string[]; disallowedTools: string[] } {
-  return docsReadToolPolicy(BUILD_DOCS_TOOL);
-}
-
-/** The build mode's submit decision, pure: accept, or answer with what to fix (shape only). */
-export function judgeBuildDocsSubmission(
-  payload: unknown,
-  attempt: number,
-  ctx: BuildDocsContext,
-  t: PromptTools = promptTools('claude'),
-): { accepted: unknown } | { reply: string; refusal: string } {
-  return judgeWith(buildDocsShapeProblems(payload, ctx), payload, attempt, SUBMIT_BUILD_DOCS_TOOL_NAME, t);
-}
-
-export interface RunBuildDocsAgentArgs extends Omit<RunStoryDocsAgentArgs, 'alignment'> {
-  build: BuildDocsContext;
-  /** The pass's US$ cap (the session's remaining budget, at most STORY_DOCS_ALIGNMENT_BUDGET_USD). */
-  budgetUsd?: number;
-}
-
-export async function runBuildDocsAgent(args: RunBuildDocsAgentArgs): Promise<RunStoryDocsAgentResult> {
-  return runDocsReadAgent(args, {
-    name: SUBMIT_BUILD_DOCS_TOOL_NAME,
-    description: 'Submit the whole weighing of the plan against the docs. Its shape is checked at once: a refusal lists what to fix.',
-    shape: submitBuildDocsShape,
-    judge: (a, attempt, words) => judgeBuildDocsSubmission(a, attempt, args.build, words),
-  });
-}
-
-// ---- the one read, shared by both modes ------------------------------------------------------------
+// ---- the one read ------------------------------------------------------------
 
 interface DocsReadTool {
   name: string;

@@ -1,0 +1,87 @@
+name: microsandbox
+
+# The microsandbox backend on a REAL microVM (docs/SANDBOX.md § microsandbox). It needs KVM, so it
+# runs on a Linux runner and ONLY when /dev/kvm exists there (GitHub's hosted Linux runners are
+# reported to expose it after a udev rule; not verified when this was written). Without KVM the job
+# says so and stops green: nothing here can prove or disprove the backend then.
+#
+# Not a release gate: microsandbox is beta and this job is new. Runs when the sandbox runtime or
+# proxy changes, nightly, and on demand.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/backend/src/sandbox/runtime/**'
+      - 'apps/backend/src/sandbox/proxy/**'
+      - 'apps/backend/sandbox-image/**'
+      - '.github/workflows/microsandbox.yml'
+  schedule:
+    # Nightly, off the hour on purpose (03:41 UTC).
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: microsandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  real-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Enable KVM for the runner user
+        id: kvm
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "kvm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::This runner has no usable /dev/kvm, so the microsandbox test cannot run here."
+            echo "kvm=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.kvm.outputs.kvm == 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.kvm.outputs.kvm == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.kvm.outputs.kvm == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.kvm.outputs.kvm == 'true'
+
+      - name: Install microsandbox
+        if: steps.kvm.outputs.kvm == 'true'
+        run: |
+          curl -fsSL https://install.microsandbox.dev | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.microsandbox/bin" >> "$GITHUB_PATH"
+
+      - name: msb doctor
+        if: steps.kvm.outputs.kvm == 'true'
+        run: msb --version && msb doctor
+
+      # The image is built with the runner's Docker and loaded into msb (`docker save | msb load`):
+      # a dev checkout has no published pin.
+      - name: The microsandbox test (slow project)
+        if: steps.kvm.outputs.kvm == 'true'
+        env:
+          LIMN_MSB_REQUIRED: '1'
+          SANDBOX_RUNTIME: microsandbox
+        run: pnpm --filter @pierre-review/backend exec vitest run --project slow src/sandbox/runtime/microsandbox-real.test.ts
+
+      - name: Remove leftover microVMs
+        if: always() && steps.kvm.outputs.kvm == 'true'
+        run: msb rm --force --label limn.test=1 || true

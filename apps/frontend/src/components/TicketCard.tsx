@@ -31,7 +31,7 @@
 //   BUILD    "Implement story" (docs/STORY-BUILD.md § Entry points): the card carries NO build button —
 //            Implement / Fill gaps / Open build is the STORY VIEW's action (the tray a click opens,
 //            StoryBuild/StoryBuildEntry.tsx). Once a session is open the card wears its MARK beside the
-//            key (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — a status in words,
+//            key (`storyBuildMark`: Working… / Waiting for you / Ready to push / Pushed — a status in words,
 //            no border; in the accessible name and the board's key). The server sends no session with AI off.
 import { STORY_BUILD_MARK_WORDS, storyBuildMark, type SprintGraphNode } from '@pierre-review/shared';
 import {

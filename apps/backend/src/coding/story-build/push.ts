@@ -10,7 +10,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { applyAndPushBranch } from '../git-ops.js';
 import { getViewerCanPush } from '../ai-fix/pr-context.js';
 import { dropSessionBaseRefs } from './base-refs.js';
-import { releaseStoryBuildWorktree } from './build.js';
+import { releaseStoryBuildWorktree } from './kept-worktree.js';
 import {
   getStoryBuildRepoRow,
   getStoryBuildRow,

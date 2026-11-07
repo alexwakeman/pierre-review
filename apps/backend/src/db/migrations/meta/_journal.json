@@ -1212,6 +1212,34 @@
       "when": 1792483279017,
       "tag": "0172_push_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "6",
+      "when": 1792569679017,
+      "tag": "0173_sandbox_allowed_hosts",
+      "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "6",
+      "when": 1792569679018,
+      "tag": "0174_sandbox_workspace_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "6",
+      "when": 1792569679019,
+      "tag": "0175_sandbox_services",
+      "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "6",
+      "when": 1792569679020,
+      "tag": "0176_sandbox_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// limn-svc — the agent's way to ask Limn for the session's services (docs/SANDBOX.md § Services).
+// It only FORWARDS: argv + the working folder go to Limn's relay (limn-svcd.cjs) over a unix socket,
+// and Limn — on the HOST — decides, polices and runs `docker compose`. There is no Docker, socket or
+// credential in the sandbox. Every word it prints comes from Limn. Plain Node, no dependencies.
+// ES module syntax: Node detects it in an extensionless file (also under a `"type": "module"` folder).
+import net from 'node:net';
+
+const SOCKET = process.env.LIMN_SVC_SOCKET || '/tmp/limn-svc.sock';
+
+const sock = net.connect(SOCKET);
+let buf = '';
+let code = null;
+sock.setEncoding('utf8');
+sock.on('connect', () => {
+  sock.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + '\n');
+});
+sock.on('data', (chunk) => {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf('\n')) >= 0) {
+    const line = buf.slice(0, i);
+    buf = buf.slice(i + 1);
+    let m;
+    try {
+      m = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof m.o === 'string') process.stdout.write(m.o);
+    else if (typeof m.e === 'string') process.stderr.write(m.e);
+    else if (typeof m.x === 'number') code = m.x;
+  }
+});
+sock.on('error', (e) => {
+  if (code === null) {
+    process.stderr.write(
+      e && (e.code === 'ENOENT' || e.code === 'ECONNREFUSED')
+        ? 'limn-svc: services are not available in this session.\n'
+        : `limn-svc: ${e && e.message ? e.message : e}\n`,
+    );
+    code = 3;
+  }
+});
+sock.on('close', () => {
+  if (code === null) {
+    process.stderr.write('limn-svc: Limn stopped answering.\n');
+    code = 3;
+  }
+  process.exitCode = code;
+});

@@ -58,7 +58,7 @@ describe('foldSprintBuilds', () => {
 
 describe('the card mark and the entry gate (shared)', () => {
   const b = (o: Partial<SprintNodeBuild>): SprintNodeBuild => ({ id: 1, status: 'ready', readyRepos: 0, pushedRepos: 0, ...o });
-  it('reads Building… / Plan ready / Ready to push / Pushed', () => {
+  it('reads Working… / Waiting for you / Ready to push / Pushed', () => {
     expect(storyBuildMark(null)).toBeNull();
     expect(storyBuildMark(b({ status: 'assessing' }))).toBe('building');
     expect(storyBuildMark(b({ status: 'building', readyRepos: 1 }))).toBe('building');

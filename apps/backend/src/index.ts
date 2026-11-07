@@ -124,6 +124,40 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
   kickWorktreeSweep('boot');
 
+  // The one-off cleanup of the transcripts older Limn agent runs left under ~/.claude/projects
+  // (ai/session-litter.ts): once per machine (a flag in the data dir), only Limn-named directories,
+  // in the background, bounded. After listen, never awaited.
+  void import('./ai/session-litter.js')
+    .then(({ defaultSessionCleanupPlaces, runBootSessionCleanup }) =>
+      runBootSessionCleanup({ ...defaultSessionCleanupPlaces(), dataDir: config.dataDir }),
+    )
+    .then((r) => {
+      if (r && r.removed > 0) {
+        console.log(
+          `claude sessions: removed ${r.removed} old Limn session folders from ~/.claude/projects` +
+            (r.timedOut ? ' (stopped at the time limit; the next start carries on)' : ''),
+        );
+      }
+    })
+    .catch(() => {
+      /* repair, never a precondition */
+    });
+
+  // THE SANDBOX BOOT SWEEP (docs/SANDBOX.md § Labels and the sweep): every container, network and
+  // volume this Limn labelled (`limn.managed`, keyed on the data dir) belongs to a session that died
+  // with the last process (the session manager marks those failed on restart), so all are removed.
+  // Free when no container CLI is installed; after listen, never awaited, never fatal.
+  void import('./sandbox/runtime/index.js')
+    .then(({ sweepSandboxesAtBoot }) => sweepSandboxesAtBoot())
+    .then((r) => {
+      const n = r ? r.containers.length + r.networks.length + r.volumes.length : 0;
+      if (n > 0) console.log(`sandbox: removed ${n} leftover sandbox resources`);
+      if (r && r.errors.length > 0) app.log.warn({ errors: r.errors.slice(0, 5) }, 'sandbox: some leftovers could not be removed');
+    })
+    .catch(() => {
+      /* repair, never a precondition */
+    });
+
   // A CI-history backfill a restart left OWED (its parked follow-on job lived only in memory):
   // queue each such repo's walk, whose follow-ons run it. After listen, never awaited.
   if (!config.disableScheduler) {

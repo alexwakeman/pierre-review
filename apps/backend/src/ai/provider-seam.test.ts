@@ -104,4 +104,83 @@ describe('the provider seam', () => {
     // …and is not fooled by a comment naming them.
     expect(isSdkCaller(`${src}\n// const q = query({ prompt }) via loadAgentSdk()\n`)).toBe(false);
   });
+
+  // NO SESSION FILES (ai/agent-isolation.ts): every query() options block spreads NO_SESSION_FILES,
+  // so no Limn run saves a transcript under ~/.claude/projects. The runtime's tap forces it too.
+  it('every query() call in the Claude provider turns session files off', () => {
+    const src = code(readFileSync(join(SRC, 'ai/providers/claude.ts'), 'utf8'));
+    const blocks = queryBlocks(src);
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
+    for (const b of blocks) expect(b, b.slice(0, 80)).toMatch(/\.\.\.NO_SESSION_FILES,/);
+    // The scan can fail: drop the spread from one block and it is caught.
+    const mutated = src.replace('...NO_SESSION_FILES,', '');
+    expect(queryBlocks(mutated).some((b) => !/\.\.\.NO_SESSION_FILES,/.test(b))).toBe(true);
+  });
+
+  it('the runtime tap forces persistSession off whatever the call site sent', async () => {
+    const { withoutSessionFiles } = await import('./runtime.js');
+    expect(withoutSessionFiles({ prompt: 'x', options: { persistSession: true, maxTurns: 1 } })).toEqual({
+      prompt: 'x',
+      options: { persistSession: false, maxTurns: 1 },
+    });
+    const bare: { prompt: string; options?: object } = { prompt: 'x' };
+    expect(withoutSessionFiles(bare)).toEqual({ prompt: 'x', options: { persistSession: false } });
+    expect(code(readFileSync(join(SRC, 'ai/runtime.ts'), 'utf8'))).toMatch(/mod\.query\(withoutSessionFiles\(params\)\)/);
+  });
 });
+
+// THE SANDBOX'S AGENTS (sandbox/drivers/; docs/SANDBOX.md § Agent drivers): a workspace session's agent
+// is a `claude` or `codex` CLI started INSIDE the sandbox, never an SDK query — so the scan above cannot
+// see it. This one does: an argv that starts the CLI (`['claude', '-p', …]`, `['codex', 'app-server', …]`)
+// appears ONLY in the two drivers, and the session's model and effort come from the run choice.
+const SANDBOX_LAUNCH = /\[\s*['"](?:claude|codex)['"]\s*,\s*['"](?:-p|--print|app-server|exec)['"]/;
+const isSandboxLauncher = (src: string): boolean => SANDBOX_LAUNCH.test(code(src));
+const SANDBOX_DRIVERS = new Set(['sandbox/drivers/claude.ts', 'sandbox/drivers/codex.ts']);
+
+describe('the sandbox agents', () => {
+  it('no module but the two drivers starts claude or codex in a sandbox', () => {
+    const offenders = sourceFiles(SRC)
+      .filter((f) => !SANDBOX_DRIVERS.has(rel(f)))
+      .filter((f) => isSandboxLauncher(readFileSync(f, 'utf8')))
+      .map(rel);
+    expect(offenders).toEqual([]);
+    for (const f of SANDBOX_DRIVERS) expect(isSandboxLauncher(readFileSync(join(SRC, f), 'utf8')), f).toBe(true);
+  });
+
+  it("the session's model and effort come from the run choice, never from a driver", () => {
+    const index = code(readFileSync(join(SRC, 'sandbox/drivers/index.ts'), 'utf8'));
+    expect(index).toMatch(/requestModelOf\(/);
+    expect(index).toMatch(/getProvider\(choice\.provider\)\.resolveModel\(/);
+    expect(index).toMatch(/agenticRunEffort\(/);
+    for (const f of SANDBOX_DRIVERS) {
+      const src = code(readFileSync(join(SRC, f), 'utf8'));
+      expect(src, f).toMatch(/o\.choice\.model/);
+      expect(src, f).toMatch(/o\.choice\.effort/);
+      expect(src, f).not.toMatch(/agenticRunEffort|resolveModel|MODEL_FOR_ROLE/);
+    }
+  });
+
+  it('the scan catches a new launch, and is not fooled by a comment', () => {
+    const src = readFileSync(join(SRC, 'sandbox/runtime/docker.ts'), 'utf8');
+    expect(isSandboxLauncher(src)).toBe(false);
+    expect(isSandboxLauncher(`${src}\nruntime.exec(box, ['claude', '-p', '--verbose']);\n`)).toBe(true);
+    expect(isSandboxLauncher(`${src}\nconst argv = [\n  "codex",\n  "app-server",\n];\n`)).toBe(true);
+    expect(isSandboxLauncher(`${src}\n// runtime.exec(box, ['codex', 'exec'])\n`)).toBe(false);
+  });
+});
+
+/** Each `query({` … up to the call's closing `});` (the options blocks of the provider). */
+function queryBlocks(src: string): string[] {
+  const out: string[] = [];
+  const re = /\bquery\(\{/g;
+  for (let m = re.exec(src); m; m = re.exec(src)) {
+    let depth = 0;
+    let i = m.index + m[0].length - 1;
+    for (; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}' && --depth === 0) break;
+    }
+    out.push(src.slice(m.index, i + 1));
+  }
+  return out;
+}

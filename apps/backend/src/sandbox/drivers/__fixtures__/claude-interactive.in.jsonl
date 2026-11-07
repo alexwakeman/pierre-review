@@ -1,0 +1,8 @@
+{"type":"control_request","request_id":"limn_1","request":{"subtype":"initialize","hooks":null}}
+{"type":"user","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":"Reply with the single word: alpha."}}
+{"type":"user","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":"Use the Bash tool to run `touch /work/plan-mode.txt`. Then tell me, in one word, the word you replied with before."}}
+{"type":"control_request","request_id":"limn_2","request":{"subtype":"set_permission_mode","mode":"bypassPermissions"}}
+{"type":"user","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":"Use the Bash tool to run `echo built > /work/built.txt`. Then reply: done."}}
+{"type":"user","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":"Write the numbers 1 to 300, one per line, nothing else."}}
+{"type":"control_request","request_id":"limn_3","request":{"subtype":"interrupt"}}
+{"type":"user","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":"Reply with the single word: still-here."}}

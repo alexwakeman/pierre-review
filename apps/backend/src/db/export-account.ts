@@ -126,6 +126,10 @@ export interface AccountExport {
    * per workspace.
    */
   repoRelations: Record<string, unknown>[];
+  /** Sandbox "Always allow" hosts (core `sandbox_allowed_hosts`, migration 0173): per workspace. */
+  sandboxAllowedHosts: Record<string, unknown>[];
+  /** Sandbox workspace settings (core `sandbox_workspace_settings`, migrations 0174 + 0175): per workspace. */
+  sandboxWorkspaceSettings: Record<string, unknown>[];
   /**
    * This Sprint's "needs code" judgements (core `sprint_code_judgements`, migration 0132): a model's
    * yes/no and one short reason per not-started ticket, per workspace.
@@ -338,6 +342,37 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     .where(eq(schema.repoRelations.accountId, accountId))
     .execute();
 
+  // Sandbox "Always allow" hosts — the rules the user allowed, per workspace.
+  const sandboxHostRows = await db
+    .select({
+      workspaceId: schema.sandboxAllowedHosts.workspaceId,
+      rule: schema.sandboxAllowedHosts.rule,
+      createdAt: schema.sandboxAllowedHosts.createdAt,
+    })
+    .from(schema.sandboxAllowedHosts)
+    .where(eq(schema.sandboxAllowedHosts.accountId, accountId))
+    .execute();
+
+  // Sandbox workspace settings — the local folder, memory choices and resources, per workspace.
+  const sandboxSettingRows = await db
+    .select({
+      workspaceId: schema.sandboxWorkspaceSettings.workspaceId,
+      localFolder: schema.sandboxWorkspaceSettings.localFolder,
+      memoryProjectsJson: schema.sandboxWorkspaceSettings.memoryProjectsJson,
+      userClaudeMd: schema.sandboxWorkspaceSettings.userClaudeMd,
+      userSkills: schema.sandboxWorkspaceSettings.userSkills,
+      startDir: schema.sandboxWorkspaceSettings.startDir,
+      globalProxyEnv: schema.sandboxWorkspaceSettings.globalProxyEnv,
+      cpus: schema.sandboxWorkspaceSettings.cpus,
+      memoryGb: schema.sandboxWorkspaceSettings.memoryGb,
+      diskGb: schema.sandboxWorkspaceSettings.diskGb,
+      servicesJson: schema.sandboxWorkspaceSettings.servicesJson,
+      updatedAt: schema.sandboxWorkspaceSettings.updatedAt,
+    })
+    .from(schema.sandboxWorkspaceSettings)
+    .where(eq(schema.sandboxWorkspaceSettings.accountId, accountId))
+    .execute();
+
   // This Sprint's "needs code" judgements — model answers about the account's tickets.
   const codeJudgementRows = await db
     .select({
@@ -383,6 +418,12 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       acceptedDocs: schema.storyBuilds.acceptedDocsJson,
       planCostUsd: schema.storyBuilds.planCostUsd,
       docsCostUsd: schema.storyBuilds.docsCostUsd,
+      // A workspace session (migration 0176): its phase, runtime, build spend and shown state (the
+      // conversation, boot steps, network log). Never the sandbox's or the agent's internal ids.
+      sessionPhase: schema.storyBuilds.sessionPhase,
+      runtime: schema.storyBuilds.runtime,
+      buildCostUsd: schema.storyBuilds.buildCostUsd,
+      session: schema.storyBuilds.sessionJson,
       createdAt: schema.storyBuilds.createdAt,
       completedAt: schema.storyBuilds.completedAt,
     })
@@ -406,6 +447,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       changeReport: schema.storyBuildRepos.changeReportJson,
       checks: schema.storyBuildRepos.checksJson,
       patch: schema.storyBuildRepos.patch,
+      stat: schema.storyBuildRepos.statJson,
       prTitle: schema.storyBuildRepos.prTitle,
       prBody: schema.storyBuildRepos.prBody,
       pushedBranch: schema.storyBuildRepos.pushedBranch,
@@ -563,6 +605,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     referenceDocFigureDescriptions: figureRows,
     referenceDocRepoOffers: repoOfferRows,
     repoRelations: repoRelationRows,
+    sandboxAllowedHosts: sandboxHostRows,
+    sandboxWorkspaceSettings: sandboxSettingRows,
     sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),
     storyBuilds: capped('storyBuilds', storyBuildRows),

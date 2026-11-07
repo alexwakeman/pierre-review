@@ -17,6 +17,8 @@ import { DiskSpaceSection } from './DiskSpaceSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutomationSection } from './DependencyAutomationSection.js';
 import { SonarSection } from './SonarSection.js';
+import { SandboxSection } from './SandboxSection.js';
+import { SandboxRuntimeSection } from './SandboxRuntimeSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
 import { ConfluenceSection } from './ConfluenceSection.js';
 import { NotionSection } from './NotionSection.js';
@@ -100,6 +102,8 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   SprintSection,
   IssueLinksSection,
   SonarSection,
+  SandboxRuntimeSection,
+  SandboxSection,
   SlackSection,
   BotScoringSection,
   BotClassificationSection,

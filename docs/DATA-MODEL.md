@@ -780,13 +780,50 @@ reads it and its rules: [BACKEND.md](BACKEND.md) § Worktree cleanup.
 ## `story_builds` + `story_build_repos` — "Implement story" (CORE; migration `0149`)
 
 `story_builds`: ONE row per session (one sprint ticket, one click) — status (shared `StoryBuildStatus`), the
-frozen inputs (`coverage_json`, `candidates_json`, and `seed_json`, the fenced prompt input that is NEVER on
-the wire nor exported), the plan + its chat + the planned design, the docs consideration + the reader's
-decisions, what Accept froze, spend. ONE OPEN SESSION PER TICKET via the partial unique
+frozen inputs (`coverage_json`, `candidates_json`, and `seed_json`, NEVER on the wire nor exported), spend,
+and the dormant plan/docs columns of the removed flow (below). ONE OPEN SESSION PER TICKET via the partial unique
 `story_builds_one_open` (in the `.sql` only). `story_build_repos`: ONE row per repository — base (+ the PR it
-stacks on), branch, build order, the patch and change report, "Run tests", the push. Composite FKs onto the
+stacks on), branch, build order, the patch and change report, the push. Composite FKs onto the
 session and `repos (id, account_id)`; `deleteRepo` deletes a repository's rows and keeps the session. The
 ONE wire mapper is `coding/story-build/persist.ts toStoryBuild`. [STORY-BUILD.md](STORY-BUILD.md).
+
+**A WORKSPACE SESSION is the same row** (migration `0176`; [SANDBOX.md](SANDBOX.md) § Sessions):
+`session_phase` (shared `SandboxSessionPhase`; NULL = a row of the old plan/build flow), and `status` is
+DERIVED from it (`sandboxSessionStatus`), never written apart — so `story_builds_one_open` and the sprint
+mark hold unchanged. `runtime`, `sandbox_ref` (the `limn.session` label; NULL once torn down), `agent_ref`
+(sandbox-internal), `session_json` (the shown state: boot steps, notes, conversation, network log — no
+secret, no patch), `build_cost_usd` (chat turns go to `plan_cost_usd`), `last_active_at`. Each mirrored
+repository gets a `story_build_repos` row; after every build-mode turn its work is stored in `patch` (+
+`patch_sha`, `stat_json`), exactly where the old build stored it, so the old diff and push routes work;
+`sandbox_path` is where it sits in the sandbox. `seed_json` keeps the old v1 shape (Push reads the
+story's title and URL from it).
+
+The plan, docs and Accept columns (`plan_json`, `transcript_json`, `design_json`, `docs_*`, `accepted_*`,
+the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/build flow was removed
+(2026-11-07, [STORY-BUILD.md](STORY-BUILD.md) § Rows from the old flow): only its old rows carry them, and
+`coding/story-build/legacy.ts` settles and discards those rows.
+
+## `sandbox_allowed_hosts` — the sandbox's "Always allow" hosts (CORE; migration `0173`)
+
+ONE row per host rule a reader allowed for every sandbox session of ONE workspace — a denied host's
+"Always allow in this workspace" button, or Settings → Sandbox ([SANDBOX.md](SANDBOX.md) §
+The allow-list). PRESENCE IS THE FACT; the rule is stored normalised (`validateReaderRule`), unique
+`(account_id, workspace_id, rule)`. Per workspace, nothing inherited. The ONE reader/writer is
+`db/sandbox-allowed-hosts.ts`; a session reads it once at start (`startEgress`) and adds to it on a
+click. Composite FK onto `workspaces (id, account_id)`, cascade; erased and exported with the account.
+
+## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`)
+
+ONE row per (account, workspace), unique `(account_id, workspace_id)` — the one upsert uses that EXACT
+target. NO ROW = every default. Columns: `local_folder` (the reader's clones' parent folder, absolute),
+`memory_projects_json` (NULL = the default, every project found with memories; else a JSON array of the
+ticked project folders), `user_claude_md` (default on), `user_skills` (default off), `start_dir`,
+`global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Limn's default), `services_json`
+(migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Limn may run for a
+session, [SANDBOX.md](SANDBOX.md) § Services). Per workspace,
+nothing inherited; PUT replaces the whole row. The ONE reader/writer is `db/sandbox-settings.ts`
+([SANDBOX.md](SANDBOX.md) § The workspace mirror). Composite FK onto `workspaces (id, account_id)`,
+cascade; erased and exported with the account.
 
 ## `claude_still_open_posts` — the still-open claim record (CORE; migration `0170`)
 

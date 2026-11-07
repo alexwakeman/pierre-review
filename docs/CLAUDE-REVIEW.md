@@ -395,6 +395,21 @@ size, cache reads). It never runs a model and never starts the usage probe.
   `ctx.llm`) calls `.complete(req)`. Only `ai/providers/claude.ts` and `ai/runtime.ts` touch an SDK
   (`provider-seam.test.ts`). The model in a spec is a ROLE (`deep` / `standard` / `fast`), with an
   optional exact id; each provider resolves it.
+- **NO SESSION FILES** (2026-11-07): every Agent SDK `query()` sends `persistSession: false`
+  (`ai/agent-isolation.ts` `NO_SESSION_FILES`, spread at each call site in `ai/providers/claude.ts`
+  AND forced by the runtime's tapped `query`, `withoutSessionFiles`; `provider-seam.test.ts` pins
+  both). Limn never resumes an SDK session, and the default wrote one folder per run under
+  `~/.claude/projects` (its runs work in throw-away worktrees and temp dirs): ~2,000 folders /
+  3.5 GB on one machine. Measured with a real run: with it, no folder; without it, one.
+  ⚠ **THE OLD LITTER IS CLEANED ONCE** (`ai/session-litter.ts`): at boot (after listen, in the
+  background, bounded at 2 minutes; a complete run writes `<dataDir>/claude-sessions-cleaned.json`,
+  versioned by `SESSION_CLEANUP_VERSION`, so later boots do not rescan; a timed-out or failed run
+  writes none and the next boot carries on) and as `limn ai clean-sessions [--dry-run]`. It deletes
+  a folder ONLY when its name starts with the encoded data dir + `-` (also the legacy
+  `~/.pierre-review`; refused when the data dir is `/`, the home dir or an ancestor of it or of the
+  temp dir) or the encoded temp dir (`os.tmpdir()` and its realpath) + `-limn-` / `-pierre-` — the
+  prefixes of every temp dir Limn's runs get. Never a symlink, never anything else
+  (`$TMPDIR/stories-agent-*` and the reader's projects stay). Bump the version with any rule change.
 - **`ai/provider-setting.ts`** answers "which provider?" for the registry and the pre-flight alike
   (it sits apart to avoid an import cycle). `LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`
   (unset or unknown ⇒ `auto`). Without it, Settings → AI (`components/settings/AiProviderSection.tsx`,
@@ -747,14 +762,14 @@ Default, Low, Medium, High, Extra high, Max.
   (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
   when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
   AI Fix and Plan first (`coding/ai-fix/manager.ts` decides it, `GenerateFixArgs.effort` /
-  `GeneratePlanArgs.effort` carry it), and "Implement story"'s plan and build passes (`story_plan`,
-  `story_build`; `coding/story-build/manager.ts` decides it per pass, docs/STORY-BUILD.md). Claude gets it as `spec.claude.effort`
+  `GeneratePlanArgs.effort` carry it), and "Implement story"'s workspace session (`story_plan` chat turns, `story_build` build turns; read
+  once by `sandbox/drivers/index.ts` `resolveSandboxAgentChoice`, docs/SANDBOX.md § Agent drivers). Claude gets it as `spec.claude.effort`
   (`sdkModelOptions(model, mode, effort)`), Codex as `spec.codex.effort`. Every other kind keeps
   `defaultRunEffort`. A provider switch never changes the level, only who reads it.
 - **Precedence**: an explicitly set `REVIEW_EFFORT` (one of the five) WINS and locks the control
   ("Set by REVIEW_EFFORT"; the PUT answers 409). `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every
   diff-only review on both providers, at Default too. ⚠ **Both env vars reach EXACTLY what the
-  control reaches** (the review, AI Fix, Plan first, the story plan and build) — `defaultRunEffort` reads no environment, so the
+  control reaches** (the review, AI Fix, Plan first, the workspace session) — `defaultRunEffort` reads no environment, so the
   CI review, ticket review, diagrams, Check threads, chats and Resolve with Claude keep their fixed
   depth (Opus 5.5 medium, as under the old pin). Before 2026-10-26 these two variables also moved
   Sonnet on every Claude kind; that was dropped so the label under the control is the whole story.
@@ -4665,6 +4680,16 @@ library, sprint briefs/paths and every one-shot completion. Details:
   here." (templated) without promising CI. ⚠ `WORKTREE_RULES` and the tool list change together
   (`no-shell.test.ts`). Every agent run sits behind the PreToolUse PATH GUARD
   (`review/path-guard.ts`). Anything an agent reads from a PR is UNTRUSTED.
+  ⚠ **THE ONE SHELL EXCEPTION: the workspace session** ("Implement story", docs/SANDBOX.md). Its Claude
+  Code or Codex agent has a full shell, ONLY inside a sandbox `sandbox/runtime` started (no GitHub
+  credential, no Docker socket, no writable host mount, the only way out Limn's allow-list proxy). It
+  does NOT go through `ai/provider.ts` `runAgent`: the two drivers (`sandbox/drivers/claude.ts`
+  `claude -p --input-format stream-json`, `sandbox/drivers/codex.ts` `codex app-server`) are the only
+  code that starts either CLI in a sandbox, and neither picks its own model or effort (both come from
+  `resolveSandboxAgentChoice`: `requestModelOf`, the provider's resolution, `agenticRunEffort`) —
+  pinned by `provider-seam.test.ts`. Usage is recorded per turn (`story_plan` / `story_build`). The
+  removed shell-less plan and build agents (`coding/story-build/plan-agent.ts`, `build.ts`, their write
+  deny-list `protectWrites`) are gone; do not bring them back as a fallback (owner decision Q2).
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON by default) / Push automatically (OFF) switches. Auto-posting is AUTO RUNS ONLY, under
   the reader's account, ONE review, `COMMENT` unless `autoVerdict` (ON by default) allows

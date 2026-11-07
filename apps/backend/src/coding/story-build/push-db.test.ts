@@ -65,7 +65,6 @@ let ctx: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let P: typeof import('./persist.js');
 let push: typeof import('./push.js');
-let seams: typeof import('./seams.js');
 let routes: typeof import('./routes-build.js');
 const repo: Record<number, { api: number; web: number }> = {};
 const ws: Record<number, number> = {};
@@ -133,7 +132,6 @@ beforeAll(async () => {
   };
   P = await import('./persist.js');
   push = await import('./push.js');
-  seams = await import('./seams.js');
   routes = await import('./routes-build.js');
 });
 
@@ -379,7 +377,7 @@ describe('pushAllRepos', () => {
   });
 });
 
-describe('the build-side routes', () => {
+describe('the patch routes', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     app = Fastify();
@@ -388,7 +386,6 @@ describe('the build-side routes', () => {
   });
   afterAll(async () => {
     await app.close();
-    seams.registerStoryBuildLane(null);
   });
   const as = (acct: number) => ({ 'x-account': String(acct) });
 
@@ -400,20 +397,6 @@ describe('the build-side routes', () => {
     expect((await app.inject({ method: 'GET', url: storyBuildPath('repoDiff', { id: s.id, repoId: s.api }), headers: as(2) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: storyBuildPath('repoDiff', { id: s.id, repoId: 99999 }), headers: as(1) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/api/story-builds/x/repos/1/diff', headers: as(1) })).statusCode).toBe(404);
-  });
-
-  it('the checks preview reads the manifest files at the BASE commit, once per ten minutes', async () => {
-    routes.clearStoryBuildChecksCache();
-    fetched.length = 0;
-    const s = await readySession();
-    const url = storyBuildPath('repoChecks', { id: s.id, repoId: s.web });
-    const a = await app.inject({ method: 'GET', url, headers: as(1) });
-    expect(a.statusCode).toBe(200);
-    expect(a.json().checks.map((c: any) => c.name)).toContain('test');
-    await app.inject({ method: 'GET', url, headers: as(1) });
-    expect(fetched).toHaveLength(1);
-    expect(fetched[0]).toMatchObject({ owner: 'acme', name: 'web', ref: 'b'.repeat(40) });
-    expect((await app.inject({ method: 'GET', url, headers: as(2) })).statusCode).toBe(404);
   });
 
   it('push: draft by default, `draft:false` opens it ready, anything else is refused; another account is 404', async () => {
@@ -431,22 +414,9 @@ describe('the build-side routes', () => {
     expect((await app.inject({ method: 'POST', url: storyBuildPath('pushAll', { id: s.id }), headers: as(2), payload: {} })).statusCode).toBe(404);
   });
 
-  it('retry goes through the manager’s lane: 503 until one is registered, then its answer', async () => {
+  it('the removed checks preview and retry routes are not mounted', async () => {
     const s = await readySession();
-    const url = storyBuildPath('repoRetry', { id: s.id, repoId: s.web });
-    expect((await app.inject({ method: 'POST', url, headers: as(1), payload: {} })).statusCode).toBe(503);
-    const calls: any[] = [];
-    seams.registerStoryBuildLane({
-      retryRepo: async (_c, a) => {
-        calls.push(a);
-        return a.repoId === s.web ? { ok: true } : { ok: false, status: 409, error: 'Busy', message: 'A build is running.' };
-      },
-    });
-    expect((await app.inject({ method: 'POST', url, headers: as(1), payload: {} })).statusCode).toBe(202);
-    expect(calls).toEqual([{ accountId: 1, buildId: s.id, repoId: s.web }]);
-    const busy = await app.inject({ method: 'POST', url: storyBuildPath('repoRetry', { id: s.id, repoId: s.api }), headers: as(1), payload: {} });
-    expect(busy.statusCode).toBe(409);
-    expect(busy.json()).toEqual({ error: 'Busy', message: 'A build is running.' });
-    expect((await app.inject({ method: 'POST', url, headers: as(2), payload: {} })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/story-builds/${s.id}/repos/${s.web}/checks`, headers: as(1) })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: `/api/story-builds/${s.id}/repos/${s.web}/retry`, headers: as(1), payload: {} })).statusCode).toBe(404);
   });
 });

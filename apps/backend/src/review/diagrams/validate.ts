@@ -59,11 +59,8 @@ import { isNonCodeFile } from '../../db/code-loc.js';
 
 /** What the run knows that the answer is checked against. */
 export interface DesignContext {
-  // 'planned' ("Implement story", coding/story-build/plan.ts): a story's flow BEFORE any PR exists —
-  // the refs are the plan's REPOSITORY refs (R1…) and `changedFiles` the files its steps name. It is
-  // judged exactly like a story design, except that it may not decline.
-  kind: 'pr' | 'story' | 'planned';
-  // In ref order: PR1 first (a planned design: R1 first). A PR design has exactly one.
+  kind: 'pr' | 'story';
+  // In ref order: PR1 first. A PR design has exactly one.
   prs: ReadonlyArray<{ ref: string; changedFiles: readonly string[] }>;
 }
 
@@ -146,10 +143,6 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
   // ---- a declined answer ----
   const declineRaw = plain(p.noDiagram);
   if (declineRaw !== '') {
-    if (ctx.kind === 'planned') {
-      add('noDiagram is not allowed here: the person asked for this design; draw it.');
-      return fail();
-    }
     const reason = text('noDiagram', declineRaw, FLOW_DECLINE_MAX, true).replace(/^no diagram:\s*/i, '');
     if (rawParts.length > 0 || rawSteps.length > 0) {
       add('noDiagram is set but participants or steps are not empty; either draw the flow (noDiagram null) or leave them empty.');
@@ -170,7 +163,7 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
   const refs = new Map(ctx.prs.map((x) => [x.ref.toUpperCase(), x]));
   const refList = [...refs.keys()].join(', ');
   const story = ctx.kind !== 'pr';
-  /** A story / planned ref the prompt gave, or null (a PR design's is always null). */
+  /** A story ref the prompt gave, or null (a PR design's is always null). */
   const refOf = (where: string, v: unknown): string | null => {
     const r = plain(v).toUpperCase();
     if (!story || r === '') return null;

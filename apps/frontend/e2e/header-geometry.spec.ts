@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi, STORY_BUILD_PLAN_READY } from './mock-api.js';
+import { fixtures, installMockApi, STORY_SESSION_READY } from './mock-api.js';
 import type { TicketPrsResponse } from '@pierre-review/shared';
 
 // ONE PAGE HEADER GEOMETRY (docs/FRONTEND.md § One page header). Every full page and full-main
@@ -34,7 +34,7 @@ function ticketPrs(ident: string): TicketPrsResponse {
 }
 
 async function setup(page: Page): Promise<void> {
-  await installMockApi(page, { storyBuild: STORY_BUILD_PLAN_READY });
+  await installMockApi(page, { storyBuild: STORY_SESSION_READY });
   const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
   await page.route(
     (u) => u.pathname.endsWith('/api/me'),

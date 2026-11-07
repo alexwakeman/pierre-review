@@ -118,6 +118,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // the ledger and the run tables read back — no model, no GitHub, and it never starts the usage
   // probe. `read`, decided; EXACT `===`.
   if (path === '/api/ai/usage-report') return [TIERS.read];
+  // THE SANDBOX RUNTIME STATUS: GET /api/sandbox/runtime (api/routes/sandbox-settings.ts). FOLLOWING THE
+  // TOKEN: no model, no GitHub — two or three local CLI processes (`docker version`, `docker info`), and
+  // the answer is cached RUNTIME_STATUS_TTL_MS server-side so a loop cannot multiply them. `read`,
+  // decided; EXACT `===` (`/api/sandbox` is a family other routes may join).
+  if (path === '/api/sandbox/runtime') return [TIERS.read];
   // THE AI PROVIDER CHOICE: PUT /api/ai/provider (api/routes/ai-provider.ts). One validated UPDATE of
   // one column, held in memory — no model, no GitHub, no process. `read`, decided; EXACT `===`.
   if (path === '/api/ai/provider') return [TIERS.read];
@@ -179,6 +184,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // day's cap of agentic model runs on the reader's own Claude or Codex — `ai` + `aiHourly`, decided
   // ABOVE the family's `read` line, by exact shape. The GET/PUT `…/auto-review` stay `read`.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/auto-review\/sweep$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  // SANDBOX SETTINGS (api/routes/sandbox-settings.ts): GET/PUT `…/sandbox`, POST `…/sandbox/check` (a
+  // BOUNDED walk of a local folder, git config read as text) and the "Always allow" hosts — DB + local
+  // disk, no GitHub, no model, no process. `read` on the next line, decided (rate-limit.test.ts).
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----
@@ -586,24 +594,20 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // `search` bucket (one upstream call per request) + `read`, spelled exactly so the /api/pro/ GET
   // catch-all below (600/min) never swallows it.
   if (!mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/checks$/.test(path)) return [TIERS.search, TIERS.read];
-  // IMPLEMENT STORY (coding/story-build/routes*.ts, LOCAL ONLY; paths: shared STORY_BUILD_API). The whole
-  // family DECIDED here, by exact shape, FOLLOWING THE TOKEN — it sits under no prefix the rules below
-  // would catch, so without these lines every route (the agent starts AND the GitHub pushes) would fall
-  // to the 600/min blanket `read`:
-  //   POST /api/story-builds                               starts assess + plan agent passes → ai + ai_hourly
-  //   POST …/:id/plan/message · …/:id/docs · …/:id/accept   one agent pass / starts the builds → ai + ai_hourly
-  //   POST …/:id/repos/:repoId/retry                        one repository's build agent      → ai + ai_hourly
+  // IMPLEMENT STORY — the WORKSPACE SESSION (sandbox/session/routes.ts + coding/story-build/routes-build.ts,
+  // LOCAL ONLY; paths: shared STORY_BUILD_API + SANDBOX_SESSION_API). The whole family DECIDED here, by
+  // exact shape, FOLLOWING THE TOKEN — it sits under no prefix the rules below would catch, so without
+  // these lines every route (the agent turns AND the GitHub pushes) would fall to the 600/min blanket:
+  //   POST /api/story-builds                               boots a sandbox + the agent          → ai + ai_hourly
+  //   POST …/:id/messages · …/:id/build · …/:id/resume     one agent turn / a sandbox boot     → ai + ai_hourly
   //   POST …/:id/repos/:repoId/push · …/:id/push            branch push + PR create (GitHub)  → github_write
-  //   GET  …/:id/repos/:repoId/checks                       one GitHub read of manifest files → search + read
-  //   GET list / :id / stream / diff · PUT docs/decisions · POST cancel / discard  DB only    → read
+  //   GET list / :id / stream / diff / repos/:repoId/diff · POST interrupt / network/allow / discard → read
   // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
   // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
     if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly];
-    if (mutating && /^\/api\/story-builds\/\d+\/(plan\/message|docs|accept)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
-    if (mutating && /^\/api\/story-builds\/\d+\/repos\/\d+\/retry$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+    if (mutating && /^\/api\/story-builds\/\d+\/(messages|build|resume)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
     if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
-    if (!mutating && /^\/api\/story-builds\/\d+\/repos\/\d+\/checks$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
   }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {

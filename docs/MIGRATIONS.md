@@ -1521,6 +1521,47 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0176_sandbox_sessions` — "Implement story" rows carry a workspace session
+
+`ALTER TABLE story_builds ADD session_phase, runtime, sandbox_ref, agent_ref, session_json,
+build_cost_usd, last_active_at` and `ALTER TABLE story_build_repos ADD patch_sha, stat_json,
+sandbox_path` ([SANDBOX.md](SANDBOX.md) § Sessions; [DATA-MODEL.md](DATA-MODEL.md) § `story_builds`). All
+nullable, so an old plan/build row reads as before (`session_phase` NULL). `status` stays the old word,
+derived from the phase, so the partial unique `story_builds_one_open` is untouched. On existing tables,
+so erasure already covers them; the export lists the new columns except `sandbox_ref` / `agent_ref`
+(sandbox-internal ids). Additive, no backfill. Journal `idx` 176, `when` sqlite `1792569679020`.
+
+⚠ **No migration removes the old plan/build flow (2026-11-07).** Its code is gone (docs/STORY-BUILD.md §
+Rows from the old flow), but its columns on `story_builds` / `story_build_repos` (`plan_json`,
+`transcript_json`, `docs_json`, `docs_decisions_json`, `accepted_*`, `checks_json`, `worktree_path`, …)
+stay DORMANT: old rows still carry them, the wire and the export still read them, and erasure covers the
+tables. Never drop them in a later migration without a plan for those rows.
+
+### `0175_sandbox_services` — the compose files a workspace's sessions may run
+
+`ALTER TABLE sandbox_workspace_settings ADD services_json text` ([SANDBOX.md](SANDBOX.md) § Services):
+NULL = none; else JSON `[{repo: "owner/name", file, egress: [service]}]`, written only by
+`db/sandbox-settings.ts`. On an existing table, so erasure already covers it; the export lists the
+column. Additive, nullable, no backfill. Journal `idx` 175, `when` sqlite `1792569679019`.
+
+### `0174_sandbox_workspace_settings` — Settings → Sandbox, per workspace
+
+NEW table `sandbox_workspace_settings` ([SANDBOX.md](SANDBOX.md) § The workspace mirror): one row per
+(account, workspace), unique `(account_id, workspace_id)` — the one upsert uses that EXACT target. No row =
+every default. Composite FK onto `workspaces (id, account_id)`, cascade. Erased explicitly, listed in
+`accountScopedTables()`, exported. Additive, no backfill. Journal `idx` 174, `when` sqlite
+`1792569679018`.
+
+### `0173_sandbox_allowed_hosts` — the sandbox's "Always allow" hosts, per workspace
+
+NEW table `sandbox_allowed_hosts` ([SANDBOX.md](SANDBOX.md) § The allow-list): one row per host rule a
+reader allowed for every sandbox session of one workspace, stored NORMALISED by the proxy's parser
+(`validateReaderRule`), unique `(account_id, workspace_id, rule)` — the one insert uses that EXACT
+target, `ON CONFLICT DO NOTHING`. Composite FK onto `workspaces (id, account_id)`, cascade (a deleted
+workspace takes its rows; nothing is re-homed, since nothing is inherited). Erased explicitly, listed in
+`accountScopedTables()`, exported. The built-in defaults live in code, never here. Additive, no
+backfill. Journal `idx` 173, `when` sqlite `1792569679017`.
+
 ### `0171_open_points` — where open points are read; what a review was given
 
 NEW table `tracker_open_points_fields` ([TRACKERS.md](TRACKERS.md) § Open points): one row per

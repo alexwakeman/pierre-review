@@ -31,6 +31,8 @@ On every release run it:
    --no-git-tag-version`, default `patch`), and then skips forward past any version
    whose tag already exists. So a run never reuses or collides with an existing
    version even if `main`, the tags, and npm have drifted apart.
+4b. **Publishes the sandbox image** to GHCR (amd64 + arm64) and hands its digest to step 5 — NON-FATAL;
+   see [The sandbox image](#the-sandbox-image).
 5. **Builds** the publishable package with `pnpm package`
    (`scripts/build-release.mjs` assembles `./release`, copies the bumped version
    into `release/package.json`, and self-verifies — it exits non-zero on any
@@ -125,6 +127,41 @@ Two things must be in place:
      loop.)
 
 ---
+
+## The sandbox image
+
+The Implement sandbox runs from `ghcr.io/<owner>/limn-sandbox` (docs/SANDBOX.md § The image). The npm
+package never carries the image, only its Dockerfile (`release/dist/sandbox-image/`) and its PIN.
+
+1. **Sandbox image recipe** runs `apps/backend/scripts/sandbox-image.ts`, the app's own recipe function:
+   the recipe hash and the build args (Claude Code = the Agent SDK's `claudeCodeVersion`, Codex =
+   `limnAiRuntime['@openai/codex']`).
+2. QEMU + Buildx, a GHCR login with the workflow's `GITHUB_TOKEN` (`permissions: packages: write`), then
+   `docker/build-push-action` builds `apps/backend/sandbox-image` for `linux/amd64,linux/arm64` with
+   those build args and `LIMN_RECIPE=<recipe>`, and pushes `:<version>` (no provenance manifests).
+3. **Build the npm release package** gets `LIMN_SANDBOX_IMAGE_REPOSITORY`, `LIMN_SANDBOX_IMAGE_DIGEST`
+   (the manifest-list digest) and `LIMN_SANDBOX_IMAGE_RECIPE` only when the push succeeded.
+   `build-release.mjs` writes `limnSandboxImage: {repository, tag, digest, recipe, buildArgs}` into the
+   manifest, and FAILS if the pushed recipe is not the one the shipped Dockerfile hashes to. Without
+   the variables it writes `{recipe, buildArgs}` only: no pin.
+
+⚠ **Every image step is `continue-on-error`.** A GHCR outage, a missing permission or a slow arm64
+build never blocks an npm release: the release ships UNPINNED and the app builds the image locally on
+first use (a few minutes, once).
+
+⚠ **One-time setup: make the GHCR package PUBLIC.** The first push creates
+`ghcr.io/<owner>/limn-sandbox` as a PRIVATE package, which readers cannot pull anonymously (they fall
+back to the local build, which works but is slow). GitHub → your profile → Packages → `limn-sandbox` →
+Package settings → Change visibility → Public. Also link it to this repository there.
+
+The release's `pnpm test:all` includes `src/sandbox/runtime/docker-real.test.ts`, which builds the image
+on the runner (Docker is present on `ubuntu-latest`) and needs the internet.
+
+**microsandbox** has its own workflow, `.github/workflows/microsandbox.yml` — NOT a release gate. It runs
+`src/sandbox/runtime/microsandbox-real.test.ts` on a Linux runner only when `/dev/kvm` exists there (there
+a skip counts as a failure; without KVM the job says so and stops green), on sandbox runtime / proxy /
+image changes, nightly and on demand. ⚠ It has never run: whether GitHub's hosted runners expose KVM is
+not verified (docs/SANDBOX.md § microsandbox).
 
 ## Loop guard
 

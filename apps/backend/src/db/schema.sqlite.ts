@@ -85,6 +85,7 @@ import type {
   StoryBuildDocsDecisions,
   StoryBuildMessage,
   StoryBuildPlan,
+  SandboxRepoStat,
   FeatureSettings,
 } from '@pierre-review/shared';
 
@@ -2515,6 +2516,79 @@ export const repoRelations = sqliteTable(
   }),
 );
 
+// ---- Sandbox "Always allow" hosts (CORE) — migration 0173 ----
+//
+// The hosts a reader allowed for every sandbox session of ONE workspace (docs/SANDBOX.md § The
+// allow-list): a denied host's "Always allow in this workspace" button, or Settings → Workspace →
+// Sandbox. PRESENCE IS THE FACT: one row per rule, the rule normalised by the proxy's own parser
+// (`validateReaderRule`), so the unique index never holds two spellings of one host. The session's
+// effective list is the UNION of the built-in defaults, these rows and its own "Allow for this session"
+// hosts (in memory only); nothing here is inherited across workspaces. `workspace_id` arrives in a
+// request, so it is a COMPOSITE FK against (id, account_id); a deleted workspace takes its rows with it.
+export const sandboxAllowedHosts = sqliteTable(
+  'sandbox_allowed_hosts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    rule: text('rule').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    ruleUx: uniqueIndex('sandbox_allowed_hosts_rule').on(t.accountId, t.workspaceId, t.rule),
+    workspaceAccountFk: foreignKey({
+      name: 'sandbox_allowed_hosts_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Sandbox workspace settings (CORE) — migration 0174 ----
+//
+// Settings → Workspace → Sandbox (docs/SANDBOX.md § The workspace mirror): ONE row per (account,
+// workspace), nothing inherited. NO ROW = every default. The ONE reader/writer is
+// db/sandbox-settings.ts. `memory_projects_json` NULL = the default (every project found with
+// memories); a JSON array is the reader's ticks (absolute folders). Resource columns NULL = Limn's
+// default. `workspace_id` arrives in a request: COMPOSITE FK against (id, account_id), cascade.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId].
+export const sandboxWorkspaceSettings = sqliteTable(
+  'sandbox_workspace_settings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    localFolder: text('local_folder'),
+    memoryProjectsJson: text('memory_projects_json'),
+    userClaudeMd: integer('user_claude_md', { mode: 'boolean' }).notNull().default(true),
+    userSkills: integer('user_skills', { mode: 'boolean' }).notNull().default(false),
+    startDir: text('start_dir'),
+    globalProxyEnv: integer('global_proxy_env', { mode: 'boolean' }).notNull().default(false),
+    cpus: integer('cpus'),
+    memoryGb: integer('memory_gb'),
+    diskGb: integer('disk_gb'),
+    /** Migration 0175: the picked compose files, JSON `SandboxServiceStackChoice[]`; NULL = none. */
+    servicesJson: text('services_json'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('sandbox_workspace_settings_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'sandbox_workspace_settings_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- My Turn dismissals (CORE, free, both modes) ----
 // "Take this off my plate for now." One row per dismissed SUBJECT — a pull request, or a repo for a
 // red default branch — never per card: a PR can hold several My Turn jobs, and dismissing the one
@@ -4456,6 +4530,18 @@ export const storyBuilds = sqliteTable(
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     numTurns: integer('num_turns'),
+    // A WORKSPACE SESSION (migration 0176; docs/SANDBOX.md § Sessions). NULL phase ⇒ an old plan/build row.
+    // SandboxSessionPhase; `status` is DERIVED from it (shared `sandboxSessionStatus`).
+    sessionPhase: text('session_phase'),
+    runtime: text('runtime'),
+    // The session's resource id (the `limn.session` label); NULL once the sandbox is torn down.
+    sandboxRef: text('sandbox_ref'),
+    // The agent's own conversation id (Claude session / Codex thread), sandbox-internal.
+    agentRef: text('agent_ref'),
+    // The shown state (sandbox/session/state.ts SessionStateJson): boot steps, notes, conversation. No secret.
+    sessionJson: text('session_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    buildCostUsd: real('build_cost_usd'),
+    lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -4499,6 +4585,10 @@ export const storyBuildRepos = sqliteTable(
     branch: text('branch'),
     worktreePath: text('worktree_path'),
     patch: text('patch'),
+    // A session's patch (migration 0176): its sha256, its numbers, and the repository's sandbox path.
+    patchSha: text('patch_sha'),
+    statJson: text('stat_json', { mode: 'json' }).$type<SandboxRepoStat>(),
+    sandboxPath: text('sandbox_path'),
     filesChangedJson: text('files_changed_json', { mode: 'json' }).$type<string[]>(),
     summary: text('summary'),
     commitMessage: text('commit_message'),

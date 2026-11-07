@@ -20,6 +20,8 @@ concurrency:
 
 permissions:
   contents: write
+  # The sandbox image push to GHCR (docs/RELEASE.md § The sandbox image).
+  packages: write
 
 jobs:
   release:
@@ -93,7 +95,69 @@ jobs:
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Releasing v$NEXT"
 
+      # THE SANDBOX IMAGE (docs/RELEASE.md § The sandbox image; docs/SANDBOX.md § The image). Built for
+      # amd64 + arm64 from apps/backend/sandbox-image and pushed to GHCR as <version>; its manifest-list
+      # DIGEST goes to `pnpm package`, which pins it in the release manifest (`limnSandboxImage`).
+      # ⚠ NON-FATAL BY DESIGN: every step below is continue-on-error, and the package step only pins when
+      # the push succeeded. A failed image push ships the release UNPINNED; the app then builds the image
+      # locally on first use. The recipe comes from the app's own module (scripts/sandbox-image.ts).
+      - name: Sandbox image recipe
+        id: sandbox_recipe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd apps/backend
+          ./node_modules/.bin/tsx scripts/sandbox-image.ts > "$RUNNER_TEMP/sandbox-recipe.json"
+          F="$RUNNER_TEMP/sandbox-recipe.json"
+          echo "recipe=$(node -p "require('$F').recipe")" >> "$GITHUB_OUTPUT"
+          echo "claude=$(node -p "require('$F').buildArgs.CLAUDE_CODE_VERSION")" >> "$GITHUB_OUTPUT"
+          echo "codex=$(node -p "require('$F').buildArgs.CODEX_VERSION")" >> "$GITHUB_OUTPUT"
+          echo "repository=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/limn-sandbox" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (arm64 image)
+        id: qemu
+        if: steps.sandbox_recipe.outcome == 'success'
+        continue-on-error: true
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        id: buildx
+        if: steps.qemu.outcome == 'success'
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        id: ghcr_login
+        if: steps.buildx.outcome == 'success'
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push the sandbox image
+        id: sandbox_image
+        if: steps.ghcr_login.outcome == 'success'
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/backend/sandbox-image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.sandbox_recipe.outputs.repository }}:${{ steps.bump.outputs.version }}
+          build-args: |
+            CLAUDE_CODE_VERSION=${{ steps.sandbox_recipe.outputs.claude }}
+            CODEX_VERSION=${{ steps.sandbox_recipe.outputs.codex }}
+            LIMN_RECIPE=${{ steps.sandbox_recipe.outputs.recipe }}
+
       - name: Build the npm release package
+        env:
+          # Empty unless the push above succeeded: build-release.mjs then writes no pin.
+          LIMN_SANDBOX_IMAGE_REPOSITORY: ${{ steps.sandbox_image.outcome == 'success' && steps.sandbox_recipe.outputs.repository || '' }}
+          LIMN_SANDBOX_IMAGE_DIGEST: ${{ steps.sandbox_image.outcome == 'success' && steps.sandbox_image.outputs.digest || '' }}
+          LIMN_SANDBOX_IMAGE_RECIPE: ${{ steps.sandbox_recipe.outputs.recipe }}
         run: pnpm package
 
       - name: Commit, tag & push (atomic)

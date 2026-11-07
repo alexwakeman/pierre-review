@@ -77,6 +77,8 @@ Commands:
   ml install       Download the model that scores bot review comments
                    (one time, about 240 MB). The app offers the same button.
   ml status        Say whether bot comment scoring is set up
+  sandbox prune    Remove leftover Implement sandboxes (stop Limn first;
+                   --dry-run lists them)
 
 Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
@@ -262,10 +264,40 @@ async function runStatusCommand(argv: string[]): Promise<void> {
 // its three peers into ~/.limn/ai-runtime via `npm install --prefix` — plus, with `codex`, the Codex
 // CLI. `login codex` / `logout codex` sign Limn's OWN Codex home (~/.limn/codex) in and out; the
 // reader's own ~/.codex is never touched.
+// `limn ai clean-sessions [--dry-run]` — the one-off cleanup the server also runs once at boot
+// (ai/session-litter.ts): only the ~/.claude/projects folders named after Limn's data dir or its
+// temp dirs. Always scans (the boot's one-time flag does not stop it); a complete real run sets it.
+async function runCleanSessions(dryRun: boolean): Promise<void> {
+  const { cleanSessionLitter, defaultSessionCleanupPlaces, recordSessionCleanup } = await import(
+    './ai/session-litter.js'
+  );
+  const places = defaultSessionCleanupPlaces();
+  const r = await cleanSessionLitter(places, { dryRun });
+  if (r.missing) {
+    console.log(`Nothing to clean: ${places.projectsDir} does not exist.`);
+    return;
+  }
+  if (dryRun) {
+    for (const name of r.matched) console.log(name);
+    console.log(
+      `\n${r.matched.length} Limn session folders would be deleted from ${places.projectsDir}; ${r.kept} other folders are kept.`,
+    );
+    console.log(dim('Run without --dry-run to delete them.'));
+    return;
+  }
+  if (existsSync(places.dataDir)) recordSessionCleanup(places.dataDir, r);
+  console.log(
+    `Deleted ${r.removed} Limn session folders from ${places.projectsDir}; ${r.kept} other folders are kept.` +
+      (r.failed > 0 ? ` ${r.failed} could not be deleted.` : ''),
+  );
+  if (r.failed > 0) process.exit(1);
+}
+
 async function runAiCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   const target = argv[1];
-  const known = sub === 'install' || sub === 'status' || sub === 'login' || sub === 'logout';
+  const known =
+    sub === 'install' || sub === 'status' || sub === 'login' || sub === 'logout' || sub === 'clean-sessions';
   const targetOk =
     sub === 'install' ? target === undefined || target === 'claude' || target === 'codex'
     : sub === 'login' || sub === 'logout' ? target === 'codex'
@@ -279,6 +311,8 @@ Usage:
   limn ai status           Say whether it is set up
   limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
   limn ai logout codex     Sign it out
+  limn ai clean-sessions   Delete the session folders older Limn runs left in
+                           ~/.claude/projects (add --dry-run to list them first)
 
 Limn downloads Claude and Codex by itself the first time it starts
 (LIMN_AI_AUTO_INSTALL=false turns that off). Signing in is the only step.
@@ -296,6 +330,11 @@ used). Codex with an OpenAI API key is not available yet. Set LIMN_CODEX_PATH to
 use your installed codex program.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
+  }
+  if (sub === 'clean-sessions') {
+    await migrateDataDir();
+    await runCleanSessions(argv.includes('--dry-run'));
+    return;
   }
   if (process.env.LIMN_AI_DISABLED === 'true') {
     console.error('AI is turned off here (LIMN_AI_DISABLED=true).');
@@ -424,6 +463,40 @@ It runs on this machine. Nothing is sent anywhere to score a comment.
   }
 }
 
+// ── `limn sandbox prune [--dry-run]` — remove leftover sandbox containers ───────────────
+// The same sweep the server runs at boot (sandbox/runtime/index.ts): every container, network and
+// volume this Limn labelled (`limn.managed`). Run it with Limn stopped: a running session's sandbox is removed too.
+async function runSandboxCommand(argv: string[]): Promise<void> {
+  const sub = argv[0];
+  const dryRun = argv.includes('--dry-run');
+  if (sub !== 'prune' || argv.slice(1).some((a) => a !== '--dry-run')) {
+    console.log(`limn sandbox — the containers Implement runs in
+
+Usage:
+  limn sandbox prune [--dry-run]   Remove every leftover sandbox container, microVM, network, volume and image.
+                                   Stop Limn first: open sessions are removed too.
+`);
+    process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
+  }
+  // Every installed backend (Docker and microsandbox), whichever one sessions use.
+  const { sweepAllBackends } = await import('./sandbox/runtime/index.js');
+  const all = await sweepAllBackends([], { dryRun });
+  if (!all || all.swept.length === 0) {
+    console.error(all?.problems[0] ?? 'No container runtime answers.');
+    process.exit(1);
+  }
+  const r = all.result;
+  const names = [...r.containers, ...r.networks, ...r.volumes, ...r.images];
+  for (const n of names) console.log(n);
+  console.log(
+    names.length === 0
+      ? 'Nothing to remove.'
+      : `${dryRun ? 'Would remove' : 'Removed'} ${r.containers.length} containers, ${r.networks.length} networks, ${r.volumes.length} volumes and ${r.images.length} images.`,
+  );
+  for (const e of r.errors) console.error(e);
+  if (r.errors.length > 0) process.exit(1);
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
@@ -447,6 +520,10 @@ async function main(): Promise<void> {
   }
   if (argv[0] === 'ml') {
     await runMlCommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'sandbox') {
+    await runSandboxCommand(argv.slice(1));
     return;
   }
 

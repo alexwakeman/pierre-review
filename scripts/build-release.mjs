@@ -23,7 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -139,6 +139,13 @@ log('copying platform migrations + data → release/dist/platform');
 for (const sub of ['migrations', 'data']) {
   cpSync(join(platformSrc, sub), join(releaseDir, 'dist', 'platform', sub), { recursive: true });
 }
+
+// 6d. The sandbox image's Dockerfile → release/dist/sandbox-image (docs/SANDBOX.md § The image). The
+//     IMAGE is not in the package; this is its local-build fallback when the pinned pull fails, read
+//     by dist/sandbox/runtime/image.js from `dist/sandbox-image`.
+log('copying the sandbox image recipe → release/dist/sandbox-image');
+const sandboxImageSrc = join(backendDir, 'sandbox-image');
+cpSync(sandboxImageSrc, join(releaseDir, 'dist', 'sandbox-image'), { recursive: true });
 
 // 7. Generate release/package.json (version copied from backend; curated deps).
 log('generating release/package.json');
@@ -280,6 +287,36 @@ if (mlModels) {
   log('no apps/backend/ml-models.json — this release will not list a model to download');
 }
 
+// ---- The sandbox image pin (`limnSandboxImage`) ----
+//
+// The recipe (a hash of the Dockerfile + the Claude Code / Codex pins) and the build args, computed by
+// the COMPILED app module (dist/sandbox/runtime/image.js) — never a copy of its formula. When CI pushed
+// the image for this release it passes the repository + manifest-list DIGEST (release.yml, docs/RELEASE.md
+// § The sandbox image); the app then pulls by digest. Without them the field carries no pin and the app
+// builds the image locally (owner decision Q3). A pushed image of ANOTHER recipe is a bug: fail.
+const SANDBOX_IMAGE_FIELD = 'limnSandboxImage';
+const sandboxImageModule = await import(pathToFileURL(join(backendDist, 'sandbox', 'runtime', 'image.js')).href);
+if (sandboxImageModule.SANDBOX_IMAGE_MANIFEST_FIELD !== SANDBOX_IMAGE_FIELD) {
+  fail(`dist/sandbox/runtime/image.js reads '${sandboxImageModule.SANDBOX_IMAGE_MANIFEST_FIELD}', this script writes '${SANDBOX_IMAGE_FIELD}'`);
+}
+const sandboxBuildArgs = sandboxImageModule.imageBuildArgs(backendDir, join(backendDir, 'src'));
+if (!sandboxBuildArgs) fail('sandbox image: the Claude Code / Codex pins are not exact versions');
+const sandboxRecipe = sandboxImageModule.imageRecipe({ contextDir: sandboxImageSrc, buildArgs: sandboxBuildArgs });
+const sandboxImage = { recipe: sandboxRecipe.recipe, buildArgs: sandboxBuildArgs };
+{
+  const repository = process.env.LIMN_SANDBOX_IMAGE_REPOSITORY?.trim();
+  const digest = process.env.LIMN_SANDBOX_IMAGE_DIGEST?.trim();
+  const pushedRecipe = process.env.LIMN_SANDBOX_IMAGE_RECIPE?.trim();
+  if (repository && digest) {
+    if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`LIMN_SANDBOX_IMAGE_DIGEST is not a sha256 digest: ${digest}`);
+    if (pushedRecipe !== sandboxRecipe.recipe) fail(`the pushed sandbox image is recipe ${pushedRecipe}, this release is ${sandboxRecipe.recipe}`);
+    Object.assign(sandboxImage, { repository, tag: backendPkg.version, digest });
+    log(`sandbox image pinned: ${repository}@${digest}`);
+  } else {
+    log('no pushed sandbox image for this release — the app will build it locally on first use');
+  }
+}
+
 const manifest = {
   // Renamed from `pierre-review` (same release that made Claude Review and AI Fix free). The old
   // package gets a deprecation stub — scripts/deprecated-pierre-review/ — published by hand.
@@ -341,6 +378,8 @@ const manifest = {
   // Not dependency fields either: ml/runtime.ts reads them to install / download on first use.
   [ML_RUNTIME_FIELD]: mlRuntimePins,
   ...(mlModels ? { [ML_MODELS_FIELD]: mlModels } : {}),
+  // Not a dependency field: sandbox/runtime/image.ts reads it to pull (by digest) or build the image.
+  [SANDBOX_IMAGE_FIELD]: sandboxImage,
 };
 
 writeFileSync(
@@ -391,6 +430,9 @@ mustExist.push(
 // sibling in a release), so a missing file only shows when a Codex run starts.
 const CODEX_HELPER_ENTRIES = ['dist/ai/codex/workspace-mcp-main.js', 'dist/ai/codex/path-guard-hook-main.js'];
 mustExist.push(...CODEX_HELPER_ENTRIES);
+// The sandbox: the Dockerfile the local-build fallback reads, and the egress proxy's program, which runs
+// ALONE in the proxy container (node: built-ins only — asserted below by the app's own check).
+mustExist.push('dist/sandbox-image/Dockerfile', 'dist/sandbox-image/limn-svc', 'dist/sandbox-image/limn-svcd.cjs', 'dist/sandbox/proxy/server.js', 'dist/sandbox/runtime/image.js');
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
 }
@@ -439,6 +481,20 @@ for (const rel of mustExist) {
   if (hook.status !== 2 || !/Limn path guard/.test(hook.stderr ?? '')) {
     fail(`release path-guard hook did not deny a foreign MCP call (exit ${hook.status}): ${hook.stderr}`);
   }
+}
+
+// The egress proxy program loads from the release tree and is self-contained, and the written manifest
+// carries the image recipe the shipped Dockerfile hashes to.
+{
+  const { proxyProgramSource } = await import(pathToFileURL(join(releaseDir, 'dist', 'sandbox', 'proxy', 'source.js')).href);
+  try {
+    proxyProgramSource(join(releaseDir, 'dist', 'sandbox', 'proxy'));
+  } catch (e) {
+    fail(`release egress proxy program: ${e.message}`);
+  }
+  const written = JSON.parse(readFileSync(join(releaseDir, 'package.json'), 'utf8'))[SANDBOX_IMAGE_FIELD];
+  const shipped = sandboxImageModule.imageRecipe({ contextDir: join(releaseDir, 'dist', 'sandbox-image'), buildArgs: written?.buildArgs ?? null });
+  if (!shipped || shipped.recipe !== written.recipe) fail(`${SANDBOX_IMAGE_FIELD}.recipe does not match the shipped Dockerfile`);
 }
 
 // No .ts files anywhere under release/.
