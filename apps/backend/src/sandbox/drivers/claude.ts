@@ -55,7 +55,7 @@ export const CLAUDE_PERMISSION_MODE: Record<SandboxAgentMode, 'plan' | 'bypassPe
 };
 
 /** The `claude` argv inside the sandbox. Pure. */
-export function claudeSandboxArgv(o: Pick<SandboxAgentStartOptions, 'choice' | 'systemPromptFile' | 'systemPrompt' | 'addDirs' | 'mode' | 'maxTurns'>): string[] {
+export function claudeSandboxArgv(o: Pick<SandboxAgentStartOptions, 'choice' | 'systemPromptFile' | 'systemPrompt' | 'addDirs' | 'mode' | 'maxTurns' | 'maxBudgetUsd'>): string[] {
   const argv = [
     'claude',
     '-p',
@@ -73,6 +73,7 @@ export function claudeSandboxArgv(o: Pick<SandboxAgentStartOptions, 'choice' | '
     '--no-session-persistence',
     '--disallowedTools', CLAUDE_SANDBOX_DISALLOWED_TOOLS.join(','),
   ];
+  if (o.maxBudgetUsd != null && Number.isFinite(o.maxBudgetUsd) && o.maxBudgetUsd > 0) argv.push('--max-budget-usd', String(o.maxBudgetUsd));
   if (o.systemPromptFile) argv.push('--append-system-prompt-file', o.systemPromptFile);
   else if (o.systemPrompt) argv.push('--append-system-prompt', o.systemPrompt);
   for (const d of o.addDirs ?? []) argv.push('--add-dir', d);
@@ -177,6 +178,7 @@ export async function startClaudeDriver(o: SandboxAgentStartOptions): Promise<Sa
             inputTokens: r.usage?.inputTokens ?? null,
             outputTokens: r.usage?.outputTokens ?? null,
             repoId: o.usage.repoId ?? null,
+            ...(o.usage.prId != null ? { prId: o.usage.prId } : {}),
           });
         }
         const end: SandboxTurnEnd = { turn, mode: turnMode, outcome: r.outcome, usage: r.usage, text: r.text, changedInChat: [] };

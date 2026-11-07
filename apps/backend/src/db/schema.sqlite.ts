@@ -2155,10 +2155,23 @@ export const aiFixes = sqliteTable(
     // 0148. "Run tests" (coding/checks/): JSON AiFixChecks — the names the reader ticked (written at
     // insert, so a plan's build runs the same), then what ran and how it went. NULL = no tests asked.
     checks: text('checks'),
+    // 0177 — THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions). NULL session_phase = a row of
+    // the removed shell-less fixer (history). `status` is DERIVED from the phase (`aiFixStatusForPhase`).
+    sessionPhase: text('session_phase'),
+    sandboxRef: text('sandbox_ref'),
+    agentRef: text('agent_ref'),
+    runtime: text('runtime'),
+    sessionJson: text('session_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
+    // 1 = an auto fix / dependency automation's fix (closes after its one build turn).
+    unattended: integer('unattended', { mode: 'boolean' }),
+    // The workspace whose Settings → Sandbox booted it (Resume reuses it). No FK.
+    workspaceId: integer('workspace_id'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
     statusIdx: index('af_account_status').on(t.accountId, t.status),
+    sessionPhaseIdx: index('af_account_session_phase').on(t.accountId, t.sessionPhase),
   }),
 );
 

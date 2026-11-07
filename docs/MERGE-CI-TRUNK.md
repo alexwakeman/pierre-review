@@ -1121,25 +1121,38 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     the live re-read shows the synced head, and — ⚠ the failure PROVEN LIVE: one read of the head's
     checks (`readCiInputs`, the CI review's own reader, Limn's lines left out) must show a failing
     check. Then the SPEND GATE (`automaticRunAllowed`): over ⇒ skipped, never queued, nothing claimed.
+  - ⚠ **THE SANDBOX** (AI Fix runs ONLY as a sandboxed session, docs/SANDBOX.md § AI Fix sessions):
+    `deps.sandbox` (`fixSandboxReadiness`: a runtime, a free session, the free build slot; never
+    reserves; the runtime's answer reused 30 s) is asked twice — in the sweep BEFORE the live PR read,
+    and in `startAiFix` after the failure is proven and BEFORE the claim. **No runtime** ⇒ ONE
+    `skipped` row with no teammate, detail "No container runtime on this computer." (`recordSandboxSkip`,
+    refreshed only when the sentence changes): no claim, no `limn/deps` line, no cap use, and a later
+    tick at a head already so recorded reads nothing; a claim takes the row over once a runtime exists.
+    **Busy** ⇒ nothing written or read; a later tick decides. A start that loses the race AFTER the
+    claim (`too_many` / `build_busy` / `over_budget`) gives the claim back ("didn't start"); `no_runtime`
+    then also writes the skip row.
   - **CONFLICTS FOLD INTO THE EXISTING STEPS**: with this switch on, a conflicting PR runs the SAME
     conflict steps as "Resolve their conflicts" (ask the bot to rebase, wait, then ONE `ai_resolve`
     run) — never a second resolver. The panel says so.
   - **THE RUN**: AI Fix's own `startFix` with seed `plain` (trigger `auto`, the default provider): the
     instruction (`dependencyFixInstruction`) names the bot and the update, asks for the smallest
     change that makes CI pass without reverting the update (a companion/peer dependency, a lock file,
-    a type break), and carries each failing check's log EXCERPT fenced as untrusted data. Same queue,
-    slot, worktree, no-shell tool list and path guard as any fix. `auto-push.ts` never pushes it (not
+    a type break), and carries each failing check's log EXCERPT fenced as untrusted data. An
+    UNATTENDED session: the PR repo at its head in the workspace mirror, ONE build turn (the agent may
+    run the repo's tests; Claude capped by `--max-budget-usd` `AI_FIX_BUDGET_USD`), then the session
+    closes; one build per computer, shared with Implement. `auto-push.ts` never pushes it (not
     the reader's own PR); this file waits for it (`watchFixAndPush`, ≤ 90 min) and pushes through
     AI Fix's own `pushFix(target 'existing')` — write access re-checked, the branch must still be the
     fix's base, NEVER forced. ⚠ Pushing to Dependabot's or Renovate's branch means the bot stops
     rebasing that PR by itself (both treat a foreign commit as "edited"); a new bump closes it.
   - **RECORDED TRUE**: `running` while it works ("Fixing CI with AI"); `done` with the PUSHED commit
     as `result_sha` ("Fixed with Claude and pushed 1a2b3c4"); `failed` with the reason (the run
-    failed, it changed nothing, a person CANCELLED it in the AI Fix tab — their cancel wins, never
-    retried — or "Not pushed: …" with AI Fix's own push message). ⚠ The pushed head must go GREEN
+    failed, it changed nothing, a person CANCELLED it in the AI Fix tab — Stop closes an unattended
+    session as `cancelled`; their cancel wins, never retried — or "Not pushed: …" with AI Fix's own push message). ⚠ The pushed head must go GREEN
     again: `aiPushedHeads` covers `ai_fix` as well as `ai_resolve`.
   - ⚠ **THE CAP**: ONE AI fix per head, and at most `DEPENDENCY_AI_FIX_DAILY_CAP` (2) AI runs — CI
-    fixes and conflict runs together — per PR in any rolling 24 hours (rows not `skipped`).
+    fixes and conflict runs together — per PR in any rolling 24 hours (rows not `skipped`, so a
+    teammate's hold and a no-runtime skip never count).
 - **TEAM CLAIMS FOR DEPENDENCY WORK** (`merge/deps-claim.ts`, 2026-11-03; modelled on
   docs/CLAUDE-REVIEW.md § Team claims). When a teammate also runs Limn with these switches on the same
   repos, EVERY automated action — approve, rebase request, AI conflict run, AI fix, arming the merge —

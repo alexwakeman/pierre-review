@@ -32,6 +32,8 @@ const SKIP_TEXT: Record<ClaudeAutoFixSkipReason, string> = {
   not_started: 'the fixer could not start',
   off: 'auto AI Fix is off for this workspace',
   over_budget: 'your AI spend budget is reached',
+  no_sandbox: 'no container runtime is running on this computer',
+  sandbox_busy: 'the sandbox was busy',
 };
 
 /** One line for the Claude Review tab, or null when there is nothing to say. */

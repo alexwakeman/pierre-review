@@ -89,8 +89,13 @@ describe('the provider seam', () => {
       const viaRunProvider = /runProvider\(/.test(src) && /\bprovider\.runAgent\(/.test(src);
       expect(direct || once || viaNamed || viaRunProvider, `${f} must call the provider`).toBe(true);
     }
-    // The resolver runs through the fixer's run core (coding/agent.ts runAgentInWorktree).
+    // The resolver runs through the host-side worktree run (coding/agent.ts runAgentInWorktree) — its ONLY
+    // caller now: AI Fix and Implement run in the sandbox (their drivers start the CLI, never a provider).
     expect(code(readFileSync(join(SRC, 'coding/ai-resolve/run.ts'), 'utf8'))).toMatch(/runAgentInWorktree\(/);
+    for (const f of ['coding/ai-fix/manager.ts', 'sandbox/session/fix.ts', 'coding/ai-fix/auto-fix.ts', 'merge/dependency-automation.ts']) {
+      const src = code(readFileSync(join(SRC, f), 'utf8'));
+      expect(src, f).not.toMatch(/runAgentInWorktree|coding\/agent\.js|generateFix|generatePlan/);
+    }
     // The platform's ctx.llm.complete IS cheapComplete, which is the provider's complete.
     expect(code(readFileSync(join(SRC, 'platform/context.ts'), 'utf8'))).toMatch(/complete: cheapComplete,/);
   });

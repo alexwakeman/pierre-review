@@ -186,10 +186,14 @@ describe('the wiring', () => {
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(
       /<AiRunGate kind="review_chat" followUp provider=\{chatProvider\}>/,
     );
-    const plan = read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'));
-    expect(plan).toMatch(/<AiRunGate kind="plan" auth=\{auth\} meter=\{false\} followUp provider=\{passProvider\}>/);
-    expect(plan).toMatch(/<AiRunGate kind="fix" auth=\{auth\} followUp provider=\{buildProvider\}>/);
-    expect(plan).not.toMatch(/anyProvider/);
+    // The workspace session (shared by Implement and AI Fix): every press after the start is a
+    // FOLLOW-UP on the session's provider, its kind named by the surface's words.
+    const shared = read(join(root, 'components', 'sandbox', 'SessionView.tsx'));
+    expect(shared).toMatch(/<AiRunGate kind=\{c\.words\.gate\.chat\} followUp provider=\{provider\} meter=\{false\}>/);
+    expect(shared).toMatch(/<AiRunGate kind=\{c\.words\.gate\.build\} followUp provider=\{provider\}>/);
+    expect(shared).not.toMatch(/anyProvider/);
+    expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(/gate: \{ chat: 'plan', build: 'fix' \}/);
+    expect(read(join(root, 'components', 'StoryBuild', 'SessionView.tsx'))).toMatch(/gate: \{ chat: 'story_plan', build: 'story_build' \}/);
   });
 
   it('no board button starts a run off the top-level `ready`: each asks its own kind', () => {
@@ -203,19 +207,15 @@ describe('the wiring', () => {
     expect(read(join(act, 'ClaudeReviewCell.tsx'))).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'review'\)/);
   });
 
-  it('the plan panel gates each button on what it runs; Discard runs no model and is never gated', () => {
-    const src = read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'));
-    const planGate = src.slice(src.indexOf('<AiRunGate kind="plan"'), src.indexOf('</AiRunGate>'));
-    // The message box + "Update plan" is the shared PlanChat piece (also the story build's plan chat).
-    expect(planGate).toMatch(/<PlanMessageBox\b/);
-    expect(read(join(root, 'components', 'AiFix', 'PlanChat.tsx'))).toMatch(/Update plan/);
-    expect(planGate).not.toMatch(/Approve and build|Discard plan/);
-    const fixGate = src.slice(src.indexOf('<AiRunGate kind="fix"'));
-    expect(fixGate.slice(0, fixGate.indexOf('</AiRunGate>'))).toMatch(/Approve and build/);
-    // Discard sits after every gate has closed.
-    expect(src.lastIndexOf('</AiRunGate>')).toBeLessThan(src.lastIndexOf('Discard plan'));
-    // AI Fix offers "Plan first" only when the PICKED provider can run a plan.
+  it('the AI Fix session gates each press on what it runs; Discard runs no model and is never gated', () => {
     const tab = read(join(root, 'components', 'AiFixTab.tsx'));
+    // Discard is its own button, passed to the session's composer row outside every gate.
+    const discard = tab.slice(tab.indexOf('function DiscardFixButton'));
+    expect(discard).not.toMatch(/AiRunGate/);
+    expect(tab).toMatch(/composerExtra=\{[^}]*<DiscardFixButton/);
+    // The plan panel is history now: nothing in it runs a model.
+    expect(read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'))).not.toMatch(/AiRunGate|useMutation|mutate\(/);
+    // AI Fix offers "Plan first" only when the PICKED provider can run a plan.
     expect(tab).toMatch(/const canPlan = aiProviderReadyFor\(me, modelPick\.chosen\.provider, 'plan'\)/);
     expect(tab).toMatch(/const planFirst = planFirstPicked && canPlan/);
     expect(tab).toMatch(/\{canPlan && \(\s*<label/);
@@ -224,7 +224,9 @@ describe('the wiring', () => {
   it('every gate names its run kind (a gate with none reads the strictest, "any agent" answer)', () => {
     for (const f of files) {
       for (const m of read(f).matchAll(/<AiRunGate\b[^>]*>/g)) {
-        expect(m[0], f).toMatch(/ kind="[a-z_]+"/);
+        // The shared session view names it through its surface's words (pinned above).
+        if (f.endsWith(join('sandbox', 'SessionView.tsx'))) expect(m[0], f).toMatch(/ kind=\{c\.words\.gate\.(chat|build)\}/);
+        else expect(m[0], f).toMatch(/ kind="[a-z_]+"/);
       }
     }
   });

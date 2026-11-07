@@ -24,7 +24,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import { arch as osArch, cpus as osCpus, homedir, platform as osPlatform, totalmem } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { findOnPath } from '../../coding/checks/sandbox.js';
+import { findOnPath } from './host-env.js';
 import { PROXY_CONFIG_ENV } from '../proxy/server.js';
 import { resolveDataDir } from '../../data-dir.js';
 import { collect, createCliRunner, EventQueue, type CliRunner } from './cli.js';

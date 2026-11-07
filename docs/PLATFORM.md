@@ -1853,61 +1853,22 @@ severity mix it shows is over that same loaded sample, not a population figure.
   client `setQueryData` a "No summary yet" box over the report it was showing, which the next
   GET refetch resurrected — a flicker whose CTA invited repeating the same no-op.
 
-### The fix agent has no shell
+### The fix agent has no shell — SUPERSEDED 2026-11-07
 
-`Bash` is gone from the fixer's tool surface. `FIX_TOOLS` (`apps/backend/src/coding/agent.ts`) is
-Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, and `DISALLOWED_TOOLS` is
-`['Bash','NotebookEdit']` — the same call Claude Review made (the comment above `WORKTREE_TOOLS` in
-`apps/backend/src/review/agent.ts` is the long version of the argument, and this is the identical
-input shape). The fixer reads and edits. It
-installs nothing, builds nothing and runs no tests — unless the reader ticks **Run tests**
-(2026-10-30): then Limn installs and runs the project's own declared checks in an OS sandbox, and the
-agent may ask for one by NAME (`run_check`), still with no shell ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
-§ Run tests, [SECURITY.md](SECURITY.md) § Sandboxed checks). The "speed and cost" argument below is
-answered there: a wall-clock timeout per check, capped output, Limn's own final run is what the row
-records, and a check never sees a token.
+History. From 2026-08 to 2026-11 the fixer ran on the host with NO shell (`FIX_TOOLS` = Read/Glob/Grep +
+Write/Edit/MultiEdit + `submit_fix`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']`): its input is
+attacker-authored and it ran under `bypassPermissions`, so a shell would have been remote code execution
+on the reader's machine, and the blocklist it replaced (`Bash(rm *)`, `Bash(git push *)` …) was never a
+boundary. The SPA said "Not built or tested here." beside every diff; "Run tests" (2026-10-30) later ran
+declared checks in an OS sandbox through one named tool.
 
-**Why.** Two reasons, either sufficient.
-
-- **Safety.** The run is `permissionMode:'bypassPermissions'` with `settingSources:[]`, so nothing
-  else was constraining the shell — and its entire input (title, description, diff, and on the
-  `'comments'` seed nothing BUT review comments) is written by whoever opened the PR. The blocklist
-  that stood in for a boundary was `Bash(rm *)`, `Bash(sudo *)`, `Bash(git push *)`,
-  `Bash(git commit *)`, `Bash(git config *)`: five literal prefixes, silent on `curl -d @~/.ssh/…`
-  and every other spelling. *A blocklist cannot enumerate the badness of a shell.*
-- **Speed and cost.** The builds and tests it ran were read by NOTHING: `runCodingAgent`'s success
-  criterion is a captured diff under `aiFixPatchMaxBytes`, `launchFix` marks the row succeeded the
-  moment the seam returns un-aborted, and no column on the fix row records a verification. The bill
-  was real — `aiFixMaxTurns` (40) and `aiFixBudgetUsd` ($5) are the only stoppers, there is **no
-  wall-clock timeout**, a suite's output returns as a `tool_result` billed as input on the next
-  turn, and `MAX_CONCURRENT = 1` (then the plugin's AI Fix manager) was ONE global slot, so one
-  account's test run queued every other account's fix behind it.
-
-⚠ **THOSE `Bash(git …)` ENTRIES WERE THE MECHANICAL HALF OF "THE HOST OWNS THE COMMIT".** The rule
-is unchanged and now strictly harder — a denied shell cannot run git at all — but the grep-able
-evidence is gone, so it is written out in the comment above `FIX_TOOLS` and still SAID in the
-prompt (`WORKTREE_RULES`' "Do NOT commit, push, create branches", pinned by a test). The agent
-leaves edits in the working tree, `captureWorktreeDiff` makes a patch, `coding/git-ops.ts` commits
-and pushes it after the reader picks a target.
-
-⚠ **THE PROMPT AND THE TOOL LIST CHANGE IN THE SAME COMMIT.** Removing the tool alone would leave
-the prompt offering a shell, and every refused call costs one of 40 turns and a slice of the $3.
-The text is `WORKTREE_RULES` (now core `coding/ai-fix/prompts.ts`), ONE constant interpolated into
-every fix prompt so they cannot drift. (The second text, the old CI-analysis capability sentence, went
-with the CI analysis.) `apps/backend/src/coding/tool-surface.test.ts` pins the tool lists and
-mutation-tests its own scan.
-
-**What the reader is told.** One templated line beside the diff, above the Push controls:
-*"Not built or tested here."* It promises no CI: whole repos here report no checks at all, so "CI
-will run on push" would invent the verification the sentence exists to deny. ⚠ **Not in the model's
-summary** — a product fact is not model prose. Nothing had to be
-retracted: the fixer never made a verification claim on screen. (The `verifying` phase this section
-once warned about went with the rebase path below — its only emitter and its SPA label are gone.)
-
-**What this costs, honestly.** A fix that wanted a codegen step, a formatter, or `git log` for
-context must now write the edit by hand or decline. Accepted, for the reason Claude Review accepted
-it. The way back is a container/VM boundary, or `canUseTool` under a non-bypass permission mode —
-**not** re-adding `Bash` with a longer blocklist.
+That section ended: "The way back is a container/VM boundary … not re-adding `Bash` with a longer
+blocklist." That is what happened. Every AI Fix run is now a sandboxed workspace session with a full
+shell inside the container ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, [SECURITY.md](SECURITY.md) §
+Workspace sessions); the shell-less fixer, its prompts, "Run tests" and the "Not built or tested here."
+line are removed. "The host owns the commit and the push" is unchanged: the patch leaves the sandbox and
+the HOST pushes it. The host-side worktree run (`coding/agent.ts`) is left only for Resolve with Claude,
+which is read-only and still has no shell (`coding/tool-surface.test.ts`).
 
 ### AI Fix pushes as-is (trunk reconciliation removed)
 

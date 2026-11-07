@@ -22,7 +22,7 @@ export function SandboxRuntimeSection(): JSX.Element {
   return (
     <SectionShell
       title="Container runtime"
-      desc="Implement runs the AI in a container on this computer."
+      desc="Implement and AI Fix run the AI in a container on this computer."
       info={
         <InfoButton title="Container runtime" width="lg">
           <div className="space-y-2">

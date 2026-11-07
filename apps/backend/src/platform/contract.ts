@@ -4,7 +4,6 @@ import type {
   FastifyBaseLogger,
 } from 'fastify';
 import type {
-  AiFixChecks,
   BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
@@ -45,32 +44,8 @@ export type { AiUsageRecord, CompareDiffResult, PrReviewCommentHunks, ConflictSe
 
 
 // ---- AI Fix seams (github + coding) -------------------------------------------
-// The generic, security-sensitive infrastructure for the Pro "AI Fix" feature lives
-// in CORE (per-account tokens, the write-capable agent, git push) and is exposed to
-// the plugin through these two seams; the plugin supplies only prompts + model and
-// owns the product workflow. Inert in OSS (nothing calls it), exactly like llm.
-
-// Progress emitted while a fix run goes (mirrors ClaudeReviewProgress). The plugin maps it
-// straight onto AiFixProgress on the wire, so the two phase unions are the same five members.
-export interface CodingProgress {
-  phase:
-    | 'fetching_diff'
-    | 'cloning'
-    | 'preparing_checks'
-    | 'fixing'
-    | 'running_checks'
-    | 'capturing'
-    | 'persisting';
-  message?: string;
-  recentActivity?: string[];
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-    estCostUsd: number;
-  };
-}
+// The generic, security-sensitive infrastructure behind AI Fix's push (per-account tokens, git push).
+// The agent itself is a sandboxed workspace session (sandbox/session/fix.ts).
 
 // Live PR head/fork metadata (fetched per-account from the GitHub API).
 export interface GithubPrHeadInfo {
@@ -82,66 +57,12 @@ export interface GithubPrHeadInfo {
   baseRef: string;
 }
 
-export interface GenerateFixArgs {
-  accountId: number;
-  owner: string;
-  name: string;
-  prNumber: number;
-  // The commit the agent works from (the live PR head at generate time).
-  baseSha: string;
-  model: string;
-  systemPrompt?: string;
-  prompt: string;
-  maxTurns?: number;
-  maxBudgetUsd?: number;
-  abortController: AbortController;
-  onProgress: (p: CodingProgress) => void;
-  /** The PR, for the ledger row a provider that records its own usage (Codex) writes. */
-  prId?: number;
-  /** The provider the prompt was worded for (ai/prompt-tools.ts). Absent ⇒ the active one. */
-  provider?: 'claude' | 'codex';
-  /** Codex-only run knobs (the opt-in live test's effort). */
-  codex?: { effort?: string; timeoutMs?: number };
-  /** The run's effort (ai/effort.ts `agenticRunEffort`, decided by the manager). Absent ⇒ Default. */
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  /**
-   * "Run tests": the check names the reader ticked (coding/checks/). Absent / empty ⇒ none — the run
-   * is exactly what it was before.
-   */
-  checks?: string[];
-}
-
 // The fix agent's self-report, as the `submit_fix` tool received it (UNVALIDATED — the AI Fix
 // manager checks refs against the set the run was shown and clips text before storing it). Self-
 // report only: the changeset still comes from git.
 export interface FixAgentReport {
   changes?: Array<{ path: string; summary: string; refs?: string[] }>;
   unaddressed?: Array<{ ref: string; reason: string }>;
-}
-
-export interface GenerateFixResult {
-  summary: string;
-  commitMessage: string;
-  // The per-change report and the items deliberately not fixed. Absent when the agent never
-  // called submit_fix (or reported neither list).
-  report?: FixAgentReport;
-  // Unified-diff patch (git add -A + git diff --cached --binary — includes new files).
-  patch: string;
-  filesChanged: string[];
-  baseSha: string;
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-  };
-  costUsd: number | null;
-  numTurns: number | null;
-  aborted: boolean;
-  /** True ⇒ the provider already wrote this run's AI-usage ledger row (Codex): write no second one. */
-  usageRecorded?: boolean;
-  /** "Run tests": what ran and how it went. Absent when no tests were asked for. */
-  checks?: AiFixChecks;
 }
 
 // Where a completed fix is pushed. 'existing' pushes onto the PR's own head branch

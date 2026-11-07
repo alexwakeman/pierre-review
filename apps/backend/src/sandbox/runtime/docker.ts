@@ -5,7 +5,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { findOnPath } from '../../coding/checks/sandbox.js';
+import { findOnPath } from './host-env.js';
 import { collect, createCliRunner, type CliRunner } from './cli.js';
 import { bridgeNetworkFor, daemonProblem, licenceNoteFor, notInstalled, parseInfo } from './detect.js';
 import { DockerfileTap } from './dockerfile.js';

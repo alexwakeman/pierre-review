@@ -3,6 +3,8 @@ import type { TicketComment } from './ticket-comments.js';
 import type { CiFlakySummary, FlakyCheck } from './flaky-checks.js';
 import type { PrBranchStack, PrCriteriaCheck } from './pr-chips.js';
 import type { ClaudeThreadStillOpen } from './still-open.js';
+import type { StoryBuildSession } from './sandbox-session.js';
+import type { AiFixLeftOutRepo } from './ai-fix-session.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
@@ -8057,7 +8059,7 @@ export type ClaudeAutoFixSkipReason =
   | 'nothing_to_fix'
   // AUTO_FIX_DAILY_CAP auto fixes already started on this PR in the last 24 hours.
   | 'cap'
-  // A fix for this PR is queued or running.
+  // A fix session holds this PR (booting, building, or a Plan first open).
   | 'fix_in_progress'
   // A finished fix for this head is waiting to be pushed.
   | 'fix_waiting'
@@ -8065,8 +8067,13 @@ export type ClaudeAutoFixSkipReason =
   | 'already_tried'
   // The PR moved on after the review; the next review will decide.
   | 'head_moved'
-  // The fixer refused to start (no Claude credential, busy queue, review gone…).
+  // The fixer refused to start (no AI sign-in, review gone…).
   | 'not_started'
+  // No container runtime on this computer: AI Fix runs only in the sandbox (docs/SANDBOX.md).
+  | 'no_sandbox'
+  // Every sandbox session is taken, or another session is building (one build per computer). Never
+  // queued: the next auto review decides again.
+  | 'sandbox_busy'
   // Auto AI Fix is switched off for this PR's workspace (`WorkspaceAutoReviewSettings.autoFixEnabled`).
   | 'off'
   // The Claude spend budget is reached (ai-budget.ts); automatic runs are paused.
@@ -9337,50 +9344,18 @@ export interface AiFixChangeReport {
 export type AiFixPhase =
   | 'fetching_diff'
   | 'cloning'
-  // "Run tests": finding the sandbox, asking Docker, installing dependencies.
-  | 'preparing_checks'
   | 'fixing'
-  // "Run tests": Limn's own run of the chosen checks and the commit hook, after the agent.
-  | 'running_checks'
   | 'capturing'
   | 'persisting'
-  // A plan-mode pass (read-only): the first plan or a re-plan after a chat message.
+  // A Plan first session's chat turn.
   | 'planning';
 
-// ---- "Run tests" (docs/CLAUDE-REVIEW.md § AI Fix "Run tests"; docs/SECURITY.md § Sandboxed checks) ----
-// A manual fix may run the project's OWN declared checks (package.json scripts, Makefile targets,
-// pytest, cargo test, go test, Gradle, Maven) in an OS sandbox: the agent through a `run_check` tool
-// that takes a NAME only, then Limn once more after the agent, plus the commit with the pre-commit
-// hook enabled. The agent still has no shell.
+// ---- "Run tests" — REMOVED 2026-11 (tests run inside the sandboxed fix session now) ----
+// Rows of the removed shell-less fixer may still carry what it ran (`ai_fixes.checks`); the AI Fix tab
+// shows them read-only. Nothing writes these shapes any more.
 
 export type AiFixCheckKind = 'test' | 'lint' | 'typecheck' | 'check' | 'hook';
 export type AiFixCheckStatus = 'passed' | 'failed' | 'timed_out' | 'skipped' | 'error';
-
-// One check the repository declares, for the picker (`GET /api/pro/prs/:id/ai-fix/checks`).
-export interface AiFixCheckOption {
-  // What the reader ticks and the agent names: `test`, `lint:types`, `pre-commit hook` …
-  name: string;
-  kind: AiFixCheckKind;
-  // The argv, joined for display.
-  command: string;
-  // Where it is declared: `package.json script "test"`.
-  source: string;
-  // Ticked on open (test, lint, typecheck; the commit hook).
-  defaultOn: boolean;
-  needsDocker: boolean;
-  // Why it can never run (a script that publishes, starts containers …), or null.
-  refused: string | null;
-}
-
-export interface AiFixChecksPreview {
-  checks: AiFixCheckOption[];
-  // The machine's sandbox: macOS Seatbelt, Linux bubblewrap, or none.
-  sandbox: 'seatbelt' | 'bwrap' | 'none';
-  // One sentence when tests cannot run here at all (no sandbox and not allowed), else null.
-  unavailable: string | null;
-  // LIMN_CHECKS_ALLOW_UNSANDBOXED is on and there is no sandbox: tests would run without one.
-  unsandboxed: boolean;
-}
 
 export interface AiFixCheckResult {
   name: string;
@@ -9550,6 +9525,14 @@ export interface AiFix {
   // "Run tests": what ran and how it went. null when the reader did not ask for tests (every auto
   // fix, every older row). Optional: an older server omits it.
   checks?: AiFixChecks | null;
+  // THE WORKSPACE SESSION the fix ran in (docs/SANDBOX.md § AI Fix sessions): boot steps, the
+  // conversation, repositories, services, network and spend. null on a row of the removed shell-less
+  // fixer (history). Optional: an older server omits it.
+  session?: StoryBuildSession | null;
+  // Repositories the agent edited that AI Fix does not push (only the PR's repository is pushed).
+  leftOut?: AiFixLeftOutRepo[];
+  // An unattended run (an auto fix, dependency automation's fix). Optional: older rows omit it.
+  unattended?: boolean;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -9638,9 +9621,6 @@ export interface GenerateFixBody {
   // include. Absent ⇒ the server's defaults (`defaultIncluded`). An unknown key is ignored; a list
   // selecting nothing ⇒ 409 NothingToFix. The budget is applied AFTER selection.
   include?: string[];
-  // "Run tests": the check names to run (`AiFixCheckOption.name`). Absent / empty ⇒ no tests, as
-  // before. Names the repository does not declare at the fix's commit are skipped, never run.
-  checks?: string[];
 }
 
 // ---- The fix picker: what a review-seeded fix would include (before a manual fix starts) ----

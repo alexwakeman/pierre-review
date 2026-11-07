@@ -34,6 +34,10 @@ Nothing is pushed, posted or written to the tracker before the reader presses a 
 runtime, the tab says what is missing in one line with "How to set up" (owner decision Q2: there is no
 fallback to the removed shell-less agents).
 
+The session machine (caps, the ONE build slot, boot, idle close, stream, restart reconcile, Resume) is
+shared with AI Fix, which is its second subject (docs/SANDBOX.md § AI Fix sessions): the two features
+share the machine's open sessions and its one build turn at a time.
+
 ## Owner decisions
 
 From 2026-10-30, still in force:

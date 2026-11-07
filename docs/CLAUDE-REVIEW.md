@@ -94,8 +94,8 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
     PR, the optional user stories, the previous review's findings and the other reviewers' open
     threads, nothing about the reader.
   - ⚠ **They take ONE context argument, `AgentContext`** (`review/agent-context.ts`), built by
-    `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.generateFix` /
-    `applyAndPush`, `ctx.github.*`, `ctx.db` / `ctx.schema`.
+    `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.applyAndPush`
+    (AI Fix's push; the fixer itself left with the sandbox), `ctx.github.*`, `ctx.db` / `ctx.schema`.
     It is not `ProContext` (the platform's context): those seams were DELETED from that contract. The argument stays
     because the tests pass a fake one and the queues carry it per item. Every SDK-bearing module is
     still reached through a lazy `await import()` inside the member that runs it.
@@ -433,7 +433,7 @@ size, cache reads). It never runs a model and never starts the usage probe.
   `complete`). `/api/me` carries the map as `ai.kinds`, and Codex's own answers as
   `ai.providers.codex.kinds` whichever provider is active. Every `AiRunGate` names its `kind`.
 - **Prompts.** Claude's prompts are byte-identical to before the seam (`prompt-golden.json`,
-  `tickets-claude-prompts.json`, `no-shell.test.ts`). Codex wording is made in two ways: tool
+  `tickets-claude-prompts.json`; the fixer's `no-shell.test.ts` went with the shell-less fixer). Codex wording is made in two ways: tool
   references marked `{Read}` / `{submit_x}` and rendered per provider by `ai/prompt-tools.ts`
   (Codex gets `read_file`, `list_files`, `search`, `apply_patch`, "your final JSON answer"), and
   whole-sentence swaps in the finished prompt (`review/codex-wording.ts`, tested so no Claude-only
@@ -3969,11 +3969,29 @@ answers with ONE CARD PER PIN (what it means, why it matters, where, what would 
 
 ## AI Fix (the agentic fixer)
 
-CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
-`routes.ts`, `review-seed.ts`, `pr-context.ts`, `prompts.ts`, `persist.ts`; the agent itself is
-`coding/agent.ts`). Its table `ai_fixes` is core since migration `0074`; `trigger`,
-`review_items` and `change_report` since `0078`. (The one-shot AI PR summary was removed
-2026-10-18.)
+CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`, `routes.ts`, `review-seed.ts`,
+`pr-context.ts`, `persist.ts`, `push.ts`, `auto-fix.ts`, `auto-push.ts`). Its table `ai_fixes` is core
+since migration `0074`; `trigger`, `review_items` and `change_report` since `0078`; the session columns
+since `0177`. (The one-shot AI PR summary was removed 2026-10-18.)
+
+- **EVERY RUN IS A SANDBOXED WORKSPACE SESSION** (2026-11-07; `sandbox/session/fix.ts`, the mechanics in
+  [SANDBOX.md](SANDBOX.md) § AI Fix sessions): manual, Plan first, the unattended AUTO FIX and dependency
+  automation's fix, on Claude Code or Codex (the run choice / `activeProviderId`). The whole workspace is
+  mirrored at the reader's layout (memories as in Implement); the PR's repository is checked out at the
+  PR's head sha and is the ONLY one pushed — to the PR's own branch, as before. Edits in other
+  repositories are listed ("left out") and never stored. The agent has a shell INSIDE the sandbox and
+  runs the repository's own tests itself (`limn-svc` for services, as in Implement). The shell-less
+  fixer (`coding/agent.ts runCodingAgent` / `runPlanAgent`, its prompts, `no-shell.test.ts`, "Run
+  tests") is REMOVED. ⚠ **NEVER QUEUED**: no runtime ⇒ `409 NoRuntime` and no row (the tab shows ONE
+  line and "How to set up", as Implement does); no free session ⇒ `409 TooManySessions`; another session
+  building ⇒ `409 BuildBusy` (AI Fix and Implement share the two sessions and the ONE build slot). The
+  unattended paths SKIP with a recorded reason (below; docs/MERGE-CI-TRUNK.md).
+- **A MANUAL FIX RUNS AT ONCE.** Start boots the session and starts the fix in build mode; the reader
+  watches it live (the shared `components/sandbox/SessionView.tsx`), can **Stop** (the turn stops, the
+  session stays) and can send follow-up instructions into the SAME session (`POST
+  /api/pro/ai-fixes/:fixId/message`; each is one more build turn and the agent rewrites the report for the
+  whole change) before **Push**. Push ends the session; **Discard** closes it unpushed; **Resume** boots
+  a closed, unpushed fix again with its patch put back.
 
 - **The paths kept their historical `/api/pro/` prefix** — `GET|POST /api/pro/prs/:id/ai-fix`,
   `…/ai-fix/status`, `…/ai-fix/stream`, `…/ai-fix/cancel`, `GET /api/pro/ai-fixes/:fixId`,
@@ -4029,20 +4047,26 @@ CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
   blockers first, nits last; the first item always); the rest are NAMED in the prompt as left out
   and stored `included: false` — never silently dropped. A review with nothing to fix is refused
   (`409 NothingToFix`) before GitHub is asked anything.
-- **THE PER-CHANGE REPORT.** `submit_fix` takes `changes: [{path, summary, refs}]` (one per changed
-  file, 1–3 sentences) and `unaddressed: [{ref, reason}]`. `normalizeChangeReport` validates it on
-  save: a ref the run was not SHOWN is dropped, a file not in the captured git diff is dropped (the
+- **THE PER-CHANGE REPORT** (`sandbox/workspace/fix-report.ts`). The agent writes ONE JSON FILE,
+  `<root>/.limn/fix-report.json`, in the `submit_fix` shape (`coding/schema.ts`): `summary`,
+  `commitMessage`, `changes: [{path, summary, refs}]` (one per changed file, 1–3 sentences) and
+  `unaddressed: [{ref, reason}]`, and runs the checker Limn copied in (`node ~/.limn/fix-report-check.cjs`)
+  until it prints OK. A FILE, not a tool: the sandbox drivers run no MCP server, nothing on the host
+  listens for the sandbox, and a file is the same on both providers. After every build turn the host reads
+  it, checks it with the SAME validator text the checker carries (`FIX_REPORT_VALIDATOR_SOURCE`), then
+  `normalizeChangeReport` validates it against the extracted patch: a ref the run was not SHOWN is dropped, a file not in the captured git diff is dropped (the
   diff is authoritative), entries for one file merge, text is clipped, and `notReported` lists the
   shown refs it never mentioned. Stored on `ai_fixes.change_report`, the items on
   `ai_fixes.review_items`, both on the wire (`AiFix.changeReport` / `.reviewItems`). The SPA
   (`components/AiFix/FixReport.tsx`) prints, per changed file, the summary and ref chips labelled
   with the section they came from (a Finding chip jumps to `claude-finding-<id>` in the Claude
-  Review tab), then Not addressed with reasons, No report, and Left out — above the diff and its
-  "Not built or tested here."
+  Review tab), then Not addressed with reasons, No report, and Left out — above the diff. A missing or
+  malformed report never blocks a push: every shown ref reads "not reported" and the patch, taken from
+  git by the host, stays what counts.
 - **`startReviewFix(ctx, { accountId, prId, reviewId, model, trigger, include? })`** (`manager.ts`) is THE
   entry the auto-review agent calls (`trigger: 'auto'`, `include` = the workspace's sections); the
-  manual route goes through the same `startFix` — same single slot, claim, queue and worktree, and
-  `trigger` is recorded on the row. Nothing is pushed until a person presses Push, except an AUTO
+  manual route goes through the same `startFix` → `startRun` — the same one-fix-per-PR claim, the same
+  session machine, and `trigger` is recorded on the row (`unattended` for an auto or dependency fix). Nothing is pushed until a person presses Push, except an AUTO
   fix under "Push automatically" (below).
 - **AUTO FIX** (`coding/ai-fix/auto-fix.ts` `maybeStartAutoFix`, called fire-and-forget by the
   review manager after an AUTO run is saved as succeeded — a failure here never touches the
@@ -4054,23 +4078,34 @@ CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
   (dimmed and inert while auto review is off; its value is kept), and carried on the same
   `GET`/`PUT /api/workspaces/:id/auto-review` as `autoReview.autoFixEnabled`. Read by
   `readWorkspaceAutoFixForPr` through the PR's repo membership (no membership row ⇒ the default, ON);
-  OFF skips with reason **`off`** before the seed is loaded. Then the first of these that holds SKIPS it, logged and kept in memory per
+  OFF skips with reason **`off`** before the seed is loaded; then the spend gate (`over_budget`); then
+  ⚠ **THE SANDBOX** (`fixSandboxReadiness`, never reserving; the runtime's answer reused 30 s): no
+  container runtime ⇒ **`no_sandbox`**, every session taken or another session building ⇒
+  **`sandbox_busy`** (or `fix_in_progress` when it is THIS PR's own fix that holds a session) —
+  recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged and kept in memory per
   review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`, one line in the Claude Review tab):
   `nothing_to_fix` (empty seed), `head_moved` (synced head ≠ reviewed head), `fix_in_progress`
-  (the fixer's claim — auto or manual; `startFix` takes it SYNCHRONOUSLY right after the check, so
-  a click racing the auto start cannot both pass), `fix_waiting` (a SUCCEEDED, never-pushed fix with
+  (a fix SESSION holds the PR — booting, building, a manual one open for follow-ups, a Plan first
+  waiting; `startFix` claims it SYNCHRONOUSLY right after the check, so a click racing the auto
+  start cannot both pass), `fix_waiting` (a SUCCEEDED, never-pushed fix with
   a non-empty patch on the CURRENT head — its `base_sha` is the synced head, the REVIEWED head, or,
   asked only when an unpushed fix sits on neither, the LIVE head: the fixer builds on the live
   head, so a lagging sync must not hide a waiting fix), `cap` (`AUTO_FIX_DAILY_CAP` = 3 rows with `trigger='auto'`
   for the PR created in the last 24h, shared constant), `already_tried` (the latest auto fix AT THIS
   HEAD listed every item this review would send under `unaddressed`). Otherwise
   `startReviewFix(…, {model: the review's model (a retired one → DEFAULT_AI_FIX_MODEL), trigger:
-  'auto', include})` — the same queue, slot and worktree. ⚠ **WHAT IT CARRIES** is the workspace's
+  'auto', include})` — the button's own start as an UNATTENDED session: build mode at once, ONE
+  build turn (Claude capped by `--max-budget-usd` `AI_FIX_BUDGET_USD`, default 5, and `--max-turns`
+  `AI_FIX_MAX_TURNS`), no TICKET.md, then the session CLOSES (the row stays resumable). `startRun` asks
+  `automaticRunAllowed` once more for every unattended start (`over_budget`), and a start that loses
+  the sandbox race answers `no_runtime` / `too_many` / `build_busy` ⇒ `no_sandbox` / `sandbox_busy`.
+  ⚠ **WHAT IT CARRIES** is the workspace's
   "Always include" sections (`workspaces.auto_fix_settings.include`, overrides only, resolved by
   `resolveAutoFixSettings`; default every section but style bots; never ticket items) — the same
   selection reaches the rule-6 seed and the start. ⚠ **PUSHED ONLY UNDER "PUSH AUTOMATICALLY"**
-  (`auto_fix_settings.autoPush`, OFF by default): `coding/ai-fix/auto-push.ts` runs after an AUTO
-  fix SUCCEEDS (off the fixer's slot) and re-checks at push time — auto + succeeded + non-empty +
+  (`auto_fix_settings.autoPush`, OFF by default): `coding/ai-fix/auto-push.ts` runs from the fix
+  subject's `onClosed` AFTER the unattended session is gone (phase `built`, status `succeeded`, a
+  non-empty patch; never from inside a live session) and re-checks at push time — auto + succeeded + non-empty +
   unpushed, auto fix and autoPush still on, the reader's OWN PR — then pushes through the Push
   button's own path (`push.ts` `pushFix`, target `'existing'`, never forced, HEAD_MOVED refused,
   write access re-checked, the PR settled). A failure is written to the succeeded row's `error`
@@ -4088,130 +4123,49 @@ CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
   "Fix ready" pill (`ClaudeReviewPrState.fix`, one batched `ai_fixes` read in
   `POST /api/claude-review/states`; "ready" = the same waiting rule); "Auto fix started" / "No auto
   fix: <why>" under the Claude Review controls.
-- **No shell.** `WORKTREE_RULES` (the one fix system prompt) and the tool list change together
-  (`coding/ai-fix/no-shell.test.ts`). "Run tests" (below) adds `run_check(name)`, never a shell.
+- **In the sandbox.** The fix's instructions are the session seed (`sandbox/workspace/seed.ts`, the ONE
+  fold: `FIX.md`, `PR.diff`, the report contract, `TICKET.md` for context on a manual fix; goldens
+  `__fixtures__/seed-fix*.md`). PR text is UNTRUSTED and fenced; what bounds it is the sandbox (no route
+  out but the allow-list proxy, no GitHub credential, host-side push — docs/SECURITY.md § Workspace
+  sessions).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
 
-### Run tests (sandboxed checks, manual fixes only)
+### Run tests — REMOVED 2026-11-07
 
-2026-10-30; migration `0148`. The security model — allow-list, deny scan, sandbox profiles, env
-scrub, the frozen list, the throwaway hook repository — is [SECURITY.md](SECURITY.md) § Sandboxed
-checks. The runner is the reusable `coding/checks/` module; this is how AI Fix uses it.
+"Run tests" (2026-10-30, migration `0148`) let the shell-less fixer run a repository's DECLARED checks in
+an OS sandbox through one tool, `run_check(name)` (`coding/checks/`, the picker's checkbox, `GET
+…/ai-fix/checks`). It went with that fixer: in the workspace session the agent runs the tests itself,
+inside the container. `GET /api/pro/prs/:id/ai-fix/checks` answers `404 ChecksRemoved` for one release;
+a `checks` field in a start body is ignored. Rows that ran checks keep `ai_fixes.checks` (`AiFixChecks`),
+shown read-only (`ChecksReport`, `ChecksStatus`).
 
-- **THE CHOICE.** The picker's **Run tests** checkbox (`components/AiFix/RunTests.tsx`, remembered
-  per repository in localStorage) fetches `GET /api/pro/prs/:id/ai-fix/checks` → `AiFixChecksPreview`
-  ONLY when ticked (one GitHub read, cached ten minutes per (repo, head); rate tier `search` +
-  `read`): the checks the head declares, `defaultOn` = plain `test` / `lint` / `typecheck` and the
-  pre-commit hook; refused ones are listed, unticked and inert, with the reason; `needsDocker` says
-  so; `unavailable` (no sandbox, not allowed) ⇒ one line and the fix runs without. Start / "Make a
-  plan" send `checks: [names]` (`GenerateFixBody.checks`; ≤ 30, else `400 BadChecks`). The names are
-  stored at insert (`ai_fixes.checks.requested`), so an approved plan's build runs the same. An AUTO
-  fix never runs checks.
-- **THE PROMPT.** `buildFixSystemPrompt(provider, {checks: true})` swaps ONE line ("Nothing is
-  installed, built or tested here") for `CHECKS_RULE` — run_check by NAME, fix what YOUR change
-  broke, say so when a failure is not yours; "You have NO shell here" stays. Without checks the
-  prompt is byte-identical. At RUN time `checksSection` appends the actual names (or why none could
-  start — then the text says nothing is built or tested).
-- **THE RUN** (`coding/agent.ts runCodingAgent`): `preparing_checks` (sandbox, Docker preflight,
-  dependency install) → the agent, with `run_check` (FIX_TOOLS + `mcp__checks__run_check`;
-  `DISALLOWED_TOOLS` unchanged) → `running_checks`: Limn runs every chosen check ONCE MORE itself
-  (`verify()` — what the reader sees; the agent's own calls are counted, not shown), then the commit
-  with the pre-commit hook. A FAILING HOOK goes back to the agent (`buildHookRepairPrompt`, its
-  output fenced) for a short follow-up pass in the same worktree, at most `MAX_HOOK_REPAIRS` = 2 and
-  only with ≥ $0.25 of the run's budget left; after a repair the checks run again. Spend of every
-  pass is summed into the row. Tests that cannot start NEVER fail the fix: the run goes on as before
-  and `checks.note` says why.
-- **SHARED WITH THE STORY BUILD:** everything from the check session to the diff capture is
-  `coding/agent.ts buildInWorktree` (extracted 2026-10-30 with no behaviour change; the caller states its
-  own literal tool lists through `toolsFor`, and a deny list without Bash is refused).
-  `runCodingAgent` keeps the worktree prep, the teardown and the patch cap; the story build
-  (docs/STORY-BUILD.md § The builder) calls it on a kept worktree with read-only roots and the write
-  deny-list.
-- **STORED** on `ai_fixes.checks` (JSON `AiFixChecks`: `requested`, `ran`, `note`, `sandbox`,
-  `install[]`, `results[]` (Limn's run + the skipped, each `AiFixCheckResult {name, kind, command,
-  status: passed|failed|timed_out|skipped|error, exitCode, durationMs, output, truncated, note}`),
-  `hook`, `hookAttempts`, `agentRuns`), on the wire as `AiFix.checks` (null = not asked).
-- **SHOWN** (`ChecksReport` under the fix's report): per check the status (icon + words), duration
-  and a collapsible output; the install steps behind one toggle; the hook. **Beside Push**:
-  `ChecksStatus` — "Tests: 3 passed, 1 failed" / "Tests did not run." The reader can push whatever it
-  says. "Not built or tested here." shows only when no check ran.
+### Plan mode ("Plan first", manual fixes only) — a chat-mode session
 
-### Plan mode ("Plan first", manual fixes only)
+The picker's "Plan first" checkbox turns Start into **Make a plan** → `POST /api/pro/prs/:id/ai-fix/plan`
+(the SAME body, parsed by the same `parseStartBody`) → `manager.ts startPlan`.
 
-A MANUAL fix may plan before it builds (2026-10-16; migration `0113`). The picker's "Plan
-first" checkbox turns Start into **Make a plan** → `POST /api/pro/prs/:id/ai-fix/plan` (the SAME body
-as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan`.
-
-- **ONE ROW, TWO STAGES.** The plan opens an `ai_fixes` row with `status = 'planned'` (a new
-  `AiFixStatus` member: a plan open, no build yet) and `plan_status = 'planning'`. "Approve and
-  build" moves the SAME row to `'queued'` / `'approved'` and the normal build runs on it; "Discard
-  plan" ends it `'cancelled'` / `'discarded'`. `plan_status` is `planning | plan_ready | approved |
-  discarded | failed`; NULL = the run never planned (every older row, every auto fix). Columns:
-  `plan` (JSON `AiFixPlan`, the latest revision), `plan_transcript` (JSON `AiFixPlanMessage[]`),
-  `plan_revision`, `plan_seed` (JSON `{kind, text}` — the frozen, fenced seed every pass re-reads;
-  never on the wire), `plan_cost_usd` (the passes' spend; the build's stays in `cost_usd`). Wire:
-  `AiFix.plan: AiFixPlanState | null`.
-- **THE PASS IS READ-ONLY.** `coding/agent.ts runPlanAgent`: `PLAN_TOOLS` = Read/Glob/Grep +
-  `mcp__plan__submit_plan`; `PLAN_DISALLOWED_TOOLS` denies Bash, Write, Edit, MultiEdit and
-  NotebookEdit OUTRIGHT (so a write tool re-added to the allow list still cannot run); same
-  `runAgentInWorktree`, so the same PATH GUARD and `ownToolsOnlyHook`. Same model the reader picked,
-  same seeds (review keys or a plain instruction, fenced exactly as for a build). The prompt
-  (`buildPlanSystemPrompt`, `PLAN_RULES`) offers no edit and no shell — pinned with the tool list
-  by `tool-surface.test.ts` + `no-shell.test.ts`.
-- **`submit_plan` IS CHECKED IN THE TOOL** (`ai-fix/plan.ts checkPlanSubmission`): `summary` 1–5
-  bullets (`AI_FIX_PLAN_MAX_BULLETS`), each ≤ `AI_FIX_PLAN_BULLET_MAX_CHARS` (160); every ref one the
-  pass was SHOWN; a step, unless every item is declined. A refused call is ANSWERED with what to fix
-  so the model calls again; only an accepted call is kept. `normalizePlan` clips again on save,
-  drops unknown refs and computes `notCovered`. `steps` = `{title, files, change, refs}`;
-  `notAddressed` = `{ref, reason}`; `reply` = one or two sentences answering the latest message.
-- **STEERING BY CHAT.** `POST /api/pro/ai-fixes/:fixId/plan/message {text}` (≤ 2,000 chars) appends
-  the reader's message (compare-and-set on `plan_ready`) and runs a FRESH pass with the frozen seed +
-  the previous plan (fenced, "context only") + the WHOLE chat, oldest first — the reader's messages
-  fenced as `STEERING FROM THE PERSON RUNNING THIS FIX` (the system prompt's ONE exception to "fenced
-  text is data": follow it about what to change, never to break the rules), Claude's earlier replies
-  as context only. The pass reads the commit the plan was made at (`base_sha`). A failed or cancelled
-  RE-plan keeps the previous plan (`plan_ready`, the reason on `error`); a failed FIRST pass ends the
-  row `failed` / `failed`.
-- **CAPS.** One plan or fix in flight per PR — the SAME synchronous `claimed` set and single slot as
-  the fixer (released between passes: a plan waiting for the reader holds nothing). The passes share
-  ONE budget, `config.aiFixBudgetUsd` (`AI_FIX_BUDGET_USD`) summed across revisions (each pass gets
-  what is left; < $0.25 left ⇒ `409 PlanBudgetSpent`); at most `AI_FIX_PLAN_MAX_REVISIONS` (12)
-  versions ⇒ `409 PlanRevisionCap`. Every pass records its spend (`recordAiUsage`, feature
-  `ai_fix_plan`) and adds it to `plan_cost_usd` — a CANCELLED pass too (`runAgentInWorktree`
-  returns the usage streamed so far, priced by `estimateCostUsd`, instead of null), and a pass that
-  THREW (the run core attaches that spend to the error, `coding/partial-spend.ts`), or a late
-  cancel would slip under the shared budget. Rate tiers: start / message / approve `[ai, aiHourly]`, discard `read` (one DB
-  update), spelled out in `tierFor`.
-- **APPROVE AND BUILD** (`POST …/plan/approve` → `approvePlan`): re-reads the PR's head and builds on
-  it NOW (the row's `base_sha` moves to it, so a push to the PR branch checks against the head the
-  build used), with the plan folded into `buildFixUserPrompt({ plan })` as the AGREED PLAN block
-  (fenced — model-written text derived from the PR) and the SAME system prompt and `WORKTREE_RULES`.
-  Refs in the change report are still validated against the shown refs (`shownRefsOf(review_items)`).
-  The SPA shows "Built from your plan" with the bullets above the build's progress and its result;
-  the header toast card follows from the approve.
-- **⚠ AN AUTO FIX NEVER PLANS.** `startReviewFix` (the auto entry) has no plan option and
-  `auto-fix.ts` never calls `startPlan`; and a person's OPEN plan (`planning` / `plan_ready`) skips
-  an auto fix as `fix_in_progress`, so an auto build cannot bury it. Boot reconcile: a pass cut off by
-  a restart returns a plan that has a revision to `plan_ready`, else fails the row.
-- SPA: `components/AiFix/PlanPanel.tsx` (bullets, Details with steps / Will not fix / Not in the plan,
-  the chat, Update plan · Approve and build · Discard plan, a progress bar + Cancel during a pass; the
-  explanation is behind the ⓘ). A row with `status = 'planned'` is ALWAYS drawn by the plan panel,
-  never as a build. Plan actions share ONE mutation key (`aiFixPlanMutationKey`); "Make a plan"
-  shares the start's.
-- **⚠ THE STREAM GAP.** The stream route ends on any snapshot that is not `running`/`queued`, and a
-  plan row's PERSISTED status stays `'planned'` while a pass or an approve is being set up (GitHub
-  calls). So `sendPlanMessage` and `approvePlan` set `fixIdByPr` (and `planPasses`) in the SAME tick
-  as `claimed.add`, before any await — a snapshot then reads `queued` — and every bail path emits
-  `done: planned` to the stream it may have opened. Client side, the tab does NOT open the stream
-  while a plan POST is in flight (its refetch, reading `planning`/`queued`, opens it), and the
-  banner holds a row's stream while EITHER the start key or the plan key is mutating ("Approve and
-  build" notes the row before its POST).
+- **THE SESSION OPENS IN CHAT** with the picked items loaded (`FIX.md`) and sends ONE "make a plan" turn,
+  then waits (phase `ready`, status `planned`). In chat mode the agent reads and runs commands, but the
+  CLI's plan mode keeps it from editing (docs/SANDBOX.md § Agent drivers). The reader may steer with more
+  messages (each one chat turn). **Start fix** (`POST …/ai-fixes/:fixId/plan/approve`, an optional
+  `{text}`) switches the SAME session to build mode and fixes, following the plan it agreed with the
+  reader. Plan first takes no build slot until Start fix; Start fix then needs it (`409 BuildBusy`).
+- **SPEND**: chat turns bill `ai_fix_plan` (into `plan_cost_usd`), build turns `ai_fix` (`cost_usd`).
+- **⚠ AN AUTO FIX NEVER PLANS.** `startReviewFix` has no plan option; a person's Plan first session
+  (live, `planned`) skips an auto fix as `fix_in_progress`.
+- **THE REMOVED PLAN MODE (2026-10-16 → 2026-11-07, migration `0113`).** A read-only host pass that
+  answered through `submit_plan`, kept a `plan` / `plan_transcript` / `plan_revision` per row and built on
+  "Approve and build". Nothing writes those columns now; `coding/ai-fix/plan.ts` only READS them, so an
+  older row still shows its plan read-only (`AiFix.plan`, `components/AiFix/PlanPanel.tsx`), and "Discard
+  plan" still ends such a row if it was waiting. The boot reconcile settles a NULL-phase row cut off by a
+  restart as before.
 
 ### Merge conflicts — "Resolve with Claude"
 
-A SEPARATE run from the fixer (`apps/backend/src/coding/ai-resolve/`), not a seed: the fixer edits
-files and pushes a patch; this one answers in RESOLVER DECISIONS that the reader reviews in the
+A SEPARATE run from AI Fix (`apps/backend/src/coding/ai-resolve/`), not a seed, and NOT in the sandbox:
+the host-side worktree run (`coding/agent.ts runAgentInWorktree`, its only caller now), read-only, no
+shell. AI Fix edits files and pushes a patch; this one answers in RESOLVER DECISIONS that the reader reviews in the
 merge-conflict resolver and lands from there. It is reached from the resolver's split entry button,
 from a "Resolve merge conflicts with Claude" card at the top of the AI Fix tab, and from an
 OPTIONAL, default-off checkbox in the fix picker ("Also resolve merge conflicts with `<base>`"),

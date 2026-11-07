@@ -70,7 +70,8 @@ export const SANDBOX_CONVERSATION_MAX = 400;
 
 // ---- what the session shows --------------------------------------------------------------------------
 
-export type SandboxBootStepKey = 'runtime' | 'image' | 'network' | 'proxy' | 'sandbox' | 'ticket' | 'repos' | 'services' | 'agent' | 'patches';
+/** `task`: an AI Fix session reading its pull request (a story session reads its `ticket`). */
+export type SandboxBootStepKey = 'runtime' | 'image' | 'network' | 'proxy' | 'sandbox' | 'ticket' | 'task' | 'repos' | 'services' | 'agent' | 'patches';
 export type SandboxBootStepState = 'running' | 'done' | 'failed' | 'skipped';
 
 export interface SandboxBootStep {

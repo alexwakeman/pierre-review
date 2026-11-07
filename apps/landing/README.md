@@ -66,7 +66,7 @@ are the app's own; never invent a feature for a mock.
 | `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review; `/teams` (PendingListMock opened on Waiting on others) | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx`, `PendingAiReviews.tsx` (AI reviews: the newest review per PR, New since the last look) |
 | `home.tsx` ReviewMock (PR tabs) | `/` Review, `/teams` | `components/PrDetail.tsx` (TAB_LABELS), `ChecksTab.tsx` (the Overview's order), `pr/ReviewDecisionPill.tsx` ("Review required"), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `AiFixTab.tsx` |
 | `home.tsx` StoryCheckMock | `/` Review | the story check in `ClaudeReviewTab.tsx` |
-| `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/` (Start fix, Push, Pushed to) |
+| `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/`, `components/sandbox/SessionView.tsx` (Start fix, the session's tool rows, Push, Pushed to) |
 | `home.tsx` CiMock | `/` Fix | `components/CheckList.tsx`, `Activity/PendingFlaky.tsx` (Re-run failed jobs) |
 | `home.tsx` ConflictsMock | `/` Fix | `components/conflicts/` (`copy.ts`) |
 | `home.tsx` VerdictMock | `/` Ship | `lib/ui.ts` `mergeVerdict`, the PR Overview's Blocked row |

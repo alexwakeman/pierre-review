@@ -156,6 +156,15 @@ describe('the Claude driver', () => {
     expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe('Seed.');
     expect(argv).not.toContain('--append-system-prompt-file');
     expect(argv[argv.indexOf('--max-turns') + 1]).toBe('80');
+    expect(argv).not.toContain('--max-budget-usd');
+  });
+
+  it('an unattended fix passes the process-wide US$ cap; a zero or missing cap passes none', () => {
+    const choice = { provider: 'claude' as const, model: 'claude-sonnet-5', effort: 'medium' as const };
+    const argv = claudeSandboxArgv({ choice, mode: 'build', maxTurns: 40, maxBudgetUsd: 5 });
+    expect(argv[argv.indexOf('--max-budget-usd') + 1]).toBe('5');
+    expect(argv[argv.indexOf('--max-turns') + 1]).toBe('40');
+    expect(claudeSandboxArgv({ choice, mode: 'build', maxBudgetUsd: 0 })).not.toContain('--max-budget-usd');
   });
 
   it('refuses a second message while a turn runs', async () => {

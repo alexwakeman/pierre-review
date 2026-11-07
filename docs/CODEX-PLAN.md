@@ -353,6 +353,10 @@ signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `promp
   model the run was ASKED for; the product copy said "Claude".
 
 **Phase 3 stream (b) built 2026-10-25** (branch `codex/p3-fix`): AI Fix, Plan first, Resolve with Claude.
+> ⚠ **Superseded for AI Fix and Plan first (2026-11-07).** Both now run as a sandboxed workspace session
+> through the Codex SANDBOX driver (docs/SANDBOX.md § AI Fix sessions); the host-side fixer below, its
+> prompts and `codex-fix.live.test.ts` are removed. Resolve with Claude still runs as described here; its
+> offline test is now `coding/codex-resolve.test.ts`.
 - `CODEX_FIX_KINDS` = `fix`, `resolve` at this stream; `plan` joined at Phase 3 complete (above), after
   its first live run's no-step answer was traced and the Codex wording fixed.
 - ONE PROVIDER PER JOB: the AI Fix manager and the resolver pick the provider once (`activeProviderId`),

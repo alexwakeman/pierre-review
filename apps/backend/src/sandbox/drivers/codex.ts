@@ -215,6 +215,7 @@ export async function startCodexDriver(o: SandboxAgentStartOptions): Promise<San
             inputTokens: r.ledgerInputTokens,
             outputTokens: r.usage.outputTokens,
             repoId: o.usage.repoId ?? null,
+            ...(o.usage.prId != null ? { prId: o.usage.prId } : {}),
           });
         }
         const changedInChat = turnMode === 'chat' ? await chatChanges() : [];

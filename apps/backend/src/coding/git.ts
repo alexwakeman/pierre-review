@@ -30,34 +30,6 @@ async function git(
 }
 
 /**
- * Stage everything (including NEW and deleted files) and capture the change as a
- * binary-safe unified diff against HEAD, plus the changed-file list. `git add -A`
- * before `git diff --cached` is what makes newly-created files round-trip — a plain
- * `git diff` silently omits untracked files. `--binary` round-trips assets too.
- */
-export async function captureWorktreeDiff(
-  worktree: string,
-  // "Run tests" (coding/checks/): the run's excludes file — what the dependency step and the checks
-  // left behind (node_modules, coverage …) stays OUT of the patch. Untracked files only.
-  opts: { excludesFile?: string } = {},
-): Promise<{ patch: string; filesChanged: string[] }> {
-  await git(opts.excludesFile ? ['-c', `core.excludesFile=${opts.excludesFile}`, 'add', '-A'] : ['add', '-A'], worktree);
-  const { stdout: patch } = await git(
-    ['diff', '--cached', '--binary'],
-    worktree,
-  );
-  const { stdout: names } = await git(
-    ['diff', '--cached', '--name-only'],
-    worktree,
-  );
-  const filesChanged = names
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return { patch, filesChanged };
-}
-
-/**
  * Apply a stored unified-diff patch onto the worktree (checked out at the patch's
  * exact base commit). `--3way` is a safety net if the tree isn't byte-identical.
  * Throws a coded 'APPLY_FAILED' error if the patch doesn't apply.

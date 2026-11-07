@@ -29,7 +29,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
 | [TEAM-REVIEW](docs/TEAM-REVIEW.md) | ANY multi-user behaviour (claims, author vs reviewer, verdicts, threads, pushback) — the plain-English design; update it in the same commit |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
-| [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox: per-OS setup, proxy, drivers, services, threat model |
+| [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox (and AI Fix's): setup, proxy, drivers, services, threats |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, Notion, stored tickets + worker, the sealed token |
@@ -356,7 +356,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   never while queued.
 - **Dependency automation** (Settings → Dependencies): all OFF; ONE policy gates merge, approve,
   resolve, AI fix; the last three only for a TRUSTED bot. ⚠ Claim before write, never retry; a
-  person's cancel wins (the rest: the doc).
+  person's cancel wins; no container runtime ⇒ ONE skip row, never a claim (the rest: the doc).
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
 - **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`; read the doc's
@@ -423,12 +423,9 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   session in PERCENTAGES ONLY — no US$ on a subscription anywhere; the header reads the SAME
   `['ai-budget']` query. Claude's usage reading (the `loadAgentSdk` Query tap — never add per-runner
   forwarding) NEVER blocks; ChatGPT's share is TOKEN-WEIGHTED (docs/CLAUDE-REVIEW.md).
-- **The agents' tools**: the reviewer and every chat are read-only, **`Bash` denied**; the fixer has
-  file tools + `submit_fix`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']` — NEVER a shell (the ONE
-  exception: the workspace session, below). "Run tests"
-  adds ONE tool, `run_check(name)`: repo-DECLARED checks only, Limn's argv, an OS sandbox
-  (`coding/checks/`; none ⇒ refused); "Not built or tested here." only when none ran. ⚠
-  `WORKTREE_RULES` and the tool list change together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
+- **The agents' tools**: the reviewer, every chat and Resolve with Claude are read-only, **`Bash`
+  denied** (`tool-surface.test.ts`). AI Fix and Implement run in the workspace session (below), the ONE
+  place an agent has a shell. Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
@@ -454,7 +451,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   ticket, `ticketStory`), diagrams. ⚠ `tracker/runtime.ts` opens the DB at import — keep review-side
   tracker imports LAZY.
 - **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`, still
-  read as history). Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
+  read as history). Plan first is a chat-mode session. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
 - **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
   context.
 - **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),
@@ -462,11 +459,11 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   kept only when SonarCloud analysed THIS head; the docs crawl is same-host, LINEAR scanners over
   untrusted text, every doc link through `resolveDocLink`.
 
-## Implement story — the workspace session
+## Implement story and AI Fix — the workspace session
 
 [docs/STORY-BUILD.md](docs/STORY-BUILD.md) · [docs/SANDBOX.md](docs/SANDBOX.md). A Claude Code / Codex agent WITH
-a shell, ONLY inside a sandbox `sandbox/runtime` started. The old shell-less plan/build agents are
-REMOVED — never a fallback.
+a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents are REMOVED — never a
+fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued, an unattended one skips.
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repository and the HOST pushes on the reader's press.

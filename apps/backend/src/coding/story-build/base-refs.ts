@@ -118,3 +118,33 @@ export async function sweepStoryBuildBaseRefs(
 export async function dropSessionBaseRefs(fullNames: readonly string[], buildId: number): Promise<void> {
   for (const n of new Set(fullNames)) await dropStoryBuildBaseRefs(n, buildId).catch(() => {});
 }
+
+// ---- AI FIX (docs/SANDBOX.md § AI Fix sessions) ----
+// A fix session pins every repository it mirrors the same way, under its OWN prefix (the fix and story
+// ids are of two tables): `refs/pierre/ai-fix/<fixId>/<repoId>`. Dropped on push, discard and a failed
+// close; kept while the row can be resumed.
+export const AI_FIX_REF_PREFIX = 'refs/pierre/ai-fix/';
+
+/** The ref pinning one repository's base commit in one AI Fix session. */
+export function aiFixBaseRef(fixId: number, repoId: number): string {
+  return `${AI_FIX_REF_PREFIX}${fixId}/${repoId}`;
+}
+
+/** Every ref of one AI Fix session, across the repositories it mirrored. Takes each repo lock; never throws. */
+export async function dropAiFixBaseRefs(fullNames: readonly string[], fixId: number): Promise<void> {
+  for (const fullName of new Set(fullNames)) {
+    const i = fullName.indexOf('/');
+    if (i <= 0) continue;
+    const owner = fullName.slice(0, i);
+    const name = fullName.slice(i + 1);
+    const dir = repoCloneDir(owner, name);
+    if (!existsSync(join(dir, '.git'))) continue;
+    await withRepoLock(`${owner}/${name}`, async () => {
+      const refs = (await gitOut(dir, ['for-each-ref', '--format=%(refname)', `${AI_FIX_REF_PREFIX}${fixId}/`]).catch(() => ''))
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      for (const ref of refs) await gitOut(dir, ['update-ref', '-d', ref]).catch(() => {});
+    }).catch(() => {});
+  }
+}

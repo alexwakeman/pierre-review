@@ -579,21 +579,19 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // UPDATE of one column; no GitHub, no model. `read`, EXACT, so it never lands on the AI bucket
   // the `/claude-review` family's generic POST rule below would give it.
   if (mutating && /^\/api\/prs\/\d+\/claude-review\/seen$/.test(path)) return [TIERS.read];
-  // AI Fix PLAN MODE (coding/ai-fix/routes.ts, LOCAL ONLY). Spelled out so the family cannot drift
-  // with the /api/pro/ catch-all below, which would also have parked the DB-only discard on `ai`:
-  //   POST /api/pro/prs/:id/ai-fix/plan             starts a planning agent pass  → ai + ai_hourly
-  //   POST /api/pro/ai-fixes/:fixId/plan/message    one re-plan agent pass        → ai + ai_hourly
-  //   POST /api/pro/ai-fixes/:fixId/plan/approve    starts the build agent run    → ai + ai_hourly
-  //   POST /api/pro/ai-fixes/:fixId/plan/discard    one DB update, no model       → read
+  // AI FIX — the WORKSPACE SESSION (coding/ai-fix/routes.ts, LOCAL ONLY; paths: shared AI_FIX_SESSION_API).
+  // Spelled out so the family cannot drift with the /api/pro/ catch-all below, which would park the
+  // teardown and the stream on `ai`, FOLLOWING THE TOKEN:
+  //   POST /api/pro/prs/:id/ai-fix/plan                       boots a sandbox + a plan turn   → ai + ai_hourly
+  //   POST /api/pro/ai-fixes/:fixId/(message|plan/message)    one agent turn                  → ai + ai_hourly
+  //   POST /api/pro/ai-fixes/:fixId/plan/approve · …/resume   a build turn / a sandbox boot   → ai + ai_hourly
+  //   POST …/discard · …/plan/discard · …/network/allow       a teardown / one allow-list row → read
+  //   GET  …/session/stream                                   attaches to a running session   → read
+  // (The start, POST /api/pro/prs/:id/ai-fix, is a generating POST of the catch-all: ai + ai_hourly.)
   if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/plan$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
-  if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/plan\/(message|approve)$/.test(path))
+  if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/(message|plan\/message|plan\/approve|resume)$/.test(path))
     return [TIERS.ai, TIERS.aiHourly];
-  if (/^\/api\/pro\/ai-fixes\/\d+\/plan\/discard$/.test(path)) return [TIERS.read];
-  // AI Fix "Run tests" picker: GET /api/pro/prs/:id/ai-fix/checks reads the PR head's manifest files —
-  // ONE GitHub GraphQL request per uncached (repo, head), no model. A GitHub read behind a click: the
-  // `search` bucket (one upstream call per request) + `read`, spelled exactly so the /api/pro/ GET
-  // catch-all below (600/min) never swallows it.
-  if (!mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/checks$/.test(path)) return [TIERS.search, TIERS.read];
+  if (/^\/api\/pro\/ai-fixes\/\d+\/(discard|plan\/discard|network\/allow|session\/stream)$/.test(path)) return [TIERS.read];
   // IMPLEMENT STORY — the WORKSPACE SESSION (sandbox/session/routes.ts + coding/story-build/routes-build.ts,
   // LOCAL ONLY; paths: shared STORY_BUILD_API + SANDBOX_SESSION_API). The whole family DECIDED here, by
   // exact shape, FOLLOWING THE TOKEN — it sits under no prefix the rules below would catch, so without

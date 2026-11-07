@@ -5,8 +5,10 @@ reader's own computer that holds every repository of the workspace, the ticket i
 own Claude notes. A full **Claude Code** or **Codex** agent works in it with a shell. The reader talks to
 the agent in the build tab, presses **Start build**, reviews one diff per repository and presses
 **Push**. The push runs on the HOST, with the host's GitHub sign-in; nothing is pushed, posted or written
-to the tracker before the reader presses a button. The product flow is [STORY-BUILD.md](STORY-BUILD.md);
-this file is how the sandbox works and how to set one up.
+to the tracker before the reader presses a button. **AI Fix** runs in the same kind of session, on a pull
+request: the PR's repository at its head, the rest of the workspace read only, one push to the PR's own
+branch (§ AI Fix sessions). The product flows are [STORY-BUILD.md](STORY-BUILD.md) and
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix; this file is how the sandbox works and how to set one up.
 
 | Section | What it says |
 |---|---|
@@ -17,8 +19,9 @@ this file is how the sandbox works and how to set one up.
 | § The runtime layer … § Sessions | how each part works (runtime, image, labels, proxy, allow-list, credentials, drivers, mirror, services, microsandbox, sessions) |
 | § Testing · § Spike results | the tests, and what the spikes measured |
 
-There is ONE path: with no container runtime, Implement says what is missing and links the setup steps
-below (owner decision Q2: the old shell-less plan/build agents are removed, not kept as a fallback).
+There is ONE path: with no container runtime, Implement and AI Fix say what is missing and link the setup
+steps below (owner decision Q2: the old shell-less plan/build agents and the shell-less fixer are removed,
+not kept as a fallback). An unattended AI Fix with no runtime is skipped, with its reason recorded.
 
 ## Setting up a runtime
 
@@ -74,10 +77,10 @@ shell. Treat everything it does as untrusted.
 | Ticket, PR or repository text tells the agent to send data out | The sandbox network has NO route out (`--internal`); the only way out is Limn's proxy, with an allow-list. Every request is logged and shown in the Network panel; a blocked host is opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the proxy adds it to each request to the provider (§ Credentials). Web search and web fetch are off in Claude Code, because they run on the provider's side, past the allow-list. |
 | The agent damages the host | No writable host mount and no Docker socket (a bind mount is read-only by type; `spec.ts` refuses the socket, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources). Non-root, all capabilities dropped, `no-new-privileges`, CPU / memory / process caps. On Docker for Mac or Windows the VM is a second boundary; **on Linux Docker the kernel is shared** (stated here and in the setup table). microsandbox gives a separate kernel (untested). |
 | A compose file escalates | The compose policy (§ Services) refuses the WHOLE file for privileged mode, added capabilities, devices, host namespaces, host mounts (the Docker socket included), loosened security options, outside builds and images from unlisted registries; it rewrites every service onto the session network with Limn's caps. Limn runs compose on the host; the sandbox only asks. |
-| The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository; the HOST applies it and pushes, on the reader's Push press, draft by default. |
+| The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository; the HOST applies it and pushes, on the reader's Push press (Implement: draft by default). Two exceptions push with no press, both on AI Fix and both opt-in: an auto fix on the reader's OWN PR under the workspace's "Push automatically" (OFF by default), and dependency automation's fix of a TRUSTED bot's PR under its policy (all OFF by default; docs/MERGE-CI-TRUNK.md). Both push only the PR repository's patch to the PR's own branch, compare-and-set on the head, after the session has closed. |
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `LIMN_SANDBOX_MAX_SESSIONS` open sessions; one build turn per computer; idle teardown. |
 | Leftovers | Every resource carries Limn's labels; discard, the boot sweep and `limn sandbox prune` remove them. |
-| Spend | Every turn is a reader's press (no automatic continuation, so the budget gate has nothing to gate); each turn's usage is recorded on the ledger and the session's spend is shown. |
+| Spend | Every turn of Implement and of a manual AI Fix is a reader's press. An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE build turn with Claude's `--max-budget-usd`, then closes. Each turn's usage is recorded on the ledger and the session's spend is shown. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
 
 The details of each layer are the sections below; [SECURITY.md](SECURITY.md) § Workspace sessions has
@@ -114,13 +117,14 @@ the summary.
    model (`services/policy.ts`, on every `up`), only from files the reader picked; the agent asks through
    `limn-svc`, and nothing on the host listens for the sandbox (§ Services).
 7. **The agent has a full shell inside the sandbox — the ONE exception to "no agent has a shell".** It
-   holds ONLY inside a sandbox `sandbox/runtime` started; AI Fix, every review and every chat keep the
-   no-shell rule (docs/CLAUDE-REVIEW.md § The agents' tools). The two drivers (`sandbox/drivers/`) are the
+   holds ONLY inside a sandbox `sandbox/runtime` started — Implement and AI Fix (§ AI Fix sessions) run
+   there; every review and every chat keep the no-shell rule (docs/CLAUDE-REVIEW.md § The agents' tools). The two drivers (`sandbox/drivers/`) are the
    only code that starts `claude` or `codex` in a sandbox (`provider-seam.test.ts`).
 8. **The local folder decides only the LAYOUT and which notes come in; the code comes from Limn's clone
    cache** at the bases today's rules pick, never from the reader's checkout (§ The workspace mirror).
-9. **One fold for everything the agent is told** (`workspace/seed.ts`): `CLAUDE.md`, `AGENTS.md`,
-   `TICKET.md` and the system prompt; nothing rebuilds them.
+9. **One fold for everything the agent is told** (`workspace/seed.ts`), for both subjects: `CLAUDE.md`,
+   `AGENTS.md`, `TICKET.md` (a story's; an AI Fix's context ticket), `FIX.md` + `PR.diff` + the report
+   checker (an AI Fix) and the system prompt; nothing rebuilds them.
 10. **Memories only, never past sessions** (owner decision D1). The ticked projects' `memory/` files
     are copied in; no transcript is copied, resumed or imported, Claude Code runs with
     `--no-session-persistence`, and nothing is written back to the reader's machine.
@@ -633,6 +637,8 @@ sessions, mounted from `registerAgenticRoutes`.
 | `state.ts` | `session_json` (`SessionStateJson`), the conversation fold, the ONE wire mapper `toStoryBuildSession`. Pure. |
 | `limits.ts` | `LIMN_SANDBOX_MAX_SESSIONS` (2), `LIMN_SANDBOX_IDLE_MINUTES` (60), the patch cap, the turns per message. |
 | `routes.ts` | The routes; the push and per-repository diff routes (`coding/story-build/routes-build.ts`) are registered from here. |
+| `subject.ts` | The SUBJECT contract: the machine serves Implement's story (`storySubject` in `manager.ts`) and AI Fix (`fix.ts`). |
+| `fix.ts` | The AI Fix subject and its actions (§ AI Fix sessions). |
 
 **The phases** (shared `SandboxSessionPhase`): `booting → ready ⇄ chatting`, Start build `→ building →
 built ⇄ building`, `→ pushed` once every change is pushed (recorded on the next read), and `discarded` /
@@ -710,6 +716,29 @@ edits the setting above. `GET /api/sandbox/runtime` (`api/routes/sandbox-setting
 `StoryBuildSession.ticket` (`SessionStateJson.criteria` + `openPoints`, rewritten at Start build), so
 it shows what TICKET.md holds, not the tracker's newest text.
 
+## AI Fix sessions (`session/fix.ts`, `workspace/fix-report.ts`)
+
+Every AI Fix run — manual, Plan first, the unattended auto fix and dependency automation's fix — is a session
+of the SAME machine with a second subject (`subject.ts`): the caps, the ONE build slot, boot, the idle close,
+the stream, the restart reconcile and Resume are shared with Implement. The row is the fix's own `ai_fixes`
+row (migration 0177: `session_phase`, `sandbox_ref`, `agent_ref`, `runtime`, `session_json`, `last_active_at`,
+`unattended`, `workspace_id`); `ai_fixes.status` is DERIVED from the phase by shared `aiFixStatusForPhase`
+(booting/building `running`, ready/chatting `planned`, built/pushed `succeeded`, discarded `cancelled` unless
+pushed, failed `failed`), so the banner, the Open PRs pill, the auto-fix caps, dependency automation's poll and
+`pushFix` read it unchanged. A NULL phase is a row of the removed shell-less fixer (history).
+
+| | |
+|---|---|
+| **Start** (`coding/ai-fix/manager.ts` `startRun`) | provider pre-flight → instruction → ONE FIX PER PR (`claimFixPr`, same tick) → the seed (review / CI-only / plain; `NothingToFix` boots nothing) → runtime (`409 NoRuntime`, no row) → the slot: a session and, for a fix that builds at once, THE build slot (`reserveSessionSlot`, same tick; `409 TooManySessions` / `BuildBusy`) → the live head (`base_sha`) → the row → `startFixSession`. Never queued. |
+| **Scope** | The whole workspace of the PR's repository, at the reader's layout, memories as in Implement. The PR repository at the PR's HEAD SHA, fetched through the base repository's `refs/pull/<n>/head` (`RepoBaseRequest.remoteRef`; a fork's head too); every other repository on its default branch, "read only". Branch `limn/fix-pr-<n>`; pins `refs/pierre/ai-fix/<fixId>/<repoId>` (dropped on push, discard and a failed close). |
+| **Seed** | `FIX.md` (the PR, its fenced description, the task — review-seed.ts's fenced items or the fenced plain instruction — and the report contract), `PR.diff` (GitHub's diff, noise files out, capped at 1 MB, cuts named), `TICKET.md` for a MANUAL fix of a PR with a ticket ("For context only"), `.limn/fix-refs.json` and the checker `~/.limn/fix-report-check.cjs`. Goldens `__fixtures__/seed-fix*.md`. |
+| **Turns** | Manual: the first turn is the build turn, started the moment the agent is ready ("Start fix"). Plan first: one chat turn ("make a plan"), then the session waits; Start fix (`…/plan/approve`) switches to build. Every later message is one more turn in the SAME session; in build mode the agent rewrites the report for the whole change. Unattended: ONE build turn, then the session closes (`built`, resumable). |
+| **The report** | A JSON FILE, not a tool: the drivers run no MCP server and nothing on the host listens for the sandbox, and a file is the same for both providers. The agent writes `<root>/.limn/fix-report.json` (the `submit_fix` shape) and runs the checker until it prints OK. After every build turn the host reads it out (as the agent), checks it with the SAME validator text (`FIX_REPORT_VALIDATOR_SOURCE`), and normalises it against the extracted diff (`normalizeChangeReport`). A wrong shape ⇒ no report (every shown ref "not reported") and one notice; content problems ⇒ named, and the normaliser drops them. The old report is removed before each build turn. |
+| **The patch** | The PR repository's only, capped at `AI_FIX_PATCH_MAX_BYTES` (1 MB). Every other repository's changed files are listed in `session_json.leftOut` and one notice each ("… are left out"), never stored. |
+| **Stop / Discard / Push / Resume** | Stop on a manual session stops the turn (the session stays); on an unattended one it closes it `discarded` ⇒ `cancelled` (a person's cancel wins). Discard closes any phase except while a push runs. Push is the unchanged `pushFix` (compare-and-set on the head, never forced): refused while a turn runs, the session refuses messages while it pushes (`push-guard.ts`), and a push that lands ends the session `pushed` (no follow-up after a push). Resume boots a closed, unpushed `built` row again with its patch put back; it is a manual session from then on. |
+| **Unattended runs** (auto fix, dependency automation) | Asked FIRST, never reserving: `fixSandboxReadiness()` (a runtime — its answer reused 30 s per runtime object — a free session and the free build slot). No runtime ⇒ the auto fix records `no_sandbox`; dependency automation writes ONE `skipped` row ("No container runtime on this computer.", before any claim, never counted). Busy ⇒ `sandbox_busy` / nothing written. `startRun` asks the ONE budget gate again for every unattended start. The session: boot → ONE build turn → report + patch stored → closed `built`; then (`onClosed`, the session already gone) "Push automatically" for an own-PR auto fix, or dependency automation's own push. Never queued, never retried in a loop: the next auto review / deps tick decides. |
+| **Spend** | Chat turns bill `ai_fix_plan`, build turns `ai_fix`, with the PR repository and `prId` on the ledger row (the Reports' "fix" bucket). Claude: `--max-turns` `AI_FIX_MAX_TURNS` (40); an UNATTENDED session also gets `--max-budget-usd` `AI_FIX_BUDGET_USD` (5; the pinned Claude Code 2.1.295 accepts it in print mode; the cap is the PROCESS's, which runs that one turn, and its `error_max_budget_usd` result ends the turn with the work so far extracted). A manual session has no US$ cap (the reader stops it). Codex has no such flag: the budget gate and the caps bound it. |
+
 ## Testing
 
 - **The fake runtime** (`fake.ts`): records every call (`fake.calls`) and replays `exec` answers
@@ -749,6 +778,19 @@ it shows what TICKET.md holds, not the tracker's newest text.
   a chat turn and a refused second message, Start build with a changed ticket, the patches, both diff
   routes, Push, discard, then no runtime, the open-session cap, the idle teardown, the restart reconcile
   and Resume. `session.live.test.ts` (`live`) is the same flow for real.
+- **AI Fix sessions**: the report validator, the checker script run with `node` on a real git
+  repository, and the host's read (`workspace/fix-report.test.ts`); the fix goldens (`seed.test.ts`);
+  THE FLOW (`session/fix-session-flow-db.test.ts`, the successor of the shell-less fixer's manager tests):
+  the real ai-fix routes and manager over the fake runtime and the recorded stream — a CI-only seed fixed
+  at once on the PR head, the report normalised, an edit elsewhere left out, a follow-up turn, Push ending
+  the session, Plan first → Start fix with no report → Discard, then no runtime, the build slot, the cap,
+  a push while a turn runs, the idle close, Resume, an unattended fix closing itself and Stop cancelling
+  one, an own-PR auto fix carrying `--max-budget-usd`, closing and THEN being pushed by "Push
+  automatically", the unattended pre-check, the restart reconcile and another account's ids. The
+  unattended callers: `coding/ai-fix/auto-fix.test.ts` (`no_sandbox`, `sandbox_busy`, the start's own
+  answers) and `merge/dependency-automation-teams.test.ts` (one skip row, no claim, later ticks read
+  nothing, not counted, taken over; busy writes nothing; a lost race gives the claim back; cancel wins). `session/fix-session.live.test.ts` (`live`,
+  `LIMN_SANDBOX_LIVE=claude`) runs one tiny real fix.
 - **The real-daemon test** (`docker-real.test.ts`, the `slow` project): a sandbox on an internal network
   reaches `registry.npmjs.org` through the proxy, is refused `example.com` (logged against the sandbox
   container), has no direct route out, gets `example.com` after "Allow for this session", the injector

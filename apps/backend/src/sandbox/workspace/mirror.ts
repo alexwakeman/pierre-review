@@ -44,6 +44,11 @@ export interface RepoBaseRequest {
   baseSha: string | null;
   /** The caller's ref that keeps the base reachable in the clone cache (`storyBuildBaseRef`). */
   pinRef: string;
+  /**
+   * The ref to fetch, when not the branch: an AI Fix reads the PR's head through the BASE repository's
+   * `refs/pull/<n>/head` (a fork's head included). Absent ⇒ `refs/heads/<baseRef>` (or `HEAD`).
+   */
+  remoteRef?: string;
 }
 
 /** A complete depth-1 repository on the host, ready to stream in. */
@@ -91,7 +96,7 @@ export async function shallowFromClone(cloneDir: string, sha: string): Promise<P
 export const defaultMirrorSeams: MirrorSeams = {
   async prepare(req) {
     const { prepBranchWorktree, removeWorktreeLocked } = await import('../../review/clone-manager.js');
-    const remoteRef = req.baseRef === 'HEAD' ? 'HEAD' : `refs/heads/${req.baseRef}`;
+    const remoteRef = req.remoteRef ?? (req.baseRef === 'HEAD' ? 'HEAD' : `refs/heads/${req.baseRef}`);
     const wt = await prepBranchWorktree(req.owner, req.name, {
       remoteRef,
       destRef: 'refs/pierre/sandbox-base',

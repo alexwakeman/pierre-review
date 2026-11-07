@@ -1,37 +1,14 @@
-// AI Fix "Run tests": what a start sends, the one-line status beside Push, and the copy rule that
-// "Not built or tested here." shows only when no check ran.
+// "Run tests" results on older rows (read-only): the one-line status beside Push, the durations, and
+// the copy rule that the sandboxed fix no longer says "Not built or tested here." (the agent ran the
+// repository's checks itself and says so).
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/runTests.test.ts
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { AiFixCheckResult, AiFixChecks, AiFixChecksPreview } from '@pierre-review/shared';
-import { checksStatusLine, formatDuration, pickedCheckNames } from '../src/components/AiFix/RunTests.js';
+import type { AiFixCheckResult, AiFixChecks } from '@pierre-review/shared';
+import { checksStatusLine, formatDuration } from '../src/components/AiFix/RunTests.js';
 import { PHASE_LABEL, fixProgressPct } from '../src/lib/aiFixProgress.js';
-
-const preview: AiFixChecksPreview = {
-  sandbox: 'seatbelt',
-  unavailable: null,
-  unsandboxed: false,
-  checks: [
-    { name: 'lint', kind: 'lint', command: 'pnpm run lint', source: '', defaultOn: true, needsDocker: false, refused: null },
-    { name: 'test', kind: 'test', command: 'pnpm run test', source: '', defaultOn: true, needsDocker: false, refused: null },
-    { name: 'test:e2e', kind: 'test', command: 'pnpm run test:e2e', source: '', defaultOn: false, needsDocker: false, refused: null },
-    { name: 'release', kind: 'check', command: 'pnpm run release', source: '', defaultOn: false, needsDocker: false, refused: 'It publishes a package.' },
-  ],
-};
-
-describe('pickedCheckNames', () => {
-  it('sends the defaults, the reader’s ticks on top, never a refused check', () => {
-    expect(pickedCheckNames(preview, true, {})).toEqual(['lint', 'test']);
-    expect(pickedCheckNames(preview, true, { lint: false, 'test:e2e': true, release: true })).toEqual(['test', 'test:e2e']);
-  });
-  it('sends nothing when off, still loading, or unavailable here', () => {
-    expect(pickedCheckNames(preview, false, {})).toEqual([]);
-    expect(pickedCheckNames(undefined, true, {})).toEqual([]);
-    expect(pickedCheckNames({ ...preview, unavailable: 'Tests can’t run here.' }, true, {})).toEqual([]);
-  });
-});
 
 const r = (name: string, status: AiFixCheckResult['status']): AiFixCheckResult => ({
   name,
@@ -75,16 +52,17 @@ describe('checksStatusLine (beside Push)', () => {
 });
 
 describe('the copy and the progress ladder', () => {
-  it('"Not built or tested here." shows only when no check ran', () => {
+  it('"Not built or tested here." is gone, and the Run tests option with it', () => {
     const src = readFileSync(fileURLToPath(new URL('../src/components/AiFixTab.tsx', import.meta.url)), 'utf8');
-    expect(src).toContain("{!fix.checks?.ran && ' · Not built or tested here.'}");
+    expect(src).not.toContain('Not built or tested here.');
+    expect(src).not.toMatch(/RunTestsOption|useRunTests/);
   });
-  it('the two new phases have words and a place on the ladder', () => {
-    expect(PHASE_LABEL.preparing_checks).toBe('Installing dependencies');
-    expect(PHASE_LABEL.running_checks).toBe('Running the tests');
+  it('the removed checks phases are gone from the ladder; a fix session reads cloning → fixing', () => {
+    expect(PHASE_LABEL).not.toHaveProperty('preparing_checks');
+    expect(PHASE_LABEL).not.toHaveProperty('running_checks');
     const at = (phase: string) => fixProgressPct({ status: 'running', fixId: 1, progress: { phase: phase as never } });
-    expect(at('preparing_checks')!).toBeGreaterThan(at('cloning')!);
-    expect(at('running_checks')!).toBeLessThan(at('capturing')!);
+    expect(at('fixing')!).toBeGreaterThan(at('cloning')!);
+    expect(PHASE_LABEL.planning).toBe('Making the plan');
   });
   it('durations read plainly', () => {
     expect(formatDuration(420)).toBe('420 ms');

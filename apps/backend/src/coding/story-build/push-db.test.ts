@@ -69,7 +69,6 @@ let routes: typeof import('./routes-build.js');
 const repo: Record<number, { api: number; web: number }> = {};
 const ws: Record<number, number> = {};
 const IDENT = 'jira:https://acme.atlassian.net#ACME-214';
-const fetched: any[] = [];
 
 const PLAN = (apiId: number, webId: number): StoryBuildPlan => ({
   revision: 1,
@@ -124,10 +123,6 @@ beforeAll(async () => {
         maintainerCanModify: false,
         baseRef: 'main',
       }),
-      fetchRepoFiles: async (_acct: number, a: any) => {
-        fetched.push(a);
-        return { 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }) };
-      },
     },
   };
   P = await import('./persist.js');

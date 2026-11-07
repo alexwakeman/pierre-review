@@ -1,9 +1,8 @@
 // ONE WAY TO START A CONTAINER CLI (docs/SANDBOX.md § The runtime layer): an argv array, never a shell
-// string, with Limn's environment MINUS anything credential-shaped (`dockerCliEnv`, the same filter the
-// sandboxed checks use). The adapters take a `CliRunner`, so their tests script the CLI's answers
+// string, with Limn's environment MINUS anything credential-shaped (`dockerCliEnv`, host-env.ts). The adapters take a `CliRunner`, so their tests script the CLI's answers
 // instead of needing a daemon.
 import { spawn } from 'node:child_process';
-import { dockerCliEnv } from '../../coding/checks/docker.js';
+import { dockerCliEnv } from './host-env.js';
 import type { ExecEvent, ExecHandle, ExecResult } from './types.js';
 
 export interface CliCallOptions {

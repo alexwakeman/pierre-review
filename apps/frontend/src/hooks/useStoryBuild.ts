@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   storyBuildPath,
@@ -10,21 +9,20 @@ import {
   type SandboxNetworkAllowBody,
   type SandboxRuntimeStatus,
   type SandboxSessionStartBody,
-  type SandboxSessionStreamEvent,
   type SandboxWorkspaceSettings,
   type SandboxWorkspaceSettingsBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { sseStream } from '../api/sse.js';
+import { useSandboxSessionStream } from './useSandboxSessionStream.js';
 import { workspaceKey } from './useActivity.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
-import { applySessionEvent, EMPTY_SESSION_STREAM, sessionEventNeedsRefetch, type SessionStreamState } from '../lib/sandboxSession.js';
+import type { SessionStreamState } from '../lib/sandboxSession.js';
 
 // "IMPLEMENT STORY" — the build tab's server state (docs/STORY-BUILD.md; docs/FRONTEND.md § The build
 // tab). ONE query per ticket (`storyBuildForKey`) holds the latest session; the session's SSE stream
 // (`useStorySessionStream`, one per tab) is the live path and a slow poll the fallback while it moves.
 // Every billed action shares ONE mutation key per ticket (`storyBuildMutationKey`, the
-// `aiFixPlanMutationKey` lesson): a tab switch mid-POST must not offer a second billed turn.
+// `aiFixSessionMutationKey` lesson): a tab switch mid-POST must not offer a second billed turn.
 
 /** A session's fallback poll while it boots or a turn runs (the stream is the live path). */
 export const SESSION_POLL_MS = 5_000;
@@ -118,8 +116,7 @@ export function useStoryBuildDiff(buildId: number, repoId: number, enabled: bool
 // `done` re-read the query (spend, repositories, the status the board reads). A stream that drops while
 // the session is still live is opened again after a pause.
 
-/** How long to wait before opening a dropped stream again. */
-export const SESSION_STREAM_RETRY_MS = 3_000;
+export { SESSION_STREAM_RETRY_MS } from './useSandboxSessionStream.js';
 
 export function useStorySessionStream(
   workspaceId: number | null,
@@ -128,33 +125,12 @@ export function useStorySessionStream(
   live: boolean,
 ): SessionStreamState {
   const qc = useQueryClient();
-  // The fold, tagged with the session it belongs to: another session's frames never show on this one.
-  const [held, setHeld] = useState<{ id: number | null; s: SessionStreamState }>({ id: null, s: EMPTY_SESSION_STREAM });
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    if (buildId == null || !live) return;
-    const ac = new AbortController();
-    let sawDone = false;
-    const refetch = (): void => void invalidateBuild(qc, workspaceId, ident);
-    void sseStream<SandboxSessionStreamEvent>(storyBuildPath('stream', { id: buildId }), {
-      signal: ac.signal,
-      onEvent: (e) => {
-        if (e.type === 'done') sawDone = true;
-        setHeld((h) => ({ id: buildId, s: applySessionEvent(h.id === buildId ? h.s : EMPTY_SESSION_STREAM, e) }));
-        if (sessionEventNeedsRefetch(e)) refetch();
-      },
-    })
-      .catch(() => {
-        /* aborted or a network error: the retry below, and the fallback poll, follow the DB */
-      })
-      .finally(() => {
-        if (ac.signal.aborted) return;
-        refetch();
-        if (!sawDone) window.setTimeout(() => !ac.signal.aborted && setAttempt((n) => n + 1), SESSION_STREAM_RETRY_MS);
-      });
-    return () => ac.abort();
-  }, [buildId, live, attempt, workspaceId, ident, qc]);
-  return held.id === buildId ? held.s : EMPTY_SESSION_STREAM;
+  return useSandboxSessionStream(
+    buildId != null ? storyBuildPath('stream', { id: buildId }) : null,
+    buildId,
+    live,
+    () => void invalidateBuild(qc, workspaceId, ident),
+  );
 }
 
 /** Start a session ("Implement" / "Fill gaps"): 409 NoRuntime / TooManySessions say why in one line. */

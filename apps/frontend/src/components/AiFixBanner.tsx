@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { AiFixStatus } from '@pierre-review/shared';
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import {
-  aiFixPlanMutationKey,
+  aiFixSessionMutationKey,
   aiFixStartMutationKey,
   prefetchAiFixTab,
   useAiFixStream,
@@ -135,11 +135,11 @@ function AiFixBannerRow({
   // survives the reader navigating away in the same breath), and the fix row does not exist
   // until the POST returns — a stream opened in that gap gets an `idle` snapshot and closes,
   // which reads as "the fix did not start" about a fix that is about to.
-  // The same holds for "Approve and build", which notes this row before its POST under the PLAN
+  // The same holds for Start fix after Plan first, which notes this row before its POST under the SESSION
   // key: until approve answers, the row still reads 'planned', a terminal status here.
   const starting =
     useIsMutating({ mutationKey: aiFixStartMutationKey(run.prId) }) +
-      useIsMutating({ mutationKey: aiFixPlanMutationKey(run.prId) }) >
+      useIsMutating({ mutationKey: aiFixSessionMutationKey(run.prId) }) >
     0;
   // The AI Fix tab may be streaming the same PR at the same time. That is fine — the manager
   // fans out to every subscriber — and de-duplicating the two subscriptions is out of scope;

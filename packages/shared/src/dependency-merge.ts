@@ -191,8 +191,9 @@ export type DependencyAutomationActionKind =
   | 'ai_fix'
   | 'arm_merge'
   | 'merge_landed';
-/** `skipped`: a teammate's Limn holds this PR's head (the `limn/deps` line) — not a failure, and it
- *  never counts as an attempt. */
+/** `skipped`: a teammate's Limn holds this PR's head (the `limn/deps` line), or (`ai_fix`, no teammate)
+ *  this computer has no container runtime for AI Fix's sandbox — not a failure, and it never counts as
+ *  an attempt. */
 export type DependencyAutomationActionState = 'running' | 'done' | 'failed' | 'skipped';
 
 /** GitHub's commit-status context the dependency automation's TEAM CLAIM uses

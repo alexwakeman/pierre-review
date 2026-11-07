@@ -273,10 +273,18 @@ describe('linear on hostile text', () => {
   // budget leaves a wide margin either way. 65,536 characters is GitHub's body limit.
   const N = 65_536;
   const BUDGET_MS = 250;
+  // The FASTEST of three runs: one run under a loaded full suite (Docker tests, 12 workers) can
+  // stall past the budget on a GC pause or a descheduled worker, while a regex that has gone
+  // back to its slow form is slow on every run, so it still fails.
   const time = (f: () => unknown): number => {
-    const t0 = performance.now();
-    f();
-    return performance.now() - t0;
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now();
+      f();
+      best = Math.min(best, performance.now() - t0);
+      if (best < BUDGET_MS) break;
+    }
+    return best;
   };
   const aikido = (bodyText: string): PrSecurityInput => ({ title: '[Aikido] x', headRefName: 'x', labels: [], bodyText });
 

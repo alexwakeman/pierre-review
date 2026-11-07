@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type {
   AiFixChangeReport,
   AiFixChecks,
@@ -8,13 +8,8 @@ import type {
   AiFixStoredSeed,
   AiFixTrigger,
 } from '@pierre-review/shared';
-import type { GenerateFixResult } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
-import { normalizeChangeReport } from './review-seed.js';
-import type { AiFixPlan, AiFixPlanMessage } from '@pierre-review/shared';
-import type { FixSeed } from './prompts.js';
 import { claudeModelChoice, queuedRanOn, type AiRanOn } from '../../ai/provider.js';
-import { parsePlan, parseTranscript } from './plan.js';
 
 // DB access for the ai_fixes table (plugin-owned). Writes go through ctx.db with the
 // portable `.execute()` terminal; internal status transitions scope by id (the manager
@@ -71,11 +66,46 @@ export interface AiFixRow {
   planCostUsd?: number | null;
   // 0148 — "Run tests": JSON AiFixChecks. NULL = no tests asked for.
   checks?: string | null;
+  // 0177 — THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions). NULL phase = the removed
+  // shell-less fixer's row (history). `status` is derived from the phase (`aiFixStatusForPhase`).
+  sessionPhase?: string | null;
+  sandboxRef?: string | null;
+  agentRef?: string | null;
+  runtime?: string | null;
+  sessionJson?: Record<string, unknown> | null;
+  lastActiveAt?: Date | number | null;
+  unattended?: boolean | null;
+  workspaceId?: number | null;
 }
 
-/** The "Run tests" record a queued run starts with: the names asked for, nothing run yet. */
-export function requestedChecks(requested: readonly string[]): AiFixChecks {
-  return { requested: [...requested], ran: false, note: null, sandbox: null, install: [], results: [], hook: null, hookAttempts: 0, agentRuns: 0 };
+/** The session columns a fix session writes (fix.ts). Scoped by account. */
+export interface FixSessionPatch {
+  sessionPhase?: string;
+  status?: AiFixStatus;
+  sessionJson?: Record<string, unknown>;
+  sandboxRef?: string | null;
+  agentRef?: string | null;
+  runtime?: string | null;
+  error?: string | null;
+  lastActiveAt?: Date;
+  finishedAt?: Date | null;
+  unattended?: boolean;
+  summary?: string | null;
+  commitMessage?: string | null;
+  patch?: string | null;
+  filesChanged?: string;
+  changeReport?: string;
+  costUsd?: number | null;
+  planCostUsd?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  numTurns?: number | null;
+}
+
+export async function updateFixSession(ctx: AgentContext, accountId: number, id: number, patch: FixSessionPatch): Promise<void> {
+  if (Object.keys(patch).length === 0) return;
+  const t = ctx.schema.aiFixes;
+  await ctx.db.update(t).set(patch).where(and(eq(t.id, id), eq(t.accountId, accountId))).execute();
 }
 
 /** A stored "Run tests" record, or null (absent, or unparseable — this getter must never throw). */
@@ -116,17 +146,14 @@ export async function insertQueuedFix(
     // seed === 'review': the items, stored BEFORE the agent runs so the row always knows what it
     // was asked to do (a run that fails or is cancelled still shows its list).
     reviewItems?: AiFixReviewItem[] | null;
-    // PLAN MODE: the row opens as an open plan ('planned' / 'planning') holding its frozen seed.
-    planSeed?: FixSeed | null;
     // The provider the job goes to (the manager's, picked once). Absent ⇒ the default provider.
     provider?: 'claude' | 'codex';
-    // "Run tests": the check names the reader ticked. Absent / empty ⇒ no tests (NULL).
-    checks?: readonly string[] | null;
+    // THE WORKSPACE SESSION (0177): the row opens `booting` (status derived: running).
+    session?: { workspaceId: number; unattended: boolean; effort: string } | null;
   },
 ): Promise<number> {
   const t = ctx.schema.aiFixes;
   const items = input.reviewItems;
-  const planSeed = input.planSeed;
   const rows = (await ctx.db
     .insert(t)
     .values({
@@ -134,9 +161,9 @@ export async function insertQueuedFix(
       repoId: input.repoId,
       prId: input.prId,
       baseSha: input.baseSha,
-      status: planSeed ? 'planned' : 'queued',
-      // Labelled by the provider it is expected to run on; each pass stamps its own (`markFixRanOn`,
-      // `markPlanRanOn`). `input.model` is the Claude model ASKED for; `requestModelOf` maps back.
+      status: input.session ? 'running' : 'queued',
+      // Labelled by the provider it is expected to run on; the session stamps its own (`markFixRanOn`).
+      // `input.model` is the Claude model ASKED for; `requestModelOf` maps back.
       ...queuedRanOn(claudeModelChoice(input.model), input.provider),
       seed: input.seed,
       sourceReviewId: input.sourceReviewId,
@@ -144,13 +171,13 @@ export async function insertQueuedFix(
       trigger: input.trigger ?? 'manual',
       // Omitted (→ NULL) on a plain run: null means "this run had no review items".
       ...(items != null ? { reviewItems: JSON.stringify(items) } : {}),
-      ...(input.checks && input.checks.length > 0 ? { checks: JSON.stringify(requestedChecks(input.checks)) } : {}),
-      ...(planSeed
+      ...(input.session
         ? {
-            planStatus: 'planning',
-            planRevision: 0,
-            planSeed: JSON.stringify(planSeed),
-            planTranscript: '[]',
+            sessionPhase: 'booting',
+            workspaceId: input.session.workspaceId,
+            unattended: input.session.unattended,
+            effort: input.session.effort,
+            lastActiveAt: new Date(),
           }
         : {}),
     })
@@ -167,103 +194,6 @@ export async function markFixRanOn(ctx: AgentContext, id: number, ran: AiRanOn):
   await ctx.db
     .update(t)
     .set({ provider: ran.provider, model: ran.model, ...(ran.effort ? { effort: ran.effort } : {}) })
-    .where(eq(t.id, id))
-    .execute();
-}
-
-/** Stamp what a PLANNING pass runs on (provider + model id), as it starts. */
-export async function markPlanRanOn(ctx: AgentContext, id: number, ran: AiRanOn): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  await ctx.db
-    .update(t)
-    .set({ planProvider: ran.provider, planModel: ran.model, ...(ran.effort ? { planEffort: ran.effort } : {}) })
-    .where(eq(t.id, id))
-    .execute();
-}
-
-export async function markFixRunning(ctx: AgentContext, id: number): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  await ctx.db.update(t).set({ status: 'running' }).where(eq(t.id, id)).execute();
-}
-
-export async function saveFixSuccess(
-  ctx: AgentContext,
-  id: number,
-  data: GenerateFixResult,
-  // The refs the run was SHOWN ([] for a plain run) — the set the agent's report is validated
-  // against.
-  sentRefs: readonly string[],
-): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  const report: AiFixChangeReport = normalizeChangeReport(data.report, sentRefs, data.filesChanged);
-  await ctx.db
-    .update(t)
-    .set({
-      status: 'succeeded',
-      summary: data.summary,
-      commitMessage: data.commitMessage,
-      patch: data.patch,
-      filesChanged: JSON.stringify(data.filesChanged),
-      costUsd: data.costUsd,
-      inputTokens: data.usage.inputTokens,
-      outputTokens: data.usage.outputTokens,
-      numTurns: data.numTurns,
-      finishedAt: new Date(),
-      changeReport: JSON.stringify(report),
-      // "Run tests": what ran (absent when none was asked for — the column keeps its NULL).
-      ...(data.checks ? { checks: JSON.stringify(data.checks) } : {}),
-    })
-    .where(eq(t.id, id))
-    .execute();
-  // Record the agentic-fixer spend on the shared AI-usage ledger (agent seam). Reads
-  // accountId/prId/model back off the row. Best-effort — the whole block (incl. the
-  // read-back SELECT) is guarded so a ledger error never flips an already-succeeded fix.
-  // A provider that records its own usage (Codex) already wrote this run's row: never a second.
-  if (!data.usageRecorded && data.costUsd != null && Number.isFinite(data.costUsd) && data.costUsd > 0) {
-    try {
-      const row = (
-        (await ctx.db
-          .select({ accountId: t.accountId, prId: t.prId, model: t.model })
-          .from(t)
-          .where(eq(t.id, id))
-          .limit(1)
-          .execute()) as Array<{ accountId: number; prId: number; model: string }>
-      )[0];
-      if (row)
-        await ctx.recordAiUsage({
-          accountId: row.accountId,
-          seam: 'agent',
-          feature: 'ai_fix',
-          model: row.model,
-          costUsd: data.costUsd,
-          inputTokens: data.usage.inputTokens,
-          outputTokens: data.usage.outputTokens,
-          prId: row.prId,
-        });
-    } catch {
-      /* ledger write is best-effort — never break the fix save */
-    }
-  }
-}
-
-export async function markFixFailed(
-  ctx: AgentContext,
-  id: number,
-  error: string,
-): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  await ctx.db
-    .update(t)
-    .set({ status: 'failed', error: error.slice(0, 4000), finishedAt: new Date() })
-    .where(eq(t.id, id))
-    .execute();
-}
-
-export async function markFixCancelled(ctx: AgentContext, id: number): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  await ctx.db
-    .update(t)
-    .set({ status: 'cancelled', finishedAt: new Date() })
     .where(eq(t.id, id))
     .execute();
 }
@@ -353,172 +283,6 @@ export async function listFixHistory(
 // Every write below is a COMPARE-AND-SET on the plan's state, so a discard that lands while a pass
 // is finishing is never overwritten by that pass, and an approve can only take a plan that is ready.
 
-async function readPlanColumns(
-  ctx: AgentContext,
-  id: number,
-): Promise<{ plan: string | null; planTranscript: string | null; planCostUsd: number | null; accountId: number; prId: number; model: string } | null> {
-  const t = ctx.schema.aiFixes;
-  const rows = (await ctx.db
-    .select({
-      plan: t.plan,
-      planTranscript: t.planTranscript,
-      planCostUsd: t.planCostUsd,
-      accountId: t.accountId,
-      prId: t.prId,
-      model: t.model,
-      planModel: t.planModel,
-    })
-    .from(t)
-    .where(eq(t.id, id))
-    .limit(1)
-    .execute()) as Array<{ plan: string | null; planTranscript: string | null; planCostUsd: number | null; accountId: number; prId: number; model: string; planModel: string | null }>;
-  const r = rows[0];
-  // The pass's ledger row names the model the PASS ran (a plan and its build may differ).
-  return r ? { ...r, model: r.planModel ?? r.model } : null;
-}
-
-function addCost(prev: number | null, cost: number | null): number | null {
-  if (cost == null || !Number.isFinite(cost)) return prev;
-  return (prev ?? 0) + cost;
-}
-
-/** Record one planning pass's spend on the AI-usage ledger. Best-effort, like the build's. */
-async function recordPlanUsage(
-  ctx: AgentContext,
-  row: { accountId: number; prId: number; model: string },
-  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number }; usageRecorded?: boolean },
-): Promise<void> {
-  // A provider that records its own usage (Codex) already wrote this pass's row: never a second.
-  if (pass.usageRecorded) return;
-  if (pass.costUsd == null || !Number.isFinite(pass.costUsd) || pass.costUsd <= 0) return;
-  try {
-    await ctx.recordAiUsage({
-      accountId: row.accountId,
-      seam: 'agent',
-      feature: 'ai_fix_plan',
-      model: row.model,
-      costUsd: pass.costUsd,
-      inputTokens: pass.usage.inputTokens,
-      outputTokens: pass.usage.outputTokens,
-      prId: row.prId,
-    });
-  } catch {
-    /* ledger write is best-effort — never break the plan save */
-  }
-}
-
-/** A planning pass produced a plan: store it as the new revision and append Claude's reply. */
-export async function savePlanSuccess(
-  ctx: AgentContext,
-  id: number,
-  input: {
-    plan: AiFixPlan;
-    reply: string | null;
-    costUsd: number | null;
-    usage: { inputTokens: number; outputTokens: number };
-    usageRecorded?: boolean;
-  },
-): Promise<boolean> {
-  const t = ctx.schema.aiFixes;
-  const cur = await readPlanColumns(ctx, id);
-  if (!cur) return false;
-  await recordPlanUsage(ctx, cur, input);
-  const transcript = parseTranscript(cur.planTranscript);
-  if (input.reply) {
-    transcript.push({ role: 'claude', text: input.reply, revision: input.plan.revision, at: new Date().toISOString() });
-  }
-  const rows = (await ctx.db
-    .update(t)
-    .set({
-      plan: JSON.stringify(input.plan),
-      planRevision: input.plan.revision,
-      planStatus: 'plan_ready',
-      planTranscript: JSON.stringify(transcript),
-      planCostUsd: addCost(cur.planCostUsd, input.costUsd),
-      error: null,
-    })
-    .where(and(eq(t.id, id), eq(t.status, 'planned'), eq(t.planStatus, 'planning')))
-    .returning({ id: t.id })
-    .execute()) as Array<{ id: number }>;
-  return rows.length > 0;
-}
-
-/**
- * A planning pass ended without a plan (failed, refused, or cancelled). A RE-PLAN keeps the plan it
- * already has (back to 'plan_ready', the reason on `error`); a FIRST pass ends the row ('failed', or
- * 'cancelled' + 'discarded' on a cancel).
- */
-export async function markPlanPassEnded(
-  ctx: AgentContext,
-  id: number,
-  outcome: { kind: 'failed'; message: string } | { kind: 'cancelled' },
-  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number }; usageRecorded?: boolean } | null = null,
-): Promise<void> {
-  const t = ctx.schema.aiFixes;
-  const cur = await readPlanColumns(ctx, id);
-  if (!cur) return;
-  if (pass) await recordPlanUsage(ctx, cur, pass);
-  const cost = addCost(cur.planCostUsd, pass?.costUsd ?? null);
-  const guard = and(eq(t.id, id), eq(t.status, 'planned'), eq(t.planStatus, 'planning'));
-  if (parsePlan(cur.plan) != null) {
-    await ctx.db
-      .update(t)
-      .set({
-        planStatus: 'plan_ready',
-        planCostUsd: cost,
-        error: outcome.kind === 'failed' ? `The plan was not updated: ${outcome.message}`.slice(0, 1_000) : null,
-      })
-      .where(guard)
-      .execute();
-    return;
-  }
-  await ctx.db
-    .update(t)
-    .set(
-      outcome.kind === 'failed'
-        ? { status: 'failed', planStatus: 'failed', planCostUsd: cost, error: outcome.message.slice(0, 4000), finishedAt: new Date() }
-        : { status: 'cancelled', planStatus: 'discarded', planCostUsd: cost, finishedAt: new Date() },
-    )
-    .where(guard)
-    .execute();
-}
-
-/** Append the reader's steering message and reopen the plan for a pass. false ⇒ not a ready plan. */
-export async function appendPlanMessage(
-  ctx: AgentContext,
-  id: number,
-  message: AiFixPlanMessage,
-): Promise<boolean> {
-  const t = ctx.schema.aiFixes;
-  const cur = await readPlanColumns(ctx, id);
-  if (!cur) return false;
-  const transcript = parseTranscript(cur.planTranscript);
-  transcript.push(message);
-  const rows = (await ctx.db
-    .update(t)
-    .set({ planTranscript: JSON.stringify(transcript), planStatus: 'planning', error: null })
-    .where(and(eq(t.id, id), eq(t.status, 'planned'), eq(t.planStatus, 'plan_ready')))
-    .returning({ id: t.id })
-    .execute()) as Array<{ id: number }>;
-  return rows.length > 0;
-}
-
-/** "Approve and build": the SAME row becomes a queued fix with the build's prompt. */
-export async function markPlanApproved(
-  ctx: AgentContext,
-  id: number,
-  input: { prompt: string; baseSha: string },
-): Promise<boolean> {
-  const t = ctx.schema.aiFixes;
-  const rows = (await ctx.db
-    .update(t)
-    .set({ status: 'queued', planStatus: 'approved', prompt: input.prompt, baseSha: input.baseSha, error: null })
-    .where(and(eq(t.id, id), eq(t.status, 'planned'), eq(t.planStatus, 'plan_ready')))
-    .returning({ id: t.id })
-    .execute()) as Array<{ id: number }>;
-  return rows.length > 0;
-}
-
 /** "Discard plan": ends a ready (or failed-to-update) plan. Scoped by account. */
 export async function markPlanDiscarded(ctx: AgentContext, accountId: number, id: number): Promise<boolean> {
   const t = ctx.schema.aiFixes;
@@ -531,7 +295,8 @@ export async function markPlanDiscarded(ctx: AgentContext, accountId: number, id
   return rows.length > 0;
 }
 
-// Heal rows left `queued`/`running` by a crash/restart (no live job can resume them).
+// Heal rows of the REMOVED shell-less fixer left `queued`/`running` by a crash/restart (no live job can
+// resume them). ⚠ `session_phase IS NULL` only: a session row is settled by fix.ts's reconcile.
 export async function reconcileOrphanedFixes(ctx: AgentContext): Promise<number> {
   const t = ctx.schema.aiFixes;
   // A planning pass cut off by the restart: a plan that already has a revision goes back to waiting
@@ -539,13 +304,13 @@ export async function reconcileOrphanedFixes(ctx: AgentContext): Promise<number>
   const replans = (await ctx.db
     .update(t)
     .set({ planStatus: 'plan_ready', error: 'The plan was not updated: interrupted by a server restart' })
-    .where(and(eq(t.status, 'planned'), eq(t.planStatus, 'planning'), isNotNull(t.plan)))
+    .where(and(isNull(t.sessionPhase), eq(t.status, 'planned'), eq(t.planStatus, 'planning'), isNotNull(t.plan)))
     .returning({ id: t.id })
     .execute()) as Array<{ id: number }>;
   const firstPlans = (await ctx.db
     .update(t)
     .set({ status: 'failed', planStatus: 'failed', error: 'interrupted by a server restart', finishedAt: new Date() })
-    .where(and(eq(t.status, 'planned'), eq(t.planStatus, 'planning')))
+    .where(and(isNull(t.sessionPhase), eq(t.status, 'planned'), eq(t.planStatus, 'planning')))
     .returning({ id: t.id })
     .execute()) as Array<{ id: number }>;
   const planned = replans.length + firstPlans.length;
@@ -556,7 +321,7 @@ export async function reconcileOrphanedFixes(ctx: AgentContext): Promise<number>
       error: 'interrupted by a server restart',
       finishedAt: new Date(),
     })
-    .where(eq(t.status, 'queued'))
+    .where(and(isNull(t.sessionPhase), eq(t.status, 'queued')))
     .returning({ id: t.id })
     .execute()) as Array<{ id: number }>;
   const rows2 = (await ctx.db
@@ -566,7 +331,7 @@ export async function reconcileOrphanedFixes(ctx: AgentContext): Promise<number>
       error: 'interrupted by a server restart',
       finishedAt: new Date(),
     })
-    .where(eq(t.status, 'running'))
+    .where(and(isNull(t.sessionPhase), eq(t.status, 'running')))
     .returning({ id: t.id })
     .execute()) as Array<{ id: number }>;
   return rows.length + rows2.length + planned;

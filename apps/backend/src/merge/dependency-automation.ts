@@ -22,9 +22,12 @@
 // strategy onto the PR's own branch, never a rebase.
 //
 // FIX WITH AI: a red PR whose failure is proven LIVE gets ONE unattended AI Fix (plain seed: the
-// failing checks' log excerpts), pushed through AI Fix's own Push. ≤ DEPENDENCY_AI_FIX_DAILY_CAP AI
-// runs (fixes + conflict runs) per PR per 24 h. Every pushed head (`resultSha`) must be GREEN again
-// before it is approved or armed.
+// failing checks' log excerpts) — an UNATTENDED sandboxed session (one build turn, then it closes) —
+// pushed through AI Fix's own Push. ≤ DEPENDENCY_AI_FIX_DAILY_CAP AI runs (fixes + conflict runs) per PR
+// per 24 h. Every pushed head (`resultSha`) must be GREEN again before it is approved or armed.
+// ⚠ NO CONTAINER RUNTIME ⇒ ONE `skipped` row per head ("No container runtime on this computer."),
+// written BEFORE any claim (`recordSandboxSkip`): no `limn/deps` line, no cap use, and later ticks at
+// that head read nothing. A BUSY sandbox writes nothing at all; a later tick decides.
 //
 // ⚠ TEAMS (merge/deps-claim.ts): before ANY action, the head's `limn/deps` commit status is read
 // and claimed; a teammate's live claim or finished action of the same family ⇒ a SKIPPED row
@@ -40,7 +43,7 @@
 // ⚠ A PERSON'S CANCEL WINS: a PR in `auto_merge_policy_skips` is left alone by every switch, and a
 // person cancelling the AI fix in its tab ends it (recorded, never retried).
 import type { FastifyBaseLogger } from 'fastify';
-import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
 import {
   DEFAULT_AI_FIX_MODEL,
   DEFAULT_DEPENDENCY_POLICY,
@@ -126,7 +129,8 @@ const {
 const ACTIONS_PER_TICK = 6;
 /** How long an AI conflict run may take before it is given up on. */
 const AI_RUN_TIMEOUT_MS = 45 * 60_000;
-/** How long an AI fix may take (queued behind the one fix slot, then run) before it is given up on. */
+/** How long an AI fix may take (the sandbox's boot — a first image pull is slow — then its one build turn)
+ *  before it is given up on. */
 const AI_FIX_TIMEOUT_MS = 90 * 60_000;
 /** The automation log's window and length. */
 const LOG_DAYS = 14;
@@ -480,6 +484,32 @@ export async function recordTeammateSkip(
         eq(daa.state, 'skipped'),
         sql`(${daa.teammateLogin} IS NOT ${hold.login} OR ${daa.teammateHandled} IS NOT ${handled ? 1 : 0})`,
       ),
+    })
+    .execute();
+}
+
+/**
+ * THE SANDBOX IS MISSING (AI Fix runs only as a sandboxed session): record the head as SKIPPED with the
+ * reason and no teammate — BEFORE any claim, so nothing is written to GitHub and nothing counts toward
+ * the AI-run cap (a skip is invisible to the sweep's steps). A later claim takes it over once a runtime
+ * exists. Written once per (PR, head, action) and refreshed only when the sentence changes, so the log
+ * does not churn; a teammate's skip and every real row are never touched.
+ */
+export async function recordSandboxSkip(
+  accountId: number,
+  prId: number,
+  headSha: string,
+  action: DependencyAutomationActionKind,
+  detail: string,
+): Promise<void> {
+  const text = detail.slice(0, 300);
+  await db
+    .insert(daa)
+    .values({ accountId, prId, headSha, action, state: 'skipped', detail: text })
+    .onConflictDoUpdate({
+      target: [daa.accountId, daa.prId, daa.headSha, daa.action],
+      set: { detail: text, updatedAt: new Date() },
+      setWhere: and(eq(daa.state, 'skipped'), isNull(daa.teammateLogin), sql`${daa.detail} IS NOT ${text}`),
     })
     .execute();
 }
@@ -888,7 +918,7 @@ async function tickWorkspace(
     .map((r) => ({ ...r, accountId })) as Candidate[];
   if (prs.length === 0) return;
   const ids = prs.map((p) => p.id);
-  const [skipRows, actionRows, facts] = await Promise.all([
+  const [skipRows, actionRows, facts, sandboxSkipRows] = await Promise.all([
     db
       .select({ prId: autoMergePolicySkips.prId })
       .from(autoMergePolicySkips)
@@ -901,8 +931,23 @@ async function tickWorkspace(
       .where(and(eq(daa.accountId, accountId), inArray(daa.prId, ids), ne(daa.state, 'skipped')))
       .execute(),
     prPolicyFacts(accountId, ids),
+    // The heads already recorded as "no container runtime" (`recordSandboxSkip`: no teammate).
+    db
+      .select({ prId: daa.prId, headSha: daa.headSha })
+      .from(daa)
+      .where(
+        and(
+          eq(daa.accountId, accountId),
+          inArray(daa.prId, ids),
+          eq(daa.action, 'ai_fix'),
+          eq(daa.state, 'skipped'),
+          isNull(daa.teammateLogin),
+        ),
+      )
+      .execute(),
   ]);
   const cancelled = new Set(skipRows.map((r) => r.prId));
+  const sandboxSkipped = new Set(sandboxSkipRows.map((r) => `${r.prId}:${r.headSha}`));
   const actionAt = (prId: number, head: string, action: DependencyAutomationActionKind) =>
     actionRows.find((a) => a.prId === prId && a.headSha === head && a.action === action) ?? null;
   // THE AI-RUN CAP: CI fixes and conflict runs together, per PR, rolling 24 hours.
@@ -982,6 +1027,11 @@ async function tickWorkspace(
       );
       if (!ok.ok) continue;
       if (depsHeldNow(accountId, pr.id, pr.headSha, 'ai_fix', now)) continue;
+      // THE SANDBOX (AI Fix runs only there), before any GitHub read: a busy computer waits for a later
+      // tick with nothing written; no runtime at a head ALREADY recorded as such costs nothing more. A
+      // new head with no runtime goes on, so its live failure is proven before the skip is recorded.
+      const sandbox = await aiFixDeps.sandbox(aiCtx!).catch(() => ({ ok: true as const }));
+      if (!sandbox.ok && (sandbox.reason === 'busy' || sandboxSkipped.has(`${pr.id}:${pr.headSha}`))) continue;
       token ??= await getAccessToken(accountId);
       const live = await fetchPrForAutomation(token, pr.owner, pr.name, pr.number).catch(() => null);
       if (!live || live.state !== 'open' || live.isDraft || live.headSha !== pr.headSha || live.isFork) continue;
@@ -1204,6 +1254,9 @@ async function watchAndLand(claim: ActionClaim, pr: Candidate, log: FastifyBaseL
 
 // ── FIX CI WITH AI ───────────────────────────────────────────────────────────────────────────
 
+/** The log's sentence for a head skipped because this computer has no container runtime. */
+export const NO_SANDBOX_DETAIL = 'No container runtime on this computer.';
+
 /** The seams the AI fix uses — replaceable in tests. */
 export interface AiFixDeps {
   allowed: (ctx: AgentContext, accountId: number) => Promise<boolean>;
@@ -1218,8 +1271,14 @@ export interface AiFixDeps {
   ) => Promise<{ status: string; fixId?: number; message?: string }>;
   fixState: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ status: string; patch: string | null; error: string | null; provider: string | null } | null>;
   push: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ ok: true; sha: string } | { ok: false; message: string }>;
-  /** Is an AI Fix (anyone's — a reader's click or an earlier automatic one) queued or running? */
+  /** Does an AI Fix session (anyone's — a reader's click or an earlier automatic one) hold the PR? */
   isFixRunning: (prId: number) => Promise<boolean>;
+  /** Could a sandboxed AI Fix session start now (a runtime, a free session, the build slot)? Never reserves. */
+  sandbox: (
+    ctx: AgentContext,
+  ) => Promise<{ ok: true } | { ok: false; reason: 'no_runtime' | 'busy'; message: string }>;
+  /** Stop THIS fix's session (it overran its time): closed as cancelled, so nothing pushes it later. */
+  stop: (ctx: AgentContext, accountId: number, prId: number, fixId: number) => Promise<void>;
   pollMs: number;
 }
 
@@ -1278,6 +1337,15 @@ const defaultAiFixDeps: AiFixDeps = {
     const { isFixRunning } = await import('../coding/ai-fix/manager.js');
     return isFixRunning(prId);
   },
+  async sandbox() {
+    const { fixSandboxReadiness } = await import('../sandbox/session/fix.js');
+    return fixSandboxReadiness();
+  },
+  async stop(ctx, accountId, prId, fixId) {
+    const { fixIdHoldingPr, stopFixSession } = await import('../sandbox/session/fix.js');
+    // Only when THIS fix still holds the PR (one fix per PR): never a later fix a person started.
+    if (fixIdHoldingPr(prId) === fixId) await stopFixSession(ctx, accountId, prId);
+  },
   pollMs: 5_000,
 };
 
@@ -1285,10 +1353,13 @@ let aiFixDeps: AiFixDeps = defaultAiFixDeps;
 
 /**
  * An UNATTENDED AI Fix for a trusted bot's PR whose CI failed: the spend gate first (over ⇒ skipped,
- * never queued), the failure proven LIVE, then the claim (DB + `limn/deps`), then AI Fix's own run
- * (plain seed: the failing checks and their log excerpts; the no-shell tools and the path guard),
- * then AI Fix's own Push onto the bot's branch. The pushed head must go GREEN again before anything
- * approves or arms it (`aiPushedHeads`). Never retried at a head; a person's cancel of the fix wins.
+ * never queued), the failure proven LIVE, then THE SANDBOX (no container runtime ⇒ one `skipped` row,
+ * `recordSandboxSkip`, no claim and no GitHub write; busy ⇒ nothing, a later tick decides), then the
+ * claim (DB + `limn/deps`), then AI Fix's own run — an UNATTENDED sandboxed session (plain seed: the
+ * failing checks and their log excerpts; one build turn, then it closes) — then AI Fix's own Push onto
+ * the bot's branch. The pushed head must go GREEN again before anything approves or arms it
+ * (`aiPushedHeads`). Never retried at a head; a person's cancel of the fix wins (Stop closes an
+ * unattended session as cancelled). A start that loses the sandbox race after the claim gives it back.
  */
 async function startAiFix(ctx: AgentContext, c: ClaimCtx, pr: Candidate, kind: string | null): Promise<void> {
   const { log } = c;
@@ -1296,6 +1367,16 @@ async function startAiFix(ctx: AgentContext, c: ClaimCtx, pr: Candidate, kind: s
   if (!(await deps.allowed(ctx, pr.accountId))) return;
   const ci = await deps.readFailures(ctx, pr).catch(() => null);
   if (ci == null || (ci.failures.length === 0 && ci.otherFailing.length === 0)) return;
+  const sandbox = await deps.sandbox(ctx).catch(() => ({ ok: true as const }));
+  if (!sandbox.ok) {
+    if (sandbox.reason === 'no_runtime') {
+      await recordSandboxSkip(pr.accountId, pr.id, pr.headSha, 'ai_fix', NO_SANDBOX_DETAIL).catch((err) =>
+        log.warn({ err, prId: pr.id }, 'dependency automation: could not record the sandbox skip'),
+      );
+      log.info({ prId: pr.id }, 'dependency automation: AI fix skipped, no container runtime');
+    }
+    return;
+  }
   const claim = await beginDependencyAction(c, pr, 'ai_fix');
   if (claim == null) return;
   const instruction = dependencyFixInstruction({
@@ -1310,7 +1391,13 @@ async function startAiFix(ctx: AgentContext, c: ClaimCtx, pr: Candidate, kind: s
   });
   if (res == null || res.status !== 'queued' || res.fixId == null) {
     if (res?.status === 'no_auth') await finishAction(claim, 'failed', 'No AI sign-in.', log);
-    else await giveBack(claim, "didn't start", log);
+    else {
+      // Busy (`too_many` / `build_busy`, the pre-check lost a race), over budget, or anything else: nothing
+      // was written, so the claim goes back and a later tick decides again.
+      await giveBack(claim, "didn't start", log);
+      // The runtime went away since the pre-check: the same one skip row as the pre-check writes.
+      if (res?.status === 'no_runtime') await recordSandboxSkip(pr.accountId, pr.id, pr.headSha, 'ai_fix', NO_SANDBOX_DETAIL).catch(() => {});
+    }
     return;
   }
   renewDepsClaim(claim.line, log);
@@ -1332,6 +1419,8 @@ async function watchFixAndPush(
     let state = await deps.fixState(ctx, pr.accountId, fixId);
     while (state != null && (state.status === 'queued' || state.status === 'running')) {
       if (Date.now() > deadline) {
+        // The session would run on (and spend) with nobody waiting for it: stop it first.
+        await deps.stop(ctx, pr.accountId, pr.id, fixId).catch(() => {});
         await finishAction(claim, 'failed', 'The AI fix took too long.', log);
         return;
       }

@@ -9,7 +9,7 @@
 //      files, then the seed (seed.ts). Returns the seed so the driver appends `systemPrompts[provider]`.
 import { readSmallFile } from './memories.js';
 import { mirrorRepos, prepareSandboxGit, readerFiles, type MirrorResult, type MirrorSeams, type RepoBaseRequest } from './mirror.js';
-import { buildSeed, type Seed, type SeedRepoBase, type SeedService } from './seed.js';
+import { buildSeed, type FixSeedInput, type Seed, type SeedRepoBase, type SeedService } from './seed.js';
 import type { LayoutPlaces, ResolvedWorkspace } from './check.js';
 import { folderClaudeMdPath } from './check.js';
 import type { WorkspaceLayout } from './layout.js';
@@ -18,11 +18,11 @@ import type { Mount, SandboxRuntime } from '../runtime/types.js';
 
 export { resolveWorkspaceLayout, toFolderCheck, defaultLayoutPlaces, folderClaudeMdPath } from './check.js';
 export { readSessionTicket } from './ticket.js';
-export { buildSeed, sessionBranch, SANDBOX_HOME } from './seed.js';
+export { buildSeed, sessionBranch, fixSessionBranch, SANDBOX_HOME } from './seed.js';
 export { SANDBOX_BASE_REF } from './mirror.js';
 export type { WorkspaceLayout, LayoutRepo } from './layout.js';
 export type { SessionTicket } from './ticket.js';
-export type { Seed } from './seed.js';
+export type { Seed, FixSeedInput } from './seed.js';
 export type { RepoBaseRequest, MirrorResult } from './mirror.js';
 
 export const FOLDER_CLAUDE_MD_MAX_BYTES = 64 * 1024;
@@ -43,8 +43,10 @@ export interface PrepareSessionArgs {
   /** The base's words per repository ("main", "your PR #12"), and its one-line note. */
   baseLabels?: ReadonlyMap<number, { label: string; note: string | null }>;
   branch: string;
-  ticket: SessionTicket;
-  mode: 'implement' | 'fill_gaps';
+  /** What the agent is told: a story's ticket (`ticket` + `mode`), or an AI Fix's task (`fix`). seed.ts, the ONE fold. */
+  ticket?: SessionTicket;
+  mode?: 'implement' | 'fill_gaps';
+  fix?: FixSeedInput;
   userClaudeMd: boolean;
   userSkills: boolean;
   /** The services for the seed, or a function asked AFTER the mirror (WP6 reads the picked compose
@@ -97,18 +99,18 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   }
   // The seed names only what IS in the sandbox.
   const cloned = new Set(mirror.repos.map((r) => r.repoId));
-  const seed = buildSeed({
+  const common = {
     layout: { ...layout, repos: layout.repos.filter((r) => cloned.has(r.repoId)), notes: seedNotes },
     bases,
     branch: a.branch,
-    ticket: a.ticket,
-    mode: a.mode,
     memories: reader.memories,
     userClaudeMd: reader.userClaudeMd,
     folderClaudeMd: folderText,
     skills: reader.skills,
     services,
-  });
+  };
+  if (a.fix == null && a.ticket == null) throw new Error('A session needs a ticket or a fix to seed.');
+  const seed = a.fix != null ? buildSeed({ ...common, kind: 'fix', fix: a.fix }) : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement' });
   await runtime.copyIn(container, seed.files);
   return { mirror, seed, notes };
 }

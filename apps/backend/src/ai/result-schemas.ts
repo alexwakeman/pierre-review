@@ -29,7 +29,6 @@ type ZodNs = typeof Zod;
 export const RESULT_TOOL_NAMES = [
   'submit_review',
   'submit_fix',
-  'submit_plan',
   'submit_resolution',
   'submit_ticket_review',
   'submit_pr_card',
@@ -65,7 +64,6 @@ type ShapeBuilder = (z: ZodNs, opts: ResultShapeOptions) => Promise<Record<strin
 const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   submit_review: async (z, o) => (await import('../review/schema.js')).buildSubmitReviewShape(z, o),
   submit_fix: async (z) => (await import('../coding/schema.js')).buildSubmitFixShape(z),
-  submit_plan: async (z) => (await import('../coding/schema.js')).buildSubmitPlanShape(z),
   submit_resolution: async (z) => (await import('../coding/ai-resolve/schema.js')).buildSubmitResolutionShape(z),
   submit_ticket_review: async (z, o) => (await import('../review/ticket-review/schema.js')).buildSubmitTicketReviewShape(z, o),
   submit_pr_card: async (z) => (await import('../review/ticket-review/schema.js')).buildSubmitPrCardShape(z),

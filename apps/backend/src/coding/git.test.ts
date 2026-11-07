@@ -6,15 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyPatchToWorktree,
   assertPushTarget,
-  captureWorktreeDiff,
   commitAll,
   pushRef,
 } from './git.js';
 
-// Exercises the AI-Fix git helpers against a REAL throwaway git repo (fast, local).
-// The load-bearing property: `captureWorktreeDiff` must round-trip NEWLY-CREATED files
-// (a plain `git diff` drops untracked files), and the captured patch must re-apply
-// cleanly onto the same base.
+// Exercises the AI-Fix push's git helpers against a REAL throwaway git repo (fast, local). The
+// load-bearing property: a stored patch (the session's extract: `git add -A` + `git diff --cached
+// --binary`, so NEWLY-CREATED files round-trip) must re-apply cleanly onto the same base.
 
 let dir: string;
 
@@ -41,23 +39,18 @@ afterEach(() => {
   }
 });
 
-describe('captureWorktreeDiff', () => {
-  it('captures modified AND newly-created files', async () => {
-    writeFileSync(join(dir, 'a.txt'), 'two\n'); // modify
-    writeFileSync(join(dir, 'b.txt'), 'brand new\n'); // create (untracked)
+// The patch as a session extract builds it (staged, binary, new files included).
+function stagedPatch(): string {
+  git(['add', '-A']);
+  return execFileSync('git', ['diff', '--cached', '--binary'], { cwd: dir }).toString();
+}
 
-    const { patch, filesChanged } = await captureWorktreeDiff(dir);
-
-    expect(filesChanged).toContain('a.txt');
-    expect(filesChanged).toContain('b.txt'); // the untracked file survives
-    expect(patch).toContain('b.txt');
-    expect(patch).toContain('brand new');
-  });
-
-  it('produces an applicable patch that round-trips onto the base', async () => {
+describe('a stored patch', () => {
+  it('round-trips modified AND newly-created files onto the base', async () => {
     writeFileSync(join(dir, 'a.txt'), 'two\n');
     writeFileSync(join(dir, 'b.txt'), 'brand new\n');
-    const { patch } = await captureWorktreeDiff(dir);
+    const patch = stagedPatch();
+    expect(patch).toContain('brand new');
 
     // Return the worktree to the exact base state.
     git(['reset', '--hard', '-q', 'HEAD']);

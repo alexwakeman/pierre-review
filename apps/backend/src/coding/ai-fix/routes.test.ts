@@ -43,22 +43,22 @@ const PREVIEW = {
 const loadFixPreview = vi.fn(async (..._args: unknown[]): Promise<typeof PREVIEW | null> => PREVIEW);
 
 const startPlan = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 56 }));
-const sendPlanMessage = vi.fn(async (..._args: unknown[]): Promise<{ status: string; fixId?: number }> => ({
+const sendFixSessionMessage = vi.fn(async (..._args: unknown[]): Promise<{ status: string; id?: number }> => ({
   status: 'queued',
-  fixId: 56,
+  id: 9,
 }));
-const approvePlan = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 56 }));
-const discardPlan = vi.fn(async (..._args: unknown[]): Promise<string> => 'discarded');
+const approvePlan = vi.fn(async (..._args: unknown[]): Promise<{ status: string; id?: number; message?: string }> => ({ status: 'queued', id: 9 }));
+const discardFix = vi.fn(async (..._args: unknown[]): Promise<{ status: string }> => ({ status: 'discarded' }));
 
 vi.mock('./manager.js', () => ({
   startFix: (...args: unknown[]) => startFix(...args),
   startPlan: (...args: unknown[]) => startPlan(...args),
-  sendPlanMessage: (...args: unknown[]) => sendPlanMessage(...args),
+  sendFixSessionMessage: (...args: unknown[]) => sendFixSessionMessage(...args),
   approvePlan: (...args: unknown[]) => approvePlan(...args),
-  discardPlan: (...args: unknown[]) => discardPlan(...args),
+  discardFix: (...args: unknown[]) => discardFix(...args),
   loadFixPreview: (...args: unknown[]) => loadFixPreview(...args),
   getFixStatus: vi.fn(),
-  requestFixCancel: vi.fn(() => false),
+  requestFixCancel: vi.fn(async () => false),
   subscribeFixStream: vi.fn(() => () => {}),
 }));
 
@@ -118,15 +118,6 @@ vi.mock('./pr-context.js', () => ({
   getViewerCanPush: vi.fn(async () => true),
 }));
 
-// "Run tests" picker: the manifest files at the head (one GitHub request in real life).
-const fetchRepoFiles = vi.fn(async (_accountId: number, a: { paths: readonly string[] }) => {
-  const files: Record<string, string> = {
-    'package.json': JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .', release: 'npm publish', 'test:docker': 'docker compose up -d && vitest' } }),
-    'pnpm-lock.yaml': '',
-  };
-  return Object.fromEntries(a.paths.map((p) => [p, files[p] ?? null]));
-});
-
 const applyAndPush = vi.fn(async (args: { target: { kind: string } }) => ({
   pushedBranch: args.target.kind === 'existing' ? 'feature' : 'feature-ai-fix',
   commitSha: 'c0ffee',
@@ -155,7 +146,6 @@ async function build(signedIn: { claude: boolean; codex: boolean } = { claude: t
     },
     coding: { applyAndPush },
   } as any as ProContext;
-  (ctx as any).github.fetchRepoFiles = fetchRepoFiles;
   const { default: Fastify } = await import('fastify');
   const { registerAiFixRoutes } = await import('./routes.js');
   const app = Fastify({ logger: false });
@@ -544,32 +534,57 @@ describe('plan mode routes', () => {
     await app.close();
   });
 
-  it('a steering message must be non-blank and short; the text reaches the manager trimmed', async () => {
+  it('a message (and the old plan/message name) must be non-blank and short; it reaches the session trimmed', async () => {
     const app = await build();
-    sendPlanMessage.mockClear();
-    const msg = (text: unknown) =>
-      app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/message', payload: { text } as object });
-    expect((await msg('   ')).statusCode).toBe(400);
-    expect((await msg(7)).statusCode).toBe(400);
-    expect((await msg('x'.repeat(2_001))).json().error).toBe('MessageTooLong');
-    expect(sendPlanMessage).not.toHaveBeenCalled();
-    expect((await msg('  Leave the API alone. ')).statusCode).toBe(202);
-    expect((sendPlanMessage.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 56, text: 'Leave the API alone.' });
-    sendPlanMessage.mockResolvedValueOnce({ status: 'revision_cap' });
-    expect((await msg('again')).json().error).toBe('PlanRevisionCap');
+    for (const url of ['/api/pro/ai-fixes/56/message', '/api/pro/ai-fixes/56/plan/message']) {
+      sendFixSessionMessage.mockClear();
+      const msg = (text: unknown) => app.inject({ method: 'POST', url, payload: { text } as object });
+      expect((await msg('   ')).statusCode).toBe(400);
+      expect((await msg(7)).statusCode).toBe(400);
+      expect((await msg('x'.repeat(8_001))).json().error).toBe('MessageTooLong');
+      expect(sendFixSessionMessage).not.toHaveBeenCalled();
+      const ok = await msg('  Leave the API alone. ');
+      expect(ok.statusCode).toBe(202);
+      expect(ok.json()).toEqual({ fixId: 9, status: 'queued' });
+      // The row read through the account-scoped getter decides the id.
+      expect((sendFixSessionMessage.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 9, text: 'Leave the API alone.' });
+      sendFixSessionMessage.mockResolvedValueOnce({ status: 'agent_busy' });
+      expect((await msg('again')).json().error).toBe('AgentBusy');
+    }
     await app.close();
   });
 
-  it('approve starts the build; discard of a plan not waiting is a 409', async () => {
+  it('approve is Start fix; a session not waiting is 409 PlanNotReady; discard (both names) closes it', async () => {
     const app = await build();
     const ok = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/approve' });
     expect(ok.statusCode).toBe(202);
-    expect((approvePlan.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 56 });
-    discardPlan.mockResolvedValueOnce('not_ready');
+    expect((approvePlan.mock.calls[0] as unknown[])[1]).toEqual({ accountId: 1, fixId: 9, text: null });
+    approvePlan.mockResolvedValueOnce({ status: 'not_ready', message: 'The fix has started.' });
+    const late = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/approve' });
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error).toBe('PlanNotReady');
+    discardFix.mockResolvedValueOnce({ status: 'not_ready' });
     const no = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/discard' });
     expect(no.statusCode).toBe(409);
-    const yes = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/discard' });
-    expect(yes.json()).toEqual({ status: 'discarded' });
+    for (const url of ['/api/pro/ai-fixes/56/plan/discard', '/api/pro/ai-fixes/56/discard']) {
+      const yes = await app.inject({ method: 'POST', url });
+      expect(yes.json()).toEqual({ status: 'discarded' });
+    }
+    await app.close();
+  });
+
+  it('the sandbox refusals of a start: NoRuntime, TooManySessions, BuildBusy (409, one line)', async () => {
+    const app = await build();
+    startFix.mockResolvedValueOnce({ status: 'no_runtime', message: 'Docker is not running.' } as never);
+    let res = await start(app, { instruction: 'Fix it.' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'NoRuntime', message: 'Docker is not running.' });
+    startFix.mockResolvedValueOnce({ status: 'too_many', message: 'A session is already open. Discard one first.' } as never);
+    res = await start(app, { instruction: 'Fix it.' });
+    expect(res.json().error).toBe('TooManySessions');
+    startFix.mockResolvedValueOnce({ status: 'build_busy' } as never);
+    res = await start(app, { instruction: 'Fix it.' });
+    expect(res.json().error).toBe('BuildBusy');
     await app.close();
   });
 });
@@ -613,47 +628,28 @@ describe('POST /api/pro/prs/:id/ai-fix — the provider', () => {
 });
 
 
-describe('"Run tests"', () => {
-  it('the start body’s check names reach startFix (deduplicated); none ⇒ nothing sent', async () => {
+describe('"Run tests" is removed', () => {
+  it('an older tab’s check names are accepted and ignored: nothing reaches startFix', async () => {
     const app = await build();
     const res = await start(app, { seed: 'review', sourceReviewId: 5, checks: ['test', 'lint', 'test'] });
     expect(res.statusCode).toBe(202);
-    expect(startArg().checks).toEqual(['test', 'lint']);
-    startFix.mockClear();
-    await start(app, { seed: 'review', sourceReviewId: 5 });
     expect(startArg()).not.toHaveProperty('checks');
     await app.close();
   });
 
-  it('a malformed list is a 400 before anything starts', async () => {
+  it('a malformed list is ignored too', async () => {
     const app = await build();
-    for (const checks of ['test', [1], ['a\nb'], Array.from({ length: 31 }, (_, i) => `t${i}`)]) {
-      const res = await start(app, { seed: 'review', sourceReviewId: 5, checks });
-      expect(res.statusCode).toBe(400);
-      expect(res.json()).toMatchObject({ error: 'BadChecks' });
-    }
-    expect(startFix).not.toHaveBeenCalled();
+    const res = await start(app, { seed: 'review', sourceReviewId: 5, checks: 'test' });
+    expect(res.statusCode).toBe(202);
+    expect(startArg()).not.toHaveProperty('checks');
     await app.close();
   });
 
-  it('GET …/ai-fix/checks lists what the head declares, refused ones with their reason', async () => {
-    const { clearChecksPreviewCache } = await import('./checks-preview.js');
-    clearChecksPreviewCache();
+  it('GET …/ai-fix/checks answers 404 ChecksRemoved', async () => {
     const app = await build();
     const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/checks' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { checks: Array<{ name: string; command: string; defaultOn: boolean; refused: string | null }> };
-    expect(body.checks.map((c) => [c.name, c.command, c.defaultOn])).toEqual([
-      ['lint', 'pnpm run lint', true],
-      ['test', 'pnpm run test', true],
-      ['test:docker', 'pnpm run test:docker', false],
-    ]);
-    expect(body.checks.find((c) => c.name === 'test:docker')!.refused).toMatch(/containers/);
-    expect(body.checks.some((c) => c.name === 'release')).toBe(false);
-    // Cached per (repo, head): a second open asks GitHub nothing.
-    fetchRepoFiles.mockClear();
-    await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/checks' });
-    expect(fetchRepoFiles).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'ChecksRemoved', message: 'Tests now run inside the sandbox.' });
     await app.close();
   });
 });

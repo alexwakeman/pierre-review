@@ -1,13 +1,14 @@
 // THE DEMO'S AGENTIC RUNS — finished Claude Reviews, a review chat, a Check threads run, a CI review,
-// AI Fix (a finished fix with its change report, and a plan waiting for approval), ticket reviews with
+// AI Fix (two closed sandboxed fix sessions with their change reports), ticket reviews with
 // their contribution cards, design diagrams, the reference library with a docs chat, and a story's
 // "Check against docs" — every one stored by the PRODUCT's own pipeline.
 //
 // HOW, WITHOUT A MODEL. Each feature's model call sits behind a seam: Claude Review calls
-// `ctx.review.runReview`, AI Fix `ctx.coding.generateFix` / `generatePlan`, the CI review reads
+// `ctx.review.runReview`, the CI review reads
 // checks through `ctx.ci`, the docs check takes `runAgent` / `complete`. Where a seam exists, this
 // file hands the real manager a context whose seam answers with the written result below, and the
-// manager does everything else — routing, reconciling, hashing, storing. Where the agent is imported
+// manager does everything else — routing, reconciling, hashing, storing. AI Fix runs in a sandbox, which a
+// demo has none of: its sessions are stored closed through its own persist module. Where the agent is imported
 // directly (Check threads, the CI review's agent, design diagrams, the ticket review, the docs build),
 // this file walks the manager's own steps with its exported pieces (plan, reconcile, validate,
 // persist), in the same order. Nothing leaves the process: no GitHub, no model.
@@ -829,22 +830,6 @@ async function seedCiReview(base: any, c: AgenticSeedCtx): Promise<number> {
 
 // ── 5. AI FIX ────────────────────────────────────────────────────────────────────────────────
 
-/** What "Run tests" recorded for the seeded #114 fix (an AiFixChecks; fictional Acme output). */
-const FIX_114_CHECKS = {
-  requested: ['lint', 'test', 'pre-commit hook'],
-  ran: true,
-  note: null,
-  sandbox: 'seatbelt',
-  install: [],
-  results: [
-    { name: 'lint', kind: 'lint', command: 'make lint', status: 'passed', exitCode: 0, durationMs: 2_140, output: 'terraform fmt -check -recursive\ntflint --recursive\n0 issue(s) found', truncated: false, note: null },
-    { name: 'test', kind: 'test', command: 'make test', status: 'passed', exitCode: 0, durationMs: 14_820, output: 'terraform init -backend=false -input=false\nterraform validate\nSuccess! The configuration is valid.\n\nterraform test\neks/tests/node_groups.tftest.hcl... in progress\n  run "scales_between_bounds"... pass\n  run "desired_inside_range"... pass\neks/tests/node_groups.tftest.hcl... tearing down\neks/tests/node_groups.tftest.hcl... pass\n\nSuccess! 2 passed, 0 failed.', truncated: false, note: null },
-  ],
-  hook: { name: 'pre-commit hook', kind: 'hook', command: 'git commit (.husky/pre-commit)', status: 'passed', exitCode: 0, durationMs: 1_960, output: 'terraform fmt: 1 file checked', truncated: false, note: null },
-  hookAttempts: 1,
-  agentRuns: 2,
-};
-
 const FIX_114_PATCH = [
   'diff --git a/terraform/eks/node-groups.tf b/terraform/eks/node-groups.tf',
   'index 3f1c2ab..9d4e7c1 100644',
@@ -864,99 +849,177 @@ const FIX_114_PATCH = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; runB: number }): Promise<Record<string, number>> {
-  const { db, schema, now } = c;
+  const { db, schema, now, platformWs: ws } = c;
   const { eq } = await import('drizzle-orm');
-  // The old seeded fix (seed 'ci_analysis', a retired seed) goes; the runs below replace it.
+  // The older seeded fixes go; the two sessions below replace them.
   await db.delete(schema.aiFixes).execute();
-  const heads = (await db.select({ id: schema.pullRequests.id, h: schema.pullRequests.headSha, ref: schema.pullRequests.headRefName }).from(schema.pullRequests).execute()) as Array<{ id: number; h: string; ref: string | null }>;
-  const headOf = (id: number) => heads.find((x) => x.id === id)!;
-  let shownRefs: readonly string[] = [];
-  const ctx = agentCtx(base, {
-    github: {
-      ...base.github,
-      fetchPrHeadInfo: async (_a: number, owner: string, name: string, n: number) => {
-        const h = headOf(n);
-        return { headSha: h.h, headRef: h.ref ?? 'main', headRepoFullName: `${owner}/${name}`, isFork: false, maintainerCanModify: true, baseRef: 'main' };
+  const ctx = agentCtx(base, {});
+  const at = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * HOUR);
+  const iso = (hoursAgo: number) => at(hoursAgo).toISOString();
+  const { loadReviewSeed } = await import('../src/coding/ai-fix/manager.js');
+  const { insertQueuedFix, updateFixSession, markFixRanOn } = await import('../src/coding/ai-fix/persist.js');
+  const { normalizeChangeReport } = await import('../src/coding/ai-fix/review-seed.js');
+  const prRow = async (id: number) =>
+    ((await db.select({ repoId: schema.pullRequests.repoId, headSha: schema.pullRequests.headSha, headRef: schema.pullRequests.headRefName, number: schema.pullRequests.number }).from(schema.pullRequests).where(eq(schema.pullRequests.id, id)).execute()) as Array<{ repoId: number; headSha: string; headRef: string | null; number: number }>)[0]!;
+  const repoName = async (id: number) => {
+    const r = ((await db.select({ owner: schema.repos.owner, name: schema.repos.name }).from(schema.repos).where(eq(schema.repos.id, id)).execute()) as Array<{ owner: string; name: string }>)[0];
+    return r ? `${r.owner}/${r.name}` : 'acme/app';
+  };
+  const BOOT = (['runtime', 'image', 'network', 'proxy', 'sandbox', 'task', 'repos', 'services', 'agent'] as const).map((key) => ({
+    key,
+    label: { runtime: 'Finding the container runtime', image: 'Getting the sandbox image', network: 'Making the private network', proxy: 'Starting the network filter', sandbox: 'Starting the sandbox', task: 'Reading the pull request', repos: 'Cloning the repositories', services: 'Getting the services ready', agent: 'Starting the agent' }[key],
+    state: key === 'services' ? 'skipped' : 'done',
+    detail: key === 'services' ? 'No compose files are picked for this workspace.' : null,
+  }));
+
+  // A sandboxed AI Fix session (docs/SANDBOX.md § AI Fix sessions), stored CLOSED with its patch kept: a
+  // demo has no sandbox, so the tab shows the conversation, the report, the diff, Push and Resume.
+  // The seed is the PRODUCT's own (`loadReviewSeed`), so the items and refs are what a real start sends.
+  async function storeSession(o: {
+    prId: number;
+    reviewId: number;
+    planFirst: boolean;
+    hoursAgo: number;
+    summary: string;
+    commitMessage: string;
+    patch: string;
+    filesChanged: string[];
+    report: (refs: string[]) => { changes: Array<{ path: string; summary: string; refs: string[] }>; unaddressed: Array<{ ref: string; reason: string }> };
+    conversation: (refs: string[]) => unknown[];
+    costUsd: number;
+    usage: { inputTokens: number; outputTokens: number; numTurns: number };
+  }): Promise<number> {
+    const loaded = await loadReviewSeed(ctx, { accountId: 1, prId: o.prId, reviewId: o.reviewId, withTicketItems: true });
+    if (!loaded) throw new Error(`ai fix: no review seed for #${o.prId}`);
+    const pr = await prRow(o.prId);
+    const fullName = await repoName(pr.repoId);
+    const refs = loaded.seed.sentRefs.slice();
+    const id = await insertQueuedFix(ctx, {
+      accountId: 1,
+      repoId: pr.repoId,
+      prId: o.prId,
+      baseSha: pr.headSha,
+      model: 'claude-opus-5-5',
+      seed: 'review',
+      sourceReviewId: o.reviewId,
+      prompt: loaded.seed.text,
+      reviewItems: loaded.seed.items,
+      session: { workspaceId: ws, unattended: false, effort: 'medium' },
+    });
+    const report = normalizeChangeReport(o.report(refs), refs, o.filesChanged);
+    const branch = `limn/fix-pr-${pr.number}`;
+    await updateFixSession(ctx, 1, id, {
+      sessionPhase: 'built',
+      status: 'succeeded',
+      runtime: 'Docker Desktop 29.6.2',
+      sandboxRef: null,
+      summary: o.summary,
+      commitMessage: o.commitMessage,
+      patch: o.patch,
+      filesChanged: JSON.stringify(o.filesChanged),
+      changeReport: JSON.stringify(report),
+      costUsd: o.costUsd,
+      inputTokens: o.usage.inputTokens,
+      outputTokens: o.usage.outputTokens,
+      numTurns: o.usage.numTurns,
+      finishedAt: at(o.hoursAgo - 0.1),
+      lastActiveAt: at(o.hoursAgo - 0.1),
+      sessionJson: {
+        version: 1,
+        action: o.planFirst ? 'fix_plan' : 'fix',
+        subject: 'fix',
+        unattended: false,
+        runtimeNote: null,
+        boot: BOOT,
+        notes: [],
+        conversation: o.conversation(refs),
+        repos: [{ repoId: pr.repoId, fullName, path: `/Users/me/${fullName}`, branch, baseSha: pr.headSha }],
+        startDir: `/Users/me/${fullName}`,
+        credentialLine: null,
+        mode: 'build',
+        criteria: [],
+        openPoints: [],
+        services: null,
+        network: [],
+        leftOut: [],
+        seq: 40,
       },
-      fetchPrDiff: async (_a: number, _o: string, _n: string, number: number) => unifiedDiff(DIFFS[number] ?? []),
-    },
-    coding: {
-      ...base.coding,
-      generateFix: async (args: { prompt: string; baseSha: string }) => {
-        const refs = [...new Set(args.prompt.match(/\b[FTCQS]\d+\b/g) ?? [])];
-        return {
-          summary: 'Set the worker node group to scale between 2 and 8 nodes, reading the upper bound from the new `worker_max_nodes` variable so the variable is no longer unused. `desired_size = 4` sits inside the range.',
-          commitMessage: 'fix(eks): scale the worker node group between 2 and 8 nodes',
-          report: {
-            changes: [
-              { path: 'terraform/eks/node-groups.tf', summary: 'min_size 6 → 2; max_size reads var.worker_max_nodes (8).', refs: refs.filter((r) => r.startsWith('F') || r.startsWith('C')).slice(0, 3) },
-            ],
-            unaddressed: refs.filter((r) => r.startsWith('T')).slice(0, 1).map((ref) => ({ ref, reason: 'A naming preference with no effect on the plan; left as it is.' })),
-          },
-          patch: FIX_114_PATCH,
-          filesChanged: ['terraform/eks/node-groups.tf'],
-          baseSha: args.baseSha,
-          usage: { inputTokens: 18_400, outputTokens: 1_250, cacheReadTokens: 61_000, cacheCreationTokens: 7_400 },
-          costUsd: 0.36,
-          numTurns: 7,
-          aborted: false,
-        };
-      },
-      generatePlan: async (args: { shownRefs: readonly string[] }) => {
-        shownRefs = args.shownRefs;
-        const r = (prefix: string) => args.shownRefs.filter((x) => x.startsWith(prefix));
-        return {
-          plan: {
-            summary: [
-              'Add the migration for the two new review_threads columns.',
-              'Batch each thread’s comments into one INSERT.',
-              'Fill previousPaths from the files listing so renames count.',
-            ],
-            steps: [
-              { title: 'Add the missing migration', change: 'Create `0126_review_threads_is_bot.sql` with two `ALTER TABLE … ADD COLUMN … DEFAULT 0` statements and register it in the journal.', files: ['src/db/migrations/0126_review_threads_is_bot.sql', 'src/db/migrations/meta/_journal.json'], refs: r('F').slice(0, 1) },
-              { title: 'Batch comment inserts per thread', change: 'Build the rows for a thread first and write them with one multi-row `insert().values(rows).onConflictDoNothing()`.', files: ['src/sync/upsert.ts'], refs: r('F').slice(1, 2) },
-              { title: 'Populate previousPaths', change: 'Read `previous_filename` from the files listing during the walk and pass it into the thread facts.', files: ['src/sync/walk.ts', 'src/sync/derive-thread-state.ts'], refs: r('F').slice(2, 3) },
-            ],
-            notAddressed: r('T').slice(0, 1).map((ref) => ({ ref, reason: 'The author deferred it to PLAT-319; doing it here would collide with that work.' })),
-          },
-          usage: { inputTokens: 24_100, outputTokens: 1_480, cacheReadTokens: 40_200, cacheCreationTokens: 6_100 },
-          costUsd: 0, // ran on Codex (a ChatGPT sign-in has no per-run price)
-          numTurns: 6,
-          aborted: false,
-        };
-      },
-    },
+    });
+    await db.update(schema.aiFixes).set({ createdAt: at(o.hoursAgo) }).where(eq(schema.aiFixes.id, id)).execute();
+    return id;
+  }
+
+  // #114: a manual fix on Claude Opus — Start fix ran the fix at once; the agent ran the checks itself.
+  const fixId = await storeSession({
+    prId: 114,
+    reviewId: runs.run114,
+    planFirst: false,
+    hoursAgo: 3.9,
+    summary: 'Set the worker node group to scale between 2 and 8 nodes, reading the upper bound from the new `worker_max_nodes` variable so the variable is no longer unused. `desired_size = 4` sits inside the range.',
+    commitMessage: 'fix(eks): scale the worker node group between 2 and 8 nodes',
+    patch: FIX_114_PATCH,
+    filesChanged: ['terraform/eks/node-groups.tf'],
+    report: (refs) => ({
+      changes: [{ path: 'terraform/eks/node-groups.tf', summary: 'min_size 6 → 2; max_size reads var.worker_max_nodes (8).', refs: refs.filter((r) => r.startsWith('F') || r.startsWith('C')).slice(0, 3) }],
+      unaddressed: refs.filter((r) => r.startsWith('T')).slice(0, 1).map((ref) => ({ ref, reason: 'A naming preference with no effect on the plan; left as it is.' })),
+    }),
+    conversation: () => [
+      { kind: 'reader', id: 'r1', text: 'Start fix', at: iso(3.9), build: true },
+      { kind: 'tool', id: 't1', tool: 'Read', summary: 'terraform/eks/node-groups.tf', ok: true, output: null, at: iso(3.89) },
+      { kind: 'tool', id: 't2', tool: 'Edit', summary: 'terraform/eks/node-groups.tf', ok: true, output: null, at: iso(3.87) },
+      { kind: 'tool', id: 't3', tool: 'Bash', summary: 'make lint', ok: true, output: 'terraform fmt -check -recursive\ntflint --recursive\n0 issue(s) found', at: iso(3.85) },
+      { kind: 'tool', id: 't4', tool: 'Bash', summary: 'make test', ok: true, output: 'terraform validate\nSuccess! The configuration is valid.\n\nterraform test\n  run "scales_between_bounds"... pass\n  run "desired_inside_range"... pass\n\nSuccess! 2 passed, 0 failed.', at: iso(3.83) },
+      { kind: 'agent', id: 'm1', text: 'The node group now scales between 2 and 8 nodes, and `max_size` reads `var.worker_max_nodes`. `make lint` and `make test` pass.', at: iso(3.81) },
+      { kind: 'turn', id: 'e1', turn: 1, mode: 'build', outcome: 'completed', costUsd: 0.36, at: iso(3.8) },
+    ],
+    costUsd: 0.36,
+    usage: { inputTokens: 18_400, outputTokens: 1_250, numTurns: 7 },
   });
-  const { startReviewFix, startPlan } = await import('../src/coding/ai-fix/manager.js');
-  const readStatus = async (id: number) =>
-    ((await db.select({ s: schema.aiFixes.status }).from(schema.aiFixes).where(eq(schema.aiFixes.id, id)).execute()) as Array<{ s: string }>)[0]?.s;
 
-  const fix = await startReviewFix(ctx, { accountId: 1, prId: 114, reviewId: runs.run114, model: 'claude-opus-5-5', trigger: 'manual' });
-  if (fix.status !== 'queued') throw new Error(`ai fix: ${JSON.stringify(fix)}`);
-  const fixId = fix.fixId;
-  const s1 = await settle(() => readStatus(fixId), 'ai fix');
-  if (s1 !== 'succeeded') throw new Error(`ai fix ${s1}`);
-  await db.update(schema.aiFixes).set({ createdAt: new Date(now.getTime() - 3.9 * HOUR), finishedAt: new Date(now.getTime() - 3.8 * HOUR) }).where(eq(schema.aiFixes.id, fixId)).execute();
-  // "Run tests" (coding/checks/): this fix ran the project's own checks in the sandbox — the results,
-  // the commit hook and the agent's own runs, as a real run stores them (AiFixChecks).
-  await db.update(schema.aiFixes).set({ checks: JSON.stringify(FIX_114_CHECKS) }).where(eq(schema.aiFixes.id, fixId)).execute();
-
-  const plan = await startPlan(ctx, { accountId: 1, prId: 113, model: 'claude-opus-5-5', seed: 'review', sourceReviewId: runs.runB });
-  if (plan.status !== 'queued') throw new Error(`ai plan: ${JSON.stringify(plan)}`);
-  const planId = plan.fixId;
-  await settle(async () => {
-    const r = ((await db.select().from(schema.aiFixes).where(eq(schema.aiFixes.id, planId)).execute()) as Array<Record<string, unknown>>)[0];
-    // 'planned' with a plan stored (planStatus leaves 'planning').
-    return r && r.status === 'planned' && r.planStatus === 'plan_ready' ? 'done' : 'running';
-  }, 'ai plan');
-  // The plan ran on Codex GPT-6.1 Sol (the fix on #114 above is Claude Opus's); its build, once
-  // approved, is labelled Codex from the start.
-  const { markPlanRanOn, markFixRanOn } = await import('../src/coding/ai-fix/persist.js');
-  await markPlanRanOn(ctx, planId, CODEX_DEEP_HIGH);
+  // #113: Plan first on Codex GPT-6.1 Sol — the plan turn, then Start fix in the same session.
+  const planId = await storeSession({
+    prId: 113,
+    reviewId: runs.runB,
+    planFirst: true,
+    hoursAgo: 2.6,
+    summary: 'Added the migration for the two new review_threads columns and batched each thread’s comment inserts into one statement.',
+    commitMessage: 'fix(sync): add the review_threads migration and batch comment inserts',
+    patch: FIX_113_PATCH,
+    filesChanged: ['src/db/migrations/0126_review_threads_is_bot.sql'],
+    report: (refs) => ({
+      changes: [{ path: 'src/db/migrations/0126_review_threads_is_bot.sql', summary: 'Adds `is_bot` and `is_bot_overridden` with DEFAULT 0.', refs: refs.filter((r) => r.startsWith('F')).slice(0, 1) }],
+      unaddressed: refs.filter((r) => r.startsWith('T')).slice(0, 1).map((ref) => ({ ref, reason: 'The author deferred it to PLAT-319; doing it here would collide with that work.' })),
+    }),
+    conversation: (refs) => [
+      { kind: 'reader', id: 'r1', text: 'Plan first', at: iso(2.6), build: false },
+      { kind: 'tool', id: 't1', tool: 'Read', summary: 'src/db/schema.sqlite.ts', ok: true, output: null, at: iso(2.59) },
+      { kind: 'agent', id: 'm1', text: `My plan:\n\n1. Add the migration for the two new review_threads columns${refs[0] ? ` (${refs[0]})` : ''}.\n2. Batch each thread’s comments into one INSERT.\n3. Leave the naming point for PLAT-319.`, at: iso(2.57) },
+      { kind: 'turn', id: 'e1', turn: 1, mode: 'chat', outcome: 'completed', costUsd: 0, at: iso(2.56) },
+      { kind: 'reader', id: 'r2', text: 'Start fix', at: iso(2.5), build: true },
+      { kind: 'tool', id: 't2', tool: 'Write', summary: 'src/db/migrations/0126_review_threads_is_bot.sql', ok: true, output: null, at: iso(2.48) },
+      { kind: 'tool', id: 't3', tool: 'Bash', summary: 'pnpm test src/sync', ok: true, output: '✓ src/sync/upsert.test.ts (14 tests)', at: iso(2.46) },
+      { kind: 'agent', id: 'm2', text: 'The migration is in and registered. `pnpm test src/sync` passes.', at: iso(2.45) },
+      { kind: 'turn', id: 'e2', turn: 2, mode: 'build', outcome: 'completed', costUsd: 0, at: iso(2.44) },
+    ],
+    costUsd: 0, // ran on Codex (a ChatGPT sign-in has no per-run price)
+    usage: { inputTokens: 24_100, outputTokens: 1_480, numTurns: 6 },
+  });
   await markFixRanOn(ctx, planId, CODEX_DEEP_HIGH);
-  void shownRefs;
   return { fixId, planId };
 }
+
+const FIX_113_PATCH = [
+  'diff --git a/src/db/migrations/0126_review_threads_is_bot.sql b/src/db/migrations/0126_review_threads_is_bot.sql',
+  'new file mode 100644',
+  'index 0000000..4b1d2e9',
+  '--- /dev/null',
+  '+++ b/src/db/migrations/0126_review_threads_is_bot.sql',
+  '@@ -0,0 +1,3 @@',
+  '+ALTER TABLE `review_threads` ADD `is_bot` integer DEFAULT 0 NOT NULL;',
+  '+--> statement-breakpoint',
+  '+ALTER TABLE `review_threads` ADD `is_bot_overridden` integer DEFAULT 0 NOT NULL;',
+  '',
+].join('\n');
 
 // ── 6. TICKET REVIEWS ────────────────────────────────────────────────────────────────────────
 

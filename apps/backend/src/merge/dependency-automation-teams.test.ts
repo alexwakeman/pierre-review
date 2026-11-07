@@ -115,6 +115,9 @@ const fix = {
   status: 'succeeded',
   patch: 'diff --git a/package.json b/package.json\n',
   push: { ok: true, sha: 'f1x5ha0000000' } as any,
+  // The sandbox pre-check's answer, and what the start answers (null ⇒ queued).
+  sandbox: { ok: true } as any,
+  startAnswer: null as any,
 };
 const aiFixDeps = () => ({
   allowed: async () => fix.allowed,
@@ -122,11 +125,12 @@ const aiFixDeps = () => ({
     fix.failing ? { failures: [{ checkName: 'build', step: 'tsc', excerpt: 'error TS2322' }], otherFailing: [] } : null,
   startFix: async (_ctx: unknown, input: any) => {
     fix.started.push(input);
-    return { status: 'queued', fixId: 100 + fix.started.length };
+    return fix.startAnswer ?? { status: 'queued', fixId: 100 + fix.started.length };
   },
   fixState: async () => ({ status: fix.status, patch: fix.patch, error: fix.status === 'failed' ? 'boom' : null, provider: 'claude' }),
   push: async () => fix.push,
   isFixRunning: async () => false,
+  sandbox: async () => fix.sandbox,
   pollMs: 1,
 });
 
@@ -214,7 +218,15 @@ beforeEach(async () => {
   lines = [];
   posted = [];
   listReads = 0;
-  Object.assign(fix, { allowed: true, failing: true, started: [], status: 'succeeded', push: { ok: true, sha: 'f1x5ha0000000' } });
+  Object.assign(fix, {
+    allowed: true,
+    failing: true,
+    started: [],
+    status: 'succeeded',
+    push: { ok: true, sha: 'f1x5ha0000000' },
+    sandbox: { ok: true },
+    startAnswer: null,
+  });
   await db.delete(schema.dependencyAutomationActions).execute();
   await db.delete(schema.autoMergeRequests).execute();
   await db.delete(schema.reviews).execute();
@@ -397,6 +409,96 @@ describe('Fix dependency PRs with AI', () => {
     const [row] = await actions();
     expect(row).toMatchObject({ action: 'ai_fix', state: 'failed', detail: 'Not pushed: The branch moved.', resultSha: null });
     expect(posted.at(-1)).toMatchObject({ state: 'success', description: "me couldn't fix CI" });
+  });
+
+  it('⚠ no container runtime: ONE skipped row with the reason, no claim, no GitHub write; later ticks read nothing', async () => {
+    bindAi();
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true });
+    await setPr(botPr, { ciStatus: 'failure' });
+    fix.sandbox = { ok: false, reason: 'no_runtime', message: 'Docker is not running.' };
+    await auto.runDependencyAutomationTick(log);
+    expect(fix.started).toEqual([]);
+    expect(posted).toEqual([]); // no limn/deps line: nothing claimed
+    const [first, ...more] = await actions();
+    expect(more).toEqual([]);
+    expect(first).toMatchObject({ action: 'ai_fix', state: 'skipped', detail: auto.NO_SANDBOX_DETAIL, teammateLogin: null });
+    // The next ticks: the head is already recorded — no live PR read, the row is not rewritten.
+    const reads = gh.fetchPrForAutomation.mock.calls.length;
+    await auto.runDependencyAutomationTick(log);
+    await auto.runDependencyAutomationTick(log);
+    expect(gh.fetchPrForAutomation.mock.calls.length).toBe(reads);
+    const after = await actions();
+    expect(after).toHaveLength(1);
+    expect(after[0].updatedAt.getTime()).toBe(first.updatedAt.getTime());
+    // The log says so, with no teammate.
+    const repoIds = (await db.select({ id: schema.pullRequests.repoId }).from(schema.pullRequests).where(eq(schema.pullRequests.id, botPr)).execute()).map((r: any) => r.id);
+    const logRows = await auto.listDependencyAutomationLog(A, repoIds);
+    expect(logRows[0]).toMatchObject({ action: 'ai_fix', state: 'skipped', detail: auto.NO_SANDBOX_DETAIL, teammate: null });
+    // A runtime appears: the skip is not an attempt — the claim takes it over and the fix runs.
+    fix.sandbox = { ok: true };
+    await auto.runDependencyAutomationTick(log);
+    await auto.__testing.settle();
+    expect(fix.started).toHaveLength(1);
+    const [row] = await actions();
+    expect(row).toMatchObject({ action: 'ai_fix', state: 'done', resultSha: 'f1x5ha0000000', teammateLogin: null });
+  });
+
+  it('a skip for no runtime never counts toward the 2-runs cap', async () => {
+    bindAi();
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true });
+    // One real run on an older head + a no-runtime skip on another: one attempt, so a run may start.
+    await db
+      .insert(schema.dependencyAutomationActions)
+      .values({ accountId: A, prId: botPr, headSha: 'h0', action: 'ai_fix', state: 'failed' })
+      .execute();
+    await auto.recordSandboxSkip(A, botPr, 'hz', 'ai_fix', auto.NO_SANDBOX_DETAIL);
+    await setPr(botPr, { ciStatus: 'failure' });
+    await auto.runDependencyAutomationTick(log);
+    await auto.__testing.settle();
+    expect(fix.started).toHaveLength(1);
+  });
+
+  it('a busy sandbox: nothing read, claimed or recorded — a later tick decides', async () => {
+    bindAi();
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true });
+    await setPr(botPr, { ciStatus: 'failure' });
+    fix.sandbox = { ok: false, reason: 'busy', message: 'Another sandbox session is building.' };
+    const reads = gh.fetchPrForAutomation.mock.calls.length;
+    await auto.runDependencyAutomationTick(log);
+    expect(gh.fetchPrForAutomation.mock.calls.length).toBe(reads);
+    expect(fix.started).toEqual([]);
+    expect(await actions()).toEqual([]);
+    expect(posted).toEqual([]);
+  });
+
+  it('the start loses the sandbox race after the claim: the claim is given back (busy), or becomes the skip (no runtime)', async () => {
+    bindAi();
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true });
+    await setPr(botPr, { ciStatus: 'failure' });
+    fix.startAnswer = { status: 'build_busy' };
+    await auto.runDependencyAutomationTick(log);
+    expect(fix.started).toHaveLength(1);
+    expect(await actions()).toEqual([]); // given back: the row is gone
+    expect(posted).toHaveLength(2); // the claim, then its release
+    expect(posted[0]?.description).toBe('me handling · fixing CI');
+    fix.startAnswer = { status: 'no_runtime', message: 'gone' };
+    await auto.runDependencyAutomationTick(log);
+    const rows = await actions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ state: 'skipped', detail: auto.NO_SANDBOX_DETAIL });
+  });
+
+  it('⚠ a person’s cancel wins: a cancelled fix is recorded "Cancelled." and never pushed', async () => {
+    bindAi();
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true });
+    await setPr(botPr, { ciStatus: 'failure' });
+    fix.status = 'cancelled';
+    let pushed = 0;
+    auto.__testing.setAiFixDeps({ ...aiFixDeps(), push: async () => ((pushed += 1), fix.push) });
+    await auto.runDependencyAutomationTick(log);
+    await auto.__testing.settle();
+    expect(pushed).toBe(0);
+    expect((await actions())[0]).toMatchObject({ action: 'ai_fix', state: 'failed', detail: 'Cancelled.' });
   });
 
   it('a teammate already tried this head: skipped, recorded as theirs', async () => {

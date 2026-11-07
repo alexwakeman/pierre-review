@@ -17,7 +17,6 @@ import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignme
 import type {
   AiFixChangeReport,
   AiFixChecks,
-  AiFixChecksPreview,
   AiFixPlanMessage,
   AiProviderId,
   ClaudeTicketCriterionStatus,
@@ -351,12 +350,10 @@ export function storyBuildDocsPending(docs: StoryBuildDocs | null, stored: Story
   return n;
 }
 
-// ---- tests ("Run tests"): the AI Fix shapes, named for both features --------------------------------
+// ---- tests (the removed "Run tests"): stored on older rows, read for history only ---------------------
 
-/** What "Run tests" did on one run. The AI Fix shape (`AiFixChecks`), named for both features. */
+/** What "Run tests" did on one run of the removed flow. The AI Fix shape (`AiFixChecks`). */
 export type CheckRunReport = AiFixChecks;
-/** The checks picker for one repository at its base (`GET …/repos/:repoId/checks`). */
-export type StoryBuildChecksPreview = AiFixChecksPreview;
 
 // ---- the wire shapes --------------------------------------------------------------------------------
 

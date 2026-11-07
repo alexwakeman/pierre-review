@@ -56,10 +56,8 @@ import type {
   RequestReviewersBody,
   RequestReviewersResult,
   AiFixPickerPreview,
-  AiFixPlanMessageBody,
   AiFixPushBody,
   AiFixPushResult,
-  AiFixChecksPreview,
   AiFixResponse,
   AiFixStatusResponse,
   ApprovePrBody,
@@ -316,7 +314,7 @@ import type {
   SandboxSessionDiffResponse,
   ReviewSuggestionDismissResponse,
 } from '@pierre-review/shared';
-import { sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
+import { aiFixSessionPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
 
 class ApiError extends Error {
   constructor(
@@ -1795,8 +1793,6 @@ export const api = {
 
   // ---- AI Fix ----
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
-  // "Run tests": the checks the PR's head declares (one GitHub read; asked when the box is ticked).
-  aiFixChecks: (prId: number) => get<AiFixChecksPreview>(`/api/pro/prs/${prId}/ai-fix/checks`),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
   // The fix picker: every item a review-seeded fix would include, with stable keys + defaults.
@@ -1816,24 +1812,29 @@ export const api = {
     fetch(`/api/pro/prs/${prId}/ai-fix/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),
     ),
-  // PLAN MODE ("Plan first", manual only): a read-only planning pass over the same body; then the
-  // steering chat, "Approve and build" and "Discard plan" on the plan's own row.
+  // PLAN FIRST (manual only): the session boots in chat mode over the same body, makes a plan and waits
+  // for Start fix (`approveAiFixPlan`).
   startAiFixPlan: (prId: number, body: GenerateFixBody) =>
     fetch(`/api/pro/prs/${prId}/ai-fix/plan`, jsonBody('POST', body)).then((r) =>
       handle<{ fixId: number; status: string }>(r),
     ),
-  sendAiFixPlanMessage: (fixId: number, body: AiFixPlanMessageBody) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/plan/message`, jsonBody('POST', body)).then((r) =>
+  // Start fix (Plan first): the session moves to build mode; `text` (optional) goes with it.
+  approveAiFixPlan: (fixId: number, body: { text?: string } = {}) =>
+    fetch(aiFixSessionPath('planApprove', fixId), jsonBody('POST', body)).then((r) =>
       handle<{ fixId: number; status: string }>(r),
     ),
-  approveAiFixPlan: (fixId: number) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/plan/approve`, jsonBody('POST')).then((r) =>
-      handle<{ fixId: number; status: string }>(r),
-    ),
-  discardAiFixPlan: (fixId: number) =>
-    fetch(`/api/pro/ai-fixes/${fixId}/plan/discard`, jsonBody('POST')).then((r) =>
-      handle<{ status: string }>(r),
-    ),
+  // AI FIX'S WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; paths: shared AI_FIX_SESSION_API). The
+  // start's 202 is followed on `aiFixSessionStreamUrl` (SandboxSessionStreamEvent frames, read through
+  // `sseStream`). A message is one more turn in the SAME session; "Start fix" is `approveAiFixPlan`.
+  aiFixMessage: (fixId: number, body: SandboxSessionMessageBody) =>
+    fetch(aiFixSessionPath('message', fixId), jsonBody('POST', body)).then((r) => handle<{ fixId: number; status: 'queued' }>(r)),
+  aiFixDiscard: (fixId: number) =>
+    fetch(aiFixSessionPath('discard', fixId), jsonBody('POST')).then((r) => handle<{ status: 'discarded' }>(r)),
+  aiFixResume: (fixId: number) =>
+    fetch(aiFixSessionPath('resume', fixId), jsonBody('POST')).then((r) => handle<{ fixId: number; status: 'queued' }>(r)),
+  aiFixAllow: (fixId: number, body: SandboxNetworkAllowBody) =>
+    fetch(aiFixSessionPath('networkAllow', fixId), jsonBody('POST', body)).then((r) => handle<SandboxNetworkAllowResponse>(r)),
+  aiFixSessionStreamUrl: (fixId: number) => aiFixSessionPath('sessionStream', fixId),
   // Push a fix as-is (synchronous, never a force push) → the full result.
   pushAiFix: (fixId: number, body: AiFixPushBody) =>
     fetch(`/api/pro/ai-fixes/${fixId}/push`, jsonBody('POST', body)).then((r) =>

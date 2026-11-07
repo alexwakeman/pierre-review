@@ -510,24 +510,14 @@ export const config = {
   // (Review concurrency + queue caps + the routing thresholds moved to the plugin's
   // PRO_REVIEW_* env — the plugin owns the queue/manager + the mode-routing decision.)
 
-  // ---- AI Fix (Pro: agentic code fixer) — core infra knobs ----
-  // The write-capable fixer (packages/pro/ai-fix) reuses the review clone/agent
-  // machinery. A runaway fixer is pricier than a review (it edits + re-reads files),
-  // so the caps are a touch higher on turns but the USD ceiling is the real guard.
-  // Concurrency is 1: the fixer relies on ambient Claude auth WITHOUT mutating
-  // process.env (which would race the review manager), so only one fix runs at once.
+  // ---- AI Fix — caps for the sandboxed fix session (sandbox/session/fix.ts) and Resolve with Claude ----
+  // AI_FIX_MAX_TURNS caps every agent turn; AI_FIX_BUDGET_USD is the US$ cap of an UNATTENDED fix
+  // (Claude Code's `--max-budget-usd`) and of a Resolve with Claude run.
   aiFixMaxTurns: intFromEnv('AI_FIX_MAX_TURNS', 40),
   aiFixBudgetUsd: floatFromEnv('AI_FIX_BUDGET_USD', 5),
-  aiFixConcurrency: intFromEnv('AI_FIX_CONCURRENCY', 1),
   // Refuse a fix whose captured patch exceeds this (a runaway diff shouldn't bloat a
   // DB row). ~1 MiB of unified diff is already a very large change.
   aiFixPatchMaxBytes: intFromEnv('AI_FIX_PATCH_MAX_BYTES', 1024 * 1024),
-  // AI Fix "Run tests" (coding/checks/; docs/SECURITY.md § Sandboxed checks). A check runs ONLY inside
-  // an OS sandbox (macOS sandbox-exec, Linux bubblewrap); with neither, tests are refused unless the
-  // reader sets LIMN_CHECKS_ALLOW_UNSANDBOXED=true — then they run without one, and the run says so.
-  checksAllowUnsandboxed: process.env.LIMN_CHECKS_ALLOW_UNSANDBOXED === 'true',
-  // The longest one check may run (the agent's and Limn's own run alike).
-  aiFixCheckTimeoutMs: intFromEnv('AI_FIX_CHECK_TIMEOUT_MS', 10 * 60_000),
   // Cap the continue/skip loop of CORE "Update branch from trunk"'s rebase
   // (coding/merge.ts): a stop with no conflicted file (a commit that became empty) is
   // continued or skipped up to this many times, then the rebase is aborted rather than

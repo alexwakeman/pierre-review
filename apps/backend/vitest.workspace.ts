@@ -30,11 +30,10 @@ export const SLOW_TESTS = [
   'src/coding/git.test.ts',
   'src/coding/merge.test.ts',
   'src/review/worktree-gc.test.ts',
-  'src/coding/checks/session.test.ts',
   // A story build on a real scratch worktree per case (git init/add/commit/diff, ~1.5 s each).
   'src/coding/story-build/push-branch.test.ts',
   // The fake Codex CLI: one node process per run (two on a retry), many on real git worktrees.
-  'src/coding/codex-fix.test.ts',
+  'src/coding/codex-resolve.test.ts',
   'src/ai/providers/codex.test.ts',
   'src/ai/codex/app-server.test.ts',
   'src/ai/codex/run.test.ts',
@@ -49,8 +48,6 @@ export const SLOW_TESTS = [
   'src/ml/model.test.ts',
   // Moved 2026-10-30 by the time budget: the workspace MCP server spawned under tsx (split from workspace-mcp.test.ts); measured 1.8s for its one case
   'src/ai/codex/workspace-mcp-process.test.ts',
-  // Moved 2026-10-30 by the time budget: spawns node children and a stand-in docker script per case (runProcess, dockerPreflight); measured 3.1s, 1.3s for one case
-  'src/coding/checks/runner.test.ts',
   // Moved 2026-10-30 by the time budget: real git per case (pins and sweeps base refs in a scratch repo); measured 4.3s for one case
   'src/coding/story-build/base-refs.test.ts',
   // Moved 2026-10-30 by the time budget: the fake Codex CLI, one node process per sign-in call, like the other Codex suites; measured 2.0s, 1.6s for one case

@@ -1789,13 +1789,12 @@ reappears.
   pins the mounts.
 - **The old CI-analysis card is DELETED** (the CI review diagnoses failing CI). The AI summary, the
   CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
-- **Plan mode in the AI Fix tab** ("Plan first" beside the model, then `AiFix/PlanPanel.tsx`;
-  contract docs/CLAUDE-REVIEW.md § Plan mode). ⚠ A row with `status === 'planned'` is ALWAYS drawn by
-  the plan panel — the tab's `isRunning` excludes it, so a planning pass never shows as a build — and
-  the picker stays shut while a plan is open. The stream stays on while `plan.status === 'planning'`
-  or a plan action is in flight. The plan actions share `aiFixPlanMutationKey`; "Make a plan"
-  shares the start's key. Only "Approve and build" seeds the header AI-fixes card (`noteAiFixRun`);
-  the banner treats `'planned'` as terminal ("Plan ready").
+- **Plan first in the AI Fix tab** (2026-11-07) is a CHAT-MODE workspace session (§ The AI Fix tab
+  below): the session makes a plan and waits; **Start fix** (`useStartFixBuild` → `…/plan/approve`)
+  moves it to build mode. The structured plan panel and its chat (`PlanChat.tsx`) are DELETED;
+  `AiFix/PlanPanel.tsx` keeps only the READ-ONLY history view (`PlanHistory`, `ApprovedPlanNote`) for
+  rows of the removed plan mode. "Make a plan" shares the start's key; Start fix notes the header
+  AI-fixes card (`noteAiFixRun`) BEFORE its POST, and the banner treats `'planned'` as terminal.
 - **STORIES ARE THE TICKET REVIEW'S NOW, in its own "Story check" section** (`TicketCoverage.tsx`,
   pure half `lib/ticketReview.ts`, hooks `hooks/useTicketReview.ts`; contract docs/CLAUDE-REVIEW.md
   § Ticket review). "Run a review" sends `{model}` only. One block per ticket the PR is on: key,
@@ -2165,9 +2164,41 @@ while the tab is visible), feeds every surface below; the decision is the server
   clears it (draft/body in `settings/claudeSpendForm.ts`). API key = "Weekly budget (US$)", no 5-hour
   setting. The explanation is behind the ⓘ.
 
-### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixPicker.tsx`, `components/AiFix/FixReport.tsx`)
+### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixPicker.tsx`, `components/AiFix/FixReport.tsx`, `components/sandbox/SessionView.tsx`)
 
-Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
+Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix · [docs/SANDBOX.md](SANDBOX.md) § AI Fix
+sessions.
+
+- **EVERY FIX IS A WORKSPACE SESSION (2026-11-07).** Top to bottom: the picker (below) with the model
+  menu, Plan first and **Start fix** inside the ONE `AiRunGate kind="fix"`; then, while `fix.session`
+  is live or a closed `built` one can be resumed (`lib/aiFixSession.ts` `fixSessionShown`), a status
+  line (`fixSessionStatusLine`) and the SHARED session view (`SharedSessionView`: the boot, the
+  conversation, the composer with Send / Start fix / Stop / Discard, Resume when closed; the rail:
+  **What to fix** — the frozen `reviewItems` — then Repositories, Services, Network, Spend); then
+  `FixResult` (the report, one "Edits in owner/name are left out. AI Fix pushes only owner/repo." line
+  per `fix.leftOut` repository, the diff, Push) whenever no turn runs. Start fix boots and runs AT ONCE
+  (D2); a message after it is a BUILD turn in the SAME session; Stop interrupts the turn
+  (`…/ai-fix/cancel`); Push ends the session. The Repositories rail says "Pushes to <headRef>" on the
+  PR's repository and "Read only. Edits here are left out." on the rest (`fixRepoStatus`). ⚠ A LIVE
+  session holds the PR: the picker and "New fix" hide until it ends (`fixSessionHoldsPr`).
+- **No container runtime** (`useSandboxRuntime`, read only while the picker shows): the picker stays
+  (what would be fixed) and the run row is replaced by `StoryBuild/SandboxSetupHelp.tsx`
+  `SandboxRuntimeLine` — the one line + "How to set up" Implement shows. HIDE, never disable. A refused
+  start (409 `NoRuntime`) re-reads the runtime.
+- **Server state** (`hooks/useAiFix.ts`): the ONE `['ai-fix', prId]` query (fallback poll
+  `SESSION_POLL_MS` only while a live session boots or a turn runs); while `session.live`, ONE SSE
+  stream, `useFixSessionStream` → the shared `useSandboxSessionStream` (also behind
+  `useStorySessionStream`) on `…/ai-fixes/:fixId/session/stream`, merged with `mergeSessionViews`.
+  Message / Start fix / Resume / Discard share `aiFixSessionMutationKey(prId)` (the banner reads it
+  too); **Stop and Allow have their own mutations**. The session view takes its presses as HOOKS
+  (`SessionActions`) and its words and gate kinds as `SessionWords` (`gate: { chat: 'plan', build:
+  'fix' }`), so the two tabs keep their own keys; `test/aiGating.test.ts` pins both.
+- **A succeeded row's `error`** (`fixErrorTone`): "Automatic push failed: …" stays an amber warning; a
+  closed session's line (idle close, a restart) is a plain note, shown only when the session view is
+  not already on screen saying so.
+- **"Run tests" and "Not built or tested here." are GONE** — the agent runs the repository's own
+  checks in the sandbox and says so in the conversation. Older rows keep their read-only
+  `ChecksReport` (`AiFix/RunTests.tsx`, results only) and their plan (`PlanHistory`).
 
 - **One entry point: the FIX PICKER.** The review is the one handed over from the Claude Review tab
   (`aiFixTabFocus.reviewId`, consumed into local state) or else the PR's latest review when it
@@ -2197,10 +2228,9 @@ Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
   and Left out (items over the prompt budget). A Finding chip is a button that opens the Claude
   Review tab and scrolls to `claude-finding-<id>` once it renders (gives up after ~3s — an older
   review's finding is not on screen). A file in the diff with no entry says "No summary reported."
-- **The tab carries almost no prose.** How the fixer works lives in ONE `InfoButton` beside the "AI
-  Fix" title, and one more on Changes / Left out. "Not built or tested here." stays ON SCREEN,
-  folded into the diff header beside the file count — never moved into a popover. A row from a
-  removed seed prints one source line ("Fix from picked comments (no longer offered).") and its diff.
+- **The tab carries almost no prose.** How the fixer works (the sandbox, what is pushed) lives in ONE
+  `InfoButton` beside the "AI Fix" title, and one more on Changes / Left out. A row from a removed
+  seed prints one source line ("Fix from picked comments (no longer offered).") and its diff.
 
 ---
 
@@ -4223,7 +4253,9 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   items) and its button reads "Fill gaps". Same session, same routes: the session folds the stored check
   into TICKET.md, so the agent builds the gaps (docs/STORY-BUILD.md § Fill gaps).
 - **A WORKSPACE SESSION (2026-11-07; [SANDBOX.md](SANDBOX.md) § Sessions).** The tab drives the session
-  routes only. The old plan/build sections (`PlanSection`, `BuildDocsSection`, `CoverageSection`), their
+  routes only. The view itself is SHARED with the AI Fix tab: `components/sandbox/SessionView.tsx`
+  (`SharedSessionView`); `StoryBuild/SessionView.tsx` is the thin story half (its hooks as
+  `SessionActions`, its words, the Ticket panel, the `story-session-*` test ids). The old plan/build sections (`PlanSection`, `BuildDocsSection`, `CoverageSection`), their
   hooks (plan message, docs, accept, retry, cancel, checks) and pure helpers (the step line, the docs
   groups, the Accept body, Retry) are DELETED; `storyBuildRefAnchor` lives in `lib/storyBuild.ts` (the
   change report's tags scroll to the criterion in the Ticket panel). A row of the removed flow (`session:

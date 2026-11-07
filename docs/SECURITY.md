@@ -115,115 +115,56 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   shell that is RCE on the developer's machine via a stranger's PR. The old
   `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
   gained explicit **untrusted-input / prompt-injection** instructions.
-- **`coding/agent.ts`**: **the AI-Fix agent followed**, and both agentic runs are now shell-free
-  (AI Fix's agentic conflict resolver, which never had a shell, was removed with its
-  trunk-reconciliation path). `FIX_TOOLS` lost `Bash`; `DISALLOWED_TOOLS` is
-  `['Bash','NotebookEdit']`. Same input shape as a review, and WIDER on the `'comments'` seed,
-  whose whole payload is comment bodies. The five `Bash(rm *)`/`Bash(git …)` prefixes it replaced
-  were the same non-boundary. ⚠ The `Bash(git commit *)`/`Bash(git push *)` pair also encoded
-  "the host owns the commit" — still true, and now enforced harder, but say so in prose because
-  the grep no longer finds it. The fixer's build/test capability went with the shell; "Run tests"
-  (2026-10-30, below) brought testing back WITHOUT it. When no check ran the SPA still says "Not
-  built or tested here." beside the diff — it promises no CI (see [PLATFORM.md](PLATFORM.md) § The
-  fix agent has no shell).
+- **`coding/agent.ts`** (`runAgentInWorktree`): the host-side worktree run, now used ONLY by Resolve with
+  Claude, which is READ-ONLY (`READ_TOOLS` = Read/Glob/Grep + `submit_resolution`; `DENIED_TOOLS` denies
+  Bash and every write tool outright; pinned by `coding/tool-surface.test.ts` with a mutation test).
+  The shell-less fixer that used to run here (`FIX_TOOLS`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']`)
+  was REMOVED on 2026-11-07: AI Fix now runs in a workspace session (below), with a shell, inside the
+  sandbox. "The host owns the commit and the push" is unchanged: the patch leaves the sandbox, the host
+  applies and pushes it.
 
-### Sandboxed checks — AI Fix "Run tests" (`coding/checks/`, 2026-10-30)
+### Sandboxed checks — REMOVED 2026-11-07
 
-The fixer may run the project's OWN tests, lint and type checks. The agent still has **no shell**:
-it gets ONE tool, `run_check(name)` (Claude `mcp__checks__run_check`, in-process; Codex
-`mcp__workspace__run_check`, Limn's workspace MCP server), and a NAME is all it can send. Limn
-decides everything else, and runs every step in an OS sandbox. A reusable module: `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `restoreGit()` / `close()`.
+AI Fix's "Run tests" (2026-10-30, `coding/checks/`) ran a repository's DECLARED checks in an OS
+sandbox (macOS Seatbelt, Linux bubblewrap) for a fixer that had no shell, through ONE tool,
+`run_check(name)`. It was removed with that fixer: in the workspace session the agent runs the
+repository's own tests itself, inside the container (below), so the allow-list, the deny scan, the
+frozen spec, the throwaway hook repository and `LIMN_CHECKS_ALLOW_UNSANDBOXED` are gone. The Codex path
+guard still DENIES `mcp__workspace__run_check` outright. Older `ai_fixes.checks` rows are read for
+history only. The two helpers the container runtimes shared (`findOnPath`, the credential-free
+`dockerCliEnv`) moved to `sandbox/runtime/host-env.ts`.
 
-- **THE ALLOW-LIST IS DERIVED, NEVER TYPED** (`discover.ts`): package.json scripts named `test`,
-  `test:*`, `lint`, `lint:*`, `typecheck`, `check`… (never `*:watch`, `*:fix`, `dev`, `start`…) run
-  through the package manager the LOCKFILE names (corepack's `packageManager` first); Makefile
-  `test`/`lint`/`check`/`typecheck` targets; pytest / tox / nox; `cargo test --offline`; `go test
-  ./...` + `go vet ./...`; `gradle test --offline`; `mvn -o test`. Each is a fixed argv. The picker
-  reads the same function over the PR head's manifest files (one GraphQL request,
-  `github/repo-files.ts`); the run discovers AGAIN on its own worktree, and a name the head no longer
-  declares is skipped. Manifest files are read only as REGULAR files (a symlinked `Makefile` or
-  `.husky` is ignored).
-- **THE DENY SCAN** (`deny-scan.ts`) refuses — listed with the reason, never runnable — a script
-  whose text, AND every script it calls (`npm run x`, `run-s lint:*`, npm's `pre`/`post`), every
-  Makefile prerequisite / sub-make / variable, and a hook's lint-staged commands, builds or starts
-  containers (`docker build|run|compose up`…), pipes a download into a shell, uses sudo, deletes
-  outside the tree (`rm -rf /|~|$VAR|..`), publishes, pushes or edits git config, talks to GitHub
-  (`gh`), ssh/scp, touches keychains or launch agents, writes home dotfiles, or `eval`s a variable. A
-  Makefile with `include` is refused (unreadable first). It is a CONSERVATIVE SECOND line: a script
-  that only TALKS to a service on localhost is fine; a monorepo's per-package scripts are not read —
-  the sandbox is the boundary.
-- **ARGV ONLY** (`spawn.ts`): `spawn(command, args, {shell:false, detached:true})`, its own process
-  group (a timeout or cancel kills the whole tree), a timeout (`AI_FIX_CHECK_TIMEOUT_MS`, 10 min;
-  install 15, hook 5), output ANSI-stripped and CAPPED (24k chars, head + tail, the cut named).
-- **THE SCRUBBED ENVIRONMENT** (`env.ts`) is an ALLOW-LIST (PATH, locale, TERM, a few toolchain
-  homes) + `NEVER_PASSED` belt and braces: no GH/ANTHROPIC/OPENAI/CLAUDE/AWS token, no
-  `SSH_AUTH_SOCK`, no `DOCKER_*`, no `LIMN_*`. HOME and TMPDIR move into the run's folder; npm reads
-  no real `~/.npmrc`; git runs with no system/global config; caches point at Limn's PRIVATE cache
-  (`<data dir>/check-cache`), never the reader's own.
-- **THE SANDBOX** (`sandbox.ts`) — macOS `sandbox-exec` with a generated Seatbelt profile (paths
-  only as `-D` PARAMETERS, never spliced into the text), Linux `bwrap`. Writes: the worktree, the
-  run's `sbx/` folder (and, for the install step only, the private cache; for Cargo only its lock
-  files); the worktree's `.git` FILE is read-only. Reads: everything outside the home folder and
-  Limn's data folder; inside them only the worktree, the clone, the caches and the toolchain homes
-  (`~/.nvm`, `~/.rustup`, PATH entries…; ⚠ never a folder DIRECTLY in the home folder through PATH —
-  `~/.docker/bin` opens that bin, not `~/.docker`); `~/.cargo/credentials*`, `~/.m2/settings*.xml`,
-  `~/.gradle/gradle.properties`, `~/.docker/config.json` stay dark. Network: a CHECK gets loopback only (macOS: `localhost`
-  in and out, so a test reaches a database the reader started; Linux `--unshare-net`: its OWN
-  loopback, so host services are NOT reachable); the INSTALL step gets the network but runs no
-  repository code (`--ignore-scripts`, `--ignore-pnpmfile`, yarn `--mode=skip-build`; a Yarn
-  `yarnPath`/plugins or Yarn 1 `.yarnrc` `yarn-path`, a `packageManager` that is a LINK (corepack
-  would fetch it), or Maven build extensions (`.mvn/extensions.xml` or `<extensions>` in the POM) gets
-  NO install; Gradle never — its build scripts are code). Unix sockets only inside the run's folder (never the Docker socket); the macOS
-  keychain daemon is denied. **No sandbox ⇒ refused** with one plain sentence; only
-  `LIMN_CHECKS_ALLOW_UNSANDBOXED=true` runs them bare, and the run says so.
-- **DOCKER FIRST** (`docker.ts`): a check that needs Docker (compose file, testcontainers, a script
-  naming docker) runs only after `docker info` answers (Limn's fixed argv, outside the sandbox);
-  otherwise it is skipped with one line and the rest run. A check never gets the Docker socket, so a
-  testcontainers suite cannot start containers — services must already run on localhost.
-- **THE FROZEN LIST** (`spec.ts`): before the agent starts, every check's wrapped argv, cwd, env,
-  timeout and cap are written to a spec file in the run's Limn-only `spec/` folder (under the data
-  folder: a check can neither read nor write it). Codex's MCP server reads it ONCE at start-up; the
-  path-guard hook allows `mcp__workspace__run_check` only when the run's guard roots carry
-  `checks: true`. An unknown name is refused; 12 calls per run.
-- **THE COMMIT HOOK** (`hooks.ts`): husky / lefthook / simple-git-hooks run INSIDE the sandbox, in a
-  THROWAWAY git folder (`spec/hook-git`, objects borrowed from the clone through `alternates`, HEAD at
-  the base commit) — the shared clone's config, refs and objects (which every later run and every
-  push reads) are never writable. ⚠ That folder lives in Limn-only `spec/`, never the checks'
-  writable `sbx/`: Limn stages into it with its OWN git, outside the sandbox, and a process a check
-  left behind (a daemon escapes the process-group kill) must not get to plant a `filter.*` command
-  in its config first. Only the hook's own sandboxed run may write it. The pre-commit framework is refused (it installs over the
-  network). Push still commits the stored patch with `--no-verify`: the hook already ran.
-- ⚠ **`restoreGit()` BEFORE EVERY GIT COMMAND OF LIMN'S IN THE WORKTREE.** A check (or the agent's
-  Write) could point the worktree's `.git` file at a folder whose config sets `core.fsmonitor` — and
-  Limn's own git, outside the sandbox, would run it. The sandbox makes `.git` read-only AND Limn puts
-  it back byte for byte before `ls-files` / `add -A`; its own git also passes `core.fsmonitor=false`.
-- Output a check leaves untracked (node_modules, coverage, target/…) stays OUT of the patch: a
-  per-run `core.excludesFile` (known output names + every path that appeared during Limn's own
-  install / final run). Tracked files are never excluded; the reader sees the diff before Push.
-
-### Workspace sessions — "Implement story" (`sandbox/`, 2026-11-07)
+### Workspace sessions — Implement and AI Fix (`sandbox/`, 2026-11-07)
 
 A session runs a full Claude Code or Codex agent **with a shell** from attacker-reachable text (the
 ticket, its comments, other people's PRs, the repositories). It is the ONE place an agent has a shell, and
-only inside a sandbox `sandbox/runtime` started; AI Fix, every review and every chat keep the no-shell
-rule above. Full design and per-OS setup: [SANDBOX.md](SANDBOX.md) (§ Threat model is the long form).
+only inside a sandbox `sandbox/runtime` started: Implement on a story, and every AI Fix run. Every review,
+every chat and Resolve with Claude keep the no-shell rule above.
+
+⚠ **AI FIX PUTS PR TEXT IN FRONT OF AN AGENT WITH A SHELL.** The PR's title, description, diff, review
+items and thread text — written by whoever opened or commented on the PR, a bot's PR included — are the
+fix's task (`FIX.md`, `PR.diff`, fenced and marked UNTRUSTED). What makes that acceptable is the sandbox,
+not the prompt: no route out but the allow-list proxy, no GitHub credential inside, no writable host
+mount, and the push on the HOST — only the PR repository's patch, to the PR's own branch, compare-and-set
+on the head, never forced. An UNATTENDED fix (auto fix, dependency automation) gets no Allow button: a
+blocked host simply stays blocked. Full design and per-OS setup: [SANDBOX.md](SANDBOX.md) (§ Threat model is the long form).
 
 | Threat | What stops it |
 |---|---|
 | The text tells the agent to send data out | The sandbox's network is `--internal` (no route out); the ONLY way out is Limn's allow-list proxy, every request logged in the Network panel, a blocked host opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the sandbox holds a per-session placeholder and the proxy swaps the real one in (`sandbox/proxy/credentials.ts`). Loopback, link-local (cloud metadata), multicast and reserved addresses are always refused. Claude Code's web search and web fetch are off (they run past the proxy). |
 | The agent damages the host | No writable host mount (a bind mount is read-only BY TYPE), no Docker socket (`spec.ts` refuses it, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources, even read-only); non-root, `--cap-drop ALL`, `no-new-privileges`, CPU / memory / process caps. Docker for Mac and Windows add the VM as a second boundary; ⚠ **on Linux Docker the kernel is shared**. microsandbox (a microVM) is built but untested. |
 | A repository's compose file escalates | Limn runs compose on the HOST from a POLICED model (`sandbox/services/policy.ts`, checked on every `up`): the whole file is refused for privileged mode, capabilities, devices, host namespaces, host mounts (the socket included), loosened security options, outside builds or unlisted registries. Services join only the session network. |
-| Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press (a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default). `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. Rate tier `github_write`. |
+| Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press. Implement: a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default; `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. AI Fix: only the PR repository, to the PR's own branch (`pushFix`, HEAD_MOVED refused); with no press only under the workspace's "Push automatically" (an own-PR auto fix, OFF by default) or dependency automation's policy (a trusted bot's PR, OFF by default). Rate tier `github_write`. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills, copied as files, size-capped, symlinks skipped. Past sessions are NEVER imported (no transcript is copied or resumed; Claude Code runs with `--no-session-persistence`). |
-| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer, idle teardown; Limn labels on every resource, swept at boot and on discard (`limn sandbox prune`); every turn is a reader's press, its usage recorded per turn. |
+| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer (Implement and AI Fix share both), idle teardown; Limn labels on every resource, swept at boot and on discard (`limn sandbox prune`). Every turn is a reader's press except an UNATTENDED fix's one build turn, which asks the spend gate first and runs under Claude's `--max-budget-usd`; usage recorded per turn. |
 
-Routes and tiers: `api/plugins/rate-limit.ts` (a session start, a message, Start build and Resume `ai` +
-`ai_hourly`; the pushes `github_write`; the rest `read`). The removed shell-less plan and build agents
+Routes and tiers: `api/plugins/rate-limit.ts` (a session start, a message, Start build / Start fix and
+Resume `ai` + `ai_hourly`; the pushes `github_write`; the rest `read`). The removed shell-less plan and build agents
 (`coding/story-build/plan-agent.ts`, `build.ts`) and their write deny-list (`review/write-deny.ts`,
 `AgentRunSpec.protectWrites`) are gone.
 
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
-The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so
+Claude Review, Resolve with Claude, the merge-conflict resolver and the sandbox mirror (Implement, AI Fix) all read this cache, so
 it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the
 clone count. **The invariant: a GitHub token never reaches disk.**
 

@@ -1030,7 +1030,7 @@ Six nullable columns on `ai_fixes`, no backfill: `plan` (JSON `AiFixPlan`), `pla
 `AiFixPlanMessage[]`), `plan_status` (`planning | plan_ready | approved | discarded | failed`; NULL = never
 planned), `plan_revision` (integer), `plan_seed` (JSON `{kind, text}`, server-only) and `plan_cost_usd`
 (`real`). Text JSON like the table's other JSON columns. A plan row carries
-the new `status = 'planned'` until it is approved or discarded (docs/CLAUDE-REVIEW.md § Plan mode). No new
+the new `status = 'planned'` until it is approved or discarded (docs/CLAUDE-REVIEW.md § Plan mode; the pass was removed 2026-11-07, see `0177`). No new
 table, so `accountScopedTables()` / erasure / both delete paths already cover it. Journal `when` sqlite
 `1792137603009`.
 
@@ -1331,7 +1331,7 @@ today's behaviour everywhere: the merge switch keeps merging every size. [MERGE-
 (written at insert, so an approved plan's build runs the same), then what Limn ran (results, install
 steps, the commit hook). Additive, nullable, no backfill: NULL = no tests asked for (every older row,
 every auto fix). `ai_fixes` is already in `accountScopedTables()`, the erasure and the export.
-[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests. Journal `idx` 148, `when` sqlite `1792137652016`
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests (removed 2026-11-07, the column dormant). Journal `idx` 148, `when` sqlite `1792137652016`
 (built as `0146`, renumbered on merge after `0146_worktree_ledger` and `0147_dependency_automation`).
 
 ### `0149_story_builds` — "Implement story" sessions
@@ -1520,6 +1520,21 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 `db/ai-reviews-seen.ts` `markAiReviewsSeen` (never moves back; [BACKEND.md](BACKEND.md) § The AI
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
+
+### `0177_ai_fix_sessions` — AI Fix rows carry a workspace session
+
+`ALTER TABLE ai_fixes ADD session_phase, sandbox_ref, agent_ref, runtime, session_json, last_active_at,
+unattended, workspace_id` and `CREATE INDEX af_account_session_phase ON ai_fixes (account_id,
+session_phase)` ([SANDBOX.md](SANDBOX.md) § AI Fix sessions; [DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes`).
+All nullable, so a row of the removed shell-less fixer reads as before (`session_phase` NULL). `status`
+stays the old word, DERIVED from the phase (shared `aiFixStatusForPhase`), so every reader of
+`ai_fixes.status` is untouched. `workspace_id` has no FK. On an existing table, so erasure already covers
+it. Additive, no backfill. Journal `idx` 177, `when` sqlite `1792569679021`.
+
+⚠ **No migration removes the shell-less fixer (2026-11-07).** Its plan-mode columns (`0113`: `plan`,
+`plan_transcript`, `plan_revision`, `plan_seed`, `plan_status`, …) and `checks` (`0148`, "Run tests") stay
+DORMANT: nothing writes them, old rows still show them read-only. Never drop them without a plan for
+those rows.
 
 ### `0176_sandbox_sessions` — "Implement story" rows carry a workspace session
 

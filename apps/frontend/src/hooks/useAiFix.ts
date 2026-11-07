@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
-  AiFixChecksPreview,
   AiFixPickerPreview,
   AiFixPushBody,
   AiFixResponse,
   AiFixStatusResponse,
   AiFixStreamEvent,
   GenerateFixBody,
+  SandboxNetworkAllowBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { DETAIL_GC_TIME } from './usePr.js';
+import { SANDBOX_RUNTIME_KEY, SESSION_POLL_MS, sandboxSettingsKey } from './useStoryBuild.js';
+import { useSandboxSessionStream } from './useSandboxSessionStream.js';
+import type { SessionStreamState } from '../lib/sandboxSession.js';
 
 // Query/mutation hooks for the AI Fix tab. Mirrors useClaudeReview; every query's `enabled` is
 // gated by the caller.
@@ -22,6 +25,12 @@ export function useAiFix(prId: number | null, enabled: boolean) {
     queryKey: ['ai-fix', prId],
     queryFn: () => api.aiFix(prId as number),
     enabled: prId != null && enabled,
+    // A live session: a slow fallback poll while something moves (its stream is the live path; an
+    // agent waiting for the reader needs no poll).
+    refetchInterval: (q) => {
+      const s = q.state.data?.fix?.session;
+      return s != null && s.live && s.phase !== 'ready' && s.phase !== 'built' ? SESSION_POLL_MS : false;
+    },
   });
 }
 
@@ -67,18 +76,6 @@ export function useAiFixPreview(prId: number, reviewId: number | null, enabled: 
   });
 }
 
-// "Run tests": the checks the PR's head declares. CLICK-GATED — `enabled` only once the reader ticks
-// "Run tests" (it is one GitHub read). Cached per PR for the session.
-export function useAiFixChecks(prId: number, enabled: boolean) {
-  return useQuery<AiFixChecksPreview>({
-    queryKey: ['ai-fix-checks', prId],
-    queryFn: () => api.aiFixChecks(prId),
-    enabled,
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-}
-
 // The start mutation's SHARED key: a per-mount `isPending` resets on a tab switch mid-start and
 // would offer a second BILLED agent run. Read in-flight off this key with
 // `useIsMutating({ mutationKey: aiFixStartMutationKey(prId) })`, never off a mutation object.
@@ -95,10 +92,13 @@ export function useStartFix(prId: number) {
       void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
       void qc.invalidateQueries({ queryKey: ['ai-fix-preview', prId] });
     },
+    // A refused start (409 NoRuntime) may mean the runtime went away: read its status again.
+    onError: () => void qc.invalidateQueries({ queryKey: SANDBOX_RUNTIME_KEY }),
   });
 }
 
-// PLAN MODE. "Plan first" shares the start's mutation key on purpose: one in-flight read covers
+// PLAN FIRST: the session boots in chat mode, makes a plan, then waits for Start fix. It shares the
+// start's mutation key on purpose: one in-flight read covers
 // both buttons, so neither can be pressed twice while the other's POST is out.
 export function useStartPlan(prId: number) {
   const qc = useQueryClient();
@@ -106,45 +106,80 @@ export function useStartPlan(prId: number) {
     mutationKey: aiFixStartMutationKey(prId),
     mutationFn: (body: GenerateFixBody) => api.startAiFixPlan(prId, body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    onError: () => void qc.invalidateQueries({ queryKey: SANDBOX_RUNTIME_KEY }),
   });
 }
 
-// Every plan action (message, approve, discard) shares ONE key per PR, read with `useIsMutating`,
-// so a tab switch mid-POST cannot offer a second billed pass.
-export function aiFixPlanMutationKey(prId: number): [string, number] {
-  return ['ai-fix-plan', prId];
+// THE WORKSPACE SESSION'S PRESSES (docs/SANDBOX.md § AI Fix sessions): a message (one more turn in the
+// SAME session), Start fix (Plan first), Resume and Discard share ONE key per PR, read with
+// `useIsMutating`, so a tab switch mid-POST cannot offer a second billed turn. The bottom-right banner
+// reads it too (a Start fix press is about to make the row 'running').
+export function aiFixSessionMutationKey(prId: number): [string, number] {
+  return ['ai-fix-session', prId];
 }
 
-export function usePlanMessage(prId: number) {
+/** The fix query and the picker's preview (a finished or discarded fix changes what is offered). */
+function invalidateFix(qc: QueryClient, prId: number): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    qc.invalidateQueries({ queryKey: ['ai-fix-preview', prId] }),
+  ]);
+}
+
+function useFixSessionAction<V>(prId: number, fn: (v: V) => Promise<unknown>) {
   const qc = useQueryClient();
   return useMutation({
-    mutationKey: aiFixPlanMutationKey(prId),
-    mutationFn: (vars: { fixId: number; text: string }) => api.sendAiFixPlanMessage(vars.fixId, { text: vars.text }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    mutationKey: aiFixSessionMutationKey(prId),
+    mutationFn: fn,
+    onSuccess: () => invalidateFix(qc, prId),
+    // A refused boot (Resume) may mean the runtime went away: read its status again.
+    onError: () => void qc.invalidateQueries({ queryKey: SANDBOX_RUNTIME_KEY }),
   });
 }
 
-export function useApprovePlan(prId: number) {
+/** One more turn: chat before Start fix, a build turn after it ("also handle X"). */
+export function useFixMessage(prId: number) {
+  return useFixSessionAction(prId, (v: { fixId: number; text: string }) => api.aiFixMessage(v.fixId, { text: v.text }));
+}
+
+/** Start fix (Plan first): the session moves to build mode; the words in the box go with it. */
+export function useStartFixBuild(prId: number) {
+  return useFixSessionAction(prId, (v: { fixId: number; text?: string }) =>
+    api.approveAiFixPlan(v.fixId, v.text != null && v.text.trim() !== '' ? { text: v.text.trim() } : {}),
+  );
+}
+
+/** Boot a closed session again with its stored patch (the agent does not remember the conversation). */
+export function useResumeFix(prId: number) {
+  return useFixSessionAction(prId, (fixId: number) => api.aiFixResume(fixId));
+}
+
+/** Close the session; nothing is pushed. Runs no model. */
+export function useDiscardFix(prId: number) {
+  return useFixSessionAction(prId, (fixId: number) => api.aiFixDiscard(fixId));
+}
+
+/** An Allow click on the Network panel (the reader's, never automatic). Its own key, like Stop. */
+export function useFixAllow(prId: number, workspaceId: number | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationKey: aiFixPlanMutationKey(prId),
-    mutationFn: (fixId: number) => api.approveAiFixPlan(fixId),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    mutationFn: (v: { fixId: number; body: SandboxNetworkAllowBody }) => api.aiFixAllow(v.fixId, v.body),
+    onSuccess: (_r, v) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+        v.body.scope === 'workspace' && workspaceId != null ? qc.invalidateQueries({ queryKey: sandboxSettingsKey(workspaceId) }) : null,
+      ]),
   });
 }
 
-export function useDiscardPlan(prId: number) {
+/** The live session of one fix row, over its SSE stream (folded by lib/sandboxSession.ts). */
+export function useFixSessionStream(prId: number, fixId: number | null, live: boolean): SessionStreamState {
   const qc = useQueryClient();
-  return useMutation({
-    mutationKey: aiFixPlanMutationKey(prId),
-    mutationFn: (fixId: number) => api.discardAiFixPlan(fixId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
-      void qc.invalidateQueries({ queryKey: ['ai-fix-preview', prId] });
-    },
-  });
+  return useSandboxSessionStream(fixId != null ? api.aiFixSessionStreamUrl(fixId) : null, fixId, live, () => void invalidateFix(qc, prId));
 }
 
+/** Stop: the running turn stops (a manual session stays; an unattended one ends). Its own key, so Stop
+ *  never waits behind the turn's press. */
 export function useCancelFix(prId: number) {
   const qc = useQueryClient();
   return useMutation({

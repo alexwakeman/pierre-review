@@ -52,3 +52,4 @@ export * from './sandbox-agent.js';
 export * from './sandbox-workspace.js';
 export * from './sandbox-services.js';
 export * from './sandbox-session.js';
+export * from './ai-fix-session.js';

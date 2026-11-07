@@ -11,7 +11,7 @@ const CODE = 'rounded-ui bg-ui-raise px-1 font-mono text-meta text-ui-ink';
 export function SandboxSetupSteps(): JSX.Element {
   return (
     <div className="space-y-3 text-body text-ui-ink">
-      <p>Implement runs the AI in a sandbox on this computer. The sandbox needs a container runtime. These are free:</p>
+      <p>Implement and AI Fix run the AI in a sandbox on this computer. The sandbox needs a container runtime. These are free:</p>
       <dl className="space-y-2">
         <div>
           <dt className="font-semibold">Mac (Apple Silicon or Intel)</dt>

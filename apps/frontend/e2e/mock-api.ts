@@ -1,6 +1,9 @@
 import type { Page, Route } from '@playwright/test';
 import type {
   ActiveReviewsResponse,
+  AiFix,
+  AiFixPickerPreview,
+  AiFixResponse,
   AiBudgetResponse,
   CloneStorageResponse,
   ThreadCheckStatusResponse,
@@ -1011,6 +1014,121 @@ export const STORY_SESSION_CLOSED: StoryBuild = {
   session: { ...STORY_SESSION_BUILT.session!, live: false, resumable: true, agentState: null },
 };
 
+// ── AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions) ──────────────────────────────
+
+/** The CI-only picker (no AI review): two failures the CI check says this PR can fix. */
+export const AI_FIX_PREVIEW: AiFixPickerPreview = {
+  sourceReviewId: null,
+  items: [
+    { key: 'ci:1', section: 'ci_failures', label: 'test: csv.spec.ts fails on an empty report', detail: null, path: 'src/reports/csv.ts', line: 12, severity: null, defaultIncluded: true, chars: 400 },
+    { key: 'ci:2', section: 'ci_failures', label: 'lint: unused import in ReportHeader.tsx', detail: null, path: 'src/reports/ReportHeader.tsx', line: 3, severity: null, defaultIncluded: true, chars: 200 },
+  ],
+  budgetChars: 60_000,
+  cutByBudget: [],
+};
+
+const AI_FIX_PATCH = [
+  'diff --git a/src/reports/csv.ts b/src/reports/csv.ts',
+  'index 1111111..2222222 100644',
+  '--- a/src/reports/csv.ts',
+  '+++ b/src/reports/csv.ts',
+  '@@ -10,3 +10,4 @@ export function toCsv(rows: Row[]): string {',
+  '   const header = columns.join(",");',
+  '+  if (rows.length === 0) return `${header}\n`;',
+  '   return [header, ...rows.map(line)].join("\n");',
+  ' }',
+  '',
+].join('\n');
+
+/** A manual fix whose first build turn has finished: the sandbox runs, the patch is stored. */
+export function aiFixBuilt(prId: number): AiFix {
+  const s = STORY_SESSION_READY_SESSION;
+  return {
+    id: 71,
+    prId,
+    status: 'succeeded',
+    model: 'claude-opus-5-5',
+    provider: 'claude',
+    effort: null,
+    seed: 'review',
+    summary: 'An empty report now gets its header row. The unused import is gone.',
+    commitMessage: 'Write the CSV header for an empty report',
+    patch: AI_FIX_PATCH,
+    filesChanged: ['src/reports/csv.ts'],
+    baseSha: 'd'.repeat(40),
+    sourceReviewId: null,
+    trigger: 'manual',
+    reviewItems: [
+      { ref: 'C1', kind: 'ci_failure', title: 'test: csv.spec.ts fails on an empty report', path: 'src/reports/csv.ts', line: 12, findingId: null, threadId: null, ticketIndex: null, included: true },
+      { ref: 'C2', kind: 'ci_failure', title: 'lint: unused import in ReportHeader.tsx', path: 'src/reports/ReportHeader.tsx', line: 3, findingId: null, threadId: null, ticketIndex: null, included: true },
+    ],
+    changeReport: {
+      changes: [{ path: 'src/reports/csv.ts', summary: 'Returns the header row when there are no rows.', refs: ['C1'] }],
+      unaddressed: [{ ref: 'C2', reason: 'The import is used by a type; the lint rule is wrong here.' }],
+      notReported: [],
+    },
+    plan: null,
+    checks: null,
+    session: {
+      ...s,
+      phase: 'built',
+      mode: 'build',
+      ticket: { criteria: [], openPoints: [] },
+      notes: [],
+      repos: [
+        { repoId: REPO.id, fullName: REPO.fullName, path: '/Users/me/acme/web', branch: 'limn/fix-pr-1', baseSha: 'd'.repeat(40) },
+        { repoId: 11, fullName: 'acme/api', path: '/Users/me/acme/api', branch: 'main', baseSha: 'b'.repeat(40) },
+      ],
+      startDir: '/Users/me/acme/web',
+      spend: { costUsd: 0.62, inputTokens: 9000, outputTokens: 1400, turns: 1 },
+      conversation: [
+        { kind: 'reader', id: 'r1', text: 'Start fix', at: iso(0.001), build: true },
+        { kind: 'tool', id: 't1', tool: 'Bash', summary: 'pnpm test src/reports', ok: true, output: '42 passed', at: iso(0.001) },
+        { kind: 'notice', id: 'n1', text: 'Changes in acme/api (1 file) are left out. AI Fix pushes only acme/web.', at: iso(0.001) },
+        { kind: 'agent', id: 'm-1', text: 'C1 is fixed. I left C2: the import is used by a type. Ran npm test: 42 passed.', at: iso(0.001) },
+        { kind: 'turn', id: 'e1', turn: 1, mode: 'build', outcome: 'completed', costUsd: 0.62, at: iso(0.001) },
+      ],
+    },
+    leftOut: [{ repoId: 11, fullName: 'acme/api', files: ['src/reports/route.ts'] }],
+    unattended: false,
+    costUsd: 0.62,
+    numTurns: 12,
+    error: null,
+    pushedBranch: null,
+    pushedPrNumber: null,
+    pushedPrUrl: null,
+    pushedAt: null,
+    createdAt: iso(0.002),
+    finishedAt: iso(0.001),
+  };
+}
+
+/** Plan first: the session booted in chat mode, made its plan and waits for Start fix. */
+export function aiFixPlanned(prId: number): AiFix {
+  const b = aiFixBuilt(prId);
+  return {
+    ...b,
+    status: 'planned',
+    summary: null,
+    commitMessage: null,
+    patch: null,
+    filesChanged: [],
+    changeReport: null,
+    leftOut: [],
+    session: {
+      ...b.session!,
+      phase: 'ready',
+      mode: 'chat',
+      spend: { ...b.session!.spend, costUsd: 0.08, turns: 1 },
+      conversation: [
+        { kind: 'reader', id: 'r1', text: 'Plan first', at: iso(0.001), build: false },
+        { kind: 'agent', id: 'm-1', text: 'C1: return the header when there are no rows. C2: I will not change it; the import is used by a type.', at: iso(0.001) },
+        { kind: 'turn', id: 'e1', turn: 1, mode: 'chat', outcome: 'completed', costUsd: 0.08, at: iso(0.001) },
+      ],
+    },
+  };
+}
+
 /** The computer's container runtime (`GET /api/sandbox/runtime`). */
 export const SANDBOX_RUNTIME_OK: SandboxRuntimeStatus = {
   available: true,
@@ -1457,8 +1575,12 @@ const AI_BUDGET: AiBudgetResponse = {
 
 export async function installMockApi(
   page: Page,
-  opts: { storyBuild?: StoryBuild | null; runtime?: SandboxRuntimeStatus } = {},
+  opts: { storyBuild?: StoryBuild | null; runtime?: SandboxRuntimeStatus; aiFix?: AiFix | null } = {},
 ): Promise<void> {
+  // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
+  // advanced by the writes below (one per page).
+  const aiFixOn = opts.aiFix !== undefined;
+  let aiFix: AiFix | null = opts.aiFix ?? null;
   // "Implement story": ACME-1's session, advanced by the writes below (one per page). A spec may start
   // from a session (`opts.storyBuild`) and name the container runtime (`opts.runtime`).
   let storyBuild: StoryBuild | null = opts.storyBuild ?? null;
@@ -1887,6 +2009,93 @@ export async function installMockApi(
           configuredCount: 0,
         } satisfies WorkspaceSlackTargetResponse);
       }
+      // AI FIX (only when the spec asked for it): the tab's read, the CI-only picker, the session presses.
+      if (aiFixOn) {
+        const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/]+)?$/);
+        if (prFix) {
+          const prId = Number(prFix[1]);
+          const rest = prFix[2] ?? '';
+          if (rest === '' && method === 'GET') {
+            const body: AiFixResponse = {
+              enabled: true,
+              auth: 'ok',
+              viewerCanPush: true,
+              headInfo: {
+                headSha: 'd'.repeat(40),
+                headRef: 'feature/e2e-branch',
+                headRepoFullName: REPO.fullName,
+                isFork: false,
+                maintainerCanModify: true,
+                baseRef: 'main',
+                canPushSameBranch: true,
+                suggestedBranch: 'feature/e2e-branch-ai-fix',
+              },
+              fix: aiFix,
+              history: [],
+            };
+            return json(route, body);
+          }
+          if (rest === '/preview') return json(route, AI_FIX_PREVIEW);
+          if (rest === '' && method === 'POST') {
+            if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);
+            aiFix = aiFixBuilt(prId);
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
+          }
+          if (rest === '/plan' && method === 'POST') {
+            aiFix = aiFixPlanned(prId);
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
+          }
+          if (rest === '/cancel') return json(route, { status: 'cancelled' });
+          if (rest === '/stream' || rest === '/status') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'done', status: aiFix?.status ?? 'idle', fixId: aiFix?.id ?? null })}\n\n` });
+        }
+        const fixRoute = path.match(/^\/api\/pro\/ai-fixes\/(\d+)\/([a-z/]+)$/);
+        if (fixRoute && aiFix != null) {
+          const what = fixRoute[2];
+          if (what === 'session/stream') {
+            const frames: SandboxSessionStreamEvent[] = aiFix.session == null || !aiFix.session.live ? [{ type: 'done' }] : [];
+            return route.fulfill({ status: 200, contentType: 'text/event-stream', body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('') });
+          }
+          if (what === 'plan/approve') {
+            const built = aiFixBuilt(aiFix.prId);
+            aiFix = { ...built, session: { ...built.session!, conversation: [...aiFix.session!.conversation, ...built.session!.conversation] } };
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
+          }
+          if (what === 'message') {
+            const body = route.request().postDataJSON() as { text: string };
+            const cur: AiFix = aiFix;
+            const s = cur.session!;
+            const n = s.conversation.length;
+            aiFix = {
+              ...cur,
+              session: {
+                ...s,
+                spend: { ...s.spend, turns: s.spend.turns + 1 },
+                conversation: [
+                  ...s.conversation,
+                  { kind: 'reader', id: `r${n}`, text: body.text, at: iso(0), build: s.mode === 'build' },
+                  { kind: 'agent', id: `m-${n}`, text: 'Done. The report covers the whole change.', at: iso(0) },
+                  { kind: 'turn', id: `e${n}`, turn: s.spend.turns + 1, mode: s.mode, outcome: 'completed', costUsd: 0.1, at: iso(0) },
+                ],
+              },
+            };
+            return json(route, { fixId: cur.id, status: 'queued' }, 202);
+          }
+          if (what === 'discard') {
+            aiFix = { ...aiFix, status: 'cancelled', session: { ...aiFix.session!, phase: 'discarded', live: false, resumable: false } };
+            return json(route, { status: 'discarded' });
+          }
+          if (what === 'resume') {
+            aiFix = { ...aiFix, session: { ...aiFix.session!, live: true, resumable: false, agentState: 'ready' } };
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
+          }
+          if (what === 'push') {
+            aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
+            return json(route, { pushedBranch: 'feature/e2e-branch', commitSha: 'e'.repeat(40) });
+          }
+        }
+        if (/^\/api\/prs\/\d+\/claude-review$/.test(path)) return json(route, { enabled: true, auth: 'ok', review: null, history: [] });
+      }
+
       // Every other `/api/pro/*` read: a harmless "switched off" stub.
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-5-5', generatedAt: iso(0) });

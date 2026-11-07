@@ -798,6 +798,18 @@ repository gets a `story_build_repos` row; after every build-mode turn its work 
 `sandbox_path` is where it sits in the sandbox. `seed_json` keeps the old v1 shape (Push reads the
 story's title and URL from it).
 
+## `ai_fixes` — AI Fix runs (CORE)
+
+ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and
+both delete paths. **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
+sessions): `session_phase` (shared `SandboxSessionPhase`; NULL = a row of the removed shell-less fixer, read
+as history), and `status` is DERIVED from it (shared `aiFixStatusForPhase`), never written apart. `sandbox_ref`
+(NULL once torn down), `agent_ref`, `runtime`, `session_json` (boot steps, conversation, repositories, the
+left-out edits, the PR facts Resume needs — no secret, no patch), `last_active_at`, `unattended` (an auto fix
+or dependency automation's fix), `workspace_id` (the workspace that booted it; no FK). `prompt` holds the
+frozen task text; `patch` is the PR repository's only; chat turns add to `plan_cost_usd`, build turns to
+`cost_usd`. The plan columns (`plan`, `plan_transcript`, `plan_status`, …) and `checks` are history only.
+
 The plan, docs and Accept columns (`plan_json`, `transcript_json`, `design_json`, `docs_*`, `accepted_*`,
 the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/build flow was removed
 (2026-11-07, [STORY-BUILD.md](STORY-BUILD.md) § Rows from the old flow): only its old rows carry them, and

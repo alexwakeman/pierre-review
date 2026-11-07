@@ -340,6 +340,8 @@ function FixFlow(): JSX.Element {
         <div className="mk-chips" style={{ marginBottom: 8 }}>
           <Chip tone="green">{FIX.ready}</Chip>
         </div>
+        <Log lines={FIX.session} />
+        <p className="mk-note">{FIX.said}</p>
         <Diff file={FIX_DIFF.file} lines={FIX_DIFF.lines} />
         <div className="mk-end">
           <Act onClick={() => fix.reset()} disabled={push.phase === 'busy'}>
@@ -513,7 +515,7 @@ export function FixMock(): JSX.Element {
   return (
     <Resettable
       title={`AI Fix · #${refunds.num}`}
-      label="AI Fix on pull request 612: pick the findings, start the fix, read the diff, then push it"
+      label="AI Fix on pull request 612: pick the findings, start the fix in a sandbox, watch it run the tests, read the diff, then push it"
     >
       <FixFlow />
     </Resettable>

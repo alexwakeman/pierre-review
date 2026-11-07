@@ -9,7 +9,6 @@ import type { CheapCompleteOpts, CheapCompleteResult } from './llm.js';
 import { buildAiBudgetGate, type AiBudgetGate } from '../ai/budget.js';
 import { getAccessToken } from '../auth/account.js';
 import { fetchBranchHeadSha, fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
-import { fetchRepoFilesAt } from '../github/repo-files.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import {
@@ -26,12 +25,9 @@ import {
   type ReviewThreadsForReview,
 } from '../db/review-threads-for-review.js';
 import type { CheckLogsResponse } from '@pierre-review/shared';
-import type { GeneratePlanArgs, GeneratePlanResult } from '../coding/ai-fix/plan.js';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
-  GenerateFixArgs,
-  GenerateFixResult,
   GithubSeam,
   ReviewSeam,
 } from '../platform/contract.js';
@@ -83,17 +79,8 @@ export interface AgentContext {
     // A branch's tip sha, or null when it does not exist (github/mutations.ts `fetchBranchHeadSha`).
     // Optional so a test's fake ctx may omit it (related-repo rule 3 is then skipped).
     fetchBranchHeadSha?(accountId: number, a: { owner: string; name: string; branch: string }): Promise<string | null>;
-    // A few root files at one commit, one GraphQL request (github/repo-files.ts) — AI Fix's "Run tests"
-    // picker. Optional so a test's fake ctx may omit it (the route then answers 404).
-    fetchRepoFiles?(
-      accountId: number,
-      a: { owner: string; name: string; ref: string; paths: readonly string[] },
-    ): Promise<Record<string, string | null>>;
   };
   coding: {
-    generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
-    // PLAN MODE: the read-only planning pass (coding/agent.ts runPlanAgent).
-    generatePlan(args: GeneratePlanArgs): Promise<GeneratePlanResult>;
     applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
   };
   review: ReviewSeam;
@@ -200,7 +187,6 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
         fetchPrHeadInfo(await getAccessToken(accountId), owner, name, number),
       fetchBranchHeadSha: async (accountId, a) =>
         fetchBranchHeadSha(await getAccessToken(accountId), a.owner, a.name, a.branch),
-      fetchRepoFiles: async (accountId, a) => fetchRepoFilesAt(await getAccessToken(accountId), a),
       // `accountId` passed THROUGH so a rate-limited compare feeds that account's budget. Never
       // throws (github/compare.ts).
       fetchCompareDiff: async (accountId, a) =>
@@ -212,9 +198,6 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
         }),
     },
     coding: {
-      // Lazy: coding/agent.ts pulls in the Claude Agent SDK.
-      generateFix: async (fixArgs) => (await import('../coding/agent.js')).runCodingAgent(fixArgs),
-      generatePlan: async (planArgs) => (await import('../coding/agent.js')).runPlanAgent(planArgs),
       applyAndPush: (pushArgs) => applyAndPush(pushArgs),
     },
     review: {

@@ -10,18 +10,23 @@
 //                          (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070, Settings →
 //                          Auto review). OFF by default (since 0084 / pg 0071): only a stored
 //                          true is on, and a repo with no membership row reads OFF;
+//   ¾. `no_sandbox`      — no container runtime on this computer: AI Fix runs ONLY as a sandboxed session
+//                          (docs/SANDBOX.md § AI Fix sessions). Recorded, never queued; the next auto
+//                          review asks again. `sandbox_busy` (every session taken, or another session
+//                          is building) is the same, from the pre-check or from the start's own answer;
 //   1. `nothing_to_fix`  — the review's seed is empty (the same refusal as the button's NothingToFix);
 //   2. `head_moved`      — the PR's synced head is no longer the reviewed one (the next review decides);
-//   3. `fix_in_progress` — a fix for this PR (auto or manual) is queued or running, OR a person's
-//                          PLAN is open (being made or waiting for their approval — plan mode,
-//                          docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"; an auto fix would bury it);
+//   3. `fix_in_progress` — a fix SESSION holds this PR (booting, building, a manual session open for
+//                          follow-ups, or a Plan first waiting for Start fix — an auto fix would bury
+//                          it), OR an older row's plan is still open (being made or waiting);
 //   4. `fix_waiting`     — a finished fix with changes, never pushed, sits on the PR's CURRENT head
 //                          (the synced head, the REVIEWED head, or — only when an unpushed fix sits
 //                          on neither — the LIVE head, so a lagging sync cannot hide one);
 //   5. `cap`             — AUTO_FIX_DAILY_CAP auto fixes already started on this PR in the last 24h;
 //   6. `already_tried`   — the latest auto fix AT THIS HEAD reported every item this review would
 //                          send as not addressed (nobody has pushed since, so nothing changed).
-// Then `startReviewFix(…, trigger: 'auto')` — the same queue, slot and worktree as the button.
+// Then `startReviewFix(…, trigger: 'auto')` — the button's own start, as an UNATTENDED session: one
+// build turn, then the session closes (the row stays resumable); the auto push follows the close.
 // ⚠ AN AUTO FIX NEVER PLANS: plan mode is a person steering and approving, so only the manual
 // "Plan first" route calls `startPlan`; `startReviewFix` always builds straight away.
 //
@@ -54,6 +59,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
+import { fixSandboxReadiness, type FixSandboxReadiness } from '../../sandbox/session/fix.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
@@ -150,6 +156,8 @@ export interface AutoFixDeps {
   isFixRunning: typeof isFixRunning;
   /** The PR's head on GitHub right now; null when unknown. Absent ⇒ never asked. */
   liveHeadSha?: (ctx: AgentContext, accountId: number, prId: number) => Promise<string | null>;
+  /** Could a sandboxed session start now (a runtime, a free session, the build slot)? Absent ⇒ never asked. */
+  sandbox?: () => Promise<FixSandboxReadiness>;
 }
 
 /** One `GET /pulls/{n}`. Never throws (a failed read is "unknown", never "no fix waiting"). */
@@ -163,7 +171,7 @@ async function liveHeadSha(ctx: AgentContext, accountId: number, prId: number): 
   }
 }
 
-const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, isFixRunning, liveHeadSha };
+const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, isFixRunning, liveHeadSha, sandbox: fixSandboxReadiness };
 
 // `not_auto`: the review was one a person started — an auto fix (which may then be pushed
 // automatically) follows AUTO reviews only. The manager already calls this for auto runs alone;
@@ -192,6 +200,13 @@ export async function maybeStartAutoFix(
     if (!ws?.enabled) return skip('off');
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, no auto fix — the next auto review decides again.
     if (!(await automaticRunAllowed(ctx, accountId, 'auto fix'))) return skip('over_budget');
+    // THE SANDBOX, before the seed (which may wait on a SonarCloud read): no runtime, or no free slot.
+    if (deps.sandbox) {
+      const ready = await deps.sandbox();
+      if (!ready.ok && ready.reason === 'no_runtime') return skip('no_sandbox');
+      // Busy because THIS PR's own fix holds a session: say so, not "the sandbox was busy".
+      if (!ready.ok) return skip(deps.isFixRunning(prId) ? 'fix_in_progress' : 'sandbox_busy');
+    }
     // WHAT an auto fix carries is the workspace's "Always include" sections (AutoFixSettings).
     const include = ws.settings.include;
 
@@ -294,6 +309,9 @@ export async function maybeStartAutoFix(
     }
     if (r.status === 'nothing_to_fix') return skip('nothing_to_fix');
     if (r.status === 'already_running') return skip('fix_in_progress');
+    if (r.status === 'no_runtime') return skip('no_sandbox');
+    if (r.status === 'too_many' || r.status === 'build_busy') return skip('sandbox_busy');
+    if (r.status === 'over_budget') return skip('over_budget');
     ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) not started: ${r.status}`);
     return skip('not_started');
   } catch (err) {

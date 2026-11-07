@@ -26,7 +26,10 @@ export const STORED_NETWORK_MAX = 200;
 
 export interface SessionStateJson {
   version: 1;
-  action: 'implement' | 'fill_gaps';
+  /** Whose session: Implement's story (absent on rows from before AI Fix moved here) or an AI Fix. */
+  subject?: 'story' | 'fix';
+  /** Story: implement / fill_gaps. Fix: `fix` (started building) or `fix_plan` (Plan first). */
+  action: 'implement' | 'fill_gaps' | 'fix' | 'fix_plan';
   runtimeNote: string | null;
   boot: SandboxBootStep[];
   notes: string[];
@@ -43,6 +46,10 @@ export interface SessionStateJson {
   network: SandboxNetworkEntry[];
   /** The next conversation item id. */
   seq: number;
+  /** AI Fix: edits in repositories that are NOT pushed (only the PR's repository is). */
+  leftOut?: Array<{ repoId: number; fullName: string; files: string[] }>;
+  /** AI Fix: nobody follows up (an auto fix, dependency automation's fix): it closes after its turn. */
+  unattended?: boolean;
 }
 
 export function emptySessionState(action: SessionStateJson['action']): SessionStateJson {
@@ -69,7 +76,8 @@ export function emptySessionState(action: SessionStateJson['action']): SessionSt
 export function readSessionState(raw: unknown, action: SessionStateJson['action'] = 'implement'): SessionStateJson {
   if (raw == null || typeof raw !== 'object' || (raw as { version?: unknown }).version !== 1) return emptySessionState(action);
   const s = raw as Partial<SessionStateJson>;
-  const base = emptySessionState(s.action === 'fill_gaps' ? 'fill_gaps' : action);
+  const stored = s.action === 'fill_gaps' || s.action === 'fix' || s.action === 'fix_plan' ? s.action : action;
+  const base = emptySessionState(stored);
   return {
     ...base,
     ...s,
@@ -80,6 +88,7 @@ export function readSessionState(raw: unknown, action: SessionStateJson['action'
     criteria: Array.isArray(s.criteria) ? s.criteria : [],
     openPoints: Array.isArray(s.openPoints) ? s.openPoints : [],
     network: Array.isArray(s.network) ? s.network : [],
+    ...(s.leftOut !== undefined ? { leftOut: Array.isArray(s.leftOut) ? s.leftOut : [] } : {}),
     seq: typeof s.seq === 'number' && s.seq > 0 ? s.seq : base.seq,
     version: 1,
   };
@@ -92,6 +101,7 @@ export const BOOT_LABELS: Readonly<Record<SandboxBootStepKey, string>> = {
   proxy: 'Starting the network filter',
   sandbox: 'Starting the sandbox',
   ticket: 'Reading the ticket',
+  task: 'Reading the pull request',
   repos: 'Cloning the repositories',
   services: 'Getting the services ready',
   agent: 'Starting the agent',

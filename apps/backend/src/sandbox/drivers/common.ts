@@ -83,6 +83,7 @@ export const DEFAULT_USAGE_SINK: SandboxUsageSink = {
         inputTokens: row.inputTokens,
         outputTokens: row.outputTokens,
         repoId: row.repoId,
+        prId: row.prId ?? null,
         provider: row.provider,
         sharePct: null,
       });

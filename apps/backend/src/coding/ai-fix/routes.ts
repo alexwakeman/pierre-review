@@ -1,27 +1,25 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
-  AI_FIX_PLAN_MAX_MESSAGE_CHARS,
-  AI_FIX_PLAN_MAX_REVISIONS,
+  AI_FIX_SESSION_API,
   aiRunProvider,
   DEFAULT_AI_FIX_MODEL,
+  SANDBOX_MESSAGE_MAX,
 } from '@pierre-review/shared';
 import type {
   AiFix,
-  AiFixChecksPreview,
   AiFixModel,
   AiProviderId,
   AiFixPickerPreview,
-  AiFixPlanMessageBody,
   AiFixPushBody,
   AiFixPushResult,
   AiFixResponse,
   AiFixSeed,
-  AiFixStatus,
   AiFixStreamEvent,
   AiFixSummary,
   GenerateFixBody,
   PrHeadInfo,
+  SandboxSessionStreamEvent,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { anyProviderPreflight, preflightFor, resolveManualRunChoice, type ManualRunChoiceOptions } from '../../ai/run-choice.js';
@@ -29,19 +27,22 @@ import { config } from '../../config.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import {
   approvePlan,
-  discardPlan,
+  discardFix,
   getFixStatus,
   loadFixPreview,
   requestFixCancel,
-  sendPlanMessage,
+  sendFixSessionMessage,
   startFix,
   startPlan,
   subscribeFixStream,
-  type PlanActionResult,
+  type FixActionResult,
 } from './manager.js';
 import { planStateOf } from './plan.js';
 import { pushFix } from './push.js';
-import { loadChecksPreview } from './checks-preview.js';
+import { requestModelOf } from '../../ai/provider.js';
+import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
+import { allowFixHost, fixSessionWire, resumeFixSession, subscribeFixSession } from '../../sandbox/session/fix.js';
+import type { ResumeResult } from '../../sandbox/session/manager.js';
 import { getLatestSucceededReviewId } from '../../review/claude-review/persist.js';
 import {
   getFixById,
@@ -84,7 +85,17 @@ function tsToIso(v: Date | number | null | undefined): string | null {
 //   a model of the other provider, or a provider not signed in ⇒ 400 with one sentence
 
 function rowToAiFix(row: AiFixRow): AiFix {
+  // THE WORKSPACE SESSION the fix ran in (null on a row of the removed shell-less fixer). Never throws.
+  let wire: ReturnType<typeof fixSessionWire> = { session: null, leftOut: [] };
+  try {
+    wire = fixSessionWire(row);
+  } catch {
+    /* an unreadable session_json reads as no session */
+  }
   return {
+    session: wire.session,
+    leftOut: wire.leftOut,
+    unattended: row.unattended === true,
     id: row.id,
     prId: row.prId,
     status: row.status,
@@ -150,28 +161,8 @@ type ParsedStartBody =
       instruction: string | undefined;
       sourceReviewId: number | null;
       include: string[] | null;
-      // "Run tests": check names (validated shape only; the run keeps only declared ones).
-      checks: string[] | null;
     }
   | { error: string; message: string };
-
-// The longest "Run tests" list the start route takes, and the longest name.
-const MAX_CHECK_NAMES = 30;
-const MAX_CHECK_NAME_CHARS = 120;
-
-/** "Run tests": absent ⇒ null; an array of short strings ⇒ them (deduplicated); anything else ⇒ error. */
-export function parseChecksField(raw: unknown): string[] | null | { error: string; message: string } {
-  if (raw === undefined || raw === null) return null;
-  if (
-    !Array.isArray(raw) ||
-    raw.length > MAX_CHECK_NAMES ||
-    !raw.every((n) => typeof n === 'string' && n.length > 0 && n.length <= MAX_CHECK_NAME_CHARS && !/[\0\r\n]/.test(n))
-  ) {
-    return { error: 'BadChecks', message: 'Pick the checks to run again.' };
-  }
-  const names = [...new Set(raw as string[])];
-  return names.length > 0 ? names : null;
-}
 
 // The start body, validated in the handler (no ajv schema — see resolveFixModel). Shared by the
 // fix start and the "Plan first" start, which take the same body.
@@ -188,8 +179,7 @@ function parseStartBody(
   );
   if (!choice.ok) return { error: choice.error, message: choice.message };
   const { model, provider } = choice;
-  const checks = parseChecksField((body as { checks?: unknown }).checks);
-  if (checks && !Array.isArray(checks)) return checks;
+  // `checks` ("Run tests", removed) from an older tab is IGNORED: tests run in the sandbox.
   // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
   const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
   if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
@@ -208,7 +198,7 @@ function parseStartBody(
         message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
       };
     }
-    return { model, provider, seed, instruction, sourceReviewId: null, include: null, checks };
+    return { model, provider, seed, instruction, sourceReviewId: null, include: null };
   }
   // Absent / null ⇒ THE CI-ONLY SEED (no AI review: the CI check's fixable items at the current
   // head — manager.ts `loadCiOnlySeed`). Anything else must be a positive integer id.
@@ -231,36 +221,40 @@ function parseStartBody(
     }
     include = inc as string[];
   }
-  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include, checks };
+  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include };
 }
 
-function sendPlanResult(reply: FastifyReply, res: PlanActionResult) {
+/** One session action's answer: 202 `{ fixId, status: 'queued' }`, or the refusal it maps to. */
+function sendFixAction(reply: FastifyReply, res: FixActionResult | ResumeResult) {
   switch (res.status) {
     case 'queued':
-      return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
+      return reply.code(202).send({ fixId: res.id, status: 'queued' });
     case 'not_found':
       return reply.code(404).send({ error: 'not found' });
+    case 'not_live':
+      return reply.code(409).send({ error: 'NotLive', message: res.message });
+    case 'agent_busy':
+      return reply.code(409).send({ error: 'AgentBusy', message: 'The agent is still working on the last message. Wait, or press Stop.' });
+    case 'build_busy':
+      return reply.code(409).send({ error: 'BuildBusy', message: 'Another session is building. One build runs at a time.' });
     case 'not_ready':
-      return reply.code(409).send({ error: 'PlanNotReady', message: 'This plan is not waiting for you any more.' });
-    case 'already_running':
-      return reply.code(409).send({ error: 'AlreadyRunning' });
-    case 'busy':
-      return reply.code(409).send({ error: 'Busy' });
-    case 'no_auth':
-      return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
-    case 'no_head':
-      return reply.code(400).send({ error: 'NoHead' });
-    case 'revision_cap':
-      return reply.code(409).send({
-        error: 'PlanRevisionCap',
-        message: `This plan has been revised ${AI_FIX_PLAN_MAX_REVISIONS} times. Approve it or start again.`,
-      });
-    case 'budget_spent':
-      return reply.code(409).send({
-        error: 'PlanBudgetSpent',
-        message: 'This plan has used its budget. Approve it or start again.',
-      });
+      return reply.code(409).send({ error: 'NotReady', message: res.message });
+    case 'no_runtime':
+      return reply.code(409).send({ error: 'NoRuntime', message: res.message });
+    case 'too_many':
+      return reply.code(409).send({ error: 'TooManySessions', message: res.message });
+    case 'not_resumable':
+      return reply.code(409).send({ error: 'NotResumable', message: res.message });
   }
+}
+
+/** The text of a message body: trimmed, 1..SANDBOX_MESSAGE_MAX, or the 400 to send. */
+function messageText(body: unknown): { text: string } | { error: string; message: string } {
+  const raw = (body as { text?: unknown } | undefined)?.text;
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (text === '') return { error: 'MessageRequired', message: 'Write a message first.' };
+  if (text.length > SANDBOX_MESSAGE_MAX) return { error: 'MessageTooLong', message: `Keep the message under ${SANDBOX_MESSAGE_MAX.toLocaleString('en-US')} characters.` };
+  return { text };
 }
 
 export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): void {
@@ -358,7 +352,6 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           sourceReviewId: parsed.sourceReviewId,
           trigger: 'manual' as const,
           selection: parsed.include ? { kind: 'keys' as const, keys: parsed.include } : undefined,
-          ...(parsed.checks ? { checks: parsed.checks } : {}),
         };
         const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
 
@@ -367,8 +360,15 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
             return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
           case 'already_running':
             return reply.code(409).send({ error: 'AlreadyRunning' });
-          case 'busy':
-            return reply.code(409).send({ error: 'Busy' });
+          case 'no_runtime':
+            return reply.code(409).send({ error: 'NoRuntime', message: res.message });
+          case 'too_many':
+            return reply.code(409).send({ error: 'TooManySessions', message: res.message });
+          case 'build_busy':
+            return reply.code(409).send({ error: 'BuildBusy', message: 'Another session is building. One build runs at a time.' });
+          case 'over_budget':
+            // Unattended starts only; a reader's click is never refused by the budget.
+            return reply.code(409).send({ error: 'OverBudget', message: 'Your AI spend budget is reached.' });
           case 'no_auth':
             return reply.code(400).send({ error: 'NoClaudeAuth', message: res.message });
           case 'no_head':
@@ -396,49 +396,142 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
     );
   }
 
-  // ---- Plan mode: steer, approve, discard (one open plan = one ai_fixes row) ----
+  // ---- The session: messages, Start fix, discard, resume, network, stream ----
+  // Every id-route reads the row through the ACCOUNT-SCOPED getter (another account's ⇒ 404) and the PR
+  // through `getFixPrContext` BEFORE touching the in-memory session.
+  const ownedFix = async (accountId: number, rawId: string): Promise<AiFixRow | null> => {
+    const fixId = parseId(rawId);
+    if (fixId == null) return null;
+    const row = await getFixById(ctx, accountId, fixId);
+    if (!row) return null;
+    return (await getFixPrContext(ctx, accountId, row.prId)) ? row : null;
+  };
 
-  // A steering message: appended to the plan's chat, then a fresh planning pass (202).
-  app.post<{ Params: { fixId: string }; Body?: AiFixPlanMessageBody }>(
-    '/api/pro/ai-fixes/:fixId/plan/message',
-    async (req, reply) => {
-      const accountId = ctx.accountIdOf(req);
-      const fixId = parseId(req.params.fixId);
-      if (fixId == null) return reply.code(404).send({ error: 'not found' });
+  // One more turn in the SAME session (chat before Start fix; a build turn after). `…/plan/message` is the
+  // older bundle's name for it.
+  for (const path of [AI_FIX_SESSION_API.message, AI_FIX_SESSION_API.planMessage]) {
+    app.post<{ Params: { fixId: string } }>(path, async (req, reply) => {
       if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
-      const raw = (req.body as { text?: unknown } | undefined)?.text;
-      const text = typeof raw === 'string' ? raw.trim() : '';
-      if (text === '') return reply.code(400).send({ error: 'MessageRequired', message: 'Say how to change the plan.' });
-      if (text.length > AI_FIX_PLAN_MAX_MESSAGE_CHARS) {
-        return reply.code(400).send({
-          error: 'MessageTooLong',
-          message: `Keep the message under ${AI_FIX_PLAN_MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.`,
-        });
-      }
-      return sendPlanResult(reply, await sendPlanMessage(ctx, { accountId, fixId, text }));
-    },
-  );
+      const accountId = ctx.accountIdOf(req);
+      const row = await ownedFix(accountId, req.params.fixId);
+      if (!row) return reply.code(404).send({ error: 'not found' });
+      const m = messageText(req.body);
+      if ('error' in m) return reply.code(400).send(m);
+      return sendFixAction(reply, await sendFixSessionMessage(ctx, { accountId, fixId: row.id, text: m.text }));
+    });
+  }
 
-  // "Approve and build": the plan becomes the brief of a normal fix run on the same row (202).
-  app.post<{ Params: { fixId: string } }>('/api/pro/ai-fixes/:fixId/plan/approve', async (req, reply) => {
-    const accountId = ctx.accountIdOf(req);
-    const fixId = parseId(req.params.fixId);
-    if (fixId == null) return reply.code(404).send({ error: 'not found' });
+  // "Start fix" (Plan first): the session switches to build mode and fixes. 409 PlanNotReady when the
+  // session is not waiting in chat.
+  app.post<{ Params: { fixId: string } }>(AI_FIX_SESSION_API.planApprove, async (req, reply) => {
     if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
-    return sendPlanResult(reply, await approvePlan(ctx, { accountId, fixId }));
+    const accountId = ctx.accountIdOf(req);
+    const row = await ownedFix(accountId, req.params.fixId);
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    const raw = (req.body as { text?: unknown } | undefined)?.text;
+    if (raw !== undefined && typeof raw !== 'string') return reply.code(400).send({ error: 'BadRequest', message: '`text` must be a string.' });
+    const extra = (raw ?? '').trim();
+    if (extra.length > SANDBOX_MESSAGE_MAX) return reply.code(400).send({ error: 'MessageTooLong', message: `Keep the message under ${SANDBOX_MESSAGE_MAX.toLocaleString('en-US')} characters.` });
+    const res = await approvePlan(ctx, { accountId, fixId: row.id, text: extra === '' ? null : extra });
+    if (res.status === 'not_ready') return reply.code(409).send({ error: 'PlanNotReady', message: res.message });
+    return sendFixAction(reply, res);
   });
 
-  // "Discard plan". DB-only.
-  app.post<{ Params: { fixId: string } }>('/api/pro/ai-fixes/:fixId/plan/discard', async (req, reply) => {
-    const accountId = ctx.accountIdOf(req);
-    const fixId = parseId(req.params.fixId);
-    if (fixId == null) return reply.code(404).send({ error: 'not found' });
+  // Discard: the session closes, nothing is pushed (`…/plan/discard` is the older name). DB + teardown.
+  for (const path of [AI_FIX_SESSION_API.discard, AI_FIX_SESSION_API.planDiscard]) {
+    app.post<{ Params: { fixId: string } }>(path, async (req, reply) => {
+      if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+      const accountId = ctx.accountIdOf(req);
+      const row = await ownedFix(accountId, req.params.fixId);
+      if (!row) return reply.code(404).send({ error: 'not found' });
+      const out = await discardFix(ctx, { accountId, fixId: row.id });
+      if (out.status === 'not_found') return reply.code(404).send({ error: 'not found' });
+      if (out.status === 'not_ready') return reply.code(409).send({ error: 'NotReady', message: 'Wait for the push to finish.' });
+      return reply.send({ status: 'discarded' });
+    });
+  }
+
+  // Resume: a closed, unpushed fix with stored changes boots again with them (its own provider and model).
+  app.post<{ Params: { fixId: string } }>(AI_FIX_SESSION_API.resume, async (req, reply) => {
     if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
-    const out = await discardPlan(ctx, { accountId, fixId });
-    if (out === 'not_found') return reply.code(404).send({ error: 'not found' });
-    if (out === 'not_ready')
-      return reply.code(409).send({ error: 'PlanNotReady', message: 'This plan is not waiting for you any more.' });
-    return reply.send({ status: 'discarded' });
+    const accountId = ctx.accountIdOf(req);
+    const row = await ownedFix(accountId, req.params.fixId);
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    const provider = aiRunProvider(row.provider, row.model);
+    const auth = preflightFor(ctx)(provider, 'fix');
+    if (auth.status !== 'ok') return reply.code(400).send({ error: 'NoClaudeAuth', message: auth.message });
+    const choice = resolveSandboxAgentChoice({ provider, model: requestModelOf(row.model) });
+    return sendFixAction(reply, await resumeFixSession(ctx, accountId, row.id, choice));
+  });
+
+  // An Allow click (the reader's, never automatic).
+  app.post<{ Params: { fixId: string } }>(AI_FIX_SESSION_API.networkAllow, async (req, reply) => {
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    const accountId = ctx.accountIdOf(req);
+    const row = await ownedFix(accountId, req.params.fixId);
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    const b = (req.body ?? {}) as { rule?: unknown; scope?: unknown };
+    if (typeof b.rule !== 'string' || b.rule.trim() === '' || b.rule.length > 260 || (b.scope !== 'session' && b.scope !== 'workspace')) {
+      return reply.code(400).send({ error: 'BadRequest', message: 'Name a host and a scope.' });
+    }
+    const r = await allowFixHost(ctx, accountId, row.id, b.rule, b.scope);
+    if (r.status === 'allowed') return reply.send({ rule: r.rule, scope: b.scope });
+    if (r.status === 'refused') return reply.code(400).send({ error: 'NetworkRule', message: r.reason });
+    return sendFixAction(reply, r);
+  });
+
+  // SSE: one snapshot of the session, then every change while the sandbox runs; `done` when it closes.
+  // ⚠ A GET, so its request's close IS the client going away. Ownership BEFORE hijack.
+  app.get<{ Params: { fixId: string } }>(AI_FIX_SESSION_API.sessionStream, async (req, reply) => {
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    const accountId = ctx.accountIdOf(req);
+    const row = await ownedFix(accountId, req.params.fixId);
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    let closed = false;
+    let unsub: (() => void) | null = null;
+    const hb = setInterval(() => {
+      if (!raw.writableEnded) raw.write(': hb\n\n');
+    }, 15_000);
+    const cleanup = (): void => {
+      if (closed) return;
+      closed = true;
+      clearInterval(hb);
+      unsub?.();
+      if (!raw.writableEnded) raw.end();
+    };
+    const send = (e: SandboxSessionStreamEvent): void => {
+      if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(e)}\n\n`);
+    };
+    req.raw.on('close', cleanup);
+    // Subscribe BEFORE the snapshot, buffering, so a frame between the two is never lost.
+    const held: SandboxSessionStreamEvent[] = [];
+    let ready = false;
+    unsub = subscribeFixSession(row.id, accountId, (e) => {
+      if (!ready) return void held.push(e);
+      send(e);
+      if (e.type === 'done') cleanup();
+    });
+    const fresh = (await getFixById(ctx, accountId, row.id).catch(() => null)) ?? row;
+    const wire = (() => {
+      try {
+        return fixSessionWire(fresh);
+      } catch {
+        return null;
+      }
+    })();
+    if (wire?.session) send({ type: 'snapshot', session: wire.session });
+    ready = true;
+    for (const e of held) {
+      send(e);
+      if (e.type === 'done') return cleanup();
+    }
+    if (unsub == null) {
+      send({ type: 'done' });
+      cleanup();
+    }
   });
 
   // The fix picker: every item a review-seeded fix would include, with stable keys and defaults.
@@ -483,23 +576,11 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
     },
   );
 
-  // "Run tests": the checks the PR's head declares and whether this machine can sandbox them. ONE
-  // GitHub request (the manifest files), asked when the reader ticks "Run tests" — never on mount.
-  app.get<{ Params: { id: string } }>('/api/pro/prs/:id/ai-fix/checks', async (req, reply) => {
-    const accountId = ctx.accountIdOf(req);
-    const prId = parseId(req.params.id);
-    if (prId == null) return reply.code(404).send({ error: 'not found' });
-    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
-    try {
-      const preview = await loadChecksPreview(ctx, { accountId, prId });
-      if (!preview) return reply.code(404).send({ error: 'not found' });
-      const resp: AiFixChecksPreview = preview;
-      return reply.send(resp);
-    } catch (err) {
-      ctx.log.warn({ err }, 'ai-fix checks preview failed');
-      return reply.code(502).send({ error: 'ChecksUnavailable', message: 'Could not read the project’s checks from GitHub.' });
-    }
-  });
+  // "Run tests" was REMOVED with the shell-less fixer: tests run inside the sandbox now. An older tab
+  // that asks gets one line (kept one release, then this route goes).
+  app.get<{ Params: { id: string } }>('/api/pro/prs/:id/ai-fix/checks', async (_req, reply) =>
+    reply.code(404).send({ error: 'ChecksRemoved', message: 'Tests now run inside the sandbox.' }),
+  );
 
   // Poll status.
   app.get<{ Params: { id: string } }>(
@@ -579,7 +660,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       // Ownership.
       const pr = await getFixPrContext(ctx, accountId, prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
-      const cancelled = requestFixCancel(ctx, prId);
+      const cancelled = await requestFixCancel(ctx, accountId, prId);
       return reply.send({ status: cancelled ? 'cancelling' : 'idle' });
     },
   );

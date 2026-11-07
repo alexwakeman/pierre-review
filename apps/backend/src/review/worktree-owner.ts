@@ -3,8 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // WHO A WORKTREE IS FOR (docs/BACKEND.md § Worktree cleanup).
 //
 // `addWorktree` (clone-manager.ts) is the ONE place a per-run checkout is made, but it sits several
-// calls below the run that wants it — a review's manager → `ctx.review.runReview` → `prepWorktree`,
-// an AI Fix's manager → `ctx.coding.generateFix` → `prepWorktree`. Threading an owner argument
+// calls below the run that wants it — a review's manager → `ctx.review.runReview` → `prepWorktree`.
+// ('fix' / 'plan' are READ-only ledger values now: AI Fix runs in the sandbox, docs/SANDBOX.md.) Threading an owner argument
 // through every one of those signatures (and the platform contract) would be the wrong cost, so the
 // run's manager names the owner ONCE around its call and `addWorktree` reads it here.
 //

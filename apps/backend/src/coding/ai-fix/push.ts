@@ -4,11 +4,17 @@ import type { ApplyAndPushTarget } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import { getFixById, markFixPushed } from './persist.js';
+import { beginFixPush, endFixPush } from './push-guard.js';
 
 // PUSH A FINISHED FIX, AS-IS — the ONE path the Push button (routes.ts) and the AUTOMATIC push
 // (auto-push.ts) share. Never a force push: onto the PR's own head branch (refused with HEAD_MOVED
 // when that branch moved since the fix was generated) or onto a NEW branch with a PR opened against
 // the base. No trunk step before it. `applyAndPush` settles the PR after the write.
+//
+// THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions): a push is refused while a turn of the fix's
+// live session runs, the session refuses messages while the push runs (`beginFixPush`, taken in the
+// first tick), and a push that lands ENDS the session (phase `pushed`). The patch is the PR repository's
+// only, extracted by the host; edits in other repositories were never stored.
 
 export type PushFixOutcome =
   | { ok: true; result: AiFixPushResult }
@@ -34,6 +40,22 @@ export async function pushFix(
   input: { accountId: number; fixId: number; target: 'existing' | 'new'; branch?: string },
 ): Promise<PushFixOutcome> {
   const { accountId, fixId } = input;
+  // ⚠ The push slot in THIS tick, before any await: a message to the session cannot start meanwhile.
+  if (!beginFixPush(fixId)) return { ok: false, code: 'not_pushable', message: 'This fix is being pushed.' };
+  try {
+    return await pushFixHeld(ctx, input);
+  } finally {
+    endFixPush(fixId);
+  }
+}
+
+async function pushFixHeld(
+  ctx: AgentContext,
+  input: { accountId: number; fixId: number; target: 'existing' | 'new'; branch?: string },
+): Promise<PushFixOutcome> {
+  const { accountId, fixId } = input;
+  const session = await import('../../sandbox/session/fix.js');
+  if (session.fixTurnRunning(fixId)) return { ok: false, code: 'not_pushable', message: 'The agent is still working. Wait, or press Stop.' };
   const row = await getFixById(ctx, accountId, fixId);
   if (!row) return { ok: false, code: 'not_found', message: 'Fix not found.' };
   if (row.status !== 'succeeded' || !row.patch || !row.baseSha)
@@ -83,6 +105,8 @@ export async function pushFix(
       pushedPrNumber: result.prNumber,
       pushedPrUrl: result.prUrl,
     });
+    // The session ends with the push (no follow-up after a push: a new fix starts from the next review).
+    if (row.sessionPhase != null) await session.closeFixAfterPush(ctx, accountId, fixId).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: closing the session after the push failed'));
     return { ok: true, result };
   } catch (err) {
     const code = (err as { code?: string })?.code;

@@ -1,52 +1,13 @@
 import { useState } from 'react';
-import { useIsMutating } from '@tanstack/react-query';
-import {
-  AI_FIX_PLAN_MAX_MESSAGE_CHARS,
-  aiRunLabel,
-  type AiFix,
-  type AiFixPlan,
-  type AiFixReviewItem,
-  type AiFixStatusResponse,
-  type ClaudeAuthStatus,
-  type PrDetail,
-} from '@pierre-review/shared';
-import {
-  aiFixPlanMutationKey,
-  useApprovePlan,
-  useCancelFix,
-  useDiscardPlan,
-  usePlanMessage,
-} from '../../hooks/useAiFix.js';
-import { useFilters } from '../../store/filters.js';
-import { fixProgressPct, PHASE_LABEL } from '../../lib/aiFixProgress.js';
-import { ApiError } from '../../api/client.js';
-import { AiRunGate } from '../AiSetup.js';
-import { InfoButton } from '../InfoModal.js';
+import { aiRunProviderName, type AiFix, type AiFixPlan, type AiFixReviewItem } from '@pierre-review/shared';
 import { ChevronIcon } from '../Icons.js';
-import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
-import { aiProviderName, aiRunProvider, aiRunProviderName } from '@pierre-review/shared';
-import { useFollowUpProvider } from '../../hooks/useModelPick.js';
-import { PlanMessageBox, PlanTranscript } from './PlanChat.js';
-import { AgentActivityLog } from '../AgentActivityLog.js';
 
-// PLAN MODE (manual AI Fix only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Claude reads the code
-// and writes a plan; it edits nothing. The reader steers it by chat — each message runs a fresh
-// planning pass with the whole chat — and "Approve and build" runs the normal fix on the SAME row
-// with the plan as its brief. Everything here reads the ONE ai-fix query; the live progress is the
-// tab's own SSE stream (`liveStatus`).
+// A PLAN FROM THE REMOVED PLAN MODE, READ-ONLY (history). "Plan first" is now a chat-mode workspace
+// session (docs/SANDBOX.md § AI Fix sessions): its plan is the conversation. Rows from before keep their
+// structured plan and chat; they are shown here as they were, with nothing to press.
 
-const BTN_PRIMARY =
-  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const BTN_SECONDARY =
-  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const REF_CHIP =
   'inline-flex items-center rounded-ui bg-ui-raise px-1.5 py-px font-mono text-meta text-ui-ink';
-
-function errText(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return 'Something went wrong';
-}
 
 /** The summary bullets — the plan at a glance. Shared with the build's "Built from your plan" note. */
 export function PlanBullets({ plan }: { plan: AiFixPlan }): JSX.Element {
@@ -113,147 +74,38 @@ function PlanDetails({ plan, items }: { plan: AiFixPlan; items: AiFixReviewItem[
   );
 }
 
-export function PlanPanel({
-  pr,
-  fix,
-  liveStatus,
-  passRunning,
-  auth,
-}: {
-  pr: PrDetail;
-  fix: AiFix;
-  liveStatus: AiFixStatusResponse | null;
-  // A planning pass is queued or running (the DB says 'planning', or the live stream says so).
-  passRunning: boolean;
-  auth: ClaudeAuthStatus | undefined;
-}): JSX.Element | null {
-  const state = fix.plan;
-  // The one that wrote this plan, and the providers that run the next pass and the build: the plan's
-  // own while it can run them, else the default (the server's rule, ai/run-choice.ts).
-  const plannedBy = aiRunProviderName(fix.plan ?? fix);
-  const planProvider = aiRunProvider((fix.plan ?? fix).provider, (fix.plan ?? fix).model);
-  const passProvider = useFollowUpProvider(planProvider, 'plan');
-  const buildProvider = useFollowUpProvider(planProvider, 'fix');
-  const name = aiProviderName(passProvider);
-  const message = usePlanMessage(pr.id);
-  const approve = useApprovePlan(pr.id);
-  const discard = useDiscardPlan(pr.id);
-  const cancel = useCancelFix(pr.id);
-  const busy = useIsMutating({ mutationKey: aiFixPlanMutationKey(pr.id) }) > 0;
-  const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
-  const [draft, setDraft] = useState('');
+/** An older row's plan (the removed plan mode): bullets, then the steps and the chat behind a toggle. */
+export function PlanHistory({ fix }: { fix: AiFix }): JSX.Element | null {
   const [open, setOpen] = useState(false);
-  if (!state) return null;
-
+  const state = fix.plan;
+  // An approved plan shows as "Built from your plan" (ApprovedPlanNote) above the result.
+  if (state == null || state.plan == null || state.status === 'approved') return null;
   const plan = state.plan;
-  const ready = state.status === 'plan_ready' && !passRunning;
-  const text = draft.trim();
-  const tooLong = text.length > AI_FIX_PLAN_MAX_MESSAGE_CHARS;
-
-  const send = (): void => {
-    if (!ready || busy || text === '' || tooLong) return;
-    message.mutate({ fixId: fix.id, text }, { onSuccess: () => setDraft('') });
-  };
-  const doApprove = (): void => {
-    // The bottom-right AiFixBanner follows the build once the reader leaves this tab.
-    noteAiFixRun({ prId: pr.id, repoFullName: pr.repoFullName, prNumber: pr.number, prTitle: pr.title });
-    approve.mutate(fix.id);
-  };
-  const actionError = message.error ?? approve.error ?? discard.error;
-
+  const by = aiRunProviderName(state.model != null ? state : fix);
   return (
-    <div className="mt-3 rounded-ui bg-ui-surface p-3">
-      <div className="mb-1 flex items-center gap-1 text-meta font-semibold text-ui-ink">
-        Plan
-        {plan && state.revision > 1 && (
-          <span className="font-normal text-ui-mute">· version {state.revision}</span>
-        )}
-        {state.model && (
-          <span className="font-normal text-ui-mute">· {aiRunLabel(state.provider, state.model, state.effort)}</span>
-        )}
-        <InfoButton title="Plan first">
-          <p>{name} reads the code and writes a plan. It changes nothing.</p>
-          <p>
-            Tell {name} what to change and it rewrites the plan, taking the whole conversation into account. Each
-            message runs {name} again.
-          </p>
-          <p>When you approve, {name} builds the fix from this plan. You still review the diff and press Push.</p>
-        </InfoButton>
-      </div>
-
-      {plan ? (
-        <>
-          <PlanBullets plan={plan} />
-          <button
-            type="button"
-            className="hit mt-2 inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            <ChevronIcon dir={open ? 'down' : 'right'} />
-            Details
-          </button>
-          {open && <PlanDetails plan={plan} items={fix.reviewItems} />}
-        </>
-      ) : (
-        !passRunning && <p className="text-meta text-ui-mute">No plan yet.</p>
+    <div data-testid="ai-fix-plan-history" className="mt-3 rounded-ui bg-ui-surface p-2">
+      <div className="mb-1 text-meta font-semibold text-ui-mute">The plan {by} made</div>
+      <PlanBullets plan={plan} />
+      <button
+        type="button"
+        className="hit mt-1 inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} />
+        {open ? 'Hide the details' : 'Show the details'}
+      </button>
+      {open && <PlanDetails plan={plan} items={fix.reviewItems} />}
+      {open && state.transcript.length > 0 && (
+        <ul className="mt-3 space-y-1.5 border-t border-ui-line pt-2 text-meta">
+          {state.transcript.map((m, i) => (
+            <li key={i} className="whitespace-pre-wrap text-ui-ink">
+              <span className="font-semibold">{m.role === 'reader' ? 'You' : by}: </span>
+              {m.text}
+            </li>
+          ))}
+        </ul>
       )}
-
-      {/* A re-plan that failed keeps the plan above; the reason sits here. */}
-      {fix.error && (
-        <p className="mt-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-warn">
-          {fix.error}
-        </p>
-      )}
-
-      <PlanTranscript transcript={state.transcript} plannedBy={plannedBy} />
-
-      {passRunning && (
-        <div className="mt-3">
-          <RegenProgressBar
-            active
-            label={plan ? 'Updating the plan' : 'Making the plan'}
-            value={fixProgressPct(liveStatus)}
-            timeConstantSec={30}
-          />
-          <div className="mt-1 flex items-center gap-2 text-meta text-ui-mute">
-            {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
-            <button type="button" className={BTN_SECONDARY} onClick={() => cancel.mutate()}>
-              Cancel
-            </button>
-          </div>
-          <AgentActivityLog lines={liveStatus?.progress?.recentActivity} className="mt-1" />
-        </div>
-      )}
-
-      {/* Three buttons, three gates: "Update plan" is a PLAN run, "Approve and build" a FIX run (a
-          provider may run one and not the other — Codex), and "Discard plan" runs no model at all,
-          so it is never gated: a plan must always be clearable, or it blocks the PR's auto fixes. */}
-      {ready && plan && (
-        <div className="mt-3">
-          <AiRunGate kind="plan" auth={auth} meter={false} followUp provider={passProvider}>
-            <PlanMessageBox
-              name={name}
-              draft={draft}
-              setDraft={setDraft}
-              busy={busy}
-              maxChars={AI_FIX_PLAN_MAX_MESSAGE_CHARS}
-              onSend={send}
-            />
-          </AiRunGate>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <AiRunGate kind="fix" auth={auth} followUp provider={buildProvider}>
-              <button type="button" data-ai-run className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
-                Approve and build
-              </button>
-            </AiRunGate>
-            <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => discard.mutate(fix.id)}>
-              Discard plan
-            </button>
-          </div>
-        </div>
-      )}
-      {actionError != null && <p className="mt-1 text-meta text-ui-danger">{errText(actionError)}</p>}
     </div>
   );
 }

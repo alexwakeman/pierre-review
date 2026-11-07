@@ -526,3 +526,50 @@ describe('ticket items in the review seed', () => {
     expect(await loadReviewSeed(ctx, { accountId: 2, prId, reviewId: rv.id, withTicketItems: true })).toBeNull();
   });
 });
+
+describe('maybeStartAutoFix — the sandbox (AI Fix runs only as a sandboxed session)', () => {
+  const withSandbox = (answer: any) => ({ ...deps(), sandbox: async () => answer });
+
+  it('⚠ no container runtime ⇒ skipped "no_sandbox" before the seed; nothing started, recorded for the tab', async () => {
+    const prId = await seedPr(viewerId);
+    const reviewId = 990 + prId;
+    const before = loadInputs.length;
+    const r = await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId }, withSandbox({ ok: false, reason: 'no_runtime', message: 'x' }), NOW);
+    expect(r).toEqual({ reviewId, status: 'skipped', reason: 'no_sandbox' });
+    expect(loadInputs.length).toBe(before);
+    expect(started).toEqual([]);
+    expect(mod.autoFixOutcomeFor(reviewId, 1)).toEqual(r);
+    expect(mod.autoFixOutcomeFor(reviewId, 2)).toBeNull();
+  });
+
+  it('a busy machine ⇒ "sandbox_busy"; busy because THIS PR’s fix holds a session ⇒ "fix_in_progress"', async () => {
+    const busy = withSandbox({ ok: false, reason: 'busy', message: 'x' });
+    const prId = await seedPr(viewerId);
+    expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 1 }, busy, NOW)).toMatchObject({ reason: 'sandbox_busy' });
+    running = true;
+    expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 2 }, busy, NOW)).toMatchObject({ reason: 'fix_in_progress' });
+    expect(started).toEqual([]);
+  });
+
+  it('the start’s own answer decides when the pre-check passed but the start lost a race', async () => {
+    const ready = withSandbox({ ok: true });
+    const cases: Array<[any, string]> = [
+      [{ status: 'no_runtime', message: 'gone' }, 'no_sandbox'],
+      [{ status: 'too_many', message: 'two open' }, 'sandbox_busy'],
+      [{ status: 'build_busy' }, 'sandbox_busy'],
+      [{ status: 'over_budget' }, 'over_budget'],
+    ];
+    for (const [answer, reason] of cases) {
+      startAnswer = answer;
+      const prId = await seedPr(viewerId);
+      expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 3000 + prId }, ready, NOW)).toMatchObject({ status: 'skipped', reason });
+    }
+    expect(started).toHaveLength(cases.length);
+  });
+
+  it('a ready sandbox ⇒ the fix starts as before', async () => {
+    const prId = await seedPr(viewerId);
+    expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 4000 + prId }, withSandbox({ ok: true }), NOW)).toMatchObject({ status: 'started', fixId: 77 });
+    expect(started[0]).toMatchObject({ trigger: 'auto' });
+  });
+});

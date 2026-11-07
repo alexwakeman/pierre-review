@@ -32,6 +32,8 @@ export interface SandboxUsageRow {
   inputTokens: number | null;
   outputTokens: number | null;
   repoId: number | null;
+  /** The pull request an AI Fix session works on (the Reports' "fix" bucket). */
+  prId?: number | null;
 }
 
 /** Where usage goes. The default (drivers/usage.ts) is the ledger + the budget's Claude reading. */
@@ -45,6 +47,8 @@ export interface SandboxUsageSink {
 export interface SandboxUsageAccount {
   accountId: number;
   repoId?: number | null;
+  /** An AI Fix session's pull request. */
+  prId?: number | null;
   /** Ledger feature per mode. Default: chat `story_plan`, build `story_build`. */
   features?: Partial<Record<SandboxAgentMode, string>>;
 }
@@ -70,6 +74,9 @@ export interface SandboxAgentStartOptions {
   mode?: SandboxAgentMode;
   /** Claude: model turns per user message. Default STORY_BUILD_MAX_TURNS_DEFAULT. */
   maxTurns?: number;
+  /** Claude: the US$ cap on the agent PROCESS (`--max-budget-usd`, print mode). Absent ⇒ no cap. Set only for
+   *  an UNATTENDED fix, whose process runs one build turn (the cap is the process's, not one turn's). */
+  maxBudgetUsd?: number;
   usage: SandboxUsageAccount;
   usageSink?: SandboxUsageSink;
   /** Called before each turn (the egress session's `refreshCredentials`: the host refreshes, never the sandbox). */

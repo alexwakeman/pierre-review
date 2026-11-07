@@ -643,9 +643,9 @@ describe('runAgentUnchecked() — one read-only run', () => {
   });
 
   it('needs exactly one result tool unless one is named', () => {
-    const other = { ...resultTool, name: 'submit_plan' };
+    const other = { ...resultTool, name: 'submit_threads' };
     expect(() => C.pickResultTool({ tools: { server: 's', tools: [resultTool, other] } })).toThrow(/exactly one result tool/);
-    expect(C.pickResultTool({ tools: { server: 's', tools: [resultTool, other] }, codex: { resultTool: 'submit_plan' } })).toBe(other);
+    expect(C.pickResultTool({ tools: { server: 's', tools: [resultTool, other] }, codex: { resultTool: 'submit_threads' } })).toBe(other);
     expect(C.pickResultTool({ tools: { server: 's', tools: [resultTool, { ...resultTool, name: 'helper' }] } })).toBe(resultTool);
     expect(C.pickResultTool({})).toBeNull();
   });

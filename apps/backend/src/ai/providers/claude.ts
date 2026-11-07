@@ -18,7 +18,7 @@
 //     handler's reply as one text block (+ `isError` only when the handler set it).
 // The SDK module comes from `loadAgentSdk()`, whose `query` is TAPPED (ai/runtime.ts `tapQuery`), so
 // every message still reaches the spend budget's observer.
-import { loadAgentSdk, loadAnthropicSdk, loadZod, claudeExecutableOptions, getAiRuntimeStatus } from '../runtime.js';
+import { loadAgentSdk, loadAnthropicSdk, claudeExecutableOptions, getAiRuntimeStatus } from '../runtime.js';
 import { agentAuthOptions, agentSdkEnv, resolveAiCredential, type AiCredential } from '../credentials.js';
 import { ISOLATED_MCP, NO_SESSION_FILES, ownToolsOnlyHook } from '../agent-isolation.js';
 import { config } from '../../config.js';
@@ -26,7 +26,6 @@ import { NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { sdkModelOptions } from '../../review/model-options.js';
 import { createPathGuard, pathGuardHook } from '../../review/path-guard.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../../review/usage.js';
-import { CHECKS_TOOL_SERVER, RUN_CHECK_TOOL } from '../check-tool.js';
 import type {
   AgentMessage,
   AgentOutcome,
@@ -78,30 +77,6 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
             }),
           ),
         });
-  }
-  // THE PROJECT'S CHECKS (`mcp__checks__run_check`): a second in-process server, present only when the
-  // run carries them. Its one argument is an enum of the frozen names — nothing else reaches the runner.
-  const checks = spec.checks;
-  if (checks && checks.names.length > 0) {
-    const z = await loadZod();
-    mcpServers[CHECKS_TOOL_SERVER] = createSdkMcpServer({
-      name: CHECKS_TOOL_SERVER,
-      version: '1.0.0',
-      tools: [
-        tool(
-          RUN_CHECK_TOOL,
-          checks.description,
-          { name: z.enum(checks.names as [string, ...string[]]).describe('The check to run.') } as Parameters<typeof tool>[2],
-          async (a: unknown) => {
-            const reply = await checks.run(a);
-            return {
-              content: [{ type: 'text' as const, text: reply.text }],
-              ...(reply.isError !== undefined ? { isError: reply.isError } : {}),
-            };
-          },
-        ),
-      ],
-    });
   }
   const ownServers = Object.keys(mcpServers);
   const guard = createPathGuard(spec.cwd, spec.roots, { readOnlyRoots: spec.readOnlyRoots });

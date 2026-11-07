@@ -16,13 +16,19 @@ describe('tierFor — AI generation', () => {
   it('puts the Pro generators in the ai tier (minute AND hour windows)', () => {
     expect(tiers('POST', '/api/pro/sprint-report/refresh')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
-    // AI Fix plan mode: every pass and the approve spend an agent run; discard is one DB update.
+    // AI Fix's workspace session: a boot, a turn, Start fix and Resume spend an agent run; the
+    // teardown, an Allow click and the stream are reads.
     expect(tiers('POST', '/api/pro/prs/12/ai-fix/plan')).toEqual(['ai', 'ai_hourly']);
-    // "Run tests" picker: one GitHub read per click, never the 600/min GET catch-all.
-    expect(tiers('GET', '/api/pro/prs/12/ai-fix/checks')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/resume')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/discard')).toEqual(['read']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/discard')).toEqual(['read']);
+    expect(tiers('POST', '/api/pro/ai-fixes/7/network/allow')).toEqual(['read']);
+    expect(tiers('GET', '/api/pro/ai-fixes/7/session/stream')).toEqual(['read']);
+    // "Run tests" is removed (a 404 for one release): the /api/pro/ GET catch-all.
+    expect(tiers('GET', '/api/pro/prs/12/ai-fix/checks')).toEqual(['read']);
   });
 
   // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does
