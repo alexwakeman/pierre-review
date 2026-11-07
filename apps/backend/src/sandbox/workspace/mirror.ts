@@ -2,8 +2,9 @@
 // INSIDE the sandbox at its layout path, on `limn/<ticket key>`, with no remote; then the reader's
 // memories, CLAUDE.md and skills, then the seed files.
 //
-// ⚠ THE CODE COMES FROM LIMN'S CLONE CACHE, NEVER THE READER'S CHECKOUT (plan invariant 4). Per
-// repository, on the HOST:
+// ⚠ THE BASE COMMIT COMES FROM LIMN'S CLONE CACHE (plan invariant 4); the reader's checkout is never
+// copied (its objects may be READ into the repo store, below). THE PER-SESSION COPY, per repository, on
+// the HOST:
 //   1. `prepBranchWorktree` at the base (the clone cache's own fetch, under its repo lock; the base is
 //      pinned by the caller's `pinRef`). The cache is a BLOBLESS clone: the worktree checkout is what
 //      brings the base tree's blobs in (measured: a shallow fetch from a blobless clone without it
@@ -18,20 +19,30 @@
 //
 // The commit Limn starts from is kept as `refs/limn/base` in each sandbox repository: the patch
 // extraction (WP7) is `git format-patch refs/limn/base..<branch>`.
+//
+// ⚠ ON DOCKER THE REPO STORE REPLACES STEPS 2–3 (store.ts, docs/SANDBOX.md § The repo store): a kept,
+// read-only volume the sandbox borrows objects from, filled from the reader's own clone when it has the
+// base commit. The per-session copy above stays for a runtime without a store (microsandbox), when the
+// store could not be made, and as the per-repository fallback when a store step fails.
+//
+// Repositories are prepared MIRROR_CONCURRENCY at a time; each host step still takes clone-manager's
+// per-repository lock, and a failed repository is one boot note (the session goes on).
 import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
-import type { FileToCopy, SandboxRuntime } from '../runtime/types.js';
+import type { FileToCopy, SandboxRuntime, SessionOwner } from '../runtime/types.js';
 import type { LayoutRepo, WorkspaceLayout } from './layout.js';
 import { readMemories, readUserClaudeMd, readUserSkills, type ClaudePlaces } from './memories.js';
 import { SANDBOX_HOME, type SeedMemoryProject } from './seed.js';
+import { defaultStoreSeams, mirrorOneViaStore, SANDBOX_BASE_REF, StoreStepError, type StoreSeams } from './store.js';
 
 const execFileAsync = promisify(execFile);
 
-/** The ref, in each SANDBOX repository, that names the commit the session started from. */
-export const SANDBOX_BASE_REF = 'refs/limn/base';
+export { SANDBOX_BASE_REF };
+/** How many repositories are prepared at once. */
+export const MIRROR_CONCURRENCY = 3;
 const SHA = /^[0-9a-f]{40}$/;
 
 export interface RepoBaseRequest {
@@ -197,38 +208,96 @@ export interface MirrorResult {
   repos: MirroredRepo[];
   /** One plain line per repository that could not be cloned (the session goes on without it). */
   failed: Array<{ repoId: number; fullName: string; reason: string }>;
+  /** Plain lines for the boot notes (at most one about the reader's clones). */
+  notes: string[];
 }
 
-/** Every repository of the layout, one at a time (each host step takes that repository's lock). */
+export interface MirrorOptions {
+  seams?: MirrorSeams;
+  onProgress?: MirrorProgress;
+  signal?: AbortSignal;
+  /**
+   * The repo store, when the sandbox was started with it mounted (`sandboxMountsFor`). Absent ⇒ the
+   * per-session copy for every repository.
+   */
+  store?: { owner: SessionOwner; seams?: StoreSeams } | null;
+  /** The reader's clones per repository (the layout's match: the first path, then `alsoAt`). */
+  localClones?: ReadonlyMap<number, readonly string[]>;
+  concurrency?: number;
+}
+
+/** `fn` over `items`, at most `limit` at a time; results in the items' order. */
+export async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
+
+/** Every repository of the layout, `MIRROR_CONCURRENCY` at a time (each host step takes that repository's lock). */
 export async function mirrorRepos(
   runtime: SandboxRuntime,
   container: string,
   layout: WorkspaceLayout,
   bases: ReadonlyMap<number, RepoBaseRequest>,
   branch: string,
-  opts: { seams?: MirrorSeams; onProgress?: MirrorProgress; signal?: AbortSignal } = {},
+  opts: MirrorOptions = {},
 ): Promise<MirrorResult> {
   const seams = opts.seams ?? defaultMirrorSeams;
-  const out: MirrorResult = { repos: [], failed: [] };
-  for (const r of layout.repos) {
-    if (opts.signal?.aborted) throw new Error('Stopped');
+  const store = opts.store && runtime.repoStore ? { ...opts.store, runtime: runtime.repoStore } : null;
+  type One = { ok: MirroredRepo } | { failed: MirrorResult['failed'][number] } | null;
+  const skippedLocal: string[] = [];
+  const results = await mapBounded<LayoutRepo, One>(layout.repos, opts.concurrency ?? MIRROR_CONCURRENCY, async (r) => {
+    if (opts.signal?.aborted) return null;
     const req = bases.get(r.repoId);
-    if (req == null) {
-      out.failed.push({ repoId: r.repoId, fullName: r.fullName, reason: 'No base was chosen.' });
-      continue;
-    }
+    if (req == null) return { failed: { repoId: r.repoId, fullName: r.fullName, reason: 'No base was chosen.' } };
     opts.onProgress?.(`Cloning ${r.fullName}`);
+    if (store) {
+      try {
+        const got = await mirrorOneViaStore({
+          runtime,
+          store: store.runtime,
+          owner: store.owner,
+          container,
+          path: r.path,
+          branch,
+          req,
+          localClones: opts.localClones?.get(r.repoId) ?? [],
+          seams: store.seams ?? defaultStoreSeams,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+        });
+        if (got.localSkipped) skippedLocal.push(`${r.fullName} (${got.localSkipped})`);
+        return { ok: { repoId: r.repoId, fullName: r.fullName, path: r.path, sha: got.sha } };
+      } catch (err) {
+        // Before the base commit was known: final. After: the per-session copy, once.
+        if (!(err instanceof StoreStepError)) return { failed: { repoId: r.repoId, fullName: r.fullName, reason: scrub(err) } };
+      }
+    }
     let source: PreparedSource | null = null;
     try {
       source = await seams.prepare(req);
       const sha = await cloneIntoSandbox(runtime, container, r, branch, source, seams);
-      out.repos.push({ repoId: r.repoId, fullName: r.fullName, path: r.path, sha });
+      return { ok: { repoId: r.repoId, fullName: r.fullName, path: r.path, sha } };
     } catch (err) {
-      out.failed.push({ repoId: r.repoId, fullName: r.fullName, reason: scrub(err) });
+      return { failed: { repoId: r.repoId, fullName: r.fullName, reason: scrub(err) } };
     } finally {
       await source?.cleanup().catch(() => {});
     }
+  });
+  if (opts.signal?.aborted) throw new Error('Stopped');
+  const out: MirrorResult = { repos: [], failed: [], notes: [] };
+  for (const x of results) {
+    if (x == null) continue;
+    if ('ok' in x) out.repos.push(x.ok);
+    else out.failed.push(x.failed);
   }
+  if (skippedLocal.length > 0) out.notes.push(`Copied from Limn's own clone, not yours: ${skippedLocal.join(', ')}.`);
   return out;
 }
 

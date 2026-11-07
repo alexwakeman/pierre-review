@@ -78,6 +78,7 @@ import {
 } from '../workspace/index.js';
 import type { LayoutPlaces } from '../workspace/check.js';
 import type { MirrorSeams } from '../workspace/mirror.js';
+import type { StoreSeams } from '../workspace/store.js';
 import { ticketMarkdown } from '../workspace/seed.js';
 import { sessionLimits } from './limits.js';
 import { extractRepoPatch, PatchTooLargeError, restoreRepoPatch } from './patches.js';
@@ -137,6 +138,8 @@ export interface SessionDeps {
   ticketPrs(ctx: AgentContext, accountId: number, ident: string): Promise<StoryBuildTicketPr[]>;
   places(): LayoutPlaces;
   mirrorSeams?: MirrorSeams;
+  /** The repo store's host steps (tests). */
+  storeSeams?: StoreSeams;
   /** The environment the proxy reads the host's sign-in from. */
   credentialEnv(): NodeJS.ProcessEnv;
   usageSink?: SandboxUsageSink;
@@ -600,7 +603,17 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     stopIfClosing(l);
 
     begin('sandbox');
-    const { mounts, workdir } = sandboxMountsFor(layout, volume);
+    // The kept repo store (Docker only; docs/SANDBOX.md § The repo store), mounted read-only. When it
+    // cannot be made, every repository takes the per-session copy: one note, never a failed session.
+    let store: string | null = null;
+    if (rt.repoStore) {
+      try {
+        store = await rt.repoStore.ensure();
+      } catch (err) {
+        l.state.notes.push(`The kept copy of your repositories is not available, so each one is copied in full: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const { mounts, workdir } = sandboxMountsFor(layout, volume, store);
     const box = await rt.startSandbox({ ...l.owner, image: image.ref, network: net.name, env: egress.sandboxEnv, mounts, resources: resourcesOf(settings), workdir });
     l.container = box.name;
     l.layoutRoot = layout.root;
@@ -621,6 +634,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       userClaudeMd: settings.userClaudeMd,
       userSkills: settings.userSkills,
       ...(deps.mirrorSeams ? { seams: deps.mirrorSeams } : {}),
+      store: store != null ? { owner: l.owner, ...(deps.storeSeams ? { seams: deps.storeSeams } : {}) } : null,
       onProgress: (line) => step(l, current, 'running', line),
       signal: l.abort.signal,
       services: async (mirror) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { labelArgs, resourceLabels, resourceName } from './labels.js';
-import { composeArgs, mountArgs, proxyRunArgs, sandboxRunArgs, serviceBuildArgv, volumeChownArgs } from './spec.js';
+import { labelArgs, repoStoreName, resourceLabels, resourceName, storeLabels } from './labels.js';
+import { composeArgs, mountArgs, proxyRunArgs, sandboxRunArgs, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
 import { DEFAULT_RESOURCES, type SandboxSpec } from './types.js';
 
 const spec: SandboxSpec = {
@@ -115,5 +115,34 @@ describe('services argv', () => {
     const base = { sessionId: 's1', accountId: 1, from: { container: 'c', dir: '/w' }, network: 'n', proxyUrl: 'p', memoryBytes: 1 };
     expect(() => serviceBuildArgv({ ...base, tag: 'limn-s1-x:1', dockerfile: '../Dockerfile' }, {})).toThrow(/inside the build folder/);
     expect(() => serviceBuildArgv({ ...base, tag: 'evil.example.com/x:1', dockerfile: 'Dockerfile' }, {})).toThrow(/Limn service image tag/);
+  });
+});
+
+describe('the repo store argv (docs/SANDBOX.md § The repo store)', () => {
+  it('a read-only volume mount says readonly', () => {
+    expect(mountArgs({ kind: 'volume', name: 'limn-repo-store-d1', target: '/limn-store', readOnly: true })).toEqual([
+      '--mount',
+      'type=volume,src=limn-repo-store-d1,dst=/limn-store,volume-nocopy,readonly',
+    ]);
+  });
+
+  it('the maintenance container: no network, no capabilities, read-only root, the store read-write', () => {
+    const argv = storeMaintenanceArgs('limn-sandbox:local-abc', 'limn-repo-store-d1', resourceLabels('d1', { sessionId: 's1', accountId: 1 }, 'setup'), ['sh', '-c', 'true']);
+    const at = (flag: string): string | undefined => argv[argv.indexOf(flag) + 1];
+    expect(argv.slice(0, 3)).toEqual(['run', '--rm', '--interactive']);
+    expect(at('--network')).toBe('none');
+    expect(at('--cap-drop')).toBe('ALL');
+    expect(argv).not.toContain('--cap-add');
+    expect(argv).toContain('--read-only');
+    expect(at('--security-opt')).toBe('no-new-privileges');
+    expect(argv).toContain('type=volume,src=limn-repo-store-d1,dst=/limn-store');
+    expect(argv.slice(-4)).toEqual(['limn-sandbox:local-abc', 'sh', '-c', 'true']);
+    expect(() => storeMaintenanceArgs('i', 'v', {}, [])).toThrow();
+  });
+
+  it('the store volume never carries limn.managed (the sweep cannot see it)', () => {
+    expect(repoStoreName('d1')).toBe('limn-repo-store-d1');
+    expect(() => repoStoreName('../x')).toThrow();
+    expect(storeLabels('d1', { 'limn.test': '1', 'limn.managed': 'x' })).toEqual({ 'limn.test': '1', 'limn.store': 'd1', 'limn.role': 'store' });
   });
 });

@@ -212,6 +212,40 @@ describe('containers', () => {
   });
 });
 
+describe('the repo store', () => {
+  it('creates the store once, labelled without limn.managed, and refuses a volume that is not Limn\'s', async () => {
+    let exists = false;
+    const cli = scripted([
+      [/^volume inspect/, () => (exists ? { stdoutText: 'd1\n' } : { code: 1, stderr: 'no such volume' })],
+      [/^volume create/, () => ((exists = true), { stdoutText: 'limn-repo-store-d1\n' })],
+    ]);
+    const rt = createDockerRuntime({ runner: cli, instance: 'd1' });
+    expect(await rt.repoStore!.ensure()).toBe('limn-repo-store-d1');
+    expect(await rt.repoStore!.ensure()).toBe('limn-repo-store-d1');
+    const creates = cli.calls.filter((c) => c.args[1] === 'create');
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.args).toEqual(['volume', 'create', '--label', 'limn.store=d1', '--label', 'limn.role=store', 'limn-repo-store-d1']);
+
+    const foreign = scripted([[/^volume inspect/, { stdoutText: '\n' }]]);
+    await expect(createDockerRuntime({ runner: foreign, instance: 'd1' }).repoStore!.ensure()).rejects.toThrow(/not Limn's repo store/);
+  });
+
+  it('removes the store only by its own label, never with --force; the sweep never lists it', async () => {
+    const cli = scripted([
+      [/^volume ls --filter label=limn\.store=d1/, { stdoutText: 'limn-repo-store-d1\n' }],
+      [/^volume rm limn-repo-store-d1$/, { code: 1, stderr: 'volume is in use' }],
+      [/^(ps|network ls|volume ls|image ls)/, { stdoutText: '' }],
+    ]);
+    const rt = createDockerRuntime({ runner: cli, instance: 'd1' });
+    expect(await rt.repoStore!.remove({ dryRun: true })).toEqual({ volumes: ['limn-repo-store-d1'], errors: [] });
+    expect(await rt.repoStore!.remove()).toEqual({ volumes: [], errors: ['limn-repo-store-d1: volume is in use'] });
+    await rt.sweep([]);
+    const sweepLists = cli.calls.filter((c) => c.args.includes('ls')).map((c) => c.args.join(' '));
+    expect(sweepLists.filter((l) => l.includes('limn.store'))).toHaveLength(2);
+    expect(sweepLists.filter((l) => !l.includes('limn.store')).every((l) => l.includes('label=limn.managed=d1'))).toBe(true);
+  });
+});
+
 describe('parseSize', () => {
   it('reads docker stats units', () => {
     expect(parseSize('12MiB')).toBe(12 * 1024 ** 2);

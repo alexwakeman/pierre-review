@@ -10,8 +10,8 @@ import { collect, createCliRunner, type CliRunner } from './cli.js';
 import { bridgeNetworkFor, daemonProblem, licenceNoteFor, notInstalled, parseInfo } from './detect.js';
 import { DockerfileTap } from './dockerfile.js';
 import { buildArgv, imageRecipe, pinnedPullRef, readImagePin, RECIPE_LABEL, type ImagePin, type ImageRecipe } from './image.js';
-import { appInstance, LABEL_MANAGED, LABEL_ROLE, LABEL_SESSION, labelArgs, resourceLabels, resourceName, type ResourceRole } from './labels.js';
-import { composeArgs, proxyRunArgs, sandboxRunArgs, SANDBOX_USER, serviceBuildArgv, volumeChownArgs } from './spec.js';
+import { appInstance, LABEL_MANAGED, LABEL_ROLE, LABEL_SESSION, LABEL_STORE, labelArgs, repoStoreName, resourceLabels, resourceName, storeLabels, type ResourceRole } from './labels.js';
+import { composeArgs, proxyRunArgs, sandboxRunArgs, SANDBOX_USER, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
 import { tarFiles } from './tar.js';
 import type {
   ComposeCall,
@@ -22,6 +22,7 @@ import type {
   ExecResult,
   ImageBuildSpec,
   ImageProgress,
+  RepoStoreRuntime,
   RuntimeDetection,
   RuntimeFlavour,
   SandboxRuntime,
@@ -200,10 +201,62 @@ export function createDockerRuntime(opts: DockerRuntimeOptions = {}): SandboxRun
     return bridgeNetworkFor(flavour ?? 'unknown');
   }
 
+  const storeVolume = repoStoreName(instance);
+  let storeReady: Promise<string> | null = null;
+  const repoStore: RepoStoreRuntime = {
+    ensure() {
+      // Once per process; a failure is retried by the next session.
+      storeReady ??= (async () => {
+        const have = await run(['volume', 'inspect', '--format', `{{index .Labels "${LABEL_STORE}"}}`, storeVolume], { timeoutMs: LIST_TIMEOUT });
+        if (have.code === 0) {
+          if (lines(have.stdout)[0] !== instance) throw new Error(`The volume ${storeVolume} is not Limn's repo store.`);
+          return storeVolume;
+        }
+        await must(['volume', 'create', ...labelArgs(storeLabels(instance, extraLabels)), storeVolume], 'Creating the repo store');
+        return storeVolume;
+      })().catch((err: unknown) => {
+        storeReady = null;
+        throw err;
+      });
+      return storeReady;
+    },
+    exec(owner, argv, o = {}) {
+      const image = imageRef;
+      if (!image) throw new Error('The sandbox image is not ready yet.');
+      return cli().spawn(storeMaintenanceArgs(image, storeVolume, labelsFor(owner, 'setup'), argv), {
+        ...(o.interactive ? { interactive: true } : {}),
+        timeoutMs: o.timeoutMs ?? 600_000,
+        ...(o.signal ? { signal: o.signal } : {}),
+      });
+    },
+    async remove(o = {}) {
+      const out = { volumes: [] as string[], errors: [] as string[] };
+      if (!runner) return out;
+      const listed = await run(['volume', 'ls', '--filter', `label=${LABEL_STORE}=${instance}`, '--format', '{{.Name}}'], { timeoutMs: LIST_TIMEOUT });
+      if (listed.code !== 0) {
+        out.errors.push(`Listing the repo store failed: ${lastLines(listed.stderr, 2)}`);
+        return out;
+      }
+      for (const name of lines(listed.stdout)) {
+        if (o.dryRun) {
+          out.volumes.push(name);
+          continue;
+        }
+        // No `--force`: the daemon then refuses while a sandbox still mounts the store.
+        const r = await run(['volume', 'rm', name], { timeoutMs: 120_000 });
+        if (r.code === 0) out.volumes.push(name);
+        else out.errors.push(`${name}: ${lastLines(r.stderr, 2)}`);
+      }
+      storeReady = null;
+      return out;
+    },
+  };
+
   const runtime: SandboxRuntime = {
     kind: 'docker',
     detect,
     ensureImage,
+    repoStore,
 
     async createNetwork(owner) {
       const name = resourceName(owner.sessionId, 'net');

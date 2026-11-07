@@ -206,7 +206,7 @@ package carries only what that needs:
   through `dist/sandbox/proxy/source.js`, which refuses any import that is not a `node:` built-in.
 - **No container runtime is installed or bundled.** The reader brings Docker, Colima, Podman or
   microsandbox (docs/SANDBOX.md § Setting up a runtime); Limn drives their CLI and adds no npm
-  dependency for it. `limn sandbox prune [--dry-run]` (`src/cli.ts`) removes leftovers.
+  dependency for it. `limn sandbox prune [--dry-run] [--store]` (`src/cli.ts`) removes leftovers (`--store`: also the kept repo store).
 
 ### The Codex CLI (downloaded with Claude's packages)
 

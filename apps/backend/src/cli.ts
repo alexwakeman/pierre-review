@@ -78,7 +78,7 @@ Commands:
                    (one time, about 240 MB). The app offers the same button.
   ml status        Say whether bot comment scoring is set up
   sandbox prune    Remove leftover Implement sandboxes (stop Limn first;
-                   --dry-run lists them)
+                   --dry-run lists them, --store also removes the repo store)
 
 Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
@@ -463,29 +463,35 @@ It runs on this machine. Nothing is sent anywhere to score a comment.
   }
 }
 
-// ── `limn sandbox prune [--dry-run]` — remove leftover sandbox containers ───────────────
+// ── `limn sandbox prune [--dry-run] [--store]` — remove leftover sandbox containers ─────
 // The same sweep the server runs at boot (sandbox/runtime/index.ts): every container, network and
 // volume this Limn labelled (`limn.managed`). Run it with Limn stopped: a running session's sandbox is removed too.
+// `--store` ALSO removes the kept repo store (docs/SANDBOX.md § The repo store), which the sweep never touches.
 async function runSandboxCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   const dryRun = argv.includes('--dry-run');
-  if (sub !== 'prune' || argv.slice(1).some((a) => a !== '--dry-run')) {
+  const store = argv.includes('--store');
+  if (sub !== 'prune' || argv.slice(1).some((a) => a !== '--dry-run' && a !== '--store')) {
     console.log(`limn sandbox — the containers Implement runs in
 
 Usage:
   limn sandbox prune [--dry-run]   Remove every leftover sandbox container, microVM, network, volume and image.
                                    Stop Limn first: open sessions are removed too.
+  limn sandbox prune --store       Also remove the kept copy of your repositories (the repo store).
+                                   The next session copies them again.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
   // Every installed backend (Docker and microsandbox), whichever one sessions use.
-  const { sweepAllBackends } = await import('./sandbox/runtime/index.js');
+  const { removeRepoStore, sweepAllBackends } = await import('./sandbox/runtime/index.js');
   const all = await sweepAllBackends([], { dryRun });
   if (!all || all.swept.length === 0) {
     console.error(all?.problems[0] ?? 'No container runtime answers.');
     process.exit(1);
   }
   const r = all.result;
+  const kept = store ? await removeRepoStore({ dryRun }) : null;
+  if (kept) r.volumes.push(...kept.volumes);
   const names = [...r.containers, ...r.networks, ...r.volumes, ...r.images];
   for (const n of names) console.log(n);
   console.log(
@@ -493,8 +499,8 @@ Usage:
       ? 'Nothing to remove.'
       : `${dryRun ? 'Would remove' : 'Removed'} ${r.containers.length} containers, ${r.networks.length} networks, ${r.volumes.length} volumes and ${r.images.length} images.`,
   );
-  for (const e of r.errors) console.error(e);
-  if (r.errors.length > 0) process.exit(1);
+  for (const e of [...r.errors, ...(kept?.errors ?? [])]) console.error(e);
+  if (r.errors.length > 0 || (kept?.errors.length ?? 0) > 0) process.exit(1);
 }
 
 async function main(): Promise<void> {

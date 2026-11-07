@@ -27,7 +27,7 @@ export interface WorkspaceRepo {
 export const fullNameOf = (r: WorkspaceRepo): string => `${r.owner}/${r.name}`;
 
 // Trees the sandbox image (or the kernel) owns: a repository may never be placed at or under one.
-const SYSTEM_TREES = ['/bin', '/boot', '/dev', '/etc', '/lib', '/lib32', '/lib64', '/libx32', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var/lib', '/var/cache', '/var/log', '/var/run', '/home/agent', '/work', '/limn'];
+const SYSTEM_TREES = ['/bin', '/boot', '/dev', '/etc', '/lib', '/lib32', '/lib64', '/libx32', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var/lib', '/var/cache', '/var/log', '/var/run', '/home/agent', '/work', '/limn', '/limn-store'];
 // Folders a volume may sit UNDER but not AT (mounting there would hide what the image keeps in it).
 const SYSTEM_EXACT = ['/home', '/var', '/tmp', '/opt', '/srv', '/mnt', '/media'];
 

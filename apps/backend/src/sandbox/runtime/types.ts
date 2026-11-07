@@ -60,11 +60,13 @@ export interface BindMount {
   target: string;
 }
 
-/** A named volume Limn created for this session (writable, labelled, removed on discard). */
+/** A named volume Limn created: a session's (writable, labelled, removed on discard), or the kept repo
+ *  store, which a sandbox only ever mounts `readOnly` (docs/SANDBOX.md § The repo store). */
 export interface VolumeMount {
   kind: 'volume';
   name: string;
   target: string;
+  readOnly?: boolean;
 }
 
 export type Mount = BindMount | VolumeMount;
@@ -234,8 +236,26 @@ export interface EnsuredImage {
   source: 'local' | 'pulled' | 'built';
 }
 
+/**
+ * THE KEPT REPO STORE (docs/SANDBOX.md § The repo store): ONE named volume per Limn install, holding a
+ * bare repository per `owner/name`, shared by every session and KEPT across them (the sweep never sees
+ * it). Only a short-lived MAINTENANCE container writes it (Limn's image, no network, root with no
+ * capabilities); a sandbox mounts it read-only. Only Docker has it: a runtime without it uses the
+ * per-session copy (workspace/mirror.ts).
+ */
+export interface RepoStoreRuntime {
+  /** The store's volume, created when missing. Never removes anything. */
+  ensure(): Promise<string>;
+  /** A maintenance program with the store at `STORE_MOUNT` (read-write); stdin kept open when `interactive`. */
+  exec(owner: SessionOwner, argv: string[], opts?: { interactive?: boolean; timeoutMs?: number; signal?: AbortSignal }): ExecHandle;
+  /** Remove the store's volume (`limn sandbox prune --store`). The daemon refuses while a sandbox mounts it. */
+  remove(opts?: { dryRun?: boolean }): Promise<{ volumes: string[]; errors: string[] }>;
+}
+
 export interface SandboxRuntime {
   readonly kind: RuntimeKind;
+  /** Present only where the store maps cleanly (Docker); absent ⇒ the per-session copy. */
+  readonly repoStore?: RepoStoreRuntime;
   detect(): Promise<RuntimeDetection>;
   /** The sandbox image, present locally: already there, pulled by digest, or built from the Dockerfile. */
   ensureImage(opts?: { onProgress?: (p: ImageProgress) => void; signal?: AbortSignal }): Promise<EnsuredImage>;

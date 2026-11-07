@@ -64,6 +64,8 @@ export function createAutoRuntime(o: { docker: SandboxRuntime; microsandbox: San
     destroy: (s) => target().destroy(s),
     sweep: (live, x) => target().sweep(live, x),
   };
+  // Only Docker has the kept repo store (workspace/store.ts checks for it).
+  Object.defineProperty(r, 'repoStore', { enumerable: true, get: () => target().repoStore });
   // Only a runtime whose proxy is not a container has it (egress.ts checks for the method).
   Object.defineProperty(r, 'proxyControl', {
     enumerable: true,
@@ -128,6 +130,18 @@ export async function sweepAllBackends(
     swept.push(b.kind);
   }
   return swept.length === 0 ? (problems.length ? { result, swept, problems } : null) : { result, swept, problems };
+}
+
+/**
+ * `limn sandbox prune --store`: remove the kept repo store (docs/SANDBOX.md § The repo store). Never part
+ * of the sweep. Null when no Docker CLI is installed or its daemon does not answer.
+ */
+export async function removeRepoStore(opts: { dryRun?: boolean; env?: NodeJS.ProcessEnv; runtime?: SandboxRuntime } = {}): Promise<{ volumes: string[]; errors: string[] } | null> {
+  const env = opts.env ?? process.env;
+  const rt = opts.runtime ?? (resolveCliProgram({ env }) ? createDockerRuntime({ env }) : null);
+  if (!rt?.repoStore) return null;
+  if (!(await rt.detect()).daemonReachable) return null;
+  return rt.repoStore.remove(opts.dryRun ? { dryRun: true } : {});
 }
 
 /**

@@ -360,20 +360,48 @@ export async function prepBranchWorktree(
   token: string = getGithubToken(),
 ): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
   return withRepoLock(`${owner}/${name}`, async () => {
-    const dir = await ensureClone(owner, name, token);
-    let sha = ref.sha ?? null;
-    if (sha == null || !(await hasCommit(dir, sha))) {
-      const tip = await fetchRefIntoClone({ cloneDir: dir, owner, name, token, remoteRef: ref.remoteRef, destRef: ref.destRef });
-      if (sha == null) sha = tip;
-      else if (!(await hasCommit(dir, sha))) {
-        await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, token), sha]);
-      }
-    }
-    // A caller-owned ref that keeps this commit reachable (a story build's base: coding/story-build/base-refs.ts).
-    if (ref.pinRef) await git(['-C', dir, 'update-ref', ref.pinRef, sha]);
+    const { dir, sha } = await branchCommitLocked(owner, name, ref, token);
     const worktreePath = await addWorktree(dir, sha, { owner, name });
     return { repoCloneDir: dir, worktreePath, sha };
   });
+}
+
+/**
+ * `prepBranchWorktree` WITHOUT the worktree: the same clone, fetch and `pinRef` rules under the same
+ * repo lock, so the commit is known (and pinned) before anything reads its files. The sandbox's repo
+ * store uses it to learn the base commit, then copies the objects from the reader's own clone when that
+ * clone has them (docs/SANDBOX.md § The repo store); the blobs come from GitHub only when it does not.
+ */
+export async function resolveBranchCommit(
+  owner: string,
+  name: string,
+  ref: { remoteRef: string; destRef: string; sha?: string | null; pinRef?: string },
+  token: string = getGithubToken(),
+): Promise<{ repoCloneDir: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const { dir, sha } = await branchCommitLocked(owner, name, ref, token);
+    return { repoCloneDir: dir, sha };
+  });
+}
+
+async function branchCommitLocked(
+  owner: string,
+  name: string,
+  ref: { remoteRef: string; destRef: string; sha?: string | null; pinRef?: string },
+  token: string,
+): Promise<{ dir: string; sha: string }> {
+  const dir = await ensureClone(owner, name, token);
+  let sha = ref.sha ?? null;
+  if (sha == null || !(await hasCommit(dir, sha))) {
+    const tip = await fetchRefIntoClone({ cloneDir: dir, owner, name, token, remoteRef: ref.remoteRef, destRef: ref.destRef });
+    if (sha == null) sha = tip;
+    else if (!(await hasCommit(dir, sha))) {
+      await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, token), sha]);
+    }
+  }
+  // A caller-owned ref that keeps this commit reachable (a story build's base: coding/story-build/base-refs.ts).
+  if (ref.pinRef) await git(['-C', dir, 'update-ref', ref.pinRef, sha]);
+  return { dir, sha };
 }
 
 /**

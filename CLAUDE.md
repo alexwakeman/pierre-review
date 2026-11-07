@@ -468,9 +468,10 @@ fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repository and the HOST pushes on the reader's press.
 - ⚠ **On Docker its only way out is Limn's allow-list proxy**; the model credential stays on the host.
-- **Code comes from Limn's clone cache**, never the reader's checkout (the local folder decides only the
-  layout and the memories). **Memories only, never past sessions.** ONE fold for what the agent is told
-  (`sandbox/workspace/seed.ts`). Every resource carries Limn labels (swept at boot and on discard).
+- **The base commit comes from Limn's clone cache**; the reader's clone only LENDS OBJECTS (never its
+  tree, index or hooks) to the KEPT read-only repo store. **Memories only, never past sessions.** ONE fold
+  for what the agent is told (`sandbox/workspace/seed.ts`). Every resource carries Limn labels (swept at
+  boot and on discard; the repo store is kept).
 
 ## Platform features (formerly Pro)
 

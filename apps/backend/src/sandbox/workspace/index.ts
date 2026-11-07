@@ -2,8 +2,8 @@
 // calls, in order:
 //
 //   1. `resolveWorkspaceLayout(repos, settings)`  (check.ts) — the SAME computation Settings shows;
-//   2. `sandboxMountsFor(layout, volume)`          — the one session volume at the layout's root and the
-//                                                    container's working folder;
+//   2. `sandboxMountsFor(layout, volume, store)`   — the one session volume at the layout's root, the
+//                                                    repo store read-only, and the working folder;
 //   3. `readSessionTicket(…)`                      (ticket.ts) — the ticket, read fresh;
 //   4. `prepareSessionWorkspace(runtime, container, …)` — the git identity, the repositories, the reader's
 //      files, then the seed (seed.ts). Returns the seed so the driver appends `systemPrompts[provider]`.
@@ -14,7 +14,9 @@ import type { LayoutPlaces, ResolvedWorkspace } from './check.js';
 import { folderClaudeMdPath } from './check.js';
 import type { WorkspaceLayout } from './layout.js';
 import type { SessionTicket } from './ticket.js';
-import type { Mount, SandboxRuntime } from '../runtime/types.js';
+import type { Mount, SandboxRuntime, SessionOwner } from '../runtime/types.js';
+import { STORE_MOUNT } from '../runtime/labels.js';
+import type { StoreSeams } from './store.js';
 
 export { resolveWorkspaceLayout, toFolderCheck, defaultLayoutPlaces, folderClaudeMdPath } from './check.js';
 export { readSessionTicket } from './ticket.js';
@@ -31,9 +33,20 @@ export const FOLDER_CLAUDE_MD_MAX_BYTES = 64 * 1024;
  * The session volume at the layout's ROOT, and the container's working folder. ⚠ The working folder is
  * the ROOT (the volume's own mount point), never the start folder: Docker would create a missing
  * working folder as root inside the agent's volume. The driver runs the agent with `cwd: startDir`.
+ * The repo store (when given) is mounted READ-ONLY at `STORE_MOUNT` (docs/SANDBOX.md § The repo store).
  */
-export function sandboxMountsFor(layout: WorkspaceLayout, volume: string): { mounts: Mount[]; workdir: string } {
-  return { mounts: [{ kind: 'volume', name: volume, target: layout.root }], workdir: layout.root };
+export function sandboxMountsFor(layout: WorkspaceLayout, volume: string, store: string | null = null): { mounts: Mount[]; workdir: string } {
+  const mounts: Mount[] = [{ kind: 'volume', name: volume, target: layout.root }];
+  if (store != null) {
+    if (layout.root === STORE_MOUNT || layout.root.startsWith(`${STORE_MOUNT}/`)) throw new Error('The workspace cannot sit inside the repo store.');
+    mounts.push({ kind: 'volume', name: store, target: STORE_MOUNT, readOnly: true });
+  }
+  return { mounts, workdir: layout.root };
+}
+
+/** The reader's clones per repository, from the layout's match (the first path, then `alsoAt`). */
+export function localClonesOf(resolved: ResolvedWorkspace): Map<number, string[]> {
+  return new Map((resolved.match?.matched ?? []).map((m) => [m.repoId, [m.localPath, ...m.alsoAt]]));
 }
 
 export interface PrepareSessionArgs {
@@ -54,6 +67,8 @@ export interface PrepareSessionArgs {
   services: readonly SeedService[] | null | ((mirror: MirrorResult) => Promise<readonly SeedService[] | null>);
   identity?: { name: string; email: string };
   seams?: MirrorSeams;
+  /** The repo store, when the sandbox was started with it mounted. */
+  store?: { owner: SessionOwner; seams?: StoreSeams } | null;
   onProgress?: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -69,8 +84,15 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   const layout = a.resolved.layout;
   const notes = [...layout.notes];
   await prepareSandboxGit(runtime, container, layout, a.identity ?? { name: 'Limn sandbox', email: 'sandbox@limn.invalid' });
-  const mirror = await mirrorRepos(runtime, container, layout, a.bases, a.branch, { seams: a.seams, onProgress: a.onProgress, signal: a.signal });
+  const mirror = await mirrorRepos(runtime, container, layout, a.bases, a.branch, {
+    seams: a.seams,
+    onProgress: a.onProgress,
+    signal: a.signal,
+    store: a.store ?? null,
+    localClones: localClonesOf(a.resolved),
+  });
   for (const f of mirror.failed) notes.push(`${f.fullName} could not be cloned: ${f.reason}`);
+  notes.push(...mirror.notes);
   const services = typeof a.services === 'function' ? await a.services(mirror) : a.services;
   const seedNotes = [...notes];
   if (layout.outside.length > 0) {

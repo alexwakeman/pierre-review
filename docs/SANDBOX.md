@@ -64,7 +64,8 @@ first session pulls (or builds) the image, which takes minutes; later sessions s
 
 **Disk clean-up.** Discard removes a session's containers, network and volumes, and the boot sweep
 removes what a crash left. `limn sandbox prune [--dry-run]` (stop Limn first) removes every sandbox
-resource of this Limn install, built service images included. Limn keeps the sandbox image; remove old
+resource of this Limn install, built service images included. The repo store (§ The repo store) is KEPT
+by both; `limn sandbox prune --store` removes it too (the next session copies the repositories again). Limn keeps the sandbox image; remove old
 `limn-sandbox:local-*` tags with `docker image rm` when the disk is full.
 
 ## Threat model
@@ -81,7 +82,7 @@ shell. Treat everything it does as untrusted.
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `LIMN_SANDBOX_MAX_SESSIONS` open sessions; one build turn per computer; idle teardown. |
 | Leftovers | Every resource carries Limn's labels; discard, the boot sweep and `limn sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press. An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE build turn with Claude's `--max-budget-usd`, then closes. Each turn's usage is recorded on the ledger and the session's spend is shown. |
-| The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
+| The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. The reader's clones only lend git OBJECTS for the base commit to the repo store, read with hooks, fsmonitor and their config off; never the working tree, index or stash. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
 
 The details of each layer are the sections below; [SECURITY.md](SECURITY.md) § Workspace sessions has
 the summary.
@@ -120,8 +121,10 @@ the summary.
    holds ONLY inside a sandbox `sandbox/runtime` started — Implement and AI Fix (§ AI Fix sessions) run
    there; every review and every chat keep the no-shell rule (docs/CLAUDE-REVIEW.md § The agents' tools). The two drivers (`sandbox/drivers/`) are the
    only code that starts `claude` or `codex` in a sandbox (`provider-seam.test.ts`).
-8. **The local folder decides only the LAYOUT and which notes come in; the code comes from Limn's clone
-   cache** at the bases today's rules pick, never from the reader's checkout (§ The workspace mirror).
+8. **The local folder decides the LAYOUT and which notes come in; the BASE COMMIT comes from Limn's clone
+   cache** at the bases today's rules pick. The reader's clone may only LEND OBJECTS for that commit to the
+   repo store — read-only, never its working tree, index, stash, hooks or remote credentials; a commit id
+   is content-addressed, so the code is the same (§ The repo store).
 9. **One fold for everything the agent is told** (`workspace/seed.ts`), for both subjects: `CLAUDE.md`,
    `AGENTS.md`, `TICKET.md` (a story's; an AI Fix's context ticket), `FIX.md` + `PR.diff` + the report
    checker (an AI Fix) and the system prompt; nothing rebuilds them.
@@ -133,7 +136,7 @@ the summary.
 
 | File | What it holds |
 |---|---|
-| `types.ts` | `SandboxRuntime`, the one contract: `detect`, `ensureImage`, `createNetwork`, `createVolume`, `startProxy`, `startSandbox`, `exec` (streamed events + stdin), `run`, `copyIn`, `readFile`, `followLogs`, `networkMembers`, `startServices`/`stopServices`, `stats`, `destroy`, `sweep`. |
+| `types.ts` | `SandboxRuntime`, the one contract: `detect`, `ensureImage`, `createNetwork`, `createVolume`, `startProxy`, `startSandbox`, `exec` (streamed events + stdin), `run`, `copyIn`, `readFile`, `followLogs`, `networkMembers`, `startServices`/`stopServices`, `stats`, `destroy`, `sweep`, and the optional `repoStore` (Docker only: `ensure`, `exec`, `remove`). |
 | `docker.ts` | The Docker backend: the `docker` CLI, no SDK. `SANDBOX_CLI=podman` (or an absolute path) names another CLI with the same verbs. |
 | `spec.ts` | Every `docker run` argv, as pure functions (pinned by `spec.test.ts`). |
 | `image.ts` | Which image, and where it comes from (below). |
@@ -190,7 +193,8 @@ layers. CI publishing: docs/RELEASE.md § The sandbox image.
 | `limn.managed` | a short hash of the Limn DATA DIR (`appInstance`), so two Limn installs on one machine (`pnpm demo` beside the real one) never sweep each other's sessions. A test passes its own value, so the app's boot sweep never removes a test's resources, nor a test's sweep the app's. |
 | `limn.session` | the session id (`[a-z0-9][a-z0-9_-]{0,62}`, checked before it becomes a name) |
 | `limn.account` | the account id |
-| `limn.role` | `sandbox`, `proxy`, `service`, `setup`, `network`, `volume` |
+| `limn.role` | `sandbox`, `proxy`, `service`, `setup`, `network`, `volume`, `image`, `store` |
+| `limn.store` | on the repo store's volume ONLY, the same instance hash as `limn.managed`. The store has NO `limn.managed` label, so the sweep (which lists by it) cannot see it. |
 
 Names are `limn-<session>-<suffix>` (`-sandbox`, `-proxy`, `-net`, `-vol-<key>`). `destroy(session)`
 and `sweep(liveSessions)` list each kind by the `limn.managed` filter, read each one's `limn.session`
@@ -200,7 +204,10 @@ pairing), and remove containers, then networks, then volumes.
 **The boot sweep** (`index.ts` after listen, `sweepSandboxesAtBoot`): no session survives a restart
 (the session manager marks them failed), so every resource carrying this Limn's `limn.managed` value goes. It starts no
 process when no container CLI is installed, and does nothing when the daemon does not answer. Never
-awaited, never fatal. By hand: `limn sandbox prune [--dry-run]` (stop Limn first).
+awaited, never fatal. By hand: `limn sandbox prune [--dry-run]` (stop Limn first); `--store` also
+removes the repo store (`limn-repo-store-<instance>`), by its `limn.store` label and without `--force`, so
+the daemon refuses while a sandbox mounts it. A store maintenance container is `--rm` and carries
+`limn.managed` + `limn.role=setup`, so a leftover one is swept like any other.
 
 ## The egress proxy (`apps/backend/src/sandbox/proxy/`)
 
@@ -371,7 +378,8 @@ computation Settings shows) → `sandboxMountsFor` → `readSessionTicket` → `
 | `check.ts` | `resolveWorkspaceLayout` + `toFolderCheck` (the Settings check's wire shape). |
 | `ticket.ts` | The ticket, read FRESH (below). |
 | `seed.ts` | THE ONE FOLD of everything the agent is told. Goldens: `__fixtures__/seed-*.md`. |
-| `mirror.ts` | The repositories into the sandbox, and the reader's files. |
+| `mirror.ts` | The repositories into the sandbox (`MIRROR_CONCURRENCY` = 3 at once), the per-session copy, and the reader's files. |
+| `store.ts` | The repo store's side: the local-clone check, the copy into the store, the repository built from it (§ The repo store). |
 | `index.ts` | The order above, and `prepareSessionWorkspace`. |
 
 **The layout** (owner decision D6; the plan's "mirroring absolute paths"):
@@ -393,21 +401,26 @@ computation Settings shows) → `sandboxMountsFor` → `readSessionTicket` → `
 - **the start folder**: the reader's choice (inside the root), else the ticked project with the most
   memories, else the folder.
 
-**The code comes from Limn's clone cache, never the reader's checkout** (plan invariant 4). Per repository,
-on the HOST: `prepBranchWorktree` at the base the caller chose (story-build `baseFor` rules; the base is
-pinned by the caller's ref), then a throw-away DEPTH-1 repository fetched from the cache at that commit,
-whose `.git` is streamed into the sandbox as a tar on `tar -x`'s stdin (as the agent), and checked out on
-`limn/<ticket key>`. ⚠ The cache is BLOBLESS: a shallow fetch from it fails ("possible repository
-corruption on the remote side") until the base tree's blobs are in it, so the worktree checkout comes
-first (measured). ⚠ macOS's `tar` adds AppleDouble `._*` files and xattr headers: the host tar runs with
-`COPYFILE_DISABLE=1 --no-xattrs` and the extract excludes `._*` (measured: `._.git` was an untracked file
-in every repository). No folder is mounted for this (a bind mount of the cache's 0700 folders would not
-be readable by the agent's uid on Linux), and no remote, hook or credential crosses. Each sandbox
-repository keeps `refs/limn/base` = the start commit: the patch is `git format-patch
-refs/limn/base..limn/<key>`. A repository that cannot be cloned is one line in the boot notes; the
-session goes on and the seed names only what is there. Measured on the real `DEFRA/bng-metric-harness`:
-55 s to prepare the first time (the cache fetching the base's blobs from GitHub), 8 s to stream and check
-out 770 files; clean status, no remote, the real commit.
+**The base commit comes from Limn's clone cache** (plan invariant 4): `prepBranchWorktree`'s fetch and
+pin rules at the base the caller chose (story-build `baseFor` rules; the base is pinned by the caller's
+ref). On Docker the repositories come from the KEPT REPO STORE (below); without it (microsandbox, a store
+that could not be made, or a store step that failed for one repository) from THE PER-SESSION COPY.
+Repositories are prepared **3 at a time** (`MIRROR_CONCURRENCY`, one constant); every host step still
+takes clone-manager's per-repository lock. Each sandbox repository keeps `refs/limn/base` = the start
+commit (the patch is `git format-patch refs/limn/base..limn/<key>`) and must end with `HEAD` at exactly
+that commit (checked). A repository that cannot be cloned is one line in the boot notes; the session goes
+on and the seed names only what is there.
+
+**The per-session copy** (`mirror.ts`): per repository, on the HOST, `prepBranchWorktree`, then a
+throw-away DEPTH-1 repository fetched from the cache at that commit, whose `.git` is streamed into the
+sandbox as a tar on `tar -x`'s stdin (as the agent), and checked out on `limn/<ticket key>`. ⚠ The cache
+is BLOBLESS: a shallow fetch from it fails ("possible repository corruption on the remote side") until the
+base tree's blobs are in it, so the worktree checkout comes first (measured). ⚠ macOS's `tar` adds
+AppleDouble `._*` files and xattr headers: the host tar runs with `COPYFILE_DISABLE=1 --no-xattrs` and the
+extract excludes `._*` (measured: `._.git` was an untracked file in every repository). No folder is mounted
+for this (a bind mount of the cache's 0700 folders would not be readable by the agent's uid on Linux), and
+no remote, hook or credential crosses. Measured on the real `DEFRA/bng-metric-harness`: 55 s to prepare
+the first time (the cache fetching the base's blobs from GitHub), 8 s to stream and check out 770 files.
 
 **Memories** (owner decision D1): the ticked projects' `memory/**` only — never a transcript — copied as
 FILES under the SAME key in `/home/agent/.claude/projects/<key>/memory/`. Found by ENCODING each folder
@@ -441,6 +454,73 @@ routes docs/API.md § Sandbox settings): the local folder, the ticked memory pro
 the user CLAUDE.md and skills switches, the start folder, `globalProxyEnv`, CPUs / memory / disk (NULL =
 4 / 8 GB / 30 GB), and the "Always allow" hosts. Per workspace, nothing inherited; PUT replaces the whole
 setting. The check (`POST …/sandbox/check`) is the same `resolveWorkspaceLayout` the session runs.
+
+## The repo store (`workspace/store.ts`, `runtime.repoStore`; Docker only)
+
+ONE named volume per Limn install, `limn-repo-store-<instance>` (labels `limn.store=<instance>`,
+`limn.role=store`, no `limn.managed`: the sweep never sees it), holding ONE BARE REPOSITORY per
+repository (`<owner>__<name>.git`), KEPT across sessions. Every sandbox mounts it READ-ONLY at
+`/limn-store` (`sandboxMountsFor`; `/limn-store` is a refused layout place). Per repository:
+
+1. **The commit**: `resolveBranchCommit` (clone-manager) — `prepBranchWorktree`'s fetch and pin, without
+   the worktree. No blob is downloaded.
+2. **In the sandbox** (as the agent): when the store has `refs/limn/keep/<sha>`, `git init` at the layout
+   path, `objects/info/alternates` → the store's objects (BORROWED, not copied), `.git/shallow` = the
+   commit, `refs/limn/base`, the branch checked out, hooks folder removed; `HEAD` must equal the commit.
+   Exit 75 = the store lacks it. Only the argv crosses `docker exec`.
+3. **Only then, the missing objects**, under a per-repository lock in this process: a MAINTENANCE
+   container (`storeMaintenanceArgs`: Limn's image, `--rm`, `--network none`, root with EVERY capability
+   dropped, `no-new-privileges`, read-only root, the store read-write) runs `git fetch --depth 1` whose
+   transport is its own stdin/stdout (`ext::`, allowed by `-c` for that one fetch). Limn connects that to
+   `git upload-pack` run on the HOST against the SOURCE. The store sends its keep refs as `have`s, so
+   only the objects it lacks cross (measured: a second base that changed one file copied 4–5 objects);
+   `fetch.fsckObjects` + `transfer.fsckObjects` check every object; git writes them into a quarantine and
+   the ref last. Then step 2 again.
+
+**The source** is the reader's LOCAL CLONE when the layout matched one by remote (the first path, then
+`alsoAt`) AND it has the commit AND it is complete (not shallow, not partial) — no blob comes from GitHub.
+Anything else (a missing commit, a shallow, partial or broken clone, a failed copy) falls back to the clone
+cache after `prepBranchWorktree` brought the base tree's blobs in, with ONE boot-note line naming each
+repository and why ("Copied from Limn's own clone, not yours: …"). A failure after the commit is known
+falls back to the per-session copy for that repository.
+
+**Why fetch over the container's stdin, not a bundle or a pack file**: git's own negotiation decides what
+the store lacks (a bundle needs Limn to list prerequisites the store has, and a pack of "missing objects"
+needs Limn to compute them); thin packs are completed and every object fsck'd by the receiving git; the
+same code serves both sources; no file is written on the host, and nothing is mounted from it. The
+repository borrows the store's objects instead of copying them, so a session's `.git` is ~100–200 KB
+(the harness's 112 MB pack is never copied per session).
+
+⚠ **The reader's clone is READ, never written.** Only `rev-parse`, `config --get-regexp`, `cat-file -e`
+and `upload-pack` run against its git dir, each with `core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_LAZY_FETCH=1` (no remote, no credential is
+ever used), `GIT_OPTIONAL_LOCKS=0` and `GIT_NO_REPLACE_OBJECTS=1`. None reads the working tree, the index
+or the stash. No transport is configured on the host side (upload-pack runs directly on the git dir), so
+no `protocol.file.allow` is set. `store-real.test.ts` pins it on a DIRTY clone (a stash, a staged change,
+an edit, an untracked file, hooks and an fsmonitor that would leave a mark): every path's mtime and size
+and `git status` are unchanged, and nothing ran. Measured on the BNG folder: no file under any `.git` was
+newer than the run's start, and `git status` was unchanged.
+
+⚠ **The sandbox cannot write the store** (shared by every session): the mount is read-only and every
+file is root's (the maintenance container runs as root; the agent is uid 1001). Pinned by
+`store-real.test.ts`.
+
+⚠ **The store is never gc'd or pruned by Limn** (`gc.auto=0`, `maintenance.auto=false`, fetch with
+`--no-auto-maintenance`): a running sandbox borrows its objects. It only grows: the depth-1 tree of the
+first base of each repository, then only the objects each later base changed. Measured on the BNG
+workspace (9 repositories, one base each): **139 MB** (108 MB of it `bng-metric-harness`). `limn sandbox
+prune --store` removes it whole; the daemon refuses while a sandbox mounts it.
+
+**Not on microsandbox**: it has no named volumes (its workspace is a private disk per VM), so a shared
+store would be a host folder written by host git and mounted `:ro`, a different trust shape. microsandbox
+keeps the per-session copy behind the same seam (`runtime.repoStore` absent).
+
+**Measured, 2026-11-07** (Intel Mac, Docker Desktop 29.6, the 9 BNG repositories, bases = each default
+branch's tip, so every repository also asks GitHub for the tip; no model run): the per-session copy one at
+a time **33–36 s** (the clone cache already holding the blobs); the store, 3 at a time, **24.7 s** with
+an EMPTY store (4 of 9 objects from the local clones, 5 from the cache: those clones did not have the
+new tips) and **7.4 s** for the next session (nothing copied). The harness alone from its local clone:
+9.7 s to fill the store (pack 6 s on the host), then 3 s per session.
 
 ## Services (`apps/backend/src/sandbox/services/`; owner decision D5)
 
@@ -599,6 +679,7 @@ per machine and there is no per-machine setting store yet.)
 | Control requests | `docker exec -i` into the proxy | `proxyControl()`: a POST over the control socket (folder 0700 + the control token) |
 | Credentials | injected at the proxy | injected at the proxy: the secret lives only in Limn and the host proxy process, never in the VM (host-bound) |
 | Workspace | a named volume (`volume-nocopy`), disk cap NOT enforced | `--mount-owned <root>:kind=disk,size=<disk>` — removed with the VM, cap enforced |
+| Repositories | the kept repo store, a read-only volume the repository borrows objects from (§ The repo store) | the per-session copy (a tar of a depth-1 `.git` over exec): no named volumes to share |
 | Read-only mounts | `type=bind,…,readonly` | `-v <src>:<dst>:ro,noexec` |
 | Caps | `--cpus`, `--memory`, `--pids-limit`, no capabilities, no new privileges | `-c` (whole vCPUs, rounded up), `-m`, `--rlimit nproc=` on every agent command |
 | Root | never in the sandbox (a CHOWN-only helper container) | one setup `exec -u root`: the `limn-proxy` hosts line and the disk's owner |
@@ -761,6 +842,15 @@ pushed, failed `failed`), so the banner, the Open PRs pill, the auto-fix caps, d
   blobless cache refuses a shallow fetch until the base is checked out — and, with a daemon,
   `prepareSessionWorkspace` end to end: mirrored paths, the branch at the real base, no remote, clean
   status, memories under the same key, the seed at the root, agent-owned files, a commit out as a patch.
+- **The repo store**: the decisions over the fake runtime and fake host steps (`store.test.ts`): a warm
+  store copies nothing, the local clone first, the cache when it lacks the commit (one note), the next
+  clone and the cache when a copy fails, the per-session copy when a store step fails, no fallback when
+  the base cannot be resolved, at most 3 at once in the layout's order; the argv and labels
+  (`spec.test.ts`, `docker.test.ts`). `store-real.test.ts` (`slow`): which local clones qualify (complete
+  yes; shallow, partial, missing commit, not a repository no), then with a daemon a test-named store
+  filled from a DIRTY clone, a sandbox repository at exactly the commit with a patch out, the sandbox
+  unable to write the store, a second base copying 4–5 objects and the same base none, the reader's clone
+  untouched; the store volume is removed after.
 - **Services**: the policy over normalised models shaped like the BNG backend file, every refusal and
   rewrite (`policy.test.ts`); the controller over the fake runtime — the verbs, a refused file never
   reaching compose, clashes, builds, `run` (`controller.test.ts`); the relay as REAL Node processes —

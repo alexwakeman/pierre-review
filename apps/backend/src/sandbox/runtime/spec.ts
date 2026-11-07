@@ -7,7 +7,7 @@
 //
 // ⚠ No caller passes raw `docker run` flags. A new need is a new typed field here, with its test.
 import { isAbsolute, normalize } from 'node:path';
-import { labelArgs } from './labels.js';
+import { labelArgs, STORE_MOUNT } from './labels.js';
 import type { ComposeVerb, ImageBuildSpec, Mount, ProxySpec, SandboxResources, SandboxSpec } from './types.js';
 
 /** The image's non-root user (apps/backend/sandbox-image/Dockerfile). */
@@ -41,7 +41,7 @@ export function mountArgs(m: Mount): string[] {
   if (m.kind === 'bind') return ['--mount', `type=bind,src=${normalize(m.source)},dst=${m.target},readonly`];
   // `volume-nocopy`: an EMPTY volume would otherwise take the mount point's ownership (root, when
   // the path is also the workdir) and undo the CHOWN step — measured on Docker 29.
-  return ['--mount', `type=volume,src=${m.name},dst=${m.target},volume-nocopy`];
+  return ['--mount', `type=volume,src=${m.name},dst=${m.target},volume-nocopy${m.readOnly ? ',readonly' : ''}`];
 }
 
 export function resourceArgs(r: SandboxResources): string[] {
@@ -116,6 +116,34 @@ export function volumeChownArgs(image: string, volume: string, labels: Record<st
     'chown', `${SANDBOX_USER}:${SANDBOX_USER}`, '/v',
   ];
 }
+
+/**
+ * A REPO STORE maintenance container (docs/SANDBOX.md § The repo store): one-off (`--rm`), stdin open,
+ * NO network, every capability dropped, no new privileges, a read-only root with a small /tmp. It runs as
+ * root so the store's files belong to root: a sandbox (the agent) could not write them even if a mount
+ * were ever read-write. Root without capabilities writes only what root owns (the volume's own folder).
+ */
+export function storeMaintenanceArgs(image: string, volume: string, labels: Record<string, string>, argv: string[]): string[] {
+  if (argv.length === 0) throw new Error('A maintenance run needs a program');
+  if (argv.some((a) => a.includes('\0'))) throw new Error('An argument contains a NUL byte');
+  assertMountable({ kind: 'volume', name: volume, target: STORE_MOUNT });
+  return [
+    'run', '--rm', '--interactive', ...labelArgs(labels),
+    '--network', 'none',
+    '--user', 'root',
+    ...HARDENING,
+    ...resourceArgs(STORE_RESOURCES),
+    '--read-only', '--tmpfs', '/tmp:rw,size=64m',
+    '--env', 'HOME=/tmp', '--env', 'GIT_CONFIG_NOSYSTEM=1',
+    '--mount', `type=volume,src=${volume},dst=${STORE_MOUNT}`,
+    '--workdir', STORE_MOUNT,
+    image,
+    ...argv,
+  ];
+}
+
+/** Enough for `index-pack` on a large repository; nothing else runs there. */
+export const STORE_RESOURCES: SandboxResources = { cpus: 2, memoryBytes: 2 * 1024 ** 3, pids: 256, diskBytes: 0 };
 
 // ── Services (sandbox/services/) ────────────────────────────────────────────────────────────────
 

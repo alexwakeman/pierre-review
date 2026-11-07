@@ -65,6 +65,9 @@ export const SLOW_TESTS = [
   // Real git (a blobless cache, worktrees, shallow fetches) and a real daemon: the workspace mirror end to
   // end; its Docker part is skipped with its reason when no daemon answers.
   'src/sandbox/workspace/mirror-real.test.ts',
+  // Real git (local clones checked, shallow and partial ones built) and a real daemon: the kept repo store
+  // filled from a dirty local clone; its Docker part is skipped with its reason when no daemon answers.
+  'src/sandbox/workspace/store-real.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every
