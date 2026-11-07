@@ -76,7 +76,7 @@ export interface WorkspaceDependencyAutoMergeResponse {
 //
 // docs/MERGE-CI-TRUNK.md § Dependency automation. Three per-workspace switches, every one OFF by
 // default — merge (the setting above), APPROVE, RESOLVE CONFLICTS (ask the bot to rebase, then
-// an AI run through the in-app resolver) and FIX WITH AI (failing CI) — and ONE policy that gates them: how big an update
+// an unattended AI Fix session that merges the base in the sandbox) and FIX WITH AI (failing CI) — and ONE policy that gates them: how big an update
 // may be, security fixes only, which ecosystems. Approval and conflict resolution act only on PRs
 // opened by a bot the reader TRUSTS (`trustedBotIds`, a mark on the workspace's bot row).
 //   GET / PUT /api/workspaces/:id/dependency-automation   the panel (DB only)

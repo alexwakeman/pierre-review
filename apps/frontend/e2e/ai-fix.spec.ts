@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { AiFix, SandboxRuntimeStatus } from '@pierre-review/shared';
-import { aiFixBuilt, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
+import type { AiFix, AiFixPickerPreview, SandboxRuntimeStatus } from '@pierre-review/shared';
+import { AI_FIX_PREVIEW_MERGE, aiFixBuilt, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
 
 // AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; docs/FRONTEND.md § The AI Fix tab)
 // against the mocked API (mock-api.ts keeps the PR's fix per page). The picker stays; Start fix boots the
@@ -11,8 +11,16 @@ import { aiFixBuilt, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mo
 
 const PR_ID = fixtures.PRS[0]!.id;
 
-async function openAiFix(page: Page, o: { aiFix?: AiFix | null; runtime?: SandboxRuntimeStatus } = {}): Promise<void> {
-  await installMockApi(page, { aiFix: o.aiFix ?? null, ...(o.runtime != null ? { runtime: o.runtime } : {}) });
+async function openAiFix(
+  page: Page,
+  o: { aiFix?: AiFix | null; runtime?: SandboxRuntimeStatus; preview?: AiFixPickerPreview; onStart?: (prId: number) => AiFix } = {},
+): Promise<void> {
+  await installMockApi(page, {
+    aiFix: o.aiFix ?? null,
+    ...(o.runtime != null ? { runtime: o.runtime } : {}),
+    ...(o.preview != null ? { aiFixPreview: o.preview } : {}),
+    ...(o.onStart != null ? { aiFixOnStart: o.onStart } : {}),
+  });
   const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
   await page.route(
     (u) => u.pathname.endsWith('/api/me'),
@@ -93,5 +101,40 @@ test.describe('AI Fix in the sandbox', () => {
     await page.locator('[data-ai-fix-action="discard-confirm"]').click();
     await expect(page.getByTestId('fix-session')).toHaveCount(0);
     await expect(page.getByText('The fix was stopped or discarded. Nothing was pushed.')).toBeVisible();
+  });
+
+  test('a conflicting PR: the merge item is ticked first; the result shows the checked merge apart from the fix', async ({ page }) => {
+    await openAiFix(page, { preview: AI_FIX_PREVIEW_MERGE, onStart: (id) => aiFixMerged(id) });
+    const mergeRow = page.getByRole('region', { name: 'Merge conflicts' });
+    await expect(mergeRow).toContainText('Resolve merge conflicts with main');
+    await expect(mergeRow.getByRole('checkbox')).toBeChecked();
+    await expect(page.getByText('3 items')).toBeVisible();
+    // The old separate conflict run is gone: no "Also resolve" box.
+    await expect(page.getByText(/Also resolve merge conflicts/)).toHaveCount(0);
+    const startReq = page.waitForRequest((r) => r.url().endsWith(`/api/pro/prs/${PR_ID}/ai-fix`) && r.method() === 'POST');
+    await page.locator('[data-ai-fix-action="start"]').click();
+    expect((await startReq).postDataJSON().include).toEqual(['conflict:merge', 'ci:1', 'ci:2']);
+
+    const merge = page.getByTestId('ai-fix-merge');
+    await expect(merge).toHaveAttribute('data-merge-status', 'valid');
+    await expect(page.getByTestId('ai-fix-merge-check')).toContainText('Its parents are the PR head (ddddddd) and main (eeeeeee).');
+    await expect(page.getByTestId('ai-fix-resolution')).toContainText('How the conflicts were resolved');
+    await expect(page.getByTestId('ai-fix-resolution')).toContainText('the API caps it at 100');
+    await expect(page.getByTestId('ai-fix-changes')).toContainText('Fixes on top of the merge');
+    await expect(page.getByTestId('fix-session-repos').locator('[data-repo="acme/web"]')).toContainText('main merged · 1 file changed');
+    // A fix with the merge pushes only to the PR's own branch.
+    await expect(page.getByText('New branch + open a PR')).toHaveCount(0);
+    const pushReq = page.waitForRequest((r) => r.url().endsWith('/push') && r.method() === 'POST');
+    await page.getByRole('button', { name: 'Push', exact: true }).click();
+    expect((await pushReq).postDataJSON().target).toBe('existing');
+    await expect(page.getByText('Pushed to')).toBeVisible();
+  });
+
+  test('a merge that fails Limn’s check offers no Push and says why', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixMerged(PR_ID, 'invalid') });
+    await expect(page.getByTestId('ai-fix-merge')).toHaveAttribute('data-merge-status', 'invalid');
+    await expect(page.getByTestId('ai-fix-merge-check')).toContainText('Nothing will be pushed: conflict markers are left in src/reports/limits.ts.');
+    await expect(page.getByTestId('ai-fix-session-status')).toContainText('The merge did not pass Limn’s check, so nothing can be pushed.');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
   });
 });

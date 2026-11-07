@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { AgentContext } from '../../review/agent-context.js';
+import { isConflicting } from '../../db/pending-classify.js';
 
 // Resolve a PR's coordinates from its id, SCOPED to the caller's account (the plugin's
 // IDOR guarantee — a PR that isn't the caller's returns null → the route 404s). Reads
@@ -97,4 +98,52 @@ export async function getViewerCanPush(
     .execute()) as Array<{ perm: string | null }>;
   const perm = rows[0]?.perm ?? '';
   return ['WRITE', 'MAINTAIN', 'ADMIN'].includes(perm);
+}
+
+/**
+ * THE MERGE ITEM'S GATE ("Resolve merge conflicts with <base>" in the fix picker; docs/CLAUDE-REVIEW.md
+ * § AI Fix): the PR is open, the SYNCED merge state says it conflicts with its base (`isConflicting`, the
+ * Pending board's own test), it is not in a merge queue, its branch is not in a fork, and the reader can push to its repository. The
+ * base branch it would merge, or null. DB only — the start re-reads the live head itself.
+ */
+export async function getFixMergeOffer(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<{ baseRef: string } | null> {
+  const pr = ctx.schema.pullRequests;
+  const repos = ctx.schema.repos;
+  const rows = (await ctx.db
+    .select({
+      state: pr.state,
+      mergeable: pr.mergeable,
+      mergeStateStatus: pr.mergeStateStatus,
+      inMergeQueue: pr.inMergeQueue,
+      isCrossRepository: pr.isCrossRepository,
+      baseRefName: pr.baseRefName,
+      defaultBranch: repos.defaultBranch,
+      perm: repos.viewerPermission,
+    })
+    .from(pr)
+    .innerJoin(repos, eq(pr.repoId, repos.id))
+    .where(and(eq(pr.id, prId), eq(pr.accountId, accountId)))
+    .limit(1)
+    .execute()) as Array<{
+    state: string;
+    mergeable: string | null;
+    mergeStateStatus: string | null;
+    inMergeQueue: boolean | null;
+    isCrossRepository: boolean | null;
+    baseRefName: string | null;
+    defaultBranch: string | null;
+    perm: string | null;
+  }>;
+  const r = rows[0];
+  if (!r || r.state !== 'open' || r.inMergeQueue === true) return null;
+  // A fork's branch: Push refuses a merge there (git-ops.ts `pushMergeResult`), so the item is not offered.
+  if (r.isCrossRepository === true) return null;
+  if (!isConflicting(r)) return null;
+  if (!['WRITE', 'MAINTAIN', 'ADMIN'].includes(r.perm ?? '')) return null;
+  const baseRef = r.baseRefName ?? r.defaultBranch;
+  return baseRef ? { baseRef } : null;
 }

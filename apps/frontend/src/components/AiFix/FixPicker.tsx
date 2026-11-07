@@ -20,6 +20,7 @@ import { FollowUpRow } from '../ClaudeReviewFollowUp.js';
 import { ThreadRow } from '../ClaudeReviewThreads.js';
 import { CiFailureRow } from '../ClaudeReviewCiFailures.js';
 import { SonarIssueRow } from '../ClaudeReviewSonar.js';
+import { ConflictIcon } from '../Icons.js';
 import { CriterionRow, MissingRow } from '../TicketReviewParts.js';
 import {
   PICKER_SECTION_LABEL,
@@ -139,6 +140,7 @@ function PlainRow({
                 {SEVERITY_LABEL[item.severity]}
               </span>
             )}
+            {item.section === 'conflicts' && <ConflictIcon size={12} className="shrink-0 text-ui-mute" />}
             <span className="break-words text-ui-ink">{item.label}</span>
             {picked && cut && <span className={WONT_FIT_CHIP}>Won’t fit</span>}
           </span>

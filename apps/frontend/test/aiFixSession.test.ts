@@ -6,7 +6,17 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { SandboxSessionPhase } from '@pierre-review/shared';
-import { fixErrorTone, fixRepoStatus, fixSessionHoldsPr, fixSessionShown, fixSessionStatusLine, leftOutLine } from '../src/lib/aiFixSession.js';
+import {
+  fixErrorTone,
+  fixMergeBlockedLine,
+  fixMergeLine,
+  fixPushable,
+  fixRepoStatus,
+  fixSessionHoldsPr,
+  fixSessionShown,
+  fixSessionStatusLine,
+  leftOutLine,
+} from '../src/lib/aiFixSession.js';
 
 const s = (phase: SandboxSessionPhase, live: boolean, resumable = false) => ({ phase, live, resumable, mode: 'build' as const });
 
@@ -59,6 +69,46 @@ describe('fixRepoStatus', () => {
   });
 });
 
+describe('the merge (the "Resolve merge conflicts" item)', () => {
+  const m = (status: 'pending' | 'valid' | 'invalid' | 'missing', reason: string | null = null) => ({
+    baseRef: 'main',
+    baseSha: 'e'.repeat(40),
+    conflictedFiles: ['a.ts', 'b.ts'],
+    status,
+    reason,
+    resolutionDiff: null,
+    resolutionFiles: [],
+  });
+  it('Push sends only a valid merge; without one, only a patch', () => {
+    expect(fixPushable({ patch: null, filesChanged: [], merge: m('valid') })).toBe(true);
+    for (const st of ['pending', 'invalid', 'missing'] as const) expect(fixPushable({ patch: 'diff', filesChanged: ['x'], merge: m(st) })).toBe(false);
+    expect(fixPushable({ patch: 'diff', filesChanged: ['x'], merge: null })).toBe(true);
+    expect(fixPushable({ patch: null, filesChanged: [], merge: null })).toBe(false);
+  });
+  it('the check line names both parents, or why nothing is pushed', () => {
+    expect(fixMergeLine(m('valid'), 'd'.repeat(40))).toEqual({
+      tone: 'ok',
+      text: 'Limn checked the merge commit. Its parents are the PR head (ddddddd) and main (eeeeeee). No conflict markers are left in the 2 files that were in conflict.',
+    });
+    expect(fixMergeLine(m('invalid', 'the merge has the wrong parents.'), null)).toEqual({ tone: 'bad', text: 'Nothing will be pushed: the merge has the wrong parents.' });
+    expect(fixMergeLine(m('missing'), null).tone).toBe('bad');
+    expect(fixMergeLine(m('pending'), null)).toEqual({ tone: 'pending', text: 'The merge of main is not finished.' });
+  });
+  it('a built session with a refused merge says nothing can be pushed', () => {
+    expect(fixMergeBlockedLine(m('invalid'), { phase: 'built' })).toMatch(/nothing can be pushed/);
+    expect(fixMergeBlockedLine(m('valid'), { phase: 'built' })).toBeNull();
+    expect(fixMergeBlockedLine(m('missing'), { phase: 'building' })).toBeNull();
+    expect(fixMergeBlockedLine(null, { phase: 'built' })).toBeNull();
+  });
+  it('the PR repository row says the base is merged', () => {
+    const base = { prRepoId: 10, headRef: 'feature/x', filesChanged: 1, pushed: false, leftOut: [] };
+    expect(fixRepoStatus({ repoId: 10 }, { ...base, merge: m('valid') }).status).toBe('main merged · 1 file changed');
+    expect(fixRepoStatus({ repoId: 10 }, { ...base, filesChanged: 0, merge: m('valid') }).status).toBe('main merged');
+    expect(fixRepoStatus({ repoId: 10 }, { ...base, merge: m('invalid') }).status).toBe('Merge not valid');
+    expect(fixRepoStatus({ repoId: 10 }, { ...base, merge: m('pending') }).status).toBe('1 file changed');
+  });
+});
+
 describe('fixErrorTone', () => {
   const session = { phase: 'built' } as never;
   it('an automatic push that failed is a warning', () => {
@@ -84,5 +134,9 @@ describe('the tab', () => {
   });
   it('the shell-less fixer’s progress bar and Run tests option are gone', () => {
     expect(src).not.toMatch(/RegenProgressBar|useAiFixStream|RunTestsOption|<PlanPanel\b/);
+  });
+  it('has no separate conflict run: no ConflictAiCard, no "Also resolve" box', () => {
+    expect(src).not.toMatch(/ConflictAiCard|useConflictAiResolve|startConflictAiRun|Also resolve merge conflicts/);
+    expect(src).toMatch(/<MergeResult\b/);
   });
 });

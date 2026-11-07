@@ -35,7 +35,7 @@ export interface FakeExecContext {
   opts: ExecOptions;
   /** Lines the caller writes to stdin (split on `\n`), then the end of input. */
   stdin: AsyncIterable<string>;
-  stdout(text: string): void;
+  stdout(text: string | Buffer): void;
   stderr(text: string): void;
   /** Resolves when the caller kills the process. */
   killed: Promise<void>;

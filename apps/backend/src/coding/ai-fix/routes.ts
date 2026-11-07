@@ -1,3 +1,4 @@
+import { mergeWire, readMergeState } from '../../sandbox/session/fix-merge.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
@@ -96,6 +97,7 @@ function rowToAiFix(row: AiFixRow): AiFix {
     session: wire.session,
     leftOut: wire.leftOut,
     unattended: row.unattended === true,
+    merge: mergeWire(readMergeState(row.mergeJson ?? null)),
     id: row.id,
     prId: row.prId,
     status: row.status,

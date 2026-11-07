@@ -17,7 +17,7 @@ import {
   type CommitChecksRead,
 } from '../github/commit-checks.js';
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
-import { applyAndPush } from '../coding/git-ops.js';
+import { applyAndPush, pushMergeResult, type PushMergeArgs } from '../coding/git-ops.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { detectClaudeAuth, detectProviderAuth } from './auth.js';
 import {
@@ -82,6 +82,9 @@ export interface AgentContext {
   };
   coding: {
     applyAndPush(args: ApplyAndPushArgs): Promise<ApplyAndPushResult>;
+    // An AI Fix that resolved merge conflicts (coding/git-ops.ts `pushMergeResult`). Optional so a test's
+    // fake ctx may omit it (push.ts then imports the real one).
+    pushMerge?(args: PushMergeArgs): Promise<ApplyAndPushResult>;
   };
   review: ReviewSeam;
   queries: {
@@ -199,6 +202,7 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     },
     coding: {
       applyAndPush: (pushArgs) => applyAndPush(pushArgs),
+      pushMerge: (pushArgs) => pushMergeResult(pushArgs),
     },
     review: {
       prepareReview: async (a) => (await import('./prepare.js')).prepareReview(a),

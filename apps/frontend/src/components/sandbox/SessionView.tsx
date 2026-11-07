@@ -2,7 +2,6 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { useIsMutating } from '@tanstack/react-query';
 import {
   SANDBOX_MESSAGE_MAX,
-  aiProviderName,
   aiRunLabel,
   type AiProviderId,
   type AiRunKind,
@@ -25,20 +24,20 @@ import {
   shortBytes,
   turnOutcomeWords,
 } from '../../lib/sandboxSession.js';
-import { CHAT_AI_BUBBLE, CHAT_AI_LABEL, CHAT_AI_ROW, CHAT_YOU_BUBBLE, CHAT_YOU_LABEL, CHAT_YOU_ROW, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
+import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { dateTime } from '../../lib/ui.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { AiRunGate } from '../AiSetup.js';
-import { CheckIcon, ChevronIcon, CloseIcon, WarningIcon, WrenchIcon } from '../Icons.js';
+import { CheckIcon, CloseIcon, WarningIcon, WrenchIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { Button } from '../ui/Button.js';
 import { cx } from '../ui/cx.js';
 
 // THE WORKSPACE SESSION VIEW, shared by the build tab ("Implement story") and the AI Fix tab
 // (docs/SANDBOX.md § Sessions, § AI Fix sessions; docs/FRONTEND.md § The build tab, § The AI Fix tab).
-// While it boots: each boot step. Then two panes: the CONVERSATION (the reader on the right, the agent
-// on the left — the review chat's look, lib/reviewStyles.ts CHAT_* — tool calls as compact rows that open
-// to their output, the agent's words as they arrive) with the composer, Start build/fix and Stop under
+// While it boots: each boot step. Then two panes: the CONVERSATION (drawn like the agent's own terminal,
+// below: the reader after a prompt mark, the agent and its tool calls after a bullet, the agent's words
+// as they arrive) with the composer, Start build/fix and Stop under
 // it; and the RAIL: the caller's own panel first (Ticket / What to fix), then Repositories, Services,
 // Network (with the Allow buttons), Spend. Nothing here pushes, and every billed press sits inside the
 // ONE AiRunGate. The caller passes its actions as HOOKS (`SessionActions`), so each surface keeps its
@@ -184,12 +183,58 @@ function Notes({ notes, testPrefix }: { notes: string[]; testPrefix: string }): 
   );
 }
 
-// ── the conversation ───────────────────────────────────────────────────────────────────────────
+// ── the conversation: drawn like the agent's own terminal ───────────────────────────────────────
+//
+// Claude Code's and Codex's terminal look, in the app's own tokens (every colour scheme, measured):
+// a monospaced pane, a header box naming the agent, model and starting folder, the reader's words after
+// a prompt mark, the agent's words and each tool call after a bullet, a tool's output under an elbow
+// (its first lines; pressing the call's row shows the rest), and a spinner while a turn runs. The glyphs follow the
+// session's provider. Words, test ids and data-kinds are the same as the chat look's.
+
+interface TerminalGlyphs {
+  /** The header box's first line. */
+  title: string;
+  /** Before the header title. */
+  logo: string;
+  prompt: string;
+  bullet: string;
+  elbow: string;
+  /** What follows the tool's name on its row, as the agent's own terminal writes it. */
+  args: (summary: string) => string;
+}
+
+const GLYPHS: Record<'claude' | 'codex', TerminalGlyphs> = {
+  claude: {
+    title: 'Claude Code',
+    logo: '✻',
+    prompt: '>',
+    bullet: '⏺',
+    elbow: '⎿',
+    args: (summary) => (summary.trim() === '' ? '' : `(${summary})`),
+  },
+  codex: {
+    title: 'Codex',
+    logo: '>_',
+    prompt: '›',
+    bullet: '•',
+    elbow: '└',
+    args: (summary) => (summary.trim() === '' ? '' : ` ${summary}`),
+  },
+};
+
+const glyphsFor = (provider: AiProviderId | null | undefined): TerminalGlyphs => GLYPHS[provider === 'codex' ? 'codex' : 'claude'];
+
+/** A tool's output shows this many lines until the reader opens it. */
+const TOOL_PREVIEW_LINES = 3;
+
+/** Claude Code's spinner frames; Codex's is a pulse of its bullet. */
+const SPINNER_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
 
 function Conversation({ session, partials, c }: { session: StoryBuildSession; partials: ReadonlyMap<string, string>; c: Ctx }): JSX.Element {
   const scroller = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
-  const who = session.model != null ? aiRunLabel(session.provider, session.model) : aiProviderName(session.provider ?? c.provider ?? 'claude');
+  const provider = session.provider ?? c.provider ?? null;
+  const g = glyphsFor(provider);
   const live = [...partials.entries()].filter(([, t]) => t.trim() !== '');
   const running = sessionTurnRunning(session);
   // Follow the newest row while the reader is at the bottom; leave them where they are once they scroll up.
@@ -199,33 +244,34 @@ function Conversation({ session, partials, c }: { session: StoryBuildSession; pa
     if (el != null && pinned.current) el.scrollTop = el.scrollHeight;
   }, [size, running]);
   return (
-    <section aria-label="Conversation" className="rounded-ui bg-ui-surface">
+    <section aria-label="Conversation" className="rounded-ui bg-ui-surface font-mono text-body">
       <div
         ref={scroller}
         data-testid={`${c.testPrefix}-conversation`}
-        className="max-h-[60vh] min-h-[12rem] overflow-y-auto p-3"
+        data-terminal={provider === 'codex' ? 'codex' : 'claude'}
+        className="max-h-[60vh] min-h-[12rem] overflow-y-auto px-3 py-2.5"
         onScroll={(e) => {
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        {session.conversation.length === 0 && live.length === 0 && <p className="text-meta text-ui-mute">{c.words.empty}</p>}
-        <ol className="space-y-2.5">
+        <TerminalHeader session={session} g={g} />
+        {session.conversation.length === 0 && live.length === 0 && <p className="mt-3 text-ui-mute">{c.words.empty}</p>}
+        <ol className="mt-3 space-y-3">
           {session.conversation.map((item) => (
-            <ConversationRow key={item.id} item={item} who={who} provider={session.provider} c={c} />
+            <ConversationRow key={item.id} item={item} provider={session.provider} g={g} c={c} />
           ))}
           {live.map(([id, text]) => (
-            <li key={`live-${id}`} className={CHAT_AI_ROW}>
-              <div className={CHAT_AI_BUBBLE} data-chat-role="assistant" data-testid={`${c.testPrefix}-partial`}>
-                <div className={CHAT_AI_LABEL}>{who}</div>
-                <div className="whitespace-pre-wrap">{text}</div>
-              </div>
+            <li key={`live-${id}`} data-testid={`${c.testPrefix}-partial`} className="flex gap-2 text-ui-ink">
+              <Bullet g={g} />
+              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">{text}</div>
             </li>
           ))}
         </ol>
         {running && live.length === 0 && (
-          <p data-testid={`${c.testPrefix}-working`} className="mt-2 text-meta text-ai-signal">
-            {session.phase === 'building' ? 'Building and testing…' : 'Working…'}
+          <p data-testid={`${c.testPrefix}-working`} className="mt-3 flex gap-2 text-ai-signal">
+            <Spinner g={g} />
+            <span>{session.phase === 'building' ? 'Building and testing…' : 'Working…'}</span>
           </p>
         )}
       </div>
@@ -233,72 +279,135 @@ function Conversation({ session, partials, c }: { session: StoryBuildSession; pa
   );
 }
 
-function ConversationRow({ item, who, provider, c }: { item: SandboxConversationItem; who: string; provider: StoryBuildSession['provider']; c: Ctx }): JSX.Element {
+function TerminalHeader({ session, g }: { session: StoryBuildSession; g: TerminalGlyphs }): JSX.Element {
+  const dir = session.startDir ?? session.repos[0]?.path ?? null;
+  return (
+    <div className="inline-block max-w-full rounded-ui border border-ui-line px-3 py-1.5">
+      <div className="text-ui-ink">
+        <span aria-hidden className="text-ai-signal">
+          {g.logo}
+        </span>{' '}
+        <span className="font-semibold">{g.title}</span>
+      </div>
+      {session.model != null && (
+        <div className="break-all text-ui-mute">
+          model: <span className="text-ui-ink">{aiRunLabel(session.provider, session.model)}</span>
+        </div>
+      )}
+      {dir != null && (
+        <div className="break-all text-ui-mute">
+          directory: <span className="text-ui-ink">{dir}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Bullet({ g, className }: { g: TerminalGlyphs; className?: string }): JSX.Element {
+  return (
+    <span aria-hidden className={cx('decorative-mark w-[1.25ch] shrink-0 select-none text-center', className ?? 'text-ui-ink')}>
+      {g.bullet}
+    </span>
+  );
+}
+
+function Spinner({ g }: { g: TerminalGlyphs }): JSX.Element {
+  const [frame, setFrame] = useState(0);
+  const claude = g === GLYPHS.claude;
+  useEffect(() => {
+    if (!claude || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const t = window.setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 120);
+    return () => window.clearInterval(t);
+  }, [claude]);
+  return (
+    <span aria-hidden className={cx('w-[1.25ch] shrink-0 select-none text-center', !claude && 'motion-safe:animate-pulse')}>
+      {claude ? SPINNER_FRAMES[frame] : g.bullet}
+    </span>
+  );
+}
+
+function ConversationRow({ item, provider, g, c }: { item: SandboxConversationItem; provider: StoryBuildSession['provider']; g: TerminalGlyphs; c: Ctx }): JSX.Element {
   const itemId = `${c.testPrefix}-item`;
   switch (item.kind) {
     case 'reader':
       return (
-        <li className={CHAT_YOU_ROW} data-testid={itemId} data-kind="reader">
-          <div className={CHAT_YOU_BUBBLE} data-chat-role="user">
-            <div className={CHAT_YOU_LABEL}>{item.build ? c.words.readerBuildLabel : 'You'}</div>
-            <div className="whitespace-pre-wrap">{item.text}</div>
+        <li data-testid={itemId} data-kind="reader" className="flex gap-2 rounded-ui bg-ui-raise px-1.5 py-1 text-ui-ink">
+          <span aria-hidden className="w-[1.25ch] shrink-0 select-none text-center text-ui-mute">
+            {g.prompt}
+          </span>
+          <div className="min-w-0 flex-1">
+            {item.text !== '' && <div className="whitespace-pre-wrap break-words">{item.text}</div>}
+            {item.build ? <div className="text-ui-mute">{c.words.readerBuildLabel}</div> : <span className="sr-only">You</span>}
           </div>
         </li>
       );
     case 'agent':
       return (
-        <li className={CHAT_AI_ROW} data-testid={itemId} data-kind="agent">
-          <div className={CHAT_AI_BUBBLE} data-chat-role="assistant">
-            <div className={CHAT_AI_LABEL}>{who}</div>
+        <li data-testid={itemId} data-kind="agent" className="flex gap-2 text-ui-ink">
+          <Bullet g={g} />
+          <div className="min-w-0 flex-1">
             <Markdown>{item.text}</Markdown>
           </div>
         </li>
       );
     case 'tool':
-      return <ToolRow item={item} itemId={itemId} />;
+      return <ToolRow item={item} itemId={itemId} g={g} />;
     case 'turn':
       return <TurnDivider item={item} provider={provider} itemId={itemId} />;
     case 'notice':
       return (
-        <li data-testid={itemId} data-kind="notice" className="text-meta text-ui-mute">
-          {item.text}
+        <li data-testid={itemId} data-kind="notice" className="flex gap-2 text-ui-mute">
+          <Bullet g={g} className="text-ui-mute" />
+          <span className="min-w-0 flex-1 break-words">{item.text}</span>
         </li>
       );
     case 'error':
       return (
-        <li data-testid={itemId} data-kind="error" className="flex items-start gap-1.5 text-meta text-ui-danger">
-          <WarningIcon size={12} className="mt-0.5 shrink-0" />
-          <span>{item.text}</span>
+        <li data-testid={itemId} data-kind="error" className="flex gap-2 text-ui-danger">
+          <Bullet g={g} className="text-ui-danger" />
+          <span className="min-w-0 flex-1 break-words">{item.text}</span>
         </li>
       );
   }
 }
 
-function ToolRow({ item, itemId }: { item: Extract<SandboxConversationItem, { kind: 'tool' }>; itemId: string }): JSX.Element {
+function ToolRow({ item, itemId, g }: { item: Extract<SandboxConversationItem, { kind: 'tool' }>; itemId: string; g: TerminalGlyphs }): JSX.Element {
   const [open, setOpen] = useState(false);
   const outId = useId();
   const state = item.ok == null ? 'running' : item.ok ? 'ok' : 'failed';
+  const lines = item.output == null ? [] : item.output.replace(/\n+$/, '').split('\n');
+  const hidden = open ? 0 : Math.max(0, lines.length - TOOL_PREVIEW_LINES);
+  const shown = open ? lines : lines.slice(0, TOOL_PREVIEW_LINES);
   return (
-    <li data-testid={itemId} data-kind="tool" data-state={state} className="text-meta">
+    <li data-testid={itemId} data-kind="tool" data-state={state}>
       <button
         type="button"
-        className="hit flex w-full min-w-0 items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+        className="hit flex w-full min-w-0 gap-2 rounded-ui text-left hover:bg-ui-hover disabled:hover:bg-transparent"
         aria-expanded={open}
         aria-controls={outId}
         disabled={item.output == null}
         onClick={() => setOpen((v) => !v)}
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} />
-        <span className="shrink-0 font-mono font-medium text-ui-ink">{item.tool}</span>
-        <span className="min-w-0 flex-1 truncate font-mono">{item.summary}</span>
-        <span className={cx('shrink-0', state === 'failed' ? 'text-ui-danger' : 'text-ui-mute')}>
-          {state === 'running' ? 'Running' : state === 'failed' ? 'Failed' : <CheckIcon size={11} />}
+        <Bullet g={g} className={state === 'failed' ? 'text-ui-danger' : state === 'ok' ? 'text-ui-success' : 'text-ui-mute motion-safe:animate-pulse'} />
+        <span className="min-w-0 flex-1 break-all text-ui-ink">
+          <span className="font-semibold">{item.tool}</span>
+          {g.args(item.summary)}
         </span>
+        <span className="sr-only">{state === 'running' ? 'Running' : state === 'failed' ? 'Failed' : 'Done'}</span>
       </button>
-      {open && item.output != null && (
-        <pre id={outId} className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-ui bg-ui-raise p-2 font-mono text-meta text-ui-ink">
-          {item.output === '' ? '(no output)' : item.output}
-        </pre>
+      {item.output != null && (
+        <div id={outId} className="flex gap-2 text-ui-mute">
+          <span aria-hidden className="w-[1.25ch] shrink-0 select-none text-right">
+            {g.elbow}
+          </span>
+          <div className="min-w-0 flex-1">
+            {state === 'failed' && <div className="text-ui-danger">Failed</div>}
+            <pre className={cx('whitespace-pre-wrap break-words font-mono', open && 'max-h-64 overflow-auto')}>
+              {item.output === '' ? '(no output)' : shown.join('\n')}
+            </pre>
+            {hidden > 0 && <div>… +{hidden} line{hidden === 1 ? '' : 's'}</div>}
+          </div>
+        </div>
       )}
     </li>
   );
@@ -308,13 +417,13 @@ function TurnDivider({ item, provider, itemId }: { item: Extract<SandboxConversa
   const costText = useRunCostText();
   const cost = costText(item.costUsd, provider);
   return (
-    <li data-testid={itemId} data-kind="turn" className="flex items-center gap-2 text-meta text-ui-mute">
-      <span aria-hidden className="decorative-mark h-px flex-1 bg-ui-line" />
+    <li data-testid={itemId} data-kind="turn" className="flex items-center gap-2 text-ui-mute">
+      <span aria-hidden className="decorative-mark h-px flex-1 border-t border-dashed border-ui-line" />
       <span>
         {item.mode === 'build' ? 'Build turn' : 'Turn'} {item.turn}: {turnOutcomeWords(item.outcome)}
         {cost != null && ` · ${cost}`}
       </span>
-      <span aria-hidden className="decorative-mark h-px flex-1 bg-ui-line" />
+      <span aria-hidden className="decorative-mark h-px flex-1 border-t border-dashed border-ui-line" />
     </li>
   );
 }
@@ -369,20 +478,25 @@ function Composer({ session, c, extra }: { session: StoryBuildSession; c: Ctx; e
   }
   return (
     <div data-testid={`${c.testPrefix}-composer`} className="mt-3 space-y-2">
-      <textarea
-        aria-label={session.mode === 'build' ? 'Message the agent (it can change the code)' : 'Message the agent'}
-        className="w-full resize-y rounded-ui bg-ui-surface px-2.5 py-1.5 text-body leading-normal text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent"
-        rows={3}
-        placeholder={session.mode === 'build' ? c.words.buildPlaceholder : c.words.chatPlaceholder}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            doSend();
-          }
-        }}
-      />
+      <div className="flex gap-2 rounded-ui bg-ui-surface px-2.5 py-1.5 font-mono text-body ring-1 ring-inset ring-ui-line focus-within:ring-2 focus-within:ring-ui-accent">
+        <span aria-hidden className="w-[1.25ch] shrink-0 select-none text-center leading-normal text-ui-mute">
+          {glyphsFor(provider).prompt}
+        </span>
+        <textarea
+          aria-label={session.mode === 'build' ? 'Message the agent (it can change the code)' : 'Message the agent'}
+          className="min-w-0 flex-1 resize-y bg-transparent leading-normal text-ui-ink placeholder:text-ui-faint focus:outline-none"
+          rows={3}
+          placeholder={session.mode === 'build' ? c.words.buildPlaceholder : c.words.chatPlaceholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              doSend();
+            }
+          }}
+        />
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {/* A message after Start build / Start fix is a BUILD turn: the gate reads that kind's answer. */}
         {session.mode === 'build' ? (

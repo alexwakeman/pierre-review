@@ -8,6 +8,8 @@ import type { AiFixPickerItem, AiFixPickerPreview, AiFixPickerSection } from '@p
 // priority order), the first ticked one always fits.
 
 export const PICKER_SECTION_ORDER: readonly AiFixPickerSection[] = [
+  // "Resolve merge conflicts with <base>": first, as the agent does it first.
+  'conflicts',
   'findings',
   'earlier_findings',
   'judged_threads',
@@ -19,6 +21,7 @@ export const PICKER_SECTION_ORDER: readonly AiFixPickerSection[] = [
 ];
 
 export const PICKER_SECTION_LABEL: Record<AiFixPickerSection, string> = {
+  conflicts: 'Merge conflicts',
   findings: 'Claude’s findings',
   earlier_findings: 'Earlier findings still open',
   judged_threads: 'Threads Claude says need a fix',

@@ -3754,7 +3754,6 @@ export type AiAgentKind =
   | 'review_chat'
   | 'fix'
   | 'plan'
-  | 'resolve'
   | 'ticket_review'
   | 'pr_card'
   | 'ci_review'
@@ -3782,7 +3781,6 @@ export const AI_AGENT_KINDS: readonly AiAgentKind[] = [
   'review_chat',
   'fix',
   'plan',
-  'resolve',
   'ticket_review',
   'pr_card',
   'ci_review',
@@ -4644,7 +4642,8 @@ export interface StoredAutoPostSettings {
 
 // ---- Auto AI Fix contents + push (workspaces.auto_fix_settings, migration 0091 / pg 0078) ----
 // WHICH sections of a review-seeded fix an AUTO fix always includes — the same sections as the
-// manual fix picker (`AiFixPickerSection`, minus 'story': an auto fix never carried story items).
+// manual fix picker (`AiFixPickerSection`, minus 'story' and 'conflicts': an auto fix never carries
+// story items, and never resolves merge conflicts — backend `AUTO_FIX_RESOLVES_CONFLICTS`).
 export interface AutoFixInclude {
   findings: boolean;          // this run's Claude findings (never ignored ones)
   earlierFindings: boolean;   // earlier findings not yet addressed
@@ -9289,9 +9288,11 @@ export type AiFixReviewItemKind =
   | 'story' // an unmet / partly met acceptance criterion, or a missing piece, of a user story (S1-AC2, S1-M1…)
   | 'ci_failure' // a CI failure the review judged fixable in this PR (C1…)
   | 'sonar_issue' // a SonarCloud issue or hotspot at the PR's current head (Q1…)
-  | 'earlier_finding'; // an earlier review's finding still not (fully) addressed (P1…)
+  | 'earlier_finding' // an earlier review's finding still not (fully) addressed (P1…)
+  | 'merge_conflicts'; // merge the PR's base into it and resolve the conflicts (ref MERGE)
 
 export const AI_FIX_REVIEW_ITEM_LABELS: Record<AiFixReviewItemKind, string> = {
+  merge_conflicts: 'Merge conflicts',
   finding: 'Finding',
   thread: 'Reviewer thread',
   story: 'User story',
@@ -9533,6 +9534,11 @@ export interface AiFix {
   leftOut?: AiFixLeftOutRepo[];
   // An unattended run (an auto fix, dependency automation's fix). Optional: older rows omit it.
   unattended?: boolean;
+  // THE MERGE (the run had the "Resolve merge conflicts" item; docs/CLAUDE-REVIEW.md § AI Fix): the base
+  // commit merged, the files git found in conflict, Limn's check of the agent's merge commit, and the
+  // resolution shown apart from the fix. When present, `patch` is the fix ON TOP OF the merge only.
+  // null/absent ⇒ the run did not resolve conflicts.
+  merge?: AiFixMerge | null;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -9543,6 +9549,28 @@ export interface AiFix {
   pushedAt: string | null;
   createdAt: string;
   finishedAt: string | null;
+}
+
+// The merge an AI Fix made (AiFix.merge).
+//   pending  the agent has not finished a build turn yet
+//   valid    a merge commit with parents (the PR head, `baseSha`), no conflict marker left in a file that
+//            was in conflict, every other commit on top of it. Push sends it (and the fix on top).
+//   invalid  a merge was made but it fails a check (`reason`). NOTHING is pushed.
+//   missing  the agent made no merge commit. NOTHING is pushed (the item is not addressed).
+export type AiFixMergeStatus = 'pending' | 'valid' | 'invalid' | 'missing';
+export interface AiFixMerge {
+  baseRef: string;
+  // The base branch's tip Limn picked at the start (the merge's second parent).
+  baseSha: string;
+  // The files git found in conflict when Limn started the merge.
+  conflictedFiles: string[];
+  status: AiFixMergeStatus;
+  // One plain sentence when status is 'invalid' or 'missing'.
+  reason: string | null;
+  // The resolution: the agent's merge commit against git's automatic merge WITH the conflict markers
+  // (so each hunk shows how a conflict was settled). Capped; null when there is no merge commit.
+  resolutionDiff: string | null;
+  resolutionFiles: string[];
 }
 
 // A lighter shape for the run history list — enough to show every fix Pierre made
@@ -9635,6 +9663,9 @@ export interface GenerateFixBody {
 //   sonar             SonarCloud issues + hotspots at the current head (the stored snapshot)
 //   style_bots        threads opened by style / quality bots (role quality_check) — default OFF
 //   story             story items, when the run has any
+//   conflicts         'conflict:merge' — "Resolve merge conflicts with <base>": the PR conflicts with its base
+//                     (synced merge state) and the reader can push. Default ON. Listed first. The agent
+//                     merges the base and resolves FIRST, then fixes the rest on top. Never in an auto fix.
 export type AiFixPickerSection =
   | 'findings'
   | 'earlier_findings'
@@ -9643,7 +9674,8 @@ export type AiFixPickerSection =
   | 'ci_failures'
   | 'sonar'
   | 'style_bots'
-  | 'story';
+  | 'story'
+  | 'conflicts';
 export interface AiFixPickerItem {
   // Stable across reads: 'finding:<findingId>' | 'thread:<threadId>' | 'ci:<ciReviewItemId>' |
   // 'story:<ticketIndex>:<ref>'.

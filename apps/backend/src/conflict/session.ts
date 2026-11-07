@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  ConflictAiResolution,
   ConflictCommitPhase,
   ConflictCommitResult,
   ConflictCommitState,
@@ -49,17 +48,6 @@ export type SuggestionId = string;
 /** The manual-edit store's handle. Same shape, same lifetime, DIFFERENT STORE — see `edits`. */
 export type EditId = string;
 
-/**
- * "Resolve with Claude" (coding/ai-resolve/, CORE, LOCAL ONLY) — Claude's answer for THIS
- * session. ⚠ ON THE SESSION, NOT IN A TABLE, for the header's three reasons: the answer is a set
- * of decisions about one pinned model, its edited lines are source code, and it is worthless the
- * instant the pins move. `abort` is set only while the run is live.
- */
-export interface ConflictAiState {
-  view: ConflictAiResolution;
-  abort: AbortController | null;
-}
-
 export interface ConflictSessionRecord {
   sessionId: string;
   accountId: number;
@@ -101,13 +89,6 @@ export interface ConflictSessionRecord {
   /** Cancels the running commit at its four checkpoints. Null once the push has happened:
    *  once GitHub holds the ref, cancelling is not a thing that can happen. */
   commitAbort: AbortController | null;
-  /** Claude's answer for this session, or null — see `ConflictAiState`. */
-  ai: ConflictAiState | null;
-  /** A "Resolve with Claude" run owns this session. ⚠ A THIRD JOB FLAG, deliberately NOT counted by
-   *  `jobCounts`: the run is minutes of model time, not a clone, and its own one-per-account cap
-   *  lives in coding/ai-resolve/run.ts. What it DOES share with the other two: the record is never
-   *  reaped, evicted or dropped under it, and no commit starts while it is deciding. */
-  aiRunning: boolean;
   subscribers: Set<(e: ConflictSessionEvent) => void>;
 }
 
@@ -127,7 +108,7 @@ function sweep(now: number): void {
     if (rec.expiresAt > now) continue;
     // A job still running owns its record — reaping it would leave the job writing into a
     // record nobody can read, and the SSE stream on the other end waiting forever.
-    if (rec.openRunning || rec.commitRunning || rec.aiRunning) continue;
+    if (rec.openRunning || rec.commitRunning) continue;
     endStream(rec);
     sessions.delete(key);
   }
@@ -231,7 +212,7 @@ function evictForNewSession(accountId: number): void {
   const evictOldest = (of: readonly ConflictSessionRecord[]): boolean => {
     let oldest: ConflictSessionRecord | null = null;
     for (const rec of of) {
-      if (rec.openRunning || rec.commitRunning || rec.aiRunning) continue;
+      if (rec.openRunning || rec.commitRunning) continue;
       if (oldest == null) {
         oldest = rec;
         continue;
@@ -355,10 +336,10 @@ export function claimSession(
   const key = keyOf(accountId, prId);
   const live = sessions.get(key) ?? null;
 
-  if (live && (live.openRunning || live.commitRunning || live.aiRunning)) {
+  if (live && (live.openRunning || live.commitRunning)) {
     // Re-attaching to a build already in flight is the right answer for a second tab; a
     // restart on top of one is not, and neither is a second commit.
-    if (!opts.restart && (live.openRunning || live.aiRunning)) {
+    if (!opts.restart && live.openRunning) {
       touch(live, now);
       return { kind: 'reused', session: live };
     }
@@ -395,8 +376,6 @@ export function claimSession(
     openRunning: true,
     commitRunning: false,
     commitAbort: null,
-    ai: null,
-    aiRunning: false,
     subscribers: new Set(),
   };
   sessions.set(key, rec);
@@ -446,7 +425,7 @@ export function dropSession(
   const key = keyOf(accountId, prId);
   const rec = sessions.get(key);
   if (!rec || rec.sessionId !== sessionId) return false;
-  if (rec.openRunning || rec.commitRunning || rec.aiRunning) return false;
+  if (rec.openRunning || rec.commitRunning) return false;
   endStream(rec);
   sessions.delete(key);
   return true;
@@ -462,9 +441,7 @@ export function claimCommitSlot(
 ):
   | { ok: true; signal: AbortSignal }
   | { ok: false; reason: 'pr' | 'account' | 'capacity' | 'shutdown' } {
-  // ⚠ `aiRunning` too: a commit while Claude is still deciding would land a resolution the run is
-  // about to change under the reader.
-  if (rec.openRunning || rec.commitRunning || rec.aiRunning) return { ok: false, reason: 'pr' };
+  if (rec.openRunning || rec.commitRunning) return { ok: false, reason: 'pr' };
   // `rec` holds no job (the line above proved it), so it contributes nothing to either count
   // and needs no exclusion.
   const refusal = capacityRefusal(rec.accountId);

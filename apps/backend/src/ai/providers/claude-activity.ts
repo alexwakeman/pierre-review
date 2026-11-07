@@ -175,8 +175,7 @@ function labelFixToolUse(name: string, input: Record<string, unknown>): string {
       const p = str(input.pattern);
       return p ? `Grep "${clip(p, ARG_CAP)}"` : 'Grep …';
     }
-    // Unreachable as things stand — no host-side run allows Bash (Resolve with Claude denies it
-    // outright; AI Fix's shell is in the sandbox, with its own stream), so no such block arrives and the panel simply shows fewer lines. Kept because
+    // Unreachable as things stand — no host-side run allows Bash (AI Fix's shell is in the sandbox, with its own stream), so no such block arrives and the panel simply shows fewer lines. Kept because
     // this function's contract is "label whatever the SDK hands me", and the default branch
     // below would render this one worse.
     case 'Bash': {

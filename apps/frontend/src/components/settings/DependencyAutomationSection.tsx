@@ -168,7 +168,7 @@ export function DependencyAutomationSection(): JSX.Element {
           <p className="mt-2">
             For a conflict, Limn first asks the bot to rebase: a comment for Dependabot, the rebase checkbox for Renovate.
             {aiEnabled
-              ? ' If the branch still conflicts 30 minutes later, or the bot can’t be asked, AI resolves the conflicts and pushes a merge commit to the branch. It pushes only when it decided every conflict and was sure of each, and stops while you are over your AI spend limit. CI must pass again before Limn approves or merges.'
+              ? ' If the branch still conflicts 30 minutes later, or the bot can’t be asked, AI resolves the conflicts and pushes a merge commit to the branch. It pushes only when Limn’s check of the merge passes, and stops while you are over your AI spend limit. CI must pass again before Limn approves or merges.'
               : ' AI conflict resolution is off on this machine.'}
           </p>
           {aiEnabled && (
@@ -176,7 +176,7 @@ export function DependencyAutomationSection(): JSX.Element {
               With “Fix them with AI”, when CI fails on a trusted bot’s pull request, AI fixes the branch and pushes the
               change: for example a companion package or lock file that was not updated. It runs once per commit, at
               most twice a day per pull request, and never while you are over your AI spend limit. CI must pass again
-              before Limn approves or merges. It also handles conflicts the same way as “Resolve their conflicts”.
+              before Limn approves or merges. It also handles conflicts the same way as “Resolve their conflicts”. When a pull request both conflicts and fails CI, one AI run merges first, then fixes CI on top.
             </p>
           )}
           <p className="mt-2">

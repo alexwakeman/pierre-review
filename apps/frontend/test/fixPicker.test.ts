@@ -5,7 +5,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend fixPicker
 import { describe, expect, it } from 'vitest';
 import type { AiFixPickerItem, AiFixPickerPreview } from '@pierre-review/shared';
-import { budgetCutKeys, onlySectionOverrides, pickedKeys } from '../src/components/AiFix/fixPickerModel.js';
+import { budgetCutKeys, onlySectionOverrides, PICKER_SECTION_ORDER, pickerSectionLabel, pickedKeys } from '../src/components/AiFix/fixPickerModel.js';
 
 const item = (key: string, chars: number, defaultIncluded = true): AiFixPickerItem => ({
   key,
@@ -55,5 +55,25 @@ describe('"Fix with AI" from the CI check — only the CI failures ticked', () =
   it('the CI-only preview (no review) sends its CI items', () => {
     const ciOnly: AiFixPickerPreview = { ...withCi, sourceReviewId: null, items: [withCi.items[0]!] };
     expect(pickedKeys(ciOnly, onlySectionOverrides(ciOnly, 'ci_failures'))).toEqual(['ci:4']);
+  });
+});
+
+describe('the merge item', () => {
+  it('is its own section, drawn first (the agent merges first)', () => {
+    expect(PICKER_SECTION_ORDER[0]).toBe('conflicts');
+    expect(pickerSectionLabel('conflicts')).toBe('Merge conflicts');
+  });
+  it('is sent when ticked by default, like any other item', () => {
+    const preview: AiFixPickerPreview = {
+      sourceReviewId: null,
+      items: [
+        { key: 'conflict:merge', section: 'conflicts', label: 'Resolve merge conflicts with main', detail: null, path: null, line: null, severity: null, defaultIncluded: true, chars: 900 },
+        { key: 'ci:1', section: 'ci_failures', label: 'x', detail: null, path: null, line: null, severity: null, defaultIncluded: true, chars: 100 },
+      ],
+      budgetChars: 60_000,
+      cutByBudget: [],
+    };
+    expect(pickedKeys(preview, {})).toEqual(['conflict:merge', 'ci:1']);
+    expect(pickedKeys(preview, { 'conflict:merge': false })).toEqual(['ci:1']);
   });
 });

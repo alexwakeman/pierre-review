@@ -865,12 +865,6 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET  …/conflicts/stream   an SSE subscribe onto an already-started job — a read.
   //   DELETE …/conflicts        a Map.delete. `read` — DECIDED, not inherited from the POST
   //                             line, which it would otherwise match.
-  // "Resolve with Claude" (coding/ai-resolve/, LOCAL ONLY): the POST starts an agent run — model
-  // money, and possibly a clone — so `ai` + `ai_hourly`. Its GET is a Map lookup polled while the
-  // run works and its DELETE a cancel: `read`. Exact paths, ABOVE the resolver's own lines.
-  if (/^\/api\/prs\/\d+\/conflicts\/ai-resolve$/.test(path)) {
-    return method === 'POST' ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
-  }
   if (method === 'POST' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.sync];
   if (method === 'DELETE' && /^\/api\/prs\/\d+\/conflicts$/.test(path)) return [TIERS.read];
   if (mutating && /^\/api\/prs\/\d+\/conflicts\/commit$/.test(path)) return [TIERS.githubWrite];

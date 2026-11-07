@@ -90,7 +90,6 @@ const KIND_WORDS: Record<AgentKind, string> = {
   review_chat: 'the review chat',
   fix: 'AI Fix',
   plan: 'AI Fix plans',
-  resolve: 'conflict resolution',
   ticket_review: 'ticket reviews',
   pr_card: 'ticket reviews',
   ci_review: 'CI reviews',

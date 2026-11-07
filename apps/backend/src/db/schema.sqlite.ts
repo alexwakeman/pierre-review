@@ -2167,6 +2167,11 @@ export const aiFixes = sqliteTable(
     unattended: integer('unattended', { mode: 'boolean' }),
     // The workspace whose Settings → Sandbox booted it (Resume reuses it). No FK.
     workspaceId: integer('workspace_id'),
+    // 0178 — the "Resolve merge conflicts" item (docs/SANDBOX.md § AI Fix sessions, "The merge"). JSON
+    // FixMergeState (sandbox/session/fix-merge.ts), and the agent's commits as a base64 git bundle.
+    // NULL = the run had no merge.
+    mergeJson: text('merge_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    mergeBundle: text('merge_bundle'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

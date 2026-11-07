@@ -11,13 +11,11 @@
 //   • IS THE AUTHOR TRUSTED — `isTrustedDependencyBot`: the STORED bot row (automated, role
 //     `dependency`, and the reader's trust mark). Never a login guess over the stored judgement.
 //   • HOW TO ASK IT TO REBASE — `rebaseRequestFor`, by the STORED vendor kind.
-//   • WHAT TO DO ABOUT A CONFLICT — `conflictStep`: ask the bot once per head, wait, then AI.
-//   • CAN AN AI ANSWER BE COMMITTED — `aiResolutionCommit`: every decidable region decided, every
-//     conflicted file supported, nothing Claude was unsure of.
+//   • WHAT TO DO ABOUT A CONFLICT — `conflictStep`: ask the bot once per head, wait, then AI (an
+//     unattended AI Fix session with the merge item; `dependencyConflictInstruction`, or — the PR is red
+//     too and "Fix them with AI" is on — the merge item AND the CI review's fixable items in the SAME
+//     session, `dependencyMergeAndCiPreamble`).
 import type {
-  ConflictAiChoice,
-  ConflictFileResolution,
-  ConflictRegionKind,
   DependencyAutomationPolicy,
   DependencyEcosystem,
   DependencyUpdateLevel,
@@ -280,58 +278,6 @@ export function conflictStep(h: ConflictHistory, botCanBeAsked: boolean, now: nu
   return 'ai';
 }
 
-// ── Committing an AI answer unattended ───────────────────────────────────────────────────────
-
-export interface CommitFile {
-  index: number;
-  path: string;
-  unsupported: unknown | null;
-  regions: ReadonlyArray<{ id: number; kind: ConflictRegionKind }>;
-}
-
-export type AiCommitRefusal = 'unsupported_files' | 'undecided' | 'unsure' | 'nothing';
-
-export const AI_COMMIT_REFUSAL_TEXT: Record<AiCommitRefusal, string> = {
-  unsupported_files: 'some conflicting files can’t be resolved here',
-  undecided: 'the AI left some conflicts undecided',
-  unsure: 'the AI wasn’t sure about some conflicts',
-  nothing: 'there was nothing to resolve',
-};
-
-/**
- * The commit body's `files` for an unattended AI answer, or why it may not be committed. Stricter
- * than the reader's own commit on purpose — nobody is looking: EVERY conflicted file must be
- * supported (a partial commit would leave the PR conflicted with a push on the bot's branch), EVERY
- * decidable region must carry the AI's choice, and none of them may be `low` confidence. A
- * `'suggestion'` is never the AI's (validate.ts), so a choice is `{decision}` or `{decision, editId}`.
- */
-export function aiResolutionCommit(
-  files: readonly CommitFile[],
-  choices: readonly ConflictAiChoice[],
-): { ok: true; files: ConflictFileResolution[] } | { ok: false; refusal: AiCommitRefusal } {
-  if (files.length === 0) return { ok: false, refusal: 'nothing' };
-  if (files.some((f) => f.unsupported != null)) return { ok: false, refusal: 'unsupported_files' };
-  const byKey = new Map(choices.map((c) => [`${c.fileIndex}:${c.regionId}`, c]));
-  const out: ConflictFileResolution[] = [];
-  for (const f of files) {
-    const decisions: ConflictFileResolution['decisions'] = [];
-    for (const r of f.regions) {
-      if (r.kind === 'unchanged') continue;
-      const c = byKey.get(`${f.index}:${r.id}`);
-      if (!c || c.decision === 'suggestion') return { ok: false, refusal: 'undecided' };
-      if (c.confidence === 'low') return { ok: false, refusal: 'unsure' };
-      if (c.decision === 'edited') {
-        if (c.editId == null) return { ok: false, refusal: 'undecided' };
-        decisions.push({ id: r.id, decision: 'edited', editId: c.editId });
-      } else {
-        decisions.push({ id: r.id, decision: c.decision });
-      }
-    }
-    out.push({ index: f.index, decisions });
-  }
-  return { ok: true, files: out };
-}
-
 // ── Fixing a dependency PR with AI ───────────────────────────────────────────────────────────
 
 /** The window the AI-run cap counts over. */
@@ -417,4 +363,34 @@ export function dependencyFixInstruction(a: {
     out.push('', `Also failing, with no log Limn could read: ${a.otherFailing.map((n) => `"${n}"`).join(', ')}.`);
   }
   return out.join('\n');
+}
+
+/**
+ * The plain instruction of dependency automation's CONFLICT run: an unattended AI Fix session with the
+ * merge item (`resolveConflicts`), which merges the base and resolves first (FIX.md says how). Nothing
+ * else changes: the bot's update stays as it is.
+ */
+export function dependencyConflictInstruction(a: { title: string; bot: string; baseRef: string }): string {
+  return [
+    `This pull request is a dependency update opened by ${a.bot}: "${a.title.replace(/\s+/g, ' ').slice(0, 200)}".`,
+    `It conflicts with ${a.baseRef}. Resolve the merge conflicts (MERGE) and change nothing else.`,
+    'Keep the update: where a lock file or a manifest conflicts, keep the newer version of each dependency from both sides, then make the lock file match the manifest with the repository\'s own package manager.',
+    'Do not downgrade or revert the updated dependency, and do not turn off or skip tests or checks.',
+  ].join('\n');
+}
+
+/**
+ * The opening lines of dependency automation's COMBINED run: the PR conflicts AND its CI fails, so ONE
+ * unattended AI Fix session gets the merge item and the CI review's fixable items at the current head (the
+ * CI-only seed; the seed's own lines say "merge first, then the other items on top", or "merge only" when
+ * the CI review found nothing fixable in the PR). Limn's own words only: it sits OUTSIDE the seed's fences,
+ * so it carries no PR text (the title is in FIX.md's heading already).
+ */
+export function dependencyMergeAndCiPreamble(a: { bot: string; baseRef: string }): string {
+  return [
+    `This pull request is a dependency update opened by ${a.bot}. It conflicts with ${a.baseRef}, and its CI fails.`,
+    'Keep the update: where a lock file or a manifest conflicts, keep the newer version of each dependency from both sides, then make the lock file match the manifest with the repository\'s own package manager.',
+    'Do not downgrade or revert the updated dependency, and do not turn off or skip tests or checks.',
+    'A CI failure the merge already fixes needs no other change: say so for that item.',
+  ].join('\n');
 }

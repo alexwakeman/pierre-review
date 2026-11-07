@@ -10,7 +10,8 @@ import type {
   ClaudeReview,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
-import { getFixPrContext } from './pr-context.js';
+import { getFixMergeOffer, getFixPrContext } from './pr-context.js';
+import { MERGE_ITEM_REF } from '../../sandbox/session/fix-merge.js';
 import { getReviewView } from '../../review/claude-review/persist.js';
 import { currentThreadAssessmentsForPrs } from '../../review/claude-review/thread-judgements.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
@@ -103,7 +104,7 @@ async function loadSeedInputs(
   prId: number,
   withTicketItems: boolean,
 ) {
-  const [ticketItems, ciItems, threads, sonarIssues] = await Promise.all([
+  const [ticketItems, ciItems, threads, sonarIssues, merge] = await Promise.all([
     withTicketItems
       ? getOwnedTicketItemsForPr(ctx, accountId, prId).catch((err: unknown): SeedTicketItem[] => {
           ctx.log.warn({ err }, 'ai-fix: loading ticket items failed');
@@ -125,8 +126,19 @@ async function loadSeedInputs(
       ctx.log.warn({ err }, 'ai-fix: loading SonarCloud issues failed');
       return [];
     }),
+    // The MERGE item, when the PR conflicts with its base (manual and auto alike: the selection decides,
+    // and an auto fix's sections never pick it — review-seed.ts `AUTO_FIX_RESOLVES_CONFLICTS`).
+    loadMergeOffer(ctx, accountId, prId),
   ]);
-  return { ticketItems, ciItems, threads, sonarIssues };
+  return { ticketItems, ciItems, threads, sonarIssues, merge };
+}
+
+/** The merge item's gate (pr-context.ts `getFixMergeOffer`). Fails soft: no item. */
+function loadMergeOffer(ctx: AgentContext, accountId: number, prId: number): Promise<{ baseRef: string } | null> {
+  return getFixMergeOffer(ctx, accountId, prId).catch((err: unknown) => {
+    ctx.log.warn({ err }, 'ai-fix: reading the merge state failed');
+    return null;
+  });
 }
 
 /**
@@ -172,8 +184,11 @@ export async function loadCiOnlySeed(
   input: { accountId: number; prId: number; selection?: SeedSelection },
 ): Promise<ReviewSeed> {
   try {
-    const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId);
-    return buildReviewSeed(null, { nonce: pickReviewNonce, ciItems, selection: input.selection });
+    const [ciItems, merge] = await Promise.all([
+      getFixableCiItemsForPr(ctx, input.accountId, input.prId),
+      loadMergeOffer(ctx, input.accountId, input.prId),
+    ]);
+    return buildReviewSeed(null, { nonce: pickReviewNonce, ciItems, merge, selection: input.selection });
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix: loading the CI-only seed failed');
     return { items: [], sentRefs: [], text: '' };
@@ -191,8 +206,11 @@ export async function loadFixPreview(
 ): Promise<AiFixPickerPreview | null> {
   try {
     if (input.reviewId == null) {
-      const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId);
-      return buildPickerPreview(null, { ciItems });
+      const [ciItems, merge] = await Promise.all([
+        getFixableCiItemsForPr(ctx, input.accountId, input.prId),
+        loadMergeOffer(ctx, input.accountId, input.prId),
+      ]);
+      return buildPickerPreview(null, { ciItems, merge });
     }
     const review = await loadSourceReview(ctx, input.accountId, input.prId, input.reviewId);
     if (!review) return null;
@@ -273,6 +291,15 @@ export interface StartFixInput {
   provider?: AgentProviderId;
   // REMOVED ("Run tests": tests now run inside the sandbox). Accepted from an older caller and ignored.
   checks?: string[];
+  // seed === 'plain' (dependency automation's conflict path): ALSO merge the PR's base and resolve the
+  // conflicts first — the MERGE item (sandbox/session/fix-merge.ts). A review seed carries it as a picker
+  // item instead ('conflict:merge'). On THE CI-ONLY SEED (dependency automation's COMBINED run: the PR
+  // conflicts and its CI fails) it is a requirement: the seed must hold the MERGE item (`getFixMergeOffer`
+  // agrees), or the start is `nothing_to_fix`.
+  resolveConflicts?: boolean;
+  // THE CI-ONLY SEED only (dependency automation's combined run): Limn's OWN lines, set above the seed's
+  // items (`dependencyMergeAndCiPreamble`). Never PR text: it sits outside every fence.
+  preamble?: string;
 }
 
 export function startFix(ctx: AgentContext, input: StartFixInput): Promise<StartFixResult> {
@@ -303,7 +330,8 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
 
   // THE ONE BUDGET GATE, for every AUTOMATIC run: the callers ask first; asked again here so no future
   // caller can start an unattended fix past it. Before the claim, so nothing needs releasing.
-  if (unattended && !(await automaticRunAllowed(ctx, accountId, input.seed === 'plain' ? 'dependency CI fix' : 'auto fix'))) return { status: 'over_budget' };
+  const dependencyRun = input.seed === 'plain' || input.preamble != null;
+  if (unattended && !(await automaticRunAllowed(ctx, accountId, dependencyRun ? 'dependency CI fix' : 'auto fix'))) return { status: 'over_budget' };
 
   // ⚠ THE CLAIM, in the same tick as its check and BEFORE any await. EVERY bail path below releases it
   // (and the reserved slot), or this PR's fixer wedges for the process's lifetime.
@@ -328,9 +356,13 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     if (input.seed === 'review' && input.sourceReviewId == null) {
       const ciSeed = await loadCiOnlySeed(ctx, { accountId, prId, selection: input.selection });
       if (ciSeed.sentRefs.length === 0) return bail({ status: 'nothing_to_fix' });
+      // The combined run asked for the merge: no MERGE item (the PR no longer conflicts, or it joined a merge
+      // queue) ⇒ nothing started; the caller's next tick decides on fresh facts.
+      if (input.resolveConflicts === true && !ciSeed.sentRefs.includes(MERGE_ITEM_REF)) return bail({ status: 'nothing_to_fix' });
       reviewItems = ciSeed.items;
       sentRefs = ciSeed.sentRefs;
-      task = { kind: 'review', text: ciSeed.text };
+      const preamble = (input.preamble ?? '').trim();
+      task = { kind: 'review', text: preamble ? `${preamble}\n\n${ciSeed.text}` : ciSeed.text };
     } else if (input.seed === 'review') {
       const loaded = await loadReviewSeed(ctx, {
         accountId,
@@ -346,7 +378,13 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
       task = { kind: 'review', text: loaded.seed.text };
     } else {
       task = { kind: 'plain', text: instruction };
+      if (input.resolveConflicts === true) {
+        reviewItems = [{ ref: MERGE_ITEM_REF, kind: 'merge_conflicts', title: 'Resolve the merge conflicts', path: null, line: null, findingId: null, threadId: null, ticketIndex: null, included: true }];
+        sentRefs = [MERGE_ITEM_REF];
+      }
     }
+    // THE MERGE goes into the session only when it was SHOWN to the agent (picked, or asked for).
+    const wantsMerge = (reviewItems ?? []).some((i) => i.kind === 'merge_conflicts' && i.included);
 
     // THE SANDBOX: a runtime, a free session, and (a fix builds at once) the ONE build slot — reserved in
     // the tick of the check and held through the boot (its first turn starts the moment the agent is ready).
@@ -406,6 +444,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
         baseRef: head.baseRef || pr.baseRefName || pr.defaultBranch || 'main',
         headSha: head.headSha,
       },
+      merge: wantsMerge ? { baseRef: head.baseRef || pr.baseRefName || pr.defaultBranch || 'main' } : null,
       choice,
       planFirst: mode === 'plan',
       unattended,

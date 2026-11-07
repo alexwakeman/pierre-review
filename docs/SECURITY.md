@@ -115,13 +115,11 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   shell that is RCE on the developer's machine via a stranger's PR. The old
   `Bash(rm *)`-style blocklist was never a boundary. Both review prompts + the AI-Fix prompt
   gained explicit **untrusted-input / prompt-injection** instructions.
-- **`coding/agent.ts`** (`runAgentInWorktree`): the host-side worktree run, now used ONLY by Resolve with
-  Claude, which is READ-ONLY (`READ_TOOLS` = Read/Glob/Grep + `submit_resolution`; `DENIED_TOOLS` denies
-  Bash and every write tool outright; pinned by `coding/tool-surface.test.ts` with a mutation test).
-  The shell-less fixer that used to run here (`FIX_TOOLS`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']`)
-  was REMOVED on 2026-11-07: AI Fix now runs in a workspace session (below), with a shell, inside the
-  sandbox. "The host owns the commit and the push" is unchanged: the patch leaves the sandbox, the host
-  applies and pushes it.
+- **`coding/agent.ts`** (`runAgentInWorktree`, the host-side worktree run) is REMOVED (2026-11-07) with its
+  last caller, "Resolve with Claude"; the shell-less fixer that ran there went the same day. AI Fix, its
+  merge-conflict item included, runs in a workspace session (below), with a shell, inside the sandbox.
+  "The host owns the commit and the push" is unchanged: the patch (or, for a merge, the bundle of the
+  agent's commits) leaves the sandbox, and the host checks it, applies or rebuilds it, and pushes it.
 
 ### Sandboxed checks — REMOVED 2026-11-07
 
@@ -139,7 +137,16 @@ history only. The two helpers the container runtimes shared (`findOnPath`, the c
 A session runs a full Claude Code or Codex agent **with a shell** from attacker-reachable text (the
 ticket, its comments, other people's PRs, the repositories). It is the ONE place an agent has a shell, and
 only inside a sandbox `sandbox/runtime` started: Implement on a story, and every AI Fix run. Every review,
-every chat and Resolve with Claude keep the no-shell rule above.
+and every chat keep the no-shell rule above.
+
+⚠ **A MERGE FROM THE SANDBOX IS CHECKED, THEN REBUILT** (docs/SANDBOX.md § AI Fix sessions, "The merge"). The
+agent's commits leave as a git bundle — untrusted bytes. The host reads it only in Limn's clone cache with
+hooks, fsmonitor, the reader's config, replace objects and lazy fetch OFF, fetches it with every object
+fsck'd under a namespaced ref (`refs/pierre/ai-fix/<id>/merge/result`), and accepts exactly one shape: ONE
+first-parent line from the PR head whose first commit is a merge with parents (PR head, the base tip Limn
+pinned), nothing else, and no conflict marker in a file that was in conflict. Push never sends the agent's
+commit objects: it rebuilds the merge commit and one fix commit from the CHECKED trees under the reader's
+name, onto the PR's own branch only (never a fork), as a fast-forward of the head the fix started from.
 
 ⚠ **AI FIX PUTS PR TEXT IN FRONT OF AN AGENT WITH A SHELL.** The PR's title, description, diff, review
 items and thread text — written by whoever opened or commented on the PR, a bot's PR included — are the
@@ -164,7 +171,7 @@ Resume `ai` + `ai_hourly`; the pushes `github_write`; the rest `read`). The remo
 `AgentRunSpec.protectWrites`) are gone.
 
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
-Claude Review, Resolve with Claude, the merge-conflict resolver and the sandbox mirror (Implement, AI Fix) all read this cache, so
+Claude Review, the merge-conflict resolver and the sandbox mirror (Implement, AI Fix and its merge check) all read this cache, so
 it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the
 clone count. **The invariant: a GitHub token never reaches disk.**
 

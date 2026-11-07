@@ -184,6 +184,21 @@ describe('the seed of an AI Fix session', () => {
   it('⚠ Claude: CLAUDE.md byte-for-byte the golden', () => golden('seed-fix-claude.md', buildSeed(fixInput()).claudeMd));
   it('⚠ Codex: AGENTS.md byte-for-byte the golden', () => golden('seed-fix-codex.md', buildSeed(fixInput()).agentsMd));
   it('⚠ FIX.md byte-for-byte the golden', () => golden('seed-fix.md', buildSeed(fixInput()).fixMd!));
+  it('⚠ the MERGE item: FIX.md byte-for-byte the golden, the merge section ahead of the items', () => {
+    const md = buildSeed(
+      fixInput({
+        task: { kind: 'plain', text: 'Resolve the merge conflicts (MERGE) and change nothing else.' },
+        shownRefs: ['MERGE'],
+        unattended: true,
+        contextTicket: null,
+        merge: { baseRef: 'main', baseSha: 'b'.repeat(40), mergeBaseSha: 'c'.repeat(40), startScript: '/home/agent/.limn/start-merge.sh' },
+      }),
+    ).fixMd!;
+    golden('seed-fix-merge.md', md);
+    expect(md.indexOf('## First: the merge conflicts (MERGE)')).toBeLessThan(md.indexOf('## What to fix'));
+    const plain = buildSeed(fixInput()).fixMd!;
+    expect(plain).not.toContain('merge conflicts');
+  });
   it('⚠ a plain fix (dependency automation): FIX.md byte-for-byte the golden', () =>
     golden('seed-fix-plain.md', buildSeed(fixInput({ task: { kind: 'plain', text: 'The test job fails: fix it.' }, shownRefs: [], unattended: true, contextTicket: null })).fixMd!));
 

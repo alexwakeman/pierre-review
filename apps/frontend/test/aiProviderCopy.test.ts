@@ -273,8 +273,6 @@ describe('the wiring', () => {
   });
 
   it('run buttons and status lines name the active provider', () => {
-    expect(read('components', 'conflicts', 'ResolveConflictsButton.tsx')).toMatch(/Resolve with \{name\}/);
-    expect(read('components', 'AiFix', 'ConflictAiCard.tsx')).toMatch(/`Resolve merge conflicts with \$\{name\}`/);
     expect(read('components', 'Activity', 'PendingClaude.tsx')).toMatch(/`Review with \$\{aiName\}`/);
     expect(read('components', 'ClaudeReviewChat.tsx')).toMatch(/`Ask \$\{providerName\} about this review`/);
     expect(read('components', 'Activity', 'SprintView.tsx')).toMatch(/Ask \{aiName\}/);

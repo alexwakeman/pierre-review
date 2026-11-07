@@ -5,6 +5,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import { getFixById, markFixPushed } from './persist.js';
 import { beginFixPush, endFixPush } from './push-guard.js';
+import { fixRowHasWork, readMergeState } from '../../sandbox/session/fix-merge.js';
 
 // PUSH A FINISHED FIX, AS-IS — the ONE path the Push button (routes.ts) and the AUTOMATIC push
 // (auto-push.ts) share. Never a force push: onto the PR's own head branch (refused with HEAD_MOVED
@@ -15,6 +16,11 @@ import { beginFixPush, endFixPush } from './push-guard.js';
 // live session runs, the session refuses messages while the push runs (`beginFixPush`, taken in the
 // first tick), and a push that lands ENDS the session (phase `pushed`). The patch is the PR repository's
 // only, extracted by the host; edits in other repositories were never stored.
+//
+// A FIX WITH THE MERGE (docs/SANDBOX.md § AI Fix sessions, "The merge") pushes ONLY onto the PR's own branch
+// and ONLY a merge Limn checked as valid: `ctx.coding.pushMerge` re-checks the sandbox's commits, rebuilds
+// the merge commit (parents: the PR head, the base tip) and the fix on top under the reader's name, and
+// pushes them as a fast-forward of the head the fix started from. An invalid or missing merge pushes nothing.
 
 export type PushFixOutcome =
   | { ok: true; result: AiFixPushResult }
@@ -58,7 +64,10 @@ async function pushFixHeld(
   if (session.fixTurnRunning(fixId)) return { ok: false, code: 'not_pushable', message: 'The agent is still working. Wait, or press Stop.' };
   const row = await getFixById(ctx, accountId, fixId);
   if (!row) return { ok: false, code: 'not_found', message: 'Fix not found.' };
-  if (row.status !== 'succeeded' || !row.patch || !row.baseSha)
+  const merge = readMergeState(row.mergeJson ?? null);
+  if (merge != null && merge.status !== 'valid')
+    return { ok: false, code: 'not_pushable', message: `Nothing is pushed: ${merge.reason ?? 'the merge is not ready yet.'}` };
+  if (row.status !== 'succeeded' || !fixRowHasWork(row) || !row.baseSha)
     return { ok: false, code: 'not_pushable', message: 'This fix has nothing to push.' };
 
   const pr = await getFixPrContext(ctx, accountId, row.prId);
@@ -68,6 +77,44 @@ async function pushFixHeld(
     return { ok: false, code: 'no_write', message: 'You cannot push to this repository.' };
 
   const commitMessage = row.commitMessage ?? 'AI fix';
+
+  if (merge != null) {
+    if (merge.mergeSha == null || merge.resultSha == null) {
+      return { ok: false, code: 'not_pushable', message: 'Nothing is pushed: Limn has not checked the merge.' };
+    }
+    if (input.target !== 'existing') {
+      return { ok: false, code: 'not_pushable', message: "A fix with a merge pushes only to the pull request's own branch." };
+    }
+    try {
+      const pushMerge = ctx.coding.pushMerge ?? (await import('../git-ops.js')).pushMergeResult;
+      const by = row.provider === 'codex' ? 'Codex' : 'Claude';
+      const result = await pushMerge({
+        accountId,
+        fixId,
+        owner: pr.owner,
+        name: pr.name,
+        prNumber: pr.number,
+        headSha: row.baseSha,
+        baseRef: merge.baseRef,
+        baseSha: merge.baseSha,
+        bundle: Buffer.from(row.mergeBundle ?? '', 'base64'),
+        conflictedFiles: merge.conflictedFiles,
+        expectedMergeSha: merge.mergeSha,
+        expectedResultSha: merge.resultSha,
+        mergeMessage: `Merge ${merge.baseRef} into this pull request\n\nConflicts resolved with ${by} in ${PRODUCT_NAME} AI Fix.`,
+        fixMessage: commitMessage,
+      });
+      await markFixPushed(ctx, fixId, { pushedBranch: result.pushedBranch });
+      if (row.sessionPhase != null) await session.closeFixAfterPush(ctx, accountId, fixId).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: closing the session after the push failed'));
+      return { ok: true, result };
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (code === 'HEAD_MOVED' || code === 'PUSH_DENIED' || code === 'APPLY_FAILED') return { ok: false, code, message };
+      ctx.log.warn({ err }, 'ai-fix merge push failed');
+      return { ok: false, code: 'failed', message };
+    }
+  }
 
   let target: ApplyAndPushTarget;
   if (input.target === 'existing') {
@@ -96,7 +143,7 @@ async function pushFixHeld(
       name: pr.name,
       prNumber: pr.number,
       baseSha: row.baseSha,
-      patch: row.patch,
+      patch: row.patch ?? '',
       commitMessage,
       target,
     });

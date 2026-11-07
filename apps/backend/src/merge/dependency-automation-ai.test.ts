@@ -1,10 +1,12 @@
-// Dependency automation's AI FALLBACK (merge/dependency-automation.ts) on a THROWAWAY sqlite DB, with
-// GitHub, the resolver session and the AI run stubbed.
+// Dependency automation's CONFLICT RUN (merge/dependency-automation.ts) on a THROWAWAY sqlite DB, with
+// GitHub and AI Fix's session stubbed through its seams (`__testing.setAiFixDeps`).
 //
-// Pinned: after the bot was asked and the wait ran out, ONE AI run starts — only when the automatic
-// budget gate allows it; a complete, sure answer is committed as a MERGE onto the PR's own branch
-// and its commit recorded (the head that must go green again); anything less is recorded as failed
-// and NOT pushed; and a second tick at the same head never starts another run.
+// Pinned: after the bot was asked and the wait ran out, ONE unattended AI Fix session starts with the
+// MERGE item (`resolveConflicts: true`, the conflict instruction) — only when the automatic budget gate
+// allows it and the sandbox is ready; a VALID merge is pushed through AI Fix's own Push and its commit
+// recorded (the head that must go green again); a merge Limn's check refused is recorded as failed and
+// NOT pushed; a person's cancel wins; no container runtime is one skip row; a reader's open resolver is
+// never taken over; and a second tick at the same head never starts another run.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,41 +31,19 @@ vi.mock('../sync/resync-after-write.js', () => ({
 }));
 const fake = vi.hoisted(() => ({
   allowed: true,
-  answer: null as any,
-  started: 0,
-  land: [] as any[],
-  /** What `peekSession` says BEFORE the automation starts its own run (a reader's session). */
+  started: [] as any[],
+  pushed: [] as number[],
+  stopped: [] as number[],
+  state: null as any,
+  sandbox: { ok: true } as any,
+  /** What `peekSession` says about the MANUAL resolver (a reader's session). */
   readerSession: null as any,
 }));
 vi.mock('../review/budget-gate.js', () => ({
   automaticRunAllowed: vi.fn(async () => fake.allowed),
 }));
-vi.mock('../coding/ai-resolve/run.js', () => ({
-  startAiResolve: vi.fn(async () => {
-    fake.started += 1;
-    return { status: 'started', resolution: {} };
-  }),
-  getAiResolution: vi.fn(() => fake.answer),
-}));
-const MODEL = {
-  headSha: 'h1',
-  baseSha: 'b1',
-  prBranchPushable: true,
-  prBranchUnavailableReason: null,
-  files: [{ index: 0, path: 'package.json', unsupported: null, regions: [{ id: 1, kind: 'conflict' }] }],
-};
 vi.mock('../conflict/session.js', () => ({
-  peekSession: vi.fn(
-    () =>
-      fake.readerSession ?? { aiRunning: false, subscribers: new Set(), sessionId: 's1', modelHash: 'mh', model: MODEL },
-  ),
-}));
-vi.mock('../api/routes/conflicts.js', () => ({
-  runOpen: vi.fn(),
-  landSessionResolution: vi.fn(async (_rec: unknown, body: unknown) => {
-    fake.land.push(body);
-    return { ok: true, result: { commitSha: 'c0ffee1234567' } };
-  }),
+  peekSession: vi.fn(() => fake.readerSession),
 }));
 vi.mock('../sync/pr-settle.js', () => ({
   notePrChangedForPr: vi.fn(async () => {}),
@@ -96,6 +76,7 @@ const live = (over: Record<string, unknown> = {}) => ({
   isDraft: false,
   headSha: 'h1',
   headRef: 'dependabot/npm_and_yarn/lodash-4.17.21',
+  baseRef: 'main',
   isFork: false,
   title: 'Bump lodash from 4.17.20 to 4.17.21',
   body: 'Bumps lodash from 4.17.20 to 4.17.21.',
@@ -216,17 +197,6 @@ beforeEach(async () => {
   });
 });
 
-const answer = (choices: any[]) => ({ status: 'succeeded', sessionId: 's1', provider: 'claude', choices, error: null });
-const choice = (over: Record<string, unknown> = {}) => ({
-  fileIndex: 0,
-  regionId: 1,
-  decision: 'theirs',
-  editId: null,
-  lines: null,
-  rationale: '',
-  confidence: 'high',
-  ...over,
-});
 const LATER = () => Date.now() + 2 * 60 * 60_000;
 
 async function settled(): Promise<any[]> {
@@ -237,15 +207,36 @@ async function settled(): Promise<any[]> {
   return actions();
 }
 
-describe('the AI fallback', () => {
+const done = (over: Record<string, unknown> = {}) => ({ status: 'succeeded', patch: null, error: null, provider: 'claude', hasWork: true, mergeReason: null, ...over });
+
+describe('the conflict run', () => {
   beforeEach(async () => {
     fake.allowed = true;
-    fake.started = 0;
-    fake.land = [];
+    fake.started = [];
+    fake.pushed = [];
+    fake.stopped = [];
+    fake.state = done();
+    fake.sandbox = { ok: true };
     fake.readerSession = null;
-    await auto.setDependencyAutomation(A, wsId, { autoResolveConflicts: true, trustedBotIds: [botId] });
+    await auto.setDependencyAutomation(A, wsId, { autoResolveConflicts: true, autoFix: false, trustedBotIds: [botId] });
     await setPr(botPr, { mergeStateStatus: 'dirty', mergeable: 'conflicting' });
     auto.bindDependencyAutomationAi({ aiBudget: null } as any);
+    auto.__testing.setAiFixDeps({
+      allowed: async () => fake.allowed,
+      startFix: async (_ctx: unknown, input: any) => {
+        fake.started.push(input);
+        return { status: 'queued', fixId: 70 + fake.started.length };
+      },
+      fixState: async () => fake.state,
+      push: async (_ctx: unknown, _a: number, fixId: number) => {
+        fake.pushed.push(fixId);
+        return { ok: true, sha: 'c0ffee1234567' };
+      },
+      isFixRunning: async () => false,
+      sandbox: async () => fake.sandbox,
+      stop: async (_c: unknown, _a: number, _p: number, fixId: number) => void fake.stopped.push(fixId),
+      pollMs: 5,
+    });
     // Dependabot was asked; the wait runs out at LATER().
     await db
       .insert(schema.dependencyAutomationActions)
@@ -253,56 +244,127 @@ describe('the AI fallback', () => {
       .execute();
   });
 
-  it('commits a complete, sure answer as a merge onto the PR branch, once', async () => {
-    fake.answer = answer([choice()]);
+  it('starts ONE unattended AI Fix with the merge item, pushes a valid merge, once', async () => {
     await auto.runDependencyAutomationTick(log, LATER());
     const rows = await settled();
-    expect(fake.started).toBe(1);
-    expect(fake.land).toEqual([
-      {
-        sessionId: 's1',
-        expectedHeadSha: 'h1',
-        expectedBaseSha: 'b1',
-        modelHash: 'mh',
-        strategy: 'merge',
-        target: { kind: 'pr_branch' },
-        files: [{ index: 0, decisions: [{ id: 1, decision: 'theirs' }] }],
-      },
-    ]);
+    expect(fake.started).toHaveLength(1);
+    expect(fake.started[0]).toMatchObject({ accountId: A, prId: botPr, resolveConflicts: true });
+    expect(fake.started[0].instruction).toContain('It conflicts with main. Resolve the merge conflicts (MERGE) and change nothing else.');
+    expect(fake.pushed).toEqual([71]);
     expect(rows.find((r) => r.action === 'ai_resolve')).toMatchObject({
       state: 'done',
       resultSha: 'c0ffee1234567',
       detail: 'Resolved with Claude and pushed c0ffee1',
     });
     await auto.runDependencyAutomationTick(log, LATER());
-    expect(fake.started).toBe(1);
+    expect(fake.started).toHaveLength(1);
   });
 
-  it('does not push an answer the AI was unsure of', async () => {
-    fake.answer = answer([choice({ confidence: 'low' })]);
+  it('pushes nothing when Limn refused the merge, and records why', async () => {
+    fake.state = done({ hasWork: false, mergeReason: 'package.json still has a conflict marker.' });
     await auto.runDependencyAutomationTick(log, LATER());
     const rows = await settled();
-    expect(fake.land).toEqual([]);
-    expect(rows.find((r) => r.action === 'ai_resolve')).toMatchObject({ state: 'failed' });
+    expect(fake.pushed).toEqual([]);
+    expect(rows.find((r) => r.action === 'ai_resolve')).toMatchObject({
+      state: 'failed',
+      detail: 'Not pushed: package.json still has a conflict marker.',
+    });
+  });
+
+  it("a person's cancel wins: recorded, nothing pushed, never retried at the head", async () => {
+    fake.state = done({ status: 'cancelled' });
+    await auto.runDependencyAutomationTick(log, LATER());
+    const rows = await settled();
+    expect(fake.pushed).toEqual([]);
+    expect(rows.find((r) => r.action === 'ai_resolve')).toMatchObject({ state: 'failed', detail: 'Cancelled.' });
+    await auto.runDependencyAutomationTick(log, LATER());
+    expect(fake.started).toHaveLength(1);
   });
 
   it('waits for the bot before the wait runs out, and skips when over budget', async () => {
-    fake.answer = answer([choice()]);
     await auto.runDependencyAutomationTick(log);
     fake.allowed = false;
     await auto.runDependencyAutomationTick(log, LATER());
-    expect(fake.started).toBe(0);
+    expect(fake.started).toEqual([]);
     expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
   });
 
-  it('never takes over a resolver a reader has open or an AI run a reader started', async () => {
-    fake.answer = answer([choice()]);
-    fake.readerSession = { aiRunning: false, subscribers: new Set([() => {}]), sessionId: 's1', modelHash: 'mh', model: MODEL };
+  it('no container runtime: ONE skip row, no claim, no GitHub write; later ticks read nothing', async () => {
+    fake.sandbox = { ok: false, reason: 'no_runtime', message: 'No container runtime.' };
     await auto.runDependencyAutomationTick(log, LATER());
-    fake.readerSession = { aiRunning: true, subscribers: new Set(), sessionId: 's1', modelHash: 'mh', model: MODEL };
+    expect(fake.started).toEqual([]);
+    const rows = (await actions()).filter((r) => r.action === 'ai_resolve');
+    expect(rows).toEqual([expect.objectContaining({ state: 'skipped', detail: 'No container runtime on this computer.', teammateLogin: null })]);
+    gh.fetchPrForAutomation.mockClear();
     await auto.runDependencyAutomationTick(log, LATER());
-    expect(fake.started).toBe(0);
-    expect(fake.land).toEqual([]);
+    expect(gh.fetchPrForAutomation).not.toHaveBeenCalled();
+    // A busy computer writes nothing at all.
+    await db.delete(schema.dependencyAutomationActions).where(eq(schema.dependencyAutomationActions.action, 'ai_resolve')).execute();
+    fake.sandbox = { ok: false, reason: 'busy', message: 'Another sandbox session is building.' };
+    await auto.runDependencyAutomationTick(log, LATER());
+    expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
+  });
+
+  it('conflicting AND red with "Fix them with AI": ONE session with the merge and the CI items, ONE run counted', async () => {
+    await auto.setDependencyAutomation(A, wsId, { autoResolveConflicts: false, autoFix: true, trustedBotIds: [botId] });
+    await setPr(botPr, { ciStatus: 'failure' });
+    fake.state = done({ ciItems: 2 });
+    await auto.runDependencyAutomationTick(log, LATER());
+    const rows = await settled();
+    expect(fake.started).toHaveLength(1);
+    expect(fake.started[0]).toMatchObject({ prId: botPr, resolveConflicts: true, withCi: true });
+    expect(fake.started[0].instruction).toContain('It conflicts with main, and its CI fails.');
+    expect(fake.started[0].instruction).not.toContain('Bump lodash'); // Limn's words only, outside every fence
+    expect(fake.pushed).toEqual([71]);
+    // ONE row (the conflict run's), so ONE AI run against the cap; no separate CI fix.
+    expect(rows.filter((r) => r.action === 'ai_resolve' || r.action === 'ai_fix')).toEqual([
+      expect.objectContaining({ action: 'ai_resolve', state: 'done', resultSha: 'c0ffee1234567', detail: 'Resolved conflicts and fixed CI with Claude and pushed c0ffee1' }),
+    ]);
+    await auto.runDependencyAutomationTick(log, LATER());
+    expect(fake.started).toHaveLength(1);
+  });
+
+  it('"Resolve their conflicts" alone never fixes CI: a red conflicting PR gets the merge only', async () => {
+    await setPr(botPr, { ciStatus: 'failure' });
+    await auto.runDependencyAutomationTick(log, LATER());
+    await settled();
+    expect(fake.started).toHaveLength(1);
+    expect(fake.started[0].withCi).toBeUndefined();
+    expect(fake.started[0].instruction).toContain('Resolve the merge conflicts (MERGE) and change nothing else.');
+  });
+
+  it('a combined start with no MERGE item falls back to the merge-only run under the same claim', async () => {
+    await auto.setDependencyAutomation(A, wsId, { autoFix: true, trustedBotIds: [botId] });
+    await setPr(botPr, { ciStatus: 'error' });
+    auto.__testing.setAiFixDeps({
+      allowed: async () => true,
+      startFix: async (_ctx: unknown, input: any) => {
+        fake.started.push(input);
+        return input.withCi ? { status: 'nothing_to_fix' } : { status: 'queued', fixId: 90 };
+      },
+      fixState: async () => fake.state,
+      push: async (_c: unknown, _a: number, fixId: number) => {
+        fake.pushed.push(fixId);
+        return { ok: true, sha: 'abcdef1234567' };
+      },
+      isFixRunning: async () => false,
+      sandbox: async () => ({ ok: true }),
+      stop: async () => {},
+      pollMs: 5,
+    });
+    await auto.runDependencyAutomationTick(log, LATER());
+    const rows = await settled();
+    expect(fake.started.map((x) => x.withCi === true)).toEqual([true, false]);
+    expect(fake.pushed).toEqual([90]);
+    expect(rows.filter((r) => r.action === 'ai_resolve')).toEqual([expect.objectContaining({ state: 'done', detail: 'Resolved with Claude and pushed abcdef1' })]);
+  });
+
+  it('never takes over the manual resolver a reader has open, or one committing', async () => {
+    fake.readerSession = { commitRunning: false, subscribers: new Set([() => {}]) };
+    await auto.runDependencyAutomationTick(log, LATER());
+    fake.readerSession = { commitRunning: true, subscribers: new Set() };
+    await auto.runDependencyAutomationTick(log, LATER());
+    expect(fake.started).toEqual([]);
     expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
   });
 });

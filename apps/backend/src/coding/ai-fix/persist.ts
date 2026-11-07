@@ -76,6 +76,9 @@ export interface AiFixRow {
   lastActiveAt?: Date | number | null;
   unattended?: boolean | null;
   workspaceId?: number | null;
+  // 0178 — the merge (sandbox/session/fix-merge.ts `FixMergeState`) and the agent's commits (base64 bundle).
+  mergeJson?: Record<string, unknown> | null;
+  mergeBundle?: string | null;
 }
 
 /** The session columns a fix session writes (fix.ts). Scoped by account. */
@@ -100,6 +103,8 @@ export interface FixSessionPatch {
   inputTokens?: number | null;
   outputTokens?: number | null;
   numTurns?: number | null;
+  mergeJson?: Record<string, unknown> | null;
+  mergeBundle?: string | null;
 }
 
 export async function updateFixSession(ctx: AgentContext, accountId: number, id: number, patch: FixSessionPatch): Promise<void> {

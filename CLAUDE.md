@@ -359,11 +359,10 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   person's cancel wins; no container runtime ⇒ ONE skip row, never a claim (the rest: the doc).
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
-- **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`; read the doc's
-  § Resolving conflicts first). ⚠ The wand NEVER picks a side; nothing is applied before the reader
-  presses something (except a "Resolve with Claude" run they started, or Dependencies' unattended
-  one). ⚠ **Bump `CONFLICT_MODEL_VERSION` with any fold change**; the commit is HARD BLOCKED until
-  every decidable region is decided (`CommitPlan.canCommit`).
+- **Conflicts: TWO ways** — by hand in the resolver (`src/conflict/`, `components/conflicts/`; the doc's
+  § Resolving conflicts), or AI Fix's MERGE item in the sandbox (below). ⚠ The wand NEVER picks a side;
+  nothing is applied before the reader presses something. ⚠ **Bump `CONFLICT_MODEL_VERSION` with any
+  fold change**; the commit is HARD BLOCKED until every decidable region is decided.
 - CI logs are live ranged reads of the signed Actions blob URL — **NEVER returned to a client**.
 - Trunk status (`/api/branch-status`) is **informational only** — no counts, badges or My Turn.
 - ⚠ **`limn/` commit statuses (team claims) are NEVER CI** — every CI read filters them via shared
@@ -374,7 +373,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 ## The agentic features (Claude or Codex)
 
 Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
-design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude, the reference-docs
+design diagrams, Check threads), AI Fix (+ Plan first), the reference-docs
 library, sprint briefs/paths and every one-shot completion, on Claude or Codex. Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) (§ Codex, the second provider) ·
 history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 
@@ -423,8 +422,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   session in PERCENTAGES ONLY — no US$ on a subscription anywhere; the header reads the SAME
   `['ai-budget']` query. Claude's usage reading (the `loadAgentSdk` Query tap — never add per-runner
   forwarding) NEVER blocks; ChatGPT's share is TOKEN-WEIGHTED (docs/CLAUDE-REVIEW.md).
-- **The agents' tools**: the reviewer, every chat and Resolve with Claude are read-only, **`Bash`
-  denied** (`tool-surface.test.ts`). AI Fix and Implement run in the workspace session (below), the ONE
+- **The agents' tools**: the reviewer and every chat are read-only, **`Bash`
+  denied**. AI Fix and Implement run in the workspace session (below), the ONE
   place an agent has a shell. Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
@@ -450,8 +449,10 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **Separate processes, never inside a PR review**: the CI review, the TICKET review (ONE story per
   ticket, `ticketStory`), diagrams. ⚠ `tracker/runtime.ts` opens the DB at import — keep review-side
   tracker imports LAZY.
-- **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`, still
-  read as history). Plan first is a chat-mode session. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
+- **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`). Plan
+  first is a chat-mode session. URL paths kept (`/api/pro/prs/:id/ai-fix*`). ⚠ **The MERGE item**
+  ("Resolve merge conflicts", `sandbox/session/fix-merge.ts`): the agent merges first; out as REAL
+  commits (a bundle); the host checks parents + markers; only a VALID merge pushes (never in an auto fix).
 - **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
   context.
 - **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),

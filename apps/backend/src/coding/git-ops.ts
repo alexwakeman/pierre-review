@@ -380,3 +380,87 @@ const quietLogger: Logger = {
   warn: (m, ...a) => console.warn(m, ...a),
   error: (m, ...a) => console.error(m, ...a),
 };
+
+// ---- AI FIX WITH A MERGE (docs/SANDBOX.md § AI Fix sessions, "The merge") ----
+
+export interface PushMergeArgs {
+  accountId: number;
+  fixId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  /** The PR head the fix started from: the merge's first parent, and the compare-and-set on the branch. */
+  headSha: string;
+  baseRef: string;
+  /** The base tip picked at the start: the merge's second parent. */
+  baseSha: string;
+  /** The agent's commits from the sandbox (a git bundle). */
+  bundle: Buffer;
+  conflictedFiles: readonly string[];
+  /** The merge commit and the last commit Limn checked after the turn (what the reader reviewed). */
+  expectedMergeSha: string;
+  expectedResultSha: string;
+  mergeMessage: string;
+  fixMessage: string;
+}
+
+/**
+ * Push a fix that resolved merge conflicts: re-check the sandbox's bundle in the clone cache
+ * (`verifyMergeBundle`: parents, markers, fixes on top), rebuild the merge commit (and ONE fix commit
+ * on top) from the verified trees under the reader's name, and push onto the PR's own branch. Never
+ * forced: the live head must still be `headSha` (HEAD_MOVED), and the push is a fast-forward of it. A
+ * fork's branch is refused (PUSH_DENIED): Limn pushes a merge only within the repository.
+ */
+export async function pushMergeResult(args: PushMergeArgs): Promise<ApplyAndPushResult> {
+  const { accountId, owner, name, prNumber } = args;
+  const token = await getAccessToken(accountId);
+  const account = await getAccountById(accountId);
+  const authorName = account?.displayName || account?.githubLogin || 'pierre-review';
+  const authorEmail = account?.githubLogin
+    ? `${account.githubLogin}@users.noreply.github.com`
+    : 'pierre-review@users.noreply.github.com';
+  const info = await fetchPrHeadInfo(token, owner, name, prNumber);
+  if (info.isFork || info.headRepoFullName.toLowerCase() !== `${owner}/${name}`.toLowerCase()) {
+    throw codedError('PUSH_DENIED', "the pull request's branch is in a fork; Limn pushes a merge only to a branch in the same repository");
+  }
+  if (info.headSha !== args.headSha) {
+    throw codedError(
+      'HEAD_MOVED',
+      `the PR head advanced (now ${info.headSha.slice(0, 7)}, the merge was made on ${args.headSha.slice(0, 7)})`,
+    );
+  }
+  const protect = await protectedRefsFor(accountId, owner, name, prNumber, owner, name);
+  const { withMergeRepo, aiFixMergeRef } = await import('./ai-fix/merge-host.js');
+  const { verifyMergeBundle, buildMergeCommits } = await import('./ai-fix/merge-verify.js');
+  const commitSha = await withMergeRepo(
+    { fixId: args.fixId, owner, name, prNumber, headSha: args.headSha, baseRef: args.baseRef, baseSha: args.baseSha },
+    async (dir) => {
+      const v = await verifyMergeBundle({
+        gitDir: dir,
+        bundle: args.bundle,
+        headSha: args.headSha,
+        baseSha: args.baseSha,
+        baseRef: args.baseRef,
+        conflictedFiles: args.conflictedFiles,
+        resultRef: aiFixMergeRef(args.fixId, 'result'),
+        token,
+      });
+      if (!v.ok) throw codedError('APPLY_FAILED', `the merge failed Limn's check: ${v.reason}`);
+      // Exactly the commits the reader reviewed (their diffs were computed from these), nothing else.
+      if (v.mergeSha !== args.expectedMergeSha || v.resultSha !== args.expectedResultSha) {
+        throw codedError('APPLY_FAILED', 'the stored merge is not the one Limn checked after the turn');
+      }
+      const sha = await buildMergeCommits(
+        dir,
+        { mergeSha: v.mergeSha, resultSha: v.resultSha, headSha: args.headSha, baseSha: args.baseSha },
+        { authorName, authorEmail, mergeMessage: args.mergeMessage, fixMessage: args.fixMessage },
+      );
+      await pushRef({ worktree: dir, owner, name, token, committish: sha, remoteBranch: info.headRef, protect });
+      return sha;
+    },
+  );
+  // ── The push LANDED: nothing below may throw (a retry would double-push). Not awaited (applyAndPush). ──
+  void settlePushedPr(accountId, owner, name, prNumber, commitSha);
+  return { pushedBranch: info.headRef, commitSha };
+}
+

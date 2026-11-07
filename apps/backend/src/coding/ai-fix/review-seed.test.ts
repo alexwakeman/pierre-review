@@ -20,6 +20,9 @@ import {
   normalizeChangeReport,
   REVIEW_ITEM_BODY_MAX,
   type SeedTicketItem,
+  AUTO_FIX_RESOLVES_CONFLICTS,
+  MERGE_FIRST_LINE,
+  MERGE_ONLY_SEED_INTRO,
 } from './review-seed.js';
 
 const NONCE = 'abcdef0123456789';
@@ -612,6 +615,52 @@ describe('the CI-only seed (review === null)', () => {
   it('nothing fixable ⇒ an empty seed (the caller’s NothingToFix)', () => {
     expect(buildReviewSeed(null, { nonce, ciItems: [flaky] }).sentRefs).toEqual([]);
     expect(buildPickerPreview(null, { ciItems: [] }).items).toEqual([]);
+  });
+});
+
+// ---- The merge item (docs/CLAUDE-REVIEW.md § AI Fix; sandbox/session/fix-merge.ts) ----
+describe('the merge item ("Resolve merge conflicts with <base>")', () => {
+  const merge = { baseRef: 'main' };
+  const r = () => review({ findings: [finding({ id: 501, title: 'Off by one' })] });
+
+  it('is listed FIRST in the picker, its own section, ticked by default', () => {
+    const p = buildPickerPreview(r(), { merge });
+    expect(p.items.map((i) => [i.key, i.section, i.defaultIncluded])).toEqual([
+      ['conflict:merge', 'conflicts', true],
+      ['finding:501', 'findings', true],
+    ]);
+    expect(p.items[0]!.label).toBe('Resolve merge conflicts with main');
+    expect(p.cutByBudget).toEqual([]);
+  });
+
+  it('with a finding: MERGE is shown first, ahead of the finding, under one line that says so', () => {
+    const s = buildReviewSeed(r(), { nonce, merge });
+    expect(s.sentRefs).toEqual(['MERGE', 'F1']);
+    expect(s.items.map((i) => [i.ref, i.kind])).toEqual([['MERGE', 'merge_conflicts'], ['F1', 'finding']]);
+    expect(s.text).toContain(MERGE_FIRST_LINE);
+    expect(s.text.indexOf('---BEGIN ITEM MERGE')).toBeLessThan(s.text.indexOf('---BEGIN ITEM F1'));
+    // Without the merge, the review's prompt is byte-for-byte what it was.
+    expect(buildReviewSeed(r(), { nonce }).text).not.toContain('MERGE');
+  });
+
+  it('alone (no review, no CI item): its own intro, ref MERGE', () => {
+    const s = buildReviewSeed(null, { nonce, merge });
+    expect(s.sentRefs).toEqual(['MERGE']);
+    expect(s.text.startsWith(MERGE_ONLY_SEED_INTRO)).toBe(true);
+    expect(buildPickerPreview(null, { merge }).items.map((i) => i.key)).toEqual(['conflict:merge']);
+  });
+
+  it('unticked by the reader: not in the seed', () => {
+    const s = buildReviewSeed(r(), { nonce, merge, selection: { kind: 'keys', keys: ['finding:501'] } });
+    expect(s.sentRefs).toEqual(['F1']);
+  });
+
+  it('NEVER in an AUTO fix (sections), whatever its switches say — one constant decides', () => {
+    expect(AUTO_FIX_RESOLVES_CONFLICTS).toBe(false);
+    const all = { findings: true, earlierFindings: true, judgedThreads: true, untouchedThreads: true, ciFailures: true, sonar: true, styleBots: true };
+    const s = buildReviewSeed(r(), { nonce, merge, selection: { kind: 'sections', include: all } });
+    expect(s.sentRefs).toEqual(['F1']);
+    expect(s.items.some((i) => i.kind === 'merge_conflicts')).toBe(false);
   });
 });
 

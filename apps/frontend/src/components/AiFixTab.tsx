@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
-  aiPickerRequestModel,
   aiProviderName,
   aiRunProvider,
   aiRunProviderName,
@@ -9,6 +8,7 @@ import {
   AI_FIX_REVIEW_ITEM_LABELS,
   DEFAULT_AI_FIX_MODEL,
   type AiFix,
+  type AiFixMerge,
   type AiFixSummary,
   type PrDetail,
   type PrHeadInfo,
@@ -42,7 +42,17 @@ import {
 } from '../hooks/useAiFix.js';
 import { useSandboxRuntime } from '../hooks/useStoryBuild.js';
 import { mergeSessionViews, sessionCanDiscard, sessionTurnRunning } from '../lib/sandboxSession.js';
-import { fixErrorTone, fixRepoStatus, fixSessionHoldsPr, fixSessionShown, fixSessionStatusLine, leftOutLine } from '../lib/aiFixSession.js';
+import {
+  fixErrorTone,
+  fixMergeBlockedLine,
+  fixMergeLine,
+  fixPushable,
+  fixRepoStatus,
+  fixSessionHoldsPr,
+  fixSessionShown,
+  fixSessionStatusLine,
+  leftOutLine,
+} from '../lib/aiFixSession.js';
 import { ApprovedPlanNote, PlanHistory } from './AiFix/PlanPanel.js';
 import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
 import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
@@ -54,13 +64,12 @@ import { Markdown } from './Markdown.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
 import { InfoButton } from './InfoModal.js';
-import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './AiFix/ConflictAiCard.js';
-import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
 import { CheckboxBox, RadioBox } from './ui/FormControls.js';
 import { ChecksReport, ChecksStatus } from './AiFix/RunTests.js';
 import { RailSection, SharedSessionView, type SessionActions, type SessionWords } from './sandbox/SessionView.js';
 import { SandboxRuntimeLine } from './StoryBuild/SandboxSetupHelp.js';
 import { Button } from './ui/Button.js';
+import { CheckIcon, ConflictIcon, WarningIcon } from './Icons.js';
 
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
@@ -220,11 +229,9 @@ function FixerSection({
   const runtime = useSandboxRuntime(showPicker && fixSource);
   const noRuntime = runtime.data != null && !runtime.data.available;
 
-  // "Resolve with Claude", offered beside a review fix ONLY when the branch conflicts (the
-  // resolver entry's own gate). OFF by default; a separate run with a separate result — the merge
-  // lands from the resolver as its own commit, never folded into the fix.
-  const conflictsResolvable = usePrConflictsResolvable(pr);
-  const [alsoResolve, setAlsoResolve] = useState(false);
+  // Merge conflicts are a PICKER ITEM ('conflict:merge', section 'conflicts'; the server offers it when
+  // the PR conflicts and the reader can push): the agent merges the base and resolves in the sandbox,
+  // first, then fixes the rest on top. There is no separate conflict run any more.
 
   const picked = preview.data ? pickedKeys(preview.data, overrides) : [];
   const cutCount = preview.data ? budgetCutKeys(preview.data, overrides).size : 0;
@@ -253,15 +260,6 @@ function FixerSection({
       });
       startFix.mutate(body, { onSuccess: () => setPickerOpen(false) });
     }
-    // The merge half: its own run, opening the resolver when Claude's answer is ready. Started on
-    // the PRESS, not in a mutate()-scoped callback (lost if this tab unmounts before the fix POST
-    // answers) — it does not depend on the fix's result.
-    // The resolver has no model menu: it runs on the DEFAULT provider, at the picked depth.
-    if (alsoResolve && conflictsResolvable)
-      startConflictAiRun(resolverTargetOf(pr), {
-        model: aiPickerRequestModel(modelPick.chosen.model),
-        providerName: ai.providerName,
-      });
   };
 
   return (
@@ -285,6 +283,11 @@ function FixerSection({
               the check says this PR can fix.
             </p>
             <p>
+              When the PR conflicts with its base branch, Resolve merge conflicts is ticked too. {pickedName}{' '}
+              merges the base first and resolves each conflict, then fixes the other items on top. Limn checks
+              the merge commit before Push. You can still resolve conflicts by hand with Resolve conflicts.
+            </p>
+            <p>
               Start fix starts at once. Watch it work, press Stop, or ask for more in the same session.
               Tick Plan first to read and discuss {pickedName}'s plan before anything changes, then press
               Start fix.
@@ -301,7 +304,6 @@ function FixerSection({
         AI Fix
       </SectionTitle>
       <div className="px-4">
-        {conflictsResolvable && <ConflictAiCard pr={pr} />}
         {data?.enabled === false ? (
           <p className="text-body text-ui-mute">
             The agentic fixer is turned off.
@@ -336,7 +338,7 @@ function FixerSection({
                 {olderNote && (
                   <p className="mb-2 text-meta text-ui-mute">{olderNote}</p>
                 )}
-                {ciOnly && (
+                {ciOnly && preview.data?.items.some((i) => i.section === 'ci_failures') && (
                   <p className="mb-2 text-meta text-ui-mute">No AI review yet. This fix works on the CI check’s failures.</p>
                 )}
                 {preview.isLoading && (
@@ -354,22 +356,6 @@ function FixerSection({
                     pr={pr}
                     review={sourceReview}
                   />
-                )}
-                {preview.data && preview.data.items.length > 0 && conflictsResolvable && !noRuntime && (
-                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-meta text-ui-ink">
-                    <CheckboxBox
-                      className="mt-0.5"
-                      checked={alsoResolve}
-                      disabled={fixStarting}
-                      onChange={(e) => setAlsoResolve(e.target.checked)}
-                    />
-                    <span>
-                      Also resolve merge conflicts with {pr.baseRefName ?? 'the base branch'}
-                      <span className="block text-meta text-ui-mute">
-                        You check the merge in the resolver. It lands as its own commit, apart from the fix.
-                      </span>
-                    </span>
-                  </label>
                 )}
                 {preview.data && preview.data.items.length > 0 && noRuntime && (
                   // No container runtime: the picker shows what would be fixed; the run row is this
@@ -528,12 +514,12 @@ function FixSession({
   );
   const leftOut = fix.leftOut ?? [];
   const repoStatus = (r: SandboxSessionRepo) =>
-    fixRepoStatus(r, { prRepoId: pr.repoId, headRef, filesChanged: fix.filesChanged.length, pushed: fix.pushedAt != null, leftOut });
+    fixRepoStatus(r, { prRepoId: pr.repoId, headRef, filesChanged: fix.filesChanged.length, pushed: fix.pushedAt != null, leftOut, merge: fix.merge ?? null });
   return (
     <div data-testid="ai-fix-session" className="mt-3">
       <p data-testid="ai-fix-session-status" className="flex flex-wrap items-center gap-2 text-meta text-ui-mute">
         {fix.trigger === 'auto' && <AutoFixChip />}
-        <span>{fixSessionStatusLine(session, fix.unattended === true)}</span>
+        <span>{fixMergeBlockedLine(fix.merge, session) ?? fixSessionStatusLine(session, fix.unattended === true)}</span>
         {session.model != null && <span>· {aiRunLabel(session.provider, session.model, session.effort)}</span>}
       </p>
       <SharedSessionView
@@ -643,6 +629,7 @@ function FixResult({
     () => parseGitPatch(fix.patch),
     [fix.patch],
   );
+  const merge = fix.merge ?? null;
 
   // Plan mode: a first planning pass that produced no plan, and a plan the reader discarded.
   if (fix.status === 'failed' && fix.plan?.status === 'failed') {
@@ -671,7 +658,9 @@ function FixResult({
   }
   if (fix.status !== 'succeeded') return <></>;
 
-  const noChanges = !fix.patch || fix.filesChanged.length === 0;
+  const noFixChanges = !fix.patch || fix.filesChanged.length === 0;
+  // A fix with the merge: Push sends a VALID merge (and the fix on top, if any); anything else sends nothing.
+  const pushable = fixPushable(fix);
   const errorTone = fixErrorTone(fix);
   const leftOut = (fix.leftOut ?? []).filter((x) => x.files.length > 0);
 
@@ -723,16 +712,18 @@ function FixResult({
       )}
       {/* "Run tests" on an older row: Limn's own run of the chosen checks (read-only history). */}
       <ChecksReport checks={fix.checks} />
-      {noChanges ? (
+      {merge != null && <MergeResult merge={merge} headSha={fix.baseSha} />}
+      {noFixChanges ? (
         <p className="mt-2 text-meta text-ui-mute">
-          No files changed.
+          {merge != null ? 'No other changes on top of the merge.' : 'No files changed.'}
         </p>
       ) : (
-        <>
+        <div data-testid="ai-fix-changes">
           <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-meta text-ui-mute">
             {/* The agent ran the repository's own checks in the sandbox and says so in its last
                 message (the conversation above); this line states only the size. */}
             <span>
+              {merge != null && <span className="font-semibold text-ui-ink">Fixes on top of the merge · </span>}
               {fix.filesChanged.length} file
               {fix.filesChanged.length === 1 ? '' : 's'} changed
             </span>
@@ -741,13 +732,76 @@ function FixResult({
           <div className="overflow-hidden rounded-ui bg-ui-surface text-ui-ink">
             <FileDiffView files={diffFiles} />
           </div>
-          <PushControls
-            pr={pr}
-            fix={fix}
-            headInfo={headInfo}
-            viewerCanPush={viewerCanPush}
-          />
-        </>
+        </div>
+      )}
+      {pushable && (
+        <PushControls
+          pr={pr}
+          fix={fix}
+          headInfo={headInfo}
+          viewerCanPush={viewerCanPush}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * THE MERGE of a fix with the "Resolve merge conflicts" item: Limn's check of the merge commit (its
+ * parents, the conflict markers), the files that were in conflict, and the RESOLUTION — the agent's merge
+ * commit against git's automatic merge with the markers, so each hunk shows how a conflict was settled —
+ * apart from the fixes on top.
+ */
+function MergeResult({ merge, headSha }: { merge: AiFixMerge; headSha: string | null }): JSX.Element {
+  const files = useMemo<DiffFile[]>(() => parseGitPatch(merge.resolutionDiff), [merge.resolutionDiff]);
+  const line = fixMergeLine(merge, headSha);
+  const n = merge.conflictedFiles.length;
+  return (
+    <div data-testid="ai-fix-merge" data-merge-status={merge.status} className="mt-2">
+      <div className="mb-1 flex items-center gap-1.5 text-meta font-semibold text-ui-ink">
+        <ConflictIcon size={12} />
+        Merge of <span className="font-mono">{merge.baseRef}</span>
+        <InfoButton title="How the conflicts were resolved">
+          <p>
+            The agent merged {merge.baseRef} into the PR in the sandbox and made a merge commit. Limn then
+            checked it: the merge commit's parents must be the PR head and the {merge.baseRef} commit Limn
+            picked, no conflict markers may be left in the files that were in conflict, and every other change
+            must sit on top of the merge.
+          </p>
+          <p>
+            The diff below compares the merge commit with git's own merge, conflict markers and all. Each
+            hunk shows how one conflict was settled. Check for lines that are doubled or dropped.
+          </p>
+          <p>Push sends the merge commit and the fixes on top to the PR's branch. A merge that fails the check sends nothing.</p>
+        </InfoButton>
+      </div>
+      <p
+        data-testid="ai-fix-merge-check"
+        className={`flex items-start gap-1.5 text-meta ${line.tone === 'ok' ? 'text-ui-success' : line.tone === 'bad' ? 'text-ui-danger' : 'text-ui-mute'}`}
+      >
+        {line.tone === 'ok' ? <CheckIcon size={12} className="mt-0.5 shrink-0" /> : line.tone === 'bad' ? <WarningIcon size={12} className="mt-0.5 shrink-0" /> : null}
+        <span>{line.text}</span>
+      </p>
+      {n > 0 && (
+        <p className="mt-0.5 break-words text-meta text-ui-mute">
+          In conflict: <span className="font-mono">{merge.conflictedFiles.slice(0, 8).join(', ')}</span>
+          {n > 8 ? `, and ${n - 8} more` : ''}
+        </p>
+      )}
+      {files.length > 0 ? (
+        <div data-testid="ai-fix-resolution" className="mt-2">
+          <div className="mb-1 text-meta text-ui-mute">
+            <span className="font-semibold text-ui-ink">How the conflicts were resolved</span> · {files.length} file
+            {files.length === 1 ? '' : 's'}
+          </div>
+          <div className="overflow-hidden rounded-ui bg-ui-surface text-ui-ink">
+            <FileDiffView files={files} />
+          </div>
+        </div>
+      ) : (
+        merge.status === 'valid' && n > 0 && (
+          <p className="mt-1 text-meta text-ui-mute">The merge commit matches git's own merge outside the conflicts.</p>
+        )
       )}
     </div>
   );
@@ -834,9 +888,9 @@ function FixHistory({
 }
 
 // Push a finished fix as it is: onto the PR's own branch, or onto a new branch with a PR opened.
-// There is no trunk step — no check against the trunk on mount, no rebase or merge, and no
-// "let Claude resolve conflicts". A fix that conflicts with the trunk pushes as-is and the PR
-// shows as conflicted on GitHub. The server never force-pushes this and refuses a push to the
+// There is no trunk step — no check against the trunk on mount and no rebase. A fix that conflicts
+// with the trunk pushes as-is and the PR shows as conflicted on GitHub, unless the fix had the
+// "Resolve merge conflicts" item: then it pushes only to the PR's own branch, and only a valid merge. The server never force-pushes this and refuses a push to the
 // PR's own branch if that branch moved since the fix was generated.
 function PushControls({
   pr,
@@ -852,6 +906,8 @@ function PushControls({
   const push = usePushFix(pr.id);
 
   const canPushSameBranch = headInfo?.canPushSameBranch ?? false;
+  // A fix with the merge pushes ONLY to the PR's own branch (GitHub sees the conflict resolved there).
+  const mergeOnly = fix.merge != null;
   const [target, setTarget] = useState<'existing' | 'new'>(
     canPushSameBranch ? 'existing' : 'new',
   );
@@ -862,9 +918,9 @@ function PushControls({
     if (!branchRef.current && headInfo?.suggestedBranch) {
       setBranch(headInfo.suggestedBranch);
       branchRef.current = true;
-      if (!headInfo.canPushSameBranch) setTarget('new');
+      if (!headInfo.canPushSameBranch && !mergeOnly) setTarget('new');
     }
-  }, [headInfo]);
+  }, [headInfo, mergeOnly]);
 
   // A pushed fix — to the PR's own branch or to a new one — is a record, nothing more.
   if (fix.pushedAt != null) return <PushedCard fix={fix} />;
@@ -876,16 +932,24 @@ function PushControls({
       </p>
     );
   }
+  if (mergeOnly && !canPushSameBranch) {
+    return (
+      <p className="mt-2 text-meta text-ui-mute">
+        A fix with a merge pushes only to the PR's own branch, and you can't push to it.
+      </p>
+    );
+  }
 
-  const branchInvalid = target === 'new' && branch.trim().length === 0;
+  const effectiveTarget = mergeOnly ? 'existing' : target;
+  const branchInvalid = effectiveTarget === 'new' && branch.trim().length === 0;
   const busy = push.isPending;
 
   const doPush = (): void => {
     push.mutate({
       fixId: fix.id,
       body: {
-        target,
-        branch: target === 'new' ? branch.trim() : undefined,
+        target: effectiveTarget,
+        branch: target === 'new' && !mergeOnly ? branch.trim() : undefined,
       },
     });
   };
@@ -913,7 +977,7 @@ function PushControls({
       >
         <RadioBox
           className="mt-0"
-          checked={target === 'existing'}
+          checked={effectiveTarget === 'existing'}
           disabled={!canPushSameBranch || busy}
           onChange={() => setTarget('existing')}
         />
@@ -922,16 +986,18 @@ function PushControls({
           <span className="font-mono text-ui-faint">({headInfo.headRef})</span>
         )}
       </label>
-      <label className="mt-1 flex items-center gap-2 text-meta">
-        <RadioBox
-          className="mt-0"
-          checked={target === 'new'}
-          disabled={busy}
-          onChange={() => setTarget('new')}
-        />
-        New branch + open a PR
-      </label>
-      {target === 'new' && (
+      {!mergeOnly && (
+        <label className="mt-1 flex items-center gap-2 text-meta">
+          <RadioBox
+            className="mt-0"
+            checked={target === 'new'}
+            disabled={busy}
+            onChange={() => setTarget('new')}
+          />
+          New branch + open a PR
+        </label>
+      )}
+      {target === 'new' && !mergeOnly && (
         <input
           type="text"
           className="mt-1 w-full rounded-ui bg-ui-raise px-2 py-1 font-mono text-meta ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent touch:min-h-10"
@@ -949,7 +1015,7 @@ function PushControls({
           disabled={busy || branchInvalid}
           onClick={doPush}
         >
-          {busy ? 'Pushing…' : target === 'new' ? 'Push + open PR' : 'Push'}
+          {busy ? 'Pushing…' : effectiveTarget === 'new' ? 'Push + open PR' : 'Push'}
         </button>
         {/* "Run tests": the results' one line. Push works whatever they say. */}
         <ChecksStatus checks={fix.checks} />

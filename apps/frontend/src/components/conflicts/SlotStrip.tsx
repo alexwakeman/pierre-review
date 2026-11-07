@@ -1,7 +1,4 @@
-import { useState } from 'react';
 import type { ConflictDecision, ConflictRegion } from '@pierre-review/shared';
-import { useClaudeMark, useClaudeRunProviderName } from '../../store/conflictClaude.js';
-import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import type { SlotDecision, SlotRole } from '../../lib/mergeResolver.js';
 import {
   AcceptBothIcon,
@@ -9,7 +6,6 @@ import {
   AcceptRightIcon,
   IgnoreHunkIcon,
   PencilIcon,
-  SparkleIcon,
   SwapOrderIcon,
   UndoIcon,
   WandIcon,
@@ -96,11 +92,6 @@ export function SlotStrip({
 }): JSX.Element {
   const labels = actionLabels(baseRef);
   const tab = active ? 0 : -1;
-  const claude = useClaudeMark(fileIndex, region.id);
-  // The provider that RAN "Resolve with …" (the run's own), else the active one.
-  const activeName = useAiProviderName();
-  const aiName = useClaudeRunProviderName() ?? activeName;
-  const [whyOpen, setWhyOpen] = useState(false);
   const allows = (d: ConflictDecision): boolean => region.allowed.includes(d);
   const wandOffered = region.wand?.reason === 'disjoint_words' && allows('disjoint_merge');
 
@@ -142,29 +133,8 @@ export function SlotStrip({
       }`}
     >
       <span className={`mr-1 text-meta font-medium ${role == null ? '' : INK_CLASS[role]}`}>
-        {/* An edited region Claude wrote is not "Your text". */}
-        {claude?.decision === 'edited' ? `${aiName}’s text` : stateWord(region, slot)}
+        {stateWord(region, slot)}
       </span>
-      {/* ⚠ "Resolve with Claude"'s mark, shown only while the decision is still Claude's
-          (`useClaudeMark` checks the live decision). The reason is one click away and never
-          hover-only: the chip toggles it in place. */}
-      {claude != null && (
-        <button
-          type="button"
-          tabIndex={tab}
-          aria-expanded={whyOpen}
-          title={claude.rationale || `Decided by ${aiName}`}
-          onClick={() => {
-            onActivate();
-            setWhyOpen((o) => !o);
-          }}
-          className="hit inline-flex items-center gap-1 rounded-ui bg-ai-signal-fill/10 px-1 py-0.5 text-meta font-medium leading-none text-ai-signal"
-        >
-          <SparkleIcon size={11} />
-          {aiName}
-          {claude.confidence === 'low' && <span className="font-normal">· not sure</span>}
-        </button>
-      )}
       {sideTakes &&
         allows('ours') &&
         button('ours', slot.kind === 'left', labels.left, <AcceptLeftIcon size={13} />, 'ours')}
@@ -222,11 +192,6 @@ export function SlotStrip({
       )}
       {slot.kind !== 'unapplied' &&
         button('undo', false, labels.undo, <UndoIcon size={13} />, null)}
-      {claude != null && whyOpen && (
-        <span className="basis-full text-meta text-ui-ink">
-          {claude.rationale || `${aiName} gave no reason.`}
-        </span>
-      )}
     </div>
   );
 }

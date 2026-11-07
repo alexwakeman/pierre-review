@@ -1867,8 +1867,8 @@ blocklist." That is what happened. Every AI Fix run is now a sandboxed workspace
 shell inside the container ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, [SECURITY.md](SECURITY.md) §
 Workspace sessions); the shell-less fixer, its prompts, "Run tests" and the "Not built or tested here."
 line are removed. "The host owns the commit and the push" is unchanged: the patch leaves the sandbox and
-the HOST pushes it. The host-side worktree run (`coding/agent.ts`) is left only for Resolve with Claude,
-which is read-only and still has no shell (`coding/tool-surface.test.ts`).
+the HOST pushes it. The host-side worktree run (`coding/agent.ts`) and its last caller, Resolve with Claude,
+were removed the same day; AI Fix's MERGE item resolves conflicts in the sandbox.
 
 ### AI Fix pushes as-is (trunk reconciliation removed)
 

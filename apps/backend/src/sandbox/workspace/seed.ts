@@ -97,6 +97,11 @@ export interface FixSeedInput {
   nonce: string;
   /** Manual sessions only: the PR's ticket, for context (`TICKET.md`). */
   contextTicket: SessionTicket | null;
+  /**
+   * The "Resolve merge conflicts" item (sandbox/session/fix-merge.ts): Limn starts the merge of `baseSha`
+   * (the tip of `baseRef`) before the agent starts; the agent resolves it FIRST. Absent ⇒ no merge.
+   */
+  merge?: { baseRef: string; baseSha: string; mergeBaseSha: string; startScript: string } | null;
 }
 
 export interface FixSeedBuildInput extends Omit<SeedInput, 'kind' | 'ticket' | 'mode'> {
@@ -445,6 +450,7 @@ export function fixMarkdown(i: FixSeedBuildInput): string {
     '',
     body === '' ? '_None._' : fence('PR DESCRIPTION', f.nonce, body.length <= FIX_BODY_MAX ? body : `${body.slice(0, FIX_BODY_MAX)}\n…(cut)`),
     '',
+    ...(f.merge ? [mergeSection(i), ''] : []),
     '## What to fix',
     '',
     f.task.kind === 'review' ? f.task.text.trim() : ['From the person who asked for this fix:', '', fence('TASK', f.nonce, f.task.text.trim())].join('\n'),
@@ -478,6 +484,26 @@ export function fixMarkdown(i: FixSeedBuildInput): string {
   return out.join('\n');
 }
 
+/** FIX.md's merge section (the MERGE item): what Limn started, and how the agent finishes it. */
+function mergeSection(i: FixSeedBuildInput): string {
+  const f = i.fix;
+  const m = f.merge!;
+  return [
+    '## First: the merge conflicts (MERGE)',
+    '',
+    `Limn has started a merge of \`${m.baseRef}\` at ${short(m.baseSha)} (\`refs/limn/merge-target\`) into \`${i.branch}\` in \`${f.pr.repoPath}\`. \`git status\` lists the files in conflict. Finish this merge BEFORE any other item.`,
+    '',
+    `1. Resolve each conflict with judgement. Read both sides and the common ancestor \`refs/limn/merge-base\` (${short(m.mergeBaseSha)}): \`git diff refs/limn/merge-base refs/limn/merge-target -- <file>\` shows what \`${m.baseRef}\` changed, \`git diff refs/limn/merge-base refs/limn/base -- <file>\` what the pull request changed. Keep what both sides meant. Take one side whole only when that is right.`,
+    '2. After each file, read the lines around every hunk you resolved. No line may be there twice, no line either side added may be lost, and no conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) may stay.',
+    `3. \`git add\` each file, then \`git commit --no-edit\`. That makes the MERGE COMMIT. Its parents must be the PR head (\`refs/limn/base\`) and \`refs/limn/merge-target\`, in that order. Do not use \`git merge --abort\`, \`git merge --squash\`, \`git rebase\`, \`git cherry-pick\` or \`git commit --amend\` on it. To start the merge again: \`git reset --hard refs/limn/base && sh ${m.startScript} ${f.pr.repoPath} ${m.baseRef}\`.`,
+    '4. Build and run the checks that cover the files you resolved.',
+    '5. Then fix the other items in NEW commits on top of the merge commit (or leave them in the working tree).',
+    `6. In the report, cite MERGE in \`changes\` for each file you resolved, or list MERGE in \`unaddressed\` with the reason.`,
+    '',
+    'The history here is cut: `git log` shows only the PR head, the base and their common ancestor. Limn checks the merge commit before anything is pushed. When the merge fails a check, nothing is pushed.',
+  ].join('\n');
+}
+
 /** The context TICKET.md of a manual fix: the ticket, under a line that says it is NOT the task. */
 export function fixContextTicketMarkdown(t: SessionTicket): string {
   return [
@@ -493,6 +519,7 @@ function fixSystemPrompt(i: FixSeedBuildInput, provider: AiProviderId): string {
   return [
     `You are in a Limn workspace session to fix pull request #${f.pr.number} in ${f.pr.repoFullName}. Read \`${own}\` and \`${posix.join(i.layout.root, 'FIX.md')}\` before anything else.`,
     f.planFirst ? 'Until the reader presses Start fix, read and plan only: do not change files.' : null,
+    f.merge ? `A merge of \`${f.merge.baseRef}\` is in progress in \`${f.pr.repoPath}\`: resolve it and commit the merge commit first, as FIX.md says.` : null,
     `Change files only in \`${f.pr.repoPath}\`. Never push or add a remote. End every build turn by writing \`${posix.join(i.layout.root, FIX_REPORT_FILE)}\` and running \`node ${FIX_REPORT_CHECKER}\` until it prints OK.`,
   ]
     .filter((x): x is string => x != null)

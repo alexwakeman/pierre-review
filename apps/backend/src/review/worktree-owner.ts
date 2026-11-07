@@ -24,7 +24,6 @@ export type WorktreeKind =
   | 'ticket_review'
   | 'diagram'
   | 'merge'
-  | 'resolve'
   // "Implement story" (docs/STORY-BUILD.md): TWO kinds, so a runId names ONE table — the plan pass's
   // read-only checkouts ('story_plan', runId = story_builds.id) and each repository's KEPT write worktree
   // ('story_build', runId = story_build_repos.id).

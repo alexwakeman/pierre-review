@@ -1496,8 +1496,8 @@ Cross-cutting:
 
 ### [x] Overview: Conflicts row and conflict-resolver entry → unchanged (same row component)
 - Entry: Overview, under Status, when `conflictsRowVisible(state, verdict)`. Other resolver entries:
-  MergeControl's conflict box, the Pending conflicts card, AI Fix's ConflictAiCard and the "Also
-  resolve merge conflicts with <base>" checkbox
+  MergeControl's conflict box and the Pending conflicts card (AI Fix's ConflictAiCard and its "Also
+  resolve" checkbox were REMOVED 2026-11-07; the AI path is the picker's merge item)
 - Files: `ChecksTab.tsx`, `conflicts/ResolveConflictsButton.tsx`, `store/conflictResolver.ts`, `lib/ui.ts`
 - Essential info:
   - [ ] The row exists whenever conflicts block the merge, even without push access
@@ -2031,10 +2031,10 @@ Cross-cutting:
 ### [x] AI Fix tab (picker, plan first, run, result, push, history) → section titles 15px (no uppercase), panels surface-toned, buttons on tokens, checkboxes/radios themed (`accent-ui-accent-fill`; still native inputs — `{canPlan && (<label` stays pinned); Model is the custom Select
 - Entry: `?prTab=ai_fix`, "Generate fix from this review" (`aiFixTabFocus`), AiFixBanner rows
 - Files: `AiFixTab.tsx`, `AiFix/FixPicker.tsx`, `AiFix/fixPickerModel.ts`, `AiFix/PlanPanel.tsx`,
-  `AiFix/FixReport.tsx`, `AiFix/ConflictAiCard.tsx`, `AiFixBanner.tsx`, `ModelPicker.tsx`
+  `AiFix/FixReport.tsx`, `AiFixBanner.tsx`, `ModelPicker.tsx` (`AiFix/ConflictAiCard.tsx` REMOVED 2026-11-07)
 - Essential info:
   - [ ] ⓘ AI Fix: no shell, builds and tests nothing; what is ticked by default; Plan first; nothing pushed until Push
-  - [ ] ConflictAiCard when resolvable ("Resolve merge conflicts with <name>", AiRunGate resolve, "Run again")
+  - [ ] The picker's "Resolve merge conflicts with <base>" row when the PR conflicts (ConflictAiCard REMOVED 2026-11-07)
   - [ ] Without a review: "A fix starts from a finished AI review." (or "… One is running.") and "Open AI Review"
   - [ ] Picker sections: <By>'s findings, Earlier findings still open, Threads <By> says need a fix,
     Unanswered threads, CI failures, SonarCloud issues, Style bot comments, Ticket gaps; "Won't
@@ -2049,7 +2049,6 @@ Cross-cutting:
 - Actions:
   - [ ] "New fix"
   - [ ] Tick / untick items, "Tick all" / "Untick all"
-  - [ ] "Also resolve merge conflicts with <base>" checkbox
   - [ ] Pick a model
   - [ ] "Plan first" checkbox
   - [ ] "Start fix" / "Make a plan" (AiRunGate fix)
@@ -2072,7 +2071,7 @@ Cross-cutting:
 - Files: `conflicts/ConflictResolverOverlay.tsx`, `ResolverToolbar.tsx`, `ResolverPanes.tsx`,
   `FileMenu.tsx`, `SlotStrip.tsx`, `SlotRow.tsx`, `RegionRibbons.tsx`, `RegionEditPanel.tsx`,
   `OutstandingPopover.tsx`, `BasePopover.tsx`, `LandingStep.tsx`, `CommitResultPanel.tsx`,
-  `CloseResolverConfirm.tsx`, `ClosedResolverToast.tsx`, `ClaudeResolutionBanner.tsx`, `copy.ts`
+  `CloseResolverConfirm.tsx`, `ClosedResolverToast.tsx`, `copy.ts` (`ClaudeResolutionBanner.tsx` REMOVED 2026-11-07)
   (all under `components/conflicts/`), `store/conflictResolver.ts`
 - Essential info:
   - [ ] Three panes (your version, result, base version) with ink/wash classes for change, conflict, applied, ignored

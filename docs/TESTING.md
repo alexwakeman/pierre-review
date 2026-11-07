@@ -29,7 +29,7 @@ loop while iterating, and the plain form is the check before pushing.
     `review/clone-hygiene`, `review/worktree-gc`, `coding/git` (`applyPatchToWorktree`),
     `coding/merge`, `coding/story-build/{push-branch,base-refs}`.
   - The fake Codex CLI (a node script per `codex exec`, one more per `exec resume` retry):
-    `coding/codex-resolve`, `ai/providers/codex`, `ai/codex/{app-server,run,hook-process,threads}`,
+    `ai/providers/codex`, `ai/codex/{app-server,run,hook-process,threads}`,
     `ai/codex/kinds/*`, `review/codex-review-runs`, `api/routes/ai-codex` (the sign-in routes).
   - Other child processes: `ai/codex/workspace-mcp-process` (the workspace MCP server under tsx).
   - The runtime installer (a stand-in npm per case): `ai/runtime-install`.
@@ -124,7 +124,7 @@ The browser checks can skip a backend-only PR because they do not read the backe
 answer every `/api` request from `apps/frontend/e2e/mock-api.ts`.
 
 `--changed` walks static AND dynamic imports (`await import()` in a `beforeAll` counts), so a PR
-that edits `conflict/model.ts` runs the conflict suites and `codex-resolve`, and one that edits
+that edits `conflict/model.ts` runs the conflict suites, and one that edits
 `ai/codex/hook-rule.ts` runs every Codex suite. Some inputs are not imports — the migration chain
 every DB suite applies, recorded `__fixtures__`, the `*-main.ts` entry files the Codex tests spawn,
 the ML scorer's child (`ml/scorer-process.ts`),
@@ -153,7 +153,7 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 |---|---|---|
 | Cross-account isolation (every query filters on `accountId`; id getters 404) | `platform/test/isolation.test.ts`, `ai/agent-isolation.test.ts`, and `pnpm --filter @pierre-review/backend verify:isolation` (a script, not vitest) | fast |
 | Rate-limit tiers (`tierFor`, exact path segments in `hitsGithub`) | `api/plugins/rate-limit.test.ts` | fast |
-| The host-side worktree agent (Resolve with Claude) has no shell and writes nothing; AI Fix and Implement have a shell ONLY in the sandbox | `coding/tool-surface.test.ts`, `ai/provider-seam.test.ts` | fast |
+| No host-side worktree agent is left (`coding/agent.ts` removed); AI Fix and Implement have a shell ONLY in the sandbox | `ai/provider-seam.test.ts` | fast |
 | Every model call through `ai/provider.ts` | `ai/provider-seam.test.ts` | fast |
 | Claude's prompts byte-identical (`prompt-golden.json`) | `review/claude-review/prompts.test.ts`, `ai/prompt-tools.test.ts` | fast |
 | Auto-post: claimed (compare-and-set) BEFORE any GitHub write, never retried; the hidden marker | `review/claude-review/auto-post.test.ts`, `review/claude-review/pair-auto-post.test.ts`, `review/ticket-review/auto-post.test.ts`, `coding/ai-fix/auto-push.test.ts` | fast |
@@ -165,7 +165,7 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 | The runtime CLI never gets a credential | `sandbox/runtime/host-env.test.ts` | fast |
 | The conflict resolver (no marker reaches a blob, the wand never picks a side, the commit blocked until every decidable region is decided) | `conflict/*` | slow |
 | AI Fix as a sandboxed session (start at once, the report file, left-out repos, Plan first, unattended runs, no runtime, caps) | `sandbox/session/fix-session-flow-db.test.ts`, `sandbox/workspace/fix-report.test.ts`, `coding/ai-fix/auto-fix.test.ts`, `merge/dependency-automation-teams.test.ts` | fast |
-| Resolve with Claude on Codex | `coding/codex-resolve.test.ts` | slow |
+| AI Fix's MERGE: only a merge with parents (PR head, base tip), no marker left and fixes on top is pushable; the item never in an auto fix | `coding/ai-fix/merge-verify.test.ts`, `sandbox/session/fix-merge-session-flow-db.test.ts` (slow), `coding/ai-fix/review-seed.test.ts`, `merge/dependency-automation-ai.test.ts` (fast) | both |
 | The worktree sweep keeps a tree a live job uses | `review/worktree-gc-policy.test.ts` (fast), `review/worktree-gc.test.ts` (slow) | both |
 | `isRetryableGithubError` keeps 403/429 out | `github/client.test.ts` | fast |
 | Derived thread state | `sync/derive-thread-state.test.ts` + `sync/__fixtures__/threads/` | fast |

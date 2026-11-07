@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ConflictAiChoice, DependencyAutomationPolicy } from '@pierre-review/shared';
+import type { DependencyAutomationPolicy } from '@pierre-review/shared';
 import {
   REBASE_WAIT_MS,
   aiFixEligibility,
   dependencyFixInstruction,
-  aiResolutionCommit,
+  dependencyConflictInstruction,
   classifyDependencyUpdate,
   conflictStep,
   isTrustedDependencyBot,
@@ -167,45 +167,12 @@ describe('conflictStep', () => {
   });
 });
 
-describe('aiResolutionCommit', () => {
-  const choice = (fileIndex: number, regionId: number, over: Partial<ConflictAiChoice> = {}): ConflictAiChoice => ({
-    fileIndex,
-    regionId,
-    decision: 'theirs',
-    editId: null,
-    lines: null,
-    rationale: '',
-    confidence: 'high',
-    ...over,
-  });
-  const file = {
-    index: 0,
-    path: 'package.json',
-    unsupported: null,
-    regions: [
-      { id: 0, kind: 'unchanged' as const },
-      { id: 1, kind: 'conflict' as const },
-      { id: 2, kind: 'theirs_only' as const },
-    ],
-  };
-  it('builds every decidable region’s decision', () => {
-    const out = aiResolutionCommit([file], [choice(0, 1), choice(0, 2, { decision: 'edited', editId: 'e1' })]);
-    expect(out).toEqual({
-      ok: true,
-      files: [{ index: 0, decisions: [{ id: 1, decision: 'theirs' }, { id: 2, decision: 'edited', editId: 'e1' }] }],
-    });
-  });
-  it('refuses an undecided region, a low-confidence one, and an unsupported file', () => {
-    expect(aiResolutionCommit([file], [choice(0, 1)])).toEqual({ ok: false, refusal: 'undecided' });
-    expect(aiResolutionCommit([file], [choice(0, 1), choice(0, 2, { confidence: 'low' })])).toEqual({
-      ok: false,
-      refusal: 'unsure',
-    });
-    expect(aiResolutionCommit([{ ...file, unsupported: 'binary' }], [])).toEqual({
-      ok: false,
-      refusal: 'unsupported_files',
-    });
-    expect(aiResolutionCommit([], [])).toEqual({ ok: false, refusal: 'nothing' });
+describe('dependencyConflictInstruction', () => {
+  it('asks for the merge item and nothing else, and keeps the update', () => {
+    const t = dependencyConflictInstruction({ title: 'Bump  lodash\nfrom 4.17.20', bot: 'Dependabot', baseRef: 'main' });
+    expect(t).toContain('opened by Dependabot: "Bump lodash from 4.17.20"');
+    expect(t).toContain('It conflicts with main. Resolve the merge conflicts (MERGE) and change nothing else.');
+    expect(t).toMatch(/Do not downgrade or revert the updated dependency/);
   });
 });
 

@@ -510,9 +510,9 @@ export const config = {
   // (Review concurrency + queue caps + the routing thresholds moved to the plugin's
   // PRO_REVIEW_* env — the plugin owns the queue/manager + the mode-routing decision.)
 
-  // ---- AI Fix — caps for the sandboxed fix session (sandbox/session/fix.ts) and Resolve with Claude ----
+  // ---- AI Fix — caps for the sandboxed fix session (sandbox/session/fix.ts) ----
   // AI_FIX_MAX_TURNS caps every agent turn; AI_FIX_BUDGET_USD is the US$ cap of an UNATTENDED fix
-  // (Claude Code's `--max-budget-usd`) and of a Resolve with Claude run.
+  // (Claude Code's `--max-budget-usd`), dependency automation's conflict run included.
   aiFixMaxTurns: intFromEnv('AI_FIX_MAX_TURNS', 40),
   aiFixBudgetUsd: floatFromEnv('AI_FIX_BUDGET_USD', 5),
   // Refuse a fix whose captured patch exceeds this (a runaway diff shouldn't bloat a

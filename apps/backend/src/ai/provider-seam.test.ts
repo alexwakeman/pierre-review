@@ -9,7 +9,7 @@
 // test mutates a runner in memory and asserts the predicate flips.
 //
 //   pnpm --filter @pierre-review/backend test ai/provider-seam
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -41,10 +41,9 @@ const isSdkCaller = (src: string): boolean => SDK_CALL.test(code(src));
 
 const ALLOWED = new Set(['ai/providers/claude.ts', 'ai/runtime.ts']);
 
-// The 13 runners + the one-shot seam the provider must cover (docs/CODEX-PLAN.md § 3.1).
+// The 12 runners + the one-shot seam the provider must cover (docs/CODEX-PLAN.md § 3.1).
 const RUNNERS = [
   'review/agent.ts',
-  'coding/agent.ts',
   'reference-docs/agent.ts',
   'review/chat-agent.ts',
   'review/ci-review/agent.ts',
@@ -89,9 +88,10 @@ describe('the provider seam', () => {
       const viaRunProvider = /runProvider\(/.test(src) && /\bprovider\.runAgent\(/.test(src);
       expect(direct || once || viaNamed || viaRunProvider, `${f} must call the provider`).toBe(true);
     }
-    // The resolver runs through the host-side worktree run (coding/agent.ts runAgentInWorktree) — its ONLY
-    // caller now: AI Fix and Implement run in the sandbox (their drivers start the CLI, never a provider).
-    expect(code(readFileSync(join(SRC, 'coding/ai-resolve/run.ts'), 'utf8'))).toMatch(/runAgentInWorktree\(/);
+    // No host-side worktree agent is left: AI Fix (conflicts included) and Implement run in the sandbox (their
+    // drivers start the CLI, never a provider), and "Resolve with Claude" was removed with coding/agent.ts.
+    expect(existsSync(join(SRC, 'coding/agent.ts'))).toBe(false);
+    expect(existsSync(join(SRC, 'coding/ai-resolve'))).toBe(false);
     for (const f of ['coding/ai-fix/manager.ts', 'sandbox/session/fix.ts', 'coding/ai-fix/auto-fix.ts', 'merge/dependency-automation.ts']) {
       const src = code(readFileSync(join(SRC, f), 'utf8'));
       expect(src, f).not.toMatch(/runAgentInWorktree|coding\/agent\.js|generateFix|generatePlan/);

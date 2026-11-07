@@ -12,7 +12,7 @@
 // owner decision 7, docs/STORY-BUILD.md), on BOTH providers — and NOTHING ELSE. REVIEW_EFFORT and
 // REVIEW_DIFF_ONLY_EFFORT reach exactly the same runs as the Settings control (REVIEW_EFFORT IS the
 // control, locked), so "Set by REVIEW_EFFORT" under it is the whole story. Every other agent kind
-// (diagrams, chats, Resolve with Claude) runs at its provider's own fixed depth
+// (diagrams, chats) runs at its provider's own fixed depth
 // (`defaultRunEffort`), which reads no environment — except Check against docs, whose read is pinned to
 // 'low' on both providers (review/story-docs/prompts.ts STORY_DOCS_EFFORT: the sections' text is in the
 // prompt, so it is reading, not search). Still a fixed depth; this setting does not reach it.

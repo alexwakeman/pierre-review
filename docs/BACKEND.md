@@ -166,7 +166,7 @@ only when the response carried it.
 ### Worktree cleanup (the ledger and the sweep)
 
 Every agentic run that reads code (Claude Review, chat, AI Fix and Plan first, Check threads, the
-replies pass, the CI review, the ticket review, diagrams, update-from-trunk, Resolve with Claude)
+replies pass, the CI review, the ticket review, diagrams, update-from-trunk)
 checks a PR out into its own worktree, `<cloneDir>/<owner__name>/.worktrees/<sha>-<pid>-<n>`, made
 ONLY by `review/clone-manager.ts` `addWorktree` and removed by the run's own `finally`. A crash, a
 kill or a failed `git worktree remove` leaves a full checkout behind. Two pieces collect them:

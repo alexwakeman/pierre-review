@@ -1,20 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
 import type { MergeVerdict, PrState } from '@pierre-review/shared';
 import { conflictResolverEntryVisible, type ConflictResolverEntry } from '../../lib/ui.js';
 import { useMe } from '../../hooks/useTriage.js';
 import { openConflictResolver, type ResolverTarget } from '../../store/conflictResolver.js';
-import { CaretIcon, ConflictIcon, SparkleIcon } from '../Icons.js';
-import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { useClickOutside } from '../../hooks/useClickOutside.js';
-import {
-  cancelConflictAiRun,
-  conflictAiPhaseLabel,
-  conflictAiRunActive,
-  startConflictAiRun,
-  useConflictAiRun,
-} from '../../hooks/useConflictAiResolve.js';
-import { AiRunGate } from '../AiSetup.js';
-import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
+import { ConflictIcon } from '../Icons.js';
 
 /**
  * THE GATE, with the one fact that is not on the caller's payload supplied.
@@ -72,146 +60,21 @@ export function ResolveConflictsButton({
   buttonClass?: string;
 }): JSX.Element | null {
   const show = useConflictResolverEntry({ state, verdict, viewerCanPush });
-  const ai = useAiCapabilities();
   if (!show) return null;
   const cls =
     buttonClass ??
     `inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3 ${className ?? ''}`;
-  // ⚠ WITHOUT THE AGENTIC FEATURES (cloud, LIMN_AI_DISABLED) THERE IS ONE WAY TO RESOLVE, SO THERE
-  // IS NO MENU: the plain button, exactly as before.
-  if (!ai.enabled) {
-    return (
-      <button
-        type="button"
-        onClick={() => openConflictResolver(target)}
-        className={cls}
-        title={`Resolve the conflicts in ${target.repoFullName} #${target.prNumber}`}
-      >
-        <ConflictIcon size={12} />
-        Resolve conflicts
-      </button>
-    );
-  }
-  return <ResolveConflictsMenu target={target} buttonClass={cls} />;
-}
-
-/**
- * The split entry: "Resolve manually" or "Resolve with Claude". ⚠ STILL FETCHES NOTHING ON MOUNT —
- * the run store is module state and a PR with no run issues no request; everything happens on the
- * click. Choosing Claude starts the run, shows its progress here, then opens the resolver with
- * Claude's decisions filled in (`useClaudePrefill`). A missing AI runtime or credential is the ONE
- * `AiRunGate`, in place of the Claude item.
- */
-function ResolveConflictsMenu({
-  target,
-  buttonClass,
-}: {
-  target: ResolverTarget;
-  buttonClass: string;
-}): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const run = useConflictAiRun(target.prId);
-  const active = conflictAiRunActive(run);
-  const ai = useAiCapabilities();
-  const aiReady = aiReadyFor(ai, 'resolve');
-  const name = ai.providerName;
-  useClickOutside(rootRef, () => setOpen(false), open);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
-
-  if (active && run != null) {
-    return (
-      <div className="inline-flex min-w-[14rem] flex-col gap-1">
-        <div className="flex items-center gap-2 text-meta text-ui-ink">
-          <SparkleIcon size={12} className="text-ai-signal" />
-          <span>{conflictAiPhaseLabel(run.phase, name)}</span>
-          <button
-            type="button"
-            onClick={() => cancelConflictAiRun(target.prId)}
-            className="hit ml-auto text-meta text-ui-mute underline underline-offset-2 hover:text-ui-ink"
-          >
-            Cancel
-          </button>
-        </div>
-        <RegenProgressBar active label={`Resolving conflicts with ${name}`} timeConstantSec={60} />
-      </div>
-    );
-  }
-
-  const item =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-meta text-ui-ink hover:bg-ui-hover touch:min-h-11';
+  // ONE WAY HERE: the resolver, by hand. An AI resolution is AI Fix's "Resolve merge conflicts" item
+  // (the AI Fix tab), made in the sandbox and checked before Push; "Resolve with Claude" was removed.
   return (
-    <div ref={rootRef} className="relative inline-flex flex-col items-start gap-1">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={buttonClass}
-        title={`Resolve the conflicts in ${target.repoFullName} #${target.prNumber}`}
-      >
-        <ConflictIcon size={12} />
-        Resolve conflicts
-        <CaretIcon dir="down" className="shrink-0 opacity-70" />
-      </button>
-      {run?.phase === 'failed' && run.error != null && (
-        <span className="text-meta text-ui-danger">{run.error}</span>
-      )}
-      {open && (
-        <div
-          role="menu"
-          aria-label="Resolve conflicts"
-          className="absolute left-0 top-full z-[55] mt-1 w-56 rounded-ui border border-ui-line bg-ui-surface py-1 shadow-lg"
-        >
-          <button
-            role="menuitem"
-            type="button"
-            className={item}
-            onClick={() => {
-              setOpen(false);
-              openConflictResolver(target);
-            }}
-          >
-            <ConflictIcon size={13} />
-            Resolve manually
-          </button>
-          {/* ⚠ THE ONE GATE. No runtime or no credential: its own line (or "Set up AI") in place
-              of the item, never a hidden feature and never a second copy of that rule. */}
-          {aiReady ? (
-            <button
-              role="menuitem"
-              type="button"
-              className={item}
-              onClick={() => {
-                setOpen(false);
-                startConflictAiRun(target, { providerName: name });
-              }}
-            >
-              <SparkleIcon size={13} />
-              Resolve with {name}
-            </button>
-          ) : (
-            <div className="px-3 py-1.5">
-              <AiRunGate kind="resolve">
-                <span />
-              </AiRunGate>
-            </div>
-          )}
-          <p className="px-3 pb-1 pt-0.5 text-meta text-ui-mute">
-            You check {name}’s choices before anything is pushed.
-          </p>
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => openConflictResolver(target)}
+      className={cls}
+      title={`Resolve the conflicts in ${target.repoFullName} #${target.prNumber}`}
+    >
+      <ConflictIcon size={12} />
+      Resolve conflicts
+    </button>
   );
 }

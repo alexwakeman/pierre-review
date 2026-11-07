@@ -17,6 +17,12 @@
 // checks it with the same validator the in-sandbox checker runs, and normalises it against the extracted
 // diff (review-seed.ts `normalizeChangeReport`) — the patch stays authoritative.
 //
+// THE MERGE (sandbox/session/fix-merge.ts; docs/SANDBOX.md § AI Fix sessions, "The merge"): a fix with the
+// "Resolve merge conflicts" item resolves the base tip and the merge base on the host (`bases`), brings both
+// commits into the PR repository and starts the merge before the agent starts (`afterMirror`), and after
+// every build turn reads the agent's commits out as a bundle, which the host checks (`storeFixTurn`). Only a
+// VALID merge is pushable; the row's `patch` is then the fix on top of the merge.
+//
 // ⚠ ONE FIX PER PR, claimed SYNCHRONOUSLY (`claimFixPr`) in the tick of the start's checks and released
 //   on every bail path and on the close; `isFixRunning(prId)` reads it.
 // ⚠ Nothing here pushes; the push is coding/ai-fix/push.ts (button-gated, or the existing automatic rules).
@@ -41,6 +47,23 @@ import type { FixAgentReport } from '../../platform/contract.js';
 import type { SandboxAgentChoice } from '../drivers/index.js';
 import { fixSessionBranch, readSessionTicket, type FixSeedInput, type RepoBaseRequest, type SessionTicket } from '../workspace/index.js';
 import { readFixReport, removeFixReport } from '../workspace/fix-report.js';
+import { defaultMirrorSeams } from '../workspace/mirror.js';
+import {
+  extractMergeTurn,
+  fetchCommitIntoSandbox,
+  fixRowHasWork,
+  MERGE_BASE_REF,
+  MERGE_ITEM_REF,
+  MERGE_TARGET_REF,
+  readMergeState,
+  RESOLUTION_DIFF_MAX_CHARS,
+  restoreMergeBundle,
+  START_MERGE_FILE,
+  startMergeInSandbox,
+  type FixMergeState,
+} from './fix-merge.js';
+import type { MergePlan } from '../../coding/ai-fix/merge-host.js';
+import type { MergeVerdict } from '../../coding/ai-fix/merge-verify.js';
 import {
   addItem,
   closeSession,
@@ -104,12 +127,42 @@ export function fixInstruction(o: { repoPath: string; afterPlan?: boolean; follo
 
 // ---- seams ----------------------------------------------------------------------------------------------
 
+export interface MergeRepoInput {
+  fixId: number;
+  owner: string;
+  name: string;
+  prNumber: number;
+  headSha: string;
+  baseRef: string;
+}
+
 export interface FixSessionDeps {
   /** The PR's ticket, for context (a manual fix only). Never fatal: null. */
   contextTicket(ctx: AgentContext, accountId: number, workspaceId: number, prId: number): Promise<SessionTicket | null>;
+  /** The merge: the base tip (pinned; `baseSha` on Resume) and the merge base, from Limn's clone cache. */
+  mergePlan(a: MergeRepoInput & { baseSha?: string | null }): Promise<MergePlan>;
+  /** The host's check of the agent's commits (coding/ai-fix/merge-verify.ts), in Limn's clone cache. */
+  verifyMerge(a: MergeRepoInput & { accountId?: number; baseSha: string; bundle: Buffer; conflictedFiles: readonly string[] }): Promise<MergeVerdict>;
 }
 
 const defaultFixDeps: FixSessionDeps = {
+  async mergePlan(a) {
+    const { resolveMergePlan } = await import('../../coding/ai-fix/merge-host.js');
+    return resolveMergePlan(a);
+  },
+  async verifyMerge(a) {
+    const { withMergeRepo, aiFixMergeRef } = await import('../../coding/ai-fix/merge-host.js');
+    const { verifyMergeBundle } = await import('../../coding/ai-fix/merge-verify.js');
+    try {
+      // The token reaches only the lazy blob fetch of the host's diffs (merge-verify.ts `hostMergeView`).
+      const token = a.accountId != null ? await (await import('../../auth/account.js')).getAccessToken(a.accountId).catch(() => null) : null;
+      return await withMergeRepo({ ...a }, (gitDir) =>
+        verifyMergeBundle({ gitDir, bundle: a.bundle, headSha: a.headSha, baseSha: a.baseSha, baseRef: a.baseRef, conflictedFiles: a.conflictedFiles, resultRef: aiFixMergeRef(a.fixId, 'result'), token }),
+      );
+    } catch {
+      return { ok: false, reason: 'Limn could not read its own copy of the repository to check the merge.' };
+    }
+  },
   async contextTicket(ctx, accountId, workspaceId, prId) {
     try {
       const { getTicketSource } = await import('../../tracker/ticket-source.js');
@@ -252,6 +305,8 @@ export interface FixSessionStart {
   shownRefs: string[];
   diff: { text: string; note: string | null };
   nonce: string;
+  /** The "Resolve merge conflicts" item: merge this base branch first. null ⇒ no merge. */
+  merge?: { baseRef: string } | null;
 }
 
 /** What the state keeps about the fix, so Resume and the wire need no GitHub call. */
@@ -270,6 +325,8 @@ interface FixFacts {
   shownRefs: string[];
   nonce: string;
   diffNote: string | null;
+  /** The merge item's base branch (the commits are in `ai_fixes.merge_json`). Absent ⇒ no merge. */
+  mergeBaseRef?: string | null;
 }
 
 type FixState = SessionStateJson & { fix?: FixFacts };
@@ -298,6 +355,7 @@ export function startFixSession(ctx: AgentContext, a: FixSessionStart): void {
     shownRefs: a.shownRefs,
     nonce: a.nonce,
     diffNote: a.diff.note,
+    ...(a.merge ? { mergeBaseRef: a.merge.baseRef } : {}),
   };
   bindFixClaim(a.pr.prId, a.fixId);
   const subject = fixSubject(ctx, { fixId: a.fixId, accountId: a.accountId, facts: state.fix, task: a.task, diff: a.diff.text, unattended: a.unattended, planFirst: a.planFirst });
@@ -318,6 +376,10 @@ function fixSubject(
   let prRepoPath: string | null = null;
   let contextTicket: SessionTicket | null = null;
   let pushedAt: Date | number | null = null;
+  // The merge (fix-merge.ts), once `bases` resolved it; written to `ai_fixes.merge_json` as it changes.
+  let merge: FixMergeState | null = null;
+  const saveMerge = (extra: { mergeBundle?: string | null } = {}): Promise<void> =>
+    updateFixSession(ctx, accountId, fixId, { mergeJson: merge as unknown as Record<string, unknown>, ...extra });
   const stateOf = (l: SubjectLive): FixState => (l as Live).state as FixState;
   const row = (): Promise<AiFixRow | null> => getFixById(ctx, accountId, fixId);
 
@@ -358,7 +420,7 @@ function fixSubject(
     },
     async hasStoredWork() {
       const r = await row();
-      return r != null && (r.patch ?? '') !== '' && r.pushedAt == null;
+      return r != null && fixRowHasWork(r) && r.pushedAt == null;
     },
     async readSubject(l) {
       const state = stateOf(l);
@@ -371,7 +433,24 @@ function fixSubject(
     async repoIds(memberRepoIds) {
       return [...new Set([...memberRepoIds, facts.prRepoId])];
     },
-    async bases(_l, repos) {
+    async bases(l, repos) {
+      if (facts.mergeBaseRef) {
+        // THE MERGE'S COMMITS, on the host: the base tip (Resume keeps the one picked at the start) and the
+        // merge base. Before the mirror, so FIX.md can name them.
+        const pr = repos.find((r) => r.repoId === facts.prRepoId);
+        if (!pr) throw new SessionFail(`${facts.fullName} is not in this workspace.`);
+        const kept = l.resume ? readMergeState((await row())?.mergeJson ?? null) : null;
+        let plan: MergePlan;
+        try {
+          plan = await fixDeps.mergePlan({ fixId, owner: pr.owner, name: pr.name, prNumber: facts.number, headSha: facts.headSha, baseRef: facts.mergeBaseRef, baseSha: kept?.baseSha ?? null });
+        } catch (err) {
+          throw new SessionFail(err instanceof Error ? err.message.split('\n')[0]! : `${facts.mergeBaseRef} could not be read.`);
+        }
+        merge = kept && kept.baseSha === plan.baseSha
+          ? { ...kept, mergeBaseSha: plan.mergeBaseSha }
+          : { baseRef: facts.mergeBaseRef, baseSha: plan.baseSha, mergeBaseSha: plan.mergeBaseSha, headSha: facts.headSha, conflictedFiles: [], status: 'pending', reason: null, mergeSha: null, resultSha: null, resolutionDiff: null, resolutionFiles: [] };
+        await saveMerge();
+      }
       const bases = new Map<number, RepoBaseRequest>();
       const labels = new Map<number, { label: string; note: string | null }>();
       for (const r of repos) {
@@ -399,21 +478,27 @@ function fixSubject(
         unattended,
         nonce: facts.nonce,
         contextTicket,
+        merge: merge ? { baseRef: merge.baseRef, baseSha: merge.baseSha, mergeBaseSha: merge.mergeBaseSha, startScript: START_MERGE_FILE } : null,
       };
       return { fix };
     },
-    async afterMirror(l, mirror) {
+    async afterMirror(l, mirror, bases) {
       const at = mirror.repos.find((r) => r.repoId === facts.prRepoId);
       if (!at) {
         const why = mirror.failed.find((f) => f.repoId === facts.prRepoId)?.reason ?? 'it could not be cloned';
         throw new SessionFail(`The pull request's repository could not be cloned: ${why}`);
       }
       prRepoPath = at.path;
-      void l;
+      if (merge && l.container) await prepareMerge(l as Live, at.path, bases.get(facts.prRepoId));
     },
     async restore(l, mirror) {
       const r = await row();
       const at = mirror.repos.find((m) => m.repoId === facts.prRepoId);
+      if (merge && r?.mergeBundle && at && l.container) {
+        // A merge's commits come back as commits (never as a patch over the merge).
+        await restoreMergeBundle((l as Live).runtime, l.container, at.path, Buffer.from(r.mergeBundle, 'base64'));
+        return 1;
+      }
       if (!r?.patch || !at || !l.container) return 0;
       await restoreRepoPatch((l as Live).runtime, l.container, at.path, r.patch, r.commitMessage?.trim() || 'AI fix: the work so far', 1);
       return 1;
@@ -435,7 +520,8 @@ function fixSubject(
     },
     async afterBuildTurn(l0) {
       const l = l0 as Live;
-      await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
+      if (merge) await storeMergeTurn(l);
+      else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
       return unattended ? 'close' : 'keep';
     },
     onPhase(l, phase) {
@@ -448,6 +534,8 @@ function fixSubject(
       const state = stateOf(l);
       if (phase === 'discarded' || phase === 'failed' || phase === 'pushed') {
         await dropAiFixBaseRefs(state.repos.map((r) => r.fullName), fixId).catch(() => {});
+        // The merge's commits are kept only while the fix can still be pushed.
+        if (merge) await updateFixSession(ctx, accountId, fixId, { mergeBundle: null }).catch(() => {});
       }
       // An AUTO fix that finished may be pushed automatically (auto-push.ts decides: the workspace's
       // "Push automatically", own PR only, never forced). Off the session: a push is not a turn.
@@ -456,13 +544,112 @@ function fixSubject(
       // never retried by a later close.
       if (phase === 'built' && unattended && facts.trigger === 'auto') {
         const r = await row();
-        if (r?.status === 'succeeded' && (r.patch ?? '') !== '') {
+        if (r?.status === 'succeeded' && fixRowHasWork(r)) {
           const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
           void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {});
         }
       }
     },
   };
+
+  /** After the mirror: the base tip and the merge base into the PR repository, then Limn starts the merge. */
+  async function prepareMerge(l: Live, repoPath: string, req: RepoBaseRequest | undefined): Promise<void> {
+    const m = merge!;
+    if (!req || !l.container) throw new SessionFail('The pull request\'s repository is not ready for the merge.');
+    const seams = sessionDeps().mirrorSeams ?? defaultMirrorSeams;
+    const { aiFixMergeRef } = await import('../../coding/ai-fix/merge-host.js');
+    const want: Array<{ ref: string; sha: string; pin: 'base' | 'merge-base' }> = [
+      { ref: MERGE_TARGET_REF, sha: m.baseSha, pin: 'base' },
+      { ref: MERGE_BASE_REF, sha: m.mergeBaseSha, pin: 'merge-base' },
+    ];
+    try {
+      for (const w of want) {
+        const source = await seams.prepare({ repoId: req.repoId, owner: req.owner, name: req.name, baseRef: m.baseRef, baseSha: w.sha, remoteRef: `refs/heads/${m.baseRef}`, pinRef: aiFixMergeRef(fixId, w.pin) });
+        try {
+          await fetchCommitIntoSandbox(l.runtime, l.container, repoPath, w.ref, source, (d) => seams.tarGitDir(d));
+        } finally {
+          await source.cleanup().catch(() => {});
+        }
+      }
+      // Resume with stored commits: `restore` puts them back; the merge is not started again.
+      const r = l.resume ? await row() : null;
+      if (r?.mergeBundle) return;
+      m.conflictedFiles = await startMergeInSandbox(l.runtime, l.container, repoPath, m.baseRef);
+    } catch (err) {
+      throw new SessionFail(`The merge of ${m.baseRef} could not be started: ${scrub(err)}`);
+    }
+    await saveMerge();
+    const n = m.conflictedFiles.length;
+    notice(
+      l,
+      n === 0
+        ? `Limn started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}). Git found no conflicts; the agent still makes the merge commit.`
+        : `Limn started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}): ${n === 1 ? 'one file is' : `${n} files are`} in conflict (${m.conflictedFiles.slice(0, 8).join(', ')}${n > 8 ? ', …' : ''}).`,
+    );
+  }
+
+  /** After a build turn of a fix with the merge: the commits out, the host's check, the fix on top, the report. */
+  async function storeMergeTurn(l: Live): Promise<void> {
+    const m = merge!;
+    if (!l.container || !prRepoPath || !l.layoutRoot) return;
+    let patch = '';
+    let files: string[] = [];
+    let gitMessage: string | null = null;
+    let error: string | null = null;
+    let bundle: string | null = null;
+    try {
+      const ex = await extractMergeTurn(l.runtime, l.container, prRepoPath, { maxPatchBytes: config.aiFixPatchMaxBytes });
+      patch = ex.fix.patch;
+      files = ex.fix.filesChanged;
+      gitMessage = ex.fix.commitMessage;
+      m.mergeSha = null;
+      m.resultSha = null;
+      m.resolutionDiff = ex.resolutionDiff;
+      m.resolutionFiles = ex.resolutionFiles;
+      if (ex.merging) m.reason = 'The merge is not finished: the agent did not commit it.';
+      else if (ex.mergeSha == null) m.reason = 'The agent made no merge commit.';
+      else if (ex.bundleTooLarge) m.reason = 'The merge is larger than Limn keeps (4 MB).';
+      else if (ex.bundle == null) m.reason = 'Limn could not read the merge out of the sandbox.';
+      else {
+        const pr = facts.fullName.split('/');
+        const v = await fixDeps.verifyMerge({ fixId, accountId, owner: pr[0]!, name: pr.slice(1).join('/'), prNumber: facts.number, headSha: m.headSha, baseRef: m.baseRef, baseSha: m.baseSha, bundle: ex.bundle, conflictedFiles: m.conflictedFiles });
+        if (!v.ok) m.reason = v.reason;
+        else if (v.mergeSha !== ex.mergeSha || v.resultSha !== ex.outSha) m.reason = 'The commits Limn checked are not the ones in the sandbox.';
+        else if (Buffer.byteLength(v.view.fixPatch, 'utf8') > config.aiFixPatchMaxBytes) m.reason = new PatchTooLargeError(Buffer.byteLength(v.view.fixPatch, 'utf8'), config.aiFixPatchMaxBytes).message;
+        else {
+          m.reason = null;
+          m.mergeSha = v.mergeSha;
+          m.resultSha = v.resultSha;
+          // ⚠ WHAT THE READER REVIEWS IS THE HOST'S (merge-verify.ts `HostMergeView`), from the verified
+          // commits Push sends — never the sandbox's own diffs, which the agent's machine wrote.
+          patch = v.view.fixPatch;
+          files = v.view.fixFiles;
+          m.conflictedFiles = v.view.conflictedFiles;
+          m.resolutionFiles = v.view.resolutionFiles;
+          m.resolutionDiff =
+            v.view.resolutionDiff.length > RESOLUTION_DIFF_MAX_CHARS
+              ? `${v.view.resolutionDiff.slice(0, RESOLUTION_DIFF_MAX_CHARS)}\n… (cut: the resolution is longer than Limn shows)\n`
+              : v.view.resolutionDiff;
+          bundle = ex.bundle.toString('base64');
+        }
+      }
+      m.status = m.reason == null ? 'valid' : ex.mergeSha == null && !ex.merging ? 'missing' : 'invalid';
+    } catch (err) {
+      error = err instanceof PatchTooLargeError ? err.message : scrub(err);
+      m.status = 'invalid';
+      m.reason = error;
+      notice(l, `${facts.fullName}: ${error}`);
+    }
+    await saveMerge({ mergeBundle: bundle });
+    notice(
+      l,
+      m.status === 'valid'
+        ? `Limn checked the merge commit: ${m.baseRef} is merged${m.conflictedFiles.length > 0 ? ` and ${m.conflictedFiles.length === 1 ? 'the conflict is' : `the ${m.conflictedFiles.length} conflicts are`} resolved` : ''}.`
+        : `Nothing will be pushed: ${m.reason}`,
+    );
+    await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath }, { patch, files, gitMessage, error, merge: m });
+  }
+
   return subject;
 }
 
@@ -481,25 +668,31 @@ async function storeFixTurn(
   ctx: AgentContext,
   l: Live,
   o: { fixId: number; accountId: number; facts: FixFacts; prRepoPath: string | null },
+  // A fix with the merge: the fix ON TOP of the merge, already read out (storeMergeTurn).
+  pre?: { patch: string; files: string[]; gitMessage: string | null; error: string | null; merge: FixMergeState },
 ): Promise<void> {
   if (!l.container || !o.prRepoPath || !l.layoutRoot) return;
   const state = l.state as FixState;
-  let patch = '';
-  let files: string[] = [];
-  let gitMessage: string | null = null;
-  let error: string | null = null;
-  try {
-    const got = await extractRepoPatch(l.runtime, l.container, o.prRepoPath, { maxBytes: config.aiFixPatchMaxBytes });
-    patch = got.patch;
-    files = got.filesChanged;
-    gitMessage = got.commitMessage;
-  } catch (err) {
-    error = err instanceof PatchTooLargeError ? err.message : scrub(err);
-    notice(l, `${o.facts.fullName}: ${error}`);
+  let patch = pre?.patch ?? '';
+  let files: string[] = pre?.files ?? [];
+  let gitMessage: string | null = pre?.gitMessage ?? null;
+  let error: string | null = pre?.error ?? null;
+  if (pre == null) {
+    try {
+      const got = await extractRepoPatch(l.runtime, l.container, o.prRepoPath, { maxBytes: config.aiFixPatchMaxBytes });
+      patch = got.patch;
+      files = got.filesChanged;
+      gitMessage = got.commitMessage;
+    } catch (err) {
+      error = err instanceof PatchTooLargeError ? err.message : scrub(err);
+      notice(l, `${o.facts.fullName}: ${error}`);
+    }
   }
 
   let report: FixAgentReport & { summary?: string; commitMessage?: string } | undefined;
-  const read = await readFixReport(l.runtime, l.container, l.layoutRoot, o.facts.shownRefs, files);
+  // The report may cite the files the MERGE resolved: they are in the merge commit, not in the fix's patch.
+  const reportFiles = pre ? [...new Set([...files, ...pre.merge.resolutionFiles, ...pre.merge.conflictedFiles])] : files;
+  const read = await readFixReport(l.runtime, l.container, l.layoutRoot, o.facts.shownRefs, reportFiles);
   if (read.kind === 'ok' && read.check.report) {
     report = read.check.report;
     const n = read.check.contentProblems.length;
@@ -511,7 +704,15 @@ async function storeFixTurn(
   } else {
     notice(l, `The agent did not hand in a valid report: ${read.reason}`);
   }
-  const changeReport = normalizeChangeReport(report, o.facts.shownRefs, files);
+  let changeReport = normalizeChangeReport(report, o.facts.shownRefs, reportFiles);
+  // LIMN'S CHECK WINS over the agent's word: a merge that is not valid is MERGE "not addressed", with why.
+  if (pre && pre.merge.status !== 'valid') {
+    changeReport = {
+      changes: changeReport.changes.map((c) => ({ ...c, refs: c.refs.filter((r) => r !== MERGE_ITEM_REF) })),
+      unaddressed: [{ ref: MERGE_ITEM_REF, reason: `Limn: ${pre.merge.reason ?? 'the merge is not ready.'}` }, ...changeReport.unaddressed.filter((u) => u.ref !== MERGE_ITEM_REF)],
+      notReported: changeReport.notReported.filter((r) => r !== MERGE_ITEM_REF),
+    };
+  }
   const lastText = l.lastAgentText.trim().slice(0, 4_000);
   const summary = report?.summary?.trim() || lastText || (files.length > 0 ? `Applied changes to ${files.length} file(s).` : 'The agent made no changes.');
   await updateFixSession(ctx, o.accountId, o.fixId, {
@@ -540,7 +741,8 @@ async function storeFixTurn(
     notice(l, `Changes in ${x.fullName} (${x.files.length} ${x.files.length === 1 ? 'file' : 'files'}) are left out. AI Fix pushes only ${o.facts.fullName}.`);
   }
   if (error == null) {
-    notice(l, files.length > 0 ? `Changes stored: ${o.facts.fullName} (${files.length} ${files.length === 1 ? 'file' : 'files'}).` : `The fix changed no files in ${o.facts.fullName}.`);
+    const onTop = pre ? ' on top of the merge' : '';
+    notice(l, files.length > 0 ? `Changes stored${onTop}: ${o.facts.fullName} (${files.length} ${files.length === 1 ? 'file' : 'files'}).` : `The fix changed no files${onTop} in ${o.facts.fullName}.`);
   }
 }
 
@@ -611,6 +813,7 @@ export async function discardFixSession(ctx: AgentContext, accountId: number, fi
       status: aiFixStatusForPhase('discarded', { pushed: r.pushedAt != null }),
       sandboxRef: null,
       finishedAt: new Date(),
+      ...(r.mergeBundle ? { mergeBundle: null } : {}),
     });
   }
   const state = readSessionState(r.sessionJson);
@@ -628,6 +831,7 @@ export async function closeFixAfterPush(ctx: AgentContext, accountId: number, fi
     } else await l.closed?.catch(() => {});
   }
   const r = await getFixById(ctx, accountId, fixId);
+  if (r?.mergeBundle) await updateFixSession(ctx, accountId, fixId, { mergeBundle: null });
   if (r?.sessionPhase != null && r.sessionPhase !== 'pushed') {
     await updateFixSession(ctx, accountId, fixId, { sessionPhase: 'pushed', status: 'succeeded', sandboxRef: null });
     const state = readSessionState(r.sessionJson);
@@ -650,7 +854,7 @@ export async function resumeFixSession(ctx: AgentContext, accountId: number, fix
   if (r == null || r.sessionPhase == null) return { status: 'not_found' };
   if (liveSession(fixKey(fixId))) return { status: 'not_ready', message: 'This session is running.' };
   if (isFixPushing(fixId)) return { status: 'not_ready', message: 'Wait for the push to finish.' };
-  if (r.sessionPhase !== 'built' || (r.patch ?? '') === '' || r.pushedAt != null) {
+  if (r.sessionPhase !== 'built' || !fixRowHasWork(r) || r.pushedAt != null) {
     return { status: 'not_resumable', message: 'Only a fix with stored changes that is not pushed can be resumed. Start a new fix instead.' };
   }
   const state = readSessionState(r.sessionJson) as FixState;
@@ -710,7 +914,7 @@ export function fixSessionWire(r: AiFixRow): FixSessionWire {
     },
     state,
     l ? liveFactsOf(l) : null,
-    (r.patch ?? '') !== '' && r.pushedAt == null,
+    fixRowHasWork(r) && r.pushedAt == null,
   );
   return { session, leftOut: state.leftOut ?? [] };
 }
@@ -743,7 +947,7 @@ export async function reconcileFixSessionsOnStartup(ctx: AgentContext): Promise<
   for (const r of rows) {
     if (liveSession(fixKey(r.id))) continue;
     if (r.sandboxRef == null && r.sessionPhase === 'built') continue;
-    const kept = (r.patch ?? '') !== '';
+    const kept = fixRowHasWork(r);
     const phase: SandboxSessionPhase = kept ? 'built' : 'failed';
     const { state, error } = restartState(r.sessionJson, kept);
     await updateFixSession(ctx, r.accountId, r.id, {

@@ -19,11 +19,9 @@ import { registerSequenceDiagramRoutes } from './diagrams/routes.js';
 import { reconcileDiagramsOnStartup } from './diagrams/manager.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
 import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
-import { registerAiResolveRoutes } from '../coding/ai-resolve/routes.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
-import { runOpen } from '../api/routes/conflicts.js';
 import { bindDependencyAutomationAi } from '../merge/dependency-automation.js';
 import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
@@ -61,9 +59,8 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // SEQUENCE DIAGRAMS: a separate Sonnet process queued after every finished review (and by Redraw).
   registerSequenceDiagramRoutes(app, ctx);
   registerAiFixRoutes(app, ctx);
-  // "Resolve with Claude" — the agentic half of the merge-conflict resolver. The resolver's own
-  // routes stay in both modes (app.ts); this one is agentic and follows this function's rule.
-  registerAiResolveRoutes(app, ctx, { runOpen });
+  // (The merge-conflict resolver's routes are not agentic and stay in app.ts. Its AI half, "Resolve with
+  // Claude", was REMOVED 2026-11-07: AI Fix's merge item resolves conflicts in the sandbox instead.)
   // STORY LABELS (Reports → Stories): Haiku labels each story's criteria against a
   // fixed rubric. Pro on `periodReports` too, and agentic — so here and nowhere else.
   registerStoryLabelRoutes(app, ctx);

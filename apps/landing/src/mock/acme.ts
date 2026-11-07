@@ -224,7 +224,7 @@ export const FIX = {
   busy: 'Setting up the sandbox…',
   ready: 'Ready to push',
   // The session's rows after the build turn (the agent runs the checks in the sandbox itself).
-  session: ['Read refunds/policy.py', 'Edit refunds/policy.py', 'Ran pytest tests/refunds: 42 passed'],
+  session: ['⏺ Read(refunds/policy.py)', '⏺ Edit(refunds/policy.py)', '⏺ Bash(pytest tests/refunds)', '  ⎿  42 passed'],
   said: 'Fixed both items. Only payments is pushed, to the PR branch.',
   discard: 'Discard',
   push: 'Push',

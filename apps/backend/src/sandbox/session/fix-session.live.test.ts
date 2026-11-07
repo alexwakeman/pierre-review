@@ -50,6 +50,8 @@ let prId = 0;
 let headSha = '';
 const usage: any[] = [];
 const prepared: any[] = [];
+/** What the repo store was asked for (the PR repository goes through it on Docker). */
+const storeAsked: any[] = [];
 
 describe.skipIf(!daemon)('an AI Fix session, live', () => {
   beforeAll(async () => {
@@ -94,6 +96,7 @@ describe.skipIf(!daemon)('an AI Fix session, live', () => {
     const { createDockerRuntime } = await import('../runtime/docker.js');
     rt = createDockerRuntime({ instance: `test-${randomBytes(4).toString('hex')}`, extraLabels: { 'limn.test': '1' } });
     const { shallowFromClone, defaultMirrorSeams } = await import('../workspace/mirror.js');
+    const { defaultStoreSeams } = await import('../workspace/store.js');
     M = await import('./manager.js');
     F = await import('./fix.js');
     const claudeDir = join(scratch, 'claude');
@@ -108,6 +111,18 @@ describe.skipIf(!daemon)('an AI Fix session, live', () => {
           return shallowFromClone(repo, req.baseSha ?? git('rev-parse', 'main'));
         },
         tarGitDir: defaultMirrorSeams.tarGitDir,
+      },
+      // The repo store (Docker, since 8beb6142): the commit is the one asked for; its objects come from the
+      // throw-away repo (as from Limn's clone cache), through the real maintenance-container fetch — never
+      // Limn's real clone cache or GitHub. The store volume is this run's own (random instance), removed after.
+      storeSeams: {
+        resolveBase: async (req) => {
+          storeAsked.push(req);
+          return { sha: req.baseSha ?? git('rev-parse', 'main') };
+        },
+        checkLocal: async () => ({ ok: false, reason: 'not used' }),
+        hydrateCache: async () => ({ gitDir: join(repo, '.git'), cleanup: async () => {} }),
+        transfer: defaultStoreSeams.transfer,
       },
       credentialEnv: () => process.env,
       usageSink: { record: async (row) => void usage.push(row), noteClaudeRateLimit: () => {} },
@@ -142,6 +157,8 @@ describe.skipIf(!daemon)('an AI Fix session, live', () => {
     M?.setSessionDepsForTests(null);
     F?.setFixSessionDepsForTests(null);
     const left = rt ? await rt.sweep([], { dryRun: true }) : null;
+    const store = rt?.repoStore ? await rt.repoStore.remove().catch((e: unknown) => ({ volumes: [], errors: [String(e)] })) : null;
+    if (store) console.log('[live fix] store removed', JSON.stringify(store));
     if (left && left.containers.length + left.networks.length + left.volumes.length > 0) await rt.sweep([]);
     await app?.close();
     await closeDb?.();
@@ -170,8 +187,9 @@ describe.skipIf(!daemon)('an AI Fix session, live', () => {
     });
     expect(start.statusCode).toBe(202);
     const built = await until((f) => f.session?.phase === 'built', 'built', 12 * 60_000);
-    // The PR repository was mirrored at the PR head, asked through refs/pull/1/head.
-    expect(prepared[0]).toMatchObject({ baseSha: headSha, remoteRef: 'refs/pull/1/head' });
+    // The PR repository was mirrored at the PR head, asked through refs/pull/1/head: through the repo store
+    // on Docker, else through the per-session copy.
+    expect(storeAsked[0] ?? prepared[0]).toMatchObject({ baseSha: headSha, remoteRef: 'refs/pull/1/head' });
     expect(built.session!.repos[0]!.baseSha).toBe(headSha);
     expect(built.status).toBe('succeeded');
     expect(built.patch).toContain("+export const hello = () => 'hello';");

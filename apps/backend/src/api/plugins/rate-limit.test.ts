@@ -958,14 +958,6 @@ describe('tierFor — merge-conflict resolver', () => {
     );
   });
 
-  it('puts "Resolve with Claude" on the AI buckets and its poll + cancel on read', () => {
-    // The POST is a billed agent run (and may build a clone first): money, so `ai`.
-    expect(tiers('POST', '/api/prs/12/conflicts/ai-resolve')).toEqual(['ai', 'ai_hourly']);
-    // Polled every ~2s while the run works — a Map lookup.
-    expect(tiers('GET', '/api/prs/12/conflicts/ai-resolve')).toEqual(['read']);
-    expect(tiers('DELETE', '/api/prs/12/conflicts/ai-resolve')).toEqual(['read']);
-  });
-
   it('puts one file’s regions on search — the response body IS the work', () => {
     expect(tiers('GET', '/api/prs/12/conflicts/files/0')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/prs/12/conflicts/files/37')).toEqual(['search', 'read']);

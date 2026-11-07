@@ -215,11 +215,9 @@ with no wash at all and every decidable region reads "Needs a decision". ⚠ **T
 SPA sends, which is now the contract. ⚠ **Do NOT bump `CONFLICT_MODEL_VERSION` for it**: `autoApply`
 changes which decision a region STARTS on, not what the region IS, which is exactly why `hash.ts`
 leaves it out of the model hash — a defensive bump would throw away every live session's decisions.
-⚠ **TWO EXCEPTIONS, AND ONLY TWO: a "Resolve with Claude" run the reader started** (§ Resolve with
-Claude, below) — its answer pre-fills the regions the reader has not decided, each marked "Claude" —
-**and Settings → Dependencies' unattended AI run on a TRUSTED dependency bot's PR** (§ Dependency
-automation), opt-in per workspace, committed only when every region is decided with confidence.
-The resolver opened any other way still opens bare, and the open still sends `autoApply: false`.
+⚠ **NO EXCEPTION.** The resolver always opens bare, and the open always sends `autoApply: false`. An AI
+resolution is not made here any more: it is AI Fix's MERGE item, made in the sandbox (§ AI resolution,
+below).
 
 **The commit is HARD BLOCKED until every decidable region in every supported file is decided.**
 `CommitPlan.canCommit` (`lib/conflictCommit.ts`) is the ONE gate, folded ONCE in the shell and handed
@@ -432,7 +430,7 @@ and not for tidiness**: a merge-strategy resolution commit has exactly the two-p
 reader never consented to merge.
 
 **Nothing is stored.** No table, no migration, no journal entry, no `accountScopedTables()` entry,
-nothing in `localStorage`. "Resolve with Claude"'s answer follows the same rule — it is held on the session. The reader's typed edits are held in the same module-level session and
+nothing in `localStorage`. The reader's typed edits are held in the same module-level session and
 die with it, bounded by a per-session character budget (64 × `CONFLICT_SUGGEST_MAX_CHARS`) with one
 live edit per region — re-saving REPLACES, so the store is bounded by region count rather than by
 keystrokes. The server session is a module-level `Map`, bounded four ways —
@@ -515,54 +513,30 @@ Routes and tiers: [docs/API.md](API.md). The SPA's landmines, the `--mr-*` palet
 defects found by running it: [docs/FRONTEND.md](FRONTEND.md) § The merge-conflict resolver. The
 clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
 
-### Resolve with Claude (`src/coding/ai-resolve/`, CORE, agentic)
+### AI resolution: AI Fix's MERGE item (owner decision 2026-11-07)
 
-The agentic half of the resolver. **Claude's answer is reviewed IN THE RESOLVER** — the run decides
-regions; it never commits, pushes or writes a file. (The ONE caller that commits an answer without a
-reader is Settings → Dependencies' conflict resolution, through `landSessionResolution` and only
-under `aiResolutionCommit`'s stricter rule — § Dependency automation.)
+Merge conflicts have exactly TWO ways: BY HAND, in the resolver above, or with AI Fix's **"Resolve merge
+conflicts with `<base>`"** item, in the SANDBOX. The host-side "Resolve with Claude" (`coding/ai-resolve/`,
+a read-only agent answering with resolver decisions) is REMOVED: it was not reliable (it duplicated a
+line), and its three routes, its menu item, its "Claude" chips and its AI Fix card went with it.
 
-- **Agentic, so it follows the agentic rule.** Its three routes (`POST|GET|DELETE
-  /api/prs/:id/conflicts/ai-resolve`) are registered by `registerAgenticRoutes` and 404 under
-  `LIMN_AI_DISABLED`. The resolver's own seven routes still run then. Ownership and
-  write permission on all three, the resolver's rule (→ 404 / 403).
-- **One run = one conflict session, then one read-only agent.** The run claims (or re-attaches to)
-  the PR's session with `autoApply: false`, waits for the build (`runOpen`), then runs the agent in a
-  worktree at the session's PINNED head. Tools: Read/Glob/Grep + `submit_resolution`; Bash,
-  NotebookEdit and every write tool are DENIED — it has nothing to write, and the conflict text is
-  attacker-authored. Every side and context line sits inside a NONCE fence (`prompt.ts`). The prompt
-  is budgeted by characters, contested regions first; a region that did not fit is not OFFERED.
-- **The answer is RESOLVER DECISIONS, validated before they exist** (`validate.ts`
-  `acceptAiChoices`): the region id must be in the session, the `fingerprint` must match (the content
-  pin, as on `…/conflicts/edit`), the region must have been offered, and the decision must be in
-  `allowedDecisions(region)` — or `'edited'`, whose lines go through `editShapeFor` +
-  `validateConflictEdit` + `storeEdit`, the reader's own door, and come back as an `editId`.
-  `'suggestion'` is never Claude's. A refused choice is reported back to the agent so it can fix it;
-  it mints nothing.
-- **Stored ON THE SESSION (`rec.ai`), never in a table** — the header of `conflict/session.ts`
-  applies to it unchanged. It dies with the session; a moved head is a new session and no answer.
-  `aiRunning` is a third job flag: the record is never reaped, evicted or dropped under it, a commit
-  refuses `Busy` while Claude is deciding, and a `restart` is refused. It is deliberately NOT in
-  `jobCounts` — the run has its own one-per-ACCOUNT slot (`run.ts`), claimed synchronously.
-- **Cost** is recorded on the usage ledger (`feature: 'ai_resolve'`, seam `agent`). Rate tier: the
-  POST is `ai` + `ai_hourly`; the GET (polled every 2s while it runs) and the DELETE (cancel) are
-  `read`.
-- **The SPA.** `ResolveConflictsButton` becomes a menu — "Resolve manually" / "Resolve with Claude" —
-  when `me.ai.enabled`; otherwise it is the plain button. A missing runtime or credential is the ONE
-  `AiRunGate` in place of the Claude item. ⚠ **It still fetches nothing on mount**: the run lives in
-  a module store (`hooks/useConflictAiResolve.ts`) and a PR with no run issues no request. On success
-  the resolver opens and `useClaudePrefill` applies the answer ONCE (by `runId`) and ONLY for the same
-  server session and `modelHash`: it fills UNDECIDED regions only (the reader's own choices win, the
-  wand's rule), seeds `'edited'` lines into `useRegionEdit`'s module map, and records which decisions
-  are Claude's (`store/conflictClaude.ts`). A region wears a "Claude" chip while its decision is
-  still Claude's — checked against the live decision on every read, so replacing it removes the chip
-  with no write — and the chip toggles Claude's one-line reason in place. The banner above the panes
-  counts the live choices and offers "Undo all Claude's choices". Claude's decisions are ordinary
-  decisions: counted, gated by `CommitPlan.canCommit` and committed by the existing land path.
-- **The AI Fix tab** shows a "Resolve merge conflicts with Claude" card when the PR conflicts (the
-  resolver entry's own gate) and, in the fix picker, an OPTIONAL, default-off "Also resolve merge
-  conflicts with `<base>`". Ticked, the conflict run starts beside the fix: two runs, two results,
-  and the merge lands from the resolver as its own commit — never folded into the fix.
+- **The item** (`coding/ai-fix/review-seed.ts` `mergeCandidate`, key `conflict:merge`, ref `MERGE`): offered
+  in the fix picker, FIRST and TICKED, when the PR is open, its SYNCED merge state conflicts
+  (`isConflicting`), it is not in a merge queue and the reader can push (`pr-context.ts`
+  `getFixMergeOffer`). It needs no AI review and no CI item. Never in an AUTO fix
+  (`AUTO_FIX_RESOLVES_CONFLICTS = false`, one constant).
+- **The run** is the fix's own sandboxed session ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, "The
+  merge"): Limn starts the merge of the base tip (pinned at the start) with the explicit merge base; the
+  agent resolves FIRST, commits the MERGE COMMIT, then fixes the other items on top. The commits leave as
+  a git bundle; the host checks parents (the PR head, the base tip, in that order), conflict markers in
+  every file that was in conflict, and that every other commit sits on top of the merge. A merge that
+  fails a check is MERGE "not addressed" with Limn's reason, and NOTHING pushes.
+- **Push** (`coding/ai-fix/push.ts` → `coding/git-ops.ts` `pushMergeResult`): only onto the PR's own
+  branch, never a fork's; the check again in the clone cache; the merge commit and ONE fix commit
+  rebuilt from the verified trees under the reader's name; a fast-forward of the head the fix started
+  from (HEAD_MOVED otherwise), never forced.
+- **The diff the reader reviews**: the resolution (`AiFix.merge.resolutionDiff`: the merge commit against
+  git's automatic merge WITH the markers) apart from the fix on top (`AiFix.patch`).
 
 ### Merge queue (GitHub's native)
 
@@ -1102,19 +1076,33 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   with `upsertLocalPrComment`); Renovate: tick its `- [ ] <!-- rebase-check -->` box in the live body
   (PATCH, then a re-read) — Renovate has no comment command, and no unticked box means it can't be
   asked; any other bot can't. (2) wait `REBASE_WAIT_MS` (30 min) — a rebase is a NEW head, so a
-  successful one ends it. (3) the bot can't, the ask failed, or the wait ran out → ONE AI run
-  through the in-app resolver (`startAiResolve`, the provider seam — Claude or Codex, whichever
-  `activeProviderId` picks), ⚠ only where agentic AI runs (`bindDependencyAutomationAi` from
-  `startAgenticBackground`) and only when `automaticRunAllowed` says so (over budget = skipped, never
-  queued). ⚠ It NEVER takes over a reader's resolver: a session with a subscriber (the overlay is
-  open) or an AI run already going is skipped with no claim, and only a run THIS call `started` is
-  watched and landed. (4) `watchAndLand` waits for it and commits UNATTENDED only when `aiResolutionCommit`
-  passes: every conflicted file supported, every decidable region carries the AI's choice, none
-  `low` confidence. Stricter than a reader's commit ON PURPOSE (nobody is looking). Strategy
-  `merge` onto `pr_branch` — never a rebase, which would rewrite the bot's branch. It lands through
-  `landSessionResolution` (api/routes/conflicts.ts) — the commit route's SAME slot, land path and
-  settle. ⚠ **THE PUSHED HEAD MUST GO GREEN AGAIN**: `result_sha` marks it; the merge sweep skips it
-  until `ci_status = success`, and approval already requires that.
+  successful one ends it. (3) the bot can't, the ask failed, or the wait ran out → ONE UNATTENDED AI
+  Fix session with the MERGE item (`startAiConflictFix` → `deps.startFix({ resolveConflicts: true })`,
+  plain seed `dependencyConflictInstruction`: "resolve the merge conflicts and change nothing else; keep the
+  update"; § AI resolution above). ⚠ **CONFLICTING AND RED, with "Fix them with AI" on**: that SAME one
+  session also gets the CI review's fixable items at the current head (`withCi` → the CI-only seed with
+  `resolveConflicts` REQUIRED and Limn's own `dependencyMergeAndCiPreamble` above it, no PR text): the merge
+  first, the CI fixes on top; no fixable item ⇒ merge only (the red may be the conflict's). ONE `ai_resolve`
+  row, so ONE AI run against the cap and no separate CI fix at that head ("Resolve their conflicts" alone never
+  fixes CI). A combined start with no MERGE item (AI Fix's own merge gate disagreed) falls back to the
+  merge-only run under the same claim. The provider seam's default provider, ⚠ only where agentic AI runs
+  (`bindDependencyAutomationAi`) and only when `automaticRunAllowed` says so (over budget = skipped, never
+  queued). The SAME sandbox rules as the CI fix: busy ⇒ nothing written; no container runtime ⇒ ONE
+  `skipped` row for `ai_resolve` at the head (`recordSandboxSkip`), never a claim, later ticks read
+  nothing. ⚠ It NEVER takes over a reader: the manual resolver open on the PR (a subscriber) or
+  committing, or any AI Fix holding the PR, is skipped with no claim. (4) `watchFixAndPush` waits for the
+  session and pushes through AI Fix's own Push ONLY a merge Limn's check passed (`hasWork`) — WITH NO
+  CLICK, on this path only (the own-PR auto fix keeps its "Push automatically" switch; `auto-push.ts` never
+  pushes a bot's PR): `pushMergeResult` re-checks the bundle and pushes the commits rebuilt from the
+  verified trees, pinned to the checked merge + result shas, as a fast-forward of the head the fix started
+  from (HEAD_MOVED otherwise), never forced, the PR's own branch only. A refused merge is `failed` "Not
+  pushed: <reason>" (nothing pushed), a person's Stop is `failed` "Cancelled.", neither retried at the head.
+  The log says "Resolved with Claude and pushed …", or "Resolved conflicts and fixed CI with …" when CI
+  items rode along. The push is a merge commit onto the bot's own branch (parents: the head, the base tip) —
+  never a rebase, which would rewrite it. The action name stays `ai_resolve` (the log's history and the
+  ≤ `DEPENDENCY_AI_FIX_DAILY_CAP` count read it). ⚠ **THE PUSHED HEAD MUST GO GREEN AGAIN**:
+  `result_sha` marks it; the merge sweep skips it until `ci_status = success`, and approval already
+  requires that.
 - **FIX WITH AI** (`startAiFix`, the "Fix them with AI" switch; owner's decisions 2026-11-03):
   - **WHEN**: a TRUSTED bot's open, non-draft, NON-conflicting PR whose SYNCED `ci_status` is
     `failure`/`error` (`aiFixEligibility`, pure, `dependency-rules.test.ts`), the policy admits it,
@@ -1415,8 +1403,8 @@ shorter form of each rule; this is the full wording.
   `editId` validated server-side (`POST …/conflicts/edit`); inline `custom` lines are forbidden.
   Edits inherit the region's line ending and BOM; a superseded `editId` is never evicted. ⚠ The
   wand NEVER picks a side. ⚠ Nothing is applied before the reader presses something
-  (`autoApply: false`), except a "Resolve with Claude" run the reader started (undecided regions
-  only, undoable). ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
+  (`autoApply: false`), with no exception (an AI resolution is AI Fix's MERGE item, in the sandbox).
+  ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
   `CONFLICT_MODEL_VERSION` with any fold change**. ⚠ The commit is HARD BLOCKED until every
   decidable region is decided (`CommitPlan.canCommit`, one `commitBlockedReason`). No worktree, no
   DB rows; a blobless clone cache under `config.cloneDir`. Read the doc's § Resolving conflicts

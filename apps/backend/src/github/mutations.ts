@@ -503,6 +503,8 @@ export interface PrAutomationSnapshot {
   isDraft: boolean;
   headSha: string;
   headRef: string;
+  /** The branch it merges into (the conflict run's merge target). */
+  baseRef: string;
   isFork: boolean;
   title: string;
   body: string | null;
@@ -526,6 +528,7 @@ export async function fetchPrForAutomation(
     isDraft: pull.draft === true,
     headSha: pull.head.sha,
     headRef: pull.head.ref,
+    baseRef: pull.base.ref,
     isFork: pull.head.repo == null || headRepoFullName !== baseRepoFullName,
     title: pull.title,
     body: pull.body,

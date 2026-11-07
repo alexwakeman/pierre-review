@@ -68,6 +68,12 @@ export const SLOW_TESTS = [
   // Real git (local clones checked, shallow and partial ones built) and a real daemon: the kept repo store
   // filled from a dirty local clone; its Docker part is skipped with its reason when no daemon answers.
   'src/sandbox/workspace/store-real.test.ts',
+  // Moved 2026-11-07 by the time budget: real git per case: a shallow sandbox-shaped repo, Limn's merge scripts run with sh, bundles verified in a clone
+  'src/coding/ai-fix/merge-verify.test.ts',
+  // Moved 2026-11-07 by the time budget: real git for every sandbox step of the merge (Limn's scripts run with sh on a local shallow repo) plus three full sessions
+  'src/sandbox/session/fix-merge-session-flow-db.test.ts',
+  // Real git for every sandbox step (as the file above) under five unattended dependency-automation sessions
+  'src/sandbox/session/fix-deps-session-flow-db.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every

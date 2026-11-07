@@ -178,7 +178,7 @@ describe('the kinds (Phase 3 foundation)', () => {
     // Each stream adds a kind to ITS file only in the commit that ports it (docs/CODEX-PLAN.md § 5).
     const own: string[][] = [
       ['review', 'review_chat', 'thread_check'],
-      ['fix', 'plan', 'resolve'],
+      ['fix', 'plan'],
       ['ticket_review', 'pr_card', 'ci_review', 'story_docs'],
       ['diagram', 'sprint_paths', 'docs_build', 'docs_chat'],
       ['story_plan', 'story_build'],

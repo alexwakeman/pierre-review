@@ -1748,7 +1748,7 @@ read-only variant — the write gate is GitHub's own `viewerCanReact`.
 EVERY model-backed surface gates on the TOP-LEVEL `MeResponse.ai` through
 **`hooks/useAiCapabilities.ts`** (pure half: `lib/aiCapabilities.ts`) and swaps its Run button
 through the one `AiRunGate`: the agentic ones — Claude Review (run, follow-up, user-story check,
-auto review, the review chat), AI Fix, Resolve with Claude, the docs library — AND the one-shot
+auto review, the review chat), AI Fix, the docs library — AND the one-shot
 ones — Bot themes (the Bots Themes sub-tab is ABSENT while AI is off), the synthesis cards,
 Chronology pointers and the period-report write-up. They
 run on the reader's own Claude Code login or `ANTHROPIC_API_KEY` (the one credential ladder,
@@ -2219,6 +2219,16 @@ sessions.
   it does not hold is fetched by id (`useTicketReviewsByIds`, key `['ticket-review', id]`) — and an
   item whose data is not on hand draws the old plain row. The folds live in `AiFix/fixPickerModel.ts` (no JSX). The CI
   list, the AI summary and the "Or say what to fix…" box are GONE (the route still takes `plain`).
+- **THE MERGE ITEM (2026-11-07).** A conflicting PR's picker leads with the `conflicts` section: ONE
+  plain row, "Resolve merge conflicts with <base>" (`conflict:merge`, ticked by default; the server
+  decides when it is offered). There is NO other AI conflict path — no `ConflictAiCard`, no "Also
+  resolve" box, and the resolver's entry (`ResolveConflictsButton`) is the plain manual button. A fix
+  with `fix.merge` draws `MergeResult` ABOVE the fix diff: Limn's check (`fixMergeLine`: both parents
+  by short sha, or "Nothing will be pushed: <reason>"), the files that were in conflict, and the
+  RESOLUTION diff (`merge.resolutionDiff`: the merge commit against git's own merge with markers) apart
+  from "Fixes on top of the merge". ⚠ Push shows only when `fixPushable` (a VALID merge; without a
+  merge, a patch) and, with a merge, offers ONLY the PR's own branch (no "New branch"); a refused merge
+  also swaps the status line (`fixMergeBlockedLine`) and the repo row reads "Merge not valid".
 - **An automatic push that failed** shows the succeeded row's `error` ("Automatic push failed: …")
   in an amber line above the summary; Push still works and clears it.
 - **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
@@ -4286,9 +4296,11 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   path; a press answers `409 NoRuntime` in one line) — `ModelPicker` on `story_build` opening deep,
   Start / Fill gaps in `AiRunGate kind="story_build" anyProvider`; Fill gaps lists the gaps first) →
   while `booting`, the boot steps (`SessionView` `SessionBoot`, each step's state in a mark AND words)
-  → then TWO PANES (`lg:` grid; one column below): the CONVERSATION (the reader right, the agent left —
-  the review chat's look, shared `lib/reviewStyles.ts CHAT_*`; tool calls as compact rows that open to
-  their clipped output; each turn's end a quiet divider with its cost; notices and errors as lines; the
+  → then TWO PANES (`lg:` grid; one column below): the CONVERSATION (drawn like the agent's OWN
+  terminal, in the app's tokens: monospaced, a header box with agent, model and starting folder, the
+  reader after a prompt mark, the agent and each tool call after a bullet, the glyphs per provider —
+  Claude Code's `> ⏺ ⎿` or Codex's `› • └` (`GLYPHS`); a tool's first 3 lines under the elbow, the
+  call's row opening the rest of its clipped output; a spinner while a turn runs; each turn's end a quiet divider with its cost; notices and errors as lines; the
   agent's words as they arrive; it follows the newest row only while the reader is at the bottom) and
   the composer (Send — `AiRunGate` `story_plan` in chat mode, `story_build` in build mode, `followUp`
   on the session's provider; ⌘/Ctrl+Enter sends; **Start build** once, in chat mode while the agent
@@ -4334,16 +4346,10 @@ landmines:
   `useConflictResolverEntry`. ⚠ **It fetches nothing** — the gate is four synced facts plus the
   App-root `['me']` cache, so fifty cards on a board issue zero requests, and `?? false` while
   `['me']` loads (an undefined capability must not render a button that 404s on the first click).
-- **With `me.ai.enabled` the entry is a MENU — "Resolve manually" / "Resolve with Claude"**
-  (MERGE-CI-TRUNK § Resolve with Claude). Still zero requests on mount: the run lives in the module
-  store `hooks/useConflictAiResolve.ts` (keyed by PR id, read through `useSyncExternalStore`, so
-  every mount shows the same run), and polling starts only on the click. Only the AI Fix tab's card
-  RESUMES a run on mount (one GET, the PR pane). The overlay applies Claude's answer through
-  `useClaudePrefill`, mounted AFTER the seed effect so the decision store already holds the key;
-  `store/conflictClaude.ts` remembers which decisions are Claude's and `useClaudeMark` shows the
-  chip only while the live decision still matches. `'edited'` lines reach the centre pane through
-  `seedEditLines` (`useRegionEdit`'s module map, with a listener so a mounted pane re-reads it).
-  ⚠ **HIDE, never disable.**
+- **ONE way in: the resolver, by hand** (the plain button, with or without `me.ai`). The "Resolve with
+  Claude" menu, its run store, `useClaudePrefill`, the "Claude" chips and banner and the AI Fix tab's
+  conflict card and checkbox were REMOVED 2026-11-07: an AI resolution is AI Fix's MERGE item, a row of the
+  fix picker (section `conflicts`, first, ticked; MERGE-CI-TRUNK § AI resolution). ⚠ **HIDE, never disable.**
 - **The overlay mounts in `App.tsx`, not inside `PrDetail`** — it opens from three places and must
   not unmount when the pane behind it closes. It is OPAQUE (`z-[60]`, above the toast cluster's `z-[51]`), not a scrim: a translucent backdrop over a live timeline is unreadable at 12px.
 - ⚠ **THERE IS NO URL KEY, NO HISTORY ENTRY AND NO `PrDetailTab` MEMBER, DELIBERATELY.** A

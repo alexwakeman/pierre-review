@@ -293,7 +293,8 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `setDependencyAutoMerge` (merge/dependency-policy.ts).
 - **`dependencyAutomationActions`** (`dependency_automation_actions`, 0147, 0162) — one row per
   (account, PR, head, action ∈ approve / rebase_request / ai_resolve / ai_fix / arm_merge /
-  merge_landed) the dependency automation TOOK; unique `daa_account_pr_head_action` IS the claim
+  merge_landed) the dependency automation TOOK (`ai_resolve` = the conflict run — since 2026-11-07 an
+  unattended AI Fix session with the MERGE item, the name kept for the log and the cap); unique `daa_account_pr_head_action` IS the claim
   (inserted `running` before the GitHub write; settled `done` / `failed` + `detail`, never retried).
   `skipped` (0162) = a teammate's `limn/deps` line held the head (`teammate_login`,
   `teammate_handled`): not an attempt, so the claim's `onConflictDoUpdate … setWhere state =
@@ -808,7 +809,12 @@ as history), and `status` is DERIVED from it (shared `aiFixStatusForPhase`), nev
 left-out edits, the PR facts Resume needs — no secret, no patch), `last_active_at`, `unattended` (an auto fix
 or dependency automation's fix), `workspace_id` (the workspace that booted it; no FK). `prompt` holds the
 frozen task text; `patch` is the PR repository's only; chat turns add to `plan_cost_usd`, build turns to
-`cost_usd`. The plan columns (`plan`, `plan_transcript`, `plan_status`, …) and `checks` are history only.
+`cost_usd`. **Since `0178`, the MERGE item** ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, "The merge"):
+`merge_json` (JSON `FixMergeState`: base ref + tip, merge base, PR head, conflicted files, `status`
+pending/valid/invalid/missing + `reason`, the checked merge and result shas, the resolution diff ≤ 1 MB;
+NULL = no merge) and `merge_bundle` (the agent's commits as a base64 git bundle ≤ 4 MB, kept only while the
+merge is VALID and unpushed; cleared on push, discard and a failed close). With a merge, `patch` is the fix
+ON TOP of the merge. The plan columns (`plan`, `plan_transcript`, `plan_status`, …) and `checks` are history only.
 
 The plan, docs and Accept columns (`plan_json`, `transcript_json`, `design_json`, `docs_*`, `accepted_*`,
 the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/build flow was removed

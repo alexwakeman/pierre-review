@@ -38,7 +38,7 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
 ### The credential ladder
 
 ONE ladder for EVERY model call Limn makes — the agent runs (Claude Review, AI Fix, the ticket /
-CI reviews, diagrams, sprint paths, the docs build and chat, Resolve with Claude, every chat) AND
+CI reviews, diagrams, sprint paths, the docs build and chat, every chat) AND
 the one-shot completions (`review/llm.ts` `cheapComplete`, which the sprint briefs/themes, story
 labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis,
 Chronology pointers, bot themes, the Slack report —
@@ -478,7 +478,7 @@ I would pick a preference for auto-review in settings."
 - **Settings → AI is the DEFAULT** ("Automatic runs and default: Auto / Claude / Codex";
   `LIMN_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
   auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
-  menu (Check threads, ticket and CI reviews, diagrams, the docs library, Resolve with Claude, the
+  menu (Check threads, ticket and CI reviews, diagrams, the docs library, the
   Open PRs table's one-click review), and it is the menu's opening choice. ⚠ One exception: the
   Check threads run that starts IN PLACE of a manual review routed `skip` runs on that review's
   provider (the reader's pick, `startThreadCheckBesideManualReview(…, provider)`).
@@ -744,7 +744,7 @@ Default, Low, Medium, High, Extra high, Max.
 - **It reaches EVERY review** (2026-11-01): the PR review (lead, specialists, follow-ups), the CI review,
   the story check (`ticket_review`) and Check threads, plus AI Fix, Plan first and Implement story, on
   both providers (`agenticRunEffort` passed as `claude.effort` and `codex.effort`). At Default each run
-  sends exactly the level it sent before. Diagrams, chats and Resolve with Claude keep their fixed depth.
+  sends exactly the level it sent before. Diagrams and chats keep their fixed depth.
 
 - **The map is the identity** (`packages/shared/src/ai-effort.ts`). Claude's Agent SDK `effort` and
   Codex's `model_reasoning_effort` both take `low | medium | high | xhigh | max`: Opus 5.5 and Sonnet 5
@@ -770,7 +770,7 @@ Default, Low, Medium, High, Extra high, Max.
   ("Set by REVIEW_EFFORT"; the PUT answers 409). `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every
   diff-only review on both providers, at Default too. ⚠ **Both env vars reach EXACTLY what the
   control reaches** (the review, AI Fix, Plan first, the workspace session) — `defaultRunEffort` reads no environment, so the
-  CI review, ticket review, diagrams, Check threads, chats and Resolve with Claude keep their fixed
+  CI review, ticket review, diagrams, Check threads and chats keep their fixed
   depth (Opus 5.5 medium, as under the old pin). Before 2026-10-26 these two variables also moved
   Sonnet on every Claude kind; that was dropped so the label under the control is the whole story.
 - ⚠ **The Opus 5.5 pin (`PINNED_EFFORT`) is GONE.** What stays fixed is real: Opus 5.5 always gets
@@ -3972,7 +3972,7 @@ answers with ONE CARD PER PIN (what it means, why it matters, where, what would 
 CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`, `routes.ts`, `review-seed.ts`,
 `pr-context.ts`, `persist.ts`, `push.ts`, `auto-fix.ts`, `auto-push.ts`). Its table `ai_fixes` is core
 since migration `0074`; `trigger`, `review_items` and `change_report` since `0078`; the session columns
-since `0177`. (The one-shot AI PR summary was removed 2026-10-18.)
+since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The one-shot AI PR summary was removed 2026-10-18.)
 
 - **EVERY RUN IS A SANDBOXED WORKSPACE SESSION** (2026-11-07; `sandbox/session/fix.ts`, the mechanics in
   [SANDBOX.md](SANDBOX.md) § AI Fix sessions): manual, Plan first, the unattended AUTO FIX and dependency
@@ -4006,7 +4006,8 @@ since `0177`. (The one-shot AI PR summary was removed 2026-10-18.)
   as history ("no longer offered"). Their `comment_targets` / `comment_verdicts` columns are dormant.
 - **THE FIX PICKER** (`components/AiFix/FixPicker.tsx`, `GET /api/pro/prs/:id/ai-fix/preview
   ?sourceReviewId=` → `AiFixPickerPreview`, DB-only). The server lists every candidate (`buildPickerPreview`)
-  with a STABLE key (`finding:<id>`, `thread:<id>`, `ci:<ciReviewItemId>`, `story:<ticketIndex>:<ref>`),
+  with a STABLE key (`conflict:merge` — the MERGE item, first, § Merge conflicts below —, `finding:<id>`,
+  `thread:<id>`, `ci:<ciReviewItemId>`, `story:<ticketIndex>:<ref>`),
   its section, its default and its CARD (`AiFixPickerCard`: which Claude Review card draws it — a
   thread the review never judged gets a synthesized `not_checked` judgement, display only); the
   reader ticks cards; Start sends `include: <keys>` and the server
@@ -4161,18 +4162,28 @@ The picker's "Plan first" checkbox turns Start into **Make a plan** → `POST /a
   plan" still ends such a row if it was waiting. The boot reconcile settles a NULL-phase row cut off by a
   restart as before.
 
-### Merge conflicts — "Resolve with Claude"
+### Merge conflicts — the MERGE item (owner decision 2026-11-07)
 
-A SEPARATE run from AI Fix (`apps/backend/src/coding/ai-resolve/`), not a seed, and NOT in the sandbox:
-the host-side worktree run (`coding/agent.ts runAgentInWorktree`, its only caller now), read-only, no
-shell. AI Fix edits files and pushes a patch; this one answers in RESOLVER DECISIONS that the reader reviews in the
-merge-conflict resolver and lands from there. It is reached from the resolver's split entry button,
-from a "Resolve merge conflicts with Claude" card at the top of the AI Fix tab, and from an
-OPTIONAL, default-off checkbox in the fix picker ("Also resolve merge conflicts with `<base>`"),
-shown only when the PR conflicts. Ticked, both runs start; the fix and the merge are separate
-results and separate commits. Same rules as every agentic run: `me.ai` + `AiRunGate`,
-no shell (and here no write tools either), cost on the usage ledger as `ai_resolve`. Full contract:
-[docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolve with Claude.
+Conflicts are resolved BY HAND in the merge-conflict resolver, or by AI Fix: **"Resolve merge conflicts with
+`<base>`"** is an item of the fix picker (key `conflict:merge`, section `conflicts`, ref `MERGE`), offered
+FIRST and TICKED whenever the PR conflicts with its base on its synced merge state, is not in a merge queue
+and the reader can push (`pr-context.ts` `getFixMergeOffer`). It is rendered as a row like the others and
+needs no AI review and no CI item (alone, its seed reads "Resolve the merge conflicts below (ref MERGE).
+Change nothing else."; with other items, one line says to merge first). It runs INSIDE the sandboxed
+session with the picked agent (Claude Code or Codex), together with every other ticked item: Limn starts the
+merge of the base tip before the agent starts, FIX.md's "First: the merge conflicts" section says how to
+finish it (judgement, no duplicated or dropped lines, `git commit` makes the merge commit, then the other
+fixes on top), and the host checks the agent's commits before anything can push ([SANDBOX.md](SANDBOX.md)
+§ AI Fix sessions, "The merge"). Limn's check wins over the report: a merge that fails it is MERGE "not
+addressed" with Limn's reason, and the fix does not push at all. The reader reviews the resolution
+(`AiFix.merge.resolutionDiff`) apart from the fix on top (`AiFix.patch`). ⚠ **Never in an AUTO fix**
+(`review-seed.ts` `AUTO_FIX_RESOLVES_CONFLICTS = false`, ONE constant). Dependency automation's conflict
+path IS this item, unattended ([MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Dependency automation).
+
+The host-side "Resolve with Claude" (`coding/ai-resolve/`, `coding/agent.ts`, three `…/conflicts/ai-resolve`
+routes, the resolver's AI menu, the AI Fix tab's card and "Also resolve merge conflicts" checkbox) was
+REMOVED the same day: it was not reliable (it duplicated a line). Its ledger rows (`ai_resolve`) stay as
+history.
 
 ## Story issues (the one vocabulary)
 
@@ -4600,8 +4611,8 @@ shorter form of each rule; this is the full wording.
 ### The agentic features (the CLAUDE.md section as of 2026-10-25)
 
 Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
-design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude, the reference-docs
-library, sprint briefs/paths and every one-shot completion. Details:
+design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude (removed 2026-11-07), the
+reference-docs library, sprint briefs/paths and every one-shot completion. Details:
 [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`

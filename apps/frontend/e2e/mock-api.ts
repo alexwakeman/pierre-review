@@ -1103,6 +1103,59 @@ export function aiFixBuilt(prId: number): AiFix {
   };
 }
 
+/** The picker of a PR that conflicts with main: the merge item first (ticked), then the CI failures. */
+export const AI_FIX_PREVIEW_MERGE: AiFixPickerPreview = {
+  ...AI_FIX_PREVIEW,
+  items: [
+    { key: 'conflict:merge', section: 'conflicts', label: 'Resolve merge conflicts with main', detail: 'The agent merges the base first, then fixes the other items on top.', path: null, line: null, severity: null, defaultIncluded: true, chars: 900 },
+    ...AI_FIX_PREVIEW.items,
+  ],
+};
+
+const AI_FIX_RESOLUTION = [
+  'diff --git a/src/reports/limits.ts b/src/reports/limits.ts',
+  'index 3333333..4444444 100644',
+  '--- a/src/reports/limits.ts',
+  '+++ b/src/reports/limits.ts',
+  '@@ -1,7 +1,2 @@',
+  '-<<<<<<< HEAD',
+  '-export const limit = 25;',
+  '-=======',
+  '-export const limit = 50; // the API caps it at 100',
+  '->>>>>>> main',
+  '+export const limit = 25; // the API caps it at 100',
+  ' export const pageSize = limit;',
+  '',
+].join('\n');
+
+/**
+ * A fix with the "Resolve merge conflicts" item after its first build turn: the merge of main (valid, or
+ * refused by Limn's check) and the CI fix on top.
+ */
+export function aiFixMerged(prId: number, status: 'valid' | 'invalid' = 'valid'): AiFix {
+  const b = aiFixBuilt(prId);
+  const valid = status === 'valid';
+  return {
+    ...b,
+    reviewItems: [
+      { ref: 'MERGE', kind: 'merge_conflicts', title: 'Resolve merge conflicts with main', path: null, line: null, findingId: null, threadId: null, ticketIndex: null, included: true },
+      ...(b.reviewItems ?? []),
+    ],
+    changeReport: valid
+      ? { ...b.changeReport!, changes: [{ path: 'src/reports/limits.ts', summary: 'Kept the PR’s limit and main’s comment, once.', refs: ['MERGE'] }, ...b.changeReport!.changes] }
+      : { ...b.changeReport!, unaddressed: [{ ref: 'MERGE', reason: 'Limn: conflict markers are left in src/reports/limits.ts.' }, ...b.changeReport!.unaddressed] },
+    merge: {
+      baseRef: 'main',
+      baseSha: 'e'.repeat(40),
+      conflictedFiles: ['src/reports/limits.ts'],
+      status,
+      reason: valid ? null : 'conflict markers are left in src/reports/limits.ts.',
+      resolutionDiff: AI_FIX_RESOLUTION,
+      resolutionFiles: ['src/reports/limits.ts'],
+    },
+  };
+}
+
 /** Plan first: the session booted in chat mode, made its plan and waits for Start fix. */
 export function aiFixPlanned(prId: number): AiFix {
   const b = aiFixBuilt(prId);
@@ -1575,7 +1628,14 @@ const AI_BUDGET: AiBudgetResponse = {
 
 export async function installMockApi(
   page: Page,
-  opts: { storyBuild?: StoryBuild | null; runtime?: SandboxRuntimeStatus; aiFix?: AiFix | null } = {},
+  opts: {
+    storyBuild?: StoryBuild | null;
+    runtime?: SandboxRuntimeStatus;
+    aiFix?: AiFix | null;
+    // The picker the preview answers (default AI_FIX_PREVIEW) and the fix a Start fix produces (default aiFixBuilt).
+    aiFixPreview?: AiFixPickerPreview;
+    aiFixOnStart?: (prId: number) => AiFix;
+  } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
   // advanced by the writes below (one per page).
@@ -2035,10 +2095,10 @@ export async function installMockApi(
             };
             return json(route, body);
           }
-          if (rest === '/preview') return json(route, AI_FIX_PREVIEW);
+          if (rest === '/preview') return json(route, opts.aiFixPreview ?? AI_FIX_PREVIEW);
           if (rest === '' && method === 'POST') {
             if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);
-            aiFix = aiFixBuilt(prId);
+            aiFix = (opts.aiFixOnStart ?? aiFixBuilt)(prId);
             return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
           }
           if (rest === '/plan' && method === 'POST') {
@@ -2089,6 +2149,10 @@ export async function installMockApi(
             return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
           }
           if (what === 'push') {
+            // As the server: a fix with the merge pushes only a VALID merge, and only to the PR's own branch.
+            const pushBody = route.request().postDataJSON() as { target?: string } | null;
+            if (aiFix.merge != null && (aiFix.merge.status !== 'valid' || pushBody?.target !== 'existing'))
+              return json(route, { error: 'NotPushable', message: 'Nothing is pushed.' }, 409);
             aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
             return json(route, { pushedBranch: 'feature/e2e-branch', commitSha: 'e'.repeat(40) });
           }

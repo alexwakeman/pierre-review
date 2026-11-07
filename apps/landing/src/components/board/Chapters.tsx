@@ -113,7 +113,7 @@ export function Fix(): JSX.Element {
         {
           k: 'Conflicts',
           h: 'Resolve conflicts in the app',
-          p: 'Both sides in one view. You pick, or ask Claude for a proposal you can check.',
+          p: 'Both sides in one view, and you pick. Or AI Fix merges in its sandbox, and you check the merge before Push.',
           mock: <ConflictsMock />,
         },
       ]}
