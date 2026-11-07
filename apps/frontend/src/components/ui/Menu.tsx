@@ -36,6 +36,104 @@ function isAction(e: MenuEntry): e is ActionEntry {
   return 'onSelect' in e;
 }
 
+/** The keys every menu shares: ↓/↑ (wrapping), Home/End, a letter jumps, Enter/Space run. Escape
+ *  and Tab are the caller's (a trigger menu returns focus; a context menu returns it elsewhere). */
+function useMenuNav(items: readonly MenuEntry[]): {
+  actions: ActionEntry[];
+  enabled: number[];
+  active: number;
+  setActive: (i: number) => void;
+  onNavKey: (e: React.KeyboardEvent, run: (i: number) => void) => boolean;
+} {
+  const [active, setActive] = useState(0);
+  const actions = items.filter(isAction);
+  const enabled = actions.map((a, i) => (a.disabled ? -1 : i)).filter((i) => i >= 0);
+  const move = (delta: 1 | -1): void => {
+    if (enabled.length === 0) return;
+    const pos = enabled.indexOf(active);
+    const next = enabled[(pos + delta + enabled.length) % enabled.length];
+    if (next != null) setActive(next);
+  };
+  const onNavKey = (e: React.KeyboardEvent, run: (i: number) => void): boolean => {
+    if (e.key === 'ArrowDown') move(1);
+    else if (e.key === 'ArrowUp') move(-1);
+    else if (e.key === 'Home') setActive(enabled[0] ?? 0);
+    else if (e.key === 'End') setActive(enabled[enabled.length - 1] ?? 0);
+    else if (e.key === 'Enter' || e.key === ' ') run(active);
+    else if (e.key.length === 1 && /\S/.test(e.key)) {
+      const ch = e.key.toLowerCase();
+      const order = [...enabled.filter((i) => i > active), ...enabled.filter((i) => i <= active)];
+      const hit = order.find((i) => {
+        const a = actions[i];
+        const text = a?.text ?? (typeof a?.label === 'string' ? a.label : '');
+        return text.toLowerCase().startsWith(ch);
+      });
+      if (hit == null) return false;
+      setActive(hit);
+    } else return false;
+    e.preventDefault();
+    return true;
+  };
+  return { actions, enabled, active, setActive, onNavKey };
+}
+
+/** The entries, drawn the same in every menu. */
+function MenuEntries({
+  items,
+  active,
+  phone,
+  run,
+  setActive,
+}: {
+  items: readonly MenuEntry[];
+  active: number;
+  phone: boolean;
+  run: (i: number) => void;
+  setActive: (i: number) => void;
+}): JSX.Element {
+  let actionIndex = -1;
+  return (
+    <>
+      {items.map((it) => {
+        if ('separator' in it) return <div key={it.id} role="separator" className="my-1 h-px bg-ui-line" />;
+        if ('heading' in it)
+          return (
+            <div key={it.id} role="presentation" className="px-2 pb-1 pt-2 text-meta text-ui-faint">
+              {it.heading}
+            </div>
+          );
+        actionIndex += 1;
+        const i = actionIndex;
+        return (
+          <button
+            key={it.id}
+            type="button"
+            role="menuitem"
+            data-menu-index={i}
+            tabIndex={i === active ? 0 : -1}
+            aria-disabled={it.disabled || undefined}
+            onClick={() => run(i)}
+            onMouseMove={() => !it.disabled && setActive(i)}
+            className={cx(
+              'flex w-full items-center gap-2 rounded-ui px-2 text-left text-body',
+              phone ? 'h-11' : 'h-8',
+              it.disabled ? 'cursor-not-allowed text-ui-faint' : it.danger ? 'text-ui-danger' : 'text-ui-ink',
+              i === active && !it.disabled && 'bg-ui-hover',
+              FOCUS_RING,
+              'focus-visible:ring-inset focus-visible:ring-offset-0',
+            )}
+          >
+            {it.icon != null && <span className="flex w-4 shrink-0 items-center text-ui-mute">{it.icon}</span>}
+            <span className="min-w-0 flex-1 truncate">{it.label}</span>
+            {it.hint != null && <span className="shrink-0 text-meta text-ui-faint">{it.hint}</span>}
+            {it.kbd != null && <Kbd>{it.kbd}</Kbd>}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 export function Menu({
   trigger,
   items,
@@ -62,7 +160,7 @@ export function Menu({
   className?: string;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const { actions, enabled, active, setActive, onNavKey } = useMenuNav(items);
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -70,8 +168,6 @@ export function Menu({
   const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
   const phone = useIsPhone();
   const float = useAnchoredFloat({ open: open && !phone, side, align, maxHeight: 320 });
-  const actions = items.filter(isAction);
-  const enabled = actions.map((a, i) => (a.disabled ? -1 : i)).filter((i) => i >= 0);
 
   const close = useCallback((refocus = true) => {
     setOpen(false);
@@ -102,13 +198,6 @@ export function Menu({
     setOpen(true);
   };
 
-  const move = (delta: 1 | -1): void => {
-    if (enabled.length === 0) return;
-    const pos = enabled.indexOf(active);
-    const next = enabled[(pos + delta + enabled.length) % enabled.length];
-    if (next != null) setActive(next);
-  };
-
   const run = (i: number): void => {
     const a = actions[i];
     if (!a || a.disabled) return;
@@ -117,27 +206,12 @@ export function Menu({
   };
 
   const onMenuKey = (e: React.KeyboardEvent): void => {
-    if (e.key === 'ArrowDown') move(1);
-    else if (e.key === 'ArrowUp') move(-1);
-    else if (e.key === 'Home') setActive(enabled[0] ?? 0);
-    else if (e.key === 'End') setActive(enabled[enabled.length - 1] ?? 0);
-    else if (e.key === 'Enter' || e.key === ' ') run(active);
-    else if (e.key === 'Escape') {
+    if (onNavKey(e, run)) return;
+    if (e.key === 'Escape') {
       e.stopPropagation();
+      e.preventDefault();
       close();
     } else if (e.key === 'Tab') close(false);
-    else if (e.key.length === 1 && /\S/.test(e.key)) {
-      const ch = e.key.toLowerCase();
-      const order = [...enabled.filter((i) => i > active), ...enabled.filter((i) => i <= active)];
-      const hit = order.find((i) => {
-        const a = actions[i];
-        const text = a?.text ?? (typeof a?.label === 'string' ? a.label : '');
-        return text.toLowerCase().startsWith(ch);
-      });
-      if (hit != null) setActive(hit);
-      else return;
-    } else return;
-    e.preventDefault();
   };
 
   // A capture-phase Escape so the app's global Esc (useKeyboard) never also fires.
@@ -153,7 +227,6 @@ export function Menu({
     return () => window.removeEventListener('keydown', onEsc, true);
   }, [open, close]);
 
-  let actionIndex = -1;
   return (
     <div className={cx('relative inline-flex', className)}>
       {trigger({
@@ -197,45 +270,128 @@ export function Menu({
                 : 'min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
             )}
           >
-            {items.map((it) => {
-              if ('separator' in it) return <div key={it.id} role="separator" className="my-1 h-px bg-ui-line" />;
-              if ('heading' in it)
-                return (
-                  <div key={it.id} role="presentation" className="px-2 pb-1 pt-2 text-meta text-ui-faint">
-                    {it.heading}
-                  </div>
-                );
-              actionIndex += 1;
-              const i = actionIndex;
-              return (
-                <button
-                  key={it.id}
-                  type="button"
-                  role="menuitem"
-                  data-menu-index={i}
-                  tabIndex={i === active ? 0 : -1}
-                  aria-disabled={it.disabled || undefined}
-                  onClick={() => run(i)}
-                  onMouseMove={() => !it.disabled && setActive(i)}
-                  className={cx(
-                    'flex w-full items-center gap-2 rounded-ui px-2 text-left text-body',
-                    phone ? 'h-11' : 'h-8',
-                    it.disabled ? 'cursor-not-allowed text-ui-faint' : it.danger ? 'text-ui-danger' : 'text-ui-ink',
-                    i === active && !it.disabled && 'bg-ui-hover',
-                    FOCUS_RING,
-                    'focus-visible:ring-inset focus-visible:ring-offset-0',
-                  )}
-                >
-                  {it.icon != null && <span className="flex w-4 shrink-0 items-center text-ui-mute">{it.icon}</span>}
-                  <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                  {it.hint != null && <span className="shrink-0 text-meta text-ui-faint">{it.hint}</span>}
-                  {it.kbd != null && <Kbd>{it.kbd}</Kbd>}
-                </button>
-              );
-            })}
+            <MenuEntries items={items} active={active} phone={phone} run={run} setActive={setActive} />
           </div>
         </FloatingPortal>
       )}
     </div>
+  );
+}
+
+/**
+ * A RIGHT-CLICK MENU (docs/redesign/DESIGN.md § Menus): the same entries, keys and look as `Menu`,
+ * opened at a POINT (the click, or a row's corner for Shift+F10 / the context-menu key) instead of
+ * from a trigger. Portalled and placed `fixed`, so it flips and shifts to stay in the viewport; on a
+ * phone it is a bottom sheet. It holds the ONE popover slot, takes focus on its first item, and
+ * closes on Escape (which never reaches the app's global Esc), Tab, an outside press or a choice —
+ * then hands focus back to `returnFocus` (the list it was opened from).
+ */
+export function ContextMenu({
+  x,
+  y,
+  items,
+  label,
+  onClose,
+  returnFocus,
+}: {
+  x: number;
+  y: number;
+  items: readonly MenuEntry[];
+  /** The menu's accessible name. */
+  label: string;
+  onClose: () => void;
+  returnFocus?: HTMLElement | null;
+}): JSX.Element {
+  const { actions, enabled, active, setActive, onNavKey } = useMenuNav(items);
+  const phone = useIsPhone();
+  const float = useAnchoredFloat({ open: !phone, maxHeight: 320 });
+  const { setReference } = float.refs;
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
+  // Latest values for the listeners below, bound once.
+  const live = useRef({ onClose, returnFocus });
+  live.current = { onClose, returnFocus };
+
+  const close = useCallback((refocus = true) => {
+    live.current.onClose();
+    if (refocus) live.current.returnFocus?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    setReference({
+      getBoundingClientRect: () => ({ x, y, top: y, left: x, right: x, bottom: y, width: 0, height: 0 }) as DOMRect,
+    });
+  }, [setReference, x, y]);
+
+  // First enabled item active on open (and again if the menu is re-opened somewhere else).
+  useEffect(() => {
+    setActive(enabled[0] ?? 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, y]);
+
+  useEffect(() => {
+    menuEl?.querySelector<HTMLElement>(`[data-menu-index="${active}"]`)?.focus({ preventScroll: true });
+  }, [active, menuEl]);
+
+  useEffect(() => {
+    const release = claimActivePopover(() => live.current.onClose());
+    const onDown = (e: PointerEvent): void => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      close(false);
+    };
+    // Capture phase, so the app's global Esc (useKeyboard) never also fires.
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      close();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onEsc, true);
+    return () => {
+      release();
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onEsc, true);
+    };
+  }, [close]);
+
+  const run = (i: number): void => {
+    const a = actions[i];
+    if (!a || a.disabled) return;
+    close();
+    a.onSelect();
+  };
+
+  return (
+    <FloatingPortal>
+      {phone && <div className="fixed inset-0 z-[90] bg-ui-scrim/40 motion-safe:animate-ui-fade" aria-hidden />}
+      <div
+        ref={(el) => {
+          menuRef.current = el;
+          setMenuEl(el);
+          if (!phone) float.refs.setFloating(el);
+        }}
+        style={phone ? undefined : float.floatingStyles}
+        data-floating-layer=""
+        role="menu"
+        aria-label={label}
+        onKeyDown={(e) => {
+          if (onNavKey(e, run)) return;
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            close();
+          }
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        className={cx(
+          'z-[90] overflow-y-auto overscroll-contain bg-ui-raise p-1 shadow-xl shadow-black/20',
+          phone
+            ? 'fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-xl pb-[max(8px,env(safe-area-inset-bottom))] motion-safe:animate-ui-sheet-up'
+            : 'min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
+        )}
+      >
+        <MenuEntries items={items} active={active} phone={phone} run={run} setActive={setActive} />
+      </div>
+    </FloatingPortal>
   );
 }

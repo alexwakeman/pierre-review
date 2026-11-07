@@ -19,6 +19,10 @@ export interface MappedReview {
   threads?: ReviewThreadReport[];
   // A docs run's `docReferences`, raw.
   docReferences?: unknown;
+  // An open-points run's `openPoints`, raw (the manager reconciles it).
+  openPoints?: unknown;
+  // A push-summary run's `pushSummary`, raw (the manager cleans it).
+  pushSummary?: unknown;
 }
 
 /**
@@ -62,5 +66,7 @@ export function mapSubmittedReview(payload: SubmitReviewPayload, strippedDiff: s
     ...(payload.followUp !== undefined ? { followUp: payload.followUp } : {}),
     ...(payload.threads !== undefined ? { threads: payload.threads } : {}),
     ...(payload.docReferences !== undefined ? { docReferences: payload.docReferences } : {}),
+    ...(payload.openPoints !== undefined && payload.openPoints !== null ? { openPoints: payload.openPoints } : {}),
+    ...(payload.pushSummary !== undefined && payload.pushSummary !== null ? { pushSummary: payload.pushSummary } : {}),
   };
 }

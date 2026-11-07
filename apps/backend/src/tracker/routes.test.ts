@@ -19,11 +19,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import { jiraAcFields, trackerTickets, workspaceTrackers } from '../db/schema.sqlite.js';
+import { jiraAcFields, trackerOpenPointsFields, trackerTickets, workspaceTrackers } from '../db/schema.sqlite.js';
 import { registerTrackerRoutes } from './routes.js';
 import { prTicketRefs } from './enricher.js';
 import { clipTicketField, resolvePrTickets } from './stories.js';
 import { resetTrackerWorker } from './worker.js';
+import { openPointsForPr } from './open-points-pr.js';
 import type { JiraTransport, RawResponse } from './jira/fetch.js';
 import type { TrackerContext } from './context.js';
 
@@ -133,6 +134,8 @@ beforeAll(async () => {
   sqlite.exec(migration('0088_issue_tracker.sql'));
   sqlite.exec(migration('0144_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
+  // The open-points field per issue type (migration 0171's tracker half; claude_reviews is not here).
+  for (const stmt of migration('0171_open_points.sql').split('--> statement-breakpoint').slice(0, 2)) sqlite.exec(stmt);
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   // The PR columns the GitHub Issues linker reads (migration 0089).
@@ -153,6 +156,7 @@ beforeAll(async () => {
     schema: {
       trackerTickets,
       jiraAcFields,
+      trackerOpenPointsFields,
       workspaceTrackers,
       workspaces: coreWorkspaces,
       workspaceRepos: coreWorkspaceRepos,
@@ -184,7 +188,7 @@ beforeEach(async () => {
   nextResponse = { status: 200, contentType: 'application/json', body: '{}' };
   // The worker's backoff and the stored tickets are per test.
   resetTrackerWorker();
-  sqlite.exec('DELETE FROM tracker_tickets; DELETE FROM pro_jira_ac_fields;');
+  sqlite.exec('DELETE FROM tracker_tickets; DELETE FROM pro_jira_ac_fields; DELETE FROM tracker_open_points_fields;');
   // A clean slate for both workspaces: Jira tracker, ENG allowlist, no token.
   for (const ws of [WS, WS_NO_TOKEN]) {
     const res = await put(ws, {
@@ -345,6 +349,8 @@ describe('3. the ticket route is not a Jira proxy', () => {
       fetchedAt: expect.any(String),
       // The people's comments (none stored here; docs/TRACKERS.md § Ticket comments).
       comments: [],
+      // No open points (no such field, no such section): docs/TRACKERS.md § Open points.
+      openPoints: [],
     });
     expect(calls).toHaveLength(1);
     // ⚠ READ ONCE, THEN STORED: the second view makes no Jira call.
@@ -697,5 +703,119 @@ describe('7. Settings: the criteria field per issue type (ac-fields)', () => {
     expect((await set(WS, { apiRoot: story.apiRoot, issueTypeId: '424242', fieldId: null })).statusCode).toBe(404);
     expect((await list(90)).statusCode).toBe(404);
     expect((await set(90, { apiRoot: story.apiRoot, issueTypeId: '10001', fieldId: null })).statusCode).toBe(404);
+  });
+});
+
+describe('8. Settings: the open-points field per issue type (open-points-fields)', () => {
+  const STORY = {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      key: 'ENG-7',
+      names: { customfield_10400: 'Acceptance Criteria', customfield_10700: 'Open Points', customfield_10600: 'Notes' },
+      fields: {
+        summary: 'Export',
+        description: 'As a user\n\nh2. Open questions\n* File name format',
+        issuetype: { id: '10001', name: 'Story' },
+        customfield_10400: '* CSV downloads',
+        customfield_10700: '* Content depends on UCD confirming',
+        customfield_10600: 'Waiting on design',
+      },
+    }),
+  } as const;
+  const list = (ws: number) => app.inject({ method: 'GET', url: `/api/workspaces/${ws}/tracker/ac-fields` });
+  const setOp = (ws: number, body: unknown) =>
+    app.inject({ method: 'PUT', url: `/api/workspaces/${ws}/tracker/open-points-fields`, payload: body as Record<string, unknown> });
+  const storyRow = (body: { types: Array<{ issueTypeId: string; apiRoot: string; openPoints?: unknown }> }) =>
+    body.types.find((t) => t.issueTypeId === '10001')!;
+
+  beforeEach(async () => {
+    await put(WS, { jira: { token: TOKEN } });
+  });
+
+  it("'auto' reads the field named for them; a choice changes the ticket's points at once, with no Jira call", async () => {
+    nextResponse = STORY;
+    const first = (await ticket(10, 'eng-7')).json();
+    expect(first.openPoints).toEqual([{ text: 'Content depends on UCD confirming', source: 'field', fieldName: 'Open Points' }]);
+    const story = storyRow((await list(WS)).json());
+    expect(story.openPoints).toEqual({ mode: 'auto', chosen: null, inUse: { id: 'customfield_10700', name: 'Open Points' } });
+
+    const calls0 = calls.length;
+    const field = await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'field', fieldId: 'customfield_10600' });
+    expect(field.statusCode).toBe(200);
+    expect(storyRow(field.json()).openPoints).toMatchObject({ mode: 'field', chosen: { id: 'customfield_10600', name: 'Notes' } });
+    expect((await ticket(10, 'ENG-7')).json().openPoints).toEqual([{ text: 'Waiting on design', source: 'field', fieldName: 'Notes' }]);
+
+    const none = await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'none' });
+    expect(storyRow(none.json()).openPoints).toEqual({ mode: 'none', chosen: null, inUse: null });
+    expect((await ticket(10, 'ENG-7')).json().openPoints).toEqual([{ text: 'File name format', source: 'description', fieldName: null }]);
+
+    const auto = await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'auto' });
+    expect(storyRow(auto.json()).openPoints).toMatchObject({ mode: 'auto', chosen: null });
+    expect(calls.length).toBe(calls0);
+  });
+
+  it('refuses a field the type does not carry (400), an unknown type and another tenant’s workspace (404)', async () => {
+    nextResponse = STORY;
+    expect((await ticket(10, 'eng-7')).statusCode).toBe(200);
+    const story = storyRow((await list(WS)).json());
+    expect((await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'field', fieldId: 'customfield_99999' })).statusCode).toBe(400);
+    expect((await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'field' })).statusCode).toBe(400);
+    expect((await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '424242', mode: 'none' })).statusCode).toBe(404);
+    expect((await setOp(90, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'none' })).statusCode).toBe(404);
+    expect((await setOp(WS, { apiRoot: story.apiRoot, issueTypeId: '10001', mode: 'sometimes' })).statusCode).toBe(400);
+  });
+});
+
+describe('9. open points for a review run: read again first, the stored copy when that fails', () => {
+  const story = (point: string) => ({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      key: 'ENG-7',
+      names: { customfield_10700: 'Open Points' },
+      fields: { summary: 'Export', description: 'As a user', issuetype: { id: '10001', name: 'Story' }, customfield_10700: point },
+    }),
+  });
+
+  beforeEach(async () => {
+    await put(WS, { jira: { token: TOKEN } });
+  });
+
+  it('reads the ticket again before a run, skips a read that is still fresh, and says when it used the stored copy', async () => {
+    const t0 = Date.now();
+    nextResponse = story('Copy depends on UCD');
+    const first = await openPointsForPr(ctx, ACCOUNT, 10, { refresh: true, transport, nowMs: t0 });
+    // PR 10 names ENG-7 and ENG-8 (the mock answers both alike).
+    expect(first.map((t) => t.key)).toEqual(['ENG-7', 'ENG-8']);
+    expect(first[0]).toEqual({
+      key: 'ENG-7',
+      points: [{ text: 'Copy depends on UCD', source: 'field', fieldName: 'Open Points' }],
+      fresh: true,
+      fetchedAt: expect.any(String),
+    });
+    const calls1 = calls.length;
+    expect(calls1).toBeGreaterThan(0);
+
+    // A minute later (a pair's second half): fresh enough, no read.
+    nextResponse = story('Changed');
+    expect((await openPointsForPr(ctx, ACCOUNT, 10, { refresh: true, transport, nowMs: t0 + 60_000 }))[0]!.points[0]!.text).toBe(
+      'Copy depends on UCD',
+    );
+    expect(calls.length).toBe(calls1);
+
+    // Ten minutes later the ticket changed: read again.
+    const later = await openPointsForPr(ctx, ACCOUNT, 10, { refresh: true, transport, nowMs: t0 + 10 * 60_000 });
+    expect(later[0]).toMatchObject({ fresh: true, points: [{ text: 'Changed' }] });
+
+    // Jira fails: the stored copy, said as such.
+    nextResponse = { status: 503, contentType: 'text/plain', body: 'down' };
+    const failed = await openPointsForPr(ctx, ACCOUNT, 10, { refresh: true, transport, nowMs: t0 + 30 * 60_000 });
+    expect(failed[0]).toMatchObject({ fresh: false, points: [{ text: 'Changed' }] });
+
+    // Without `refresh` (a view): never a call.
+    const before = calls.length;
+    await openPointsForPr(ctx, ACCOUNT, 10, { refresh: false, transport, nowMs: t0 + 60 * 60_000 });
+    expect(calls.length).toBe(before);
   });
 });

@@ -68,6 +68,7 @@ export function MergeControl({
   syncedAt,
   showQueuePosition = true,
   queueLine = true,
+  defaultOpen = false,
 }: {
   prId: number;
   githubUrl: string;
@@ -126,8 +127,14 @@ export function MergeControl({
    * card HEADING is that line (from the same newer-wins answer), so the row keeps only the verb.
    */
   queueLine?: boolean;
+  /**
+   * Mount EXPANDED. Only for a caller whose own mount is a click (the Open PRs row menu's "Merge"):
+   * expanding is what buys the live merge-options read, so a control mounted on page paint must
+   * never pass it.
+   */
+  defaultOpen?: boolean;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   // ⚠ STILL `open`-GATED. A disabled query returns whatever is CACHED — which is why the board
   // turns the position off (`showQueuePosition`): there it would be an earlier click's answer.
   // The membership and entry state it carries still count, newer-wins, and nothing is fetched.

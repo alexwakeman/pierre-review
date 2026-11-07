@@ -288,7 +288,11 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // offered models (review/model-options.ts). The SDK and zod come from the AI runtime
     // (ai/runtime.ts) — downloaded on first use for an npm install. A missing runtime throws here and
     // lands in the catch as a readable failure.
-    const reviewShape = await submitReviewShape({ docs: docsDir != null });
+    const reviewShape = await submitReviewShape({
+      docs: docsDir != null,
+      openPoints: args.openPoints === true,
+      pushSummary: args.pushSummary === true,
+    });
     let captured: SubmitReviewPayload | null = null;
 
     // Deep review: the specialist catalogue + the dispatch guard (a fresh count per run).

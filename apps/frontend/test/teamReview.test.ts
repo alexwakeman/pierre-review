@@ -19,6 +19,7 @@ import {
   itemShows,
   newestReviewKey,
   nextShownReview,
+  openAiReviewCount,
   pairReviewIdsOf,
   raisedByLabel,
   reviewListLine,
@@ -181,6 +182,35 @@ describe('findings by their state now', () => {
     const points = [point(1, { ignored: true }), point(2, { ignored: true }), point(3)];
     const { open } = teamFindingRows(points, [{ id: 2, severity: 'warning' as const }], new Set([3]));
     expect(open.map((e) => (e.kind === 'point' ? e.point.findingId : e.finding.id))).toEqual([2]);
+  });
+});
+
+describe("the AI Review tab's count", () => {
+  type Data = Parameters<typeof openAiReviewCount>[0];
+  const run = (status: string, findings: Array<{ id: number; severity: string }>) =>
+    ({ status, findings, followUp: null }) as unknown as NonNullable<NonNullable<Data>['review']>;
+  const view = (allFindings: ClaudeTeamPoint[]) => ({ allFindings }) as unknown as NonNullable<NonNullable<Data>['teamView']>;
+
+  it('counts every open finding: the fold, plus own findings it does not name; praise and closed ones are not counted', () => {
+    const data = {
+      review: run('succeeded', [
+        { id: 1, severity: 'warning' },
+        { id: 2, severity: 'praise' },
+        { id: 3, severity: 'nit' },
+      ]),
+      teamView: view([
+        point(1),
+        point(5, { origin: 'teammate', author: byRobin, reviewId: 20 }),
+        point(6, { state: { kind: 'resolved_on_github' } }),
+      ]),
+    };
+    expect(openAiReviewCount(data)).toBe(3);
+  });
+
+  it('is 0 with no data; a run still going adds no own findings', () => {
+    expect(openAiReviewCount(undefined)).toBe(0);
+    expect(openAiReviewCount({ review: run('running', [{ id: 1, severity: 'warning' }]), teamView: undefined })).toBe(0);
+    expect(openAiReviewCount({ review: null, teamView: view([point(5, { origin: 'teammate', author: byRobin, reviewId: 20 })]) })).toBe(1);
   });
 });
 

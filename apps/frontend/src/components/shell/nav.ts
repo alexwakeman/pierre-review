@@ -41,8 +41,8 @@ export interface Destination {
 
 /** Sidebar order, top to bottom. The four primaries are also the phone's bottom bar. */
 export const DESTINATIONS: readonly Destination[] = [
-  { id: 'attention', label: 'Pending', title: 'Everything waiting on you or your workspace, ranked most actionable first', group: 'primary', goKey: 'p' },
   { id: 'open-prs', label: 'Open pull requests', title: 'Every open pull request in this workspace', group: 'primary', goKey: 'o' },
+  { id: 'attention', label: 'Pending', title: 'Everything waiting on you or your workspace, ranked most actionable first', group: 'primary', goKey: 'p' },
   { id: 'sprint', label: 'This Sprint', title: "The tracker's current sprint: themes, critical path, people and what merged", group: 'primary', goKey: 's' },
   { id: 'timeline', label: 'Timeline', title: 'The activity board: every pull request over time', group: 'primary', goKey: 't' },
   { id: 'docs', label: 'Docs', title: 'Reference documents for this workspace, and a chat that answers from them', group: 'library', goKey: 'd', aiOnly: true },

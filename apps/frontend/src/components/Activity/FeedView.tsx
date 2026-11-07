@@ -66,6 +66,8 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { UserName } from '../UserName.js';
+import { PushSummary } from '../PushSummary.js';
+import { usePushSummariesVisible } from '../../hooks/usePushSummaries.js';
 
 // THE FILTER PILL EACH ITEM BELONGS TO, as the pill's own icon + ink — drawn on the card so a
 // reader can tell a comment from a PR event from a push at a glance, and so the icon on a card is
@@ -1917,6 +1919,9 @@ function FeedRowImpl({
       : '';
   const affected = item.affectedThreads ?? [];
   const primaryReason = item.myTurnReasons[0];
+  // The Limn review summaries of this commit run's pushes (docs/FRONTEND.md § Push summaries).
+  const showPushSummaries = usePushSummariesVisible();
+  const pushSummaries = showPushSummaries && item.kind === 'commit_pushed' ? (item.pushSummaries ?? []) : [];
 
   // A review-thread card shows its FULL conversation inline (reply + resolve, with
   // the specific comment highlighted new); a PR-comment card can open a quote+@mention
@@ -2156,13 +2161,16 @@ function FeedRowImpl({
         {/* what changed: a commit push → the "pushed N commits" summary (always, so a plain
             push under "show commits" isn't a bare card), and when it addressed review threads,
             those threads inline so the reader sees the change without opening the PR. */}
-        {(item.changeSummary != null || affected.length > 0) && (
+        {(item.changeSummary != null || affected.length > 0 || pushSummaries.length > 0) && (
           <div className="ml-[21px] mt-1.5 space-y-1.5">
             {item.changeSummary != null && (
               <div className="text-meta text-ui-mute">
                 {item.changeSummary}
               </div>
             )}
+            {pushSummaries.map((ps) => (
+              <PushSummary key={ps.reviewId} summary={ps} />
+            ))}
             {affected.length > 0 && (
               <AffectedThreadsList
                 affected={affected}

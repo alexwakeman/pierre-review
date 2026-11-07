@@ -59,7 +59,7 @@ describe('the sidebar gate', () => {
   });
   it('leaves out a hidden destination, and keeps the AI gate', () => {
     const shown = ids({ aiOn: false, features: resolveFeatures(null, NEW) });
-    expect(shown).toEqual(['attention', 'open-prs', 'timeline']);
+    expect(shown).toEqual(['open-prs', 'attention', 'timeline']);
     expect(ids({ aiOn: true, features: resolveFeatures(null, EXISTING) })).toEqual(DESTINATIONS.map((d) => d.id));
   });
   it('a deep link to a hidden destination still lands there', () => {

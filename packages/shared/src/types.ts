@@ -21,6 +21,7 @@ import type { AiEffortSettingStatus } from './ai-effort.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 import type { RepoDocsOffers, RepoDocsUnreadableReason } from './reference-docs-offers.js';
 import type { LimnSeverity } from './limn-severity.js';
+import type { PrPushSummary } from './push-summaries.js';
 
 export type DerivedState =
   | 'resolved'
@@ -2079,6 +2080,10 @@ export interface FlowResponse {
   settings?: ResolvedFlowSettings;
   /** The workspace split in WORKING hours (`hours` is working hours here). */
   courtsWork?: CourtShare[];
+  /** The same split over only the pull requests that went back to their author at least once
+   *  (`rounds > 0`) — the balance target's population. PRs approved on their first review never
+   *  wait for their author, so they would pull every workspace away from equal thirds. */
+  balanceCourts?: CourtShare[];
   medianLeadWorkHours?: number;
   p75LeadWorkHours?: number;
   /** The headline in working hours. Templated server-side like every sentence here.
@@ -4318,6 +4323,30 @@ export interface WorkspaceTrackerUpdate {
   notion?: NotionTrackerMapping | null;
 }
 
+// "Copy from another workspace" (docs/TRACKERS.md § Copying a tracker). `GET
+// /api/workspaces/:id/tracker/copy-sources` lists the account's OTHER workspaces with a tracker SET UP
+// (a stored provider and a base URL to link to); `POST /api/workspaces/:id/tracker/copy` copies one
+// server-side, token included in its sealed form. ⚠ `hasToken` only — the token never reaches the wire.
+export interface TrackerCopySource {
+  workspaceId: number;
+  name: string;
+  provider: TrackerProvider;
+  baseUrl: string | null;
+  hasToken: boolean;
+}
+
+export interface TrackerCopySourcesResponse {
+  workspaceId: number;
+  sources: TrackerCopySource[];
+}
+
+export interface TrackerCopyBody {
+  fromWorkspaceId: number;
+  // Required (true) when this workspace already has a tracker set up: the copy REPLACES it. Without
+  // it such a copy is refused `409 TrackerExists`.
+  replace?: boolean;
+}
+
 export interface WorkspaceProSettings {
   workspaceId: number;
   // The sprint pair — what every window on this workspace is framed by. Both null = no sprint.
@@ -5055,6 +5084,48 @@ export interface JiraTicketDetails {
   /** The people's comments on the ticket (bots left out), OLDEST first, at most TICKET_COMMENTS_KEPT;
    *  [] = none stored. Absent from an older server. docs/TRACKERS.md § Ticket comments. */
   comments?: TicketComment[];
+  /** The ticket's OPEN POINTS (decisions, content or designs not final when it was written): from the
+   *  field set for its issue type, else a section of its description. Absent from an older server.
+   *  docs/TRACKERS.md § Open points. */
+  openPoints?: TicketOpenPoint[];
+}
+
+/** Where an open point was read: the ticket's open-points field, or a section of its description. */
+export type TicketOpenPointSource = 'field' | 'description';
+
+/** One open point of a ticket (docs/TRACKERS.md § Open points). `text` is markdown, one point. */
+export interface TicketOpenPoint {
+  text: string;
+  source: TicketOpenPointSource;
+  /** The field's name when `source` is 'field'. */
+  fieldName: string | null;
+}
+
+/** Code in the PR that depends on an open point, as the reviewer named it. */
+export interface ClaudeOpenPointCode {
+  path: string;
+  line: number | null;
+  note: string;
+}
+
+/** One open point a PR review was given, with the code that depends on it. */
+export interface ClaudeOpenPoint {
+  /** 'OP1'… — what the reviewer saw. */
+  ref: string;
+  ticketKey: string;
+  text: string;
+  source: TicketOpenPointSource;
+  /** [] = the reviewer tied no code to it. */
+  code: ClaudeOpenPointCode[];
+}
+
+/** A PR review's open points (`ClaudeReview.openPoints`). Never part of the verdict or the counts. */
+export interface ClaudeReviewOpenPoints {
+  /** true = the tickets were read from the tracker just before the run; false = Limn's stored copy. */
+  fresh: boolean;
+  /** The oldest read of the tickets used (ISO), or null when unknown. */
+  readAt: string | null;
+  points: ClaudeOpenPoint[];
 }
 
 /** Jira's status category key — the part of a status that means the same on every site. */
@@ -5097,6 +5168,32 @@ export interface JiraAcFieldTypeRow {
   inUse: { id: string; name: string } | null;
   /** Every text field seen on this type's tickets, most common first. */
   fields: Array<{ id: string; name: string; ticketCount: number }>;
+  /** Where this type's OPEN POINTS are read from (docs/TRACKERS.md § Open points). */
+  openPoints?: JiraOpenPointsFieldChoice;
+}
+
+/**
+ * How Limn finds an issue type's open points. 'auto' = a field named like "Open points" / "Open
+ * questions" with text, else an "Open points" section of the description; 'field' = the chosen field
+ * (the description when it is empty); 'none' = the description only.
+ */
+export type OpenPointsFieldMode = 'auto' | 'field' | 'none';
+
+export interface JiraOpenPointsFieldChoice {
+  mode: OpenPointsFieldMode;
+  /** The chosen field when `mode` is 'field', else null. */
+  chosen: { id: string; name: string } | null;
+  /** The field the stored tickets read open points from now (the most common one), or null. */
+  inUse: { id: string; name: string } | null;
+}
+
+/** PUT /api/workspaces/:id/tracker/open-points-fields — one issue type's open-points field. */
+export interface JiraOpenPointsFieldBody {
+  apiRoot: string;
+  issueTypeId: string;
+  mode: OpenPointsFieldMode;
+  /** Required when `mode` is 'field'; ignored otherwise. */
+  fieldId?: string | null;
 }
 
 export interface JiraAcFieldSettingsResponse {
@@ -5342,6 +5439,13 @@ export interface TimelinePr {
 
 export interface OpenPrsResponse {
   prs: TimelinePr[];
+  /** The scope's repos the viewer can PUSH to (synced `repos.viewerPermission` ∈ WRITE/MAINTAIN/ADMIN):
+   *  the Open PRs row menu offers Merge only there. A visibility gate, never the authority. Absent on
+   *  an older server (no Merge offered). */
+  writableRepoIds?: number[];
+  /** The listed PRs GitHub's merge queue holds (a POSITIVE observation of the synced membership):
+   *  the row menu never offers Merge on them. Absent on an older server (nothing known queued). */
+  queuedPrIds?: number[];
 }
 
 /** Reports → "Merged so far" (GET /api/merged-prs, Pro on `periodReports`): every PR MERGED in the
@@ -7355,6 +7459,10 @@ export interface ClaudeReview {
   // server-checked. null/absent = the run did not read the library (switch off, empty library, or a
   // run from before the feature).
   docReferences?: ReviewDocReference[] | null;
+  // The OPEN POINTS of the PR's tickets this run was given, each with the code the reviewer tied to
+  // it (docs/CLAUDE-REVIEW.md § Open points). They never move the verdict or the counts.
+  // null/absent = the PR's tickets had none (or a run from before the feature).
+  openPoints?: ClaudeReviewOpenPoints | null;
   // The other code this run read, read-only: ticket peers and related repos' companion changes
   // (docs/CLAUDE-REVIEW.md § Related repos). Only what was checked out. null/absent = none.
   alsoRead?: ReviewPeerRead[] | null;
@@ -10030,6 +10138,10 @@ export interface ConsolidatedFeedItem {
   // Short human-readable "what changed" summary (e.g. "pushed 3 commits · addressed 2
   // threads"); null when the row chrome already says everything.
   changeSummary: string | null;
+  // A 'commit_pushed' run only: the Limn review summaries of the pushes in this run — each one sits
+  // on the run holding its reviewed head (docs/FRONTEND.md § Push summaries). Model text: render as
+  // plain text. Optional (stale caches, other kinds); empty/absent = no review after these pushes.
+  pushSummaries?: PrPushSummary[];
   // Consolidated top-level PR comment(s) folded INTO a coinciding "host" event — a
   // review_submitted OR a lifecycle action (pr_merged / pr_closed) — where the same actor
   // posted the comment(s) within a short window (GitHub's "Comment and close/merge", or a

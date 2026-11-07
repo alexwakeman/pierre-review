@@ -1,5 +1,5 @@
 // Chronology's working-hours render model: the calendar line, the budget scale, the scatter's
-// axis and the triangle's geometry. Pure — no renderer.
+// axis and the balance target's verdict. Pure — no renderer.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/chronologyModel.test.ts
 import { readFileSync } from 'node:fs';
@@ -17,24 +17,26 @@ import {
 } from '@pierre-review/shared';
 import { buildBottlenecksModel, exclusionLineFor } from '../src/components/Activity/bottlenecksModel.js';
 import {
+  BALANCE_RULES,
   budgetAriaLabel,
   budgetClip,
   budgetPopoverRows,
   budgetScale,
   calendarLine,
+  courtBalance,
   dotRadius,
   chronologyWindowLabel,
   effectiveChronologyWindow,
   formatWorkHours,
   lookedBeforeAskedLine,
   neverWentBack,
+  firstReviewSeries,
   prFiguresOf,
   requestCoverageLine,
   scatterTicks,
   scatterYRange,
   slowestPrs,
   slowestTenthShare,
-  trianglePoint,
   workingDaysText,
 } from '../src/components/Activity/chronologyModel.js';
 
@@ -153,17 +155,57 @@ describe('the scatter', () => {
   });
 });
 
-describe('the triangle', () => {
-  it('places a pull request by its shares, and leaves off one with no working time', () => {
-    expect(trianglePoint({ reviewer: 3, author: 0, landing: 1 })).toEqual({
-      reviewer: 0.75,
-      author: 0,
-      landing: 0.25,
-    });
-    expect(trianglePoint({ reviewer: 0, author: 0, landing: 0.01 })).toBeNull();
+describe('the balance target', () => {
+  const courts = (reviewer: number, author: number, landing: number) => [
+    { court: 'reviewer' as const, hours: reviewer, share: 0 },
+    { court: 'author' as const, hours: author, share: 0 },
+    { court: 'landing' as const, hours: landing, share: 0 },
+  ];
+
+  it('weights by hours and reads equal thirds as balanced, at distance 0', () => {
+    const b = courtBalance(courts(10, 10, 10))!;
+    expect(b.distance).toBeCloseTo(0, 9);
+    expect(b).toMatchObject({ verdict: 'balanced', text: 'Balanced', toward: null, away: null });
+    expect(b.shares.reviewer).toBeCloseTo(1 / 3, 9);
   });
 
-  it('counts those that never went back to their author — the right-hand edge', () => {
+  it('puts a corner at distance 1 and an edge midpoint at 0.5', () => {
+    expect(courtBalance(courts(5, 0, 0))!.distance).toBeCloseTo(1, 9);
+    expect(courtBalance(courts(5, 5, 0))!.distance).toBeCloseTo(0.5, 9);
+  });
+
+  it('names the court that clearly leads, and how far', () => {
+    expect(courtBalance(courts(45, 30, 25))!.text).toBe('Leans to waiting for a reviewer');
+    expect(courtBalance(courts(80, 10, 10))).toMatchObject({
+      verdict: 'strong',
+      toward: 'reviewer',
+      text: 'Mostly waiting for a reviewer',
+    });
+  });
+
+  it('names the gap when no single court leads', () => {
+    expect(courtBalance(courts(42, 42, 16))).toMatchObject({
+      verdict: 'leans',
+      away: 'landing',
+      text: 'Little time waiting to merge',
+    });
+    expect(courtBalance(courts(50, 0, 50))!.text).toBe('Almost no time waiting for the author');
+  });
+
+  it('keeps its thresholds in order, inside the triangle', () => {
+    expect(BALANCE_RULES.balanced).toBeLessThan(BALANCE_RULES.leans);
+    // The inscribed circle is distance 0.5: the outer ring must stay inside it.
+    expect(BALANCE_RULES.leans).toBeLessThan(0.5);
+  });
+
+  it('draws no marker without hours — unknown is not zero', () => {
+    expect(courtBalance([])).toBeNull();
+    expect(courtBalance(courts(0, 0, 0))).toBeNull();
+  });
+});
+
+describe('never went back', () => {
+  it('counts those that never went back to their author', () => {
     expect(neverWentBack([row({ rounds: 0 }), row({ rounds: 2 }), row({ rounds: 0 })])).toBe(2);
   });
 });
@@ -288,7 +330,7 @@ function resp(over: Partial<FlowResponse>): FlowResponse {
   };
 }
 
-describe('the scatter’s and triangle’s figures', () => {
+describe('the scatter’s figures', () => {
   const prs = [
     row({ prId: 1, leadWorkHours: 20, rounds: 0 }),
     row({ prId: 2, leadWorkHours: 5, rounds: 1 }),
@@ -448,5 +490,27 @@ describe('the "i" modal from the keyboard', () => {
     // Otherwise the popover's Escape listener, added first, takes the first Escape. The slot is
     // shared with the Pending "i" popovers (lib/activePopover.ts, test/activePopover.test.ts).
     expect(src).toMatch(/useEffect\(\(\) => \{\s*closeActivePopover\(\);\s*\}, \[\]\)/);
+  });
+});
+
+describe('firstReviewSeries', () => {
+  const week = (i: number, passed: number | undefined, partial = false) =>
+    ({
+      weekStart: `2026-01-${String(i + 1).padStart(2, '0')}`,
+      measuredPrs: 10,
+      partial,
+      ...(passed === undefined ? {} : { passedFirstReview: passed }),
+    }) as unknown as Parameters<typeof firstReviewSeries>[0][number];
+
+  it('keeps the last 12 weeks, oldest first', () => {
+    const weeks = Array.from({ length: 26 }, (_, i) => week(i, i, i === 25));
+    const s = firstReviewSeries(weeks);
+    expect(s).toHaveLength(12);
+    expect(s[0]!.count).toBe(14);
+    expect(s[11]).toMatchObject({ count: 25, partial: true });
+  });
+
+  it('reads a missing figure as unknown, never zero', () => {
+    expect(firstReviewSeries([week(0, undefined), week(1, 0)]).map((p) => p.count)).toEqual([null, 0]);
   });
 });

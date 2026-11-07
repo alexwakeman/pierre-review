@@ -1,4 +1,5 @@
 import type { ClaudeReviewTicket, TicketComment } from '@pierre-review/shared';
+import type { PrTicketOpenPoints } from './open-points-pr.js';
 
 // ⚠ LAZY on purpose: ./runtime.ts opens the database client at import time, and this module sits in
 // the import graph of review modules that tests load STATICALLY before they point DATABASE_URL at a
@@ -33,6 +34,10 @@ export interface TicketSource {
   //   listChangedTicketIdents — tickets whose membership or story text changed at or after
   //     `sinceMs`. Feeds the sweeper cheaply.
   listChangedTicketIdents(accountId: number, sinceMs: number): Promise<string[]>;
+  //   openPointsForPr — the OPEN POINTS of the PR's tickets (docs/TRACKERS.md § Open points). With
+  //     `refresh` the tickets are read from the tracker first — a review RUN only, never a view.
+  //     Never throws: [] on any failure.
+  openPointsForPr(accountId: number, prId: number, opts: { refresh: boolean }): Promise<PrTicketOpenPoints[]>;
 }
 
 const core: TicketSource = {
@@ -55,6 +60,10 @@ const core: TicketSource = {
   listChangedTicketIdents: async (a, s) => {
     const { peers, ctx } = await load();
     return peers.listChangedTicketIdents(ctx, a, s);
+  },
+  openPointsForPr: async (a, p, o) => {
+    const [{ ctx }, mod] = await Promise.all([load(), import('./open-points-pr.js')]);
+    return mod.openPointsForPr(ctx, a, p, o);
   },
 };
 

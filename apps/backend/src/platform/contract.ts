@@ -441,6 +441,12 @@ export interface RunReviewArgs {
   // a finding's `docRefs`. Absent/null ⇒ the run is exactly as before. Core-only (Claude Review left
   // the plugin), so no apiVersion question.
   docsDir?: string | null;
+  // The prompt carries an "Open points on the ticket" section (docs/CLAUDE-REVIEW.md § Open points):
+  // the result tool gains `openPoints`. Absent/false ⇒ the tool's shape is exactly as before. Core-only.
+  openPoints?: boolean;
+  // The prompt carries a "Push summary" section (docs/CLAUDE-REVIEW.md § Push summaries): the result
+  // tool gains `pushSummary`. Absent/false ⇒ the tool's shape is exactly as before. Core-only.
+  pushSummary?: boolean;
   // WHO TO BILL, for a provider that writes its own ledger row (Codex: a ChatGPT run is US$ 0, so the
   // manager's cost-gated row would never be written; ai/provider.ts `usageRecord`). Claude ignores it
   // and the manager records Claude's run exactly as before. Core-only.
@@ -491,6 +497,12 @@ export interface RunReviewResult {
   // A docs run only (RunReviewArgs.docsDir): the model's `docReferences`, RAW — the manager checks each
   // against the library before anything is stored.
   docReferences?: unknown;
+  // An open-points run only (RunReviewArgs.openPoints): the model's `openPoints`, RAW — the manager
+  // keeps only the refs it sent.
+  openPoints?: unknown;
+  // A push-summary run only (RunReviewArgs.pushSummary): the model's `pushSummary`, RAW — the manager
+  // cleans and clips it.
+  pushSummary?: unknown;
   // The refs of the peers that WERE checked out (a deep run handed peers); absent otherwise. The
   // manager stores what was read (`claude_reviews.peers_read`).
   peersCheckedOut?: string[];

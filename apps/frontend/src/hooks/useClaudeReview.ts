@@ -27,6 +27,7 @@ import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { CI_REVIEW_STATES_KEY, ciReviewKey } from './useCiReview.js';
 import { anyReviewInFlight, reviewTabPill, type ReviewTabPill } from '../lib/claudeReviewColumn.js';
 import { anyFixRunning } from '../lib/claudeAutoReview.js';
+import { openAiReviewCount } from '../lib/teamReview.js';
 import {
   activeReviewSignatures,
   changedActivePrIds,
@@ -103,6 +104,21 @@ export function useClaudeReviewTabPill(prId: number, enabled: boolean): ReviewTa
     },
   });
   return enabled ? reviewTabPill(data, starting) : null;
+}
+
+/**
+ * The count on the AI Review tab's label: every finding open now (`openAiReviewCount`). It observes
+ * the SAME `['claude-review', prId]` query the pill keeps alive, so it adds no request; `select`
+ * re-renders the strip only when the number changes.
+ */
+export function useOpenAiReviewCount(prId: number, enabled: boolean): number {
+  const { data } = useQuery<ClaudeReviewResponse, Error, number>({
+    queryKey: ['claude-review', prId],
+    queryFn: () => api.claudeReview(prId),
+    enabled,
+    select: openAiReviewCount,
+  });
+  return enabled ? (data ?? 0) : 0;
 }
 
 /** The active-list cadence while a PR pane is open. The banner polls faster (2.5s) only after a

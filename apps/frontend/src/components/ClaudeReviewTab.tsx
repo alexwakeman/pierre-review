@@ -141,6 +141,7 @@ import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
 import { RailLayout, RailPiece, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
+import { ClaudeReviewOpenPointsSection } from './ClaudeReviewOpenPoints.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
@@ -1640,6 +1641,13 @@ export function ClaudesReview({
         finishedAt: review.finishedAt,
       })}
       {ciCheck}
+      {/* The tickets' open points and the code that depends on each — never blocking
+          (docs/CLAUDE-REVIEW.md § Open points). Absent when the run was given none. */}
+      <ClaudeReviewOpenPointsSection
+        openPoints={review.openPoints}
+        changedPaths={changedPaths}
+        onOpenInChanges={onOpenInChanges}
+      />
       {/* SonarCloud's analysis of the reviewed head (docs/SONARCLOUD.md). Absent when the
           workspace has no SonarCloud set up and nothing was stored. */}
       <ClaudeReviewSonarSection
@@ -1689,6 +1697,7 @@ export const REVIEW_SECTIONS = [
   { id: 'findings', label: 'Findings' },
   { id: 'stories', label: 'Story check' },
   { id: 'ci', label: 'CI check' },
+  { id: 'open', label: 'Open points' },
   { id: 'sonar', label: 'SonarCloud' },
   { id: 'refs', label: 'Reference docs' },
   { id: 'design', label: 'Design' },

@@ -212,6 +212,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .where(eq(schema.trackerTicketComments.accountId, accountId))
       .execute();
     await tx.delete(schema.jiraAcFields).where(eq(schema.jiraAcFields.accountId, accountId)).execute();
+    // Where each issue type's open points are read (migration 0171). No FKs.
+    await tx.delete(schema.trackerOpenPointsFields).where(eq(schema.trackerOpenPointsFields.accountId, accountId)).execute();
     await tx.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, accountId)).execute();
     // SonarCloud (migration 0114 / pg 0101): the workspace rows hold the SEALED token; the snapshots
     // hold third-party analysis of the account's code. No FK on the snapshots, so this is the whole
@@ -418,6 +420,8 @@ export function accountScopedTables(): {
     // Ticket comments (migration 0141), erased explicitly above.
     { name: 'trackerTicketComments', col: schema.trackerTicketComments.accountId, table: schema.trackerTicketComments },
     { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
+    // The open-points field per issue type (migration 0171), erased explicitly above.
+    { name: 'trackerOpenPointsFields', col: schema.trackerOpenPointsFields.accountId, table: schema.trackerOpenPointsFields },
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
     // SonarCloud (migration 0114 / pg 0101), erased explicitly above; `workspaceSonar` holds a credential.
     { name: 'sonarSnapshots', col: schema.sonarSnapshots.accountId, table: schema.sonarSnapshots },

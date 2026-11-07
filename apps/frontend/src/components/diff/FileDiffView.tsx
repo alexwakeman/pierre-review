@@ -1781,9 +1781,10 @@ export const FileDiffView = memo(function FileDiffView({
   // 29,462 against a 1,000px window before; equal to the window after.
   // ⚠ `overflow-anchor: none`: lazy mounts compensate their own height change (`useHoldAboveReader`);
   // the browser anchoring as well would correct twice.
+  // `space-y-3`: a small gap between files, so one file's last line never runs into the next name.
   return (
     <LazyMountContext.Provider value={mounter}>
-    <div className="relative [overflow-anchor:none]">
+    <div className="relative space-y-3 [overflow-anchor:none]">
       {files.map((f) => (
         <FileDiffBlock
           key={f.path}

@@ -1,3 +1,4 @@
+import { withOpenPointsBlock } from './open-points.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ActiveReviewsResponse,
@@ -896,7 +897,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         name: pctx.name,
         prNumber: pctx.prNumber,
         reviewHeadSha: pctx.reviewHeadSha,
-        body: review.userBody ?? '',
+        // The tickets' open points ride the body, marked as not affecting the outcome (open-points.ts).
+        body: withOpenPointsBlock(review.userBody ?? '', review.openPoints),
         verdict: userVerdict,
         // How the review ran, in the summary marker (a teammate's Limn shows it from there).
         limnMeta: {

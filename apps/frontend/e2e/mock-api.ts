@@ -26,6 +26,7 @@ import type {
   MyTurnResponse,
   OpenPrsResponse,
   ClaudeReviewStatesResponse,
+  PrPushSummariesResponse,
   ClaudeThreadJudgementsResponse,
   PrTicketReviewsResponse,
   TicketReviewStatesResponse,
@@ -57,6 +58,7 @@ import type {
   TicketMergedPrsResponse,
   TicketStoryResponse,
   WorkspaceTrackerSettings,
+  TrackerCopySourcesResponse,
   WorkspaceSonarSettings,
   WikiCredentialsSettings,
   SonarPrResponse,
@@ -1570,6 +1572,10 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
           check: null,
           progress: null,
         } satisfies ThreadCheckStatusResponse);
+      // The PR Activity tab's push summaries (docs/FRONTEND.md § Push summaries): none here.
+      const pushSummariesMatch = path.match(/\/api\/prs\/(\d+)\/push-summaries$/);
+      if (pushSummariesMatch)
+        return json(route, { prId: Number(pushSummariesMatch[1]), summaries: [] } satisfies PrPushSummariesResponse);
       if (path.endsWith('/api/ticket-reviews/states')) return json(route, TICKET_REVIEW_STATES);
       if (path.endsWith(`/api/ticket-reviews/${ACME_2_CHECK.id}`)) return json(route, ACME_2_CHECK);
       const ticketReviewsMatch = path.match(/\/api\/prs\/(\d+)\/ticket-reviews$/);
@@ -1591,6 +1597,10 @@ export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild
           providerChosen: false,
           githubIssuesRepos: [],
         } satisfies WorkspaceTrackerSettings);
+      }
+      // "Copy from another workspace": no other workspace has a tracker, so the control stays hidden.
+      if (/\/api\/workspaces\/\d+\/tracker\/copy-sources$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, sources: [] } satisfies TrackerCopySourcesResponse);
       }
       // SONARCLOUD (core, free; docs/SONARCLOUD.md). Not set up in e2e: the settings answer "no
       // organization, no token", and a PR's stored read answers "not configured, nothing stored" —

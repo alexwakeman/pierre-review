@@ -4,7 +4,7 @@ import { fixtures, installMockApi } from './mock-api.js';
 // Regression gates for the consolidated Activity Feed + click-to-detail UX (see CLAUDE.md):
 //   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
 //     entry; an empty workspace lands on the guidance to move repos in
-//   • the sidebar reads Pending, Open pull requests, This Sprint, Timeline, Feed, Reports, Bots
+//   • the sidebar reads Open pull requests, Pending, This Sprint, Timeline, Feed, Reports, Bots
 //     Monitoring (Docs too, where AI runs)
 //   • a legacy ?insightsTab=sprint|merged link lands on This Sprint
 //   • the Open PRs trunk strip arrives collapsed, and expands on a click
@@ -16,8 +16,8 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
 //   • clicking ANY feed item opens the full-height PR DETAIL tab (an overlay + a closable
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
-//   • THE REDESIGN'S SHELL: one sidebar replaced the tab row and the Activity rail. Pending, Open
-//     pull requests, This Sprint and Timeline lead it; Docs, Feed, Reports and Bots Monitoring
+//   • THE REDESIGN'S SHELL: one sidebar replaced the tab row and the Activity rail. Open pull
+//     requests, Pending, This Sprint and Timeline lead it; Docs, Feed, Reports and Bots Monitoring
 //     follow. `aria-current="page"` marks where you are. The open tabs (a PR, a drill-down) are listed
 //     in the sidebar (`sidebar-tabs`) at desktop width, which renders nothing when none is open.
 
@@ -108,7 +108,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await isCurrent(page, 'Pending');
   });
 
-  test('the sidebar reads Pending, Open pull requests, This Sprint, Timeline, then Feed, Reports, Bots Monitoring', async ({ page }) => {
+  test('the sidebar reads Open pull requests, Pending, This Sprint, Timeline, then Feed, Reports, Bots Monitoring', async ({ page }) => {
     await gotoActivity(page);
     // The destination items, top to bottom (the LABEL span only: some carry a count after it).
     // Polled, because the sidebar can re-render while the workspace resolves. Docs shows only where
@@ -117,11 +117,11 @@ test.describe('Activity Feed / click-to-detail flows', () => {
       .poll(() =>
         page
           .getByTestId('sidebar')
-          // Pending and Open pull requests are pinned in their own nav ("Main") above the rest ("More").
+          // Open pull requests and Pending are pinned in their own nav ("Main") above the rest ("More").
           .locator('nav[aria-label="Main"] button[data-testid^="nav-"], nav[aria-label="More"] button[data-testid^="nav-"]')
           .evaluateAll((els) => els.map((el) => (el.querySelector('.nav-label')?.textContent ?? '').trim())),
       )
-      .toEqual(['Pending', 'Open pull requests', 'This Sprint', 'Timeline', 'Feed', 'Reports', 'Bots Monitoring']);
+      .toEqual(['Open pull requests', 'Pending', 'This Sprint', 'Timeline', 'Feed', 'Reports', 'Bots Monitoring']);
     // No fixed views in the tab strip any more: with no PR open it is not there at all.
     await expect(tabs(page)).toHaveCount(0);
     // The two pinned entries sit outside the scrolling middle.

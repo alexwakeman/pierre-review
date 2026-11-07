@@ -20,6 +20,7 @@ import {
   type ClaudeTeammateFinding,
   type ClaudeReviewStanding,
   type ClaudeReviewStandings,
+  type ClaudeReviewResponse,
   type ClaudeReviewStatus,
   type ClaudeReviewSummary,
   type ClaudeReviewVerdict,
@@ -29,6 +30,7 @@ import {
   type ClaudeTeamPoint,
 } from '@pierre-review/shared';
 import { AUTO_REVIEW_LABEL as AUTO_WORD } from '../components/Activity/pendingLabels.js';
+import { withoutPraise } from './claudeReviewFollowUp.js';
 import { CLAUDE_VERDICT_LABEL, shortDay } from './claudeReviewColumn.js';
 import { REPLIES_CHECK_LABEL as REPLIES_WORD } from './repliesCheck.js';
 import { joinNames, teammateName } from './teammateReviews.js';
@@ -187,6 +189,19 @@ export function teamFindingRows<F extends { id: number; severity: ClaudeFindingS
   const sev = (e: OpenEntry<F>): ClaudeFindingSeverity | null => (e.kind === 'own' ? e.finding.severity : e.point.severity);
   rows.sort((a, b) => rank(sev(a)) - rank(sev(b)));
   return { open: rows, closed };
+}
+
+/**
+ * THE AI REVIEW TAB'S BADGE: every finding open NOW — the same rows as the tab's "Open" list
+ * (`teamFindingRows`), story-placed findings included, read from the `['claude-review', prId]`
+ * answer PrDetail already holds. The latest run's own findings count only when it finished (the tab
+ * shows them only then). 0 ⇒ no badge.
+ */
+export function openAiReviewCount(data: Pick<ClaudeReviewResponse, 'review' | 'teamView'> | undefined): number {
+  if (data == null) return 0;
+  const r = data.review;
+  const own = r != null && r.status === 'succeeded' ? withoutPraise(r).findings : [];
+  return teamFindingRows(data.teamView?.allFindings ?? [], own).open.length;
 }
 
 /** Who raised a point, and their avatar(s). */

@@ -49,6 +49,8 @@ import { registerManualTicketLinkRoute } from './manual-links.js';
 import { registerTicketStatusRoutes } from './status-change.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 import { registerAcFieldSettingsRoutes } from './ac-field-settings.js';
+import { storedOpenPoints } from './open-points-pr.js';
+import { registerTrackerCopyRoutes } from './copy.js';
 
 const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear', notion: 'Notion' };
 
@@ -63,6 +65,8 @@ const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Iss
 //                                                     site's custom fields with the SAVED token).
 //   GET  /api/workspaces/:id/tracker/linear-check     the Linear CONNECTION CHECK (one call with the
 //                                                     SAVED key: who it is, and which Linear workspace).
+//   GET  /api/workspaces/:id/tracker/copy-sources     ./copy.ts — "Copy from another workspace": the
+//   POST /api/workspaces/:id/tracker/copy             other workspaces with a tracker, and the copy.
 //   GET  /api/workspaces/:id/tracker/notion-schema    the Notion MAPPING READ (the SAVED database's
 //                                                     properties, with the saved token; a refusal
 //                                                     when it has no prefixed Unique ID).
@@ -320,6 +324,7 @@ export function registerTrackerRoutes(
   registerManualTicketLinkRoute(app, ctx, opts);
   registerTicketStatusRoutes(app, ctx, opts);
   registerAcFieldSettingsRoutes(app, ctx);
+  registerTrackerCopyRoutes(app, ctx);
 
   const idParams = {
     type: 'object',
@@ -509,7 +514,9 @@ async function answerRow(
     const comments = await readTicketComments(ctx, accountId, row)
       .then((rows) => peopleComments(rows).map(toWireComment))
       .catch(() => []);
-    return { ...toDetails(gate.prId, row), comments };
+    // Open points are derived on read under the workspace's choice (docs/TRACKERS.md § Open points).
+    const openPoints = await storedOpenPoints(ctx, accountId, row);
+    return { ...toDetails(gate.prId, row), comments, openPoints };
   }
   // Nothing readable: the remembered refusal, or the error that put the workspace in backoff (no
   // row is written for a workspace-wide refusal).

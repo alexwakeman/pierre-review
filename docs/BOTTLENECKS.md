@@ -224,12 +224,27 @@ Settings → Workspace → "Working hours and budgets"; CORE).
 - **The calendar** (`db/working-hours.ts`) precomputes each working day's window through Intl, so a
   clock change is simply a day one hour shorter in UTC terms; `between(a, b)` is two binary searches
   over a prefix sum. No holidays — a bank holiday is a working day, stated as a weekly pattern.
-- **Budgets, not balance.** An even three-way split is not health: a PR approved on its first review
-  never visits its author, which is the best case and reads as lopsided. Each wait instead has a
-  budget in working hours ("good" / "acceptable"), and the chart under the working-hour split shows
-  where three in four landed against it. Defaults: first look 4/8 (Google's one-business-day guidance as the ceiling),
-  reply 8/16, approved-to-merged 1/4, whole PR 8/16. The triangle of court shares is kept, labelled
-  as context.
+- **Balance is the aim; budgets say how long.** (Reader decision, 2026-11-06 — this reverses the
+  earlier "an even split is not health" stance.) The page opens on the **balance target**: ONE
+  triangle, corners = the three courts, the centre (equal thirds) drawn as a target, and ONE marker
+  at the window's HOURS-WEIGHTED position over `balanceCourts` (`chronologyModel.ts` `courtBalance`)
+  — the split over ONLY the PRs that went back to their author (`rounds > 0`). ⚠ PRs approved on
+  their first review are LEFT OUT (reader decision, 2026-11-06): they never wait for their author,
+  so they pulled every healthy workspace away from the centre. They are counted beside the target
+  as a big green number (`prFigures.neverWentBack`), and week by week beside it (one right-hand panel; the target is the left panel) for the last 12
+  weeks (`FirstReviewTrend`, the tail of `/api/flow-trend`'s `passedFirstReview`; no second fetch).
+  The bar under them is still over every PR (`courtsWork`).
+  Both figures are PEOPLE ONLY, by the one loader (`loadFlowPopulation`): bot-authored PRs are
+  excluded, bot reviews/comments/approvals never enter the walk, so a bot never adds a round or
+  supplies the approval (pinned in `flow-trend.test.ts`, week 23).
+  Distance from the centre is 0 there and 1 at a corner; the verdict line ("Balanced" / "Leans to
+  …" / "Mostly …", or "Little time …" / "Almost no time …" when no court leads by
+  `BALANCE_RULES.clearLead`) and the chart's two rings are read from the SAME `BALANCE_RULES`
+  (balanced 0.15, leans 0.35). No hours ⇒ no marker and the line says so — never a centred dot.
+  The per-PR dot triangle is GONE; its "never went back to their author" figure moved to the
+  scatter's Figures row. Each wait still has a budget in working hours ("good" / "acceptable"), and
+  the budget chart shows where three in four landed against it. Defaults: first look 4/8 (Google's
+  one-business-day guidance as the ceiling), reply 8/16, approved-to-merged 1/4, whole PR 8/16.
 - ⚠ **THE REPO CALL-OUT STAYS ON CLOCK HOURS.** `FLOW_SLOW_P75_HOURS` was calibrated over 66,088 PRs
   on clock hours; moving it would silently invalidate the calibration. The panel labels that half
   "By repository, in clock hours".
@@ -265,7 +280,7 @@ its sentence led by the fastest quarter) (a row "separates" at 2× with an absol
 floor, so ten times six minutes is not a finding), lead time by size and by weekday (clock beside
 working), the landing tail, and first-review concentration.
 
-`prFigures` carries the scatter's and triangle's headline figures over EVERY measured PR — the
+`prFigures` carries the scatter's headline figures over EVERY measured PR — the
 per-PR rows are capped at 1,000, and a figure counted over a sample was wrong exactly when
 `prsCapped`.
 

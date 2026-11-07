@@ -43,6 +43,8 @@ import { aiRunProvider, CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@p
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
+import type { ClaudeReviewOpenPoints } from '@pierre-review/shared';
+import { openPointsFromStored } from './open-points.js';
 import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../platform/contract.js';
 import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
@@ -197,6 +199,8 @@ interface ReviewRow {
   // The reference-library passages the run used, server-checked (migration 0117 / pg 0104). NULL =
   // the run did not read the library.
   docReferences?: unknown;
+  // The tickets' open points the run was given (migration 0171). NULL = none.
+  openPoints?: unknown;
   // What it read beside the PR (migration 0131). NULL = nothing.
   peersRead?: unknown;
   // What the team claim did (migration 0134). NULL = no claim attempted.
@@ -428,6 +432,7 @@ function mapReview(
     ...ciWireOf(r.ciFailures),
     autoPost: autoPostWireOf(r.autoPost),
     docReferences: reviewDocReferencesFromStored(r.docReferences),
+    openPoints: openPointsFromStored(r.openPoints),
     alsoRead: peersReadFromStored(r.peersRead),
     ...(r.pairId != null ? { pair: pairInfoOf(r, pairOther) } : {}),
     teamClaim: teamClaimRecordOf(r.teamClaim),
@@ -2264,6 +2269,11 @@ export interface ReviewSuccessData {
   >;
   // The reference-library passages (checked). Absent/null = the run did not read the library.
   docReferences?: ReviewDocReference[] | null;
+  // The tickets' open points shown, with the code tied to each. Absent/null = none (stored NULL).
+  openPoints?: ClaudeReviewOpenPoints | null;
+  // The pushes since the previous full review, summarised (docs/CLAUDE-REVIEW.md § Push summaries):
+  // `fromSha` EXCLUSIVE (null = the PR's first commit) to this run's head. Absent / null text = none.
+  pushSummary?: { text: string | null; fromSha: string | null } | null;
   followUp?: ClaudeReviewFollowUpRecord | null;
   // (No story assessment: stories left the PR review, so `ticket_assessment` and the findings'
   // story_* columns stay NULL on every new run. Old rows keep theirs as read-only history.)
@@ -2302,6 +2312,9 @@ export async function saveReviewSuccess(
         threadAssessments: data.threadAssessments ?? null,
         ciFailures: data.ciFailures ?? null,
         docReferences: data.docReferences ?? null,
+        openPoints: data.openPoints ?? null,
+        pushSummary: data.pushSummary?.text ?? null,
+        pushSummaryFromSha: data.pushSummary?.text ? data.pushSummary.fromSha : null,
         ...(data.pairDropped != null ? { pairDropped: data.pairDropped } : {}),
         finishedAt: new Date(),
       })

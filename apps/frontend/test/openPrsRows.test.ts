@@ -198,3 +198,30 @@ describe('the wiring', () => {
   });
 });
 
+
+describe('the row menu (OpenPrsRowMenu.tsx)', () => {
+  it('offers Merge only where it can land, in a repo the viewer can push to, nothing armed', async () => {
+    const { rowCanMerge } = await import('../src/components/Activity/OpenPrsRowMenu.js');
+    expect(rowCanMerge(pr({}), true, false)).toBe(true);
+    // unstable IS mergeable; behind / blocked / dirty are not.
+    expect(rowCanMerge(pr({ mergeStateStatus: 'unstable' }), true, false)).toBe(true);
+    expect(rowCanMerge(pr({ mergeStateStatus: 'behind' }), true, false)).toBe(false);
+    expect(rowCanMerge(pr({ mergeStateStatus: 'blocked' }), true, false)).toBe(false);
+    expect(rowCanMerge(pr({ mergeable: 'conflicting', mergeStateStatus: 'dirty' }), true, false)).toBe(false);
+    expect(rowCanMerge(pr({ isDraft: true }), true, false)).toBe(false);
+    expect(rowCanMerge(pr({}), false, false)).toBe(false);
+    expect(rowCanMerge(pr({}), true, true)).toBe(false);
+    // A QUEUED PR never shows Merge (mergeVerdict's queue branch).
+    expect(rowCanMerge(pr({}), true, false, true)).toBe(false);
+  });
+
+  it('fetches nothing on open: no query in the menu, Merge mounts MergeControl only on a click', () => {
+    const menu = src('components/Activity/OpenPrsRowMenu.tsx');
+    expect(menu).not.toMatch(/useQuery|api\./);
+    expect(menu).toMatch(/<MergeControl[^>]*defaultOpen/);
+    // The rows open it from a right-click and from Shift+F10 / the context-menu key.
+    const rows = src('components/Activity/OpenPrsRows.tsx');
+    expect(rows).toMatch(/addEventListener\('contextmenu'/);
+    expect(rows).toMatch(/ev\.key === 'ContextMenu' \|\| \(ev\.shiftKey && ev\.key === 'F10'\)/);
+  });
+});

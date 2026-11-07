@@ -336,6 +336,7 @@ export function weekFigures(
     courtsWork: core.courtsWork.map((c) => ({ ...c, share: Math.round(c.share * 1000) / 1000 })),
     medianLeadWorkHours: n === 0 ? null : r2(core.medianLeadWorkHours),
     budgets,
+    passedFirstReview: core.passedFirstReview,
   };
 }
 

@@ -149,7 +149,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 
 - **`Sidebar`** (`components/shell/Sidebar.tsx`) — top to bottom: the wordmark (the `h1`), the
   **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
-  (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests — ⚠ PINNED above the scrolling
+  (`components/shell/nav.ts` `DESTINATIONS`: Open pull requests · Pending — ⚠ PINNED above the scrolling
   middle (`PINNED_DESTINATIONS`, `data-testid="sidebar-pinned"`; the drawer still scrolls whole) — ·
   This Sprint · Timeline;
   Library: Docs (AI only; its search is a row in Docs' own Library panel) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
@@ -392,7 +392,19 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   green ready, grey otherwise) · title · CI icon · review standing · open threads · ONE AI
   marker; the second line is repo#N · author · age; every old chip is in words in the panel (+ the unchanged
   `ClaudeReviewPanel`). Keys: j/k, ↵ panel then PR, `o` GitHub, `r` AI review; double-click opens the
-  PR; selection, panel state and the drawn window survive Back (session memo). The icon columns sit
+  PR; **THE ROW MENU** (`Activity/OpenPrsRowMenu.tsx`, `ui/Menu.tsx` `ContextMenu`): a right-click on a
+  row, or Shift+F10 / the context-menu key on the selected one (at the row's corner), selects the row
+  (never opens the drawer) and lists Merge · Overview · Changes · Threads · AI Review (AI only), each
+  opening the PR on that tab (`openPrDetailTab` + `setPrDetailTab`; `openPrThreadsView`;
+  `openClaudeReview`). ⚠ **It fetches nothing on open**: Merge shows only when `rowCanMerge` — the
+  ONE `mergeVerdict` over the row's synced facts, not a draft, nothing armed (`usePrArmedIntent`, a
+  cache read), not in GitHub's merge queue (`OpenPrsResponse.queuedPrIds`, fed to the verdict's queue
+  branch), and the repo in `OpenPrsResponse.writableRepoIds` — HIDDEN otherwise; choosing it is
+  the click that mounts `MergeControl defaultOpen` in a small popover at the same point, which is what
+  buys the live merge options. Portalled (`data-floating-layer`, so a press in it never closes the
+  drawer), holds the popover slot, Escape / outside press / Tab close it and focus returns to the list;
+  a phone gets a bottom sheet. No shortcut labels on its items. Pinned in `test/openPrsRows.test.ts`.
+  Selection, panel state and the drawn window survive Back (session memo). The icon columns sit
   under a HEADING ROW (Review · CI · Threads · AI review, each with a
   tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so
   a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
@@ -857,7 +869,11 @@ commit, findings, the earlier review, CI, what was posted, when it ran, and the 
 Re-review / Open review). It reads the batched `useClaudeReviewStates` / `useCiReviewStates` for this
 one PR, so the panel and the Overview never disagree. The panel's Story check line is left out (the
 header's criteria chips and the Ticket row carry the story). Hidden with `me.ai.enabled` off. **The AI
-Review tab label has NO verdict pill**; it keeps its sparkle like every tab's icon.
+Review tab label has NO verdict pill**; it keeps its sparkle like every tab's icon. It carries a
+COUNT, like Threads: every finding open now (`lib/teamReview.ts` `openAiReviewCount` — the tab's own
+"Open" rows via `teamFindingRows`, story-placed findings included; the latest run's own findings only
+once it succeeded), read through `useOpenAiReviewCount` from the `['claude-review', prId]` query the
+pane already keeps alive (no new request). Hidden at 0.
 
 **A check with a log: the NAME opens the log** (`CheckList.tsx` `CheckRow`), the same as the rest of
 the row; a small `ExternalLinkIcon` link beside the name opens the run on GitHub. Siblings, never
@@ -878,6 +894,16 @@ nested. A check with no log stays one whole link.
   the summary marker) and every Limn PR-level finding wears a small **"Limn"** chip; the NEWEST Limn
   AUTO review (marker `k=auto`, else the auto-post footer on an older post) adds **"Auto review ·
   latest"**. No per-row timeline magnifier and no per-row GitHub link.
+  - **PUSH SUMMARIES** (`components/PushSummary.tsx`, `hooks/usePushSummaries.ts`; docs/CLAUDE-REVIEW.md
+    § Push summaries): under the commit a full Limn review ran at, one AI-tinted block — "Since the last
+    review · N commits" (or "Since the pull request opened") and the review's ≤ 2 sentences / ≤ 4
+    bullets about the pushes since the review before. Placed by shared `placePushSummaries` (the head
+    commit's sha; a pair's two rows are one; a head a force-push rewrote is not placed; an unknown
+    start leaves the count out). A push with no review after it shows nothing. ⚠ Model text: PLAIN
+    TEXT only, never Markdown/HTML. Gated on `me.ai.enabled` (off ⇒ no request). The query key sits
+    under `['claude-review', prId]`, so every post-run refresh of the review refreshes it. The FEED's
+    commit-run card shows the same block for each summary whose head the run holds
+    (`FeedItem.pushSummaries`, attached server-side in the commit-run builder), under the same gate.
   - **A RESOLVED THREAD is an entry of its own** (`kind: 'resolved'`, `ResolveIcon`), at
     `ThreadDetail.resolvedAt` — when Limn first SAW it resolved (GitHub keeps no resolve time), by
     `resolvedByLogin` (matched to a user by login, else shown as `@login`). ⚠ A thread already resolved
@@ -1173,7 +1199,8 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   ("View in Activity") or **review** ("Open in detail pane") popover deep-links here via the
   `activityFocus` signal (matched by `{type, refId}`) → opens this tab, scrolls to + flashes
   the entry. The "Show" links share `ShowOnTimeline`.
-- **Changes** — `ChangesTab` → `diff/FileDiffView`: per-file diffs, each file's expand state a
+- **Changes** — `ChangesTab` → `diff/FileDiffView`: per-file diffs, a small gap (`space-y-3` on the
+  list) between files, each file's expand state a
   local `useState` seeded by `startsCollapsed` (null patch / >250 patch lines / >400 changed
   lines) — files with threads override to expanded, EXCEPT **lock files
   (`isLockFile` in `lib/diff.ts`, exact-basename list, deliberately not `*.lock`), which ALWAYS
@@ -2974,12 +3001,13 @@ convention this file has to remember.
   `reportingWindowShortTitle`) by default, then 30/60/90 days as longer views (React state remembered for the session —
   not a URL key and not a persisted filter, so "Clear filters" cannot reset it), then the one-line
   disclosures: the calendar, coverage, what was set aside, truncation. The working-hours half, top
-  to bottom: **Where the working hours went** (`CourtSplit` over `courtsWork`: a stacked
-  bar and three large percentages), **Each wait against its time budget**, **Every pull request** (the
+  to bottom: **Where the working hours went** (`BalanceTarget` — one triangle, the centre drawn
+  as the target, one hours-weighted marker and a verdict line, docs/BOTTLENECKS.md — above
+  `CourtSplit` over `courtsWork`: a stacked bar and three large percentages), **Each wait against its time budget**, **Every pull request** (the
   scatter + its "Show as a table, longest first" keyboard view), **What the quick ones do
   differently** (the contrast table — columns "Quickest N" / "Slowest N" / "Clear difference?", emphasis
-  on the Quickest column), **Approved, waiting to merge**, **Who gives the first review**, **Asking for a review**,
-  **Pointers** and **Where each pull request sits** (the triangle, labelled context). The clock-hours
+  on the Quickest column), **Approved, waiting to merge**, **Who gives the first review**, **Asking for a review** and
+  **Pointers**. The clock-hours
   half: **By repository, in clock hours** — the original court ledger, whose call-out rule stays
   calibrated on clock hours; each court prints the server's one-line `summary` above its repository
   rows, and the full `directive` sits in that Block's modal — then **Merged without a human

@@ -1198,6 +1198,20 @@
       "when": 1792396879016,
       "tag": "0170_claude_still_open_posts",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "6",
+      "when": 1792483279016,
+      "tag": "0171_open_points",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "6",
+      "when": 1792483279017,
+      "tag": "0172_push_summaries",
+      "breakpoints": true
     }
   ]
 }

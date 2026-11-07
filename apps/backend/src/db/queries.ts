@@ -215,6 +215,8 @@ import { dropRepoRelations } from './related-repos.js';
 import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
+import { getPushSummariesForPrs } from './push-summaries.js';
+import { pushSummariesForShas } from '@pierre-review/shared';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
 import { config } from '../config.js';
 import { automaticRetryTarget, pressRetryTarget } from './auto-retry-at-head.js';
@@ -3280,6 +3282,9 @@ async function getCommitThreadItems(
   // author's pushes split by the >6h gap). Claim newest-first via a shared set.
   const out: ConsolidatedFeedItem[] = [];
   const claimed = new Set<number>();
+  // The Limn review summaries of these PRs' pushes (docs/FRONTEND.md § Push summaries): each run
+  // carries the ones whose reviewed head is one of its commits. ONE read for the page's PRs.
+  const pushSummariesByPr = await getPushSummariesForPrs(accountId, prIds);
   const runsByRecency = [...runs].sort(
     (a, b) => b.latestOccurredAt.getTime() - a.latestOccurredAt.getTime(),
   );
@@ -3346,6 +3351,10 @@ async function getCommitThreadItems(
       affectedThreads: affected,
       commitCount: run.commitCount,
       changeSummary,
+      pushSummaries: pushSummariesForShas(
+        run.commitShas.map((c) => c.sha),
+        pushSummariesByPr.get(run.prId) ?? [],
+      ),
       mergedComments: [],
     });
   }

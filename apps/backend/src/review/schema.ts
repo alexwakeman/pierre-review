@@ -29,14 +29,62 @@ type ZodNs = typeof Zod;
 // THE REFERENCE LIBRARY (`opts.docs`, docs/REFERENCE-DOCS.md § Use in reviews): only when the
 // workspace's library is in use does the shape gain `docReferences` and a finding's `docRefs`. Without
 // it the shape is EXACTLY the one below — the tool schema a run without the library sees is unchanged.
-export function buildSubmitReviewShape(z: ZodNs, opts: { docs?: boolean } = {}) {
+//
+// THE TICKETS' OPEN POINTS (`opts.openPoints`, docs/CLAUDE-REVIEW.md § Open points): only when the
+// user message carries an "Open points on the ticket" section does the shape gain `openPoints`. Without
+// it the shape is unchanged, exactly as for the library.
+//
+// THE PUSH SUMMARY (`opts.pushSummary`, docs/CLAUDE-REVIEW.md § Push summaries): only when the user
+// message carries a "Push summary" section does the shape gain `pushSummary`. Without it the shape is
+// unchanged, exactly as for the library.
+export function buildSubmitReviewShape(
+  z: ZodNs,
+  opts: { docs?: boolean; openPoints?: boolean; pushSummary?: boolean } = {},
+) {
   const base = buildBaseReviewShape(z);
-  if (!opts.docs) return base;
+  const withPoints = {
+    ...(opts.openPoints ? { openPoints: buildOpenPointsField(z) } : {}),
+    ...(opts.pushSummary ? { pushSummary: buildPushSummaryField(z) } : {}),
+  };
+  if (!opts.docs) return { ...base, ...withPoints };
   return {
     ...base,
     findings: z.array(base.findings.element.extend({ docRefs: buildDocCitationsField(z) })),
     docReferences: buildDocReferencesField(z),
+    ...withPoints,
   };
+}
+
+/** The `pushSummary` field: what the pushes this review covers changed. Never a verdict. */
+export function buildPushSummaryField(z: ZodNs) {
+  return z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Only when the user message has a 'Push summary' section: what those pushes changed and how that bears on the earlier findings and review threads. At most two sentences, or three or four short bullets that start with '- '.",
+    );
+}
+
+/** The `openPoints` field: the code in the PR that depends on each open point. Never a verdict. */
+export function buildOpenPointsField(z: ZodNs) {
+  return z
+    .array(
+      z.object({
+        ref: z.string().describe("The open point's ref from the 'Open points on the ticket' section, e.g. 'OP1'."),
+        code: z
+          .array(
+            z.object({
+              path: z.string(),
+              line: z.number().int().nullable().optional(),
+              note: z.string().describe('One sentence: what in this code depends on the open point.'),
+            }),
+          )
+          .describe('Each place in this pull request that depends on the point; an empty list when none does.'),
+      }),
+    )
+    .optional()
+    .describe("Only when the user message has an 'Open points on the ticket' section: one entry per point there. They never change the verdict.");
 }
 
 function buildBaseReviewShape(z: ZodNs) {
@@ -155,10 +203,14 @@ type BaseSubmitReviewPayload = Zod.infer<Zod.ZodObject<SubmitReviewShape>>;
 export type SubmitReviewPayload = Omit<BaseSubmitReviewPayload, 'findings'> & {
   findings: Array<BaseSubmitReviewPayload['findings'][number] & { docRefs?: unknown }>;
   docReferences?: unknown;
+  // An open-points run's report (raw: the manager checks every ref against what it sent).
+  openPoints?: unknown;
+  // A push-summary run's summary (raw: the manager cleans and clips it).
+  pushSummary?: unknown;
 };
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */
-export async function submitReviewShape(opts: { docs?: boolean } = {}): Promise<ReturnType<typeof buildSubmitReviewShape>> {
+export async function submitReviewShape(opts: { docs?: boolean; openPoints?: boolean; pushSummary?: boolean } = {}): Promise<ReturnType<typeof buildSubmitReviewShape>> {
   return buildSubmitReviewShape(await loadZod(), opts);
 }
 

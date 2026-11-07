@@ -20,7 +20,7 @@ import { usePrLiveRefresh } from '../hooks/usePrLiveRefresh.js';
 import { usePrArmedIntent } from '../hooks/useAutoMerge.js';
 import { useMe } from '../hooks/useTriage.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
-import { useClaudeReviewTabPill } from '../hooks/useClaudeReview.js';
+import { useClaudeReviewTabPill, useOpenAiReviewCount } from '../hooks/useClaudeReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
@@ -242,6 +242,8 @@ export function PrDetail({
   // Keeps the PR's ['claude-review', prId] read alive (and polling while a run is in flight) for
   // the Overview's AI review card, which reads that cache and fetches nothing itself.
   useClaudeReviewTabPill(prId, claudeReviewEnabled);
+  // The AI Review tab's count: every finding open now, from that same cached read (no new fetch).
+  const openAiFindings = useOpenAiReviewCount(prId, claudeReviewEnabled);
   const aiFixTabEnabled = aiEnabled;
   // The inner tab is STORE state, paired with the PR it belongs to (see `prDetailTab`), so the
   // URL can name it. Read through the pair — a tab seated for ANOTHER PR is not ours, exactly
@@ -977,7 +979,9 @@ export function PrDetail({
             : null
           : t === 'changes' && pr.changedFilesCount > 0
             ? pr.changedFilesCount
-            : null,
+            : t === 'claude_review' && openAiFindings > 0
+              ? openAiFindings
+              : null,
     title:
       t === 'activity' && conversationCount > 0
         ? `${conversationCount} comments and reviews`
@@ -985,7 +989,9 @@ export function PrDetail({
           ? `${unresolvedThreads} unresolved of ${pr.threads.length} threads`
           : t === 'changes' && pr.changedFilesCount > 0
             ? `${pr.changedFilesCount} files changed`
-            : undefined,
+            : t === 'claude_review' && openAiFindings > 0
+              ? `${openAiFindings} open ${openAiFindings === 1 ? 'finding' : 'findings'}`
+              : undefined,
   }]);
   // Everything the toolbar does, in words — the overflow menu (every width) and, below md, the
   // only way to the actions the icon row hides. Nothing here is unique to the menu.

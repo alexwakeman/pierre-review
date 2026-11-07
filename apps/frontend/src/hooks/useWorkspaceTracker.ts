@@ -1,10 +1,16 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { WorkspaceTrackerSettings, WorkspaceTrackerUpdate } from '@pierre-review/shared';
+import type {
+  TrackerCopyBody,
+  TrackerCopySourcesResponse,
+  WorkspaceTrackerSettings,
+  WorkspaceTrackerUpdate,
+} from '@pierre-review/shared';
 import { TRACKER_PROVIDER_FIELDS } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { TICKET_LINKS_KEY } from './useTicketLinks.js';
 import { TICKET_MERGED_PRS_KEY } from './useTicketMergedPrs.js';
+import { jiraAcFieldSettingsKey } from './useJiraAcFieldSettings.js';
 
 // THE WORKSPACE'S ISSUE TRACKER (apiVersion 23; docs/TRACKERS.md). One tracker per
 // workspace on core's `workspace_trackers` row: `GET`/`PUT /api/workspaces/:id/tracker`. It left the
@@ -62,6 +68,8 @@ export function useUpdateWorkspaceTracker(workspaceId: number | null) {
     },
     onSuccess: (settings) => {
       qc.setQueryData(workspaceTrackerKey(workspaceId), settings);
+      // This workspace may now be (or stop being) another workspace's copy source.
+      void qc.invalidateQueries({ queryKey: [TRACKER_COPY_SOURCES_KEY] });
       // Ticket links are computed on read into the PR-detail payload, which is IndexedDB-persisted
       // with staleTime:Infinity — a provider / base URL / key list / match scope change would not
       // appear on already-viewed PRs without this. A saved or removed token flips each ticket's
@@ -70,6 +78,46 @@ export function useUpdateWorkspaceTracker(workspaceId: number | null) {
       void qc.invalidateQueries({ queryKey: ['thread'] });
       void qc.invalidateQueries({ queryKey: TICKET_LINKS_KEY });
       void qc.invalidateQueries({ queryKey: TICKET_MERGED_PRS_KEY });
+    },
+  });
+}
+
+// "Copy from another workspace" (docs/TRACKERS.md § Copying a tracker): the account's OTHER workspaces
+// with a tracker set up, fetched when the reader opens the picker.
+export const TRACKER_COPY_SOURCES_KEY = 'tracker-copy-sources';
+
+export function useTrackerCopySources(workspaceId: number | null, enabled: boolean) {
+  return useQuery<TrackerCopySourcesResponse>({
+    queryKey: [TRACKER_COPY_SOURCES_KEY, workspaceKey(workspaceId)],
+    queryFn: workspaceId == null || !enabled ? skipToken : () => api.trackerCopySources(workspaceId),
+    staleTime: 60_000,
+  });
+}
+
+/** The copy replaces this workspace's whole tracker setup, so everything the tracker feeds re-reads:
+ *  the PUT's set, plus the criteria-field list, the stored tickets and This Sprint. */
+export function useCopyWorkspaceTracker(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<WorkspaceTrackerSettings, Error, TrackerCopyBody>({
+    mutationFn: (body) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.copyWorkspaceTracker(workspaceId, body);
+    },
+    onSuccess: (settings) => {
+      qc.setQueryData(workspaceTrackerKey(workspaceId), settings);
+      for (const queryKey of [
+        [TRACKER_COPY_SOURCES_KEY],
+        jiraAcFieldSettingsKey(workspaceId),
+        ['pr'],
+        ['thread'],
+        TICKET_LINKS_KEY,
+        TICKET_MERGED_PRS_KEY,
+        ['jira-ticket'],
+        ['ticket-reviews'],
+        ['sprint-graph', workspaceKey(workspaceId)],
+      ]) {
+        void qc.invalidateQueries({ queryKey });
+      }
     },
   });
 }

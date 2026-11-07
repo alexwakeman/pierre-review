@@ -1,5 +1,5 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { JiraAcFieldSettingsBody, JiraAcFieldSettingsResponse } from '@pierre-review/shared';
+import type { JiraAcFieldSettingsBody, JiraAcFieldSettingsResponse, JiraOpenPointsFieldBody } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { TICKET_REVIEW_STATES_KEY } from './useTicketReview.js';
@@ -33,6 +33,22 @@ export function useSetJiraAcFieldSetting(workspaceId: number | null) {
         qc.invalidateQueries({ queryKey: ['ticket-reviews'] }),
         qc.invalidateQueries({ queryKey: TICKET_REVIEW_STATES_KEY }),
       ]);
+    },
+  });
+}
+
+/** The OPEN-POINTS field for one issue type (docs/TRACKERS.md § Open points). Open points are derived
+ *  on read, so only the list and the stored-ticket read refresh. */
+export function useSetJiraOpenPointsField(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<JiraAcFieldSettingsResponse, Error, JiraOpenPointsFieldBody>({
+    mutationFn: (body) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.setJiraOpenPointsField(workspaceId, body);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(jiraAcFieldSettingsKey(workspaceId), data);
+      return qc.invalidateQueries({ queryKey: ['jira-ticket'] });
     },
   });
 }

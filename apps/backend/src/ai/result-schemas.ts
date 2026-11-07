@@ -58,6 +58,10 @@ export type ResultToolName = (typeof RESULT_TOOL_NAMES)[number];
 /** Options a shape depends on: the reference library adds fields to the two review results. */
 export interface ResultShapeOptions {
   docs?: boolean;
+  // The PR review only: the tickets' open points add `openPoints` (review/schema.ts).
+  openPoints?: boolean;
+  // The PR review only: a "Push summary" section adds `pushSummary` (review/schema.ts).
+  pushSummary?: boolean;
 }
 
 type ShapeBuilder = (z: ZodNs, opts: ResultShapeOptions) => Promise<Record<string, unknown>>;

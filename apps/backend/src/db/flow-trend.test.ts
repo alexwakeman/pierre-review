@@ -330,6 +330,20 @@ describe('getFlowTrend, end to end', () => {
       })
       .execute();
 
+    // HUMANS ONLY, week 23: "approved on the first review" never counts a bot.
+    //  (a) a PR the bot AUTHORED, approved by bob — left out (automation's own PR);
+    //  (b) alice's PR the bot asked changes on, then bob approved — counted: a bot never moves
+    //      the ball, so it passed its first HUMAN review;
+    //  (c) alice's PR only the bot approved — left out (no human touch).
+    const botPr = await mergedPr(1, r1.id, tue(23), bob.id);
+    await db.update(schema.pullRequests).set({ authorId: rabbit.id }).where(eq(schema.pullRequests.id, botPr)).execute();
+    const botAsked = await mergedPr(1, r1.id, tue(23) + 60_000, bob.id);
+    await db
+      .insert(schema.reviews)
+      .values({ githubNodeId: 'RV_ft_bot_cr', prId: botAsked, authorId: rabbit.id, state: 'changes_requested', submittedAt: new Date(tue(23) + 60_000 + HOUR) })
+      .execute();
+    await mergedPr(1, r1.id, tue(23) + 120_000, rabbit.id);
+
     // A real settings change is recorded once; saving the same again records nothing.
     await setWorkspaceFlowSettings(1, ws1, { budgets: { firstLook: { good: 2 } } });
     await setWorkspaceFlowSettings(1, ws1, { budgets: { firstLook: { good: 2 } } });
@@ -350,6 +364,9 @@ describe('getFlowTrend, end to end', () => {
     const lead = res.weeks[20]!.budgets.find((b) => b.measure === 'lead')!;
     expect(lead.p75).toBe(4);
     expect(res.weeks[20]!.courtsWork.find((c) => c.court === 'reviewer')!.share).toBe(0.5);
+    expect(res.weeks[20]!.passedFirstReview).toBe(6);
+    expect(res.weeks[23]!.measuredPrs).toBe(1);
+    expect(res.weeks[23]!.passedFirstReview).toBe(1);
     // Membership by week's end: before the join, nothing; after, one.
     expect(res.weeks[10]!.reposInWorkspace).toBe(0);
     expect(res.weeks[25]!.reposInWorkspace).toBe(1);

@@ -3,17 +3,19 @@ import {
   REPORTING_DEFAULT_DAYS,
   reportingWindowShortTitle,
   type ReportingWindowInfo,
+  type CourtShare,
   type FlowBudgetRow,
   type FlowPrFigures,
   type FlowPrRow,
   type FlowRequestStats,
   type FlowResponse,
+  type FlowTrendWeek,
   type PrCourt,
   type ResolvedFlowSettings,
 } from '@pierre-review/shared';
 
-// The render model for Chronology's WORKING-HOURS half — the budget chart, the scatter, the
-// triangle and the per-PR tables. Pure, so `apps/frontend/test/chronologyModel.test.ts` can pin it
+// The render model for Chronology's WORKING-HOURS half — the balance target, the budget chart, the
+// scatter and the per-PR tables. Pure, so `apps/frontend/test/chronologyModel.test.ts` can pin it
 // without a renderer. The court-ledger half keeps `bottlenecksModel.ts`.
 //
 // ⚠ EVERY FIGURE HERE IS WORKING HOURS unless its name says otherwise. The repo rows further down
@@ -256,29 +258,120 @@ export function slowestTenthShare(prs: readonly FlowPrRow[]): { count: number; s
   return { count, share: total > 0 ? top / total : 0 };
 }
 
-// ── The triangle ─────────────────────────────────────────────────────────────────────────────
+// ── The balance target ───────────────────────────────────────────────────────────────────────
 //
-// ⚠ CONTEXT, NOT A TARGET. Balance between the three courts is not health: a pull request approved
-// on its first review never visits its author, which is the best outcome and sits on an EDGE of
-// this triangle. Its "i" says so, and the budget chart is the headline.
+// The window's working hours as ONE point between the three courts, hours-weighted, with the
+// centre (equal thirds) drawn as the target. Distance from the centre is 0 there and 1 at a
+// corner; the verdict is read off that distance with the thresholds below, and the chart draws its
+// rings at the SAME two numbers, so the picture and the words cannot disagree.
+//
+// ⚠ UNKNOWN IS NOT ZERO. No measured working hours ⇒ null ⇒ no marker, and the page says so.
 
-/** Below this many working minutes of waiting, a PR has no meaningful position and is left off. */
-export const TRIANGLE_MIN_HOURS = 0.05;
+export const BALANCE_RULES = {
+  /** Within this distance of the centre: "Balanced" (the inner ring). */
+  balanced: 0.15,
+  /** Within this: it leans (the outer ring). Past it: "Mostly …" / "Almost no time …". */
+  leans: 0.35,
+  /** The largest share must beat the next by this much to be named as the pull; otherwise the
+   *  smallest share is named as the gap ("Little time waiting for the author"). */
+  clearLead: 0.1,
+} as const;
 
-export interface TrianglePoint {
-  /** Barycentric weights, summing to 1. */
-  reviewer: number;
-  author: number;
-  landing: number;
+export type BalanceVerdict = 'balanced' | 'leans' | 'strong';
+
+export interface CourtBalance {
+  /** Hours-weighted shares, summing to 1. */
+  shares: Record<PrCourt, number>;
+  /** 0 at equal thirds, 1 at a corner. */
+  distance: number;
+  verdict: BalanceVerdict;
+  /** The court pulling the point, or null when the gap is named instead (or it is balanced). */
+  toward: PrCourt | null;
+  /** The court short of its third, when no single court clearly leads. */
+  away: PrCourt | null;
+  /** The verdict line, plain English. */
+  text: string;
 }
 
-export function trianglePoint(work: Record<PrCourt, number>): TrianglePoint | null {
-  const total = work.reviewer + work.author + work.landing;
-  if (!(total >= TRIANGLE_MIN_HOURS)) return null;
-  return { reviewer: work.reviewer / total, author: work.author / total, landing: work.landing / total };
+const BALANCE_PHRASE: Record<PrCourt, string> = {
+  reviewer: 'waiting for a reviewer',
+  author: 'waiting for the author',
+  landing: 'waiting to merge',
+};
+
+const BALANCE_COURTS: readonly PrCourt[] = ['reviewer', 'author', 'landing'];
+
+export function courtBalance(courts: readonly CourtShare[]): CourtBalance | null {
+  const hours: Record<PrCourt, number> = { reviewer: 0, author: 0, landing: 0 };
+  for (const c of courts) if (Number.isFinite(c.hours) && c.hours > 0) hours[c.court] += c.hours;
+  const total = hours.reviewer + hours.author + hours.landing;
+  if (!(total > 0)) return null;
+  const shares: Record<PrCourt, number> = {
+    reviewer: hours.reviewer / total,
+    author: hours.author / total,
+    landing: hours.landing / total,
+  };
+  const third = 1 / 3;
+  const distance = Math.min(
+    1,
+    Math.sqrt(BALANCE_COURTS.reduce((s, c) => s + (shares[c] - third) ** 2, 0) / (2 / 3)),
+  );
+  if (distance < BALANCE_RULES.balanced) {
+    return { shares, distance, verdict: 'balanced', toward: null, away: null, text: 'Balanced' };
+  }
+  const verdict: BalanceVerdict = distance < BALANCE_RULES.leans ? 'leans' : 'strong';
+  const ranked = [...BALANCE_COURTS].sort((a, b) => shares[b] - shares[a]);
+  const [first, second, last] = ranked as [PrCourt, PrCourt, PrCourt];
+  if (shares[first] - shares[second] >= BALANCE_RULES.clearLead) {
+    const phrase = BALANCE_PHRASE[first];
+    return {
+      shares,
+      distance,
+      verdict,
+      toward: first,
+      away: null,
+      text: verdict === 'leans' ? `Leans to ${phrase}` : `Mostly ${phrase}`,
+    };
+  }
+  const phrase = BALANCE_PHRASE[last];
+  return {
+    shares,
+    distance,
+    verdict,
+    toward: null,
+    away: last,
+    text: verdict === 'leans' ? `Little time ${phrase}` : `Almost no time ${phrase}`,
+  };
 }
 
-/** How many pull requests never went back to their author — the edge the caption names. */
+// ── Passed the first review, week by week ─────────────────────────────────────────────────────
+
+/** Weeks the "passed the first review" line covers — the tail of the 26-week trend fetch. */
+export const FIRST_REVIEW_TREND_WEEKS = 12;
+
+export interface FirstReviewPoint {
+  weekStart: string;
+  /** Null when the server did not send the figure (an older server) — never drawn as zero. */
+  count: number | null;
+  measuredPrs: number;
+  /** The current week, counted so far. */
+  partial: boolean;
+}
+
+/** The last `FIRST_REVIEW_TREND_WEEKS` weeks of the trend, oldest first. */
+export function firstReviewSeries(
+  weeks: readonly FlowTrendWeek[],
+  n: number = FIRST_REVIEW_TREND_WEEKS,
+): FirstReviewPoint[] {
+  return weeks.slice(-n).map((w) => ({
+    weekStart: w.weekStart,
+    count: w.passedFirstReview ?? null,
+    measuredPrs: w.measuredPrs,
+    partial: w.partial,
+  }));
+}
+
+/** How many pull requests never went back to their author for changes. */
 export function neverWentBack(prs: readonly FlowPrRow[]): number {
   return prs.filter((p) => p.rounds === 0).length;
 }
@@ -286,7 +379,7 @@ export function neverWentBack(prs: readonly FlowPrRow[]): number {
 // ── The headline figures over every measured pull request ────────────────────────────────────
 
 /**
- * The scatter's and the triangle's headline figures.
+ * The scatter's headline figures.
  *
  * ⚠ THE SERVER'S, WHENEVER IT SENT THEM. `prs` is capped at 1,000 rows — every slow pull request,
  * then an even sample of the rest — so a count folded over it inflates exactly when it capped

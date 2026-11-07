@@ -106,8 +106,9 @@ row (`DELETE /api/prs/:id/tracker-ticket/manual?key=`, deletes only the `'manual
 ## Fetch on receipt — the stored tickets and the worker
 
 **A tracker is read when a PR is RECEIVED, never when it is VIEWED.** The worker stores each
-detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exception is the sprint list read
-(§ The sprint list read), and it is still never triggered by a view.
+detected ticket in `tracker_tickets`; every consumer reads the row. The exceptions are the sprint list read
+(§ The sprint list read) and the re-read a PR REVIEW RUN makes for its tickets' open points (§ Open
+points); neither is ever triggered by a view.
 
 - **`tracker_tickets`** — one row per `(account_id, pr_id, issue_key)` (the conflict target):
   provider, workspace, site (`api_root`), browse URL, `detected_from` + `detect_order`, title,
@@ -145,6 +146,43 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
   the re-derivation. "None of these" stays a per-tab choice, never stored.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
+
+## Open points — what the ticket left undecided (`tracker/open-points*.ts`, 2026-11-06)
+
+Decisions, content or designs not final when the ticket was written ("Content depends on UCD
+confirming"). A PR review is told about them and names the code that depends on each, so the
+developer and their agent can chase it; they never move a verdict ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Open points).
+
+- **DERIVED ON READ, NEVER STORED** (`open-points.ts` `deriveOpenPoints`, ONE pure rule over what the
+  worker already stores — the text-field `candidates_json` and the description): (1) the issue type's
+  open-points FIELD — the field chosen in Settings, or with "Limn picks" ('auto') the field whose NAME
+  reads "Open points" / "Open questions" (an exact name first); (2) when no field gives a point, or the
+  type is set to "Description only" ('none'), an open-points SECTION of the description: a heading,
+  bold label or "Label:" line reading Open points / Open questions / Outstanding / TBC / TBD / To be
+  confirmed / Unresolved / Pending decisions, up to the next heading or short label. List items are
+  points (a continuation line joins its item), else paragraphs; "None", "N/A" and code fences are
+  skipped; ≤ 20 points of ≤ 400 characters. Every point carries its `source` (`field` /
+  `description`) and the field's name. ⚠ The description is UNTRUSTED: LINEAR scans, one line at a
+  time, anchored patterns with no nested quantifiers, input capped first (a test pins a hostile line).
+  GitHub Issues and Linear have no field: their description's section is read.
+- **THE SETTING** (`tracker_open_points_fields`, migration `0171`; `open-points-settings.ts`, the ONE
+  reader/writer): per (account, workspace, site, issue type), `mode` `field` (+ `field_id`/`field_name`)
+  or `none`; no row = 'auto'. Settings → Integrations → "Ticket fields" (`JiraAcFieldSettings.tsx`)
+  shows an "Open points" menu beside "Criteria" on each issue-type row (`JiraAcFieldTypeRow.openPoints`:
+  mode, the chosen field, the field in use). `PUT /api/workspaces/:id/tracker/open-points-fields`
+  writes it: DB only, nothing re-derived or marked due (the next read derives under the new choice).
+  Erased with the account; in `accountScopedTables()`.
+- **SHOWN** on `GET /api/prs/:id/tracker-ticket` as `JiraTicketDetails.openPoints` (stored row, DB only).
+- ⚠ **A REVIEW RUN READS THE TICKETS AGAIN — the deliberate exception to "read when received".** Open
+  points change while a ticket is in flight, and a review naming a settled point as open misleads. So a
+  PR review RUN (manual or auto — never a view) calls `openPointsForPr(…, {refresh: true})`
+  (`open-points-pr.ts`, through `ticket-source.ts`, LAZY): the PR's detected keys (≤
+  `CLAUDE_REVIEW_MAX_TICKETS`) are re-read through the worker's own `syncOnePrNow` (`force: false`: the
+  workspace backoff is honoured), except a row read in the last `OPEN_POINTS_FRESH_MS` (2 min — a pair's
+  second half, a quick re-run). ⚠ NON-FATAL: a failed read keeps the stored content (state `ok` +
+  `error_code`), the points come from that copy and are marked `fresh: false`; the review says "from
+  Limn's stored copy". Never throws. The TICKET review does not use open points yet.
 
 ## Ticket comments — read in the same issue read (`tracker/comments.ts`, `tracker_ticket_comments`)
 
@@ -783,6 +821,30 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
 - The account export carries the tracker row with the token reduced to `hasToken`
   (`db/export-account.ts`); erasure deletes all three tables.
 
+## Copying a tracker — "Copy from another workspace" (`tracker/copy.ts`)
+
+Settings → Issue tracker offers "Copy from another workspace" when at least one OTHER workspace of the
+account has a tracker SET UP (a stored live provider with somewhere to link, `isIssueConfigured`; the
+automatic GitHub Issues default does not count — it is derived per workspace). Nothing shows otherwise.
+
+- **Server-side, the token never moves through the client.** `POST …/tracker/copy` writes the source's
+  STORED `workspace_trackers` row onto this workspace column for column (`copyStoredTracker`, through
+  the same upsert as the PUT): provider, base URL, project keys, where to look, email, Notion mapping and
+  `auth_token` in its stored form — a `sealed:v1:` value is copied as ciphertext under the same process
+  key, never opened. The base URL travels with it, so "a token belongs to one site" still holds.
+- **The per-issue-type choices** REPLACE this workspace's: the criteria field (`pro_jira_ac_fields`;
+  every stored ticket whose choice moved re-derives from its stored candidates, no tracker call, and is
+  marked due) and the open-points source (`tracker_open_points_fields`, through its own reader and
+  writer; open points are derived on read, so nothing re-derives).
+  ⚠ A new per-workspace tracker setting must join `copyFieldChoices`, or a copy leaves it behind.
+  This Sprint's status buckets (`workspaces.sprint_statuses`) are NOT copied — they are This Sprint's
+  setting, with their own writer.
+- **One tracker per workspace.** When this workspace already has one set up the SPA asks first, and the
+  server refuses without `replace: true` (`409 TrackerExists`).
+- Both ids are the account's (`ownedWorkspaceId`, path AND body → `404`). The copy writes the `tracker`
+  setting event when the provider or site moved, and kicks the worker like a save — so `search` tier.
+  Later edits in either workspace never reach the other.
+
 ## Outbound calls — the SSRF guard (`tracker/jira/fetch.ts`)
 
 Every call to a customer-named host goes through ONE helper — never a bare `fetch`. (Linear's and
@@ -801,6 +863,8 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 |---|---|---|
 | `GET /api/workspaces/:id/tracker` | the workspace's tracker (`hasToken`, never the token); 404 if not yours | `read` |
 | `PUT /api/workspaces/:id/tracker` | partial patch `{issue?, jira?}`; kicks the worker | `search` |
+| `GET /api/workspaces/:id/tracker/copy-sources` | the other workspaces with a tracker set up (DB only) | `read` |
+| `POST /api/workspaces/:id/tracker/copy` | copy one here, token sealed; kicks the worker (§ Copying a tracker) | `search` |
 | `GET /api/workspaces/:id/tracker/jira-fields` | the Settings connection check (one Jira call) | `search` |
 | `GET /api/workspaces/:id/tracker/linear-check` | the Linear connection check (one Linear call) | `search` |
 | `GET /api/workspaces/:id/tracker/notion-schema` | the Notion mapping read (the saved database + ≤ 3 related ones) | `search` |
@@ -808,6 +872,7 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `POST /api/prs/:id/tracker-ticket/refresh` | re-read now (backoff bypassed) | `search` |
 | `PUT /api/prs/:id/tracker-ticket/ac-field` | the criteria field for the ticket's issue type | `search` |
 | `GET`/`PUT /api/workspaces/:id/tracker/ac-fields` | Settings: the criteria field per issue type (DB only) | `read` |
+| `PUT /api/workspaces/:id/tracker/open-points-fields` | Settings: the open-points field per issue type (DB only; § Open points) | `read` |
 | `POST /api/ticket-links` | the Open PRs ticket row, ONE request per board | `search` |
 | `GET /api/ticket-merged-prs?workspace=&keys=` | the stacks' "Merged (n)" panel, DB-only | `read` |
 | `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |

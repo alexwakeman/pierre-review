@@ -4,13 +4,14 @@ import {
   FLOW_RULES,
   type ResolvedFlowSettings,
 } from '@pierre-review/shared';
-import type { CourtSection } from './bottlenecksModel.js';
+import { COURT_SHORT, type CourtSection } from './bottlenecksModel.js';
 import {
   BUDGET_SUB,
   clockTime,
   formatShare,
   formatWorkHours,
   workingDaysText,
+  FIRST_REVIEW_TREND_WEEKS,
 } from './chronologyModel.js';
 
 // What each Chronology panel is, behind its "i" (components/InfoModal.tsx). One component per
@@ -65,19 +66,45 @@ export function ChronologyAboutInfo({
   );
 }
 
-/** M1 — the working-hours split. */
+/** M1 — the balance target and the working-hours split. */
 export function SplitInfo(): JSX.Element {
   return (
     <>
       <p>
-        How all the working hours were split between waiting for a reviewer, waiting for the
-        author, and waiting to merge after approval.
+        The aim is equal thirds: the ringed centre. The marker shows where this window’s working
+        hours sit between the three waits.
       </p>
       <p>
-        An even split is not the goal. A pull request approved on its first review never waits for
-        its author, and that is the best case.
+        The target leaves out pull requests approved on their first review, with no changes asked
+        for. They never wait for their author, so they would pull every team away from the centre.
+        The green number counts them, and the line beside it shows that count for each of the last{' '}
+        {FIRST_REVIEW_TREND_WEEKS} weeks, by the week each one merged.
       </p>
-      <p>The next chart holds each wait against its budget.</p>
+      <p>
+        People only. Pull requests opened by bots are left out, and a bot’s review or comment never
+        counts: a pull request only a bot approved is not counted, and one where a bot asked for
+        changes still counts as approved on the first review if a person approved it first time.
+      </p>
+      <dl className="space-y-1.5">
+        <div>
+          <dt className="font-medium text-ui-ink">{COURT_SHORT.reviewer} (top)</dt>
+          <dd>Waiting for a person to look, or to look again.</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-ui-ink">{COURT_SHORT.author} (bottom left)</dt>
+          <dd>Waiting for the author to answer a review.</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-ui-ink">{COURT_SHORT.landing} (bottom right)</dt>
+          <dd>Approved, and not merged yet.</dd>
+        </div>
+      </dl>
+      <p>
+        Every hour a pull request waits pulls the marker toward that corner, so one very slow pull
+        request can move it a long way. Inside the filled ring reads as balanced; past the dashed
+        ring, one wait dominates.
+      </p>
+      <p>The bar gives the split over every pull request, as percentages. The next chart holds each wait against its budget.</p>
     </>
   );
 }
@@ -253,24 +280,6 @@ export function PointersInfo(): JSX.Element {
         links the pull requests it is based on, and a pointer that cites none is dropped.
       </p>
       <p>Nothing is written until you press the button.</p>
-    </>
-  );
-}
-
-/** M9 — where each pull request sits. */
-export function TriangleInfo(): JSX.Element {
-  return (
-    <>
-      <p>
-        Each pull request is placed by how its working time split: waiting for a reviewer (top), for
-        its author (bottom left) and to merge after approval (bottom right). The ringed dot is the
-        workspace as a whole.
-      </p>
-      <p>
-        This is context, not a target. A pull request approved on its first review never goes back
-        to its author, so it sits on the right-hand edge. That is the best case, and it is far from
-        the middle.
-      </p>
     </>
   );
 }

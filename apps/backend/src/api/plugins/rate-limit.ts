@@ -162,6 +162,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // All four take the 60/min `search` bucket, the "one upstream call per request" tier. The plain
   // `GET …/tracker` is DB-only and stays on `read` with the rest of the family.
   if (method === 'PUT' && /^\/api\/workspaces\/\d+\/tracker$/.test(path)) return [TIERS.search, TIERS.read];
+  // POST …/tracker/copy ("Copy from another workspace", tracker/copy.ts) is DB-only itself, but like
+  // the PUT it KICKS the ticket worker with the copied token → `search`. Its GET …/copy-sources is a read.
+  if (method === 'POST' && /^\/api\/workspaces\/\d+\/tracker\/copy$/.test(path)) return [TIERS.search, TIERS.read];
   if (!mutating && /^\/api\/workspaces\/\d+\/tracker\/(jira-fields|linear-check|notion-schema)$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
@@ -683,6 +686,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // members are GitHub-hydrating, so the next person to widen `prGithubGet` should have to see
   // that this one was decided, not defaulted.
   if (!mutating && /^\/api\/prs\/\d+\/ml-labels$/.test(path)) return [TIERS.read];
+  // GET /api/prs/<id>/push-summaries — the stored Limn push summaries (docs/CLAUDE-REVIEW.md § Push
+  // summaries): one indexed read over claude_reviews, no model, no GitHub. `read`, RECORDED for the
+  // same reason as the label index above.
+  if (!mutating && /^\/api\/prs\/\d+\/push-summaries$/.test(path)) return [TIERS.read];
   // GET /api/ml-status — the enrichment worker's live state, POLLED every few seconds while a
   // sync round is open so the progress UI can represent the model pass. Its in-memory half is
   // free, but its backlog half is a bot-set resolve plus three unlabelled-count joins PER

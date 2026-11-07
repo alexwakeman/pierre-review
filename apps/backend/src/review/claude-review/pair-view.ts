@@ -6,6 +6,7 @@
 // The consolidation itself (the quick pass, its fallback, the write) is ./pair-consolidate.ts; this
 // module only folds the two stored halves and the stored record (`claude_reviews.pair_consolidation`,
 // migration 0137) into the wire shape. Pure, except the in-memory "merging now" set below.
+import { mergeOpenPoints } from './open-points.js';
 import {
   aiRunProvider,
   aiProviderName,
@@ -278,6 +279,8 @@ export function buildPairView(
     followUp: status === 'succeeded' ? mergedFollowUp(ok) : null,
     ...(settledEarlier.length > 0 || main.settledEarlier != null ? { settledEarlier } : {}),
     docReferences: docRefs.length > 0 ? docRefs : (main.docReferences ?? null),
+    // The tickets' open points: one section, each point with both halves' code.
+    openPoints: mergeOpenPoints(ok.map((h) => h.openPoints)) ?? main.openPoints ?? null,
     pair: {
       pairId,
       role: latest === second ? 'second' : 'first',

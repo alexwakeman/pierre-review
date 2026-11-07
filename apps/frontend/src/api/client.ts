@@ -1,6 +1,7 @@
 import type {
   JiraAcFieldSettingsBody,
   JiraAcFieldSettingsResponse,
+  JiraOpenPointsFieldBody,
   ReferenceDocMutationResponse,
   ReferenceDocSectionResponse,
   DocsSearchResponse,
@@ -158,6 +159,7 @@ import type {
   BranchStatusResponse,
   BranchTrendsResponse,
   PrMlLabelsResponse,
+  PrPushSummariesResponse,
   MlEnrichmentStatus,
   ClosePrResult,
   ReopenPrResult,
@@ -232,6 +234,8 @@ import type {
   WorkspaceProSettingsUpdate,
   WorkspaceTrackerSettings,
   WorkspaceTrackerUpdate,
+  TrackerCopyBody,
+  TrackerCopySourcesResponse,
   JiraFieldListResponse,
   LinearConnectionCheck,
   NotionSchemaResponse,
@@ -1195,6 +1199,9 @@ export const api = {
   // no severity-api configured (empty labels / enabled:false) — the SPA's gate is
   // `useMlSeverityEnabled()` off /api/me, not a 404 from here.
   prMlLabels: (prId: number) => get<PrMlLabelsResponse>(`/api/prs/${prId}/ml-labels`),
+  // What each full Limn review said the pushes since the previous one changed (docs/FRONTEND.md
+  // § Push summaries). A DB read; the caller gates on `me.ai.enabled`.
+  prPushSummaries: (prId: number) => get<PrPushSummariesResponse>(`/api/prs/${prId}/push-summaries`),
 
   // ---- Emoji reactions (CORE, free tier; GitHub-live, nothing stored) ---------------------
   // Both are POSTs. The LOOKUP is a read wearing a mutating verb because it carries a target
@@ -1291,12 +1298,26 @@ export const api = {
     fetch(`/api/workspaces/${workspaceId}/tracker`, jsonBody('PUT', patch)).then((r) =>
       handle<WorkspaceTrackerSettings>(r),
     ),
+  // "Copy from another workspace": the account's OTHER workspaces with a tracker set up (DB only), and
+  // the copy itself — server-side, the token in its sealed form (`hasToken` only comes back). A copy
+  // onto a workspace that already has a tracker needs `replace: true` (409 TrackerExists without it).
+  trackerCopySources: (workspaceId: number) =>
+    get<TrackerCopySourcesResponse>(`/api/workspaces/${workspaceId}/tracker/copy-sources`),
+  copyWorkspaceTracker: (workspaceId: number, body: TrackerCopyBody) =>
+    fetch(`/api/workspaces/${workspaceId}/tracker/copy`, jsonBody('POST', body)).then((r) =>
+      handle<WorkspaceTrackerSettings>(r),
+    ),
   // Settings → Trackers: the acceptance-criteria field per Jira issue type, from the stored tickets
   // (DB only, no Jira call). PUT sets one type's field (null = Limn's own pick) and answers the list.
   jiraAcFieldSettings: (workspaceId: number) =>
     get<JiraAcFieldSettingsResponse>(`/api/workspaces/${workspaceId}/tracker/ac-fields`),
   setJiraAcFieldSetting: (workspaceId: number, body: JiraAcFieldSettingsBody) =>
     fetch(`/api/workspaces/${workspaceId}/tracker/ac-fields`, jsonBody('PUT', body)).then((r) =>
+      handle<JiraAcFieldSettingsResponse>(r),
+    ),
+  // The OPEN-POINTS field for one issue type ('auto' | 'field' | 'none'); answers the same list. DB only.
+  setJiraOpenPointsField: (workspaceId: number, body: JiraOpenPointsFieldBody) =>
+    fetch(`/api/workspaces/${workspaceId}/tracker/open-points-fields`, jsonBody('PUT', body)).then((r) =>
       handle<JiraAcFieldSettingsResponse>(r),
     ),
   // The Settings connection check: lists the Jira site's custom fields with the SAVED token.

@@ -12,6 +12,7 @@ import {
   type ClaudeReviewChatPinRef,
 } from '@pierre-review/shared';
 import {
+  chatThreadLoadFailed,
   useAskClaudeReviewChat,
   useClaudeReviewChat,
   useClaudeReviewChatBusy,
@@ -55,6 +56,33 @@ const BTN_ASK =
 const MUTED = 'text-ui-mute';
 const PILL =
   'inline-flex max-w-full items-center gap-1 rounded-full bg-ui-sel px-2.5 py-0.5 text-meta text-ui-accent';
+
+// WHO SAID IT, AT A GLANCE: the reader's turns sit on the RIGHT in a selected-tone bubble under "You";
+// the answers sit on the LEFT on the AI surface under the provider and model that answered. Both inks
+// are measured on these grounds in every colour scheme (designTokens + colorSchemes tests).
+const YOU_ROW = 'flex justify-end';
+const YOU_BUBBLE = 'max-w-[85%] rounded-ui bg-ui-sel px-3 py-2 text-body text-ui-ink';
+const YOU_LABEL = 'text-meta font-medium text-ui-mute';
+const AI_ROW = 'flex justify-start';
+const AI_BUBBLE = 'w-full max-w-[95%] rounded-ui border border-ai-border bg-ai-surface px-3 py-2 text-body text-ai-ink';
+const AI_LABEL = 'mb-1 text-meta font-semibold text-ai-signal';
+
+/** One of the reader's turns: their words and any items they sent. */
+function YouTurn({ text, pins }: { text: string; pins: readonly { key: string; label: string }[] }): JSX.Element {
+  return (
+    <div className={YOU_BUBBLE} data-chat-role="user">
+      <div className={YOU_LABEL}>You</div>
+      <div className="whitespace-pre-wrap">{text}</div>
+      {pins.length > 0 && (
+        <ul className="mt-1 flex flex-wrap justify-end gap-1.5" aria-label="Items sent">
+          {pins.map((p) => (
+            <PinPill key={p.key} label={p.label} onBubble />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const sameRef = (a: ClaudeReviewChatPinRef, b: ClaudeReviewChatPinRef): boolean => chatPinKey(a) === chatPinKey(b);
 
@@ -114,9 +142,18 @@ export function SendToChatButton({
   );
 }
 
-function PinPill({ label, onRemove }: { label: string; onRemove?: () => void }): JSX.Element {
+function PinPill({
+  label,
+  onRemove,
+  onBubble = false,
+}: {
+  label: string;
+  onRemove?: () => void;
+  // Inside the reader's bubble (already the selected tone): the pill steps to the surface tone.
+  onBubble?: boolean;
+}): JSX.Element {
   return (
-    <li className={PILL}>
+    <li className={onBubble ? PILL.replace('bg-ui-sel', 'bg-ui-surface') : PILL}>
       <span className="min-w-0 break-words">{label}</span>
       {onRemove != null && (
         <button
@@ -192,29 +229,23 @@ function ChatMessages({ messages }: { messages: readonly ClaudeReviewChatMessage
       {messages.map((m, i) => {
         if (m.role === 'user') {
           return (
-            <li key={m.id} className="text-body">
-              <div className={`text-meta font-medium ${MUTED}`}>You</div>
-              <div className="whitespace-pre-wrap">{m.content}</div>
-              {m.pins != null && m.pins.length > 0 && (
-                <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Items sent">
-                  {m.pins.map((p) => (
-                    <PinPill key={chatPinKey(p.ref)} label={p.label} />
-                  ))}
-                </ul>
-              )}
+            <li key={m.id} className={YOU_ROW}>
+              <YouTurn text={m.content} pins={(m.pins ?? []).map((p) => ({ key: chatPinKey(p.ref), label: p.label }))} />
             </li>
           );
         }
         const question = messages[i - 1];
         return (
-          <li key={m.id} className="text-body">
-            {/* Who answered (the provider and the model that ran); an older answer stored no model. */}
-            <div className={`text-meta font-medium ${MUTED}`}>{m.model ? aiRunLabel(m.provider, m.model) : 'Claude'}</div>
-            {m.explanations != null ? (
-              <ExplanationCards cards={m.explanations} pins={question?.role === 'user' ? (question.pins ?? []) : []} />
-            ) : (
-              <Markdown prRefs>{m.content}</Markdown>
-            )}
+          <li key={m.id} className={AI_ROW}>
+            <div className={AI_BUBBLE} data-chat-role="assistant">
+              {/* Who answered (the provider and the model that ran); an older answer stored no model. */}
+              <div className={AI_LABEL}>{m.model ? aiRunLabel(m.provider, m.model) : 'Claude'}</div>
+              {m.explanations != null ? (
+                <ExplanationCards cards={m.explanations} pins={question?.role === 'user' ? (question.pins ?? []) : []} />
+              ) : (
+                <Markdown prRefs>{m.content}</Markdown>
+              )}
+            </div>
           </li>
         );
       })}
@@ -306,21 +337,19 @@ export function ReviewChatThread({
         <div className="text-meta text-ui-warn">{CHAT_HEAD_MOVED_LINE}</div>
       )}
       {thread.isLoading && <div className={`text-meta ${MUTED}`}>Loading…</div>}
-      {thread.isError && (
-        <div className="text-meta text-ui-danger">Could not load this conversation.</div>
+      {/* Only when there is NOTHING to show: a failed background re-read keeps the thread on screen. */}
+      {chatThreadLoadFailed(thread) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-meta text-ui-danger">Could not load this conversation.</span>
+          <button type="button" onClick={() => void thread.refetch()} className={BTN_SMALL}>
+            Try again
+          </button>
+        </div>
       )}
       <ChatMessages messages={messages} />
       {pendingQuestion != null && (
-        <div className="text-body">
-          <div className={`text-meta font-medium ${MUTED}`}>You</div>
-          <div className="whitespace-pre-wrap">{pendingQuestion}</div>
-          {pendingHere != null && pendingHere.pins.length > 0 && (
-            <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Items sent">
-              {pendingHere.pins.map((p) => (
-                <PinPill key={p.key} label={p.label} />
-              ))}
-            </ul>
-          )}
+        <div className={YOU_ROW}>
+          <YouTurn text={pendingQuestion} pins={pendingHere?.pins ?? []} />
         </div>
       )}
       {answering && (

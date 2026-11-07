@@ -11,6 +11,7 @@ import { JiraApiAccess } from './JiraApiAccess.js';
 import { JiraAcFieldSettings } from './JiraAcFieldSettings.js';
 import { LinearApiAccess } from './LinearApiAccess.js';
 import { NotionTrackerSetup } from './NotionTrackerSetup.js';
+import { TrackerCopyFrom } from './TrackerCopyFrom.js';
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
@@ -158,6 +159,11 @@ export function IssueLinksSection(): JSX.Element {
         </InfoButton>
       }
     >
+      {/* Offered only when another workspace has a tracker set up (renders nothing otherwise). */}
+      <TrackerCopyFrom
+        workspaceId={workspaceId}
+        hasTracker={saved.provider != null && (!TRACKER_PROVIDER_FIELDS[saved.provider].baseUrl || (saved.baseUrl ?? '') !== '')}
+      />
       <Field group label="Provider">
         <Select
           label="Provider"

@@ -869,6 +869,7 @@ export async function getFlowCourts(
     coverage,
     settings,
     courtsWork: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
+    balanceCourts: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
     medianLeadWorkHours: 0,
     p75LeadWorkHours: 0,
     workHeadline: null,

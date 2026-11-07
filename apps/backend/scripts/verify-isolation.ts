@@ -1329,6 +1329,32 @@ check(
 check('getPrMlLabels(A.pr, B) returns null (IDOR blocked)', (await getPrMlLabels(A.prId, 2)) === null);
 check('getPrMlLabels(B.pr, A) returns null (IDOR blocked)', (await getPrMlLabels(B.prId, 1)) === null);
 
+// ── Push summaries (db/push-summaries.ts; docs/CLAUDE-REVIEW.md § Push summaries) ──
+{
+  const { getPrPushSummaries, getPushSummariesForPrs } = await import('../src/db/push-summaries.js');
+  await db
+    .insert(schema.claudeReviews)
+    .values({
+      accountId: 1,
+      prId: A.prId,
+      headSha: 'push_summary_head',
+      status: 'succeeded',
+      model: 'claude-opus-5-5',
+      trigger: 'manual',
+      pushSummary: 'A only.',
+      createdAt: new Date(),
+    })
+    .execute();
+  const own = await getPrPushSummaries(A.prId, 1);
+  check('getPrPushSummaries(A.pr, A) returns the stored summary', own != null && own.some((s) => s.text === 'A only.'));
+  check('getPrPushSummaries(A.pr, B) returns null (IDOR blocked)', (await getPrPushSummaries(A.prId, 2)) === null);
+  check('getPrPushSummaries(B.pr, A) returns null (IDOR blocked)', (await getPrPushSummaries(B.prId, 1)) === null);
+  check(
+    'getPushSummariesForPrs(B, [A.pr]) reads nothing of A (account-scoped)',
+    (await getPushSummariesForPrs(2, [A.prId])).size === 0,
+  );
+}
+
 // The rollup is workspace-scoped, and a BotScope may only ever come from resolveWorkspaceScope —
 // so the cross-account attempt is spelled the way a caller could actually spell it: B asking for
 // A's repo id. resolveWorkspaceScope intersects with B's own membership, so the narrowing must
@@ -3627,6 +3653,23 @@ check(
   );
   const links = await app.inject({ method: 'POST', url: '/api/ticket-links', payload: { prIds: [B.prId] } });
   check("POST /api/ticket-links with B's PR as A answers nothing", links.statusCode === 200 && links.json().prs.length === 0);
+  // "Copy from another workspace" (tracker/copy.ts): B's set-up workspace is never a source for A, and
+  // naming it in the body (or the path) is a 404 that copies nothing.
+  const { trackerCopySources } = await import('../src/tracker/copy.js');
+  check(
+    "trackerCopySources(A) never lists B's workspace",
+    (await trackerCopySources(tctx, 1, -1)).every((s) => s.workspaceId !== defaultB),
+  );
+  check(
+    "POST /api/workspaces/<A's>/tracker/copy from B's workspace as A → 404",
+    (await app.inject({ method: 'POST', url: `/api/workspaces/${defaultA}/tracker/copy`, payload: { fromWorkspaceId: defaultB, replace: true } })).statusCode === 404,
+  );
+  check(
+    "GET /api/workspaces/<B's>/tracker/copy-sources as A → 404",
+    (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker/copy-sources` })).statusCode === 404,
+  );
+  const aTokenAfterCopy = (await ts.readWorkspaceTrackerAccess(tctx, 1, defaultA)).token;
+  check("A's token is still A's after the refused copy", aTokenAfterCopy.state === 'ok' && aTokenAfterCopy.token === 'token-of-1');
   const own = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=ENG-1` });
   check("GET /api/prs/<A's>/tracker-ticket as A → A's story", own.statusCode === 200 && own.json().title === 'A story');
 

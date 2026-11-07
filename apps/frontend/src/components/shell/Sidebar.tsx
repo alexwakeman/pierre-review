@@ -73,7 +73,7 @@ import {
 // strip and the header's right-hand controls. Top to bottom:
 //
 //   wordmark · workspace picker · "Search or jump ⌘K"
-//   Pending · Open pull requests                                   (PINNED: above the scrolling middle)
+//   Open pull requests · Pending                                   (PINNED: above the scrolling middle)
 //   This Sprint · Timeline                                         (primary, with the two above; the phone's bottom bar)
 //   Needs you                                                      (other workspaces' My Turn)
 //   Library: Docs · Feed      Insights: Reports · Bots Monitoring
@@ -166,7 +166,7 @@ function GroupHeading({ children }: { children: ReactNode }): JSX.Element {
 
 /** The destinations, with the two counts the shell owns. */
 /**
- * PINNED: Pending and Open pull requests sit ABOVE the scrolling middle, so they stay in reach after
+ * PINNED: Open pull requests and Pending (in that order) sit ABOVE the scrolling middle, so they stay in reach after
  * scrolling down to the repositories and open tabs. The rest of the primary group (This Sprint,
  * Timeline) scrolls with the other groups. The drawer below lg scrolls as a whole, as before.
  */

@@ -7,7 +7,7 @@ export { Tabs, tabId, panelId, type TabItem } from './Tabs.js';
 export { List, ListGroup, Row, RowLead, RowTitle, RowMeta, rowDomId, useListKeyboard, type ListKeyboardOptions } from './List.js';
 export { nextIndex, resolveListKey, indexAfterRemoval, type ListMove, type ListKeyResult } from './listNav.js';
 export { HEADER_ACTION_CLASS, SidePanel } from './SidePanel.js';
-export { Menu, type MenuEntry } from './Menu.js';
+export { ContextMenu, Menu, type MenuEntry } from './Menu.js';
 export { Select, type SelectOption } from './Select.js';
 export { Checkbox, CheckboxBox, Radio, RadioBox, RadioGroup, Switch } from './FormControls.js';
 export { CommandPalette } from './CommandPalette.js';

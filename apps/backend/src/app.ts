@@ -42,6 +42,7 @@ import { flowRoutes } from './api/routes/flow.js';
 import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
+import { pushSummaryRoutes } from './api/routes/push-summaries.js';
 import { reactionRoutes } from './api/routes/reactions.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -211,6 +212,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // configured (empty labels / `enabled:false`), so nothing 404s on a deployment that has the
   // data but not the service. Generation is the background worker's job (sync/ml-enrichment.ts).
   await app.register(mlLabelRoutes);
+  await app.register(pushSummaryRoutes);
   // Emoji reactions (CORE, free tier). Both routes are GitHub-LIVE and store nothing: the
   // batched lookup turns a screenful of comments into one GraphQL call, the toggle returns the
   // authoritative post-write groups. Registered in both modes; their rate-limit tiers are

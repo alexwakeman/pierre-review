@@ -1521,6 +1521,15 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0171_open_points` — where open points are read; what a review was given
+
+NEW table `tracker_open_points_fields` ([TRACKERS.md](TRACKERS.md) § Open points): one row per
+(account, workspace, site, issue type), `mode` `field`/`none` (no row = 'auto'), unique
+`(account_id, workspace_id, api_root, issue_type_id)` — every upsert uses that EXACT target. No FKs;
+erased explicitly and listed in `accountScopedTables()`. Plus `claude_reviews.open_points` (nullable
+JSON, `ClaudeReviewOpenPoints`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Open points). Additive, no
+backfill. Journal `idx` 171, `when` sqlite `1792483279016`.
+
 ### `0170_claude_still_open_posts` — the still-open claim record
 
 NEW table `claude_still_open_posts` ([DATA-MODEL.md](DATA-MODEL.md); [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)

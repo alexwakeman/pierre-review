@@ -123,6 +123,8 @@ export interface FlowPrFacts {
 
 export interface FlowDetail {
   courtsWork: CourtShare[];
+  /** `courtsWork` over only the PRs that went back to their author (`rounds > 0`). */
+  balanceCourts: CourtShare[];
   medianLeadWorkHours: number;
   p75LeadWorkHours: number;
   workHeadline: string | null;
@@ -725,6 +727,8 @@ export function flowCoreFigures(
 
 export interface CoreFigures {
   courtsWork: CourtShare[];
+  /** Measured PRs that never went back to their author (`rounds === 0`). */
+  passedFirstReview: number;
   /** Raw (unrounded) working-hour medians. */
   medianLeadWorkHours: number;
   p75LeadWorkHours: number;
@@ -732,7 +736,8 @@ export interface CoreFigures {
   budgets: FlowBudgetRow[];
 }
 
-function coreOf(worked: Worked[], settings: ResolvedFlowSettings): CoreFigures {
+/** The working-hour split over a set of pull requests. */
+function courtSharesOf(worked: Worked[]): CourtShare[] {
   const totals: Record<PrCourt, number> = { reviewer: 0, author: 0, landing: 0 };
   for (const w of worked) {
     totals.reviewer += w.work.reviewer;
@@ -740,11 +745,15 @@ function coreOf(worked: Worked[], settings: ResolvedFlowSettings): CoreFigures {
     totals.landing += w.work.landing;
   }
   const sum = totals.reviewer + totals.author + totals.landing;
-  const courtsWork: CourtShare[] = (['reviewer', 'author', 'landing'] as PrCourt[]).map((court) => ({
+  return (['reviewer', 'author', 'landing'] as PrCourt[]).map((court) => ({
     court,
     hours: r2(totals[court]),
     share: sum > 0 ? totals[court] / sum : 0,
   }));
+}
+
+function coreOf(worked: Worked[], settings: ResolvedFlowSettings): CoreFigures {
+  const courtsWork = courtSharesOf(worked);
   const leads = worked.map((w) => w.leadWork);
   const medianLeadWorkHours = median(leads);
   const p75LeadWorkHours = percentile(leads, 0.75);
@@ -755,7 +764,8 @@ function coreOf(worked: Worked[], settings: ResolvedFlowSettings): CoreFigures {
     lead: leads,
   };
   const budgets = FLOW_BUDGET_MEASURES.map((m) => budgetRow(m, measures[m], settings));
-  return { courtsWork, medianLeadWorkHours, p75LeadWorkHours, leads, budgets };
+  const passedFirstReview = worked.filter((w) => w.f.rounds === 0).length;
+  return { courtsWork, passedFirstReview, medianLeadWorkHours, p75LeadWorkHours, leads, budgets };
 }
 
 export function buildFlowDetail(
@@ -815,6 +825,10 @@ export function buildFlowDetail(
   const { rows: shown, capped } = capRows(worked);
   return {
     courtsWork,
+    // THE BALANCE TARGET'S POPULATION: a PR approved on its first review never waits for its
+    // author, so counting it would pull every healthy workspace away from equal thirds. The page
+    // counts those apart (`prFigures.neverWentBack`).
+    balanceCourts: courtSharesOf(worked.filter((w) => w.f.rounds > 0)),
     medianLeadWorkHours: r2(medianLeadWorkHours),
     p75LeadWorkHours: r2(p75LeadWorkHours),
     workHeadline,

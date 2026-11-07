@@ -352,6 +352,19 @@ describe('the per-PR rows', () => {
     expect(g.neverWentBack).toBe(20);
   });
 
+  it('leaves PRs approved on the first review out of the balance split, and counts them', () => {
+    const passed = Array.from({ length: 6 }, () => pr([['reviewer', 2], ['landing', 4]]));
+    const reworked = [pr([['reviewer', 2], ['author', 2], ['landing', 2]])];
+    const out = detail([...passed, ...reworked]);
+    expect(out.prFigures.neverWentBack).toBe(6);
+    const share = Object.fromEntries(out.balanceCourts.map((c) => [c.court, c.share]));
+    expect(share.reviewer).toBeCloseTo(1 / 3, 9);
+    expect(share.author).toBeCloseTo(1 / 3, 9);
+    expect(share.landing).toBeCloseTo(1 / 3, 9);
+    // The workspace split itself still counts every PR.
+    expect(out.courtsWork.find((c) => c.court === 'landing')!.share).toBeGreaterThan(0.5);
+  });
+
   it('is all zeros when nothing was measured', () => {
     expect(detail([]).prFigures).toEqual({
       overWorkingDay: 0,

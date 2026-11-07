@@ -46,6 +46,7 @@ import type {
   ReferenceDocFigures,
   ReferenceDocSectionEntry,
   ReviewDocReference,
+  ClaudeReviewOpenPoints,
   ReviewPeerRead,
   ReferenceDocCitation,
   StoryDocsAlignmentResult,
@@ -1397,6 +1398,16 @@ export const claudeReviews = sqliteTable(
     // NULL = the run did not read the library (switch off, empty library, older row). Migration 0117
     // (pg 0104).
     docReferences: text('doc_references', { mode: 'json' }).$type<ReviewDocReference[]>(),
+    // The OPEN POINTS of the PR's tickets the run was given, each with the code the reviewer tied to it
+    // (docs/CLAUDE-REVIEW.md § Open points; shared `ClaudeReviewOpenPoints`). Never part of the verdict
+    // or the counts. NULL = the tickets had none (or an older row). Migration 0171.
+    openPoints: text('open_points', { mode: 'json' }).$type<ClaudeReviewOpenPoints>(),
+    // THE PUSH SUMMARY (docs/CLAUDE-REVIEW.md § Push summaries; shared `PrPushSummary`): a FULL review's
+    // short summary of the pushes it covers — from `pushSummaryFromSha` EXCLUSIVE (the previous full
+    // review's head; NULL = the PR's first commit) to this row's `headSha`. Model text, plain text only.
+    // NULL = none asked (an unmoved head, a replies pass, an older row). Migration 0172.
+    pushSummary: text('push_summary'),
+    pushSummaryFromSha: text('push_summary_from_sha'),
     // DORMANT (2026-11-01): the review plan was measured, did not help, and was removed. Never written
     // or read; kept because migration 0150 added it.
     coverage: text('coverage', { mode: 'json' }),
@@ -3221,6 +3232,39 @@ export const jiraAcFields = sqliteTable(
   },
   (t) => ({
     accountWsSiteTypeUx: uniqueIndex('pro_jira_ac_fields_account_ws_site_type').on(
+      t.accountId,
+      t.workspaceId,
+      t.apiRoot,
+      t.issueTypeId,
+    ),
+  }),
+);
+
+// ── tracker_open_points_fields: WHERE AN ISSUE TYPE'S OPEN POINTS ARE READ (migration 0171) ──────
+// One row per (account, workspace, tracker site, issue type) the reader set in Settings → Integrations
+// (tracker/open-points-settings.ts; docs/TRACKERS.md § Open points). No row = 'auto' (a field named
+// like "Open points", else the description's section). `mode` 'field' names `field_id`/`field_name`;
+// 'none' = the description only. Open points themselves are DERIVED ON READ from the stored ticket
+// (tracker/open-points.ts) — never stored. No FKs (like pro_jira_ac_fields); erased with the account.
+//
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, apiRoot,
+// issueTypeId].
+export const trackerOpenPointsFields = sqliteTable(
+  'tracker_open_points_fields',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueTypeId: text('issue_type_id').notNull(),
+    // 'field' | 'none'
+    mode: text('mode').notNull(),
+    fieldId: text('field_id'),
+    fieldName: text('field_name'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsSiteTypeUx: uniqueIndex('tracker_open_points_fields_account_ws_site_type').on(
       t.accountId,
       t.workspaceId,
       t.apiRoot,

@@ -8,6 +8,7 @@ import { CheckCircleIcon, MinusIcon, ThinSampleIcon, TimerIcon, WarningIcon } fr
 import { metaFor } from './AttentionCards.js';
 import { barWidth, COURT_LABEL, COURT_ORDER, COURT_SHORT, formatPct } from './bottlenecksModel.js';
 import {
+  BALANCE_RULES,
   BUDGET_SUB,
   budgetAriaLabel,
   budgetClip,
@@ -19,12 +20,17 @@ import {
   scatterTicks,
   scatterYRange,
   SCATTER_FLOOR_HOURS,
-  trianglePoint,
+  courtBalance,
+  firstReviewSeries,
+  FIRST_REVIEW_TREND_WEEKS,
   VERDICT_LABEL,
 } from './chronologyModel.js';
+import { useFlowTrend } from '../../hooks/useFlowTrend.js';
+import { niceMax } from '../charts/common.js';
+import { weekLabel } from './chronologyTrendModel.js';
 
-// Chronology's charts: who was holding the hours (the split), each wait against its budget, every
-// pull request as one dot, and where each sits between the three courts (context only).
+// Chronology's charts: how balanced the three courts were (the target), who was holding the hours
+// (the split), each wait against its budget, and every pull request as one dot.
 //
 // ⚠ COURT COLOURS ARE THE VALIDATED SET, NOT THE APP'S OLD DARK SHADES. amber-500 / teal-600 /
 // indigo-500 on light and amber-600 / teal-600 / indigo-500 on dark were run through the palette
@@ -564,124 +570,206 @@ export function LeadScatter({
   );
 }
 
-// ── Where each pull request sits between the three courts ─────────────────────────────────────
+// ── The balance target: the window as one point between the three courts ─────────────────────
 
-export function CourtTriangle({
-  prs,
-  overall,
+/**
+ * One triangle, one marker. The corners are the three courts; the centre (equal thirds) is drawn
+ * as the target, its two rings at `BALANCE_RULES`' two distances — the same numbers the verdict
+ * line is read from. The marker is the window's hours-weighted position; no hours, no marker.
+ */
+export function BalanceTarget({
+  courts,
+  emptyText = 'No working hours measured yet',
 }: {
-  prs: FlowPrRow[];
-  overall: CourtShare[];
+  courts: readonly CourtShare[];
+  /** The verdict line when there is no marker. */
+  emptyText?: string;
 }): JSX.Element {
   const [ref, w] = useChartWidth();
-  const [hover, setHover] = useState<Placed | null>(null);
-  const open = useOpenFlowPr();
-  const H = 300;
-  const side = Math.min(w - 40, (H - 60) / 0.866);
-  const cx = w / 2;
-  const A = { x: cx, y: 24 }; // reviewer, top
-  const Bv = { x: cx - side / 2, y: 24 + side * 0.866 }; // author, bottom-left
-  const C = { x: cx + side / 2, y: 24 + side * 0.866 }; // landing, bottom-right
-  const P = (rv: number, au: number, la: number): { x: number; y: number } => {
-    const t = rv + au + la || 1;
-    return {
-      x: (rv * A.x + au * Bv.x + la * C.x) / t,
-      y: (rv * A.y + au * Bv.y + la * C.y) / t,
-    };
-  };
-
-  const placed = useMemo((): Placed[] => {
-    if (w <= 0) return [];
-    const out: Placed[] = [];
-    for (const pr of prs) {
-      const tp = trianglePoint(pr.workHours);
-      if (tp == null) continue;
-      // A small, deterministic nudge so a stack of identical shares reads as a stack.
-      const jx = ((pr.prId * 37) % 11) - 5;
-      const jy = ((pr.prId * 53) % 9) - 4;
-      const p = P(tp.reviewer, tp.author, tp.landing);
-      out.push({ pr, x: p.x + jx * 0.8, y: p.y + jy * 0.8 });
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prs, w]);
-
-  const by = new Map(overall.map((c) => [c.court, c.share]));
-  const agg = P(by.get('reviewer') ?? 0, by.get('author') ?? 0, by.get('landing') ?? 0);
-  const centre = P(1, 1, 1);
-  const grid = [0.25, 0.5, 0.75];
+  const balance = courtBalance(courts);
+  const H = 232;
+  const side = Math.max(0, Math.min(w - 40, 200));
+  const cx = Math.min(w, side + 40) / 2;
+  const top = 26;
+  const A = { x: cx, y: top }; // reviewer, top
+  const Bv = { x: cx - side / 2, y: top + side * 0.866 }; // author, bottom-left
+  const C = { x: cx + side / 2, y: top + side * 0.866 }; // landing, bottom-right
+  const P = (rv: number, au: number, la: number): { x: number; y: number } => ({
+    x: rv * A.x + au * Bv.x + la * C.x,
+    y: rv * A.y + au * Bv.y + la * C.y,
+  });
+  const centre = P(1 / 3, 1 / 3, 1 / 3);
+  // Centre to corner, in pixels: distance 1 in the model.
+  const R = side / Math.sqrt(3);
+  const mark = balance == null ? null : P(balance.shares.reviewer, balance.shares.author, balance.shares.landing);
+  const aria =
+    balance == null
+      ? `Balance between the three waits: ${emptyText}. The target is equal thirds.`
+      : `Balance between the three waits: ${balance.text}. ${COURT_ORDER.map(
+          (c) => `${COURT_SHORT[c]} ${formatPct(balance.shares[c])}`,
+        ).join(', ')}. The target is equal thirds.`;
 
   return (
     <div>
-      <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-        <CourtLegend prefix="mostly " />
-        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
-          <span className="h-3 w-3 rounded-full border-2 bg-ui-surface" />
-          the workspace as a whole
-        </span>
-        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
-          <span className="h-3 w-3 rounded-full border-[1.5px] border-dashed border-ui-mute" />
-          equal thirds
-        </span>
-      </div>
-      <div ref={ref} className="relative" style={{ height: H }}>
-        {w > 0 && side > 40 && (
-          <svg
-            width={w}
-            height={H}
-            className="block"
-            role="img"
-            aria-label="Each pull request placed by its share of working time waiting for a reviewer (top), for its author (bottom left) and to merge after approval (bottom right)."
-          >
-            {grid.map((f) => {
-              const lines = [
-                [P(f, 1 - f, 0), P(f, 0, 1 - f)],
-                [P(0, f, 1 - f), P(1 - f, f, 0)],
-                [P(0, 1 - f, f), P(1 - f, 0, f)],
-              ];
-              return lines.map(([a, b], i) => (
-                <line key={`${f}-${i}`} x1={a!.x} y1={a!.y} x2={b!.x} y2={b!.y} className="decorative-mark stroke-gray-200 dark:stroke-gray-800" strokeWidth={1} />
-              ));
-            })}
-            <path d={`M${A.x},${A.y} L${Bv.x},${Bv.y} L${C.x},${C.y} Z`} fill="none" className="stroke-gray-300 dark:stroke-gray-700" strokeWidth={1.2} />
-            <text x={A.x} y={A.y - 10} textAnchor="middle" className={AXIS_TEXT}>
-              All waiting for a reviewer
-            </text>
-            <text x={Bv.x} y={Bv.y + 18} textAnchor="start" className={AXIS_TEXT}>
-              All with the author
-            </text>
-            <text x={C.x} y={C.y + 18} textAnchor="end" className={AXIS_TEXT}>
-              All waiting to merge
-            </text>
-            {placed.map((p) => (
-              <circle
-                key={p.pr.prId}
-                cx={p.x}
-                cy={p.y}
-                r={3.5}
-                className={`${COURT_FILL[p.pr.dominant]} stroke-ui-bg`}
-                strokeWidth={1}
-                fillOpacity={hover == null || hover.pr.prId === p.pr.prId ? 0.8 : 0.3}
-              />
-            ))}
-            <circle cx={centre.x} cy={centre.y} r={12} fill="none" className="stroke-gray-500 dark:stroke-gray-400" strokeWidth={1.5} strokeDasharray="3 3" />
-            <circle cx={agg.x} cy={agg.y} r={7} className="fill-ui-bg stroke-gray-800 dark:stroke-gray-100" strokeWidth={2.2} />
-            <rect
-              x={0}
-              y={0}
-              width={w}
-              height={H}
-              fill="transparent"
-              style={{ cursor: hover ? 'pointer' : 'default' }}
-              onMouseMove={(e) => setHover(nearest(placed, e.nativeEvent.offsetX, e.nativeEvent.offsetY, 10))}
-              onMouseLeave={() => setHover(null)}
-              onClick={() => {
-                if (hover) open(hover.pr);
-              }}
+      <p className="flex items-center gap-1.5 text-title font-semibold text-ui-ink">
+        {balance?.verdict === 'balanced' && <CheckCircleIcon size={16} className="text-ui-success" />}
+        {balance == null ? emptyText : balance.text}
+      </p>
+      <div ref={ref} className="relative mt-1" style={{ height: H }}>
+        {w > 0 && side > 60 && (
+          <svg width={Math.min(w, side + 40)} height={H} className="block" role="img" aria-label={aria}>
+            <path
+              d={`M${A.x},${A.y} L${Bv.x},${Bv.y} L${C.x},${C.y} Z`}
+              className="fill-ui-raise stroke-ui-line"
+              strokeWidth={1.2}
             />
+            {/* The target: the outer ring is "leans", the filled inner zone is "balanced". */}
+            <circle
+              cx={centre.x}
+              cy={centre.y}
+              r={BALANCE_RULES.leans * R}
+              fill="none"
+              className="decorative-mark stroke-ui-faint"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+            <circle
+              cx={centre.x}
+              cy={centre.y}
+              r={BALANCE_RULES.balanced * R}
+              className="fill-ui-success stroke-ui-success"
+              fillOpacity={0.18}
+              strokeWidth={1.5}
+            />
+            <circle cx={centre.x} cy={centre.y} r={2} className="fill-ui-success" />
+            {COURT_ORDER.map((c) => {
+              const v = c === 'reviewer' ? A : c === 'author' ? Bv : C;
+              return <circle key={c} cx={v.x} cy={v.y} r={4} className={`${COURT_FILL[c]} stroke-ui-bg`} strokeWidth={1.5} />;
+            })}
+            <text x={A.x} y={A.y - 10} textAnchor="middle" className="fill-ui-mute text-meta">
+              {COURT_SHORT.reviewer}
+            </text>
+            <text x={Bv.x - 4} y={Bv.y + 18} textAnchor="start" className="fill-ui-mute text-meta">
+              {COURT_SHORT.author}
+            </text>
+            <text x={C.x + 4} y={C.y + 18} textAnchor="end" className="fill-ui-mute text-meta">
+              {COURT_SHORT.landing}
+            </text>
+            {mark != null && (
+              <>
+                <line
+                  x1={centre.x}
+                  y1={centre.y}
+                  x2={mark.x}
+                  y2={mark.y}
+                  className="stroke-ui-mute"
+                  strokeWidth={1.5}
+                />
+                <circle cx={mark.x} cy={mark.y} r={7} className="fill-ui-bg stroke-ui-ink" strokeWidth={2.2} />
+                <circle cx={mark.x} cy={mark.y} r={2.5} className="fill-ui-ink" />
+              </>
+            )}
           </svg>
         )}
-        {hover != null && w > 0 && <PrTip p={hover} width={w} />}
+      </div>
+    </div>
+  );
+}
+
+// ── Passed the first review: the big number and its 12 weeks ─────────────────────────────────
+
+/** The count beside the balance target: PRs left out of it because they never went back. */
+export function FirstReviewCount({ passed, measured }: { passed: number; measured: number }): JSX.Element {
+  return (
+    <div data-testid="chronology-first-review-count">
+      <p className="text-[44px] font-semibold leading-none tabular-nums text-ui-success">{formatCount(passed)}</p>
+      <p className="mt-1.5 max-w-[16rem] text-body text-ui-ink">approved on the first review</p>
+      <p className="mt-0.5 text-meta text-ui-mute">of {formatCount(measured)} merged pull requests</p>
+    </div>
+  );
+}
+
+/**
+ * Merged pull requests approved on their first review, week by week — the last
+ * `FIRST_REVIEW_TREND_WEEKS` weeks of `GET /api/flow-trend` (the same query the Over time charts
+ * read, so no second fetch). Weeks run by merge date; the current week is counted so far and drawn
+ * hollow. A week without the figure (an older server) is a gap, never a zero.
+ */
+export function FirstReviewTrend({ workspaceId }: { workspaceId: number | null }): JSX.Element | null {
+  const q = useFlowTrend(workspaceId);
+  const [ref, w] = useChartWidth();
+  const points = useMemo(() => firstReviewSeries(q.data?.weeks ?? []), [q.data]);
+  if (points.length === 0 || points.every((p) => p.count == null)) return null;
+
+  const H = 140;
+  const PAD_L = 28;
+  const PAD_R = 10;
+  const TOP = 12;
+  const BOTTOM = H - 22;
+  const max = niceMax(Math.max(1, ...points.map((p) => p.count ?? 0)));
+  const step = points.length > 1 ? (w - PAD_L - PAD_R) / (points.length - 1) : 0;
+  const x = (i: number): number => PAD_L + i * step;
+  const y = (v: number): number => BOTTOM - (v / max) * (BOTTOM - TOP);
+  // Gaps split the line; each run of known weeks is its own path.
+  const runs: string[] = [];
+  let cur = '';
+  points.forEach((p, i) => {
+    if (p.count == null) {
+      if (cur) runs.push(cur);
+      cur = '';
+      return;
+    }
+    cur += `${cur ? 'L' : 'M'}${x(i)},${y(p.count)}`;
+  });
+  if (cur) runs.push(cur);
+  const known = points.filter((p) => p.count != null);
+  const aria = `Merged pull requests approved on the first review, last ${points.length} weeks: ${known
+    .map((p) => `${weekLabel(p.weekStart)} ${p.count}${p.partial ? ' so far' : ''}`)
+    .join(', ')}.`;
+
+  return (
+    <div data-testid="chronology-first-review-trend">
+      <p className="text-body font-medium text-ui-ink">
+        Approved on the first review, last {FIRST_REVIEW_TREND_WEEKS} weeks
+      </p>
+      <div ref={ref} className="mt-1" style={{ height: H }}>
+        {w > 0 && (
+          <svg width={w} height={H} className="block" role="img" aria-label={aria}>
+            {[0, max / 2, max].map((t) => (
+              <g key={t}>
+                <line x1={PAD_L} x2={w - PAD_R} y1={y(t)} y2={y(t)} className="decorative-mark stroke-ui-line" strokeWidth={1} />
+                <text x={PAD_L - 6} y={y(t) + 4} textAnchor="end" className="fill-ui-faint text-meta">
+                  {formatCount(t)}
+                </text>
+              </g>
+            ))}
+            {runs.map((d) => (
+              <path key={d} d={d} fill="none" className="stroke-ui-success" strokeWidth={2.2} strokeLinejoin="round" />
+            ))}
+            {points.map((p, i) =>
+              p.count == null ? null : (
+                <circle
+                  key={p.weekStart}
+                  cx={x(i)}
+                  cy={y(p.count)}
+                  r={3.5}
+                  className={p.partial ? 'fill-ui-bg stroke-ui-success' : 'fill-ui-success stroke-ui-success'}
+                  strokeWidth={1.5}
+                >
+                  <title>
+                    {`Week of ${weekLabel(p.weekStart)}: ${p.count} of ${p.measuredPrs} merged${p.partial ? ' (so far)' : ''}`}
+                  </title>
+                </circle>
+              ),
+            )}
+            <text x={x(0)} y={H - 6} textAnchor="start" className="fill-ui-faint text-meta">
+              {weekLabel(points[0]!.weekStart)}
+            </text>
+            <text x={x(points.length - 1)} y={H - 6} textAnchor="end" className="fill-ui-faint text-meta">
+              {points[points.length - 1]!.partial ? 'This week' : weekLabel(points[points.length - 1]!.weekStart)}
+            </text>
+          </svg>
+        )}
       </div>
     </div>
   );

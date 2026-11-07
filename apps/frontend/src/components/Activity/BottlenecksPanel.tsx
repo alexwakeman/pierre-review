@@ -24,12 +24,14 @@ import { metaFor } from './AttentionCards.js';
 import { FlowPointersPanel } from './FlowPointersPanel.js';
 import { ChronologyTrend } from './ChronologyTrend.js';
 import {
+  BalanceTarget,
+  FirstReviewCount,
+  FirstReviewTrend,
   BudgetChart,
   COURT_SWATCH,
   COURT_TEXT,
   CourtLegend,
   CourtSplit,
-  CourtTriangle,
   Figure,
   LeadScatter,
 } from './ChronologyCharts.js';
@@ -44,7 +46,6 @@ import {
   RequestsInfo,
   ScatterInfo,
   SplitInfo,
-  TriangleInfo,
   UnreviewedInfo,
 } from './chronologyInfo.js';
 import {
@@ -399,10 +400,10 @@ export function BottlenecksPanel(): JSX.Element {
       ) : (
         <>
           {/* ══ THE WORKING-HOURS HALF (db/flow-detail.ts) ════════════════════════════════
-              The split first, then each wait against its budget: an even split between the three
-              courts is not a target, so the budgets are what say whether a wait was too long. An
-              older server sends none of these fields; the page then opens on the CLOCK-hour split
-              and renders its court half below. */}
+              The balance target and the split first (equal thirds is the aim), then each wait
+              against its budget, which says whether a wait was too long. An older server sends
+              none of these fields; the page then opens on the CLOCK-hour split and renders its
+              court half below. */}
           {working && resp.settings != null ? (
             <>
               <Block
@@ -410,7 +411,34 @@ export function BottlenecksPanel(): JSX.Element {
                 info={<SplitInfo />}
                 testId="chronology-split"
               >
-                <CourtSplit courts={resp.courtsWork ?? []} size="lg" />
+                {/* Two panels: the target (only PRs that went back to their author) on the left;
+                    the ones approved on their first review on the right — the big number beside
+                    their last 12 weeks. */}
+                <div className="grid gap-4 lg:grid-cols-[auto_minmax(0,1fr)]">
+                  <div className="rounded-ui border border-ui-line p-4">
+                    <div className="w-[260px] max-w-full">
+                      <BalanceTarget
+                        courts={resp.balanceCourts ?? []}
+                        emptyText={
+                          figures != null && model.measuredPrs > 0 && figures.neverWentBack === model.measuredPrs
+                            ? 'Every pull request was approved on the first review'
+                            : 'No working hours measured yet'
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-4 rounded-ui border border-ui-line p-4">
+                    {figures != null && (
+                      <FirstReviewCount passed={figures.neverWentBack} measured={model.measuredPrs} />
+                    )}
+                    <div className="min-w-[16rem] flex-1">
+                      <FirstReviewTrend workspaceId={workspaceId} />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <CourtSplit courts={resp.courtsWork ?? []} size="lg" />
+                </div>
               </Block>
 
               {/* THE REVIEW TARGET: the server's sentence, and its denominator from the wire counts.
@@ -457,6 +485,10 @@ export function BottlenecksPanel(): JSX.Element {
                           } took ${Math.round(figures.slowestTenthShare * 100)}%.`}
                         />
                       )}
+                      <Figure
+                        value={`${formatCount(figures.neverWentBack)} of ${formatCount(model.measuredPrs)}`}
+                        label="never went back to their author for changes"
+                      />
                     </div>
                   )}
                   <LeadScatter
@@ -539,25 +571,6 @@ export function BottlenecksPanel(): JSX.Element {
 
               {/* The one model-written block — AI palette, never a figure, every citation checked. */}
               <FlowPointersPanel workspaceId={workspaceId} days={windowDays} />
-
-              {prs.length > 0 && (
-                <Block
-                  title="Where each pull request sits"
-                  info={<TriangleInfo />}
-                  testId="chronology-triangle"
-                >
-                  {figures != null && (
-                    <div className="mb-2">
-                      <Figure
-                        value={`${formatCount(figures.neverWentBack)} of ${formatCount(model.measuredPrs)}`}
-                        label="never went back to their author for changes"
-                      />
-                    </div>
-                  )}
-                  <CourtTriangle prs={prs} overall={resp.courtsWork ?? []} />
-                  {resp.prsCapped && <CappedLine shown={prs.length} measured={model.measuredPrs} />}
-                </Block>
-              )}
             </>
           ) : (
             // An older server: no working hours, so the page still opens on a split — in clock hours.

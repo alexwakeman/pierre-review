@@ -87,6 +87,9 @@ export interface FlowTrendWeek {
   /** Median whole-PR time, working hours; null when nothing was measured. */
   medianLeadWorkHours: number | null;
   budgets: FlowTrendBudgetCell[];
+  /** Measured pull requests that merged without going back to their author (`rounds === 0`):
+   *  approved on the first review, with no changes asked for. Absent from an older server. */
+  passedFirstReview?: number;
 }
 
 export type FlowTrendEventKind = 'bot' | 'contributor' | 'repo' | 'setting' | 'shift';

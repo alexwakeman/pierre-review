@@ -207,6 +207,64 @@ const SCALE = 24; // hours across the track; anything past it runs off the end
 const pct = (h: number): string => `${(Math.min(h, SCALE) / SCALE) * 100}%`;
 const hrs = (h: number): string => `${h}h`;
 
+/**
+ * The balance target above the split, as in the app (`ChronologyCharts.tsx` `BalanceTarget`): one
+ * triangle, the centre drawn as the target, one marker where the hours sit.
+ */
+function BalanceMark(): JSX.Element {
+  const [rv, au, la] = COURTS.map((c) => c.pct / 100) as [number, number, number];
+  const A = { x: 120, y: 22 };
+  const B = { x: 30, y: 22 + 180 * 0.866 };
+  const C = { x: 210, y: 22 + 180 * 0.866 };
+  const t = rv + au + la;
+  const at = (r: number, a: number, l: number): { x: number; y: number } => ({
+    x: (r * A.x + a * B.x + l * C.x) / t,
+    y: (r * A.y + a * B.y + l * C.y) / t,
+  });
+  const mid = { x: (A.x + B.x + C.x) / 3, y: (A.y + B.y + C.y) / 3 };
+  const m = at(rv, au, la);
+  const R = 180 / Math.sqrt(3);
+  return (
+    <div className="rp-balance">
+      <p className="v">Balanced</p>
+      <svg viewBox="0 0 240 200" width="240" aria-hidden="true">
+        <path d={`M${A.x},${A.y} L${B.x},${B.y} L${C.x},${C.y} Z`} className="tri" />
+        <circle cx={mid.x} cy={mid.y} r={0.35 * R} className="outer" />
+        <circle cx={mid.x} cy={mid.y} r={0.15 * R} className="inner" />
+        {[A, B, C].map((v, i) => (
+          <circle key={i} cx={v.x} cy={v.y} r={4} style={{ fill: COURTS[i]!.color }} />
+        ))}
+        <text x={A.x} y={A.y - 9} textAnchor="middle">With reviewer</text>
+        <text x={B.x - 4} y={B.y + 17} textAnchor="start">With author</text>
+        <text x={C.x + 4} y={C.y + 17} textAnchor="end">Waiting to merge</text>
+        <line x1={mid.x} y1={mid.y} x2={m.x} y2={m.y} className="pull" />
+        <circle cx={m.x} cy={m.y} r={6} className="mark" />
+      </svg>
+    </div>
+  );
+}
+
+/** As in the app (`ChronologyCharts.tsx` `FirstReviewTrend`): 12 weeks, one green line. */
+const FIRST_REVIEW_WEEKS = [3, 4, 3, 5, 4, 6, 5, 6, 7, 6, 8, 5];
+
+function FirstReviewLine(): JSX.Element {
+  const max = 10;
+  const x = (i: number): number => 8 + (i * 224) / (FIRST_REVIEW_WEEKS.length - 1);
+  const y = (v: number): number => 62 - (v / max) * 54;
+  const d = FIRST_REVIEW_WEEKS.map((v, i) => `${i ? 'L' : 'M'}${x(i)},${y(v)}`).join('');
+  return (
+    <div className="rp-first-line">
+      <p className="t">Approved on the first review, last 12 weeks</p>
+      <svg viewBox="0 0 240 70" width="240" aria-hidden="true">
+        <path d={d} />
+        {FIRST_REVIEW_WEEKS.map((v, i) => (
+          <circle key={i} cx={x(i)} cy={y(v)} r={2.5} className={i === FIRST_REVIEW_WEEKS.length - 1 ? 'now' : ''} />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 /** Chronology: each wait's row opens the figures behind its verdict. */
 export function ChronologyMock(): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
@@ -216,9 +274,22 @@ export function ChronologyMock(): JSX.Element {
       title="Chronology"
       meta="This sprint · working hours, Monday to Friday, 09:00–17:30"
       onReset={open ? () => setOpen(null) : null}
-      label="Chronology: 36% of working hours waiting for a reviewer, 31% waiting for the author, 33% approved and waiting to merge; first look, approved to merged and opened to merged are past their limits, reply to review is acceptable. Each wait opens its figures."
+      label="Chronology: balanced, 36% of working hours waiting for a reviewer, 31% waiting for the author, 33% approved and waiting to merge; first look, approved to merged and opened to merged are past their limits, reply to review is acceptable. Each wait opens its figures."
     >
       <Group first>Where the working hours went</Group>
+      <div className="rp-balance-row">
+        <div className="rp-panel">
+          <BalanceMark />
+        </div>
+        <div className="rp-panel rp-first-panel">
+          <div className="rp-first">
+            <p className="n">23</p>
+            <p className="l">approved on the first review</p>
+            <p className="d">of 41 merged pull requests</p>
+          </div>
+          <FirstReviewLine />
+        </div>
+      </div>
       <CourtBar showPct segments={COURTS} />
       <Group>Each wait against its time budget</Group>
       <div className="rp-budgets">

@@ -34,8 +34,8 @@ describe('the destinations', () => {
 
   it('puts the four primaries first, in the order of the bottom bar', () => {
     expect(DESTINATIONS.filter((d) => d.group === 'primary').map((d) => d.id)).toEqual([
-      'attention',
       'open-prs',
+      'attention',
       'sprint',
       'timeline',
     ]);

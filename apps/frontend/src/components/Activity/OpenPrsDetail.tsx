@@ -220,6 +220,8 @@ export function OpenPrsDetail(): JSX.Element {
             sort={sort}
             grouped={view === 'grouped'}
             onOpenPr={openTab}
+            writableRepoIds={data?.writableRepoIds}
+            queuedPrIds={data?.queuedPrIds}
             // The workspace and the repo filter are this list's identity: either changing starts the
             // drawn window (and the selection) again.
             windowScope={windowScope}

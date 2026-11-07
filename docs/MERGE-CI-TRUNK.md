@@ -42,7 +42,8 @@ answer; absent (the lean timeline PR doesn't carry it) the reason stays generic,
 - Consumers: `ChecksTab` at **TWO sites** — the Overview Status chip (open PRs only) and the
   **Conflicts** row's gate, `conflictsRowVisible(state, verdict)`, which consumes the RESOLVED
   verdict rather than re-reading `mergeStateStatus`/`mergeable` so the merge queue keeps outranking
-  the conflict test — then `MergeControl`,
+  the conflict test — then `MergeControl`, the Open PRs row menu's Merge (`rowCanMerge`, synced
+  facts + `writableRepoIds`, no fetch; [FRONTEND.md](FRONTEND.md) § the row menu),
   `Activity/RepoOpenPrList` + `Timeline/prBar` via **`mergeVerdictWarning()`**.
   **Landmine:** `mergeVerdict` returns `draft` before it looks at behind/blocked, and `draft`
   is not a compact warning — so a draft that was ALSO behind lost its ⚠ on the dense surfaces.

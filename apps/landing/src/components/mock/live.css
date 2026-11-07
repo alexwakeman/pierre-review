@@ -306,6 +306,113 @@
 .lb .rp-budget.open .h > span::after {
   content: ' ⌄';
 }
+.lb .rp-balance {
+  margin-bottom: 10px;
+}
+.lb .rp-balance-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.lb .rp-panel {
+  border: 1px solid #3a3b40;
+  border-radius: 6px;
+  padding: 12px;
+}
+.lb .rp-panel .rp-balance {
+  margin-bottom: 0;
+}
+.lb .rp-first-panel {
+  flex: 1 1 260px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+.lb .rp-first-panel .rp-first-line {
+  flex: 1 1 200px;
+  margin-bottom: 0;
+}
+.lb .rp-first .n {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1;
+  color: #5fa592;
+  font-variant-numeric: tabular-nums;
+}
+.lb .rp-first .l {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.lb .rp-first .d {
+  font-size: 11px;
+  color: var(--muted);
+}
+.lb .rp-first-line {
+  margin-bottom: 10px;
+}
+.lb .rp-first-line .t {
+  font-size: 12px;
+  color: var(--ink);
+}
+.lb .rp-first-line svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.lb .rp-first-line path {
+  fill: none;
+  stroke: #5fa592;
+  stroke-width: 2;
+}
+.lb .rp-first-line circle {
+  fill: #5fa592;
+}
+.lb .rp-first-line circle.now {
+  fill: var(--bg);
+  stroke: #5fa592;
+  stroke-width: 1.5;
+}
+.lb .rp-balance .v {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.lb .rp-balance svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.lb .rp-balance .tri {
+  fill: var(--surface-2);
+  stroke: #3a3b40;
+}
+.lb .rp-balance .outer {
+  fill: none;
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+.lb .rp-balance .inner {
+  fill: rgb(51 107 93 / 0.35);
+  stroke: #5fa592;
+  stroke-width: 1.5;
+}
+.lb .rp-balance text {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.lb .rp-balance .pull {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+.lb .rp-balance .mark {
+  fill: var(--bg);
+  stroke: var(--ink);
+  stroke-width: 2.2;
+}
 .lb .rp-why {
   margin-top: 6px;
   font-size: 12.5px;

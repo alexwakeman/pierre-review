@@ -389,7 +389,8 @@ export function mergeTracker(
 }
 
 /**
- * The ONE writer of `workspace_trackers`. A partial patch over ONE workspace's row. ⚠ IT NEVER
+ * The patch writer of `workspace_trackers` (the copy, `copyStoredTracker`, is the other; both go
+ * through the one upsert, `upsertTrackerCols`). A partial patch over ONE workspace's row. ⚠ IT NEVER
  * DELETES — clearing writes NULLs, so a cleared value can never be resurrected by the legacy move
  * (./legacy-import.ts copies with ON CONFLICT DO NOTHING onto an existing row).
  *
@@ -402,11 +403,46 @@ export async function writeWorkspaceTracker(
   workspaceId: number,
   patch: WorkspaceTrackerUpdate,
 ): Promise<WorkspaceTrackerSettings> {
-  const t = ctx.schema.workspaceTrackers;
   // ⚠ The STORED row, never the effective one: a patch that does not name a provider must leave an
   // unchosen workspace on the automatic default, not freeze today's detection into a choice.
   const existing = await readStoredTrackerRow(ctx, accountId, workspaceId);
-  const cols = mergeTracker(existing, patch, ctx.host);
+  await upsertTrackerCols(ctx, accountId, workspaceId, mergeTracker(existing, patch, ctx.host));
+  return readWorkspaceTracker(ctx, accountId, workspaceId);
+}
+
+/**
+ * COPY another workspace's STORED tracker row onto this one, column for column (./copy.ts, "Copy from
+ * another workspace"). The token travels in its STORED form — sealed ciphertext stays sealed, under
+ * the same process key — so it is never opened, never re-typed and never sent to the client. The
+ * base URL travels WITH it, so "a token belongs to one site" still holds. Both workspaces are already
+ * proved this account's by the caller.
+ */
+export async function copyStoredTracker(
+  ctx: TrackerContext,
+  accountId: number,
+  from: WorkspaceTrackerRow,
+  toWorkspaceId: number,
+): Promise<void> {
+  await upsertTrackerCols(ctx, accountId, toWorkspaceId, {
+    provider: from.provider,
+    baseUrl: from.baseUrl,
+    projectKeys: from.projectKeys,
+    matchScope: from.matchScope,
+    authEmail: from.authEmail,
+    authToken: from.authToken,
+    notionConfig: from.notionConfig ?? null,
+  });
+}
+
+/** The ONE upsert of `workspace_trackers` (the patch writer above and the copy share it). ⚠ `cols`
+ *  is the FULL column set — a column left out is NULLED. */
+async function upsertTrackerCols(
+  ctx: TrackerContext,
+  accountId: number,
+  workspaceId: number,
+  cols: MutableCols,
+): Promise<void> {
+  const t = ctx.schema.workspaceTrackers;
   const now = new Date();
   await ctx.db
     .insert(t)
@@ -417,5 +453,4 @@ export async function writeWorkspaceTracker(
       set: { ...cols, updatedAt: now },
     })
     .execute();
-  return readWorkspaceTracker(ctx, accountId, workspaceId);
 }

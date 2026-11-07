@@ -970,6 +970,70 @@ changed lines, everything else in its summary body (docs/SONARCLOUD.md § Postin
 retried; an auto review posts it under auto-posting's `sonar` kind. AI Fix seeds the same items as
 `Q<n>`. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
+## Open points (the ticket's undecided parts, 2026-11-06)
+
+A ticket often ships with points not final when it was written ("Content depends on UCD confirming").
+The PR review names the code that depends on each, so the developer and their agent can chase it.
+⚠ **OPEN POINTS NEVER AFFECT THE OUTCOME**: no finding, no severity count, no verdict, no "approved"
+rule reads them.
+
+- **INPUT.** Before the prompt, the manager (`reviewOpenPointsFor`) asks the ticket source for the PR's
+  open points WITH A RE-READ of its tickets (`openPointsForPr(…, {refresh: true})`; the deliberate
+  exception to "read when received" — [TRACKERS.md](TRACKERS.md) § Open points). A failed re-read uses
+  the stored copy (`fresh: false`). None ⇒ prompt, tool shape and stored row exactly as before.
+- **THE PROMPT** (`prompts.ts` `pushOpenPointsSection`, user message): "## Open points on the ticket",
+  one sentence that they are not findings and never move the verdict, one that asks for the code that
+  depends on each, then each point nonce-fenced as `OPEN POINT OP<n> (<KEY>)` (in the nonce scan), ≤
+  `OPEN_POINTS_PROMPT_MAX` (30). The closing line names `openPoints` among the fields. The words are
+  PROVIDER-NEUTRAL (no tool names, no "leave it out"), so a Codex run sends them as they are; only the
+  closing "call submit_review" line is swapped (`codex-wording.ts`). Golden: `worktreeOpenPoints`.
+- **THE RESULT** (`schema.ts` `buildOpenPointsField`, added only with `RunReviewArgs.openPoints` —
+  `ResultShapeOptions.openPoints`, so Codex's strict schema follows): `openPoints: [{ref, code: [{path,
+  line?, note}]}]`. `open-points.ts` `reconcileOpenPoints` keeps EVERY point shown (so the reader sees
+  it exists even with no code), only refs that were sent carry code (≤ 5 per point, notes clipped), and
+  stores `claude_reviews.open_points` (`ClaudeReviewOpenPoints {fresh, readAt, points}`, migration
+  `0171`). A pair: one section, each point with both halves' code (`mergeOpenPoints`, pair-view.ts).
+- **SHOWN** as "Open points" with a "Not blocking" chip, after CI check (`ClaudeReviewOpenPoints.tsx`,
+  section `open`): each point, its ticket key, the code (a link into Changes when the file is in the
+  PR), "No code in this PR depends on it." otherwise, and a line when it came from the stored copy.
+- **POSTED** in the review body, auto and manual alike (`openPointsPostBlock`): "#### Open points on the
+  ticket (not blocking)", "Not decided when the ticket was written. They do not affect this review's
+  outcome.", one bullet per point with its code. Auto: just before the footer
+  (`withOpenPointsBeforeFooter`); manual: after the reader's body (`withOpenPointsBlock`). HTML comments
+  are stripped from point text; the seam appends the marker as always. A run that posts nothing posts
+  no open points.
+- **NOT YET**: the TICKET review does not get open points.
+
+## Push summaries (what each push changed, 2026-11-06)
+
+Every FULL review (auto or manual; never a replies pass) writes ONE short summary of the pushes since
+the previous full review on the PR: what changed, and how it bears on the earlier findings and the
+review threads ("Adds the null check that thread R2 asks for."). ⚠ **NO EXTRA MODEL RUN** — it is a
+field of the review's own result. Rapid consecutive pushes between two reviews are ONE range, so one
+summary; commits are never summarised one by one. It never moves the verdict.
+
+- **THE RANGE** (`push-summary.ts` `previousFullReviewHead`): from the head of the newest SUCCEEDED full
+  review before this run (any provider, `kind IS NULL`), EXCLUSIVE, to this run's head. No earlier
+  review ⇒ the first review summarises the whole PR (`fromSha` null).
+- **WHEN IT IS ASKED** (`planPushes`, pure): not when the head did not move since that review. When the
+  follow-up's "Changes since the previous review" diff starts at the same head, the section points at
+  it (no second read); otherwise ONE compare read (`fetchCompareDiff`, the PR's files) whose diff is
+  nonce-fenced as `PUSHED SINCE PREVIOUS REVIEW` (in the nonce scan). No diff, or the pushes changed
+  none of the PR's files ⇒ not asked. A failure costs the summary only.
+- **THE PROMPT** (`prompts.ts` `pushPushSummarySection`, user message): "## Push summary", the range,
+  and one line of rules (at most two sentences or three or four '- ' bullets; not per commit; never the
+  verdict). PROVIDER-NEUTRAL words; the closing line names `pushSummary`. Without it the prompt is
+  byte-identical (golden unchanged); golden `worktreePushSummaryFirst` was ADDED deliberately.
+- **THE RESULT** (`schema.ts` `buildPushSummaryField`, only with `RunReviewArgs.pushSummary` —
+  `ResultShapeOptions.pushSummary`, so Codex's strict schema follows): `pushSummary: string | null`.
+  `cleanPushSummary` keeps plain text: control characters out, ≤ 4 lines, ≤ `PUSH_SUMMARY_MAX_CHARS`
+  (600). Stored on the run row: `claude_reviews.push_summary` + `push_summary_from_sha` (migration
+  `0172`; the range ends at `head_sha`). No text ⇒ both NULL. A pair writes one per half; readers keep
+  the newest per head (shared `newestPushSummaryPerHead`).
+- **READ** by ONE core reader, `db/push-summaries.ts` — `GET /api/prs/:id/push-summaries` (the PR
+  Activity tab) and the Feed's commit runs (`FeedItem.pushSummaries`). Shown: docs/FRONTEND.md § Push
+  summaries. Not posted to GitHub.
+
 ## Data, not only code (2026-10-26)
 
 An Opus-vs-Astra comparison on five BNG PRs found that every bug BOTH models missed was a DATA-lifecycle
@@ -3840,6 +3904,19 @@ nothing on screen opens a new one. Agentic like the rest of Claude Review. Host:
   the server is still answering polls every 4s until the answer lands. Ask EMPTIES the box at once
   and the question shows as the pending turn (read off the shared mutation's variables), with the
   shared `RegenProgressBar` easing under it while Claude answers.
+  ⚠ **"Could not load this conversation." means NOTHING TO SHOW** (`chatThreadLoadFailed`: error AND
+  no data), with a Try again button. A failed BACKGROUND re-read (after an answer, the 4s poll, a
+  remount) keeps React Query's data but sets `isError`; reading `isError` alone printed the line under a
+  thread whose answer had landed (reported 2026-11-06). An answer with no cached thread SEEDS it
+  (`mergeChatAnswer`) rather than being dropped. ⚠ **THE ROOT CAUSE was a passive observer**: the AI
+  Review tab reads the same thread key with `enabled: false` (to link `#123` refs in answers), and it
+  used `skipToken`, which each render wrote onto the SHARED query — so the re-read after every answer
+  (`invalidateQueries`, which fetches with the query's own options) rejected with "Missing queryFn".
+  Every observer of the thread now carries the real queryFn and gates on `enabled`
+  (`claudeReviewChatQueryOptions`); never `skipToken` on a key another mount fetches. Pinned by
+  `apps/frontend/test/reviewChatLoad.test.ts`.
+  **Who said it**: the reader's turns sit RIGHT in a `bg-ui-sel` bubble under "You"; answers sit LEFT
+  on the AI surface (`bg-ai-surface`, `border-ai-border`) under the provider + model in `text-ai-signal`.
 
 ### Send to chat — "explain these" (migration `0095`)
 

@@ -228,6 +228,10 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `teammateLift` (migration `0164`, JSON `TeammateLiftRecord`) on such a row is the reader's Limn's ONE
   claimed attempt to dismiss its standing Request changes (docs/CLAUDE-REVIEW.md § Lifting a
   teammate's block); the import never writes it.
+- **THE PUSH SUMMARY** (`claudeReviews.pushSummary` + `pushSummaryFromSha`, migration `0172`): a FULL
+  review's ≤ 600-char plain-text summary of the pushes it covers, from `pushSummaryFromSha` EXCLUSIVE
+  (NULL = the PR's first commit) to the row's `headSha`. NULL on replies passes, unmoved heads and older
+  rows. One reader: `db/push-summaries.ts` (docs/CLAUDE-REVIEW.md § Push summaries).
 - **"REVIEW AND POST"** (`claudeReviews.postOnFinish`, migration `0161`): true on a MANUAL run the
   reader started with "Review and post" (both halves of a pair), NULL otherwise. The run is posted by
   the auto-post path when it (its pair) ends; the outcome is its `autoPost` record, as for an auto run.

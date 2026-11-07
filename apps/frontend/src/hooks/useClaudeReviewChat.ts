@@ -40,12 +40,60 @@ export const claudeReviewChatAskKey = (reviewId: number) =>
  * reopened mid-answer), it re-reads every few seconds until the answer lands.
  */
 export function useClaudeReviewChat(reviewId: number, findingId: number | null, enabled: boolean) {
-  return useQuery<ClaudeReviewChatResponse>({
+  return useQuery<ClaudeReviewChatResponse>(claudeReviewChatQueryOptions(reviewId, findingId, enabled));
+}
+
+/** The thread query's options (exported so test/reviewChatLoad.test.ts pins them without React). */
+export function claudeReviewChatQueryOptions(
+  reviewId: number,
+  findingId: number | null,
+  enabled: boolean,
+  fetchThread: (reviewId: number, findingId: number | null) => Promise<ClaudeReviewChatResponse> = api.claudeReviewChat,
+) {
+  return {
     queryKey: claudeReviewChatKey(reviewId, findingId),
-    queryFn: enabled ? () => api.claudeReviewChat(reviewId, findingId) : skipToken,
+    // ⚠ `enabled`, NEVER `skipToken`, for the closed case. The AI Review tab OBSERVES this same key
+    // passively (enabled: false), and every observer's options are written onto the shared query on
+    // each render. A `skipToken` observer left the QUERY's queryFn as skipToken, so the re-read after
+    // an answer (`invalidateQueries`, which fetches with the query's own options) rejected with
+    // "Missing queryFn" and the open thread showed "Could not load this conversation." under a
+    // conversation that had loaded. With the real queryFn on every observer that cannot happen.
+    queryFn: () => fetchThread(reviewId, findingId),
+    enabled,
     staleTime: 30_000,
-    refetchInterval: (q) => (q.state.data?.answering ? 4_000 : false),
-  });
+    refetchInterval: (q: { state: { data?: ClaudeReviewChatResponse } }) => (q.state.data?.answering ? 4_000 : false),
+  };
+}
+
+/**
+ * THE THREAD FAILED TO LOAD only when there is nothing to show. A failed BACKGROUND re-read (the
+ * re-read after an answer, the poll while one is written, a remount) keeps the thread already on
+ * screen: React Query then holds `status: 'error'` AND the data, and reading `isError` alone printed
+ * "Could not load this conversation." under a conversation that had loaded, answer included.
+ */
+export function chatThreadLoadFailed(q: { isError: boolean; data: ClaudeReviewChatResponse | undefined }): boolean {
+  return q.isError && q.data === undefined;
+}
+
+/**
+ * The stored turn an Ask returned, written into the thread's cache. With no cached thread (the first
+ * read failed) the answer SEEDS it, so the answer shows; the re-read that follows fills in any earlier
+ * turns. Before this, a missing cache entry dropped the answer on the floor.
+ */
+export function mergeChatAnswer(
+  prev: ClaudeReviewChatResponse | undefined,
+  data: ClaudeReviewChatAnswer,
+  reviewId: number,
+  findingId: number | null,
+): ClaudeReviewChatResponse {
+  const earlier = (prev?.messages ?? []).filter((m) => !data.messages.some((n) => n.id === m.id));
+  return {
+    reviewId: prev?.reviewId ?? reviewId,
+    findingId: prev?.findingId ?? findingId,
+    messages: [...earlier, ...data.messages],
+    headMoved: data.headMoved,
+    answering: false,
+  };
 }
 
 /** True while ANY mount is waiting on an answer for this review. */
@@ -100,20 +148,9 @@ export function useAskClaudeReviewChat(reviewId: number) {
       }
     },
     onSuccess: (data, variables) => {
-      const key = claudeReviewChatKey(reviewId, variables.findingId ?? null);
-      qc.setQueryData<ClaudeReviewChatResponse>(key, (prev) =>
-        prev
-          ? {
-              ...prev,
-              messages: [
-                ...prev.messages.filter((m) => !data.messages.some((n) => n.id === m.id)),
-                ...data.messages,
-              ],
-              headMoved: data.headMoved,
-              answering: false,
-            }
-          : prev,
-      );
+      const findingId = variables.findingId ?? null;
+      const key = claudeReviewChatKey(reviewId, findingId);
+      qc.setQueryData<ClaudeReviewChatResponse>(key, (prev) => mergeChatAnswer(prev, data, reviewId, findingId));
       void qc.invalidateQueries({ queryKey: key });
       if (variables.prId != null) {
         void qc.invalidateQueries({ queryKey: ['claude-review-chat-history', variables.prId] });

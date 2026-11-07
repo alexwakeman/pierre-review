@@ -104,6 +104,8 @@ import {
 } from './team-claim.js';
 import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { openPointsForPrompt, reconcileOpenPoints, type OpenPointsPlan } from './open-points.js';
+import { cleanPushSummary, planPushes, previousFullReviewHead } from './push-summary.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -1380,7 +1382,41 @@ async function runPipeline(
   // independent reviews find more than one told to skip what the other raised). The prompt seam
   // still takes a pair block (`pushPairSection`), now never sent.
   const pairInput: PromptPairInput | null = null;
-  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar, pairInput));
+
+  // ---- the tickets' OPEN POINTS (docs/CLAUDE-REVIEW.md § Open points): the PR's tickets are read
+  // again from the tracker first (they change while a ticket is in flight; tracker/open-points-pr.ts).
+  // Never throws; none ⇒ no section, and prompt and tool shape are exactly as before. ----
+  const openPointsPlan = await reviewOpenPointsFor(item);
+
+  // ---- THE PUSH SUMMARY (docs/CLAUDE-REVIEW.md § Push summaries): the pushes since the previous
+  // full review, summarised by this run's own result (no extra model run). None when the head did not
+  // move, or when no honest diff of the pushes can be had. A failure costs the summary only. ----
+  let pushes: Awaited<ReturnType<typeof planPushes>> = null;
+  try {
+    pushes = await planPushes({
+      prevHead: await previousFullReviewHead(ctx, item.accountId, item.prId, reviewId),
+      headSha: item.headSha,
+      followUp: plan?.headMoved ? { priorHeadSha: plan.priorHeadSha, since } : null,
+      fetchSince: (baseSha) =>
+        ctx.github.fetchCompareDiff(item.accountId, {
+          owner: prCtx.owner,
+          name: prCtx.name,
+          baseSha,
+          headSha: item.headSha,
+          paths: prep.changedFiles,
+          maxPatchChars: SINCE_PATCH_CHARS,
+        }),
+    });
+  } catch (err) {
+    ctx.log.warn(
+      `claude review pr ${item.prId}: push summary not planned: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    pushes = null;
+  }
+
+  const nonce = pickReviewNonce(
+    untrustedTexts(plan, since, threadPlan, peers, settled, sonar, pairInput, openPointsPlan?.prompt ?? null, pushes),
+  );
 
   // ---- the workspace's reference library (docs/REFERENCE-DOCS.md § Use in reviews) ----
   // Only when its switch is on and something is built; null ⇒ prompt, tools and output unchanged.
@@ -1407,6 +1443,8 @@ async function runPipeline(
     settled,
     sonar,
     ...(pairInput != null ? { pair: pairInput } : {}),
+    ...(openPointsPlan != null ? { openPoints: openPointsPlan.prompt } : {}),
+    ...(pushes != null ? { pushes } : {}),
     nonce,
   });
 
@@ -1425,6 +1463,8 @@ async function runPipeline(
     specialists,
     peers: peers.map(runPeerOf),
     ...(docs != null ? { docsDir: docs.dir } : {}),
+    ...(openPointsPlan != null ? { openPoints: true } : {}),
+    ...(pushes != null ? { pushSummary: true } : {}),
     // Who to bill when the provider writes its own ledger row (Codex), and — for an AUTOMATIC review
     // on Codex, where Limn runs each specialist as its own run — the spend budget asked before each.
     usage: { accountId: item.accountId, prId: item.prId },
@@ -1518,6 +1558,10 @@ async function runPipeline(
       excludedFiles: prep.excludedFiles,
       findings: savedFindings,
       ...(checked != null ? { docReferences: checked.references } : {}),
+      // Every point shown, with the code the run tied to it. Never part of the verdict or the counts.
+      ...(openPointsPlan != null ? { openPoints: reconcileOpenPoints(openPointsPlan, res.openPoints) } : {}),
+      // What the pushes since the previous full review changed (plain text, clipped). Never a verdict.
+      ...(pushes != null ? { pushSummary: { text: cleanPushSummary(res.pushSummary), fromSha: pushes.fromSha } } : {}),
       followUp:
         plan && items
           ? {
@@ -1537,6 +1581,23 @@ async function runPipeline(
     return true;
   }
   return false;
+}
+
+/**
+ * The open points of the PR's tickets for this run, read AGAIN from the tracker first (a review run is
+ * the one place that refreshes them; docs/TRACKERS.md § Open points), or null when there are none. A
+ * failed re-read uses the stored copy (`fresh: false`). Never throws.
+ */
+async function reviewOpenPointsFor(item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>): Promise<OpenPointsPlan | null> {
+  try {
+    const tickets = await getTicketSource().openPointsForPr(item.accountId, item.prId, { refresh: true });
+    return openPointsForPrompt(tickets);
+  } catch (err) {
+    item.ctx.log.warn(
+      `claude review pr ${item.prId}: open points not read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 /**

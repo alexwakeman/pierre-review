@@ -74,6 +74,7 @@ import { PrChips } from './PrChips.js';
 import { filesLabel } from './PrCardShell.js';
 import { TicketKeyButton, threadChipLabel } from './OpenPrsCards.js';
 import { useFillToPaneBottom } from '../ui/stickyFill.js';
+import { OpenPrsMergePopover, OpenPrsRowMenu, type RowMenuTab } from './OpenPrsRowMenu.js';
 
 // THE OPEN PRs ROWS — Activity → Open PRs in the redesign (docs/redesign/DESIGN.md): one LINE per
 // pull request, the detail in a SidePanel. OpenPrsCards still owns every read (one batched request
@@ -120,6 +121,13 @@ export interface OpenPrsRowsData {
   onOpenFix: (pr: TimelinePr) => void;
   /** The PR's Changes tab, on its Threads tab (the drawer's threads link). */
   onOpenThreads: (pr: TimelinePr) => void;
+  /** The PR on its Overview or Changes tab (the row menu). */
+  onOpenTab: (pr: TimelinePr, tab: RowMenuTab) => void;
+  /** The repos the viewer can push to (`OpenPrsResponse.writableRepoIds`): the row menu's Merge
+   *  shows only there. null = not known (an older server): no Merge. */
+  writableRepoIds: ReadonlySet<number> | null;
+  /** The listed PRs GitHub's merge queue holds (`OpenPrsResponse.queuedPrIds`): never Merge. */
+  queuedPrIds: ReadonlySet<number> | null;
   /** The list's identity (workspace, repo filter, sort, layout): a change starts at one page. */
   windowKey: string | null;
   /** "Tickets loaded. [Group by ticket]" — shown above the list when offered. */
@@ -346,6 +354,57 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const selectedIndex = selectedKey == null ? null : drawn.findIndex((e) => e.key === selectedKey);
   const sel = selectedIndex != null && selectedIndex >= 0 ? selectedIndex : null;
   const selected = sel != null ? drawn[sel] : undefined;
+
+  // THE ROW MENU (OpenPrsRowMenu.tsx): a right-click on a row, or Shift+F10 / the context-menu key on
+  // the selected one (at the row's corner). It selects the row; it never opens the drawer.
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  const [mergeAt, setMergeAt] = useState<{ x: number; y: number; key: string } | null>(null);
+  const menuEntry = rowMenu != null ? drawn.find((e) => e.key === rowMenu.key) : undefined;
+  const mergeEntry = mergeAt != null ? drawn.find((e) => e.key === mergeAt.key) : undefined;
+  const openRowMenu = (i: number, at: { x: number; y: number } | null): void => {
+    const e = drawn[i];
+    if (e == null) return;
+    setSelectedKey(e.key);
+    setMergeAt(null);
+    let point = at;
+    if (point == null) {
+      const r = listRef.current?.querySelector<HTMLElement>(`[data-row-index="${i}"]`)?.getBoundingClientRect();
+      point = r != null ? { x: r.left + 24, y: r.bottom } : { x: 0, y: 0 };
+    }
+    setRowMenu({ ...point, key: e.key });
+  };
+  // Latest values for the list's listeners, bound once.
+  const menuLive = useRef({ openRowMenu, sel });
+  menuLive.current = { openRowMenu, sel };
+  const hasList = drawn.length > 0;
+  useEffect(() => {
+    const ul = listRef.current;
+    if (ul == null) return;
+    const onContext = (ev: MouseEvent): void => {
+      const { openRowMenu: open, sel: at } = menuLive.current;
+      const li = ev.target instanceof Element ? ev.target.closest<HTMLElement>('[data-row-index]') : null;
+      // A right-click on a row; the context-menu key on the list (the event lands on the list).
+      if (li != null && ul.contains(li)) {
+        ev.preventDefault();
+        open(Number(li.dataset.rowIndex), { x: ev.clientX, y: ev.clientY });
+      } else if (ev.target === ul && at != null) {
+        ev.preventDefault();
+        open(at, null);
+      }
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+      const { openRowMenu: open, sel: at } = menuLive.current;
+      if (at == null || !(ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10'))) return;
+      ev.preventDefault();
+      open(at, null);
+    };
+    ul.addEventListener('contextmenu', onContext);
+    ul.addEventListener('keydown', onKey);
+    return () => {
+      ul.removeEventListener('contextmenu', onContext);
+      ul.removeEventListener('keydown', onKey);
+    };
+  }, [hasList]);
 
   // A press outside the docked drawer and outside every PR row closes it. The row stays selected (the
   // "last viewed" highlight) and the list takes keyboard focus, so j/k and Enter carry on from there.
@@ -591,6 +650,32 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
 
   return (
     <div className="flex min-w-0 items-start gap-4">
+      {rowMenu != null && menuEntry != null && (
+        <OpenPrsRowMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          pr={menuEntry.pr}
+          writable={props.writableRepoIds?.has(menuEntry.pr.repoId) === true}
+          queued={props.queuedPrIds?.has(menuEntry.pr.id) === true}
+          claudeOn={props.claudeOn}
+          returnFocus={listRef.current}
+          onClose={() => setRowMenu(null)}
+          onMerge={() => setMergeAt(rowMenu)}
+          onOpenTab={(tab) => props.onOpenTab(menuEntry.pr, tab)}
+          onOpenThreads={() => props.onOpenThreads(menuEntry.pr)}
+          onOpenReview={() => props.onOpenReview(menuEntry.pr)}
+        />
+      )}
+      {mergeAt != null && mergeEntry != null && (
+        <OpenPrsMergePopover
+          x={mergeAt.x}
+          y={mergeAt.y}
+          pr={mergeEntry.pr}
+          repoFullName={props.repoNameById.get(mergeEntry.pr.repoId) ?? ''}
+          returnFocus={listRef.current}
+          onClose={() => setMergeAt(null)}
+        />
+      )}
       <div className="min-w-0 flex-1">
         {props.offer}
         {(stacks != null ? stacks.length > 0 : drawn.length > 0) && <ColumnHeadings columns={openPrsColumns({ claudeOn: props.claudeOn })} />}

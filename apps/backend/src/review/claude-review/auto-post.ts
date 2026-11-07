@@ -73,6 +73,7 @@
 // (open and not a draft still apply); steps 2-8 are the same. Auto resolve and auto pushback stay
 // AUTO-only. "Review only" (and every older manual run) keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
+import { mergeOpenPoints, withOpenPointsBeforeFooter } from './open-points.js';
 import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { aiRunProvider, clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
@@ -1228,8 +1229,14 @@ async function autoPostReview(
   const errors: string[] = [];
 
   // The body. With findings: the lead, the reason line, the footer. Reason only: the reason, the footer.
+  // The tickets' open points ride the body just before the footer, marked as not affecting the
+  // outcome (open-points.ts; docs/CLAUDE-REVIEW.md § Open points). A pair: the one merged section.
+  const openPoints = pairFirst != null ? mergeOpenPoints([pairFirst.openPoints, review.openPoints]) : (review.openPoints ?? null);
   const bodyOf = (reason: string | null): string => {
     const footer = pairFirst != null ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
+    return withOpenPointsBeforeFooter(bodyWithoutPoints(reason, footer), footer, openPoints);
+  };
+  const bodyWithoutPoints = (reason: string | null, footer: string): string => {
     if (reasonOnly && reason != null) return withReasonLine(reason, footer);
     if (pairFirst == null) return autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review), reason);
     return consolidation?.how === 'pass'

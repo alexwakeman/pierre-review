@@ -379,6 +379,8 @@ export function OpenPrsCards({
   story,
   windowScope,
   layout = 'cards',
+  writableRepoIds,
+  queuedPrIds,
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -412,6 +414,10 @@ export function OpenPrsCards({
   /** 'rows' = the redesign's one-line rows + side panel (OpenPrsRows.tsx) — Activity → Open PRs.
    *  The story view and "Merged so far" keep the cards. Every read above is the same either way. */
   layout?: 'cards' | 'rows';
+  /** `OpenPrsResponse.writableRepoIds` — the rows' menu offers Merge only in these repos. */
+  writableRepoIds?: readonly number[];
+  /** `OpenPrsResponse.queuedPrIds` — a queued PR's row menu never offers Merge. */
+  queuedPrIds?: readonly number[];
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -468,6 +474,9 @@ export function OpenPrsCards({
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const openPrThreadsView = useFilters((s) => s.openPrThreadsView);
   const openAiFix = useFilters((s) => s.openAiFix);
+  const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
+  const writableSet = useMemo(() => (writableRepoIds != null ? new Set(writableRepoIds) : null), [writableRepoIds]);
+  const queuedSet = useMemo(() => (queuedPrIds != null ? new Set(queuedPrIds) : null), [queuedPrIds]);
   const metaOf = (pr: TimelinePr): TabMeta => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
     return {
@@ -662,6 +671,12 @@ export function OpenPrsCards({
         onOpenReview={(pr) => openClaudeReview(metaOf(pr), { fromActivity: true })}
         onOpenFix={(pr) => openAiFix(metaOf(pr))}
         onOpenThreads={(pr) => openPrThreadsView(metaOf(pr))}
+        onOpenTab={(pr, prTab) => {
+          openPrDetailTab(metaOf(pr), { fromActivity: true });
+          setPrDetailTab(pr.id, prTab);
+        }}
+        writableRepoIds={writableSet}
+        queuedPrIds={queuedSet}
         windowKey={fullKey}
         offer={offer}
       />

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
+  placePushSummaries,
   hasAutoPostFooter,
   hasLimnReviewMarker,
   parseLimnReviewMarker,
@@ -23,6 +24,8 @@ import { PrCommentComposer } from '../PrCommentComposer.js';
 import { isNewComment, NewTag } from '../ThreadView/index.js';
 import { cx, FOCUS_RING } from '../ui/index.js';
 import { ResolvedThreadCard } from './ResolvedThreadCard.js';
+import { PushSummary } from '../PushSummary.js';
+import { usePushSummaries } from '../../hooks/usePushSummaries.js';
 import {
   CheckCircleIcon,
   ChevronIcon,
@@ -339,6 +342,17 @@ export function PrActivityTab({
   onShowInThreads?: (threadId: number) => void;
 }): JSX.Element {
   const all = useMemo(() => buildPrActivity(pr), [pr]);
+  // THE PUSH SUMMARIES (docs/FRONTEND.md § Push summaries): each sits on the commit its review ran
+  // at, covering every push since the review before. Empty when AI is off (the hook's gate).
+  const pushSummaries = usePushSummaries(pr.id);
+  const placedSummaries = useMemo(
+    () =>
+      placePushSummaries(
+        pr.commits.map((c) => ({ sha: c.sha, at: c.committedAt })),
+        pushSummaries,
+      ),
+    [pr.commits, pushSummaries],
+  );
   const threadsById = useMemo(() => new Map(pr.threads.map((t) => [t.id, t])), [pr.threads]);
   const usersByLogin = useMemo(() => {
     const m = new Map<string, User>();
@@ -475,7 +489,15 @@ export function PrActivityTab({
                     )}
                   />
                 ) : (
-                  <EntryLine pr={pr} entry={e} user={user} flashing={e.key === flashKey} />
+                  <>
+                    <EntryLine pr={pr} entry={e} user={user} flashing={e.key === flashKey} />
+                    {e.kind === 'commit' && e.sha != null && placedSummaries.has(e.sha) && (
+                      <PushSummary
+                        summary={placedSummaries.get(e.sha)!.summary}
+                        commitCount={placedSummaries.get(e.sha)!.commitCount}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             </li>

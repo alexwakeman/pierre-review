@@ -186,9 +186,10 @@ export const PR_VIEW = {
   tabs: [
     { id: 'overview', label: 'Overview' },
     { id: 'changes', label: 'Changes' },
-    { id: 'claude_review', label: 'AI Review' },
+    // The count is every finding open now (PrDetail `useOpenAiReviewCount`): the major, minor and nit.
+    { id: 'claude_review', label: 'AI Review', count: 3 },
     { id: 'ai_fix', label: 'AI Fix' },
-  ] as { id: PrTabId; label: string }[],
+  ] as { id: PrTabId; label: string; count?: number }[],
   /** The Overview in the app's order (ChecksTab.tsx): the AI review card, Checks, People
    *  (GitHub's review decision words, as the header's review pill says them), About. */
   overview: [

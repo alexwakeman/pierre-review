@@ -316,6 +316,10 @@ describe('tierFor — the issue tracker', () => {
     expect(tiers('GET', '/api/workspaces/3/tracker/notion-schema')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/workspaces/3/tracker/notion-schemas')).toEqual(['read']);
     expect(tiers('GET', '/api/workspaces/3/tracker')).toEqual(['read']);
+    // The copy kicks the worker with the copied token; the source list is a DB read.
+    expect(tiers('POST', '/api/workspaces/3/tracker/copy')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/tracker/copy-sources')).toEqual(['read']);
+    expect(tiers('POST', '/api/workspaces/3/tracker/copys')).toEqual(['read']);
     // The rest of the workspace family is untouched.
     expect(tiers('PUT', '/api/workspaces/3/pending-mute')).toEqual(['read']);
     expect(tiers('PUT', '/api/workspaces/3/trackers')).toEqual(['read']);
@@ -504,6 +508,11 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/prs/42/ml-labels')).toEqual(['read']);
     // ...and the label index must NOT be swept into the GitHub-hydrating PR-detail bucket.
     expect(tiers('GET', '/api/prs/42/ml-labels')).not.toContain('pr_detail');
+  });
+
+  // The push summaries are stored text (docs/CLAUDE-REVIEW.md § Push summaries): one DB read.
+  it('keeps the per-PR push summaries on read', () => {
+    expect(tiers('GET', '/api/prs/42/push-summaries')).toEqual(['read']);
   });
 
   // GET /api/pro/bot-behaviour — the workspace behaviour rollup, MOVED from core's
