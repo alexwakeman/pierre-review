@@ -384,70 +384,45 @@ export const FLOW = {
 export type PeriodGrain = 'sprint' | 'month';
 
 type Period = {
+  /** The bands, oldest first, and the period being projected (null at month grain). */
+  bands: string[];
+  next: string | null;
+  /** The selected (newest) period, for Effort vs automation. */
   name: string;
-  grain: string;
-  before: string;
   effort: { k: string; total: string; parts: number[] }[];
-  movers: { k: string; d: string; tone: Tone }[];
-  rows: { k: string; now: string; prior: string; change: string; next: string | null }[];
+  series: { k: string; color: string; values: number[]; projection: number | null }[];
 };
 
-/** Period reports, at both grains (the app's "Grain: Sprint · Month" buttons). */
+/** Period reports, at both grains: every period of the last 12 weeks / 6 months on one chart. */
 export const PERIODS: Record<PeriodGrain, Period> = {
   sprint: {
-    name: 'Oct 1 – Oct 15',
-    grain: 'sprint · 14 days',
-    before: 'Against the sprint before',
+    bands: ['Aug 6', 'Aug 20', 'Sep 3', 'Sep 17', 'Oct 1', 'Oct 15'],
+    next: 'Oct 29',
+    name: 'Oct 15 – Oct 29',
     effort: [
       { k: 'PRs merged', total: '53', parts: [57, 43] },
       { k: 'Review comments', total: '635', parts: [26, 74] },
       { k: 'Approvals', total: '34', parts: [100, 0] },
     ],
-    movers: [
-      { k: 'Time to first review by a person', d: '+4.5h (+20%)', tone: 'red' },
-      { k: 'Human review comments', d: '+24 (+18%)', tone: 'green' },
-      { k: 'Merged PRs by people', d: '+4 (+15%)', tone: 'green' },
-    ],
-    rows: [
-      { k: 'Merged PRs', now: '53', prior: '48', change: '+5 (+10%)', next: '≈ 53 (44–63)' },
-      { k: '…by people', now: '30', prior: '26', change: '+4 (+15%)', next: '≈ 30 (25–35)' },
-      { k: 'Opened PRs', now: '57', prior: '60', change: '−3 (−5%)', next: '≈ 57 (47–67)' },
-      { k: 'Automation share of merges', now: '43%', prior: '46%', change: '−2 pts', next: '≈ 43%' },
+    series: [
+      { k: 'Merged PRs', color: '#4fae95', values: [41, 44, 43, 47, 48, 53], projection: 55 },
+      { k: 'Bot review comments', color: '#d98a4e', values: [380, 410, 470, 455, 520, 470], projection: 515 },
     ],
   },
   month: {
+    bands: ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+    next: null,
     name: 'September 2026',
-    grain: 'calendar month · 30 days',
-    before: 'Against the month before',
     effort: [
       { k: 'PRs merged', total: '96', parts: [57, 43] },
       { k: 'Review comments', total: '1,140', parts: [27, 73] },
       { k: 'Approvals', total: '63', parts: [100, 0] },
     ],
-    movers: [
-      { k: 'Merged PRs by people', d: '+6 (+12%)', tone: 'green' },
-      { k: 'Time to first review by a person', d: '−1.2h (−6%)', tone: 'green' },
-      { k: 'Opened PRs', d: '−6 (−5%)', tone: 'grey' },
-    ],
-    rows: [
-      { k: 'Merged PRs', now: '96', prior: '88', change: '+8 (+9%)', next: null },
-      { k: '…by people', now: '55', prior: '49', change: '+6 (+12%)', next: null },
-      { k: 'Opened PRs', now: '104', prior: '110', change: '−6 (−5%)', next: null },
-      { k: 'Automation share of merges', now: '43%', prior: '44%', change: '−1 pt', next: null },
+    series: [
+      { k: 'Merged PRs', color: '#4fae95', values: [78, 84, 80, 91, 88, 96], projection: null },
+      { k: 'Bot review comments', color: '#d98a4e', values: [820, 900, 980, 1010, 1060, 1140], projection: null },
     ],
   },
-};
-
-export const PERIOD_SUMMARY = {
-  name: PERIODS.sprint.name,
-  happened: [
-    'The team merged 53 pull requests. Half cleared in 77 working hours from opening to merge.',
-    'The biggest move was time to first review by a person, up 20% on the previous sprint.',
-  ],
-  watch: [
-    'Time to first review by a person is the number to hold. It is the part of the wait the team controls.',
-    'Bot comments rise with pull-request volume. What matters is how many were acted on.',
-  ],
 };
 
 /** Where the work is happening: opened by people / automation, lines changed, reach. */

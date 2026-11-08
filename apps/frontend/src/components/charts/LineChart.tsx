@@ -7,6 +7,8 @@ import {
   Legend,
   FloatingTip,
   ANOMALY_RING,
+  splinePath,
+  splineSegments,
   type Series,
 } from './common.js';
 import { RingIcon } from '../Icons.js';
@@ -131,24 +133,8 @@ export function LineChart({
     );
   };
 
-  // --- Smooth (Catmull-Rom → cubic-bezier, tension 1/6) variants, used only
-  // when `curved`. bezierSegments emits the `C …` commands for a contiguous
-  // point run (no leading `M`); endpoints are clamped (P−1=P0, Pn+1=Pn).
-  const bezierSegments = (pts: readonly (readonly [number, number])[]): string => {
-    let d = '';
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i - 1] ?? pts[i]!;
-      const p1 = pts[i]!;
-      const p2 = pts[i + 1]!;
-      const p3 = pts[i + 2] ?? p2;
-      const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
-      const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
-      const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
-      const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
-      d += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${p2[0]} ${p2[1]}`;
-    }
-    return d;
-  };
+  // --- Smooth variants, used only when `curved`. The spline itself is `splinePath` /
+  // `splineSegments` in ./common.js — one implementation for every line chart.
 
   // Each contiguous run of non-null points is its own smooth sub-path (breaks
   // on gaps, mirroring linePath); a run of length 1 is just `M x y`.
@@ -164,12 +150,7 @@ export function LineChart({
       }
     });
     if (cur.length) runs.push(cur);
-    return runs
-      .map((r) => {
-        const head = `M ${r[0]![0]} ${r[0]![1]}`;
-        return r.length < 2 ? head : head + bezierSegments(r);
-      })
-      .join(' ');
+    return runs.map(splinePath).join(' ');
   };
 
   // Smooth top edge (across-gap contiguous, mirroring areaPath) closed to baseY.
@@ -182,7 +163,7 @@ export function LineChart({
     const last = pts[pts.length - 1]!;
     return (
       `M ${first[0]} ${baseY} L ${first[0]} ${first[1]}` +
-      bezierSegments(pts) +
+      splineSegments(pts) +
       ` L ${last[0]} ${baseY} Z`
     );
   };

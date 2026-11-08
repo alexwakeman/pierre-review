@@ -38,7 +38,6 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import {
   readProSettings,
   readSettingsRow,
-  reportModelOf,
   toPublicSettings,
   writeProSettings,
 } from '../settings/store.js';
@@ -212,24 +211,14 @@ describe('writeProSettings — bots round-trip', () => {
   });
 
   it('a partial bots patch preserves prior bot values and leaves other sections intact', async () => {
-    await writeProSettings(ctx, ACCOUNT, {
-      reportModel: 'claude-haiku-5-5',
-      bots: { autoResolveDays: 14 },
-    });
+    await writeProSettings(ctx, ACCOUNT, { bots: { autoResolveDays: 14 } });
     // A second patch touching only autoResolve must not reset autoResolveDays.
     await writeProSettings(ctx, ACCOUNT, { bots: { autoResolve: true } });
 
     const settings = await readProSettings(ctx, ACCOUNT);
     expect(settings.bots.autoResolveDays).toBe(14);
     expect(settings.bots.autoResolve).toBe(true);
-    // ⚠ THE NEIGHBOUR THIS ASSERTS AGAINST HAS MOVED FOUR TIMES, and every move narrowed what
-    // `pro_settings` holds. It was `slack.cadence` until plugin 0030 (the digest went
-    // per-workspace); `issue.provider` until 0031 (the tracker and the sprint cadence went too);
-    // `sprint.comparisonMode` until 0032 (the comparison MODE went — it COMPOSES with the cadence,
-    // so one account setting was producing two window shapes). What is genuinely left at the
-    // ACCOUNT grain is the narration MODEL, so that is the neighbour now. If a future change
-    // leaves nothing beside `bots`, delete this assertion rather than inventing one.
-    expect(reportModelOf(await readSettingsRow(ctx, ACCOUNT))).toBe('claude-haiku-5-5');
+    // (Nothing account-grain is left beside `bots` since the report model went, 2026-11-08.)
   });
 
   it('the retired account-grain sections read EMPTY rather than stale', async () => {

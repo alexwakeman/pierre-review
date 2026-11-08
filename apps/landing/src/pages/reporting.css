@@ -8,7 +8,7 @@
                 · .r-chap (h2 + p over a section) · .r-txt (heading + copy tile)
      header     .r-head > .r-name (h1, .r-lead) · .ph.r-pic · .r-say · .r-say2
      split      .r-split > .r-txt + .shot.r-wide  (.r-flip puts the shot first)
-     period     .r-period > .r-chap + .board > .r-full · .r-fact×3 · .r-sumtxt · .r-sum
+     period     .r-period > .r-chap + .board > .r-full · .r-fact×3
      chronology .r-chron > .r-txt · .r-wide · .r-big (.r-fig > span) · .r-proof
                 · .r-usd (h3 + p)
      bots       .r-bots > .r-bclaim · .r-bshot · .r-btxt · .r-bshot2
@@ -141,16 +141,6 @@
 .lb.rep .r-fact p {
   font-size: 17px;
   line-height: 1.45;
-}
-.lb.rep .r-sumtxt {
-  grid-column: 1 / 5;
-  display: flex;
-  align-items: flex-end;
-  font-size: var(--step-lead);
-  line-height: 1.3;
-}
-.lb.rep .r-sum {
-  grid-column: 5 / 13;
 }
 
 /* ---- chronology ------------------------------------------------------- */
@@ -296,11 +286,6 @@
   .lb.rep .r-bshot,
   .lb.rep .r-bshot2,
   .lb.rep .r-btxt,
-  .lb.rep .r-sumtxt,
-  .lb.rep .r-sum {
-    grid-column: 1 / -1;
-    grid-row: auto;
-  }
   .lb.rep .r-chap h2,
   .lb.rep .r-chap p {
     grid-column: 1 / -1;

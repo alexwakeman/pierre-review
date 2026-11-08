@@ -54,17 +54,8 @@ export const proSettings = sqliteTable(
     // The column still exists and is deliberately NOT declared here, which is what makes it
     // dormant: never selected, never written, `merge()` no longer carries it. ⚠ ONE LIVE
     // SPELLING — do not re-declare it "to show what the account used to have".
-    // Which model NARRATES the period-over-period report. null → the PRO_REPORT_MODEL config
-    // default; a generate call may still override it per run. Only 'claude-haiku-5-5' is
-    // SELECTABLE now (REPORT_MODELS in llm/seam.ts); rows still holding the retired
-    // 'claude-sonnet-5' are read through `resolveReportModel` and degrade to the default —
-    // deliberately NOT migrated, because the column is a preference, not a fact about history.
-    // Plain `text`, not a `$type` union, because the value is a model id the config supplies and
-    // pinning a literal here would make a model rename a compile error in the schema rather than
-    // in the one place that maps ids to pricing.
-    // ⚠ Declaring the column is only step 1 of settings/store.ts's 8-step checklist — miss any of
-    // the rest and the field is silently dropped. Note too that settings/routes.ts's `updateSchema`
-    // is `additionalProperties: false`, which STRIPS an unlisted property and still answers 200.
+    // DORMANT since 2026-11-08: the period report's narrating model, removed with the AI
+    // write-up. Never read or written; declared only because the column exists.
     reportModel: text('report_model'),
     // ── THE SEVEN `slack_*` COLUMNS ARE DORMANT AS OF PLUGIN MIGRATION 0030 ──────────────────
     // `slack_webhook_url` / `slack_cadence` / `slack_hour1` / `slack_hour2` / `slack_timezone` /

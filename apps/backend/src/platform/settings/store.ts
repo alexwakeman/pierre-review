@@ -11,7 +11,6 @@ import type {
 import { HOURLY_COST_MAX_USD } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import { proSchemaFor } from '../db.js';
-import { DEFAULT_REPORT_MODEL, resolveReportModel, type ReportModel } from '../llm/seam.js';
 
 // The raw pro_settings row (sqlite returns Date for timestamp columns; the number branch is a
 // defensive fallback). Exposed to the feature modules (sprint window, Slack cron, ticket
@@ -34,8 +33,8 @@ export interface SettingsRow {
   // comparison-window mode is a per-WORKSPACE fact — it COMPOSES with the cadence, so reading the
   // two off different grains made one account setting produce two different window SHAPES — and it
   // lives on `pro_workspace_settings` beside the cadence, read through `resolveComparisonMode`.
-  // Which model narrates the period-over-period report. null = the PRO_REPORT_MODEL config
-  // default (`DEFAULT_REPORT_MODEL`); a per-run override on the generate body beats both.
+  // DORMANT since 2026-11-08 (the period report's narrating model; the AI write-up was removed).
+  // Read nowhere, written nowhere; kept because the column is.
   reportModel: string | null;
   // ⚠ NO `slack*` FIELDS. Those seven columns went DORMANT with plugin migration 0030 — the
   // digest is a PER-WORKSPACE delivery now, one row per (account, workspace) in
@@ -246,39 +245,13 @@ export async function readProSettings(
   return toPublicSettings(await readSettingsRow(ctx, accountId));
 }
 
-// The account's effective report model: the stored setting when it is still a SELECTABLE id,
-// otherwise the config default. A stored value that has since left `REPORT_MODELS` degrades to the
-// default rather than throwing — this is read on a free GET, and it is no longer hypothetical:
-// Sonnet was retired as a choice, so every account that had pinned it lands here and quietly gets
-// Haiku. (It is still PRICEABLE — its stored reports keep rendering their model and their spend;
-// selection and pricing are two different tables, see llm/seam.ts.)
-//
-// ⚠ IT IS NOT ON `ProSettings`. The public settings shape is a settled wire type owned by
-// `@pierre-review/shared`, which this slice does not own; the Reports surface reads the effective
-// model off its OWN list response instead (see insights/period-routes.ts). Adding
-// `ProSettings.reportModel` later is a two-line change — one field in shared, one line in
-// `toPublicSettings` — if the settings modal ever wants to show the selector too.
-export function reportModelOf(row: SettingsRow | null): ReportModel {
-  return resolveReportModel(row?.reportModel ?? null) ?? DEFAULT_REPORT_MODEL;
-}
-
-export async function readReportModel(
-  ctx: ProContext,
-  accountId: number,
-): Promise<ReportModel> {
-  return reportModelOf(await readSettingsRow(ctx, accountId));
-}
-
-// The patch shape the PUT accepts. `ProSettingsUpdate` is the settled wire type and carries no
-// `reportModel`; this INTERSECTION adds it without editing the shared package (which this slice
-// does not own). Every existing caller still type-checks — the field is optional — and the
-// property is listed in `updateSchema` in routes.ts, WITHOUT which ajv's
-// `additionalProperties: false` would strip it silently and still answer 200.
-export type ProSettingsPatch = ProSettingsUpdate & { reportModel?: string | null };
+// The patch shape the PUT accepts. (`reportModel`, the period report's narrating model, was
+// REMOVED 2026-11-08 with the AI write-up; its column is dormant and a stale client sending it is
+// stripped by `additionalProperties: false` and still answers 200.)
+export type ProSettingsPatch = ProSettingsUpdate;
 
 // The mutable columns (everything except id/accountId/createdAt and the cron-managed lastSent*).
 interface MutableCols {
-  reportModel: string | null;
   // (No `slack*` columns — dormant since plugin 0030. No `sprint*` or `issue*` columns — dormant
   // since plugin 0031, both facts per-WORKSPACE now. No `comparison_mode` — dormant since plugin
   // 0032, also per-WORKSPACE. No `bot_slack_digest` — dormant since plugin 0033, a per-DELIVERY
@@ -295,7 +268,6 @@ function merge(existing: SettingsRow | null, patch: ProSettingsPatch): MutableCo
     // ⚠ SEEDED FROM `existing`, like every other column here. A field that is declared in
     // MutableCols but not seeded is NULLED by the upsert on any unrelated patch — the specific
     // way this 8-step checklist silently loses a setting.
-    reportModel: existing?.reportModel ?? null,
     botAutoResolve: existing?.botAutoResolve ?? null,
     botAutoResolveDays: existing?.botAutoResolveDays ?? null,
     botCostJson: existing?.botCostJson ?? null,
@@ -306,12 +278,6 @@ function merge(existing: SettingsRow | null, patch: ProSettingsPatch): MutableCo
   // schema no longer lists any of them, so a stale client sending one is SILENTLY STRIPPED and
   // still gets a 200 (the documented failure mode for every field retired from this patch). Their
   // replacement is `PUT /api/pro/settings/workspace` → `writeWorkspaceSettings`.
-  if (patch.reportModel !== undefined) {
-    // An unselectable id CLEARS the setting rather than storing it (the `normalizeBaseUrl` /
-    // `normalizeSlackWebhookUrl` convention in this builder): the account falls back to the
-    // config default, and nothing outside REPORT_MODELS can reach the metered path from storage.
-    out.reportModel = resolveReportModel(patch.reportModel);
-  }
   // NO `patch.slack` BRANCH — `ProSettingsUpdate.slack` was removed from the wire with plugin
   // migration 0030 and the columns are dormant. A stale client still sending one is SILENTLY
   // STRIPPED by routes.ts's `additionalProperties: false` body schema and the PUT still 200s

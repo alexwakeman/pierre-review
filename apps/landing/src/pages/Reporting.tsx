@@ -12,7 +12,6 @@ import {
   FlowMetricsMock,
   OverTimeMock,
   PeriodReportMock,
-  PeriodSummaryMock,
   SprintLanesMock,
   WhereWorkMock,
 } from '../components/mock/reports';
@@ -100,10 +99,10 @@ export default function Reporting(): JSX.Element {
       {/* ---- 2. period reports: full-width mock + a row of three -------- */}
       <section className="section r-period" aria-labelledby="r-per-h">
         <div className="r-chap">
-          <h2 id="r-per-h">A report per sprint or month</h2>
+          <h2 id="r-per-h">Every sprint or month on one chart</h2>
           <p>
-            Fifteen measures for each completed sprint or calendar month, against the period before. Month to date is
-            live and costs nothing.
+            Fifteen measures for each sprint of the last 12 weeks, or each month of the last 6. Compare any of them on one
+            chart, as the change from their first period.
           </p>
         </div>
         <div className="board">
@@ -112,22 +111,16 @@ export default function Reporting(): JSX.Element {
           </Shot>
           <div className="tile r-fact rise">
             <b>Stays the same</b>
-            <p>Every figure counts only what happened inside its window, so a report reads the same after you send it.</p>
+            <p>Every figure counts only what happened inside its window, so a period reads the same next month.</p>
           </div>
           <div className="tile r-fact rise">
             <b>Same repositories</b>
-            <p>Changes are compared over the repositories you tracked in both periods, so adding a repo isn't growth.</p>
+            <p>Every period is measured over the repositories tracked since the first one shown, so adding a repo isn't growth.</p>
           </div>
           <div className="tile r-fact rise">
             <b>No guessing</b>
-            <p>No forecast for calendar months: they aren't the same length. Where the data can't support a number, it says so.</p>
+            <p>No projection for calendar months: they aren't the same length. Where the data can't support a number, it says so.</p>
           </div>
-          <div className="tile r-sumtxt rise">
-            <p>A short written summary, by your own AI agent.</p>
-          </div>
-          <Shot className="r-sum">
-            <PeriodSummaryMock />
-          </Shot>
         </div>
       </section>
 

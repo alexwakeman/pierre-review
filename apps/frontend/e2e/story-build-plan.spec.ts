@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fixtures, installMockApi, STORY_SESSION_PLAN_READY, STORY_SESSION_STACK_BUILT } from './mock-api.js';
-import type { BuildPlanDecisionBody, BuildPlanReplyBody, StoryBuild, StoryDocsAlignmentResponse, TicketPrsResponse } from '@pierre-review/shared';
+import type { BuildPlanDecisionBody, BuildPlanReplyBody, StoryBuild, StoryDocsAlignmentResponse, TicketPrsResponse, TicketUpdateBody, TicketUpdateResponse } from '@pierre-review/shared';
 
 // "IMPLEMENT, PLAN FIRST" against the mocked API (docs/STORY-BUILD.md § Plan first; mock-api.ts keeps
 // ACME-1's session per page). The story view's Implement is a split button whose menu adds "Implement with
@@ -179,5 +179,46 @@ test.describe('Implement, plan first', () => {
     await expect(p1.getByTestId('story-build-pushed-pr')).toContainText('#81');
     await expect(p2.getByRole('button', { name: 'Push as draft' })).toBeVisible();
     await expect(p2).toContainText('Builds on #81 (P1)');
+  });
+  test('the ticket draft is editable, and Update ticket writes it to Jira once asked', async ({ page }) => {
+    await withAi(page, { storyBuild: STORY_SESSION_PLAN_READY });
+    const sent: TicketUpdateBody[] = [];
+    await page.route(
+      (u) => u.pathname.endsWith('/api/ticket-update'),
+      (r) => {
+        sent.push(r.request().postDataJSON() as TicketUpdateBody);
+        const res: TicketUpdateResponse = { workspaceId: fixtures.WORKSPACE.id, ident: ACME_1, updated: { description: false, acceptanceCriteria: true }, criteriaField: 'Acceptance Criteria' };
+        return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(res) });
+      },
+    );
+    await page.goto(tabUrl);
+    const draft = page.getByTestId('story-plan-ticket-update');
+    const box = draft.getByTestId('story-plan-ticket-criteria').getByRole('textbox', { name: 'Acceptance criteria' });
+    await expect(box).toHaveValue(/GIVEN a report with more than 500 rows/);
+    await box.fill('AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row');
+    await expect(draft).toContainText('Ticket update (edited)');
+    // Copy takes the edited text.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await draft.getByRole('button', { name: 'Copy acceptance criteria' }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row');
+    // Update asks once, then writes only the field the draft has.
+    await draft.getByTestId('story-plan-ticket-update-button').click();
+    await expect(draft).toContainText('Replace the ticket\'s acceptance criteria in Jira?');
+    await draft.getByTestId('story-plan-ticket-update-confirm').click();
+    await expect(draft.getByTestId('story-plan-ticket-updated')).toHaveText('Updated in Jira. Approve and start reads the ticket again.');
+    expect(sent).toEqual([{ ident: ACME_1, description: null, acceptanceCriteria: 'AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row' }]);
+    await expect(draft.getByTestId('story-plan-ticket-update-button')).toBeDisabled();
+    // Back to the draft restores the agent's text.
+    await draft.getByTestId('story-plan-ticket-reset').click();
+    await expect(box).toHaveValue(/GIVEN a report with more than 500 rows/);
+  });
+
+  test('the build header links to the ticket tab and to the tracker, with no sprint read in memory', async ({ page }) => {
+    await withAi(page, { storyBuild: STORY_SESSION_PLAN_READY });
+    await page.goto(tabUrl);
+    const header = page.getByTestId('story-build-header');
+    await expect(header.getByTestId('tracker-link-out')).toHaveAttribute('href', 'https://acme.atlassian.net/browse/ACME-1');
+    await header.getByTestId('story-build-open-story').click();
+    await expect(page.getByTestId('ticket-tab-view')).toBeVisible();
   });
 });

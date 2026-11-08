@@ -237,47 +237,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path.startsWith('/api/my-turn/dismissals/')) return [TIERS.read];
 
   // ---- Period reports (must sit ABOVE the /api/pro/ AI-tier catch-all) ----
-  // The Insights → Reports family is two free GETs and one spending POST under ONE path prefix,
-  // which is exactly the shape the catch-all below gets wrong in both directions: it tiers on the
-  // VERB, so `GET …/reports` (a list of stored rows — no model call, no GitHub) would inherit the
-  // 600/min blanket read bucket by accident rather than by decision, while a future GET that
-  // happened to be a POST would land on `ai` for free. Spelling the family out here also means
-  // the next reader sees the three routes and their costs together:
-  //   POST …/:periodKey/generate  an Anthropic completion (Haiku OR Sonnet — the one route in the
-  //                               app whose per-call price the USER picks) plus, on a first run,
-  //                               a bounded 8-period metrics backfill: ~20 indexed scans.
-  //   GET  …/reports              stored rows + a bounded per-period coverage read. DB only.
-  //   GET  …/reports/:periodKey   one stored row + ONE metric-vector recompute for the staleness
-  //                               flag, OR — for the open month — the whole month-to-date read
-  //                               live (six indexed scans, the month-to-date route's cost). That
-  //                               keeps it on the 60/min `search` bucket, never the 600/min
-  //                               blanket. (The "By workspace" axis that once rode it, 2 windows ×
-  //                               N workspaces, was removed 2026-10-26.) Still DB only — it must
-  //                               NEVER grow a generation leg.
-  // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
-  if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
-    // (`POST …/:periodKey/chat` was REMOVED 2026-10-22; a POST to that path now lands on `read`
-    // and 404s.)
-    if (mutating && path.endsWith('/generate')) {
-      return [TIERS.ai, TIERS.aiHourly];
-    }
-    // The one-report GET can recompute a whole open month live — `search`, not the 600/min
-    // blanket. Anchored at both ends so ONLY `…/reports/:periodKey`
-    // matches: the list root and a GET spelling of `…/generate` stay on the plain read bucket.
-    if (/^\/api\/pro\/insights\/reports\/[^/]+$/.test(path)) return [TIERS.search, TIERS.read];
-    return [TIERS.read];
-  }
-
-  // GET /api/pro/insights/month-to-date — the OPEN calendar month, computed live on every read
-  // (Reports → Month grain). DECIDED, not inherited: it does NOT match the `…/insights/reports`
-  // family block above, so without this line it would fall through to the `/api/pro/` catch-all's
-  // GET→`read` branch and sit on the 600/min blanket bucket. It costs SIX indexed scans per call
-  // — the headline metric vector, two `repos.createdAt` coverage reads, the lane breakdown, and
-  // both sides of the elapsed-slice comparison — which is the one-report GET's shape of cost, on a
-  // surface the SPA re-reads whenever the pane regains focus (an open period's figures move, so
-  // there is nothing to cache for long). Same 60/min `search` bucket, same argument. It NEVER
-  // generates and NEVER writes a row, so it must never move to the AI tier either.
-  if (!mutating && path === '/api/pro/insights/month-to-date') {
+  // (The stored period-report family — `…/insights/reports`, `…/reports/:periodKey`,
+  // `…/reports/:periodKey/generate` — and `…/insights/month-to-date` were REMOVED 2026-11-08 with
+  // the AI write-up. Their paths now 404 wherever the catch-all below tiers them.)
+  // GET /api/pro/insights/period-series — THE Reports chart: one metric scan and one lane scan per
+  // period (≤ 12 each), live on every read, DB only. DECIDED, not inherited: the `/api/pro/`
+  // catch-all's GET→`read` branch would park it on the 600/min blanket bucket.
+  if (!mutating && path === '/api/pro/insights/period-series') {
     return [TIERS.search, TIERS.read];
   }
 
@@ -508,12 +474,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/ticket-merged-prs') return [TIERS.read];
   // GET /api/ticket-prs — the ticket tab: stored ticket rows joined to PRs, DB-only.
   if (!mutating && path === '/api/ticket-prs') return [TIERS.read];
-  // THE ONE TRACKER WRITE (tracker/status-change.ts): GET /api/ticket-status/transitions (one or two
+  // A TRACKER WRITE (tracker/status-change.ts): GET /api/ticket-status/transitions (one or two
   // Jira calls, on the picker's open) and POST /api/ticket-status (the transition + its re-read) both
   // spend the customer's Jira quota with the saved token → `search`, as every other tracker call.
   // EXACT `===`, method-checked.
   if (!mutating && path === '/api/ticket-status/transitions') return [TIERS.search, TIERS.read];
   if (method === 'POST' && path === '/api/ticket-status') return [TIERS.search, TIERS.read];
+  // The other tracker write (tracker/ticket-update.ts): the plan's ticket update — one Jira PUT, the
+  // same spend as a transition.
+  if (method === 'POST' && path === '/api/ticket-update') return [TIERS.search, TIERS.read];
 
   // ---- AI generation ----
   // (The annotations routes — the blast-radius impact note — are REMOVED, 2026-10-30.)

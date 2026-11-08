@@ -13,8 +13,9 @@ import { BlockList, isIP } from 'node:net';
 //
 // What it enforces, in BOTH modes:
 //   • GET, with two exceptions through the same transport and guard: the Linear GraphQL POST to its
-//     FIXED host (linear/client.ts, a read), and THE ONE TRACKER WRITE — the Jira status transition
-//     the reader picks (`jiraPostJson`, ../status-change.ts). Nothing else writes to a tracker;
+//     FIXED host (linear/client.ts, a read), and the TWO TRACKER WRITES — the Jira status transition
+//     the reader picks (`jiraPostJson`, ../status-change.ts) and the ticket update the reader presses
+//     (`jiraPutJson`, ../ticket-update.ts). Nothing else writes to a tracker;
 //   • a hard TIMEOUT (10s for the whole exchange) and a RESPONSE SIZE CAP;
 //   • NO REDIRECTS. Node's http client never follows one, and any 3xx is an error — following it
 //     would forward the Authorization header to a host nobody chose;
@@ -347,6 +348,31 @@ export async function jiraPostJson(
   policy: JiraFetchPolicy,
   transport: JiraTransport = nodeTransport,
 ): Promise<unknown> {
+  return jiraSendJson('POST', rawUrl, headers, body, policy, transport);
+}
+
+/**
+ * PUT JSON to a Jira URL — used ONLY by the ticket update the reader presses (../ticket-update.ts:
+ * `PUT …/issue/<key>` answers 204). The same rules as `jiraPostJson`.
+ */
+export async function jiraPutJson(
+  rawUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  policy: JiraFetchPolicy,
+  transport: JiraTransport = nodeTransport,
+): Promise<unknown> {
+  return jiraSendJson('PUT', rawUrl, headers, body, policy, transport);
+}
+
+async function jiraSendJson(
+  method: TransportInit['method'],
+  rawUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  policy: JiraFetchPolicy,
+  transport: JiraTransport,
+): Promise<unknown> {
   const url = checkJiraUrl(rawUrl, policy);
   const res = await transport(
     url,
@@ -356,7 +382,7 @@ export async function jiraPostJson(
       timeoutMs: JIRA_TIMEOUT_MS,
       maxBytes: JIRA_MAX_BYTES,
     },
-    { method: 'POST', body: JSON.stringify(body) },
+    { method, body: JSON.stringify(body) },
   );
   if (res.status >= 300 && res.status < 400) throw new JiraFetchError('redirect', res.status);
   if (res.status === 401) throw new JiraFetchError('unauthorized', 401);

@@ -483,9 +483,11 @@ reader of `stage` works whatever the buckets are.
   would drag the split earlier). The boundary is found over the AUTOMATIC order
   (`db/sprint-status-layout.ts` `inferReviewFrom`, `loadSprintStatusEvidence`).
 
-## The status change — THE ONE TRACKER WRITE (`tracker/status-change.ts`)
+## The status change — A TRACKER WRITE (`tracker/status-change.ts`)
 
-Limn writes to a tracker in exactly one place: **the Jira status transition the reader picks** from
+Limn writes to a tracker in exactly TWO places, both Jira, both a reader's press: this one, and the
+build plan's ticket update (§ The ticket update), which passes THIS gate. The status change is
+**the Jira status transition the reader picks** from
 the story view's status chip (`components/Ticket/TicketStatusPicker.tsx`, mounted by the story view's
 one stack header — so the story TAB and This Sprint's story TRAY share it). Jira only; GitHub Issues,
 Linear and Notion show the status chip as before (⚠ Notion is READ-ONLY: nothing calls a Notion write). Nothing else writes — no worker, no automation, no retry,
@@ -525,6 +527,32 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
   pins the settle (a key both accounts hold moves only the caller's rows) and the gate (a ticket only
   the other account holds → 404).
 
+
+## The ticket update — THE OTHER TRACKER WRITE (`tracker/ticket-update.ts`)
+
+Owner decision 2026-11-08 (it replaces "Limn does NOT update the tracker" in STORY-BUILD.md § Plan
+first): the build plan's draft ticket update can be EDITED by the reader and written to the ticket with
+**Update ticket** (`StoryBuild/PlanPanel.tsx` `EditableTicketUpdate`, the latest revision before
+Approve only). Jira only; on GitHub Issues, Linear and Notion the draft stays editable and copyable.
+
+- `POST /api/ticket-update?workspace=` `{ident, description, acceptanceCriteria}` → `TicketUpdateResponse`.
+  Each field is the WHOLE new text or `null` (leave it); both null → `400 NothingToUpdate`. ⚠ The body
+  schema is a TYPE UNION (`['string','null']`), never `anyOf`: Fastify's coercion turns a null into `""`
+  under `anyOf`, which would blank the field.
+- **The gate is the status change's** (`statusGate`, its not-Jira sentence swapped): this workspace's
+  Jira site, a ticket Limn holds a row for in this account, a usable token — refused before Jira is called.
+- **The description** is markdown in Limn (`jiraWikiToMarkdown` on read), so it goes back as wiki markup
+  (`jira/text.ts markdownToJiraWiki`: headings, lists by indent, quotes, rules, fences, tables, inline
+  marks, links, images; the round trip is pinned by `jira/md-wiki.test.ts`).
+- **The criteria** are written VERBATIM into the custom field Limn read them from (`ac_field_id` on a
+  stored `tracker_tickets` row, else the workspace's `sprint_tickets` row; only `customfield_<n>`) —
+  Limn shows that field's own text, so nothing is converted. No such field (the criteria live in the
+  description) → `400 NoCriteriaField` (shared `TICKET_UPDATE_NO_CRITERIA_FIELD`), before Jira is called.
+- ONE `PUT /rest/api/2/issue/{key}` `{fields}` (`jiraPutJson`, the same guard as every Jira call), then
+  the PR rows are marked due (`next_check_at` = 0). The build's Approve and start reads the ticket live
+  (`readSessionTicket`), so the build gets the new text. Refusals are the status change's sentences
+  (403 → `TICKET_STATUS_NO_PERMISSION`, 400 → "Jira refused this change."). No worker, no automation,
+  no retry; the SPA asks once ("Replace the ticket's … in Jira?"). Rate tier `[search, read]`.
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 
 Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`
@@ -884,7 +912,8 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `POST /api/ticket-links` | the Open PRs ticket row, ONE request per board | `search` |
 | `GET /api/ticket-merged-prs?workspace=&keys=` | the stacks' "Merged (n)" panel, DB-only | `read` |
 | `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |
-| `POST /api/ticket-status?workspace=` | the ONE tracker write: make the picked Jira transition, then settle | `search` |
+| `POST /api/ticket-status?workspace=` | a tracker write: make the picked Jira transition, then settle | `search` |
+| `POST /api/ticket-update?workspace=` | the other tracker write: the build plan's edited ticket update (§ The ticket update) | `search` |
 
 ⚠ **NOT A TRACKER PROXY.** The ticket routes address a PULL REQUEST (ownership → 404), re-run
 detection on it and answer only for a key detection found. Every failure is a 502 carrying a

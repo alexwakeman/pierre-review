@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   SANDBOX_MESSAGE_MAX,
@@ -13,6 +13,7 @@ import {
 } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
+import { useFollowBottom } from '../../hooks/useFollowBottom.js';
 import {
   bootProgress,
   networkAllowRule,
@@ -29,7 +30,7 @@ import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { dateTime } from '../../lib/ui.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { AiRunGate } from '../AiSetup.js';
-import { CheckIcon, CloseIcon, WarningIcon, WrenchIcon } from '../Icons.js';
+import { CheckIcon, ChevronIcon, CloseIcon, WarningIcon, WrenchIcon } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { Button } from '../ui/Button.js';
 import { cx } from '../ui/cx.js';
@@ -232,29 +233,26 @@ const TOOL_PREVIEW_LINES = 3;
 const SPINNER_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
 
 function Conversation({ session, partials, c }: { session: StoryBuildSession; partials: ReadonlyMap<string, string>; c: Ctx }): JSX.Element {
-  const scroller = useRef<HTMLDivElement | null>(null);
-  const pinned = useRef(true);
+  // Follow the newest output while the reader is at the bottom — a new row, a tool's output landing
+  // in a row already drawn, words streaming in (hooks/useFollowBottom.ts watches the content, not a
+  // dependency list). Scrolled up, nothing moves; back at the bottom, it follows again.
+  const follow = useFollowBottom<HTMLDivElement>();
   const provider = session.provider ?? c.provider ?? null;
   const g = glyphsFor(provider);
   const live = [...partials.entries()].map(([id, t]) => [id, visiblePartialText(t)] as const).filter(([, t]) => t.trim() !== '');
   const running = sessionTurnRunning(session);
-  // Follow the newest row while the reader is at the bottom; leave them where they are once they scroll up.
-  const size = session.conversation.length + live.reduce((n, [, t]) => n + t.length, 0);
-  useEffect(() => {
-    const el = scroller.current;
-    if (el != null && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [size, running]);
   return (
-    <section aria-label="Conversation" className="rounded-ui bg-ui-surface font-mono text-body">
+    <section aria-label="Conversation" className="relative rounded-ui bg-ui-surface font-mono text-body">
+      {/* ⚠ `relative` IS LOAD-BEARING: the rows hold `sr-only` spans (position: absolute). In a scroll
+          box that is not positioned, they belong to the PAGE's scroll area instead, at their place
+          far down the conversation, and a long session made the whole build page scroll for
+          thousands of pixels of nothing. Positioned, the box contains and clips them. */}
       <div
-        ref={scroller}
+        ref={follow.ref}
         data-testid={`${c.testPrefix}-conversation`}
         data-terminal={provider === 'codex' ? 'codex' : 'claude'}
-        className="max-h-[60vh] min-h-[12rem] overflow-y-auto px-3 py-2.5"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
+        className="relative max-h-[60vh] min-h-[12rem] overflow-y-auto overscroll-contain px-3 py-2.5"
+        onScroll={follow.onScroll}
       >
         <TerminalHeader session={session} g={g} />
         {session.conversation.length === 0 && live.length === 0 && <p className="mt-3 text-ui-mute">{c.words.empty}</p>}
@@ -276,6 +274,17 @@ function Conversation({ session, partials, c }: { session: StoryBuildSession; pa
           </p>
         )}
       </div>
+      {follow.away && (
+        <button
+          type="button"
+          data-testid={`${c.testPrefix}-jump-latest`}
+          className="hit absolute bottom-2 right-4 inline-flex items-center gap-1 rounded-ui bg-ui-raise px-2 py-1 font-sans text-meta font-medium text-ui-ink shadow ring-1 ring-ui-line hover:bg-ui-hover"
+          onClick={follow.jump}
+        >
+          <ChevronIcon dir="down" size={11} />
+          Jump to latest
+        </button>
+      )}
     </section>
   );
 }

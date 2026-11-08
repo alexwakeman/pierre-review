@@ -94,7 +94,7 @@ export interface TicketStoryResponse {
   story: { description: string; acceptanceCriteria: string } | null;
 }
 
-// ── The story view's status picker — THE ONE TRACKER WRITE (Jira only) ───────────────────────────
+// ── The story view's status picker — A TRACKER WRITE (Jira only) ───────────────────────────
 //
 //   GET  /api/ticket-status/transitions?workspace=<id>&ident=…  →  TicketTransitionsResponse
 //   POST /api/ticket-status?workspace=<id>  { ident, transitionId }  →  TicketStatusChangeResponse
@@ -140,3 +140,38 @@ export interface TicketStatusChangeResponse {
 
 /** The one-line refusal when the saved token may not change an issue. */
 export const TICKET_STATUS_NO_PERMISSION = 'Your Jira token cannot change this issue.';
+
+// ── THE TICKET UPDATE (the reader's press in the build tab's plan panel) ─────────────────────────────
+//
+//   POST /api/ticket-update?workspace=<id>  { ident, description, acceptanceCriteria }  →  TicketUpdateResponse
+//
+// docs/TRACKERS.md § The ticket update. Jira only, like the status change, and behind the same
+// not-a-proxy gate. Writes the fields the reader sent (null = leave that field as it is): the
+// description as markdown, converted to Jira's wiki markup; the acceptance criteria verbatim, into
+// the custom field Limn read them from. A ticket whose criteria live in its description has no such
+// field: the request is refused (`NoCriteriaField`) before Jira is called. Nothing else writes the
+// ticket: no automation, no retry.
+
+/** The longest text one field may carry (the plan's own cap on a drafted field). */
+export const TICKET_UPDATE_FIELD_MAX = 12_000;
+
+export interface TicketUpdateBody {
+  ident: string;
+  /** The whole new description, in markdown; null leaves it. */
+  description: string | null;
+  /** The whole new acceptance criteria, in the field's own text; null leaves it. */
+  acceptanceCriteria: string | null;
+}
+
+export interface TicketUpdateResponse {
+  workspaceId: number;
+  ident: string;
+  /** What was written. */
+  updated: { description: boolean; acceptanceCriteria: boolean };
+  /** The field the criteria went into ("Acceptance Criteria"), or null when they were not written. */
+  criteriaField: string | null;
+}
+
+/** The refusal when the criteria have no field of their own. */
+export const TICKET_UPDATE_NO_CRITERIA_FIELD =
+  'This ticket keeps its acceptance criteria in the description. Put them in the description and clear the criteria box.';

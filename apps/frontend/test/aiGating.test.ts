@@ -232,8 +232,7 @@ describe('the wiring', () => {
   });
 
   it('every one-shot AI surface shows only while AI is on and runs behind the one gate', () => {
-    // Themes, synthesis cards, Chronology pointers, the period-report write-up,
-    // sprint Ask Claude and the docs: one visibility rule (`me.ai.enabled`)
+    // Themes, synthesis cards, Chronology pointers, sprint Ask Claude and the docs: one visibility rule (`me.ai.enabled`)
     // and one Run-button swap (AiRunGate), the same as the agentic surfaces.
     const activity = (n: string): string => read(join(root, 'components', 'Activity', n));
     for (const n of [
@@ -247,13 +246,14 @@ describe('the wiring', () => {
       expect(s, n).toMatch(/<AiRunGate kind="complete">/);
     }
     for (const [n, kind] of [
-      ['PeriodReportsPanel.tsx', 'complete'],
       ['SprintAskPanel.tsx', 'complete'],
       ['DocsView.tsx', 'docs_build'],
       ['DocsChat.tsx', 'docs_chat'],
     ] as const) {
       expect(activity(n), n).toMatch(new RegExp(`<AiRunGate kind="${kind}">`));
     }
+    // Reports → Period reports is CODE ONLY (the write-up was removed 2026-11-08): no gate, no run.
+    expect(activity('PeriodReportsPanel.tsx')).not.toMatch(/AiRunGate|useAiCapabilities/);
     expect(read(join(root, 'components', 'Activity', 'BotsView.tsx'))).toMatch(
       /showThemes = useAiCapabilities\(\)\.enabled/,
     );

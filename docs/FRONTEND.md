@@ -2610,29 +2610,27 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   `stale` flag → badge + Regenerate, nothing regenerates on its own); with AI off the card renders
   nothing and fetches nothing (`useSynthesis(…, aiEnabled)`, `me.ai.enabled`). Mutation keys share the canonical
   scope-key segment so two mounts of one scope share in-flight state.
-- **Reports pane (`PeriodReportsPanel`)**: Reports-FIRST — `InsightsSubTab` and the whole
-  sub-tab apparatus are deleted. (The ad-hoc chat that lived INSIDE the report, "Ask about this
-  period", was REMOVED 2026-10-22 with its routes, hooks and store slices — `sprintChatDraft` /
-  `sprintChatThreads` were transient, so no storage bump.) New: the "**By workspace**" axis (the folded
-  Compare — a per-metric expansion showing every workspace's current + prior figures from the
-  window-pure per-workspace vectors; ⚠ one population per row, low-coverage annotated, NO money
-  ever), "**Copy as Markdown**" (`periodReportMarkdown.ts` — ONE deterministic exporter serving
-  both the panel's rendering rules and the clipboard, so the copy cannot drift from the screen)
-  and **Print** (`@media print` in `index.css` + `print:hidden` on picker/controls/chat;
-  print-to-PDF is the board-pack path). `?report=<periodKey>` pairs with
-  `?activityRepo=insights` as before — it no longer needs to seed a sub-tab.
-  **A GRAIN TOGGLE (`Sprint | Month`) sits above every loading branch** — the two grains COEXIST
-  and sprint stays the default. It reads `filters.insightsReportGrain`, mirrored to
-  `?reportGrain=month` (omitted at the default, per the standing URL rule), and ⚠
-  **`setInsightsReportGrain` CLEARS `insightsReportKey`**: `sprint-2026-08-18` names no period on
-  the calendar grid and `month-2026-08` names none on the sprint grid, so carrying the key across
-  would render the ordinary "not generated yet" box for a document that cannot exist. Titles are
-  grain-aware (`periodTitle(start, end, grain)` — a month is NAMED, "August 2026"; the sprint
-  formatter would print the EXCLUSIVE end and read "1 Aug – 1 Sep", a 32-day span). At month grain
-  the picker leads with **month to date**, marked `· to date`, whose body comes from
-  `usePeriodMonthToDate` — a LIVE read with no stored row, so **Generate is ABSENT (not disabled)**
-  and no staleness badge is possible. Full contract:
-  [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The CALENDAR-MONTH grain.
+- **Reports pane (`PeriodReportsPanel`) — ONE CHART, CODE ONLY (2026-11-08).** The period picker,
+  the per-period metric table, Generate and the AI write-up are GONE; nothing on the pane calls a
+  model or fetches more than ONE read, `usePeriodSeries` (`['period-series', ws, grain]` →
+  `GET /api/pro/insights/period-series`, docs/PERIOD-REPORTING.md § The series). Top to bottom:
+  **Grain** (`Sprint | Month`, `filters.insightsReportGrain`, `?reportGrain=`) · **Show as** (`Change`
+  — the DEFAULT — `| Values`) · ⓘ · Copy as Markdown (`seriesMarkdown`: periods × picked metrics) →
+  the METRIC CHIPS (all 15; Merged PRs on at first; ≤ 6; the last cannot be switched off) → the repo
+  line ("3 of 4 repos: the ones tracked across every period.") → the CHART (`PeriodSeriesChart.tsx`):
+  one shaded BAND per period (the selected one `ui-sel`), a point per period at the band's centre, a
+  GAP for a null (never 0), the period in progress as a HATCHED band with the projection (dashed
+  segment + its low–high bar). Every band is a `ChartPopover` (hover/focus shows, a click pins AND
+  SELECTS the period — `insightsReportKey`, `?report=`): each metric's figure, the thin-sample mark,
+  the change vs the period before (a percentage ONLY when the server's `significant` says so, else
+  the signed figure), and in Change the change since the baseline period. → **Effort vs automation**
+  (`LanesPanel`) for the selected period, over the full membership and labelled so ("· all N repos").
+  ⚠ **CHANGE** (`lib/periodSeries.ts changeSeries`): % change from each metric's BASELINE — its first
+  period above zero that is not a thin sample — so metrics of any size share one axis (round ticks,
+  `changeAxis`, 0 always shown). A metric with NO baseline is REFUSED and named under the chart, never
+  rebased off nothing. ⚠ **VALUES**: one chart PER UNIT (`unitGroups`, `PERIOD_METRIC_UNIT`) — never
+  two units on one axis, never a second axis; a metric with no figures is named. Pure half pinned by
+  `test/periodSeries.test.ts`; the pane by `e2e/period-reports.spec.ts`.
 - **People / 1:1 prep — REMOVED 2026-10-22.** `PeriodPeopleSection` (the Reports People picker),
   `PeopleReportDetail` (the ephemeral `people-report` tab, never persisted and never in the URL),
   `PersonPeriodSection` (the contributor tab's 1:1 prep) and the popover's "1:1 prep →" are deleted,
@@ -4286,7 +4284,9 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   Allow have their OWN mutations** (Stop must never wait behind the press it stops). The diff is
   fetched only when a repository's Diff opens. A push sweeps `invalidateAfterPrWrite(qc, null)` +
   `['ticket-prs']` + the sprint graph/token.
-- **The screen**, top to bottom: header (key, Open ticket, Open in <tracker>, title + ⓘ, the step line
+- **The screen**, top to bottom: header (key, **Open ticket tab** — the story view, for Implement and Fill
+  gaps alike — and **Open in <tracker>**: the sprint read's link when in memory, else derived from the
+  IDENT (`lib/storyBuild.ts trackerLinkOfIdent`, no fetch), title + ⓘ, the step line
   "Set up · Talk · Build · Push" from the PHASE (`sessionSteps`) with the current step underlined and
   `aria-current`, `sessionStatusLine`, `AiRunLabel`, the spend via `useRunCostText`; end slot: Draft,
   Push all (≥ 2 pushable), Stop while a turn runs, Discard — asking once, "Stop the agent and remove the
@@ -4301,7 +4301,12 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   reader after a prompt mark, the agent and each tool call after a bullet, the glyphs per provider —
   Claude Code's `> ⏺ ⎿` or Codex's `› • └` (`GLYPHS`); a tool's first 3 lines under the elbow, the
   call's row opening the rest of its clipped output; a spinner while a turn runs; each turn's end a quiet divider with its cost; notices and errors as lines; the
-  agent's words as they arrive; it follows the newest row only while the reader is at the bottom) and
+  agent's words as they arrive; it follows the newest output only while the reader is at the bottom —
+  `hooks/useFollowBottom.ts` watches the CONTENT (a ResizeObserver on the rows, a MutationObserver on the
+  subtree), so a tool's output landing in a row already drawn follows too; scrolled up, nothing moves and
+  "Jump to latest" shows; ⚠ the scroll box is `relative` — its rows hold `sr-only` spans (position:
+  absolute), and in an unpositioned scroll box they extended the PAGE's scroll area by the whole
+  conversation's height) and
   the composer (Send — `AiRunGate` `story_plan` in chat mode, `story_build` in build mode, `followUp`
   on the session's provider; ⌘/Ctrl+Enter sends; **Start build** once, in chat mode while the agent
   waits, the box's words going with it; Stop; the idle-close time; a CLOSED session shows "The sandbox is
@@ -4338,8 +4343,11 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
     time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
     the dropped line ("Limn left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
-    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **draft ticket update** as
-    preformatted text with a `CopyButton` per field (ⓘ: Limn never changes the ticket) and **Approve and
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket update** — on the latest
+    revision an EDITABLE text box per field (`EditableTicketUpdate`: "(edited)", "Back to the draft",
+    Copy takes the edited text, an empty box leaves that field; on a Jira ticket **Update ticket** asks
+    once and writes it, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update), on an
+    older or approved revision preformatted text with a `CopyButton` — and **Approve and
     start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
     `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
     `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over
@@ -5719,8 +5727,6 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   `sync/bot-resolution-markers.ts`, `platform/bot-themes/build.ts` and `db/queries.ts`
   (~9195, use `grep -a`) match ⚠️ 🛠️ 🧹 💡 ✅ **that review vendors write into their own comment
   bodies**. Changing one silently breaks bot classification and no test fails loudly.
-- **`Activity/periodReportMarkdown.ts`** — a markdown export people paste elsewhere. It has no DOM,
-  so its ▲ ▼ ▵ stay characters.
 - **The backend CLI** (`apps/backend/src/status.ts`) — a terminal, not a browser.
 - **Glyphs inside `title=` / `aria-label=` strings.** An attribute value is text; those sites were
   **reworded** (e.g. "the ✕ on the tab" → "the close button on the tab").
@@ -6031,6 +6037,11 @@ shorter form of each rule; this is the full wording.
   Settings → Bots (since 2026-11-03). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
   all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
+- **LIMN'S OWN WORK is labelled "Limn" and is never My Turn** (2026-11-08): the backend marks an item
+  `limn` (`feed/my-turn.ts markLimnItems`: a `limn:` bot actor, or a body with a Limn hidden marker — a
+  review summary, a CI review or a story check posted under a person's account) and `enrichMyTurn`
+  skips it. The card shows a "Limn" label (`feed-limn-label`) unless the actor's own bot tag already
+  reads "Limn · alice".
 
 ### "Where the work is happening"
 
@@ -6098,8 +6109,8 @@ shorter form of each rule; this is the full wording.
   and critical paths (Sonnet, no digits in its text, daily cap) are made after a read, never on a
   view. ONE `LaneBoard` draws Theme / Critical path / People; a card opens the story tray
   (`Ticket/StoryViewBody.tsx`); tickets open the story view only through `useOpenStory()`. Never
-  bring the force-graph canvas back. The ONE tracker write is the Jira status the reader picks in the
-  story view's header (§ The story view); nothing on the boards writes.
+  bring the force-graph canvas back. The tracker writes are the Jira status the reader picks in the
+  story view's header (§ The story view) and the build plan's ticket update; nothing on the boards writes.
 
 ### Colour and contrast
 

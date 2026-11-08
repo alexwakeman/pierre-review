@@ -3,6 +3,11 @@
 // React-free so test/storyBuild.test.ts pins it. A session's own pure half is lib/sandboxSession.ts.
 import {
   isStoryBuildOpen,
+  isTrackerIdent,
+  parseTicketIdent,
+  ticketBrowseUrl,
+  trackerTicketRow,
+  type TrackerProvider,
   storyBuildMark,
   storyBuildOffered,
   type JiraStatusCategory,
@@ -19,6 +24,21 @@ import {
   type StoryBuildRepo,
   type StoryBuildRepoStatus,
 } from '@pierre-review/shared';
+
+// ── the ticket's own tracker ──────────────────────────────────────────────────────────────────────
+
+/**
+ * The tracker link for a ticket, from its IDENT alone (no fetch, no sprint read in memory): Jira's
+ * browse page, the GitHub issue, the Linear issue, the Notion page. Null for a pasted story or an
+ * ident that does not parse. The caller still sends it through `safeExternalUrl` (TrackerLinkOut).
+ */
+export function trackerLinkOfIdent(ident: string): { url: string; provider: TrackerProvider } | null {
+  const parsed = parseTicketIdent(ident);
+  if (!isTrackerIdent(parsed)) return null;
+  const row = trackerTicketRow(parsed);
+  const url = ticketBrowseUrl({ provider: row.provider, root: row.apiRoot }, row.issueKey);
+  return url == null ? null : { url, provider: row.provider };
+}
 
 // ── the action: "Implement" or "Fill gaps" ─────────────────────────────────────────────────────────
 

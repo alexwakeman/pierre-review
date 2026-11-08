@@ -508,11 +508,10 @@ Monitoring, Slack.
 ## Period reporting, Chronology, This Sprint
 
 - **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
-  (`db/period-metrics.ts` and siblings); storage and narration are the
-  platform's. Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
-  reaches every fold). History is **COVERAGE-BIASED**. **One row never mixes headline and subset
-  populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is in the hash (three spellings
-  in lockstep); a metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
+  (`db/period-metrics.ts` and siblings). Reports is CODE ONLY: ONE chart, the DB-only series
+  (`buildPeriodSeries`, one repo set). Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
+  reaches every fold). History is **COVERAGE-BIASED**: a series line is ONE repo set,
+  never a mix. A metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
   never stored. Every reading setting is PER WORKSPACE, no inheritance.
 - **Chronology** ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md), `db/pr-intervals.ts`): every open
   hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and
@@ -523,9 +522,9 @@ Monitoring, Slack.
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
-  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONE tracker write is the
-  Jira status transition the reader picks** in the story view (`tracker/status-change.ts`); nothing
-  else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
+  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are two
+  Jira writes the reader presses**: the status transition and the plan's ticket update
+  (`tracker/status-change.ts`, `ticket-update.ts`); nothing else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)

@@ -9,7 +9,6 @@ import {
   FLOW,
   OVER_TIME,
   PERIODS,
-  PERIOD_SUMMARY,
   SPRINT,
   WHERE,
 } from '../../mock/acme';
@@ -122,21 +121,70 @@ const GRAINS: { id: PeriodGrain; label: string }[] = [
   { id: 'month', label: 'Month' },
 ];
 
-/** A period report at either grain. Months carry no forecast: they aren't the same length. */
+type ShowAs = 'change' | 'values';
+const SHOW_AS: { id: ShowAs; label: string }[] = [
+  { id: 'change', label: 'Change' },
+  { id: 'values', label: 'Values' },
+];
+
+/**
+ * Period reports: every period on one chart, a band each, with the projection for the one in
+ * progress (sprints only: months aren't the same length). Change, the default, puts measures of any
+ * size on one axis; Values shows why — the smaller line goes flat.
+ */
 export function PeriodReportMock(): JSX.Element {
   const [grain, setGrain] = useState<PeriodGrain>('sprint');
+  const [show, setShow] = useState<ShowAs>('change');
   const p = PERIODS[grain];
-  const forecast = p.rows.some((r) => r.next !== null);
+  const W = 560;
+  const H = 150;
+  const slots = p.bands.length + (p.next != null ? 1 : 0);
+  const bw = W / slots;
+  const cx = (i: number): number => bw * (i + 0.5);
+  const lines = p.series.map((s) => {
+    const base = s.values[0]!;
+    const conv = (v: number): number => (show === 'change' ? ((v - base) / base) * 100 : v);
+    return { ...s, ys: s.values.map(conv), proj: s.projection == null ? null : conv(s.projection) };
+  });
+  const all = lines.flatMap((l) => [...l.ys, l.proj ?? 0]);
+  const max = Math.max(...all) * 1.1;
+  const min = Math.min(0, ...all);
+  const y = (v: number): number => H - ((v - min) / (max - min)) * H;
   return (
     <MockFrame
       live
-      title={p.name}
-      meta={p.grain}
-      onReset={grain !== 'sprint' ? () => setGrain('sprint') : null}
-      label="A period report, by sprint or by calendar month: the split of merges between people and automation, the biggest movers, and each measure against the period before"
+      title="Period reports"
+      meta={grain === 'sprint' ? 'the last 12 weeks' : 'the last 6 months'}
+      onReset={grain !== 'sprint' || show !== 'change' ? () => (setGrain('sprint'), setShow('change')) : null}
+      label="Period reports: every sprint of the last 12 weeks, or every month of the last 6, on one chart. Each measure as the change from its first period, or as its figures; a projection for the sprint in progress; who did the work in the newest period."
     >
-      <Segmented label="Grain" options={GRAINS} value={grain} onChange={setGrain} />
-      <Group>People against automation</Group>
+      <div className="mk-chips">
+        <Segmented label="Grain" options={GRAINS} value={grain} onChange={setGrain} />
+        <Segmented label="Show as" options={SHOW_AS} value={show} onChange={setShow} />
+      </div>
+      <svg className="mk-svg" viewBox={`0 0 ${W} ${H + 18}`} aria-hidden="true">
+        {p.bands.map((b, i) => (
+          <rect key={b} x={bw * i} y={0} width={bw} height={H} fill={i % 2 === 0 ? '#1b1c21' : '#212228'} />
+        ))}
+        {p.next != null ? <rect x={bw * p.bands.length} y={0} width={bw} height={H} fill="#212228" opacity={0.5} /> : null}
+        <line x1="0" y1={y(0)} x2={W} y2={y(0)} stroke="#3a3b42" />
+        {lines.map((l) => (
+          <g key={l.k}>
+            <polyline points={l.ys.map((v, i) => `${cx(i)},${y(v)}`).join(' ')} fill="none" stroke={l.color} strokeWidth="2.5" />
+            {l.proj != null && p.next != null ? (
+              <line x1={cx(p.bands.length - 1)} y1={y(l.ys[l.ys.length - 1]!)} x2={cx(p.bands.length)} y2={y(l.proj)} stroke={l.color} strokeWidth="2" strokeDasharray="4 4" />
+            ) : null}
+          </g>
+        ))}
+        {[...p.bands, ...(p.next != null ? [p.next] : [])].map((b, i) => (
+          <text key={b} x={cx(i)} y={H + 13} textAnchor="middle" fontSize="11" fill="#8b8a85">
+            {b}
+          </text>
+        ))}
+      </svg>
+      <Legend items={p.series.map((s) => ({ label: s.k, color: s.color }))} />
+      {p.next == null ? <p className="mk-note">No projection for calendar months.</p> : null}
+      <Group>{p.name} · people against automation</Group>
       <div className="rp-effort">
         {p.effort.map((e) => (
           <div key={e.k}>
@@ -152,50 +200,6 @@ export function PeriodReportMock(): JSX.Element {
           { label: 'Automation', color: AUTOMATION },
         ]}
       />
-      <Group>Biggest movers</Group>
-      <div className="mk-chips">
-        {p.movers.map((m) => (
-          <Chip key={m.k} tone={m.tone}>
-            {m.k} {m.d}
-          </Chip>
-        ))}
-      </div>
-      <Group>{p.before}</Group>
-      <MiniTable
-        className="stack"
-        cols={[
-          { key: 'k', label: 'Measure' },
-          { key: 'now', label: grain === 'sprint' ? 'This sprint' : 'This month', num: true },
-          { key: 'prior', label: 'Before', num: true },
-          { key: 'change', label: 'Change', num: true },
-          ...(forecast ? [{ key: 'next', label: 'Next sprint', num: true }] : []),
-        ]}
-        rows={p.rows.map((r) => ({ _key: r.k, k: r.k, now: <b>{r.now}</b>, prior: r.prior, change: r.change, next: r.next }))}
-      />
-      {!forecast ? <p className="mk-note">No forecast for calendar months.</p> : null}
-    </MockFrame>
-  );
-}
-
-export function PeriodSummaryMock(): JSX.Element {
-  return (
-    <MockFrame
-      title="Written summary"
-      meta={PERIOD_SUMMARY.name}
-      label="A sprint report's written summary: what happened, and what to watch"
-    >
-      <Group first>What happened</Group>
-      <ul className="rp-bullets">
-        {PERIOD_SUMMARY.happened.map((t) => (
-          <li key={t}>{t}</li>
-        ))}
-      </ul>
-      <Group>What to watch</Group>
-      <ul className="rp-bullets">
-        {PERIOD_SUMMARY.watch.map((t) => (
-          <li key={t}>{t}</li>
-        ))}
-      </ul>
     </MockFrame>
   );
 }
