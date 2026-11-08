@@ -389,11 +389,9 @@ describe('tierFor — the issue tracker', () => {
 // about this family: add `/generate` to that suffix list, or add a fifth route here, and the
 // coincidence breaks silently. These assertions are what turns that into a failing test.
 describe('tierFor — period reports', () => {
-  it('bills the generate POST as generation (minute AND hour windows)', () => {
-    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual([
-      'ai',
-      'ai_hourly',
-    ]);
+  it('bills nothing in the family: the generate POST was removed (Reports is code-only)', () => {
+    // A POST to the removed path lands on `read` and 404s — never back on the AI bucket.
+    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual(['read']);
     // The `…/chat` turn was REMOVED 2026-10-22: its arm went with it, so the path is no longer
     // billed (it would 404 on the read bucket).
     expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/chat')).toEqual(['read']);
@@ -440,6 +438,12 @@ describe('tierFor — period reports', () => {
     expect(tiers('GET', '/api/pro/insights/month-to-date')).not.toContain('ai');
     // The decision is anchored on the exact path: a neighbour must keep falling through.
     expect(tiers('GET', '/api/pro/insights/month-to-date-export')).toEqual(['read']);
+  });
+
+  // GET /api/pro/insights/period-series — the Reports chart: ≤ 12 metric + lane scans per read.
+  it('puts the period series on the search bucket', () => {
+    expect(tiers('GET', '/api/pro/insights/period-series')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/insights/period-series-x')).toEqual(['read']);
   });
 });
 

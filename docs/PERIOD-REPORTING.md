@@ -960,6 +960,34 @@ running past today under a caption saying "to date".
 
 ---
 
+## The series — THE Reports chart, code only (2026-11-08)
+
+Owner decision 2026-11-08: Reports is CODE ONLY. The AI write-up, its Generate route
+(`POST /api/pro/insights/reports/:periodKey/generate`, removed with its rate-limit arm) and the
+period picker are gone; the pane is ONE chart over every period (docs/FRONTEND.md § Reports pane).
+The stored-report code (`generatePeriodReport`, the list / one-report / month-to-date GETs and
+`workspace_period_reports`) is no longer reached from the SPA; the table stays dormant like every
+retired store.
+
+`GET /api/pro/insights/period-series?workspace=&grain=` → `PeriodSeriesResponse`
+(`platform/insights/period-report.ts buildPeriodSeries`, pinned by `platform/test/period-series.test.ts`):
+
+- **How many**: the completed periods of the last **12 weeks** at sprint grain
+  (`floor(84 / cadenceDays)`, at least 2, at most 12) or the last **6 months** (`seriesLength`),
+  oldest first. The period in progress is the `next` slot, never a point.
+- ⚠ **ONE REPO SET for every point**: the repos tracked since the OLDEST period shown
+  (`getPeriodCoverage` at its start). A repo onboarded inside the window is left out of EVERY point,
+  never added to the later ones — the coverage rule above, applied to a whole line rather than a
+  pair. A period before ANY repo was tracked is DROPPED, never drawn as zero. `repos: {measured,
+  total}` states the set; the SPA prints it.
+- **Deltas** are consecutive (`buildDeltas` on neighbours, same set), so they carry the server's
+  own `significant`; the SPA never re-derives it.
+- **The forecast** is `buildForecasts` over this series (complete by construction, ≥ 4 points);
+  refused `uneven_periods` at month grain and `insufficient_history` below 4 points.
+- **Lanes** per period over the FULL membership — their own population, labelled apart.
+- DB only, never stored, never a model: ≤ 12 metric scans + ≤ 12 lane scans per read → rate tier
+  `[search, read]` (`tierFor`, pinned in `rate-limit.test.ts`).
+
 ## ⚠ `getBotAnalytics`'s `toMs` rule
 
 Not strictly period-reporting, but it is the same "one row must not mix two window

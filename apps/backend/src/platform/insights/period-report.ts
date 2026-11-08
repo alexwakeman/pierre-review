@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { PERIOD_METRIC_KEYS } from '@pierre-review/shared';
+import { PERIOD_METRIC_KEYS, PERIOD_SERIES_MONTHS, PERIOD_SERIES_WEEKS } from '@pierre-review/shared';
 import type {
   PeriodArchivedReport,
   PeriodCoverage,
@@ -17,6 +17,8 @@ import type {
   PeriodReportCostEstimate,
   PeriodReportListItem,
   PeriodReportSpend,
+  PeriodSeriesPoint,
+  PeriodSeriesResponse,
 } from '@pierre-review/shared';
 import type { BotScopeWire, ProContext } from '../contract.js';
 import type { LlmClient } from '../llm/seam.js';
@@ -246,7 +248,7 @@ export interface PeriodWindow {
  * absent turns every read of them into a compile error that has to be answered per grain, which
  * is how the cadence-vs-grain confusion below gets caught at build time instead of by a reader.
  */
-type PeriodGrid =
+export type PeriodGrid =
   | {
       grain: 'sprint';
       startMs: number;
@@ -2249,3 +2251,91 @@ export function narrationPayload(report: PeriodReport): Record<string, unknown> 
 
 // (REMOVED 2026-10-22: `answerPeriodChat` and its grounding payload — the `…/reports/:key/chat`
 // route had no caller. Stored rows keep their `suggested` questions, served and unread.)
+
+
+// ── THE PERIOD SERIES (Reports → Period reports, the chart) ───────────────────────────────────
+//
+// Every completed period in the reading window, oldest first, ALL measured over ONE repo set — the
+// repos tracked since the oldest period shown — so each line is one population and never a repo
+// onboarding schedule (§ Retroactive history is COVERAGE-BIASED). The deltas compare each period
+// with the one before it over the same set: like-for-like by construction, with the server's own
+// significance floors. The forecast is the fit `chooseForecastSeries` would make, over THIS set and
+// these windows; refused at month grain (`uneven_periods`) and on too little history.
+//
+// ⚠ DB ONLY. No model call, no stored row, no payload hash: it is recomputed on every read, so
+// nothing here can go stale or bill. Cost: one metric scan and one lane scan per period (≤ 12 + 12),
+// plus one coverage read per period dropped for having no tracked repo.
+
+/** How many completed periods the series reads: 12 weeks of sprints (at least 2), or 6 months. */
+export function seriesLength(grid: PeriodGrid): number {
+  if (grid.grain === 'month') return PERIOD_SERIES_MONTHS;
+  return Math.min(12, Math.max(2, Math.floor((PERIOD_SERIES_WEEKS * 7) / grid.cadenceDays)));
+}
+
+export async function buildPeriodSeries(
+  ctx: ProContext,
+  accountId: number,
+  scope: BotScopeWire,
+  grid: PeriodGrid,
+): Promise<Omit<PeriodSeriesResponse, 'enabled' | 'workspaceId' | 'cadenceConfigured'>> {
+  const grain = grid.grain;
+  const cadenceDays = grid.grain === 'sprint' ? grid.cadenceDays : null;
+  const empty = (measured: number) => ({
+    grain,
+    cadenceDays,
+    periods: [],
+    repos: { measured, total: scope.repoIds.length },
+    next: null,
+    forecasts: PERIOD_METRIC_KEYS.map((key): PeriodForecast => ({ available: false, key, reason: 'insufficient_history' })),
+    forecastDisclosure: null,
+  });
+  // Oldest first.
+  let windows = completedWindows(grid, seriesLength(grid)).reverse();
+  // The repo set: tracked since the oldest period's start. A period before ANY repo was tracked has
+  // nothing to measure, so it is dropped rather than drawn as a zero.
+  let repoIds: number[] = [];
+  while (windows.length > 0) {
+    const tracked = await coverageFor(ctx, accountId, scope.repoIds, windows[0]!.fromMs);
+    repoIds = [...tracked.trackedRepoIds].sort((a, b) => a - b);
+    if (repoIds.length > 0) break;
+    windows = windows.slice(1);
+  }
+  if (windows.length === 0) return empty(0);
+  const subset: BotScopeWire = { workspaceId: scope.workspaceId, repoIds };
+  const measured = await Promise.all(
+    windows.map(async (win) => {
+      const [metrics, lanes] = await Promise.all([
+        metricsFor(ctx, accountId, subset, win),
+        // Over the FULL membership, like the report's lanes: its own population, labelled apart.
+        lanesFor(ctx, accountId, scope, win).catch(() => null),
+      ]);
+      return { win, metrics: metrics.metrics, lanes };
+    }),
+  );
+  const periods: PeriodSeriesPoint[] = measured.map((m, i) => ({
+    periodKey: m.win.key,
+    periodStart: new Date(m.win.fromMs).toISOString(),
+    periodEnd: new Date(m.win.toMs).toISOString(),
+    cadenceDays: m.win.cadenceDays,
+    metrics: m.metrics,
+    deltas: i === 0 ? [] : buildDeltas(m.metrics, measured[i - 1]!.metrics),
+    lanes: m.lanes,
+  }));
+
+  // The projection slot is the period in progress.
+  const nextWin = windowAt(grid, grid.currentIndex);
+  const next = { periodKey: nextWin.key, periodStart: new Date(nextWin.fromMs).toISOString(), periodEnd: new Date(nextWin.toMs).toISOString() };
+  let forecasts: PeriodForecast[];
+  let forecastDisclosure: string | null = null;
+  if (grain === 'month') {
+    forecasts = PERIOD_METRIC_KEYS.map((key) => ({ available: false, key, reason: 'uneven_periods' as const }));
+  } else if (periods.length < MIN_FORECAST_POINTS) {
+    forecasts = PERIOD_METRIC_KEYS.map((key) => ({ available: false, key, reason: 'insufficient_history' as const }));
+  } else {
+    const coverage: PeriodCoverage = { trackedRepos: repoIds.length, totalRepos: repoIds.length, complete: true };
+    const history: HistoryPeriod[] = measured.map((m) => ({ key: m.win.key, fromMs: m.win.fromMs, toMs: m.win.toMs, metrics: m.metrics, coverage, repoIds }));
+    forecasts = await buildForecasts(ctx, history, repoIds);
+    forecastDisclosure = `fitted on ${periods.length} periods`;
+  }
+  return { grain, cadenceDays, periods, repos: { measured: repoIds.length, total: scope.repoIds.length }, next, forecasts, forecastDisclosure };
+}

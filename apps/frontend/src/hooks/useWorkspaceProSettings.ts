@@ -2,7 +2,7 @@ import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/reac
 import type { WorkspaceProSettings, WorkspaceProSettingsUpdate } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
-import { periodReportsListKey } from './usePeriodReports.js';
+
 
 // The PER-WORKSPACE reporting config (`pro_workspace_settings`; /api/pro/settings/workspace) —
 // ONE row holding the sprint cadence + phase anchor and the comparison-window MODE. (The Jira/Linear
@@ -55,8 +55,8 @@ export function useUpdateWorkspaceProSettings(workspaceId: number | null) {
       // setting didn't take". They stay bare literals because they are PREFIXES, which is what
       // makes them sweep every workspace's `['<name>', 'ws:<id>']` slot.
       if (patch.sprint) {
-        void qc.invalidateQueries({ queryKey: periodReportsListKey(workspaceId) });
-        void qc.invalidateQueries({ queryKey: ['period-report'] });
+        // The Reports series IS the grid (both grains: the prefix sweeps them).
+        void qc.invalidateQueries({ queryKey: ['period-series'] });
       }
       // ⚠ THE COMPARISON MODE SWEEPS THE SAME TWO INSIGHTS KEYS AS THE CADENCE, AND THAT CLAUSE
       // ARRIVED WITH THE SETTING. The mode moved here from the ACCOUNT patch in plugin migration

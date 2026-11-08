@@ -2610,29 +2610,27 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   `stale` flag → badge + Regenerate, nothing regenerates on its own); with AI off the card renders
   nothing and fetches nothing (`useSynthesis(…, aiEnabled)`, `me.ai.enabled`). Mutation keys share the canonical
   scope-key segment so two mounts of one scope share in-flight state.
-- **Reports pane (`PeriodReportsPanel`)**: Reports-FIRST — `InsightsSubTab` and the whole
-  sub-tab apparatus are deleted. (The ad-hoc chat that lived INSIDE the report, "Ask about this
-  period", was REMOVED 2026-10-22 with its routes, hooks and store slices — `sprintChatDraft` /
-  `sprintChatThreads` were transient, so no storage bump.) New: the "**By workspace**" axis (the folded
-  Compare — a per-metric expansion showing every workspace's current + prior figures from the
-  window-pure per-workspace vectors; ⚠ one population per row, low-coverage annotated, NO money
-  ever), "**Copy as Markdown**" (`periodReportMarkdown.ts` — ONE deterministic exporter serving
-  both the panel's rendering rules and the clipboard, so the copy cannot drift from the screen)
-  and **Print** (`@media print` in `index.css` + `print:hidden` on picker/controls/chat;
-  print-to-PDF is the board-pack path). `?report=<periodKey>` pairs with
-  `?activityRepo=insights` as before — it no longer needs to seed a sub-tab.
-  **A GRAIN TOGGLE (`Sprint | Month`) sits above every loading branch** — the two grains COEXIST
-  and sprint stays the default. It reads `filters.insightsReportGrain`, mirrored to
-  `?reportGrain=month` (omitted at the default, per the standing URL rule), and ⚠
-  **`setInsightsReportGrain` CLEARS `insightsReportKey`**: `sprint-2026-08-18` names no period on
-  the calendar grid and `month-2026-08` names none on the sprint grid, so carrying the key across
-  would render the ordinary "not generated yet" box for a document that cannot exist. Titles are
-  grain-aware (`periodTitle(start, end, grain)` — a month is NAMED, "August 2026"; the sprint
-  formatter would print the EXCLUSIVE end and read "1 Aug – 1 Sep", a 32-day span). At month grain
-  the picker leads with **month to date**, marked `· to date`, whose body comes from
-  `usePeriodMonthToDate` — a LIVE read with no stored row, so **Generate is ABSENT (not disabled)**
-  and no staleness badge is possible. Full contract:
-  [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The CALENDAR-MONTH grain.
+- **Reports pane (`PeriodReportsPanel`) — ONE CHART, CODE ONLY (2026-11-08).** The period picker,
+  the per-period metric table, Generate and the AI write-up are GONE; nothing on the pane calls a
+  model or fetches more than ONE read, `usePeriodSeries` (`['period-series', ws, grain]` →
+  `GET /api/pro/insights/period-series`, docs/PERIOD-REPORTING.md § The series). Top to bottom:
+  **Grain** (`Sprint | Month`, `filters.insightsReportGrain`, `?reportGrain=`) · **Show as** (`Change`
+  — the DEFAULT — `| Values`) · ⓘ · Copy as Markdown (`seriesMarkdown`: periods × picked metrics) →
+  the METRIC CHIPS (all 15; Merged PRs on at first; ≤ 6; the last cannot be switched off) → the repo
+  line ("3 of 4 repos: the ones tracked across every period.") → the CHART (`PeriodSeriesChart.tsx`):
+  one shaded BAND per period (the selected one `ui-sel`), a point per period at the band's centre, a
+  GAP for a null (never 0), the period in progress as a HATCHED band with the projection (dashed
+  segment + its low–high bar). Every band is a `ChartPopover` (hover/focus shows, a click pins AND
+  SELECTS the period — `insightsReportKey`, `?report=`): each metric's figure, the thin-sample mark,
+  the change vs the period before (a percentage ONLY when the server's `significant` says so, else
+  the signed figure), and in Change the change since the baseline period. → **Effort vs automation**
+  (`LanesPanel`) for the selected period, over the full membership and labelled so ("· all N repos").
+  ⚠ **CHANGE** (`lib/periodSeries.ts changeSeries`): % change from each metric's BASELINE — its first
+  period above zero that is not a thin sample — so metrics of any size share one axis (round ticks,
+  `changeAxis`, 0 always shown). A metric with NO baseline is REFUSED and named under the chart, never
+  rebased off nothing. ⚠ **VALUES**: one chart PER UNIT (`unitGroups`, `PERIOD_METRIC_UNIT`) — never
+  two units on one axis, never a second axis; a metric with no figures is named. Pure half pinned by
+  `test/periodSeries.test.ts`; the pane by `e2e/period-reports.spec.ts`.
 - **People / 1:1 prep — REMOVED 2026-10-22.** `PeriodPeopleSection` (the Reports People picker),
   `PeopleReportDetail` (the ephemeral `people-report` tab, never persisted and never in the URL),
   `PersonPeriodSection` (the contributor tab's 1:1 prep) and the popover's "1:1 prep →" are deleted,

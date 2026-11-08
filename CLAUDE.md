@@ -508,8 +508,8 @@ Monitoring, Slack.
 ## Period reporting, Chronology, This Sprint
 
 - **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
-  (`db/period-metrics.ts` and siblings); storage and narration are the
-  platform's. Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
+  (`db/period-metrics.ts` and siblings). Reports is CODE ONLY: ONE chart, the DB-only series
+  (`buildPeriodSeries`, one repo set). Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
   reaches every fold). History is **COVERAGE-BIASED**. **One row never mixes headline and subset
   populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is in the hash (three spellings
   in lockstep); a metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,

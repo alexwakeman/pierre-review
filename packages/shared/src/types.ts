@@ -12081,6 +12081,51 @@ export interface PeriodReportsListResponse {
   archived?: PeriodArchivedReport[];
 }
 
+// ── THE PERIOD SERIES (Reports → Period reports, the chart; docs/PERIOD-REPORTING.md § The series) ──
+//
+//   GET /api/pro/insights/period-series?workspace=&grain=   DB only, never a model call
+//
+// Every completed period in the last 12 weeks (sprint grain) or 6 months (month grain), oldest
+// first, ALL measured over ONE repo set: the repos tracked since the oldest period shown. One
+// population per line, so a line is never a repo-onboarding schedule. `deltas` compare each period
+// with the one before it over that same set (like-for-like, with the server's significance call).
+
+/** How many periods the series covers: 12 weeks of sprints, or 6 calendar months. */
+export const PERIOD_SERIES_WEEKS = 12;
+export const PERIOD_SERIES_MONTHS = 6;
+
+export interface PeriodSeriesPoint {
+  periodKey: string;
+  periodStart: string;
+  periodEnd: string;          // EXCLUSIVE
+  cadenceDays: number;
+  /** Over the series' repo set (`PeriodSeriesResponse.repoIds`). */
+  metrics: PeriodMetricValue[];
+  /** Against the period before it, over the same repo set. Empty on the first point. */
+  deltas: PeriodMetricDelta[];
+  /** Effort vs automation, over the workspace's FULL membership (its own population). */
+  lanes: PeriodLanes | null;
+}
+
+export interface PeriodSeriesResponse {
+  enabled: boolean;
+  workspaceId: number;
+  grain: PeriodGrain;
+  /** false at sprint grain with no cadence set: the setup prompt. Always true at month grain. */
+  cadenceConfigured: boolean;
+  /** The sprint length; null at month grain. */
+  cadenceDays: number | null;
+  periods: PeriodSeriesPoint[];
+  /** The repos every point is measured over, and the workspace's total. */
+  repos: { measured: number; total: number };
+  /** The period being projected (the one in progress), or null when there is no projection slot. */
+  next: { periodKey: string; periodStart: string; periodEnd: string } | null;
+  /** One per metric: the projection for `next`, or the named refusal. */
+  forecasts: PeriodForecast[];
+  /** "fitted on …" when a forecast was fitted; null otherwise. */
+  forecastDisclosure: string | null;
+}
+
 export interface PeriodReportResponse {
   enabled: boolean; workspaceId: number; report: PeriodReport | null;
   modelInfo?: PeriodReportModelInfo;

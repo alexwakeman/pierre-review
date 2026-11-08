@@ -223,10 +223,8 @@ import type {
   SuggestedReviewersResponse,
   PrReviewWaitsResponse,
   ReviewerCandidateResponse,
-  PeriodReportGenerateResponse,
-  PeriodReportResponse,
   PeriodGrain,
-  PeriodReportsListResponse,
+  PeriodSeriesResponse,
   ProSettings,
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
@@ -1151,62 +1149,19 @@ export const api = {
   repoClaudeReviews: (repoId: number) =>
     get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
 
-  // ---- Period-over-period reports (/api/pro/insights/reports/*) ----
-  // A stored, forwardable artifact for ONE completed sprint-cadence period: its window-pure
-  // metric vector, a coverage-stable comparison against the prior period, and a refusable
-  // forecast. The two GETs are FREE (plain DB reads of an immutable row — a stale row is
-  // FLAGGED, never silently regenerated); the two POSTs spend model budget.
-  //
-  // The period travels as a PATH SEGMENT (`sprint-2026-08-18`) — which is exactly why the key
-  // is punctuated with a hyphen rather than the colon the plan sketched. It is still
-  // `encodeURIComponent`-wrapped here: the key's shape is a server contract, not something the
-  // client gets to assume stays path-safe.
-  //
-  // ⚠ `grain` IS A READING CHOICE ON THE REQUEST, never a stored setting — picking "Month" on
-  // Reports must not move the free flow-metrics comparison window on another tab. It is spelled
-  // out ONLY on the list: every other call here is given a period KEY, whose shape already says
-  // which grid it names (`sprint-2026-08-18` vs `month-2026-08`), so no second parameter exists
-  // that could disagree with the key beside it.
-  periodReports: (workspaceId: number, grain: PeriodGrain = 'sprint') =>
-    get<PeriodReportsListResponse>(
+  // ---- Reports → Period reports: THE series (/api/pro/insights/period-series) ----
+  // Every completed period of the last 12 weeks (sprint) or 6 months (month), over ONE repo set,
+  // with consecutive like-for-like deltas, each period's lanes and the projection. DB only; nothing
+  // in reporting calls a model (the AI write-up was removed 2026-11-08). `grain` is a reading
+  // choice on the request, never a stored setting.
+  periodSeries: (workspaceId: number, grain: PeriodGrain = 'sprint') =>
+    get<PeriodSeriesResponse>(
       withQuery(
-        '/api/pro/insights/reports',
+        '/api/pro/insights/period-series',
         workspaceParam(workspaceId),
-        // Omitted when it is the default, so a plain link never names a grain it does not change.
         grain === 'sprint' ? undefined : `grain=${grain}`,
       ),
     ),
-  // The OPEN calendar month. FREE, LIVE and never stored — there is no row behind it, no
-  // narration, no staleness flag and no generate verb anywhere near it. Its own path (not a
-  // `…/reports/:key` sibling) is what keeps it structurally outside the billing family, and it
-  // carries its own `search` rate-limit tier in core.
-  periodMonthToDate: (workspaceId: number) =>
-    get<PeriodReportResponse>(
-      withQuery('/api/pro/insights/month-to-date', workspaceParam(workspaceId)),
-    ),
-  periodReport: (workspaceId: number, periodKey: string) =>
-    get<PeriodReportResponse>(
-      withQuery(
-        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}`,
-        workspaceParam(workspaceId),
-      ),
-    ),
-  // The ONE billing path. `model` is the per-run override of the account default
-  // (`pro_settings.report_model`); omitted = whatever the account is configured for. The model is
-  // part of the stored row's unique key, so generating Sonnet does NOT destroy the Haiku row —
-  // asking for a model you already have back is a $0 cache hit (`generated: false`).
-  generatePeriodReport: (
-    workspaceId: number,
-    periodKey: string,
-    body: { model?: string } = {},
-  ) =>
-    fetch(
-      withQuery(
-        `/api/pro/insights/reports/${encodeURIComponent(periodKey)}/generate`,
-        workspaceParam(workspaceId),
-      ),
-      jsonBody('POST', body),
-    ).then((r) => handle<PeriodReportGenerateResponse>(r)),
   // ---- ML severity/category labels (CORE, FREE TIER — not under /api/pro/) ----------------
   // Both are pure DB reads: the model runs in a background worker on the server, never on a
   // request, so neither of these can spend anything. They answer normally on a deployment with

@@ -1,272 +1,68 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
-import { useIsMutating } from '@tanstack/react-query';
-import { AiRunGate } from '../AiSetup.js';
-import type {
-  ActorLane,
-  ActorLaneBand,
-  PeriodForecast,
-  PeriodLaneStats,
-  PeriodLanes,
-  PeriodMetricDelta,
-  PeriodMetricKey,
-  PeriodMetricValue,
-  PeriodGrain,
-  PeriodMovement,
-  PeriodRefusalReason,
-  PeriodReport,
-  PeriodArchivedReport,
-  PeriodReportListItem,
-  PeriodReportModelInfo,
-} from '@pierre-review/shared';
 import {
   ACTOR_LANES,
   ACTOR_LANE_BAND,
   PERIOD_METRIC_KEYS,
-  PERIOD_METRICS_SCHEMA_VERSION,
+  type ActorLane,
+  type ActorLaneBand,
+  type PeriodGrain,
+  type PeriodLaneStats,
+  type PeriodLanes,
+  type PeriodMetricKey,
+  type PeriodRefusalReason,
+  type PeriodSeriesPoint,
+  type PeriodSeriesResponse,
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
+import { usePeriodSeries } from '../../hooks/usePeriodReports.js';
 import {
-  periodReportGenerateMutationKey,
-  periodReportModelChoices,
-  useGeneratePeriodReport,
-  usePeriodMonthToDate,
-  usePeriodReport,
-  usePeriodReportsList,
-} from '../../hooks/usePeriodReports.js';
+  PERIOD_SERIES_DEFAULT_METRICS,
+  PERIOD_UNIT_WORDS,
+  changeAxis,
+  changeLabel,
+  changeSeries,
+  deltaOf,
+  metricOf,
+  projectionIn,
+  seriesMarkdown,
+  toggleMetric,
+  unitGroups,
+  valuesOf,
+} from '../../lib/periodSeries.js';
 import { CopyButton } from '../CopyButton.js';
 import { InfoButton } from '../InfoModal.js';
-import {
-  CaretIcon,
-  PartialCircleIcon,
-  RefreshIcon,
-  ThinSampleIcon,
-  WarningIcon,
-} from '../Icons.js';
-import { FOCUS_RING, Menu, Select } from '../ui/index.js';
-import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
-import {
-  METRIC_META,
-  REFUSAL_TEXT,
-  changeFmtFor,
-  figuresOnly,
-  metaFor,
-  pctFmt,
-  periodTitle,
-  renderPeriodReportMarkdown,
-  rowFigures,
-  signed,
-  standaloneChangeFmtFor,
-  standaloneLabelFor,
-} from './periodReportMarkdown.js';
-import { PALETTE, fmtDuration } from '../charts/common.js';
+import { ThinSampleIcon } from '../Icons.js';
+import { FOCUS_RING } from '../ui/index.js';
+import { METRIC_META, metaFor, periodTitle, signed, changeFmtFor } from './periodReportMarkdown.js';
+import { PALETTE, SERIES_COLORS, fmtDuration, niceMax } from '../charts/common.js';
+import { PeriodSeriesChart, type PeriodChartLine } from './PeriodSeriesChart.js';
 
 // Re-exported for periodMetricRow.test.ts, which pins the one-population row rule through this
-// module's public surface (the definition moved to periodReportMarkdown.ts with the rest of the
-// presentation metadata).
+// module's public surface (the definition lives in periodReportMarkdown.ts).
 export { rowFigures } from './periodReportMarkdown.js';
-import { PeriodMetricSpark } from './PeriodMetricSpark.js';
-import { SummaryMarkdown } from './prRefTable.js';
-import { aiRunLabel } from '@pierre-review/shared';
 
-/** A stored model id as its run label ("Claude Haiku 5.5", "Codex · GPT-6 Luna"); null stays null. */
-const runModelName = (model: string | null | undefined): string | null => (model ? aiRunLabel(null, model) : null);
-
-// The Insights "Reports" sub-tab — one completed period as a forwardable artifact: what happened,
-// how it compares like-for-like to the period before it, what that implies for the next one, and
-// a grounded drill-down.
+// REPORTS → PERIOD REPORTS (docs/FRONTEND.md § Period reports; docs/PERIOD-REPORTING.md § The series).
+// CODE ONLY: nothing here calls a model (the AI write-up and its Generate button were removed
+// 2026-11-08). ONE read, `usePeriodSeries`: every completed period of the last 12 weeks (sprint
+// grain) or 6 months (month grain), all over ONE repo set, plus the projection for the period in
+// progress. Top to bottom: Grain · Show as (Change | Values) · Copy as Markdown, the metric chips
+// (Merged PRs on at first), the repo line, the CHART — one shaded band per period, a popover per
+// band, a click selects the period — and Effort vs automation for the selected period.
 //
-// The whole surface is built around being honest about what it does not know, and most of the
-// rules below exist because the alternative renders a plausible lie:
-//
-//  • "No prior period" is NOT "no change". One means there is nothing to compare against; the
-//    other means we compared and found nothing moved. Rendering the first as a 0 (or as a blank)
-//    invents a comparison.
-//  • A null metric renders "—". Never 0. `null` means no data; 0 means we counted and got none.
-//  • An INSIGNIFICANT delta shows the raw figures and no percentage. A percentage off a tiny
-//    base is noise wearing a suit — the same reason `WorkspaceMetricsPanel` drops its ▲/▼ under
-//    `lowConfidence`. The server has already decided (`significant`); the SPA must never
-//    re-derive it, because the floors that produced it live in CORE and are not on the wire.
-//  • A refused forecast names its reason. A blank cell reads as "no change expected".
-//  • The comparison states its coverage subset VERBATIM. Retroactive history is biased by repo
-//    onboarding — merged-PR counts across the dev workspace's last 6 months read 570…39, which
-//    looks like explosive growth and is actually 18 repos shrinking to 4.
-//  • THE TITLE IS THE DATE RANGE AT SPRINT GRAIN, AND THE MONTH'S NAME AT MONTH GRAIN — the
-//    month-word rule is GRAIN-CONDITIONAL, not gone. At sprint grain the words "monthly" /
-//    "month on month" still appear nowhere: a 14-day cadence is ~2.17 periods per calendar month
-//    and that label would simply be false. At month grain the period IS a calendar month and
-//    naming it one is the only honest title — but the sprint formatter would render it
-//    "1 Aug – 1 Sep" (the EXCLUSIVE end), which reads as a 32-day span, so months get their own.
-//  • MONTH TO DATE IS AN OPEN PERIOD and says so. No Generate button, no staleness badge, no
-//    narration — it is recomputed live on every read and no row is ever written for it.
+// ⚠ THE HONESTY RULES STILL HOLD, in fewer words: a null is "—" and a gap in the line, never 0; a
+// change off a thin or empty baseline is REFUSED (`changeSeries`), not drawn; an insignificant
+// change shows the figures, not a percentage (the server's `significant`, never re-derived here);
+// a refused projection names its reason; and Values never put two units on one axis.
 
-// ── Metric presentation ──────────────────────────────────────────────────────────────────────
-//
-// The labels, formatters, refusal copy and the one-population row rule moved to
-// `periodReportMarkdown.ts` — ONE definition serving both this panel and the "Copy as Markdown"
-// export, so the copied artifact can never disagree with the screen it was copied from.
-// `rowFigures` is re-exported below for its unit test (periodMetricRow.test.ts).
+const MAX_METRICS = 6;
 
-function shortPeriodLabel(p: PeriodReportListItem): string {
-  const base = periodTitle(p.periodStart, p.periodEnd, p.grain ?? 'sprint');
-  // ⚠ THE OPEN PERIOD IS MARKED IN THE PICKER ITSELF, not only once it is selected. Two buttons
-  // reading "August 2026" and "July 2026" side by side would invite the reader to compare a
-  // part-month against a whole one without noticing.
-  return p.inProgress ? `${base} · to date` : base;
-}
-
-/** "sprint · 14 days" / "calendar month · 31 days" — the grain named beside the title, so a
- *  forwarded screenshot says what it measured. */
-function grainCaption(grain: PeriodGrain, cadenceDays: number): string {
-  return grain === 'month'
-    ? `calendar month · ${cadenceDays} days`
-    : `sprint · ${cadenceDays} days`;
-}
-
-const GOOD = 'text-ui-success';
-const BAD = 'text-ui-danger';
-const MUTED = 'text-ui-faint';
-
-// Did the change go the metric's good way? `null` for a neutral metric (opened PRs, thread
-// volume, bot comment counts) — those genuinely have no good direction and must not be coloured.
-function favourability(d: PeriodMetricDelta): boolean | null {
-  if (d.absoluteChange == null || d.absoluteChange === 0) return null;
-  if (d.direction === 'neutral') return null;
-  return (d.absoluteChange > 0) === (d.direction === 'up_good');
-}
-
-function toneClass(fav: boolean | null): string {
-  return fav == null ? MUTED : fav ? GOOD : BAD;
-}
-
-function toneHex(fav: boolean | null): string {
-  return fav == null ? PALETTE.gray : fav ? PALETTE.green : PALETTE.red;
-}
-
-function NoPrior({
-  hasPriorPeriod,
-  notComputed,
-}: {
-  hasPriorPeriod: boolean;
-  notComputed: boolean;
-}): JSX.Element {
-  if (notComputed) {
-    return (
-      <span
-        className={`text-meta ${MUTED}`}
-        title="This period was backfilled for the forecast series; no comparison was run for it"
-      >
-        not compared
-      </span>
-    );
-  }
-  return hasPriorPeriod ? (
-    <span
-      className={`text-meta ${MUTED}`}
-      title="The previous period exists but has no figure for this metric, so there is nothing to subtract"
-    >
-      no prior figure
-    </span>
-  ) : (
-    <span className={`text-meta ${MUTED}`} title="Nothing is stored for the period before this one">
-      no prior period
-    </span>
-  );
-}
-
-// ── The change cell ──────────────────────────────────────────────────────────────────────────
-function ChangeCell({
-  delta,
-  format,
-  hasPriorPeriod,
-}: {
-  delta: PeriodMetricDelta;
-  format: Fmt;
-  hasPriorPeriod: boolean;
-}): JSX.Element {
-  // NO PRIOR VALUE — rendered distinctly from "no change", and never as a 0. This is the branch
-  // the spec is most emphatic about: the two states look identical if you only check for a
-  // falsy delta, and conflating them tells the reader we compared when we did not.
-  // `notComputed` is false by construction here: this cell only renders when a delta EXISTS, and
-  // a figures-only period has none.
-  if (delta.prior == null) return <NoPrior hasPriorPeriod={hasPriorPeriod} notComputed={false} />;
-  if (delta.value == null || delta.absoluteChange == null) {
-    return (
-      <span className={`text-meta ${MUTED}`} title="No data for this metric in this period">
-        —
-      </span>
-    );
-  }
-  if (delta.absoluteChange === 0) {
-    return <span className={`text-meta ${MUTED}`}>no change</span>;
-  }
-
-  // INSIGNIFICANT — the raw figures only, no percentage and no verdict colour. The columns either
-  // side already carry both real numbers; all this says is "it moved, and we are not calling it".
-  if (!delta.significant) {
-    return (
-      <span
-        className={`text-meta ${MUTED}`}
-        title="Below the sample or size floor for this metric — the figures are real, but the change is not distinguishable from noise, so no percentage is quoted"
-      >
-        {signed(delta.absoluteChange, format)}
-        <span className="ml-1 text-meta">· not significant</span>
-      </span>
-    );
-  }
-
-  const fav = favourability(delta);
-  return (
-    <span className={`text-meta font-medium ${toneClass(fav)}`}>
-      <CaretIcon
-        dir={delta.absoluteChange > 0 ? 'up' : 'down'}
-        className="inline-block align-[-0.1em]"
-      />{' '}
-      {signed(delta.absoluteChange, format)}
-      {delta.percentChange != null ? (
-        <span className="ml-1 font-normal">({signed(delta.percentChange, pctFmt)})</span>
-      ) : (
-        // prior === 0: a percentage would be infinite, so the server sends null and we say why
-        // rather than leaving the reader to wonder where the % went.
-        <span className={`ml-1 font-normal ${MUTED}`} title="The prior period was 0, so a percentage change is undefined">
-          (from 0)
-        </span>
-      )}
-    </span>
-  );
-}
-
-// ── The forecast cell ────────────────────────────────────────────────────────────────────────
-function ForecastCell({
-  forecast,
-  format,
-}: {
-  forecast: PeriodForecast | undefined;
-  format: Fmt;
-}): JSX.Element {
-  if (forecast == null) {
-    return <span className={`text-meta ${MUTED}`}>—</span>;
-  }
-  if (!forecast.available) {
-    return (
-      <span className={`text-meta ${MUTED}`} title={REFUSAL_TEXT[forecast.reason]}>
-        not forecast · {forecast.reason.replace(/_/g, ' ')}
-      </span>
-    );
-  }
-  return (
-    <span
-      className="text-meta text-ai-signal"
-      title={`${forecast.basis} · ${forecast.periodsUsed} periods`}
-    >
-      ≈ {format(forecast.point)}
-      <span className={`ml-1 ${MUTED}`}>
-        ({format(forecast.low)}–{format(forecast.high)})
-      </span>
-    </span>
-  );
-}
-
+/** Why there is no projection, in one short line. */
+const NO_PROJECTION: Partial<Record<PeriodRefusalReason, string>> = {
+  insufficient_history: 'Not enough periods to project.',
+  too_volatile: 'Too uneven to project.',
+  uneven_periods: 'No projection for calendar months: their lengths differ.',
+};
 
 // ── Effort vs automation ─────────────────────────────────────────────────────────────────────
 //
@@ -379,8 +175,8 @@ function LanesInfo(): JSX.Element {
       </p>
       <p>The legend lists only lanes that did something this period.</p>
       <p>
-        “First review by a person” is the same figure as the table’s “Time to first review by a
-        person” row. Bot approvals do not count.
+        “First review by a person” is the same figure as the chart’s “Time to first review by a
+        person”. Bot approvals do not count.
       </p>
     </>
   );
@@ -526,507 +322,6 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   );
 }
 
-// ── The metric table ─────────────────────────────────────────────────────────────────────────
-function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
-  // Keyed lookups, so a metric the server did not send (an older schema version, or a key added
-  // in a later version) simply renders "—" / "no prior" rather than throwing or landing on the
-  // wrong row. PERIOD_METRIC_KEYS is the render order and is part of the contract.
-  const values = new Map<PeriodMetricKey, PeriodMetricValue>(
-    report.metrics.map((m) => [m.key, m]),
-  );
-  const deltas = new Map<PeriodMetricKey, PeriodMetricDelta>(
-    report.comparison.deltas.map((d) => [d.key, d]),
-  );
-  const forecasts = new Map<PeriodMetricKey, PeriodForecast>(
-    report.forecasts.map((f) => [f.key, f]),
-  );
-  // Whether an EARLIER PERIOD exists at all — a report-level fact, not a per-metric one, which is
-  // why the cells cannot work it out for themselves from a null `prior`.
-  const hasPriorPeriod = report.comparison.priorPeriodKey != null;
-  const notComputed = figuresOnly(report);
-
-  // ⚠ TWO POPULATIONS, AND A ROW MAY ONLY EVER SHOW ONE.
-  //
-  // `report.metrics` is the HEADLINE scan over the workspace's FULL CURRENT membership;
-  // `report.comparison.deltas` is a SEPARATE scan over the coverage-stable subset — the repos
-  // tracked across BOTH this period and the prior one (spec §4). They are different populations
-  // and their figures do not belong in one subtraction.
-  //
-  // This row used to take "This period" from the headline and "Prior"/"Change" from the subset,
-  // which rendered arithmetic that does not close. Measured on the real dev DB: workspace BNG's
-  // just-closed sprint showed "117 | 146 | −33" — 117 is 8 repos, 146 and the −33 are 7 repos,
-  // and 117 − 146 = −29, so none of the three numbers agreed with the other two. It is the SAME
-  // defect that was found and fixed in the narration prompt (period-report.ts's two-populations
-  // rule, and the test that forbids the headline and subset figures sharing a field name) — the
-  // prose was hardened and the table a reader actually looks at was not.
-  //
-  // So: when a comparison exists, every cell in the row — and the spark — comes from the DELTA.
-  // The headline still appears, in its own labelled line, because §4 is right that it is what the
-  // reader means by "this period"; it is simply never the thing "Prior" is subtracted from.
-  //
-  // NOT `delta?.value ?? mv?.value`: that silently substitutes the headline whenever the subset
-  // legitimately has no figure (a null median on a thin subset), reintroducing the mix in exactly
-  // the case that is hardest to notice.
-  const subsetCovers = report.comparison.subsetRepoIds.length;
-  const populationsDiffer = subsetCovers > 0 && subsetCovers !== report.coverage.totalRepos;
-
-  return (
-    // Scrolls inside its own box on a narrow screen; the Metric column stays put.
-    <div className="max-w-full overflow-x-auto overscroll-x-contain">
-      <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-left text-meta tabular-nums">
-        <thead>
-          <tr className="text-meta text-ui-faint">
-            <th className="sticky left-0 z-[1] bg-ui-bg py-1 pr-3 font-medium">Metric</th>
-            <th className="py-1 pr-3 text-right font-medium">This period</th>
-            <th className="py-1 pr-3 text-right font-medium">Prior</th>
-            <th className="py-1 pr-3 font-medium">Change</th>
-            <th className="py-1 pr-3 font-medium">Next period</th>
-            <th className="py-1 font-medium" aria-label="Trend" />
-          </tr>
-        </thead>
-        <tbody>
-          {PERIOD_METRIC_KEYS.map((key) => {
-            const meta = METRIC_META[key];
-            const mv = values.get(key);
-            const delta = deltas.get(key);
-            const forecast = forecasts.get(key);
-            // One population per row — see the block comment above. Resolved by `rowFigures`,
-            // which is exported and unit-tested because the invariant is arithmetic.
-            const { value, prior, headline, lowSample } = rowFigures(mv, delta, populationsDiffer);
-            const fav = delta ? favourability(delta) : null;
-            // An insignificant change must not colour the spark either — the picture and the
-            // number have to tell the same story.
-            const sparkTone = delta?.significant ? toneHex(fav) : PALETTE.gray;
-            return (
-              <tr key={key} className="group hover:bg-ui-hover">
-                <td className="sticky left-0 z-[1] w-[11rem] max-w-[11rem] bg-ui-bg py-1.5 pr-3 align-top group-hover:bg-ui-hover sm:w-auto sm:max-w-none">
-                  <div className="font-medium text-ui-ink">{meta.label}</div>
-                  {meta.note && <div className="text-meta text-ui-faint">{meta.note}</div>}
-                </td>
-                <td className="py-1.5 pr-3 text-right align-top">
-                  {/* null is "—", never 0. The `sampleSize` title is only shown when this cell IS
-                      the headline figure — `PeriodMetricDelta` carries no sample size, so quoting
-                      the headline's count beside a subset figure would describe a different
-                      population from the number above it. */}
-                  <span
-                    className="text-body font-semibold text-ui-ink"
-                    title={
-                      mv && !delta
-                        ? `${mv.sampleSize} item${mv.sampleSize === 1 ? '' : 's'} behind this figure`
-                        : undefined
-                    }
-                  >
-                    {value == null ? '—' : meta.format(value)}
-                  </span>
-                  {/* ⚠ THIN SAMPLE. A real figure computed from almost nothing looks exactly like
-                      a real figure computed from plenty, and "Time to first review: 0h" off two
-                      reviews is the version of that which gets a tool called broken. The marker
-                      says the figure is thin; it never suppresses it, because the number IS what
-                      was observed. Rendered only when there is a figure — "—" is already the
-                      stronger statement. */}
-                  {lowSample && value != null && (
-                    <span
-                      className="ml-1 align-super text-meta font-normal text-ui-warn"
-                      title={
-                        mv
-                          ? `Thin sample — ${mv.sampleSize} item${mv.sampleSize === 1 ? '' : 's'} behind this figure. It is what was observed, but it moves easily.`
-                          : 'Thin sample — this figure rests on very few items and moves easily.'
-                      }
-                      aria-label="thin sample"
-                    >
-                      <ThinSampleIcon />
-                    </span>
-                  )}
-                  {headline != null && (
-                    <div
-                      className="text-meta text-ui-faint"
-                      title={`The comparison covers the ${subsetCovers} repo${subsetCovers === 1 ? '' : 's'} tracked across both periods. This is the figure for all ${report.coverage.totalRepos}.`}
-                    >
-                      all repos: {meta.format(headline)}
-                    </div>
-                  )}
-                </td>
-                <td className="py-1.5 pr-3 text-right align-top text-meta text-ui-mute">
-                  {/* '—' for both flavours of absence; the Change cell beside it says which. */}
-                  {prior == null ? '—' : meta.format(prior)}
-                </td>
-                <td className="py-1.5 pr-3 align-top">
-                  {delta ? (
-                    <ChangeCell
-                      delta={delta}
-                      format={changeFmtFor(meta)}
-                      hasPriorPeriod={hasPriorPeriod}
-                    />
-                  ) : (
-                    // No delta row at all for this key — an older stored schema version, or a
-                    // refused comparison (which empties `deltas`). Either way there is nothing to
-                    // subtract, which is stated in words and NEVER as 0.
-                    <NoPrior hasPriorPeriod={hasPriorPeriod} notComputed={notComputed} />
-                  )}
-                </td>
-                <td className="py-1.5 pr-3 align-top">
-                  {notComputed ? (
-                    <span className={`text-meta ${MUTED}`} title="No forecast was computed for a backfilled period">
-                      not forecast
-                    </span>
-                  ) : (
-                    <ForecastCell forecast={forecast} format={meta.format} />
-                  )}
-                </td>
-                <td className="py-1.5 align-top">
-                  <PeriodMetricSpark
-                    prior={prior}
-                    value={value}
-                    forecast={forecast?.available ? forecast : null}
-                    format={meta.format}
-                    favourableColor={sparkTone}
-                  />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── Movements ────────────────────────────────────────────────────────────────────────────────
-// Significant movers only (the server ranks them; rank 0 is the biggest).
-//
-// ⚠ `favourable: false` IS NOT "BAD". `PeriodMovement` carries no `direction`, and the server sets
-// `favourable` false for every NEUTRAL metric because a neutral metric has no good direction at
-// all — so a two-way green/red on that flag alone paints every change in opened-PR count, thread
-// volume and bot-comment count red. (The plugin that computes it says exactly this next to
-// `rankMovements`; this component shipped doing it anyway.) The direction does reach the SPA —
-// on the matching `PeriodMetricDelta` — so the tone is looked up by key there, and a metric with
-// no delta row falls back to neutral rather than guessing.
-const NEUTRAL_PILL = 'text-ui-mute';
-// The chip is a grey ground; only the direction's words carry the colour.
-const GOOD_PILL = 'text-ui-success';
-const BAD_PILL = 'text-ui-danger';
-
-function Movements({
-  movements,
-  deltas,
-}: {
-  movements: PeriodMovement[];
-  deltas: PeriodMetricDelta[];
-}): JSX.Element | null {
-  // `?? []`: a row stored before `movements` existed serves the field absent, and an unguarded
-  // `.slice` on it blanks the whole pane (there is no error boundary above this).
-  const top = (movements ?? []).slice(0, 5);
-  if (top.length === 0) return null;
-  const directionOf = new Map(deltas.map((d) => [d.key, d.direction]));
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-1 text-meta text-ui-mute">
-        Biggest movers
-      </span>
-      {top.map((m) => {
-        // metaFor, not a direct index: movements ride the report array, and a stale row stored
-        // under an older schema version can carry keys the current vocabulary renamed away.
-        const meta = metaFor(m.key);
-        const neutral = (directionOf.get(m.key) ?? 'neutral') === 'neutral';
-        return (
-          <span
-            key={m.key}
-            className={`rounded-ui bg-ui-surface px-2 py-0.5 text-meta tabular-nums ${
-              neutral ? NEUTRAL_PILL : m.favourable ? GOOD_PILL : BAD_PILL
-            }`}
-            title={
-              neutral
-                ? 'This metric has no good direction — it moved, and that is all this says.'
-                : m.favourable
-                  ? 'Moved in this metric’s good direction'
-                  : 'Moved against this metric’s good direction'
-            }
-          >
-            {standaloneLabelFor(meta)}{' '}
-            <CaretIcon
-              dir={m.absoluteChange > 0 ? 'up' : 'down'}
-              className="inline-block align-[-0.1em]"
-            />{' '}
-            {/* A chip stands alone — no table note beside it — so the change carries its unit. */}
-            {signed(m.absoluteChange, standaloneChangeFmtFor(meta))}
-            {m.percentChange != null && ` (${signed(m.percentChange, pctFmt)})`}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── The report body ──────────────────────────────────────────────────────────────────────────
-function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
-  const comparison = report.comparison;
-  // A backfilled, metrics-only row: no comparison was ATTEMPTED (so no refusal either) and no
-  // forecast was computed. Distinguishable from a generated report whose comparison was refused —
-  // that one carries a `refusal` — and from a real first period, which has a refusal of
-  // 'no_prior_period'. All three used to render identically.
-  const isFiguresOnly =
-    comparison.deltas.length === 0 &&
-    comparison.refusal == null &&
-    comparison.priorPeriodKey == null &&
-    report.forecasts.length === 0;
-
-  return (
-    <div className="space-y-3">
-      {/* Coverage: stated on EVERY report, not only the incomplete ones — "all 19 repos were
-          being tracked" is the sentence that makes the figure trustworthy, and it only means
-          something if its absence is meaningful too. */}
-      <div
-        className={`rounded-ui bg-ui-surface px-3 py-2 text-meta ${
-          report.coverage.complete ? 'text-ui-mute' : 'text-ui-ink'
-        }`}
-      >
-        {report.coverage.complete ? (
-          <>
-            All {report.coverage.totalRepos} repos in this workspace were already being tracked
-            when this period started.
-          </>
-        ) : (
-          <>
-            <WarningIcon className="mr-1 inline-block align-[-0.1em] text-ui-warn" />
-            <span className="font-medium">Partial coverage.</span>{' '}
-            {report.coverage.trackedRepos} of {report.coverage.totalRepos} repos in this workspace
-            were being tracked when this period started. The headline figures below cover the whole
-            workspace as it is today, so they under-count this period relative to a later one —
-            which is why the comparison is computed over the repos present in both.
-          </>
-        )}
-      </div>
-
-      {/* A report stored under an EARLIER metric schema simply lacks the keys added since, and
-          those rows render "—" / "no prior period" rather than 0. Say why, or the blanks read as
-          a bug. The report is immutable by design, so this is not something regeneration under
-          the same period "fixes" silently — it produces a NEW row at the current version. */}
-      {report.metricsSchemaVersion !== PERIOD_METRICS_SCHEMA_VERSION && (
-        <div className="text-meta text-ui-faint">
-          Written under metric schema v{report.metricsSchemaVersion} (current is v
-          {PERIOD_METRICS_SCHEMA_VERSION}) — any metric added since is blank here, not zero.
-        </div>
-      )}
-
-      {report.lanes && <LanesPanel lanes={report.lanes} />}
-
-      <Movements movements={report.movements} deltas={comparison.deltas} />
-
-      {/* ⚠ "NOT COMPUTED" IS NOT "NO PRIOR PERIOD", and they had the same pixels.
-          A BACKFILLED period (spec §8: up to 8 prior periods stored metrics-only on first
-          generate — no LLM, `model: ''`) carries an EMPTY comparison and EMPTY
-          forecasts by construction, not because anything was missing. Rendered through the normal
-          path, every row read "no prior period" and every forecast read "—", which is a claim
-          about the DATA rather than about what was run — and it invited the reader to press
-          Generate on eight periods to fix something that was never broken. */}
-      {isFiguresOnly && (
-        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-mute bg-ui-surface">
-          <span className="font-medium">Figures only.</span> Filled in automatically as forecast
-          history, with no comparison, forecast or write-up. Generate it to compare it with the period
-          before.
-        </div>
-      )}
-
-      {/* What the PROJECTION was fitted on. Separate from the comparison's disclosure above it
-          because they are different subsets answering different questions: the comparison covers
-          the repos present in this period AND the prior one, the forecast covers the repos present
-          across the whole SERIES. A forecast over most of a workspace is worth having; one the
-          reader assumes covers all of it is not. */}
-      {!isFiguresOnly && report.forecastDisclosure && (
-        <div className="text-meta text-ui-mute">
-          Forecast {report.forecastDisclosure}
-        </div>
-      )}
-
-      {/* The comparison's own disclosure, VERBATIM from the server. It is the one sentence that
-          says which repos the deltas are actually about. */}
-      {isFiguresOnly ? null : comparison.refusal ? (
-        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-mute bg-ui-surface">
-          <span className="font-medium">No comparison.</span> {REFUSAL_TEXT[comparison.refusal]}
-        </div>
-      ) : (
-        comparison.subsetDisclosure && (
-          <div className="text-meta text-ui-mute">
-            Comparison {comparison.subsetDisclosure}
-            {comparison.priorPeriodKey && (
-              <span className={MUTED}> · vs {comparison.priorPeriodKey}</span>
-            )}
-          </div>
-        )
-      )}
-
-      <MetricTable report={report} />
-
-      {/* The narration. A backfilled period has none by design (metrics-only, no LLM) — say
-          that plainly rather than showing an empty box. */}
-      {report.narrative ? (
-        <div className="rounded-ui border border-ai-hairline bg-ui-surface p-3">
-          <SummaryMarkdown markdown={report.narrative} prRefs={[]} onOpenPr={() => {}} />
-        </div>
-      ) : (
-        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-faint bg-ui-surface">
-          Not written up yet. Generating adds a write-up; the figures above are final.
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Generation controls ──────────────────────────────────────────────────────────────────────
-function GenerateControls({
-  workspaceId,
-  periodKey,
-  hasReport,
-  stale,
-  reportLoading,
-  modelInfo,
-}: {
-  workspaceId: number | null;
-  periodKey: string | null;
-  hasReport: boolean;
-  stale: boolean;
-  // The report for this period is still in flight, so we do not yet know whether the button
-  // should say Generate or Regenerate. Keep it mounted (hiding it makes the layout jump) but
-  // disabled — offering a BILLING action under a label we know might be wrong is worse than a
-  // moment of nothing.
-  reportLoading: boolean;
-  // The server's model list + its pre-flight quotes. Optional on the wire (an older plugin omits
-  // it), in which case the selector is hidden and no number is quoted — the SPA holds no price
-  // table of its own to fall back on, deliberately. A PRESENT list with one entry is the normal
-  // case now (Haiku is the only selectable model): the selector goes, the quote stays.
-  modelInfo: PeriodReportModelInfo | undefined;
-}): JSX.Element {
-  const choices = useMemo(() => periodReportModelChoices(modelInfo), [modelInfo]);
-  // `null` = "whatever the account is configured for": with no explicit choice the POST body omits
-  // `model` and `pro_settings.report_model` governs, which is what that setting is FOR. Picking
-  // from the selector overrides it for this run only. With the selector hidden (one model) nothing
-  // ever writes this, so every generation goes out without a `model` field — the account setting
-  // and the server default stay in charge, which is what we want when there is nothing to choose.
-  const [model, setModel] = useState<string | null>(null);
-  const effectiveModel = model ?? modelInfo?.model ?? null;
-  // A ONE-OPTION `<select>` is a control that cannot be operated: it invites a click, absorbs it,
-  // and changes nothing. Haiku is the only selectable model now (REPORT_MODELS in the plugin's
-  // llm/seam.ts), so the whole label comes out. The test is on the SERVER's list length, not on a hardcoded id, so re-adding a model server-side brings the
-  // selector back with no frontend release.
-  const showModelPicker = choices.length > 1;
-  const generate = useGeneratePeriodReport(workspaceId, periodKey);
-  // Mount-shared in-flight state. `generate.isPending` is per-mount and resets to "Generate" the
-  // moment this component remounts (a sub-tab switch mid-run), which invites a second model run
-  // — the CiAnalysisCard lesson. The mutation KEY is what two mounts share.
-  const running =
-    useIsMutating({ mutationKey: periodReportGenerateMutationKey(workspaceId, periodKey) }) > 0;
-
-  const blocked = workspaceId == null || periodKey == null || running || reportLoading;
-  const result = generate.data;
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        {showModelPicker && (
-          <div className="flex items-center gap-1 text-meta text-ui-mute">
-            Model
-            <Select<string>
-              label="Model"
-              size="sm"
-              value={effectiveModel ?? null}
-              onChange={(v) => setModel(v)}
-              disabled={running}
-              options={choices.map((c) => ({ value: c.id, label: c.label, hint: c.hint ?? undefined }))}
-            />
-          </div>
-        )}
-        {/* The write-up is a model run: hidden when AI is off, swapped for the one setup or
-            sign-in line when it cannot run (AiRunGate). */}
-        <AiRunGate kind="complete">
-          <button
-            type="button"
-            onClick={() => generate.mutate(model != null ? { model } : {})}
-            disabled={blocked}
-            className="hit rounded-ui border border-ai-border px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
-            title={
-              hasReport
-                ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
-                : 'Compute this period and write it up. The first generation also backfills earlier periods (figures only, no AI) so the forecast has a series.'
-            }
-          >
-            {running
-              ? hasReport
-                ? 'Regenerating…'
-                : 'Generating…'
-              : reportLoading
-                ? 'Loading…'
-                : hasReport
-                  ? stale
-                    ? (
-                        <span className="inline-flex items-center gap-1">
-                          <RefreshIcon size={11} />
-                          Regenerate
-                        </span>
-                      )
-                    : 'Regenerate'
-                  : 'Generate'}
-          </button>
-        </AiRunGate>
-      </div>
-
-      {generate.isError && (
-        <div className="text-meta text-ui-danger">
-          {(generate.error as Error)?.message ?? 'Couldn’t generate the report.'}
-        </div>
-      )}
-      {result?.cadenceMissing && (
-        <div className="text-meta text-ui-warn">
-          No sprint cadence is configured, so there is no period to report on.
-        </div>
-      )}
-      {/* What ran. A silent no-op button reads as broken, which is why the cache hit says so out
-          loud. ⚠ `generated === false` is also false when no cadence is configured, which already
-          prints its own line above — so that case is excluded here. */}
-      {result != null && !generate.isError && !result.cadenceMissing && (
-        <div className="text-meta text-ui-faint">
-          {result.generated === false
-            ? 'Already had this one — served from cache.'
-            : `Generated with ${runModelName(result.spend?.model ?? result.report?.ranModel ?? result.report?.model ?? effectiveModel) ?? 'the default model'}.`}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── The "i" beside the period title ──────────────────────────────────────────────────────────
-// How a period report is cut and what its chips mean. The chips keep their `title=`, but a touch
-// reader cannot reach a title, so their meanings are restated here.
-function PeriodReportsInfo(): JSX.Element {
-  return (
-    <>
-      <p>
-        A report covers one completed period: a sprint, at this workspace’s sprint length, or a
-        calendar month from the 1st (UTC). Choose with Grain.
-      </p>
-      <p>
-        Months run 28 to 31 days, so a month report has no forecast: the difference in length would
-        read as a trend.
-      </p>
-      <p>
-        The current month shows <span className="font-medium">in progress</span>. Its figures are
-        worked out live each time you open it, nothing is stored or written up, and it is compared
-        with the same days of the month before.
-      </p>
-      <p>
-        <span className="font-medium">Stale</span>: the data changed after the report was written.
-        The report is kept as generated, so a copy already sent stays comparable. Regenerate for the
-        newer figures.
-      </p>
-      <p>
-        <span className="font-medium">Archived</span>, and Earlier cadences: reports written under a
-        sprint length this workspace no longer uses, or older than the current periods reach. They
-        are kept as written and cannot be regenerated, because their dates no longer line up with
-        the current periods.
-      </p>
-    </>
-  );
-}
-
 // ── Empty / setup states ─────────────────────────────────────────────────────────────────────
 function SetupPrompt(): JSX.Element {
   return (
@@ -1053,400 +348,340 @@ function Skeleton(): JSX.Element {
 }
 
 // ── The panel ────────────────────────────────────────────────────────────────────────────────
-export function PeriodReportsPanel(): JSX.Element | null {
-  // null until the workspaces query resolves the account's Default. Nothing workspace-scoped may
-  // render — and nothing billable may fire — before then.
-  const workspaceId = useFilters((s) => s.workspaceId);
 
-  // ⚠ THE GRAIN IS A READING CHOICE, HELD IN THE STORE AND MIRRORED TO `?reportGrain=`. It is
-  // deliberately NOT the sprint-cadence setting: that is a stored per-workspace fact which also
-  // grids the flow-metrics comparison window on another tab, so overloading it would move a
-  // number on a screen nobody was looking at.
-  const grain = useFilters((s) => s.insightsReportGrain);
-  const setGrain = useFilters((s) => s.setInsightsReportGrain);
-  const list = usePeriodReportsList(true, workspaceId, grain);
-  const periods = useMemo<PeriodReportListItem[]>(() => list.data?.periods ?? [], [list.data]);
-  // Stored artifacts this workspace's CURRENT cadence grid cannot name — reports generated under a
-  // cadence the team has since changed, plus anything aged past the look-back horizon. They are
-  // preserved, never deleted, and readable at their own `<periodKey>@cad<days>` key.
-  const archived = useMemo<PeriodArchivedReport[]>(() => list.data?.archived ?? [], [list.data]);
+type Mode = 'change' | 'values';
 
-  // The selection lives in the FILTERS STORE, not in local state, because it is URL-mirrored as
-  // `?report=<periodKey>` (see hooks/useUrlState.ts) — and a link to the period you are reading is
-  // the point of the artifact. `useUrlState` hydrates the store from the query string before this
-  // panel mounts, so a forwarded link opens on the period it names with no module-load capture
-  // trick; selecting another period writes the URL back.
-  const selectedKey = useFilters((s) => s.insightsReportKey);
-  const setSelectedKey = useFilters((s) => s.setInsightsReportKey);
-  // Re-seat the selection when the workspace changes or the selected key is not in the list (a
-  // stale link, or a period the plugin's retention has dropped). Written as an effect against the
-  // RESOLVED list rather than a corrective render, so the user's own choice is never quietly
-  // replaced while it is still valid.
-  useEffect(() => {
-    // ⚠ WAIT FOR THE LIST TO RESOLVE BEFORE TOUCHING THE SELECTION. `periods` is
-    // `list.data?.periods ?? []`, so "still loading" and "this workspace has no periods" are the
-    // same empty array — and clearing on the first was enough to break every forwarded link:
-    // hydrate put `?report=sprint-2026-07-22` in the store, this effect ran on the cold query and
-    // nulled it, and the seat below then chose `periods[0]`. The reader got the NEWEST period, the
-    // URL rewrote itself to match, and nothing anywhere indicated that the link had been ignored —
-    // which is worse than an error, because the page looks like it worked.
-    if (list.data == null) return;
-    if (periods.length === 0) {
-      if (selectedKey != null) setSelectedKey(null);
-      return;
-    }
-    // ⚠ AN ARCHIVED KEY IS A VALID SELECTION. It is not in `periods` by construction (that is what
-    // "archived" means), so without this the re-seat would bounce a reader off an old-cadence
-    // report the instant they opened one — and rewrite the URL of the link that brought them.
-    const valid =
-      periods.some((p) => p.periodKey === selectedKey) ||
-      archived.some((a) => a.archivedKey === selectedKey);
-    if (selectedKey == null || !valid) {
-      setSelectedKey(periods[0]!.periodKey);
-    }
-  }, [list.data, periods, archived, selectedKey, setSelectedKey]);
+/** A metric's name standing alone: the table's "…by people" rows read "Merged PRs by people". */
+function metricName(k: PeriodMetricKey): string {
+  const label = metaFor(k).label;
+  if (!label.startsWith('…')) return label;
+  const parent: PeriodMetricKey = k === 'human_merged_prs' ? 'merged_prs' : 'median_pr_size_lines';
+  return `${metaFor(parent).label} ${label.slice(1)}`;
+}
 
-  // ⚠ TWO SOURCES, ONE SELECTION — and which one answers is decided by the LIST ROW, not by the
-  // key's shape. A completed period is a STORED, immutable artifact read through `usePeriodReport`
-  // (which also reports staleness); the open month is a LIVE recompute with no row behind it. Both
-  // hooks are always called (hook order), and exactly one is enabled.
-  const selectedItem = periods.find((p) => p.periodKey === selectedKey) ?? null;
-  const isMonthToDate = selectedItem?.inProgress === true;
-  const stored = usePeriodReport(!isMonthToDate, workspaceId, selectedKey);
-  const live = usePeriodMonthToDate(isMonthToDate, workspaceId);
-  const report = isMonthToDate ? live : stored;
+const bandTitle = (p: Pick<PeriodSeriesPoint, 'periodStart' | 'periodEnd'>, grain: PeriodGrain): string =>
+  periodTitle(p.periodStart, p.periodEnd, grain);
+/** Under a narrow band: the start date only ("18 Aug"), or the month's short name. */
+const bandShort = (startIso: string, grain: PeriodGrain): string =>
+  new Date(startIso).toLocaleDateString(undefined, grain === 'month' ? { month: 'short', timeZone: 'UTC' } : { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-  // The "Copy as Markdown" text — the report rendered by the deterministic exporter, built from
-  // the SAME METRIC_META/REFUSAL_TEXT/rowFigures this panel renders (periodReportMarkdown.ts).
-  // Hook sits above the early returns (hooks-order rule); empty string ⇒ CopyButton
-  // renders nothing.
-  const reportMarkdown = useMemo(() => {
-    const r = report.data?.report;
-    // try/catch, not trust: this memo runs during render with no error boundary above it, so a
-    // renderer defect on one stored row (it happened — a stale v1 row's renamed metric key)
-    // must degrade to "no copy button" ('' ⇒ CopyButton renders nothing), never blank the pane.
-    try {
-      return r ? renderPeriodReportMarkdown(r, PERIOD_METRICS_SCHEMA_VERSION) : '';
-    } catch (err) {
-      console.error('period report markdown failed', err);
-      return '';
-    }
-  }, [report.data]);
-
-  // `enabled: false` from the route: the reports surface is switched off server-side. Render
-  // nothing rather than the "no periods yet" empty state, whose copy invites a click which cannot
-  // work.
-  if (list.data?.enabled === false) return null;
-
-  // Fold `isPlaceholderData` into loading everywhere: a stale window's numbers under a new
-  // window's caption is a bug this codebase has already shipped once. (Neither of these queries
-  // sets placeholderData today — the check is here so adding it later cannot reintroduce that.)
-  const listLoading = list.isLoading || list.isPlaceholderData;
-  // `selectedKey == null` counts as loading: the seating effect runs one commit after the list
-  // lands, and without this the "not generated yet" box paints for that one frame on a workspace
-  // that has plenty of reports.
-  const reportLoading = report.isLoading || report.isPlaceholderData || selectedKey == null;
-
-  const selectedArchived = archived.find((a) => a.archivedKey === selectedKey) ?? null;
-  // One shape for the title row, whichever list the selection came from. An archived entry carries
-  // the same start/end/cadence fields; `coverageComplete` is a live-period annotation and is simply
-  // absent, which renders as no marker rather than as a false "complete".
-  const selected: {
-    periodStart: string;
-    periodEnd: string;
-    cadenceDays: number;
-    grain?: PeriodGrain;
-  } | null = selectedItem ?? selectedArchived;
-  const current = report.data?.report ?? null;
-
+function PeriodReportsInfo(): JSX.Element {
   return (
-    // `data-print-report` scopes the @media print stylesheet (index.css): printing the Reports
-    // pane prints THIS subtree — title, coverage, figures table, forecast, narrative — with the
-    // rail/tabs/chat/buttons hidden and light colors forced. Print-to-PDF is the board-pack path.
-    <div className="space-y-3" data-testid="period-reports" data-print-report>
-      {/* ── GRAIN TOGGLE ────────────────────────────────────────────────────────────────────
-          Both grains COEXIST and sprint stays the default — this is an additional way to read
-          the same window-pure vector, not a replacement for the team's cadence. It sits OUTSIDE
-          the loading branches so the control never disappears while a list reloads (switching
-          grain is exactly when that reload happens). */}
-      <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-        <span className="mr-1 w-12 text-meta text-ui-mute">
-          Grain
-        </span>
-        {(
-          [
-            ['sprint', 'Sprint', 'Periods of the length this workspace runs its sprints at'],
-            [
-              'month',
-              'Month',
-              'Real calendar months, aligned to the 1st (UTC). Needs no cadence setting — and month-to-date is live',
-            ],
-          ] as [PeriodGrain, string, string][]
-        ).map(([g, label, hint]) => (
+    <>
+      <p>
+        Each band is one completed period: a sprint at this workspace’s sprint length (the last 12 weeks), or a calendar month
+        (the last 6). The hatched band is the period in progress, with the projection for it.
+      </p>
+      <p>
+        Every period is measured over the same repos: the ones tracked since the first period shown. A repo added later is left
+        out, so a line shows the work, not the repos being added.
+      </p>
+      <p>
+        <span className="font-medium">Change</span> shows each metric as the change from its first period with enough data, so
+        metrics of any size compare on one chart. <span className="font-medium">Values</span> shows the figures, one chart per unit.
+      </p>
+      <p>Hover or tap a band for its figures. Select one to see its effort vs automation.</p>
+      <p>Months run 28 to 31 days, so months have no projection.</p>
+    </>
+  );
+}
+
+function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string, string][]; onChange: (v: T) => void }): JSX.Element {
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label={label}>
+      <span className="mr-0.5 text-meta text-ui-mute">{label}</span>
+      {options.map(([v, text, hint]) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          aria-pressed={value === v}
+          title={hint}
+          className={`inline-flex h-7 items-center rounded-ui px-2.5 text-body touch:h-10 ${FOCUS_RING} ${
+            value === v ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
+          }`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MetricChips({ picked, colorOf, onToggle }: { picked: PeriodMetricKey[]; colorOf: (k: PeriodMetricKey) => string; onToggle: (k: PeriodMetricKey) => void }): JSX.Element {
+  const full = picked.length >= MAX_METRICS;
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Metrics" data-testid="period-metric-chips">
+      {PERIOD_METRIC_KEYS.map((k) => {
+        const on = picked.includes(k);
+        const meta = METRIC_META[k];
+        const name = metricName(k);
+        return (
           <button
-            key={g}
+            key={k}
             type="button"
-            onClick={() => setGrain(g)}
-            aria-pressed={grain === g}
-            title={hint}
-            className={`inline-flex h-7 items-center rounded-ui px-2.5 text-body touch:h-10 ${FOCUS_RING} ${
-              grain === g ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
+            data-metric={k}
+            aria-pressed={on}
+            disabled={!on && full}
+            title={!on && full ? `Up to ${MAX_METRICS} at once` : meta.note}
+            onClick={() => onToggle(k)}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-ui px-2 text-meta touch:h-10 disabled:opacity-50 ${FOCUS_RING} ${
+              on ? 'bg-ui-sel font-medium text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
             }`}
           >
-            {label}
+            <span aria-hidden className="decorative-mark h-2 w-2 rounded-[2px]" style={on ? { background: colorOf(k) } : { border: `1.5px solid ${PALETTE.gray}` }} />
+            {name}
           </button>
-        ))}
+        );
+      })}
+    </div>
+  );
+}
+
+/** One band's figures in its popover: the value, a thin-sample mark, the change vs the period before. */
+function BandFigures({ point, keys, since }: { point: PeriodSeriesPoint; keys: PeriodMetricKey[]; since?: (k: PeriodMetricKey) => string | null }): JSX.Element {
+  return (
+    <ul className="space-y-1.5">
+      {keys.map((k) => {
+        const meta = metaFor(k);
+        const m = metricOf(point, k);
+        const d = deltaOf(point, k);
+        return (
+          <li key={k}>
+            <div className="font-medium text-ui-ink">{metricName(k)}</div>
+            <div className="tabular-nums text-ui-mute">
+              <span className="text-ui-ink">{m?.value == null ? '—' : meta.format(m.value)}</span>
+              {m?.lowSample === true && m.value != null && (
+                <span className="ml-1 text-ui-warn" aria-label="thin sample" title={`${m.sampleSize} item${m.sampleSize === 1 ? '' : 's'} behind this figure`}>
+                  <ThinSampleIcon />
+                </span>
+              )}
+              {/* vs the period before: a percentage only when the server calls the change significant. */}
+              {d?.prior != null && d.value != null && d.absoluteChange != null && (
+                <span>
+                  {' · '}
+                  {d.significant && d.percentChange != null ? changeLabel(d.percentChange) : signed(d.absoluteChange, changeFmtFor(meta))} vs the
+                  period before
+                </span>
+              )}
+            </div>
+            {since?.(k) != null && <div className="text-ui-faint">{since(k)}</div>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ProjectionFigures({ series, keys }: { series: PeriodSeriesResponse; keys: PeriodMetricKey[] }): JSX.Element {
+  return (
+    <ul className="space-y-1.5">
+      {keys.map((k) => {
+        const meta = metaFor(k);
+        const f = series.forecasts.find((x) => x.key === k);
+        return (
+          <li key={k}>
+            <div className="font-medium text-ui-ink">{metricName(k)}</div>
+            <div className="tabular-nums text-ui-mute">
+              {f?.available ? (
+                <>
+                  <span className="text-ui-ink">{meta.format(f.point)}</span> projected · {meta.format(f.low)}–{meta.format(f.high)}
+                </>
+              ) : (
+                (f != null && NO_PROJECTION[f.reason]) ?? 'No projection.'
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function PeriodReportsPanel(): JSX.Element | null {
+  // null until the workspaces query resolves the account's Default: nothing workspace-scoped renders.
+  const workspaceId = useFilters((s) => s.workspaceId);
+  // The grain is a READING choice (store + `?reportGrain=`), never the sprint-cadence setting.
+  const grain = useFilters((s) => s.insightsReportGrain);
+  const setGrain = useFilters((s) => s.setInsightsReportGrain);
+  // The selected period (store + `?report=`): Effort vs automation follows it.
+  const selectedKey = useFilters((s) => s.insightsReportKey);
+  const setSelectedKey = useFilters((s) => s.setInsightsReportKey);
+  const [mode, setMode] = useState<Mode>('change');
+  const [picked, setPicked] = useState<PeriodMetricKey[]>(() => [...PERIOD_SERIES_DEFAULT_METRICS]);
+  const q = usePeriodSeries(workspaceId, grain);
+  const series = q.data ?? null;
+  const periods = useMemo(() => series?.periods ?? [], [series]);
+
+  // Seat the selection on the newest period when it names none of these (a new grain, a stale link).
+  useEffect(() => {
+    if (series == null || periods.length === 0) return;
+    if (selectedKey == null || !periods.some((p) => p.periodKey === selectedKey)) setSelectedKey(periods[periods.length - 1]!.periodKey);
+  }, [series, periods, selectedKey, setSelectedKey]);
+  const selected = Math.max(0, periods.findIndex((p) => p.periodKey === selectedKey));
+
+  const colorOf = (k: PeriodMetricKey): string => SERIES_COLORS[picked.indexOf(k) % SERIES_COLORS.length] ?? PALETTE.blue;
+  const change = useMemo(() => new Map(picked.map((k) => [k, changeSeries(periods, k)] as const)), [picked, periods]);
+  const refusedBaseline = picked.filter((k) => change.get(k)?.base == null);
+
+  const markdown = useMemo(() => {
+    if (series == null || periods.length === 0) return '';
+    try {
+      return seriesMarkdown(periods, picked, metricName, (k, v) => metaFor(k).format(v), (p) => bandTitle(p, grain), series.repos);
+    } catch {
+      return '';
+    }
+  }, [series, periods, picked, grain]);
+
+  if (series?.enabled === false) return null;
+  const bands = periods.map((p) => ({ key: p.periodKey, label: bandTitle(p, grain), short: bandShort(p.periodStart, grain) }));
+  const next = series?.next != null && periods.length > 0 ? { label: bandTitle(series.next, grain), short: bandShort(series.next.periodStart, grain) } : null;
+  const nextLabel = series?.next != null ? bandTitle(series.next, grain) : '';
+
+  const chartFor = (keys: PeriodMetricKey[], testId: string): JSX.Element => {
+    const lines: PeriodChartLine[] = keys.map((k) => {
+      const c = change.get(k)!;
+      return {
+        key: k,
+        label: metricName(k),
+        color: colorOf(k),
+        values: mode === 'change' ? c.values : valuesOf(periods, k),
+        projection: projectionIn(series?.forecasts.find((f) => f.key === k), mode, c.base),
+      };
+    });
+    const all = lines.flatMap((l) => [...l.values, l.projection?.low ?? null, l.projection?.high ?? null]);
+    let domain: { min: number; max: number };
+    let ticks: number[];
+    let formatTick: (v: number) => string;
+    if (mode === 'change') {
+      const axis = changeAxis(all);
+      domain = { min: axis.min, max: axis.max };
+      ticks = axis.ticks;
+      formatTick = (v) => changeLabel(v);
+    } else {
+      const max = niceMax(Math.max(0, ...all.filter((v): v is number => v != null)));
+      domain = { min: 0, max };
+      ticks = [0, max / 4, max / 2, (3 * max) / 4, max];
+      const fmt = metaFor(keys[0]!).format;
+      formatTick = (v) => (keys[0]!.endsWith('_hours') ? fmtDuration(v) : fmt(v));
+    }
+    return (
+      <PeriodSeriesChart
+        testId={testId}
+        bands={bands}
+        next={next}
+        lines={lines}
+        domain={domain}
+        ticks={ticks}
+        formatTick={formatTick}
+        zeroRule={mode === 'change'}
+        selected={selected}
+        onSelect={(i) => setSelectedKey(periods[i]!.periodKey)}
+        bandLabel={(i) => (i < periods.length ? bands[i]!.label : nextLabel)}
+        popover={(i) =>
+          i < periods.length ? (
+            <>
+              <div className="mb-1 font-semibold text-ui-ink">{bands[i]!.label}</div>
+              <BandFigures
+                point={periods[i]!}
+                keys={keys}
+                since={(k) => {
+                  if (mode !== 'change') return null;
+                  const c = change.get(k);
+                  const v = c?.values[i];
+                  return c?.base != null && v != null && c.base.index !== i ? `${changeLabel(v)} since ${bands[c.base.index]!.label}` : null;
+                }}
+              />
+            </>
+          ) : series != null ? (
+            <>
+              <div className="mb-1 font-semibold text-ui-ink">{nextLabel} · in progress</div>
+              <ProjectionFigures series={series} keys={keys} />
+            </>
+          ) : null
+        }
+      />
+    );
+  };
+
+  return (
+    <div className="space-y-3" data-testid="period-reports" data-print-report>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 print:hidden">
+        <Segmented
+          label="Grain"
+          value={grain}
+          onChange={setGrain}
+          options={[
+            ['sprint', 'Sprint', 'The last 12 weeks, at this workspace’s sprint length'],
+            ['month', 'Month', 'The last 6 calendar months'],
+          ]}
+        />
+        <Segmented
+          label="Show as"
+          value={mode}
+          onChange={setMode}
+          options={[
+            ['change', 'Change', 'Each metric as the change from its first period, so any metrics compare on one chart'],
+            ['values', 'Values', 'The figures, one chart per unit'],
+          ]}
+        />
+        <span className="flex items-center gap-1">
+          <InfoButton title="Period reports" className="text-ui-mute hover:text-ui-ink">
+            <PeriodReportsInfo />
+          </InfoButton>
+          <CopyButton text={markdown} what="periods as Markdown" />
+        </span>
       </div>
-      {workspaceId == null || listLoading ? (
+
+      {workspaceId == null || q.isLoading ? (
         <Skeleton />
-      ) : list.data?.cadenceConfigured === false ? (
+      ) : q.isError ? (
+        <div className="text-meta text-ui-danger">Couldn’t load the periods.</div>
+      ) : series?.cadenceConfigured === false ? (
         <SetupPrompt />
       ) : periods.length === 0 ? (
         <div className="rounded-ui p-4 text-meta text-ui-mute bg-ui-surface">
-          {grain === 'month'
-            ? 'No months yet. A report covers one completed calendar month — the first one appears once a month has ended with activity behind it.'
-            : 'No periods yet. A report covers one completed sprint — the first one appears once a sprint boundary has passed with activity behind it.'}
+          {grain === 'month' ? 'No completed months with tracked repos yet.' : 'No completed sprints with tracked repos yet.'}
         </div>
       ) : (
         <>
-          {/* Period picker. Newest first; the label IS the date range, which is also the title
-              below — the reader never has to decode a key to know what they are looking at. */}
-          <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-            <span className="mr-1 w-12 text-meta text-ui-mute">
-              Period
-            </span>
-            {periods.slice(0, 8).map((p) => {
-              const on = p.periodKey === selectedKey;
-              return (
-                <button
-                  key={p.periodKey}
-                  type="button"
-                  onClick={() => setSelectedKey(p.periodKey)}
-                  aria-pressed={on}
-                  /* ⚠ ONE HEIGHT DOWN THE WHOLE ROW, AND IT IS SET RATHER THAN INHERITED.
-                     `inline-flex items-center` puts the partial-coverage mark on the text's own
-                     line instead of below its baseline — an inline SVG grows the line box, so the
-                     one chip carrying the mark used to stand taller than every chip beside it.
-                     The explicit `h-[22px]` then matches the `Earlier…` select below, which a
-                     browser renders taller than a bare button whatever the padding says. */
-                  className={`inline-flex h-7 items-center gap-1 rounded-ui px-2.5 text-body tabular-nums leading-none touch:h-10 ${FOCUS_RING} ${
-                    on ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
-                  }`}
-                  title={
-                    p.hasNarrative
-                      ? `${p.periodKey} · written up${p.model ? ` with ${aiRunLabel(p.provider ?? null, p.ranModel ?? p.model)}` : ''}`
-                      : `${p.periodKey} · figures only, not written up`
-                  }
-                >
-                  <span className="truncate">{shortPeriodLabel(p)}</span>
-                  {!p.coverageComplete && (
-                    <span
-                      className="flex shrink-0 items-center text-ui-warn"
-                      title="Partial repo coverage"
-                    >
-                      <PartialCircleIcon />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            {periods.length > 8 && (
-              (() => {
-                const earlier = periods.slice(8);
-                const picked = earlier.find((p) => p.periodKey === selectedKey) ?? null;
-                return (
-                  <Menu
-                    label="Earlier periods"
-                    trigger={(props) => (
-                      <button
-                        {...props}
-                        type="button"
-                        className={`inline-flex h-7 items-center gap-1 rounded-ui px-2.5 text-body tabular-nums touch:h-10 ${FOCUS_RING} ${
-                          picked ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
-                        }`}
-                      >
-                        {picked ? shortPeriodLabel(picked) : 'Earlier…'}
-                        <CaretIcon dir="down" />
-                      </button>
-                    )}
-                    items={earlier.map((p) => ({
-                      id: p.periodKey,
-                      label: shortPeriodLabel(p),
-                      onSelect: () => setSelectedKey(p.periodKey),
-                    }))}
-                  />
-                );
-              })()
-            )}
-          </div>
-
-          {/* THE TITLE IS THE DATE RANGE, with the grain named beside it. Never "monthly" and
-              never "month on month" — a 14-day cadence is ~2.17 periods per calendar month, so
-              that wording would be plainly false. */}
-          {selected && (
-            <div className="flex flex-wrap items-baseline gap-2">
-              <span className="flex items-center gap-1 self-center">
-                <h3 className="text-title text-ui-ink">
-                  {periodTitle(
-                    selected.periodStart,
-                    selected.periodEnd,
-                    selected.grain ?? current?.grain ?? 'sprint',
-                  )}
-                </h3>
-                <InfoButton title="Period reports" className="print:hidden text-ui-mute hover:text-ui-ink">
-                  <PeriodReportsInfo />
-                </InfoButton>
-              </span>
-              <span
-                className="text-meta text-ui-faint"
-                title={
-                  (selected.grain ?? current?.grain ?? 'sprint') === 'month'
-                    ? 'A calendar month, from the 1st (UTC)'
-                    : 'This workspace’s sprint length'
-                }
-              >
-                {grainCaption(
-                  selected.grain ?? current?.grain ?? 'sprint',
-                  selected.cadenceDays,
-                )}
-                {/* Named only when it is this WORKSPACE's own setting. The account default is the
-                    unremarkable case and saying so on every report would be noise; a per-workspace
-                    cadence is the one a reader may not expect, and it is the one they would go
-                    looking for after seeing a period they did not recognise. Month grain has no
-                    per-workspace anything — the calendar is not a setting. */}
-                {(selected.grain ?? current?.grain ?? 'sprint') === 'sprint' &&
-                  list.data?.cadenceSource === 'workspace' &&
-                  !current?.archived && <span className="ml-1">· this workspace</span>}
-              </span>
-              {current && !current.inProgress && (
-                <span className="text-meta text-ui-faint" title={current.periodKey}>
-                  {current.model ? `${aiRunLabel(current.provider ?? null, current.ranModel ?? current.model)} · ` : ''}
-                  generated {new Date(current.generatedAt).toLocaleString()}
-                </span>
+          <MetricChips picked={picked} colorOf={colorOf} onToggle={(k) => setPicked((p) => toggleMetric(p, k))} />
+          <p data-testid="period-series-repos" className="text-meta text-ui-mute">
+            {series!.repos.measured === series!.repos.total
+              ? `All ${series!.repos.total} repos.`
+              : `${series!.repos.measured} of ${series!.repos.total} repos: the ones tracked across every period.`}
+            {series!.forecastDisclosure != null && ` Projection ${series!.forecastDisclosure}.`}
+          </p>
+          {mode === 'change' ? (
+            <div className="rounded-ui bg-ui-bg">
+              {chartFor(picked.filter((k) => change.get(k)?.base != null), 'period-chart')}
+              {refusedBaseline.length > 0 && (
+                <p data-testid="period-no-baseline" className="mt-1 text-meta text-ui-mute">
+                  No baseline for {refusedBaseline.map(metricName).join(', ')}: no period has enough data. Show as Values to see
+                  the figures.
+                </p>
               )}
-              {/* ⚠ AN OPEN PERIOD SAYS SO, AND SAYS IT DIFFERENTLY FROM "not generated yet".
-                  It carries no stored row at all: it is recomputed on every read, so there is
-                  nothing to generate, nothing to go stale, and nothing written up. */}
-              {current?.inProgress && (
-                <span
-                  className="rounded-ui bg-ai-signal/10 px-1.5 py-0.5 text-meta font-semibold text-ai-signal"
-                  title="This month is still running. The figures are recomputed live on every read — nothing is stored, nothing is written up, and there is nothing to regenerate. The comparison is against the SAME stretch of the previous month, not against the whole of it."
-                >
-                  in progress · {current.elapsedDays ?? 0} day
-                  {current.elapsedDays === 1 ? '' : 's'} so far
-                </span>
-              )}
-              {current?.archived && (
-                <span
-                  className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-semibold text-ui-mute"
-                  title="Generated under a sprint cadence this workspace no longer runs. It is kept exactly as it was written and cannot be regenerated — its window is not on the current period grid."
-                >
-                  archived · {current.cadenceDays}-day cadence
-                </span>
-              )}
-              {current?.stale && (
-                <span
-                  className="rounded-ui bg-ui-surface px-1.5 py-0.5 text-meta font-semibold text-ui-ink"
-                  title="The underlying data changed after this report was written. It is kept exactly as generated — a copy someone has already forwarded has to stay comparable — so regenerate if you want the newer figures."
-                >
-                  stale
-                </span>
-              )}
-              {/* Copy the whole report as markdown — the forwardable artifact (plan N3). The text
-                  is the deterministic export above; an empty string (no report yet) renders no
-                  button at all, per CopyButton's own contract. */}
-              <CopyButton text={reportMarkdown} what="report as Markdown" className="print:hidden" />
-            </div>
-          )}
-
-          {/* Generation is a screen affordance, not part of the printed artifact.
-              ⚠ ABSENT ENTIRELY ON AN ARCHIVED REPORT, not disabled. Its window is not on the
-              current cadence grid, so there is nothing the server could generate — and offering the
-              button is how a reader used to be invited to overwrite the artifact they were
-              reading. */}
-          {/* ⚠ ABSENT ON AN OPEN PERIOD as well as an archived one, and for the mirror-image
-              reason: an archived window is off the grid so there is nothing the server COULD
-              generate, and an open window must never be stored at all (its data fingerprint moves
-              on every merge, so the row would read stale forever and invite a billed regenerate on
-              every load). Absent, never disabled. */}
-          {!(current?.archived === true) && !isMonthToDate && !(current?.inProgress === true) && (
-          <div className="print:hidden">
-          <GenerateControls
-            workspaceId={workspaceId}
-            periodKey={selectedKey}
-            hasReport={current != null}
-            stale={current?.stale === true}
-            reportLoading={reportLoading}
-            modelInfo={list.data?.modelInfo}
-          />
-          </div>
-          )}
-
-          {reportLoading ? (
-            <Skeleton />
-          ) : report.isError ? (
-            <div className="text-meta text-ui-danger">
-              {(report.error as Error)?.message ?? 'Couldn’t load this report.'}
-            </div>
-          ) : current ? (
-            // Keyed by the period so switching periods remounts the body — every derived map
-            // belongs to ONE period and must not carry over.
-            <div key={current.periodKey}>
-              <ReportBody report={current} />
             </div>
           ) : (
-            <div className="rounded-ui p-4 text-meta text-ui-mute bg-ui-surface">
-              {isMonthToDate
-                ? 'Couldn’t read the month-to-date figures. Try again.'
-                : grain === 'month'
-                  ? 'This month has not been generated yet. The first Generate also fills in earlier months, figures only.'
-                  : 'This period has not been generated yet. The first Generate also fills in earlier periods, figures only, so the forecast has history.'}
-            </div>
-          )}
-
-
-          {/* ── EARLIER CADENCES ────────────────────────────────────────────────────────────
-              Stored reports the current period grid cannot name. They are here because a report is
-              an artifact somebody forwarded: changing the sprint length regrids the boundaries, so
-              a report measured over 14 days is not a period on a 7-day grid — but it is still a
-              real document, and it stays readable rather than being deleted, rewritten, or (worse)
-              left CLICKABLE in the picker above where it opened as an ordinary empty state.
-              Collapsed by default: this is a shelf, not part of the current reading. */}
-          {archived.length > 0 && (
-            <details className="print:hidden">
-              <summary className="hit cursor-pointer text-meta text-ui-faint hover:text-ui-mute">
-                Earlier cadences ({archived.length})
-              </summary>
-              <div className="mt-1.5 space-y-1 pl-2">
-                <p className="text-meta text-ui-faint">
-                  Kept as written. They cannot be regenerated.
-                </p>
-                {archived.map((a) => (
-                  <button
-                    key={a.archivedKey}
-                    type="button"
-                    onClick={() => setSelectedKey(a.archivedKey)}
-                    aria-pressed={a.archivedKey === selectedKey}
-                    className={`block text-left text-meta hover:underline ${
-                      a.archivedKey === selectedKey
-                        ? 'text-ai-signal'
-                        : 'text-ui-mute'
-                    }`}
-                    title={
-                      a.reason === 'cadence_changed'
-                        ? `Measured over a ${a.cadenceDays}-day sprint, which this workspace no longer runs`
-                        : 'Older than the period grid reaches back'
-                    }
-                  >
-                    {periodTitle(a.periodStart, a.periodEnd, a.grain ?? 'sprint')}
-                    <span className="ml-1.5 text-ui-faint">
-                      {a.cadenceDays}-day
-                      {a.hasNarrative ? ' · written up' : ' · figures only'}
-                    </span>
-                  </button>
-                ))}
+            <>
+            {picked.some((k) => valuesOf(periods, k).every((v) => v == null)) && (
+              <p data-testid="period-no-figures" className="text-meta text-ui-mute">
+                No figures for {picked.filter((k) => valuesOf(periods, k).every((v) => v == null)).map(metricName).join(', ')} in these periods.
+              </p>
+            )}
+            {unitGroups(picked).map((g) => (
+              <div key={g.unit}>
+                <h4 className="mb-0.5 text-meta font-medium text-ui-mute">{PERIOD_UNIT_WORDS[g.unit]}</h4>
+                {chartFor(g.keys, `period-chart-${g.unit}`)}
               </div>
-            </details>
+            ))}
+            </>
+          )}
+          {periods[selected]?.lanes != null && (
+            <div data-testid="period-lanes">
+              <div className="mb-1 text-meta text-ui-mute">{bands[selected]!.label} · all {series!.repos.total} repos</div>
+              <LanesPanel lanes={periods[selected]!.lanes!} />
+            </div>
           )}
         </>
       )}

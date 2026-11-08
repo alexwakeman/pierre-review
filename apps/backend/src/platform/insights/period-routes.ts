@@ -1,23 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   PeriodGrain,
-  PeriodReportGenerateResponse,
   PeriodReportModelInfo,
   PeriodReportResponse,
   PeriodReportsListResponse,
+  PeriodSeriesResponse,
 } from '@pierre-review/shared';
 import type { BotScopeWire, ProContext } from '../contract.js';
-import {
-  makeReportClient,
-  REPORT_MODELS,
-  resolveReportModel,
-  type ReportModel,
-} from '../llm/seam.js';
+import { REPORT_MODELS, type ReportModel } from '../llm/seam.js';
 import { readSettingsRow, reportModelOf, resolveSprintCadence } from '../settings/store.js';
 import { resolveRequestScope } from './workspace-request.js';
 import {
   buildMonthToDate,
-  generatePeriodReport,
+  buildPeriodSeries,
   grainOfKey,
   listPeriods,
   loadArchivedReport,
@@ -33,8 +28,11 @@ import {
 //
 //   GET  /api/pro/insights/reports?workspace=&grain=       list stored periods (free)
 //   GET  /api/pro/insights/month-to-date?workspace=        the OPEN month, live (free)
+//   GET  /api/pro/insights/period-series?workspace=&grain= THE Reports chart: every period of the
+//                                                         last 12 weeks / 6 months, live, DB only
 //   GET  /api/pro/insights/reports/:periodKey?workspace=   one report (free, cached, no generation)
-//   POST /api/pro/insights/reports/:periodKey/generate     manual, credit-gated, model-selectable
+//   (POST …/reports/:periodKey/generate — the AI write-up — was REMOVED 2026-11-08: Reports is
+//   code-only. Nothing in reporting calls a model.)
 //
 // Registered UNCONDITIONALLY and self-gated on DIGEST_ENABLED inside each handler (the house
 // pattern): a flag-less build answers `enabled: false` rather than 404ing, so the SPA can tell
@@ -85,16 +83,6 @@ interface ListQuery extends ScopeQuery {
  */
 function parseGrain(raw: string | undefined): PeriodGrain {
   return raw === 'month' ? 'month' : 'sprint';
-}
-
-interface GenerateBody {
-  /** Per-run override; unrecognised — and now RETIRED — values fall back to the account default
-   *  rather than 400ing, and the store already refuses to persist anything outside REPORT_MODELS.
-   *  With one selectable model the SPA stops sending this field at all (the picker is hidden), so
-   *  in practice every run takes the account default; the field stays because it is the seam a
-   *  second model would arrive through, and because an OLD client may still send `claude-sonnet-5`
-   *  — which must land on Haiku, not on a meter. */
-  model?: string;
 }
 
 /**
@@ -235,64 +223,30 @@ export function registerPeriodReportRoutes(app: FastifyInstance, ctx: ProContext
     },
   );
 
-  // ---- generate (the ONE billing path) ----
-  app.post<{ Params: KeyParams; Querystring: ScopeQuery; Body?: GenerateBody }>(
-    '/api/pro/insights/reports/:periodKey/generate',
-    async (req, reply) => {
-      const accountId = ctx.accountIdOf(req);
-      const { scope, grid, model: accountModel } = await context(
-        ctx,
-        accountId,
-        req.query.workspace,
-        grainOfKey(req.params.periodKey) ?? 'sprint',
-      );
-      if (grid == null) {
-        // §6.1: refuse, and say WHY, so the surface can point at the sprint setting instead of
-        // rendering an empty card.
-        const resp: PeriodReportGenerateResponse = {
-          enabled: true,
-          workspaceId: scope.workspaceId,
-          report: null,
-          generated: false,
-          cadenceMissing: true,
-        };
-        return reply.send(resp);
-      }
-      const window = windowForKey(grid, req.params.periodKey);
-      if (window == null) {
-        const resp: PeriodReportGenerateResponse = {
-          enabled: true,
-          workspaceId: scope.workspaceId,
-          report: null,
-          generated: false,
-        };
-        return reply.send(resp);
-      }
-      // Per-run override → the account default (which itself already falls back to the
-      // PRO_REPORT_MODEL config default). NEVER a raw body string: this id is handed to the
-      // metered Anthropic path, so it goes through the allowlist first and an unrecognised value
-      // silently means "use my default" rather than 400ing a report the user wanted.
-      const model = resolveReportModel(req.body?.model) ?? accountModel;
-      const outcome = await generatePeriodReport(
-        ctx,
-        makeReportClient(ctx, model),
-        accountId,
-        scope,
-        grid,
-        window,
-        model,
-      );
-      const resp: PeriodReportGenerateResponse = {
+  // ---- the series (THE Reports chart; free, LIVE, DB only, never stored, never a model call) ----
+  app.get<{ Querystring: ListQuery }>('/api/pro/insights/period-series', async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const grain = parseGrain(req.query.grain);
+    const { scope, grid } = await context(ctx, accountId, req.query.workspace, grain);
+    if (grid == null) {
+      const resp: PeriodSeriesResponse = {
         enabled: true,
         workspaceId: scope.workspaceId,
-        report: outcome.report,
-        generated: outcome.generated,
-        ...(outcome.creditsExhausted ? { creditsExhausted: true } : {}),
-        ...(outcome.spend ? { spend: outcome.spend } : {}),
+        grain,
+        cadenceConfigured: false,
+        cadenceDays: null,
+        periods: [],
+        repos: { measured: 0, total: scope.repoIds.length },
+        next: null,
+        forecasts: [],
+        forecastDisclosure: null,
       };
       return reply.send(resp);
-    },
-  );
+    }
+    const series = await buildPeriodSeries(ctx, accountId, scope, grid);
+    const resp: PeriodSeriesResponse = { enabled: true, workspaceId: scope.workspaceId, cadenceConfigured: true, ...series };
+    return reply.send(resp);
+  });
 
   // ---- month to date (free, LIVE, never stored) ----
   //

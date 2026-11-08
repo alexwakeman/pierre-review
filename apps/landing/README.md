@@ -76,7 +76,7 @@ are the app's own; never invent a feature for a mock.
 | `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Limn" label, "passed" / "running"), the `limn/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
 | `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingLine`), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
-| `reports.tsx` PeriodReportMock, PeriodSummaryMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` (Grain: Sprint · Month) |
+| `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx`, `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure`, `/getting-started` | Bots Monitoring (platform), the peer benchmark |

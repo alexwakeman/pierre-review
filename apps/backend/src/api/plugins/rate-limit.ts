@@ -258,9 +258,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
     // (`POST …/:periodKey/chat` was REMOVED 2026-10-22; a POST to that path now lands on `read`
     // and 404s.)
-    if (mutating && path.endsWith('/generate')) {
-      return [TIERS.ai, TIERS.aiHourly];
-    }
+    // (`POST …/:periodKey/generate`, the AI write-up, was REMOVED 2026-11-08: Reports is code-only.)
     // The one-report GET can recompute a whole open month live — `search`, not the 600/min
     // blanket. Anchored at both ends so ONLY `…/reports/:periodKey`
     // matches: the list root and a GET spelling of `…/generate` stay on the plain read bucket.
@@ -278,6 +276,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // there is nothing to cache for long). Same 60/min `search` bucket, same argument. It NEVER
   // generates and NEVER writes a row, so it must never move to the AI tier either.
   if (!mutating && path === '/api/pro/insights/month-to-date') {
+    return [TIERS.search, TIERS.read];
+  }
+
+  // GET /api/pro/insights/period-series — THE Reports chart: one metric scan and one lane scan per
+  // period (≤ 12 each), live on every read, DB only. The month-to-date route's shape of cost.
+  if (!mutating && path === '/api/pro/insights/period-series') {
     return [TIERS.search, TIERS.read];
   }
 
