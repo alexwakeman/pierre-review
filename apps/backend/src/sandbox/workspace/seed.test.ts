@@ -107,6 +107,44 @@ describe('the seed', () => {
       ),
     ));
 
+  // PLAN FIRST: the plan section, rule 1, the checker and its context; docs and Fill gaps variants.
+  const gapsTicket: SessionTicket = {
+    ...ticket,
+    gaps: {
+      criteria: [
+        { ref: 'AC1', text: ticket.criteria[0]!.text, verdict: 'met' },
+        { ref: 'AC2', text: ticket.criteria[1]!.text, verdict: 'partly_met' },
+      ],
+      missing: [{ ref: 'M1', text: 'An empty-state message' }],
+      note: null,
+    },
+  };
+  it('⚠ plan first, Claude: CLAUDE.md byte-for-byte the golden', () => golden('seed-plan-claude.md', buildSeed(input({ planFirst: true })).claudeMd));
+  it('⚠ plan first, Codex: AGENTS.md byte-for-byte the golden', () => golden('seed-plan-codex.md', buildSeed(input({ planFirst: true })).agentsMd));
+  it('⚠ plan first with docs: CLAUDE.md + TICKET.md byte-for-byte the golden', () => {
+    const s = buildSeed(input({ planFirst: true, docs: { dir: '/home/agent/.limn/docs' } }));
+    golden('seed-plan-docs.md', `${s.claudeMd}\n----- TICKET.md -----\n${s.ticketMd}`);
+  });
+  it('⚠ plan first, Fill gaps: CLAUDE.md byte-for-byte the golden', () =>
+    golden('seed-plan-fill-gaps.md', buildSeed(input({ planFirst: true, mode: 'fill_gaps', ticket: gapsTicket })).claudeMd));
+  it('plan first: the checker and its context are seeded; the system prompt waits for approval', () => {
+    const s = buildSeed(input({ planFirst: true, mode: 'fill_gaps', ticket: gapsTicket }));
+    const ctxFile = s.files.find((f) => f.path === `${ROOT}/.limn/plan-context.json`)!;
+    expect(JSON.parse(String(ctxFile.content))).toEqual({
+      criteria: ['AC1', 'AC2', 'M1'],
+      gaps: ['AC2', 'M1'],
+      repos: ['DEFRA/bng-metric-backend', 'DEFRA/bng-metric-harness', 'DEFRA/bng-perf-tests'],
+      runs: [],
+      docs: false,
+      fillGaps: true,
+      repoPaths: { 'defra/bng-metric-backend': `${ROOT}/bng-metric-backend`, 'defra/bng-metric-harness': `${ROOT}/bng-metric-harness`, 'defra/bng-perf-tests': `${ROOT}/bng-perf-tests` },
+      docsDir: null,
+    });
+    expect(s.files.find((f) => f.path === '/home/agent/.limn/plan-check.cjs')?.mode).toBe(0o755);
+    expect(s.systemPrompts.claude).toMatch(/Until the reader approves the plan, read and plan only/);
+    expect(buildSeed(input()).files.map((f) => f.path)).not.toContain('/home/agent/.limn/plan-check.cjs');
+  });
+
   it('writes the three files at the ROOT, outside every repository, as the strings it returns', () => {
     const s = buildSeed(input());
     expect(s.files.map((f) => f.path)).toEqual([`${ROOT}/CLAUDE.md`, `${ROOT}/AGENTS.md`, `${ROOT}/TICKET.md`]);

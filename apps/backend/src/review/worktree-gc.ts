@@ -22,7 +22,7 @@ import {
   type WorktreeRemoveReason,
 } from './worktree-gc-policy.js';
 import { isStoryBuildOpen, type StoryBuildStatus } from '@pierre-review/shared';
-import { sweepStoryBuildBaseRefs } from '../coding/story-build/base-refs.js';
+import { storyBuildRefKey, sweepStoryBuildBaseRefs, type StoryBuildRefKey } from '../coding/story-build/base-refs.js';
 import { PROCESS_INSTANCE, recordWorktreeCreated, recordWorktreeReleased } from './worktree-ledger.js';
 
 // THE WORKTREE SWEEP (docs/BACKEND.md § Worktree cleanup).
@@ -495,12 +495,17 @@ export function dbSweepDeps(): WorktreeSweepDeps {
  * and, once it has repository rows, that repository is not pushed (a read-only candidate the build left
  * out stays pinned only until the plan is accepted). Keys `buildId/repoId`.
  */
-async function storyBuildRefsToKeep(refs: ReadonlyArray<{ buildId: number; repoId: number }>): Promise<ReadonlySet<string>> {
+async function storyBuildRefsToKeep(refs: ReadonlyArray<StoryBuildRefKey>): Promise<ReadonlySet<string>> {
   const keep = new Set<string>();
   const buildIds = [...new Set(refs.map((r) => r.buildId))];
   if (buildIds.length === 0) return keep;
   const b = schema.storyBuilds;
   const r = schema.storyBuildRepos;
+  const pr = schema.storyBuildPrs;
+  // Plan first: a planned PR's verified tip is kept while the session is open and that PR is not pushed.
+  const prStatus = new Map(
+    (await db.select({ id: pr.id, status: pr.status }).from(pr).where(inArray(pr.buildId, buildIds)).execute()).map((x) => [x.id, x.status]),
+  );
   const sessions = new Map(
     (await db.select({ id: b.id, status: b.status }).from(b).where(inArray(b.id, buildIds)).execute()).map((x) => [x.id, x.status as StoryBuildStatus]),
   );
@@ -513,6 +518,11 @@ async function storyBuildRefsToKeep(refs: ReadonlyArray<{ buildId: number; repoI
   for (const ref of refs) {
     const status = sessions.get(ref.buildId);
     if (status == null || !isStoryBuildOpen(status)) continue;
+    if (ref.stackPrId != null) {
+      const ps = prStatus.get(ref.stackPrId);
+      if (ps != null && ps !== 'pushed') keep.add(storyBuildRefKey(ref));
+      continue;
+    }
     const key = `${ref.buildId}/${ref.repoId}`;
     const rs = repoStatus.get(key);
     if (rs == null ? status === 'building' || status === 'ready' : rs === 'pushed') continue;

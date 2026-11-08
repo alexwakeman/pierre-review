@@ -4313,6 +4313,52 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   **Always allow** — a reader's click, never automatic), Spend → **Changes** (`BuildSection`, the old
   per-repository cards in SESSION mode: no Retry, no live step, no "Not built or tested here." — the
   agent ran the tests in the sandbox; lazy diff; Push / Push as draft; the pushed PR chip).
+- **PLAN FIRST (2026-11-08; [STORY-BUILD.md](STORY-BUILD.md) § Plan first).** Every NEW session plans
+  before it builds; the build starts only from the plan panel. The pieces:
+  - **The split button** (`components/ui/SplitButton.tsx`: a primary `Button` joined to a `CaretIcon`
+    trigger of the one `Menu`, its own tab stop; ONE action ⇒ a plain Button). The story view's entry is
+    one: "Implement" / "Fill gaps", the menu adding "Implement with docs" / "Fill gaps with docs" (and ⌘K
+    the same pair) only while the workspace library has a built document — `TicketStorySection` hands
+    its Check against docs read's `available` in (`docsAvailable`; nothing new is fetched). ⚠ The docs
+    gate is `available` (`hasDocs`), NOT `docsContextFor().usable` (that folds the "docs in Claude
+    Review" switch, off by default). The choice travels as `TabTicketMeta.buildOffer.docs` (parsed in
+    `ticketMetaFrom`, survives a reload). ⚠ A split button's menu items RUN, and `OverBudgetConfirm`
+    guards only a button on the page — so it only ever OPENS the tab: the start state carries the choice
+    as a checkbox, "Give the agent the reference documents" (ticked from the offer, shown only while
+    `available`), and its ONE gated button reads "Start with docs" / "Fill gaps with docs", sending
+    `docs: true`.
+  - **The plan panel** (`StoryBuild/PlanPanel.tsx`, above the conversation while `session.plan` is set;
+    pure half `lib/buildPlan.ts`, pinned by `test/buildPlan.test.ts`): "Plan · revision N" (+ With docs,
+    ⓘ, an "Earlier revisions" menu → `GET …/plan?revision=`, read-only), the stage line
+    (`planStageLine`: planning / revising / the checks' one-line failure), the summary, Repositories,
+    the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), **Points to
+    settle** — one card per contention with the story's words, the problem, "If you agree" / "If you
+    keep the story", its EVIDENCE (code and data files as Limn's own numbered excerpt in plain mono —
+    NOT the syntax highlighter, so no new code ground for `codeTokens.test.ts` — with a GitHub link at
+    the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
+    time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
+    the dropped line ("Limn left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **draft ticket update** as
+    preformatted text with a `CopyButton` per field (ⓘ: Limn never changes the ticket) and **Approve and
+    start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
+    `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
+    `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over
+    the read optimistically (`decisionsWithPending`); a second press on the chosen one clears it; the
+    answer is seated into the read. Reply opens a composer under the card (`plan/reply`, `story_plan`
+    gate). While a turn runs the card's buttons read "The agent is revising the plan…". 409 PlanStale
+    says "The plan changed. Look at the new revision." After Approve it folds to "Approved plan ·
+    revision N · time" (expandable, read-only). The composer's words change for a plan session and
+    **Start build is never offered on one** (`sessionCanStartBuild` is false when `plan` is set); a
+    partial ```` ```limn-plan ```` block reads "Writing the plan…" (`visiblePartialText`).
+  - **The stack view** (`StoryBuild/StackView.tsx`) replaces `BuildSection` when `build.prs` is
+    non-empty (titled "Pull requests"): one card per planned PR in plan order, grouped by repository —
+    status, criteria chips, "n of m", branch, "Builds on #n (P1)", stat, "The agent says" (the build
+    report: words, checks passed / failed / not run — a self-report, never a gate), the lazy diff
+    (`GET …/prs/:prId/diff`), and Push — HIDDEN until the PR before it in its repository (empty ones
+    skipped) and any cross-repository dependency are pushed, the reason as one line (`prPushState`). Its
+    own Draft and **Push all (N)** (≥ 2 ready; the existing Push all route, which pushes the stack in
+    plan order); the header drops its Draft / Push all for a stack. Pushes share the session's key and
+    sweep the same write set (`useStoryBuildPrPush`).
 - **The card mark** for a session reads `STORY_BUILD_MARK_WORDS`: Working… (booting or a turn running)
   / Waiting for you (the agent waits) / Ready to push / Pushed.
 - **Settings → Sandbox** (`settings/SandboxRuntimeSection.tsx` GLOBAL + `settings/SandboxSection.tsx`
@@ -4324,12 +4370,14 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   compose file + the services allowed online), the always-allowed hosts (saved at once, through the
   proxy's parser), the proxy-variables switch and the resources. ⚠ The PUT REPLACES the setting, so
   Save sends the WHOLE draft (`sandboxBodyOf`).
-- **⌘K inside the tab:** Start build, Push all, Stop — each registered only while its button is on
+- **⌘K inside the tab:** Approve the plan, Start build, Push all, Stop — each registered only while its button is on
   screen, and each PRESSES that button (`data-story-build-action`), so `OverBudgetConfirm` still asks.
 - Tests: `test/sandboxSession.test.ts` (the fold, the merge, the words and buttons, the Network rows,
   the settings form), `test/storyBuildTab.test.ts`, `test/storyBuild.test.ts` (push gating, the card's
-  mark, the story view's entry, Fill gaps), `e2e/story-build.spec.ts` (start → talk → Allow → Start
-  build → diff → Push; no runtime + How to set up; a closed session's Resume; Discard; the entries in
+  mark, the story view's entry, Fill gaps), `test/buildPlan.test.ts` (Approve's gate and line, decisions,
+  evidence labels and links, the stack's push order), `e2e/story-build-plan.spec.ts` (the split button with
+  and without docs, the plan panel end to end, the stack view's push order), `e2e/story-build.spec.ts`
+  (a new start plans first; an older session: talk → Allow → Start build → diff → Push; no runtime + How to set up; a closed session's Resume; Discard; the entries in
   the tray, the story tab and the PR Story tab; ACME-2 is the Fill gaps ticket). The mock's live
   stream sends nothing (the read is the truth there). Demo: `seed-demo-agentic.ts seedStoryBuilds`
   still seeds OLD-flow rows (they read as closed sessions) — WP10.

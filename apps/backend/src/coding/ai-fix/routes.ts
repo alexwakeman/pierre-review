@@ -247,6 +247,8 @@ function sendFixAction(reply: FastifyReply, res: FixActionResult | ResumeResult)
       return reply.code(409).send({ error: 'TooManySessions', message: res.message });
     case 'not_resumable':
       return reply.code(409).send({ error: 'NotResumable', message: res.message });
+    case 'rejected':
+      return reply.code(409).send({ error: res.code, message: res.message });
   }
 }
 

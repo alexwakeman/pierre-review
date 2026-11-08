@@ -74,6 +74,15 @@ export const SLOW_TESTS = [
   'src/sandbox/session/fix-merge-session-flow-db.test.ts',
   // Real git for every sandbox step (as the file above) under five unattended dependency-automation sessions
   'src/sandbox/session/fix-deps-session-flow-db.test.ts',
+  // Real node + git: the plan checker script run as the agent runs it; the plan evidence blob reader on a scratch repo
+  'src/sandbox/workspace/plan-check-script.test.ts',
+  'src/coding/story-build/plan-verify-git.test.ts',
+  // Moved 2026-11-07 by the time budget: real git on both sides: ~30 git processes per case (bundle, fetch with fsck, lineage, diffs)
+  'src/coding/story-build/stack-verify.test.ts',
+  // Moved 2026-11-07 by the time budget: real git for every push: a worktree, apply, commit, push to a local bare repository per PR
+  'src/coding/story-build/push-stack-db.test.ts',
+  // Moved 2026-11-07 by the time budget: real git for the stacked extraction after Approve (the sandbox script and the host's bundle check)
+  'src/sandbox/session/plan-session-flow-db.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every

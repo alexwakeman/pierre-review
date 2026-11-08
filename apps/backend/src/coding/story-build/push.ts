@@ -52,7 +52,7 @@ export function isStoryBuildRepoPushing(repoRowId: number): boolean {
 
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`);
 
-function httpUrl(url: string | null | undefined): string | null {
+export function httpUrl(url: string | null | undefined): string | null {
   return url != null && /^https?:\/\/[^\s<>()]+$/i.test(url) ? url : null;
 }
 
@@ -75,6 +75,12 @@ export function storyBuildPrTitle(ticketKey: string, title: string | null, commi
   return clip(`${ticketKey}: ${t.replace(/\s+/g, ' ')}`, TITLE_MAX);
 }
 
+/** A stacked PR's title: `KEY (n/m): title` — n/m its place in the WHOLE plan; the key still leads. */
+export function storyBuildStackTitle(ticketKey: string, n: number, m: number, title: string): string {
+  const t = title.replace(/\s+/g, ' ').trim() || 'Implement the story';
+  return clip(`${ticketKey} (${n}/${m}): ${t}`, TITLE_MAX);
+}
+
 export interface PrBodyInput {
   summary: string | null;
   ticketKey: string;
@@ -87,7 +93,22 @@ export interface PrBodyInput {
   stackedOnPrNumber: number | null;
   /** "Closes owner/repo#n" — a single-repository GitHub Issues build only. */
   closes: string | null;
+  /**
+   * PLAN FIRST, a stack of more than one PR: every planned PR in plan order (this one marked), the PR this
+   * one builds on in its repository, and the reader's decisions on the story that touch this PR. The
+   * Part list replaces the sibling list.
+   */
+  stack?: {
+    position: number;
+    total: number;
+    parts: Array<{ fullName: string; title: string; number: number | null; url: string | null; self: boolean }>;
+    buildsOnNumber: number | null;
+  } | null;
+  /** Plan first: "Kept the story: …" / "Changed from the story: …" (one line each). */
+  decisions?: Array<{ kind: 'kept' | 'changed'; text: string }>;
 }
+
+const oneLine = (s: string, n = 300): string => clip(s.replace(/\s+/g, ' ').trim(), n);
 
 /** The new PR's body. People who never saw Limn read it on GitHub: plain, short, the product named once. */
 export function storyBuildPrBody(b: PrBodyInput): string {
@@ -100,8 +121,22 @@ export function storyBuildPrBody(b: PrBodyInput): string {
     lines.push('', '**Covers:**');
     for (const c of b.covers) lines.push(`- ${c.ref}: ${defangGithubText(c.text.replace(/\s+/g, ' ').trim())}`);
   }
+  if (b.stack && b.stack.total > 1) {
+    lines.push('', `**Part ${b.stack.position} of ${b.stack.total}:**`);
+    for (const [i, p] of b.stack.parts.entries()) {
+      const what = defangGithubText(`${p.fullName} — ${oneLine(p.title, 120)}`).replace(/[[\]]/g, '');
+      const link = p.number != null ? httpUrl(p.url) : null;
+      const ref = p.number != null ? ` (#${p.number})` : '';
+      lines.push(`${i + 1}. ${link ? `[${what}](${link})` : what}${ref}${p.self ? ' (this pull request)' : ''}`);
+    }
+    if (b.stack.buildsOnNumber != null) lines.push('', `Builds on #${b.stack.buildsOnNumber}.`);
+  }
+  if (b.decisions && b.decisions.length > 0) {
+    lines.push('', '**Decisions on the story:**');
+    for (const d of b.decisions) lines.push(`- ${d.kind === 'kept' ? 'Kept the story' : 'Changed from the story'}: ${defangGithubText(oneLine(d.text))}`);
+  }
   if (b.stackedOnPrNumber != null) lines.push('', `Stacked on #${b.stackedOnPrNumber}.`);
-  if (b.siblings.length > 0) {
+  if (!(b.stack && b.stack.total > 1) && b.siblings.length > 0) {
     lines.push('', '**Other pull requests for this story:**');
     for (const s of b.siblings) {
       const ref = `${s.fullName}#${s.number}`;
@@ -126,7 +161,7 @@ interface RepoFacts {
   defaultBranch: string | null;
 }
 
-async function repoFacts(ctx: AgentContext, accountId: number, repoId: number): Promise<RepoFacts | null> {
+export async function repoFacts(ctx: AgentContext, accountId: number, repoId: number): Promise<RepoFacts | null> {
   const r = ctx.schema.repos;
   const rows = (await ctx.db
     .select({ defaultBranch: r.defaultBranch })
@@ -154,6 +189,46 @@ async function stackedPr(
   return rows[0] ?? null;
 }
 
+/**
+ * THE BASE of a repository's FIRST new PR: the build's base branch, or — stacked on the reader's own open
+ * ticket PR — that PR's head branch. Refused when that PR is no longer open, or is from a FORK (read live:
+ * the PR's head repository is not synced). Shared by the one-PR push and a planned stack's first PR.
+ */
+export async function firstPrBase(
+  ctx: AgentContext,
+  accountId: number,
+  repo: Pick<StoryBuildRepoRow, 'repoId' | 'baseRef' | 'stackedOnPrId'>,
+  owner: string,
+  name: string,
+): Promise<{ ok: true; prBase: string; stackedNumber: number | null } | { ok: false; code: string; message: string }> {
+  if (repo.stackedOnPrId == null) return { ok: true, prBase: repo.baseRef, stackedNumber: null };
+  const pr = await stackedPr(ctx, accountId, repo.repoId, repo.stackedOnPrId);
+  if (!pr || pr.state !== 'open') {
+    return {
+      ok: false,
+      code: 'STACK_CLOSED',
+      message: `${pr ? `Pull request #${pr.number}` : 'The pull request'}, which this build stacks on, is no longer open. Build this repository again to start from the default branch.`,
+    };
+  }
+  // ⚠ NEVER A FORK'S BRANCH: a PR opened from a fork has its head branch on the fork only, so a new PR
+  // here could not target it. The plan falls back to the default branch for one (candidates.ts); this
+  // re-reads GitHub at the press, since the PR's head repository is not synced.
+  let fork: boolean;
+  try {
+    fork = (await ctx.github.fetchPrHeadInfo(accountId, owner, name, pr.number)).isFork;
+  } catch {
+    return { ok: false, code: 'STACK_UNKNOWN', message: `Couldn't check pull request #${pr.number} on GitHub. Try again.` };
+  }
+  if (fork) {
+    return {
+      ok: false,
+      code: 'STACK_FORK',
+      message: `Pull request #${pr.number}, which this build stacks on, is from a fork, so a new pull request cannot target its branch. Discard this build and start again to build from the default branch.`,
+    };
+  }
+  return { ok: true, prBase: pr.headRefName ?? repo.baseRef, stackedNumber: pr.number };
+}
+
 /** The criteria this repository covers, as `ref: text` (the plan's planned rows for it + its steps' refs). */
 function coveredBy(build: StoryBuildRow, repo: StoryBuildRepoRow): Array<{ ref: string; text: string }> {
   const plan = build.planJson;
@@ -174,7 +249,7 @@ function coveredBy(build: StoryBuildRow, repo: StoryBuildRepoRow): Array<{ ref: 
 }
 
 /** The issue a single-repository GitHub Issues build closes, or null. */
-function closesFor(build: StoryBuildRow, includedRepos: number): string | null {
+export function closesFor(build: StoryBuildRow, includedRepos: number): string | null {
   if (includedRepos !== 1) return null;
   const parsed = parseTicketIdent(build.ident);
   if (!isTrackerIdent(parsed) || parsed.provider !== 'github') return null;
@@ -185,7 +260,7 @@ function closesFor(build: StoryBuildRow, includedRepos: number): string | null {
  * After the new PR synced: link it to the ticket by hand (`detected_from='manual'`), so a tracker whose
  * detection does not read the title (GitHub Issues) links it too. Best-effort, never throws.
  */
-async function linkTicket(ctx: AgentContext, accountId: number, repoId: number, prNumber: number, ident: string): Promise<void> {
+export async function linkTicket(ctx: AgentContext, accountId: number, repoId: number, prNumber: number, ident: string): Promise<void> {
   try {
     const parsed = parseTicketIdent(ident);
     if (!isTrackerIdent(parsed)) return;
@@ -252,34 +327,9 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
   const facts = await repoFacts(ctx, a.accountId, repo.repoId);
 
   // THE BASE the new PR targets: the default branch, or the reader's own open PR this build stacks on.
-  let prBase = repo.baseRef;
-  let stackedNumber: number | null = null;
-  if (repo.stackedOnPrId != null) {
-    const pr = await stackedPr(ctx, a.accountId, repo.repoId, repo.stackedOnPrId);
-    if (!pr || pr.state !== 'open') {
-      return recordError(
-        'STACK_CLOSED',
-        `${pr ? `Pull request #${pr.number}` : 'The pull request'}, which this build stacks on, is no longer open. Build this repository again to start from the default branch.`,
-      );
-    }
-    // ⚠ NEVER A FORK'S BRANCH: a PR opened from a fork has its head branch on the fork only, so a new PR
-    // here could not target it. The plan falls back to the default branch for one (candidates.ts); this
-    // re-reads GitHub at the press, since the PR's head repository is not synced.
-    let fork: boolean;
-    try {
-      fork = (await ctx.github.fetchPrHeadInfo(a.accountId, owner, name, pr.number)).isFork;
-    } catch {
-      return recordError('STACK_UNKNOWN', `Couldn't check pull request #${pr.number} on GitHub. Try again.`);
-    }
-    if (fork) {
-      return recordError(
-        'STACK_FORK',
-        `Pull request #${pr.number}, which this build stacks on, is from a fork, so a new pull request cannot target its branch. Discard this build and start again to build from the default branch.`,
-      );
-    }
-    stackedNumber = pr.number;
-    prBase = pr.headRefName ?? repo.baseRef;
-  }
+  const first = await firstPrBase(ctx, a.accountId, repo, owner, name);
+  if (!first.ok) return recordError(first.code, first.message);
+  const { prBase, stackedNumber } = first;
   const protect = [...new Set([facts?.defaultBranch, repo.baseRef, prBase].filter((n): n is string => Boolean(n)))];
 
   // The body links the PRs this session already pushed (Push all runs in plan order).

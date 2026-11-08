@@ -54,9 +54,12 @@ export function aiFixStatusForPhase(phase: SandboxSessionPhase, o: { pushed: boo
   switch (phase) {
     case 'booting':
     case 'building':
+    case 'planning':
+    case 'revising':
       return 'running';
     case 'ready':
     case 'chatting':
+    case 'plan_ready':
       return 'planned';
     case 'built':
     case 'pushed':

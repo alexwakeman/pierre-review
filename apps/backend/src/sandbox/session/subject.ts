@@ -6,7 +6,7 @@
 //
 // A subject is made per session and holds what is only its own (its row id, its bases, its ticket or
 // task); the machine calls it at fixed points and never reads a subject's table itself.
-import type { SandboxAgentMode, SandboxSessionPhase, SandboxTurnUsage } from '@pierre-review/shared';
+import type { BuildPlanSource, SandboxAgentMode, SandboxSessionPhase, SandboxTurnUsage } from '@pierre-review/shared';
 import type { SandboxUsageAccount } from '../drivers/index.js';
 import type { RepoBaseRequest, MirrorResult, FixSeedInput, SessionTicket, WorkspaceLayout } from '../workspace/index.js';
 
@@ -38,9 +38,12 @@ export interface SubjectBases {
   labels: Map<number, { label: string; note: string | null }>;
 }
 
-/** One turn the machine starts by itself the moment the agent is ready (an AI Fix: the reader's Start). */
+/** One turn the machine starts by itself the moment the agent is ready (an AI Fix: the reader's Start; a
+ *  plan-first story: the planning turn). */
 export interface FirstTurn {
   build: boolean;
+  /** Plan first: the turn is a plan turn of this source. */
+  planSource?: BuildPlanSource;
   /** The conversation's reader line ("Start fix"). */
   readerText: string;
   text: () => Promise<string>;
@@ -55,6 +58,14 @@ export interface SubjectLive {
   readonly container: string | null;
   readonly layoutRoot: string | null;
   readonly lastAgentText: string;
+  /** The FINAL agent texts of the running (or last) turn, in order (partial deltas are not in it). */
+  readonly turnTexts: readonly string[];
+}
+
+/** After a chat turn (plan first): the phase it ends in, and an automatic follow-up turn (the repair). */
+export interface AfterChatTurn {
+  nextPhase: SandboxSessionPhase | null;
+  followUp?: { text: string; planSource: BuildPlanSource } | null;
 }
 
 export interface SessionSubject {
@@ -80,7 +91,7 @@ export interface SessionSubject {
   bases(l: SubjectLive, repos: readonly SessionRepoInfo[]): Promise<SubjectBases>;
   branch(): string;
   /** What the seed fold gets (the layout says where each repository will be). */
-  seed(layout: WorkspaceLayout): { ticket: SessionTicket; mode: 'implement' | 'fill_gaps' } | { fix: FixSeedInput };
+  seed(layout: WorkspaceLayout): { ticket: SessionTicket; mode: 'implement' | 'fill_gaps'; planFirst?: boolean } | { fix: FixSeedInput };
   /** The mirror is in: record where each repository is (and fail when the one that matters is missing). */
   afterMirror(l: SubjectLive, mirror: MirrorResult, bases: ReadonlyMap<number, RepoBaseRequest>): Promise<void>;
   /** Resume: put the stored work back. Returns how many repositories. */
@@ -88,6 +99,22 @@ export interface SessionSubject {
   /** The driver's mode at start. */
   startMode(l: SubjectLive): SandboxAgentMode;
   firstTurn?(l: SubjectLive): FirstTurn | null;
+  /** The phase a running chat turn shows (plan first: planning / revising). Absent ⇒ chatting. */
+  chatPhase?(l: SubjectLive): SandboxSessionPhase;
+  /** A reader's message in chat mode: the text the agent gets (plan first adds one line). */
+  chatText?(l: SubjectLive, text: string): string;
+  /** After every chat turn, with the turn's final agent texts (plan first: the plan check). */
+  afterChatTurn?(l: SubjectLive, texts: readonly string[]): Promise<AfterChatTurn>;
+  /** Start build (the button) is refused now: plan first before approval. */
+  buildRefused?(l: SubjectLive): { code: string; message: string } | null;
+  /** The phase a CLOSED session with stored work keeps (plan first: plan_ready before approval). */
+  keptPhase?(phase: SandboxSessionPhase): Promise<SandboxSessionPhase | null>;
+  /** The phase after a boot with no first turn (a resumed plan: plan_ready). Absent ⇒ built / ready. */
+  bootedPhase?(l: SubjectLive): SandboxSessionPhase | null;
+  /** "with docs": copy the reference documents in after the mirror. null ⇒ none (the step says why). */
+  prepareDocs?(l: SubjectLive): Promise<{ dir: string | null; detail: string | null }>;
+  /** A `limn-svc run` was recorded. */
+  onServiceRun?(l: SubjectLive): void;
   /** Start build (the button): switch the driver first (the machine does), then this is the instruction. */
   buildInstruction(l: SubjectLive, extra: string | null): Promise<string>;
   /** A reader's message in build mode: the text the agent gets (story: the message as written). */
@@ -97,6 +124,9 @@ export interface SessionSubject {
   beforeBuildTurn?(l: SubjectLive): Promise<void>;
   /** After every build-mode turn: store the work. 'close' ends the session (an unattended fix). */
   afterBuildTurn(l: SubjectLive): Promise<'keep' | 'close'>;
+  /** After a kept build turn: an AUTOMATIC continuation's text (plan first: the turn cap hit with work
+   *  unfinished; the subject asks the budget gate), or null. The machine claims it in the same tick. */
+  buildFollowUp?(l: SubjectLive): Promise<string | null>;
   onPhase?(l: SubjectLive, phase: SandboxSessionPhase): void;
   onClosed?(l: SubjectLive, phase: SandboxSessionPhase): Promise<void>;
 }

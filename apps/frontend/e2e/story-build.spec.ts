@@ -6,8 +6,8 @@ import type { PrDetail, SandboxNetworkAllowBody, SandboxRuntimeStatus, StoryBuil
 // keeps ACME-1's session per page). The entry is the STORY VIEW's action (docs/STORY-BUILD.md § Entry
 // points), never a sprint card: the card carries only the build mark; a click opens the story tray, whose
 // action group offers "Implement" on the not-started ticket with no pull request (owner decision 4) —
-// opening the build tab, where Start boots a sandbox, Send talks to the agent, Start build builds and Push
-// pushes one repository — and "Fill gaps" on ACME-2 (started, its current story check found gaps), whose
+// opening the build tab, where Start boots a sandbox that PLANS FIRST (the plan panel: story-build-plan.spec.ts);
+// an older session (before plan first) still talks, then Start build builds and Push pushes one repository — and "Fill gaps" on ACME-2 (started, its current story check found gaps), whose
 // tab lists them up front. The story tab and the PR view's Story tab offer the same action from their own
 // facts. With no container runtime the tab says so in one line, with "How to set up".
 
@@ -137,7 +137,7 @@ test.describe('Implement story', () => {
     await expect(view.getByTestId('story-build-start-button')).toHaveText('Fill gaps');
   });
 
-  test('open from the story, start, talk, start build, push', async ({ page }) => {
+  test('open from the story and start: the agent plans first, and nothing builds before Approve', async ({ page }) => {
     await gotoSprint(page);
     const tray = await openTray(page, 'ACME-1');
     await tray.getByRole('button', { name: 'Implement ACME-1' }).click();
@@ -146,9 +146,24 @@ test.describe('Implement story', () => {
     await expect(view).toBeVisible();
     await expect(page).toHaveURL(/view=story-build%3A/);
     await expect(view.getByTestId('story-build-start')).toBeVisible();
+    await expect(view.getByTestId('story-build-start')).toContainText('It plans first.');
     await expect(view.getByTestId('sandbox-runtime-line')).toContainText('Colima 0.8.1');
+    // No built document in this workspace: no docs box.
+    await expect(view.getByTestId('story-build-start-docs')).toHaveCount(0);
 
+    const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
+    expect((await start).postDataJSON()).not.toHaveProperty('docs');
+    await expect(view.getByTestId('story-session')).toHaveAttribute('data-phase', 'plan_ready');
+    await expect(view.getByTestId('story-plan')).toBeVisible();
+    // A plan-first session never offers Start build: the plan panel's Approve starts it.
+    await expect(view.getByRole('button', { name: 'Start build' })).toHaveCount(0);
+  });
+
+  test('an older session (before plan first): talk, start build, push', async ({ page }) => {
+    await withAi(page, STORY_SESSION_READY);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
     const session = view.getByTestId('story-session');
     await expect(session).toHaveAttribute('data-phase', 'ready');
     await expect(view.getByTestId('story-build-steps').locator('[aria-current="step"]')).toHaveText('Talk');

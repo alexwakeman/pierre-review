@@ -4731,6 +4731,34 @@ check(
     repoFkRefused = true;
   }
   check("a repository row naming B's repo under account A is refused by the composite FK", repoFkRefused);
+  // PLAN FIRST (migration 0179): B's plan revision and planned PR read as nothing for A; the composite
+  // FK refuses a plan row under A naming B's session.
+  const pp = await import('../src/coding/story-build/plan-persist.js');
+  const bPlan = await pp.insertPlanRevision(dc, {
+    accountId: 2,
+    buildId: b,
+    source: 'opening',
+    plan: { summary: 's', repos: [], criteria: [], contentions: [], stack: [{ key: 'P1', repoId: B.repoId, fullName: 'b/b', stackIndex: 1, title: 't', contains: 'c', criteria: [], dependsOn: [], branch: 'limn/x' }], stackReason: null, ticketUpdate: null, dropped: { contentions: 0, evidence: 0, reasons: [] } },
+    rawSha: 'x',
+    now: new Date(),
+  });
+  check("listPlanRows(A, B's id) is empty", (await pp.listPlanRows(dc, 1, b)).length === 0);
+  check("listPlanRows(B, B's id) has B's revision (mutation check)", (await pp.listPlanRows(dc, 2, b)).length === 1);
+  check("getPlanRow(A, B's id, 1) is null", (await pp.getPlanRow(dc, 1, b, 1)) === null);
+  check("setPlanDecision(A, B's plan row) writes nothing", !(await pp.setPlanDecision(dc, 1, bPlan.id, 'C1', { decision: 'agree', fingerprint: 'f', at: 'now' })));
+  check("approvePlanRevision(A, B's build) writes nothing", !(await pp.approvePlanRevision(dc, { accountId: 1, buildId: b, plan: bPlan, now: new Date() })));
+  check("approvePlanRevision(B, B's build) approves (mutation check)", await pp.approvePlanRevision(dc, { accountId: 2, buildId: b, plan: bPlan, now: new Date() }));
+  const bPr = (await pp.listPlannedPrRows(dc, 2, b))[0]!;
+  check("listPlannedPrRows(A, B's id) is empty", (await pp.listPlannedPrRows(dc, 1, b)).length === 0);
+  check("getStoryBuildPrRow(A, B's id, B's PR) is null", (await pp.getStoryBuildPrRow(dc, 1, b, bPr.id)) === null);
+  check("updateStoryBuildPr(A, B's PR) writes nothing", !(await pp.updateStoryBuildPr(dc, 1, bPr.id, { status: 'failed' })));
+  let planFkRefused = false;
+  try {
+    await pp.insertPlanRevision(dc, { accountId: 1, buildId: b, source: 'opening', plan: bPlan.planJson as never, rawSha: 'y', now: new Date() });
+  } catch {
+    planFkRefused = true;
+  }
+  check("a plan row naming B's session under account A is refused by the composite FK", planFkRefused);
   const marks = await sprintBuildsFor(1, defaultA, [IDENT]);
   check("sprintBuildsFor(A) sees A's session only", marks.get(IDENT)?.id === a);
   check("sprintBuildsFor(A, B's workspace) is empty", (await sprintBuildsFor(1, defaultB, [IDENT])).size === 0);
@@ -4758,9 +4786,26 @@ check(
     ['GET', `/api/story-builds/${b}/repos/${B.repoId}/diff`, undefined],
     ['POST', `/api/story-builds/${b}/repos/${B.repoId}/push`, { draft: true }],
     ['POST', `/api/story-builds/${b}/push`, { draft: true }],
+    ['GET', `/api/story-builds/${b}/plan?revision=1`, undefined],
+    ['POST', `/api/story-builds/${b}/plan/decisions`, { revision: 1, contentionId: 'C1', decision: 'agree' }],
+    ['POST', `/api/story-builds/${b}/plan/reply`, { revision: 1, contentionId: null, text: 'x' }],
+    ['POST', `/api/story-builds/${b}/plan/approve`, { revision: 1 }],
   ] as const) {
     const r = await sapp.inject({ method, url, ...(payload ? { payload } : {}) });
     check(`session route ${method} ${url.replace(String(b), "<B's>")} as A → 404`, r.statusCode === 404);
+  }
+  // PLAN FIRST: one planned PR's diff and push, by B's PR id, as A → 404 (the getter scopes the account).
+  {
+    const { listPlannedPrRows } = await import('../src/coding/story-build/plan-persist.js');
+    const bPrId = (await listPlannedPrRows(dc, 2, b))[0]?.id;
+    check("B's session has a planned PR to probe (mutation check)", bPrId != null);
+    for (const [method, url, payload] of [
+      ['GET', `/api/story-builds/${b}/prs/${bPrId}/diff`, undefined],
+      ['POST', `/api/story-builds/${b}/prs/${bPrId}/push`, { draft: true }],
+    ] as const) {
+      const r = await sapp.inject({ method, url, ...(payload ? { payload } : {}) });
+      check(`session route ${method} ${url.replace(String(b), "<B's>").replace(String(bPrId), "<B's PR>")} as A → 404`, r.statusCode === 404);
+    }
   }
   {
     const own = Fastify({ logger: false });

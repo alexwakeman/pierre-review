@@ -1521,6 +1521,20 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0179_story_build_plans` — plan first: plan revisions and planned pull requests
+
+`ALTER TABLE story_builds ADD with_docs (NOT NULL DEFAULT false), approved_plan_id, approved_at`; NEW
+`story_build_plans` (one row per plan revision; unique `(build_id, revision)` and `(id, account_id)`;
+composite FK `story_build_plans_build_account_fk` → `story_builds (id, account_id)` cascade) and NEW
+`story_build_prs` (one row per planned PR, written at Approve; unique `(build_id, pr_key)` and `(id,
+account_id)`; composite FKs onto `story_builds`, `repos` and `story_build_plans`, all cascade)
+([DATA-MODEL.md](DATA-MODEL.md) § `story_builds`; [STORY-BUILD.md](STORY-BUILD.md) § Plan first).
+`approved_plan_id` has NO FK (re-scoped by `(build_id, account_id)`). Both tables are in
+`accountScopedTables()`, erased before `story_build_repos`, exported, and `deleteRepo` deletes a
+repository's PR rows. ⚠ The dormant `story_builds.plan_json` / `docs_json` are NOT reused (old rows and
+`push.ts coveredBy` read the removed flow's shape). Additive, no backfill. Journal `idx` 179, `when`
+sqlite `1792569679023`.
+
 ### `0177_ai_fix_sessions` — AI Fix rows carry a workspace session
 
 `ALTER TABLE ai_fixes ADD session_phase, sandbox_ref, agent_ref, runtime, session_json, last_active_at,

@@ -59,6 +59,11 @@ export interface PrepareSessionArgs {
   /** What the agent is told: a story's ticket (`ticket` + `mode`), or an AI Fix's task (`fix`). seed.ts, the ONE fold. */
   ticket?: SessionTicket;
   mode?: 'implement' | 'fill_gaps';
+  /** A story session opens with a planning turn (seed.ts `planFirst`). */
+  planFirst?: boolean;
+  /** "Implement with docs": copy the reference documents in AFTER the mirror, before the services and the
+   *  seed (docs.ts). Returns where they are, or null when none were copied. */
+  docs?: (mirror: MirrorResult) => Promise<{ dir: string } | null>;
   fix?: FixSeedInput;
   userClaudeMd: boolean;
   userSkills: boolean;
@@ -93,6 +98,7 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   });
   for (const f of mirror.failed) notes.push(`${f.fullName} could not be cloned: ${f.reason}`);
   notes.push(...mirror.notes);
+  const docs = a.docs ? await a.docs(mirror) : null;
   const services = typeof a.services === 'function' ? await a.services(mirror) : a.services;
   const seedNotes = [...notes];
   if (layout.outside.length > 0) {
@@ -132,7 +138,7 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
     services,
   };
   if (a.fix == null && a.ticket == null) throw new Error('A session needs a ticket or a fix to seed.');
-  const seed = a.fix != null ? buildSeed({ ...common, kind: 'fix', fix: a.fix }) : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement' });
+  const seed = a.fix != null ? buildSeed({ ...common, kind: 'fix', fix: a.fix }) : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement', planFirst: a.planFirst === true, docs });
   await runtime.copyIn(container, seed.files);
   return { mirror, seed, notes };
 }

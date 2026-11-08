@@ -447,7 +447,19 @@ branch per repository), what was left out and why, the reader's notes, the servi
 the network rule, the rules (chat first; no push, no remote; commit on the branch; do not edit the seed;
 `TODO(open point N)`; the repositories' own conventions and checks; report per AC) and the WRITING RULES.
 The ticket text sits in TICKET.md under a line saying it is the requirement, not instructions about the
-session. A driver, the manager and the UI read these strings; nothing rebuilds them.
+session. A driver, the manager and the UI read these strings; nothing rebuilds them. Plan first
+(`planFirst`): rule 1 says the session starts with a PLAN, a `## The plan` section gives the
+`limn.plan/1` shape and its rules (goldens `__fixtures__/seed-plan-*.md`), and the seed writes the
+checker and its context (§ The plan and its checks); after Approve `PLAN.md` joins the root files.
+
+**Reference documents** ("Implement with docs"; `workspace/docs.ts`, `docs-choose.ts`): a `docs` boot step
+after `repos`, before `services`, copies a READ-ONLY SUBSET of the library to `/home/agent/.limn/docs/`
+at the library's own relative paths (`INDEX.md`, every `CONTENTS.md`, the chosen sections, a
+`SHORTLIST.md`), as root, files 0444 and folders 0555; no host folder is mounted and no model is asked.
+The sections: the CURRENT Check against docs run's shortlist and cited sections, else the whole small
+library, else the top 30 full-text hits; ≤ 30 sections and 600 KB. `DOCS.md` at the root carries that
+check's findings (fenced as library text) or says there is none; TICKET.md points at the folder. No
+built document ⇒ the step is skipped with one line; a copy that fails is skipped too, never fatal.
 
 **Settings → Sandbox** (`sandbox_workspace_settings`, migration 0174; `db/sandbox-settings.ts`;
 routes docs/API.md § Sandbox settings): the local folder, the ticked memory projects (NULL = the default),
@@ -637,6 +649,13 @@ every compose/build line. The seed (`buildSeed`, `services`) lists each file's s
 **Discard.** `services.close()` takes every running file down (`compose down --volumes`), then
 `runtime.destroy(session)` removes whatever is left, images included.
 
+**The run log** (`services/run-log.ts`): every `limn-svc run` is executed by the HOST, which records it
+(`svc-<n>`, the stack, service and command, the exit code, stdout + stderr as received, the tail ≤ 64 KB,
+and whether the reader opened that service to the internet) and prints `limn-svc: run recorded as
+svc-<n>` as its last line. ≤ 100 per session; `limn-svc runs` lists them; `session_json.serviceRuns`
+keeps them with the output clipped to 16 KB. A plan's `data_run` evidence is checked against this log
+only — a query over a `localhost` forward is not recorded and is not evidence.
+
 **microsandbox** (`dind.ts`, ⚠ untested: no machine here runs it). Docker runs INSIDE the VM
 (`startDindDaemon`: `dockerd` as the one root step, then `docker info` until it answers) and the agent
 runs `docker compose` itself. `prepareDindServices` normalises and polices every picked file (`bindMode:
@@ -742,8 +761,9 @@ host with no usable sign-in fails here, in one line) → `sandbox` → `repos` (
 is the egress's `refreshCredentials`). Measured live (Intel Mac, Docker Desktop, the image already
 local, a two-file repository): ready in 4 s.
 
-**Turns.** Every turn is a reader's click (a message, Start build), so the budget gate has nothing to
-gate: there is no automatic continuation. ONE turn per session at a time (`409 AgentBusy`) and ONE
+**Turns.** Every turn is a reader's click (a message, Start build, Approve, a Reply) — the planning turn
+Limn sends at boot answers the reader's Implement click — except plan first's ONE repair turn (§ The plan
+and its checks), which asks the budget gate (`review/budget-gate.ts automaticRunAllowed`) first. ONE turn per session at a time (`409 AgentBusy`) and ONE
 build-mode turn per machine (`409 BuildBusy`, owner decision 3 of STORY-BUILD); both claims are taken in
 the same tick as the click's checks. Spend comes from each `turn_end`: chat turns add to
 `plan_cost_usd`, build turns to `build_cost_usd`, tokens and turns to the row; the ledger rows are the
@@ -796,6 +816,83 @@ edits the setting above. `GET /api/sandbox/runtime` (`api/routes/sandbox-setting
 `runtimeStatusOf`, cached 10 s) gives both the runtime's one line. The Ticket panel reads
 `StoryBuildSession.ticket` (`SessionStateJson.criteria` + `openPoints`, rewritten at Start build), so
 it shows what TICKET.md holds, not the tracker's newest text.
+
+## The plan and its checks (plan first; `session/plan.ts`, `session/plan-block.ts`, `workspace/plan-check.ts`, `coding/story-build/plan-verify.ts`)
+
+Every NEW story session is plan first ([STORY-BUILD.md](STORY-BUILD.md) § Plan first; `session_json.planFirst`,
+older rows read as before). The subject adds three phases, `planning` (the opening or repair turn), `revising`
+(a reply, message or repair turn on an existing plan) and `plan_ready` (a usable revision waits for the
+reader, live or closed), and the machine calls the subject at three new points: `firstTurn` (the opening
+turn, the moment the agent is ready), `chatPhase` (what a running chat turn shows) and `afterChatTurn`
+(after every chat turn, with the turn's FINAL agent texts, `Live.turnTexts`). `afterChatTurn` may ask for
+ONE automatic follow-up turn, which `runTurn` claims in the same tick.
+
+- **Delivery.** Claude's chat mode is `--permission-mode plan` (no write), so the plan is the LAST
+  ```` ```limn-plan ```` fenced block of the turn's final text (`plan-block.ts extractPlanBlock`; a block inside
+  another fence is text; ≤ `BUILD_PLAN_MAX_BYTES`). The stored conversation item has the block replaced
+  by "(The plan went to Limn to check.)" (`stripPlanBlock`), so `session_json` never holds the plan.
+  The live partial text hides an open block (shared `hidePartialPlanText`).
+- **ONE validator.** `BUILD_PLAN_CHECK_SOURCE` is plain ES2019 text: the checker `~/.limn/plan-check.cjs`
+  embeds it (the agent pipes its plan in; it also tries each code quote against `refs/limn/base` and each
+  docs quote against the copied sections — advice only) and the host compiles the SAME text. Context:
+  `<root>/.limn/plan-context.json` (the refs, the repositories and their paths, the docs folder, the
+  `svc-<n>` ids so far; rewritten after every `limn-svc run`). SHAPE problems (a missing criterion, an
+  unknown repository, a PR that is not in the stack, a stack in one repository that is not one line,
+  `stackReason` missing, > 3 PRs in a repository or > 6 in all, a contention with 0 or > 4 evidence items,
+  Fill gaps: a gap marked `met`) make the plan unusable; CONTENT problems drop the item.
+- **The host's evidence check** (`plan-verify.ts verifyBuildPlan`; the agent controls the sandbox, so its
+  quotes count for nothing): `code` / `data_file` — the blob at the session's pinned base sha in Limn's
+  clone cache (`plan-blobs.ts`: hooks and config off, the lazy fetch's token only in a process-scoped
+  `insteadOf`, ≤ 2 MB, never binary); the quote, whitespace folded, in the cited lines ± 3, or EXACTLY
+  once elsewhere (lines corrected); the page shows the HOST's text (≤ 40 lines / 4 KB). `data_file`'s
+  label stays only on a data path. `docs` — `validateDocReferences` against the FULL built library.
+  `data_run` — a run in Limn's own log (§ Services → The run log) from a service with no internet route,
+  the quote in the recorded output. A point left with no evidence is dropped; `storySays` not in
+  TICKET.md is cleared. Only counts and plain reasons are kept (`dropped`).
+- **No usable plan** (no block after an opening, reply, or — with no plan yet — message turn; bad JSON;
+  shape problems): ONE repair turn per reader action (`planRepairInstruction`, ≤ 20 problems), an
+  AUTOMATIC run, so it asks the budget gate first; refused, or a failed repair ⇒ no turn, the stage is
+  `failed` with the first problem, and the session waits (`ready`). The session never loops.
+- **Approve** (`approveSessionPlan`): the route checks the LATEST revision and every answer, then
+  `claimBuildTurn` (the one build slot); inside the turn's instruction ONE transaction records the
+  approval and the `story_build_prs` rows and `PLAN.md` is copied in (`planMarkdown`). Start build is
+  refused `PlanNotApproved` (`buildRefused`).
+- **The build after Approve**: `planBuildInstruction` names each PR's branch (`limn/<key>`, `-2`, `-3`, each
+  made from the previous one in its repository) and asks for THE BUILD REPORT (`workspace/build-report.ts`,
+  the fix-report pattern: ONE validator text, `~/.limn/build-report-check.cjs`, read out after every build
+  turn; a self-report, never a gate). Seed rule 3 says to commit each planned PR on the branch PLAN.md
+  names. A build turn that hit the turn cap (`max_turns`) with work unfinished gets ≤ 2 automatic
+  continuation turns (`SessionSubject.buildFollowUp`, claimed by `runTurn` in the same tick with the build
+  slot); each asks the ONE budget gate first (`deps.automaticAllowed`), refused ⇒ no turn, one notice.
+- **The stacked extraction** (`session/stack-turn.ts`, `session/stack.ts`, `coding/story-build/stack-verify.ts`):
+  after every build turn of an approved plan, per repository with planned PRs, ONE script as the agent
+  (`EXTRACT_STACK_SCRIPT <repo> <max> <branch…>`: each planned branch's tip, uncommitted work folded into
+  ONE commit through a throw-away index only when the LAST planned branch is checked out — dirty elsewhere
+  is reported, never folded — and ONE bundle `refs/limn/stack/<k> ^refs/limn/base`, ≤ 8 MB, base64). On the
+  HOST, in Limn's clone cache for THAT repository only, under its lock, hooks and config off (the
+  `verifyMergeBundle` discipline): only the expected heads; the bundle header's prerequisites exactly the
+  base; fetched with fsck into `refs/pierre/story-build/<id>/stack/<prRowId>`; base → tip 1 → … ancestors in
+  turn, no merge commit, ≤ 200 commits, no gitlink, no path in `.git`; each PR's patch, numstat, tree and
+  messages computed here. A failure at PR k fails k and every later PR of that repository; a repository
+  with changes but no planned PR is left out (`leftOut`, one notice). ⚠ The agent's commit objects never
+  reach GitHub: Push makes ONE commit per PR by the reader and checks its tree against the verified one.
+- **Resume of an approved plan**: `restoreApprovedStack` puts each stored PR patch back as ONE commit on
+  its own branch (`RESTORE_STACK_SCRIPT`), the branches stacked, the last checked out, the agent in build
+  mode.
+- **Closed in the plan stage**: `keptPhase` is `plan_ready` (the plan is stored work); `bootedPhase` makes a
+  resumed plan-stage session `plan_ready` in CHAT mode with PLAN.md "not approved yet" and no turn. The
+  restart reconcile does the same.
+- **Live check, 2026-11-07** (`plan-session.live.test.ts`; Docker Desktop 29, Claude Code on the
+  subscription, Sonnet 5 at low effort; two throw-away repositories, a ticket whose AC2 says the API
+  already exports 10000 rows while the code caps it at 500): with no reader message, the opening turn read
+  TICKET.md and both repositories and sent one block; Limn verified it as revision 1 in 37 s for
+  US$ 0.19 — AC1 planned, AC2 `not_planned`, contention C1 on AC2 with code evidence the host re-read
+  (`MAX_EXPORT_ROWS = 500`), one PR in the one repository it changes, nothing dropped. **Spike S1:** in
+  `--permission-mode plan` the agent RAN Bash (`find`, `git show refs/limn/base:…`, the heredoc checker),
+  every call allowed — so no fallback F1 is needed. That plan had `ticketUpdate: null`; the validator now
+  requires a draft whenever there is a point of contention (a missing one gets the repair turn).
+- **Codex** is untested here (its usage limit): the block rides its final `agentMessage` the same way, and
+  its chat turns can write files (reported, not prevented, as before).
 
 ## AI Fix sessions (`session/fix.ts`, `workspace/fix-report.ts`)
 

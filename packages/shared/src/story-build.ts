@@ -13,6 +13,7 @@ import type { DesignDiagram, FlowDiagram } from './sequence-diagrams.js';
 import type { SprintStage } from './sprint-stories.js';
 import type { SprintTicketCheck } from './sprint-graph.js';
 import type { StoryBuildSession } from './sandbox-session.js';
+import type { StoryBuildPr, StoryBuildPrPushResult } from './build-plan.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
 import type {
   AiFixChangeReport,
@@ -450,6 +451,8 @@ export interface StoryBuild {
   pushedAll: boolean;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
+  /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
+  prs?: StoryBuildPr[];
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -511,6 +514,8 @@ export interface StoryBuildRepoPushResult {
 /** Push-one answers one result; Push all answers every unpushed ready repository, in plan order. */
 export interface StoryBuildPushResponse {
   results: StoryBuildRepoPushResult[];
+  /** Plan first: one result per planned PR the press reached, in plan order (absent on older sessions). */
+  prs?: StoryBuildPrPushResult[];
 }
 
 /** `GET …/repos/:repoId/diff` — the stored patch. */
@@ -534,15 +539,19 @@ export const STORY_BUILD_API = {
   discard: '/api/story-builds/:id/discard',
   repoDiff: '/api/story-builds/:id/repos/:repoId/diff',
   repoPush: '/api/story-builds/:id/repos/:repoId/push',
+  /** Plan first: one planned PR's patch, and its push (a stacked PR: the previous one first). */
+  prDiff: '/api/story-builds/:id/prs/:prId/diff',
+  prPush: '/api/story-builds/:id/prs/:prId/push',
 } as const;
 
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;
 
 /** A concrete path: `storyBuildPath('repoPush', { id: 7, repoId: 3 })`. */
-export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number } = {}): string {
+export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number; prId?: number } = {}): string {
   return STORY_BUILD_API[route]
     .replace(':id', params.id == null ? ':id' : String(params.id))
-    .replace(':repoId', params.repoId == null ? ':repoId' : String(params.repoId));
+    .replace(':repoId', params.repoId == null ? ':repoId' : String(params.repoId))
+    .replace(':prId', params.prId == null ? ':prId' : String(params.prId));
 }
 
 // ---- the sprint card ----------------------------------------------------------------------------------

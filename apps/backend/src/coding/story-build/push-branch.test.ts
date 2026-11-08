@@ -186,6 +186,20 @@ describe('applyAndPushBranch — the no-PR push', () => {
     expect(T.pushed).toEqual([]);
   });
 
+  it('plan first: `expectTree` — the verified tree pushes; any other is TREE_MISMATCH before the push', async () => {
+    const wrong = await applyAndPushBranch(args({ expectTree: '0'.repeat(40) })).catch((e) => e);
+    expect(wrong.code).toBe('TREE_MISMATCH');
+    expect(wrong.message).toBe("Limn's copy of the earlier pull request does not match. Push it again from Limn.");
+    expect(T.pushed).toEqual([]);
+    expect(T.prs).toEqual([]);
+    expect(T.removed).toHaveLength(1);
+    // The tree the patch makes on that base, worked out on a scratch tree the same way: it pushes.
+    const tree = execFileSync('git', ['-C', T.worktree, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const r = await applyAndPushBranch(args({ expectTree: tree }));
+    expect(r.prNumber).toBe(77);
+    expect(T.pushed).toHaveLength(1);
+  });
+
   it('a PR GitHub refused to open names the branch that WAS pushed', async () => {
     T.prFails = true;
     const err = await applyAndPushBranch(args()).catch((e) => e);

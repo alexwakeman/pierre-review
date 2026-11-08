@@ -6,6 +6,7 @@
 //   line with its output clipped, the turn ends with their cost, and notices.
 import {
   SANDBOX_CONVERSATION_MAX,
+  SANDBOX_SESSION_PHASES,
   clipSandboxText,
   type SandboxAgentEvent,
   type SandboxAgentMode,
@@ -17,8 +18,11 @@ import {
   type SandboxServicesStatus,
   type SandboxSessionPhase,
   type SandboxSessionRepo,
+  type BuildPlanStage,
+  type BuildPlanView,
   type StoryBuildSession,
 } from '@pierre-review/shared';
+import type { ServiceRunRecord } from '../services/run-log.js';
 
 /** A tool's output as STORED (the live frame carries up to SANDBOX_TOOL_OUTPUT_MAX). */
 export const STORED_TOOL_OUTPUT_MAX = 600;
@@ -50,6 +54,18 @@ export interface SessionStateJson {
   leftOut?: Array<{ repoId: number; fullName: string; files: string[] }>;
   /** AI Fix: nobody follows up (an auto fix, dependency automation's fix): it closes after its turn. */
   unattended?: boolean;
+  /** PLAN FIRST (docs/STORY-BUILD.md § Plan first): the session opens with a planning turn. Old rows: false. */
+  planFirst?: boolean;
+  /** "Implement with docs" was chosen. */
+  withDocs?: boolean;
+  /** What the docs boot step copied (null: none). */
+  docs?: { source: 'check' | 'whole' | 'search'; libraryHash: string; sections: string[] } | null;
+  /** Limn's own log of `limn-svc run` (services/run-log.ts), the output clipped. */
+  serviceRuns?: ServiceRunRecord[];
+  /** The plan stage's word (null once approved, or on a session without a plan). */
+  planStage?: BuildPlanStage | null;
+  /** Why there is no usable plan, in one line. */
+  planProblem?: string | null;
 }
 
 export function emptySessionState(action: SessionStateJson['action']): SessionStateJson {
@@ -89,6 +105,17 @@ export function readSessionState(raw: unknown, action: SessionStateJson['action'
     openPoints: Array.isArray(s.openPoints) ? s.openPoints : [],
     network: Array.isArray(s.network) ? s.network : [],
     ...(s.leftOut !== undefined ? { leftOut: Array.isArray(s.leftOut) ? s.leftOut : [] } : {}),
+    // Plan first: only on the rows that have it (an older row reads exactly as before).
+    ...(s.planFirst === true
+      ? {
+          planFirst: true,
+          withDocs: s.withDocs === true,
+          docs: s.docs != null && typeof s.docs === 'object' ? s.docs : null,
+          serviceRuns: Array.isArray(s.serviceRuns) ? s.serviceRuns : [],
+          planStage: typeof s.planStage === 'string' ? s.planStage : null,
+          planProblem: typeof s.planProblem === 'string' ? s.planProblem : null,
+        }
+      : {}),
     seq: typeof s.seq === 'number' && s.seq > 0 ? s.seq : base.seq,
     version: 1,
   };
@@ -103,6 +130,7 @@ export const BOOT_LABELS: Readonly<Record<SandboxBootStepKey, string>> = {
   ticket: 'Reading the ticket',
   task: 'Reading the pull request',
   repos: 'Cloning the repositories',
+  docs: 'Copying the reference documents',
   services: 'Getting the services ready',
   agent: 'Starting the agent',
   patches: 'Putting your earlier changes back',
@@ -203,8 +231,7 @@ export interface LiveFacts {
   idleCloseAt: string | null;
 }
 
-const isPhase = (p: string | null): p is SandboxSessionPhase =>
-  p === 'booting' || p === 'ready' || p === 'chatting' || p === 'building' || p === 'built' || p === 'pushed' || p === 'discarded' || p === 'failed';
+const isPhase = (p: string | null): p is SandboxSessionPhase => p != null && (SANDBOX_SESSION_PHASES as readonly string[]).includes(p);
 
 /**
  * THE wire mapper of a session (`StoryBuild.session`). `live` is the in-memory session when the
@@ -215,6 +242,7 @@ export function toStoryBuildSession(
   state: SessionStateJson,
   live: LiveFacts | null,
   hasPatches: boolean,
+  plan: BuildPlanView | null = null,
 ): StoryBuildSession | null {
   if (!isPhase(row.sessionPhase)) return null;
   const phase = row.sessionPhase;
@@ -229,7 +257,8 @@ export function toStoryBuildSession(
     agentState: live?.agentState ?? null,
     mode: state.mode,
     live: live != null,
-    resumable: live == null && hasPatches && (phase === 'built' || phase === 'pushed'),
+    // A closed session resumes from its stored patches, or (plan first) from its plan before approval.
+    resumable: live == null && ((hasPatches && (phase === 'built' || phase === 'pushed')) || (phase === 'plan_ready' && (plan?.revisions ?? 0) > 0)),
     boot: state.boot,
     notes: state.notes,
     conversation: state.conversation,
@@ -246,5 +275,6 @@ export function toStoryBuildSession(
     },
     idleCloseAt: live?.idleCloseAt ?? null,
     ticket: { criteria: state.criteria, openPoints: state.openPoints },
+    plan,
   };
 }

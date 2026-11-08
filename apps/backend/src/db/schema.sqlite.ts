@@ -87,6 +87,8 @@ import type {
   StoryBuildPlan,
   SandboxRepoStat,
   FeatureSettings,
+  BuildPlanDecision,
+  BuildPlanRevision,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -4560,6 +4562,11 @@ export const storyBuilds = sqliteTable(
     sessionJson: text('session_json', { mode: 'json' }).$type<Record<string, unknown>>(),
     buildCostUsd: real('build_cost_usd'),
     lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
+    // PLAN FIRST (migration 0179): "Implement with docs", and the approved plan revision (story_build_plans.id;
+    // NO FK — readers re-scope it by (build_id, account_id)).
+    withDocs: integer('with_docs', { mode: 'boolean' }).notNull().default(false),
+    approvedPlanId: integer('approved_plan_id'),
+    approvedAt: integer('approved_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -4645,6 +4652,104 @@ export const storyBuildRepos = sqliteTable(
       name: 'story_build_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_plans — ONE row per PLAN REVISION of a story session (migration 0179; docs/STORY-BUILD.md
+// § Plan first). `plan_json` is the HOST-VERIFIED revision (shared BuildPlanRevision without revision /
+// createdAt); `decisions_json` is this revision's answers (carried forward by id + fingerprint);
+// `replies_json` the replies sent FROM it. The unique `(build_id, revision)` is the ON CONFLICT target.
+export const storyBuildPlans = sqliteTable(
+  'story_build_plans',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    revision: integer('revision').notNull(),
+    source: text('source').notNull(),
+    planJson: text('plan_json', { mode: 'json' }).$type<Omit<BuildPlanRevision, 'revision' | 'createdAt'>>().notNull(),
+    rawSha: text('raw_sha').notNull(),
+    decisionsJson: text('decisions_json', { mode: 'json' }).$type<Record<string, { decision: BuildPlanDecision; fingerprint: string; at: string }>>(),
+    repliesJson: text('replies_json', { mode: 'json' }).$type<Array<{ contentionId: string | null; text: string; at: string }>>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    buildRevisionUx: uniqueIndex('story_build_plans_build_revision').on(t.buildId, t.revision),
+    idAccountUx: uniqueIndex('story_build_plans_id_account').on(t.id, t.accountId),
+    accountIdx: index('story_build_plans_account_idx').on(t.accountId, t.buildId, t.revision),
+    buildAccountFk: foreignKey({
+      name: 'story_build_plans_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_prs — ONE row per PLANNED pull request, created at Approve (migration 0179). Status: shared
+// `StoryBuildPrStatus`. `branch` is the sandbox branch and the push branch (`limn/<key>`, `-2`, `-3`). The
+// patch, `tip_sha` and `tree_sha` are computed on the HOST from verified commits, never the sandbox's diffs.
+export const storyBuildPrs = sqliteTable(
+  'story_build_prs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    planId: integer('plan_id').notNull(),
+    prKey: text('pr_key').notNull(),
+    position: integer('position').notNull(),
+    stackIndex: integer('stack_index').notNull(),
+    dependsOnJson: text('depends_on_json', { mode: 'json' }).$type<string[]>(),
+    criteriaJson: text('criteria_json', { mode: 'json' }).$type<string[]>(),
+    title: text('title').notNull(),
+    contains: text('contains').notNull(),
+    branch: text('branch').notNull(),
+    status: text('status').notNull(),
+    tipSha: text('tip_sha'),
+    treeSha: text('tree_sha'),
+    patch: text('patch'),
+    patchSha: text('patch_sha'),
+    statJson: text('stat_json', { mode: 'json' }).$type<SandboxRepoStat>(),
+    filesChangedJson: text('files_changed_json', { mode: 'json' }).$type<string[]>(),
+    commitMessage: text('commit_message'),
+    summary: text('summary'),
+    // The build report's word on this PR (a self-report): its status and the checks the agent says it ran.
+    checksJson: text('checks_json', { mode: 'json' }).$type<{ status: 'done' | 'partly' | 'not_done'; checks: Array<{ command: string; result: 'passed' | 'failed' | 'not_run'; note: string | null }> }>(),
+    error: text('error'),
+    pushedBranch: text('pushed_branch'),
+    pushedPrNumber: integer('pushed_pr_number'),
+    pushedPrUrl: text('pushed_pr_url'),
+    pushedCommitSha: text('pushed_commit_sha'),
+    pushedAt: integer('pushed_at', { mode: 'timestamp' }),
+    prTitle: text('pr_title'),
+    prBody: text('pr_body'),
+    pushError: text('push_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    buildKeyUx: uniqueIndex('story_build_prs_build_key').on(t.buildId, t.prKey),
+    idAccountUx: uniqueIndex('story_build_prs_id_account').on(t.id, t.accountId),
+    accountIdx: index('story_build_prs_account_idx').on(t.accountId, t.buildId, t.position),
+    buildAccountFk: foreignKey({
+      name: 'story_build_prs_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'story_build_prs_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+    planAccountFk: foreignKey({
+      name: 'story_build_prs_plan_account_fk',
+      columns: [t.planId, t.accountId],
+      foreignColumns: [storyBuildPlans.id, storyBuildPlans.accountId],
     }).onDelete('cascade'),
   }),
 );

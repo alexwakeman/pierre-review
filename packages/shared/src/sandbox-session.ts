@@ -19,6 +19,7 @@
 // status is DERIVED from it by `sandboxSessionStatus` — never written apart.
 import type { SandboxAgentErrorCode, SandboxAgentEvent, SandboxAgentMode, SandboxAgentState } from './sandbox-agent.js';
 import type { SandboxServicesStatus } from './sandbox-services.js';
+import type { BuildPlanView, StoryBuildPr } from './build-plan.js';
 import type { StoryBuildStatus } from './story-build.js';
 import type { AiProviderId } from './types.js';
 
@@ -29,6 +30,12 @@ export type SandboxSessionPhase =
   | 'ready'
   /** A chat turn is running. */
   | 'chatting'
+  /** Plan first: the opening planning turn (or its repair) runs. */
+  | 'planning'
+  /** Plan first: a usable plan waits for the reader (live, or closed and resumable). */
+  | 'plan_ready'
+  /** Plan first: a reply, message or repair turn runs on an existing plan. */
+  | 'revising'
   /** Start build was pressed: a build-mode turn is running. */
   | 'building'
   /** A build turn ended and its patches are stored: Push, or keep talking. */
@@ -38,12 +45,27 @@ export type SandboxSessionPhase =
   | 'discarded'
   | 'failed';
 
-export const SANDBOX_SESSION_PHASES: readonly SandboxSessionPhase[] = ['booting', 'ready', 'chatting', 'building', 'built', 'pushed', 'discarded', 'failed'];
+export const SANDBOX_SESSION_PHASES: readonly SandboxSessionPhase[] = [
+  'booting',
+  'ready',
+  'chatting',
+  'planning',
+  'plan_ready',
+  'revising',
+  'building',
+  'built',
+  'pushed',
+  'discarded',
+  'failed',
+];
 
 const STATUS_OF: Readonly<Record<SandboxSessionPhase, StoryBuildStatus>> = {
   booting: 'assessing',
   ready: 'plan_ready',
   chatting: 'planning',
+  planning: 'planning',
+  plan_ready: 'plan_ready',
+  revising: 'planning',
   building: 'building',
   built: 'ready',
   pushed: 'ready',
@@ -57,7 +79,7 @@ export function sandboxSessionStatus(phase: SandboxSessionPhase): StoryBuildStat
 }
 
 /** The sandbox is (or should be) running: the phases a restart or an idle teardown cuts off. */
-export const SANDBOX_SESSION_LIVE_PHASES: readonly SandboxSessionPhase[] = ['booting', 'ready', 'chatting', 'building', 'built'];
+export const SANDBOX_SESSION_LIVE_PHASES: readonly SandboxSessionPhase[] = ['booting', 'ready', 'chatting', 'planning', 'plan_ready', 'revising', 'building', 'built'];
 
 /** Open sessions (a running sandbox) per machine (LIMN_SANDBOX_MAX_SESSIONS). */
 export const SANDBOX_MAX_OPEN_SESSIONS_DEFAULT = 2;
@@ -71,7 +93,8 @@ export const SANDBOX_CONVERSATION_MAX = 400;
 // ---- what the session shows --------------------------------------------------------------------------
 
 /** `task`: an AI Fix session reading its pull request (a story session reads its `ticket`). */
-export type SandboxBootStepKey = 'runtime' | 'image' | 'network' | 'proxy' | 'sandbox' | 'ticket' | 'task' | 'repos' | 'services' | 'agent' | 'patches';
+/** `docs`: Implement with docs copies a read-only subset of the reference library into the sandbox. */
+export type SandboxBootStepKey = 'runtime' | 'image' | 'network' | 'proxy' | 'sandbox' | 'ticket' | 'task' | 'repos' | 'docs' | 'services' | 'agent' | 'patches';
 export type SandboxBootStepState = 'running' | 'done' | 'failed' | 'skipped';
 
 export interface SandboxBootStep {
@@ -166,6 +189,8 @@ export interface StoryBuildSession {
   ticket: SandboxSessionTicket;
   /** ISO: when an idle session will be closed; null while a turn runs or when closed. */
   idleCloseAt: string | null;
+  /** Plan first (every new story session): the plan stage. null on older sessions and AI Fix. */
+  plan: BuildPlanView | null;
 }
 
 // ---- the stream ----------------------------------------------------------------------------------------
@@ -183,6 +208,10 @@ export type SandboxSessionStreamEvent =
   | { type: 'item'; item: SandboxConversationItem }
   | { type: 'network'; entry: SandboxNetworkEntry }
   | { type: 'services'; status: SandboxServicesStatus }
+  /** Plan first: the plan stage changed (a new revision, a decision, a reply, approval). */
+  | { type: 'plan'; plan: BuildPlanView }
+  /** Plan first: the planned pull requests after a build turn's extraction. */
+  | { type: 'prs'; prs: StoryBuildPr[] }
   | { type: 'done' };
 
 // ---- bodies --------------------------------------------------------------------------------------------
@@ -195,6 +224,8 @@ export interface SandboxSessionStartBody {
   action?: 'implement' | 'fill_gaps';
   provider?: AiProviderId;
   model?: string;
+  /** "Implement with docs": a read-only subset of the workspace's reference library goes into the sandbox. */
+  docs?: boolean;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

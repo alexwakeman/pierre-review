@@ -1,6 +1,12 @@
 import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   storyBuildPath,
+  type BuildPlanApproveBody,
+  type BuildPlanDecisionBody,
+  type BuildPlanReplyBody,
+  type BuildPlanRevisionResponse,
+  type BuildPlanView,
+  type StoryBuildPrDiffResponse,
   type StoryBuild,
   type StoryBuildDiffResponse,
   type StoryBuildForTicketResponse,
@@ -51,7 +57,7 @@ export function useStoryBuildFor(workspaceId: number | null, ident: string | nul
       const b = q.state.data?.build;
       // A session: only while something moves (the stream carries the rest; a waiting agent needs no poll).
       if (b?.session == null) return false;
-      return b.session.live && b.session.phase !== 'ready' && b.session.phase !== 'built' ? SESSION_POLL_MS : false;
+      return b.session.live && b.session.phase !== 'ready' && b.session.phase !== 'plan_ready' && b.session.phase !== 'built' ? SESSION_POLL_MS : false;
     },
   });
 }
@@ -104,6 +110,89 @@ export function useStoryBuildDiff(buildId: number, repoId: number, enabled: bool
     // `patchKey` (the repo row's completion stamp) re-reads the patch after a later build turn.
     queryKey: ['story-build-diff', buildId, repoId, patchKey],
     queryFn: () => api.storyBuildRepoDiff(buildId, repoId),
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
+// ── PLAN FIRST (docs/STORY-BUILD.md § Plan first) ─────────────────────────────────────────────────
+//
+// The plan rides on the session (`session.plan`, the read and the stream's `plan` frame). Agree / Keep the
+// story is a DB write with no model turn: its OWN key (never blocked by, and never blocking, a billed
+// press), and its answer is the plan view, laid into the read at once. Reply and Approve are billed turns
+// on the session's one key.
+
+/** One earlier revision (the history list), read when the reader opens it. Revisions never change. */
+export function useStoryBuildPlanRevision(buildId: number, revision: number | null) {
+  return useQuery<BuildPlanRevisionResponse>({
+    queryKey: ['story-build-plan', buildId, revision],
+    queryFn: revision == null ? skipToken : () => api.storyBuildPlanRevision(buildId, revision),
+    staleTime: Infinity,
+  });
+}
+
+/** Write a plan view into the ticket's read (the decision's answer). */
+function seatPlan(qc: QueryClient, workspaceId: number | null, ident: string, plan: BuildPlanView): void {
+  qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) => {
+    const b = old?.build;
+    if (old == null || b == null || b.session == null) return old;
+    return { ...old, build: { ...b, session: { ...b.session, plan } } };
+  });
+}
+
+export function usePlanDecision(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: number; body: BuildPlanDecisionBody }) => api.decideStoryBuildPlan(v.id, v.body),
+    onSuccess: (plan) => seatPlan(qc, workspaceId, ident, plan),
+    // PlanStale (a new revision) or any refusal: the read says what the plan now is.
+    onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
+  });
+}
+
+export function usePlanReply(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: storyBuildMutationKey(ident),
+    mutationFn: (v: { id: number; body: BuildPlanReplyBody }) => api.replyStoryBuildPlan(v.id, v.body),
+    onSettled: () => invalidateBuild(qc, workspaceId, ident),
+  });
+}
+
+export function usePlanApprove(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: storyBuildMutationKey(ident),
+    mutationFn: (v: { id: number; body: BuildPlanApproveBody }) => api.approveStoryBuildPlan(v.id, v.body),
+    onSettled: () => invalidateBuild(qc, workspaceId, ident),
+  });
+}
+
+/**
+ * Push one planned PR (`prId`), or every ready one in plan order (`prId` null: the Push all route, which
+ * pushes the stack on a plan-first session). THE ONE WRITE SET, as `useStoryBuildPush`.
+ */
+export function useStoryBuildPrPush(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: storyBuildMutationKey(ident),
+    mutationFn: (v: { id: number; prId: number | null; draft: boolean }): Promise<StoryBuildPushResponse> =>
+      v.prId == null ? api.pushStoryBuildAll(v.id, { draft: v.draft }) : api.pushStoryBuildPr(v.id, v.prId, { draft: v.draft }),
+    onSettled: () =>
+      Promise.all([
+        invalidateBuild(qc, workspaceId, ident),
+        qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
+        invalidateAfterPrWrite(qc, null),
+      ]),
+  });
+}
+
+/** One planned PR's patch — fetched only once the reader opens its diff. `patchKey` re-reads it after a
+ *  later build turn (the PR's tip changes with its stat). */
+export function useStoryBuildPrDiff(buildId: number, prId: number, enabled: boolean, patchKey: string) {
+  return useQuery<StoryBuildPrDiffResponse>({
+    queryKey: ['story-build-pr-diff', buildId, prId, patchKey],
+    queryFn: () => api.storyBuildPrDiff(buildId, prId),
     enabled,
     staleTime: Infinity,
   });

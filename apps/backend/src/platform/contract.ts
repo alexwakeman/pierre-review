@@ -102,6 +102,7 @@ export interface ApplyAndPushResult {
 //   'REBASE_FAILED'        — the rebase failed for a non-conflict reason (→ 422)
 //   'TRUNK_FETCH_FAILED'   — the trunk ref couldn't be fetched (→ 422)
 //   'BRANCH_EXISTS'        — a NEW push target branch already exists (→ 409)
+//   'TREE_MISMATCH'        — a stacked PR's commit does not have the host-verified tree (nothing pushed)
 export type CodingErrorCode =
   | 'HEAD_MOVED'
   | 'PUSH_DENIED'
@@ -110,7 +111,8 @@ export type CodingErrorCode =
   | 'MERGE_FAILED'
   | 'REBASE_FAILED'
   | 'TRUNK_FETCH_FAILED'
-  | 'BRANCH_EXISTS';
+  | 'BRANCH_EXISTS'
+  | 'TREE_MISMATCH';
 
 export interface GithubSeam {
   fetchPrDiff(

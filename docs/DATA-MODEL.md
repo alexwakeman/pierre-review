@@ -799,6 +799,24 @@ repository gets a `story_build_repos` row; after every build-mode turn its work 
 `sandbox_path` is where it sits in the sandbox. `seed_json` keeps the old v1 shape (Push reads the
 story's title and URL from it).
 
+**PLAN FIRST** (migration `0179`; [STORY-BUILD.md](STORY-BUILD.md) § Plan first): `story_builds.with_docs`
+("Implement with docs"), `approved_plan_id` (the approved `story_build_plans.id`; NO FK, re-scoped by
+`(build_id, account_id)`) and `approved_at`. `story_build_plans`: ONE row per plan REVISION — `revision`
+(unique `(build_id, revision)`), `source` (opening · reply · message · repair), `plan_json` (the
+HOST-VERIFIED shared `BuildPlanRevision` without revision/createdAt; evidence excerpts are the host's own
+text), `raw_sha` (an identical resubmission makes no revision), `decisions_json` (`{ [contentionId]:
+{ decision, fingerprint, at } }` — carried to the next revision only by id AND fingerprint) and
+`replies_json` (the replies sent from it): the decision log. `story_build_prs`: ONE row per PLANNED pull
+request, written at Approve in the same transaction as `approved_plan_id` — `pr_key` (unique `(build_id,
+pr_key)`), `position`, `stack_index`, `branch`, criteria, depends-on, status (shared `StoryBuildPrStatus`),
+and the HOST-computed patch (against the PR before it) / `tip_sha` / `tree_sha` (written after every build
+turn from the verified bundle; never the sandbox's own diff; a pushed row is never rewritten), the build
+report's `summary` and `checks_json` (`{status, checks}`, a self-report) and the push record (`pushed_*`,
+`push_error`; Push checks the commit's tree against `tree_sha`). Both have unique `(id, account_id)` and named
+composite FKs onto `story_builds (id, account_id)` (+ `repos` and `story_build_plans` for the PR rows),
+cascade; both are in `accountScopedTables()`, erased before `story_build_repos`, and exported (the PR
+patch cut like a repository's); `deleteRepo` deletes a repository's PR rows explicitly.
+
 ## `ai_fixes` — AI Fix runs (CORE)
 
 ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and

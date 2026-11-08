@@ -135,7 +135,7 @@ function StoryActions({
   const rail = useInRail();
   return (
     <span className={rail ? 'flex flex-wrap items-center gap-1.5' : 'ml-auto flex flex-wrap items-center gap-1.5'} data-testid="story-actions">
-      <StoryBuildEntry ticket={ticket} state={state} />
+      <StoryBuildEntry ticket={ticket} state={state} docsAvailable={docs?.q.data?.available === true} />
       {docs != null && <StoryDocsButton q={docs.q} start={docs.start} starting={docs.starting} />}
       <StoryDesignButton design={design} />
     </span>

@@ -148,6 +148,21 @@ pinned), nothing else, and no conflict marker in a file that was in conflict. Pu
 commit objects: it rebuilds the merge commit and one fix commit from the CHECKED trees under the reader's
 name, onto the PR's own branch only (never a fork), as a fast-forward of the head the fix started from.
 
+⚠ **A PLAN'S EVIDENCE IS THE HOST'S, NOT THE AGENT'S** (plan first, docs/SANDBOX.md § The plan and its checks).
+The agent controls the sandbox, so every quote in its plan is re-read on the host: code at the pinned base
+sha in Limn's clone cache (hooks and config off), docs in the full library, data runs only from Limn's own
+`limn-svc run` log and never from a service the reader opened to the internet. The page shows the host's
+text. The plan leaves as text in the agent's answer (Claude's plan mode cannot write), so nothing on the
+host listens. "Implement with docs" copies a read-only, root-owned subset of the library; no host folder
+is mounted.
+
+⚠ **AN APPROVED STACK FROM THE SANDBOX IS CHECKED, THEN REBUILT** (docs/STORY-BUILD.md § Plan first →
+Stacks). Each repository's planned branches leave as ONE git bundle, read only in THAT repository's clone
+cache with hooks and config off, fsck'd into `refs/pierre/story-build/<id>/stack/<prRowId>`; accepted only
+with the expected heads, the base as its only prerequisite, a straight line base → PR 1 → PR 2 …, no merge,
+no gitlink, no path in `.git`. Every patch and tree the reader sees is the host's. Push makes ONE commit per
+PR by the reader and refuses (`TREE_MISMATCH`) when its tree is not the verified one.
+
 ⚠ **AI FIX PUTS PR TEXT IN FRONT OF AN AGENT WITH A SHELL.** The PR's title, description, diff, review
 items and thread text — written by whoever opened or commented on the PR, a bot's PR included — are the
 fix's task (`FIX.md`, `PR.diff`, fenced and marked UNTRUSTED). What makes that acceptable is the sandbox,

@@ -14,11 +14,13 @@ import type { SandboxRuntime, SessionOwner } from '../runtime/types.js';
 import { ServicesController, stackKeyFor, type ServiceStackConfig } from './controller.js';
 import type { ServiceLimits } from './policy.js';
 import { startServicesRelay } from './relay.js';
+import type { ServiceRunRecord } from './run-log.js';
 
 export { policeCompose, DEFAULT_SERVICE_LIMITS, DEFAULT_ALLOWED_REGISTRIES } from './policy.js';
 export type { PolicyResult, PolicedStack, Forward, ServiceLimits } from './policy.js';
 export { ServicesController, USAGE as LIMN_SVC_USAGE } from './controller.js';
 export type { ServiceStackConfig } from './controller.js';
+export type { ServiceRunRecord } from './run-log.js';
 export { prepareDindServices, startDindDaemon } from './dind.js';
 
 /** A picked file's path must stay inside its repository. */
@@ -78,6 +80,8 @@ export async function startSessionServices(o: {
   onStatus?: (s: SandboxServicesStatus) => void;
   onOutput?: (line: string) => void;
   onProblem?: (line: string) => void;
+  /** A `limn-svc run` was recorded (run-log.ts). */
+  onRun?: (rec: ServiceRunRecord) => void;
 }): Promise<SessionServices> {
   const controller = new ServicesController(o);
   const relay = startServicesRelay({ runtime: o.runtime, sandbox: o.sandbox, controller, ...(o.onProblem ? { onProblem: o.onProblem } : {}) });

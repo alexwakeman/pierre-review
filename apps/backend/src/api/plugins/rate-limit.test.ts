@@ -124,6 +124,9 @@ describe('tierFor — implement story', () => {
   it('puts both pushes on the GitHub write bucket', () => {
     expect(tiers('POST', '/api/story-builds/7/repos/3/push')).toEqual(['github_write']);
     expect(tiers('POST', '/api/story-builds/7/push')).toEqual(['github_write']);
+    // Plan first: one planned PR's push is a GitHub write; its diff is a read.
+    expect(tiers('POST', '/api/story-builds/7/prs/4/push')).toEqual(['github_write']);
+    expect(tiers('GET', '/api/story-builds/7/prs/4/diff')).toEqual(['read']);
   });
   it('keeps the DB-only routes on read', () => {
     expect(tiers('GET', '/api/story-builds')).toEqual(['read']);
@@ -137,6 +140,11 @@ describe('tierFor — implement story', () => {
     expect(tiers('POST', '/api/story-builds/7/build')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/story-builds/7/resume')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/story-builds/7/interrupt')).toEqual(['read']);
+    // Plan first: a Reply and Approve start a turn; Agree / Keep the story and the revision read are DB only.
+    expect(tiers('POST', '/api/story-builds/7/plan/reply')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds/7/plan/decisions')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/7/plan')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/network/allow')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/7/diff')).toEqual(['read']);
     // MUTATION: a near-miss path is not billed as a turn.
@@ -150,10 +158,17 @@ describe('tierFor — implement story', () => {
       expect(tiers(route === 'diff' ? 'GET' : 'POST', path).length).toBeGreaterThan(0);
     }
   });
+  it('decides every shared plan path: the turns on AI, the rest on read', async () => {
+    const { BUILD_PLAN_API, buildPlanPath } = await import('@pierre-review/shared');
+    const want: Record<keyof typeof BUILD_PLAN_API, string[]> = { plan: ['read'], decisions: ['read'], reply: ['ai', 'ai_hourly'], approve: ['ai', 'ai_hourly'] };
+    for (const route of Object.keys(BUILD_PLAN_API) as Array<keyof typeof BUILD_PLAN_API>) {
+      expect(tiers(route === 'plan' ? 'GET' : 'POST', buildPlanPath(route, 7)), route).toEqual(want[route]);
+    }
+  });
   it('spells every shared route path into a decided tier', async () => {
     const { STORY_BUILD_API, storyBuildPath } = await import('@pierre-review/shared');
     for (const route of Object.keys(STORY_BUILD_API) as Array<keyof typeof STORY_BUILD_API>) {
-      const path = storyBuildPath(route, { id: 7, repoId: 3 });
+      const path = storyBuildPath(route, { id: 7, repoId: 3, prId: 4 });
       expect(path, route).not.toMatch(/:/);
       expect(tiers('GET', path).length, route).toBeGreaterThan(0);
     }

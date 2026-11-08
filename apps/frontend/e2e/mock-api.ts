@@ -91,6 +91,14 @@ import type {
   RepoDocsCheckResponse,
   RepoDocsOffersAddResponse,
   RepoDocsOffersDismissResponse,
+  BuildPlanDecisionBody,
+  BuildPlanReplyBody,
+  BuildPlanRevision,
+  BuildPlanRevisionResponse,
+  BuildPlanView,
+  StoryBuildPr,
+  StoryBuildPrDiffResponse,
+  SandboxSessionStartBody,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -106,6 +114,7 @@ import {
   resolveMyTurnSettings,
   SANDBOX_SESSION_API,
   STORY_BUILD_API,
+  BUILD_PLAN_API,
 } from '@pierre-review/shared';
 
 // Deterministic, self-contained API fixtures for the My Turn / Feed / Focus-mode
@@ -911,6 +920,8 @@ export const STORY_SESSION_READY_SESSION: StoryBuildSession = {
     criteria: ['AC1: Every report has a Download CSV button.', 'AC2: The file opens in a spreadsheet with one header row.', 'AC3: Large reports stream instead of timing out.'],
     openPoints: ['Which reports are in scope for the first release?'],
   },
+  // A session from before plan first (chat, then Start build). A plan-first session: STORY_SESSION_PLAN_READY.
+  plan: null,
 };
 
 export const STORY_SESSION_READY: StoryBuild = {
@@ -1013,6 +1024,183 @@ export const STORY_SESSION_CLOSED: StoryBuild = {
   ...STORY_SESSION_BUILT,
   session: { ...STORY_SESSION_BUILT.session!, live: false, resumable: true, agentState: null },
 };
+
+// ── PLAN FIRST (docs/STORY-BUILD.md § Plan first) ─────────────────────────────────────────────────
+//
+// What a NEW session is now: Limn sends the planning turn itself, and the agent's checked plan waits for the
+// reader. Revision 2 (revision 1 is the history entry): three criteria, two points to settle (code + docs
+// evidence on C1, a data run on C2), a three-PR stack (two stacked in acme/api, one in acme/web) and a draft
+// ticket update. Approve turns it into STORY_SESSION_STACK_BUILT: three planned PRs, ready to push in order.
+
+const PLAN_CODE_EVIDENCE = {
+  kind: 'code' as const,
+  repoId: 11,
+  fullName: 'acme/api',
+  path: 'src/reports/export.ts',
+  startLine: 14,
+  endLine: 16,
+  baseSha: 'b'.repeat(40),
+  excerpt: '// Reports over this size are refused.\nexport const MAX_EXPORT_ROWS = 500;\nexport const EXPORT_TIMEOUT_MS = 30_000;\n',
+  linesCorrected: false,
+};
+
+export function storyPlanRevision(revision: number, o: Partial<BuildPlanRevision> = {}): BuildPlanRevision {
+  return {
+    revision,
+    source: revision === 1 ? 'opening' : 'reply',
+    createdAt: iso(0.002),
+    summary: 'Add a streamed CSV route to acme/api and a Download CSV button to acme/web. The export cap in acme/api is changed first, in its own pull request.',
+    repos: [
+      { repoId: 11, fullName: 'acme/api', why: 'The reports endpoint and the export cap.' },
+      { repoId: 10, fullName: 'acme/web', why: 'The Download CSV button on each report.' },
+    ],
+    criteria: [
+      { ref: 'AC1', text: 'Every report has a Download CSV button.', status: 'planned', how: 'A button in ReportHeader that calls the new route.', prs: ['P3'], openPoints: [] },
+      { ref: 'AC2', text: 'The file opens in a spreadsheet with one header row.', status: 'planned', how: 'The route writes the column names first.', prs: ['P2'], openPoints: [] },
+      { ref: 'AC3', text: 'Large reports stream instead of timing out.', status: 'planned', how: 'Stream rows from a cursor; lift the 500-row cap.', prs: ['P1', 'P2'], openPoints: [1] },
+    ],
+    contentions: [
+      {
+        id: 'C1',
+        fingerprint: 'f-c1',
+        about: ['AC3'],
+        storySays: 'Large reports stream instead of timing out.',
+        problem: 'acme/api refuses any export over 500 rows, so a large report never reaches the stream. The export guide also says exports are capped.',
+        proposal: 'Remove the 500-row cap for CSV and stream every row.',
+        ifKept: 'Stream up to 500 rows and keep the refusal above that.',
+        evidence: [
+          PLAN_CODE_EVIDENCE,
+          {
+            kind: 'docs',
+            path: 'export-guide/sections/02-row-limits.md',
+            anchor: null,
+            docSlug: 'export-guide',
+            docTitle: 'Export guide',
+            sectionTitle: 'Row limits',
+            quote: 'An export may hold at most 500 rows.',
+            verdict: 'contradicts',
+            note: 'The guide caps every export at 500 rows.',
+            about: 'AC3',
+            workspaceId: WORKSPACE.id,
+          },
+        ],
+      },
+      {
+        id: 'C2',
+        fingerprint: 'f-c2',
+        about: ['AC1'],
+        storySays: 'Every report has a Download CSV button.',
+        problem: 'Two of the nine report types have no rows table, so a CSV of them would be empty.',
+        proposal: 'Show the button only on the seven report types with rows.',
+        ifKept: 'Show the button on every report, and send a header row only for the two without rows.',
+        evidence: [
+          {
+            kind: 'data_run',
+            run: 'svc-1',
+            stack: 'dev',
+            service: 'postgres',
+            command: ['psql', '-c', 'select kind, count(*) from report_rows group by kind'],
+            exitCode: 0,
+            at: iso(0.002),
+            excerpt: ' kind     | count\n----------+-------\n summary  |     0\n pipeline |     0\n(7 more rows)',
+          },
+        ],
+      },
+    ],
+    stack: [
+      { key: 'P1', repoId: 11, fullName: 'acme/api', stackIndex: 1, title: 'Lift the export row cap', contains: 'The cap constant and its test.', criteria: ['AC3'], dependsOn: [], branch: 'limn/ACME-1' },
+      { key: 'P2', repoId: 11, fullName: 'acme/api', stackIndex: 2, title: 'Stream reports as CSV', contains: 'GET /reports/:id.csv, streamed from a cursor.', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], branch: 'limn/ACME-1-2' },
+      { key: 'P3', repoId: 10, fullName: 'acme/web', stackIndex: 1, title: 'Add the Download CSV button', contains: 'The button in ReportHeader.', criteria: ['AC1'], dependsOn: ['P2'], branch: 'limn/ACME-1' },
+    ],
+    stackReason: 'The cap change touches every export, so it is reviewed on its own before the new route.',
+    ticketUpdate: {
+      description: null,
+      acceptanceCriteria: 'AC3: GIVEN a report with more than 500 rows\nWHEN I select Download CSV\nTHEN the file streams every row',
+      why: 'The story does not say what happens above the current 500-row cap.',
+      contentions: ['C1'],
+    },
+    dropped: { contentions: 1, evidence: 0, reasons: ['A quote was not in the file at the session start.'] },
+    ...o,
+  };
+}
+
+export const STORY_PLAN_VIEW: BuildPlanView = {
+  latest: storyPlanRevision(2),
+  revisions: 2,
+  decisions: {},
+  replies: [{ contentionId: 'C1', text: 'Is the cap used anywhere else?', at: iso(0.003), revision: 1 }],
+  unanswered: 2,
+  approvedRevision: null,
+  approvedAt: null,
+  status: 'ready',
+  problem: null,
+  withDocs: true,
+  fillGaps: false,
+};
+
+/** A plan-first session waiting for the reader to settle its plan. */
+export const STORY_SESSION_PLAN_READY: StoryBuild = {
+  ...STORY_SESSION_READY,
+  session: {
+    ...STORY_SESSION_READY_SESSION,
+    phase: 'plan_ready',
+    plan: STORY_PLAN_VIEW,
+    conversation: [
+      { kind: 'reader', id: 'r0', text: 'Plan with docs', at: iso(0.004), build: false },
+      { kind: 'tool', id: 't0', tool: 'Read', summary: 'src/reports/export.ts', ok: true, output: 'export const MAX_EXPORT_ROWS = 500;', at: iso(0.004) },
+      { kind: 'agent', id: 'm-0', text: 'I read the ticket, both repositories and the export guide. The plan is above.', at: iso(0.003) },
+      { kind: 'turn', id: 'e0', turn: 1, mode: 'chat', outcome: 'completed', costUsd: 0.12, at: iso(0.003) },
+    ],
+  },
+};
+
+function storyBuildPr(id: number, key: string, position: number, o: Partial<StoryBuildPr>): StoryBuildPr {
+  return {
+    id,
+    key,
+    repoId: 11,
+    fullName: 'acme/api',
+    position,
+    stackIndex: 1,
+    title: '',
+    contains: '',
+    criteria: [],
+    dependsOn: [],
+    branch: 'limn/ACME-1',
+    status: 'ready',
+    error: null,
+    stat: { files: 1, insertions: 3, deletions: 0, commits: 1 },
+    filesChanged: ['src/reports/csv.ts'],
+    summary: null,
+    checks: null,
+    reported: null,
+    pushedBranch: null,
+    pushedPrNumber: null,
+    pushedPrUrl: null,
+    pushError: null,
+    ...o,
+  };
+}
+
+/** After Approve: the build followed the stack and every planned PR is ready to push, in order. */
+export function stackBuiltFrom(b: StoryBuild): StoryBuild {
+  const s = b.session!;
+  const plan = s.plan!;
+  const decisions = Object.keys(plan.decisions).length > 0 ? plan.decisions : { C1: { decision: 'agree' as const, at: iso(0) }, C2: { decision: 'keep_story' as const, at: iso(0) } };
+  return {
+    ...builtFrom(b),
+    prs: [
+      storyBuildPr(501, 'P1', 0, { title: 'Lift the export row cap', criteria: ['AC3'], summary: 'Removes the 500-row cap for CSV.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
+      storyBuildPr(502, 'P2', 1, { stackIndex: 2, branch: 'limn/ACME-1-2', title: 'Stream reports as CSV', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], summary: 'Adds GET /reports/:id.csv, streamed.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
+      storyBuildPr(503, 'P3', 2, { repoId: 10, fullName: 'acme/web', title: 'Add the Download CSV button', criteria: ['AC1'], dependsOn: ['P2'], filesChanged: ['src/reports/ReportHeader.tsx'], reported: 'partly', checks: [{ command: 'pnpm lint', result: 'not_run', note: 'No lint config.' }] }),
+    ],
+    session: { ...builtFrom(b).session!, plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) } },
+  };
+}
+
+export const STORY_SESSION_STACK_BUILT: StoryBuild = stackBuiltFrom(STORY_SESSION_PLAN_READY);
+
+const STORY_PR_DIFF = (prId: number): StoryBuildPrDiffResponse => ({ prId, key: `P${prId - 500}`, repoId: 11, patch: CSV_PATCH, filesChanged: ['src/reports/csv.ts'], stat: { files: 1, insertions: 3, deletions: 0, commits: 1 } });
 
 // ── AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions) ──────────────────────────────
 
@@ -1663,8 +1851,11 @@ export async function installMockApi(
         }
         if (path === STORY_BUILD_API.list && method === 'POST') {
           if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);
-          // The boot is over at once in the mock: the session opens ready.
-          storyBuild = STORY_SESSION_READY;
+          // The boot and the planning turn are over at once in the mock: a NEW session is plan first, and
+          // its checked plan waits for the reader ("with docs" only when the start asked for them).
+          const body = route.request().postDataJSON() as SandboxSessionStartBody;
+          const plan = { ...STORY_PLAN_VIEW, withDocs: body.docs === true, fillGaps: body.action === 'fill_gaps' };
+          storyBuild = { ...STORY_SESSION_PLAN_READY, session: { ...STORY_SESSION_PLAN_READY.session!, plan } };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
         }
         if (at('messages')) {
@@ -1690,6 +1881,59 @@ export async function installMockApi(
           if (storyBuild?.session != null) storyBuild = { ...storyBuild, session: { ...storyBuild.session, live: true, resumable: false, agentState: 'ready' } };
           return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
         }
+        // PLAN FIRST: the plan's routes (shared BUILD_PLAN_API) and the planned PRs' diff and push.
+        const planAt = (r: keyof typeof BUILD_PLAN_API): boolean => path === BUILD_PLAN_API[r].replace(':id', String(id));
+        if (planAt('plan')) {
+          const n = Number(new URL(route.request().url()).searchParams.get('revision') ?? '1');
+          return json(route, { revision: storyPlanRevision(n, { summary: `Revision ${n}: the first plan.`, contentions: [] }), decisions: {} } satisfies BuildPlanRevisionResponse);
+        }
+        if (planAt('decisions')) {
+          const body = route.request().postDataJSON() as BuildPlanDecisionBody;
+          const s = storyBuild?.session;
+          if (s?.plan == null || s.plan.latest == null) return json(route, { error: 'NoPlan', message: 'No plan yet.' }, 409);
+          if (body.revision !== s.plan.latest.revision) return json(route, { error: 'PlanStale', message: 'The plan changed.' }, 409);
+          const decisions = { ...s.plan.decisions };
+          if (body.decision == null) delete decisions[body.contentionId];
+          else decisions[body.contentionId] = { decision: body.decision, at: iso(0) };
+          const plan: BuildPlanView = { ...s.plan, decisions, unanswered: s.plan.latest.contentions.filter((c) => decisions[c.id] == null).length };
+          storyBuild = { ...storyBuild!, session: { ...s, plan } };
+          return json(route, plan);
+        }
+        if (planAt('reply')) {
+          // The revision turn is over at once: revision n+1, the decisions carried forward (same ids).
+          const body = route.request().postDataJSON() as BuildPlanReplyBody;
+          const s = storyBuild?.session;
+          if (s?.plan?.latest != null) {
+            const n = s.plan.latest.revision + 1;
+            const latest = storyPlanRevision(n, { summary: `${s.plan.latest.summary} Revised after your reply.` });
+            const replies = [...s.plan.replies, { contentionId: body.contentionId, text: body.text, at: iso(0), revision: s.plan.latest.revision }];
+            storyBuild = { ...storyBuild!, session: { ...s, plan: { ...s.plan, latest, revisions: n, replies } } };
+          }
+          return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
+        }
+        if (planAt('approve')) {
+          const s = storyBuild?.session;
+          if (s?.plan?.latest == null) return json(route, { error: 'NoPlan', message: 'No plan yet.' }, 409);
+          if (s.plan.latest.contentions.some((c) => s.plan!.decisions[c.id] == null)) return json(route, { error: 'PlanUnanswered', message: 'Answer every point first.' }, 409);
+          storyBuild = stackBuiltFrom(storyBuild!);
+          return json(route, { buildId: id } satisfies SandboxSessionActionResponse, 202);
+        }
+        const prPush = /\/prs\/(\d+)\/push$/.exec(path);
+        if (prPush != null) {
+          const prId = Number(prPush[1]);
+          const prNumber = 80 + (prId - 500);
+          const pr = storyBuild?.prs?.find((p) => p.id === prId);
+          if (storyBuild != null && pr != null) {
+            const url = `https://github.com/${pr.fullName}/pull/${prNumber}`;
+            storyBuild = { ...storyBuild, prs: storyBuild.prs!.map((p) => (p.id === prId ? { ...p, status: 'pushed' as const, pushedBranch: p.branch, pushedPrNumber: prNumber, pushedPrUrl: url } : p)) };
+          }
+          return json(route, {
+            results: [],
+            prs: [{ prId, key: pr?.key ?? 'P1', repoId: pr?.repoId ?? 11, outcome: 'pushed', prNumber, prUrl: `https://github.com/acme/api/pull/${prNumber}`, code: null, error: null }],
+          } satisfies StoryBuildPushResponse);
+        }
+        const prDiff = /\/prs\/(\d+)\/diff$/.exec(path);
+        if (prDiff != null) return json(route, STORY_PR_DIFF(Number(prDiff[1])));
         if (/\/repos\/\d+\/push$/.test(path)) {
           const repoId = Number(path.split('/').at(-2));
           const prNumber = 77;

@@ -167,7 +167,7 @@ describe('a reload', () => {
     s().openTicketTab({ ident: IDENT, key: 'PLAT-310', title: 'Export' });
     s().togglePinTab(ticketTabKey(IDENT));
     s().openTicketTab({ ident: 'jira:https://acme.atlassian.net#PLAT-9', key: 'PLAT-9', title: null });
-    s().openStoryBuildTab({ ident: IDENT, key: 'PLAT-310', title: 'Export', buildOffer: { action: 'fill_gaps', reviewId: 7 } });
+    s().openStoryBuildTab({ ident: IDENT, key: 'PLAT-310', title: 'Export', buildOffer: { action: 'fill_gaps', reviewId: 7, docs: true } });
     s().openBotPrsTab();
 
     const fresh = (await reload()).usePinnedTabs.getState();
@@ -179,7 +179,8 @@ describe('a reload', () => {
     ]);
     expect(fresh.tabs[1]?.ticketMeta).toEqual({ ident: IDENT, key: 'PLAT-310', title: 'Export' });
     expect(fresh.tabs[2]?.kind).toBe('story-build');
-    expect(fresh.tabs[2]?.ticketMeta?.buildOffer).toEqual({ action: 'fill_gaps', reviewId: 7 });
+    // "Fill gaps with docs": the docs choice survives the reload.
+    expect(fresh.tabs[2]?.ticketMeta?.buildOffer).toEqual({ action: 'fill_gaps', reviewId: 7, docs: true });
   });
 
   it('a stored pinned key of an unknown kind is dropped, and a bad label falls back to the key', async () => {

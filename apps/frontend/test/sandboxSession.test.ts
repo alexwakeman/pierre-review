@@ -26,6 +26,7 @@ import {
   sessionSteps,
   sessionTurnRunning,
   shortBytes,
+  visiblePartialText,
 } from '../src/lib/sandboxSession.js';
 import { sandboxBodyOf, sandboxDraftDirty, sandboxDraftOf, sandboxMemoryTicks } from '../src/components/settings/sandboxSettingsForm.js';
 
@@ -54,6 +55,7 @@ function session(o: Partial<StoryBuildSession> = {}): StoryBuildSession {
     spend: { costUsd: 0.1, inputTokens: 10, outputTokens: 5, turns: 1 },
     idleCloseAt: null,
     ticket: { criteria: ['AC1: A button.'], openPoints: [] },
+    plan: null,
     ...o,
   };
 }
@@ -131,6 +133,8 @@ describe('the stream fold', () => {
     expect(sessionEventNeedsRefetch({ type: 'done' })).toBe(true);
     expect(sessionEventNeedsRefetch({ type: 'item', item: { kind: 'turn', id: 'e', turn: 1, mode: 'build', outcome: 'completed', costUsd: null, at } })).toBe(true);
     expect(sessionEventNeedsRefetch({ type: 'item', item: { kind: 'notice', id: 'n', text: 'x', at } })).toBe(false);
+    // Plan first: the planned PRs live on the build, so their frame brings the read again.
+    expect(sessionEventNeedsRefetch({ type: 'prs', prs: [] })).toBe(true);
     expect(sessionEventNeedsRefetch({ type: 'agent', event: { type: 'text', messageId: 'a', partial: true, text: 'x' } })).toBe(false);
   });
 });
@@ -181,6 +185,9 @@ describe('the words and the buttons', () => {
     expect(sessionCanSend(session({ phase: 'ready', agentState: 'stopped' }))).toBe(false);
     expect(sessionCanStartBuild(session({ phase: 'ready', mode: 'chat' }))).toBe(true);
     expect(sessionCanStartBuild(session({ phase: 'built', mode: 'build' }))).toBe(false);
+    // Plan first: the build starts only from the plan panel's Approve, never from Start build.
+    const planView = { latest: null, revisions: 0, decisions: {}, replies: [], unanswered: 0, approvedRevision: null, approvedAt: null, status: 'failed' as const, problem: 'x', withDocs: false, fillGaps: false };
+    expect(sessionCanStartBuild(session({ phase: 'ready', mode: 'chat', plan: planView }))).toBe(false);
     expect(sessionTurnRunning(session({ phase: 'building' }))).toBe(true);
     expect(sessionTurnRunning(session({ phase: 'building', live: false }))).toBe(false);
     expect(sessionCanDiscard({ phase: 'built' })).toBe(true);
@@ -261,5 +268,13 @@ describe('Settings → Sandbox form', () => {
     expect(ticks[1]!.toggle(false)).toEqual(['/p/a']);
     expect(ticks[2]!.toggle(true)).toEqual(['/p/a', '/p/b', '/p/c']);
     expect(sandboxMemoryTicks(found, ['/p/c']).map((t) => t.ticked)).toEqual([false, false, true]);
+  });
+});
+
+describe('the plan block while it streams', () => {
+  it('hides an opened ```limn-plan block behind one line, and leaves other text alone', () => {
+    expect(visiblePartialText('I read the code.\n\n```limn-plan\n{"schema":"limn.plan/1",')).toBe('I read the code.\n\nWriting the plan…');
+    expect(visiblePartialText('```limn-plan\n{')).toBe('Writing the plan…');
+    expect(visiblePartialText('Some `code` and ```ts\nx\n```')).toBe('Some `code` and ```ts\nx\n```');
   });
 });

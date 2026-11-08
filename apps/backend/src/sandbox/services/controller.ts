@@ -28,6 +28,7 @@ import {
   type PolicyResult,
   type ServiceLimits,
 } from './policy.js';
+import { runRecordedLine, ServiceRunLog, type ServiceRunRecord } from './run-log.js';
 
 /** The compose CLI inside the sandbox image (config only). */
 export const SANDBOX_COMPOSE = '/usr/local/bin/docker-compose';
@@ -65,6 +66,8 @@ export interface ServicesControllerOptions {
   onStatus?: (s: SandboxServicesStatus) => void;
   /** Every line of compose / build output, for the session's activity. */
   onOutput?: (line: string) => void;
+  /** A `limn-svc run` finished and is in the run log (run-log.ts): the session saves the log. */
+  onRun?: (rec: ServiceRunRecord) => void;
 }
 
 export type Out = (stream: 'o' | 'e', text: string) => void;
@@ -89,7 +92,8 @@ export const USAGE = [
   '  limn-svc logs <service> [--tail N]',
   '  limn-svc build <service> [folder] [--file Dockerfile] [--target stage]',
   '                                    build the service image from your code, then `up` uses it',
-  '  limn-svc run <service> [command …] run a one-off container (a migration job)',
+  '  limn-svc run <service> [command …] run a one-off container (a migration job, a query)',
+  '  limn-svc runs                      list the runs Limn recorded (svc-1, svc-2, …)',
   '',
   'A service is reached by its name. Its published ports are on localhost here too.',
 ].join('\n');
@@ -119,6 +123,8 @@ export class ServicesController {
   private chain: Promise<unknown> = Promise.resolve();
   private inventoried = false;
   private forwarder: ((f: Forward[]) => Promise<{ listening: number[]; failed: { port: number; reason: string }[] }>) | null = null;
+  /** Every `limn-svc run`, as the HOST saw it (a plan's data evidence is checked against this). */
+  readonly runs = new ServiceRunLog();
 
   constructor(o: ServicesControllerOptions) {
     this.o = o;
@@ -259,6 +265,9 @@ export class ServicesController {
           return await this.serial(() => this.build(rest, cwd, say, fail));
         case 'run':
           return await this.serial(() => this.run(rest, out, fail));
+        case 'runs':
+          say(this.runs.describe());
+          return 0;
         default:
           return fail(`limn-svc: unknown command \`${verb}\`.\n\n${USAGE}`, 2);
       }
@@ -504,17 +513,32 @@ export class ServicesController {
     if (r.stack.bindDirs.length > 0) {
       await this.o.runtime.run(this.o.sandbox, ['sh', '-c', 'for p; do [ -e "$p" ] || mkdir -p -- "$p"; done', 'sh', ...r.stack.bindDirs], { timeoutMs: 30_000 });
     }
-    const res = await this.o.runtime.compose({
-      ...this.o.owner,
-      project: this.project(st),
-      compose: r.stack.model,
-      call: { verb: 'run', service: svc, command },
-      onLine: (l) => {
-        this.o.onOutput?.(l);
-        out('o', `${l}\n`);
-      },
-    });
+    const rec = this.runs.begin({ stack: st.cfg.key, service: svc, command, egress: st.cfg.egress.includes(svc) });
+    let res: ExecResult;
+    try {
+      res = await this.o.runtime.compose({
+        ...this.o.owner,
+        project: this.project(st),
+        compose: r.stack.model,
+        call: { verb: 'run', service: svc, command },
+        onLine: (l) => {
+          this.o.onOutput?.(l);
+          this.runs.append(rec, `${l}\n`);
+          out('o', `${l}\n`);
+        },
+      });
+    } catch (e) {
+      this.runs.finish(rec, null);
+      this.o.onRun?.(rec);
+      throw e;
+    }
+    // The output the host received: the streamed lines, else (no line sink) the whole stdout, then stderr.
+    if (rec.output === '' && res.stdout.length > 0) this.runs.append(rec, res.stdout.toString('utf8'));
+    if (res.stderr) this.runs.append(rec, res.stderr.endsWith('\n') ? res.stderr : `${res.stderr}\n`);
+    this.runs.finish(rec, res.code ?? null);
+    this.o.onRun?.(rec);
     if (res.code !== 0 && res.stderr) out('e', `${lastLines(res.stderr, 10)}\n`);
+    out('e', `${runRecordedLine(rec.id)}\n`);
     return res.code ?? 1;
   }
 

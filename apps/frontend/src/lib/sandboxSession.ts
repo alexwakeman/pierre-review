@@ -4,6 +4,7 @@
 // and which buttons a phase offers.
 import {
   SANDBOX_CONVERSATION_MAX,
+  hidePartialPlanText,
   type SandboxBootStep,
   type SandboxConversationItem,
   type SandboxNetworkEntry,
@@ -84,12 +85,17 @@ export function applySessionEvent(s: SessionStreamState, e: SandboxSessionStream
       return { ...s, session: { ...cur, network: upsertBy<SandboxNetworkEntry>(cur.network, e.entry, (n) => n.key === e.entry.key) } };
     case 'services':
       return { ...s, session: { ...cur, services: e.status } };
+    case 'plan':
+      return { ...s, session: { ...cur, plan: e.plan } };
+    // Plan first: the planned PRs live on the build, not the session — the query's read brings them.
+    case 'prs':
+      return s;
   }
 }
 
 /** A frame after which the query's read is worth fetching again (spend, repositories, status). */
 export function sessionEventNeedsRefetch(e: SandboxSessionStreamEvent): boolean {
-  return e.type === 'phase' || e.type === 'done' || (e.type === 'item' && e.item.kind === 'turn');
+  return e.type === 'phase' || e.type === 'done' || e.type === 'prs' || (e.type === 'item' && e.item.kind === 'turn');
 }
 
 /**
@@ -109,6 +115,7 @@ export function mergeSessionViews(read: StoryBuildSession | null | undefined, st
     conversation: longer(read.conversation, stream.conversation),
     network: stream.network,
     services: stream.services ?? read.services,
+    plan: stream.plan ?? read.plan,
     agentState: stream.agentState,
     mode: stream.mode,
     live: stream.live,
@@ -128,6 +135,12 @@ export function sessionStatusLine(s: Pick<StoryBuildSession, 'phase' | 'live' | 
       return 'Ready. Talk to the agent, then press Start build.';
     case 'chatting':
       return 'The agent is answering.';
+    case 'planning':
+      return 'The agent is making the plan.';
+    case 'revising':
+      return 'The agent is revising the plan.';
+    case 'plan_ready':
+      return s.live ? 'Waiting for you to settle the plan.' : 'The sandbox is closed. The plan is kept: resume to answer it.';
     case 'building':
       return 'The agent is building and testing.';
     case 'built':
@@ -151,6 +164,9 @@ const STEP_OF: Readonly<Record<SandboxSessionPhase, number>> = {
   booting: 0,
   ready: 1,
   chatting: 1,
+  planning: 1,
+  plan_ready: 1,
+  revising: 1,
   building: 2,
   built: 3,
   pushed: 4,
@@ -168,17 +184,24 @@ export function sessionSteps(s: Pick<StoryBuildSession, 'phase'> | null): Sessio
 
 /** A turn is running (the composer waits; Stop is offered). */
 export function sessionTurnRunning(s: Pick<StoryBuildSession, 'phase' | 'live'>): boolean {
-  return s.live && (s.phase === 'chatting' || s.phase === 'building');
+  return s.live && (s.phase === 'chatting' || s.phase === 'planning' || s.phase === 'revising' || s.phase === 'building');
 }
 
 /** The agent takes a message now. */
 export function sessionCanSend(s: Pick<StoryBuildSession, 'phase' | 'live' | 'agentState'>): boolean {
-  return s.live && (s.phase === 'ready' || s.phase === 'built' || s.phase === 'pushed') && s.agentState !== 'stopped';
+  return s.live && (s.phase === 'ready' || s.phase === 'plan_ready' || s.phase === 'built' || s.phase === 'pushed') && s.agentState !== 'stopped';
 }
 
-/** Start build is offered once: in chat mode, while the agent waits. */
-export function sessionCanStartBuild(s: Pick<StoryBuildSession, 'phase' | 'live' | 'mode' | 'agentState'>): boolean {
-  return s.live && s.phase === 'ready' && s.mode === 'chat' && s.agentState !== 'stopped';
+/** Start build is offered once: in chat mode, while the agent waits. Never on a PLAN-FIRST session (`plan`
+ *  set): its build starts only from the plan panel's "Approve and start" (the server refuses PlanNotApproved). */
+export function sessionCanStartBuild(s: Pick<StoryBuildSession, 'phase' | 'live' | 'mode' | 'agentState'> & { plan?: StoryBuildSession['plan'] }): boolean {
+  return s.live && s.phase === 'ready' && s.mode === 'chat' && s.agentState !== 'stopped' && s.plan == null;
+}
+
+/** The words of a message still arriving, as shown: a ```limn-plan block in progress is hidden behind one
+ *  line (the plan panel shows the plan once Limn has checked it). */
+export function visiblePartialText(text: string): string {
+  return hidePartialPlanText(text, 'Writing the plan…');
 }
 
 /** Discard: anything not already over. */

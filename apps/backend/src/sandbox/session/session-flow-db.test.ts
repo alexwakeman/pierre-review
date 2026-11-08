@@ -190,6 +190,8 @@ beforeAll(async () => {
   scriptFake(fake);
   const claudeDir = join(scratch, 'claude');
   M.setSessionDepsForTests({
+    // The flow before plan first (an older session's turns); plan-session-flow-db.test.ts covers plan first.
+    planFirst: false,
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-300' : 'ACME-301', title: 'Export a report as CSV', empty: false }),
     readTicket: async () => {

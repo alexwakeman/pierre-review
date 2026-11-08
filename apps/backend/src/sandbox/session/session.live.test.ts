@@ -83,6 +83,8 @@ describe.skipIf(!daemon)('a workspace session, live', () => {
     M = await import('./manager.js');
     const claudeDir = join(scratch, 'claude');
     M.setSessionDepsForTests({
+      // The chat → Start build flow (plan first has its own live test: plan-session.live.test.ts).
+      planFirst: false,
       runtime: () => rt,
       storyInputs: async () => ({ ticketKey: 'TINY-1', title: 'Note the build in the README', empty: false }),
       readTicket: async () => ({

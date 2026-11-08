@@ -598,14 +598,19 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // these lines every route (the agent turns AND the GitHub pushes) would fall to the 600/min blanket:
   //   POST /api/story-builds                               boots a sandbox + the agent          → ai + ai_hourly
   //   POST …/:id/messages · …/:id/build · …/:id/resume     one agent turn / a sandbox boot     → ai + ai_hourly
-  //   POST …/:id/repos/:repoId/push · …/:id/push            branch push + PR create (GitHub)  → github_write
-  //   GET list / :id / stream / diff / repos/:repoId/diff · POST interrupt / network/allow / discard → read
+  //   POST …/:id/plan/reply · …/:id/plan/approve            a plan revision turn / the build turn → ai + ai_hourly
+  //   POST …/:id/repos/:repoId/push · …/:id/push · …/:id/prs/:prId/push   branch push + PR create → github_write
+  //   GET list / :id / stream / diff / repos/:repoId/diff / prs/:prId/diff / plan · POST interrupt /
+  //   network/allow / discard / plan/decisions → read
   // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
   // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
     if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly];
     if (mutating && /^\/api\/story-builds\/\d+\/(messages|build|resume)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
-    if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
+    // Plan first: a Reply is a revision turn, Approve the build turn. Agree / Keep the story are DB only (read).
+    if (mutating && /^\/api\/story-builds\/\d+\/plan\/(reply|approve)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+    // Plan first: one planned PR's push (`prs/:prId/push`) is the same GitHub write.
+    if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/|prs\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
     return [TIERS.read];
   }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {

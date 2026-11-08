@@ -10,12 +10,20 @@
 // ⚠ The stream is a GET, so its request's close IS the client going away (a POST's fires early).
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  BUILD_PLAN_API,
+  BUILD_PLAN_LIMITS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   SANDBOX_MESSAGE_MAX,
   SANDBOX_SESSION_API,
   STORY_BUILD_API,
   TICKET_IDENT_MAX_CHARS,
   parseTicketIdent,
+  type BuildPlanApproveBody,
+  type BuildPlanDecisionBody,
+  type BuildPlanErrorCode,
+  type BuildPlanReplyBody,
+  type BuildPlanRevisionResponse,
+  type BuildPlanView,
   type SandboxNetworkAllowBody,
   type SandboxNetworkAllowResponse,
   type SandboxSessionActionResponse,
@@ -40,10 +48,15 @@ import { AGENTIC_AI_ENABLED } from '../../review/claude-review/manager.js';
 import { resolveSandboxAgentChoice } from '../drivers/index.js';
 import {
   allowSessionHost,
+  approveSessionPlan,
+  decideSessionPlan,
+  replySessionPlan,
+  sessionPlanRevision,
   discardSession,
   interruptSession,
   resumeSession,
   sendSessionMessage,
+  sessionDocsAvailable,
   sessionStoryInputs,
   sessionWire,
   startSession,
@@ -53,7 +66,7 @@ import {
   type SessionActionResult,
 } from './manager.js';
 
-type ErrorCode = StoryBuildErrorCode | SandboxSessionErrorCode;
+type ErrorCode = StoryBuildErrorCode | SandboxSessionErrorCode | BuildPlanErrorCode;
 type ErrorBody = { error: ErrorCode; message: string };
 
 const fail = (reply: FastifyReply, status: number, error: ErrorCode, message: string): ErrorBody => {
@@ -99,6 +112,8 @@ function sendAction(reply: FastifyReply, r: SessionActionResult | ResumeResult):
       return fail(reply, 409, 'TooManySessions', r.message);
     case 'not_resumable':
       return fail(reply, 409, 'NotResumable', r.message);
+    case 'rejected':
+      return fail(reply, r.code === 'NotFound' ? 404 : 409, r.code as ErrorCode, r.message);
   }
 }
 
@@ -200,8 +215,9 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             action: { type: 'string', enum: ['implement', 'fill_gaps'] },
             provider: { type: 'string', maxLength: 20 },
             model: { type: 'string', maxLength: 80 },
-            // The old start's switches, accepted and ignored (the session has no plan pass).
+            // The old start's diagram switch, accepted and ignored.
             diagram: { type: 'boolean' },
+            // "Implement with docs": a read-only copy of part of the reference library goes into the sandbox.
             docs: { type: 'boolean' },
           },
         },
@@ -226,6 +242,9 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       // The cheap DB check first (the fresh tracker read happens in the boot): no story ⇒ no sandbox.
       const inputs = await sessionStoryInputs(ctx, accountId, scope.workspaceId, body.ident);
       if (inputs == null || inputs.empty) return fail(reply, 400, 'NoStory', 'This ticket has no story or criteria to build from.');
+      if (body.docs === true && !(await sessionDocsAvailable(accountId, scope.workspaceId))) {
+        return fail(reply, 400, 'NoDocs', 'No reference documents are built for this workspace.');
+      }
       const r = await startSession(ctx, {
         accountId,
         workspaceId: scope.workspaceId,
@@ -234,6 +253,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         ticketKey: inputs.ticketKey,
         ticketTitle: inputs.title,
         action: body.action === 'fill_gaps' ? 'fill_gaps' : 'implement',
+        docs: body.docs === true,
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);
@@ -359,6 +379,99 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
     const out: StoryBuildDiscardResponse = { status: res.status };
     return out;
   });
+
+  // ---- PLAN FIRST (docs/STORY-BUILD.md § Plan first) ----
+
+  // GET one stored revision (the history list).
+  app.get(
+    BUILD_PLAN_API.plan,
+    { schema: { ...idParams, querystring: { type: 'object', required: ['revision'], properties: { revision: { type: 'string', pattern: '^[0-9]{1,4}$' } } } } },
+    async (req, reply): Promise<BuildPlanRevisionResponse | ErrorBody> => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const id = idOf(req);
+      if (id == null) return notFound(reply);
+      const got = await sessionPlanRevision(ctx, ctx.accountIdOf(req), id, Number((req.query as { revision: string }).revision));
+      return got ?? notFound(reply);
+    },
+  );
+
+  // POST Agree / Keep the story / clear: DB only, no turn.
+  app.post(
+    BUILD_PLAN_API.decisions,
+    {
+      schema: {
+        ...idParams,
+        body: {
+          type: 'object',
+          required: ['revision', 'contentionId', 'decision'],
+          additionalProperties: false,
+          properties: {
+            revision: { type: 'integer', minimum: 1 },
+            contentionId: { type: 'string', pattern: '^C[1-9][0-9]?$' },
+            decision: { type: ['string', 'null'], enum: ['agree', 'keep_story', null] },
+          },
+        },
+      },
+    },
+    async (req, reply): Promise<BuildPlanView | ErrorBody | SandboxSessionActionResponse> => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const id = idOf(req);
+      if (id == null) return notFound(reply);
+      const r = await decideSessionPlan(ctx, ctx.accountIdOf(req), id, req.body as BuildPlanDecisionBody);
+      if (r.status === 'plan') return r.plan;
+      return sendAction(reply, r);
+    },
+  );
+
+  // POST Reply: a revision turn.
+  app.post(
+    BUILD_PLAN_API.reply,
+    {
+      schema: {
+        ...idParams,
+        body: {
+          type: 'object',
+          required: ['revision', 'contentionId', 'text'],
+          additionalProperties: false,
+          properties: {
+            revision: { type: 'integer', minimum: 1 },
+            contentionId: { type: ['string', 'null'], pattern: '^C[1-9][0-9]?$' },
+            text: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const id = idOf(req);
+      if (id == null) return notFound(reply);
+      const body = req.body as BuildPlanReplyBody;
+      const text = body.text.trim();
+      if (text === '') return fail(reply, 400, 'BadRequest', 'Write a reply first.');
+      if (text.length > BUILD_PLAN_LIMITS.reply) return fail(reply, 400, 'BadRequest', `Keep the reply under ${BUILD_PLAN_LIMITS.reply.toLocaleString('en-US')} characters.`);
+      return sendAction(reply, await replySessionPlan(ctx, ctx.accountIdOf(req), id, { revision: body.revision, contentionId: body.contentionId, text }));
+    },
+  );
+
+  // POST Approve and start: the build turn (the ONE build slot).
+  app.post(
+    BUILD_PLAN_API.approve,
+    {
+      schema: {
+        ...idParams,
+        body: { type: 'object', required: ['revision'], additionalProperties: false, properties: { revision: { type: 'integer', minimum: 1 }, text: { type: 'string' } } },
+      },
+    },
+    async (req, reply) => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const id = idOf(req);
+      if (id == null) return notFound(reply);
+      const body = req.body as BuildPlanApproveBody;
+      const extra = (body.text ?? '').trim();
+      if (extra.length > SANDBOX_MESSAGE_MAX) return fail(reply, 400, 'BadRequest', `Keep the message under ${SANDBOX_MESSAGE_MAX.toLocaleString('en-US')} characters.`);
+      return sendAction(reply, await approveSessionPlan(ctx, ctx.accountIdOf(req), id, { revision: body.revision, text: extra === '' ? null : extra }));
+    },
+  );
 
   // The push + per-repository diff routes (coding/story-build/routes-build.ts): a session stores its
   // patches exactly where Push reads them.

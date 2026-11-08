@@ -29,6 +29,12 @@ async function git(
   });
 }
 
+/** The tree of the worktree's HEAD commit. */
+export async function headTree(worktree: string): Promise<string> {
+  const { stdout } = await git(['rev-parse', 'HEAD^{tree}'], worktree);
+  return stdout.trim();
+}
+
 /**
  * Apply a stored unified-diff patch onto the worktree (checked out at the patch's
  * exact base commit). `--3way` is a safety net if the tree isn't byte-identical.

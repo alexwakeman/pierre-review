@@ -9827,6 +9827,11 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // "Implement story" (migration 0149): this repository's rows in build sessions. Keyed on the REPO
     // through a composite FK (cascade), deleted explicitly for the same dialect reason as above. The
     // SESSION stays (it belongs to its workspace and may hold other repositories).
+    // Plan first (0179): this repository's PLANNED pull requests, explicitly beside its repository rows.
+    await tx
+      .delete(schema.storyBuildPrs)
+      .where(and(eq(schema.storyBuildPrs.accountId, accountId), eq(schema.storyBuildPrs.repoId, id)))
+      .execute();
     await tx
       .delete(schema.storyBuildRepos)
       .where(and(eq(schema.storyBuildRepos.accountId, accountId), eq(schema.storyBuildRepos.repoId, id)))

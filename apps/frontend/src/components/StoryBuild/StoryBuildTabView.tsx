@@ -10,6 +10,7 @@ import {
   useStorySessionStream,
 } from '../../hooks/useStoryBuild.js';
 import { pushAllOffered } from '../../lib/storyBuild.js';
+import { planApproveState, pushAllPrCount } from '../../lib/buildPlan.js';
 import { mergeSessionViews, sessionCanDiscard, sessionCanStartBuild, sessionClosedForGood, sessionTurnRunning } from '../../lib/sandboxSession.js';
 import { parseStoryBuildTabKey, ticketKeyOfIdent, usePinnedTabs, type TabTicketMeta } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
@@ -21,6 +22,8 @@ import { CheckboxBox } from '../ui/FormControls.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { PAGE_GUTTER } from '../ui/PageHeader.js';
 import { BuildSection } from './BuildSection.js';
+import { PlanPanel } from './PlanPanel.js';
+import { StackView } from './StackView.js';
 import { SessionView } from './SessionView.js';
 import { StartPanel } from './StartPanel.js';
 import { StoryBuildHeader } from './StoryBuildHeader.js';
@@ -32,8 +35,9 @@ import { StoryBuildSection } from './StoryBuildSection.js';
 // (`useStoryBuildFor`) and, while its sandbox runs, ONE SSE stream follows it (`useStorySessionStream`,
 // folded by lib/sandboxSession.ts; `mergeSessionViews` puts the two together). Top to bottom: the
 // header (steps, status, cost; Draft, Push all, Stop, Discard), then the start state OR the session —
-// the boot, then the conversation beside the rail — and the repositories' diffs with Push. Nothing
-// changes before Start build and nothing is pushed before Push.
+// the boot, then (plan first) the PLAN PANEL, the conversation beside the rail — and the changes with
+// Push: per planned pull request (StackView) once a plan was approved, else per repository. Nothing
+// changes before the plan is approved (Start build on an older session) and nothing is pushed before Push.
 
 export function StoryBuildTabView(): JSX.Element | null {
   const activeTab = usePinnedTabs((s) => s.activeTab);
@@ -92,6 +96,8 @@ function StoryBuildBody({
   // An old-flow row with patches still ready can be pushed from here (its push routes are mounted).
   const oldReady = build != null && build.session == null && build.repos.some((r) => r.include && r.status === 'ready' && r.hasPatch);
   const pushable = open != null && open.build.repos.some((r) => r.hasPatch || r.status === 'pushed');
+  // Plan first: after Approve the changes are the planned pull requests (the stack view), not repositories.
+  const stacked = open != null && (open.build.prs?.length ?? 0) > 0;
 
   return (
     <>
@@ -108,11 +114,19 @@ function StoryBuildBody({
       {q.isLoading && <p className="mt-5 text-meta text-ui-mute">Loading…</p>}
       {q.isError && <p className="mt-5 text-body text-ui-danger">Could not load this session.</p>}
       {q.isSuccess && open == null && <StartPanel workspaceId={workspaceId} ident={ident} last={closed ? build : null} offer={offer ?? null} />}
+      {open != null && open.session.plan != null && open.session.phase !== 'booting' && <PlanPanel build={open.build} session={open.session} />}
       {open != null && <SessionView build={open.build} session={open.session} partials={stream.partials} />}
-      {(pushable || oldReady) && build != null && (
-        <StoryBuildSection title="Changes" testId="story-build-build">
-          <BuildSection build={build} draft={draft} />
+      {stacked && open != null ? (
+        <StoryBuildSection title="Pull requests" testId="story-build-build">
+          <StackView build={open.build} session={open.session} draft={draft} setDraft={setDraft} />
         </StoryBuildSection>
+      ) : (
+        (pushable || oldReady) &&
+        build != null && (
+          <StoryBuildSection title="Changes" testId="story-build-build">
+            <BuildSection build={build} draft={draft} />
+          </StoryBuildSection>
+        )
       )}
       <StoryBuildCommands build={open?.build ?? null} session={open?.session ?? null} />
     </>
@@ -134,8 +148,10 @@ function HeaderActions({
   const push = useStoryBuildPush(build.workspaceId, build.ident);
   const stop = useStorySessionInterrupt(build.workspaceId, build.ident);
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
-  const pushAll = pushAllOffered(build);
-  const anyPushable = build.repos.some((r) => r.include && r.status === 'ready' && r.hasPatch);
+  // A planned stack has its own Draft and Push all (the stack view); the header keeps Stop and Discard.
+  const stacked = (build.prs?.length ?? 0) > 0;
+  const pushAll = !stacked && pushAllOffered(build);
+  const anyPushable = !stacked && build.repos.some((r) => r.include && r.status === 'ready' && r.hasPatch);
   const running = sessionTurnRunning(session);
   const discardable = sessionCanDiscard(session);
   if (!anyPushable && !running && !discardable) return null;
@@ -205,7 +221,9 @@ function DiscardButton({ build, live }: { build: StoryBuild; live: boolean }): J
  */
 function StoryBuildCommands({ build, session }: { build: StoryBuild | null; session: StoryBuildSession | null }): null {
   const canBuild = session != null && sessionCanStartBuild(session);
-  const canPushAll = build != null && pushAllOffered(build);
+  const canApprove = session != null && planApproveState(session).enabled;
+  const stacked = (build?.prs?.length ?? 0) > 0;
+  const canPushAll = build != null && (stacked ? pushAllPrCount(build.prs ?? []) >= 2 : pushAllOffered(build));
   const canStop = session != null && sessionTurnRunning(session);
   const key = build?.ticketKey ?? '';
   const commands = useMemo<Command[]>(() => {
@@ -216,12 +234,14 @@ function StoryBuildCommands({ build, session }: { build: StoryBuild | null; sess
       el.click();
     };
     const out: Command[] = [];
+    if (canApprove)
+      out.push({ id: 'approve', group: 'Actions', title: `Approve the plan for ${key} and start`, keywords: ['plan', 'build', 'implement'], icon: <WrenchIcon size={14} />, run: press('approve') });
     if (canBuild) out.push({ id: 'build', group: 'Actions', title: `Start build of ${key}`, keywords: ['implement', 'build'], icon: <WrenchIcon size={14} />, run: press('build') });
     if (canPushAll)
       out.push({ id: 'push-all', group: 'Actions', title: `Push all of ${key}`, keywords: ['pull request', 'open'], icon: <PullRequestIcon size={14} />, run: press('push-all') });
     if (canStop) out.push({ id: 'stop', group: 'Actions', title: `Stop the agent on ${key}`, keywords: ['cancel', 'interrupt'], icon: <CloseIcon size={14} />, run: press('stop-header') });
     return out;
-  }, [canBuild, canPushAll, canStop, key]);
+  }, [canApprove, canBuild, canPushAll, canStop, key]);
   useRegisterCommands('story-build', commands);
   return null;
 }

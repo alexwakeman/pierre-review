@@ -11,6 +11,10 @@ describe('aiFixStatusForPhase', () => {
       booting: ['running', 'running'],
       ready: ['planned', 'planned'],
       chatting: ['planned', 'planned'],
+      // A story session's plan stage (an AI Fix never enters it): mapped like its neighbours.
+      planning: ['running', 'running'],
+      plan_ready: ['planned', 'planned'],
+      revising: ['running', 'running'],
       building: ['running', 'running'],
       built: ['succeeded', 'succeeded'],
       pushed: ['succeeded', 'succeeded'],

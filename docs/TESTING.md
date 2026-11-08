@@ -27,7 +27,9 @@ loop while iterating, and the plain form is the check before pushing.
   PROCESSES, not on running Limn's code.
   - Real `git`: `conflict/land*.test.ts`, `conflict/model*.test.ts`, `conflict/janitor`,
     `review/clone-hygiene`, `review/worktree-gc`, `coding/git` (`applyPatchToWorktree`),
-    `coding/merge`, `coding/story-build/{push-branch,base-refs}`.
+    `coding/merge`, `coding/story-build/{push-branch,base-refs,plan-verify-git,stack-verify,push-stack-db}`,
+    `sandbox/workspace/plan-check-script`, `sandbox/session/plan-session-flow-db` (the stacked
+    extraction after Approve, real git on both sides).
   - The fake Codex CLI (a node script per `codex exec`, one more per `exec resume` retry):
     `ai/providers/codex`, `ai/codex/{app-server,run,hook-process,threads}`,
     `ai/codex/kinds/*`, `review/codex-review-runs`, `api/routes/ai-codex` (the sign-in routes).

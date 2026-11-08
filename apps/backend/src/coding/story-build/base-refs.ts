@@ -24,10 +24,24 @@ export function storyBuildBaseRef(buildId: number, repoId: number): string {
   return `${STORY_BUILD_REF_PREFIX}${buildId}/${repoId}`;
 }
 
-/** `{buildId, repoId}` of one of these refs, or null (an unrecognised ref is KEPT, never guessed at). */
-export function parseStoryBuildBaseRef(ref: string): { buildId: number; repoId: number } | null {
+/**
+ * One of these refs: a repository's base (`<buildId>/<repoId>`), or — plan first — one planned PR's
+ * verified tip (`<buildId>/stack/<prRowId>`, coding/story-build/stack-verify.ts).
+ */
+export type StoryBuildRefKey = { buildId: number; repoId: number; stackPrId?: undefined } | { buildId: number; stackPrId: number; repoId?: undefined };
+
+/** The sweep's keep-list spelling of a key: `buildId/repoId` or `buildId/stack/prRowId`. */
+export function storyBuildRefKey(k: StoryBuildRefKey): string {
+  return k.stackPrId != null ? `${k.buildId}/stack/${k.stackPrId}` : `${k.buildId}/${k.repoId}`;
+}
+
+/** The key of one of these refs, or null (an unrecognised ref is KEPT, never guessed at). */
+export function parseStoryBuildBaseRef(ref: string): StoryBuildRefKey | null {
   if (!ref.startsWith(STORY_BUILD_REF_PREFIX)) return null;
-  const m = /^(\d+)\/(\d+)$/.exec(ref.slice(STORY_BUILD_REF_PREFIX.length));
+  const rest = ref.slice(STORY_BUILD_REF_PREFIX.length);
+  const stack = /^(\d+)\/stack\/(\d+)$/.exec(rest);
+  if (stack != null) return { buildId: Number(stack[1]), stackPrId: Number(stack[2]) };
+  const m = /^(\d+)\/(\d+)$/.exec(rest);
   if (m == null) return null;
   return { buildId: Number(m[1]), repoId: Number(m[2]) };
 }
@@ -62,11 +76,11 @@ export async function dropStoryBuildBaseRefs(fullName: string, buildId: number, 
 }
 
 /**
- * The sweep: every clone's `refs/pierre/story-build/*` whose (session, repository) `keep` does not hold
- * is deleted, under the repo lock. Sequential (git does not scale with concurrency here); never throws.
+ * The sweep: every clone's `refs/pierre/story-build/*` whose key `keep` does not hold (its spelling:
+ * `storyBuildRefKey`) is deleted, under the repo lock. Sequential (git does not scale with concurrency here); never throws.
  */
 export async function sweepStoryBuildBaseRefs(
-  keep: (refs: ReadonlyArray<{ buildId: number; repoId: number }>) => Promise<ReadonlySet<string>>,
+  keep: (refs: ReadonlyArray<StoryBuildRefKey>) => Promise<ReadonlySet<string>>,
   cloneRoot: string = config.cloneDir,
 ): Promise<number> {
   let deleted = 0;
@@ -98,7 +112,7 @@ export async function sweepStoryBuildBaseRefs(
         if (parsed.length === 0) return;
         const kept = await keep(parsed.map((p) => p.key!));
         for (const p of parsed) {
-          if (kept.has(`${p.key!.buildId}/${p.key!.repoId}`)) continue;
+          if (kept.has(storyBuildRefKey(p.key!))) continue;
           await gitOut(dir, ['update-ref', '-d', p.ref]).then(
             () => {
               deleted += 1;

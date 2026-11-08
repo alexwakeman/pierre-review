@@ -23,6 +23,7 @@ import {
   sessionTurnRunning,
   shortBytes,
   turnOutcomeWords,
+  visiblePartialText,
 } from '../../lib/sandboxSession.js';
 import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { dateTime } from '../../lib/ui.js';
@@ -235,7 +236,7 @@ function Conversation({ session, partials, c }: { session: StoryBuildSession; pa
   const pinned = useRef(true);
   const provider = session.provider ?? c.provider ?? null;
   const g = glyphsFor(provider);
-  const live = [...partials.entries()].filter(([, t]) => t.trim() !== '');
+  const live = [...partials.entries()].map(([id, t]) => [id, visiblePartialText(t)] as const).filter(([, t]) => t.trim() !== '');
   const running = sessionTurnRunning(session);
   // Follow the newest row while the reader is at the bottom; leave them where they are once they scroll up.
   const size = session.conversation.length + live.reduce((n, [, t]) => n + t.length, 0);

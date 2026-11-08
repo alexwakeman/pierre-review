@@ -792,6 +792,14 @@ alone. A run that consults the library:
 The switch is per workspace, `workspaces.docs_in_review` (NULL/false = OFF), via
 `GET`/`PUT /api/workspaces/:id/docs-settings`; the ONE reader/writer is `store.ts`.
 
+**The build session ("Implement with docs", 2026-11-07)** is the one exception to `usable`: it is offered
+on `hasDocs` (the same `available` Check against docs reads) and gets a COPY, not the folder — a read-only,
+root-owned subset under `/home/agent/.limn/docs/` at the library's own relative paths, chosen without a
+model call (the current Check against docs run's sections, else the whole small library, else the top 30
+full-text hits; `sandbox/workspace/docs.ts`). Its plan's docs evidence is checked with
+`validateDocReferences` against the full library on the host ([SANDBOX.md](SANDBOX.md) § The plan and its
+checks).
+
 ## The SPA
 
 **Tree, chat strip (2026-11-01).** Clicking a contents-tree row that has rows under it opens its section AND its branch; only the chevron closes a branch. At xl the chat collapses to a 40px strip (one full-height button: chevron + sparkle) exactly as the library does; below xl it is the Ask tab and never collapses. Default (`lib/docsChatDefault.ts`): collapsed unless a conversation's `updatedAt` is under 24 hours old — then open, on that conversation when nothing is picked yet. A click is stored as `pierre:docsChatCollapsed = {collapsed, at}`; a conversation newer than a collapse opens it again. The list is read once per mount, clock fixed at mount.

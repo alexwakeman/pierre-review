@@ -147,6 +147,10 @@ export interface AccountExport {
    * (`patchTruncated` says so).
    */
   storyBuildRepos: Record<string, unknown>[];
+  /** Plan first (0179): every plan revision, the reader's decisions and replies (`story_build_plans`). */
+  storyBuildPlans: Record<string, unknown>[];
+  /** Plan first: the planned pull requests and their pushes; the patch cut as `storyBuildRepos`'s. */
+  storyBuildPrs: Record<string, unknown>[];
 }
 
 /** A stored story-build patch is exported up to this many characters. */
@@ -421,6 +425,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       // A workspace session (migration 0176): its phase, runtime, build spend and shown state (the
       // conversation, boot steps, network log). Never the sandbox's or the agent's internal ids.
       sessionPhase: schema.storyBuilds.sessionPhase,
+      withDocs: schema.storyBuilds.withDocs,
+      approvedAt: schema.storyBuilds.approvedAt,
       runtime: schema.storyBuilds.runtime,
       buildCostUsd: schema.storyBuilds.buildCostUsd,
       session: schema.storyBuilds.sessionJson,
@@ -461,6 +467,50 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.storyBuildRepos)
     .where(eq(schema.storyBuildRepos.accountId, accountId))
+    .execute();
+  const storyBuildPlanRows = await db
+    .select({
+      buildId: schema.storyBuildPlans.buildId,
+      revision: schema.storyBuildPlans.revision,
+      source: schema.storyBuildPlans.source,
+      plan: schema.storyBuildPlans.planJson,
+      decisions: schema.storyBuildPlans.decisionsJson,
+      replies: schema.storyBuildPlans.repliesJson,
+      createdAt: schema.storyBuildPlans.createdAt,
+    })
+    .from(schema.storyBuildPlans)
+    .where(eq(schema.storyBuildPlans.accountId, accountId))
+    .execute();
+  const storyBuildPrRows = await db
+    .select({
+      buildId: schema.storyBuildPrs.buildId,
+      repoId: schema.storyBuildPrs.repoId,
+      key: schema.storyBuildPrs.prKey,
+      position: schema.storyBuildPrs.position,
+      stackIndex: schema.storyBuildPrs.stackIndex,
+      title: schema.storyBuildPrs.title,
+      contains: schema.storyBuildPrs.contains,
+      criteria: schema.storyBuildPrs.criteriaJson,
+      dependsOn: schema.storyBuildPrs.dependsOnJson,
+      branch: schema.storyBuildPrs.branch,
+      status: schema.storyBuildPrs.status,
+      patch: schema.storyBuildPrs.patch,
+      stat: schema.storyBuildPrs.statJson,
+      filesChanged: schema.storyBuildPrs.filesChangedJson,
+      commitMessage: schema.storyBuildPrs.commitMessage,
+      summary: schema.storyBuildPrs.summary,
+      checks: schema.storyBuildPrs.checksJson,
+      prTitle: schema.storyBuildPrs.prTitle,
+      prBody: schema.storyBuildPrs.prBody,
+      pushedBranch: schema.storyBuildPrs.pushedBranch,
+      pushedPrNumber: schema.storyBuildPrs.pushedPrNumber,
+      pushedPrUrl: schema.storyBuildPrs.pushedPrUrl,
+      pushedAt: schema.storyBuildPrs.pushedAt,
+      error: schema.storyBuildPrs.error,
+      createdAt: schema.storyBuildPrs.createdAt,
+    })
+    .from(schema.storyBuildPrs)
+    .where(eq(schema.storyBuildPrs.accountId, accountId))
     .execute();
 
   const [
@@ -613,6 +663,14 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     storyBuildRepos: capped(
       'storyBuildRepos',
       storyBuildRepoRows.map((r) => {
+        const long = r.patch != null && r.patch.length > STORY_BUILD_EXPORT_PATCH_MAX;
+        return { ...r, patch: long ? r.patch!.slice(0, STORY_BUILD_EXPORT_PATCH_MAX) : r.patch, patchTruncated: long };
+      }),
+    ),
+    storyBuildPlans: capped('storyBuildPlans', storyBuildPlanRows),
+    storyBuildPrs: capped(
+      'storyBuildPrs',
+      storyBuildPrRows.map((r) => {
         const long = r.patch != null && r.patch.length > STORY_BUILD_EXPORT_PATCH_MAX;
         return { ...r, patch: long ? r.patch!.slice(0, STORY_BUILD_EXPORT_PATCH_MAX) : r.patch, patchTruncated: long };
       }),

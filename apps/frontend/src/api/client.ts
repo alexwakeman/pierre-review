@@ -298,6 +298,12 @@ import type {
   StartCiReviewResponse,
   StoryBuild,
   StoryBuildDiffResponse,
+  StoryBuildPrDiffResponse,
+  BuildPlanApproveBody,
+  BuildPlanDecisionBody,
+  BuildPlanReplyBody,
+  BuildPlanRevisionResponse,
+  BuildPlanView,
   StoryBuildDiscardResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushBody,
@@ -312,7 +318,7 @@ import type {
   SandboxSessionDiffResponse,
   ReviewSuggestionDismissResponse,
 } from '@pierre-review/shared';
-import { aiFixSessionPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
+import { aiFixSessionPath, buildPlanPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
 
 class ApiError extends Error {
   constructor(
@@ -1843,6 +1849,10 @@ export const api = {
     ),
   pushStoryBuildAll: (id: number, body: StoryBuildPushBody) =>
     fetch(storyBuildPath('pushAll', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
+  // Plan first: one planned PR's patch (against the PR before it), and its push (a stacked PR needs the one before it).
+  storyBuildPrDiff: (id: number, prId: number) => get<StoryBuildPrDiffResponse>(storyBuildPath('prDiff', { id, prId })),
+  pushStoryBuildPr: (id: number, prId: number, body: StoryBuildPushBody) =>
+    fetch(storyBuildPath('prPush', { id, prId }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
   discardStoryBuild: (id: number) =>
     fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<StoryBuildDiscardResponse>(r)),
 
@@ -1869,6 +1879,17 @@ export const api = {
   // Boot a closed session again from its stored patches.
   resumeStorySession: (id: number) =>
     fetch(sandboxSessionPath('resume', id), jsonBody('POST')).then((r) => handle<SandboxSessionActionResponse>(r)),
+  // PLAN FIRST (docs/STORY-BUILD.md § Plan first; shared BUILD_PLAN_API). One earlier revision (the history
+  // list); Agree / Keep the story / clear (DB only, no turn; answers the plan view); Reply (a revision
+  // turn); Approve and start (the build turn). 409 PlanStale when the plan moved on.
+  storyBuildPlanRevision: (id: number, revision: number) =>
+    get<BuildPlanRevisionResponse>(withQuery(buildPlanPath('plan', id), `revision=${revision}`)),
+  decideStoryBuildPlan: (id: number, body: BuildPlanDecisionBody) =>
+    fetch(buildPlanPath('decisions', id), jsonBody('POST', body)).then((r) => handle<BuildPlanView>(r)),
+  replyStoryBuildPlan: (id: number, body: BuildPlanReplyBody) =>
+    fetch(buildPlanPath('reply', id), jsonBody('POST', body)).then((r) => handle<SandboxSessionActionResponse>(r)),
+  approveStoryBuildPlan: (id: number, body: BuildPlanApproveBody) =>
+    fetch(buildPlanPath('approve', id), jsonBody('POST', body)).then((r) => handle<SandboxSessionActionResponse>(r)),
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
   //

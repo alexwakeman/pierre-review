@@ -27,6 +27,12 @@ export function fixSessionStatusLine(s: Pick<StoryBuildSession, 'phase' | 'live'
       return 'The plan is ready. Talk to the agent, then press Start fix.';
     case 'chatting':
       return s.mode === 'chat' ? 'The agent is making a plan.' : 'The agent is answering.';
+    // A story session's plan stage; an AI Fix never enters it.
+    case 'planning':
+    case 'revising':
+      return 'The agent is making a plan.';
+    case 'plan_ready':
+      return 'The plan is ready. Talk to the agent, then press Start fix.';
     case 'building':
       return 'The agent is fixing and testing.';
     case 'built':

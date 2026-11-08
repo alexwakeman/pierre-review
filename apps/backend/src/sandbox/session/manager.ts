@@ -29,6 +29,9 @@ import {
   SANDBOX_SESSION_LIVE_PHASES,
   sandboxSessionStatus,
   type AiProviderId,
+  type BuildPlanDecision,
+  type BuildPlanSource,
+  type BuildPlanView,
   type SandboxAgentEvent,
   type SandboxAgentMode,
   type SandboxAgentState,
@@ -37,6 +40,7 @@ import {
   type SandboxNetworkEntry,
   type SandboxSessionPhase,
   type SandboxSessionStreamEvent,
+  type SandboxTurnOutcome,
   type StoryBuild,
   type StoryBuildCoverage,
 } from '@pierre-review/shared';
@@ -59,6 +63,7 @@ import {
   type StoryBuildSeed,
 } from '../../coding/story-build/persist.js';
 import { isStoryBuildRepoPushing } from '../../coding/story-build/push.js';
+import { isStoryBuildStackPushing } from '../../coding/story-build/push-stack.js';
 import { defaultSandboxSettings, readSandboxSettings, type SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import { resolveSandboxAgentChoice, startSandboxAgent, type SandboxAgentChoice, type SandboxAgentDriver, type SandboxUsageSink } from '../drivers/index.js';
 import { credentialModeLine } from '../proxy/credentials.js';
@@ -80,6 +85,13 @@ import type { LayoutPlaces } from '../workspace/check.js';
 import type { MirrorSeams } from '../workspace/mirror.js';
 import type { StoreSeams } from '../workspace/store.js';
 import { ticketMarkdown } from '../workspace/seed.js';
+import { listPlanRows, listPlannedPrRows, toStoryBuildPr } from '../../coding/story-build/plan-persist.js';
+import { storedServiceRuns, type ServiceRunRecord } from '../services/run-log.js';
+import { PLAN_SENT_LINE, PlanStage, planBuildInstruction, planMessageText, planViewOf, type PlanLive, type PlanMachine } from './plan.js';
+import { stripPlanBlock } from './plan-block.js';
+import { CONTINUATIONS_MAX, CONTINUE_LINE, extractApprovedStack, restoreApprovedStack } from './stack-turn.js';
+import { SANDBOX_DOCS_DIR } from '../workspace/docs.js';
+import type { DocsPick } from '../workspace/docs-choose.js';
 import { sessionLimits } from './limits.js';
 import { extractRepoPatch, PatchTooLargeError, restoreRepoPatch } from './patches.js';
 import {
@@ -93,7 +105,7 @@ import {
   toStoryBuildSession,
   type SessionStateJson,
 } from './state.js';
-import type { SessionKey, SessionRepoInfo, SessionRowPatch, SessionSubject, SubjectLive } from './subject.js';
+import type { AfterChatTurn, SessionKey, SessionRepoInfo, SessionRowPatch, SessionSubject, SubjectLive } from './subject.js';
 
 export type { SessionRepoInfo } from './subject.js';
 
@@ -143,6 +155,14 @@ export interface SessionDeps {
   /** The environment the proxy reads the host's sign-in from. */
   credentialEnv(): NodeJS.ProcessEnv;
   usageSink?: SandboxUsageSink;
+  /** New story sessions open with a planning turn (always; false only in the tests of the older flow). */
+  planFirst: boolean;
+  /** "Implement with docs" is offered: the workspace has a built reference document. */
+  docsAvailable(accountId: number, workspaceId: number): Promise<boolean>;
+  /** "Implement with docs": which library sections go into the sandbox (no model call). */
+  chooseDocs(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): Promise<DocsPick>;
+  /** THE ONE budget gate, for an AUTOMATIC build continuation (plan first). */
+  automaticAllowed(ctx: AgentContext, accountId: number, provider: AiProviderId): Promise<boolean>;
   now(): number;
 }
 
@@ -180,6 +200,23 @@ const defaultDeps: SessionDeps = {
   },
   places: () => defaultLayoutPlaces(),
   credentialEnv: () => process.env,
+  planFirst: true,
+  async docsAvailable(accountId, workspaceId) {
+    try {
+      const { docsContextFor } = await import('../../reference-docs/context.js');
+      return (await docsContextFor(accountId, workspaceId)).hasDocs;
+    } catch {
+      return false;
+    }
+  },
+  async chooseDocs(ctx, accountId, workspaceId, ident) {
+    const { chooseSessionDocs } = await import('../workspace/docs-choose.js');
+    return chooseSessionDocs(ctx, accountId, workspaceId, ident);
+  },
+  async automaticAllowed(ctx, accountId, provider) {
+    const { automaticRunAllowed } = await import('../../review/budget-gate.js');
+    return automaticRunAllowed(ctx, accountId, 'story_build_continue', provider);
+  },
   now: () => Date.now(),
 };
 
@@ -221,6 +258,12 @@ export interface Live extends SubjectLive {
   /** A turn is running (set in the same tick as the click). */
   turn: boolean;
   lastAgentText: string;
+  /** The running turn's FINAL agent texts (plan first reads the plan block from them). */
+  turnTexts: string[];
+  /** Plan first: what started the running chat turn (opening · reply · message · repair). */
+  planSource: BuildPlanSource | null;
+  /** How the last turn ended (a build that hit the turn cap may continue, plan first). */
+  lastOutcome: SandboxTurnOutcome | null;
   toolIds: Map<string, string>;
   subs: Set<Listener>;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -312,10 +355,20 @@ async function idleClose(l: Live): Promise<void> {
   if (l.turn) return touch(l);
   const minutes = Math.round(sessionLimits().idleMs / 60_000);
   const kept = await l.subject.hasStoredWork();
-  await closeSession(l, { phase: kept ? keptPhase(l.phase) : 'failed', error: `${idleLine(minutes)} ${kept ? KEPT_LINE : GONE_LINE}` });
+  await closeSession(l, { phase: kept ? await keptPhaseOf(l) : 'failed', error: `${idleLine(minutes)} ${kept ? KEPT_LINE : GONE_LINE}` });
 }
 
 const keptPhase = (p: SandboxSessionPhase): SandboxSessionPhase => (p === 'pushed' ? 'pushed' : 'built');
+
+/** The phase a closed session with stored work keeps (the subject's word first: plan first ⇒ plan_ready). */
+async function keptPhaseOf(l: Live): Promise<SandboxSessionPhase> {
+  return (await l.subject.keptPhase?.(l.phase).catch(() => null)) ?? keptPhase(l.phase);
+}
+
+/** "Implement with docs" needs a built document (the `available` Check against docs reads). */
+export function sessionDocsAvailable(accountId: number, workspaceId: number): Promise<boolean> {
+  return deps.docsAvailable(accountId, workspaceId);
+}
 
 /** The start's cheap check: null ⇒ not a ticket Limn knows; `empty` ⇒ no story text and no criteria. */
 export function sessionStoryInputs(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): ReturnType<SessionDeps['storyInputs']> {
@@ -399,6 +452,8 @@ export interface StartSessionArgs {
   ticketTitle: string | null;
   action: 'implement' | 'fill_gaps';
   choice: SandboxAgentChoice;
+  /** "Implement with docs". */
+  docs?: boolean;
 }
 
 export type StartSessionResult =
@@ -442,6 +497,9 @@ export function newLive(
     agentState: null,
     turn: false,
     lastAgentText: '',
+    turnTexts: [],
+    planSource: null,
+    lastOutcome: null,
     toolIds: new Map(),
     subs: new Set(),
     idleTimer: null,
@@ -495,8 +553,11 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
     return tooMany(maxOpen);
   }
   const subject = storySubject(ctx, { id, accountId: a.accountId, workspaceId: a.workspaceId, ident: a.ident, ticketKey: a.ticketKey });
-  const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state: emptySessionState(a.action), resume: false });
+  // PLAN FIRST: every new story session opens with a planning turn (docs/STORY-BUILD.md § Plan first).
+  const state = { ...emptySessionState(a.action), planFirst: deps.planFirst, withDocs: a.docs === true, docs: null, serviceRuns: [], planStage: null, planProblem: null };
+  const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
+  if (a.docs === true) await updateStoryBuild(ctx, a.accountId, id, { withDocs: true }).catch(() => {});
   return { outcome: 'started', id };
 }
 
@@ -637,6 +698,20 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       store: store != null ? { owner: l.owner, ...(deps.storeSeams ? { seams: deps.storeSeams } : {}) } : null,
       onProgress: (line) => step(l, current, 'running', line),
       signal: l.abort.signal,
+      // "Implement with docs": the reference documents, after the repositories, before the services.
+      ...(sub.prepareDocs && l.state.withDocs
+        ? {
+            docs: async (mirror) => {
+              step(l, 'repos', 'done', `${mirror.repos.length} of ${layout.repos.length} cloned`);
+              begin('docs');
+              const r = await sub.prepareDocs!(l);
+              step(l, 'docs', r.dir ? 'done' : 'skipped', r.detail);
+              stopIfClosing(l);
+              begin('repos', 'Writing the session notes');
+              return r.dir ? { dir: r.dir } : null;
+            },
+          }
+        : {}),
       services: async (mirror) => {
         step(l, 'repos', 'done', `${mirror.repos.length} of ${layout.repos.length} cloned`);
         const { stacks, notes } = serviceStacksFor(settings.services, mirror.repos);
@@ -667,6 +742,16 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
             scheduleSave(l);
           },
           onProblem: (line) => notice(l, line),
+          onRun: () => {
+            // Limn's own log of `limn-svc run` (a plan's data evidence is checked against it).
+            l.state.serviceRuns = storedServiceRuns(liveServiceRuns(l));
+            scheduleSave(l);
+            try {
+              sub.onServiceRun?.(l);
+            } catch {
+              /* the subject's listener never stops the machine */
+            }
+          },
         });
         const inv = await l.services.inventory();
         l.state.services = l.services.status();
@@ -735,10 +820,11 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       l.turn = true;
       if (first.build) building = l.key;
       addItem(l, { kind: 'reader', text: first.readerText, build: first.build });
-      runTurn(l, { build: first.build, text: first.text });
+      runTurn(l, { build: first.build, text: first.text, ...(first.planSource ? { planSource: first.planSource } : {}) });
       return;
     }
-    await setPhase(l, l.resume || mode === 'build' ? 'built' : 'ready', { error: null, startedAt: new Date(deps.now()) });
+    const booted = sub.bootedPhase?.(l) ?? null;
+    await setPhase(l, booted ?? (l.resume || mode === 'build' ? 'built' : 'ready'), { error: null, startedAt: new Date(deps.now()) });
     touch(l);
   } catch (err) {
     if (l.closing) return void (await reapAfterClose(l));
@@ -746,7 +832,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     if (!(err instanceof SessionFail)) ctx.log.warn({ err }, `sandbox session ${l.key}: boot failed`);
     step(l, current, 'failed', message);
     const kept = await sub.hasStoredWork().catch(() => false);
-    await closeSession(l, { phase: kept ? 'built' : 'failed', error: kept ? `${message} ${KEPT_LINE}` : message });
+    await closeSession(l, { phase: kept ? await keptPhaseOf(l) : 'failed', error: kept ? `${message} ${KEPT_LINE}` : message });
   }
 }
 
@@ -768,7 +854,13 @@ function onAgentEvent(l: Live, e: SandboxAgentEvent): void {
     emit(l, { type: 'agent', event: e });
     return;
   }
-  if (e.type === 'text' && e.text.trim() !== '') l.lastAgentText = e.text;
+  if (e.type === 'text' && e.text.trim() !== '') {
+    l.turnTexts.push(e.text);
+    // Plan first: the stored item never holds the plan block itself (it is checked and stored apart).
+    const stripped = l.state.planFirst ? stripPlanBlock(e.text, PLAN_SENT_LINE) : null;
+    if (stripped != null) e = { ...e, text: stripped };
+    l.lastAgentText = e.text;
+  }
   const item = itemForAgentEvent(l.state, e, iso(deps.now()), l.toolIds);
   if (item) {
     emit(l, { type: 'item', item });
@@ -780,7 +872,7 @@ async function agentEnded(l: Live): Promise<void> {
   if (l.closing) return;
   if (l.state.mode === 'build' && l.container) await l.subject.afterBuildTurn(l).catch(() => {});
   const kept = await l.subject.hasStoredWork().catch(() => false);
-  await closeSession(l, { phase: kept ? keptPhase(l.phase) : 'failed', error: `${AGENT_ENDED_LINE} ${kept ? KEPT_LINE : GONE_LINE}` });
+  await closeSession(l, { phase: kept ? await keptPhaseOf(l) : 'failed', error: `${AGENT_ENDED_LINE} ${kept ? KEPT_LINE : GONE_LINE}` });
 }
 
 // ---- turns --------------------------------------------------------------------------------------------------
@@ -791,7 +883,9 @@ export type SessionActionResult =
   | { status: 'not_live'; message: string }
   | { status: 'agent_busy' }
   | { status: 'build_busy' }
-  | { status: 'not_ready'; message: string };
+  | { status: 'not_ready'; message: string }
+  /** The subject refuses the action with its own code (plan first: PlanNotApproved, PlanStale, …). */
+  | { status: 'rejected'; code: string; message: string };
 
 /**
  * The live session behind an action, or why not. `rowExists` reads the subject's row (account-scoped):
@@ -810,37 +904,64 @@ export async function liveFor(key: SessionKey, accountId: number, rowExists: () 
 
 export const isLive = (x: Live | SessionActionResult): x is Live => (x as Live).key != null;
 
+/** Limn's log of `limn-svc run` in a live session (empty without services). */
+export function liveServiceRuns(l: Pick<Live, 'services'>): ServiceRunRecord[] {
+  return l.services?.controller.runs.list() ?? [];
+}
+
 /**
  * One turn. The CLAIM (`l.turn`, and `building` for a build turn) is taken by the caller in the same
  * tick as its checks; this runs `text` (Start build's ticket read), the turn, then — for a build turn —
- * the subject's store step, and settles the phase.
+ * the subject's store step, or — for a chat turn — the subject's chat step (plan first: the plan check,
+ * which may ask for ONE automatic follow-up turn, claimed here in the same tick), and settles the phase.
  */
-function runTurn(l: Live, o: { build: boolean; text: () => Promise<string> }): void {
+function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; planSource?: BuildPlanSource }): void {
   void (async () => {
     let after: 'keep' | 'close' = 'keep';
+    let afterChat: AfterChatTurn | null = null;
+    let buildFollow: string | null = null;
     try {
-      await setPhase(l, o.build ? 'building' : 'chatting');
+      l.planSource = o.build ? null : (o.planSource ?? null);
+      l.turnTexts = [];
+      await setPhase(l, o.build ? 'building' : (l.subject.chatPhase?.(l) ?? 'chatting'));
       const text = await o.text();
       if (l.closing || l.driver == null) return;
       if (o.build) await l.subject.beforeBuildTurn?.(l);
       l.lastAgentText = '';
+      l.turnTexts = [];
+      l.lastOutcome = null;
       const end = await l.driver.send(text);
+      l.lastOutcome = end.outcome;
       await l.subject.addSpend(l, end.mode, end.usage).catch(() => {});
     } catch (err) {
       if (!l.closing) addItem(l, { kind: 'error', code: 'session', text: scrub(err) });
     } finally {
       try {
         if (o.build && !l.closing && l.container) after = await l.subject.afterBuildTurn(l);
+        if (o.build && after === 'keep' && !l.closing && l.subject.buildFollowUp) buildFollow = await l.subject.buildFollowUp(l);
+        if (!o.build && !l.closing && l.subject.afterChatTurn) afterChat = await l.subject.afterChatTurn(l, [...l.turnTexts]);
       } catch (err) {
         if (!l.closing) addItem(l, { kind: 'error', code: 'session', text: scrub(err) });
       }
       l.turn = false;
       if (building === l.key) building = null;
       if (!l.closing) {
+        const follow = afterChat?.followUp ?? null;
         if (after === 'close') {
           await closeSession(l, { phase: 'built', error: null }).catch(() => {});
+        } else if (buildFollow != null && l.driver != null && !l.driver.busy() && l.driver.mode() === 'build' && !buildSlotTaken(l.key)) {
+          // A BUILD CONTINUATION (plan first: the turn cap hit with work unfinished; the subject asked the
+          // budget gate): claimed in this same tick, the build slot with it.
+          l.turn = true;
+          building = l.key;
+          const text = buildFollow;
+          runTurn(l, { build: true, text: async () => text });
+        } else if (follow && l.driver != null && !l.driver.busy() && l.driver.mode() === 'chat') {
+          // THE ONE AUTOMATIC FOLLOW-UP (plan first's repair): claimed in this same tick.
+          l.turn = true;
+          runTurn(l, { build: false, text: async () => follow.text, planSource: follow.planSource });
         } else {
-          const next: SandboxSessionPhase = o.build || l.phase === 'built' ? 'built' : 'ready';
+          const next: SandboxSessionPhase = o.build || l.phase === 'built' ? 'built' : (afterChat?.nextPhase ?? 'ready');
           await setPhase(l, next).catch(() => {});
           touch(l);
         }
@@ -863,8 +984,47 @@ export async function messageSession(key: SessionKey, accountId: number, text: s
   if (build) building = key;
   touch(l);
   addItem(l, { kind: 'reader', text, build: false });
-  const sent = build && l.subject.followUpText ? l.subject.followUpText(l, text) : text;
-  runTurn(l, { build, text: async () => sent });
+  const sent = build ? (l.subject.followUpText ? l.subject.followUpText(l, text) : text) : l.subject.chatText ? l.subject.chatText(l, text) : text;
+  runTurn(l, { build, text: async () => sent, ...(!build && l.state.planFirst ? { planSource: 'message' as const } : {}) });
+  return { status: 'queued', id: l.subject.rowId };
+}
+
+/**
+ * A chat turn a subject starts on the reader's press (plan first: a Reply). The claim in the same tick as
+ * the checks; `readerText` is the conversation's line, `text` what the agent gets.
+ */
+export function claimChatTurn(l: Live, o: { readerText: string; text: () => Promise<string>; planSource: BuildPlanSource }): SessionActionResult {
+  const busy = l.subject.busyReason?.() ?? null;
+  if (busy) return { status: 'not_ready', message: busy };
+  if (l.turn || l.driver == null || l.driver.busy()) return { status: 'agent_busy' };
+  if (l.driver.mode() !== 'chat') return { status: 'not_ready', message: 'The build has started. Send the agent a message instead.' };
+  l.turn = true;
+  touch(l);
+  addItem(l, { kind: 'reader', text: o.readerText, build: false });
+  runTurn(l, { build: false, text: o.text, planSource: o.planSource });
+  return { status: 'queued', id: l.subject.rowId };
+}
+
+/** The build turn's claim (Start build, Approve and start): same tick as the checks; then the driver switches. */
+export function claimBuildTurn(l: Live, o: { readerText: string; instruction: () => Promise<string> }): SessionActionResult {
+  const busy = l.subject.busyReason?.() ?? null;
+  if (busy) return { status: 'not_ready', message: busy };
+  if (l.driver!.mode() === 'build') return { status: 'not_ready', message: 'The build has started. Send the agent a message instead.' };
+  if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
+  if (buildSlotTaken(l.key)) return { status: 'build_busy' };
+  l.turn = true;
+  building = l.key;
+  touch(l);
+  addItem(l, { kind: 'reader', text: o.readerText, build: true });
+  runTurn(l, {
+    build: true,
+    text: async () => {
+      const instruction = await o.instruction();
+      await l.driver!.startBuild();
+      l.state.mode = 'build';
+      return instruction;
+    },
+  });
   return { status: 'queued', id: l.subject.rowId };
 }
 
@@ -872,25 +1032,9 @@ export async function messageSession(key: SessionKey, accountId: number, text: s
 export async function buildSession(key: SessionKey, accountId: number, extra: string | null, rowExists: () => Promise<boolean>, readerText = 'Start build'): Promise<SessionActionResult> {
   const l = await liveFor(key, accountId, rowExists);
   if (!isLive(l)) return l;
-  const busy = l.subject.busyReason?.() ?? null;
-  if (busy) return { status: 'not_ready', message: busy };
-  if (l.driver!.mode() === 'build') return { status: 'not_ready', message: 'The build has started. Send the agent a message instead.' };
-  if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
-  if (buildSlotTaken(key)) return { status: 'build_busy' };
-  l.turn = true;
-  building = key;
-  touch(l);
-  addItem(l, { kind: 'reader', text: extra ?? readerText, build: true });
-  runTurn(l, {
-    build: true,
-    text: async () => {
-      const instruction = await l.subject.buildInstruction(l, extra);
-      await l.driver!.startBuild();
-      l.state.mode = 'build';
-      return instruction;
-    },
-  });
-  return { status: 'queued', id: l.subject.rowId };
+  const refused = l.subject.buildRefused?.(l) ?? null;
+  if (refused) return { status: 'rejected', ...refused };
+  return claimBuildTurn(l, { readerText: extra ?? readerText, instruction: () => l.subject.buildInstruction(l, extra) });
 }
 
 export async function interruptLive(key: SessionKey, accountId: number, rowExists: () => Promise<boolean>): Promise<{ status: 'stopping' } | { status: 'idle' } | SessionActionResult> {
@@ -948,6 +1092,75 @@ export function allowSessionHost(
   return allowLiveHost(storyKey(buildId), accountId, rule, scope, storyRowExists(ctx, accountId, buildId));
 }
 
+// ---- story: the plan (plan first) ------------------------------------------------------------------------------
+
+/** The plan stage of a story session: the live one's, or (closed) one made for its stored rows. */
+function planStageFor(ctx: AgentContext, row: StoryBuildRow): { stage: PlanStage; l: Live | null } {
+  const l = live.get(storyKey(row.id));
+  if (l && l.accountId === row.accountId) return { stage: (l.subject as StorySubject).plan, l };
+  return { stage: storySubject(ctx, row).plan, l: null };
+}
+
+export type PlanActionResult = SessionActionResult | { status: 'plan'; plan: BuildPlanView };
+
+const notPlanFirst = (): SessionActionResult => ({ status: 'rejected', code: 'NoPlan', message: 'This session has no plan.' });
+
+/** Agree / Keep the story (or clear the answer) on the LATEST revision. DB only: no turn. */
+export async function decideSessionPlan(ctx: AgentContext, accountId: number, buildId: number, b: { revision: number; contentionId: string; decision: BuildPlanDecision | null }): Promise<PlanActionResult> {
+  const row = await getStoryBuildRow(ctx, accountId, buildId);
+  if (row == null || row.sessionPhase == null) return { status: 'not_found' };
+  const { stage, l } = planStageFor(ctx, row);
+  const state = l ? l.state : readSessionState(row.sessionJson);
+  if (state.planFirst !== true) return notPlanFirst();
+  const r = await stage.setDecision({ state } as PlanLive, b.revision, b.contentionId, b.decision);
+  if (!r.ok) return r.code === 'NotFound' ? { status: 'rejected', code: 'NotFound', message: r.message } : { status: 'rejected', code: r.code === 'NotOpen' ? 'PlanStale' : r.code, message: r.message };
+  if (l) {
+    touch(l);
+    emit(l, { type: 'plan', plan: r.view });
+  }
+  return { status: 'plan', plan: r.view };
+}
+
+/** Reply: stored on the revision, then ONE revision turn (the reader's press). */
+export async function replySessionPlan(ctx: AgentContext, accountId: number, buildId: number, b: { revision: number; contentionId: string | null; text: string }): Promise<SessionActionResult> {
+  const l = await liveFor(storyKey(buildId), accountId, storyRowExists(ctx, accountId, buildId));
+  if (!isLive(l)) return l;
+  if (l.state.planFirst !== true) return notPlanFirst();
+  if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
+  const stage = (l.subject as StorySubject).plan;
+  const r = await stage.replyText(b.revision, b.contentionId, b.text);
+  if (!r.ok) return { status: 'rejected', code: r.code === 'NotOpen' ? 'PlanStale' : r.code, message: r.message };
+  const line = b.contentionId ? `About ${b.contentionId}: ${b.text}` : b.text;
+  const out = claimChatTurn(l, { readerText: line, text: async () => r.text, planSource: 'reply' });
+  if (out.status === 'queued') void stage.view(l).then((v) => emit(l, { type: 'plan', plan: v })).catch(() => {});
+  return out;
+}
+
+/** Approve and start: the LATEST revision, every point answered, the session live and the build slot free. */
+export async function approveSessionPlan(ctx: AgentContext, accountId: number, buildId: number, b: { revision: number; text: string | null }): Promise<SessionActionResult> {
+  const l = await liveFor(storyKey(buildId), accountId, storyRowExists(ctx, accountId, buildId));
+  if (!isLive(l)) return l.status === 'not_live' ? { status: 'not_live', message: 'Resume the session first.' } : l;
+  if (l.state.planFirst !== true) return notPlanFirst();
+  if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
+  const stage = (l.subject as StorySubject).plan;
+  const check = await stage.approveCheck(b.revision);
+  if (!check.ok) return { status: 'rejected', code: check.code, message: check.message };
+  // ⚠ Re-checked AFTER the await: a second press that lands while the first one's build turn is claimed
+  // must not overwrite (and then clear) the first press's held plan — its approveNow would find none.
+  if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
+  stage.pendingApprove = check.plan;
+  const r = claimBuildTurn(l, { readerText: b.text ?? 'Approve and start', instruction: () => l.subject.buildInstruction(l, b.text) });
+  if (r.status !== 'queued') stage.pendingApprove = null;
+  return r;
+}
+
+/** One stored revision (the history list). */
+export async function sessionPlanRevision(ctx: AgentContext, accountId: number, buildId: number, revision: number): Promise<{ revision: import('@pierre-review/shared').BuildPlanRevision; decisions: BuildPlanView['decisions'] } | null> {
+  const row = await getStoryBuildRow(ctx, accountId, buildId);
+  if (row == null || row.sessionPhase == null) return null;
+  return planStageFor(ctx, row).stage.revision(revision);
+}
+
 // ---- closing ---------------------------------------------------------------------------------------------------
 
 export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; error: string | null }): Promise<void> {
@@ -999,6 +1212,9 @@ export async function discardSession(ctx: AgentContext, accountId: number, build
   if (row == null) return { status: 'not_found' };
   const repos = await listStoryBuildRepoRows(ctx, accountId, buildId);
   if (repos.some((r) => isStoryBuildRepoPushing(r.id))) return { status: 'not_ready' };
+  // Plan first: a planned PR (or Push all of the stack) in flight.
+  const planned = await listPlannedPrRows(ctx, accountId, buildId);
+  if (isStoryBuildStackPushing(buildId, planned.map((p) => p.id))) return { status: 'not_ready' };
   if (row.sessionPhase == null) {
     // A row of the old plan/build flow: its own discard (kept worktrees, refs).
     const { discardLegacyStoryBuild } = await import('../../coding/story-build/legacy.js');
@@ -1036,8 +1252,11 @@ export async function resumeSession(ctx: AgentContext, accountId: number, buildI
   const row = await getStoryBuildRow(ctx, accountId, buildId);
   if (row == null || row.sessionPhase == null) return { status: 'not_found' };
   if (live.has(storyKey(buildId))) return { status: 'not_ready', message: 'This session is running.' };
-  if (!(row.sessionPhase === 'built' || row.sessionPhase === 'pushed') || !(await storyHasPatches(ctx, accountId, buildId))) {
-    return { status: 'not_resumable', message: 'Only a session with stored changes can be resumed. Start again instead.' };
+  // A closed session resumes from its stored patches, or (plan first) from its plan before approval.
+  const fromPatches = (row.sessionPhase === 'built' || row.sessionPhase === 'pushed') && (await storyHasPatches(ctx, accountId, buildId));
+  const fromPlan = row.sessionPhase === 'plan_ready' && (await storyHasOpenPlan(ctx, accountId, row));
+  if (!fromPatches && !fromPlan) {
+    return { status: 'not_resumable', message: 'Only a session with stored changes or a plan can be resumed. Start again instead.' };
   }
   const provider: AiProviderId = row.provider === 'codex' ? 'codex' : 'claude';
   const choice = resolveSandboxAgentChoice({ provider, model: row.model ?? 'claude-sonnet-5' });
@@ -1068,13 +1287,18 @@ export async function sessionWire(ctx: AgentContext, accountId: number, row: Sto
   const names = await storyBuildRepoNames(ctx, accountId, repos.map((r) => r.repoId));
   const base = toStoryBuild(row, repos, { repoNames: names, sessionBudgetUsd: storyBuildLimits().sessionBudgetUsd });
   const state = l ? l.state : readSessionState(row.sessionJson);
+  // PLAN FIRST: the plan stage and the planned pull requests (created at Approve).
+  const plan = state.planFirst ? await planViewOf(ctx, accountId, row.id, await listPlanRows(ctx, accountId, row.id), state) : null;
+  const prRows = state.planFirst ? await listPlannedPrRows(ctx, accountId, row.id) : [];
+  const prNames = prRows.length > 0 ? await storyBuildRepoNames(ctx, accountId, prRows.map((r) => r.repoId)) : new Map<number, string>();
   const session = toStoryBuildSession(
     { ...row, sessionPhase: l ? l.phase : row.sessionPhase },
     state,
     l ? liveFactsOf(l) : null,
     repos.some((r) => (r.patch ?? '') !== ''),
+    plan,
   );
-  return { ...base, session };
+  return { ...base, session, prs: prRows.map((r) => toStoryBuildPr(r, prNames.get(r.repoId) ?? `#${r.repoId}`)) };
 }
 
 /** The live facts the wire mapper reads (agent state, the idle close time). */
@@ -1122,10 +1346,13 @@ export async function reconcileSessionsOnStartup(ctx: AgentContext): Promise<num
   let moved = 0;
   for (const row of rows) {
     if (live.has(storyKey(row.id))) continue;
-    const closed = row.sandboxRef == null && (row.sessionPhase === 'built' || row.sessionPhase === 'pushed');
+    const closed = row.sandboxRef == null && (row.sessionPhase === 'built' || row.sessionPhase === 'pushed' || row.sessionPhase === 'plan_ready');
     if (closed) continue;
-    const kept = await storyHasPatches(ctx, row.accountId, row.id);
-    const phase: SandboxSessionPhase = kept ? (row.sessionPhase === 'pushed' ? 'pushed' : 'built') : 'failed';
+    const patches = await storyHasPatches(ctx, row.accountId, row.id);
+    // Plan first: a session cut off in the plan stage keeps its plan (resumable as plan_ready).
+    const planKept = !patches && (await storyHasOpenPlan(ctx, row.accountId, row));
+    const kept = patches || planKept;
+    const phase: SandboxSessionPhase = patches ? (row.sessionPhase === 'pushed' ? 'pushed' : 'built') : planKept ? 'plan_ready' : 'failed';
     const { state, error } = restartState(row.sessionJson, kept);
     await updateStoryBuild(ctx, row.accountId, row.id, {
       sessionPhase: phase,
@@ -1147,17 +1374,70 @@ async function storyHasPatches(ctx: AgentContext, accountId: number, buildId: nu
   return (await listStoryBuildRepoRows(ctx, accountId, buildId)).some((r) => (r.patch ?? '') !== '' || r.status === 'pushed');
 }
 
+/** Plan first: a stored plan revision that is not approved yet (the session can resume to answer it). */
+async function storyHasOpenPlan(ctx: AgentContext, accountId: number, row: Pick<StoryBuildRow, 'id' | 'approvedPlanId'>): Promise<boolean> {
+  if (row.approvedPlanId != null) return false;
+  return (await listPlanRows(ctx, accountId, row.id)).length > 0;
+}
+
+/** The story subject with its plan stage (the plan routes reach the stage through the live session). */
+type StorySubject = SessionSubject & { plan: PlanStage };
+
 /** Implement's subject: the ticket, the bases (the reader's own open ticket PR, else the default branch), one row per repository. */
-function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accountId' | 'workspaceId' | 'ident' | 'ticketKey'>): SessionSubject {
+function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accountId' | 'workspaceId' | 'ident' | 'ticketKey'>): StorySubject {
   const buildId = row.id;
   const accountId = row.accountId;
   let ticket: SessionTicket | null = null;
   let action: 'implement' | 'fill_gaps' = 'implement';
   let repoRows: StoryBuildRepoRow[] = [];
+  let planFirstFlag = false;
   const stacked = new Map<number, number | null>();
   const stateOf = (l: SubjectLive): SessionStateJson => (l as Live).state;
+  // PLAN FIRST (sandbox/session/plan.ts): the planning turn, the revisions, the reader's answers, Approve.
+  const plan = new PlanStage({
+    ctx,
+    accountId,
+    buildId,
+    ticket: () => ticket,
+    mode: () => action,
+    approvedPlanId: async () => (await getStoryBuildRow(ctx, accountId, buildId))?.approvedPlanId ?? null,
+  });
+  const inPlan = (l: SubjectLive): boolean => stateOf(l).planFirst === true && !plan.isApproved();
+  /** Plan first, after Approve: the work is the approved stack (one branch per planned PR). */
+  const isStacked = (l: SubjectLive): boolean => stateOf(l).planFirst === true && plan.isApproved();
+  /** Build continuations sent since the reader last acted (at most CONTINUATIONS_MAX). */
+  let continuations = 0;
+  let lastUnfinished = false;
+  const machine = (l: Live): PlanMachine => ({ notice: (t) => notice(l, t), emitPlan: (v) => emit(l, { type: 'plan', plan: v }), scheduleSave: () => scheduleSave(l) });
+
+  /** THE TICKET AGAIN (open points and criteria change while a ticket is in flight), into TICKET.md. */
+  async function rereadTicket(l: Live): Promise<boolean> {
+    let ticketChanged = false;
+    const before = l.state.criteria;
+    const fresh = await deps.readTicket(ctx, accountId, l.workspaceId, row.ident, null).catch(() => null);
+    if (fresh && l.container && l.layoutRoot) {
+      const ticketFile = `${l.layoutRoot.replace(/\/$/, '')}/TICKET.md`;
+      const docsDir = l.state.withDocs && l.state.docs ? SANDBOX_DOCS_DIR : null;
+      await l.runtime.copyIn(l.container, [{ path: ticketFile, content: ticketMarkdown(fresh, l.state.action === 'fill_gaps' ? 'fill_gaps' : 'implement', docsDir) }]);
+      const after = criteriaLines(fresh);
+      ticketChanged = JSON.stringify(after) !== JSON.stringify(before);
+      if (ticketChanged) {
+        notice(l, `The acceptance criteria changed since the session started: there ${after.length === 1 ? 'is' : 'are'} now ${after.length}.`);
+        l.state.criteria = after;
+      }
+      l.state.openPoints = openPointLines(fresh);
+      await updateStoryBuild(ctx, accountId, buildId, {
+        criteriaJson: fresh.criteria.map((c) => ({ n: c.n, text: c.text })),
+        seedJson: seedJsonOf(fresh),
+      });
+    } else if (fresh == null) {
+      notice(l, 'The ticket could not be read again, so the build uses the copy from the start of the session.');
+    }
+    return ticketChanged;
+  }
 
   return {
+    plan,
     kind: 'story',
     rowId: buildId,
     idPrefix: 'sb',
@@ -1189,10 +1469,15 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         numTurns: (r.numTurns ?? 0) + 1,
       });
     },
-    hasStoredWork: () => storyHasPatches(ctx, accountId, buildId),
+    async hasStoredWork() {
+      if (await storyHasPatches(ctx, accountId, buildId)) return true;
+      return planFirstFlag && storyHasOpenPlan(ctx, accountId, { id: buildId, approvedPlanId: plan.isApproved() ? -1 : null });
+    },
     async readSubject(l) {
       const state = stateOf(l);
       action = state.action === 'fill_gaps' ? 'fill_gaps' : 'implement';
+      planFirstFlag = state.planFirst === true;
+      if (planFirstFlag) await plan.load();
       const coverage = state.action === 'fill_gaps' ? await deps.coverage(ctx, accountId, row.ident).catch(() => null) : null;
       ticket = await deps.readTicket(ctx, accountId, l.workspaceId, row.ident, coverage);
       if (ticket == null) throw new SessionFail(NO_STORY_LINE);
@@ -1241,7 +1526,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     },
     branch: () => sessionBranch(row.ticketKey),
     seed() {
-      return { ticket: ticket!, mode: action };
+      return { ticket: ticket!, mode: action, planFirst: planFirstFlag && !plan.isApproved() };
     },
     async afterMirror(_l, mirror, bases) {
       // One row per mirrored repository: the patch Push applies lands here.
@@ -1267,43 +1552,102 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       }
     },
     async restore(l, mirror) {
+      // After Approve: each planned PR's patch back on its own branch, stacked (stack-turn.ts).
+      if (isStacked(l)) return restoreApprovedStack(ctx, { buildId, ticketKey: row.ticketKey }, l as Live, mirror);
       let n = 0;
       for (const rr of repoRows) {
         const at = mirror.repos.find((m) => m.repoId === rr.repoId);
         if (!at || !rr.patch || !l.container) continue;
         await restoreRepoPatch((l as Live).runtime, l.container, at.path, rr.patch, rr.commitMessage?.trim() || `${row.ticketKey}: the work so far`, (n += 1));
       }
+      // Plan first, before approval: the latest revision as PLAN.md ("not approved yet"); no automatic turn.
+      if (inPlan(l)) await plan.restorePlan(l as Live).catch(() => false);
       return n;
     },
-    startMode: (l) => (l.resume ? 'build' : 'chat'),
-    async buildInstruction(l0, extra) {
-      // THE TICKET AGAIN (open points and criteria change while a ticket is in flight), into TICKET.md.
+    startMode: (l) => (l.resume && !inPlan(l) ? 'build' : 'chat'),
+    firstTurn: (l) => (inPlan(l) && !l.resume ? plan.firstTurn(l as Live) : null),
+    chatPhase: (l) => (inPlan(l) ? plan.chatPhase() : 'chatting'),
+    chatText(l, text) {
+      if (!inPlan(l)) return text;
+      plan.readerActed();
+      return planMessageText(text, plan.hasRevision());
+    },
+    async afterChatTurn(l, texts) {
+      if (!inPlan(l)) return { nextPhase: null };
+      return plan.afterChatTurn(l as Live, texts, machine(l as Live));
+    },
+    buildRefused: (l) => (stateOf(l).planFirst === true ? plan.buildRefused() : null),
+    async keptPhase() {
+      return planFirstFlag && !plan.isApproved() && !(await storyHasPatches(ctx, accountId, buildId)) ? 'plan_ready' : null;
+    },
+    bootedPhase: (l) => (l.resume && inPlan(l) ? (plan.hasRevision() ? 'plan_ready' : 'ready') : null),
+    async prepareDocs(l0) {
       const l = l0 as Live;
-      let ticketChanged = false;
-      const before = l.state.criteria;
-      const fresh = await deps.readTicket(ctx, accountId, l.workspaceId, row.ident, null).catch(() => null);
-      if (fresh && l.container && l.layoutRoot) {
-        const ticketFile = `${l.layoutRoot.replace(/\/$/, '')}/TICKET.md`;
-        await l.runtime.copyIn(l.container, [{ path: ticketFile, content: ticketMarkdown(fresh, l.state.action === 'fill_gaps' ? 'fill_gaps' : 'implement') }]);
-        const after = criteriaLines(fresh);
-        ticketChanged = JSON.stringify(after) !== JSON.stringify(before);
-        if (ticketChanged) {
-          notice(l, `The acceptance criteria changed since the session started: there ${after.length === 1 ? 'is' : 'are'} now ${after.length}.`);
-          l.state.criteria = after;
-        }
-        l.state.openPoints = openPointLines(fresh);
-        await updateStoryBuild(ctx, accountId, buildId, {
-          criteriaJson: fresh.criteria.map((c) => ({ n: c.n, text: c.text })),
-          seedJson: seedJsonOf(fresh),
-        });
-      } else if (fresh == null) {
-        notice(l, 'The ticket could not be read again, so the build uses the copy from the start of the session.');
+      const { planDocsCopy, copyDocsIn } = await import('../workspace/docs.js');
+      const pick = await deps.chooseDocs(ctx, accountId, l.workspaceId, row.ident).catch((err: unknown) => ({ ok: false as const, reason: scrub(err) }));
+      if (!pick.ok || !l.container || !l.layoutRoot) {
+        l.state.docs = null;
+        return { dir: null, detail: pick.ok ? null : pick.reason };
       }
+      const copy = planDocsCopy(pick.lib, pick.index, pick.choice);
+      try {
+        await copyDocsIn(l.runtime, l.container, copy);
+        await l.runtime.copyIn(l.container, [{ path: `${l.layoutRoot.replace(/\/$/, '')}/DOCS.md`, content: copy.docsMd }]);
+      } catch (err) {
+        // Optional context: the session goes on without the documents (one line), never fails for them.
+        l.state.docs = null;
+        return { dir: null, detail: `The reference documents could not be copied in: ${scrub(err)}` };
+      }
+      l.state.docs = { source: pick.choice.source, libraryHash: pick.libraryHash, sections: copy.sections };
+      return { dir: SANDBOX_DOCS_DIR, detail: `${copy.sections.length} ${copy.sections.length === 1 ? 'section' : 'sections'}` };
+    },
+    onServiceRun(l) {
+      if (inPlan(l)) void plan.writeContext(l as Live);
+    },
+    async buildInstruction(l0, extra) {
+      const l = l0 as Live;
+      // Approve and start (plan first): the approval and the planned PRs are recorded, PLAN.md written.
+      if (l.state.planFirst === true && plan.pendingApprove != null) {
+        const rev = await plan.approveNow(l, machine(l));
+        const ticketChanged = await rereadTicket(l);
+        continuations = 0;
+        return planBuildInstruction({ revision: rev.revision, root: l.layoutRoot ?? '/workspace', ticketChanged, extra, stack: rev.stack, fillGaps: action === 'fill_gaps' });
+      }
+      const ticketChanged = await rereadTicket(l);
       return buildInstruction({ ticketChanged, extra });
     },
-    afterBuildTurn: async (l) => {
-      await extractAll(l as Live, buildId);
+    afterBuildTurn: async (l0) => {
+      const l = l0 as Live;
+      if (isStacked(l)) {
+        const approvedPlanId = (await getStoryBuildRow(ctx, accountId, buildId))?.approvedPlanId ?? null;
+        const r = await extractApprovedStack(ctx, { buildId, approvedPlanId, patchMaxBytes: sessionLimits().patchMaxBytes, now: deps.now }, l, {
+          notice: (t) => notice(l, t),
+          emitPrs: (prs) => emit(l, { type: 'prs', prs }),
+          scheduleSave: () => scheduleSave(l),
+        });
+        lastUnfinished = r.unfinished;
+        return 'keep';
+      }
+      await extractAll(l, buildId);
       return 'keep';
+    },
+    async buildFollowUp(l0) {
+      // Plan first: the build runs to the end unattended. A turn that hit the turn cap with work left gets
+      // at most CONTINUATIONS_MAX more turns; each is an AUTOMATIC run, so it asks the ONE gate first.
+      const l = l0 as Live;
+      if (!isStacked(l) || l.lastOutcome !== 'max_turns' || !lastUnfinished || continuations >= CONTINUATIONS_MAX) return null;
+      const allowed = await deps.automaticAllowed(ctx, accountId, l.choice.provider).catch(() => false);
+      if (!allowed) {
+        notice(l, 'The build stopped at the turn limit with work left. The spend limit is reached, so Limn did not ask the agent to go on. Send a message to go on.');
+        return null;
+      }
+      continuations += 1;
+      notice(l, `The build stopped at the turn limit with work left, so Limn asked the agent to go on (${continuations} of ${CONTINUATIONS_MAX}).`);
+      return CONTINUE_LINE;
+    },
+    followUpText(_l, text) {
+      continuations = 0;
+      return text;
     },
   };
 }

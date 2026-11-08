@@ -16,13 +16,17 @@ import {
 } from '../../lib/storyBuild.js';
 import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { useFilters } from '../../store/filters.js';
-import { WrenchIcon, FillGapsIcon } from '../Icons.js';
+import { BookIcon, WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
+import type { MenuEntry } from '../ui/Menu.js';
+import { SplitButton } from '../ui/SplitButton.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 
 // "IMPLEMENT STORY"'S ENTRY (docs/STORY-BUILD.md § Entry points): the STORY VIEW's primary action —
 // "Implement" on a not-started story with no pull request, "Fill gaps" on a started one whose current
-// story check found gaps (shared `storyBuildOffered`, the ONE gate), "Open build · <mark>" once a session
+// story check found gaps — each a SPLIT BUTTON whose menu adds "Implement with docs" / "Fill gaps with
+// docs" when the workspace's reference library has a built document (the tab's start state then ticks
+// its docs box) (shared `storyBuildOffered`, the ONE gate), "Open build · <mark>" once a session
 // is open. It sits first in the story's action group (TicketStorySection `StoryActions`: the rail's
 // actions in the two-column layout, the Story heading row otherwise), in EVERY story view — This
 // Sprint's tray, the story tab and the PR view's Story tab — and registers the same action in ⌘K.
@@ -50,21 +54,33 @@ export function StoryBuildEntryProvider({ facts, children }: { facts: StoryBuild
   return <StoryBuildEntryContext.Provider value={facts}>{children}</StoryBuildEntryContext.Provider>;
 }
 
-export function StoryBuildEntry({ ticket, state }: { ticket: CardTicket & { ident: string }; state: TicketReviewState | undefined }): JSX.Element | null {
+export function StoryBuildEntry({
+  ticket,
+  state,
+  docsAvailable = false,
+}: {
+  ticket: CardTicket & { ident: string };
+  state: TicketReviewState | undefined;
+  /** The workspace's reference library has a built document (the Story section's Check against docs read,
+   *  `available`): the "… with docs" action is offered. Nothing is fetched for it here. */
+  docsAvailable?: boolean;
+}): JSX.Element | null {
   const aiOn = useAiCapabilities().enabled;
   const facts = useContext(StoryBuildEntryContext);
   if (!aiOn || facts == null) return null;
-  return <Entry ticket={ticket} state={state} facts={facts} />;
+  return <Entry ticket={ticket} state={state} facts={facts} docsAvailable={docsAvailable} />;
 }
 
 function Entry({
   ticket,
   state,
   facts,
+  docsAvailable,
 }: {
   ticket: CardTicket & { ident: string };
   state: TicketReviewState | undefined;
   facts: StoryBuildEntryFacts;
+  docsAvailable: boolean;
 }): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const node = facts.sprintNode != null && facts.sprintNode.ident === ticket.ident ? facts.sprintNode : null;
@@ -88,16 +104,17 @@ function Entry({
   }
 
   const title = ticket.title != null && ticket.title !== '' ? ticket.title : null;
-  const open = (): void => {
+  const open = (docs = false): void => {
     openBuild({
       ident: ticket.ident,
       key: ticket.key,
       title,
-      ...(entry?.kind === 'offer' ? { offer: { action: entry.action, reviewId: entry.reviewId } } : {}),
+      ...(entry?.kind === 'offer' ? { offer: { action: entry.action, reviewId: entry.reviewId, ...(docs ? { docs: true } : {}) } } : {}),
     });
   };
   const live = useRef(open);
   live.current = open;
+  const withDocs = docsAvailable && entry?.kind === 'offer';
 
   const words =
     entry == null
@@ -113,40 +130,62 @@ function Entry({
   const commands = useMemo<Command[] | null>(() => {
     if (label == null || commandKind == null) return null;
     const fill = commandKind === 'fill_gaps';
-    return [
-      {
-        id: `story-build:${ticket.ident}`,
-        group: 'Actions',
-        title: title != null ? `${label} · ${title}` : label,
-        keywords: fill ? ['build', 'story', 'code', 'gaps', 'fill'] : ['build', 'story', 'code', 'implement'],
-        icon: fill ? <FillGapsIcon size={14} /> : <WrenchIcon size={14} />,
-        run: () => live.current(),
-      },
+    const keywords = fill ? ['build', 'story', 'code', 'gaps', 'fill'] : ['build', 'story', 'code', 'implement'];
+    const icon = fill ? <FillGapsIcon size={14} /> : <WrenchIcon size={14} />;
+    const out: Command[] = [
+      { id: `story-build:${ticket.ident}`, group: 'Actions', title: title != null ? `${label} · ${title}` : label, keywords, icon, run: () => live.current() },
     ];
-  }, [label, commandKind, ticket.ident, title]);
+    if (withDocs) {
+      const docsLabel = `${label} with docs`;
+      out.push({
+        id: `story-build-docs:${ticket.ident}`,
+        group: 'Actions',
+        title: title != null ? `${docsLabel} · ${title}` : docsLabel,
+        keywords: [...keywords, 'docs', 'reference'],
+        icon,
+        run: () => live.current(true),
+      });
+    }
+    return out;
+  }, [label, commandKind, ticket.ident, title, withDocs]);
   useRegisterCommands(`story-build-entry:${ticket.ident}`, commands);
 
   if (entry == null || words == null) return null;
+  if (entry.kind === 'open') {
+    return (
+      <Button
+        variant="primary"
+        size="sm"
+        icon={icon}
+        data-testid="story-build-entry"
+        data-action="open"
+        aria-label={words.label}
+        title={words.title}
+        onClick={() => open()}
+      >
+        Open build<span className="font-normal"> · {STORY_BUILD_MARK_WORDS[entry.mark]}</span>
+      </Button>
+    );
+  }
+  // "Implement" / "Fill gaps", and beside it the menu with "… with docs" when the library has a document.
+  const verb = entry.action === 'fill_gaps' ? 'Fill gaps' : 'Implement';
+  const items: MenuEntry[] = [
+    { id: 'plain', label: verb, icon, onSelect: () => open() },
+    ...(withDocs ? [{ id: 'docs', label: `${verb} with docs`, icon: <BookIcon size={12} />, onSelect: () => open(true) }] : []),
+  ];
   return (
-    <Button
-      variant="primary"
-      size="sm"
+    <SplitButton
       icon={icon}
       data-testid="story-build-entry"
-      data-action={entry.kind === 'open' ? 'open' : entry.action}
+      data-action={entry.action}
       aria-label={words.label}
       title={words.title}
-      onClick={open}
+      menuLabel={entry.action === 'fill_gaps' ? 'More ways to fill the gaps' : 'More ways to implement'}
+      menuTestId="story-build-entry-menu"
+      items={items}
+      onPrimary={() => open()}
     >
-      {entry.kind === 'open' ? (
-        <>
-          Open build<span className="font-normal"> · {STORY_BUILD_MARK_WORDS[entry.mark]}</span>
-        </>
-      ) : entry.action === 'fill_gaps' ? (
-        'Fill gaps'
-      ) : (
-        'Implement'
-      )}
-    </Button>
+      {verb}
+    </SplitButton>
   );
 }

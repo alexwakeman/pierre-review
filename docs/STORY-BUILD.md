@@ -20,10 +20,11 @@ session** (since 2026-11-07):
    (at the reader's own local paths, so their Claude memories still apply), the **ticket in full**
    (description, numbered acceptance criteria, open points) and the reader's **own Claude notes** — never
    a past session (owner decision D1). It takes seconds once the image is local.
-2. **Talk.** The reader talks to a full Claude Code or Codex agent in the tab (plans, questions, "look at X
-   first") and watches every step live. Chat turns run in plan mode: the agent reads and runs commands
-   but does not change files.
-3. **Build.** **Start build** reads the ticket again and switches the agent to build mode. It implements,
+2. **Plan** (§ Plan first). Limn sends the opening turn itself: the agent investigates the code, the data
+   and (with docs) the reference documents, and submits a STRUCTURED PLAN that Limn checks on the host.
+   The reader settles each point of contention (Agree / Keep the story / Reply) and talks to the agent
+   in the tab; chat turns run in plan mode (the agent reads but does not change files).
+3. **Build.** **Approve and start** reads the ticket again and switches the agent to build mode. It implements,
    runs the repositories' own tests — integration tests too, against real services from the compose
    files the reader picked — and reports per acceptance criterion. After every build turn each
    repository's work is stored as a patch.
@@ -37,6 +38,73 @@ fallback to the removed shell-less agents).
 The session machine (caps, the ONE build slot, boot, idle close, stream, restart reconcile, Resume) is
 shared with AI Fix, which is its second subject (docs/SANDBOX.md § AI Fix sessions): the two features
 share the machine's open sessions and its one build turn at a time.
+
+## Plan first
+
+Owner decisions 2026-11-07: data evidence = repository data (fixtures, seed data, schemas, migrations) and
+queries the agent ran through `limn-svc run` against a sandbox service — nothing from production; the
+plan is a structured panel; Limn does NOT update the tracker — when the story needs work the plan carries
+a DRAFT ticket update for the reader to paste; ≤ 3 PRs per repository, ≤ 6 in all, each building and
+passing its tests on its own; Fill gaps gets the same flow, its plan about the gaps; after Approve the
+build runs to the end (Stop / redirect stay). The split button offers "Implement with docs" / "Fill gaps
+with docs" when the workspace has a built reference document (`docsContextFor().hasDocs`, the `available`
+Check against docs reads — not `.usable`, which also needs the Claude Review switch). There is no "build
+without a plan": a session whose agent never sends a usable plan can only be messaged or discarded.
+
+- **The opening turn** (`sandbox/session/plan.ts planOpeningInstruction`) is the subject's `firstTurn`,
+  sent the moment the agent is ready (the reader's Implement click, so no budget question). The reader's
+  line reads "Plan" ("Plan with docs").
+- **The plan** leaves the sandbox as the LAST ```` ```limn-plan ```` block of the turn's final text (Claude's
+  plan mode refuses every write, so not a file), shape `limn.plan/1` (shared `build-plan.ts`
+  `BuildPlanRaw`): the repositories it will change, one entry per criterion (AC1… in TICKET.md's order;
+  Fill gaps also the missing items, and a gap may not be `met`), the points of contention, each with 1–4
+  pieces of evidence, the PR stack, and an optional ticket update in the ticket's own format. The stored
+  conversation item has the block replaced by one line. THE check is docs/SANDBOX.md § The plan and its
+  checks: ONE validator text, then every piece of evidence verified on the HOST; what fails is dropped, a
+  point left with none is dropped, and only counts and plain reasons are kept.
+- **Revisions** (`story_build_plans`): every usable plan is a revision (≤ 12; an identical resubmission is
+  none). Agree / Keep the story are stored at once on the LATEST revision (no turn). Reply stores the
+  reply and sends a revision turn. A free message is a revision turn only when its answer has a block. An
+  answer carries to the next revision when the contention's id AND fingerprint (its problem + evidence)
+  are unchanged. No usable plan after an opening, reply or (no plan yet) message turn ⇒ ONE automatic
+  repair turn per reader action, which asks the budget gate first (refused ⇒ no turn, one line).
+- **Approve and start** (latest revision, every point answered, live, build slot free): ONE transaction sets
+  `approved_plan_id` / `approved_at` and writes one `story_build_prs` row per planned PR; `PLAN.md` (the
+  plan and the decisions) goes into the sandbox; ONE build turn (`planBuildInstruction`). Start build is
+  refused `PlanNotApproved` on a plan-first session. Branches: P1 of a repository on `limn/<key>`, its
+  second and third on `limn/<key>-2` / `-3`.
+- **Closed in the plan stage** (idle, the agent ended, a restart): the session keeps its plan as
+  `plan_ready` (not live, resumable). Resume boots it, writes PLAN.md marked "not approved yet" and sends
+  NO turn. Approve on a closed session: `409 NotLive` ("Resume the session first.").
+- **With docs** (`with_docs`): a boot step copies a READ-ONLY subset of the library into the sandbox
+  (docs/SANDBOX.md § The workspace mirror → Reference documents) and TICKET.md points at it.
+- **The build after Approve** (`planBuildInstruction`): one branch line per planned PR, "make each branch
+  from the previous one" for a real stack, the reader's decisions through PLAN.md, Fill gaps "only the
+  gaps", and THE BUILD REPORT (`sandbox/workspace/build-report.ts`): `<root>/.limn/build-report.json` —
+  per PR status (done / partly / not_done), a summary (its PR body's opening) and the checks it ran; per
+  criterion met / partly / not_met — checked with `node ~/.limn/build-report-check.cjs` (ONE validator
+  text, the fix-report pattern; Approve copies the checker and `build-context.json` in). A SELF-REPORT:
+  shown as "The agent says", never a gate; missing ⇒ the agent's last words, checks "not reported".
+- **Unattended to the end**: a build turn that hit the turn cap (`max_turns`) with work unfinished (the
+  report says so, or there is none, or a PR is not ready) gets at most TWO automatic continuation turns
+  (`stack-turn.ts CONTINUE_LINE`), each an AUTOMATIC run that asks the ONE budget gate first (refused ⇒
+  no turn, one notice). Never after Stop or any other end; a reader's message resets the count.
+- **Stacks** (`sandbox/session/stack-turn.ts`, after EVERY build turn of an approved plan): per repository
+  with planned PRs, ONE git bundle of the planned branches leaves the sandbox (`stack.ts`
+  `EXTRACT_STACK_SCRIPT`: `refs/limn/stack/<k>` `^refs/limn/base`, ≤ 8 MB, base64; uncommitted work folded
+  into the LAST branch only when it is checked out; a repository with ONE planned PR reads HEAD, as
+  before plans) and is VERIFIED ON THE HOST in Limn's clone cache for that repository only
+  (`coding/story-build/stack-verify.ts`: only the expected heads, the only prerequisite the base, fetched
+  with fsck into `refs/pierre/story-build/<id>/stack/<prRowId>`, base → tip 1 → tip 2 … each an ancestor
+  of the next, no merge commit, ≤ 200 commits, no gitlink, no path in `.git`). Each PR row gets the
+  HOST's patch (against the PR before it), tip, tree and status (`ready` · `empty` · `failed`, with the
+  reason); a failure at PR k fails k and every later PR of that repository. The repository row holds the
+  WHOLE change (base → last good tip), so its diff, Resume and the sprint marks keep working. A pushed
+  PR is never rewritten. Work in a repository with no planned PR is LEFT OUT (one notice). The planned
+  PRs go out on the stream (`{ type: 'prs' }`).
+- **Resume of an approved plan** (`restoreApprovedStack`): each stored PR patch back as ONE commit on its
+  own branch, each branch made from the previous one, the last left checked out.
+- The push of the planned PRs is § Push → Pushing a stack.
 
 ## Owner decisions
 
@@ -68,9 +136,9 @@ documented (SANDBOX.md § Setting up a runtime) · D9 every part is free. Q1 the
 skills opt-in per workspace · Q2 no old fallback · Q3 the image is pulled from GHCR by digest, built
 locally if that fails · Q4 the model credential is injected at the proxy (spike 3).
 
-## Data model (migrations 0149, 0176)
+## Data model (migrations 0149, 0176, 0179)
 
-Two core tables, both account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
+Four core tables, all account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
 
 - **`story_builds`** — ONE row per session (one ticket, one click). Named composite FK
   `story_builds_workspace_account_fk` onto `workspaces (id, account_id)`, cascade. Unique `(id,
@@ -87,6 +155,15 @@ Two core tables, both account-scoped, on the erase checklist (`accountScopedTabl
   target. `stacked_on_pr_id` has NO FK (readers re-scope it). The work is `patch` (+ `patch_sha`,
   `stat_json`, `files_changed_json`, `commit_message`, `summary`); `sandbox_path` is where it sat in the
   sandbox. `deleteRepo` deletes the repository's rows explicitly and keeps the session.
+- **`story_build_plans`** (0179) — ONE row per plan revision: the verified `plan_json`, `raw_sha`, this
+  revision's answers `decisions_json` and the replies sent from it `replies_json` (the decision log).
+  Composite FK onto `story_builds (id, account_id)`, cascade; unique `(build_id, revision)`.
+- **`story_build_prs`** (0179) — ONE row per PLANNED pull request, written at Approve: key, plan order
+  (`position`), `stack_index`, branch, criteria, depends-on, status (shared `StoryBuildPrStatus`), and the
+  host-computed patch / tip / tree and the push record. Composite FKs onto the build, the repository and
+  the plan row; `deleteRepo` deletes a repository's rows explicitly.
+- `story_builds.with_docs`, `approved_plan_id` (NO FK; re-scoped by `(build_id, account_id)`) and
+  `approved_at` (0179).
 - The plan / docs / checks columns (`plan_json`, `docs_json`, `checks_json`, `worktree_path`, …) are
   DORMANT: only rows of the removed plan/build flow carry them (§ Rows from the old flow). Never drop
   them casually ([MIGRATIONS.md](MIGRATIONS.md)).
@@ -98,16 +175,20 @@ The wire mapper is ONE function, `coding/story-build/persist.ts toStoryBuild`, w
 ## States
 
 ```
-POST /api/story-builds ──► booting ──► ready ◄──► chatting          (status: assessing → plan_ready ⇄ planning)
-                              │          │ Start build
-                       fail ⇒ failed     ▼
+POST /api/story-builds ──► booting ──► planning ──(a usable plan)──► plan_ready ◄──► revising  (Reply / message / repair)
+                              │           └──(none)──► ready ──(message)──► revising
+                       fail ⇒ failed      plan_ready ──Approve and start (every point answered)──┐
+                                                                                                    ▼
                                       building ──► built ◄──► building   (status: building → ready)
-                                                    │ Push <repo> · Push all
+                                                    │ Push <repo> · Push all · Push <planned PR>
                                                     ▼
                                                   pushed                  (status: ready, pushedAll)
 Discard (any phase) ⇒ discarded · idle 60 min / the agent ending / a restart ⇒ closed: built when it
-stored patches (pushable, Resume boots it again), else failed
+stored patches (pushable, Resume boots it again), plan_ready when it holds an unapproved plan, else failed
 ```
+
+`planning` and `revising` are stored as status `planning` ("Working…"), `plan_ready` as `plan_ready`
+("Waiting for you"). A session from before plan first keeps `ready ⇄ chatting` and Start build.
 
 The details (boot steps, turns, the patch extraction, closing, Resume, the stream) are
 [SANDBOX.md](SANDBOX.md) § Sessions.
@@ -127,12 +208,18 @@ story.
 | `GET /api/story-builds/:id` | `StoryBuild` (with `session`) | read |
 | `GET /api/story-builds/:id/stream` | SSE `SandboxSessionStreamEvent` | read |
 | `POST /api/story-builds` | `SandboxSessionStartBody` → 202/200 `StoryBuildStartResponse` (409 `NoRuntime` / `TooManySessions`, 400 `NoStory`) | ai + ai_hourly |
-| `POST …/:id/messages` · `…/:id/build` · `…/:id/resume` | one agent turn · Start build · boot again → 202 | ai + ai_hourly |
+| `POST …/:id/messages` · `…/:id/build` · `…/:id/resume` | one agent turn · Start build (409 `PlanNotApproved` on a plan-first session) · boot again → 202 | ai + ai_hourly |
+| `POST …/:id/plan/reply` · `…/:id/plan/approve` | a revision turn · Approve and start → 202 (409 `PlanStale` / `PlanUnanswered` / `AgentBusy` / `BuildBusy` / `NotLive`) | ai + ai_hourly |
+| `POST …/:id/plan/decisions` · `GET …/:id/plan?revision=` | Agree / Keep the story / clear → `BuildPlanView` · one older revision | read |
 | `POST …/:id/interrupt` · `…/:id/network/allow` · `…/:id/discard` | Stop · an Allow press · Discard | read |
 | `GET …/:id/diff` · `GET …/:id/repos/:repoId/diff` | every stored patch · one | read |
-| `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` | github_write |
+| `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` (plan first: that repository's stack / every planned PR, in order; adds `prs`) | github_write |
+| `GET …/:id/prs/:prId/diff` | plan first: one planned PR's host-computed patch, `StoryBuildPrDiffResponse` | read |
+| `POST …/:id/prs/:prId/push` | plan first: one planned PR → `StoryBuildPushResponse` with `prs: [one]` | github_write |
 
-Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode`.
+Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode` + `BuildPlanErrorCode`. The plan paths
+are shared `BUILD_PLAN_API`; the start body's `docs: true` is `400 NoDocs` without a built document. The
+stream adds `{ type: 'plan', plan }` and `{ type: 'prs', prs }`; `StoryBuild.prs` lists the planned PRs (no patch).
 
 ## Entry points
 
@@ -140,6 +227,11 @@ ONE component, `apps/frontend/src/components/StoryBuild/StoryBuildEntry.tsx`, th
 story view's action group (beside Check against docs / Redraw design). The story view is mounted by the
 tray, the story tab (`?view=ticket:…`) and the PR view's Story tab (`?prTab=story`), so all three offer it.
 Gated on `me.ai.enabled` (hidden, never disabled); opens the build tab through `useOpenStoryBuild` only.
+It is a SPLIT BUTTON (`components/ui/SplitButton.tsx`): its menu adds "Implement with docs" / "Fill gaps
+with docs" while the library has a built document (the Story section's Check against docs read,
+`available`; nothing new is fetched). The choice only opens the tab (`buildOffer.docs`): the start state's
+"Give the agent the reference documents" box starts ticked, and its one gated Start sends `docs: true`. The
+plan panel and the stack view: docs/FRONTEND.md § The build tab.
 
 - **Inputs.** The tray hands in the board's node: the gate reads it exactly as the board would, and no
   request is made. Elsewhere the view derives the node's fields (`lib/storyBuild.ts`): the stage from the
@@ -172,6 +264,8 @@ The second entry, for a ticket that is already under way. Same session, routes a
   a stale one ⇒ nothing is offered. A session NEVER starts a story check.
 - **Data** (DB only, no fetch on mount): `db/sprint-ticket-checks.ts` adds `missing` and `reviewId` to the
   check it already reads; the change token appends `missing` ONLY when non-zero.
+- **Plan first, too**: the opening turn plans only the gaps (a gap may not be `met`); the build turn says
+  "Build only the gaps PLAN.md plans"; a PR body's Covers names the gap refs it builds.
 - **In the session**: at boot the latest stored check is folded (`coverage.ts latestTicketCheck` +
   `foldCoverage`: `met` is done with the PRs that deliver it; everything else, and every missing item, is a
   gap), and TICKET.md carries those verdicts, so the agent builds the gaps.
@@ -186,7 +280,9 @@ each starts, after `unstackablePrs` has read each stacked PR's head repository o
 PINNED by the session's own ref `refs/pierre/story-build/<buildId>/<repoId>` (`base-refs.ts`), because the
 shared fetch refs move and the conflict janitor prunes (`gc --prune=now`). The refs go on Discard, once
 every repository is pushed, and with the worktree sweep (`worktree-gc.ts storyBuildRefsToKeep`: kept while
-the session is OPEN and that repository is not pushed).
+the session is OPEN and that repository is not pushed). Plan first adds one ref per planned PR's verified
+tip, `refs/pierre/story-build/<buildId>/stack/<prRowId>` (parsed by `parseStoryBuildBaseRef`, kept while
+the session is open and that PR is not pushed, dropped with the session's refs).
 
 ## Push (`coding/story-build/push.ts`)
 
@@ -221,6 +317,35 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
 - ⚠ Known gap: when an earlier session already pushed `limn/<key>`, Push answers `BRANCH_EXISTS` and there
   is no way to rename the branch yet.
 
+### Pushing a stack (`coding/story-build/push-stack.ts`)
+
+A build with an approved plan pushes its PLANNED PRs (`story_build_prs`), never the repository rows. Each
+is ONE commit by the reader through the same `applyAndPushBranch`, plus `expectTree`: the commit's tree
+must equal the host-verified tip's (`TREE_MISMATCH` before any push), so what was reviewed is what is
+pushed.
+
+- **Base**: PR 1 of a repository keeps the rules above (`push.ts firstPrBase`: the build's base, or the
+  reader's own open PR's head; `STACK_CLOSED` / `STACK_FORK` / `STACK_UNKNOWN`). PR k ≥ 2 targets the
+  previous PR's pushed branch AT its pushed commit (an EMPTY PR is skipped over: same tree).
+- **Dependencies**: the previous PR in the repository pushed (`STACK_PREVIOUS_NOT_PUSHED`: "Push P1 (…)
+  first." — or, when GitHub did not open it, "Open the pull request for <branch> on GitHub first.") and
+  still open (`STACK_PREVIOUS_CLOSED`: merged or closed ⇒ discard and start again, v1); a PR of another
+  repository in `dependsOn` pushed first (`DEPENDS_ON_NOT_PUSHED`). Every other branch of the session is
+  protected.
+- **Title** `KEY (n/m): title` (n/m in the WHOLE plan; the key still leads for detection); a one-PR plan
+  keeps `KEY: <ticket title>`. **Body**: the summary (the build report, else the agent's last words), the
+  story, the criteria this PR covers (from the approved plan — this also fills Covers for sessions), the
+  `**Part n of m:**` list (each PR as `owner/name — title`, linked once pushed, this one marked), "Builds
+  on #n.", `**Decisions on the story:**` ("Kept the story: …" / "Changed from the story: …", the points
+  touching this PR's criteria and those touching none), `Closes …` on the LAST PR of a single-repository
+  GitHub Issues build only. Earlier PRs' bodies are NOT edited afterwards (no extra GitHub write).
+- **Push all** (`pushPlannedStack`): every ready, unpushed PR in PLAN ORDER; a failure stops ITS
+  repository (later PRs `STACK_BELOW_FAILED`) and what depends on it (`DEPENDS_ON_NOT_PUSHED`); other
+  repositories go on; pressing again pushes what is left (`ALREADY_PUSHED`). The per-repository route
+  pushes that repository's stack. ONE stack push per build at a time (`PUSH_IN_PROGRESS`; Discard waits).
+- **Recorded** on the PR row; once a repository's every planned PR with changes is pushed, its repository
+  row is `pushed` too (the marks and the `pushed` phase read it); once every PR is, the session's refs go.
+
 ## Limits
 
 | Limit | Default |
@@ -228,6 +353,12 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
 | `LIMN_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 2 |
 | `LIMN_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes; its patches stay) | 60 |
 | `STORY_BUILD_PATCH_MAX_BYTES` (one repository's patch; larger is refused, never cut) | 4 MB |
+| The plan block (`BUILD_PLAN_MAX_BYTES`) · revisions per session (`BUILD_PLAN_MAX_REVISIONS`) | 128 KB · 12 |
+| Planned PRs per repository · in all · points of contention · evidence per point | 3 · 6 · 12 · 1–4 |
+| One repository's stack bundle (`STACK_BUNDLE_MAX_BYTES`) · commits per planned PR | 8 MB · 200 |
+| Automatic build continuations after the turn cap (`CONTINUATIONS_MAX`) | 2 |
+| The build report (`BUILD_REPORT_MAX_BYTES`) | 128 KB |
+| The docs copy (`BUILD_DOCS_COPY_MAX_SECTIONS` / `_BYTES`) | 30 sections · 600 KB |
 | Build turns at once per computer | 1 |
 | CPUs / memory / disk per session (Settings → Sandbox) | 4 / 8 GB / 30 GB |
 

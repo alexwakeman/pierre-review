@@ -26,6 +26,14 @@ const STORY_WORDS: SessionWords = {
   gate: { chat: 'story_plan', build: 'story_build' },
 };
 
+/** A PLAN-FIRST session (`session.plan` set): the agent plans on its own; the build starts from the plan
+ *  panel's "Approve and start", never from the composer. */
+const PLAN_WORDS: Pick<SessionWords, 'empty' | 'chatPlaceholder' | 'buildPlaceholder'> = {
+  empty: 'The agent is reading the ticket and the code. Its plan shows above once Limn has checked it.',
+  chatPlaceholder: 'Ask a question, or tell the agent what to change in the plan.',
+  buildPlaceholder: 'Ask for a change. It is a build turn: the agent may edit and test.',
+};
+
 function storyActions(build: StoryBuild): SessionActions {
   const { workspaceId, ident, id } = build;
   return {
@@ -70,6 +78,18 @@ export function SessionView({
 }): JSX.Element {
   // Rebuilt only when the session's identity changes (the hooks inside are called in the same order).
   const actions = useMemo(() => storyActions(build), [build]);
+  const plan = session.plan;
+  const words = useMemo<SessionWords>(
+    () =>
+      plan == null
+        ? STORY_WORDS
+        : {
+            ...STORY_WORDS,
+            ...PLAN_WORDS,
+            ...(plan.latest == null && plan.status === 'failed' ? { chatPlaceholder: 'Tell the agent what to change, or ask it to plan again.' } : {}),
+          },
+    [plan],
+  );
   const byId = new Map(build.repos.map((r) => [r.repoId, r] as const));
   const repoStatus = (r: SandboxSessionRepo) => {
     const row = byId.get(r.repoId);
@@ -81,7 +101,7 @@ export function SessionView({
       session={session}
       partials={partials}
       actions={actions}
-      words={STORY_WORDS}
+      words={words}
       provider={build.provider ?? null}
       testPrefix="story-session"
       actionAttr="data-story-build-action"

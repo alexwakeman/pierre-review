@@ -24,6 +24,7 @@ import {
   assertPushTarget,
   codedError,
   commitAll,
+  headTree,
   pushRef,
 } from './git.js';
 
@@ -290,7 +291,14 @@ export interface ApplyAndPushBranchArgs {
   protect: string[];
   /** Runs once the new PR has synced (it is a local row then); never awaited, a throw is swallowed. */
   afterSync?: (prNumber: number) => Promise<void>;
+  /**
+   * Plan first (a stacked PR): the tree the commit must have — the host-verified tip's tree. A mismatch is
+   * `TREE_MISMATCH`, refused BEFORE anything is pushed.
+   */
+  expectTree?: string;
 }
+
+export const TREE_MISMATCH_LINE = "Limn's copy of the earlier pull request does not match. Push it again from Limn.";
 
 /**
  * THE NO-PR VARIANT of `applyAndPush` (a story build's push, coding/story-build/push.ts): the same
@@ -331,6 +339,7 @@ export async function applyAndPushBranch(
     ));
     await applyPatchToWorktree(worktreePath, args.patch);
     const commitSha = await commitAll(worktreePath, { message: args.commitMessage, authorName, authorEmail });
+    if (args.expectTree != null && (await headTree(worktreePath)) !== args.expectTree) throw codedError('TREE_MISMATCH', TREE_MISMATCH_LINE);
     await pushRef({ worktree: worktreePath, owner, name, token, committish: 'HEAD', protect: args.protect, remoteBranch: args.branch });
     let pr: { number: number; url: string };
     try {

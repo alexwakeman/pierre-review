@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
 import { storyBuildMutationKey, useSandboxRuntime, useStartStorySession } from '../../hooks/useStoryBuild.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
+import { useStoryDocsAlignment } from '../../hooks/useStoryDocsAlignment.js';
 import { TICKET_CRITERION_STATUS_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionErrorText, sessionStatusLine } from '../../lib/sandboxSession.js';
@@ -14,9 +16,14 @@ import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
 import { WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
+import { CheckboxBox } from '../ui/FormControls.js';
+import { InfoButton } from '../InfoModal.js';
 import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
 
-// THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences,
+// THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences
+// (it PLANS FIRST: docs/STORY-BUILD.md § Plan first), the docs box ("Give the agent the reference
+// documents", ticked when the story view's "… with docs" opened the tab; shown only while the library has
+// a built document),
 // the container runtime's ONE line (`GET /api/sandbox/runtime`; with none, what is wrong + "How to set
 // up" — the button stays, owner decision Q2: there is no other path), the model menu (kind
 // `story_build`, opening on the deep model) and Start inside the ONE `AiRunGate`. A failed / discarded
@@ -52,8 +59,15 @@ export function StartPanel({
   const node = graph.data?.nodes.find((n) => n.ident === ident);
   const offered = node != null ? storyBuildOffered({ ...node, build: null }) : (offer?.action ?? null);
   const fill = offered === 'fill_gaps';
+  // "… with docs" (the story view's menu ticks it): offered only while the library has a built document.
+  // The Story section reads the same query, so it is usually in memory already.
+  const docsQ = useStoryDocsAlignment(workspaceId, ident);
+  const docsAvailable = docsQ.data?.available === true;
+  const [docsPicked, setDocsPicked] = useState(offer?.docs === true);
+  useEffect(() => setDocsPicked(offer?.docs === true), [offer?.docs]);
+  const docs = docsAvailable && docsPicked;
   const go = (): void => {
-    start.mutate({ action: fill ? 'fill_gaps' : 'implement', provider: pick.chosen.provider, model: pick.chosen.model });
+    start.mutate({ action: fill ? 'fill_gaps' : 'implement', provider: pick.chosen.provider, model: pick.chosen.model, ...(docs ? { docs: true } : {}) });
   };
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
   const lastLine = last == null ? null : last.session != null ? sessionStatusLine(last.session, last.error) : storyBuildStatusLine(last);
@@ -67,20 +81,30 @@ export function StartPanel({
       {fill ? (
         <>
           <p className="text-body text-ui-ink">
-            The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. Talk
-            to it first, then press Start build. Nothing is pushed until you press Push.
+            The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. It
+            plans first. Nothing is built until you approve the plan, and nothing is pushed until you press Push.
           </p>
           <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
-          The AI gets a sandbox with every repository in this workspace and the ticket. Talk to it first, then press Start build.
-          Nothing is pushed until you press Push.
+          The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built until you
+          approve the plan, and nothing is pushed until you press Push.
         </p>
       )}
       <div className="mt-3">
         <SandboxRuntimeLine status={runtime.data} loading={runtime.isLoading} />
       </div>
+      {offered != null && docsAvailable && (
+        <label data-testid="story-build-start-docs" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
+          <CheckboxBox checked={docsPicked} disabled={busy} onChange={(e) => setDocsPicked(e.target.checked)} />
+          Give the agent the reference documents
+          <InfoButton title="Reference documents">
+            <p>Limn copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
+            <p className="mt-2">The agent can then cite a document where the story does not match it.</p>
+          </InfoButton>
+        </label>
+      )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {offered != null ? (
           <>
@@ -95,7 +119,7 @@ export function StartPanel({
                 busyLabel="Starting…"
                 onClick={go}
               >
-                {fill ? 'Fill gaps' : 'Start'}
+                {fill ? (docs ? 'Fill gaps with docs' : 'Fill gaps') : docs ? 'Start with docs' : 'Start'}
               </Button>
             </AiRunGate>
           </>

@@ -1,13 +1,16 @@
 // A BUILD'S BASE COMMITS, PINNED (base-refs.ts) over a real git repository in a scratch clone root. Pinned:
 //   1. one ref per (session, repository), `refs/pierre/story-build/<buildId>/<repoId>`, at the base sha;
 //   2. the sweep deletes every ref its keep-list does not name, and KEEPS a ref it cannot parse;
-//   3. only a 40-hex sha is ever written.
+//   3. only a 40-hex sha is ever written;
+//   4. plan first: a planned PR's tip ref `<buildId>/stack/<prRowId>` is parsed (never kept forever as an
+//      unknown ref) and kept only when the keep-list names it.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { parseStoryBuildBaseRef, pinStoryBuildBase, storyBuildBaseRef, sweepStoryBuildBaseRefs } from './base-refs.js';
+import { parseStoryBuildBaseRef, pinStoryBuildBase, storyBuildBaseRef, storyBuildRefKey, sweepStoryBuildBaseRefs, type StoryBuildRefKey } from './base-refs.js';
+import { storyBuildStackRef } from './stack-verify.js';
 
 let root = '';
 let clone = '';
@@ -43,7 +46,7 @@ describe('base refs', () => {
     await pinStoryBuildBase(clone, 3, 10, 'not-a-sha');
     git('update-ref', 'refs/pierre/story-build/odd', sha);
     expect(git('rev-parse', storyBuildBaseRef(1, 10))).toBe(sha);
-    let asked: Array<{ buildId: number; repoId: number }> = [];
+    let asked: StoryBuildRefKey[] = [];
     const deleted = await sweepStoryBuildBaseRefs(async (r) => {
       asked = [...r];
       return new Set(['2/11']);
@@ -51,5 +54,20 @@ describe('base refs', () => {
     expect(asked).toHaveLength(3);
     expect(deleted).toBe(2);
     expect(refs()).toEqual(['refs/pierre/story-build/2/11', 'refs/pierre/story-build/odd']);
+  });
+
+  it('parses a planned PR\'s stack ref, and keeps it only when the keep-list names it', async () => {
+    expect(storyBuildStackRef(12, 7)).toBe('refs/pierre/story-build/12/stack/7');
+    expect(parseStoryBuildBaseRef('refs/pierre/story-build/12/stack/7')).toEqual({ buildId: 12, stackPrId: 7 });
+    expect(parseStoryBuildBaseRef('refs/pierre/story-build/12/stack/x')).toBeNull();
+    expect(storyBuildRefKey({ buildId: 12, stackPrId: 7 })).toBe('12/stack/7');
+    expect(storyBuildRefKey({ buildId: 12, repoId: 3 })).toBe('12/3');
+    git('update-ref', storyBuildStackRef(5, 1), sha);
+    git('update-ref', storyBuildStackRef(5, 2), sha);
+    git('update-ref', storyBuildBaseRef(5, 10), sha);
+    const deleted = await sweepStoryBuildBaseRefs(async () => new Set(['2/11', '5/stack/2', '5/10']), root);
+    expect(deleted).toBe(1);
+    expect(refs()).toContain('refs/pierre/story-build/5/stack/2');
+    expect(refs()).not.toContain('refs/pierre/story-build/5/stack/1');
   });
 });
