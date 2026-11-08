@@ -523,9 +523,9 @@ Monitoring, Slack.
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
-  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONE tracker write is the
-  Jira status transition the reader picks** in the story view (`tracker/status-change.ts`); nothing
-  else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
+  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are two
+  Jira writes the reader presses**: the status transition and the plan's ticket update
+  (`tracker/status-change.ts`, `ticket-update.ts`); nothing else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)

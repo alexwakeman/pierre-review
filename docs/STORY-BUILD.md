@@ -43,8 +43,9 @@ share the machine's open sessions and its one build turn at a time.
 
 Owner decisions 2026-11-07: data evidence = repository data (fixtures, seed data, schemas, migrations) and
 queries the agent ran through `limn-svc run` against a sandbox service — nothing from production; the
-plan is a structured panel; Limn does NOT update the tracker — when the story needs work the plan carries
-a DRAFT ticket update for the reader to paste; ≤ 3 PRs per repository, ≤ 6 in all, each building and
+plan is a structured panel; when the story needs work the plan carries a DRAFT ticket update, which the
+reader may edit and copy — and, since 2026-11-08, write to a Jira ticket with **Update ticket** (their
+press, once; docs/TRACKERS.md § The ticket update — Approve then reads the updated ticket); ≤ 3 PRs per repository, ≤ 6 in all, each building and
 passing its tests on its own; Fill gaps gets the same flow, its plan about the gaps; after Approve the
 build runs to the end (Stop / redirect stay). The split button offers "Implement with docs" / "Fill gaps
 with docs" when the workspace has a built reference document (`docsContextFor().hasDocs`, the `available`

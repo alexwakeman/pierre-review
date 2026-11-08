@@ -47,6 +47,7 @@ import { registerTicketMergedPrsRoute } from './merged.js';
 import { registerTicketPrsRoute } from './ticket-prs.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
 import { registerTicketStatusRoutes } from './status-change.js';
+import { registerTicketUpdateRoutes } from './ticket-update.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 import { registerAcFieldSettingsRoutes } from './ac-field-settings.js';
 import { storedOpenPoints } from './open-points-pr.js';
@@ -85,8 +86,10 @@ const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Iss
 //   POST /api/ticket-links                            ./links.ts — the Open PRs ticket row.
 //   GET  /api/ticket-merged-prs                       ./merged.ts — the stacks' "Merged (n)" panel.
 //   GET  /api/ticket-prs                              ./ticket-prs.ts — the ticket tab (one ticket's PRs).
-//   GET  /api/ticket-status/transitions               ./status-change.ts — THE ONE TRACKER WRITE: the
+//   GET  /api/ticket-status/transitions               ./status-change.ts — A TRACKER WRITE: the
 //   POST /api/ticket-status                           Jira status transition the reader picks.
+//   POST /api/ticket-update                           ./ticket-update.ts — the other: the build plan's
+//                                                     ticket update the reader presses (Jira).
 //
 // ⚠ LIMN IS NOT A TRACKER PROXY. The ticket routes address a PULL REQUEST (ownership-scoped → 404),
 // resolve that PR's workspace exactly as the enricher does, RE-RUN detection on it and answer only
@@ -323,6 +326,7 @@ export function registerTrackerRoutes(
   registerTicketPrsRoute(app, ctx);
   registerManualTicketLinkRoute(app, ctx, opts);
   registerTicketStatusRoutes(app, ctx, opts);
+  registerTicketUpdateRoutes(app, ctx, opts);
   registerAcFieldSettingsRoutes(app, ctx);
   registerTrackerCopyRoutes(app, ctx);
 

@@ -10091,6 +10091,11 @@ export interface ConsolidatedFeedItem {
   // (authored / requested reviewer / reviewed / commented / merged) and the actor isn't
   // the viewer. Drives the yellow card.
   isMyTurn: boolean;
+  // LIMN'S OWN WORK: the actor is a `limn:` bot (a finding or a reply Limn posted), or the body
+  // carries a Limn hidden marker (a review summary, a CI review, a story check posted under a
+  // person's account). Never My Turn (no bot action returns the ball); the card reads "Limn".
+  // Optional for stale caches: absent = false.
+  limn?: boolean;
   // The relationships that make this item "my turn" (see MyTurnReason), most-relevant first;
   // empty for non-my-turn rows. The UI renders the primary reason as a pill.
   myTurnReasons: MyTurnReason[];

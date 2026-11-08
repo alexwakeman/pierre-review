@@ -5,6 +5,8 @@ import {
   type TicketStatusChangeResponse,
   type TicketStoryResponse,
   type TicketTransitionsResponse,
+  type TicketUpdateBody,
+  type TicketUpdateResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
@@ -43,7 +45,7 @@ export function useTicketStory(workspaceId: number | null, ident: string | null)
   });
 }
 
-// ── The story view's status picker (Jira only) — THE ONE TRACKER WRITE ─────────────────────────────
+// ── The story view's status picker (Jira only) — a TRACKER WRITE ─────────────────────────────
 
 /** The transitions Jira allows now. ⚠ CLICK-GATED: enabled only while the picker is OPEN, never on
  *  mount, and never cached past the menu (the allowed set moves with the status). */
@@ -90,5 +92,30 @@ export function useSetTicketStatus(workspaceId: number | null, ident: string) {
         qc.invalidateQueries({ queryKey: ['jira-ticket'] }),
       ]);
     },
+  });
+}
+
+// ── The build plan's ticket update (Jira only) — the other TRACKER WRITE ───────────────────────────
+
+/**
+ * Write the reader's edited draft to the ticket (description and/or acceptance criteria). Never
+ * retried. On success every read that shows the ticket's text refetches.
+ */
+export function useUpdateTicket(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation<TicketUpdateResponse, Error, Omit<TicketUpdateBody, 'ident'>>({
+    mutationKey: ['ticket-update', workspaceKey(workspaceId), ident],
+    retry: false,
+    mutationFn: (body) => {
+      if (workspaceId == null) throw new Error('No workspace yet.');
+      return api.updateTicket(workspaceId, { ident, ...body });
+    },
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
+        qc.invalidateQueries({ queryKey: ['ticket-story'] }),
+        qc.invalidateQueries({ queryKey: ['sprint-graph', workspaceKey(workspaceId)] }),
+        qc.invalidateQueries({ queryKey: ['jira-ticket'] }),
+      ]),
   });
 }

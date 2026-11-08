@@ -1,7 +1,8 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
-import type { ConsolidatedFeedItem, MyTurnReason, ReasonTag } from '@pierre-review/shared';
+import { isLimnAuthoredBody, type ConsolidatedFeedItem, type MyTurnReason, type ReasonTag } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getAccountUserId } from '../auth/account.js';
+import { limnBotUserIds } from '../db/limn-bots.js';
 
 // "My Turn" participation intelligence — CORE / free. The Consolidated Feed is a plain
 // chronological activity stream; this flags each item `isMyTurn` when it's an event on a PR
@@ -131,15 +132,27 @@ function reasonTagFor(participation: Participation, prId: number | null): Reason
   return null;
 }
 
+// LIMN'S OWN WORK (`ConsolidatedFeedItem.limn`): the actor is a `limn:` bot (a finding or reply
+// Limn posted), or the body carries a Limn hidden marker (a review summary, a CI review, a story
+// check, posted under a person's account). Mutates in place. Pure apart from the bot-id read.
+export function markLimnItems(items: ConsolidatedFeedItem[], limnBotIds: ReadonlySet<number>): void {
+  for (const it of items) {
+    if ((it.actorId != null && limnBotIds.has(it.actorId)) || isLimnAuthoredBody(it.content)) it.limn = true;
+  }
+}
+
 // Flag each feed item `isMyTurn` by the viewer's participation in its PR. Mutates the items in
 // place. Runs BEFORE the feed's cap so uncapped my-turn rows survive. Claude Review items stay
-// OUT of the my-turn flow (their own lane). No-op when there's no viewer identity (offline /
-// not-yet-synced) → the feed stays a plain chronological stream.
+// OUT of the my-turn flow (their own lane), and so does Limn's own work (`markLimnItems`: no bot
+// action returns the ball, and Limn's posts are automation even under a person's account). No-op
+// when there's no viewer identity (offline / not-yet-synced) → the feed stays a plain
+// chronological stream.
 export async function enrichMyTurn(
   accountId: number,
   items: ConsolidatedFeedItem[],
 ): Promise<void> {
-  const flaggable = items.filter((i) => i.kind !== 'claude_review');
+  markLimnItems(items, new Set(await limnBotUserIds()));
+  const flaggable = items.filter((i) => i.kind !== 'claude_review' && i.limn !== true);
   const candidatePrIds = [
     ...new Set(flaggable.map((i) => i.prId).filter((x): x is number => x != null)),
   ];

@@ -57,6 +57,7 @@ import {
   MagnifierIcon,
   PeopleIcon,
   PullRequestIcon,
+  SparkleIcon,
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
 import { PageHeader, useEdgeFade, useRegisterCommands, type Command } from '../ui/index.js';
@@ -2025,6 +2026,18 @@ function FeedRowImpl({
                   {overridePending ? 'saving…' : 'not a bot?'}
                 </button>
               )}
+            </span>
+          )}
+          {/* LIMN'S OWN WORK (a finding, a reply, a review summary Limn posted): named, and never
+              My Turn (the backend leaves it out). A `limn:` bot actor already reads "Limn · alice". */}
+          {item.limn === true && automatedTag == null && (
+            <span
+              data-testid="feed-limn-label"
+              className="inline-flex shrink-0 items-center gap-1 text-meta font-medium text-ai-signal"
+              title="Posted by Limn"
+            >
+              <SparkleIcon size={11} />
+              Limn
             </span>
           )}
           <span className="contents max-sm:order-last max-sm:flex max-sm:min-w-0 max-sm:basis-full max-sm:items-center max-sm:gap-2 max-sm:pl-[21px]">

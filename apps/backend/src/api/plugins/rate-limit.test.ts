@@ -655,6 +655,8 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/ticket-status')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-status/transitions')).not.toEqual(['search', 'read']);
     expect(tiers('PUT', '/api/ticket-status')).not.toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/ticket-update')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/ticket-update')).not.toEqual(['search', 'read']);
     // With AI on (local) a refresh may start up to three ticket checks — agent runs.
     expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(
       config.aiEnabled ? ['search', 'ai', 'ai_hourly'] : ['search', 'read'],

@@ -163,6 +163,15 @@ export function isLimnThreadReply(body: string | null | undefined): boolean {
   return LIMN_ANY_MARKER_RE.test(unquoted);
 }
 
+/**
+ * Is this body Limn's own writing, posted under someone's account? True when it carries any Limn hidden
+ * marker (`<!-- pierre:claude-review…`: a finding, a reply, a review summary, a CI review, a story
+ * check) outside a quoted (`>`) line. The Feed's "Limn" label and its My Turn exclusion read it. Pure.
+ */
+export function isLimnAuthoredBody(body: string | null | undefined): boolean {
+  return isLimnThreadReply(body);
+}
+
 /** A finding's severity as the ML severity scale reads it, for its badge. */
 export const LIMN_ML_SEVERITY: Record<LimnSeverity, MlSeverity> = {
   blocker: 'critical',

@@ -4,16 +4,18 @@ import { STORY_BUILD_ACTION_WORDS, type SprintGraphResponse, type StoryBuild, ty
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
-import { storyBuildActionOf } from '../../lib/storyBuild.js';
+import { storyBuildActionOf, trackerLinkOfIdent } from '../../lib/storyBuild.js';
 import { sessionStatusLine, sessionSteps } from '../../lib/sandboxSession.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { InfoButton } from '../InfoModal.js';
 import { TrackerLinkOut } from '../TrackerLinkOut.js';
+import { TicketIcon } from '../Icons.js';
 import { cx } from '../ui/cx.js';
 import { PageHeader } from '../ui/PageHeader.js';
 
 // THE BUILD TAB'S HEADER: what the tab does ("Implement" or "Fill gaps", `storyBuildActionOf`), the
-// ticket key, "Open ticket", "Open in <tracker>", the title, who runs it, what it cost so far (ONE
+// ticket key, "Open ticket tab" (Limn's story view), "Open in <tracker>" (from the sprint read,
+// else from the ident), the title, who runs it, what it cost so far (ONE
 // formatter, `useRunCostText` — US$ on an API key, a share of the week on a subscription), the quiet
 // step line ("Set up · Talk · Build · Push", the current step in words AND weight — never colour
 // alone), the status sentence, and the end slot (Draft, Push all, Stop, Discard).
@@ -50,6 +52,9 @@ export function StoryBuildHeader({
   const cost = session != null ? costText(session.spend.costUsd, session.provider ?? build?.provider ?? null) : null;
   const shownTitle = build?.ticketTitle ?? title ?? (node != null && node.title !== '' ? node.title : null);
   const action = storyBuildActionOf(build, node, offered);
+  // The tracker link: the sprint read's when it is in memory, else derived from the ident (a tab
+  // opened from a PR's Story tab, or after a reload, has no sprint read yet).
+  const tracker = node?.url != null ? { url: node.url, provider: node.provider } : trackerLinkOfIdent(ident);
   const fill = action === 'fill_gaps';
   return (
     // THE PAGE HEADER (components/ui/PageHeader.tsx): the ticket's title first, at the one page
@@ -84,14 +89,19 @@ export function StoryBuildHeader({
           {STORY_BUILD_ACTION_WORDS[action]}
         </span>
         <span className="font-mono font-medium text-ui-mute">{ticketKey}</span>
+        {/* THE TICKET TAB: Limn's story view of this ticket, for Implement and Fill gaps alike. */}
         <button
           type="button"
-          className="hit text-meta font-medium text-ui-ink hover:underline"
+          data-testid="story-build-open-story"
+          className="hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink hover:underline"
+          title={`Open ${ticketKey} in its ticket tab`}
           onClick={() => openStory({ ident, key: ticketKey, title: shownTitle })}
         >
-          Open ticket
+          <TicketIcon size={12} />
+          Open ticket tab
         </button>
-        {node != null && <TrackerLinkOut url={node.url} provider={node.provider} />}
+        {/* THE SOURCE: the ticket in the tracker it came from. */}
+        {tracker != null && <TrackerLinkOut url={tracker.url} provider={tracker.provider} />}
       </div>
       <ol aria-label="Steps" data-testid="story-build-steps" className="mt-2 flex flex-wrap items-center gap-x-1.5 text-meta">
         {steps.map((s, i) => (

@@ -542,7 +542,8 @@ after that thread's last comment, carrying the addressed threads inline (`affect
 `commitCount` + `changeSummary` — "pushed N commits · addressed M threads"); plain
 (non-thread-touching) pushes stay excluded. **Each item carries `isMyTurn`** — true when it's an
 event on a PR the viewer PARTICIPATES in (authored / requested reviewer / previously reviewed or
-commented) AND the actor isn't the viewer. That flag **replaces the old two-source (`my_turn` vs
+commented) AND the actor isn't the viewer — and the item is not LIMN'S OWN WORK (`limn`: a
+`limn:` bot actor or a Limn hidden marker in the body, `markLimnItems`; labelled "Limn"). That flag **replaces the old two-source (`my_turn` vs
 `feed`) synthesis + its dedup** — there is now exactly one row per underlying event, which killed
 the duplication. **My Turn / "FYI" is CORE** — it was moved back out of the plugin early on (the `feedMyTurn`
 capability and the `registerFyiProvider` seam were removed; `feed/fyi-provider.ts` is gone). The participation compute lives in the core module **`src/feed/my-turn.ts`** (`enrichMyTurn`

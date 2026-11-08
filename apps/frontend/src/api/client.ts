@@ -206,6 +206,8 @@ import type {
   TicketPrsResponse,
   TicketStoryResponse,
   TicketStatusChangeBody,
+  TicketUpdateBody,
+  TicketUpdateResponse,
   TicketStatusChangeResponse,
   TicketTransitionsResponse,
   PostCommentResult,
@@ -1056,7 +1058,7 @@ export const api = {
     get<TicketStoryResponse>(
       withQuery('/api/ticket-story', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
     ),
-  // The story view's status picker (Jira only) — THE ONE TRACKER WRITE. The GET is made when the
+  // The story view's status picker (Jira only) — a TRACKER WRITE. The GET is made when the
   // picker opens (one Jira call); the POST makes the transition the reader picked and settles it.
   ticketTransitions: (workspaceId: number, ident: string) =>
     get<TicketTransitionsResponse>(
@@ -1065,6 +1067,11 @@ export const api = {
   setTicketStatus: (workspaceId: number, body: TicketStatusChangeBody) =>
     fetch(withQuery('/api/ticket-status', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
       handle<TicketStatusChangeResponse>(r),
+    ),
+  // The build plan's ticket update (Jira only) — the other tracker write: the reader's press, once.
+  updateTicket: (workspaceId: number, body: TicketUpdateBody) =>
+    fetch(withQuery('/api/ticket-update', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<TicketUpdateResponse>(r),
     ),
   // The story label run (core, agentic, LOCAL-ONLY; one in flight per account; the path keeps the
   // retired Story health prefix). No screen starts it since Story health was removed. The POST is the

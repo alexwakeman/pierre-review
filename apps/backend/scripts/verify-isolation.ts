@@ -3697,7 +3697,7 @@ check(
   const own = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=ENG-1` });
   check("GET /api/prs/<A's>/tracker-ticket as A → A's story", own.statusCode === 200 && own.json().title === 'A story');
 
-  // THE ONE TRACKER WRITE (tracker/status-change.ts): the settle writes only the caller's rows of a
+  // A TRACKER WRITE (tracker/status-change.ts): the settle writes only the caller's rows of a
   // key both accounts hold, and the gate refuses a key only B holds before any Jira call.
   const { writeTicketStatus } = await import('../src/tracker/status-change.js');
   await writeTicketStatus(tctx, 1, SITE, 'ENG-1', IDENT, { name: 'Done', category: 'done', id: '10001' });

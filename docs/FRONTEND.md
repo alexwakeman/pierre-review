@@ -4286,7 +4286,9 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   Allow have their OWN mutations** (Stop must never wait behind the press it stops). The diff is
   fetched only when a repository's Diff opens. A push sweeps `invalidateAfterPrWrite(qc, null)` +
   `['ticket-prs']` + the sprint graph/token.
-- **The screen**, top to bottom: header (key, Open ticket, Open in <tracker>, title + ⓘ, the step line
+- **The screen**, top to bottom: header (key, **Open ticket tab** — the story view, for Implement and Fill
+  gaps alike — and **Open in <tracker>**: the sprint read's link when in memory, else derived from the
+  IDENT (`lib/storyBuild.ts trackerLinkOfIdent`, no fetch), title + ⓘ, the step line
   "Set up · Talk · Build · Push" from the PHASE (`sessionSteps`) with the current step underlined and
   `aria-current`, `sessionStatusLine`, `AiRunLabel`, the spend via `useRunCostText`; end slot: Draft,
   Push all (≥ 2 pushable), Stop while a turn runs, Discard — asking once, "Stop the agent and remove the
@@ -4301,7 +4303,12 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   reader after a prompt mark, the agent and each tool call after a bullet, the glyphs per provider —
   Claude Code's `> ⏺ ⎿` or Codex's `› • └` (`GLYPHS`); a tool's first 3 lines under the elbow, the
   call's row opening the rest of its clipped output; a spinner while a turn runs; each turn's end a quiet divider with its cost; notices and errors as lines; the
-  agent's words as they arrive; it follows the newest row only while the reader is at the bottom) and
+  agent's words as they arrive; it follows the newest output only while the reader is at the bottom —
+  `hooks/useFollowBottom.ts` watches the CONTENT (a ResizeObserver on the rows, a MutationObserver on the
+  subtree), so a tool's output landing in a row already drawn follows too; scrolled up, nothing moves and
+  "Jump to latest" shows; ⚠ the scroll box is `relative` — its rows hold `sr-only` spans (position:
+  absolute), and in an unpositioned scroll box they extended the PAGE's scroll area by the whole
+  conversation's height) and
   the composer (Send — `AiRunGate` `story_plan` in chat mode, `story_build` in build mode, `followUp`
   on the session's provider; ⌘/Ctrl+Enter sends; **Start build** once, in chat mode while the agent
   waits, the box's words going with it; Stop; the idle-close time; a CLOSED session shows "The sandbox is
@@ -4338,8 +4345,11 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
     time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
     the dropped line ("Limn left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
-    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **draft ticket update** as
-    preformatted text with a `CopyButton` per field (ⓘ: Limn never changes the ticket) and **Approve and
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket update** — on the latest
+    revision an EDITABLE text box per field (`EditableTicketUpdate`: "(edited)", "Back to the draft",
+    Copy takes the edited text, an empty box leaves that field; on a Jira ticket **Update ticket** asks
+    once and writes it, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update), on an
+    older or approved revision preformatted text with a `CopyButton` — and **Approve and
     start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
     `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
     `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over
@@ -6031,6 +6041,11 @@ shorter form of each rule; this is the full wording.
   Settings → Bots (since 2026-11-03). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
   all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
+- **LIMN'S OWN WORK is labelled "Limn" and is never My Turn** (2026-11-08): the backend marks an item
+  `limn` (`feed/my-turn.ts markLimnItems`: a `limn:` bot actor, or a body with a Limn hidden marker — a
+  review summary, a CI review or a story check posted under a person's account) and `enrichMyTurn`
+  skips it. The card shows a "Limn" label (`feed-limn-label`) unless the actor's own bot tag already
+  reads "Limn · alice".
 
 ### "Where the work is happening"
 
@@ -6098,8 +6113,8 @@ shorter form of each rule; this is the full wording.
   and critical paths (Sonnet, no digits in its text, daily cap) are made after a read, never on a
   view. ONE `LaneBoard` draws Theme / Critical path / People; a card opens the story tray
   (`Ticket/StoryViewBody.tsx`); tickets open the story view only through `useOpenStory()`. Never
-  bring the force-graph canvas back. The ONE tracker write is the Jira status the reader picks in the
-  story view's header (§ The story view); nothing on the boards writes.
+  bring the force-graph canvas back. The tracker writes are the Jira status the reader picks in the
+  story view's header (§ The story view) and the build plan's ticket update; nothing on the boards writes.
 
 ### Colour and contrast
 

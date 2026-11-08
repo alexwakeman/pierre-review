@@ -1,4 +1,4 @@
-// ── THE ONE TRACKER WRITE: the Jira status transition the reader picks (./status-change.ts) ─────
+// ── A TRACKER WRITE: the Jira status transition the reader picks (./status-change.ts) ─────
 //
 // Pinned through a real Fastify instance with an injected transport (no network):
 //   1. NOT A PROXY — a ticket Limn holds no row for, an ident on another site, another account's

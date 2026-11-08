@@ -2,6 +2,9 @@ import { useEffect, useId, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   BUILD_PLAN_LIMITS,
+  TICKET_UPDATE_FIELD_MAX,
+  isTrackerIdent,
+  parseTicketIdent,
   type BuildPlanContention,
   type BuildPlanDecision,
   type BuildPlanEvidence,
@@ -12,6 +15,7 @@ import {
 } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { storyBuildMutationKey, usePlanApprove, usePlanDecision, usePlanReply, useStoryBuildPlanRevision } from '../../hooks/useStoryBuild.js';
+import { useUpdateTicket } from '../../hooks/useTicketPrs.js';
 import {
   CRITERION_STATUS_WORDS,
   PLAN_DECISION_WORDS,
@@ -48,9 +52,17 @@ import { Menu, type MenuEntry } from '../ui/Menu.js';
 // Keep the story / Reply, the planned pull requests in order, and a draft ticket update to paste. "Approve
 // and start" is enabled only once every point is answered (lib/buildPlan.ts `planApproveState`). Agree /
 // Keep the story is a DB write with no model turn; Reply and Approve are billed turns inside the ONE
-// AiRunGate. Limn never writes the ticket update to the tracker. After approval it folds to one line.
+// AiRunGate. The ticket draft is editable on the latest revision, and "Update ticket" writes it to Jira
+// on the reader's press (EditableTicketUpdate); nothing else writes the ticket. After approval it folds
+// to one line.
 
 type DecidedMap = Readonly<Record<string, BuildPlanDecision>>;
+
+/** A Jira ticket: the only tracker Limn writes a ticket update to. */
+const isJiraIdent = (ident: string): boolean => {
+  const p = parseTicketIdent(ident);
+  return isTrackerIdent(p) && p.provider === 'jira';
+};
 
 export function PlanPanel({ build, session }: { build: StoryBuild; session: StoryBuildSession }): JSX.Element | null {
   const plan = session.plan;
@@ -163,6 +175,7 @@ function LatestPlan({ build, session, plan }: { build: StoryBuild; session: Stor
           plan={plan}
           rev={latest}
           decided={decided}
+          editable
           card={(c) => (
             <ContentionActions
               build={build}
@@ -190,12 +203,15 @@ function RevisionBody({
   rev,
   decided,
   card,
+  editable = false,
 }: {
   build: StoryBuild;
   plan: Pick<BuildPlanView, 'replies' | 'fillGaps'>;
   rev: BuildPlanRevision;
   decided: DecidedMap;
   card?: (c: BuildPlanContention) => JSX.Element;
+  /** The latest revision before Approve: the ticket draft can be edited and written to the ticket. */
+  editable?: boolean;
 }): JSX.Element {
   const dropped = droppedLine(rev.dropped);
   return (
@@ -245,7 +261,12 @@ function RevisionBody({
         </p>
       )}
       <PlanStack rev={rev} />
-      {rev.ticketUpdate != null && <TicketUpdate update={rev.ticketUpdate} />}
+      {rev.ticketUpdate != null &&
+        (editable ? (
+          <EditableTicketUpdate key={rev.revision} build={build} update={rev.ticketUpdate} />
+        ) : (
+          <TicketUpdate update={rev.ticketUpdate} />
+        ))}
     </div>
   );
 }
@@ -614,6 +635,134 @@ function TicketUpdate({ update }: { update: NonNullable<BuildPlanRevision['ticke
       {update.why !== '' && <p className="mb-2 break-words text-body text-ui-ink">{update.why}</p>}
       {update.description != null && <DraftField label="Description" text={update.description} testId="story-plan-ticket-description" />}
       {update.acceptanceCriteria != null && <DraftField label="Acceptance criteria" text={update.acceptanceCriteria} testId="story-plan-ticket-criteria" />}
+    </div>
+  );
+}
+
+/**
+ * THE TICKET DRAFT, EDITABLE (the latest revision, before Approve): the agent's draft in a text box
+ * per field, which the reader may change ("Back to the draft" undoes their edits), copy, or write to
+ * the ticket with "Update ticket" (Jira only; docs/TRACKERS.md § The ticket update). The write asks
+ * once ("Replace …?") and is never retried. Approve and start reads the ticket again, so the build
+ * gets the updated text. An empty box leaves that field as it is.
+ */
+function EditableTicketUpdate({ build, update }: { build: StoryBuild; update: NonNullable<BuildPlanRevision['ticketUpdate']> }): JSX.Element {
+  const [description, setDescription] = useState(update.description);
+  const [criteria, setCriteria] = useState(update.acceptanceCriteria);
+  const [asking, setAsking] = useState(false);
+  const write = useUpdateTicket(build.workspaceId, build.ident);
+  const jira = isJiraIdent(build.ident);
+  const edited = description !== update.description || criteria !== update.acceptanceCriteria;
+  const body = { description: blankToNull(description), acceptanceCriteria: blankToNull(criteria) };
+  const tooLong = [description, criteria].some((t) => t != null && t.length > TICKET_UPDATE_FIELD_MAX);
+  const nothing = body.description == null && body.acceptanceCriteria == null;
+  const what = [body.description != null ? 'description' : null, body.acceptanceCriteria != null ? 'acceptance criteria' : null]
+    .filter((x) => x != null)
+    .join(' and ');
+  const err = write.error != null ? (sessionErrorText(write.error) ?? 'Could not update the ticket.') : null;
+  // An edit after a write makes the ticket differ again: forget the "Updated" line.
+  const change = (set: (v: string) => void) => (v: string) => {
+    set(v);
+    if (write.isSuccess || write.isError) write.reset();
+  };
+  return (
+    <div data-testid="story-plan-ticket-update" data-editable="true">
+      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+        <h4 className={REVIEW_SUBHEAD}>Ticket update{edited ? ' (edited)' : ' (draft)'}</h4>
+        <InfoButton title="Ticket update">
+          <p>The agent's draft of the ticket, in the ticket's own style, as if you agree with every point. Change it as you like.</p>
+          <p className="mt-2">
+            {jira
+              ? 'Update ticket writes it to Jira: the description, and the acceptance criteria into the field Limn read them from. An empty box leaves that field as it is. Approve and start reads the ticket again.'
+              : 'Updating the ticket from Limn works with Jira only. Copy the text into the ticket instead.'}
+          </p>
+        </InfoButton>
+        {edited && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            data-testid="story-plan-ticket-reset"
+            onClick={() => {
+              setDescription(update.description);
+              setCriteria(update.acceptanceCriteria);
+              write.reset();
+            }}
+          >
+            Back to the draft
+          </Button>
+        )}
+      </div>
+      {update.why !== '' && <p className="mb-2 break-words text-body text-ui-ink">{update.why}</p>}
+      {description != null && (
+        <DraftEditor label="Description" text={description} onChange={change(setDescription)} testId="story-plan-ticket-description" />
+      )}
+      {criteria != null && (
+        <DraftEditor label="Acceptance criteria" text={criteria} onChange={change(setCriteria)} testId="story-plan-ticket-criteria" />
+      )}
+      {jira && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-meta">
+          {asking ? (
+            <>
+              <span className="text-ui-ink">Replace the ticket's {what} in Jira?</span>
+              <Button
+                size="sm"
+                variant="primary"
+                data-testid="story-plan-ticket-update-confirm"
+                busy={write.isPending}
+                busyLabel="Updating…"
+                onClick={() => write.mutate(body, { onSettled: () => setAsking(false) })}
+              >
+                Replace
+              </Button>
+              <Button size="sm" variant="ghost" disabled={write.isPending} onClick={() => setAsking(false)}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="story-plan-ticket-update-button"
+              disabled={nothing || tooLong || write.isPending || write.isSuccess}
+              onClick={() => setAsking(true)}
+            >
+              Update ticket
+            </Button>
+          )}
+          {write.isSuccess && (
+            <span data-testid="story-plan-ticket-updated" className="text-ui-mute">
+              Updated in Jira. Approve and start reads the ticket again.
+            </span>
+          )}
+          {tooLong && <span className="text-ui-warn">Keep each box under {TICKET_UPDATE_FIELD_MAX.toLocaleString('en-GB')} characters.</span>}
+          {err != null && <span className="text-ui-danger">{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const blankToNull = (t: string | null): string | null => (t == null || t.trim() === '' ? null : t);
+
+function DraftEditor({ label, text, onChange, testId }: { label: string; text: string; onChange: (v: string) => void; testId: string }): JSX.Element {
+  const id = useId();
+  return (
+    <div data-testid={testId} className="mt-1.5">
+      <div className="flex items-center gap-1.5">
+        <label htmlFor={id} className="text-meta font-medium text-ui-ink">
+          {label}
+        </label>
+        <CopyButton text={text} what={label.toLowerCase()} title={`Copy the ${label.toLowerCase()}, exactly as written`} />
+      </div>
+      <textarea
+        id={id}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+        rows={Math.min(14, Math.max(4, text.split('\n').length + 1))}
+        spellCheck
+        className="mt-1 block max-h-[28rem] w-full resize-y rounded-ui bg-ui-raise p-2 font-mono text-meta text-ui-ink ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent"
+      />
     </div>
   );
 }

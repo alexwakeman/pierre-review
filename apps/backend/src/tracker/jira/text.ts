@@ -338,3 +338,85 @@ export function jiraWikiToMarkdown(wiki: string): string {
   if (fence) out.push('```');
   return out.join('\n');
 }
+
+// ── MARKDOWN → JIRA WIKI MARKUP (the ticket update, ../ticket-update.ts) ────────────────────────────
+//
+// The reverse of `jiraWikiToMarkdown` for what Limn shows a ticket's description as: the reader (or
+// the agent's draft) writes the description in markdown, and Jira's REST v2 stores wiki markup.
+// Covered: headings, bullet and numbered lists (nested by indent), block quotes, rules, fenced code,
+// tables, bold, italic, strike, inline code, links and images. Anything else passes through as text,
+// which wiki markup shows as typed. Inline code and fences are copied verbatim (no markup inside).
+
+/** Inline markdown → wiki: code spans kept verbatim; bold before italic (placeholders keep them apart). */
+function inlineMdToWiki(line: string): string {
+  const codes: string[] = [];
+  let s = line.replace(/`([^`\n]+)`/g, (_m, c: string) => {
+    codes.push(c);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  s = s
+    .replace(/!\[[^\]]*\]\(([^)\s]+)\)/g, '!$1!')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '[$1|$2]')
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '\u0001$2\u0001')
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\w)/g, '$1_$2_')
+    .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '-$1-')
+    .replace(/\u0001/g, '*');
+  return s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => `{{${codes[Number(i)] ?? ''}}}`);
+}
+
+const MD_TABLE_SEP = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
+function mdTableCells(line: string): string[] {
+  const t = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return t.split('|').map((c) => inlineMdToWiki(c.trim()));
+}
+
+export function markdownToJiraWiki(md: string): string {
+  const lines = md.replace(/\r\n?/g, '\n').split('\n');
+  const out: string[] = [];
+  // The open list levels: each one's indent and kind, outermost first.
+  const levels: Array<{ indent: number; kind: '*' | '#' }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i]!;
+    const fence = /^\s*```\s*([A-Za-z0-9+#-]{0,20})\s*$/.exec(raw);
+    if (fence) {
+      levels.length = 0;
+      const body: string[] = [];
+      let j = i + 1;
+      while (j < lines.length && !/^\s*```\s*$/.test(lines[j]!)) body.push(lines[j++]!);
+      const lang = fence[1] ?? '';
+      out.push(lang !== '' ? `{code:${lang}}` : '{noformat}', ...body, lang !== '' ? '{code}' : '{noformat}');
+      i = j;
+      continue;
+    }
+    // A table: a header row followed by its separator row.
+    if (/^\s*\|/.test(raw) && i + 1 < lines.length && MD_TABLE_SEP.test(lines[i + 1]!)) {
+      levels.length = 0;
+      out.push(`|| ${mdTableCells(raw).join(' || ')} ||`);
+      i += 1;
+      while (i + 1 < lines.length && /^\s*\|/.test(lines[i + 1]!)) {
+        i += 1;
+        out.push(`| ${mdTableCells(lines[i]!).join(' | ')} |`);
+      }
+      continue;
+    }
+    const item = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/.exec(raw);
+    if (item && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(raw)) {
+      const indent = item[1]!.replace(/\t/g, '    ').length;
+      const kind = /^\d/.test(item[2]!) ? '#' : '*';
+      while (levels.length > 0 && levels[levels.length - 1]!.indent > indent) levels.pop();
+      const top = levels[levels.length - 1];
+      if (top == null || top.indent < indent) levels.push({ indent, kind });
+      else top.kind = kind;
+      out.push(`${levels.map((l) => l.kind).join('')} ${inlineMdToWiki(item[3]!)}`);
+      continue;
+    }
+    if (raw.trim() === '' || !/^\s/.test(raw)) levels.length = 0;
+    let m: RegExpMatchArray | null;
+    if ((m = raw.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/))) out.push(`h${m[1]!.length}. ${inlineMdToWiki(m[2]!)}`);
+    else if ((m = raw.match(/^\s{0,3}>\s?(.*)$/))) out.push(m[1]!.trim() === '' ? '' : `bq. ${inlineMdToWiki(m[1]!)}`);
+    else if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(raw)) out.push('----');
+    else out.push(inlineMdToWiki(raw));
+  }
+  return out.join('\n');
+}

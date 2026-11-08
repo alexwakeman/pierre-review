@@ -19,8 +19,9 @@ import { prepareTrackerCall } from './calls.js';
 import { isTicketKey, jiraAuthHeader, jiraErrorMessage, statusOf, type JiraCall } from './jira/client.js';
 import { JiraFetchError, jiraGetJson, jiraPostJson, type JiraTransport } from './jira/fetch.js';
 
-// ── THE ONE TRACKER WRITE — a Jira status transition the reader picks (docs/TRACKERS.md § The status
-// change). CORE and FREE, Jira only.
+// ── A TRACKER WRITE — a Jira status transition the reader picks (docs/TRACKERS.md § The status
+// change). CORE and FREE, Jira only. The other write, the ticket update, is ./ticket-update.ts and
+// passes the SAME gate (`statusGate`).
 //
 //   GET  /api/ticket-status/transitions?workspace=<id>&ident=…  the transitions Jira allows from the
 //        current status. Fetched when the story view's picker OPENS, never on mount: one Jira call,
@@ -81,8 +82,8 @@ export function toTransitions(raw: unknown): TicketTransition[] {
   return out;
 }
 
-const auth = (call: JiraCall): Record<string, string> => ({ authorization: jiraAuthHeader(call.credentials) });
-const issueUrl = (call: JiraCall, key: string): string => `${call.apiRoot}/rest/api/2/issue/${encodeURIComponent(key)}`;
+export const auth = (call: JiraCall): Record<string, string> => ({ authorization: jiraAuthHeader(call.credentials) });
+export const issueUrl = (call: JiraCall, key: string): string => `${call.apiRoot}/rest/api/2/issue/${encodeURIComponent(key)}`;
 
 export async function fetchJiraTransitions(call: JiraCall, key: string): Promise<TicketTransition[]> {
   const raw = await jiraGetJson(`${issueUrl(call, key)}/transitions?expand=transitions.fields`, auth(call), call.policy, call.transport);
@@ -135,9 +136,11 @@ export async function statusGate(
   workspaceId: number,
   rawIdent: string,
   transport: JiraTransport | undefined,
+  /** The refusal for a workspace whose tracker is not Jira (the ticket update says its own). */
+  notJiraMessage: string = MSG_NOT_JIRA,
 ): Promise<Gate> {
   const access = await readWorkspaceTrackerAccess(ctx, accountId, workspaceId);
-  if (access.issue.provider !== 'jira') return { ok: false, status: 400, error: 'NotJira', message: MSG_NOT_JIRA };
+  if (access.issue.provider !== 'jira') return { ok: false, status: 400, error: 'NotJira', message: notJiraMessage };
   const parsed = parseTicketIdent(rawIdent);
   const notHeld = { ok: false as const, status: 404, error: 'TicketNotFound', message: MSG_NOT_HELD };
   if (!isTrackerIdent(parsed)) return notHeld;
@@ -215,7 +218,7 @@ export async function writeTicketStatus(
 }
 
 /** The re-read failed after a made change: the worker reads the PR rows at its next pass. */
-async function markTicketDue(ctx: TrackerContext, accountId: number, apiRoot: string, key: string): Promise<void> {
+export async function markTicketDue(ctx: TrackerContext, accountId: number, apiRoot: string, key: string): Promise<void> {
   const t = ctx.schema.trackerTickets;
   await ctx.db
     .update(t)
