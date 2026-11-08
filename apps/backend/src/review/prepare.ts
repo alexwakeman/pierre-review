@@ -1,7 +1,7 @@
 import type { PreparedReview, ReviewFileMetric } from '../platform/contract.js';
 import { config } from '../config.js';
+import { capDiffRanked } from './diff-rank.js';
 import {
-  capDiff,
   fetchPrDiff,
   splitDiffByFile,
   stripNoiseFromDiff,
@@ -164,12 +164,14 @@ export async function prepareReview(args: {
   const changedFiles = fileMetrics.map((f) => f.path);
 
   // Diff-size cap (feature-flagged): shrink only the PROMPT's diff body at a whole-file
-  // boundary. Routing ran on the full stripped diff and anchoring still uses it.
+  // boundary. Routing ran on the full stripped diff and anchoring still uses it. Which files are
+  // kept is chosen by IMPACT rank (contract files first, tests and non-code last), and the kept
+  // files stay in diff order (`review/diff-rank.ts`). Chat shares this, so it sees the same files.
   let promptDiff = strippedDiff;
   let omittedFiles: string[] = [];
   let diffCapped = false;
   if (config.reviewDiffCapEnabled) {
-    const capped = capDiff(strippedDiff, config.reviewDiffCapChars);
+    const capped = capDiffRanked(strippedDiff, config.reviewDiffCapChars, fileMetrics);
     promptDiff = capped.diff;
     omittedFiles = capped.omittedFiles;
     diffCapped = capped.capped;

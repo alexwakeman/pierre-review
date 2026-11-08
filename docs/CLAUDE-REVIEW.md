@@ -4784,6 +4784,15 @@ and REVERTED) made it worse: 37% recall, 1 issue found every run, and the review
 files "checked" even where it missed the issue. `claude_reviews.coverage` (migration 0150) stays as a
 DORMANT column: nothing writes or reads it.
 
+**Impact-ranked diff cap (2026-11-08, not measured yet):** when the diff cap trims a big PR,
+`prepareReview` now keeps files by IMPACT (`review/diff-rank.ts` `capDiffRanked`: contract files
+first whatever their size, then code, then tests, then non-code; API-touching and bigger changes first
+within a tier; ties on path) instead of alphabetical diff order. The kept files stay in diff order
+and the prompt's instructions are unchanged: this changes WHICH files are included under the cap, not
+how the reviewer is told to work. It is not the review plan above. A file too big for the budget is
+skipped; the top-ranked file is kept alone only when nothing fits. Chat shares `prepareReview`, so it
+gets the same files. The other `capDiff` callers (CI, ticket, thread check, diagrams) are unchanged.
+
 **Claude + Codex at the same time, with the finding check (2026-11-01, `--pair`):** 9 full pair runs
 found 87% of the known issues on average (the earlier sequential pair ≈ 79%), about 4–7 minutes per
 run. The ChatGPT Plus 5-hour limit cut Codex after 9 halves; the 6 runs left were Claude alone with
