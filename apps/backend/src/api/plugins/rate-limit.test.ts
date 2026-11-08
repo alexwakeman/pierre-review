@@ -378,72 +378,20 @@ describe('tierFor — the issue tracker', () => {
   });
 });
 
-// The period-report family sits ABOVE the /api/pro/ catch-all, which tiers on the VERB alone.
-//
-// ⚠ MUTATION-TESTED, AND MOST OF THIS BLOCK IS INTENT RATHER THAN GUARD — said out loud because
-// "a new isolation check can be VACUOUS" is a lesson this repo has already paid for. Disabling
-// the family block in tierFor fails EXACTLY ONE assertion below: `POST …/reports` (the list root),
-// which the catch-all would bill as generation. Every other answer here is one the catch-all
-// happens to give too. They are asserted anyway because the catch-all's agreement is a
-// COINCIDENCE of its suffix heuristic (`/cancel`, `/key`, `/budget`, `/settings`), not a decision
-// about this family: add `/generate` to that suffix list, or add a fifth route here, and the
-// coincidence breaks silently. These assertions are what turns that into a failing test.
+// Reports → Period reports is ONE route since 2026-11-08 (the stored family and month-to-date were
+// removed with the AI write-up). It sits ABOVE the /api/pro/ catch-all, which tiers on the VERB
+// alone and would park ≤ 24 scans on the 600/min blanket bucket.
 describe('tierFor — period reports', () => {
-  it('bills nothing in the family: the generate POST was removed (Reports is code-only)', () => {
-    // A POST to the removed path lands on `read` and 404s — never back on the AI bucket.
-    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual(['read']);
-    // The `…/chat` turn was REMOVED 2026-10-22: its arm went with it, so the path is no longer
-    // billed (it would 404 on the read bucket).
-    expect(tiers('POST', '/api/pro/insights/reports/sprint-2026-08-18/chat')).toEqual(['read']);
+  it('puts the period series on the search bucket, anchored on the exact path', () => {
+    expect(tiers('GET', '/api/pro/insights/period-series')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/pro/insights/period-series')).not.toContain('ai');
+    expect(tiers('GET', '/api/pro/insights/period-series-x')).toEqual(['read']);
   });
 
-  it('keeps the list GET on read and puts the one-report GET on the search bucket', () => {
-    expect(tiers('GET', '/api/pro/insights/reports')).toEqual(['read']);
-    // The one-report GET can serve the open month live (six indexed scans, the month-to-date
-    // route's cost). 60/min, never the 600/min blanket.
-    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).toEqual([
-      'search',
-      'read',
-    ]);
-    // ...and neither free GET may be swept onto the AI bucket by the family block above them.
-    expect(tiers('GET', '/api/pro/insights/reports')).not.toContain('ai');
-    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).not.toContain('ai');
-  });
-
-  // The catch-all below this block treats every non-cancel/key/budget/settings POST as generation,
-  // so a GET spelling of a generate path must stay cheap and a POST to the list root must not
-  // become free. Both directions pinned.
-  it('does not let the verb alone decide inside the family', () => {
-    expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18/generate')).toEqual(['read']);
-    expect(tiers('POST', '/api/pro/insights/reports')).toEqual(['read']);
-  });
-
-  // The prefix is anchored on the exact family: a sibling under /api/pro/insights/ must keep
-  // falling through to the catch-all (a POST there is billed as generation, a GET is read).
   it('does not sweep in the neighbouring insights routes', () => {
     expect(tiers('POST', '/api/pro/insights/sibling')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/pro/insights/sibling')).toEqual(['read']);
     expect(tiers('GET', '/api/pro/insights')).toEqual(['read']);
-    // A path that merely STARTS the same must not be captured by the family prefix.
-    expect(tiers('POST', '/api/pro/insights/reports-export/generate')).toEqual(['ai', 'ai_hourly']);
-  });
-
-  // GET /api/pro/insights/month-to-date — the OPEN calendar month, recomputed on every read
-  // (Reports → Month grain). It sits OUTSIDE the `…/insights/reports` family prefix, so without
-  // its own entry the /api/pro/ catch-all's GET→read branch would park six indexed scans on the
-  // 600/min blanket bucket. `search`, like every other route of that cost shape here.
-  it('puts month-to-date on the search bucket, not the blanket read one', () => {
-    expect(tiers('GET', '/api/pro/insights/month-to-date')).toEqual(['search', 'read']);
-    // It never generates and never writes a row — it must not drift onto the AI tier either.
-    expect(tiers('GET', '/api/pro/insights/month-to-date')).not.toContain('ai');
-    // The decision is anchored on the exact path: a neighbour must keep falling through.
-    expect(tiers('GET', '/api/pro/insights/month-to-date-export')).toEqual(['read']);
-  });
-
-  // GET /api/pro/insights/period-series — the Reports chart: ≤ 12 metric + lane scans per read.
-  it('puts the period series on the search bucket', () => {
-    expect(tiers('GET', '/api/pro/insights/period-series')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/pro/insights/period-series-x')).toEqual(['read']);
   });
 });
 

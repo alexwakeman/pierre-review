@@ -5727,8 +5727,6 @@ Each of these is a decision, not an oversight, and "finishing the migration" wou
   `sync/bot-resolution-markers.ts`, `platform/bot-themes/build.ts` and `db/queries.ts`
   (~9195, use `grep -a`) match ⚠️ 🛠️ 🧹 💡 ✅ **that review vendors write into their own comment
   bodies**. Changing one silently breaks bot classification and no test fails loudly.
-- **`Activity/periodReportMarkdown.ts`** — a markdown export people paste elsewhere. It has no DOM,
-  so its ▲ ▼ ▵ stay characters.
 - **The backend CLI** (`apps/backend/src/status.ts`) — a terminal, not a browser.
 - **Glyphs inside `title=` / `aria-label=` strings.** An attribute value is text; those sites were
   **reworded** (e.g. "the ✕ on the tab" → "the close button on the tab").

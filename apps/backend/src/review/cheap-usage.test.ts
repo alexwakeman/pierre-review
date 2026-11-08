@@ -2,7 +2,7 @@
 // never priced at a Claude rate and its row says 'codex' with Codex's model; a Claude answer is priced
 // by the caller exactly as before.
 import { describe, expect, it } from 'vitest';
-import { makeHaikuClient, makeReportClient } from '../platform/llm/seam.js';
+import { makeHaikuClient } from '../platform/llm/seam.js';
 import type { ProContext } from '../platform/contract.js';
 import { cheapUsage } from './cheap-usage.js';
 
@@ -35,18 +35,16 @@ describe('the platform LlmClient', () => {
   const ctxAnswering = (res: Awaited<ReturnType<ProContext['llm']['complete']>>): ProContext =>
     ({ llm: { complete: async () => res, detectAuth: () => ({ status: 'ok' }) } }) as unknown as ProContext;
 
-  it('a Codex answer keeps Codex’s US$, model and provider (Haiku and report clients alike)', async () => {
+  it('a Codex answer keeps Codex’s US$, model and provider', async () => {
     const ctx = ctxAnswering({ text: 'hi', usage: { inputTokens: 1_000_000, outputTokens: 1_000_000 }, provider: 'codex', model: 'gpt-6-luna', costUsd: 0 });
-    for (const client of [makeHaikuClient(ctx), makeReportClient(ctx, 'claude-haiku-5-5')]) {
-      expect(await client.complete({ system: 's', user: 'u', maxTokens: 10 })).toEqual({
-        text: 'hi',
-        inputTokens: 1_000_000,
-        outputTokens: 1_000_000,
-        costUsd: 0,
-        provider: 'codex',
-        model: 'gpt-6-luna',
-      });
-    }
+    expect(await makeHaikuClient(ctx).complete({ system: 's', user: 'u', maxTokens: 10 })).toEqual({
+      text: 'hi',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      costUsd: 0,
+      provider: 'codex',
+      model: 'gpt-6-luna',
+    });
   });
   it('a Claude answer is priced at the Haiku rate, as before', async () => {
     const ctx = ctxAnswering({ text: 'hi', usage: { inputTokens: 10_000, outputTokens: 10_000 } });

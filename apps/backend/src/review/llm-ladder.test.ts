@@ -1,6 +1,5 @@
-// THE ONE LADDER, end to end through `cheapComplete` and the platform's clients (makeHaikuClient,
-// makeReportClient — every report, synthesis, pointer, bot-theme, refine
-// and Slack call goes through one of the two):
+// THE ONE LADDER, end to end through `cheapComplete` and the platform's client (makeHaikuClient —
+// every synthesis, pointer, bot-theme, refine and Slack call goes through it):
 //   • login present → the Agent SDK, with ANTHROPIC_API_KEY hidden from the run;
 //   • no login + key → the Anthropic API with that key;
 //   • LIMN_AI_USE_API_KEY=true → the key first, even with a login;
@@ -38,7 +37,7 @@ vi.mock('../ai/runtime.js', () => ({
 
 const { cheapComplete } = await import('./llm.js');
 const { config } = await import('../config.js');
-const { makeHaikuClient, makeReportClient } = await import('../platform/llm/seam.js');
+const { makeHaikuClient } = await import('../platform/llm/seam.js');
 type Ctx = Parameters<typeof makeHaikuClient>[0];
 const ctx = { llm: { complete: cheapComplete, detectAuth: () => ({ status: 'ok' }) } } as unknown as Ctx;
 
@@ -140,22 +139,6 @@ describe('the platform clients take the same ladder', () => {
     const out = await makeHaikuClient(ctx).complete({ system: 's', user: 'u', maxTokens: 100 });
     expect(out.text).toBe('from the api');
     expect(query).not.toHaveBeenCalled();
-  });
-
-  it('makeReportClient (Reports): login → the Agent SDK, not a meter', async () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
-    const out = await makeReportClient(ctx, 'claude-haiku-5-5').complete({ system: 's', user: 'u', maxTokens: 100 });
-    expect(out.text).toBe('from the login');
-    expect(messagesCreate).not.toHaveBeenCalled();
-  });
-
-  it('makeReportClient: opt-in → the key', async () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
-    process.env.LIMN_AI_USE_API_KEY = 'true';
-    const out = await makeReportClient(ctx, 'claude-haiku-5-5').complete({ system: 's', user: 'u', maxTokens: 100 });
-    expect(out.text).toBe('from the api');
   });
 
   it('nothing in the backend reads SUMMARY_ANTHROPIC_API_KEY any more', async () => {

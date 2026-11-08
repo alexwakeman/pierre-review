@@ -510,9 +510,8 @@ Monitoring, Slack.
 - **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
   (`db/period-metrics.ts` and siblings). Reports is CODE ONLY: ONE chart, the DB-only series
   (`buildPeriodSeries`, one repo set). Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
-  reaches every fold). History is **COVERAGE-BIASED**. **One row never mixes headline and subset
-  populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is in the hash (three spellings
-  in lockstep); a metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
+  reaches every fold). History is **COVERAGE-BIASED**: a series line is ONE repo set,
+  never a mix. A metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
   never stored. Every reading setting is PER WORKSPACE, no inheritance.
 - **Chronology** ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md), `db/pr-intervals.ts`): every open
   hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and

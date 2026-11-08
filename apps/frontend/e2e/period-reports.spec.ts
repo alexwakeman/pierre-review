@@ -97,15 +97,19 @@ test.describe('Period reports', () => {
     await open(page);
     const panel = page.getByTestId('period-reports');
     const bands = panel.getByTestId('period-chart-band');
-    await bands.nth(4).hover();
+    // A click PINS the popover (hover alone races its close delay under load).
+    await bands.nth(4).click();
     const tip = page.getByRole('tooltip');
+    await expect(tip).toHaveCount(1);
     await expect(tip).toContainText('30');
     // Significant: a percentage. Change since the baseline (the first period, 20 → 30).
     await expect(tip).toContainText('+25% vs the period before');
     await expect(tip).toContainText('+50% since');
-    // The projection band.
-    await bands.nth(6).hover();
+    // The projection band: pinning it closes the first (one popover at a time).
+    await bands.nth(6).click();
+    await expect(page.getByRole('tooltip')).toHaveCount(1);
     await expect(page.getByRole('tooltip')).toContainText('36 projected · 31–41');
+    await page.keyboard.press('Escape');
     // Selecting the second period: the lanes follow it.
     await bands.nth(1).click();
     await expect(panel.getByTestId('period-lanes')).toContainText('11% of merges were automated');

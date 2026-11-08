@@ -34,8 +34,6 @@ import type { ReactNode } from 'react';
 //    live there. Those were reworded, not converted.
 //  • Typographic arrows inside prose and chart labels ("open → 1st review"). That is a
 //    sentence, not a control.
-//  • ▲ / ▼ inside the period-report MARKDOWN export (`periodReportMarkdown.ts`). The export is
-//    a text artifact people paste elsewhere; it has no DOM.
 //  • The backend CLI's ● / · / ↩ (`apps/backend/src/status.ts`) — a terminal, not a browser.
 //  • ⚠️ 🛠️ 🧹 💡 ✅ inside REGEXES and test fixtures (`sync/review-fingerprint.ts`,
 //    `sync/bot-resolution-markers.ts`, the bot-theme classifiers). Those match emoji that

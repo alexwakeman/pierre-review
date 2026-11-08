@@ -34,13 +34,10 @@ import { CopyButton } from '../CopyButton.js';
 import { InfoButton } from '../InfoModal.js';
 import { ThinSampleIcon } from '../Icons.js';
 import { FOCUS_RING } from '../ui/index.js';
-import { METRIC_META, metaFor, periodTitle, signed, changeFmtFor } from './periodReportMarkdown.js';
+import { METRIC_META, metaFor, periodTitle, signed, changeFmtFor } from './periodMetricMeta.js';
 import { PALETTE, SERIES_COLORS, fmtDuration, niceMax } from '../charts/common.js';
 import { PeriodSeriesChart, type PeriodChartLine } from './PeriodSeriesChart.js';
 
-// Re-exported for periodMetricRow.test.ts, which pins the one-population row rule through this
-// module's public surface (the definition lives in periodReportMarkdown.ts).
-export { rowFigures } from './periodReportMarkdown.js';
 
 // REPORTS → PERIOD REPORTS (docs/FRONTEND.md § Period reports; docs/PERIOD-REPORTING.md § The series).
 // CODE ONLY: nothing here calls a model (the AI write-up and its Generate button were removed

@@ -219,3 +219,30 @@ export function ChartEmpty({ label = 'No data in this window' }: { label?: strin
     </div>
   );
 }
+
+/**
+ * A smooth line through a contiguous run of points: Catmull-Rom → cubic bézier, tension 1/6, the
+ * endpoints clamped (P−1 = P0, Pn+1 = Pn). The ONE spline every line chart here draws (LineChart's
+ * `curved`, the Reports period chart). A run of one point is just its `M`.
+ */
+export function splinePath(pts: readonly (readonly [number, number])[]): string {
+  if (pts.length === 0) return '';
+  return `M ${pts[0]![0]} ${pts[0]![1]}` + splineSegments(pts);
+}
+
+/** `splinePath` without its leading `M`: the `C …` commands only (an area's top edge). */
+export function splineSegments(pts: readonly (readonly [number, number])[]): string {
+  let d = '';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[i + 2] ?? p2;
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}

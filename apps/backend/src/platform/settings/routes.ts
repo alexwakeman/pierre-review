@@ -6,7 +6,6 @@ import type {
 } from '@pierre-review/shared';
 import { HOURLY_COST_MAX_USD } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
-import { REPORT_MODELS } from '../llm/seam.js';
 import { resolveRequestWorkspaceId } from '../insights/workspace-request.js';
 import {
   readProSettings,
@@ -41,20 +40,8 @@ const updateSchema = {
     // `workspace_slack_targets`. A stale client still sending `{slack: {...}}` here is SILENTLY
     // STRIPPED by `additionalProperties: false` + ajv's `removeAdditional` and still gets a 200:
     // the right outcome — nothing changes — but silent, hence written down.)
-    // The period report's narrating model, per account. TOP-LEVEL rather than inside a section
-    // because `ProSettingsUpdate` (the settled wire type) declares no `reports` section and this
-    // slice does not own that file — see `ProSettingsPatch` in store.ts.
-    //
-    // MUST BE LISTED, for the reason spelled out on `comparisonMode` above and again on the
-    // `bots` section below: `additionalProperties: false` STRIPS an unlisted property and still
-    // answers 200, so a missing entry here reads as "the setting silently never saves".
-    // The enum is derived from REPORT_MODELS — the SELECTION allowlist, deliberately not the
-    // pricing table, which is wider because it still prices models that narrated stored reports.
-    // Today that makes this a single-value enum (Haiku): a PUT naming the retired Sonnet 400s,
-    // and a row that ALREADY holds it degrades to the default on read rather than erroring, which
-    // is `resolveReportModel`'s job. `null` clears back to the PRO_REPORT_MODEL default; the store
-    // re-validates either way.
-    reportModel: { type: ['string', 'null'], enum: [...REPORT_MODELS, null] },
+    // (No `reportModel` — the period report's narrating model went with the AI write-up
+    // 2026-11-08; a stale client sending it is stripped and the PUT still 200s.)
     // (No `aiUpdate` section — the AI-summary update policy was removed. A stale client still
     // sending one is stripped by `additionalProperties: false` and the PUT still 200s.)
     // (NO `issue` SECTION. The Jira/Linear tracker moved to the WORKSPACE grain in plugin

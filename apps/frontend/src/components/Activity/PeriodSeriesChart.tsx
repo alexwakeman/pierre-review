@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { ChartPopover } from '../charts/ChartPopover.js';
-import { useChartWidth } from '../charts/common.js';
+import { splinePath, useChartWidth } from '../charts/common.js';
 
 // THE PERIOD CHART (Reports → Period reports; docs/FRONTEND.md § Period reports). One shaded BAND
 // per period, so each period reads as its own section; one point per period per line at the band's
-// centre; a gap where a period has no figure (never a 0). A projection, when there is one, is a
+// centre, joined by a spline; a gap where a period has no figure (never a 0). A projection, when there is one, is a
 // dashed segment into a hatched "next" band with its range as a bar. Every band is a ChartPopover
 // trigger — hover or focus shows that period's figures, a click pins it AND selects the period
 // (Effort vs automation below follows the selection).
@@ -102,17 +102,17 @@ export function PeriodSeriesChart(props: PeriodChartProps): JSX.Element {
           )}
           {/* The lines: a gap where there is no figure. */}
           {lines.map((l) => {
-            const segs: string[] = [];
-            let cur = '';
+            // A spline per contiguous run (the charts' one `splinePath`); a null breaks the line.
+            const runs: (readonly [number, number])[][] = [];
+            let cur: (readonly [number, number])[] = [];
             l.values.forEach((v, i) => {
               if (v == null) {
-                if (cur !== '') segs.push(cur);
-                cur = '';
-                return;
-              }
-              cur += `${cur === '' ? 'M' : 'L'}${cx(i).toFixed(1)},${y(v).toFixed(1)}`;
+                if (cur.length > 0) runs.push(cur);
+                cur = [];
+              } else cur.push([cx(i), y(v)] as const);
             });
-            if (cur !== '') segs.push(cur);
+            if (cur.length > 0) runs.push(cur);
+            const segs = runs.map(splinePath);
             const lastIdx = l.values.reduce<number>((acc, v, i) => (v != null ? i : acc), -1);
             const p = l.projection;
             return (
