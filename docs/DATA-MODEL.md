@@ -539,6 +539,30 @@ bots). Two storage facts carry it:
 No new account-scoped table, so `accountScopedTables()` is unchanged (the columns ride
 `review_comments` / `pr_comments`, erased with their PRs).
 
+## `limn_actions` and the `limn_*` provenance columns (CORE; migration `0180`)
+
+EVERY row Limn writes under a person's account is a bot row ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+Limn's actions are bots), not only findings.
+
+- **`limn_actions`** — the provenance ledger, ONE row per GitHub write Limn made or tried: `kind`
+  (shared `LimnActionKind`: review, review_wrapper, pr_comment, review_comment, reply, push, merge,
+  enqueue, dequeue, open_pr, resolve, reaction, request_reviewers, branch_update, dismiss, status,
+  pr_body, close, reopen, rerun), `claim_key` (unique with `(account_id, kind)` — every upsert targets
+  it), `status` (`claimed` before the call · `done` · `failed`, kept), `origin` (`auto` · `policy` ·
+  `reader_pressed`), GitHub's `github_node_id` / `github_database_id` / `review_database_id` /
+  `commit_sha`, `on_behalf_user_id`, `source_table` + `source_id` (the run), `pr_number`, `at`.
+  `pr_id` is NULL while a PR Limn opened is not stored yet; sync links it (`linkLimnActionsToPr`).
+  Composite FKs onto `repos` and `pull_requests` `(id, account_id)`, cascade; in
+  `accountScopedTables()`, `deleteRepo` (every repo row, unlinked ones too) and `deletePrSubtree`.
+  Written ONLY by `github/write-origin.ts` (`limnWrite`, `recordLimnWrite`, `recordLimnPush`).
+- **`reviews.limn_posted_by_user_id`**, **`commits.limn_pushed_by_user_id`**,
+  **`pull_requests.limn_merged_for_user_id`** / **`limn_opened_for_user_id`** (nullable FKs to
+  `users`): the person behind a Limn review / commit / merge / opened PR; `author_id` / `merged_by_id`
+  then hold the `limn:` bot. Read through `trueAuthorId(table)` / `trueMergerId` (`db/true-author.ts`).
+  Written by sync (`config.limnAttributeAll`, on by default) and by `reattributeLimnRows`.
+- **`review_comments.review_database_id`**: GitHub's id of the review a comment belongs to (the
+  wrapper rule). Written on every walk when GitHub sent the key.
+
 ## `review_request_events` (CORE — who was asked to review, and when)
 
 Every `ReviewRequestedEvent` / `ReviewRequestRemovedEvent` on a PR's timeline (first 25 per PR):
@@ -574,6 +598,15 @@ something, then just those fields. Every reader resolves through `resolveFlowSet
 workspace that never overrode it — the `accounts.blast_radius_config` precedent. Per WORKSPACE
 because two teams in two zones in one account work different hours. Written only by
 `PUT /api/workspaces/:id/flow-settings`, which replaces the whole set.
+
+## `workspaces.flow_view` (CORE — Chronology's view, migration `0181`)
+
+`text`, NULL = the default. `'people'` or `'people_bots'` (shared `FlowActorView`): who moves the ball
+on Reports → Chronology — people only, or people plus Limn and the AI review bots
+([BOTTLENECKS.md](BOTTLENECKS.md) § Two views). A READING setting per workspace, no inheritance; it
+changes what is measured, never what is stored. Read once per request by `db/flow-settings.ts`
+`getWorkspaceFlowView`, written only by `PUT /api/workspaces/:id/flow-view` (`setWorkspaceFlowView`).
+Exported with the workspace; erased with it.
 
 ## `accounts.my_turn_settings` (CORE — Settings → Pending → My Turn)
 

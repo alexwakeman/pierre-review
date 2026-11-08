@@ -31,6 +31,8 @@ import { git, gitTry } from './git.js';
 import { conflictModelHash } from './hash.js';
 import { allowedDecisions, buildConflictModel } from './model.js';
 import type { ConflictModel, ConflictModelFile, ConflictModelRegion } from './model-types.js';
+import { withLimnRunTrailer } from '@pierre-review/shared';
+import { limnOriginForPr, orReader } from '../db/limn-actions.js';
 
 /**
  * THE LAND PATH — turn a set of per-region decisions into a tree, a commit and a push.
@@ -326,10 +328,12 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
         message = original.message;
         parents.push('-p', fresh.baseSha);
       } else if (plan.full) {
-        message = fullMergeMessage(fresh, plan);
+        // A resolution commit Limn makes carries the `Limn-Run:` trailer (docs/CLAUDE-REVIEW.md § Limn's
+        // actions are bots). The rebase keeps the original commit's message and author: it is not Limn's.
+        message = withLimnRunTrailer(fullMergeMessage(fresh, plan), `conflict/${args.sessionId}`);
         parents.push('-p', fresh.headSha, '-p', fresh.baseSha);
       } else {
-        message = partialMessage(fresh, plan);
+        message = withLimnRunTrailer(partialMessage(fresh, plan), `conflict/${args.sessionId}`);
         parents.push('-p', fresh.headSha);
       }
 
@@ -400,6 +404,9 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
       pushOwner,
       pushName,
     );
+    // LIMN'S WORK IS BOT WORK: the resolution commit and any PR it opens are Limn's, on the reader's
+    // behalf (a rebase rewrites someone's commit: nothing of it is recorded as Limn's push).
+    const origin = orReader(await limnOriginForPr(args.accountId, args.prId, 'reader_pressed'));
     const push = {
       worktree: cloneDir,
       owner: pushOwner,
@@ -407,6 +414,8 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
       token,
       committish: built.commitSha,
       protect,
+      origin,
+      limnCommits: body.strategy === 'rebase' ? [] : [built.commitSha],
     };
 
     let branch: string;
@@ -441,7 +450,7 @@ export async function landConflictResolution(args: LandArgs): Promise<ConflictCo
           base: model.baseRef,
           title: `Resolve conflicts with ${model.baseRef} for #${model.number}`,
           body: `Conflict resolution for #${model.number}.`,
-        }).catch(() => null);
+        }, origin).catch(() => null);
         if (opened) {
           compareUrl = opened.url;
           openedNumber = opened.number;

@@ -18,6 +18,8 @@
 // never overrode it (the blast-radius config precedent). The engine, the route and the Settings
 // form all resolve through this one function.
 
+import type { ActorLane } from './types.js';
+
 /** The four waits a budget is set for. */
 export type FlowBudgetMeasure = 'firstLook' | 'reply' | 'land' | 'lead';
 
@@ -225,3 +227,38 @@ export const FLOW_BUDGET_LABEL: Record<FlowBudgetMeasure, string> = {
   land: 'Approved to merged',
   lead: 'Opened to merged',
 };
+
+// ── WHO MOVES THE BALL — Chronology's two views (docs/BOTTLENECKS.md § Two views) ────────────
+//
+// "People": only people's reviews and comments move the ball — Limn and every bot are left out.
+// "People + bots": Limn's and the AI review bots' reviews and comments move it too, so a team can
+// see what its review automation changed over time. Quality gates, CI and housekeeping bots never
+// move it in either view (a status badge is not a review), a push moves it in both whoever made
+// it, and a pull request a bot opened is measured in neither.
+//
+// A per-WORKSPACE reading setting (`workspaces.flow_view`, NULL = the default), no inheritance.
+// It changes what is measured, never what is stored.
+export type FlowActorView = 'people' | 'people_bots';
+
+/** The picker's order. */
+export const FLOW_ACTOR_VIEWS: readonly FlowActorView[] = ['people_bots', 'people'];
+
+export const DEFAULT_FLOW_ACTOR_VIEW: FlowActorView = 'people_bots';
+
+export const FLOW_ACTOR_VIEW_LABEL: Record<FlowActorView, string> = {
+  people: 'People',
+  people_bots: 'People + bots',
+};
+
+/** The bot lanes whose reviews and comments move the ball in "People + bots". */
+export const FLOW_BALL_BOT_LANES: readonly ActorLane[] = ['limn', 'ai_review'];
+
+/** A view from a query string or a body, or null when it is not one. */
+export function parseFlowActorView(raw: unknown): FlowActorView | null {
+  return raw === 'people' || raw === 'people_bots' ? raw : null;
+}
+
+/** The view in force: the stored one, else the default. */
+export function resolveFlowActorView(stored: unknown): FlowActorView {
+  return parseFlowActorView(stored) ?? DEFAULT_FLOW_ACTOR_VIEW;
+}

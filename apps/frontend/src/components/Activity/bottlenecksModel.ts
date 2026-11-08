@@ -3,6 +3,7 @@ import {
   reportingWindowTitle,
   type CourtDirective,
   type CourtShare,
+  type FlowActorView,
   type FlowCoverage,
   type FlowResponse,
   type PrCourt,
@@ -191,13 +192,18 @@ export function coverageLineFor(
  *   • never-human-touched — their ledger is 100% reviewer by construction, so including them would
  *     drive the reviewer share towards 100% on any repo that merges unreviewed work.
  */
-export function exclusionLineFor(c: FlowCoverage): string | null {
+export function exclusionLineFor(c: FlowCoverage, view: FlowActorView = 'people'): string | null {
   const parts: string[] = [];
   if (c.excludedBotAuthored > 0) {
     parts.push(`${c.excludedBotAuthored} opened by automation`);
   }
   if (c.excludedNoHumanTouch > 0) {
-    parts.push(`${c.excludedNoHumanTouch} no person reviewed or commented on`);
+    // "People + bots" (docs/BOTTLENECKS.md § Two views): a review bot's look counts as a touch too.
+    parts.push(
+      view === 'people'
+        ? `${c.excludedNoHumanTouch} no person reviewed or commented on`
+        : `${c.excludedNoHumanTouch} no person or review bot reviewed or commented on`,
+    );
   }
   if (parts.length === 0) return null;
   return `Set aside: ${parts.join(', and ')}.`;

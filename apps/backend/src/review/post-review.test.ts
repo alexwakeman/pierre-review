@@ -11,9 +11,11 @@ import {
   splitDiffByFile,
   stripNoiseFromDiff,
 } from './post-review.js';
-import { FINDING_COMMENT_MARKER, matchReviewComments, prLevelFindingBody } from './post-review.js';
+import { FINDING_COMMENT_MARKER, matchReviewComments, prLevelFindingBody, THREAD_REPLY_NOTE } from './post-review.js';
 
 const M = `\n\n${FINDING_COMMENT_MARKER}`;
+/** An inline finding comment opens a thread: its reply note, then the marker. */
+const T = `\n\n${THREAD_REPLY_NOTE}${M}`;
 
 // A small but realistic single-file unified diff. The hunk header
 // `@@ -10,3 +10,4 @@` means: old file starts at line 10 (3 lines), new file
@@ -399,7 +401,7 @@ describe('buildReview', () => {
       includedFindings: [noSuggestion],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nPlain body, no suggestion.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nPlain body, no suggestion.${T}`);
     expect(result.preview.comments[0]?.body).not.toContain('```suggestion');
   });
 
@@ -420,7 +422,7 @@ describe('buildReview', () => {
       includedFindings: [reworded],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nMy reworded comment.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nMy reworded comment.${T}`);
     expect(result.preview.comments[0]?.body).not.toContain('original wording');
   });
 
@@ -441,7 +443,7 @@ describe('buildReview', () => {
       includedFindings: [blank],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nClaude body.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nClaude body.${T}`);
   });
 });
 
@@ -449,19 +451,19 @@ describe('findingCommentBody', () => {
   it('uses Claude body, appending a suggestion block when present', () => {
     expect(
       findingCommentBody({ body: 'B', editedBody: null, suggestion: 'S' }),
-    ).toBe(`B\n\n\`\`\`suggestion\nS\n\`\`\`${M}`);
+    ).toBe(`B\n\n\`\`\`suggestion\nS\n\`\`\`${T}`);
     expect(
       findingCommentBody({ body: 'B', editedBody: null, suggestion: null }),
-    ).toBe(`B${M}`);
+    ).toBe(`B${T}`);
   });
 
   it('prefers a non-empty editedBody over Claude body', () => {
     expect(
       findingCommentBody({ body: 'B', editedBody: 'Mine', suggestion: null }),
-    ).toBe(`Mine${M}`);
+    ).toBe(`Mine${T}`);
     expect(
       findingCommentBody({ body: 'B', editedBody: '   ', suggestion: null }),
-    ).toBe(`B${M}`);
+    ).toBe(`B${T}`);
   });
 
   it('appends the fallback note and plainly fences a suggestion on a fallback', () => {
@@ -492,20 +494,20 @@ describe('severity labels on posted findings', () => {
 
   it('leads an inline comment with the bold severity word on its own line, for every severity', () => {
     for (const [sev, word] of Object.entries(words)) {
-      expect(findingCommentBody({ ...base, severity: sev as keyof typeof words })).toBe(`**${word}**\n\nB${M}`);
+      expect(findingCommentBody({ ...base, severity: sev as keyof typeof words })).toBe(`**${word}**\n\nB${T}`);
     }
   });
 
   it('puts the tag on the lead line, and the lead before a story or reminder lead', () => {
-    expect(findingCommentBody({ ...base, severity: 'nit' }, { tag: 'Codex' })).toBe(`**Nit** · Codex\n\nB${M}`);
+    expect(findingCommentBody({ ...base, severity: 'nit' }, { tag: 'Codex' })).toBe(`**Nit** · Codex\n\nB${T}`);
     expect(findingCommentBody({ ...base, severity: 'blocker', storyLead: '**Reminder:** first raised earlier.' })).toBe(
-      `**Blocker**\n\n**Reminder:** first raised earlier.\n\nB${M}`,
+      `**Blocker**\n\n**Reminder:** first raised earlier.\n\nB${T}`,
     );
   });
 
   it('adds no lead without a severity, or for praise (never posted)', () => {
-    expect(findingCommentBody(base)).toBe(`B${M}`);
-    expect(findingCommentBody({ ...base, severity: 'praise' })).toBe(`B${M}`);
+    expect(findingCommentBody(base)).toBe(`B${T}`);
+    expect(findingCommentBody({ ...base, severity: 'praise' })).toBe(`B${T}`);
   });
 
   it('a PR-level comment carries the file reference on the lead line', () => {
@@ -527,7 +529,7 @@ describe('severity labels on posted findings', () => {
 
   it('keeps the footer and the hidden marker last', () => {
     const out = findingCommentBody({ ...base, severity: 'warning' }, { footer: 'Posted automatically' });
-    expect(out).toBe(`**Warning**\n\nB\n\nPosted automatically${M}`);
+    expect(out).toBe(`**Warning**\n\nB\n\nPosted automatically${T}`);
     expect(out.endsWith(FINDING_COMMENT_MARKER)).toBe(true);
   });
 });

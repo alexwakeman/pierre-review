@@ -3384,6 +3384,11 @@ Every comment Limn posts for a finding LEADS with the finding's severity as a bo
   The builders (`post-review.ts` `findingCommentBody` /
   `prLevelFindingBody`) take `severity` on the finding (`PostReviewFinding.severity`, optional) and
   call the seam. Replies (accept, pushback, resolve, manual reply) get no label.
+- **The reply note** (2026-11-08): every INLINE finding comment (`findingCommentBody`, the first
+  comment of a Limn thread, auto or manual) ends with `THREAD_REPLY_NOTE` ("_Replies will be picked up
+  in the next Limn check._") after the footer, before the marker. PR-level finding comments and every
+  reply Limn writes inside a thread never carry it. `parsePostedLimnFinding` strips it as one of its
+  italic notes. Comments posted before it are never edited.
 - ⚠ **Matching comments posted before and after the label.** `finding-thread.ts` compares a thread
   root's START with the finding's text; it accepts the start with or without a leading severity line
   (`stripLimnSeverityLead`). `posted-state.ts`'s PR-level match needs the backticked `path:line`,
@@ -3434,13 +3439,14 @@ activity.
   (`reconcileLimnFindingAuthors`, after `ensureLocalAccount`) applies the same rule to stored rows.
 - ⚠ **Every "own post" check reads the TRUE author** (`trueAuthorId(t)` = `coalesce(limn_posted_by,
   author_id)`): `isLimnPostedComment`, finding replies, posted state, `findFindingThread`, the
-  severity chip, auto-post's "did I take part", My Turn participation. So auto-resolve, pushback and
+  severity chip, auto-post's "did I take part". (NOT My Turn or the Feed: they count only what the
+  reader did in person — BACKEND.md § My Turn.) So auto-resolve, pushback and
   reminders keep working, and the reader's OWN Limn posts still never trigger their auto review. A
   teammate's Limn findings are a review bot's comments, so they DO count for a re-review.
-- **A bot everywhere**: never moves the ball (My Turn, Chronology), the Bots side of the Feed,
-  hidden on the Timeline, a `u<id>` row in Bots Monitoring with its own `bot-detail:<id>` tab. My
-  Turn keeps one exception: a PERSON's reply in a thread rooted on your own Limn finding still
-  summons you (your thread set is you plus your Limn bot).
+- **A bot everywhere**: never moves the ball in My Turn or in Chronology's "People" view (it does in
+  "People + bots", BOTTLENECKS.md § Two views), the Bots side of the Feed, hidden on the Timeline, a
+  `u<id>` row in Bots Monitoring with its own `bot-detail:<id>` tab. Since 2026-11-08 a person's
+  reply in a thread rooted on your Limn finding does NOT summon you (your thread set is you alone).
 - **Severity** is the lead's, never the scorer's: ML-SEVERITY.md § Limn findings.
 - **Bulk bot-thread resolve** (`getResolvableBotThreads*`) leaves Limn threads out; auto-resolve owns
   them.
@@ -3451,6 +3457,73 @@ activity.
   "Limn · alice" and its card names the poster. The severity badge on a Limn label says "From
   Limn's review." with no confidence. The old single `'pierre'` row in Bots Monitoring is gone (the
   vendor drill-down routes answer 400 for it).
+
+## Limn's actions are bots (2026-11-08)
+
+Owner rule: **"Everything Limn does on my behalf is not me."** The finding rule above is now the rule
+for EVERY GitHub write Limn makes under a person's account: reviews and approvals, the empty wrapper
+review GitHub makes around a reply or a standalone comment, story-check / CI / Sonar comments, the
+"@dependabot rebase" request, AI Fix / conflict / Implement commits, auto-merge and Dependencies
+merges, and PRs Limn opens. Each is the poster's `limn:<login>` bot; the person is kept beside it.
+
+- **Whose is a write (`github/write-origin.ts`)**: every exported write in `github/mutations.ts`, the
+  Limn posts in `review/post-review.ts`, the git push (`coding/git.ts` `PushTarget.origin` +
+  `limnCommits`) and the team-claim status take a REQUIRED `origin: WriteOrigin` — `'reader'` (a plain
+  button with the reader's own words or decision: Approve, Merge now, a typed reply, a reaction,
+  "Update branch", "Merge all") or a `LimnWriteOrigin` (`limn`: `auto` · `policy` · `reader_pressed`,
+  the account, repo, PR, the person, the source run). A Limn write runs through `limnWrite`, which
+  CLAIMS a ledger row before the call and settles it `done` with GitHub's ids (or `failed`) after. The
+  content rule: a plain comment route posting a body with a Limn marker is Limn's (`originForPostedBody`).
+  The seam's posts carry `PostReviewArgs.limn` / `PostFindingArgs.limn` (`LimnPostContext`).
+- **The ledger, `limn_actions`** (migration `0180`; DATA-MODEL.md): one row per write, `kind` shared
+  `LimnActionKind`, unique `(account_id, kind, claim_key)`. The review id of a reply's wrapper comes
+  back from the mutation (`pullRequestReview { fullDatabaseId }`), a standalone comment's from
+  `pull_request_review_id`. AI Fix, Implement and the conflict resolver record the commits they push
+  (one `push` row per sha); a rebase records none (rebased commits keep their authors). GitHub's
+  update-branch merge commit is recorded when the auto-merge runner adopts it (`isOurUpdateMerge`).
+- **The commit trailer**: every commit Limn creates ends `Limn-Run: <ref>` (`ai-fix/12`,
+  `story-build/4`, `conflict/<session>`, `auto-merge/7`; shared `withLimnRunTrailer`), so any install
+  knows it.
+- **ONE resolver** (`db/limn-bots.ts`: `commentIsLimn`, `reviewIsLimn`, `commitIsLimn`,
+  `prLimnRoles`): a row is Limn's when (a) its id / sha is in the ledger, (b) its body has a Limn
+  marker outside quoted lines, (c) it is an EMPTY COMMENTED review whose every inline comment is
+  Limn's (`review_comments.review_database_id`, from the fat query's `pullRequestReview`), or (d) a
+  commit carries the trailer. A merge / an opening moves only when GitHub names the same person the
+  ledger does.
+- **Where the person goes**: `reviews.limn_posted_by_user_id`, `commits.limn_pushed_by_user_id`,
+  `pull_requests.limn_merged_for_user_id` (beside `merged_by_id` = the bot) and
+  `limn_opened_for_user_id` (beside `author_id` = the bot). Events, search rows and thread roots follow
+  the bot. ⚠ "Is this mine" reads `trueAuthorId(table)` / `trueMergerId` (`db/true-author.ts`,
+  DB-free): team standings, the teammate import, own-PR gates (auto fix, auto post, claims, story build).
+  `isLimnPostedComment` also takes the reader's own `limn:` login as theirs.
+- **The `limn` lane** (shared `ActorLane`, label "Limn"): `resolveActorLanes` puts every `limn:` bot
+  there first. `PERIOD_METRICS_SCHEMA_VERSION` = 3.
+- ⚠ **SWITCHED BY `config.limnAttributeAll`, ON by default since 2026-11-08 (`LIMN_ATTRIBUTE_ALL=false` only for a fresh test DB — never turn it off on a database it has run on).** Off, sync
+  keeps the finding-era rule (findings and marked replies only) and writes no `limn_*` column; the
+  ledger, the trailer and `review_database_id` are recorded either way. It flips together with the
+  history: `reattributeLimnRows(accountId, { prIds? })` applies the same rule to stored rows
+  (idempotent, ONE transaction). With the flag on, the boot reconcile uses the wide rule too. Past AI
+  Fix commits (no sha stored then) are never guessed.
+- **The history backfill** (`db/limn-history-backfill.ts`; boot job `kickLimnHistoryBackfill`, after
+  listen, never awaited, ONLY with the flag on — off, the narrow rule would hand the rows back):
+  1. it SEEDS the ledger from the records Limn kept — `claude_reviews.posted_review_id` (review),
+     `claude_review_findings.github_comment_id`, `ticket_review_items.posted_comment_id`,
+     `claude_still_open_posts.comment_id`, `auto_merge_requests` 'merged' + Dependencies
+     `merge_landed` (ONE merge row per PR), Dependencies `result_sha` and Implement's
+     `pushed_commit_sha` (push), Implement / new-branch AI Fix PR numbers (open_pr), and each
+     Dependencies `rebase_request` matched to the reader's exact "@dependabot rebase" comment on that
+     PR within 2 minutes. Claim key `history:…` (a push `sha:<sha>`, the live key), `detail` 'history';
+  2. the WRAPPER RULE BY TIMING: an empty COMMENTED review of the READER's whose id no stored comment
+     names, with a Limn comment of theirs on the PR within ±2 s and none of their own words in that
+     window, gets a `review_wrapper` row (a teammate's wrappers wait for sync's exact rule);
+  3. `reattributeLimnRows` in batches of 100 PRs with a yield between them.
+  Done is recorded in `instance_meta` (`limn_history_backfill:v1:<accountId>`); a run past its 10-minute
+  limit records nothing and the next boot carries on. On a copy of the dev DB (8 s): 2,725 ledger rows;
+  1,071 reviews moved (596 of the reader's marked, 51 of a teammate's Limn, 424 wrappers — 346 beside a
+  marked comment, 78 beside an unmarked finding the ledger names), 322 comments, 161 merges, 1 commit;
+  the three My Turn "pushed since" cards (#444, #449, #455) went; a second run moved nothing.
+- **Not yet**: the instant local stamps (`upsertLocalReview`, `markPrMergedLocally`) still write the
+  reader until the next walk.
 
 ## Teammates' reviews (2026-11-03)
 

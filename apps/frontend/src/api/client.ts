@@ -251,6 +251,7 @@ import type {
   Workspace,
   WorkspacePendingMuteUpdate,
   FlowSettings,
+  FlowActorView,
   FlowPointersResponse,
   SandboxFolderCheck,
   SandboxFolderCheckBody,
@@ -609,6 +610,12 @@ export const api = {
   // OVERRIDE SET: a field left out goes back to its product default, and `{}` resets everything.
   setWorkspaceFlowSettings: (id: number, body: FlowSettings) =>
     fetch(`/api/workspaces/${id}/flow-settings`, jsonBody('PUT', body)).then((r) =>
+      handle<{ workspace: Workspace }>(r),
+    ),
+  // Chronology's view for a workspace (`null` = back to the default, "People + bots"). Refetch
+  // `flowFindings` + `flowTrend` (and the pointers) after it: every figure is re-measured.
+  setWorkspaceFlowView: (id: number, view: FlowActorView | null) =>
+    fetch(`/api/workspaces/${id}/flow-view`, jsonBody('PUT', { view })).then((r) =>
       handle<{ workspace: Workspace }>(r),
     ),
   // Settings → Workspace → Sandbox (docs/SANDBOX.md § The workspace mirror). Registered only while AI
@@ -1120,14 +1127,23 @@ export const api = {
 
   // `'reporting'` (the panel's default) is the workspace's REPORTING WINDOW, resolved server-side;
   // a number is the fixed 30/60/90-day view.
-  flowFindings: (workspaceId: number, window: number | 'reporting' = 'reporting') =>
+  // `view` (docs/BOTTLENECKS.md § Two views) overrides the workspace's stored Chronology view for
+  // this read; omitted ⇒ the stored one, echoed back as `view`. Key the query on whichever you send.
+  flowFindings: (workspaceId: number, window: number | 'reporting' = 'reporting', view?: FlowActorView) =>
     get<FlowResponse>(
-      withQuery('/api/flow-findings', workspaceParam(workspaceId), flowWindowParam(window)),
+      withQuery(
+        '/api/flow-findings',
+        workspaceParam(workspaceId),
+        flowWindowParam(window),
+        view ? `view=${view}` : undefined,
+      ),
     ),
   // Chronology "Over time": the last 26 weeks of the
   // same ledger, the event markers and a before/after lens per marked week. Fixed span, no window.
-  flowTrend: (workspaceId: number) =>
-    get<FlowTrendResponse>(withQuery('/api/flow-trend', workspaceParam(workspaceId))),
+  flowTrend: (workspaceId: number, view?: FlowActorView) =>
+    get<FlowTrendResponse>(
+      withQuery('/api/flow-trend', workspaceParam(workspaceId), view ? `view=${view}` : undefined),
+    ),
   // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click).
   workspaceMetricsDetail: (workspaceId: number) =>
     get<WorkspaceMetricsDetailResponse>(

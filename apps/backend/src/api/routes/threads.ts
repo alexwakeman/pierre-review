@@ -13,6 +13,7 @@ import {
   stampThreadResolved,
   upsertLocalReply,
 } from '../../db/queries.js';
+import { originForPostedBody } from '../../db/limn-actions.js';
 import {
   addReviewThreadReply,
   setReviewThreadResolved,
@@ -79,7 +80,7 @@ export async function threadRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const token = await getAccessToken(accountId);
-        const gh = await addReviewThreadReply(token, ctx.threadNodeId, body);
+        const gh = await addReviewThreadReply(token, ctx.threadNodeId, body, await originForPostedBody(accountId, ctx.prId, body));
         const authorId = await getAccountUserId(accountId);
         const rowId = await upsertLocalReply(ctx.prId, id, authorId, gh);
         // Bump the parent thread off 'untouched' so its badge reflects the reply
@@ -130,6 +131,7 @@ export async function threadRoutes(app: FastifyInstance): Promise<void> {
           token,
           ctx.threadNodeId,
           resolved,
+          'reader',
         );
         // Ownership already confirmed above, so the stamp is non-null.
         const derivedState = await stampThreadResolved(id, resolved, accountId);

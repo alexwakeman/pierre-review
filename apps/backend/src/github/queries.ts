@@ -70,6 +70,9 @@ const REVIEW_THREAD_NODE_FIELDS = /* GraphQL */ `
       fullDatabaseId
       body
       createdAt${reviewCommentDiffHunkField}
+      pullRequestReview {
+        fullDatabaseId
+      }
       author {
         login
         __typename
@@ -801,6 +804,9 @@ export interface GqlReviewComment {
   createdAt: string;
   diffHunk: string | null;
   author: GqlActor | null;
+  /** The review this comment belongs to (Limn's reply wrapper rule, db/limn-bots.ts). Optional: older
+   *  fixtures and partial responses omit it. */
+  pullRequestReview?: { fullDatabaseId: string | null } | null;
 }
 
 export interface GqlReviewThread {

@@ -129,6 +129,7 @@ const args = (over: Record<string, unknown> = {}): any => ({
   body: 'Body.',
   draft: true,
   protect: ['main'],
+  limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: 1 } },
   ...over,
 });
 
@@ -213,8 +214,8 @@ describe('applyAndPushBranch — the no-PR push', () => {
 describe('createPullRequest’s draft flag', () => {
   it('sends draft:true only when asked; absent otherwise (as before)', async () => {
     const real = await vi.importActual<typeof import('../../github/mutations.js')>('../../github/mutations.js');
-    await real.createPullRequest('t', { owner: 'acme', name: 'web', head: 'h', base: 'main', title: 't', body: 'b', draft: true });
-    await real.createPullRequest('t', { owner: 'acme', name: 'web', head: 'h', base: 'main', title: 't', body: 'b' });
+    await real.createPullRequest('t', { owner: 'acme', name: 'web', head: 'h', base: 'main', title: 't', body: 'b', draft: true }, 'reader');
+    await real.createPullRequest('t', { owner: 'acme', name: 'web', head: 'h', base: 'main', title: 't', body: 'b' }, 'reader');
     expect(T.posts[0].body).toMatchObject({ draft: true });
     expect('draft' in T.posts[1].body).toBe(false);
   });

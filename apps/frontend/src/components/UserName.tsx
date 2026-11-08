@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { limnPosterOf } from '@pierre-review/shared';
 import type { User } from '@pierre-review/shared';
-import { profileUrl, userLabel } from '../lib/ui.js';
+import { limnActsForTitle, profileUrl, userLabel } from '../lib/ui.js';
 import { useMaintainersByRepo } from '../hooks/useMaintainers.js';
 import { MaintainerShield } from './MaintainerShield.js';
 import { UserProfilePopover } from './UserProfilePopover.js';
@@ -74,7 +74,7 @@ export function UserName({
         }}
         title={
           limnPoster != null
-            ? `Limn findings posted by @${limnPoster}`
+            ? limnActsForTitle(limnPoster)
             : login
               ? `@${login} — activity & stats`
               : 'Activity & stats'

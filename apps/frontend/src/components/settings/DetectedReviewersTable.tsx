@@ -564,7 +564,7 @@ function ReviewerCard({
           </div>
           <div className="truncate text-meta text-ui-mute">
             {/* A Limn bot's login (`limn:alice`) is not a GitHub account: name the poster. */}
-            {limnPosterOf(r.login) != null ? `Findings posted by @${limnPosterOf(r.login)}` : `@${r.login}`}
+            {limnPosterOf(r.login) != null ? `Acts for @${limnPosterOf(r.login)}` : `@${r.login}`}
             {r.displayName != null && r.displayName !== r.login && r.displayName !== title && (
               <span className="ml-1">· {r.displayName}</span>
             )}

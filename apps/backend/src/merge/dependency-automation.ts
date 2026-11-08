@@ -120,6 +120,8 @@ import {
   type DepsClaimHandle,
   type DepsHold,
 } from './deps-claim.js';
+import { limnOriginForPr, orReader } from '../db/limn-actions.js';
+import type { WriteOrigin } from '../github/write-origin.js';
 
 const {
   autoMergePolicySkips,
@@ -1078,6 +1080,13 @@ async function tickWorkspace(
   }
 }
 
+/** LIMN'S WORK IS BOT WORK: the Dependencies policy writes as Limn, on the reader's behalf. */
+async function depsOrigin(pr: Candidate, actionId: number): Promise<WriteOrigin> {
+  return orReader(
+    await limnOriginForPr(pr.accountId, pr.id, 'policy', { source: { table: 'dependency_automation_actions', id: actionId } }),
+  );
+}
+
 function updateWords(cls: DependencyUpdateClass, securityFix: boolean): string {
   const size = cls.level ? `${cls.level} ` : '';
   return securityFix ? `a ${size}security fix` : `a ${size}dependency update`;
@@ -1101,7 +1110,7 @@ async function approve(
       // Pinned to the head we checked: a push since makes GitHub refuse it.
       commitId: pr.headSha,
       body: `Approved automatically: ${updateWords(cls, securityFix)} from a trusted bot, with CI green.\n\n${LIMN_MARKER}`,
-    });
+    }, await depsOrigin(pr, claim.id));
   } catch (err) {
     await finishAction(claim, 'failed', firstLine(err), log);
     log.warn({ err, prId: pr.id }, 'dependency automation: approval failed');
@@ -1136,11 +1145,12 @@ async function askBotToRebase(
   const bot = BOT_BRAND[kind ?? ''] ?? 'the bot';
   try {
     if (req.method === 'comment') {
-      const gh = await addIssueComment(token, pr.owner, pr.name, pr.number, req.body);
+      // ⚠ NO MARKER: the bot reads the command from the comment. The ledger is what makes it Limn's.
+      const gh = await addIssueComment(token, pr.owner, pr.name, pr.number, req.body, await depsOrigin(pr, claim.id));
       await finishAction(claim, 'done', `Asked ${bot} to rebase`, log);
       await upsertLocalPrComment(pr.id, viewerUserId, gh);
     } else {
-      const out = await updatePullRequestBody(token, pr.owner, pr.name, pr.number, req.body);
+      const out = await updatePullRequestBody(token, pr.owner, pr.name, pr.number, req.body, await depsOrigin(pr, claim.id));
       if (!out.ok) {
         await finishAction(claim, 'failed', out.message, log);
         return;
@@ -1355,7 +1365,7 @@ const defaultAiFixDeps: AiFixDeps = {
     const { pushFix } = await import('../coding/ai-fix/push.js');
     // The Push button's own path: write access re-checked, the branch must still be the fix's base
     // (never forced), the PR settled after the write.
-    const out = await pushFix(ctx, { accountId, fixId, target: 'existing' });
+    const out = await pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'policy' });
     return out.ok ? { ok: true, sha: out.result.commitSha } : { ok: false, message: out.message };
   },
   async isFixRunning(prId) {

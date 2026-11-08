@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { FlowResponse, FlowTrendResponse } from '@pierre-review/shared';
+import { parseFlowActorView, type FlowResponse, type FlowTrendResponse } from '@pierre-review/shared';
 import { FLOW_DEFAULT_WINDOW_DAYS, getFlowCourts } from '../../db/pr-intervals.js';
 import { getFlowTrend } from '../../db/flow-trend.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
@@ -28,6 +28,10 @@ import { accountIdOf } from '../plugins/auth.js';
 // span shows a "trend" that is entirely onboarding). `coverage` rides every response for the same
 // reason. The clamp lives in the engine, not here, so a future second caller cannot skip it.
 //
+// `?view=people|people_bots` picks who moves the ball (docs/BOTTLENECKS.md § Two views) for this
+// read only; absent or unknown ⇒ the workspace's stored view (PUT /api/workspaces/:id/flow-view).
+// The response echoes `view`. Same rule on /api/flow-trend.
+//
 // Rate tier: `search` (60/min), a DELIBERATE entry in `tierFor` and pinned in rate-limit.test.ts.
 // It is DB-only, but "this route is DB-only" is exactly the sentence that file exists to distrust:
 // one call runs the lane resolver and then FOUR chunked action scans (reviews, review comments,
@@ -35,9 +39,10 @@ import { accountIdOf } from '../plugins/auth.js';
 // of cost that put `GET /api/attention` and `GET /api/daily-brief` on this bucket.
 export async function flowRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/flow-findings', async (req): Promise<FlowResponse> => {
-    const q = req.query as { workspace?: string; days?: string; window?: string };
+    const q = req.query as { workspace?: string; days?: string; window?: string; view?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
+    const view = parseFlowActorView(q.view) ?? undefined;
     // A garbage `?days=` is the DEFAULT — the reporting window — not a 400: this is a dashboard
     // parameter carried in a bookmark, and the same "never an error out of a scope hint" rule
     // `?workspace=` follows. Only a positive integer picks a fixed span; anything else (absent,
@@ -47,9 +52,9 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
     if (q.window === 'reporting' || !hasDays) {
       const nowMs = Date.now();
       const reporting = await getReportingWindow(accountId, scope.workspaceId, nowMs);
-      return getFlowCourts(accountId, scope, FLOW_DEFAULT_WINDOW_DAYS, { reporting, nowMs });
+      return getFlowCourts(accountId, scope, FLOW_DEFAULT_WINDOW_DAYS, { reporting, nowMs, view });
     }
-    return getFlowCourts(accountId, scope, parsed);
+    return getFlowCourts(accountId, scope, parsed, { view });
   });
 
   // GET /api/flow-trend — Chronology "Over time": the last 26 weeks of the same ledger, one point per
@@ -61,9 +66,10 @@ export async function flowRoutes(app: FastifyInstance): Promise<void> {
   // markers and a thin-week flag so the coverage bias the cap guards against stays on screen. No
   // `?days=`: the span is fixed.
   app.get('/api/flow-trend', async (req): Promise<FlowTrendResponse> => {
-    const q = req.query as { workspace?: string };
+    const q = req.query as { workspace?: string; view?: string };
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
-    return getFlowTrend(accountId, scope);
+    const view = parseFlowActorView(q.view) ?? undefined;
+    return getFlowTrend(accountId, scope, { view });
   });
 }

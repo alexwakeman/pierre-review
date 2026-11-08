@@ -605,15 +605,17 @@ describe('failures are recorded, never retried', () => {
 
 describe('our own bodies are recognised as ours', () => {
   it('footer + marker on inline and PR-level bodies; isLimnPostedComment says ours only for our login', async () => {
-    const { findingCommentBody, prLevelFindingBody, FINDING_COMMENT_MARKER } = await import('../post-review.js');
+    const { findingCommentBody, prLevelFindingBody, FINDING_COMMENT_MARKER, THREAD_REPLY_NOTE } = await import('../post-review.js');
     const { isLimnPostedComment } = await import('../../db/review-threads-for-review.js');
     const inline = findingCommentBody({ body: 'b', editedBody: null, suggestion: 'x()' }, { footer: AUTO_POST_FOOTER });
     const question = prLevelFindingBody(
       { path: 'src/a.ts', line: 3, body: 'Why?', editedBody: null, suggestion: null },
       { outsideDiffNote: false, footer: AUTO_POST_FOOTER },
     );
+    // The inline comment opens a thread, so the reply note sits between the footer and the marker.
+    expect(inline.endsWith(`${AUTO_POST_FOOTER}\n\n${THREAD_REPLY_NOTE}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
+    expect(question.endsWith(`${AUTO_POST_FOOTER}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
     for (const body of [inline, question]) {
-      expect(body.endsWith(`${AUTO_POST_FOOTER}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
       expect(isLimnPostedComment({ body, databaseId: '1', authorLogin: 'Me' }, undefined, 'me')).toBe(true);
       expect(isLimnPostedComment({ body, databaseId: '1', authorLogin: 'alice' }, undefined, 'me')).toBe(false);
     }

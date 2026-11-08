@@ -297,7 +297,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - **MY TURN IS THE BALL RULE, STATE-DERIVED** ([docs/BACKEND.md](docs/BACKEND.md) § My Turn): a
   card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
   one stored thing is a per-SUBJECT DISMISSAL timestamp, applied inside `getMyTurn`. ⚠ **No bot
-  action returns the ball, including a push**; bot-ness via `globalAutomationUserIds`, NEVER
+  action (Limn's too, a push too) returns the ball or counts as the reader's**; bot-ness via `globalAutomationUserIds`, NEVER
   `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array** (drafts and muted repos
   too). FIXED groups (Waiting on you, Re-review, Your PRs — always on; `MY_TURN_ORDER`), oldest
   first, "Older" past 14 days; one card per PR (`onePerPr`). The ONE setting is the opt-in survey.
@@ -434,8 +434,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
   write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
-- ⚠ **A Limn FINDING comment is a BOT** (`limn:<login>`); the poster is `limn_posted_by_user_id`,
-  and own-post checks read `trueAuthorId`.
+- ⚠ **ALL LIMN WRITES ARE A BOT** (`limn:<login>`): writes take an `origin`, Limn's are ledgered;
+  own-post checks read `trueAuthorId`.
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
   never Limn's own. A FAILED auto run is retried by that rule only when TRANSIENT (caps and "Run auto
@@ -514,8 +514,8 @@ Monitoring, Slack.
   never a mix. A metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
   never stored. Every reading setting is PER WORKSPACE, no inheritance.
 - **Chronology** ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md), `db/pr-intervals.ts`): every open
-  hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and
-  bot-authored PRs are not measured; flag only LOPSIDED *AND* SLOW; NO person is named (except the
+  hour belongs to a court (reviewer / author / landing). ⚠ Who moves the ball is the per-workspace
+  VIEW ("People" / "People + bots"); bot-authored PRs are not measured; flag only LOPSIDED *AND* SLOW; NO person is named (except the
   new-contributor marker). `getFlowCourts` stays account-row-free (`verify:isolation` calls it).
 - **This Sprint** (fixed tab, `?view=sprint`; [docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint):
   `GET /api/sprint-graph` is DB only, ONE fold (`db/sprint-graph-fold.ts`). Briefs, themes, "needs

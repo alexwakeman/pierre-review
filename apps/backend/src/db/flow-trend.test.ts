@@ -350,9 +350,11 @@ describe('getFlowTrend, end to end', () => {
     await setWorkspaceFlowSettings(2, ws2, { days: [1, 2, 3, 4] });
 
     const scope = await q.resolveWorkspaceScope(1, String(ws1));
-    const res = await ft.getFlowTrend(1, scope, { nowMs });
+    // "People": only people move the ball (docs/BOTTLENECKS.md § Two views).
+    const res = await ft.getFlowTrend(1, scope, { nowMs, view: 'people' });
 
     expect(res.workspaceId).toBe(ws1);
+    expect(res.view).toBe('people');
     expect(res.weeks).toHaveLength(26);
     expect(res.weeks[25]!.partial).toBe(true);
     expect(res.weeks[20]!.measuredPrs).toBe(6);
@@ -387,7 +389,26 @@ describe('getFlowTrend, end to end', () => {
     expect(res.budgets.firstLook.good).toBe(2);
 
     // The cache serves completed weeks identically.
-    const again = await ft.getFlowTrend(1, scope, { nowMs });
+    const again = await ft.getFlowTrend(1, scope, { nowMs, view: 'people' });
     expect(again.weeks.slice(0, 25)).toEqual(res.weeks.slice(0, 25));
+
+    // "PEOPLE + BOTS" (the default): the AI review bot's reviews move the ball too. Week 23's (c) —
+    // only the bot approved — is now measured and passed its first review; (b)'s first review is
+    // the bot's request for changes, so it did not. The bot's own PR (a) stays out in both views.
+    // ⚠ The view is in the cache key: the cached "People" weeks above are not served here.
+    const both = await ft.getFlowTrend(1, scope, { nowMs });
+    expect(both.view).toBe('people_bots');
+    expect(both.weeks[23]!.measuredPrs).toBe(2);
+    expect(both.weeks[23]!.passedFirstReview).toBe(1);
+    expect(both.weeks[20]!.measuredPrs).toBe(6);
+
+    // The stored per-workspace setting is what an un-viewed read measures in.
+    const { setWorkspaceFlowView } = await import('./flow-settings.js');
+    expect(await setWorkspaceFlowView(1, ws1, 'people')).toBe(true);
+    expect((await ft.getFlowTrend(1, scope, { nowMs })).weeks[23]!.measuredPrs).toBe(1);
+    // Another account's workspace id is not writable from here.
+    expect(await setWorkspaceFlowView(1, ws2, 'people')).toBe(false);
+    expect(await setWorkspaceFlowView(1, ws1, null)).toBe(true);
+    expect((await ft.getFlowTrend(1, scope, { nowMs })).view).toBe('people_bots');
   });
 });

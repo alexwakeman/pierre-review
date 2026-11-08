@@ -14,7 +14,7 @@ import type {
   DoNextWeights,
   PendingTabKey,
 } from './pending-rules.js';
-import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
+import type { FlowActorView, FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { FeaturesStatus } from './features.js';
 import type { SonarIssue } from './sonar.js';
@@ -474,7 +474,11 @@ export type ActorLane =
   | 'release'
   /** CLA/DCO, triage, labels, stale-closers, metadata, size + preview reporters
    *  (`HOUSEKEEPING_BOTS`). Volume here is pure noise in every review metric. */
-  | 'housekeeping';
+  | 'housekeeping'
+  /** LIMN ITSELF — every `limn:<login>` bot: the reviews, findings, replies, approvals, merges and
+   *  pushes Limn made on a person's behalf (docs/CLAUDE-REVIEW.md § Limn's actions are bots). Its own
+   *  lane, so a report shows what Limn did apart from the people and from the other AI reviewers. */
+  | 'limn';
 
 /** Render order: people first, then the automation that AUTHORS code (the lanes that distort
  *  throughput), then the automation that RESPONDS to it (the lanes that distort review counts). */
@@ -482,6 +486,7 @@ export const ACTOR_LANES: ActorLane[] = [
   'human',
   'code_agent',
   'dependency',
+  'limn',
   'ai_review',
   'quality_gate',
   'release',
@@ -506,6 +511,8 @@ export const ACTOR_LANE_BAND: Record<ActorLane, ActorLaneBand> = {
   dependency: 'authors',
   release: 'authors',
   ai_review: 'responds',
+  // Limn mostly responds (reviews, approvals); it also lands and opens PRs, which its own lane shows.
+  limn: 'responds',
   quality_gate: 'responds',
   housekeeping: 'responds',
 };
@@ -778,6 +785,7 @@ export const ACTOR_LANE_LABEL: Record<ActorLane, string> = {
   code_agent: 'Code agents',
   release: 'Release automation',
   housekeeping: 'Housekeeping',
+  limn: 'Limn',
 };
 
 // A BOT IS A PER-WORKSPACE OBJECT. Everything below keys on (account, WORKSPACE, actor): ONE row
@@ -2057,6 +2065,9 @@ export interface FlowResponse {
    *  default): the window that was measured, so the panel names it ("This sprint so far", "Last 14
    *  days"). Absent for the 30/60/90-day options. */
   reportingWindow?: ReportingWindowInfo;
+  /** Who moved the ball in these figures (`FlowActorView`): the workspace's setting, or the
+   *  request's `?view=`. Trailing-optional for wire tolerance; the server always sets it. */
+  view?: FlowActorView;
   /** Human-touched merged pull requests behind every figure below. */
   measuredPrs: number;
   /** Workspace-wide, always three. */
@@ -2353,6 +2364,9 @@ export interface FlowPointerEvidence {
   /** Set when the evidence covers the workspace's reporting window rather than a fixed 30/60/90
    *  days. The plugin keys its cache on it and names it in the prompt. */
   reportingWindow?: ReportingWindowInfo;
+  /** Who moved the ball (`FlowActorView`). The plugin keys its cache on it, so each view keeps its
+   *  own pointers. */
+  view: FlowActorView;
   measuredPrs: number;
   settings: ResolvedFlowSettings;
   budgets: FlowBudgetRow[];
@@ -2541,6 +2555,9 @@ export interface Workspace {
   // Chronology's working hours and wait budgets for this workspace — ONLY what someone changed
   // (null = every default). Resolve with `resolveFlowSettings`; never read a field raw.
   flowSettings?: FlowSettings | null;
+  // Chronology's view (`FlowActorView`) for this workspace, RAW: null = the default
+  // (`resolveFlowActorView`). Set with PUT /api/workspaces/:id/flow-view.
+  flowView?: FlowActorView | null;
 }
 
 // What ONE Save on the Pending-mute settings section writes: either half, both, or neither.
@@ -11775,7 +11792,12 @@ export interface WorkspaceMetricsResponse {
 // `median_time_to_first_human_review_hours` are not the same measurement and must never be
 // subtracted from one another. `payloadHashFor` folds this constant, so the bump alone makes
 // every stored row stale and the next read regenerates it.
-export const PERIOD_METRICS_SCHEMA_VERSION = 2;
+//
+// ── VERSION 3 (2026-11-08): Limn's own actions are not the people's ─────────────────────────────
+// Limn writes under the reader's account; its reviews, approvals, merges and pushes were counted as
+// that person's. They are now stored under the poster's `limn:` bot (docs/CLAUDE-REVIEW.md § Limn's
+// actions are bots) in a lane of their own, `limn`, so every human-only figure changes meaning.
+export const PERIOD_METRICS_SCHEMA_VERSION = 3;
 
 export type PeriodMetricKey =
   | 'merged_prs' | 'human_merged_prs' | 'opened_prs'

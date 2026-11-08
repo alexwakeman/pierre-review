@@ -1070,8 +1070,9 @@ Overview later does not jump. It adds no fetch of its own: it stays fresh throug
 `usePrLiveRefresh`'s `['pr', prId]` invalidation, and `useDetailCacheReconciler` now also
 invalidates `['pr', id]` (never its threads) when the most recently fetched timeline/open-PRs feed
 carries a different `ciStatus` and was fetched after the detail (`ciDetailOutdated`) — CI finishing
-never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix, listed whenever
-`me.ai.enabled` — see **The agentic AI surfaces** below):
+never bumps `updatedAt`. Tabs (Overview / Activity / Threads / Changes, + AI Review / AI Fix, listed whenever `me.ai.enabled` — see
+**The agentic AI surfaces** below — + one Ticket tab per story, + a presence-gated **Bot activity** LAST, so its
+late arrival never shifts the 1–9 keys of the tabs before it):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
   from `mergeVerdict` — this row is where the old "mergeable" lie lived), a **Conflicts** row on
@@ -3408,6 +3409,23 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   these). Nothing is sent from another tab, or under the Automation lens (`ai_review` rows are always
   the People side). ⌘K and the liveness sweep skip `ai_review` cards. The tab never keeps the board
   from reading as empty.
+  - **SEEN BLOCKS** (2026-11-08; `lib/aiReviewsLedger.ts` pure, `store/aiReviewsSeen.ts`, tests
+    `test/aiReviewsLedger.test.ts`). The list is drawn as New (no heading: each row wears its tag),
+    then ONE BLOCK PER EARLIER VISIT, newest first, headed "Seen today 14:32" / "Seen yesterday
+    09:10" / "Seen Tue 4 Nov 16:17" (`seenBlockLabel`, local time), then the rows with no ledger
+    entry under no heading (a rule sets them apart) — reviews seen before the ledger existed, in
+    another browser, or in a never-looked workspace. Each block keeps the server's order
+    (`groupAiReviews`). The LEDGER is per BROWSER, one localStorage key `pierre:aiReviewsSeen:v1` =
+    `{v:1, seen:{[reviewId]:[seenAtMs, prId]}}`: while the tab is on screen and the page visible,
+    `useAiReviewsSeen` records every row New against the visit's stamp at the VISIT's start time, so
+    rows that arrive by poll join that visit's block; a workspace never looked at (`baseline` null)
+    records nothing. ONE entry per PR: a re-review (a new `reviewId`) is New again and replaces its
+    PR's entry, so its old block shrinks. A row this browser saw in an EARLIER visit is never New
+    again, even while the server's stamp lags. Pruned on write (60 days, then the newest 600).
+    Another tab's write arrives by the `storage` event and is MERGED (earliest seen time wins), and a
+    write merges what is stored first. Every read and write is in try/catch: broken storage only
+    means no blocks. ⚠ No server change, nothing scored, no row removed, the badge unchanged; it is
+    not in the persisted filters, so `FILTER_STORAGE_VERSION` is not involved (`:v1` is its own).
 - **Every My turn row has Dismiss** — a ✕ `IconButton` at the row's end (`dismissTargetOf`, the same
   per-PR dismissal as the panel's Dismiss and `e`), shown on hover or on the selected row with a
   pointer, always on touch; rendered only where it applies, never disabled; nothing fetches until it

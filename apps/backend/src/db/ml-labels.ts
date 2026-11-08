@@ -270,6 +270,8 @@ export async function listMlCandidates(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviews.authorId),
           inArray(reviews.authorId, automatedIds),
+          // A Limn review (its `limn:` bot) is Limn's own words, never an ML candidate.
+          isNull(reviews.limnPostedByUserId), // ⚠ LOCKSTEP with `countBotText`
           isNotNull(reviews.body),
           hasText(reviews.body),
           isNull(mlCommentLabels.id),
@@ -1504,6 +1506,7 @@ async function countBotText(
           inArray(pullRequests.repoId, scope.repoIds),
           isNotNull(reviews.authorId),
           inArray(reviews.authorId, automatedIds),
+          isNull(reviews.limnPostedByUserId), // ⚠ LOCKSTEP with `listMlCandidates`
           bodyPredicate(reviews.body),
           isNull(mlCommentLabels.id),
           ...windowed(reviews.submittedAt),

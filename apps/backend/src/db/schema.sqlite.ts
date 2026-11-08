@@ -89,6 +89,8 @@ import type {
   FeatureSettings,
   BuildPlanDecision,
   BuildPlanRevision,
+  LimnActionKind,
+  LimnActionOrigin,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -336,6 +338,13 @@ export const pullRequests = sqliteTable(
     // Drives the "has merge rights / maintainer" inference. Null for non-merged
     // PRs and until a (deep) sync backfills it on already-synced merged PRs.
     mergedById: integer('merged_by_id').references(() => users.id),
+    // LIMN'S WORK IS BOT WORK (migration 0180). A PR Limn MERGED (an auto-merge landing, a
+    // Dependencies merge, a merge-queue enqueue) stores the poster's `limn:<login>` bot in
+    // `mergedById` and the person here; a PR Limn OPENED (Implement, AI Fix on a new branch, the
+    // conflict resolver) stores the bot in `authorId` and the person in `limnOpenedForUserId`.
+    // "Is this my PR" reads `trueAuthorId(pullRequests)`. NULL on every other PR.
+    limnMergedForUserId: integer('limn_merged_for_user_id').references(() => users.id),
+    limnOpenedForUserId: integer('limn_opened_for_user_id').references(() => users.id),
     // The branch this PR targets (GraphQL `baseRefName`). The maintainer
     // inference only counts merges into the repo's default branch, so a merge
     // into a feature/integration branch doesn't elevate the merger. Null until a
@@ -659,6 +668,10 @@ export const reviewComments = sqliteTable(
     // other comment. Every "is this my own post" check reads `coalesce(this, author_id)`
     // (db/limn-bots.ts `trueAuthorId`).
     limnPostedByUserId: integer('limn_posted_by_user_id').references(() => users.id),
+    // GitHub's id of the REVIEW this comment belongs to (`pullRequestReview.databaseId`; migration
+    // 0180). Every inline comment and reply sits in one; an empty review whose every comment is
+    // Limn's is Limn's reply wrapper (db/limn-bots.ts `limnReviewVerdict`). NULL until synced.
+    reviewDatabaseId: text('review_database_id'),
   },
   (t) => ({
     threadIdx: index('rc_thread_idx').on(t.threadId),
@@ -711,10 +724,16 @@ export const reviews = sqliteTable(
     // GitHub numeric id (fullDatabaseId) for the #pullrequestreview-<id> deep link.
     databaseId: text('database_id'),
     submittedAt: integer('submitted_at', { mode: 'timestamp' }).notNull(),
+    // LIMN'S WORK IS BOT WORK (migration 0180; docs/CLAUDE-REVIEW.md § Limn's actions are bots). A
+    // review Limn posted (a summary, an approval, the empty wrapper GitHub makes around a reply) is
+    // stored under the poster's `limn:<login>` bot in `authorId`; the person is kept HERE. NULL on
+    // every other review. "Is this my own review" reads `trueAuthorId(reviews)`.
+    limnPostedByUserId: integer('limn_posted_by_user_id').references(() => users.id),
   },
   (t) => ({
     prIdx: index('rv_pr_idx').on(t.prId),
     authorIdx: index('rv_author_idx').on(t.authorId),
+    limnPosterIdx: index('rv_limn_poster_idx').on(t.limnPostedByUserId),
     nodeUx: uniqueIndex('reviews_pr_node').on(t.prId, t.githubNodeId),
   }),
 );
@@ -735,6 +754,9 @@ export const commits = sqliteTable(
     // card (migration 0072 / pg 0059).
     messageHeadline: text('message_headline'),
     committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
+    // A commit Limn made (an AI Fix, a conflict resolution, a branch update, an Implement push;
+    // migration 0180): `authorId` holds the poster's `limn:<login>` bot and the person is HERE.
+    limnPushedByUserId: integer('limn_pushed_by_user_id').references(() => users.id),
   },
   (t) => ({
     prIdx: index('commit_pr_idx').on(t.prId),
@@ -2226,6 +2248,10 @@ export const workspaces = sqliteTable(
     // the `accounts.blast_radius_config` precedent. Per WORKSPACE, because two teams in two
     // zones in one account work different hours.
     flowSettings: text('flow_settings', { mode: 'json' }).$type<FlowSettings>(),
+    // CHRONOLOGY'S VIEW (migration 0181): who moves the ball — 'people' or 'people_bots' (shared
+    // `FlowActorView`). NULL = the default (`resolveFlowActorView`). A reading setting, per WORKSPACE,
+    // no inheritance; it changes what is measured, never what is stored. db/flow-settings.ts.
+    flowView: text('flow_view'),
     // Activity → This Sprint: which story issues this workspace raised (migration 0102 / pg 0089).
     // DORMANT since 2026-10-12 (the sprint checks left This sprint with the chips): never read or
     // written; kept rather than rebuilding the table to drop a column.
@@ -4911,5 +4937,67 @@ export const worktreeLedger = sqliteTable(
     pathUq: uniqueIndex('worktree_ledger_path').on(t.path),
     // The sweep's read: every row still on disk.
     openIdx: index('worktree_ledger_removed').on(t.removedAt),
+  }),
+);
+
+// limn_actions — THE LIMN PROVENANCE LEDGER (migration 0180; docs/CLAUDE-REVIEW.md § Limn's actions
+// are bots). ONE row per GitHub write Limn made (or tried) under a person's account: a review, a
+// comment, a reply, a push, a merge, an enqueue, a PR it opened, a resolve, a reaction… Written by
+// the write functions themselves (`github/mutations.ts`, `review/post-review.ts`, `coding/git.ts`
+// push, the team-claim status) when the caller names a Limn origin (`LimnWriteOrigin`): CLAIMED
+// ('claimed') before the call, 'done' with GitHub's ids after it, 'failed' when it threw (a failed
+// write may still have landed — the row is kept). Sync's attribution reads it (db/limn-bots.ts):
+// a stored row whose GitHub id or sha is here is Limn's, whatever its body says.
+//   kind        shared LimnActionKind.          claim_key   the writer's own idempotency key.
+//   origin      'auto' (a run nobody pressed) · 'policy' (Dependencies) · 'reader_pressed'
+//               (the reader pressed a button that posts Limn's words or lands Limn's work).
+//   on_behalf_user_id   the person whose account Limn wrote as.
+//   source_table / source_id   the Limn run that caused it (claude_reviews, ai_fixes, …), if any.
+// pr_id is NULL while the PR is not stored yet (a PR Limn just opened); `pr_number` names it.
+// Tenancy: composite FKs onto repos and pull_requests (id, account_id), cascade; in
+// `accountScopedTables()` and both delete paths (deleteRepo, deletePrSubtree).
+export const limnActions = sqliteTable(
+  'limn_actions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    // No single-column FKs: the COMPOSITE declarations below (tenancy as a constraint).
+    repoId: integer('repo_id').notNull(),
+    prId: integer('pr_id'),
+    prNumber: integer('pr_number'),
+    kind: text('kind').$type<LimnActionKind>().notNull(),
+    claimKey: text('claim_key').notNull(),
+    status: text('status', { enum: ['claimed', 'done', 'failed'] }).notNull(),
+    origin: text('origin').$type<LimnActionOrigin>().notNull(),
+    githubNodeId: text('github_node_id'),
+    githubDatabaseId: text('github_database_id'),
+    commitSha: text('commit_sha'),
+    reviewDatabaseId: text('review_database_id'),
+    onBehalfUserId: integer('on_behalf_user_id').references(() => users.id),
+    sourceTable: text('source_table'),
+    sourceId: integer('source_id'),
+    detail: text('detail'),
+    at: integer('at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    claimUx: uniqueIndex('limn_actions_claim').on(t.accountId, t.kind, t.claimKey),
+    prIdx: index('limn_actions_pr_idx').on(t.accountId, t.prId),
+    dbIdIdx: index('limn_actions_dbid_idx').on(t.accountId, t.githubDatabaseId),
+    reviewDbIdIdx: index('limn_actions_review_dbid_idx').on(t.accountId, t.reviewDatabaseId),
+    shaIdx: index('limn_actions_sha_idx').on(t.accountId, t.commitSha),
+    nodeIdx: index('limn_actions_node_idx').on(t.accountId, t.githubNodeId),
+    repoAccountFk: foreignKey({
+      name: 'limn_actions_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+    prAccountFk: foreignKey({
+      name: 'limn_actions_pr_account_fk',
+      columns: [t.prId, t.accountId],
+      foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
   }),
 );

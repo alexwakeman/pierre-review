@@ -7,7 +7,7 @@ import type { SlackMessage } from './report.js';
 import { postToSlack } from './send.js';
 import { readTargetRow, type SlackTargetRow } from './targets.js';
 import { MERGED_EMOJI, toneAttachment, verdictEmoji, verdictTone } from './tones.js';
-import { aiRunProviderName, PAIR_RUN_LABEL } from '@pierre-review/shared';
+import { aiRunProviderName, limnPosterOf, PAIR_RUN_LABEL } from '@pierre-review/shared';
 
 // ── THE TWO SLACK EVENT SIGNALS (Pro, `slackDigest`; plugin migration 0040) ──────────────────
 //
@@ -175,10 +175,19 @@ export function reviewMessage(
   };
 }
 
+/** A login as Slack shows it: "@alex", or "Limn for @alex" for a `limn:` bot (Limn landed or opened it
+ *  on alex's behalf — never "@limn:alex", which is no GitHub login). */
+function slackActor(login: string | null | undefined): string | null {
+  if (!login) return null;
+  const poster = limnPosterOf(login);
+  return poster != null ? `Limn for @${escapeSlack(poster)}` : `@${escapeSlack(login)}`;
+}
+
 /** Pure builder for the "Pull request merged" message. Exported for its test. */
 export function mergeMessage(ctx: ProContext, workspaceId: number, f: PrFacts): SlackMessage {
-  const who = f.mergedByLogin ? `@${escapeSlack(f.mergedByLogin)}` : 'Someone';
-  const author = f.authorLogin ? ` (opened by @${escapeSlack(f.authorLogin)})` : '';
+  const who = slackActor(f.mergedByLogin) ?? 'Someone';
+  const opener = slackActor(f.authorLogin);
+  const author = opener ? ` (opened by ${opener})` : '';
   const text = `${who} merged ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`;
   return {
     blocks: [],

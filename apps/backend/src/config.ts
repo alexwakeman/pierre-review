@@ -145,6 +145,14 @@ export const config = {
   // full bodies instead — instant, fully-offline detail at the cost of a larger DB
   // (e.g. a local instance used without network).
   persistBodies: process.env.PERSIST_BODIES === 'true',
+  // LIMN'S WORK IS BOT WORK (docs/CLAUDE-REVIEW.md § Limn's actions are bots): sync stores EVERY row
+  // Limn wrote (reviews, reply wrappers, story-check / CI / Sonar comments, commits, merges, PRs it
+  // opened) under the poster's `limn:` bot — not only the finding comments. ON by default (owner
+  // decision 2026-11-08); the one-time history re-attribution (`kickLimnHistoryBackfill`) runs with it.
+  // ⚠ Never turn it off on a database it has run on: off, sync hands authors back to people while the
+  // re-attributed reviews stay with the bot. `LIMN_ATTRIBUTE_ALL=false` exists only for a fresh test DB.
+  // The ledger, the commit trailer and the GraphQL review id are recorded either way.
+  limnAttributeAll: process.env.LIMN_ATTRIBUTE_ALL !== 'false',
   port: intFromEnv('PORT', 4000),
   host: process.env.HOST ?? '127.0.0.1',
   dbPath,

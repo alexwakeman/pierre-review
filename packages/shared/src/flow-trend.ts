@@ -10,7 +10,7 @@
 // because retroactive history is coverage-biased; this view keeps the bias visible instead — every
 // week carries how many repositories contributed, repo-joined weeks are marked, and thin weeks are
 // drawn faint and left out of every baseline and shift calculation.
-import type { FlowBudgetMeasure } from './flow-settings.js';
+import type { FlowActorView, FlowBudgetMeasure } from './flow-settings.js';
 import type { CourtShare } from './types.js';
 
 /** The floors and spans the trend folds with — the ONE spelling the page's copy quotes. */
@@ -154,6 +154,8 @@ export interface FlowTrendResponse {
   truncated: boolean;
   /** Days of history the server keeps (RETENTION_DAYS), when that is shorter than the span. */
   retentionDays: number | null;
+  /** Who moved the ball in every week (`FlowActorView`). Trailing-optional for wire tolerance. */
+  view?: FlowActorView;
 }
 
 /**

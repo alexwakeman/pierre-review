@@ -56,9 +56,13 @@ describe('prTab on the wire', () => {
 
 describe('the Story tab', () => {
   const pd = read('components/PrDetail.tsx');
-  it('is listed only while the PR names a story, and last', () => {
+  it('is listed only while the PR names a story, after AI Fix; only Bot activity comes after it', () => {
     expect(pd).toMatch(/const storyTabVisible = storyTickets\.length > 0;/);
-    expect(pd).toMatch(/\.\.\.\(aiFixTabEnabled \? \(\['ai_fix'\] as Tab\[\]\) : \[\]\),\s*\/\/[^\n]*\n\s*\.\.\.\(storyTabVisible \? \(\['story'\] as Tab\[\]\) : \[\]\),/);
+    expect(pd).toMatch(/\.\.\.\(aiFixTabEnabled \? \(\['ai_fix'\] as Tab\[\]\) : \[\]\),\s*\.\.\.\(storyTabVisible \? \(\['story'\] as Tab\[\]\) : \[\]\),/);
+    // Bot activity is LAST in the strip and in the ⌘K list: it appears only once its data loads,
+    // so at the end it never shifts the 1–9 keys of the tabs before it.
+    expect(pd).toMatch(/\.\.\.\(storyTabVisible \? \(\['story'\] as Tab\[\]\) : \[\]\),\s*(\/\/[^\n]*\n\s*)*\.\.\.\(botTabVisible \|\| effectiveTab === 'bot_activity' \? \(\['bot_activity'\] as Tab\[\]\) : \[\]\),\s*\];/);
+    expect(pd).toMatch(/\.\.\.\(storyTabVisible \? \(\['story'\] as Tab\[\]\) : \[\]\),\s*(\/\/[^\n]*\n\s*)*\.\.\.\(botTabVisible \? \(\['bot_activity'\] as Tab\[\]\) : \[\]\),\s*\] as Tab\[\];/);
     // A stale ?prTab=story on a PR with no story reads as Overview, derived.
     expect(pd).toMatch(/tab === 'story' && pr != null && !storyTabVisible/);
   });

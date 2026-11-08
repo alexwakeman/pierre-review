@@ -367,6 +367,8 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       draft: a.draft,
       protect,
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, repo.repoId, prNumber, build.ident),
+      // Implement's work is Limn's: the reader pressed Push on what Limn built.
+      limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it, release the kept worktree. Nothing below may fail the push. ──
     await updateStoryBuildRepo(ctx, a.accountId, repo.id, {

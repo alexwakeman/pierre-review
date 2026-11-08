@@ -1,8 +1,10 @@
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { isLimnAuthoredBody, type ConsolidatedFeedItem, type MyTurnReason, type ReasonTag } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getAccountUserId } from '../auth/account.js';
 import { limnBotUserIds } from '../db/limn-bots.js';
+import { limnDischargedReviewRequests } from '../db/limn-discharged-requests.js';
+import { trueAuthorId } from '../db/true-author.js';
 
 // "My Turn" participation intelligence — CORE / free. The Consolidated Feed is a plain
 // chronological activity stream; this flags each item `isMyTurn` when it's an event on a PR
@@ -28,6 +30,13 @@ interface Participation {
 // feed): the subset the viewer authored, merged, is a requested reviewer on, or previously
 // reviewed / commented on. Isolation rides on prId ∈ the account-owned candidate set, so the
 // child tables need no accountId predicate. The sets are broken out to colour the reason pills.
+//
+// ⚠ ONLY WHAT THE VIEWER DID IN PERSON (docs/BACKEND.md § My Turn: "everything Limn does on my
+// behalf is not me"). Limn's reviews, comments and merges are stored under the viewer's `limn:` bot
+// (db/limn-bots.ts), so `author_id` / `merged_by_id` = the viewer already leaves them out — never OR
+// in `limn_posted_by_user_id` / `limn_merged_for_user_id`. Two deliberate exceptions, both about the
+// PR rather than an action: a PR Limn OPENED for the viewer is authored by them (`trueAuthorId`), and
+// a review request only a Limn review answered still stands (db/limn-discharged-requests.ts).
 async function resolveParticipation(
   accountId: number,
   localUserId: number | null,
@@ -50,7 +59,7 @@ async function resolveParticipation(
     .where(
       and(
         eq(pullRequests.accountId, accountId),
-        eq(pullRequests.authorId, localUserId),
+        eq(trueAuthorId(pullRequests), localUserId),
         inArray(pullRequests.id, prIds),
       ),
     )
@@ -81,6 +90,10 @@ async function resolveParticipation(
     requested.add(row.prId);
     all.add(row.prId);
   }
+  for (const prId of (await limnDischargedReviewRequests(localUserId, prIds)).keys()) {
+    requested.add(prId);
+    all.add(prId);
+  }
   for (const row of await db
     .select({ prId: reviews.prId })
     .from(reviews)
@@ -92,8 +105,7 @@ async function resolveParticipation(
   for (const row of await db
     .select({ prId: prComments.prId })
     .from(prComments)
-    // The TRUE poster: a Limn finding the reader posted sits under their `limn:` bot.
-    .where(and(or(eq(prComments.authorId, localUserId), eq(prComments.limnPostedByUserId, localUserId)), inArray(prComments.prId, prIds)))
+    .where(and(eq(prComments.authorId, localUserId), inArray(prComments.prId, prIds)))
     .execute()) {
     commented.add(row.prId);
     all.add(row.prId);
@@ -101,8 +113,7 @@ async function resolveParticipation(
   for (const row of await db
     .select({ prId: reviewComments.prId })
     .from(reviewComments)
-    // The TRUE poster: a Limn finding the reader posted sits under their `limn:` bot.
-    .where(and(or(eq(reviewComments.authorId, localUserId), eq(reviewComments.limnPostedByUserId, localUserId)), inArray(reviewComments.prId, prIds)))
+    .where(and(eq(reviewComments.authorId, localUserId), inArray(reviewComments.prId, prIds)))
     .execute()) {
     commented.add(row.prId);
     all.add(row.prId);

@@ -338,10 +338,11 @@ export async function runDependencyMergeAll(args: {
           continue;
         }
         if (LIVE_READY_STATES.has(m.mergeableState)) {
+          // The reader pressed "Merge all": their decision, like the merge button (not recorded).
           const out = await mergePullRequest(token, pr.owner, pr.name, pr.number, {
             method,
             expectedHeadSha: m.headSha,
-          });
+          }, 'reader');
           if (out.ok) {
             // Stamp + cascade exactly like POST /api/prs/:id/merge.
             await markPrMergedLocally(prId, accountId, await getAccountUserId(accountId));

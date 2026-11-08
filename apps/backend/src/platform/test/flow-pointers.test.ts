@@ -41,6 +41,7 @@ function evidence(over: Partial<FlowPointerEvidence> = {}): FlowPointerEvidence 
   return {
     workspaceId: 5,
     windowDays: 30,
+    view: 'people_bots',
     measuredPrs: 3,
     settings: resolveFlowSettings(null, 'Europe/London'),
     budgets: [],
@@ -166,12 +167,21 @@ describe('the payload hash', () => {
       elapsedDays: 3,
     };
     const e = evidence({ workspaceId: 5, reportingWindow: sprint });
-    expect(flowPointersScopeKeyFor(e)).toBe('ws:5|r:sprint:2026-10-01T00:00:00.000Z');
+    expect(flowPointersScopeKeyFor(e)).toBe('ws:5|r:sprint:2026-10-01T00:00:00.000Z|v:people_bots');
     // A rolling window's start slides every second; keying on it would never hit the cache.
     const rolling = { ...sprint, mode: 'rolling_14' as const, from: '2026-09-20T12:34:56.000Z' };
-    expect(flowPointersScopeKeyFor(evidence({ workspaceId: 5, reportingWindow: rolling }))).toBe('ws:5|r:rolling_14');
-    // The fixed options keep their old key, so stored rows stay readable.
-    expect(flowPointersScopeKeyFor(evidence({ workspaceId: 5, windowDays: 60 }))).toBe(flowPointersScopeKey(5, 60));
+    expect(flowPointersScopeKeyFor(evidence({ workspaceId: 5, reportingWindow: rolling }))).toBe('ws:5|r:rolling_14|v:people_bots');
+    // The fixed options key on their days, plus the view.
+    expect(flowPointersScopeKeyFor(evidence({ workspaceId: 5, windowDays: 60 }))).toBe(`${flowPointersScopeKey(5, 60)}|v:people_bots`);
+    // Each Chronology view keeps its own row, and its own hash.
+    const people = evidence({ workspaceId: 5, reportingWindow: rolling, view: 'people' });
+    expect(flowPointersScopeKeyFor(people)).toBe('ws:5|r:rolling_14|v:people');
+    expect(flowPointersPayloadHash(flowPointersScopeKeyFor(people), people)).not.toBe(
+      flowPointersPayloadHash(
+        flowPointersScopeKeyFor(evidence({ workspaceId: 5, reportingWindow: rolling })),
+        evidence({ workspaceId: 5, reportingWindow: rolling }),
+      ),
+    );
     // The prompt names the window the panel names.
     expect(buildFlowPointersUserPrompt(e)).toContain('(this sprint so far)');
   });

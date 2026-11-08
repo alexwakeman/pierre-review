@@ -339,19 +339,23 @@ export const defaultStillOpenDeps: StillOpenDeps = {
     };
   },
   async reply(accountId, threadNodeId, body) {
-    const [{ getAccessToken }, { addReviewThreadReply }] = await Promise.all([
+    const [{ getAccessToken }, { addReviewThreadReply }, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    const c = await addReviewThreadReply(await getAccessToken(accountId), threadNodeId, body);
+    const origin = ledger.orReader(await ledger.limnOriginForThread(accountId, threadNodeId, 'auto'));
+    const c = await addReviewThreadReply(await getAccessToken(accountId), threadNodeId, body, origin);
     return { commentId: c.databaseId != null ? String(c.databaseId) : null };
   },
   async unresolve(accountId, threadNodeId) {
-    const [{ getAccessToken }, { setReviewThreadResolved }] = await Promise.all([
+    const [{ getAccessToken }, { setReviewThreadResolved }, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, false);
+    const origin = ledger.orReader(await ledger.limnOriginForThread(accountId, threadNodeId, 'auto'));
+    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, false, origin);
   },
   async stampUnresolved(threadId, accountId) {
     const { stampThreadResolved } = await import('../../db/queries.js');
@@ -606,6 +610,7 @@ async function postStillOpen(
             owner: pr.owner,
             name: pr.name,
             prNumber: pr.number,
+            limn: { accountId, prId, origin: 'auto', source: { table: 'claude_reviews', id: review.id } },
             reviewHeadSha: review.headSha,
             finding: {
               id: -thread.id,

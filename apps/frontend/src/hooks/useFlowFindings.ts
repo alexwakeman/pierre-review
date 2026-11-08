@@ -1,7 +1,8 @@
 import { skipToken, useQuery } from '@tanstack/react-query';
-import type { FlowResponse } from '@pierre-review/shared';
+import type { FlowActorView, FlowResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
+import { flowViewKeySlot, useWorkspaceFlowView } from './useFlowView.js';
 
 // The "Chronology" tab's one read — `GET /api/flow-findings`, the COURT LEDGER.
 // The human-lane twin of the Bots rail: that surface measures automation, this one measures where
@@ -23,11 +24,13 @@ import { workspaceKey } from './useActivity.js';
 export function flowFindingsQueryKey(
   workspaceId: number | null,
   days: number | 'reporting',
+  view: FlowActorView | null = null,
 ): (string | number)[] {
   // `days` is its own slot ('reporting' = the workspace's reporting window; a number is clamped to
   // [7, 90] server-side), so two windows are two genuinely
   // different answers over the same workspace and must not share a cache entry.
-  return ['flow-findings', workspaceKey(workspaceId), days];
+  // `view` (who moves the ball, hooks/useFlowView.ts) is its own slot for the same reason.
+  return ['flow-findings', workspaceKey(workspaceId), days, flowViewKeySlot(view)];
 }
 
 // ⚠ DELIBERATELY NOT IN `ACTIVITY_QUERY_KEYS`. That list is swept on every repo add/move and every
@@ -39,9 +42,10 @@ export function flowFindingsQueryKey(
 // claims to describe the same population. The 5-minute interval below already tracks the sync
 // cadence; adding it to the sweep would spend that fold again on every repo edit.
 export function useFlowFindings(workspaceId: number | null, days: number | 'reporting') {
+  const view = useWorkspaceFlowView(workspaceId);
   return useQuery<FlowResponse>({
-    queryKey: flowFindingsQueryKey(workspaceId, days),
-    queryFn: workspaceId == null ? skipToken : () => api.flowFindings(workspaceId, days),
+    queryKey: flowFindingsQueryKey(workspaceId, days, view),
+    queryFn: workspaceId == null ? skipToken : () => api.flowFindings(workspaceId, days, view ?? undefined),
     // The same cadence every workspace-scoped survey on this pane runs at: findings are folded
     // from already-synced rows, so they can only change when a sync lands. Held with the query:
     // a disabled query does not refetch on an interval, on focus or on reconnect.

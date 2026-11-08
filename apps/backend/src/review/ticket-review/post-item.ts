@@ -302,6 +302,7 @@ async function postInsideClaim(
       owner: pr.owner,
       name: pr.name,
       prNumber: pr.number,
+      limn: { accountId, prId: targetPrId, origin: a.auto === true ? 'auto' : 'reader_pressed', source: { table: 'ticket_reviews', id: runId } },
       // The head this run judged: a PR pushed since gets headMoved, so a stale verdict is never posted.
       reviewHeadSha: member.headSha,
       // ONE PR-level comment, never inline.

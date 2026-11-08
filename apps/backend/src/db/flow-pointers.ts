@@ -18,11 +18,12 @@
 // Deterministic and free: no model, no GitHub call. The plugin's GET runs it to report staleness,
 // so nothing clock-derived may leave here in a field the payload hash folds.
 import { and, eq, inArray } from 'drizzle-orm';
-import type {
-  FlowPointerEvidence,
-  FlowPointerExemplar,
-  FlowPointerRow,
-  FlowPrRow,
+import {
+  DEFAULT_FLOW_ACTOR_VIEW,
+  type FlowPointerEvidence,
+  type FlowPointerExemplar,
+  type FlowPointerRow,
+  type FlowPrRow,
 } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { resolveActorLanes } from './actor-lanes.js';
@@ -198,6 +199,8 @@ export async function getFlowPointerEvidence(
     workspaceId: flow.workspaceId,
     windowDays: flow.windowDays,
     ...(flow.reportingWindow ? { reportingWindow: flow.reportingWindow } : {}),
+    // The workspace's Chronology view — the evidence is measured in it, and the plugin keys on it.
+    view: flow.view ?? DEFAULT_FLOW_ACTOR_VIEW,
     measuredPrs: flow.measuredPrs,
     settings,
     budgets: flow.budgets ?? [],

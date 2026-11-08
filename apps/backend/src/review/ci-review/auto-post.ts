@@ -45,6 +45,7 @@ import {
   type AutoPostDeps,
 } from '../claude-review/auto-post.js';
 import { getCiPrContext, getCiReviewById, getCiReviewRow } from './persist.js';
+import type { LimnPostContext } from '../../platform/contract.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -114,7 +115,7 @@ export function ciCommentBody(items: readonly CiReviewItem[], headSha: string, b
 
 export interface CiAutoPostDeps extends Pick<AutoPostDeps, 'livePr' | 'settle' | 'isAutomation' | 'accountUserId'> {
   /** Post ONE PR-level comment as the reader; returns GitHub's comment id. Throws on a GitHub error. */
-  postComment(owner: string, name: string, prNumber: number, body: string): Promise<{ commentId: string }>;
+  postComment(owner: string, name: string, prNumber: number, body: string, limn: LimnPostContext): Promise<{ commentId: string }>;
 }
 
 export const defaultCiAutoPostDeps: CiAutoPostDeps = {
@@ -122,9 +123,11 @@ export const defaultCiAutoPostDeps: CiAutoPostDeps = {
   settle: defaultAutoPostDeps.settle,
   isAutomation: defaultAutoPostDeps.isAutomation,
   accountUserId: defaultAutoPostDeps.accountUserId,
-  async postComment(owner, name, prNumber, body) {
+  async postComment(owner, name, prNumber, body, limn) {
     const { submitGithubIssueComment } = await import('../post-review.js');
-    return submitGithubIssueComment({ owner, name, prNumber, body });
+    const { limnOriginForPr, orReader } = await import('../../db/limn-actions.js');
+    const origin = orReader(await limnOriginForPr(limn.accountId, limn.prId, limn.origin, { source: limn.source ?? null }));
+    return submitGithubIssueComment({ owner, name, prNumber, body }, origin);
   },
 };
 
@@ -256,7 +259,12 @@ async function autoPostCiReview(
 
   let final: CiAutoPostRecord;
   try {
-    const { commentId } = await deps.postComment(pr.owner, pr.name, pr.number, ciCommentBody(picked, row.headSha, aiRunProviderName(run)));
+    const { commentId } = await deps.postComment(pr.owner, pr.name, pr.number, ciCommentBody(picked, row.headSha, aiRunProviderName(run)), {
+      accountId,
+      prId,
+      origin: 'auto',
+      source: { table: 'ci_reviews', id: runId },
+    });
     // GitHub has 201'd: from here nothing may throw or retry.
     final = { ...record, status: 'posted', at: nowIso(), commentId };
   } catch (err) {

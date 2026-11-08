@@ -26,7 +26,7 @@ table:
 |---|---|---|
 | The **metric vector** (15 keys), coverage, the lane breakdown | `db/period-metrics.ts` | CORE |
 | The **forecast estimator** (pure, no I/O, no db import) | `db/forecast.ts` | CORE |
-| **Who did the work** — the seven-lane actor resolver | `db/actor-lanes.ts` | CORE |
+| **Who did the work** — the eight-lane actor resolver | `db/actor-lanes.ts` | CORE |
 | The **1:1 person vector** (no caller since 2026-10-22 — the People report is removed; kept behind the required `getPersonPeriod` seam) | `db/person-period.ts` | CORE |
 | **Storage, narration, routes, hashing, backfill** | `apps/backend/src/platform/insights/period-report.ts` (+ platform migrations `0025`/`0026`) | platform |
 
@@ -220,7 +220,11 @@ discipline as `db/changepoint.ts`.
 
 ---
 
-## `PERIOD_METRICS_SCHEMA_VERSION` = 2
+## `PERIOD_METRICS_SCHEMA_VERSION` = 3
+
+**v3 (2026-11-08)**: Limn's own writes (reviews, approvals, merges, pushes) moved off the people's
+figures into the `limn` lane ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn's actions are bots), so every
+human-only figure changed meaning — bumped in both spellings (shared `types.ts`, `db/period-metrics.ts`).
 
 The version is **folded into the platform's `payloadHashFor`** (`v:${…}` alongside the `p3|`
 formula prefix, the workspace, the period key, the cadence, the model, the sorted repo ids, the
@@ -293,15 +297,18 @@ which metric it is fitting.
 
 ---
 
-## The seven `ActorLane`s (`db/actor-lanes.ts`)
+## The eight `ActorLane`s (`db/actor-lanes.ts`)
 
 The vector answers *what happened*; the lane resolver answers *how much of it was a person*.
 Both are needed, because on a real workspace the blend is severe enough to make the headline
 figures describe nobody (the 68-line median above).
 
 ```
-human · code_agent · dependency · ai_review · quality_gate · release · housekeeping
+human · code_agent · dependency · limn · ai_review · quality_gate · release · housekeeping
 ```
+
+`limn` is Limn itself: every `limn:<login>` bot, whatever its stored role (rule 0 below), band
+`responds`, label "Limn".
 
 `ACTOR_LANES` render order is people first, then the automation that **AUTHORS** code (the
 lanes that distort throughput), then the automation that **RESPONDS** to it (the lanes that
@@ -344,6 +351,7 @@ The categories genuinely overlap (`github-advanced-security` is a scanner with a
 SonarQube is a quality check some accounts classify by hand; Copilot both reviews and,
 elsewhere, authors). Earlier rules win:
 
+0. a `limn:` login → `limn` (before everything: it is never a person)
 1. manual "this is a person" → `human` (nothing overrules it)
 2. no automation signal at all → `human`
 3. **MANUAL** role → that role's lane

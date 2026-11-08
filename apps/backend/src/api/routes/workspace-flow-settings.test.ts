@@ -137,3 +137,40 @@ describe('PUT /api/workspaces/:id/flow-settings', () => {
     expect((await getResolvedFlowSettings(2, foreignWs)).defaults.timeZone).toBe(true);
   });
 });
+
+// PUT /api/workspaces/:id/flow-view — Chronology's view (docs/BOTTLENECKS.md § Two views): who
+// moves the ball. A reading setting per workspace, null = the default ("People + bots").
+describe('PUT /api/workspaces/:id/flow-view', () => {
+  const putView = async (id: number, body: unknown) => {
+    const res = await app.inject({ method: 'PUT', url: `/api/workspaces/${id}/flow-view`, payload: body as any });
+    return { status: res.statusCode, body: res.json() as any };
+  };
+
+  it('stores the view, echoes it raw on the workspace, and null clears it to the default', async () => {
+    const { getWorkspaceFlowView } = await import('../../db/flow-settings.js');
+    expect(await getWorkspaceFlowView(1, ownWs)).toBe('people_bots');
+    const set = await putView(ownWs, { view: 'people' });
+    expect(set.status).toBe(200);
+    expect(set.body.workspace.flowView).toBe('people');
+    expect(await getWorkspaceFlowView(1, ownWs)).toBe('people');
+    // Setting the view leaves the working hours alone (a separate route, a separate column).
+    await put(ownWs, { timeZone: 'America/New_York' });
+    expect(await getWorkspaceFlowView(1, ownWs)).toBe('people');
+    const cleared = await putView(ownWs, { view: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.workspace.flowView).toBeNull();
+    expect(await getWorkspaceFlowView(1, ownWs)).toBe('people_bots');
+  });
+
+  it('400s on an unknown view and on a missing one', async () => {
+    expect((await putView(ownWs, { view: 'bots' })).status).toBe(400);
+    expect((await putView(ownWs, {})).status).toBe(400);
+  });
+
+  it('404s on another account’s workspace and writes nothing there', async () => {
+    const res = await putView(foreignWs, { view: 'people' });
+    expect(res.status).toBe(404);
+    const { getWorkspaceFlowView } = await import('../../db/flow-settings.js');
+    expect(await getWorkspaceFlowView(2, foreignWs)).toBe('people_bots');
+  });
+});

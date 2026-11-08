@@ -12,7 +12,7 @@ import {
   storyMatchKey,
   ticketEntriesOf,
 } from './ticket.js';
-import { prLevelFindingBody, findingCommentBody, FINDING_COMMENT_MARKER } from '../post-review.js';
+import { prLevelFindingBody, findingCommentBody, FINDING_COMMENT_MARKER, THREAD_REPLY_NOTE } from '../post-review.js';
 
 const ticket: ClaudeReviewTicket = {
   title: 'Reset password',
@@ -201,11 +201,11 @@ describe('legacy story findings — reading and posting', () => {
     expect(off.startsWith('BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\n**`src/other.ts:9`**\n\nOnly on success.')).toBe(true);
     // Inline: the story line, then the body (or the reword), then the marker.
     expect(findingCommentBody({ ...partly, editedBody: 'Mine', storyLead: storyCommentLead(partly, entries) })).toBe(
-      `BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\nMine\n\n${FINDING_COMMENT_MARKER}`,
+      `BMD-1040 · AC3 (partly met): Ping @\u200balice on reset\n\nMine\n\n${THREAD_REPLY_NOTE}\n\n${FINDING_COMMENT_MARKER}`,
     );
     // An explanation-less finding posts the story line alone.
     expect(findingCommentBody({ body: '', editedBody: null, suggestion: null, storyLead: 'Story 2 · AC1 (not met): X' })).toBe(
-      `Story 2 · AC1 (not met): X\n\n${FINDING_COMMENT_MARKER}`,
+      `Story 2 · AC1 (not met): X\n\n${THREAD_REPLY_NOTE}\n\n${FINDING_COMMENT_MARKER}`,
     );
   });
 

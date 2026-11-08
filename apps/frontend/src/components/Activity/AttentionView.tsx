@@ -757,7 +757,7 @@ export function AttentionView(): JSX.Element {
               <>
                 {/* AI reviews: the newest AI review per PR, newest first; "New" since the last look. */}
                 {aiRows.length > 0 && (
-                  <PendingAiReviews rows={aiRows} usersById={aiUsersById} baseline={aiSeen.baseline} />
+                  <PendingAiReviews rows={aiRows} usersById={aiUsersById} baseline={aiSeen.baseline} visitStartMs={aiSeen.visitStartMs} />
                 )}
                 {empty?.placement !== 'alone' && view.shown < view.total && (
                   <p className="px-3 pt-3 text-meta text-ui-faint">

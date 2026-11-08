@@ -689,6 +689,8 @@ describe('tierFor — GitHub quota spenders', () => {
     // Deterministic — no model behind it, so it must never be swept onto the BILLED `ai` bucket
     // either. Paid ≠ AI: the `ai` tier meters token spend, and this route spends none.
     expect(tiers('GET', '/api/flow-findings')).not.toContain('ai');
+    // Storing the view is a one-row DB write: the workspace-CRUD read tier.
+    expect(tiers('PUT', '/api/workspaces/3/flow-view')).toEqual(['read']);
   });
 
   // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label

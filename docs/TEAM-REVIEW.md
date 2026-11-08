@@ -33,9 +33,14 @@ flowchart LR
 Three rules follow from that and explain most of what is below:
 
 1. **A Limn only knows what reached GitHub.** A review someone "kept in Limn" is invisible to the team.
-2. **Every write is a person's write.** A Limn post is that person's review or comment on GitHub, so
-   GitHub's own rules apply to it (an author cannot approve their own PR; branch rules decide what a
-   push dismisses).
+2. **Every write is a person's write ON GITHUB, and Limn's IN LIMN.** A Limn post is that person's
+   review or comment on GitHub, so GitHub's own rules apply to it (an author cannot approve their own
+   PR; branch rules decide what a push dismisses). Inside Limn it is the bot "Limn · alex", never
+   alex: the owner's rule is "everything Limn does on my behalf is not me". Every row Limn wrote
+   (a review, an approval, the empty review around a reply, a story check, a commit, a merge, a PR it
+   opened) is stored under that bot, recognised by the hidden marker, the `Limn-Run:` commit trailer,
+   or, on the machine that wrote it, Limn's own record of its writes ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+   § Limn's actions are bots). A teammate's Limn rows are found by the marker and the trailer only.
 3. **Each Limn decides alone, from what it reads.** Nothing coordinates two machines except the
    status lines and markers they leave on GitHub, so every rule is written to be safe when two Limns
    act at nearly the same moment, and safe when a teammate runs an older version.
@@ -47,6 +52,7 @@ What travels between Limns:
 | A **status line** on the PR's latest commit, one per model ("alex is reviewing with Claude", "alex reviewed · 3 comments", "Cleared by alex…") | Who is reviewing this commit with which model, and whether it is done. Never CI. |
 | A **posted review** with a hidden marker at the end | That it is a Limn review; the commit it read; the model(s); the verdict sent; the Limn version; its judgement of earlier threads; whether the poster lets a teammate's Limn lift their "changes requested". |
 | **Finding comments** with a severity word ("**Warning**") and a hidden marker | A Limn finding, raised by that person's Limn. Every Limn treats it as a bot ("Limn · alex"), never as the person. |
+| A **`Limn-Run:` line** at the end of a commit message | A commit Limn made (AI Fix, a conflict resolution, Implement, a branch update). Every Limn treats it as the bot's, never the person's. |
 | **"Still open:" replies** with a hidden marker | Which commit it was said at, and whether this thread has already been reopened once. |
 
 What never travels: costs, settings, drafts, reviews kept in Limn, chat, and anything about the
@@ -445,13 +451,19 @@ flowchart TD
 |---|---|---|
 | An unanswered review thread | **The PR author** — never the person who opened it | The author replies, pushes a fix, or resolves |
 | A still-open point | The PR author | Same, judged at the current commit |
-| An outstanding review request | The requested reviewer | They review |
+| An outstanding review request | The requested reviewer | They review **in person**. A review only their Limn posted removes the request on GitHub, but Limn keeps it in their My Turn |
 | A Limn finding, reminder, "Still open:" reply, pushback, acknowledgement or resolve reply | Nobody — stored as "Limn · alex", never as the person | — |
+| A teammate's reply to your Limn's finding | Nobody — the thread is Limn's, not yours, unless you replied in it yourself | — |
 
 Any reply with Limn's hidden marker is stored as "Limn · alex" (a "Post reply" you press too: the
 words are Limn's draft). It never ends a thread card, never raises a "reply in a thread you
 commented in" card, never makes a thread "Replied", and never starts another Limn's review.
 Replies stored before 1.0.5 are moved to the bot on the next start or sync.
+
+Your turn counts only what you did yourself. Limn's reviews, comments, pushes and merges for you
+never count as "your last action", so a PR only your Limn touched is never your turn. Two things are
+about the PR, not an action, and still count: a PR your Limn opened for you (Implement, AI Fix on a
+new branch) is one of "Your PRs", and a review request only your Limn answered still waits on you.
 
 The Slack digest and the Pending board word threads this way: "Comment on src/x.ts waiting on the
 author"; "Alex's comment on package.json has no reply · waiting on Robin".
@@ -607,6 +619,7 @@ version.
 |---|---|---|
 | D1 | An earlier warning or blocker that a review judges still open stops an approval, like a new one; an earlier blocker means "request changes". | § 5 |
 | D2 | On the reader's own PR, Limn never reopens a thread and never starts a new one; it may only reply "Still open:". | § 6 |
+| D3 | Limn's actions never count as the person (2026-11-08): a reply to your Limn's finding does not summon you; a PR your Limn opened is still yours; a request only your Limn answered still stands. Chronology shows two views, "People" and "People + bots", so Limn's effect on the waits is visible. | § 8 |
 
 ### Gaps that remain
 

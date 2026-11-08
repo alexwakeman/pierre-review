@@ -12,6 +12,9 @@ import {
 import { fetchPrHeadInfo } from '../github/mutations.js';
 import { codedError, pushForceWithLease, pushRef } from './git.js';
 import { protectedRefsFor } from './git-ops.js';
+import { isLimnOrigin, recordLimnWrite, type WriteOrigin } from '../github/write-origin.js';
+import { limnRunTrailer } from '@pierre-review/shared';
+import { limnRunRef } from '../db/limn-actions.js';
 import { withWorktreeOwner } from '../review/worktree-owner.js';
 
 const execFileAsync = promisify(execFile);
@@ -265,13 +268,16 @@ async function runMerge(
   trunk: string,
   branchLabel: string,
   ident: Ident,
+  trailer: string | null = null,
 ): Promise<void> {
   const gc = identArgs(ident);
   if (await isAncestor(worktree, trunkSha, 'HEAD')) {
     return; // already contains the trunk
   }
+  // A Limn update carries the `Limn-Run:` trailer (a second paragraph), so any install knows it.
+  const message = trailer ? ['-m', `Merge ${trunk} into ${branchLabel}`, '-m', trailer] : ['-m', `Merge ${trunk} into ${branchLabel}`];
   const res = await gitTry(
-    [...gc, 'merge', '--no-ff', '--no-edit', '-m', `Merge ${trunk} into ${branchLabel}`, trunkSha],
+    [...gc, 'merge', '--no-ff', '--no-edit', ...message, trunkSha],
     worktree,
   );
   if (res.ok) return;
@@ -300,8 +306,11 @@ export async function updatePrBranchFromTrunk(args: {
   headSha: string;
   trunk: string;
   strategy: 'rebase' | 'merge';
+  /** The reader pressed "Update branch" (theirs), or Limn's auto-merge runner updates it (Limn's,
+   *  github/write-origin.ts). Required: every caller answers. */
+  origin: WriteOrigin;
 }): Promise<{ headSha: string; strategy: 'rebase' | 'merge' }> {
-  const { accountId, owner, name, prNumber, headRef, headSha, trunk, strategy } = args;
+  const { accountId, owner, name, prNumber, headRef, headSha, trunk, strategy, origin } = args;
   const token = await getAccessToken(accountId);
   const ident = await identFor(accountId);
 
@@ -337,6 +346,7 @@ export async function updatePrBranchFromTrunk(args: {
     committish: 'HEAD',
     remoteBranch: headRef,
     protect: await protectedRefsFor(accountId, owner, name, prNumber, headOwner, headName),
+    origin,
   };
 
   let repoCloneDir: string | null = null;
@@ -351,16 +361,19 @@ export async function updatePrBranchFromTrunk(args: {
       const newSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
       // Rewriting history requires a force push; the lease pins to the sha we cloned so a
       // concurrent push aborts it (never blows away someone else's work).
-      await pushForceWithLease({ ...push, worktree: worktreePath, leaseSha: headSha });
+      // Rebased commits keep their authors: they are not Limn's work, so none is recorded as a push.
+      await pushForceWithLease({ ...push, worktree: worktreePath, leaseSha: headSha, limnCommits: [] });
+      await recordLimnWrite(origin, 'branch_update', { detail: `rebased onto ${trunk}: ${newSha}` });
       return { headSha: newSha, strategy };
     }
 
-    await runMerge(worktreePath, trunkSha, trunk, headRef, ident); // throws on conflict
+    await runMerge(worktreePath, trunkSha, trunk, headRef, ident, isLimnOrigin(origin) && origin.source ? limnRunTrailer(limnRunRef(origin.source)) : isLimnOrigin(origin) ? limnRunTrailer('update-branch') : null); // throws on conflict
     const newSha = (await git(['rev-parse', 'HEAD'], worktreePath)).stdout.trim();
     // A merge only adds a commit (the old head is its ancestor) → a plain push. Already
     // up-to-date (runMerge no-op) leaves HEAD unchanged → nothing to push.
     if (newSha !== headSha) {
-      await pushRef({ ...push, worktree: worktreePath });
+      // The merge commit is Limn's when Limn made it.
+      await pushRef({ ...push, worktree: worktreePath, limnCommits: [newSha] });
     }
     return { headSha: newSha, strategy };
   } finally {

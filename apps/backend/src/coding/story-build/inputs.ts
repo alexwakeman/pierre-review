@@ -2,6 +2,7 @@ import type { ClaudeReviewTicket, StoryDocsCriteriaSource, StoryDocsCriterion, T
 import type { AgentContext } from '../../review/agent-context.js';
 import { defaultInputSeams, resolveStoryDocsInputs, type StoryDocsInputSeams, type StoryText } from '../../review/story-docs/inputs.js';
 import type { StoryBuildSeed } from './persist.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 // THE STORY A BUILD STARTS FROM ("Implement story", docs/STORY-BUILD.md § Inputs). Resolved EXACTLY as
 // the docs check resolves it (`review/story-docs/inputs.ts resolveStoryDocsInputs` — the same criteria
@@ -96,7 +97,7 @@ export const defaultStoryBuildInputSeams: StoryBuildInputSeams = {
         authorNode: users.githubNodeId,
       })
       .from(pr)
-      .leftJoin(users, eq(users.id, pr.authorId))
+      .leftJoin(users, eq(users.id, trueAuthorId(pr)))
       .where(and(eq(pr.accountId, accountId), inArray(pr.id, ids)))
       .execute()) as Array<{
       id: number;

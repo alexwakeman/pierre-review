@@ -11,7 +11,7 @@ import {
 } from '@floating-ui/react';
 import type { User } from '@pierre-review/shared';
 import { FEED_WINDOW_DAYS, USER_STATS_WINDOW_DAYS, limnPosterOf } from '@pierre-review/shared';
-import { profileUrl, userLabel } from '../lib/ui.js';
+import { limnActsForLine, limnActsForTitle, profileUrl, userLabel } from '../lib/ui.js';
 import { useFilters } from '../store/filters.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { useRepos } from '../hooks/useTimeline.js';
@@ -151,7 +151,7 @@ export function UserProfilePopover({
   const label = userLabel(user, userId);
   const login = user?.githubLogin ?? null;
   // A Limn bot (`limn:alice`) is not a GitHub account: no profile link, and its sub-line names
-  // the person whose findings it posted.
+  // the person it acts for (everything Limn did for them is this bot, never them).
   const githubUrl = login ? profileUrl(login) : null;
   const limnPoster = limnPosterOf(login);
   const rows: { label: string; value: number; dot?: string }[] = stats
@@ -198,8 +198,8 @@ export function UserProfilePopover({
               {label}
             </div>
             {limnPoster != null ? (
-              <div className="truncate text-meta text-ui-mute" title={`Limn findings posted by @${limnPoster}`}>
-                Findings posted by @{limnPoster}
+              <div className="truncate text-meta text-ui-mute" title={limnActsForTitle(limnPoster)}>
+                {limnActsForLine(limnPoster)}
               </div>
             ) : login ? (
               <div className="truncate text-meta text-ui-mute" title={`@${login}`}>

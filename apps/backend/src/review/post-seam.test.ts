@@ -25,6 +25,12 @@ type Got = Array<{ id: number; path: string; line: number | null; side?: 'LEFT' 
 const fetchReviewComments = vi.fn(async (..._a: unknown[]): Promise<Got> => []);
 type Listed = Array<{ id: number; commit_id: string | null; body: string | null; state: string; submitted_at?: string | null }>;
 const fetchPrReviews = vi.fn(async (..._a: unknown[]): Promise<Listed> => []);
+// The ledger is a database write: never the real DB from this file (it has none). The origin the
+// seam builds is 'reader' here, so nothing is recorded.
+vi.mock('../db/limn-actions.js', () => ({
+  limnOriginForPr: vi.fn(async () => null),
+  orReader: (o: unknown) => o ?? 'reader',
+}));
 vi.mock('./post-review.js', async (orig) => ({
   ...(await orig<typeof import('./post-review.js')>()),
   fetchCurrentHeadSha: vi.fn(async () => 'HEAD'),
@@ -51,11 +57,12 @@ const q = (id: number, path: string, line: number | null) => ({
 describe('questions in the one auto review', () => {
   it('inline on their line, else the file’s first change with a note, else a PR comment', async () => {
     const { postReview } = await import('./post-seam.js');
-    const { FINDING_COMMENT_MARKER, FALLBACK_ANCHOR_NOTE } = await import('./post-review.js');
+    const { FINDING_COMMENT_MARKER, FALLBACK_ANCHOR_NOTE, THREAD_REPLY_NOTE } = await import('./post-review.js');
     const out = await postReview({
       owner: 'acme',
       name: 'api',
       prNumber: 1,
+      limn: { accountId: 1, prId: 1, origin: 'auto' as const },
       reviewHeadSha: 'HEAD',
       body: 'Lead.',
       verdict: 'COMMENT',
@@ -73,9 +80,11 @@ describe('questions in the one auto review', () => {
     expect(sent.comments[1]!.body).toContain(FALLBACK_ANCHOR_NOTE);
     const pc = submitGithubIssueComment.mock.calls[0]![0] as { body: string };
     expect(pc.body).toContain('Question 3?');
-    for (const b of [...sent.comments.map((c) => c.body), pc.body]) {
-      expect(b.endsWith(`${AUTO_POST_FOOTER}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
+    // Inline comments open threads (reply note before the marker); the PR comment does not.
+    for (const b of sent.comments.map((c) => c.body)) {
+      expect(b.endsWith(`${AUTO_POST_FOOTER}\n\n${THREAD_REPLY_NOTE}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
     }
+    expect(pc.body.endsWith(`${AUTO_POST_FOOTER}\n\n${FINDING_COMMENT_MARKER}`)).toBe(true);
   });
 });
 
@@ -88,6 +97,7 @@ describe('a Claude + Codex pair’s comments', () => {
       owner: 'acme',
       name: 'api',
       prNumber: 1,
+      limn: { accountId: 1, prId: 1, origin: 'auto' as const },
       reviewHeadSha: 'HEAD',
       body: 'Lead.',
       verdict: 'COMMENT',
@@ -109,6 +119,7 @@ describe('the review’s inline comment ids are read back', () => {
     owner: 'acme',
     name: 'api',
     prNumber: 1,
+    limn: { accountId: 1, prId: 1, origin: 'auto' as const },
     reviewHeadSha: 'HEAD',
     body: 'Lead.',
     verdict: 'COMMENT' as const,
@@ -158,6 +169,7 @@ describe('a failed review POST that landed anyway', () => {
     owner: 'acme',
     name: 'api',
     prNumber: 1,
+    limn: { accountId: 1, prId: 1, origin: 'auto' as const },
     reviewHeadSha: 'HEAD',
     body: 'Lead.',
     verdict: 'COMMENT' as const,
@@ -235,6 +247,7 @@ describe('the summary marker carries how the review ran', () => {
       owner: 'acme',
       name: 'api',
       prNumber: 1,
+      limn: { accountId: 1, prId: 1, origin: 'auto' as const },
       reviewHeadSha: 'HEAD',
       body: 'Lead.',
       verdict: 'REQUEST_CHANGES',

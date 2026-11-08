@@ -30,6 +30,20 @@ import {
 import { randomBytes } from 'node:crypto';
 import { limnReviewMarker } from '@pierre-review/shared';
 import { limnVersion } from '../version.js';
+import { recordLimnWrite, type WriteOrigin } from '../github/write-origin.js';
+import type { LimnPostContext } from '../platform/contract.js';
+
+/** The ledger origin of a seam post (every seam post is Limn's words; 'reader' only when the PR
+ *  cannot be placed, which never blocks the post). */
+async function seamOrigin(limn: LimnPostContext, claimKey?: string): Promise<WriteOrigin> {
+  const { limnOriginForPr, orReader } = await import('../db/limn-actions.js');
+  return orReader(
+    await limnOriginForPr(limn.accountId, limn.prId, limn.origin, {
+      source: limn.source ?? null,
+      ...(claimKey ? { claimKey } : {}),
+    }),
+  );
+}
 
 // The GitHub-write half of the ctx.review seam. Security-sensitive (per-account gh token +
 // line-anchoring), so it stays CORE — the plugin hands over the user's ticked findings (read
@@ -109,7 +123,8 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   // THE HIDDEN METADATA (shared `limnReviewMarker`, docs/CLAUDE-REVIEW.md § Teammates' reviews): the
   // head, how the review ran, the verdict and the Limn version — what a teammate's Limn reads to show
   // this review. Same `v=1 a=` prefix, so every prefix reader is unchanged.
-  const marker = limnReviewMarker(randomBytes(6).toString('hex'), {
+  const nonce = randomBytes(6).toString('hex');
+  const marker = limnReviewMarker(nonce, {
     headSha: args.reviewHeadSha,
     verdict: args.verdict,
     limnVersion: limnVersion(),
@@ -131,6 +146,8 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   if (args.dryRun) return { preview };
 
   const startedAt = Date.now();
+  // The ledger row is keyed by this attempt's nonce, so the read-back below settles the same row.
+  const origin = await seamOrigin(args.limn, `review:${nonce}`);
   let ghReviewId: string;
   try {
     ({ reviewId: ghReviewId } = await submitGithubReview({
@@ -141,7 +158,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
       body: finalBody,
       event: args.verdict,
       comments,
-    }));
+    }, origin));
   } catch (err) {
     // ⚠ AN ERROR IS NOT PROOF NOTHING WAS POSTED. GitHub has answered a review POST with a 422
     // ("An internal error occurred") AND published the review. Look before calling it a failure:
@@ -154,6 +171,8 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     });
     if (landed == null) throw err;
     ghReviewId = landed;
+    // GitHub published it after all: it is Limn's (the claimed row turns 'done' with its id).
+    await recordLimnWrite(origin, 'review', { githubDatabaseId: landed });
   }
 
   // Read back the inline comments GitHub just created and pair each with its finding, so the finding
@@ -184,7 +203,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
         name: args.name,
         prNumber: args.prNumber,
         body: pc.body,
-      });
+      }, await seamOrigin(args.limn));
       prCommentResults.push({ findingId: pc.findingId, commentId });
     } catch {
       /* best-effort — leave the finding un-posted rather than strand the posted review */
@@ -232,6 +251,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   const { owner, name, prNumber, reviewHeadSha, finding: f } = args;
   const currentHead = await fetchCurrentHeadSha(owner, name, prNumber);
   if (currentHead !== reviewHeadSha) return { headMoved: true };
+  const origin = await seamOrigin(args.limn);
   const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead, severity: f.severity };
   const footer = f.footer ?? null;
   const tag = f.severityTag ?? null;
@@ -252,7 +272,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   // A forced PR-level comment (auto-posting's questions): never inline, and the file it names IS
   // in the diff, so no "outside the diff" note.
   if (args.prLevel) {
-    const { commentId } = await submitGithubIssueComment({ owner, name, prNumber, body: prLevelBody(false) });
+    const { commentId } = await submitGithubIssueComment({ owner, name, prNumber, body: prLevelBody(false) }, origin);
     return { commentId, postedCommentKind: 'pr_comment' };
   }
 
@@ -266,7 +286,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       line: f.line,
       side: f.side,
       body: findingCommentBody(shape, { footer, tag }),
-    });
+    }, origin);
     return { commentId, postedCommentKind: 'inline' };
   }
 
@@ -282,7 +302,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       line: fb.line,
       side: fb.side,
       body: findingCommentBody(shape, { fallbackNote: true, footer, tag }),
-    });
+    }, origin);
     return { commentId, postedCommentKind: 'inline' };
   }
 
@@ -291,6 +311,6 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
     name,
     prNumber,
     body: prLevelBody(true),
-  });
+  }, origin);
   return { commentId, postedCommentKind: 'pr_comment' };
 }

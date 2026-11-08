@@ -134,6 +134,8 @@ export async function postTeammateReminder(
       owner: pr.owner,
       name: pr.name,
       prNumber: pr.number,
+      // The reader pressed "Remind": Limn's words, on their behalf.
+      limn: { accountId, prId, origin: 'reader_pressed' },
       // The synced head: the seam refuses when the live head moved past it (`headMoved`).
       reviewHeadSha: pr.headSha,
       finding: {

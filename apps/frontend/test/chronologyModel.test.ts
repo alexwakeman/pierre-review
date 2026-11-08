@@ -396,6 +396,15 @@ describe('what was set aside', () => {
     );
   });
 
+  it('in "People + bots" a review bot’s look counts too, and the line says so', () => {
+    expect(exclusionLineFor(coverage({ excludedNoHumanTouch: 3 }), 'people_bots')).toBe(
+      'Set aside: 3 no person or review bot reviewed or commented on.',
+    );
+    expect(exclusionLineFor(coverage({ excludedNoHumanTouch: 3 }), 'people')).toBe(
+      'Set aside: 3 no person reviewed or commented on.',
+    );
+  });
+
   it('says nothing when nothing was set aside', () => {
     expect(exclusionLineFor(coverage({}))).toBeNull();
   });

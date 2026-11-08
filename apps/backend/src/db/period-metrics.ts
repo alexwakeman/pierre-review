@@ -57,6 +57,7 @@ const ACTOR_LANE_ORDER: ActorLane[] = [
   'human',
   'code_agent',
   'dependency',
+  'limn',
   'ai_review',
   'quality_gate',
   'release',
@@ -71,7 +72,8 @@ const { prComments, pullRequests, repos, reviewComments, reviews, reviewThreads 
 // in lockstep — and `period-metrics.test.ts` imports the shared originals (a test is not in
 // release/dist) and asserts the two arrays are identical, so the drift is caught in CI rather
 // than by a reader.
-export const PERIOD_METRICS_SCHEMA_VERSION = 2;
+// v3 (2026-11-08): Limn's own actions moved out of the people's figures into the `limn` lane.
+export const PERIOD_METRICS_SCHEMA_VERSION = 3;
 
 /** CLOSED + ORDERED at schema version 2. This order IS the render order and is part of the
  *  contract. Each human-only twin sits immediately after the blended figure it corrects — read

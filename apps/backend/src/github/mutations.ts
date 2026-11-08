@@ -25,6 +25,7 @@ import type { GqlCheckContext, GqlReactionGroup } from './queries.js';
 import { checkContextState } from './check-context-state.js';
 import { rollupStateWithoutLimn } from '@pierre-review/shared';
 import { summariseReactionGroups, toGithubReactionContent } from './reactions.js';
+import { limnWrite, type WriteOrigin } from './write-origin.js';
 
 // ---- Review-thread reply (GraphQL) ----
 
@@ -39,6 +40,8 @@ interface AddReplyResponse {
       createdAt: string;
       url: string;
       author: { login: string } | null;
+      // The review GitHub wraps the reply in (Limn's wrapper when Limn replies).
+      pullRequestReview?: { fullDatabaseId: string | null } | null;
     } | null;
   };
 }
@@ -55,6 +58,9 @@ const ADD_REPLY_MUTATION = /* GraphQL */ `
         author {
           login
         }
+        pullRequestReview {
+          fullDatabaseId
+        }
       }
     }
   }
@@ -66,6 +72,7 @@ export async function addReviewThreadReply(
   token: string,
   threadNodeId: string,
   body: string,
+  origin: WriteOrigin,
 ): Promise<{
   nodeId: string;
   databaseId: number | null;
@@ -73,25 +80,36 @@ export async function addReviewThreadReply(
   createdAt: string;
   url: string;
   authorLogin: string | null;
+  /** The review GitHub wrapped the reply in. */
+  reviewDatabaseId: string | null;
 }> {
-  const gql = getGraphqlClientFor(token);
-  const res = await gql<AddReplyResponse>(ADD_REPLY_MUTATION, {
-    input: { pullRequestReviewThreadId: threadNodeId, body },
-  });
-  const c = res.addPullRequestReviewThreadReply.comment;
-  if (!c) {
-    throw new Error(
-      'GitHub returned no comment for the thread reply (the reply may still have posted)',
-    );
-  }
-  return {
-    nodeId: c.id,
-    databaseId: c.databaseId,
-    body: c.body,
-    createdAt: c.createdAt,
-    url: c.url,
-    authorLogin: c.author?.login ?? null,
-  };
+  return limnWrite(
+    origin,
+    'reply',
+    {},
+    async () => {
+      const gql = getGraphqlClientFor(token);
+      const res = await gql<AddReplyResponse>(ADD_REPLY_MUTATION, {
+        input: { pullRequestReviewThreadId: threadNodeId, body },
+      });
+      const c = res.addPullRequestReviewThreadReply.comment;
+      if (!c) {
+        throw new Error(
+          'GitHub returned no comment for the thread reply (the reply may still have posted)',
+        );
+      }
+      return {
+        nodeId: c.id,
+        databaseId: c.databaseId,
+        body: c.body,
+        createdAt: c.createdAt,
+        url: c.url,
+        authorLogin: c.author?.login ?? null,
+        reviewDatabaseId: c.pullRequestReview?.fullDatabaseId ?? null,
+      };
+    },
+    (r) => ({ githubNodeId: r.nodeId, githubDatabaseId: r.databaseId, reviewDatabaseId: r.reviewDatabaseId }),
+  );
 }
 
 // ---- Resolve / unresolve a review thread (GraphQL) ----
@@ -129,7 +147,15 @@ export async function setReviewThreadResolved(
   token: string,
   threadNodeId: string,
   resolved: boolean,
+  origin: WriteOrigin,
 ): Promise<{ isResolved: boolean }> {
+  return limnWrite(origin, 'resolve', {}, () => setThreadResolvedNow(token, threadNodeId, resolved), () => ({
+    githubNodeId: threadNodeId,
+    detail: resolved ? 'resolved' : 'unresolved',
+  }));
+}
+
+async function setThreadResolvedNow(token: string, threadNodeId: string, resolved: boolean): Promise<{ isResolved: boolean }> {
   const gql = getGraphqlClientFor(token);
   if (resolved) {
     const res = await gql<ResolveResponse>(RESOLVE_MUTATION, {
@@ -166,6 +192,7 @@ export async function addIssueComment(
   name: string,
   number: number,
   body: string,
+  origin: WriteOrigin,
 ): Promise<{
   nodeId: string;
   databaseId: number;
@@ -174,19 +201,27 @@ export async function addIssueComment(
   url: string;
   authorLogin: string | null;
 }> {
-  const res = await ghRestPostFor<RestIssueComment>(
-    token,
-    `/repos/${owner}/${name}/issues/${number}/comments`,
-    { body },
+  return limnWrite(
+    origin,
+    'pr_comment',
+    { prNumber: number },
+    async () => {
+      const res = await ghRestPostFor<RestIssueComment>(
+        token,
+        `/repos/${owner}/${name}/issues/${number}/comments`,
+        { body },
+      );
+      return {
+        nodeId: res.node_id,
+        databaseId: res.id,
+        body: res.body,
+        createdAt: res.created_at,
+        url: res.html_url,
+        authorLogin: res.user?.login ?? null,
+      };
+    },
+    (r) => ({ githubNodeId: r.nodeId, githubDatabaseId: r.databaseId }),
   );
-  return {
-    nodeId: res.node_id,
-    databaseId: res.id,
-    body: res.body,
-    createdAt: res.created_at,
-    url: res.html_url,
-    authorLogin: res.user?.login ?? null,
-  };
 }
 
 // ---- Submit a PR review (REST) ----
@@ -273,13 +308,22 @@ export async function dismissPrReview(
   number: number,
   reviewId: number,
   message: string,
+  origin: WriteOrigin,
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
-  const res = await ghRestPutStatus(token, `/repos/${owner}/${name}/pulls/${number}/reviews/${reviewId}/dismissals`, {
-    message,
-    event: 'DISMISS',
-  });
-  if (res.ok) return { ok: true };
-  return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+  return limnWrite(
+    origin,
+    'dismiss',
+    { prNumber: number },
+    async (): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+      const res = await ghRestPutStatus(token, `/repos/${owner}/${name}/pulls/${number}/reviews/${reviewId}/dismissals`, {
+        message,
+        event: 'DISMISS',
+      });
+      if (res.ok) return { ok: true };
+      return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+    },
+    (r) => (r.ok ? { githubDatabaseId: reviewId } : { failed: r.message }),
+  );
 }
 
 // Submit ONE PR review (inline comments + body + verdict) in a single call. The
@@ -297,6 +341,7 @@ export async function submitPrReview(
     commitId?: string;
     comments?: Array<{ path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string }>;
   },
+  origin: WriteOrigin,
 ): Promise<{
   databaseId: number;
   nodeId: string | null;
@@ -306,6 +351,19 @@ export async function submitPrReview(
   url: string;
   authorLogin: string | null;
 }> {
+  return limnWrite(origin, 'review', { prNumber: number }, () => submitPrReviewNow(token, owner, name, number, opts), (r) => ({
+    githubNodeId: r.nodeId,
+    githubDatabaseId: r.databaseId,
+  }));
+}
+
+async function submitPrReviewNow(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  opts: Parameters<typeof submitPrReview>[4],
+): Promise<Awaited<ReturnType<typeof submitPrReview>>> {
   const payload: Record<string, unknown> = { event: opts.event };
   if (opts.body !== undefined) payload.body = opts.body;
   if (opts.commitId !== undefined) payload.commit_id = opts.commitId;
@@ -339,6 +397,8 @@ interface RestPullComment {
   id: number;
   node_id: string;
   html_url: string;
+  /** The review GitHub wraps a standalone comment in. */
+  pull_request_review_id?: number | null;
 }
 
 // Post a SINGLE standalone inline review comment (not part of a review draft),
@@ -350,19 +410,30 @@ export async function postInlineComment(
   name: string,
   number: number,
   opts: { commitId: string; path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string },
+  origin: WriteOrigin,
 ): Promise<{ databaseId: number; nodeId: string; url: string }> {
-  const res = await ghRestPostFor<RestPullComment>(
-    token,
-    `/repos/${owner}/${name}/pulls/${number}/comments`,
-    {
-      body: opts.body,
-      commit_id: opts.commitId,
-      path: opts.path,
-      line: opts.line,
-      side: opts.side,
+  let reviewDatabaseId: number | null = null;
+  return limnWrite(
+    origin,
+    'review_comment',
+    { prNumber: number },
+    async () => {
+      const res = await ghRestPostFor<RestPullComment>(
+        token,
+        `/repos/${owner}/${name}/pulls/${number}/comments`,
+        {
+          body: opts.body,
+          commit_id: opts.commitId,
+          path: opts.path,
+          line: opts.line,
+          side: opts.side,
+        },
+      );
+      reviewDatabaseId = res.pull_request_review_id ?? null;
+      return { databaseId: res.id, nodeId: res.node_id, url: res.html_url };
     },
+    (r) => ({ githubNodeId: r.nodeId, githubDatabaseId: r.databaseId, reviewDatabaseId }),
   );
-  return { databaseId: res.id, nodeId: res.node_id, url: res.html_url };
 }
 
 // ---- Per-file diff patches (REST, paginated) ----
@@ -545,10 +616,19 @@ export async function updatePullRequestBody(
   name: string,
   number: number,
   body: string,
+  origin: WriteOrigin,
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
-  const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, { body });
-  if (res.ok) return { ok: true };
-  return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+  return limnWrite(
+    origin,
+    'pr_body',
+    { prNumber: number },
+    async (): Promise<{ ok: true } | { ok: false; status: number; message: string }> => {
+      const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, { body });
+      if (res.ok) return { ok: true };
+      return { ok: false, status: res.status, message: githubErrorMessage(res.json, res.text) };
+    },
+    (r) => (r.ok ? {} : { failed: r.message }),
+  );
 }
 
 /**
@@ -894,6 +974,19 @@ export async function mergePullRequest(
   name: string,
   number: number,
   opts: { method: MergeMethod; expectedHeadSha?: string },
+  origin: WriteOrigin,
+): Promise<MergePrOutcome> {
+  return limnWrite(origin, 'merge', { prNumber: number }, () => mergePullRequestNow(token, owner, name, number, opts), (r) =>
+    r.ok ? { detail: r.sha ? `merge commit ${r.sha}` : null } : { failed: r.message },
+  );
+}
+
+async function mergePullRequestNow(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  opts: { method: MergeMethod; expectedHeadSha?: string },
 ): Promise<MergePrOutcome> {
   const body: Record<string, unknown> = { merge_method: opts.method };
   if (opts.expectedHeadSha) body.sha = opts.expectedHeadSha;
@@ -924,14 +1017,23 @@ export async function closePullRequest(
   owner: string,
   name: string,
   number: number,
+  origin: WriteOrigin,
 ): Promise<ClosePrOutcome> {
-  const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, {
-    state: 'closed',
-  });
-  if (res.ok) return { ok: true };
-  const j = (res.json ?? {}) as { message?: string };
-  const message = j.message ?? res.text.slice(0, 300);
-  return { ok: false, reason: res.status === 404 ? 'not_found' : 'error', message };
+  return limnWrite(
+    origin,
+    'close',
+    { prNumber: number },
+    async (): Promise<ClosePrOutcome> => {
+      const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, {
+        state: 'closed',
+      });
+      if (res.ok) return { ok: true };
+      const j = (res.json ?? {}) as { message?: string };
+      const message = j.message ?? res.text.slice(0, 300);
+      return { ok: false, reason: res.status === 404 ? 'not_found' : 'error', message };
+    },
+    (r) => (r.ok ? {} : { failed: r.message }),
+  );
 }
 
 export type ReopenPrOutcome =
@@ -954,7 +1056,14 @@ export async function reopenPullRequest(
   owner: string,
   name: string,
   number: number,
+  origin: WriteOrigin,
 ): Promise<ReopenPrOutcome> {
+  return limnWrite(origin, 'reopen', { prNumber: number }, () => reopenPullRequestNow(token, owner, name, number), (r) =>
+    r.ok ? {} : { failed: r.message },
+  );
+}
+
+async function reopenPullRequestNow(token: string, owner: string, name: string, number: number): Promise<ReopenPrOutcome> {
   const res = await ghRestPatchStatus(token, `/repos/${owner}/${name}/pulls/${number}`, {
     state: 'open',
   });
@@ -984,7 +1093,24 @@ export async function updatePullRequestBranch(
   owner: string,
   name: string,
   number: number,
-  expectedHeadSha?: string,
+  expectedHeadSha: string | undefined,
+  origin: WriteOrigin,
+): Promise<UpdateBranchOutcome> {
+  return limnWrite(
+    origin,
+    'branch_update',
+    { prNumber: number },
+    () => updatePullRequestBranchNow(token, owner, name, number, expectedHeadSha),
+    (r) => (r.ok ? { detail: expectedHeadSha ? `from ${expectedHeadSha}` : null } : { failed: r.message }),
+  );
+}
+
+async function updatePullRequestBranchNow(
+  token: string,
+  owner: string,
+  name: string,
+  number: number,
+  expectedHeadSha: string | undefined,
 ): Promise<UpdateBranchOutcome> {
   const body = expectedHeadSha ? { expected_head_sha: expectedHeadSha } : undefined;
   const res = await ghRestPutStatus(
@@ -1072,6 +1198,7 @@ async function reconstructUnifiedDiffFromFiles(
 interface RestCreatedPull {
   number: number;
   html_url: string;
+  node_id?: string | null;
 }
 
 // Open a pull request (per-account). `head` is the branch to merge FROM (in the base
@@ -1089,19 +1216,28 @@ export async function createPullRequest(
     /** Open it as a DRAFT (a story build's default). Absent ⇒ the field is not sent (ready for review). */
     draft?: boolean;
   },
-): Promise<{ number: number; url: string }> {
-  const res = await ghRestPostFor<RestCreatedPull>(
-    token,
-    `/repos/${args.owner}/${args.name}/pulls`,
-    {
-      title: args.title,
-      head: args.head,
-      base: args.base,
-      body: args.body,
-      ...(args.draft === true ? { draft: true } : {}),
+  origin: WriteOrigin,
+): Promise<{ number: number; url: string; nodeId: string | null }> {
+  return limnWrite(
+    origin,
+    'open_pr',
+    {},
+    async () => {
+      const res = await ghRestPostFor<RestCreatedPull>(
+        token,
+        `/repos/${args.owner}/${args.name}/pulls`,
+        {
+          title: args.title,
+          head: args.head,
+          base: args.base,
+          body: args.body,
+          ...(args.draft === true ? { draft: true } : {}),
+        },
+      );
+      return { number: res.number, url: res.html_url, nodeId: res.node_id ?? null };
     },
+    (r) => ({ prNumber: r.number, githubNodeId: r.nodeId }),
   );
-  return { number: res.number, url: res.html_url };
 }
 
 // ---- Request reviewers on a PR (REST) ----
@@ -1119,14 +1255,17 @@ export async function requestReviewers(
   name: string,
   number: number,
   logins: string[],
-  teamSlugs: string[] = [],
+  teamSlugs: string[],
+  origin: WriteOrigin,
 ): Promise<void> {
   const body: { reviewers: string[]; team_reviewers?: string[] } = { reviewers: logins };
   if (teamSlugs.length > 0) body.team_reviewers = teamSlugs;
-  await ghRestPostFor<unknown>(
-    token,
-    `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`,
-    body,
+  await limnWrite(
+    origin,
+    'request_reviewers',
+    { prNumber: number },
+    () => ghRestPostFor<unknown>(token, `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`, body),
+    () => ({ detail: [...logins, ...teamSlugs.map((t) => `@${t}`)].join(', ') }),
   );
 }
 
@@ -1145,11 +1284,15 @@ export async function rerunWorkflowRun(
   name: string,
   runId: number,
   mode: 'failed' | 'all',
+  origin: WriteOrigin,
 ): Promise<void> {
   const suffix = mode === 'failed' ? 'rerun-failed-jobs' : 'rerun';
-  await ghRestPostNoContent(
-    token,
-    `/repos/${owner}/${name}/actions/runs/${runId}/${suffix}`,
+  await limnWrite(
+    origin,
+    'rerun',
+    {},
+    () => ghRestPostNoContent(token, `/repos/${owner}/${name}/actions/runs/${runId}/${suffix}`),
+    () => ({ githubDatabaseId: runId }),
   );
 }
 
@@ -1360,28 +1503,46 @@ export function isFailingEnqueueRefusal(message: string): boolean {
 export async function enqueuePullRequestOnQueue(
   token: string,
   prNodeId: string,
-  expectedHeadOid?: string,
+  expectedHeadOid: string | undefined,
+  origin: WriteOrigin,
 ): Promise<{ position: number | null; state: string | null; estimatedTimeToMergeMs: number | null }> {
-  const gql = getGraphqlClientFor(token);
-  const input: Record<string, unknown> = { pullRequestId: prNodeId };
-  if (expectedHeadOid) input.expectedHeadOid = expectedHeadOid;
-  const res = await gql<GqlEnqueueResponse>(ENQUEUE_MUTATION, { input });
-  const entry = res.enqueuePullRequest?.mergeQueueEntry ?? null;
-  return {
-    position: entry?.position ?? null,
-    state: entry?.state ?? null,
-    estimatedTimeToMergeMs:
-      entry?.estimatedTimeToMerge != null ? entry.estimatedTimeToMerge * SECONDS_TO_MS : null,
-  };
+  return limnWrite(
+    origin,
+    'enqueue',
+    {},
+    async () => {
+      const gql = getGraphqlClientFor(token);
+      const input: Record<string, unknown> = { pullRequestId: prNodeId };
+      if (expectedHeadOid) input.expectedHeadOid = expectedHeadOid;
+      const res = await gql<GqlEnqueueResponse>(ENQUEUE_MUTATION, { input });
+      const entry = res.enqueuePullRequest?.mergeQueueEntry ?? null;
+      return {
+        position: entry?.position ?? null,
+        state: entry?.state ?? null,
+        estimatedTimeToMergeMs:
+          entry?.estimatedTimeToMerge != null ? entry.estimatedTimeToMerge * SECONDS_TO_MS : null,
+      };
+    },
+    () => ({ githubNodeId: prNodeId }),
+  );
 }
 
 /** Remove the PR from the merge queue. `DequeuePullRequestInput.id` is the PR's node id. */
 export async function dequeuePullRequestFromQueue(
   token: string,
   prNodeId: string,
+  origin: WriteOrigin,
 ): Promise<void> {
-  const gql = getGraphqlClientFor(token);
-  await gql<GqlDequeueResponse>(DEQUEUE_MUTATION, { input: { id: prNodeId } });
+  await limnWrite(
+    origin,
+    'dequeue',
+    {},
+    async () => {
+      const gql = getGraphqlClientFor(token);
+      await gql<GqlDequeueResponse>(DEQUEUE_MUTATION, { input: { id: prNodeId } });
+    },
+    () => ({ githubNodeId: prNodeId }),
+  );
 }
 
 // ---- Emoji reactions (GraphQL) ----
@@ -1458,6 +1619,19 @@ const REMOVE_REACTION_MUTATION = /* GraphQL */ `
  * discovers the limit still teaches the shared budget and the next lookup skips itself.
  */
 export async function setReaction(
+  token: string,
+  subjectNodeId: string,
+  content: ReactionContent,
+  add: boolean,
+  origin: WriteOrigin,
+): Promise<{ groups: ReactionGroupSummary[]; viewerCanReact: boolean }> {
+  return limnWrite(origin, 'reaction', {}, () => setReactionNow(token, subjectNodeId, content, add), () => ({
+    githubNodeId: subjectNodeId,
+    detail: `${add ? '+' : '-'}${content}`,
+  }));
+}
+
+async function setReactionNow(
   token: string,
   subjectNodeId: string,
   content: ReactionContent,

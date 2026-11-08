@@ -792,10 +792,11 @@ export function PrDetail({
     'activity',
     'threads',
     'changes',
-    ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
     ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
     ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
     ...(storyTabVisible ? (['story'] as Tab[]) : []),
+    // Last, in step with `tabIds`.
+    ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
   ] as Tab[];
   const cmdTabsKey = cmdTabs.join(',');
   const prNumber = pr?.number ?? null;
@@ -920,15 +921,15 @@ export function PrDetail({
     'activity',
     'threads',
     'changes',
-    // Also listed while the bot data is still in flight for a reader who ARRIVED on this
-    // tab (a deep link / a refresh), so the strip is never showing a screen with no
-    // highlighted tab. It disappears again if the answer comes back empty, and
-    // `effectiveTab` moves to Overview with it.
-    ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
     ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
     ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
-    // Last, so the 1–9 keys of the tabs before it never move.
     ...(storyTabVisible ? (['story'] as Tab[]) : []),
+    // LAST: it appears only once its data loads (and only when a bot touched the PR), so at
+    // the end it never shifts the 1–9 keys of the tabs before it. Also listed while the bot
+    // data is still in flight for a reader who ARRIVED on this tab (a deep link / a refresh),
+    // so the strip is never showing a screen with no highlighted tab. It disappears again if
+    // the answer comes back empty, and `effectiveTab` moves to Overview with it.
+    ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
   ];
   // One strip entry per story (`story:<index>`); every other tab is its own id.
   type StripId = Exclude<Tab, 'story'> | `story:${number}`;

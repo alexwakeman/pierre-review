@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { AgentContext } from '../../review/agent-context.js';
 import { isConflicting } from '../../db/pending-classify.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 // Resolve a PR's coordinates from its id, SCOPED to the caller's account (the plugin's
 // IDOR guarantee — a PR that isn't the caller's returns null → the route 404s). Reads
@@ -40,7 +41,7 @@ export async function getFixPrContext(
       headSha: pr.headSha,
       baseRefName: pr.baseRefName,
       defaultBranch: repos.defaultBranch,
-      authorId: pr.authorId,
+      authorId: trueAuthorId(pr),
       state: pr.state,
     })
     .from(pr)

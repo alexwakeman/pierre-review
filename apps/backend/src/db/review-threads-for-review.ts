@@ -44,7 +44,7 @@
 // comments then the continuation's. So the run's judgement, its still-open writes and the author's
 // card all land where the point is open now. Only when the EARLIER thread is not rooted on Limn's
 // own finding (that one belongs to the follow-up, which follows the continuation itself).
-import { continuationThreadMap, isLimnThreadReply } from '@pierre-review/shared';
+import { continuationThreadMap, isLimnThreadReply, limnPosterOf } from '@pierre-review/shared';
 import { and, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { globalAutomationUserIds } from './automation-ids.js';
@@ -85,7 +85,12 @@ export function isLimnPostedComment(
   accountLogin: string | null,
 ): boolean {
   if (!accountLogin || !c.authorLogin) return false;
-  if (c.authorLogin.toLowerCase() !== accountLogin.toLowerCase()) return false;
+  // ⚠ THE PERSON, NOT THE STORED AUTHOR: every reader joins `users` on `trueAuthorId` (a Limn row is
+  // stored under the poster's `limn:` bot). A caller that joined on `author_id` hands in the bot's
+  // login — the reader's own `limn:<login>` is the reader's post too, or auto re-review would fire on
+  // Limn's own comments (docs/CLAUDE-REVIEW.md § Limn's actions are bots).
+  const author = limnPosterOf(c.authorLogin) ?? c.authorLogin;
+  if (author.toLowerCase() !== accountLogin.toLowerCase()) return false;
   const body = c.body ?? '';
   if (LIMN_MARKER.test(body)) return true;
   if (!own) return false;

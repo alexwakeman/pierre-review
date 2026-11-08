@@ -49,6 +49,7 @@ const {
   autoMergeRequests,
   autoMergePolicySkips,
   dependencyAutomationActions,
+  limnActions,
   branchCommits,
   trunkCiStatusEvents,
   mlCommentLabels,
@@ -336,6 +337,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(dependencyAutomationActions)
       .where(eq(dependencyAutomationActions.accountId, accountId))
       .execute();
+    // The Limn provenance ledger (migration 0180) — same reasoning.
+    await tx.delete(limnActions).where(eq(limnActions.accountId, accountId)).execute();
     // Default-branch commit snapshots (author names, commit subjects) — same reasoning: the
     // repo cascade normally clears them, this makes the guarantee independent of it.
     await tx.delete(branchCommits).where(eq(branchCommits.accountId, accountId)).execute();
@@ -537,6 +540,7 @@ export function accountScopedTables(): {
       col: dependencyAutomationActions.accountId,
       table: dependencyAutomationActions,
     },
+    { name: 'limnActions', col: limnActions.accountId, table: limnActions },
     { name: 'branchCommits', col: branchCommits.accountId, table: branchCommits },
     // The trunk CI transition log. On the checklist rather than in the KNOWN_UNCHECKED
     // exemption that `ci_status_events` sits in, because this one has NO parent PR: neither the

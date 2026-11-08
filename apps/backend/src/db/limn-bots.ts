@@ -21,7 +21,10 @@
 // drop the marker goes back to its person; `reconcileLimnFindingAuthors` applies the same rule to
 // rows already stored (boot, and the demo seed).
 import { and, eq, inArray, isNotNull, like, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import {
+  hasLimnRunTrailer,
+  isLimnAuthoredBody,
   isLimnBotLogin,
   isLimnThreadReply,
   limnBotLabel,
@@ -31,6 +34,9 @@ import {
 } from '@pierre-review/shared';
 import { db, runTransaction, schema, type Executor } from './client.js';
 import { syncLimnFindingLabels } from './limn-finding-labels.js';
+import { accountLimnLedger } from './limn-actions.js';
+import { config } from '../config.js';
+import { trueAuthorId, trueMergerId } from './true-author.js';
 
 const {
   users,
@@ -38,15 +44,114 @@ const {
   reviewComments,
   prComments,
   reviewThreads,
+  reviews,
+  commits,
   events,
   searchIndex,
   workspaceRepos,
   workspaceReviewers,
 } = schema;
 
-/** The person who wrote a comment row: the poster of a Limn finding, else its author. */
-export function trueAuthorId(t: typeof reviewComments | typeof prComments): SQL<number | null> {
-  return sql<number | null>`coalesce(${t.limnPostedByUserId}, ${t.authorId})`;
+// The person behind a row: `trueAuthorId` / `trueMergerId` (db/true-author.ts, DB-free), re-exported.
+export { trueAuthorId, trueMergerId } from './true-author.js';
+
+// ── THE ONE RESOLVER: is this row Limn's? (pure; sync's `persistPr` and `reattributeLimnRows`) ──────
+//
+// A row is Limn's when ANY of these holds:
+//   (a) its GitHub id / commit sha is in the provenance ledger (`limn_actions`, this install's writes);
+//   (b) its body carries a Limn hidden marker outside quoted lines (`isLimnAuthoredBody`; a teammate's
+//       Limn too);
+//   (c) it is an EMPTY COMMENTED review whose every inline comment is Limn's (the wrapper GitHub makes
+//       around a reply or a standalone comment; `review_comments.review_database_id`);
+//   (d) it is a commit whose message carries a `Limn-Run:` trailer.
+// `wide` false is the narrower rule of the finding era (a finding, a marked reply): sync applies it
+// while `config.limnAttributeAll` is off, so nothing moves until the history moves with it.
+
+export type LimnCommentRule = 'thread_root' | 'thread_reply' | 'pr_comment';
+
+export interface LimnLedgerIds {
+  commentIds?: ReadonlySet<string> | ReadonlyMap<string, unknown>;
+  reviewIds?: ReadonlySet<string> | ReadonlyMap<string, unknown>;
+  commitShas?: ReadonlySet<string> | ReadonlyMap<string, unknown>;
+}
+
+const hasId = (set: ReadonlySet<string> | ReadonlyMap<string, unknown> | undefined, id: string | number | null | undefined): boolean =>
+  id != null && set != null && set.has(String(id));
+
+/** Is this comment Limn's? A thread ROOT or a PR comment by the finding rule, a REPLY by the reply rule;
+ *  `wide` adds any marker and the ledger. Pure. */
+export function commentIsLimn(
+  c: { body: string | null | undefined; databaseId?: string | number | null },
+  rule: LimnCommentRule,
+  o: { wide: boolean; ledger?: LimnLedgerIds },
+): boolean {
+  if (rule === 'thread_reply' ? isLimnThreadReply(c.body) : limnFindingPost(c.body, { threadRoot: rule === 'thread_root' }) != null) {
+    return true;
+  }
+  if (!o.wide) return false;
+  return isLimnAuthoredBody(c.body) || hasId(o.ledger?.commentIds, c.databaseId);
+}
+
+/** Is this review Limn's? (a), (b) or (c). `commentsLimn`: per review database id, whether each of
+ *  its inline comments is Limn's. Pure. */
+export function reviewIsLimn(
+  r: { databaseId: string | number | null | undefined; body: string | null | undefined; state: string },
+  o: { ledger?: LimnLedgerIds; commentsLimn?: ReadonlyMap<string, readonly boolean[]> },
+): boolean {
+  if (hasId(o.ledger?.reviewIds, r.databaseId)) return true;
+  if (isLimnAuthoredBody(r.body)) return true;
+  if ((r.body ?? '').trim() === '' && r.state === 'commented' && r.databaseId != null) {
+    const cs = o.commentsLimn?.get(String(r.databaseId));
+    if (cs != null && cs.length > 0 && cs.every(Boolean)) return true;
+  }
+  return false;
+}
+
+/** Is this commit Limn's? (a) or (d). Pure. */
+export function commitIsLimn(c: { sha: string; message: string | null | undefined }, o: { ledger?: LimnLedgerIds }): boolean {
+  return hasId(o.ledger?.commitShas, c.sha.toLowerCase()) || hasLimnRunTrailer(c.message);
+}
+
+/** Who Limn merged or opened a PR for, from the ledger: the merger / author moves to the bot only
+ *  when GitHub names that same person (a queue landing named after a bot stays as GitHub says). Pure. */
+export function prLimnRoles(
+  pr: { authorId: number | null; mergedById: number | null },
+  ledger: { mergedFor: number | null; openedFor: number | null },
+): { openedFor: number | null; mergedFor: number | null } {
+  return {
+    openedFor: ledger.openedFor != null && pr.authorId === ledger.openedFor ? ledger.openedFor : null,
+    mergedFor: ledger.mergedFor != null && pr.mergedById === ledger.mergedFor ? ledger.mergedFor : null,
+  };
+}
+
+/** Per-repo access to the posters' `limn:` bots: created on first use, with the bot's reviewer row in
+ *  the repo's workspace. `botFor(login)` is null for a missing login or one that is already a bot. */
+export interface LimnAttributor {
+  botFor(posterLogin: string | null | undefined): Promise<number | null>;
+}
+
+export async function limnAttributor(exec: Executor, accountId: number, repoId: number): Promise<LimnAttributor> {
+  const workspaceId = (
+    await exec
+      .select({ workspaceId: workspaceRepos.workspaceId })
+      .from(workspaceRepos)
+      .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)))
+      .limit(1)
+      .execute()
+  )[0]?.workspaceId;
+  const cache = new Map<string, number>();
+  return {
+    async botFor(login) {
+      if (!login || isLimnBotLogin(login)) return null;
+      let id = cache.get(login);
+      if (id === undefined) {
+        id = await ensureLimnBotUser(exec, login);
+        cache.set(login, id);
+        if (workspaceId != null) await ensureLimnReviewerRow(exec, accountId, workspaceId, id, login);
+      }
+      return id;
+    },
+  };
 }
 
 /** The SQL LIKE pattern every `limn:` login matches. */
@@ -199,7 +304,19 @@ export interface LimnReconcileResult {
  * author and its thread's root author with it, and ensures the bot's reviewer rows. Idempotent: a
  * second run writes no comment, event, search or thread row. DB only, one transaction.
  */
-export async function reconcileLimnFindingAuthors(accountId: number): Promise<LimnReconcileResult> {
+export async function reconcileLimnFindingAuthors(
+  accountId: number,
+  opts: { wide?: boolean; ledger?: LimnLedgerIds; prIds?: readonly number[] } = {},
+): Promise<LimnReconcileResult> {
+  // `wide` (config.limnAttributeAll, or `reattributeLimnRows`): any Limn marker on any comment, and the
+  // ledger's comment ids (`commentIsLimn`). Off: the finding rule and the reply rule only.
+  const wide = opts.wide ?? config.limnAttributeAll;
+  const ledger: LimnLedgerIds | undefined = wide ? (opts.ledger ?? (await accountLimnLedger(db, accountId))) : undefined;
+  const inPrs = (col: typeof reviewComments.prId | typeof prComments.prId) =>
+    opts.prIds != null ? inArray(col, opts.prIds.length > 0 ? [...opts.prIds] : [-1]) : undefined;
+  // A wide pass also reads every comment on a PR the ledger names (an unmarked Limn comment).
+  const onLedgerPr = (col: typeof reviewComments.prId | typeof prComments.prId) =>
+    wide ? sql`${col} in (select la.pr_id from limn_actions la where la.account_id = ${accountId} and la.pr_id is not null)` : undefined;
   // Thread replies wear any Limn marker (the pushback's too); PR-level comments follow the finding rule.
   const markerLike = '%pierre:claude-review%';
   const poster = sql<number | null>`coalesce(${reviewComments.limnPostedByUserId}, ${reviewComments.authorId})`;
@@ -211,6 +328,7 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
       threadId: reviewComments.threadId,
       repoId: pullRequests.repoId,
       body: reviewComments.body,
+      databaseId: reviewComments.databaseId,
       authorId: reviewComments.authorId,
       limnPostedBy: reviewComments.limnPostedByUserId,
       posterId: poster,
@@ -222,7 +340,8 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
     .where(
       and(
         eq(pullRequests.accountId, accountId),
-        or(like(reviewComments.body, markerLike), isNotNull(reviewComments.limnPostedByUserId)),
+        inPrs(reviewComments.prId),
+        or(like(reviewComments.body, markerLike), isNotNull(reviewComments.limnPostedByUserId), onLedgerPr(reviewComments.prId)),
       ),
     )
     .execute();
@@ -234,6 +353,7 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
       nodeId: prComments.githubNodeId,
       repoId: pullRequests.repoId,
       body: prComments.body,
+      databaseId: prComments.databaseId,
       authorId: prComments.authorId,
       limnPostedBy: prComments.limnPostedByUserId,
       posterId: pcPoster,
@@ -243,7 +363,8 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
     .where(
       and(
         eq(pullRequests.accountId, accountId),
-        or(like(prComments.body, markerLike), isNotNull(prComments.limnPostedByUserId)),
+        inPrs(prComments.prId),
+        or(like(prComments.body, markerLike), isNotNull(prComments.limnPostedByUserId), onLedgerPr(prComments.prId)),
       ),
     )
     .execute();
@@ -282,11 +403,13 @@ export async function reconcileLimnFindingAuthors(accountId: number): Promise<Li
     // `reply`: a review-thread comment that is not its thread's root (the reply rule, as sync's).
     const desired = async (r: {
       body: string | null;
+      databaseId: string | null;
       posterId: number | null;
       repoId: number;
     }, threadRoot = false, reply = false): Promise<{ authorId: number | null; limnPostedBy: number | null }> => {
       const login = r.posterId != null ? posterLogin.get(r.posterId) : undefined;
-      const isLimn = reply ? isLimnThreadReply(r.body) : limnFindingPost(r.body, { threadRoot }) != null;
+      const rule: LimnCommentRule = reply ? 'thread_reply' : threadRoot ? 'thread_root' : 'pr_comment';
+      const isLimn = commentIsLimn({ body: r.body, databaseId: r.databaseId }, rule, { wide, ...(ledger ? { ledger } : {}) });
       if (r.posterId == null || login == null || isLimnBotLogin(login) || !isLimn) {
         return { authorId: r.posterId, limnPostedBy: null };
       }
@@ -405,4 +528,230 @@ async function retagActor(
       ),
     )
     .execute();
+}
+
+// ── THE RE-ATTRIBUTION OF STORED ROWS (the history backfill's ONE entry point) ─────────────────────
+//
+// `reattributeLimnRows` applies the WIDE rule (the resolver above + the account's ledger) to rows
+// already stored: comments (via `reconcileLimnFindingAuthors`), reviews (with the reply-wrapper rule
+// over `review_comments.review_database_id`), commits, and the PR's own author / merger. Each row's
+// author becomes the poster's `limn:` bot with the person in its `limn_*_by` column — or goes back to
+// the person when the rule no longer holds. Events (`actor_id`) and the search index follow. Idempotent:
+// a second run writes nothing. DB only; reads outside, writes in ONE transaction.
+//
+// ⚠ NOT WIRED INTO BOOT. Run it deliberately (the backfill), against a COPY first. Rows a heuristic
+// would guess (past AI Fix commits without a sha) are never touched: only the four rules above.
+
+export interface LimnReattributeResult extends LimnReconcileResult {
+  reviews: number;
+  commits: number;
+  prs: number;
+}
+
+export async function reattributeLimnRows(
+  accountId: number,
+  opts: { prIds?: readonly number[] } = {},
+): Promise<LimnReattributeResult> {
+  const ledger = await accountLimnLedger(db, accountId);
+  const ledgerIds: LimnLedgerIds = { commentIds: ledger.commentIds, reviewIds: ledger.reviewIds, commitShas: ledger.commitShas };
+  // Comments first: the wrapper rule below reads the comment rule, not the stored author.
+  const commentsResult = await reconcileLimnFindingAuthors(accountId, { wide: true, ledger: ledgerIds, ...(opts.prIds ? { prIds: opts.prIds } : {}) });
+  const prScope = (col: typeof pullRequests.id) =>
+    opts.prIds != null ? inArray(col, opts.prIds.length > 0 ? [...opts.prIds] : [-1]) : undefined;
+
+  // (c) the wrapper rule's input: per review database id, whether each of its comments is Limn's.
+  const rcRows = await db
+    .select({
+      reviewDbId: reviewComments.reviewDatabaseId,
+      body: reviewComments.body,
+      databaseId: reviewComments.databaseId,
+      isRoot: sql<number>`not exists (select 1 from review_comments rc2 where rc2.thread_id = ${reviewComments.threadId} and (rc2.created_at < ${reviewComments.createdAt} or (rc2.created_at = ${reviewComments.createdAt} and rc2.id < ${reviewComments.id})))`,
+    })
+    .from(reviewComments)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
+    .where(and(eq(pullRequests.accountId, accountId), prScope(pullRequests.id), isNotNull(reviewComments.reviewDatabaseId)))
+    .execute();
+  const commentsLimn = new Map<string, boolean[]>();
+  for (const c of rcRows) {
+    const list = commentsLimn.get(c.reviewDbId!) ?? [];
+    list.push(commentIsLimn({ body: c.body, databaseId: c.databaseId }, c.isRoot ? 'thread_root' : 'thread_reply', { wide: true, ledger: ledgerIds }));
+    commentsLimn.set(c.reviewDbId!, list);
+  }
+
+  const person = alias(users, 'limn_person');
+  const reviewRows = await db
+    .select({
+      id: reviews.id,
+      prId: reviews.prId,
+      repoId: pullRequests.repoId,
+      nodeId: reviews.githubNodeId,
+      databaseId: reviews.databaseId,
+      body: reviews.body,
+      state: reviews.state,
+      authorId: reviews.authorId,
+      limnPostedBy: reviews.limnPostedByUserId,
+      personId: trueAuthorId(reviews),
+      personLogin: person.githubLogin,
+    })
+    .from(reviews)
+    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
+    .leftJoin(person, eq(person.id, trueAuthorId(reviews)))
+    .where(and(eq(pullRequests.accountId, accountId), prScope(pullRequests.id)))
+    .execute();
+
+  const commitRows = await db
+    .select({
+      id: commits.id,
+      prId: commits.prId,
+      repoId: pullRequests.repoId,
+      prNodeId: pullRequests.githubNodeId,
+      sha: commits.sha,
+      message: commits.message,
+      authorId: commits.authorId,
+      limnPushedBy: commits.limnPushedByUserId,
+      personId: trueAuthorId(commits),
+      personLogin: person.githubLogin,
+    })
+    .from(commits)
+    .innerJoin(pullRequests, eq(pullRequests.id, commits.prId))
+    .leftJoin(person, eq(person.id, trueAuthorId(commits)))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        prScope(pullRequests.id),
+        or(
+          isNotNull(commits.limnPushedByUserId),
+          like(commits.message, '%Limn-Run:%'),
+          sql`lower(${commits.sha}) in (select lower(la.commit_sha) from limn_actions la where la.account_id = ${accountId} and la.commit_sha is not null)`,
+        ),
+      ),
+    )
+    .execute();
+
+  const merger = alias(users, 'limn_merger');
+  const prRows = await db
+    .select({
+      id: pullRequests.id,
+      repoId: pullRequests.repoId,
+      authorId: pullRequests.authorId,
+      mergedById: pullRequests.mergedById,
+      openedFor: pullRequests.limnOpenedForUserId,
+      mergedFor: pullRequests.limnMergedForUserId,
+      personId: trueAuthorId(pullRequests),
+      personLogin: person.githubLogin,
+      mergerId: trueMergerId(pullRequests),
+      mergerLogin: merger.githubLogin,
+    })
+    .from(pullRequests)
+    .leftJoin(person, eq(person.id, trueAuthorId(pullRequests)))
+    .leftJoin(merger, eq(merger.id, trueMergerId(pullRequests)))
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        prScope(pullRequests.id),
+        or(
+          isNotNull(pullRequests.limnOpenedForUserId),
+          isNotNull(pullRequests.limnMergedForUserId),
+          sql`${pullRequests.id} in (select la.pr_id from limn_actions la where la.account_id = ${accountId} and la.pr_id is not null and la.kind in ('merge', 'enqueue', 'open_pr'))`,
+        ),
+      ),
+    )
+    .execute();
+
+  const counts = await runTransaction(async (tx) => {
+    const attributors = new Map<number, LimnAttributor>();
+    const botFor = async (repoId: number, login: string | null): Promise<number | null> => {
+      let a = attributors.get(repoId);
+      if (!a) {
+        a = await limnAttributor(tx, accountId, repoId);
+        attributors.set(repoId, a);
+      }
+      return a.botFor(login);
+    };
+
+    let reviewsChanged = 0;
+    for (const r of reviewRows) {
+      if (r.personId == null) continue;
+      const isLimn = reviewIsLimn({ databaseId: r.databaseId, body: r.body, state: r.state }, { ledger: ledgerIds, commentsLimn });
+      const bot = isLimn ? await botFor(r.repoId, r.personLogin) : null;
+      const want = { authorId: bot ?? r.personId, limnPostedBy: bot != null ? r.personId : null };
+      if (want.authorId === r.authorId && want.limnPostedBy === r.limnPostedBy) continue;
+      reviewsChanged++;
+      await tx.update(reviews).set({ authorId: want.authorId, limnPostedByUserId: want.limnPostedBy }).where(eq(reviews.id, r.id)).execute();
+      await tx
+        .update(events)
+        .set({ actorId: want.authorId })
+        .where(and(eq(events.accountId, accountId), eq(events.dedupeKey, `review_submitted:${r.nodeId}`)))
+        .execute();
+      await tx
+        .update(searchIndex)
+        .set({ authorId: want.authorId })
+        .where(and(eq(searchIndex.prId, r.prId), eq(searchIndex.accountId, accountId), eq(searchIndex.kind, 'review'), eq(searchIndex.refId, r.id)))
+        .execute();
+    }
+
+    let commitsChanged = 0;
+    for (const c of commitRows) {
+      if (c.personId == null) continue;
+      const bot = commitIsLimn({ sha: c.sha, message: c.message }, { ledger: ledgerIds }) ? await botFor(c.repoId, c.personLogin) : null;
+      const want = { authorId: bot ?? c.personId, limnPushedBy: bot != null ? c.personId : null };
+      if (want.authorId === c.authorId && want.limnPushedBy === c.limnPushedBy) continue;
+      commitsChanged++;
+      await tx.update(commits).set({ authorId: want.authorId, limnPushedByUserId: want.limnPushedBy }).where(eq(commits.id, c.id)).execute();
+      await tx
+        .update(events)
+        .set({ actorId: want.authorId })
+        .where(and(eq(events.accountId, accountId), eq(events.dedupeKey, `commit_pushed:${c.prNodeId}:${c.sha}`)))
+        .execute();
+    }
+
+    let prsChanged = 0;
+    for (const p of prRows) {
+      const roles = prLimnRoles(
+        { authorId: p.personId, mergedById: p.mergerId },
+        { mergedFor: ledger.mergedFor.get(p.id) ?? null, openedFor: ledger.openedFor.get(p.id) ?? null },
+      );
+      const openedBot = roles.openedFor != null ? await botFor(p.repoId, p.personLogin) : null;
+      const mergedBot = roles.mergedFor != null ? await botFor(p.repoId, p.mergerLogin) : null;
+      const want = {
+        authorId: openedBot ?? p.personId,
+        openedFor: openedBot != null ? roles.openedFor : null,
+        mergedById: mergedBot ?? p.mergerId,
+        mergedFor: mergedBot != null ? roles.mergedFor : null,
+      };
+      if (
+        want.authorId === p.authorId &&
+        want.openedFor === p.openedFor &&
+        want.mergedById === p.mergedById &&
+        want.mergedFor === p.mergedFor
+      )
+        continue;
+      prsChanged++;
+      await tx
+        .update(pullRequests)
+        .set({
+          authorId: want.authorId,
+          limnOpenedForUserId: want.openedFor,
+          mergedById: want.mergedById,
+          limnMergedForUserId: want.mergedFor,
+        })
+        .where(eq(pullRequests.id, p.id))
+        .execute();
+      if (want.authorId !== p.authorId) {
+        // The PR's lifecycle events name its author (sync/upsert.ts), and so does its search row.
+        await tx
+          .update(events)
+          .set({ actorId: want.authorId })
+          .where(and(eq(events.accountId, accountId), eq(events.prId, p.id), eq(events.refTable, 'pull_requests'), eq(events.refId, p.id)))
+          .execute();
+        await tx
+          .update(searchIndex)
+          .set({ authorId: want.authorId })
+          .where(and(eq(searchIndex.prId, p.id), eq(searchIndex.accountId, accountId), eq(searchIndex.kind, 'pr'), eq(searchIndex.refId, p.id)))
+          .execute();
+      }
+    }
+    return { reviews: reviewsChanged, commits: commitsChanged, prs: prsChanged };
+  });
+  return { ...commentsResult, ...counts };
 }

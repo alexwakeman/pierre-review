@@ -770,6 +770,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         owner: fctx.owner,
         name: fctx.name,
         prNumber: fctx.prNumber,
+        // The reader pressed Post on Limn's finding: Limn's words, on their behalf.
+        limn: { accountId, prId: fctx.prId, origin: 'reader_pressed', source: { table: 'claude_reviews', id: f.reviewId } },
         reviewHeadSha: fctx.reviewHeadSha,
         finding: {
           id: f.id,
@@ -896,6 +898,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         owner: pctx.owner,
         name: pctx.name,
         prNumber: pctx.prNumber,
+        limn: { accountId, prId: review.prId, origin: 'reader_pressed', source: { table: 'claude_reviews', id: review.id } },
         reviewHeadSha: pctx.reviewHeadSha,
         // The tickets' open points ride the body, marked as not affecting the outcome (open-points.ts).
         body: withOpenPointsBlock(review.userBody ?? '', review.openPoints),

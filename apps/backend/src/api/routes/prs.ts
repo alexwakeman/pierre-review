@@ -73,6 +73,7 @@ import {
   upsertLocalPrComment,
   upsertLocalReview,
 } from '../../db/queries.js';
+import { originForPostedBody } from '../../db/limn-actions.js';
 import { resolveArmedQueues, withArmedQueueFields } from '../../db/merge-queue.js';
 // The watcher's live marks (yields + queue-disabled fallbacks). Read-only, and the reason this
 // import is not a layering smell: every one of them is a LIVE observation of GitHub made inside
@@ -598,6 +599,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           ctx.name,
           ctx.number,
           body,
+          // Limn's drafted words posted by a press are Limn's; the reader's own words are theirs.
+          await originForPostedBody(accountId, ctx.prId, body),
         );
         const authorId = await getAccountUserId(accountId);
         const rowId = await upsertLocalPrComment(ctx.prId, authorId, gh);
@@ -660,7 +663,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         const gh = await submitPrReview(token, ctx.owner, ctx.name, ctx.number, {
           event: 'APPROVE',
           body,
-        });
+        }, 'reader');
         const rowId = await upsertLocalReview(ctx.prId, viewerUserId, gh);
         // ── The approval's SECOND and THIRD stamps — "an approved PR should drop off Pending,
         //    and may become ready to merge" ────────────────────────────────────────────────────
@@ -776,7 +779,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       let res: Awaited<ReturnType<typeof dismissPrReview>>;
       try {
-        res = await dismissPrReview(token, ctx.owner, ctx.name, ctx.number, review.databaseId, WITHDRAW_APPROVAL_MESSAGE);
+        res = await dismissPrReview(token, ctx.owner, ctx.name, ctx.number, review.databaseId, WITHDRAW_APPROVAL_MESSAGE, 'reader');
       } catch (err) {
         reply.status(502);
         return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
@@ -856,7 +859,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         const gh = await submitPrReview(token, ctx.owner, ctx.name, ctx.number, {
           event: 'REQUEST_CHANGES',
           body: text,
-        });
+        }, 'reader');
         const rowId = await upsertLocalReview(
           ctx.prId,
           viewerUserId,
@@ -1024,7 +1027,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       const out = await mergePullRequest(token, ctx.owner, ctx.name, ctx.number, {
         method,
         expectedHeadSha: info.headSha,
-      });
+      }, 'reader');
       if (!out.ok) {
         const status = out.reason === 'method_disallowed' ? 422 : 409;
         reply.status(status);
@@ -1103,7 +1106,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         return already;
       }
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
-      const entry = await enqueuePullRequestOnQueue(token, ctx.prNodeId, info.headSha);
+      const entry = await enqueuePullRequestOnQueue(token, ctx.prNodeId, info.headSha, 'reader');
       // GitHub has accepted the enqueue, so membership is true even when the mutation's
       // nullable payload gave us no entry state (it can 200 with a null entry — see
       // GqlEnqueueResponse). `null` there stores "queued, state unknown", never "not queued".
@@ -1179,7 +1182,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         const out: MergeQueueResult = { inQueue: false, position: null, state: null };
         return out;
       }
-      await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+      await dequeuePullRequestFromQueue(token, ctx.prNodeId, 'reader');
       // Stamped for the same reason the enqueue is, and it matters more here: without it the
       // row keeps claiming `queued` until the next walk, so the SPA re-reads the PR it just
       // removed and offers "Remove from queue" again. ⚠ NON-FATAL: GitHub has accepted the
@@ -1283,7 +1286,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       let dequeued = false;
       try {
         const token = await getAccessToken(accountId);
-        await dequeuePullRequestFromQueue(token, ctx.prNodeId);
+        await dequeuePullRequestFromQueue(token, ctx.prNodeId, 'reader');
         dequeued = true;
       } catch (err) {
         req.log.warn(
@@ -1359,7 +1362,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      const out = await closePullRequest(token, ctx.owner, ctx.name, ctx.number);
+      const out = await closePullRequest(token, ctx.owner, ctx.name, ctx.number, 'reader');
       if (!out.ok) {
         reply.status(out.reason === 'not_found' ? 404 : 502);
         return {
@@ -1418,7 +1421,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await getAccessToken(accountId);
-      const out = await reopenPullRequest(token, ctx.owner, ctx.name, ctx.number);
+      const out = await reopenPullRequest(token, ctx.owner, ctx.name, ctx.number, 'reader');
       if (!out.ok) {
         // ⚠ `not_reopenable` is a 409, not a 502. GitHub's usual refusal is the deleted head
         // branch — nothing is broken and no retry will help, so the answer is the conflict code
@@ -1499,6 +1502,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         headSha: info.headSha,
         trunk: info.baseRef,
         strategy: strat,
+        // The reader pressed "Update branch": their own action, as GitHub's button would be.
+        origin: 'reader',
       });
       // The push LANDED — settle-and-verify against the exact sha it pushed (an already-current
       // branch returns its unchanged head, which is then trivially met). Never throws.
@@ -1620,6 +1625,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           ctx.name,
           ctx.number,
           { commitId: head, path, line: finalLine, side: finalSide, body },
+          await originForPostedBody(accountId, ctx.prId, body),
         );
         // THE COMMENT NOW EXISTS ON GITHUB. From here nothing may fail the request: the
         // catch below maps a 422 to "couldn't place" and everything else to a 502, either
@@ -1910,7 +1916,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
           () => null,
         );
         const token = await getAccessToken(accountId);
-        await rerunWorkflowRun(token, ctx.owner, ctx.name, runId, mode);
+        await rerunWorkflowRun(token, ctx.owner, ctx.name, runId, mode, 'reader');
         // CI moves asynchronously and never bumps the PR's `updatedAt`, so without this nothing
         // re-reads the PR until a walk happens to — the red card stays up after the rerun began.
         // ⚠ `ciNot`: a stale FAILURE is a KNOWN value, so a ladder with no expectation would stop
@@ -2019,7 +2025,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const token = await getAccessToken(accountId);
-        await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins, teams);
+        await requestReviewers(token, ctx.owner, ctx.name, ctx.number, logins, teams, 'reader');
         // Optimistically stamp the request locally (mirrors approve/comment/merge) so the
         // "Requested" row + the suggestion gate reflect it immediately; the next sync
         // re-derives review_requests idempotently. Team handle = `owner/slug` (matches how a

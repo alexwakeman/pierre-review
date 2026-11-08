@@ -36,6 +36,7 @@ import {
   type AutoSkipReason,
   type TeamClaimGithub,
 } from './team-claim.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -109,7 +110,7 @@ async function prFacts(ctx: AgentContext, accountId: number, prId: number): Prom
       headSha: prs.headSha,
       state: prs.state,
       draft: prs.isDraft,
-      authorId: prs.authorId,
+      authorId: trueAuthorId(prs),
     })
     .from(prs)
     .innerJoin(repos, and(eq(repos.id, prs.repoId), eq(repos.accountId, accountId)))

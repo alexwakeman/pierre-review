@@ -65,6 +65,7 @@ import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { requestModelOf } from '../../ai/provider.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -106,7 +107,7 @@ export async function prAuthorIsAccount(
     ctx.db
       .select({ login: users.githubLogin })
       .from(prs)
-      .innerJoin(users, eq(users.id, prs.authorId))
+      .innerJoin(users, eq(users.id, trueAuthorId(prs)))
       .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
       .limit(1)
       .execute() as Promise<Array<{ login: string | null }>>,

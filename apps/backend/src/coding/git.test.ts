@@ -162,6 +162,8 @@ describe('pushRef', () => {
         committish: 'HEAD',
         remoteBranch: 'main',
         protect: ['main'],
+        origin: 'reader',
+        limnCommits: [],
       }),
     ).rejects.toThrow(/protected branch for this pull request/);
   });

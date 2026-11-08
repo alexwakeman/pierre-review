@@ -72,6 +72,12 @@ describe('Slack tones', () => {
     expect(m.text).toBe('@bob merged acme/api#12');
   });
 
+  it('a merge Limn landed names Limn and the person, never the bot login', () => {
+    const m = mergeMessage(ctx, 1, { ...facts, mergedByLogin: 'limn:bob' });
+    expect(m.text).toBe('Limn for @bob merged acme/api#12');
+    expect(att(m).blocks[0]!.text.text).not.toContain('limn:');
+  });
+
   it('every team tab has a tone and one heading emoji', () => {
     for (const def of PENDING_TABS) {
       if (def.key === 'my_turn' || def.key === 'claude' || def.key === 'waiting') continue;

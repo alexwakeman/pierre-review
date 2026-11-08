@@ -14,11 +14,16 @@
 // negative result); `approval_parked` survives, absorbed here as the LANDING court, where it
 // finally has a denominator.
 //
-// ⚠ A BOT ACTION NEVER MOVES THE BALL. One predicate, and it is the entire moat: a tool keying on
-// `user.type === 'Bot'` cannot separate "this pull request was reviewed" from "a person looked at
-// this". Human-ness comes from `resolveActorLanes`' UNION, never `users.isBot` alone — the second
-// row of a duplicated identity (`dependabot` vs `dependabot[bot]`) carries `is_bot = 0` and would
-// otherwise be counted as a human reviewer.
+// ⚠ WHO MOVES THE BALL IS THE VIEW (shared `FlowActorView`; docs/BOTTLENECKS.md § Two views). In
+// "People" a bot action never moves the ball — one predicate, and it is the entire moat: a tool
+// keying on `user.type === 'Bot'` cannot separate "this pull request was reviewed" from "a person
+// looked at this". In "People + bots" Limn's and the AI review bots' reviews and comments move it
+// too (`FLOW_BALL_BOT_LANES`), so a team sees what its review automation changed; quality gates,
+// CI and housekeeping never do. Lanes come from `resolveActorLanes`' UNION, never `users.isBot`
+// alone — the second row of a duplicated identity (`dependabot` vs `dependabot[bot]`) carries
+// `is_bot = 0` and would otherwise be counted as a human reviewer. Limn's own actions are stored
+// under its `limn:` bot (docs/CLAUDE-REVIEW.md § Limn's actions are bots), so they are never a
+// person's here. A bot-opened pull request is measured in NEITHER view.
 //
 // ⚠ EVERY SENTENCE IN THIS FILE IS TEMPLATED. No model, no plugin, no AI import. An EM makes
 // staffing decisions off this screen, so a generated sentence would launder an unverified figure
@@ -50,8 +55,10 @@
 // would move between windows as it aged.
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import {
+  FLOW_BALL_BOT_LANES,
   FLOW_RULES,
   reportingWindowPhrase,
+  type FlowActorView,
   type CourtEvidencePr,
   type CourtShare,
   type FlowCoverage,
@@ -67,7 +74,8 @@ import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
 import type { BotScope } from './queries.js';
 import { measuredTo, reportingWindowInfo, type ReportingWindow } from './reporting-window.js';
 import { surfacesForPath } from './blast-radius.js';
-import { getResolvedFlowSettings } from './flow-settings.js';
+import { getResolvedFlowSettings, getWorkspaceFlowView } from './flow-settings.js';
+import { trueMergerId } from './true-author.js';
 import { buildWorkingCalendar } from './working-hours.js';
 import {
   buildFlowDetail,
@@ -400,26 +408,37 @@ function directiveSummaryFor(court: PrCourt, namedBeatsTeam: boolean | null = nu
 // unreviewed-merge floor) is explained behind that section's "i" on the page, quoting FLOW_RULES;
 // repeating it inside the refusal put the same explanation on screen twice.
 
-function noHumanReviewReason(phrase: string): string {
-  return `No pull request merged ${phrase} had a human review or comment on it.`;
+/** What counts as somebody looking, in the view's words. */
+function lookNoun(view: FlowActorView): string {
+  return view === 'people' ? 'a human review' : 'a review from a person or a review bot';
+}
+
+function noHumanReviewReason(phrase: string, view: FlowActorView): string {
+  return `No pull request merged ${phrase} had ${lookNoun(view)} or comment on it.`;
 }
 
 function noneStandsOutReason(measured: number, phrase: string): string {
   return `Measured ${measured} ${plural(measured, 'repository', 'repositories')} ${phrase}. None stands out.`;
 }
 
-function unreviewedUnderFloorReason(): string {
-  return 'No repository merged enough pull requests without a human review to name.';
+function unreviewedUnderFloorReason(view: FlowActorView): string {
+  return `No repository merged enough pull requests without ${lookNoun(view)} to name.`;
 }
 
-function headlineFor(courts: CourtShare[], medianLead: number, p75Lead: number, prs: number): string {
+function headlineFor(
+  courts: CourtShare[],
+  medianLead: number,
+  p75Lead: number,
+  prs: number,
+  view: FlowActorView,
+): string {
   const by = new Map(courts.map((c) => [c.court, c.share]));
   const top = [...courts].sort((a, b) => b.share - a.share)[0];
   const lead =
     `Half of pull requests merged within ${fmtHours(medianLead)}; three in four within ` +
     `${fmtHours(p75Lead)}.`;
   return (
-    `Across ${prs} merged pull requests a person actually worked on, time split ` +
+    `Across ${prs} merged pull requests ${view === 'people' ? 'a person' : 'a person or a review bot'} actually worked on, time split ` +
     `${pct(by.get('reviewer') ?? 0)} waiting for a reviewer, ` +
     `${pct(by.get('author') ?? 0)} waiting for the author, and ` +
     `${pct(by.get('landing') ?? 0)} approved and waiting to merge. ` +
@@ -482,7 +501,8 @@ export interface FlowPopulation {
   repoName: Map<number, string>;
   /** Every merged pull request in the window (bots included) — the scan, before exclusions. */
   prs: PrRow[];
-  /** Human-authored, human-touched: the population every share and budget is over. */
+  /** Human-authored and touched by somebody who moves the ball in this view: the population every
+   *  share and budget is over. */
   measured: MeasuredPr[];
   botAuthors: Set<number>;
   unreviewedByRepo: Map<number, PrRow[]>;
@@ -496,6 +516,8 @@ export interface FlowPopulation {
   >;
   ciObs: Map<number, { atMs: number; red: boolean }[]>;
   isHuman: (userId: number | null) => boolean;
+  /** The view this population was measured in. */
+  view: FlowActorView;
 }
 
 /**
@@ -511,9 +533,12 @@ export async function loadFlowPopulation(
   scope: BotScope,
   from: Date,
   to: Date,
-  opts: { detail?: boolean; lanes?: ActorLanes } = {},
+  opts: { detail?: boolean; lanes?: ActorLanes; view?: FlowActorView } = {},
 ): Promise<FlowPopulation> {
   const detail = opts.detail !== false;
+  // ⚠ The DEFAULT is "People" here, the engine's original rule: a caller that wants the workspace's
+  // setting resolves it (`getWorkspaceFlowView`) and hands it in, ONCE per request.
+  const view: FlowActorView = opts.view ?? 'people';
   const caps = { truncated: false };
   const noteCap = (rows: number, cap: number): void => {
     if (rows >= cap) caps.truncated = true;
@@ -534,7 +559,9 @@ export async function loadFlowPopulation(
       number: pullRequests.number,
       title: pullRequests.title,
       authorId: pullRequests.authorId,
-      mergedById: pullRequests.mergedById,
+      // The person a merge was BY OR FOR (`trueMergerId`): a Limn landing the author armed is still
+      // a self-merge. Read only for `selfMerged`.
+      mergedById: trueMergerId(pullRequests),
       headRefName: pullRequests.headRefName,
       additions: pullRequests.additions,
       deletions: pullRequests.deletions,
@@ -595,6 +622,7 @@ export async function loadFlowPopulation(
       requestEvents: new Map(),
       ciObs: new Map(),
       isHuman: () => false,
+      view,
     };
   }
 
@@ -605,6 +633,10 @@ export async function loadFlowPopulation(
   // ⚠ The lane resolver's UNION, never `users.isBot` alone — see the header.
   const isHuman = (userId: number | null): boolean =>
     userId != null && lanes.laneOf(userId) === 'human';
+  // WHO MOVES THE BALL in this view — reviews and comments only; a push always does.
+  const ballBotLanes = new Set(view === 'people_bots' ? FLOW_BALL_BOT_LANES : []);
+  const movesBall = (userId: number | null): boolean =>
+    userId != null && (isHuman(userId) || ballBotLanes.has(lanes.laneOf(userId)));
 
   const actions = new Map<number, CourtAction[]>();
   const requestEvents = new Map<
@@ -628,7 +660,7 @@ export async function loadFlowPopulation(
       .execute();
     noteCap(rvRows.length, FLOW_ACTION_CAP);
     for (const r of rvRows) {
-      if (r.at == null || !isHuman(r.authorId)) continue;
+      if (r.at == null || !movesBall(r.authorId)) continue;
       if (r.state === 'pending') continue;
       const pr = byId.get(r.prId);
       if (pr == null) continue;
@@ -638,7 +670,8 @@ export async function loadFlowPopulation(
         atMs: r.at.getTime(),
         by: self ? 'author' : 'reviewer',
         approves: !self && r.state === 'approved',
-        userId: r.authorId,
+        // A bot is never a "first reviewer" person (the concentration rows count people only).
+        userId: isHuman(r.authorId) ? r.authorId : null,
       });
     }
 
@@ -651,14 +684,15 @@ export async function loadFlowPopulation(
       .execute();
     noteCap(rcRows.length, FLOW_ACTION_CAP);
     for (const r of rcRows) {
-      if (r.at == null || !isHuman(r.authorId)) continue;
+      if (r.at == null || !movesBall(r.authorId)) continue;
       const pr = byId.get(r.prId);
       if (pr == null) continue;
       push(r.prId, {
         atMs: r.at.getTime(),
         by: r.authorId === pr.authorId ? 'author' : 'reviewer',
         approves: false,
-        userId: r.authorId,
+        // A bot is never a "first reviewer" person (the concentration rows count people only).
+        userId: isHuman(r.authorId) ? r.authorId : null,
       });
     }
 
@@ -671,14 +705,15 @@ export async function loadFlowPopulation(
       .execute();
     noteCap(pcRows.length, FLOW_ACTION_CAP);
     for (const r of pcRows) {
-      if (r.at == null || !isHuman(r.authorId)) continue;
+      if (r.at == null || !movesBall(r.authorId)) continue;
       const pr = byId.get(r.prId);
       if (pr == null) continue;
       push(r.prId, {
         atMs: r.at.getTime(),
         by: r.authorId === pr.authorId ? 'author' : 'reviewer',
         approves: false,
-        userId: r.authorId,
+        // A bot is never a "first reviewer" person (the concentration rows count people only).
+        userId: isHuman(r.authorId) ? r.authorId : null,
       });
     }
 
@@ -800,6 +835,7 @@ export async function loadFlowPopulation(
     requestEvents,
     ciObs,
     isHuman,
+    view,
   };
 }
 
@@ -820,7 +856,8 @@ export async function getFlowCourts(
   accountId: number,
   scope: BotScope,
   windowDaysRaw: number,
-  opts: { reporting?: ReportingWindow; nowMs?: number } = {},
+  // `view`: who moves the ball (the request's `?view=`); absent ⇒ the workspace's setting.
+  opts: { reporting?: ReportingWindow; nowMs?: number; view?: FlowActorView } = {},
 ): Promise<FlowResponse> {
   const toMs = opts.reporting
     ? Math.max(opts.reporting.fromMs, measuredTo(opts.reporting, opts.nowMs ?? Date.now()))
@@ -852,11 +889,13 @@ export async function getFlowCourts(
   };
 
   const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
+  const view = opts.view ?? (await getWorkspaceFlowView(accountId, scope.workspaceId));
 
   const empty = (coverage: FlowCoverage): FlowResponse => ({
     workspaceId: scope.workspaceId,
     windowDays,
     ...(reportingWindow ? { reportingWindow } : {}),
+    view,
     measuredPrs: 0,
     courts: sharesOf({ reviewer: 0, author: 0, landing: 0 }),
     medianLeadHours: 0,
@@ -899,7 +938,7 @@ export async function getFlowCourts(
     });
   }
 
-  const pop = await loadFlowPopulation(accountId, scope, from, to);
+  const pop = await loadFlowPopulation(accountId, scope, from, to, { view });
   const {
     repoName,
     prs,
@@ -947,7 +986,7 @@ export async function getFlowCourts(
   };
 
   if (measured.length === 0) {
-    refuse('courts', noHumanReviewReason(phrase));
+    refuse('courts', noHumanReviewReason(phrase, view));
   }
 
   // ── Workspace-wide ─────────────────────────────────────────────────────────────────────────
@@ -1051,7 +1090,7 @@ export async function getFlowCourts(
   if (measured.length > 0 && clearedFloor === 0) {
     refuse(
       'courts',
-      `No repository reached ${FLOW_MIN_REPO_PRS} merged pull requests with a human review ${phrase}.`,
+      `No repository reached ${FLOW_MIN_REPO_PRS} merged pull requests with ${lookNoun(view)} ${phrase}.`,
     );
   } else if (shownRepos.length > 0 && shownRepos.every((p) => p.dominant == null)) {
     refuse('courts', noneStandsOutReason(clearedFloor, phrase), 'measured_clean');
@@ -1091,8 +1130,8 @@ export async function getFlowCourts(
     refuse(
       'unreviewed',
       excludedNoHumanTouch === 0
-        ? `Every pull request merged ${phrase} had a human review or comment on it.`
-        : unreviewedUnderFloorReason(),
+        ? `Every pull request merged ${phrase} had ${lookNoun(view)} or comment on it.`
+        : unreviewedUnderFloorReason(view),
       'measured_clean',
     );
   }
@@ -1146,12 +1185,13 @@ export async function getFlowCourts(
     workspaceId: scope.workspaceId,
     windowDays,
     ...(reportingWindow ? { reportingWindow } : {}),
+    view,
     measuredPrs: measured.length,
     courts: wsCourts,
     medianLeadHours: wsMedian,
     p75LeadHours: wsP75,
     headline:
-      measured.length === 0 ? null : headlineFor(wsCourts, wsMedian, wsP75, measured.length),
+      measured.length === 0 ? null : headlineFor(wsCourts, wsMedian, wsP75, measured.length, view),
     repos: shownRepos,
     directives,
     unreviewed,

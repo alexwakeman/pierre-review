@@ -1,5 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Segmented } from './reportChrome.js';
+import {
+  FLOW_ACTOR_VIEWS,
+  FLOW_ACTOR_VIEW_LABEL,
+  type FlowActorView,
+} from '@pierre-review/shared';
 import type {
   CourtEvidencePr,
   PrCourt,
@@ -7,6 +12,7 @@ import type {
   RepoCourtProfile,
 } from '@pierre-review/shared';
 import { useFlowFindings } from '../../hooks/useFlowFindings.js';
+import { useSetWorkspaceFlowView, useWorkspaceFlowView } from '../../hooks/useFlowView.js';
 import { useWorkspaceMetrics } from '../../hooks/useWorkspaceInsights.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
@@ -40,6 +46,7 @@ import {
   BudgetsInfo,
   ReviewTargetInfo,
   ChronologyAboutInfo,
+  FlowViewInfo,
   ConcentrationInfo,
   ContrastInfo,
   LandingInfo,
@@ -245,6 +252,33 @@ function WindowPicker({
 }
 
 /**
+ * WHO MOVES THE BALL (hooks/useFlowView.ts): "People + bots" or "People", saved per workspace. The
+ * panel, the trend and the pointers all read the view this shows. Hidden until the workspace row
+ * is loaded, so it never shows a choice that is not the stored one.
+ */
+function ViewPicker({ workspaceId }: { workspaceId: number | null }): JSX.Element | null {
+  const view = useWorkspaceFlowView(workspaceId);
+  const save = useSetWorkspaceFlowView();
+  if (workspaceId == null || view == null) return null;
+  return (
+    <div className="flex items-center gap-1">
+      <Segmented<FlowActorView>
+        label="Whose actions count"
+        testId="chronology-view"
+        value={view}
+        onChange={(v) => {
+          if (v !== view) save.mutate({ id: workspaceId, view: v });
+        }}
+        options={FLOW_ACTOR_VIEWS.map((v) => ({ value: v, label: FLOW_ACTOR_VIEW_LABEL[v] }))}
+      />
+      <InfoButton title="People + bots, or People">
+        <FlowViewInfo />
+      </InfoButton>
+    </div>
+  );
+}
+
+/**
  * One panel: a title, the "i" that explains it, and its figures.
  *
  * ⚠ NO NOTE UNDER THE TITLE. Every panel used to open with a sentence about how to read it, and
@@ -344,7 +378,7 @@ export function BottlenecksPanel(): JSX.Element {
     );
   }
 
-  const exclusions = exclusionLineFor(model.coverage);
+  const exclusions = exclusionLineFor(model.coverage, resp.view ?? 'people');
   const truncation = truncationLineFor(model.coverage);
   // ⚠ Over EVERY measured pull request — the server's, or a recount of a list that is complete.
   // Null when the list is a sample from an older server: no figure beats a wrong one.
@@ -363,7 +397,10 @@ export function BottlenecksPanel(): JSX.Element {
               <ChronologyAboutInfo settings={resp.settings ?? null} />
             </InfoButton>
           </div>
-          <WindowPicker value={windowDays} onChange={setWindowDays} reporting={reportingInfo} />
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewPicker workspaceId={workspaceId} />
+            <WindowPicker value={windowDays} onChange={setWindowDays} reporting={reportingInfo} />
+          </div>
         </div>
         {/* ⚠ THE DISCLOSURES STAY ON THE PAGE, one line each. Retroactive history is coverage-
             biased, and what was set aside changes every share below — a reader who has to open a
@@ -390,8 +427,9 @@ export function BottlenecksPanel(): JSX.Element {
           <div className="rounded-ui p-6 text-center text-body text-ui-mute bg-ui-surface">
             Nothing to measure in this workspace yet.
             <p className="mt-1 text-meta">
-              A pull request has to merge, and a person has to have reviewed or commented on it,
-              before its waiting time can be counted.
+              {resp.view === 'people'
+                ? 'A pull request has to merge, and a person has to have reviewed or commented on it, before its waiting time can be counted.'
+                : 'A pull request has to merge, and a person or a review bot has to have reviewed or commented on it, before its waiting time can be counted.'}
             </p>
           </div>
           {/* The last 26 weeks can hold work even when the picked window holds none. */}

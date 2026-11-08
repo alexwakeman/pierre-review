@@ -45,6 +45,7 @@ import {
 } from '@pierre-review/shared';
 import { db, runTransaction, schema } from './client.js';
 import { TEAMMATE_KIND } from './teammate-reviews.js';
+import { trueAuthorId } from './true-author.js';
 
 const { accounts, users, reviews, reviewComments, reviewThreads, prComments, commits, pullRequests } = schema;
 const cr = schema.claudeReviews;
@@ -116,14 +117,15 @@ export async function importTeammateReviews(accountId: number, prId: number): Pr
       .select({
         nodeId: reviews.githubNodeId,
         databaseId: reviews.databaseId,
-        authorId: reviews.authorId,
+        // The PERSON who posted it (sync stores a Limn review under their `limn:` bot).
+        authorId: trueAuthorId(reviews),
         login: users.githubLogin,
         state: reviews.state,
         body: reviews.body,
         submittedAt: reviews.submittedAt,
       })
       .from(reviews)
-      .innerJoin(users, eq(users.id, reviews.authorId))
+      .innerJoin(users, eq(users.id, trueAuthorId(reviews)))
       .where(and(eq(reviews.prId, prId), sql`${reviews.body} like '%pierre:claude-review%'`))
       .orderBy(asc(reviews.submittedAt), asc(reviews.id))
       .execute()

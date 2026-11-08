@@ -139,19 +139,19 @@ export type PrDetailTab =
   | 'activity'
   | 'threads'
   | 'changes'
-  | 'bot_activity'
   | 'claude_review'
   | 'ai_fix'
-  | 'story';
+  | 'story'
+  | 'bot_activity';
 export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'overview',
   'activity',
   'threads',
   'changes',
-  'bot_activity',
   'claude_review',
   'ai_fix',
   'story',
+  'bot_activity',
 ];
 // Activity → Open PRs' repo dropdown (see openPrsRepoFilter). Stamped with the workspace it
 // was chosen in, so a switch makes it inert by DERIVATION rather than by a reset effect.

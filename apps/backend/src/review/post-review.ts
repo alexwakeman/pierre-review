@@ -10,6 +10,7 @@ import type {
   PostReviewPreview,
 } from '@pierre-review/shared';
 import { ghRestGet, ghRestPost } from '../github/client.js';
+import { limnWrite, type WriteOrigin } from '../github/write-origin.js';
 import { localPrDiff } from './clone-manager.js';
 import {
   type AnchorIndex,
@@ -207,9 +208,15 @@ export function findingCommentBody(
   }
   if (opts?.fallbackNote) parts.push(FALLBACK_ANCHOR_NOTE);
   if (opts?.footer) parts.push(opts.footer);
+  // Every inline finding comment opens a review thread; it tells people their replies are read.
+  // Only here (the thread's FIRST comment) — Limn's later replies in the thread never carry it.
+  parts.push(THREAD_REPLY_NOTE);
   parts.push(FINDING_COMMENT_MARKER);
   return parts.join('\n\n');
 }
+
+/** The last visible line of every inline finding comment (the first comment of a Limn thread). */
+export const THREAD_REPLY_NOTE = '_Replies will be picked up in the next Limn check._';
 
 // Note appended to a PR-level comment, so readers know the referenced code is NOT
 // part of this PR's changes (it can't be an inline comment — there's no diff line).
@@ -316,22 +323,30 @@ export async function submitGithubReview(input: {
   body: string;
   event: ClaudeReviewVerdict;
   comments: PostReviewComment[];
-}): Promise<{ reviewId: string }> {
-  const res = await ghRestPost<GhReviewResponse>(
-    `/repos/${input.owner}/${input.name}/pulls/${input.prNumber}/reviews`,
-    {
-      commit_id: input.commitId,
-      body: input.body,
-      event: input.event,
-      comments: input.comments.map((c) => ({
-        path: c.path,
-        line: c.line,
-        side: c.side,
-        body: c.body,
-      })),
+}, origin: WriteOrigin): Promise<{ reviewId: string }> {
+  return limnWrite(
+    origin,
+    'review',
+    { prNumber: input.prNumber },
+    async () => {
+      const res = await ghRestPost<GhReviewResponse>(
+        `/repos/${input.owner}/${input.name}/pulls/${input.prNumber}/reviews`,
+        {
+          commit_id: input.commitId,
+          body: input.body,
+          event: input.event,
+          comments: input.comments.map((c) => ({
+            path: c.path,
+            line: c.line,
+            side: c.side,
+            body: c.body,
+          })),
+        },
+      );
+      return { reviewId: String(res.id) };
     },
+    (r) => ({ githubDatabaseId: r.reviewId }),
   );
-  return { reviewId: String(res.id) };
 }
 
 // A review as GitHub's `GET /repos/{o}/{r}/pulls/{n}/reviews` lists it (the fields the read-back
@@ -459,6 +474,8 @@ export function matchReviewComments(
 interface GhCommentResponse {
   id: number;
   html_url?: string;
+  /** The review GitHub wraps a standalone comment in (Limn's wrapper). */
+  pull_request_review_id?: number | null;
 }
 
 // Post a SINGLE standalone inline review comment (not part of a review draft).
@@ -472,18 +489,28 @@ export async function submitGithubComment(input: {
   line: number;
   side: 'LEFT' | 'RIGHT';
   body: string;
-}): Promise<{ commentId: string }> {
-  const res = await ghRestPost<GhCommentResponse>(
-    `/repos/${input.owner}/${input.name}/pulls/${input.prNumber}/comments`,
-    {
-      body: input.body,
-      commit_id: input.commitId,
-      path: input.path,
-      line: input.line,
-      side: input.side,
+}, origin: WriteOrigin): Promise<{ commentId: string }> {
+  let reviewDatabaseId: number | null = null;
+  return limnWrite(
+    origin,
+    'review_comment',
+    { prNumber: input.prNumber },
+    async () => {
+      const res = await ghRestPost<GhCommentResponse>(
+        `/repos/${input.owner}/${input.name}/pulls/${input.prNumber}/comments`,
+        {
+          body: input.body,
+          commit_id: input.commitId,
+          path: input.path,
+          line: input.line,
+          side: input.side,
+        },
+      );
+      reviewDatabaseId = res.pull_request_review_id ?? null;
+      return { commentId: String(res.id) };
     },
+    (r) => ({ githubDatabaseId: r.commentId, reviewDatabaseId }),
   );
-  return { commentId: String(res.id) };
 }
 
 interface GhIssueCommentResponse {
@@ -499,10 +526,18 @@ export async function submitGithubIssueComment(input: {
   name: string;
   prNumber: number;
   body: string;
-}): Promise<{ commentId: string }> {
-  const res = await ghRestPost<GhIssueCommentResponse>(
-    `/repos/${input.owner}/${input.name}/issues/${input.prNumber}/comments`,
-    { body: input.body },
+}, origin: WriteOrigin): Promise<{ commentId: string }> {
+  return limnWrite(
+    origin,
+    'pr_comment',
+    { prNumber: input.prNumber },
+    async () => {
+      const res = await ghRestPost<GhIssueCommentResponse>(
+        `/repos/${input.owner}/${input.name}/issues/${input.prNumber}/comments`,
+        { body: input.body },
+      );
+      return { commentId: String(res.id) };
+    },
+    (r) => ({ githubDatabaseId: r.commentId }),
   );
-  return { commentId: String(res.id) };
 }

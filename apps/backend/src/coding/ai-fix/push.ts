@@ -1,4 +1,4 @@
-import { PRODUCT_NAME } from '@pierre-review/shared';
+import { PRODUCT_NAME, type LimnActionOrigin } from '@pierre-review/shared';
 import type { AiFixPushResult } from '@pierre-review/shared';
 import type { ApplyAndPushTarget } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
@@ -41,9 +41,20 @@ export type PushFixOutcome =
       message: string;
     };
 
+/** `origin`: why the fix is pushed — the reader pressed Push ('reader_pressed', the default), Push
+ *  automatically ('auto'), or the Dependencies policy ('policy'). The ledger's origin either way: an
+ *  AI Fix push is always Limn's work (docs/CLAUDE-REVIEW.md § Limn's actions are bots). */
+export interface PushFixInput {
+  accountId: number;
+  fixId: number;
+  target: 'existing' | 'new';
+  branch?: string;
+  origin?: LimnActionOrigin;
+}
+
 export async function pushFix(
   ctx: AgentContext,
-  input: { accountId: number; fixId: number; target: 'existing' | 'new'; branch?: string },
+  input: PushFixInput,
 ): Promise<PushFixOutcome> {
   const { accountId, fixId } = input;
   // ⚠ The push slot in THIS tick, before any await: a message to the session cannot start meanwhile.
@@ -57,9 +68,10 @@ export async function pushFix(
 
 async function pushFixHeld(
   ctx: AgentContext,
-  input: { accountId: number; fixId: number; target: 'existing' | 'new'; branch?: string },
+  input: PushFixInput,
 ): Promise<PushFixOutcome> {
   const { accountId, fixId } = input;
+  const limnRun = { origin: input.origin ?? ('reader_pressed' as const), source: { table: 'ai_fixes', id: fixId } };
   const session = await import('../../sandbox/session/fix.js');
   if (session.fixTurnRunning(fixId)) return { ok: false, code: 'not_pushable', message: 'The agent is still working. Wait, or press Stop.' };
   const row = await getFixById(ctx, accountId, fixId);
@@ -103,6 +115,7 @@ async function pushFixHeld(
         expectedResultSha: merge.resultSha,
         mergeMessage: `Merge ${merge.baseRef} into this pull request\n\nConflicts resolved with ${by} in ${PRODUCT_NAME} AI Fix.`,
         fixMessage: commitMessage,
+        limnOrigin: limnRun.origin,
       });
       await markFixPushed(ctx, fixId, { pushedBranch: result.pushedBranch });
       if (row.sessionPhase != null) await session.closeFixAfterPush(ctx, accountId, fixId).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: closing the session after the push failed'));
@@ -146,6 +159,7 @@ async function pushFixHeld(
       patch: row.patch ?? '',
       commitMessage,
       target,
+      limnRun,
     });
     await markFixPushed(ctx, fixId, {
       pushedBranch: result.pushedBranch,

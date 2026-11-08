@@ -1442,6 +1442,18 @@ export function userLabel(user: User | undefined, fallbackId: number | null): st
  * GitHub profile URL for a login (e.g. `octocat` → https://github.com/octocat). Null for a Limn
  * bot (`limn:alice`): that login is not a GitHub account and must never become a link to one.
  */
+/**
+ * A Limn bot's sub-line, "Bot · acts for @alice", and its hover title. A `limn:alice` bot holds
+ * everything Limn did for alice — reviews, findings, replies, approvals, merges and pushes — never
+ * alice herself (docs/CLAUDE-REVIEW.md § Limn's actions are bots).
+ */
+export function limnActsForLine(poster: string): string {
+  return `Bot · acts for @${poster}`;
+}
+export function limnActsForTitle(poster: string): string {
+  return `Limn, acting for @${poster}: the reviews, comments, merges and pushes Limn made for them`;
+}
+
 export function profileUrl(login: string): string | null {
   if (isLimnBotLogin(login)) return null;
   return `https://github.com/${encodeURIComponent(login)}`;

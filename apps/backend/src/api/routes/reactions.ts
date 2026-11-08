@@ -227,7 +227,7 @@ export async function reactionRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const token = await getAccessToken(accountId);
-        const gh = await setReaction(token, target.nodeId, content, add);
+        const gh = await setReaction(token, target.nodeId, content, add, 'reader');
         return { kind, id, groups: gh.groups, viewerCanReact: gh.viewerCanReact };
       } catch (err) {
         // Unlike the lookup, the toggle does NOT degrade quietly: a click the user made on

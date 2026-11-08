@@ -155,11 +155,12 @@ export const PENDING = {
     waiting: ['waiting'],
   } as Record<PendingTabId, PendingCardId[]>,
   /** AI reviews: the newest AI review on each PR, theirs and their teammates', newest first
-   *  (Activity/PendingAiReviews.tsx). Read-only rows; `isNew` = since the reader last opened the tab. */
+   *  (Activity/PendingAiReviews.tsx). Read-only rows; `isNew` = since the reader last opened the tab;
+   *  `seen` = the visit that first showed it ("Seen today 09:12"), one block per visit. */
   aiSeen: [
     { pr: PRS.refunds, by: 'Your Limn', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
-    { pr: PRS.ledgerIndex, by: 'Priya’s Limn', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false },
-  ] as { pr: Pr; by: string; verdict: string; tone: Tone; findings: string; when: string; isNew: boolean }[],
+    { pr: PRS.ledgerIndex, by: 'Priya’s Limn', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false, seen: 'Seen today 09:12' },
+  ] as { pr: Pr; by: string; verdict: string; tone: Tone; findings: string; when: string; isNew: boolean; seen?: string }[],
 };
 
 /** A Pending tab's badge: its cards; AI reviews' badge is its rows marked New. */

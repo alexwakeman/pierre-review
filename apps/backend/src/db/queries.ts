@@ -195,6 +195,7 @@ import {
   hasNewSinceLastViewed,
   USER_STATS_WINDOW_DAYS,
   stillOpenLabel,
+  parseFlowActorView,
 } from '@pierre-review/shared';
 
 // Local copy of the shared `REASON_PRIORITY` value constant. `@pierre-review/shared`
@@ -278,6 +279,8 @@ import { dormantBotUserIds } from './bot-dormancy.js';
 import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
 import { limnBotUserIdForUser, limnBotUserIds, limnReplyAttribution } from './limn-bots.js';
+import { prOwnerId } from './true-author.js';
+import { limnDischargedReviewRequests } from './limn-discharged-requests.js';
 import { ownRunsOnly } from './teammate-reviews.js';
 import {
   automationVendorUserIds,
@@ -514,6 +517,8 @@ function mapWorkspace(
     // Overrides only (null = every default) — the SPA resolves them for display with the same
     // `resolveFlowSettings` the Chronology engine uses.
     flowSettings: w.flowSettings ?? null,
+    // Chronology's view, raw (null = the default; `resolveFlowActorView`).
+    flowView: parseFlowActorView(w.flowView),
   };
 }
 
@@ -5604,6 +5609,9 @@ export async function getWorkspaceInsights(
       number: pullRequests.number,
       title: pullRequests.title,
       authorId: pullRequests.authorId,
+      // WHOSE PR (`prOwnerId`): the person Limn opened it for, else the author. Every "is this the
+      // reader's own PR" test below reads it; `authorId` stays the name on the card.
+      limnOpenedForUserId: pullRequests.limnOpenedForUserId,
       openedAt: pullRequests.openedAt,
       ciStatus: pullRequests.ciStatus,
       changedFiles: pullRequests.changedFiles,
@@ -5747,7 +5755,7 @@ export async function getWorkspaceInsights(
         // A dependency PR's red build is on its Dependencies card ("CI failing"), not here; one the
         // reader promoted into My Turn is on its my_turn card.
         if (
-          p.authorId !== viewerId ||
+          prOwnerId(p) !== viewerId ||
           !isRedCiStatus(p.ciStatus) ||
           depPrIds.has(p.id) ||
           promotedCi.has(p.id)
@@ -5963,7 +5971,7 @@ export async function getWorkspaceInsights(
       // reader's own ready work out of a 15-row cap, in exchange for suppressing nothing. Muting
       // is about interruption; a forward card does not interrupt.
       const relevance: MyTurnRelevance =
-        viewerId != null && p.authorId === viewerId
+        viewerId != null && prOwnerId(p) === viewerId
           ? 'direct'
           : maintained.has(p.repoId)
             ? 'maintained'
@@ -6077,7 +6085,7 @@ export async function getWorkspaceInsights(
       // is unreachable. Resolving it here would buy the same answer for an account-wide `repos`
       // select plus getMergers.
       const relevance: MyTurnRelevance =
-        viewerId != null && p.authorId === viewerId ? 'direct' : 'maintained';
+        viewerId != null && prOwnerId(p) === viewerId ? 'direct' : 'maintained';
       addUser(p.authorId);
       conflictSeeds.push({
         sortAt: (p.lastCommitAt ?? p.openedAt).getTime(),
@@ -6146,7 +6154,7 @@ export async function getWorkspaceInsights(
       // For the ranker's weight and the colour only — the merge block's three tiers, and like
       // there never an ownership claim on screen.
       const relevance: MyTurnRelevance =
-        viewerId != null && p.authorId === viewerId
+        viewerId != null && prOwnerId(p) === viewerId
           ? 'direct'
           : maintained.has(p.repoId)
             ? 'maintained'
@@ -6565,7 +6573,7 @@ export async function getWorkspaceInsights(
         ? []
         : openPrs.filter(
             (p) =>
-              p.authorId === viewerId &&
+              prOwnerId(p) === viewerId &&
               // A dependency PR's review state is on its Dependencies card.
               !depPrIds.has(p.id) &&
               requestedPrIds.has(p.id) &&
@@ -7547,6 +7555,9 @@ async function getAddedRepoActionablePrIds(
     if (bots.has(t.authorId)) continue;
     const m = rowById.get(t.id);
     if (!m || m.isDraft) continue;
+    // A PR Limn opened for you is YOUR PR, never a "new PR" (its author, your `limn:` bot, is
+    // automation and already skipped above; this states the ownership rule outright).
+    if (prOwnerId(m) === localUserId) continue;
     candidates.push(t.id);
   }
   if (candidates.length === 0) return out;
@@ -7755,11 +7766,14 @@ export async function getMyTurn(
   // THE AUTOMATION SET — ONE read, handed to every rule below. GLOBAL (users.isBot ∪ GitHub-typed
   // Bots ∪ vendor logins), never `hiddenBotUserIds`, which needs a workspace this fold may not have.
   const bots = await globalAutomationUserIds();
-  // The reader's own Limn bot (`limn:<login>`, db/limn-bots.ts), or null. A thread rooted on one of
-  // YOUR Limn findings is still your thread: the finding never moves the ball, a person's reply in
-  // it does (docs/BACKEND.md § My Turn).
+  // ⚠ "EVERYTHING LIMN DOES ON MY BEHALF IS NOT ME" (docs/BACKEND.md § My Turn). A thread rooted on
+  // one of YOUR Limn findings is Limn's thread, not yours: a person replying to the finding does not
+  // summon you. Only a thread you started IN PERSON, or replied in in person, is yours.
+  const myThreadOpeners = [localUserId];
+  // …but on YOUR OWN PR, your Limn's untouched finding is still not a thread somebody left you — it
+  // stays on its home tab, as your own note does. The reader's `limn:<login>` bot, or null.
   const myLimnBotId = await limnBotUserIdForUser(localUserId);
-  const myThreadOpeners = myLimnBotId != null ? [localUserId, myLimnBotId] : [localUserId];
+  const ownPrNoteOpeners = myLimnBotId != null ? [localUserId, myLimnBotId] : [localUserId];
 
   // ── THE PENDING MUTE. One read, ACCOUNT-WIDE, unioning the two independently-owned facts
   //    (`workspaces.pending_muted` OR a `pending_muted_repos` row) — see db/pending-mute.ts.
@@ -7914,8 +7928,11 @@ export async function getMyTurn(
   // ⚠ A PR CARRYING A DEPENDENCY TOOL'S MARKER IS NOT PROMOTED, even when your token opened it (a
   // Snyk fix pushed as you): it is a dependency PR, listed in the Dependencies tab, and promoting
   // it would list it twice.
+  // ⚠ OWNERSHIP IS `prOwnerId`: a PR Limn OPENED for you (Implement, AI Fix on a new branch, the
+  // conflict resolver) is still yours here — its CI, conflicts, approvals and threads are your work —
+  // though its author is your `limn:` bot and nothing Limn does on it counts as you acting.
   const ownRows = openRows.filter(
-    (p) => p.authorId === localUserId && !p.isDraft && p.dependencyVendor == null,
+    (p) => prOwnerId(p) === localUserId && !p.isDraft && p.dependencyVendor == null,
   );
   const activeOwn =
     ownRows.length > 0
@@ -8005,7 +8022,7 @@ export async function getMyTurn(
           // yourself — it stays on its home tab.
           or(
             isNull(reviewThreads.originalCommenterId),
-            notInArray(reviewThreads.originalCommenterId, myThreadOpeners),
+            notInArray(reviewThreads.originalCommenterId, ownPrNoteOpeners),
           ),
         ),
       )
@@ -8081,11 +8098,18 @@ export async function getMyTurn(
   //    removes that row the moment you submit, so the state IS the rule: nothing here needs a
   //    second "have I acted since" test. ⚠ Dependency PRs keep this card: a direct summons wins
   //    over "listed only in Dependencies".
+  //    ⚠ …EXCEPT WHEN LIMN SUBMITTED IT. A Limn review is posted under your login, so GitHub drops
+  //    your request as answered though you never looked. Such a request still stands until you
+  //    review in person (db/limn-discharged-requests.ts), dated by when you were asked.
+  const limnAnswered = await limnDischargedReviewRequests(
+    localUserId,
+    open.filter((t) => !t.reviewRequestedFromMe && prOwnerId(meta(t.id)) !== localUserId).map((t) => t.id),
+  );
   const awaitingReview = claim(
     'review_request',
     await Promise.all(
       open
-        .filter((t) => t.reviewRequestedFromMe)
+        .filter((t) => t.reviewRequestedFromMe || limnAnswered.has(t.id))
         .map(async (t) => {
           // otherReviewersRequested is recomputed via triage map; re-derive count.
           const others = await countOtherReviewers(t.id, localUserId);
@@ -8093,7 +8117,7 @@ export async function getMyTurn(
           // The review-pickup clock: when a review was REQUESTED of you (the PR's open time
           // only stands in for repos synced before that column existed).
           return {
-            ...toMyTurnPr(t, m.firstReviewRequestedAt ?? m.openedAt),
+            ...toMyTurnPr(t, limnAnswered.get(t.id) ?? m.firstReviewRequestedAt ?? m.openedAt),
             alsoRequested: others,
           };
         }),
@@ -8116,7 +8140,7 @@ export async function getMyTurn(
         open
           .filter((t) => {
             // Drafts can't merge even when approved — don't claim "ready to merge".
-            if (t.authorId !== localUserId || t.isDraft) return false;
+            if (prOwnerId(meta(t.id)) !== localUserId || t.isDraft) return false;
             if (approvalInfo.get(t.id)?.approved !== true) return false;
             if (ownReadyIds.has(t.id)) {
               claimed.add(t.id);
@@ -8486,7 +8510,7 @@ async function countOtherReviewers(
 // (`approvedSince`, below). S3(b) is NOT discharged: an approval does not say you checked the fix.
 async function getThreadTurns(opts: {
   localUserId: number;
-  /** You, plus your own Limn bot when you have one: the threads that are "yours". */
+  /** The threads that are "yours": the ones YOU opened in person (never your Limn's findings). */
   myThreadOpeners: number[];
   accountId: number;
   repoNameById: Map<number, string>;
@@ -9707,6 +9731,12 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       .delete(schema.referenceDocRepoOffers)
       .where(and(eq(schema.referenceDocRepoOffers.repoId, id), eq(schema.referenceDocRepoOffers.accountId, accountId)))
       .execute();
+    // The Limn provenance ledger (migration 0180): every row of this repo, a PR Limn opened that never
+    // synced (pr_id NULL) included. The composite FKs cascade; explicit anyway.
+    await tx
+      .delete(schema.limnActions)
+      .where(and(eq(schema.limnActions.repoId, id), eq(schema.limnActions.accountId, accountId)))
+      .execute();
     if (prIds.length > 0) {
       await tx.delete(reviewComments).where(inArray(reviewComments.prId, prIds)).execute();
       await tx.delete(reviewThreads).where(inArray(reviewThreads.prId, prIds)).execute();
@@ -9741,6 +9771,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         .delete(schema.dependencyAutomationActions)
         .where(inArray(schema.dependencyAutomationActions.prId, prIds))
         .execute();
+      // The Limn provenance ledger (migration 0180), PR rows. Composite FK cascades; explicit.
+      await tx.delete(schema.limnActions).where(inArray(schema.limnActions.prId, prIds)).execute();
       // Claude review runs + findings reference these PRs (FKs are ON), so clear
       // them before the PRs.
       const reviewIdRows = await tx

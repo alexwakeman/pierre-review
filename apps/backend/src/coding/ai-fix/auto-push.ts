@@ -50,7 +50,7 @@ export async function maybeAutoPushFix(
     if (!ws?.enabled || !ws.settings.autoPush) return { status: 'skipped', reason: 'off' };
     if (!(await deps.prAuthorIsAccount(ctx, accountId, row.prId))) return { status: 'skipped', reason: 'not_own' };
 
-    const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing' });
+    const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'auto' });
     if (out.ok) {
       ctx.log.info(`auto push: fix ${fixId} pushed to ${out.result.pushedBranch}`);
       return { status: 'pushed', branch: out.result.pushedBranch };

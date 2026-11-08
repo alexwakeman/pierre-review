@@ -142,6 +142,7 @@ import {
   teammateLiftMessage,
   type TeammateLiftCandidate,
 } from './teammate-lift.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 // A pair's body names both when it falls back to a count ("3 comments from Claude and Codex.").
 const PAIR_BODY_BY = 'Claude and Codex';
@@ -536,8 +537,11 @@ export const defaultAutoPostDeps: AutoPostDeps = {
   async dismissReview(accountId, owner, name, prNumber, reviewId, message) {
     const { getAccessToken } = await import('../../auth/account.js');
     const { dismissPrReview } = await import('../../github/mutations.js');
+    const ledger = await import('../../db/limn-actions.js');
     const token = await getAccessToken(accountId);
-    const res = await dismissPrReview(token, owner, name, prNumber, Number(reviewId), message);
+    // Limn lifting its OWN blocking review.
+    const origin = ledger.orReader(await ledger.limnOriginForPrNumber(accountId, owner, name, prNumber, 'auto'));
+    const res = await dismissPrReview(token, owner, name, prNumber, Number(reviewId), message, origin);
     return res.ok ? { ok: true } : { ok: false, message: res.message };
   },
 };
@@ -678,7 +682,7 @@ export async function readAutoPostPrFacts(
 ): Promise<AutoPostPrFacts | null> {
   const t = s(ctx);
   const rows = (await ctx.db
-    .select({ state: t.pullRequests.state, isDraft: t.pullRequests.isDraft, authorId: t.pullRequests.authorId })
+    .select({ state: t.pullRequests.state, isDraft: t.pullRequests.isDraft, authorId: trueAuthorId(t.pullRequests) })
     .from(t.pullRequests)
     .where(and(eq(t.pullRequests.id, prId), eq(t.pullRequests.accountId, accountId)))
     .limit(1)
@@ -1258,6 +1262,7 @@ async function autoPostReview(
       owner: pctx.owner,
       name: pctx.name,
       prNumber: pctx.prNumber,
+      limn: { accountId, prId, origin: pressed ? 'reader_pressed' : 'auto', source: { table: 'claude_reviews', id: reviewId } },
       reviewHeadSha: pctx.reviewHeadSha,
       body: bodyOf(ev === 'APPROVE' ? null : reasonNow()),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ACTIONS,
@@ -201,24 +201,28 @@ function PendingCards({
           </PrRow>
         );
       })}
-      {/* AI reviews: the newest AI review on each PR, "New" since you last looked
-          (Activity/PendingAiReviews.tsx). */}
+      {/* AI reviews: the newest AI review on each PR, "New" since you last looked, then one block
+          per earlier visit (Activity/PendingAiReviews.tsx). */}
       {tab === 'claude' ? (
         <>
           <p className="mk-muted mk-purpose">Latest AI review on each pull request</p>
-          {PENDING.aiSeen.map((r) => (
-            <PrRow
-              key={r.pr.num}
-              title={prLabel(r.pr)}
-              repo={r.pr.repo}
-              status={<Chip tone={r.tone}>{r.verdict}</Chip>}
-              why={
-                <>
-                  {r.isNew ? <Chip tone="blue">New</Chip> : null}
-                  <span>{`${r.by} · ${r.findings} · ${r.when}`}</span>
-                </>
-              }
-            />
+          {PENDING.aiSeen.map((r, i) => (
+            <Fragment key={r.pr.num}>
+              {r.seen != null && r.seen !== PENDING.aiSeen[i - 1]?.seen ? (
+                <p className="mk-muted mk-purpose">{r.seen}</p>
+              ) : null}
+              <PrRow
+                title={prLabel(r.pr)}
+                repo={r.pr.repo}
+                status={<Chip tone={r.tone}>{r.verdict}</Chip>}
+                why={
+                  <>
+                    {r.isNew ? <Chip tone="blue">New</Chip> : null}
+                    <span>{`${r.by} · ${r.findings} · ${r.when}`}</span>
+                  </>
+                }
+              />
+            </Fragment>
           ))}
         </>
       ) : null}

@@ -316,7 +316,7 @@ describe('PR write routes raise the change signal before replying', () => {
     const res = await inject('POST', `/api/prs/${openPr}/withdraw-approval`);
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ state: 'dismissed' });
-    expect(dismissPrReview).toHaveBeenCalledWith('tok', expect.anything(), expect.anything(), expect.anything(), 77, 'Approval withdrawn in Limn.');
+    expect(dismissPrReview).toHaveBeenCalledWith('tok', expect.anything(), expect.anything(), expect.anything(), 77, 'Approval withdrawn in Limn.', 'reader');
     expect(fetchViewerLatestDecisiveReview.mock.calls[0]![4]).toBe(VIEWER_LOGIN);
     const rows = await db.select().from(schema.reviews).where(eq(schema.reviews.githubNodeId, 'PRR_wd')).execute();
     expect(rows.map((r: any) => r.state)).toEqual(['dismissed']);
@@ -381,6 +381,7 @@ describe('PR write routes raise the change signal before replying', () => {
       expect.anything(),
       expect.anything(),
       { event: 'REQUEST_CHANGES', body: 'Changes requested.' },
+      'reader',
     );
     expectSignalledBeforeReply(repoA);
   });

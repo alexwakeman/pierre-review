@@ -1521,6 +1521,24 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0181_workspace_flow_view` — Chronology's two views
+
+`ALTER TABLE workspaces ADD COLUMN flow_view text` — NULL = the default view, "People + bots"
+([DATA-MODEL.md](DATA-MODEL.md) § `workspaces.flow_view`; [BOTTLENECKS.md](BOTTLENECKS.md) § Two
+views). On an existing table, so erasure already covers it; export adds the column. Additive, no
+backfill. Journal `idx` 181, `when` sqlite `1792569679025`.
+
+### `0180_limn_actions` — Limn's actions are bots: the ledger and the provenance columns
+
+NEW `limn_actions` (unique `(account_id, kind, claim_key)`; indexes on `(account_id, pr_id)`, the
+GitHub ids and the sha; composite FKs `limn_actions_repo_account_fk` → `repos (id, account_id)` and
+`limn_actions_pr_account_fk` → `pull_requests (id, account_id)`, cascade) and five nullable columns:
+`reviews.limn_posted_by_user_id` (+ `rv_limn_poster_idx`), `review_comments.review_database_id`,
+`commits.limn_pushed_by_user_id`, `pull_requests.limn_merged_for_user_id` / `limn_opened_for_user_id`
+([DATA-MODEL.md](DATA-MODEL.md) § `limn_actions`). Additive, NO backfill in SQL: the re-attribution is
+code (`db/limn-bots.ts` `reattributeLimnRows`), run deliberately, not at boot. Replayed on a copy of
+the dev DB before registering. Journal `idx` 180, `when` sqlite `1792569679024`.
+
 ### `0179_story_build_plans` — plan first: plan revisions and planned pull requests
 
 `ALTER TABLE story_builds ADD with_docs (NOT NULL DEFAULT false), approved_plan_id, approved_at`; NEW

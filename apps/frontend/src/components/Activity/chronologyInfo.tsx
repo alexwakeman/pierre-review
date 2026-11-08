@@ -48,8 +48,9 @@ export function ChronologyAboutInfo({
         Chronology adds up those hours.
       </p>
       <p>
-        It measures pull requests a person wrote and a person reviewed or commented on, merged in
-        the window you pick. The first option is the same window as the rest of Reports: this
+        It measures pull requests a person wrote, merged in the window you pick. In “People”, a
+        person must also have reviewed or commented on it; in “People + bots”, Limn or an AI review
+        bot is enough. The first option is the same window as the rest of Reports: this
         sprint so far, or the last 7 or 14 days, as set for the workspace in Settings. 30, 60 and
         90 days are longer views. Pull requests opened by automation are measured on the Bots rail.
       </p>
@@ -62,6 +63,27 @@ export function ChronologyAboutInfo({
         calls a repository out was set on clock hours.
       </p>
       <p>No person is named on this page.</p>
+    </>
+  );
+}
+
+/** The "People + bots" / "People" toggle (docs/BOTTLENECKS.md § Two views). */
+export function FlowViewInfo(): JSX.Element {
+  return (
+    <>
+      <p>
+        <strong>People + bots</strong>: a review or comment by a person, by Limn or by an AI review bot
+        such as CodeRabbit moves a pull request on. Compare it with People to see what your review
+        bots change over time.
+      </p>
+      <p>
+        <strong>People</strong>: only people’s reviews and comments count. Work only a bot reviewed
+        counts as merged without a review.
+      </p>
+      <p>
+        In both views, CI, quality gates and housekeeping bots never count, a push counts whoever made
+        it, and pull requests a bot opened are not measured. Saved for this workspace.
+      </p>
     </>
   );
 }

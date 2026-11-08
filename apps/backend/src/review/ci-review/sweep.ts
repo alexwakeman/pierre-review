@@ -9,6 +9,7 @@ import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { ciReviewDue } from './currency.js';
 import { countAutoCiReviewsSince, getCiStateInputs, readSyncedCi } from './persist.js';
 import { ciAutoLaneRoom, ciReviewHeld, startCiReview, type StartCiArgs, type StartCiResult } from './manager.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 // THE CI REVIEW SWEEPER — explains a failing check as soon as the sync sees it, where auto review is
 // on for the workspace (Settings → Workspace → "Review new PRs automatically").
@@ -80,7 +81,7 @@ async function redOpenPrs(
   if (workspaceIds.length === 0) return [];
   const { pullRequests: pr, workspaceRepos: wr } = s(ctx);
   const rows = (await ctx.db
-    .select({ prId: pr.id, repoId: pr.repoId, workspaceId: wr.workspaceId, authorId: pr.authorId, headSha: pr.headSha })
+    .select({ prId: pr.id, repoId: pr.repoId, workspaceId: wr.workspaceId, authorId: trueAuthorId(pr), headSha: pr.headSha })
     .from(pr)
     .innerJoin(wr, and(eq(wr.repoId, pr.repoId), eq(wr.accountId, pr.accountId)))
     .where(

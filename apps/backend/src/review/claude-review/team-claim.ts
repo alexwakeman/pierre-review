@@ -75,6 +75,7 @@ import {
   setClaimLine,
 } from './team-claim-ledger.js';
 import { forgetTeammateLine, recordTeammateLine, teammateLinesAtHead } from './team-claim-seen.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 /** How long a pending line holds the head after its claimant's NEWEST line. */
 export const TEAM_CLAIM_LEASE_MS = 25 * 60 * 1000;
@@ -435,13 +436,25 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
   async postLine(accountId, owner, name, sha, context, post) {
     const { getAccessToken } = await import('../../auth/account.js');
     const { ghRestPostFor } = await import('../../github/client.js');
+    const { limnWrite } = await import('../../github/write-origin.js');
+    const { limnOriginForPrNumber, orReader } = await import('../../db/limn-actions.js');
     const token = await getAccessToken(accountId);
-    await ghRestPostFor(token, `/repos/${enc(owner)}/${enc(name)}/statuses/${enc(sha)}`, {
-      state: post.state,
-      context,
-      description: clamp(post.description),
-      ...(post.targetUrl ? { target_url: post.targetUrl } : {}),
-    });
+    // A team claim is Limn's line (LIMN'S WORK IS BOT WORK): recorded in the ledger like every write.
+    // The PR is not named here, so the repo's PR row is not linked (only the repo, via a head lookup).
+    const origin = orReader(await limnOriginForHead(accountId, owner, name, sha, limnOriginForPrNumber).catch(() => null));
+    await limnWrite(
+      origin,
+      'status',
+      {},
+      () =>
+        ghRestPostFor(token, `/repos/${enc(owner)}/${enc(name)}/statuses/${enc(sha)}`, {
+          state: post.state,
+          context,
+          description: clamp(post.description),
+          ...(post.targetUrl ? { target_url: post.targetUrl } : {}),
+        }),
+      () => ({ commitSha: null, detail: `${context} ${post.state} on ${sha}` }),
+    );
   },
   async login(accountId) {
     // ⚠ UNDER TEST the real adapter never reaches GitHub: the switch is ON by default (0159), so every
@@ -454,6 +467,26 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
 };
 
 const enc = (s: string): string => encodeURIComponent(s);
+
+/** The Limn origin for a status on a PR HEAD: the open PR of this account whose head is `sha`. */
+async function limnOriginForHead(
+  accountId: number,
+  owner: string,
+  name: string,
+  sha: string,
+  byNumber: typeof import('../../db/limn-actions.js').limnOriginForPrNumber,
+): Promise<import('../../github/write-origin.js').LimnWriteOrigin | null> {
+  const [{ db, schema }, { and, eq }] = await Promise.all([import('../../db/client.js'), import('drizzle-orm')]);
+  const row = (
+    await db
+      .select({ number: schema.pullRequests.number })
+      .from(schema.pullRequests)
+      .where(and(eq(schema.pullRequests.accountId, accountId), eq(schema.pullRequests.headSha, sha)))
+      .limit(1)
+      .execute()
+  )[0];
+  return row ? byNumber(accountId, owner, name, row.number, 'auto') : null;
+}
 
 /**
  * A write GitHub refused for lack of access (403 / 404): run without a line, never retry.
@@ -622,7 +655,8 @@ export async function prAuthorLogin(ctx: AgentContext, accountId: number, prId: 
     const rows = (await ctx.db
       .select({ login: users.githubLogin })
       .from(prs)
-      .innerJoin(users, eq(users.id, prs.authorId))
+      // The PERSON behind the PR (a PR Limn opened for the reader is still theirs).
+      .innerJoin(users, eq(users.id, trueAuthorId(prs)))
       .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
       .limit(1)
       .execute()) as Array<{ login: string | null }>;

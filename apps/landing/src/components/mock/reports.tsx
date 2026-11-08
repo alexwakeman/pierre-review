@@ -276,7 +276,7 @@ export function ChronologyMock(): JSX.Element {
     <MockFrame
       live
       title="Chronology"
-      meta="This sprint · working hours, Monday to Friday, 09:00–17:30"
+      meta="People + bots · this sprint · working hours, Monday to Friday, 09:00–17:30"
       onReset={open ? () => setOpen(null) : null}
       label="Chronology: balanced, 36% of working hours waiting for a reviewer, 31% waiting for the author, 33% approved and waiting to merge; first look, approved to merged and opened to merged are past their limits, reply to review is acceptable. Each wait opens its figures."
     >

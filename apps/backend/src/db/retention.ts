@@ -101,6 +101,8 @@ async function deletePrSubtree(
     .delete(schema.dependencyAutomationActions)
     .where(inArray(schema.dependencyAutomationActions.prId, prIds))
     .execute();
+  // The Limn provenance ledger (migration 0180) — composite FK cascades; explicit anyway.
+  await tx.delete(schema.limnActions).where(inArray(schema.limnActions.prId, prIds)).execute();
   // Claude review runs + findings FK these PRs — clear findings (via reviewId) then runs.
   const reviewIdRows = await tx
     .select({ id: claudeReviews.id })

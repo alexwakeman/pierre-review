@@ -426,6 +426,7 @@ async function postOutcome(
         owner: pctx.owner,
         name: pctx.name,
         prNumber: pctx.prNumber,
+        limn: { accountId, prId, origin: 'auto', source: { table: 'claude_reviews', id: reviewId } },
         reviewHeadSha: pctx.reviewHeadSha,
         body:
           event === 'COMMENT'

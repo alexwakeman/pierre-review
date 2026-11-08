@@ -263,7 +263,9 @@ describe('resolveActorLanes', () => {
       REVIEWER_ROLES.map((role) => REVIEWER_ROLE_LANE[role] as string),
     );
     for (const lane of ACTOR_LANES) {
-      if (lane === 'human') continue;
+      // `human` is no role, and `limn` is reached by the login alone (a `limn:` bot, rule 0), never
+      // by a role a person can pick.
+      if (lane === 'human' || lane === 'limn') continue;
       expect(reachable.has(lane), `lane '${lane}' has no role that produces it`).toBe(true);
     }
     expect(typeof al.resolveActorLanes).toBe('function');

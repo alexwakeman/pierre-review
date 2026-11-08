@@ -1,4 +1,5 @@
-// WHO DID THE WORK — the seven lanes, resolved per user id for one workspace.
+// WHO DID THE WORK — the eight lanes (seven automation kinds and the people; `limn` is Limn itself),
+// resolved per user id for one workspace.
 //
 // The period report's twelve metrics answer "what happened"; this answers "how much of it was a
 // person". Both are needed, because on a real workspace the blend is severe enough to make the
@@ -47,7 +48,7 @@
 // A genuine manual "this is a person" still wins (that rule is load-bearing elsewhere and is not
 // weakened here); what does not win is the mere ABSENCE of an automated verdict.
 import { inArray } from 'drizzle-orm';
-import type { ActorLane, ReviewerRole } from '@pierre-review/shared';
+import { isLimnBotLogin, type ActorLane, type ReviewerRole } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { roleForBotLogin } from '../sync/bot-detection.js';
 import {
@@ -202,8 +203,16 @@ export async function resolveActorLanes(
   const automatedIds = new Set<number>();
 
   for (const id of candidateIds) {
-    if (vouched.has(id)) continue; // a person said this is a person — nothing overrules that
     const login = loginById.get(id) ?? '';
+    // LIMN ITSELF (rule 0): a `limn:<login>` bot is Limn acting for a person — its own lane, whatever
+    // its stored role (docs/CLAUDE-REVIEW.md § Limn's actions are bots). Never a person: the bot user
+    // exists only for Limn's rows; the person is the `limn_*_by` column beside them.
+    if (isLimnBotLogin(login)) {
+      automatedIds.add(id);
+      lane.set(id, 'limn');
+      continue;
+    }
+    if (vouched.has(id)) continue; // a person said this is a person — nothing overrules that
     // ONE call, not five predicates in an order this file gets to choose: the vocabularies are
     // asserted pairwise disjoint, so `roleForBotLogin` has exactly one answer per login.
     const loginRole = roleForBotLogin(login);

@@ -14,14 +14,14 @@ Three courts, and they partition the open life of a pull request:
 | Piece | Where |
 |---|---|
 | The engine | `apps/backend/src/db/pr-intervals.ts` (courts) + `db/flow-detail.ts` (working hours, budgets, per-PR) + `db/working-hours.ts` (the calendar) |
-| Settings | `packages/shared/src/flow-settings.ts` · `workspaces.flow_settings` · `PUT /api/workspaces/:id/flow-settings` · `components/settings/FlowSettingsSection.tsx` |
+| Settings | `packages/shared/src/flow-settings.ts` · `workspaces.flow_settings` · `PUT /api/workspaces/:id/flow-settings` · `components/settings/FlowSettingsSection.tsx` · the VIEW: `workspaces.flow_view` · `PUT /api/workspaces/:id/flow-view` (§ Two views) |
 | Request history | `review_request_events` · `sync/upsert.ts` `persistReviewRequestHistory` · `sync/backfill-review-requests.ts` |
 | Pointers (model) | core `db/flow-pointers.ts` (evidence) · `apps/backend/src/platform/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
-| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days` (default: the reporting window) · `GET /api/flow-trend?workspace` (Over time, 26 weeks) |
+| The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days&view` (default: the reporting window, the stored view) · `GET /api/flow-trend?workspace&view` (Over time, 26 weeks) |
 | Over time | core `db/flow-trend.ts` (+ `flowCoreFigures` in `db/flow-detail.ts`, `loadFlowPopulation` in `db/pr-intervals.ts`, `localWeeksEndingAt` in `db/working-hours.ts`) · `db/workspace-setting-events.ts` + `db/setting-event-write.ts` (`workspace_setting_events`) · `packages/shared/src/flow-trend.ts` · `hooks/useFlowTrend.ts` · `Activity/ChronologyTrend.tsx` + `chronologyTrendModel.ts` · `components/charts/EventMarkers.tsx` |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
-| Tests | `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `platform/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
+| Tests | `db/flow-views-limn.test.ts` (the two views, Limn) · `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `platform/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
 
 Deterministic, **no model touches any part of it except the Pointers block**, which is a separate,
 opt-in generation (below), shown while `me.ai.enabled`. It lives in Reports (`insightsTab:
@@ -56,10 +56,10 @@ LANDING court where it finally has a denominator.
 
 ## The rules
 
-- ⚠ **A BOT ACTION NEVER MOVES THE BALL, AND AUTOMATION'S OWN PULL REQUESTS ARE NOT MEASURED.**
-  This is the whole moat and it is two predicates. A tool keying on `user.type === 'Bot'` cannot
-  separate "this pull request was reviewed" from "a person looked at this". Human-ness comes from
-  `resolveActorLanes`' UNION, never `users.isBot` alone.
+- ⚠ **WHO MOVES THE BALL IS THE VIEW, AND AUTOMATION'S OWN PULL REQUESTS ARE NOT MEASURED** (§ Two
+  views). In "People" a bot action never moves the ball — the moat: a tool keying on
+  `user.type === 'Bot'` cannot separate "this pull request was reviewed" from "a person looked at
+  this". Lanes come from `resolveActorLanes`' UNION, never `users.isBot` alone.
   Measured: bot-authored work was **43% of merges** on a real workspace and **slower** than human
   work (32h against 24h mean), so blending them moved every share — 72/10/18 became 60/16/24 — and
   put `Bump actions/checkout from 4 to 7` on screen as something a person was waiting on.
@@ -99,6 +99,43 @@ LANDING court where it finally has a denominator.
   structural test reads them), and `Activity/chronologyInfo.tsx` reads it for the modal copy.
 - Both exclusions are **rendered** (`exclusionLineFor`), as is coverage. Retroactive history is
   coverage-biased, and a reader who does not know what was set aside will mis-read every share.
+
+## Two views — "People" and "People + bots" (2026-11-08)
+
+Limn's reviews, findings and approvals are bot actions (docs/CLAUDE-REVIEW.md § Limn's actions are
+bots: stored under the `limn:` bot, its own `limn` lane). Before that change they were counted as the
+person they were posted for, so a Limn auto review ended the reviewer court on 208 PRs of the dev
+DB. A team still wants to see what its review automation did to the waits, so there are two views:
+
+| View | Reviews and comments that move the ball |
+|---|---|
+| **People + bots** (the default) | people, Limn, and the AI review bots (`FLOW_BALL_BOT_LANES`: `limn`, `ai_review`) |
+| **People** | people only — the original rule |
+
+- ⚠ In BOTH views a quality gate, CI or housekeeping bot never moves the ball (a "Quality Gate
+  passed" comment is not a look), a push moves it whoever made it (the state machine's rule), and a
+  pull request a bot opened — Limn's Implement PRs included — is measured in neither.
+- "Merged without a review" follows the view: in "People + bots" a PR only Limn or CodeRabbit looked
+  at is measured, not unreviewed. The refusal sentences name what counted (`lookNoun`).
+- The first-reviewer CONCENTRATION rows count people only in both views (a bot first look carries no
+  person id), so "rests on one person" never means CodeRabbit.
+- The review-request history is unchanged: asking a bot is not asking someone to look.
+- **Stored per workspace** (`workspaces.flow_view`, migration 0181; NULL = the default), a READING
+  setting with no inheritance, read once per request by `getWorkspaceFlowView`. `?view=` on either
+  route overrides it for that read; every response echoes `view`. The panel, the 26-week trend and
+  the Pointers evidence all measure in the same view.
+- ⚠ **The view is in every cache key**: the trend's week cache (`v:<view>`) and the Pointers' scope
+  key (`|v:<view>`), so each view keeps its own pointers and its own hash. Pointers stored before the
+  view existed are never read again.
+- `loadFlowPopulation`'s own default is "People"; a caller that wants the workspace's view resolves
+  it and hands it in.
+- **The toggle** (SPA): a "People + bots" / "People" switch beside the window picker in the panel's
+  header, with its ⓘ (`FlowViewInfo`). It saves the workspace's view (`useSetWorkspaceFlowView`:
+  the workspace row is updated at once, then the PUT; the Pointers are refetched). Both reads SEND the
+  resolved view and carry it as a key slot (`useWorkspaceFlowView`, `flowViewKeySlot`; `stored` while
+  the workspace row is not loaded), so the panel and the trend always show the same view and a switch
+  is a new cache entry, never the other view's figures. The "Set aside" line follows the view
+  (`exclusionLineFor(coverage, view)`). Pinned by `e2e/chronology-trend.spec.ts` (the toggle test).
 
 ## The state machine, and its three judgement calls
 
@@ -370,8 +407,8 @@ shorter form of each rule; this is the full wording.
 ### Chronology
 
 - **Chronology** ([docs/BOTTLENECKS.md](BOTTLENECKS.md), `db/pr-intervals.ts`): every open
-  hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and
-  bot-authored PRs are not measured; never-human-touched PRs are excluded; flag only LOPSIDED *AND*
+  hour belongs to a court (reviewer / author / landing). ⚠ Who moves the ball is the VIEW
+  ("People" / "People + bots", § Two views) and bot-authored PRs are not measured; never-human-touched PRs are excluded; flag only LOPSIDED *AND*
   SLOW; advice is per court; NO person is named (one exception: the new-contributor marker);
   working hours lead, clock hours call out; `review_requests_synced_at` NULL is "not known".
   `getFlowCourts` stays account-row-free because `verify:isolation` calls it.

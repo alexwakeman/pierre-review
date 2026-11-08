@@ -37,12 +37,17 @@ export function flowPointersScopeKey(workspaceId: number, windowDays: number): s
 /** The scope key for the evidence actually measured. The REPORTING WINDOW (Chronology's default)
  *  keys on its mode, plus the sprint's start for a sprint — so each sprint stores its own row and
  *  a rolling window (whose start slides every second) still hits its cache. */
+// ⚠ …and on the Chronology VIEW (`|v:<view>`): pointers written over "People + bots" describe a
+// different population from "People", so each view keeps its own row. (Rows stored before the view
+// existed have no suffix and are never read again — they were measured before Limn's own actions
+// left the people's figures.)
 export function flowPointersScopeKeyFor(e: FlowPointerEvidence): string {
   const w = e.reportingWindow;
-  if (w == null) return flowPointersScopeKey(e.workspaceId, e.windowDays);
+  const v = `|v:${e.view}`;
+  if (w == null) return flowPointersScopeKey(e.workspaceId, e.windowDays) + v;
   return w.mode === 'sprint'
-    ? `ws:${e.workspaceId}|r:sprint:${w.from}`
-    : `ws:${e.workspaceId}|r:${w.mode}`;
+    ? `ws:${e.workspaceId}|r:sprint:${w.from}${v}`
+    : `ws:${e.workspaceId}|r:${w.mode}${v}`;
 }
 
 function rowSig(r: FlowPointerRow): string {

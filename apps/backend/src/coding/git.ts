@@ -1,3 +1,4 @@
+import { recordLimnPush, type WriteOrigin } from '../github/write-origin.js';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +28,17 @@ async function git(
     timeout: 120_000,
     maxBuffer: 128 * 1024 * 1024,
   });
+}
+
+/** The commits on `to`'s FIRST-PARENT line that are not on `from` (newest first, at most `max`): what a
+ *  push of `to` over `from` adds, without the base branch's commits a merge brings in. Used to record
+ *  exactly the commits Limn created. */
+export async function commitsAdded(worktree: string, from: string, to: string, max = 20): Promise<string[]> {
+  const { stdout } = await git(['rev-list', '--first-parent', `--max-count=${max}`, `${from}..${to}`], worktree);
+  return stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 }
 
 /** The tree of the worktree's HEAD commit. */
@@ -126,6 +138,12 @@ export interface PushTarget {
   remoteBranch: string;
   /** Branch names this push must never land on (repo default branch, PR base ref). */
   protect: string[];
+  /** Who pushes (github/write-origin.ts): the reader, or Limn on their behalf. Required, so every
+   *  push site answers the question. */
+  origin: WriteOrigin;
+  /** The commits LIMN CREATED in this push (recorded in the ledger as 'push' rows after it lands).
+   *  Empty for a rebase: rebased commits keep their authors and are not Limn's work. */
+  limnCommits: readonly string[];
 }
 
 /**
@@ -192,6 +210,8 @@ export async function pushRef(t: PushTarget): Promise<void> {
       }`,
     );
   }
+  // The push LANDED: record Limn's commits (never throws; a no-op for the reader).
+  await recordLimnPush(t.origin, t.limnCommits);
 }
 
 /**
@@ -222,4 +242,5 @@ export async function pushForceWithLease(
       }`,
     );
   }
+  await recordLimnPush(t.origin, t.limnCommits);
 }

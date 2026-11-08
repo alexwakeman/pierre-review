@@ -1596,6 +1596,7 @@ export interface FindingPostContext {
   owner: string;
   name: string;
   prNumber: number;
+  prId: number;
 }
 
 export async function getFindingPostContext(
@@ -1611,6 +1612,7 @@ export async function getFindingPostContext(
       owner: repos.owner,
       name: repos.name,
       prNumber: prs.number,
+      prId: prs.id,
     })
     .from(crf)
     .innerJoin(cr, eq(cr.id, crf.reviewId))
@@ -1625,11 +1627,12 @@ export async function getFindingPostContext(
     owner: string;
     name: string;
     prNumber: number;
+    prId: number;
   }>;
   const row = rows[0];
   // A hidden (praise) finding is not addressable: it 404s exactly like a missing one.
   if (!row || !isShownFinding(row.finding)) return null;
-  return { finding: row.finding, reviewHeadSha: row.reviewHeadSha, owner: row.owner, name: row.name, prNumber: row.prNumber };
+  return { finding: row.finding, reviewHeadSha: row.reviewHeadSha, owner: row.owner, name: row.name, prNumber: row.prNumber, prId: row.prId };
 }
 
 // PR coordinates needed to run a review.

@@ -48,7 +48,7 @@ export async function resolveThreadsOnGitHub(
   const stampedPrIds = new Set<number>();
   for (const t of threads) {
     try {
-      await setReviewThreadResolved(token, t.threadNodeId, true);
+      await setReviewThreadResolved(token, t.threadNodeId, true, 'reader');
       const derivedState = await stampThreadResolved(t.id, true, accountId);
       out.results.push({ threadId: t.id, ok: true, derivedState: derivedState ?? 'resolved' });
       out.resolved += 1;

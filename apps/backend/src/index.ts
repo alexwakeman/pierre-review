@@ -43,9 +43,11 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 
   // Synthesize/refresh the single local account from `gh api user` so triage ("my turn") knows
   // who "you" are. Non-fatal if gh is missing.
+  let localAccountId: number | null = null;
   {
     const { ensureLocalAccount } = await import('./auth/account.js');
     const me = await ensureLocalAccount();
+    localAccountId = me?.id ?? null;
     if (me?.githubLogin) console.log(`local user: ${me.githubLogin}`);
     else console.warn('local user unknown (gh api user failed) — "my turn" disabled');
     // The Settings → AI provider choice, into memory before any run can start (LIMN_AI_PROVIDER, when
@@ -120,6 +122,13 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   installShutdownHandler(app);
 
   await app.listen({ port: config.port, host: config.host });
+  // LIMN'S HISTORY (db/limn-history-backfill.ts): the rows Limn wrote before its ledger existed move
+  // to the poster's `limn:` bot, ONCE per account (a flag in `instance_meta`), in PR batches. Only
+  // with LIMN_ATTRIBUTE_ALL on; after listen, never awaited, bounded, never fatal.
+  void import('./db/limn-history-backfill.js')
+    .then(({ kickLimnHistoryBackfill }) => kickLimnHistoryBackfill(localAccountId, app.log))
+    .catch((err: unknown) => app.log.warn({ err }, 'limn: history re-attribution not started'));
+
   // Remove the per-run checkouts nothing needs any more — in the background, bounded by
   // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
   kickWorktreeSweep('boot');

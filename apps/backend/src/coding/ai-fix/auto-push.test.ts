@@ -125,7 +125,7 @@ describe('maybeAutoPushFix — the gate', () => {
   it('⚠ an auto fix on my own PR, push on ⇒ pushed onto the existing branch', async () => {
     const fixId = await seedFix();
     expect(await mod.maybeAutoPushFix(ctx, { accountId: 1, fixId }, deps())).toEqual({ status: 'pushed', branch: 'feature' });
-    expect(pushes).toEqual([{ accountId: 1, fixId, target: 'existing' }]);
+    expect(pushes).toEqual([{ accountId: 1, fixId, target: 'existing', origin: 'auto' }]);
   });
 
   it('⚠ "Push automatically" OFF (the default) ⇒ nothing pushed', async () => {

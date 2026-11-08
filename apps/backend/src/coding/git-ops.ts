@@ -11,6 +11,9 @@ import {
   fetchPrHeadInfo,
 } from '../github/mutations.js';
 import { ghRestGetFor, ghRestGetText } from '../github/client.js';
+import { withLimnRunTrailer, type LimnActionOrigin } from '@pierre-review/shared';
+import { limnOriginForPrNumber, limnOriginForRepo, limnRunRef, orReader } from '../db/limn-actions.js';
+import type { WriteOrigin } from '../github/write-origin.js';
 import { db, schema } from '../db/client.js';
 import { settlePrAfterWrite } from '../sync/resync-after-write.js';
 import { syncOnePr } from '../sync/sync-one-pr.js';
@@ -24,6 +27,7 @@ import {
   assertPushTarget,
   codedError,
   commitAll,
+  commitsAdded,
   headTree,
   pushRef,
 } from './git.js';
@@ -145,6 +149,11 @@ export async function applyAndPush(
   const { accountId, owner, name, prNumber, baseSha, patch, commitMessage, target } =
     args;
   const token = await getAccessToken(accountId);
+  // LIMN'S WORK IS BOT WORK: the commit carries the run's trailer, the push and any PR it opens are
+  // recorded in the ledger (github/write-origin.ts).
+  const origin: WriteOrigin = orReader(
+    await limnOriginForPrNumber(accountId, owner, name, prNumber, args.limnRun.origin, { source: args.limnRun.source }).catch(() => null),
+  );
   const account = await getAccountById(accountId);
   const authorName =
     account?.displayName || account?.githubLogin || 'pierre-review';
@@ -210,12 +219,12 @@ export async function applyAndPush(
     ));
     await applyPatchToWorktree(worktreePath, patch);
     const commitSha = await commitAll(worktreePath, {
-      message: commitMessage,
+      message: withLimnRunTrailer(commitMessage, limnRunRef(args.limnRun.source)),
       authorName,
       authorEmail,
     });
 
-    const push = { worktree: worktreePath, owner, name, token, committish: 'HEAD', protect };
+    const push = { worktree: worktreePath, owner, name, token, committish: 'HEAD', protect, origin, limnCommits: [commitSha] };
     if (target.kind === 'existing') {
       await pushRef({ ...push, remoteBranch: target.headRef });
       // ── The push LANDED: nothing below may throw (a retry would double-push). ──────────
@@ -242,7 +251,7 @@ export async function applyAndPush(
       base: target.base,
       title: target.title,
       body: target.body,
-    });
+    }, origin);
     // The new PR exists on GitHub: sync it so it becomes local. ⚠ NOT AWAITED, for the same
     // reason as above: the caller records the new PR's number and URL only after this returns.
     // The sync's first sighting raises the SPA change signal. `syncNewPrInRepo` never rejects.
@@ -296,6 +305,8 @@ export interface ApplyAndPushBranchArgs {
    * `TREE_MISMATCH`, refused BEFORE anything is pushed.
    */
   expectTree?: string;
+  /** The run this push lands (the commit's `Limn-Run:` trailer, the ledger's source). */
+  limnRun: { origin: LimnActionOrigin; source: { table: string; id: number } };
 }
 
 export const TREE_MISMATCH_LINE = "Limn's copy of the earlier pull request does not match. Push it again from Limn.";
@@ -318,6 +329,9 @@ export async function applyAndPushBranch(
   const authorEmail = account?.githubLogin
     ? `${account.githubLogin}@users.noreply.github.com`
     : 'pierre-review@users.noreply.github.com';
+  const origin: WriteOrigin = orReader(
+    await limnOriginForRepo(accountId, owner, name, args.limnRun.origin, { source: args.limnRun.source }).catch(() => null),
+  );
 
   // The name is the reader's (or the plan's slug): git's own check and the protected names FIRST, before
   // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
@@ -338,9 +352,23 @@ export async function applyAndPushBranch(
       token,
     ));
     await applyPatchToWorktree(worktreePath, args.patch);
-    const commitSha = await commitAll(worktreePath, { message: args.commitMessage, authorName, authorEmail });
+    const commitSha = await commitAll(worktreePath, {
+      message: withLimnRunTrailer(args.commitMessage, limnRunRef(args.limnRun.source)),
+      authorName,
+      authorEmail,
+    });
     if (args.expectTree != null && (await headTree(worktreePath)) !== args.expectTree) throw codedError('TREE_MISMATCH', TREE_MISMATCH_LINE);
-    await pushRef({ worktree: worktreePath, owner, name, token, committish: 'HEAD', protect: args.protect, remoteBranch: args.branch });
+    await pushRef({
+      worktree: worktreePath,
+      owner,
+      name,
+      token,
+      committish: 'HEAD',
+      protect: args.protect,
+      remoteBranch: args.branch,
+      origin,
+      limnCommits: [commitSha],
+    });
     let pr: { number: number; url: string };
     try {
       pr = await createPullRequest(token, {
@@ -351,7 +379,7 @@ export async function applyAndPushBranch(
         title: args.title,
         body: args.body,
         draft: args.draft,
-      });
+      }, origin);
     } catch (err) {
       // The branch IS on GitHub: say so, so nobody presses Push again into BRANCH_EXISTS.
       const e = new Error(
@@ -411,6 +439,8 @@ export interface PushMergeArgs {
   expectedResultSha: string;
   mergeMessage: string;
   fixMessage: string;
+  /** Why it is pushed: a press, an automatic push, the Dependencies policy (the ledger's origin). */
+  limnOrigin: LimnActionOrigin;
 }
 
 /**
@@ -439,6 +469,9 @@ export async function pushMergeResult(args: PushMergeArgs): Promise<ApplyAndPush
     );
   }
   const protect = await protectedRefsFor(accountId, owner, name, prNumber, owner, name);
+  const source = { table: 'ai_fixes', id: args.fixId };
+  const origin: WriteOrigin = orReader(await limnOriginForPrNumber(accountId, owner, name, prNumber, args.limnOrigin, { source }).catch(() => null));
+  const trailerRef = limnRunRef(source);
   const { withMergeRepo, aiFixMergeRef } = await import('./ai-fix/merge-host.js');
   const { verifyMergeBundle, buildMergeCommits } = await import('./ai-fix/merge-verify.js');
   const commitSha = await withMergeRepo(
@@ -462,9 +495,16 @@ export async function pushMergeResult(args: PushMergeArgs): Promise<ApplyAndPush
       const sha = await buildMergeCommits(
         dir,
         { mergeSha: v.mergeSha, resultSha: v.resultSha, headSha: args.headSha, baseSha: args.baseSha },
-        { authorName, authorEmail, mergeMessage: args.mergeMessage, fixMessage: args.fixMessage },
+        {
+          authorName,
+          authorEmail,
+          mergeMessage: withLimnRunTrailer(args.mergeMessage, trailerRef),
+          fixMessage: withLimnRunTrailer(args.fixMessage, trailerRef),
+        },
       );
-      await pushRef({ worktree: dir, owner, name, token, committish: sha, remoteBranch: info.headRef, protect });
+      // The merge commit and (when there is one) the fix on top: both Limn's.
+      const pushed = await commitsAdded(dir, args.headSha, sha, 2).catch(() => [sha]);
+      await pushRef({ worktree: dir, owner, name, token, committish: sha, remoteBranch: info.headRef, protect, origin, limnCommits: pushed.length > 0 ? pushed : [sha] });
       return sha;
     },
   );

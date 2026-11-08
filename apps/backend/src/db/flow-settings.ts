@@ -1,12 +1,15 @@
 // Chronology's working hours and wait budgets, per workspace — the ONE reader and writer of
-// `workspaces.flow_settings` (migration 0065 / pg 0052).
+// `workspaces.flow_settings` (migration 0065 / pg 0052) and of Chronology's VIEW,
+// `workspaces.flow_view` (migration 0181; shared `FlowActorView`).
 //
 // The column holds OVERRIDES ONLY. Every reader resolves them against the product defaults with
 // `resolveFlowSettings` from packages/shared, so the engine, the route and the Settings form can
 // never disagree about what a missing field means.
 import { and, eq } from 'drizzle-orm';
 import {
+  resolveFlowActorView,
   resolveFlowSettings,
+  type FlowActorView,
   type FlowSettings,
   type ResolvedFlowSettings,
 } from '@pierre-review/shared';
@@ -107,4 +110,34 @@ export function compactFlowSettings(s: FlowSettings): FlowSettings | null {
     if (Object.keys(budgets).length > 0) out.budgets = budgets;
   }
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Chronology's view for a workspace: the stored one, else the default. A workspace that is not
+ *  this account's gets the default. */
+export async function getWorkspaceFlowView(accountId: number, workspaceId: number): Promise<FlowActorView> {
+  const row = (
+    await db
+      .select({ flowView: workspaces.flowView })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0];
+  return resolveFlowActorView(row?.flowView ?? null);
+}
+
+/** Store (or, with null, clear back to the default) a workspace's Chronology view. False when the
+ *  workspace is not this account's (the route 404s). Callers validate with `parseFlowActorView`. */
+export async function setWorkspaceFlowView(
+  accountId: number,
+  workspaceId: number,
+  view: FlowActorView | null,
+): Promise<boolean> {
+  const rows = await db
+    .update(workspaces)
+    .set({ flowView: view })
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+    .returning({ id: workspaces.id })
+    .execute();
+  return rows.length > 0;
 }

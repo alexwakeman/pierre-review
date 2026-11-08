@@ -33,6 +33,7 @@ import {
   FLOW_TREND_MEASURES,
   automationVendorKind,
   reviewBotKind,
+  type FlowActorView,
   type FlowBudgetMeasure,
   type FlowTrendBudgetCell,
   type FlowTrendEvent,
@@ -48,7 +49,7 @@ import { db, schema } from './client.js';
 import { resolveActorLanes, type ActorLanes } from './actor-lanes.js';
 import { detectChangepoints, MIN_BASELINE_POINTS } from './changepoint.js';
 import { flowCoreFigures, type FlowPrFacts } from './flow-detail.js';
-import { getResolvedFlowSettings } from './flow-settings.js';
+import { getResolvedFlowSettings, getWorkspaceFlowView } from './flow-settings.js';
 import { loadFlowPopulation, type MeasuredPr } from './pr-intervals.js';
 import type { BotScope } from './queries.js';
 import { buildWorkingCalendar, localWeeksEndingAt, type LocalWeek } from './working-hours.js';
@@ -360,10 +361,18 @@ const weekCache = new Map<
   { at: number; week: Omit<FlowTrendWeek, 'reposInWorkspace'>; dataRepoIds: number[]; truncated: boolean }
 >();
 
-function cacheKey(accountId: number, scope: BotScope, settings: ResolvedFlowSettings, weekKey: string): string {
+// ⚠ THE VIEW IS IN THE KEY: the same week measured in "People" and in "People + bots" is two
+// different sets of figures.
+function cacheKey(
+  accountId: number,
+  scope: BotScope,
+  settings: ResolvedFlowSettings,
+  view: FlowActorView,
+  weekKey: string,
+): string {
   const repoKey = [...scope.repoIds].sort((a, b) => a - b).join(',');
   const s = JSON.stringify([settings.timeZone, settings.days, settings.startMinute, settings.endMinute, settings.budgets]);
-  return `${accountId}|${scope.workspaceId}|${repoKey}|${s}|${weekKey}`;
+  return `${accountId}|${scope.workspaceId}|${repoKey}|${s}|v:${view}|${weekKey}`;
 }
 
 /** For tests. */
@@ -376,10 +385,13 @@ export function clearFlowTrendCache(): void {
 export async function getFlowTrend(
   accountId: number,
   scope: BotScope,
-  opts: { nowMs?: number } = {},
+  // `view`: who moves the ball (the request's `?view=`); absent ⇒ the workspace's setting — the
+  // panel's rule, so the two always measure in the same view.
+  opts: { nowMs?: number; view?: FlowActorView } = {},
 ): Promise<FlowTrendResponse> {
   const nowMs = opts.nowMs ?? Date.now();
   const settings = await getResolvedFlowSettings(accountId, scope.workspaceId);
+  const view = opts.view ?? (await getWorkspaceFlowView(accountId, scope.workspaceId));
   const localWeeks = localWeeksEndingAt(nowMs, settings.timeZone, FLOW_TREND.weeks);
   const spanFrom = localWeeks[0]?.startMs ?? nowMs;
   // Markers are read to the END of the current week, so a change made a moment after `nowMs` (the
@@ -427,7 +439,7 @@ export async function getFlowTrend(
   const nowCached = Date.now();
   localWeeks.forEach((w, i) => {
     if (w.endMs > nowMs) return; // the current week is always live
-    const hit = weekCache.get(cacheKey(accountId, scope, settings, w.key));
+    const hit = weekCache.get(cacheKey(accountId, scope, settings, view, w.key));
     if (hit && nowCached - hit.at < CACHE_TTL_MS) {
       weeks[i] = { ...hit.week, reposInWorkspace: reposBy(w.endMs, hit.dataRepoIds) };
       truncated = truncated || hit.truncated;
@@ -452,6 +464,7 @@ export async function getFlowTrend(
       const pop = await loadFlowPopulation(accountId, scope, new Date(first.startMs), new Date(toMs), {
         detail: false,
         lanes: lanes as ActorLanes,
+        view,
       });
       truncated = truncated || pop.truncated;
       const runWeeks = run.map((i) => localWeeks[i] as LocalWeek);
@@ -482,7 +495,7 @@ export async function getFlowTrend(
           }
           const { reposInWorkspace: _drop, ...rest } = fig;
           void _drop;
-          weekCache.set(cacheKey(accountId, scope, settings, w.key), {
+          weekCache.set(cacheKey(accountId, scope, settings, view, w.key), {
             at: nowCached,
             week: rest,
             dataRepoIds: dataReposBy[k] ?? [],
@@ -605,6 +618,7 @@ export async function getFlowTrend(
     settingsHistoryFrom: historyFrom == null ? null : new Date(historyFrom).toISOString(),
     truncated,
     retentionDays,
+    view,
   };
 }
 

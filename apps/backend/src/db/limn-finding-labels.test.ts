@@ -11,8 +11,9 @@
 //      `backends` (the fallback banner's input) never lists `limn-review`.
 //   5. The inflation index has nothing to compare (no vendor badge): Limn is never counted as
 //      badged.
-//   6. My Turn: a thread rooted on YOUR Limn finding is still yours — a person's reply in it
-//      summons you; your own Limn finding on your own PR is not an "unanswered thread".
+//   6. My Turn: a thread rooted on YOUR Limn finding is Limn's, not yours — a person's reply in it
+//      does NOT summon you ("everything Limn does on my behalf is not me", docs/BACKEND.md § My Turn);
+//      your own Limn finding on your own PR is not an "unanswered thread".
 //   7. The per-reviewer drill-down lists a Limn bot's PRs by its `u<id>` key.
 //   8. A body edited to drop the marker loses its Limn label.
 //
@@ -401,11 +402,14 @@ describe('Limn bots in the Bots folds', () => {
 });
 
 describe('My Turn on threads rooted on your Limn finding', () => {
-  it('a person\'s reply in a thread rooted on your Limn finding summons you', async () => {
+  it('a person\'s reply in a thread rooted on your Limn finding does not summon you', async () => {
     const mt = await q.getMyTurn(1, scope);
-    const item = mt.threadsAwaiting.find((t: any) => t.path === 'src/x.ts' && t.awaitingKind === 'reply');
-    expect(item).toBeDefined();
-    expect(item!.lastReplyAuthorId).toBe(await userId('carol-dev'));
+    // The thread exists and a person (carol) replied in it…
+    const carol = await userId('carol-dev');
+    const threadIds = [...mt.threadsAwaiting, ...mt.threadReplies].filter((t: any) => t.path === 'src/x.ts');
+    // …but you never took part in person, so it is not your turn.
+    expect(threadIds).toEqual([]);
+    expect(carol).toBeGreaterThan(0);
   });
 
   it('your own Limn finding on your own PR is not an unanswered thread', async () => {

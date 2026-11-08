@@ -100,7 +100,7 @@ describe('reopenPullRequest', () => {
 
   it('PATCHes the pull request to state open', async () => {
     stubFetch(200, { number: 7, state: 'open' });
-    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toEqual({ ok: true });
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7, 'reader')).resolves.toEqual({ ok: true });
     const call = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(call[0]).toBe('https://api.github.com/repos/acme/api/pulls/7');
     expect(JSON.parse((call[1] as { body: string }).body)).toEqual({ state: 'open' });
@@ -111,7 +111,7 @@ describe('reopenPullRequest', () => {
       message: 'Validation Failed',
       errors: [{ message: 'state cannot be changed. The foo branch was deleted.' }],
     });
-    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toEqual({
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7, 'reader')).resolves.toEqual({
       ok: false,
       // A 409 at the route: nothing is broken and no retry helps.
       reason: 'not_reopenable',
@@ -121,20 +121,20 @@ describe('reopenPullRequest', () => {
 
   it('reports a 403 as not_reopenable too (an archived repo), and a 404 as not_found', async () => {
     stubFetch(403, { message: 'Repository was archived so is read-only.' });
-    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7, 'reader')).resolves.toMatchObject({
       reason: 'not_reopenable',
       message: 'Repository was archived so is read-only.',
     });
     vi.unstubAllGlobals();
     stubFetch(404, { message: 'Not Found' });
-    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7, 'reader')).resolves.toMatchObject({
       reason: 'not_found',
     });
   });
 
   it('anything else is a plain error (the 502 arm)', async () => {
     stubFetch(500, { message: 'Server Error' });
-    await expect(reopenPullRequest('tok', 'acme', 'api', 7)).resolves.toMatchObject({
+    await expect(reopenPullRequest('tok', 'acme', 'api', 7, 'reader')).resolves.toMatchObject({
       reason: 'error',
       message: 'Server Error',
     });
@@ -142,7 +142,7 @@ describe('reopenPullRequest', () => {
 
   it('falls back to the raw body when GitHub sends no JSON at all', async () => {
     stubFetch(502, null);
-    const out = await reopenPullRequest('tok', 'acme', 'api', 7);
+    const out = await reopenPullRequest('tok', 'acme', 'api', 7, 'reader');
     expect(out).toEqual({ ok: false, reason: 'error', message: '' });
   });
 });

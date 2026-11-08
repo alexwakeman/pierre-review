@@ -63,12 +63,15 @@ export interface ManualReplyDeps {
 
 export const defaultManualReplyDeps: ManualReplyDeps = {
   async reply(accountId, thread, body) {
-    const [{ getAccessToken, getAccountUserId }, { addReviewThreadReply }, q] = await Promise.all([
+    const [{ getAccessToken, getAccountUserId }, { addReviewThreadReply }, q, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
       import('../../db/queries.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    const gh = await addReviewThreadReply(await getAccessToken(accountId), thread.nodeId, body);
+    // The reader pressed "Post reply" on Limn's drafted words: Limn's reply, on their behalf.
+    const origin = ledger.orReader(await ledger.limnOriginForPr(accountId, thread.prId, 'reader_pressed'));
+    const gh = await addReviewThreadReply(await getAccessToken(accountId), thread.nodeId, body, origin);
     // GitHub has 201'd: the local stamps may fail, the write may not.
     try {
       const authorId = await getAccountUserId(accountId);
@@ -80,11 +83,13 @@ export const defaultManualReplyDeps: ManualReplyDeps = {
     return { commentId: gh.databaseId != null ? String(gh.databaseId) : null };
   },
   async resolve(accountId, threadNodeId) {
-    const [{ getAccessToken }, { setReviewThreadResolved }] = await Promise.all([
+    const [{ getAccessToken }, { setReviewThreadResolved }, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, true);
+    const origin = ledger.orReader(await ledger.limnOriginForThread(accountId, threadNodeId, 'reader_pressed'));
+    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, true, origin);
   },
   async stamp(threadId, accountId) {
     const { stampThreadResolved } = await import('../../db/queries.js');

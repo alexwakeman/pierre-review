@@ -28,6 +28,7 @@ import {
   type PriorFindingForFollowUp,
   type PriorReviewForFollowUp,
 } from './follow-up.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 /** The anchor's poster, stored on the follow-up record (`ClaudeReviewFollowUpRecord.teammate`). */
 export interface TeammateAnchorPoster {
@@ -89,7 +90,7 @@ export async function loadAuthorReviewAnchor(
   const anchor = await latestFullReviewAtOrBefore(accountId, prId, headSha, ctx.db, { beforeReviewId });
   if (!anchor || anchor.origin !== 'teammate' || anchor.sourceUserId == null) return null;
   const pr = (await ctx.db
-    .select({ authorId: prs.authorId })
+    .select({ authorId: trueAuthorId(prs) })
     .from(prs)
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)

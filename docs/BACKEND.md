@@ -361,14 +361,29 @@ board, while a repo added later still starts clean at its add time.
 - The same mark opens Pending's summary window (`PENDING_SUMMARY_DAYS` from the earliest marked
   add; docs/FRONTEND.md § Pending on the first landing). Pinned by `db/pending-first-landing.test.ts`.
 
-### Limn findings never move the ball
+### Everything Limn does on your behalf is not you (2026-11-08)
 
-A Limn finding comment is stored under the poster's `limn:` bot (CLAUDE-REVIEW.md § Limn findings
-are bots), so like every bot action it never counts as the reader acting. One exception keeps
-"replied to you" alive: the reader's thread set is **the reader plus their own Limn bot**
-(`limnBotUserIdForUser`), so a PERSON's reply in a thread rooted on the reader's Limn finding still
-summons them, and the reader's own Limn finding on their own PR is never an unanswered thread.
-Participation ("did I take part") reads the TRUE poster (`limn_posted_by_user_id`).
+The owner's rule: **Limn's whole cycle is bot activity, and a PR the reader never PERSONALLY touched is
+never My Turn.** Limn's reviews, findings, replies, story checks, pushes and merges are stored under
+the poster's `limn:` bot, the person in a `limn_*_by_user_id` column (CLAUDE-REVIEW.md § Limn's
+actions are bots), so every "what did you last do" clock (`lastActionClocks`), the comment-reply
+candidates, the approval-answers-a-thread rule and the Feed's participation (`feed/my-turn.ts`) see
+only what the reader did in person. ⚠ Never OR `limn_posted_by_user_id` / `limn_merged_for_user_id`
+back into them. Like every bot action, a Limn action never returns the ball either.
+
+- **Threads.** The reader's thread set is the reader ALONE: a person replying to the reader's Limn
+  finding does NOT summon them. A Limn-rooted thread the reader replied in, in person, is S3(d) like
+  any other. (On the reader's OWN PR their Limn's untouched finding is still not an "unanswered
+  thread" — `ownPrNoteOpeners`.)
+- **A review request only Limn answered still stands** (`db/limn-discharged-requests.ts`). GitHub
+  drops the request when Limn's review is submitted under the reader's login. The `review_request`
+  card is kept when the reader's newest request event is a `requested` one, no `review_requests`
+  row exists, a Limn review posted for them came at or after it, and no review of theirs in person
+  did; its clock is the request. The Feed counts it as `requested`.
+- **A PR Limn OPENED for the reader is "Your PRs"** (`prOwnerId` / `trueAuthorId`:
+  `limn_opened_for_user_id`, else the author): its CI, conflicts, approval, readiness and threads,
+  Waiting on others, the ownership tests on the Pending cards, and the Feed's `authored`. It is never
+  a "New PR". Nothing Limn does on it counts as the reader acting.
 
 ### Removed types (2026-11-06)
 
@@ -401,7 +416,9 @@ against the stamp its visit STARTED with (docs/FRONTEND.md § The AI reviews lis
 `markAiReviewsSeen` (`POST /api/attention/ai-reviews/seen`): it stamps the newest review time the
 reader's list showed, clamped to now, and **never moves back**. The SPA sends it only while the tab is
 on screen, and only when the newest row is newer than the response's own stamp — so the refetch the
-POST starts sends nothing (no loop). Per WORKSPACE, server-side.
+POST starts sends nothing (no loop). Per WORKSPACE, server-side. (The "Seen today 14:32" blocks under
+New are a per-browser ledger in the SPA, keyed by review id — docs/FRONTEND.md § The AI reviews list;
+the server knows only the one stamp.)
 
 ⚠ **LIVE BOARD ONLY, COUNTED ONLY IN ITS TAB.** `buildPendingBoard` appends the cards AFTER
 `getWorkspaceInsights` (`live` only) and sets `kindTotals.ai_review`; the daily brief, Slack, the

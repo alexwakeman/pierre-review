@@ -35,7 +35,15 @@ import {
   rollupStateWithoutLimn,
   type CheckRun,
 } from '@pierre-review/shared';
-import { ensureLimnBotUser, ensureLimnReviewerRow } from '../db/limn-bots.js';
+import {
+  commentIsLimn,
+  commitIsLimn,
+  limnAttributor,
+  prLimnRoles,
+  reviewIsLimn,
+  type LimnCommentRule,
+} from '../db/limn-bots.js';
+import { emptyPrLimnLedger, linkLimnActionsToPr, prLimnLedgers } from '../db/limn-actions.js';
 import { syncLimnFindingLabels } from '../db/limn-finding-labels.js';
 import { importTeammateReviews } from '../db/teammate-reviews-import.js';
 import { notifyTeammateReviewsImported } from './teammate-review-hooks.js';
@@ -756,6 +764,13 @@ export function securityColumnsFor(input: PrSecurityInput): SecurityColumns {
   };
 }
 
+/** The review a thread comment belongs to (`review_comments.review_database_id`), written only when
+ *  GitHub sent the key — an omitted selection leaves the stored value alone. */
+function reviewKeyOf(c: { pullRequestReview?: { fullDatabaseId: string | null } | null }): { reviewDatabaseId?: string | null } {
+  if (c.pullRequestReview === undefined) return {};
+  return { reviewDatabaseId: c.pullRequestReview?.fullDatabaseId ?? null };
+}
+
 export async function persistPr(
   pr: GqlPullRequest,
   repoId: number,
@@ -999,6 +1014,58 @@ export async function persistPr(
     const prId = prRow.id;
     persistedPrId = prId;
 
+    // ---- LIMN'S WORK IS BOT WORK (db/limn-bots.ts; docs/CLAUDE-REVIEW.md § Limn's actions are bots) ----
+    // The ledger rows Limn wrote for this PR before it was stored (a PR Limn opened) get its id. Then,
+    // with `config.limnAttributeAll` on, every row Limn wrote is attributed to the poster's `limn:` bot
+    // with the person beside it — the PR itself first (a merge Limn landed, a PR Limn opened). Off, only
+    // finding comments and marked replies are (the narrower rule below), and no `limn_*` column is
+    // written, so a walk changes nothing it did not change before.
+    await linkLimnActionsToPr(tx, { accountId, repoId, prNumber: pr.number, prId });
+    const wideLimn = config.limnAttributeAll;
+    const limnLedger = wideLimn
+      ? ((await prLimnLedgers(tx, accountId, [{ prId, repoId, number: pr.number, nodeId: pr.id }])).get(prId) ?? emptyPrLimnLedger())
+      : emptyPrLimnLedger();
+    const ledgerIds = {
+      commentIds: limnLedger.commentDbIds,
+      reviewIds: limnLedger.reviewDbIds,
+      commitShas: limnLedger.commitShas,
+    };
+    const limnBots = await limnAttributor(tx, accountId, repoId);
+    // The PR author as every row below names it (the `limn:` bot when Limn opened the PR).
+    let prAuthorId = authorId;
+    if (wideLimn) {
+      const roles = prLimnRoles({ authorId, mergedById }, limnLedger);
+      const openedBot = roles.openedFor != null ? await limnBots.botFor(pr.author?.login) : null;
+      const mergedBot = roles.mergedFor != null ? await limnBots.botFor(pr.mergedBy?.login) : null;
+      if (openedBot != null) prAuthorId = openedBot;
+      await tx
+        .update(pullRequests)
+        .set({
+          authorId: openedBot ?? authorId,
+          limnOpenedForUserId: openedBot != null ? roles.openedFor : null,
+          mergedById: mergedBot ?? mergedById,
+          limnMergedForUserId: mergedBot != null ? roles.mergedFor : null,
+        })
+        .where(eq(pullRequests.id, prId))
+        .execute();
+    }
+    // Which inline comments are Limn's, per the review GitHub put them in (the wrapper rule, (c)).
+    const limnCommentsByReview = new Map<string, boolean[]>();
+    for (const t of pr.reviewThreads.nodes) {
+      for (const [ci, c] of t.comments.nodes.entries()) {
+        const reviewKey = c.pullRequestReview?.fullDatabaseId;
+        if (reviewKey == null) continue;
+        const list = limnCommentsByReview.get(String(reviewKey)) ?? [];
+        list.push(
+          commentIsLimn({ body: c.body, databaseId: c.fullDatabaseId }, ci === 0 ? 'thread_root' : 'thread_reply', {
+            wide: wideLimn,
+            ledger: ledgerIds,
+          }),
+        );
+        limnCommentsByReview.set(String(reviewKey), list);
+      }
+    }
+
     // ---- cross-team search index rows (accumulated, written once at the end) ----
     // `bodyText` (plain-text description) is fetched unconditionally, so the PR row indexes the
     // description even under lean storage where pullRequests.body is null. Review / comment rows are
@@ -1009,7 +1076,7 @@ export async function persistPr(
       kind: 'pr',
       refId: prId,
       threadId: null,
-      authorId,
+      authorId: prAuthorId,
       body: searchText(pr.title, pr.bodyText),
       createdAt: openedAt,
     });
@@ -1087,7 +1154,7 @@ export async function persistPr(
     await upsertEvent(tx, {
       accountId,
       repoId,
-      actorId: authorId,
+      actorId: prAuthorId,
       prId,
       type: 'pr_opened',
       occurredAt: openedAt,
@@ -1104,7 +1171,7 @@ export async function persistPr(
       await upsertEvent(tx, {
         accountId,
         repoId,
-        actorId: authorId,
+        actorId: prAuthorId,
         prId,
         type: 'pr_merged',
         occurredAt: mergedAt,
@@ -1116,7 +1183,7 @@ export async function persistPr(
       await upsertEvent(tx, {
         accountId,
         repoId,
-        actorId: authorId,
+        actorId: prAuthorId,
         prId,
         type: 'pr_closed',
         occurredAt: closedAt,
@@ -1137,7 +1204,7 @@ export async function persistPr(
       await upsertEvent(tx, {
         accountId,
         repoId,
-        actorId: authorId,
+        actorId: prAuthorId,
         prId,
         type,
         occurredAt: new Date(pr.updatedAt),
@@ -1149,9 +1216,23 @@ export async function persistPr(
 
     // ---- reviews ----
     for (const r of pr.reviews.nodes) {
-      const reviewerId = await resolver.resolve(tx, r.author);
+      const personId = await resolver.resolve(tx, r.author);
       const submittedAt = toDate(r.submittedAt);
       if (!submittedAt) continue; // pending reviews have no timestamp
+      // A review Limn posted (a summary, an approval, a reply wrapper) is the poster's bot's.
+      const limnBot =
+        wideLimn && personId != null &&
+        reviewIsLimn(
+          { databaseId: r.fullDatabaseId ?? null, body: r.body ?? null, state: reviewState(r.state) },
+          { ledger: ledgerIds, commentsLimn: limnCommentsByReview },
+        )
+          ? await limnBots.botFor(r.author?.login)
+          : null;
+      const reviewerId = limnBot ?? personId;
+      // Written only with the wide rule on: off, a walk leaves both columns exactly as they were.
+      const reviewAttribution = wideLimn
+        ? { authorId: reviewerId, limnPostedByUserId: limnBot != null ? personId : null }
+        : {};
       const reviewRow = (
         await tx
         .insert(reviews)
@@ -1165,6 +1246,7 @@ export async function persistPr(
           body: r.body ?? null,
           databaseId: r.fullDatabaseId ?? null,
           submittedAt,
+          ...reviewAttribution,
         })
         .onConflictDoUpdate({
           target: [reviews.prId, reviews.githubNodeId],
@@ -1173,6 +1255,7 @@ export async function persistPr(
             body: r.body ?? null,
             databaseId: r.fullDatabaseId ?? null,
             submittedAt,
+            ...reviewAttribution,
           },
         })
         .returning({ id: reviews.id })
@@ -1229,40 +1312,27 @@ export async function persistPr(
     // `limnFindingPost`) is stored under the poster's `limn:<login>` bot, with the poster kept in
     // `limn_posted_by_user_id`; every other comment under its author. Both columns are in each
     // conflict `set`, so a body edited to drop the marker goes back to its person on this walk.
-    const limnWorkspaceId = (
-      await tx
-        .select({ workspaceId: workspaceRepos.workspaceId })
-        .from(workspaceRepos)
-        .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)))
-        .limit(1)
-        .execute()
-    )[0]?.workspaceId;
-    const limnBots = new Map<string, number>();
     // `finding` false = this comment is a thread REPLY, which can never be a finding: Limn posts a
     // finding or a reminder as a new thread ROOT, so a reply (even one opening with a bold "**Nit**")
     // is judged by the REPLY rule instead — a reply carrying any Limn marker (a pushback, an
     // acknowledgement / resolve reply, a "Still open:" reply, a "Post reply") is Limn's words and
     // joins the poster's bot too (shared `isLimnThreadReply`, gap 1); every other reply stays its author's.
+    // With `config.limnAttributeAll` on, the WIDE rule (db/limn-bots.ts `commentIsLimn`): any Limn marker
+    // (a story check, a CI review, a Sonar comment) and the ledger (an unmarked "@dependabot rebase") too.
     const attribute = async (
       c: {
         author?: GqlActor | null;
         body?: string | null;
+        fullDatabaseId?: string | null;
       },
       finding = true,
       threadRoot = false,
     ): Promise<{ authorId: number | null; limnPostedByUserId: number | null }> => {
       const posterId = await resolver.resolve(tx, c.author);
-      const login = c.author?.login;
-      const isLimn = finding ? limnFindingPost(c.body, { threadRoot }) != null : isLimnThreadReply(c.body);
-      if (posterId == null || !login || !isLimn) {
-        return { authorId: posterId, limnPostedByUserId: null };
-      }
-      let botId = limnBots.get(login);
-      if (botId === undefined) {
-        botId = await ensureLimnBotUser(tx, login);
-        limnBots.set(login, botId);
-        if (limnWorkspaceId != null) await ensureLimnReviewerRow(tx, accountId, limnWorkspaceId, botId, login);
-      }
+      const rule: LimnCommentRule = !finding ? 'thread_reply' : threadRoot ? 'thread_root' : 'pr_comment';
+      const isLimn = commentIsLimn({ body: c.body, databaseId: c.fullDatabaseId ?? null }, rule, { wide: wideLimn, ledger: ledgerIds });
+      const botId = posterId != null && isLimn ? await limnBots.botFor(c.author?.login) : null;
+      if (botId == null) return { authorId: posterId, limnPostedByUserId: null };
       return { authorId: botId, limnPostedByUserId: posterId };
     };
 
@@ -1351,6 +1421,7 @@ export async function persistPr(
             databaseId: c.fullDatabaseId ?? null,
             createdAt,
             limnPostedByUserId,
+            ...reviewKeyOf(c),
           })
           .onConflictDoUpdate({
             target: [reviewComments.prId, reviewComments.githubNodeId],
@@ -1361,6 +1432,7 @@ export async function persistPr(
               databaseId: c.fullDatabaseId ?? null,
               authorId: commenterId,
               limnPostedByUserId,
+              ...reviewKeyOf(c),
             },
           })
           .returning({ id: reviewComments.id })
@@ -1463,6 +1535,14 @@ export async function persistPr(
           : null,
       );
       const committedAt = new Date(c.committedDate);
+      // A commit Limn made (the ledger's sha, or its `Limn-Run:` trailer) is the poster's bot's.
+      const commitBot =
+        wideLimn && commitAuthorId != null && commitIsLimn({ sha: c.oid, message: c.message }, { ledger: ledgerIds })
+          ? await limnBots.botFor(c.author?.user?.login)
+          : null;
+      const commitAttribution = wideLimn
+        ? { authorId: commitBot ?? commitAuthorId, limnPushedByUserId: commitBot != null ? commitAuthorId : null }
+        : {};
       // The subject line, written ONLY when GitHub sent the key (a tolerant partial or an old
       // fixture omits it) — spreading `{}` leaves a stored headline alone instead of clearing it.
       const headline =
@@ -1482,10 +1562,11 @@ export async function persistPr(
           message: config.persistBodies ? c.message : null,
           ...headline,
           committedAt,
+          ...commitAttribution,
         })
         .onConflictDoUpdate({
           target: [commits.sha, commits.prId],
-          set: { message: config.persistBodies ? c.message : null, ...headline, committedAt },
+          set: { message: config.persistBodies ? c.message : null, ...headline, committedAt, ...commitAttribution },
         })
         .returning({ id: commits.id })
         .execute()
@@ -1493,7 +1574,7 @@ export async function persistPr(
       await upsertEvent(tx, {
         accountId,
         repoId,
-        actorId: commitAuthorId ?? committerId,
+        actorId: (commitBot ?? commitAuthorId) ?? committerId,
         prId,
         type: 'commit_pushed',
         occurredAt: committedAt,

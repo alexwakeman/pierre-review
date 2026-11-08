@@ -196,3 +196,32 @@ test('on a phone the charts scroll sideways, and the popover and hover box stay 
   await expectOnScreen(page, await tip.boundingBox());
   await page.screenshot({ path: `${SHOTS}/chronology-390-budget-hover.png` });
 });
+
+// THE VIEW TOGGLE (docs/BOTTLENECKS.md § Two views): "People + bots" is the default; picking
+// "People" saves it for the workspace and both reads ask for that view.
+test('the People + bots / People toggle saves the view and re-reads the panel and the trend in it', async ({ page }) => {
+  const reads: string[] = [];
+  const puts: unknown[] = [];
+  page.on('request', (req) => {
+    const u = new globalThis.URL(req.url());
+    if (u.pathname === '/api/flow-findings' || u.pathname === '/api/flow-trend') reads.push(`${u.pathname}?${u.searchParams.get('view')}`);
+  });
+  await openChronology(page);
+  // Registered after the mock, so it answers first.
+  await page.route(
+    (u) => /^\/api\/workspaces\/\d+\/flow-view$/.test(u.pathname),
+    async (r) => {
+      puts.push(r.request().postDataJSON());
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ workspace: {} }) });
+    },
+  );
+  const toggle = page.getByTestId('chronology-view');
+  await expect(toggle.getByRole('button', { name: 'People + bots' })).toHaveAttribute('aria-pressed', 'true');
+  expect(reads).toContain('/api/flow-findings?people_bots');
+  expect(reads).toContain('/api/flow-trend?people_bots');
+  await toggle.getByRole('button', { name: 'People', exact: true }).click();
+  await expect(toggle.getByRole('button', { name: 'People', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => puts).toEqual([{ view: 'people' }]);
+  await expect.poll(() => reads.includes('/api/flow-findings?people') && reads.includes('/api/flow-trend?people')).toBe(true);
+  await page.screenshot({ path: `${SHOTS}/chronology-view-toggle.png` });
+});

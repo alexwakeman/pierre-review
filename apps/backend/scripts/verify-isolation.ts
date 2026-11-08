@@ -2351,8 +2351,27 @@ check(
     }
   }
 
-  const aOut = await getFlowCourts(1, scopeA, WIN);
-  const bOut = await getFlowCourts(2, scopeB, WIN);
+  // "People" (only people move the ball): the exact counts below were written for it. The default
+  // view, "People + bots", also lets the review bots other checks seed here move the ball.
+  const aOut = await getFlowCourts(1, scopeA, WIN, { view: 'people' });
+  const bOut = await getFlowCourts(2, scopeB, WIN, { view: 'people' });
+
+  // Chronology's VIEW is a per-workspace setting: A cannot write B's, and B's reads stay B's.
+  {
+    const { setWorkspaceFlowView, getWorkspaceFlowView } = await import('../src/db/flow-settings.js');
+    const wrote = await setWorkspaceFlowView(1, scopeB.workspaceId, 'people');
+    check(
+      "setWorkspaceFlowView(A, B's workspace) writes nothing",
+      wrote === false && (await getWorkspaceFlowView(2, scopeB.workspaceId)) === 'people_bots',
+    );
+    await setWorkspaceFlowView(2, scopeB.workspaceId, 'people');
+    check(
+      "getWorkspaceFlowView(A, B's workspace) reads the default, never B's setting",
+      (await getWorkspaceFlowView(1, scopeB.workspaceId)) === 'people_bots' &&
+        (await getWorkspaceFlowView(2, scopeB.workspaceId)) === 'people',
+    );
+    await setWorkspaceFlowView(2, scopeB.workspaceId, null);
+  }
 
   // ⚠ NON-VACUITY FIRST. Every assertion below is an `.every()` over repos/evidence, and
   // `[].every()` is `true` — so a fixture that produces NO profiles turns this whole block into

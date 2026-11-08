@@ -42,6 +42,7 @@ import type { Executor } from '../../db/client.js';
 import * as schema from '../../db/schema.sqlite.js';
 import { ownRunsOnly } from '../../db/teammate-reviews.js';
 import { similarTitles } from './settled-by-reply.js';
+import { trueAuthorId } from '../../db/true-author.js';
 
 /** A follow-up status that settles a finding: it drops out of the list. */
 const SETTLED: ReadonlySet<ClaudeFollowUpStatus> = new Set(['addressed', 'no_longer_applies', 'reply_accepted']);
@@ -766,7 +767,8 @@ export async function loadTeamStandingsForPrs(
       : await exec
           .select({
             prId: reviews.prId,
-            authorId: reviews.authorId,
+            // The PERSON who posted it (a Limn review is stored under their `limn:` bot).
+            authorId: trueAuthorId(reviews),
             nodeId: reviews.githubNodeId,
             databaseId: reviews.databaseId,
             state: reviews.state,
@@ -774,7 +776,7 @@ export async function loadTeamStandingsForPrs(
             limn: sql<number>`coalesce(${reviews.body}, '') like '%pierre:claude-review%'`,
           })
           .from(reviews)
-          .where(and(inArray(reviews.prId, [...prsWith]), inArray(reviews.authorId, authorIds)))
+          .where(and(inArray(reviews.prId, [...prsWith]), inArray(trueAuthorId(reviews), authorIds)))
           .execute();
   for (const prId of prsWith) {
     const mates = mateRows.filter((r) => r.prId === prId);

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { removeWorkspaceDocs } from '../../reference-docs/library.js';
 import {
   RELATED_REPOS_MAX_PER_REPO,
+  parseFlowActorView,
   validateFlowSettings,
   type FlowSettings,
   type RelatedReposResponse,
@@ -20,7 +21,7 @@ import {
 } from '../../db/queries.js';
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
 import { getRelatedRepoPairs, setRelatedRepos } from '../../db/related-repos.js';
-import { setWorkspaceFlowSettings } from '../../db/flow-settings.js';
+import { setWorkspaceFlowSettings, setWorkspaceFlowView } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { kickGithubIssuesCheck } from '../../tracker/index.js';
 
@@ -353,6 +354,45 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'InvalidFlowSettings', message: problem };
       }
       if (!(await setWorkspaceFlowSettings(accountId, id, body))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      const workspace = await findWorkspace(accountId, id);
+      if (!workspace) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return { workspace };
+    },
+  );
+
+  // CHRONOLOGY'S VIEW for this workspace (docs/BOTTLENECKS.md § Two views): who moves the ball —
+  // `{ view: 'people' | 'people_bots' }`, or `{ view: null }` for the default. A reading setting,
+  // per workspace, no inheritance. DB-only (the workspace-CRUD read tier). 400 on an unknown view,
+  // 404 on a workspace that is not this account's. Returns the workspace.
+  app.put(
+    '/api/workspaces/:id/flow-view',
+    {
+      schema: {
+        ...idParamSchema,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['view'],
+          properties: { view: { type: ['string', 'null'], maxLength: 32 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id } = req.params as { id: number };
+      const raw = (req.body as { view: string | null }).view;
+      const view = raw == null ? null : parseFlowActorView(raw);
+      if (raw != null && view == null) {
+        reply.status(400);
+        return { error: 'InvalidFlowView', message: 'Choose “People” or “People + bots”.' };
+      }
+      if (!(await setWorkspaceFlowView(accountId, id, view))) {
         reply.status(404);
         return { error: 'NotFound', message: `Workspace ${id} not found` };
       }

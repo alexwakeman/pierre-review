@@ -20,6 +20,7 @@ import type {
   FlowPointerEvidence,
   PendingBoardSnapshot,
   SprintComparisonMode,
+  LimnActionOrigin,
 } from '@pierre-review/shared';
 import type { CompareDiffResult } from '../github/compare.js';
 import type { PrReviewCommentHunks } from '../sync/hydrate-detail.js';
@@ -81,6 +82,10 @@ export interface ApplyAndPushArgs {
   patch: string;
   commitMessage: string;
   target: ApplyAndPushTarget;
+  /** LIMN'S WORK IS BOT WORK: the run whose work this push lands, and why it is pushed (a press, an
+   *  automatic push, the Dependencies policy). The commit carries a `Limn-Run:` trailer and the push
+   *  is recorded in the provenance ledger (docs/CLAUDE-REVIEW.md § Limn's actions are bots). */
+  limnRun: { origin: LimnActionOrigin; source: { table: string; id: number } };
 }
 
 export interface ApplyAndPushResult {
@@ -460,10 +465,22 @@ export interface PostReviewFinding {
   severityTag?: string | null;
 }
 
+/** LIMN'S WORK IS BOT WORK (docs/CLAUDE-REVIEW.md § Limn's actions are bots): who a seam post is
+ *  for and why — an automatic run ('auto') or a press on Limn's words ('reader_pressed'). The seam
+ *  records the write in the provenance ledger. Required on every post. */
+export interface LimnPostContext {
+  accountId: number;
+  prId: number;
+  origin: LimnActionOrigin;
+  /** The run that wrote the words (claude_reviews, ticket_review_items, …). */
+  source?: { table: string; id: number } | null;
+}
+
 export interface PostReviewArgs {
   owner: string;
   name: string;
   prNumber: number;
+  limn: LimnPostContext;
   reviewHeadSha: string; // pins commit_id; the seam 409s if the live head moved
   body: string;
   verdict: ClaudeReviewVerdict;
@@ -515,6 +532,7 @@ export interface PostFindingArgs {
   owner: string;
   name: string;
   prNumber: number;
+  limn: LimnPostContext;
   reviewHeadSha: string;
   finding: PostReviewFinding;
   // true = always a PR-level comment, never inline (auto-posting's questions), naming the file

@@ -241,6 +241,7 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
       protect,
       ...(pr.treeSha ? { expectTree: pr.treeSha } : {}),
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, pr.repoId, prNumber, build.ident),
+      limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it. Nothing below may fail the push. ──
     await updateStoryBuildPr(ctx, a.accountId, pr.id, {

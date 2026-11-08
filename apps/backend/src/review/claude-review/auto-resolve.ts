@@ -102,19 +102,23 @@ export interface AutoResolveDeps {
 
 export const defaultAutoResolveDeps: AutoResolveDeps = {
   async reply(accountId, threadNodeId, body) {
-    const [{ getAccessToken }, { addReviewThreadReply }] = await Promise.all([
+    const [{ getAccessToken }, { addReviewThreadReply }, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    const c = await addReviewThreadReply(await getAccessToken(accountId), threadNodeId, body);
+    const origin = ledger.orReader(await ledger.limnOriginForThread(accountId, threadNodeId, 'auto'));
+    const c = await addReviewThreadReply(await getAccessToken(accountId), threadNodeId, body, origin);
     return { commentId: c.databaseId != null ? String(c.databaseId) : null };
   },
   async resolve(accountId, threadNodeId) {
-    const [{ getAccessToken }, { setReviewThreadResolved }] = await Promise.all([
+    const [{ getAccessToken }, { setReviewThreadResolved }, ledger] = await Promise.all([
       import('../../auth/account.js'),
       import('../../github/mutations.js'),
+      import('../../db/limn-actions.js'),
     ]);
-    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, true);
+    const origin = ledger.orReader(await ledger.limnOriginForThread(accountId, threadNodeId, 'auto'));
+    await setReviewThreadResolved(await getAccessToken(accountId), threadNodeId, true, origin);
   },
   async stamp(threadId, accountId) {
     const { stampThreadResolved } = await import('../../db/queries.js');

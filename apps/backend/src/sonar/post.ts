@@ -14,6 +14,7 @@ import {
   sonarReviewMarker,
   splitSonarIssues,
 } from './comment.js';
+import type { LimnPostContext } from '../platform/contract.js';
 
 // POSTING A SNAPSHOT AS ONE GITHUB REVIEW (docs/SONARCLOUD.md § Posting) — by hand ("Post SonarCloud
 // findings" in the review tab) or after an AUTO review when the workspace's auto-posting is on with
@@ -54,6 +55,7 @@ export interface SonarPostDeps {
     name: string,
     prNumber: number,
     review: { commitId: string; body: string; comments: SonarReviewComment[] },
+    limn: LimnPostContext,
   ): Promise<{ reviewId: string }>;
   // The review a failed POST created anyway (same commit, exactly this body, new since `sinceMs`).
   findLandedReview(owner: string, name: string, prNumber: number, want: { commitId: string; body: string; sinceMs: number }): Promise<string | null>;
@@ -79,9 +81,11 @@ export const defaultSonarPostDeps: SonarPostDeps = {
     ]);
     return stripNoiseFromDiff(await fetchPrDiff(owner, name, prNumber), isNoiseFile).diff;
   },
-  async postReview(owner, name, prNumber, r) {
+  async postReview(owner, name, prNumber, r, limn) {
     const { submitGithubReview } = await import('../review/post-review.js');
-    return submitGithubReview({ owner, name, prNumber, commitId: r.commitId, body: r.body, event: 'COMMENT', comments: r.comments });
+    const { limnOriginForPr, orReader } = await import('../db/limn-actions.js');
+    const origin = orReader(await limnOriginForPr(limn.accountId, limn.prId, limn.origin, { source: limn.source ?? null }));
+    return submitGithubReview({ owner, name, prNumber, commitId: r.commitId, body: r.body, event: 'COMMENT', comments: r.comments }, origin);
   },
   async findLandedReview(owner, name, prNumber, want) {
     const { findLandedReview } = await import('../review/post-seam.js');
@@ -198,13 +202,28 @@ export async function postSonarSnapshot(
   let reviewId: string | null = null;
   let error: string | null = null;
   try {
-    ({ reviewId } = await deps.postReview(access.owner, access.name, access.prNumber, { commitId: headSha, body, comments }));
+    ({ reviewId } = await deps.postReview(access.owner, access.name, access.prNumber, { commitId: headSha, body, comments }, {
+      accountId,
+      prId,
+      origin: trigger === 'auto' ? 'auto' : 'reader_pressed',
+    }));
   } catch (err) {
     // ⚠ AN ERROR IS NOT PROOF NOTHING WAS POSTED (post-seam.ts): look for THIS attempt's review.
     reviewId = await deps
       .findLandedReview(access.owner, access.name, access.prNumber, { commitId: headSha, body, sinceMs: startedAt })
       .catch(() => null);
     if (reviewId == null) error = errText(err);
+    else {
+      // GitHub published it after all: it is Limn's (the ledger learns its id).
+      const [{ recordLimnWrite }, { limnOriginForPr, orReader }] = await Promise.all([
+        import('../github/write-origin.js'),
+        import('../db/limn-actions.js'),
+      ]);
+      const landedId = reviewId;
+      await recordLimnWrite(orReader(await limnOriginForPr(accountId, prId, trigger === 'auto' ? 'auto' : 'reader_pressed')), 'review', {
+        githubDatabaseId: landedId,
+      });
+    }
   }
   if (reviewId != null) {
     // GitHub has 201'd: nothing below may throw or retry. The thread ids are best-effort.

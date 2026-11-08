@@ -143,6 +143,21 @@ import { schedulePrSettle } from '../sync/pr-settle.js';
 import { noteMergeLanded } from '../sync/unsettled-prs.js';
 import { stampPrMergeQueueState } from '../db/pr-merge-queue-stamp.js';
 import { AUTO_MERGE_TTL_MS } from './arm-intent.js';
+import { limnOriginForPr, orReader } from '../db/limn-actions.js';
+import { recordLimnPush, type WriteOrigin } from '../github/write-origin.js';
+
+/**
+ * LIMN'S WORK IS BOT WORK (docs/CLAUDE-REVIEW.md § Limn's actions are bots): every write the watcher
+ * makes — the merge, the enqueue, the branch update — is Limn's on the reader's behalf, even when the
+ * reader armed it (their consent, Limn's landing). 'policy' when the Dependencies setting armed it.
+ */
+async function limnOriginForWork(work: ArmedMergeWork): Promise<WriteOrigin> {
+  return orReader(
+    await limnOriginForPr(work.accountId, work.prId, work.armedByPolicy ? 'policy' : 'auto', {
+      source: { table: 'auto_merge_requests', id: work.id },
+    }),
+  );
+}
 
 // Cron for the watcher. NOT in `config` on purpose: it is not a deployment knob (the whole
 // feature is "it lands within a couple of minutes of going green"), and a misconfigured value
@@ -665,7 +680,7 @@ async function enqueueWhenReady(
   await updateAutoMergeState(work.id, { phase: 'enqueuing' });
   let entry: Awaited<ReturnType<typeof enqueuePullRequestOnQueue>>;
   try {
-    entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid);
+    entry = await enqueuePullRequestOnQueue(token, work.prNodeId, pinnedOid, await limnOriginForWork(work));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // ⚠ "NOT YET" IS NOT A FAILURE, AND TREATING IT AS ONE IS WHAT KILLED THREE REAL INTENTS.
@@ -826,6 +841,9 @@ async function processOne(
     // new head a tick for its checks to be queued before reading mergeability again.
     pendingUpdates.delete(work.id);
     pinnedOid = m.headSha;
+    // The merge commit GitHub made for OUR update is Limn's: its sha is known only now (the update's
+    // reply carries none), so the ledger learns it here. Never throws.
+    await recordLimnPush(await limnOriginForWork(work), [m.headSha]);
     await updateAutoMergeState(work.id, {
       expectedHeadOid: pinnedOid,
       // The update we were waiting for has landed and been adopted — the mark has done its job.
@@ -1041,6 +1059,7 @@ async function processOne(
         headSha: m.headSha,
         trunk: m.baseRef,
         strategy: 'rebase',
+        origin: await limnOriginForWork(work),
       });
       // The rebase is SYNCHRONOUS and returns the sha it pushed, so re-pinning to that exact
       // value adopts nothing we didn't produce — unlike the native update below.
@@ -1071,6 +1090,7 @@ async function processOne(
       work.name,
       work.number,
       pinnedOid,
+      await limnOriginForWork(work),
     );
     if (!upd.ok) {
       await updateAutoMergeState(work.id, {
@@ -1201,7 +1221,7 @@ async function processOne(
   const out = await mergePullRequest(token, work.owner, work.name, work.number, {
     method: work.mergeMethod,
     expectedHeadSha: pinnedOid,
-  });
+  }, await limnOriginForWork(work));
   if (out.ok) {
     forgetIntent(work.id);
     // ⚠ THE FRESHEN FIX (rule 8). We just moved the trunk, so every other armed intent on this
