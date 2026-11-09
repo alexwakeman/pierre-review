@@ -146,6 +146,10 @@ points); neither is ever triggered by a view.
   the re-derivation. "None of these" stays a per-tab choice, never stored.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
+- `linked_at` (migration `0182`) is when the PR JOINED the ticket: written by the row's FIRST insert
+  only, never by an update (`upsertTicketRow`). `ticketMembers` returns it and `changed_at` per member
+  — the automatic story check's grace window restarts on both ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+  The automatic story check's clock).
 
 ## Open points — what the ticket left undecided (`tracker/open-points*.ts`, 2026-11-06)
 

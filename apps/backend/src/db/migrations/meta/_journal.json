@@ -1275,6 +1275,13 @@
       "when": 1792569679025,
       "tag": "0181_workspace_flow_view",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "6",
+      "when": 1792569679026,
+      "tag": "0182_ticket_auto_clock",
+      "breakpoints": true
     }
   ]
 }

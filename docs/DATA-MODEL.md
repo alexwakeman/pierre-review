@@ -781,6 +781,15 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
 - **`ticket_reviews.comments_seen`** (migration `0142`) — `{ids, count, hash}` of the people comments a
   run was given. Outside the `fingerprint`; feeds `TicketReviewState.newComments`. NULL on older runs
   and pasted stories.
+- **THE AUTOMATIC STORY CHECK'S STORED CLOCK** (migration `0182`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+  § The automatic story check's clock). `pull_requests.head_seen_at` — when Limn SAW the synced head
+  move (`sync/upsert.ts`, only when a KNOWN stored head differs; an insert stamps `opened_at`; never the
+  commit's committedAt). `pull_requests.head_burst_at` — where the PR's current run of pushes began
+  (kept while each move is under `TICKET_AUTO_GRACE_MS` after the last). `tracker_tickets.linked_at` —
+  when the PR JOINED the ticket: the row's FIRST insert only, never in `upsertTicketRow`'s update set.
+  `ticket_reviews.cause` — why the sweeper queued the run (`first` · `pushed` · `joined` · `left` ·
+  `merged` · `story_edited`). All NULL on older rows, read as "no change" / "not known". Never in a
+  fingerprint.
 - **`pull_requests.closing_issues` / `closing_issues_checked_at`** (migration `0089`) — the
   issues a PR closes, as GitHub states them (`owner/repo#12` keys), read only for GitHub Issues
   workspaces by the tracker worker. ⚠ NULL = never read, `[]` = closes nothing.

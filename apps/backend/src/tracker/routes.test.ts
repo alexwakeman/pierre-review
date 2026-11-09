@@ -138,6 +138,7 @@ beforeAll(async () => {
   for (const stmt of migration('0171_open_points.sql').split('--> statement-breakpoint').slice(0, 2)) sqlite.exec(stmt);
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
+  sqlite.exec('ALTER TABLE tracker_tickets ADD linked_at integer;'); // migration 0182
   // The PR columns the GitHub Issues linker reads (migration 0089).
   for (const col of ["state text DEFAULT 'open'", 'github_node_id text', 'updated_at integer', 'closing_issues text', 'closing_issues_checked_at integer', 'linear_links text', 'linear_links_root text', 'linear_links_checked_at integer', 'number integer']) {
     try {

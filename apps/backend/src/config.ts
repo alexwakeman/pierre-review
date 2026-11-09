@@ -435,11 +435,9 @@ export const config = {
   // review/ticket-review/prepass.ts). Its spend is added to the ticket run's cost. Env only.
   ticketCardBudgetUsd: floatFromEnv('TICKET_CARD_BUDGET_USD', 0.4),
   // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
-  // the PR review's own auto cap. Manual runs never count. Default = shared TICKET_REVIEW_DAILY_CAP.
-  ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 20),
-  // Automatic re-checks of ONE ticket that only follow pushes, per UTC day (review/ticket-review/sweep.ts).
-  // A PR joining, leaving or merging, or the story changing, is not limited by it.
-  ticketReviewPushRechecksPerDay: intFromEnv('TICKET_REVIEW_PUSH_RECHECKS_PER_DAY', 3),
+  // the PR review's own auto cap. Manual runs never count, and a ticket with a PR the reader owns is
+  // never held by it. Default = shared TICKET_REVIEW_DAILY_CAP (60). No per-ticket limit (2026-11-09).
+  ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 60),
   // ---- CI review (one run per (PR, head, failing-check set) — review/ci-review/) ----
   // Its OWN spend cap and turn cap: a CI run reads log excerpts and the files they point at, nothing
   // more. Env only — no route sets it.

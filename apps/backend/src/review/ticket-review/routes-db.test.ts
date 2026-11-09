@@ -23,6 +23,8 @@ vi.mock('./manager.js', () => ({
   startTicketReview: (...a: unknown[]) => (startTicketReview as (...x: unknown[]) => unknown)(...a),
   getTicketRunStatus: vi.fn(async () => null),
   subscribeTicketReviewStream: vi.fn(() => () => {}),
+  ticketAutoLaneRoom: () => 4,
+  ticketReviewHeld: () => false,
 }));
 vi.mock('../../sync/resync-after-write.js', () => ({ settlePrAfterWrite: async () => ({ visible: true }) }));
 

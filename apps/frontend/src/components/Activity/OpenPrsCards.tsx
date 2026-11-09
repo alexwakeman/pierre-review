@@ -50,7 +50,6 @@ import {
   prLabelOf,
   newCommentsWords,
   ticketCurrency,
-  ticketWaitWords,
   type CoverageTone,
 } from '../../lib/ticketReview.js';
 import {
@@ -81,6 +80,7 @@ import {
   type OpenPrsWindowScope,
 } from '../../lib/openPrsWindow.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
+import { TicketAutoCheckLine } from '../TicketAutoCheckLine.js';
 import { TicketStorySection } from './TicketStorySection.js';
 import { OpenPrsRows } from './OpenPrsRows.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
@@ -1291,7 +1291,6 @@ function StoryCurrencyLine({
   const running = state?.status === 'running';
   const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
   const stale =cov != null && cov.stale && currency != null;
-  const why = stale ? ticketWaitWords(state?.waiting) : null;
   const comments = newCommentsWords(state);
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
@@ -1307,14 +1306,6 @@ function StoryCurrencyLine({
               {currency.label}
             </span>
           )}
-          {why != null && (
-            <>
-              <span aria-hidden className="decorative-mark text-ui-faint">
-                {' · '}
-              </span>
-              <span title={why.title}>{why.label}</span>
-            </>
-          )}
           {stale && state?.checkedAt != null && (
             <span aria-hidden className="decorative-mark text-ui-faint">
               {' · '}
@@ -1323,6 +1314,7 @@ function StoryCurrencyLine({
           {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-meta" />}
         </span>
       )}
+      {!running && <TicketAutoCheckLine autoCheck={state?.autoCheck} labelOf={labelOf} />}
       {ready && !running && (
         <button
           type="button"

@@ -315,6 +315,8 @@ const OPEN_PRS: OpenPrsResponse = {
 const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
 // The ticket review's two boot-time reads (the PR pane's Story check, the Open PRs stack pills).
 // Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
+// No tracker in e2e, so no ticket states. A spec that adds one carries `autoCheck` (the automatic
+// check's plan) — see story-build.spec.ts.
 const TICKET_REVIEW_STATES: TicketReviewStatesResponse = { states: [] };
 /** ACME-2's latest story check (`GET /api/ticket-reviews/501`): one criterion met, one not, one missing item. */
 const ACME_2_CHECK: TicketReview = {

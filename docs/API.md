@@ -299,9 +299,16 @@ against one rebuilt from the synced `pull_requests` heads and the ticket source'
 `TicketReviewState.status`: `current` · `stale` (+ `staleBecause` in the order `story_edited`,
 `pr_added`, `pr_left`, `pr_pushed`, `pr_merged`, and `changedPrIds`) · `running` (a run is
 queued or running; the last succeeded run's counts still ride) · `none`. With no ticket-source answer
-the live half is unknown and the latest run reads `current`. A `stale` state may carry `waiting`
-(`TicketReviewWait`: `settling` · `ticket_limit` · `daily_limit`) — why the auto sweeper is holding it
-back (in memory, `sweep-waits.ts`; absent where auto review is off or nothing waits).
+the live half is unknown and the latest run reads `current`. Every tracker ticket's state carries
+`autoCheck` (`TicketAutoCheck {status, reason, startsAt, lastChange}`) — what the AUTOMATIC check does
+next, from the sweeper's own pure rule (`review/ticket-review/auto-plan.ts` `ticketAutoCheckPlan`)
+over STORED rows (`auto-inputs.ts`), so it survives a restart and the time shown is the time kept:
+`status` `up_to_date` · `running` · `waiting` (`reason` `settling` with `startsAt` = 2 quiet minutes
+after `lastChange`, or `lane_full`) · `due` (starts within a minute) · `held` (`daily_limit` with
+`startsAt` = 00:00 UTC, `over_budget`, `ai_not_ready`) · `off` (`auto_off`, `too_many_prs`,
+`no_floor`, `already_tried`). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed',
+at}`. Absent on a pasted (`manual:`) ticket, or when it could not be read (the read never fails on it).
+(Replaced `waiting` / `TicketReviewWait`, 2026-11-09.)
 `newComments` (optional) counts the ticket's people comments the latest succeeded run was not given
 (`ticket_reviews.comments_seen`); absent / 0 when none or the run predates comment reading. ⚠ Never a
 `staleBecause` reason: a comment does not make a run stale or start an automatic one
@@ -313,13 +320,15 @@ back (in memory, `sweep-waits.ts`; absent where auto review is off or nothing wa
 | `GET /api/prs/:id/ticket-reviews` | `PrTicketReviewsResponse {prId, tickets: [{ident, ticketKey, ticketTitle, review: TicketReview\|null, state: TicketReviewState}]}` — one entry per ticket the PR is on: the tracker's detected tickets first (detection order), then any other ticket this PR was reviewed on (member or starting PR), newest first. `review` = that ticket's latest run of ANY status. DB + the stored ticket rows only (no Jira call). Tier `read` |
 | `GET /api/ticket-reviews/:id` | one run in full: `TicketReview` (members with `repo`/`number`/`title`/`headSha`/`state`/`checkedOut`; `assessment` only when `succeeded`; `items[]` with `posted`, `carried: true` when inherited from the earlier run it re-raises, `auto: true` when auto-posting posted it; `autoPost: {status, at, reason, error, postedCount, notRequested: [{index, prId, postedAt, carried}]} \| null` — what auto-posting did with an AUTOMATIC run, `notRequested` naming the "Not asked for" items on GitHub by their index in `assessment.notRequested`). Tier `read` |
 | `GET /api/ticket-reviews/:id/stream` | SSE (a GET — `req.raw.on('close')` is correct here), `TicketReviewStreamEvent`: one `snapshot`, `progress` on every phase/activity/usage change, one terminal `done {status, ticketReviewId, memberPrIds}` then close. A finished run answers `snapshot` + `done` at once. On `done` the SPA invalidates `['ticket-reviews', prId]` for EVERY `memberPrIds` entry plus `['ticket-review-states']`. Tier `read` |
-| `POST /api/ticket-reviews/states` | Body `TicketReviewStatesBody {idents}` (de-duplicated; > `TICKET_REVIEW_STATES_MAX` (100) → `400 {error:'TooManyIdents'}`, never truncated; a malformed ident → `400 {error:'InvalidIdent'}`) → `TicketReviewStatesResponse {states}`, one per requested ident in request order (unknown → `status:'none'`). A FIXED number of reads (`getTicketStateInputs` + one `pull_requests` read + one `ticketMembers` and one `ticketStory` per ident — the SAME story the run hashed, the freshest stored row, whichever PR is viewed; stored rows only, never a Jira call). Feeds Open PRs' ticket stacks through ONE `useTicketReviewStates(idents)`; poll only while some state is `running`. DB-only, tier `read` |
+| `POST /api/ticket-reviews/states` | Body `TicketReviewStatesBody {idents}` (de-duplicated; > `TICKET_REVIEW_STATES_MAX` (100) → `400 {error:'TooManyIdents'}`, never truncated; a malformed ident → `400 {error:'InvalidIdent'}`) → `TicketReviewStatesResponse {states}`, one per requested ident in request order (unknown → `status:'none'`). A FIXED number of reads per ident (`getTicketStateInputs` + one `pull_requests` read + one `ticketMembers` and one `ticketStory` per ident, and the same again for `autoCheck` with the member clocks, the latest run row and the workspace's cap count — the SAME story the run hashed, the freshest stored row, whichever PR is viewed; stored rows only, never a Jira call). Feeds Open PRs' ticket stacks through ONE `useTicketReviewStates(idents)`; poll only while some state is `running`. DB-only, tier `read` |
 | `POST /api/ticket-reviews/:id/post` | Post the run's not-yet-posted unmet / partly met / missing items whose target is `targetPrId` as ONE collated PR-level comment (the per-item route is gone). Body `PostStoryGapsBody {viewedPrId, targetPrId}`. An item's target = its `ownerPrId`, else `viewedPrId`; `targetPrId` must be a member of the run (`400 {error:'NotAMember'}`). Nothing left to post for that PR — every such item already posted, its own posting or one inherited from the item it re-raises — → `409 {error:'AlreadyPosted'}` (never posted twice; an in-process claim keyed (run, target PR) and holding every item id is taken BEFORE that check and the run re-read inside it, so a second request in flight also answers `AlreadyPosted`). Auto-posting posts through the SAME function (`review/ticket-review/post-item.ts` `postStoryGapsComment`) and claim. Only `AlreadyPosted` means a comment exists — the SPA must not read the other 409s as posted. Every item in the comment is stamped with its one comment id. The body ends with the `<!-- pierre:claude-review` marker so `isLimnPostedComment` keeps it from triggering an auto PR review. → `PostStoryGapsResponse {items, visible, commentId, postedCount}` under the post-write copy contract (`visible:false` with a `commentId` = it IS on GitHub; never offer a retry). `409 {error:'Superseded'}` when the run is not the ticket's latest succeeded run; `409 {error:'HeadMoved'}` when the target PR was pushed since the run (the comment is pinned to the head the run judged); `502 {error:'GitHubError'}`. Tier `github_write` (spell the exact path in `tierFor`) |
 
 Never auto-posted; no auto fix ever reads ticket items. A MANUAL review-seeded AI Fix may include
 the items this PR owns (`getOwnedTicketItemsForPr`: the latest succeeded run per ticket only).
 Automatic runs (`trigger` `auto` / `cascade`) count against the starting workspace's
-`TICKET_REVIEW_DAILY_CAP` (default 20, `countAutoTicketReviewsSince`); manual runs never do.
+`TICKET_REVIEW_DAILY_CAP` (default 60, `countAutoTicketReviewsSince`); manual runs never do, and a
+ticket with a PR the reader owns is never held by it (the spend budget still applies). No per-ticket
+limit (removed 2026-11-09).
 
 ### Design diagrams (the paths keep "sequence-diagrams")
 

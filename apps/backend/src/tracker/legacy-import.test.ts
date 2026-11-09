@@ -137,7 +137,7 @@ describe('the legacy tracker move', () => {
 
     // The ticket keeps its ident: the ticket review's members and story find it.
     const ident = `jira:${SITE}#BMD-1036`;
-    expect(await peers.ticketMembers(tctx, 1, ident)).toEqual([{ prId, workspaceId: wsA }]);
+    expect(await peers.ticketMembers(tctx, 1, ident)).toEqual([expect.objectContaining({ prId, workspaceId: wsA })]);
     expect((await peers.ticketStory(tctx, 1, ident))?.title).toBe('Export the metric');
     expect((await peers.ticketsForPr(tctx, 1, prId)).map((x) => x.ident)).toEqual([ident]);
   });

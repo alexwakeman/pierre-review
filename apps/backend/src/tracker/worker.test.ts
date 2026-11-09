@@ -203,6 +203,8 @@ beforeAll(async () => {
   sqlite.exec(migration('0141_tracker_ticket_comments.sql'));
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
+  // When the PR joined the ticket (migration 0182).
+  sqlite.exec('ALTER TABLE tracker_tickets ADD linked_at integer;');
   // The PR columns the GitHub Issues linker reads (migration 0089).
   for (const col of ['github_node_id text', 'updated_at integer', 'closing_issues text', 'closing_issues_checked_at integer', 'linear_links text', 'linear_links_root text', 'linear_links_checked_at integer', 'number integer']) {
     try {
@@ -526,11 +528,12 @@ describe('7. ticket peers', () => {
     await pass(B);
     const apiRoot = (await rows(A, [10]))[0]!.apiRoot;
     const ident = `jira:${apiRoot}#ENG-7`;
-    expect(await ticketMembers(ctx, A, ident)).toEqual([
+    const bare = (ms: Array<{ prId: number; workspaceId: number }>) => ms.map(({ prId, workspaceId }) => ({ prId, workspaceId }));
+    expect(bare(await ticketMembers(ctx, A, ident))).toEqual([
       { prId: 10, workspaceId: WS_A },
       { prId: 12, workspaceId: WS_A },
     ]);
-    expect(await ticketMembers(ctx, B, ident)).toEqual([{ prId: 90, workspaceId: WS_B }]);
+    expect(bare(await ticketMembers(ctx, B, ident))).toEqual([{ prId: 90, workspaceId: WS_B }]);
     expect(await ticketMembers(ctx, A, 'jira:https://other.example#ENG-7')).toEqual([]);
     expect(await ticketMembers(ctx, A, 'manual:10:abcdef12')).toEqual([]);
     const forPr = await ticketsForPr(ctx, A, 10);
@@ -544,6 +547,10 @@ describe('7. ticket peers', () => {
     await pass();
     const apiRoot = (await rows(A, [10]))[0]!.apiRoot;
     const at0 = clock;
+    // linked_at: when the PR JOINED — its first write, never moved by a later read (migration 0182).
+    const joined = (await ticketMembers(ctx, A, `jira:${apiRoot}#ENG-7`)).find((m) => m.prId === 12)!;
+    expect(joined.linkedAtMs).toBe(joined.changedAtMs);
+    expect(joined.linkedAtMs).not.toBeNull();
     expect(await listChangedTicketIdents(ctx, A, at0)).toEqual([
       `jira:${apiRoot}#ENG-7`,
       `jira:${apiRoot}#ENG-8`,
@@ -559,6 +566,9 @@ describe('7. ticket peers', () => {
     jira.set('ENG-7', { summary: 'Renamed' });
     await pass();
     expect(await listChangedTicketIdents(ctx, A, clock)).toEqual([`jira:${apiRoot}#ENG-7`]);
+    const after = (await ticketMembers(ctx, A, `jira:${apiRoot}#ENG-7`)).find((m) => m.prId === 12)!;
+    expect(after.linkedAtMs).toBe(joined.linkedAtMs);
+    expect(after.changedAtMs).toBeGreaterThan(joined.linkedAtMs!);
     // PR 12 drops the key: its row goes, and the ticket is still found through PR 10's row.
     clock += 60_000;
     const at3 = clock;
@@ -614,7 +624,7 @@ describe('8. merged pull requests', () => {
     const [r] = await rows(A, [20]);
     expect([r?.issueKey, r?.state, r?.title]).toEqual(['ENG-40', 'ok', 'Title of ENG-40']);
     const ident = `jira:${r!.apiRoot}#ENG-40`;
-    expect(await ticketMembers(ctx, A, ident)).toEqual([{ prId: 20, workspaceId: WS_A }]);
+    expect(await ticketMembers(ctx, A, ident)).toEqual([expect.objectContaining({ prId: 20, workspaceId: WS_A })]);
     expect(await listChangedTicketIdents(ctx, A, at)).toContain(ident);
     calls.length = 0;
     clock += OK_TTL_MS + 1000; // a merged PR's row is never TTL-refreshed

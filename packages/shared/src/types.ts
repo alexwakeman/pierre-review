@@ -8551,14 +8551,18 @@ export const TICKET_REVIEW_MAX_PRS = 30;
 export const TICKET_REVIEW_MAX_DIFFS = 4;
 // Default per-WORKSPACE daily cap on AUTOMATIC ticket reviews (trigger 'auto' or 'cascade'), counted
 // from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
-// auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it.
-export const TICKET_REVIEW_DAILY_CAP = 20;
-// A re-check that only follows PUSHES (no PR joined, left or merged; the story unchanged) is limited
-// TWICE, so one busy ticket cannot spend the whole day's cap: at most this many automatic re-checks
-// ('cascade' rows) per TICKET per UTC day (`TICKET_REVIEW_PUSH_RECHECKS_PER_DAY` overrides), and never
-// the workspace's last few slots (`repeatRunLimit`), kept for a ticket's first check and for a PR
-// joining, leaving or merging.
-export const TICKET_REVIEW_PUSH_RECHECKS_PER_DAY = 3;
+// auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it. ⚠ A ticket with a PR the
+// READER owns is never held by it (the spend budget still applies). There is NO per-ticket limit
+// (removed 2026-11-09): the grace window below folds a burst of pushes into one check.
+export const TICKET_REVIEW_DAILY_CAP = 60;
+// THE AUTOMATIC STORY CHECK'S GRACE WINDOW (docs/CLAUDE-REVIEW.md § The automatic story check's
+// clock): a check starts once the ticket has been quiet this long — no push to ANY member PR, no PR
+// joining, no ticket change. Every such change restarts it, and it applies to a ticket's FIRST check
+// too (its PRs are often linked a few minutes apart). Measured from when Limn SAW each change.
+export const TICKET_AUTO_GRACE_MS = 2 * 60 * 1000;
+// The ceiling: a ticket whose PRs never go quiet is still checked this long after the first change of
+// the burst.
+export const TICKET_AUTO_MAX_WAIT_MS = 20 * 60 * 1000;
 /**
  * The share of a daily cap that REPEAT automatic runs may use — a ticket re-check after pushes only,
  * a design redraw — all but min(5, cap/4): the last slots stay free for FIRST runs (a new ticket, a
@@ -8845,19 +8849,47 @@ export interface TicketReviewState {
   memberCount: number;
   // When the latest succeeded run finished.
   checkedAt: string | null; // ISO-8601
-  // A STALE ticket the auto sweeper has seen and is holding back (only where auto review is on):
-  //   settling      waiting for the PRs to go quiet (5 minutes; at most 20 from the first change)
-  //   ticket_limit  this ticket's push-only re-checks for today are used (TICKET_REVIEW_PUSH_RECHECKS_PER_DAY)
-  //   daily_limit   the workspace's automatic ticket checks for today are used (resets 00:00 UTC)
-  // Absent / null: nothing is waiting (current, running, never checked, or auto review is off).
-  waiting?: TicketReviewWait | null;
+  // THE AUTOMATIC STORY CHECK: when it will start, or why it will not — from the SAME rule the sweeper
+  // follows (review/ticket-review/auto-plan.ts), recomputed on every read from stored rows. Absent
+  // on a pasted story, or from a server before it.
+  autoCheck?: TicketAutoCheck | null;
   // People's comments on the ticket that the latest succeeded run did not see (docs/TRACKERS.md §
   // Ticket comments). Comments never make a run stale; this only says the reader may re-run. Absent /
   // 0 when none, or when that run predates comment reading.
   newComments?: number;
 }
 
-export type TicketReviewWait = 'settling' | 'ticket_limit' | 'daily_limit';
+// What the automatic story check will do next.
+//   up_to_date  nothing moved since the latest check
+//   running     a check is queued or running now
+//   waiting     it will start at `startsAt` (`reason` 'settling'), or once a check slot is free
+//               (`reason` 'lane_full')
+//   due         it starts within a minute (the sweeper's next tick)
+//   held        it will not start until `reason` clears: 'daily_limit' (`startsAt` = 00:00 UTC),
+//               'over_budget', 'ai_not_ready'
+//   off         no automatic check: 'auto_off', 'too_many_prs', 'no_floor' (its PRs predate auto
+//               review), 'already_tried' (the last automatic attempt failed on these same PRs)
+export type TicketAutoCheckStatus = 'up_to_date' | 'running' | 'waiting' | 'due' | 'held' | 'off';
+export type TicketAutoCheckReason =
+  | 'settling'
+  | 'lane_full'
+  | 'daily_limit'
+  | 'over_budget'
+  | 'ai_not_ready'
+  | 'auto_off'
+  | 'too_many_prs'
+  | 'no_floor'
+  | 'already_tried';
+// The newest change the grace window counts from: a push to a member PR (or its opening), a PR
+// joining the ticket, a member merging, or the ticket itself changing (story text, a PR leaving).
+export type TicketAutoChangeKind = 'pushed' | 'joined' | 'merged' | 'ticket_changed';
+export interface TicketAutoCheck {
+  status: TicketAutoCheckStatus;
+  reason: TicketAutoCheckReason | null;
+  // When it will start (ISO-8601): the end of the grace window, or 00:00 UTC for the daily cap.
+  startsAt: string | null;
+  lastChange: { prId: number | null; kind: TicketAutoChangeKind; at: string } | null;
+}
 
 // One run, in full.
 export interface TicketReview {

@@ -1,28 +1,15 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
-import {
-  TICKET_REVIEW_MAX_PRS,
-  isTrackerIdent,
-  parseTicketIdent,
-  repeatRunLimit,
-  type TicketReviewWait,
-} from '@pierre-review/shared';
+import { and, eq, inArray } from 'drizzle-orm';
+import { isTrackerIdent, parseTicketIdent } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from '../claude-review/ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
-import { autoReviewAvailable, autoReviewDue, utcDayStartMs } from '../claude-review/auto.js';
+import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { onAutoReviewLaunched } from '../claude-review/manager.js';
-import { fingerprint, readLiveMembers, ticketHash, type FingerprintMember } from './fingerprint.js';
-import {
-  countAutoTicketReviewsSince,
-  countCascadeTicketReviewsSince,
-  getTicketIdentsForPr,
-  getTicketStateInputs,
-} from './persist.js';
-import { jiraMemberIds, jiraStoryFor } from './prepare.js';
-import { _resetTicketSweepWaitsForTest, setTicketSweepWait } from './sweep-waits.js';
+import { getTicketIdentsForPr } from './persist.js';
+import { loadTicketAutoState, readerUserIdOf } from './auto-inputs.js';
 import {
   startTicketReview,
   ticketAutoLaneRoom,
@@ -44,30 +31,23 @@ import {
 //      `onAutoReviewLaunched` — so a PR's first auto review and its tickets' check start together);
 //      and tickets still waiting from earlier ticks. ⚠ ONE HOP: only the tickets the changed PR is itself on. A ticket that merely
 //      shares another PR with one of them is never added — its own fingerprint did not move.
-//   2. LIVE FINGERPRINT from the synced heads (fingerprint.ts).
-//   3. DUE when it differs from the latest SUCCEEDED run's — and no newer attempt (refused, failed
-//      without an answer, or cancelled) already ran on exactly these inputs, which would only stop
-//      the same way again. A run that THREW, or was cut off by a restart, stores no fingerprint
-//      (persist.ts), so it stays retryable. A ticket whose run is queued or running WAITS, and is
-//      judged again once the run has stored its fingerprint.
-//   4. THE PR REVIEW'S START RULE, reused as is (`autoReviewDue`), keyed `account:ident` with the
-//      fingerprint as the "head": a first run starts at once; a re-run starts at once when no run
-//      of the ticket is in flight and none started or finished in the last 5 minutes, else after 5
-//      quiet minutes (20-minute ceiling from the burst's first change). A run in flight is never
-//      cancelled: the ticket WAITS, its clock running from the first change seen. NO CI hold — a
-//      member's running CI does not delay the check.
-//   5. ITS OWN DAILY CAP, `TICKET_REVIEW_DAILY_CAP` automatic runs ('auto' and 'cascade') per
+//   2. ONE RULE DECIDES, for each candidate: `loadTicketAutoState` (auto-inputs.ts) reads the stored
+//      rows and the pure `ticketAutoCheckPlan` (auto-plan.ts) answers — the SAME answer the states
+//      route shows the reader. Due when the live fingerprint differs from the latest SUCCEEDED run's
+//      (or there is none) and no newer attempt already ran on exactly these inputs (it would only
+//      stop the same way again; a run that THREW stores no fingerprint, so it stays retryable).
+//   3. THE GRACE WINDOW, from STORED stamps (no in-memory timer, so a restart loses nothing): 2 quiet
+//      minutes after the newest push to ANY member PR (`head_seen_at`), PR joining (`linked_at`),
+//      merge or ticket change — a FIRST check too — with a 20-minute ceiling from the burst's first
+//      change. A ticket whose run is queued or running WAITS (never cancelled) and is judged again
+//      once the run has stored its fingerprint; the changes it did not see restart the window then.
+//      NO CI hold.
+//   4. ITS OWN DAILY CAP, `TICKET_REVIEW_DAILY_CAP` (60) automatic runs ('auto' and 'cascade') per
 //      workspace per UTC day — counted from rows, which an automatic run writes when it is QUEUED.
-//      Never shared with the PR review's cap.
-//   6. ⚠ ONE BUSY TICKET CANNOT SPEND THE DAY. A PUSH-ONLY re-check (the same members in the same
-//      states and the same story as the last succeeded run — only heads moved) is limited twice: at
-//      most `TICKET_REVIEW_PUSH_RECHECKS_PER_DAY` (3) 'cascade' rows of THAT ticket per UTC day, and
-//      never the workspace's last slots (shared `repeatRunLimit`: all but
-//      min(5, cap/4)). A ticket's first check and a PR joining, leaving or merging are held only by
-//      the cap itself. (2026-10-28: one ticket's 11 pushes took 11 of the day's 20 checks by 11:40,
-//      and a story whose two new PRs joined that afternoon waited until midnight.)
-//   7. WHY IT WAITS is kept per ticket (`ticketSweepWait`) and served on the ticket's state
-//      (`waiting`), so the story view can say "daily limit reached" instead of nothing.
+//      ⚠ A ticket with a PR the READER owns is never held by it. NO per-ticket limit (removed
+//      2026-11-09: it counted PR joins and story edits as pushes, and held BMD-1175 until midnight).
+//      The spend budget is the money brake.
+//   5. Each queued run stores its CAUSE (`ticket_reviews.cause`).
 //
 // THE WORKSPACE. Members may span workspaces (same Jira site); the run counts against an
 // AUTO-ENABLED member workspace — the changed PR's when it is one. A ticket with no member in an
@@ -86,49 +66,22 @@ const FIRST_TICK_LOOKBACK_MS = 60 * 60 * 1000;
 // listChangedTicketIdents overlap, so a row stamped while a tick ran is never missed.
 const CHANGED_SLACK_MS = 60 * 1000;
 
-interface Settle {
-  key: string;
-  firstSeenMs: number;
-  burstStartMs: number;
-}
-
 // accountId → (prId → `${headSha}`) of the open PRs seen last tick, in auto-enabled workspaces.
 const prSnap = new Map<number, Map<number, string>>();
 // accountId → the last completed tick's time (the listChangedTicketIdents cursor).
 const lastTick = new Map<number, number>();
 // accountId → PRs whose auto PR review launched since the last tick.
 const kicked = new Map<number, Set<number>>();
-// `${accountId}:${ident}` → still waiting (settle, CI or the daily cap). Re-checked every tick.
+// `${accountId}:${ident}` → still waiting (the grace window, a run in flight, the cap or the lane).
+// Re-checked every tick; only WHICH tickets to look at — when to run is read from stored rows.
 const watching = new Map<string, { accountId: number; ident: string; kicked: boolean; viaPrId: number | null }>();
-const settleSeen = new Map<string, Settle>();
-// The settle key recorded while a run is in flight (its fingerprint is not read until it finishes).
-const HELD = '\u0000held';
 
 export function _resetTicketSweepForTest(): void {
   prSnap.clear();
   lastTick.clear();
   kicked.clear();
   watching.clear();
-  settleSeen.clear();
-  _resetTicketSweepWaitsForTest();
   sweeping = false;
-}
-
-export { ticketSweepWait } from './sweep-waits.js';
-
-/**
- * True when only heads moved since the last succeeded run: the same story, and the same members in
- * the same states. Such a re-check is limited per ticket (rule 6); anything else is not.
- */
-export function pushOnlyChange(
-  last: { ticketHash: string | null; members: readonly FingerprintMember[] },
-  liveHash: string,
-  live: readonly FingerprintMember[],
-): boolean {
-  if (last.ticketHash !== liveHash) return false;
-  if (last.members.length !== live.length) return false;
-  const state = new Map(last.members.map((m) => [m.prId, m.state]));
-  return live.every((m) => state.get(m.prId) === m.state);
 }
 
 export interface TicketSweepDeps {
@@ -137,8 +90,8 @@ export interface TicketSweepDeps {
   laneRoom(): number;
   held(accountId: number, ident: string): boolean;
   dailyCap: number;
-  // Rule 6's per-ticket limit (default config `ticketReviewPushRechecksPerDay`).
-  pushRechecksPerDay?: number;
+  // The reader's users.id (the cap exemption); default reads it from the account.
+  readerUserId?: (ctx: AgentContext, accountId: number) => Promise<number | null>;
 }
 
 const defaultDeps: TicketSweepDeps = {
@@ -147,7 +100,7 @@ const defaultDeps: TicketSweepDeps = {
   laneRoom: ticketAutoLaneRoom,
   held: ticketReviewHeld,
   dailyCap: config.ticketReviewDailyCap,
-  pushRechecksPerDay: config.ticketReviewPushRechecksPerDay,
+  readerUserId: readerUserIdOf,
 };
 
 export interface TicketSweepResult {
@@ -200,40 +153,6 @@ async function openPrsIn(
   return rows.map((r) => ({ ...r, headSha: r.headSha ?? '' }));
 }
 
-/** Per member: when it was opened (the onboarding floor). */
-async function memberOpenedAt(
-  ctx: AgentContext,
-  accountId: number,
-  prIds: readonly number[],
-): Promise<Map<number, number>> {
-  const out = new Map<number, number>();
-  if (prIds.length === 0) return out;
-  const { pullRequests: pr } = s(ctx);
-  const rows = (await ctx.db
-    .select({ id: pr.id, openedAt: pr.openedAt })
-    .from(pr)
-    .where(and(eq(pr.accountId, accountId), inArray(pr.id, [...prIds])))
-    .execute()) as Array<{ id: number; openedAt: Date }>;
-  for (const r of rows) out.set(r.id, new Date(r.openedAt).getTime());
-  return out;
-}
-
-/** The latest start or finish of any run of this ticket (null = none) — the "on receipt" test. */
-async function lastTicketRunAtMs(ctx: AgentContext, accountId: number, ident: string): Promise<number | null> {
-  const { ticketReviews: tr } = s(ctx);
-  const rows = (await ctx.db
-    .select({ createdAt: tr.createdAt, startedAt: tr.startedAt, completedAt: tr.completedAt })
-    .from(tr)
-    .where(and(eq(tr.accountId, accountId), eq(tr.ticketIdent, ident)))
-    .orderBy(desc(tr.id))
-    .limit(1)
-    .execute()) as Array<{ createdAt: Date | null; startedAt: Date | null; completedAt: Date | null }>;
-  const r = rows[0];
-  if (!r) return null;
-  const t = (d: Date | null): number => (d ? new Date(d).getTime() : 0);
-  return Math.max(t(r.createdAt), t(r.startedAt), t(r.completedAt)) || null;
-}
-
 let sweeping = false;
 
 /** One tick. Exported for tests; the host scheduler calls it through `registerTicketReviewSweep`. */
@@ -253,7 +172,6 @@ export async function runTicketReviewSweep(
   }
   sweeping = true;
   try {
-    const dayStartMs = utcDayStartMs(nowMs);
     const roster = await deps.roster(ctx);
     const byAccount = new Map<number, Map<number, number>>(); // account → (workspace → enabledAtMs)
     for (const w of roster) {
@@ -262,12 +180,7 @@ export async function runTicketReviewSweep(
       byAccount.set(w.accountId, m);
     }
     // An account with nothing switched on any more forgets everything it was waiting on.
-    for (const [k, w] of watching) if (!byAccount.has(w.accountId)) {
-      watching.delete(k);
-      settleSeen.delete(k);
-      // Nothing will re-check it automatically now, so no "daily limit reached" either.
-      setTicketSweepWait(w.accountId, w.ident, null);
-    }
+    for (const [k, w] of watching) if (!byAccount.has(w.accountId)) watching.delete(k);
 
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
@@ -303,12 +216,10 @@ export async function runTicketReviewSweep(
         for (const i of await getTicketIdentsForPr(ctx, accountId, prId)) idents.add(i);
         ticketsOf.set(prId, [...idents].filter((i) => isTrackerIdent(parseTicketIdent(i))));
       }
-      // `fromChange`: named by something that happened THIS tick (a moved/kicked PR, an edited story),
-      // as opposed to only being carried in from `watching` — a held burst's quiet clock restarts on it.
-      const candidates = new Map<string, { kicked: boolean; viaPrId: number | null; fromChange: boolean }>();
+      const candidates = new Map<string, { kicked: boolean; viaPrId: number | null }>();
       for (const ident of oneHopIdents(toRead, ticketsOf)) {
         const via = toRead.find((p) => ticketsOf.get(p)?.includes(ident)) ?? null;
-        candidates.set(ident, { kicked: via != null && kickedHere.has(via), viaPrId: via, fromChange: true });
+        candidates.set(ident, { kicked: via != null && kickedHere.has(via), viaPrId: via });
       }
       // A kicked PR's tickets count as kicked even when another changed PR named them first.
       for (const prId of kickedHere) {
@@ -321,7 +232,7 @@ export async function runTicketReviewSweep(
       try {
         for (const ident of await providers.listChangedTicketIdents(accountId, since)) {
           if (!candidates.has(ident) && isTrackerIdent(parseTicketIdent(ident))) {
-            candidates.set(ident, { kicked: false, viaPrId: null, fromChange: true });
+            candidates.set(ident, { kicked: false, viaPrId: null });
           }
         }
       } catch {
@@ -331,23 +242,21 @@ export async function runTicketReviewSweep(
         if (w.accountId !== accountId) continue;
         const c = candidates.get(w.ident);
         if (c) c.kicked ||= w.kicked;
-        else candidates.set(w.ident, { kicked: w.kicked, viaPrId: w.viaPrId, fromChange: false });
+        else candidates.set(w.ident, { kicked: w.kicked, viaPrId: w.viaPrId });
       }
 
-      // ---- 2–5. per ticket ----
+      // ---- 2–5. per ticket: one rule (auto-plan.ts), read from stored rows ----
       const capUsed = new Map<number, number>();
+      const readerUserId = await (deps.readerUserId ?? readerUserIdOf)(ctx, accountId).catch(() => null);
       const ordered = [...candidates].sort(([a], [b]) => a.localeCompare(b));
       for (let ci = 0; ci < ordered.length; ci += 1) {
         const [ident, cand] = ordered[ci]!;
         const key = `${accountId}:${ident}`;
         const forget = (): void => {
           watching.delete(key);
-          settleSeen.delete(key);
-          setTicketSweepWait(accountId, ident, null);
         };
-        const wait = (why: TicketReviewWait | null = null): void => {
+        const wait = (): void => {
           watching.set(key, { accountId, ident, kicked: cand.kicked, viaPrId: cand.viaPrId });
-          setTicketSweepWait(accountId, ident, why);
         };
         // The lane is full: this candidate AND every one not reached yet keep waiting. The PR
         // snapshot below still advances, so a candidate dropped here would never come back.
@@ -356,145 +265,68 @@ export async function runTicketReviewSweep(
             watching.set(`${accountId}:${i}`, { accountId, ident: i, kicked: c.kicked, viaPrId: c.viaPrId });
           }
         };
-        // A change seen while a run is in flight opens the burst; every LATER change restarts its
-        // quiet clock (spec: 5 quiet minutes since the LAST push), and the burst start never moves.
-        const holdSettle = (): void => {
-          const prev = settleSeen.get(key);
-          settleSeen.set(key, {
-            key: HELD,
-            firstSeenMs: cand.fromChange || prev == null ? nowMs : prev.firstSeenMs,
-            burstStartMs: prev?.burstStartMs ?? nowMs,
-          });
-        };
         result.considered.push(ident);
         // ⚠ Queued or running: WAIT, never forget. The run's fingerprint was fixed when it was
         // prepared, so a member that moves while it runs is a change the run never saw — and the PR
         // snapshot advances this tick, so nothing else would bring the ticket back.
         if (deps.held(accountId, ident)) {
-          // A change seen while a run is in flight opens the burst NOW (never cancelled; the run
-          // finishes, then the new fingerprint settles from this moment, not from the run's end).
-          holdSettle();
           wait();
           continue;
         }
-        const membersWs = await providers.ticketMembers(accountId, ident).catch(() => []);
-        const memberIds = [...new Set(membersWs.map((m) => m.prId))];
-        if (memberIds.length === 0) {
-          forget();
-          continue;
-        }
-        const wsOfPr = new Map(membersWs.map((m) => [m.prId, m.workspaceId]));
-        const viaWs = cand.viaPrId != null ? wsOfPr.get(cand.viaPrId) : undefined;
-        const enabledWs = [...new Set(membersWs.map((m) => m.workspaceId))].filter((w) => enabled.has(w)).sort((a, b) => a - b);
-        const workspaceId = viaWs != null && enabled.has(viaWs) ? viaWs : enabledWs[0];
-        if (workspaceId == null) {
-          forget();
-          continue;
-        }
-        const ticket = await jiraStoryFor(accountId, ident, memberIds);
-        if (!ticket) {
-          forget();
-          continue;
-        }
-        const live = await readLiveMembers(ctx, accountId, memberIds);
-        // Over the member cap an automatic run would only store a refusal; a click explains it.
-        if (live.length === 0 || live.length > TICKET_REVIEW_MAX_PRS) {
-          forget();
-          continue;
-        }
-        const liveHash = ticketHash(ticket);
-        const fp = fingerprint(liveHash, live);
-        const st = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
-        if (st?.runningRunId != null) {
-          holdSettle();
-          wait();
-          continue;
-        }
-        if (st?.latest?.fingerprint === fp) {
-          forget();
-          continue;
-        }
-        const attempt = st?.latestAttempt;
-        if (attempt && attempt.id > (st?.latest?.id ?? 0) && attempt.fingerprint === fp) {
-          forget();
-          continue;
-        }
-        const first = st?.latest == null;
-        if (first && !cand.kicked) {
-          const opened = await memberOpenedAt(ctx, accountId, live.map((m) => m.prId));
-          const floor = enabled.get(workspaceId)!;
-          const fresh = live.some((m) => m.state === 'open' && (opened.get(m.prId) ?? 0) >= floor);
-          if (!fresh) {
-            forget();
-            continue;
-          }
-        }
-
-        // ---- the settle rule, the PR review's own (no CI hold) ----
-        let settle: Settle | null = null;
-        if (!first) {
-          settle = settleSeen.get(key) ?? { key: fp, firstSeenMs: nowMs, burstStartMs: nowMs };
-          if (settle.key !== fp) {
-            settle = { ...settle, key: fp, firstSeenMs: settle.key === HELD ? settle.firstSeenMs : nowMs };
-          }
-          settleSeen.set(key, settle);
-        }
-        const due = autoReviewDue({
+        const st = await loadTicketAutoState(
+          ctx,
+          ident,
+          {
+            accountId,
+            enabled,
+            viaPrId: cand.viaPrId,
+            kicked: cand.kicked,
+            // Both gated above, for the whole account.
+            aiReady: true,
+            overBudget: false,
+            laneRoom: deps.laneRoom(),
+            held: false,
+            dailyCap: deps.dailyCap,
+            readerUserId,
+            capUsed,
+          },
           nowMs,
-          settle: settle ? { quietSinceMs: settle.firstSeenMs, burstStartMs: settle.burstStartMs, reason: 'head' } : null,
-          lastRunAtMs: first ? null : await lastTicketRunAtMs(ctx, accountId, ident),
-        });
-        if (!due.due) {
-          wait('settling');
+        );
+        if (st == null || st.workspaceId == null) {
+          forget();
           continue;
         }
-
-        // ---- rule 6: a push-only re-check is limited per ticket, and never takes the last slots ----
-        // Against the last success, OR against a newer attempt that got as far as its members (one
-        // that failed after a PR joined): else every push after a failed join-check would read as
-        // "a PR joined" again and escape the per-ticket limit.
-        const tried = attempt != null && attempt.members != null && attempt.members.length > 0 ? attempt : null;
-        const pushOnly =
-          !first &&
-          st?.latest != null &&
-          (pushOnlyChange(st.latest, liveHash, live) ||
-            (tried != null && pushOnlyChange({ ticketHash: tried.ticketHash ?? null, members: tried.members! }, liveHash, live)));
-        if (pushOnly) {
-          const perTicket = deps.pushRechecksPerDay ?? config.ticketReviewPushRechecksPerDay;
-          if ((await countCascadeTicketReviewsSince(ctx, accountId, ident, dayStartMs)) >= perTicket) {
-            wait('ticket_limit');
-            continue;
-          }
-        }
-
-        // ---- the daily cap (rows: an automatic run's row exists from the moment it is queued) ----
-        let used = capUsed.get(workspaceId);
-        if (used == null) {
-          used = await countAutoTicketReviewsSince(ctx, accountId, workspaceId, dayStartMs);
-          capUsed.set(workspaceId, used);
-        }
-        if (used >= (pushOnly ? repeatRunLimit(deps.dailyCap) : deps.dailyCap)) {
-          wait('daily_limit');
+        const { plan } = st;
+        if (plan.status === 'off' || plan.status === 'up_to_date') {
+          forget();
           continue;
         }
-        if (deps.laneRoom() <= 0) {
+        if (plan.status === 'waiting' && plan.reason === 'lane_full') {
           waitRest();
           result.stopped = 'lane_full';
           break;
         }
-        const trigger = first ? 'auto' : 'cascade';
+        if (!plan.due) {
+          // running, settling, or held by the cap: look again next tick.
+          wait();
+          continue;
+        }
+        const trigger = st.first ? 'auto' : 'cascade';
+        const workspaceId = st.workspaceId;
+        const live = st.live;
         const r = await deps.enqueue(ctx, {
           accountId,
           workspaceId,
           ident,
-          ticketKey: ticket.key ?? null,
-          ticketTitle: ticket.title,
+          ticketKey: st.ticket?.key ?? null,
+          ticketTitle: st.ticket?.title ?? null,
           manualTicket: null,
           originPrId: cand.viaPrId ?? live.find((m) => m.state === 'open')?.prId ?? live[0]!.prId,
           trigger,
+          cause: st.cause,
         });
         if (r.outcome === 'queued') {
-          capUsed.set(workspaceId, used + 1);
+          capUsed.set(workspaceId, (capUsed.get(workspaceId) ?? 0) + 1);
           result.queued.push({ ident, trigger, workspaceId });
           forget();
         } else if (r.outcome === 'already_running') {

@@ -25,7 +25,12 @@ export interface TicketSource {
   ticketsForPr(accountId: number, prId: number): Promise<Array<{ ident: string; ticket: ClaudeReviewTicket; ticketHash: string }>>;
   //   ticketMembers — every PR on the ticket: this account, the same site, ANY workspace, merged
   //     PRs included. The caller decides open / merged / closed from pull_requests.
-  ticketMembers(accountId: number, ident: string): Promise<Array<{ prId: number; workspaceId: number }>>;
+  //     `linkedAtMs` / `changedAtMs`: the row's join and last membership-or-story change (the story
+  //     check's grace clock); absent or null = not known.
+  ticketMembers(
+    accountId: number,
+    ident: string,
+  ): Promise<Array<{ prId: number; workspaceId: number; linkedAtMs?: number | null; changedAtMs?: number | null }>>;
   //   ticketStory — THE story of a ticket: the freshest stored row across every PR on it.
   ticketStory(accountId: number, ident: string): Promise<ClaudeReviewTicket | null>;
   //   ticketComments — the PEOPLE's comments on the ticket (bots out), oldest first. Never part of

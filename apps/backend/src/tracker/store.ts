@@ -59,6 +59,9 @@ export interface StoredTicketRow {
   // Written ONLY by this module (upsertTicketRow / deleteStaleKeys / rederiveAcForIssueType); see
   // `storyOrMembershipMoved`.
   changedAt: Date | null;
+  // When this PR first joined the ticket (migration 0182): written on the row's FIRST insert only,
+  // never updated. Optional: absent on a write, NULL on a row from before 0182.
+  linkedAt?: Date | null;
   // The ticket's own created / resolved instants (migration 0098 / pg 0085). null = not read yet
   // (a row from before 0098) or the tracker said none. NOT story text: never moves `changedAt`.
   issueCreatedAt: Date | null;
@@ -231,7 +234,7 @@ export function groupByPr(rows: readonly StoredTicketRow[]): Map<number, StoredT
  *  cleared. */
 export type TicketWrite = Omit<
   StoredTicketRow,
-  'id' | 'accountId' | 'prId' | 'issueKey' | 'changedAt' | 'issueCreatedAt' | 'issueResolvedAt'
+  'id' | 'accountId' | 'prId' | 'issueKey' | 'changedAt' | 'linkedAt' | 'issueCreatedAt' | 'issueResolvedAt'
 > &
   Partial<Pick<StoredTicketRow, 'issueCreatedAt' | 'issueResolvedAt'>>;
 
@@ -263,8 +266,13 @@ export async function upsertTicketRow(
   values: TicketWrite,
 ): Promise<void> {
   const t = ctx.schema.trackerTickets;
-  // A caller spreading a stored row must not round-trip its `changedAt`: this function owns it.
-  const { changedAt: _ignored, ...spread } = values as TicketWrite & { changedAt?: unknown };
+  // A caller spreading a stored row must not round-trip its `changedAt` or `linkedAt`: this function
+  // owns both.
+  const {
+    changedAt: _ignored,
+    linkedAt: _ignoredLinked,
+    ...spread
+  } = values as TicketWrite & { changedAt?: unknown; linkedAt?: unknown };
   // An undefined date is "not asked" — drop the key so the stored value stands.
   const write = Object.fromEntries(Object.entries(spread).filter(([, v]) => v !== undefined)) as TicketWrite;
   const prior = (
@@ -286,7 +294,9 @@ export async function upsertTicketRow(
   const changedAt = storyOrMembershipMoved(prior, write) ? write.checkedAt : (prior?.changedAt ?? null);
   await ctx.db
     .insert(t)
-    .values({ accountId, prId, issueKey, ...write, changedAt })
+    // `linkedAt` — when the PR JOINED the ticket — is set by the insert only: the update set never
+    // carries it, so a later read cannot move it (the story check's grace clock, migration 0182).
+    .values({ accountId, prId, issueKey, ...write, changedAt, linkedAt: write.checkedAt })
     .onConflictDoUpdate({ target: [t.accountId, t.prId, t.issueKey], set: { ...write, changedAt } })
     .execute();
 }

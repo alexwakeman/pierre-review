@@ -1521,6 +1521,19 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0182_ticket_auto_clock` — the automatic story check's stored clock
+
+Four nullable columns, bare `ADD COLUMN`: `pull_requests.head_seen_at` and `head_burst_at` (integer
+timestamps; when Limn saw the head move, and where the PR's run of pushes began), `tracker_tickets.linked_at`
+(integer timestamp; the row's first insert only) and `ticket_reviews.cause` (text). Read by
+`review/ticket-review/auto-inputs.ts` for the ONE start rule ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+The automatic story check's clock; [DATA-MODEL.md](DATA-MODEL.md)). ⚠ **No backfill, on purpose**:
+NULL reads as "no change" — a backfill from `last_commit_at` or `checked_at` would invent pushes and
+joins and restart grace windows on upgrade. On existing tables, so erasure and export already cover
+them. ⚠ Hand-built tracker test DBs add `linked_at` themselves (`ALTER TABLE tracker_tickets ADD
+linked_at integer`), or `ticketMembers` answers [] silently. Journal `idx` 182, `when` sqlite
+`1792569679026`.
+
 ### `0181_workspace_flow_view` — Chronology's two views
 
 `ALTER TABLE workspaces ADD COLUMN flow_view text` — NULL = the default view, "People + bots"

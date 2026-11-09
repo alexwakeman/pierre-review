@@ -23,7 +23,13 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { postStoryGapsComment } from './post-item.js';
 import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
-import { ticketSweepWait } from './sweep-waits.js';
+import { config } from '../../config.js';
+import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { autoReviewAvailable } from '../claude-review/auto.js';
+import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
+import { automaticRunAllowed } from '../budget-gate.js';
+import { loadTicketAutoState, readerUserIdOf, type TicketAutoContext } from './auto-inputs.js';
+import { toWireAutoCheck } from './auto-plan.js';
 import {
   getLatestTicketReview,
   getTicketIdentsForPr,
@@ -33,7 +39,13 @@ import {
 } from './persist.js';
 import { jiraMemberIds, jiraStoryFor, ticketCommentsFor, workspaceOfPr } from './prepare.js';
 import { newCommentsSince } from '../../tracker/comments.js';
-import { getTicketRunStatus, startTicketReview, subscribeTicketReviewStream } from './manager.js';
+import {
+  getTicketRunStatus,
+  startTicketReview,
+  subscribeTicketReviewStream,
+  ticketAutoLaneRoom,
+  ticketReviewHeld,
+} from './manager.js';
 
 // THE TICKET REVIEW API (CORE, free, LOCAL ONLY) — docs/API.md § Ticket review. Registered by
 // `registerAgenticRoutes` (review/agentic.ts), so absent in cloud and under LIMN_AI_DISABLED; the
@@ -139,6 +151,25 @@ async function statesFor(
 ): Promise<Map<string, TicketReviewState>> {
   const inputs = await getTicketStateInputs(ctx, accountId, idents);
   const out = new Map<string, TicketReviewState>();
+  // The automatic check's account-wide inputs, read once per request and only for a tracker ticket.
+  let autoBase: Omit<TicketAutoContext, 'held' | 'viaPrId' | 'kicked'> | null = null;
+  const autoContext = async (): Promise<Omit<TicketAutoContext, 'held' | 'viaPrId' | 'kicked'>> => {
+    if (autoBase) return autoBase;
+    const on = autoReviewAvailable(ctx);
+    const roster = on ? (await listAutoReviewWorkspaces(ctx)).filter((w) => w.accountId === accountId) : [];
+    autoBase = {
+      accountId,
+      enabled: new Map(roster.map((w) => [w.workspaceId, w.enabledAtMs])),
+      aiReady: agenticRunReady(ctx, 'ticket_review'),
+      overBudget: roster.length > 0 && !(await automaticRunAllowed(ctx, accountId, 'ticket review')),
+      laneRoom: ticketAutoLaneRoom(),
+      dailyCap: config.ticketReviewDailyCap,
+      readerUserId: await readerUserIdOf(ctx, accountId).catch(() => null),
+      capUsed: new Map(),
+    };
+    return autoBase;
+  };
+  const nowMs = Date.now();
   for (const ident of idents) {
     const inp = inputs.get(ident);
     const parsed = parseTicketIdent(ident);
@@ -162,8 +193,23 @@ async function statesFor(
       const n = newCommentsSince(inp.latest.commentsSeen, await ticketCommentsFor(accountId, ident));
       if (n > 0) state.newComments = n;
     }
-    // Why the auto sweeper is holding a stale ticket back (sweep.ts rule 7) — only while it is stale.
-    if (state.status === 'stale') state.waiting = ticketSweepWait(accountId, ident);
+    // When the automatic check will start, or why it will not — the sweeper's own rule (auto-plan.ts)
+    // over the same stored rows, so the time shown is the time it keeps. A tracker ticket only.
+    // Never fails the read: without an answer the field is simply absent.
+    if (isTrackerIdent(parsed)) {
+      try {
+        const base = await autoContext();
+        const auto = await loadTicketAutoState(
+          ctx,
+          ident,
+          { ...base, held: ticketReviewHeld(accountId, ident), viaPrId: null, kicked: false },
+          nowMs,
+        );
+        if (auto != null) state.autoCheck = toWireAutoCheck(auto.plan);
+      } catch (err) {
+        ctx.log.warn(`ticket review: auto check state not read: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     out.set(ident, state);
   }
   return out;

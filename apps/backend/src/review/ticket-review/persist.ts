@@ -155,6 +155,8 @@ export interface QueueTicketReviewArgs {
   originPrId: number | null;
   trigger: TicketReviewTrigger;
   model: string;
+  // Why the automatic sweeper queued it (auto-inputs.ts `TicketReviewCause`); absent = a manual run.
+  cause?: string | null;
 }
 
 /** Insert a queued run. Members are written once the run is prepared. */
@@ -174,6 +176,7 @@ export async function insertQueuedTicketReview(
       ticketSnapshot: a.ticket,
       originPrId: a.originPrId,
       trigger: a.trigger,
+      cause: a.cause ?? null,
       status: 'queued',
       // Labelled by the provider it is expected to run on; the run stamps its own (`markTicketReviewRanOn`).
       ...expectedRanOn(claudeModelChoice(a.model)),
@@ -968,32 +971,6 @@ export async function getTicketItemPostContext(
   if (run == null) return null;
   const item = run.items.find((i) => i.id === itemId);
   return item != null ? { run, item } : null;
-}
-
-/**
- * The ticket's 'cascade' runs (automatic re-checks) since `dayStartMs` — the per-ticket limit on
- * re-checks that only follow pushes (sweep.ts). Every workspace counts: it is the ticket's own budget.
- */
-export async function countCascadeTicketReviewsSince(
-  ctx: AgentContext,
-  accountId: number,
-  ident: string,
-  dayStartMs: number,
-): Promise<number> {
-  const { tr } = tables(ctx);
-  const rows = (await ctx.db
-    .select({ id: tr.id })
-    .from(tr)
-    .where(
-      and(
-        eq(tr.accountId, accountId),
-        eq(tr.ticketIdent, ident),
-        eq(tr.trigger, 'cascade'),
-        gte(tr.createdAt, new Date(dayStartMs)),
-      ),
-    )
-    .execute()) as Array<{ id: number }>;
-  return rows.length;
 }
 
 /**

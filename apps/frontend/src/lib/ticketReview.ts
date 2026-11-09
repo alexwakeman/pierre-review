@@ -19,8 +19,8 @@ import {
   type TicketReviewProgress,
   type TicketReviewRefusal,
   type TicketReviewStaleReason,
+  type TicketAutoCheck,
   type TicketReviewState,
-  type TicketReviewWait,
 } from '@pierre-review/shared';
 import { ticketInputFromStored } from './claudeReviewFollowUp.js';
 import { relativeTime } from './ui.js';
@@ -190,23 +190,81 @@ export function newCommentsWords(
   };
 }
 
-/** Why a stale ticket has not been checked again yet — the auto sweeper's hold, in a few words. */
-export function ticketWaitWords(
-  w: TicketReviewWait | null | undefined,
+/** "1m 40s", "45s", "2m" — a short countdown. */
+export function shortDuration(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  if (m === 0) return `${sec}s`;
+  return sec === 0 ? `${m}m` : `${m}m ${sec}s`;
+}
+
+/**
+ * THE AUTOMATIC STORY CHECK IN ONE LINE — when it starts, or why it will not (the server's
+ * `autoCheck`, the sweeper's own rule). null when there is nothing to say: up to date, running now,
+ * or an older server. `labelOf` names a PR ("backend#615"); `nowMs` drives the countdown.
+ */
+export function ticketAutoCheckWords(
+  auto: TicketAutoCheck | null | undefined,
+  labelOf: (prId: number) => string | null,
+  nowMs: number,
 ): { label: string; title: string } | null {
-  switch (w) {
-    case 'settling':
-      return { label: 'update due soon', title: 'It checks again once the PRs have been quiet for 5 minutes, or 20 minutes after the first change.' };
-    case 'ticket_limit':
-      return {
-        label: 'next update tomorrow',
-        title: 'This ticket has had its automatic re-checks for pushes today. A PR joining, leaving or merging still updates it. Re-check runs one now.',
-      };
-    case 'daily_limit':
-      return {
-        label: 'daily limit reached',
-        title: 'This workspace has used its automatic ticket checks for today. They start again at 00:00 UTC. Re-check runs one now.',
-      };
+  if (auto == null) return null;
+  const after = ((): string | null => {
+    const c = auto.lastChange;
+    if (c == null) return null;
+    const pr = c.prId != null ? (labelOf(c.prId) ?? 'a PR') : 'a PR';
+    switch (c.kind) {
+      case 'pushed':
+        return `the last push to ${pr}`;
+      case 'joined':
+        return `${pr} joined the ticket`;
+      case 'merged':
+        return `${pr} merged`;
+      default:
+        return 'the ticket changed';
+    }
+  })();
+  const startsMs = auto.startsAt != null ? Date.parse(auto.startsAt) : null;
+  switch (auto.status) {
+    case 'waiting':
+      if (auto.reason === 'lane_full') {
+        return { label: 'Story check starts when a check slot is free', title: 'Other automatic checks are running first.' };
+      }
+      if (startsMs != null && startsMs > nowMs) {
+        const wait = after != null ? ` — waiting 2 quiet minutes after ${after}` : '';
+        return {
+          label: `Story check starts in ${shortDuration(startsMs - nowMs)}${wait}`,
+          title: 'Every push, joining PR or ticket change restarts the 2 minutes. After 20 minutes of changes it starts anyway.',
+        };
+      }
+      return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
+    case 'due':
+      return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
+    case 'held':
+      if (auto.reason === 'daily_limit') {
+        return {
+          label: 'Story check starts at 00:00 UTC — the daily limit of automatic checks is reached',
+          title: 'This workspace has used its automatic ticket checks for today. Tickets with your own PRs are not limited. Re-check runs one now.',
+        };
+      }
+      if (auto.reason === 'over_budget') {
+        return { label: 'No automatic story check — the AI spend limit is reached', title: 'It starts again when spend is under the limit (Settings → AI). Re-check runs one now.' };
+      }
+      return { label: 'No automatic story check — AI is not ready', title: 'Sign in to Claude or Codex in Settings → AI.' };
+    case 'off':
+      switch (auto.reason) {
+        case 'auto_off':
+          return { label: 'No automatic story check — auto review is off in this workspace', title: 'Turn it on in Settings → AI review. Re-check runs one now.' };
+        case 'too_many_prs':
+          return { label: 'No automatic story check — the ticket has too many PRs', title: 'Re-check says how many.' };
+        case 'no_floor':
+          return { label: 'No automatic story check — its PRs are older than auto review', title: 'Auto review checks tickets with a PR opened after it was turned on. Re-check runs one now.' };
+        case 'already_tried':
+          return { label: 'No automatic story check — the last one failed on these PRs', title: 'It tries again after the next push or change. Re-check runs one now.' };
+        default:
+          return null;
+      }
     default:
       return null;
   }

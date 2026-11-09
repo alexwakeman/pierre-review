@@ -2,14 +2,18 @@
 // client and migrations, with a fake plugin seam. What this pins:
 //   1. ⚠ ONE HOP: a push to PR X looks only at the tickets X is on. T3, which shares PR Y with T1,
 //      is not even considered.
-//   2. A re-run waits for the settle (5 minutes quiet), then queues as 'cascade'.
-//   3. ⚠ The per-workspace daily cap counts cascade runs (rows written when queued).
-//   4. A FIRST automatic run needs a member opened after the switch-on, or the kick.
+//   2. A re-run waits for the grace window (2 quiet minutes after the push Limn SAW, `head_seen_at`),
+//      then queues as 'cascade'.
+//   3. ⚠ The per-workspace daily cap counts cascade runs (rows written when queued); a ticket with a
+//      PR the reader owns is exempt.
+//   4. A FIRST automatic run needs a member opened after the switch-on, or the kick — and waits too.
 //   5. ⚠ More than TICKET_REVIEW_MAX_PRS (30) members refuses `too_many_prs` with the count; 30 runs.
 //   6. ⚠ A ticket whose run is queued or running WAITS (a member that moves meanwhile is re-judged
 //      once the run ends), and a full lane keeps EVERY unreached candidate waiting.
-//   8. ⚠ NO CI hold: a member's running CI never delays a re-run.
 //   7. ⚠ ONE story per ticket, whoever asks: the freshest stored row, never "the first member's".
+//   8. ⚠ NO CI hold: a member's running CI never delays a re-run.
+//   9. ⚠ BMD-1175: no per-ticket limit; PRs joining restart the window, so a ticket whose PRs are
+//      linked minutes apart gets ONE first check with all of them.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/sweep-db
 import { rmSync } from 'node:fs';
@@ -65,6 +69,8 @@ const membership: Record<string, string[]> = {
   [AT_CAP]: Array.from({ length: TICKET_REVIEW_MAX_PRS }, (_, i) => `b${i + 1}`),
 };
 const keyOf = (ident: string): string => ident.split('#')[1]!;
+// `${ident}|${tag}` → when that PR joined the ticket (tracker_tickets.linked_at).
+const linkedAt: Record<string, number> = {};
 
 // The sweeper's clock is injected, but rows are stamped with the real clock and the cap counts
 // from the UTC day of the tick — so every tick must fall on the same UTC day as now.
@@ -142,6 +148,7 @@ const deps = (): import('./sweep.js').TicketSweepDeps => ({
       ticket: null,
       originPrId: a.originPrId,
       trigger: a.trigger,
+      cause: a.cause ?? null,
       model: 'm',
     });
     enqueued.push({ ident: a.ident, trigger: a.trigger });
@@ -162,9 +169,20 @@ async function endQueuedRuns(): Promise<void> {
     .execute();
 }
 
-async function push(tag: string, head: string): Promise<void> {
+/** A push Limn saw at `atMs` — the stamps sync/upsert.ts writes when the head moves. */
+async function push(tag: string, head: string, atMs: number): Promise<void> {
   const { eq } = await import('drizzle-orm');
-  await db.update(schema.pullRequests).set({ headSha: head }).where(eq(schema.pullRequests.id, pr[tag]!)).execute();
+  const [row] = (await db
+    .select({ seen: schema.pullRequests.headSeenAt, burst: schema.pullRequests.headBurstAt })
+    .from(schema.pullRequests)
+    .where(eq(schema.pullRequests.id, pr[tag]!))
+    .execute()) as Array<{ seen: Date | null; burst: Date | null }>;
+  const inBurst = row?.seen != null && atMs - row.seen.getTime() < 2 * 60_000 && atMs >= row.seen.getTime();
+  await db
+    .update(schema.pullRequests)
+    .set({ headSha: head, headSeenAt: new Date(atMs), headBurstAt: inBurst ? (row!.burst ?? row!.seen) : new Date(atMs) })
+    .where(eq(schema.pullRequests.id, pr[tag]!))
+    .execute();
 }
 
 beforeAll(async () => {
@@ -210,7 +228,8 @@ beforeAll(async () => {
       Object.entries(membership)
         .filter(([, tags]) => tags.some((t) => idOf(t) === prId))
         .map(([ident]) => ({ ident, ticket: story(keyOf(ident)), ticketHash: '' })),
-    ticketMembers: async (_a, ident) => (membership[ident] ?? []).map((t) => ({ prId: idOf(t), workspaceId: ws })),
+    ticketMembers: async (_a, ident) =>
+      (membership[ident] ?? []).map((t) => ({ prId: idOf(t), workspaceId: ws, linkedAtMs: linkedAt[`${ident}|${t}`] ?? null })),
     // THE story of a ticket (core's is the freshest stored row; there are no stored rows here).
     ticketStory: async (_a, ident) => (membership[ident] ? story(keyOf(ident)) : null),
     listChangedTicketIdents: async () => [],
@@ -236,38 +255,59 @@ describe('ticket review sweep', () => {
     expect(enqueued).toEqual([]);
   });
 
-  it('⚠ one hop: a push to X looks at T1 and T2 only, and waits for the settle', async () => {
-    await push('x', 'h_x2');
+  it('⚠ one hop: a push to X looks at T1 and T2 only, and waits for the grace window', async () => {
+    await push('x', 'h_x2', T0 + 60_000);
     const r = await sweep.runTicketReviewSweep(ctx, T0 + 60_000, deps());
     expect(r.considered).toEqual([T1, T2]);
     expect(r.queued).toEqual([]);
+    const early = await sweep.runTicketReviewSweep(ctx, T0 + 150_000, deps());
+    expect(early.queued).toEqual([]);
   });
 
-  it('after 5 quiet minutes both re-run as cascade — never T3', async () => {
-    const r = await sweep.runTicketReviewSweep(ctx, T0 + 7 * 60_000, deps());
+  it('after 2 quiet minutes both re-run as cascade — never T3 — with the cause stored', async () => {
+    const r = await sweep.runTicketReviewSweep(ctx, T0 + 3 * 60_000, deps());
     expect(r.queued.map((q) => [q.ident, q.trigger])).toEqual([
       [T1, 'cascade'],
       [T2, 'cascade'],
     ]);
     expect(r.considered).not.toContain(T3);
+    const { eq } = await import('drizzle-orm');
+    const rows = (await db
+      .select({ cause: schema.ticketReviews.cause })
+      .from(schema.ticketReviews)
+      .where(eq(schema.ticketReviews.status, 'queued'))
+      .execute()) as Array<{ cause: string | null }>;
+    expect(rows.map((x) => x.cause)).toEqual(['pushed', 'pushed']);
   });
 
   it('⚠ the daily cap counts those cascade runs', async () => {
     expect(await persist.countAutoTicketReviewsSince(ctx, 1, ws, NOW - 3_600_000)).toBe(2);
     dailyCap = 2;
-    await push('z', 'h_z2');
+    await push('z', 'h_z2', T0 + 8 * 60_000);
     await sweep.runTicketReviewSweep(ctx, T0 + 8 * 60_000, deps());
     const capped = await sweep.runTicketReviewSweep(ctx, T0 + 15 * 60_000, deps());
     expect(capped.considered).toContain(T3);
     expect(capped.queued).toEqual([]);
-    dailyCap = 3;
-    const room = await sweep.runTicketReviewSweep(ctx, T0 + 16 * 60_000, deps());
+    // ⚠ A ticket with a PR the READER owns is never held by the cap.
+    const { eq } = await import('drizzle-orm');
+    const [me] = await db.insert(schema.users).values({ githubLogin: 'me-cap', githubNodeId: 'U_me_cap' }).returning().execute();
+    await db.update(schema.pullRequests).set({ authorId: me.id }).where(eq(schema.pullRequests.id, pr.y!)).execute();
+    const mine = await sweep.runTicketReviewSweep(ctx, T0 + 15 * 60_000 + 1, { ...deps(), readerUserId: async () => me.id });
+    expect(mine.queued.map((q) => q.ident)).toEqual([T3]);
+    await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, pr.y!)).execute();
+    await endQueuedRuns();
+    // Not the reader's: held until the cap has room.
+    await push('z', 'h_z2b', T0 + 15 * 60_000);
+    const held = await sweep.runTicketReviewSweep(ctx, T0 + 17 * 60_000 + 30_000, deps());
+    expect(held.queued).toEqual([]);
+    dailyCap = 4;
+    const room = await sweep.runTicketReviewSweep(ctx, T0 + 18 * 60_000, deps());
     expect(room.queued.map((q) => q.ident)).toEqual([T3]);
     dailyCap = 20;
   });
 
   it('a first run needs a member opened after the switch-on, or the kick', async () => {
-    await push('old', 'h_old2');
+    await push('old', 'h_old2', T0 + 20 * 60_000);
     const r = await sweep.runTicketReviewSweep(ctx, T0 + 20 * 60_000, deps());
     expect(r.considered).toContain(T4);
     expect(r.queued).toEqual([]);
@@ -276,25 +316,26 @@ describe('ticket review sweep', () => {
     aiReady = false;
     sweep.kickTicketSweep(ctx, 1, pr.old!);
     aiReady = true;
+    // The kick lifts the floor, not the grace window: still 2 quiet minutes after the push.
     const kicked = await sweep.runTicketReviewSweep(ctx, T0 + 21 * 60_000, deps());
-    expect(kicked.queued).toEqual([{ ident: T4, trigger: 'auto', workspaceId: ws }]);
+    expect(kicked.queued).toEqual([]);
+    const due = await sweep.runTicketReviewSweep(ctx, T0 + 22 * 60_000, deps());
+    expect(due.queued).toEqual([{ ident: T4, trigger: 'auto', workspaceId: ws }]);
   });
 
   it('⚠ a held ticket waits, and is re-judged once its run is gone', async () => {
     await endQueuedRuns();
-    await push('y', 'h_y2');
+    await push('y', 'h_y2', T0 + 30 * 60_000);
     const held = await sweep.runTicketReviewSweep(ctx, T0 + 30 * 60_000, { ...deps(), held: (_a, i) => i === T1 || i === T3 });
     expect(held.considered).toEqual([T1, T3]);
     expect(held.queued).toEqual([]);
-    // Y did not move again: only waiting brings T1 and T3 back. Once the run is gone they queue —
-    // at once when no run of theirs started or finished in the last 5 minutes, else after 5 quiet
-    // minutes counted from the change seen WHILE held (T0+30), never from the run's end. (Rows are
-    // stamped with the real clock, so which tick it is depends on the time of day; the pair is
-    // queued exactly once by T0+35 either way.)
+    // Y did not move again: only waiting brings T1 and T3 back. Once the run is gone they queue, 2
+    // quiet minutes after the push seen WHILE held (T0+30) — never counted from the run's end.
     const back = await sweep.runTicketReviewSweep(ctx, T0 + 31 * 60_000, deps());
     expect(back.considered).toEqual([T1, T3]);
-    const after = await sweep.runTicketReviewSweep(ctx, T0 + 35 * 60_000, deps());
-    expect([...back.queued, ...after.queued].map((q) => q.ident)).toEqual([T1, T3]);
+    expect(back.queued).toEqual([]);
+    const after = await sweep.runTicketReviewSweep(ctx, T0 + 32 * 60_000, deps());
+    expect(after.queued.map((q) => q.ident)).toEqual([T1, T3]);
   });
 
   it('⚠ a full lane keeps every candidate it did not reach waiting', async () => {
@@ -314,35 +355,35 @@ describe('ticket review sweep', () => {
     ]);
   });
 
-  it('⚠ does not wait for CI: a member whose CI is still running re-runs on the settle rule alone', async () => {
+  it('⚠ does not wait for CI: a member whose CI is still running re-runs on the grace window alone', async () => {
     await endQueuedRuns();
     const { eq } = await import('drizzle-orm');
     await db
       .update(schema.pullRequests)
-      .set({ headSha: 'h_z3', ciStatus: 'pending' })
+      .set({ headSha: 'h_z3', headSeenAt: new Date(T0 + 60 * 60_000), ciStatus: 'pending' })
       .where(eq(schema.pullRequests.id, pr.z!))
       .execute();
     // The old CI hold would wait until this head was 30 minutes old (T0+90).
     const first = await sweep.runTicketReviewSweep(ctx, T0 + 60 * 60_000, deps());
-    const later = await sweep.runTicketReviewSweep(ctx, T0 + 66 * 60_000, deps());
+    const later = await sweep.runTicketReviewSweep(ctx, T0 + 62 * 60_000, deps());
     expect([...first.queued, ...later.queued].map((q) => [q.ident, q.trigger])).toEqual([[T3, 'cascade']]);
   });
 
-  it('⚠ pushes during a run: the quiet clock counts from the LAST push, not the first', async () => {
+  it('⚠ pushes during a run: the window counts from the LAST push, not the first or the run end', async () => {
     await endQueuedRuns();
     const { and, eq, desc } = await import('drizzle-orm');
     const B = T0 + 70 * 60_000;
     const min = (n: number): number => B + n * 60_000;
     const heldX = { ...deps(), held: (_a: number, i: string) => i === T1 || i === T2 };
     // A run of T1 and T2 is in flight from B to B+15; X is pushed at +1, +8 and +14.
-    await push('x', 'h_x_r1');
+    await push('x', 'h_x_r1', min(1));
     await sweep.runTicketReviewSweep(ctx, min(1), heldX);
-    await push('x', 'h_x_r2');
+    await push('x', 'h_x_r2', min(8));
     await sweep.runTicketReviewSweep(ctx, min(8), heldX);
-    await push('x', 'h_x_r3');
+    await push('x', 'h_x_r3', min(14));
     const held = await sweep.runTicketReviewSweep(ctx, min(14), heldX);
     expect(held.queued).toEqual([]);
-    // The run ends at B+15: stamp each ticket's newest row so the "on receipt" test sees it.
+    // The run ends at B+15.
     for (const ident of [T1, T2]) {
       const [row] = await db
         .select({ id: schema.ticketReviews.id })
@@ -357,12 +398,9 @@ describe('ticket review sweep', () => {
         .where(eq(schema.ticketReviews.id, row!.id))
         .execute();
     }
-    // Counting from the first push (+1) would start at +16, two minutes after the last push.
-    for (const t of [16, 17, 18]) {
-      const early = await sweep.runTicketReviewSweep(ctx, min(t), deps());
-      expect(early.queued).toEqual([]);
-    }
-    const due = await sweep.runTicketReviewSweep(ctx, min(19), deps());
+    const early = await sweep.runTicketReviewSweep(ctx, min(15), deps());
+    expect(early.queued).toEqual([]);
+    const due = await sweep.runTicketReviewSweep(ctx, min(16), deps());
     expect(due.queued.map((q) => [q.ident, q.trigger])).toEqual([
       [T1, 'cascade'],
       [T2, 'cascade'],
@@ -378,186 +416,113 @@ describe('ticket review sweep', () => {
   });
 });
 
-// ⚠ THE BMD-1086 SEQUENCE (2026-10-28). One busy ticket (BMD-1083: one PR pushed 11 times) took a
-// cascade re-check after every push and spent the workspace's 20 automatic checks by 11:40. A story
-// checked by hand (run 361, two PRs) then gained two more PRs that afternoon and never updated: the
-// sweeper parked it on the cap every tick, and the story view said only "2 PRs changed since".
-describe('one busy ticket cannot spend the day (BMD-1086)', () => {
+// ⚠ THE BMD-1175 DAY (2026-11-09). A first check ran on 1 of the story's 5 PRs; the other 4 were
+// linked minutes later and a "PR joined" re-check followed (5 of the day's 20 checks went that way).
+// Two story edits then used the ticket's "3 push re-checks", and the 10 real pushes that afternoon
+// waited until midnight. Now: joins restart the 2-minute window (first checks wait too), there is no
+// per-ticket limit, and every queued run says why.
+describe('the grace window and no per-ticket limit (BMD-1175)', () => {
+  const STORY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1175';
   const BUSY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1083';
-  const STORY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1086';
-  // Ticks on today's UTC day, clear of midnight (rows are stamped with the real clock).
-  // ⚠ Count the cap from the SAME instant the sweeper does — the UTC day start of the tick —
-  // never from B: a row stamped by the real clock before 06:00 UTC is in the sweeper's day but
-  // not in "since B", so the test's budget disagreed with the sweeper's whenever it ran between
-  // midnight and 06:00 UTC (failed at 02:40, passed every afternoon).
   const DAY = NOW - (NOW % 86_400_000);
   const B = DAY + 6 * 3_600_000;
   const at = (min: number): number => B + min * 60_000;
+  const causes = async (ident: string): Promise<Array<string | null>> => {
+    const { eq, asc } = await import('drizzle-orm');
+    const rows = (await db
+      .select({ cause: schema.ticketReviews.cause, trigger: schema.ticketReviews.trigger })
+      .from(schema.ticketReviews)
+      .where(eq(schema.ticketReviews.ticketIdent, ident))
+      .orderBy(asc(schema.ticketReviews.id))
+      .execute()) as Array<{ cause: string | null; trigger: string }>;
+    return rows.filter((r) => r.trigger !== 'manual').map((r) => r.cause);
+  };
 
-  it('push-only re-checks stop at the per-ticket limit; PRs joining the story still re-check it', async () => {
-    const { repeatRunLimit } = await import('@pierre-review/shared');
-    const waits = await import('./sweep-waits.js');
+  it('PRs linked minutes apart get ONE first check, with all of them', async () => {
     await endQueuedRuns();
-    const fresh = new Date(B - 3_600_000);
-    await addPr('busy', repoIds[0]!, fresh);
-    await addPr('s1', repoIds[1]!, fresh);
-    await addPr('s2', repoIds[2]!, fresh);
-    membership[BUSY] = ['busy'];
-    membership[STORY] = ['s1', 's2'];
-    await seedCurrentRun(BUSY);
-    // Run 361: a manual check of the story's first two PRs.
-    await seedCurrentRun(STORY);
-
     sweep._resetTicketSweepForTest();
-    // Baseline ticks (everything reads "changed" after a reset, and what settles queues a tick
-    // later); whatever they queue is ended, so only this test's tickets move from here.
-    await sweep.runTicketReviewSweep(ctx, at(0), deps());
-    await sweep.runTicketReviewSweep(ctx, at(7), deps());
+    dailyCap = 500;
+    // Baseline: whatever a reset re-reads is settled and ended, so only this ticket moves from here.
+    await sweep.runTicketReviewSweep(ctx, at(-30), deps());
+    await sweep.runTicketReviewSweep(ctx, at(-20), deps());
     await endQueuedRuns();
-    const base = await persist.countAutoTicketReviewsSince(ctx, 1, ws, DAY);
-    // Room for 8 more automatic checks: the old rule let the busy ticket take all 8.
-    dailyCap = Math.max(base + 8, 20);
-    expect(repeatRunLimit(dailyCap) - base).toBeGreaterThanOrEqual(3);
 
-    let busyRuns = 0;
-    let t = 8;
-    for (let i = 1; i <= 10; i += 1) {
-      await push('busy', `h_busy_${i}`);
-      // ⚠ Count BOTH ticks. Whether a push queues on receipt or after the 5-minute settle depends
-      // on how long ago the last run row was stamped — by the REAL clock, against injected ticks:
-      // before 06:00 UTC the rows read hours old (queued on receipt), after it they read as just
-      // now (settles). Counting only the settled tick saw 0 runs before 06:00 UTC.
-      const received = await sweep.runTicketReviewSweep(ctx, at(t), deps());
-      const settled = await sweep.runTicketReviewSweep(ctx, at(t + 6), deps());
-      busyRuns += [...received.queued, ...settled.queued].filter((q) => q.ident === BUSY).length;
-      await endQueuedRuns();
-      t += 7;
-    }
-    expect(busyRuns).toBe(3);
-    expect(waits.ticketSweepWait(1, BUSY)).toBe('ticket_limit');
-
-    // The afternoon: two more PRs name the story.
-    await addPr('s3', repoIds[0]!, new Date(at(t)));
-    await addPr('s4', repoIds[3]!, new Date(at(t)));
-    membership[STORY] = ['s1', 's2', 's3', 's4'];
-    const joined = await sweep.runTicketReviewSweep(ctx, at(t), deps());
-    const later = await sweep.runTicketReviewSweep(ctx, at(t + 6), deps());
-    expect([...joined.queued, ...later.queued].filter((q) => q.ident === STORY).map((q) => q.trigger)).toEqual(['cascade']);
-    expect(waits.ticketSweepWait(1, STORY)).toBeNull();
-    dailyCap = 20;
-  });
-
-  it('a push-only re-check never takes the last slots; the wait says why', async () => {
-    const { repeatRunLimit } = await import('@pierre-review/shared');
-    const waits = await import('./sweep-waits.js');
-    const QUIET = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1048';
-    await endQueuedRuns();
-    await addPr('c1', repoIds[1]!, new Date(at(190)));
-    membership[QUIET] = ['c1'];
-    await seedCurrentRun(QUIET);
-    await sweep.runTicketReviewSweep(ctx, at(195), deps());
-    await endQueuedRuns();
-    const used = await persist.countAutoTicketReviewsSince(ctx, 1, ws, DAY);
-    // One slot left: a push-only re-check may not take it (the reserve kept for first checks and
-    // PRs joining or leaving).
-    dailyCap = used + 1;
-    expect(repeatRunLimit(dailyCap)).toBeLessThanOrEqual(used);
-    await push('c1', 'h_c1_push');
-    const received = await sweep.runTicketReviewSweep(ctx, at(200), deps());
-    const capped = await sweep.runTicketReviewSweep(ctx, at(207), deps());
-    expect([...received.queued, ...capped.queued]).toEqual([]);
-    expect(waits.ticketSweepWait(1, QUIET)).toBe('daily_limit');
-    dailyCap = 20;
-  });
-
-  it('⚠ a FAILED join-check does not let every later push escape the per-ticket limit', async () => {
-    const { eq, and } = await import('drizzle-orm');
-    const FAILS = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1090';
-    // What the real lane does with a queued run that then fails: it is prepared (members written),
-    // then fails without clearing its fingerprint. ⚠ The row's own stamps come from the REAL clock
-    // (created_at is SQL unixepoch()), while the sweep's ticks are injected: re-stamp the attempt at
-    // the tick it ran in, or the attempt reads OLDER than the join it answers whenever the test runs
-    // before ~11:00 UTC (CI failed at 08:20 and 09:50 UTC, passed at 11:42).
-    const prepareAndFail = async (ranAt: number): Promise<number> => {
-      const rows = (await db
-        .select({ id: schema.ticketReviews.id })
-        .from(schema.ticketReviews)
-        .where(and(eq(schema.ticketReviews.status, 'queued'), eq(schema.ticketReviews.ticketIdent, FAILS)))
-        .execute()) as Array<{ id: number }>;
-      for (const r of rows) {
-        const live = await fp.readLiveMembers(ctx, 1, membership[FAILS]!.map((t) => pr[t]!));
-        const h = fp.ticketHash(story(keyOf(FAILS)));
-        await persist.markTicketReviewRunning(ctx, 1, r.id, {
-          ticket: story(keyOf(FAILS)),
-          ticketHash: h,
-          fingerprint: fp.fingerprint(h, live),
-          prCount: live.length,
-          members: live.map((m) => ({ ...m, checkedOut: true })),
-        });
-        await persist.markTicketReviewFailed(ctx, 1, r.id, 'turn limit');
-        const stamp = new Date(ranAt);
-        await db
-          .update(schema.ticketReviews)
-          .set({ createdAt: stamp, startedAt: stamp, completedAt: stamp })
-          .where(eq(schema.ticketReviews.id, r.id))
-          .execute();
-      }
-      return rows.length;
+    const tags = ['p1', 'p2', 'p3', 'p4', 'p5'];
+    membership[STORY] = [];
+    const join = async (tag: string, minute: number): Promise<void> => {
+      await addPr(tag, repoIds[tags.indexOf(tag) % 3]!, new Date(at(minute)));
+      await push(tag, `h_${tag}`, at(minute));
+      membership[STORY]!.push(tag);
+      linkedAt[`${STORY}|${tag}`] = at(minute);
     };
+    await join(tags[0]!, 0);
+    const queued: string[] = [];
+    const tick = async (minute: number): Promise<void> => {
+      const r = await sweep.runTicketReviewSweep(ctx, at(minute), deps());
+      queued.push(...r.queued.filter((q) => q.ident === STORY).map((q) => q.trigger));
+    };
+    await tick(0);
+    await tick(1);
+    await join(tags[1]!, 1.5);
+    await tick(2);
+    await tick(3);
+    await join(tags[2]!, 3.2);
+    await join(tags[3]!, 3.4);
+    await tick(4);
+    await join(tags[4]!, 5);
+    await tick(5);
+    await tick(6);
+    expect(queued).toEqual([]);
+    await tick(7);
+    await tick(8);
+    expect(queued).toEqual(['auto']);
+    expect(await causes(STORY)).toEqual(['first']);
     await endQueuedRuns();
-    const fresh = new Date(at(290));
-    await addPr('f1', repoIds[1]!, fresh);
-    await addPr('f2', repoIds[2]!, fresh);
-    membership[FAILS] = ['f1', 'f2'];
-    await seedCurrentRun(FAILS);
-    sweep._resetTicketSweepForTest();
-    await sweep.runTicketReviewSweep(ctx, at(300), deps());
-    await sweep.runTicketReviewSweep(ctx, at(307), deps());
+  });
+
+  it('⚠ no per-ticket limit: every push burst after a quiet spell gets its own re-check', async () => {
     await endQueuedRuns();
-    dailyCap = 200;
-    const limited = (): import('./sweep.js').TicketSweepDeps => ({ ...deps(), pushRechecksPerDay: 2 });
-
-    // Two PRs join; the check queued for that fails after it was prepared.
-    await addPr('f3', repoIds[0]!, new Date(at(310)));
-    await addPr('f4', repoIds[3]!, new Date(at(310)));
-    membership[FAILS] = ['f1', 'f2', 'f3', 'f4'];
-    await sweep.runTicketReviewSweep(ctx, at(310), limited());
-    await sweep.runTicketReviewSweep(ctx, at(316), limited());
-    expect(await prepareAndFail(at(316))).toBe(1);
-
-    // Every later push is push-only against that attempt's members: the limit (2 cascade rows of
-    // this ticket today, the failed join-check included) holds after one more.
-    let queued = 0;
-    let t = 320;
-    for (let i = 1; i <= 5; i += 1) {
-      await push('f1', `h_f1_${i}`);
-      await sweep.runTicketReviewSweep(ctx, at(t), limited());
-      const r = await sweep.runTicketReviewSweep(ctx, at(t + 6), limited());
-      queued += r.queued.filter((q) => q.ident === FAILS).length;
-      await prepareAndFail(at(t + 6));
-      t += 7;
+    await addPr('busy', repoIds[0]!, new Date(at(19)));
+    membership[BUSY] = ['busy'];
+    await seedCurrentRun(BUSY);
+    let runs = 0;
+    for (let i = 0; i < 6; i += 1) {
+      const m = 20 + i * 5;
+      await push('busy', `h_busy_${i}`, at(m));
+      const a = await sweep.runTicketReviewSweep(ctx, at(m + 1), deps());
+      const b = await sweep.runTicketReviewSweep(ctx, at(m + 2), deps());
+      runs += [...a.queued, ...b.queued].filter((q) => q.ident === BUSY).length;
+      await endQueuedRuns();
     }
-    expect(queued).toBe(1);
-    const waits = await import('./sweep-waits.js');
-    expect(waits.ticketSweepWait(1, FAILS)).toBe('ticket_limit');
+    expect(runs).toBe(6);
+    expect((await causes(BUSY)).every((c) => c === 'pushed')).toBe(true);
+  });
+
+  it('a story whose PRs never go quiet is still checked within the 20-minute ceiling', async () => {
+    await endQueuedRuns();
+    // Rows are stamped by the real clock; put the last run before this burst, as it was.
+    const { eq } = await import('drizzle-orm');
+    await db
+      .update(schema.ticketReviews)
+      .set({ createdAt: new Date(at(50)), startedAt: new Date(at(50)) })
+      .where(eq(schema.ticketReviews.ticketIdent, BUSY))
+      .execute();
+    let first = -1;
+    for (let m = 60; m <= 85; m += 1) {
+      await push('busy', `h_busy_c${m}`, at(m));
+      const r = await sweep.runTicketReviewSweep(ctx, at(m) + 30_000, deps());
+      if (first < 0 && r.queued.some((q) => q.ident === BUSY)) first = m;
+    }
+    expect(first).toBe(80);
     dailyCap = 20;
   });
 
-  it('switching auto review off everywhere drops the wait reason with the watch', async () => {
-    const waits = await import('./sweep-waits.js');
-    const FAILS = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1090';
-    expect(waits.ticketSweepWait(1, FAILS)).toBe('ticket_limit');
-    await sweep.runTicketReviewSweep(ctx, at(400), { ...deps(), roster: async () => [] });
-    expect(waits.ticketSweepWait(1, FAILS)).toBeNull();
-  });
-
-  it('pushOnlyChange: only heads moved', () => {
-    const m = (prId: number, state: 'open' | 'merged' = 'open', headSha = 'a') => ({ prId, headSha, state });
-    const last = { ticketHash: 'h', members: [m(1), m(2)] };
-    expect(sweep.pushOnlyChange(last, 'h', [m(1, 'open', 'b'), m(2)])).toBe(true);
-    expect(sweep.pushOnlyChange(last, 'h', [m(1), m(2), m(3)])).toBe(false);
-    expect(sweep.pushOnlyChange(last, 'h', [m(1, 'merged'), m(2)])).toBe(false);
-    expect(sweep.pushOnlyChange(last, 'edited', [m(1), m(2)])).toBe(false);
+  it('switching auto review off everywhere drops every watch', async () => {
+    await push('busy', 'h_busy_off', at(100));
+    await sweep.runTicketReviewSweep(ctx, at(100), deps());
+    const off = await sweep.runTicketReviewSweep(ctx, at(103), { ...deps(), roster: async () => [] });
+    expect(off.considered).toEqual([]);
+    await endQueuedRuns();
   });
 });
 

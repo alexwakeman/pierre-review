@@ -177,6 +177,8 @@ export interface StartTicketArgs {
   manualTicket: ClaudeReviewTicket | null;
   originPrId: number | null;
   trigger: TicketReviewTrigger;
+  // Why the automatic sweeper queued it (ticket_reviews.cause); absent on a manual run.
+  cause?: string | null;
 }
 
 export type StartTicketResult =
@@ -211,6 +213,7 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
       ticket: a.manualTicket,
       originPrId: a.originPrId,
       trigger: a.trigger,
+      cause: a.cause ?? null,
       model: DEFAULT_CLAUDE_REVIEW_MODEL,
     });
   } catch (err) {
