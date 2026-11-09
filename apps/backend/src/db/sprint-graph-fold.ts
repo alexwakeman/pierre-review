@@ -297,7 +297,17 @@ export function sprintChangeTokenOf(g: Pick<GraphFoldResult, 'nodes' | 'edges'>)
       // field existed. (`reviewId` moves with `checkedAt`, so it is not hashed.)
       n.check == null
         ? null
-        : [n.check.met, n.check.partlyMet, n.check.notMet, n.check.total, n.check.stale, n.check.checkedAt, ...(n.check.missing ? [n.check.missing] : [])],
+        : [
+            n.check.met,
+            n.check.partlyMet,
+            n.check.notMet,
+            n.check.total,
+            n.check.stale,
+            n.check.checkedAt,
+            ...(n.check.missing ? [n.check.missing] : []),
+            // Appended only when non-zero, like `missing`.
+            ...(n.check.metOutsideCode ? [['outside', n.check.metOutsideCode]] : []),
+          ],
       n.checkRunning,
       n.codeJudgement?.state ?? null,
       n.prs.map((p) => [p.prId, p.state, p.draft, p.ciState]),

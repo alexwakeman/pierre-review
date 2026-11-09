@@ -33,6 +33,7 @@ import {
   limnFindingPost,
   mergeStateWithoutLimn,
   rollupStateWithoutLimn,
+  TICKET_AUTO_GRACE_MS,
   type CheckRun,
 } from '@pierre-review/shared';
 import {
@@ -903,6 +904,8 @@ export async function persistPr(
             isDraft: pullRequests.isDraft,
             state: pullRequests.state,
             headSha: pullRequests.headSha,
+            headSeenAt: pullRequests.headSeenAt,
+            headBurstAt: pullRequests.headBurstAt,
             ciStatus: pullRequests.ciStatus,
             mergeable: pullRequests.mergeable,
             mergeStateStatus: pullRequests.mergeStateStatus,
@@ -932,6 +935,23 @@ export async function persistPr(
       ...queueObserved,
     });
 
+    // WHEN LIMN SAW THE HEAD MOVE (migration 0182) — the automatic story check's grace clock
+    // (review/ticket-review/auto-plan.ts). An insert stamps the PR's opening; an update only when the
+    // synced head differs from a KNOWN stored one (a read without a head, or a null → head refill,
+    // is not a push and leaves the stamp alone). Never the commit's committedAt.
+    // `head_burst_at` keeps the start of a run of pushes each less than the grace window apart, so the
+    // check's 20-minute ceiling can count from it (one column only holds the newest push).
+    const headSeenObserved = ((): { headSeenAt?: Date; headBurstAt?: Date } => {
+      if (prev == null || prev.headSha == null || headSha == null || prev.headSha === headSha) return {};
+      const seenNow = new Date();
+      const lastSeen = prev.headSeenAt != null ? new Date(prev.headSeenAt).getTime() : null;
+      const inBurst = lastSeen != null && seenNow.getTime() - lastSeen < TICKET_AUTO_GRACE_MS;
+      return {
+        headSeenAt: seenNow,
+        headBurstAt: inBurst ? new Date(prev.headBurstAt ?? prev.headSeenAt!) : seenNow,
+      };
+    })();
+
     const prRow = (
       await tx
       .insert(pullRequests)
@@ -959,6 +979,8 @@ export async function persistPr(
         closedAt,
         updatedAt: new Date(pr.updatedAt),
         headSha,
+        headSeenAt: headSha != null ? openedAt : null,
+        headBurstAt: headSha != null ? openedAt : null,
         ciStatus,
         mergeable,
         mergeStateStatus,
@@ -994,6 +1016,7 @@ export async function persistPr(
           closedAt,
           updatedAt: new Date(pr.updatedAt),
           headSha,
+          ...headSeenObserved,
           ciStatus,
           mergeable,
           mergeStateStatus,

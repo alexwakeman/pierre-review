@@ -128,6 +128,8 @@ export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {
 
 export const TICKET_CRITERION_STATUS_CLASS: Record<ClaudeTicketCriterionStatus, string> = {
   met: CHIP_GREEN,
+  // Done, but by a person's comment, not code: the same green, its own label (TICKET_CRITERION_STATUS_LABEL).
+  met_outside_code: CHIP_GREEN,
   partly_met: CHIP_ORANGE,
   not_met: CHIP_RED,
   unclear: CHIP_GREY,

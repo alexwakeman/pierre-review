@@ -1,5 +1,5 @@
 import type { PrBranchStack, PrCriteriaCheck, PrStackMember } from '@pierre-review/shared';
-import { criteriaCheckTone } from '@pierre-review/shared';
+import { criteriaCheckTone, criteriaDoneWords } from '@pierre-review/shared';
 import { BranchIcon, CheckIcon, CloseIcon, WarningIcon } from '../Icons.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
@@ -42,14 +42,16 @@ export function stackChipTitle(s: PrBranchStack): string {
 /** The criteria chip's words. `several` = the PR has more than one checked ticket. Pure. */
 export function criteriaChipText(c: PrCriteriaCheck, several: boolean): { label: string; title: string } {
   const head = several && c.key != null ? `${c.key} criteria` : 'Criteria';
-  const label = `${head} ${c.met}/${c.total}${c.olderHead ? ' · older commit' : ''}`;
+  // The chip counts every DONE criterion; its title names the outside-code ones apart.
+  const outside = c.metOutsideCode ?? 0;
+  const label = `${head} ${c.met + outside}/${c.total}${c.olderHead ? ' · older commit' : ''}`;
   const rest: string[] = [];
   if (c.notMet > 0) rest.push(`${c.notMet} not met`);
   if (c.partlyMet > 0) rest.push(`${c.partlyMet} partly met`);
   if (c.unsettled > 0) rest.push(`${c.unsettled} unclear`);
   const who = c.key != null ? `${c.key}: ` : '';
   const title =
-    `${who}${c.met} of ${c.total} acceptance criteria met${rest.length > 0 ? ` (${rest.join(', ')})` : ''}. ` +
+    `${who}${outside > 0 ? `${criteriaDoneWords(c)} acceptance criteria` : `${c.met} of ${c.total} acceptance criteria met`}${rest.length > 0 ? ` (${rest.join(', ')})` : ''}. ` +
     `Checked ${relativeTime(c.checkedAt)}${c.olderHead ? ', on an older commit of this PR' : ''}.`;
   return { label, title };
 }

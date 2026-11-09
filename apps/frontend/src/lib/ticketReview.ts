@@ -1,6 +1,7 @@
 import {
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
+  criteriaDoneWords,
   jiraApiRoot,
   isTrackerIdent,
   ticketIdentForLink,
@@ -19,8 +20,8 @@ import {
   type TicketReviewProgress,
   type TicketReviewRefusal,
   type TicketReviewStaleReason,
+  type TicketAutoCheck,
   type TicketReviewState,
-  type TicketReviewWait,
 } from '@pierre-review/shared';
 import { ticketInputFromStored } from './claudeReviewFollowUp.js';
 import { relativeTime } from './ui.js';
@@ -123,7 +124,7 @@ export interface TicketCurrency {
   title: string;
 }
 
-const CHANGE_VERB: Record<Exclude<TicketReviewStaleReason, 'story_edited'>, string> = {
+const CHANGE_VERB: Record<Exclude<TicketReviewStaleReason, 'story_edited' | 'new_comments'>, string> = {
   pr_pushed: 'pushed since',
   pr_merged: 'merged since',
   pr_added: 'added',
@@ -136,6 +137,7 @@ const REASON_SENTENCE: Record<TicketReviewStaleReason, string> = {
   pr_left: 'A PR no longer names this ticket.',
   pr_pushed: 'A PR was pushed.',
   pr_merged: 'A PR was merged.',
+  new_comments: 'Someone commented on the ticket, and a criterion is not done yet.',
 };
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -166,6 +168,7 @@ export function ticketCurrency(
       const first = reasons[0];
       if (first == null) return { tone: 'stale', label: 'Changed since', title };
       if (first === 'story_edited') return { tone: 'stale', label: 'Ticket edited since', title };
+      if (first === 'new_comments') return { tone: 'stale', label: 'New comments since', title };
       const ids = state.changedPrIds;
       if (ids.length > 1) return { tone: 'stale', label: `${ids.length} PRs changed since`, title };
       const one = ids.length === 1 ? labelOf(ids[0]!) : null;
@@ -176,8 +179,9 @@ export function ticketCurrency(
 
 /**
  * "2 new comments since this check" — people commented on the ticket after the latest check
- * (docs/TRACKERS.md § Ticket comments). A comment never makes a check stale; this only tells the reader
- * a Re-check would see them. null when there are none (or while a check runs).
+ * (docs/TRACKERS.md § Ticket comments). They make the check stale only while a criterion is not done
+ * (the server's 'new_comments'); this line tells the reader either way. null when there are none (or
+ * while a check runs).
  */
 export function newCommentsWords(
   state: Pick<TicketReviewState, 'status' | 'newComments'> | null | undefined,
@@ -190,23 +194,83 @@ export function newCommentsWords(
   };
 }
 
-/** Why a stale ticket has not been checked again yet — the auto sweeper's hold, in a few words. */
-export function ticketWaitWords(
-  w: TicketReviewWait | null | undefined,
+/** "1m 40s", "45s", "2m" — a short countdown. */
+export function shortDuration(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  if (m === 0) return `${sec}s`;
+  return sec === 0 ? `${m}m` : `${m}m ${sec}s`;
+}
+
+/**
+ * THE AUTOMATIC STORY CHECK IN ONE LINE — when it starts, or why it will not (the server's
+ * `autoCheck`, the sweeper's own rule). null when there is nothing to say: up to date, running now,
+ * or an older server. `labelOf` names a PR ("backend#615"); `nowMs` drives the countdown.
+ */
+export function ticketAutoCheckWords(
+  auto: TicketAutoCheck | null | undefined,
+  labelOf: (prId: number) => string | null,
+  nowMs: number,
 ): { label: string; title: string } | null {
-  switch (w) {
-    case 'settling':
-      return { label: 'update due soon', title: 'It checks again once the PRs have been quiet for 5 minutes, or 20 minutes after the first change.' };
-    case 'ticket_limit':
-      return {
-        label: 'next update tomorrow',
-        title: 'This ticket has had its automatic re-checks for pushes today. A PR joining, leaving or merging still updates it. Re-check runs one now.',
-      };
-    case 'daily_limit':
-      return {
-        label: 'daily limit reached',
-        title: 'This workspace has used its automatic ticket checks for today. They start again at 00:00 UTC. Re-check runs one now.',
-      };
+  if (auto == null) return null;
+  const after = ((): string | null => {
+    const c = auto.lastChange;
+    if (c == null) return null;
+    const pr = c.prId != null ? (labelOf(c.prId) ?? 'a PR') : 'a PR';
+    switch (c.kind) {
+      case 'pushed':
+        return `the last push to ${pr}`;
+      case 'joined':
+        return `${pr} joined the ticket`;
+      case 'merged':
+        return `${pr} merged`;
+      case 'commented':
+        return 'the last comment on the ticket';
+      default:
+        return 'the ticket changed';
+    }
+  })();
+  const startsMs = auto.startsAt != null ? Date.parse(auto.startsAt) : null;
+  switch (auto.status) {
+    case 'waiting':
+      if (auto.reason === 'lane_full') {
+        return { label: 'Story check starts when a check slot is free', title: 'Other automatic checks are running first.' };
+      }
+      if (startsMs != null && startsMs > nowMs) {
+        const wait = after != null ? ` — waiting 2 quiet minutes after ${after}` : '';
+        return {
+          label: `Story check starts in ${shortDuration(startsMs - nowMs)}${wait}`,
+          title: 'Every push, joining PR, ticket change or new comment restarts the 2 minutes. After 20 minutes of changes it starts anyway.',
+        };
+      }
+      return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
+    case 'due':
+      return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
+    case 'held':
+      if (auto.reason === 'daily_limit') {
+        return {
+          label: 'Story check starts at 00:00 UTC — the daily limit of automatic checks is reached',
+          title: 'This workspace has used its automatic ticket checks for today. Tickets with your own PRs are not limited. Re-check runs one now.',
+        };
+      }
+      if (auto.reason === 'over_budget') {
+        return { label: 'No automatic story check — the AI spend limit is reached', title: 'It starts again when spend is under the limit (Settings → AI). Re-check runs one now.' };
+      }
+      return { label: 'No automatic story check — AI is not ready', title: 'Sign in to Claude or Codex in Settings → AI.' };
+    case 'off':
+      switch (auto.reason) {
+        case 'auto_off':
+          return { label: 'No automatic story check — auto review is off in this workspace', title: 'Turn it on in Settings → AI review. Re-check runs one now.' };
+        case 'too_many_prs':
+          return { label: 'No automatic story check — the ticket has too many PRs', title: 'Re-check says how many.' };
+        case 'no_floor':
+          return { label: 'No automatic story check — its PRs are older than auto review', title: 'Auto review checks tickets with a PR opened after it was turned on. Re-check runs one now.' };
+        case 'already_tried':
+          return { label: 'No automatic story check — the last one failed on these PRs', title: 'It tries again after the next push or change. Re-check runs one now.' };
+        default:
+          return null;
+      }
     default:
       return null;
   }
@@ -214,18 +278,19 @@ export function ticketWaitWords(
 
 // ---- coverage ----
 
-/** "4 of 6 met"; null when the run had no criteria. */
+/** "4 of 6 met" / "4 met + 1 outside code of 6"; null when the run had no criteria. */
 export function coverageLabel(counts: TicketReviewState['counts']): string | null {
   if (counts == null || counts.total === 0) return null;
-  return `${counts.met} of ${counts.total} met`;
+  const outside = counts.metOutsideCode ?? 0;
+  return outside > 0 ? criteriaDoneWords(counts) : `${counts.met} of ${counts.total} met`;
 }
 
 export type CoverageTone = 'ok' | 'partial' | 'bad' | 'muted';
 
-/** All met → ok; any not met → bad; otherwise (partly met / can't tell) → partial. */
+/** All DONE (met, or met outside code) → ok; any not met → bad; otherwise (partly met / can't tell) → partial. */
 export function coverageTone(counts: TicketReviewState['counts']): CoverageTone {
   if (counts == null || counts.total === 0) return 'muted';
-  if (counts.met === counts.total) return 'ok';
+  if (counts.met + (counts.metOutsideCode ?? 0) === counts.total) return 'ok';
   if (counts.notMet > 0) return 'bad';
   return 'partial';
 }
@@ -502,4 +567,22 @@ export function membersWithCards(
 /** True when a card has anything beyond its summary to expand into. */
 export function cardHasDetail(card: Pick<TicketPrCard, 'interfaces' | 'looseEnds'>): boolean {
   return card.interfaces.length > 0 || card.looseEnds.length > 0;
+}
+
+// ---- met outside code changes ----
+
+/** "Per Dana Lee's comment, 4 Mar" — the citation line of a "Met outside code changes" criterion
+ *  (`metBy`, copied by the server from the stored comment). null without one. */
+export function metByWords(metBy: TicketCriterion['metBy'], fmt: (iso: string) => string): string | null {
+  if (metBy == null) return null;
+  const who = metBy.author.trim() !== '' ? metBy.author.trim() : 'someone';
+  return `Per ${who}'s comment, ${fmt(metBy.createdAt)}`;
+}
+
+/** The event a citation sends so the ticket's Comments list opens on that comment (TicketComments.tsx). */
+export const SHOW_TICKET_COMMENT_EVENT = 'limn:show-ticket-comment';
+
+/** Open the ticket's Comments list, where it is on screen, at this comment. */
+export function showTicketComment(commentId: string): void {
+  window.dispatchEvent(new CustomEvent(SHOW_TICKET_COMMENT_EVENT, { detail: { commentId } }));
 }

@@ -138,6 +138,9 @@ describe('shareRestLine', () => {
     );
     expect(shareRestLine({ metElsewhere: 0, todoElsewhere: 2 })).toBe('2 more are still to do in other PRs.');
     expect(shareRestLine({ metElsewhere: 0, todoElsewhere: 0 })).toBeNull();
+    expect(shareRestLine({ metElsewhere: 1, metOutsideCode: 2, todoElsewhere: 0 })).toBe(
+      '1 more criterion is met by another PR. 2 more are met outside code changes.',
+    );
   });
 });
 

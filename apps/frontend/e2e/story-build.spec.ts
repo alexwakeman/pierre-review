@@ -62,6 +62,8 @@ async function withAi(page: Page, storyBuild?: StoryBuild, runtime?: SandboxRunt
         counts: { met: 1, partlyMet: 0, notMet: 1, unclear: 0, notChecked: 0, total: 2 },
         memberCount: 1,
         checkedAt: '2026-10-19T10:00:00.000Z',
+        // The automatic check's plan (auto-plan.ts): nothing moved, so the story view says nothing.
+        autoCheck: { status: 'up_to_date', reason: null, startsAt: null, lastChange: null },
       },
     ],
   };

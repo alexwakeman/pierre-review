@@ -83,6 +83,11 @@ describe('the criteria chip', () => {
     expect(criteriaChipText(c, true).label).toBe('BMD-7 criteria 3/4');
     expect(criteriaChipText(c, false).title).toMatch(/^BMD-7: 3 of 4 acceptance criteria met \(1 not met\)\. Checked /);
   });
+  it('met outside code changes counts as done on the chip, and is named apart in its title', () => {
+    const o = criteriaChipText({ ...c, met: 2, metOutsideCode: 1 }, false);
+    expect(o.label).toBe('Criteria 3/4');
+    expect(o.title).toMatch(/^BMD-7: 2 met \+ 1 outside code of 4 acceptance criteria \(1 not met\)\. Checked /);
+  });
   it('says when the check read an older commit', () => {
     const o = criteriaChipText({ ...c, olderHead: true }, false);
     expect(o.label).toBe('Criteria 3/4 · older commit');

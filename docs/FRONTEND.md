@@ -3674,9 +3674,11 @@ and `GET /api/prs/:id` — ⚠ never on the lean `/api/timeline`.
   the "merge" cards, My Turn's ready-to-land and auto-merge.
 - **"Criteria 3/4"** (`criteria: PrCriteriaCheck[]`, one per ticket): the latest SUCCEEDED ticket
   review of the ticket that had this PR as a member (`db/pr-criteria.ts`, three batched queries, no
-  AI, no tracker call). ⚠ **"Met" is `status === 'met'` ONLY** — `partly_met`, `not_met`, `unclear`,
-  `not_checked` are not met. Tone (`criteriaCheckTone`): all met → green; any `not_met` → red; else
-  amber. "· older commit" when the run read a head other than the PR's current one. A check with no
+  AI, no tracker call). ⚠ **"Done" is shared `criterionDone`** — `met`, or `met_outside_code` ("Met
+  outside code changes", a person's ticket comment; counted apart as `metOutsideCode`); `partly_met`,
+  `not_met`, `unclear`, `not_checked` are not. The label counts every done criterion; the title names
+  the outside-code ones apart ("2 met + 1 outside code of 4 acceptance criteria"). Tone
+  (`criteriaCheckTone`): all done → green; any `not_met` → red; else amber. "· older commit" when the run read a head other than the PR's current one. A check with no
   criteria, or none at all, draws nothing. Several tickets → one chip each, keyed ("BMD-7 criteria
   3/4"). Click → `useOpenStory()` (a pasted `manual:` story has no tab: plain text).
 - **"Large"** is the existing large-PR flag (`LargePrFlag`, `largePrFlag()` in `lib/ui.ts`): its
@@ -4075,9 +4077,10 @@ board.
   full width; then ONE meta row that wraps as whole groups — status picker, type and assignee
   (`TicketPeopleAndStatus`, shared with the board header); the facts as chips of one kind (coverage
   "3 of 10 met", the roll-up "1 failing CI", "2 PRs"); and, `ml-auto` from `sm`, the ticket review's
-  currency as ONE quiet line ("2 PRs changed since · daily limit reached · reviewed 52 mins ago", the
-  sweeper's `waiting` through `ticketWaitWords`, the reason as the title) with Re-check beside it
-  (`StoryCurrencyLine`). ⚠ The currency is said ONLY here: the Story section no longer draws its
+  currency as ONE quiet line ("2 PRs changed since · reviewed 52 mins ago") and the automatic check's
+  ONE line (`TicketAutoCheckLine` over the state's `autoCheck`: "Story check starts in 1m 40s — waiting
+  2 quiet minutes after the last push to backend#615", or why it will not; the PR pane's AI Review tab
+  shows the SAME component) with Re-check beside it (`StoryCurrencyLine`). ⚠ The currency is said ONLY here: the Story section no longer draws its
   CurrencyPill. One changed PR is NAMED ("api#88 pushed since"): the line passes `ticketCurrency` a
   `labelOf` (`lib/ticketReview.ts` `prLabelOf`) over the stack's open rows and its merged PRs. The
   board's stack header is unchanged.

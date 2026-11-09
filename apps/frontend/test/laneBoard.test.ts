@@ -521,6 +521,7 @@ describe('the criteria line', () => {
   it('a ticket check wins: "n of m criteria met", stale carried', () => {
     expect(ticketCardCriteria(node('A-1', { check: check(), brief: brief(5) }))).toEqual({ text: '3 of 4 criteria met', stale: false, running: false });
     expect(ticketCardCriteria(node('A-1', { check: check({ met: 1, total: 1, stale: true }) }))).toEqual({ text: '1 of 1 criterion met', stale: true, running: false });
+    expect(ticketCardCriteria(node('A-1', { check: check({ met: 2, metOutsideCode: 1 }) }))?.text).toBe('2 met + 1 outside code of 4 criteria');
   });
   it('else the brief count; else nothing', () => {
     expect(ticketCardCriteria(node('A-1', { brief: brief(4) }))?.text).toBe('4 criteria');

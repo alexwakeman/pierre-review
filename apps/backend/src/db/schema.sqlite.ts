@@ -377,6 +377,15 @@ export const pullRequests = sqliteTable(
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
     // ---- v1.1: CI / mergeability / labels (head-commit derived) ----
     headSha: text('head_sha'),
+    // When Limn SAW `headSha` move (migration 0182): stamped by sync/upsert.ts only when the synced
+    // head differs from the stored one (an insert: `openedAt`). Never the commit's committedAt. The
+    // automatic story check's grace window counts from it (review/ticket-review/auto-plan.ts).
+    // NULL = not known (synced before 0182) — read as no change.
+    headSeenAt: integer('head_seen_at', { mode: 'timestamp' }),
+    // When this PR's current burst of pushes began (migration 0182): kept while each head move comes
+    // less than the grace window (shared TICKET_AUTO_GRACE_MS) after the last, else restarted. The
+    // story check's 20-minute ceiling counts from it. NULL = not known.
+    headBurstAt: integer('head_burst_at', { mode: 'timestamp' }),
     ciStatus: text('ci_status', {
       enum: ['success', 'failure', 'pending', 'error', 'expected', 'unknown'],
     }),
@@ -1732,6 +1741,9 @@ export const ticketReviews = sqliteTable(
     // run stale; the state route counts the comments not in `ids` ("n new comments since this check").
     // NULL on a run from before comments were read, or a pasted story.
     commentsSeen: text('comments_seen', { mode: 'json' }).$type<{ ids: string[]; count: number; hash: string }>(),
+    // Why the automatic sweeper queued it (migration 0182): 'first' | 'pushed' | 'joined' | 'left' |
+    // 'merged' | 'story_edited'. NULL = a manual run, or a row from before 0182.
+    cause: text('cause'),
   },
   (t) => ({
     accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
@@ -3249,6 +3261,9 @@ export const trackerTickets = sqliteTable(
     // When the worker may read it again. Epoch 0 = due now (a forced refresh / field change).
     nextCheckAt: integer('next_check_at', { mode: 'timestamp' }).notNull(),
     changedAt: integer('changed_at', { mode: 'timestamp' }),
+    // When this PR first joined the ticket (migration 0182): the row's FIRST insert only, never in the
+    // upsert's update set (tracker/store.ts `upsertTicketRow`). NULL = a row from before 0182.
+    linkedAt: integer('linked_at', { mode: 'timestamp' }),
     // The TICKET's own created / resolved instants as the tracker gave them (Jira `created` /
     // `resolutiondate`, GitHub Issues `createdAt` / `closedAt`, Linear `createdAt` / `completedAt`;
     // migration 0098, pg 0085). The label run buckets stories by the created week. NULL on a row

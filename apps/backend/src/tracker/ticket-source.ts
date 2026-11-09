@@ -25,15 +25,23 @@ export interface TicketSource {
   ticketsForPr(accountId: number, prId: number): Promise<Array<{ ident: string; ticket: ClaudeReviewTicket; ticketHash: string }>>;
   //   ticketMembers — every PR on the ticket: this account, the same site, ANY workspace, merged
   //     PRs included. The caller decides open / merged / closed from pull_requests.
-  ticketMembers(accountId: number, ident: string): Promise<Array<{ prId: number; workspaceId: number }>>;
+  //     `linkedAtMs` / `changedAtMs`: the row's join and last membership-or-story change (the story
+  //     check's grace clock); absent or null = not known.
+  ticketMembers(
+    accountId: number,
+    ident: string,
+  ): Promise<Array<{ prId: number; workspaceId: number; linkedAtMs?: number | null; changedAtMs?: number | null }>>;
   //   ticketStory — THE story of a ticket: the freshest stored row across every PR on it.
   ticketStory(accountId: number, ident: string): Promise<ClaudeReviewTicket | null>;
   //   ticketComments — the PEOPLE's comments on the ticket (bots out), oldest first. Never part of
   //     the story or its hash: a comment does not make a review stale.
   ticketComments(accountId: number, ident: string): Promise<TicketComment[]>;
   //   listChangedTicketIdents — tickets whose membership or story text changed at or after
-  //     `sinceMs`. Feeds the sweeper cheaply.
+  //     `sinceMs`, or whose people's comments were stored at or after it. Feeds the sweeper cheaply.
   listChangedTicketIdents(accountId: number, sinceMs: number): Promise<string[]>;
+  //   refreshComments — a story check RUN reads the ticket's comments again from the tracker
+  //     (./comments-refresh.ts: comments only, never the story text). Never throws.
+  refreshComments(accountId: number, ident: string, workspaceIds: readonly number[]): Promise<{ fresh: boolean }>;
   //   openPointsForPr — the OPEN POINTS of the PR's tickets (docs/TRACKERS.md § Open points). With
   //     `refresh` the tickets are read from the tracker first — a review RUN only, never a view.
   //     Never throws: [] on any failure.
@@ -60,6 +68,10 @@ const core: TicketSource = {
   listChangedTicketIdents: async (a, s) => {
     const { peers, ctx } = await load();
     return peers.listChangedTicketIdents(ctx, a, s);
+  },
+  refreshComments: async (a, i, w) => {
+    const [{ ctx }, mod] = await Promise.all([load(), import('./comments-refresh.js')]);
+    return mod.refreshTicketComments(ctx, a, i, w);
   },
   openPointsForPr: async (a, p, o) => {
     const [{ ctx }, mod] = await Promise.all([load(), import('./open-points-pr.js')]);

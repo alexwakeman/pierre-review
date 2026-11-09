@@ -45,11 +45,18 @@ describe('latestRunPerTicket', () => {
 });
 
 describe('criteriaCheckOf', () => {
-  it('"met" is status met ONLY — partly met, not met, unclear and not checked are not', () => {
+  it('"met" is status met — partly met, not met, unclear and not checked are not done', () => {
     const c = criteriaCheckOf(member(), run(assessment('met', 'met', 'met', 'partly_met')), 'aaa')!;
     expect(c).toMatchObject({ met: 3, partlyMet: 1, notMet: 0, unsettled: 0, total: 4, olderHead: false });
     const d = criteriaCheckOf(member(), run(assessment('met', 'not_met', 'unclear', 'not_checked')), 'aaa')!;
     expect(d).toMatchObject({ met: 1, notMet: 1, unsettled: 2, total: 4 });
+  });
+
+  it('met outside code changes is DONE, counted apart; the chip goes green on met + outside code', () => {
+    const c = criteriaCheckOf(member(), run(assessment('met', 'met_outside_code', 'met')), 'aaa')!;
+    expect(c).toMatchObject({ met: 2, metOutsideCode: 1, partlyMet: 0, notMet: 0, unsettled: 0, total: 3 });
+    expect(criteriaCheckTone(c)).toBe('met');
+    expect(criteriaCheckTone({ met: 1, metOutsideCode: 1, notMet: 0, total: 3 })).toBe('partly');
   });
 
   it('a check with no criteria, or none at all, is no chip (unknown is never zero)', () => {

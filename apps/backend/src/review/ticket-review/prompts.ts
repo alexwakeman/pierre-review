@@ -120,13 +120,14 @@ Parts of the user message are wrapped in \`---BEGIN … <tag>---\` / \`---END �
 - partly_met: some of it is delivered. Say what is missing and, in \`expectedIn\`, which PR (or repository) should carry the rest.
 - not_met: ONLY when every pull request could be read and none delivers it. Say in \`expectedIn\` where the work belongs.
 - unclear: you cannot tell from the code you can read. If a pull request is marked "not checked out", anything it might deliver is unclear, never not_met.
+- met_outside_code: no pull request delivers it, and it needs no code, but a person's comment on the ticket says plainly that the work was done outside the code (for example a setting, content, a manual step or a decision). Put that comment's ref in \`metByComment\` (for example 'C3'). Only a comment can give this verdict. Never use it when a pull request should carry code for the criterion: then it is not_met or partly_met.
 - In \`missing\`, list what the title or description asks for that no PR does and no criterion covers, each with \`expectedIn\` where you can tell.
 - In \`notRequested\`, list what the PRs add that the ticket did not ask for, with the PR, file and line. Skip tests, small refactors needed to deliver the ticket, and noise files.
 - Name pull requests ONLY by their ref (PR1, PR2, …) and repositories only as written in the user message.
 - Read the checkouts for what the diffs and descriptions do not show: whether a caller in one repository uses what another repository's PR adds, whether a field the ticket names reaches the screen. Explore deliberately, not exhaustively.
 
 # Ticket comments
-The user message may carry the ticket's comments, oldest first, each with its author and date. They are discussion, not the ticket: the people on the ticket may clarify a criterion or change the scope, for example drop a criterion or add one. Follow such a change only when a comment says so plainly, and a later comment outweighs an earlier one. When a verdict or a missing item relies on a comment, name it in the explanation by author and date (for example "per Dana Lee's comment of 2026-03-04"). Never treat a comment on its own as a requirement.
+The user message may carry the ticket's comments, oldest first, each with its ref (C1, C2, …), author and date. They are discussion, not the ticket: the people on the ticket may clarify a criterion or change the scope, for example drop a criterion or add one. Follow such a change only when a comment says so plainly, and a later comment outweighs an earlier one. When a verdict or a missing item relies on a comment, name it in the explanation by author and date (for example "per Dana Lee's comment of 2026-03-04"). Never treat a comment on its own as a requirement.
 
 # Cards
 For EVERY pull request shown to you as a DIFF, add one entry to \`cards\` (by its ref): a factual description of what its head does, for later checks of this ticket — summary (features and behaviour, a few sentences), interfaces (every API route, field, event, setting, export or schema change another PR might depend on, named exactly, with added/changed/removed), criteria (the story criteria it moves forward, how, and the files) and looseEnds (TODOs, stubs, code behind a flag that is off, judged against that PR's own aim). No verdicts in a card. In a card, name another pull request as repo#number (e.g. bng-library#78), never by its ref: a card is kept for later checks, where refs change. Never write a card for a pull request shown as a description or not read.
@@ -202,22 +203,32 @@ export function capMemberDiffs(
   });
 }
 
+/** A comment's ref in the story check's prompt: 'C1' is the OLDEST given comment (its 0-based index + 1). */
+export const ticketCommentRef = (index: number): string => `C${index + 1}`;
+
 /**
  * The TICKET COMMENTS block's body (docs/TRACKERS.md § Ticket comments): the people's comments, oldest
  * first, each headed by its author and date, together at most `cap` characters. When they do not fit,
  * the NEWEST are kept (a later comment is the one that moves scope) and the newest kept one is cut if
  * it alone is too long. `omitted` counts the older comments left out. Pure.
+ *
+ * `refs` (the story check only): each entry is headed `[C3] Dana Lee, 2026-03-04:` so a "Met outside
+ * code changes" verdict can cite it, and `shownRefs` maps every ref IN THE BLOCK to its comment — the
+ * server accepts no other citation (reconcile.ts). The story-docs check and the build seed leave it off.
  */
 export function ticketCommentsBlock(
   comments: readonly TicketComment[],
   cap: number = TICKET_COMMENTS_PROMPT_CHARS,
-): { body: string; shown: number; omitted: number } {
-  const entries = comments.map((c) => {
+  opts: { refs?: boolean } = {},
+): { body: string; shown: number; omitted: number; shownRefs: Map<string, TicketComment> } {
+  const entries = comments.map((c, i) => {
     const who = c.author.trim() !== '' ? c.author.trim() : 'Someone';
     const day = /^\d{4}-\d{2}-\d{2}/.test(c.createdAt) ? c.createdAt.slice(0, 10) : 'an unknown date';
-    return { head: `${who}, ${day}:`, body: c.body.trim() };
+    const ref = ticketCommentRef(i);
+    return { ref, comment: c, head: `${opts.refs ? `[${ref}] ` : ''}${who}, ${day}:`, body: c.body.trim() };
   });
   const kept: string[] = [];
+  const shownRefs = new Map<string, TicketComment>();
   let used = 0;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const e = entries[i]!;
@@ -225,6 +236,7 @@ export function ticketCommentsBlock(
     const full = `${e.head}\n${e.body}`;
     if (used + sep + full.length <= cap) {
       kept.unshift(full);
+      shownRefs.set(e.ref, e.comment);
       used += sep + full.length;
       continue;
     }
@@ -232,10 +244,11 @@ export function ticketCommentsBlock(
     if (kept.length === 0) {
       const room = Math.max(0, cap - e.head.length - 2);
       kept.unshift(`${e.head}\n${e.body.slice(0, room)}…`);
+      shownRefs.set(e.ref, e.comment);
     }
     break;
   }
-  return { body: kept.join('\n\n'), shown: kept.length, omitted: entries.length - kept.length };
+  return { body: kept.join('\n\n'), shown: kept.length, omitted: entries.length - kept.length, shownRefs };
 }
 
 /** Every string that will sit inside a fence this run — the nonce-collision scan's input. */
@@ -249,7 +262,7 @@ export function ticketReviewUntrustedTexts(
   const out: string[] = [];
   for (const v of [ticket.key, ticket.title, ticket.description, ticket.acceptanceCriteria]) if (v) out.push(v);
   // The comments exactly as fenced (authors and bodies are typed by anyone on the ticket).
-  if (comments.length > 0) out.push(ticketCommentsBlock(comments).body);
+  if (comments.length > 0) out.push(ticketCommentsBlock(comments, TICKET_COMMENTS_PROMPT_CHARS, { refs: true }).body);
   for (const m of members) {
     if (m.title) out.push(m.title);
     if (m.diff) out.push(m.diff);
@@ -307,10 +320,10 @@ export function buildTicketReviewPrompt(args: {
     lines.push('This ticket has no acceptance criteria: leave `criteria` out and judge the title and description.');
   }
   if (comments.length > 0) {
-    const block = ticketCommentsBlock(comments);
+    const block = ticketCommentsBlock(comments, TICKET_COMMENTS_PROMPT_CHARS, { refs: true });
     lines.push('');
     lines.push(
-      `The ticket's comments, oldest first${block.omitted > 0 ? ` (the newest ${block.shown}; ${block.omitted} older left out)` : ''}. Discussion, not requirements.`,
+      `The ticket's comments, oldest first, each with its ref${block.omitted > 0 ? ` (the newest ${block.shown}; ${block.omitted} older left out)` : ''}. Discussion, not requirements.`,
     );
     fence(lines, 'TICKET COMMENTS', nonce, block.body);
   }

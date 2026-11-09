@@ -122,6 +122,15 @@ describe('the issue fold', () => {
     expect(t.epic).toEqual({ key: 'ENG-7', title: null });
     expect(t.components).toBeNull();
   });
+  it('keeps the comments only when Jira sent them WHOLE (a thread cut short stays unknown)', () => {
+    const comment = (id: string) => ({ id, author: { displayName: 'Dana Lee', accountType: 'atlassian' }, body: 'Done in admin.', created: '2026-03-04T10:00:00.000+0000' });
+    const whole = toJiraSprintTicket(issue(4, { comment: { total: 2, comments: [comment('1'), comment('2')] } }), NAMES, SCHEMA, true)!;
+    expect(whole.comments?.map((c) => c.id)).toEqual(['1', '2']);
+    const cut = toJiraSprintTicket(issue(5, { comment: { total: 40, comments: [comment('1')] } }), NAMES, SCHEMA, true)!;
+    expect(cut.comments).toBeUndefined();
+    expect(toJiraSprintTicket(issue(6), NAMES, SCHEMA, true)!.comments).toBeUndefined();
+  });
+
   it('a fallback ticket carries no sprint name; a malformed key is dropped', () => {
     expect(toJiraSprintTicket(issue(3), NAMES, SCHEMA, false)!.sprintName).toBeNull();
     expect(toJiraSprintTicket({ key: 'nope', fields: {} }, NAMES, SCHEMA, true)).toBeNull();

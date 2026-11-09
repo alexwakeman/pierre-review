@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { STORY_MISSING_HEADING, criterionTextOnly, storySummaryProse } from '@pierre-review/shared';
-import { prLabelOf, ticketCurrency, ticketWaitWords } from '../src/lib/ticketReview.js';
+import type { TicketAutoCheckReason } from '@pierre-review/shared';
+import { prLabelOf, shortDuration, ticketAutoCheckWords, ticketCurrency } from '../src/lib/ticketReview.js';
 import { autoSkippedLine } from '../src/lib/sequenceDiagrams.js';
 
 const src = (rel: string): string => readFileSync(join(import.meta.dirname, '../src', rel), 'utf8');
@@ -60,13 +61,49 @@ describe('the summary', () => {
 });
 
 describe('why it waits', () => {
-  it('a stale ticket the sweeper holds back says why', () => {
-    expect(ticketWaitWords('daily_limit')?.label).toBe('daily limit reached');
-    expect(ticketWaitWords('daily_limit')?.title).toContain('00:00 UTC');
-    expect(ticketWaitWords('ticket_limit')?.label).toBe('next update tomorrow');
-    expect(ticketWaitWords('settling')?.label).toBe('update due soon');
-    expect(ticketWaitWords(null)).toBeNull();
-    expect(ticketWaitWords(undefined)).toBeNull();
+  it('the automatic story check says when it starts, in one line', () => {
+    const now = Date.parse('2026-11-09T16:00:00Z');
+    const labelOf = (id: number): string | null => (id === 615 ? 'backend#615' : null);
+    const waiting = ticketAutoCheckWords(
+      {
+        status: 'waiting',
+        reason: 'settling',
+        startsAt: '2026-11-09T16:01:40Z',
+        lastChange: { prId: 615, kind: 'pushed', at: '2026-11-09T15:59:40Z' },
+      },
+      labelOf,
+      now,
+    );
+    expect(waiting?.label).toBe('Story check starts in 1m 40s — waiting 2 quiet minutes after the last push to backend#615');
+    const joined = ticketAutoCheckWords(
+      { status: 'waiting', reason: 'settling', startsAt: '2026-11-09T16:00:30Z', lastChange: { prId: 9, kind: 'joined', at: 'x' } },
+      labelOf,
+      now,
+    );
+    expect(joined?.label).toBe('Story check starts in 30s — waiting 2 quiet minutes after a PR joined the ticket');
+    expect(ticketAutoCheckWords({ status: 'due', reason: null, startsAt: null, lastChange: null }, labelOf, now)?.label).toBe(
+      'Story check starts within a minute',
+    );
+  });
+
+  it('…or why it will not', () => {
+    const now = Date.parse('2026-11-09T16:00:00Z');
+    const w = (status: 'held' | 'off', reason: TicketAutoCheckReason) =>
+      ticketAutoCheckWords({ status, reason, startsAt: null, lastChange: null }, () => null, now)?.label;
+    expect(w('held', 'daily_limit')).toBe('Story check starts at 00:00 UTC — the daily limit of automatic checks is reached');
+    expect(w('held', 'over_budget')).toBe('No automatic story check — the AI spend limit is reached');
+    expect(w('off', 'auto_off')).toBe('No automatic story check — auto review is off in this workspace');
+    expect(w('off', 'already_tried')).toBe('No automatic story check — the last one failed on these PRs');
+    expect(ticketAutoCheckWords({ status: 'up_to_date', reason: null, startsAt: null, lastChange: null }, () => null, now)).toBeNull();
+    expect(ticketAutoCheckWords({ status: 'running', reason: null, startsAt: null, lastChange: null }, () => null, now)).toBeNull();
+    expect(ticketAutoCheckWords(undefined, () => null, now)).toBeNull();
+  });
+
+  it('a short countdown', () => {
+    expect(shortDuration(100_000)).toBe('1m 40s');
+    expect(shortDuration(45_000)).toBe('45s');
+    expect(shortDuration(120_000)).toBe('2m');
+    expect(shortDuration(-5)).toBe('0s');
   });
 
   it('a design a review did not draw says why', () => {

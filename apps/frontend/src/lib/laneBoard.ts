@@ -26,6 +26,7 @@
 //             layout; borders and "waiting" still read the whole sprint.
 import {
   SPRINT_STAGE_LABEL,
+  criteriaDoneWords,
   personNameKey,
   sprintLaneSummary,
   type SprintColumn,
@@ -378,7 +379,12 @@ export function ticketCardCriteria(
 ): { text: string; stale: boolean; running: boolean } | null {
   const running = n.checkRunning === true;
   const c = n.check;
-  if (c != null && c.total > 0) return { text: `${c.met} of ${c.total} ${c.total === 1 ? 'criterion' : 'criteria'} met`, stale: c.stale, running };
+  if (c != null && c.total > 0) {
+    // Outside-code criteria are done but named apart: "3 met + 1 outside code of 5 criteria".
+    const noun = c.total === 1 ? 'criterion' : 'criteria';
+    const text = (c.metOutsideCode ?? 0) > 0 ? `${criteriaDoneWords(c)} ${noun}` : `${c.met} of ${c.total} ${noun} met`;
+    return { text, stale: c.stale, running };
+  }
   const count = n.brief.criteriaCount;
   if (count > 0) return { text: `${count} ${count === 1 ? 'criterion' : 'criteria'}`, stale: false, running };
   return running ? { text: '', stale: false, running } : null;

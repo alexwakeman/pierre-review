@@ -268,8 +268,11 @@ The second entry, for a ticket that is already under way. Same session, routes a
 - **Plan first, too**: the opening turn plans only the gaps (a gap may not be `met`); the build turn says
   "Build only the gaps PLAN.md plans"; a PR body's Covers names the gap refs it builds.
 - **In the session**: at boot the latest stored check is folded (`coverage.ts latestTicketCheck` +
-  `foldCoverage`: `met` is done with the PRs that deliver it; everything else, and every missing item, is a
-  gap), and TICKET.md carries those verdicts, so the agent builds the gaps.
+  `foldCoverage`: DONE — shared `criterionDone` — is not a gap: `met` with the PRs that deliver it,
+  `met_outside_code` ("Met outside code changes", a person's ticket comment) with the comment it rests on;
+  everything else, and every missing item, is a gap), and TICKET.md carries those verdicts — an
+  outside-code criterion is tagged "already done outside the code (per Dana Lee's comment of …): do not
+  build it" — so the agent builds the gaps. `storyBuildCheckGaps` never counts an outside-code criterion.
 - **The tab**: the header leads with the action word ("Fill gaps", `storyBuildActionOf`); the start state
   lists the gaps up front — ONE read of that run (`GET /api/ticket-reviews/:id`) when the tab opens,
   folded by shared `storyBuildGapsOf` — and its button reads "Fill gaps".

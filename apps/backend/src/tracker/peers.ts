@@ -127,23 +127,34 @@ export async function ticketComments(
   }
 }
 
+/** One PR on a ticket, with the two tracker stamps the story check's grace clock reads (auto-plan.ts):
+ *  when it JOINED (`linked_at`) and when its row's membership or story text last moved (`changed_at`). */
+export interface TicketMemberRow {
+  prId: number;
+  workspaceId: number;
+  linkedAtMs?: number | null;
+  changedAtMs?: number | null;
+}
+
 export async function ticketMembers(
   ctx: TrackerContext,
   accountId: number,
   ident: string,
-): Promise<Array<{ prId: number; workspaceId: number }>> {
+): Promise<TicketMemberRow[]> {
   const parsed = parseTicketIdent(ident);
   if (!isTrackerIdent(parsed)) return [];
   try {
     const t = ctx.schema.trackerTickets;
     const rows = (await ctx.db
-      .select({ prId: t.prId, workspaceId: t.workspaceId })
+      .select({ prId: t.prId, workspaceId: t.workspaceId, linkedAt: t.linkedAt, changedAt: t.changedAt })
       .from(t)
       .where(identWhere(t, accountId, parsed))
-      .execute()) as Array<{ prId: number; workspaceId: number }>;
+      .execute()) as Array<{ prId: number; workspaceId: number; linkedAt: Date | null; changedAt: Date | null }>;
+    const ms = (d: Date | number | null): number | null => (d == null ? null : new Date(d).getTime());
     const seen = new Set<number>();
     return rows
       .filter((r) => (seen.has(r.prId) ? false : (seen.add(r.prId), true)))
+      .map((r) => ({ prId: r.prId, workspaceId: r.workspaceId, linkedAtMs: ms(r.linkedAt), changedAtMs: ms(r.changedAt) }))
       .sort((a, b) => a.prId - b.prId);
   } catch (err) {
     ctx.log.warn({ accountId, code: codeOf(err) }, 'ticket review: ticket members not read');
@@ -163,6 +174,19 @@ export async function listChangedTicketIdents(
       .from(t)
       .where(and(eq(t.accountId, accountId), gte(t.changedAt, new Date(sinceMs))))
       .execute()) as Array<{ provider: TrackerProvider; apiRoot: string; issueKey: string }>;
+    // Tickets whose people's comments were stored since (a read that carried them): a comment the
+    // latest check did not see may make it stale (comments.ts `newCommentsMakeStale` — the sweeper's
+    // rule decides; this only names the ticket). A narrow test schema without the table: none.
+    const c = ctx.schema.trackerTicketComments;
+    if (c != null) {
+      rows.push(
+        ...((await ctx.db
+          .selectDistinct({ provider: c.provider, apiRoot: c.apiRoot, issueKey: c.issueKey })
+          .from(c)
+          .where(and(eq(c.accountId, accountId), eq(c.isBot, false), gte(c.fetchedAt, new Date(sinceMs))))
+          .execute()) as Array<{ provider: TrackerProvider; apiRoot: string; issueKey: string }>),
+      );
+    }
     return [...new Set(rows.map((r) => trackerTicketIdent(r.provider, r.apiRoot, r.issueKey)))].sort();
   } catch (err) {
     ctx.log.warn({ accountId, code: codeOf(err) }, 'ticket review: changed tickets not read');

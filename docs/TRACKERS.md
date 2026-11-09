@@ -146,6 +146,10 @@ points); neither is ever triggered by a view.
   the re-derivation. "None of these" stays a per-tab choice, never stored.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
+- `linked_at` (migration `0182`) is when the PR JOINED the ticket: written by the row's FIRST insert
+  only, never by an update (`upsertTicketRow`). `ticketMembers` returns it and `changed_at` per member
+  — the automatic story check's grace window restarts on both ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+  The automatic story check's clock).
 
 ## Open points — what the ticket left undecided (`tracker/open-points*.ts`, 2026-11-06)
 
@@ -212,11 +216,27 @@ are given it as discussion — never as the story.
   per ticket per read (`writeTicketComments`): the newest `TICKET_COMMENTS_KEPT` (20) are upserted, each
   body cut to `TICKET_COMMENT_BODY_MAX` (4000), and the ticket's other rows deleted. A merged PR's copy
   from a stored sibling makes no read and writes no comments (they are already the ticket's).
+- **THE SPRINT LIST READ WRITES THEM TOO (Jira).** Its `fields=*all` search already carries
+  `fields.comment`: `toJiraSprintTicket` keeps it ONLY when WHOLE (`jiraCommentPage(…).complete`), and
+  `storeSprintList` writes it per ticket. A thread cut short is left unknown — the list read never makes
+  the extra `/comment` call. GitHub Projects, Linear and Notion lists carry none (`undefined`, nothing
+  written); the check-time re-read below covers them.
+- **FRESH AT EVERY STORY CHECK** (`tracker/comments-refresh.ts` `refreshTicketComments`, through the
+  ticket source's `refreshComments`). Before a ticket review runs (manual, automatic, sprint-refresh
+  started), the ticket is read from the tracker ONCE and ONLY its comments are written. The story text,
+  status and fields of that answer are thrown away: a merged ticket's story stays as it merged (it is in
+  the fingerprint; moving it would re-bill), an open one's is the worker's job, and `changed_at` never
+  moves. The run's workspace first, then the ticket's other member workspaces: the first whose tracker
+  is the ticket's site. At most once per ticket per `COMMENTS_FRESH_MS` (2 min, in memory). A workspace
+  in the worker's backoff is not read; any failure keeps the stored copy. Never throws, never inside a
+  transaction. The next "a run, never a view" exception after open points.
 - ⚠ **POSITIVE-ANSWER RULE.** `comments: undefined` (not in the answer) writes nothing; `[]` (the
   tracker's "none") clears; a FAILED read — transient or refused — never touches them. A comment write
   failure is logged and never fails the ticket. When the last PR stops naming a ticket (the worker's key
-  prune) or its PRs are deleted (BOTH delete paths, `db/ticket-comments-prune.ts`), comments of tickets
-  no `tracker_tickets` row names are deleted. Erased with the account.
+  prune), its PRs are deleted (BOTH delete paths, `db/ticket-comments-prune.ts`) or the sprint read prunes
+  a long-unseen sprint ticket, comments of tickets that NO `tracker_tickets` row AND no `sprint_tickets` row
+  of the account names are deleted (a sprint ticket with no PR keeps the comments the sprint read wrote).
+  Erased with the account.
 - **BOTS** are STORED with `is_bot` and left out of every prompt and every list a person reads: Jira
   `author.accountType === 'app'` (Automation for Jira, Connect / Forge apps) or an automation NAME (shared
   `isAutomationCommentName`, for Server / Data Center); GitHub `author.__typename === 'Bot'`, a `[bot]`
@@ -225,18 +245,27 @@ are given it as discussion — never as the story.
   (cached an hour; a refused user read is an unknown person, not a bot) or an automation NAME.
 - **WHERE THEY GO.** `ticketComments(account, ident)` (peers.ts, the ticket source) → the ticket review
   (`review/ticket-review/prompts.ts`) and the story docs check (`review/story-docs/`) get a nonce-fenced
-  `TICKET COMMENTS` block, oldest first, `Author, YYYY-MM-DD:` per comment, at most
+  `TICKET COMMENTS` block, oldest first, `Author, YYYY-MM-DD:` per comment (the ticket review heads
+  each with its ref, `[C3] Author, YYYY-MM-DD:` — C1 is the oldest — so a "Met outside code changes"
+  verdict can cite one; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Met outside code changes), at most
   `TICKET_COMMENTS_PROMPT_CHARS` (6000) — the NEWEST kept when cut, the lead line saying how many older
   were left out — and in the untrusted-text collision scan. The system prompts say: discussion, not the
   ticket; a comment may clarify or change scope when it says so plainly; a later one outweighs an earlier
   one; cite author and date when a verdict relies on one; never a requirement on its own. The sprint
   ticket checks start the same ticket review, so they get them too. The sprint briefs do NOT (their text
   hash is the sprint read's; comments would re-bill them).
-- ⚠ **NOT STORY TEXT. A COMMENT NEVER RE-BILLS.** Comments are outside `storyOrMembershipMoved`
-  (`changed_at`), the story hash, the ticket review's fingerprint and the docs check's `storyHash`. A run
-  stores what it was given instead (`ticket_reviews.comments_seen {ids, count, hash}`, migration `0142`),
-  and `TicketReviewState.newComments` counts the people comments since — "2 new comments since this
-  check" beside the result, so the reader decides whether to Re-check.
+- ⚠ **NOT STORY TEXT.** Comments are outside `storyOrMembershipMoved` (`changed_at`), the story hash, the
+  ticket review's fingerprint and the docs check's `storyHash`. A run stores what it was given instead
+  (`ticket_reviews.comments_seen {ids, count, hash}`, migration `0142`), and
+  `TicketReviewState.newComments` counts the people comments since — "2 new comments since this check".
+- ⚠ **A PERSON'S NEW COMMENT MAKES THE CHECK STALE ONLY WHILE IT HAS A CRITERION NOT DONE** — ONE rule,
+  `newCommentsMakeStale` (tracker/comments.ts): the latest succeeded check did not see a current people
+  comment AND one of its criteria is not done (shared `criterionDone`: unmet, partly met, unclear — a
+  comment may settle it). A check whose criteria are all done only shows the note. Read by the states
+  route (`staleBecause: ['new_comments']`), the sweeper (auto-inputs.ts: `needsRun`, a `commented` change
+  that restarts the 2-minute grace window, cause `commented`), This Sprint's cards (`stale`) and its
+  Refresh. The sweeper finds such tickets through `listChangedTicketIdents` (people comments stored since
+  its last tick). A check from before comments were read is never made stale by them.
 - **SHOWN** under the ticket as written (`components/TicketComments.tsx`, in `StoryDisclosure`):
   "Comments (n)", collapsed, author · date · body. They ride `GET /api/prs/:id/tracker-ticket`
   (`JiraTicketDetails.comments`), already click-gated — no request of their own.
@@ -837,7 +866,8 @@ is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status p
   `select` — the chosen option, no dates; `date` — pages whose own range holds today (started within
   90 days), the busiest range as the dates. No sprint mapped → the status fallback `no_sprint_concept`;
   nothing current → `none_active` (To-do + In-progress options, edited in the window). Each page's body
-  and blockers are read (comments are left to the per-ticket reader). Ghost lookups: none (Jira only).
+  and blockers are read (comments are left to the per-ticket reader and the story check's re-read). Ghost
+  lookups: none (Jira only).
 
 ## Credential — the sealed per-workspace token
 

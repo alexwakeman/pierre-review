@@ -43,4 +43,18 @@ describe('foldCoverage', () => {
     expect(c.existingPrs).toEqual([{ prId: 5, repoId: 1, number: 12, state: 'open', headSha: 'abc' }]);
     expect(gapRefs(c)).toEqual(['AC2', 'M1']);
   });
+
+  it('met outside code changes is NOT a gap: no PRs, the comment it rests on', () => {
+    const metBy = { commentId: '10001', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z' };
+    const a: TicketAssessment = {
+      ...ASSESSMENT,
+      criteria: [{ ...ASSESSMENT.criteria[1]!, status: 'met_outside_code', deliveredBy: [], metBy }],
+      missing: [],
+    };
+    const c = foldCoverage({ criteria: CRITERIA, check: { ...LATEST, assessment: a }, state: 'checked', prs: [PR], note: null });
+    expect(c.criteria[0]).toEqual({ ref: 'AC2', text: 'Email a receipt', verdict: 'met_outside_code', coveredByPrIds: [], metBy });
+    expect(gapRefs(c)).toEqual([]);
+    // Unknown statuses (a newer server) are gaps, never silently done.
+    expect(storyBuildIsGap({ verdict: 'something_new' as never })).toBe(true);
+  });
 });

@@ -4,7 +4,8 @@ import { setSprintTicketChecks } from '../../tracker/sprint/hooks.js';
 import { fingerprint, readLiveMembers, ticketHash, type LiveMember } from './fingerprint.js';
 import { startTicketReview, ticketReviewHeld, type StartTicketArgs, type StartTicketResult } from './manager.js';
 import { getTicketStateInputs, type TicketStateInputs } from './persist.js';
-import { jiraMemberIds, jiraStoryFor } from './prepare.js';
+import { jiraMemberIds, jiraStoryFor, ticketCommentsFor } from './prepare.js';
+import { newCommentsMakeStale } from '../../tracker/comments.js';
 
 // THIS SPRINT → "REFRESH" ALSO RUNS TICKET CHECKS (docs/CLAUDE-REVIEW.md § Ticket review → Started by
 // a sprint refresh). A MANUAL press of This Sprint's Refresh (POST /api/sprint-stories/refresh) starts
@@ -13,7 +14,8 @@ import { jiraMemberIds, jiraStoryFor } from './prepare.js';
 // a view, never from the sprint read's own schedule.
 //
 //   • WHO: sprint tickets (never ghosts) with ≥ 1 open or merged PR in this workspace, whose check is
-//     not CURRENT (the server fingerprint, the sweeper's own: story hash + members' heads/state).
+//     not CURRENT (the server fingerprint, the sweeper's own: story hash + members' heads/state — or a
+//     person's comment it did not see while it has a criterion not done, `newCommentsMakeStale`).
 //     Skipped: a run queued or running (DB or this process), ≤ 0 or > TICKET_REVIEW_MAX_PRS members,
 //     no stored story, and a ticket whose newest attempt since the last success FAILED or was REFUSED
 //     on these very inputs (the sweeper's rule — pressing Refresh again must not re-bill a failure).
@@ -38,6 +40,9 @@ export interface SprintCheckCandidate {
 export interface SprintCheckLive {
   fingerprint: string;
   members: LiveMember[];
+  /** The people's comments now (ids) — a check that did not see one, with a criterion not done, is
+   *  stale (tracker/comments.ts `newCommentsMakeStale`). Absent = not read (never stale by comments). */
+  commentIds?: string[];
   ticketKey: string | null;
   ticketTitle: string | null;
 }
@@ -70,7 +75,12 @@ export function sprintCheckPickOf(
 ): SprintCheckPick | null {
   if (live == null || live.members.length === 0 || live.members.length > TICKET_REVIEW_MAX_PRS) return null;
   if (st?.runningRunId != null) return null;
-  if (st?.latest?.fingerprint === live.fingerprint) return null;
+  if (
+    st?.latest?.fingerprint === live.fingerprint &&
+    !newCommentsMakeStale(st.latest, (live.commentIds ?? []).map((id) => ({ id })))
+  ) {
+    return null;
+  }
   const attempt = st?.latestAttempt;
   if (attempt != null && attempt.id > (st?.latest?.id ?? 0) && attempt.fingerprint === live.fingerprint) return null;
   const newestMs = Math.max(0, ...live.members.map((m) => (m.updatedAt == null ? 0 : m.updatedAt.getTime())));
@@ -110,7 +120,14 @@ const DEFAULT_DEPS = (ctx: AgentContext): SprintCheckDeps => ({
     const ticket = await jiraStoryFor(accountId, ident, memberIds);
     if (ticket == null) return null;
     const members = await readLiveMembers(ctx, accountId, memberIds);
-    return { fingerprint: fingerprint(ticketHash(ticket), members), members, ticketKey: ticket.key ?? null, ticketTitle: ticket.title ?? null };
+    const commentIds = (await ticketCommentsFor(accountId, ident)).map((c) => c.id);
+    return {
+      fingerprint: fingerprint(ticketHash(ticket), members),
+      members,
+      commentIds,
+      ticketKey: ticket.key ?? null,
+      ticketTitle: ticket.title ?? null,
+    };
   },
   held: ticketReviewHeld,
   start: (a) => startTicketReview(ctx, a),

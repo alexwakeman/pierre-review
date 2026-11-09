@@ -44,10 +44,11 @@ export interface PrBranchStack {
  * One ticket's acceptance-criteria judgement covering a PR — from the latest SUCCEEDED ticket
  * review of that ticket that had this PR as a member.
  *
- * "MET" IS `status === 'met'` ONLY. `partly_met`, `not_met`, `unclear` and `not_checked` are all
- * NOT met: the chip counts what the check said is delivered, and "partly" or "could not tell" is
- * not delivered. The colour separates them: every criterion met → green; any `not_met` → red; else
- * (only partly met / unclear / not checked short of all met) → amber.
+ * "DONE" IS THE SHARED `criterionDone`: `met` (a PR delivers it) or `met_outside_code` (a person's
+ * ticket comment says it was done outside the code), each counted apart. `partly_met`, `not_met`,
+ * `unclear` and `not_checked` are NOT done: "partly" or "could not tell" is not delivered. The colour:
+ * every criterion done → green; any `not_met` → red; else (only partly met / unclear / not checked
+ * short of all done) → amber.
  */
 export interface PrCriteriaCheck {
   /** `trackerTicketIdent` of the ticket (`manual:…` for a pasted story). */
@@ -58,6 +59,8 @@ export interface PrCriteriaCheck {
   /** The ticket review run (`GET /api/ticket-reviews/:id`). */
   reviewId: number;
   met: number;
+  /** "Met outside code changes" — done, named apart. Absent from an older server (read as 0). */
+  metOutsideCode?: number;
   partlyMet: number;
   notMet: number;
   /** `unclear` + `not_checked`. */
@@ -71,8 +74,10 @@ export interface PrCriteriaCheck {
 }
 
 /** The chip's tone, from the counts. Pure — the SPA's colour and its tests read this one rule. */
-export function criteriaCheckTone(c: Pick<PrCriteriaCheck, 'met' | 'notMet' | 'total'>): 'met' | 'not_met' | 'partly' {
-  if (c.total > 0 && c.met === c.total) return 'met';
+export function criteriaCheckTone(
+  c: Pick<PrCriteriaCheck, 'met' | 'notMet' | 'total'> & { metOutsideCode?: number },
+): 'met' | 'not_met' | 'partly' {
+  if (c.total > 0 && c.met + (c.metOutsideCode ?? 0) === c.total) return 'met';
   return c.notMet > 0 ? 'not_met' : 'partly';
 }
 

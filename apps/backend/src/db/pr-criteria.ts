@@ -1,11 +1,12 @@
-import type { PrCriteriaCheck, TicketAssessment } from '@pierre-review/shared';
+import { criterionCounts, type PrCriteriaCheck, type TicketAssessment } from '@pierre-review/shared';
 
 // THE "Criteria 3/4" CHIP (docs/FRONTEND.md § PR chips; docs/CLAUDE-REVIEW.md § Ticket review).
 // CORE, DB only — never a model, tracker or GitHub call.
 //
 // For each PR, per TICKET: the latest SUCCEEDED ticket review (Story check) of that ticket that had
-// this PR as a MEMBER, and its criteria verdicts. "Met" is `status === 'met'` only — `partly_met`,
-// `not_met`, `unclear` and `not_checked` are not met (shared `PrCriteriaCheck`). A check whose
+// this PR as a MEMBER, and its criteria verdicts, counted by the shared `criterionCounts`: `met` and
+// `met_outside_code` are DONE (counted apart); `partly_met`, `not_met`, `unclear` and `not_checked` are
+// not (shared `PrCriteriaCheck`). A check whose
 // assessment lists no criteria is NO chip (unknown is never zero), and a PR never checked has none.
 //
 // `olderHead`: the run read this PR at a head other than its current synced head.
@@ -53,22 +54,14 @@ export function criteriaCheckOf(
 ): PrCriteriaCheck | null {
   const criteria = run?.assessment?.criteria;
   if (run == null || !Array.isArray(criteria) || criteria.length === 0) return null;
-  let met = 0;
-  let partlyMet = 0;
-  let notMet = 0;
-  let unsettled = 0;
-  for (const c of criteria) {
-    if (c.status === 'met') met += 1;
-    else if (c.status === 'partly_met') partlyMet += 1;
-    else if (c.status === 'not_met') notMet += 1;
-    else unsettled += 1;
-  }
+  const { met, metOutsideCode, partlyMet, notMet, unsettled } = criterionCounts(criteria);
   return {
     ident: member.ident,
     key: run.key,
     title: run.title,
     reviewId: run.id,
     met,
+    metOutsideCode,
     partlyMet,
     notMet,
     unsettled,

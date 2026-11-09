@@ -87,6 +87,7 @@ import { REVIEW_CHIP } from '../lib/reviewStyles.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { AiRunLabel } from './AiRunLabel.js';
+import { TicketAutoCheckLine } from './TicketAutoCheckLine.js';
 import {
   CriterionRow,
   CurrencyPill,
@@ -201,7 +202,8 @@ function TicketBlock({
   const members = shown?.members ?? review?.members ?? [];
   const labelOf = (prId: number): string | null => {
     const m = members.find((x) => x.prId === prId);
-    return m != null ? memberLabel(m) : null;
+    if (m != null) return memberLabel(m);
+    return prId === pr.id ? memberLabel({ repo: pr.repoFullName, number: pr.number }) : null;
   };
   const currency = ticketCurrency(state, labelOf);
   const comments = newCommentsWords(state);
@@ -266,6 +268,7 @@ function TicketBlock({
           )}
         </span>
       </div>
+      {!running && <TicketAutoCheckLine autoCheck={state.autoCheck} labelOf={labelOf} className="block" />}
       <StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[snapshot]} url={url} linkKey={false} />
       <div className="empty:hidden">
         <RegenProgressBar

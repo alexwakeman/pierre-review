@@ -67,6 +67,7 @@ beforeAll(async () => {
   sqlite.exec(migration('0144_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
+  sqlite.exec('ALTER TABLE tracker_tickets ADD linked_at integer;'); // migration 0182
   const ctx = {
     db: drizzle(sqlite),
     host: {},

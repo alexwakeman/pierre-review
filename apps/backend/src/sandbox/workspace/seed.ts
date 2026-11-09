@@ -14,7 +14,7 @@
 // ⚠ The ticket text is UNTRUSTED (tracker text): it sits in TICKET.md under a line that says it is the
 // requirement, not instructions about the session.
 import { posix } from 'node:path';
-import type { AiProviderId } from '@pierre-review/shared';
+import { criterionIsGap, type AiProviderId } from '@pierre-review/shared';
 import { WRITING_RULES } from '../../ai/writing-rules.js';
 import type { FileToCopy } from '../runtime/types.js';
 import { FIX_REFS_FILE, FIX_REPORT_CHECKER, FIX_REPORT_FILE, fixReportCheckerSource } from './fix-report.js';
@@ -321,11 +321,12 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
     '',
   );
   const verdict = new Map((t.gaps?.criteria ?? []).map((c) => [c.ref.toUpperCase(), c.verdict]));
+  const metByOf = new Map((t.gaps?.criteria ?? []).map((c) => [c.ref.toUpperCase(), c.metBy ?? null]));
   if (t.criteria.length > 0) {
     out.push('Meet each one. Refer to them as AC1, AC2, … in this order.', '');
     for (const c of t.criteria) {
       const v = verdict.get(`AC${c.n}`);
-      const tag = mode === 'fill_gaps' && v != null ? (v === 'met' ? ' _(already met by the existing pull requests)_' : ' _(a gap: build this)_') : '';
+      const tag = mode === 'fill_gaps' && v != null ? gapTag(v, metByOf.get(`AC${c.n}`) ?? null) : '';
       out.push(`${c.n}. ${c.text}${tag}`);
     }
   } else if (t.acceptanceCriteriaText.trim() !== '') {
@@ -344,7 +345,7 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   if (mode === 'fill_gaps' && t.gaps != null) {
     out.push('', '## What the existing pull requests do not deliver', '');
     if (t.gaps.note) out.push(t.gaps.note, '');
-    const gaps = t.gaps.criteria.filter((c) => c.verdict !== 'met');
+    const gaps = t.gaps.criteria.filter((c) => criterionIsGap(c.verdict));
     if (gaps.length === 0 && t.gaps.missing.length === 0) out.push('The ticket check found no gap.');
     for (const g of gaps) out.push(`- ${g.ref}: ${g.text}`);
     for (const m of t.gaps.missing) out.push(`- ${m.ref} (not in the criteria): ${m.text}`);
@@ -359,6 +360,17 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   return out.join('\n');
 }
 
+/** A Fill gaps criterion's tag in TICKET.md. Done (shared `criterionDone`) is never a gap: an
+ *  outside-code criterion names the comment it rests on, so the agent does not build it. Pure. */
+export function gapTag(verdict: string, metBy: { author: string; createdAt: string } | null): string {
+  if (verdict === 'met') return ' _(already met by the existing pull requests)_';
+  if (verdict === 'met_outside_code') {
+    const who = metBy != null ? ` (per ${metBy.author}'s comment of ${metBy.createdAt.slice(0, 10)})` : '';
+    return ` _(already done outside the code${who}: do not build it)_`;
+  }
+  return ' _(a gap: build this)_';
+}
+
 function systemPromptOf(i: SeedInput, provider: AiProviderId): string {
   const own = posix.join(i.layout.root, provider === 'claude' ? 'CLAUDE.md' : 'AGENTS.md');
   return [
@@ -371,7 +383,10 @@ function systemPromptOf(i: SeedInput, provider: AiProviderId): string {
 /** The refs a plan must cover (the checker's and the host's `ctx.criteria` / `ctx.gaps`). Pure. */
 export function planCriteriaRefs(t: SessionTicket, mode: SeedInput['mode']): { criteria: string[] | null; gaps: string[] | null } {
   const missing = mode === 'fill_gaps' ? (t.gaps?.missing ?? []).map((m) => m.ref.toUpperCase()) : [];
-  const gaps = mode === 'fill_gaps' && t.gaps != null ? [...t.gaps.criteria.filter((c) => c.verdict !== 'met').map((c) => c.ref.toUpperCase()), ...missing] : null;
+  const gaps =
+    mode === 'fill_gaps' && t.gaps != null
+      ? [...t.gaps.criteria.filter((c) => criterionIsGap(c.verdict)).map((c) => c.ref.toUpperCase()), ...missing]
+      : null;
   if (t.criteria.length > 0) return { criteria: [...t.criteria.map((c) => `AC${c.n}`), ...missing], gaps };
   return { criteria: t.acceptanceCriteriaText.trim() !== '' ? null : missing, gaps };
 }

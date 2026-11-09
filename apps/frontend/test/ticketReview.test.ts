@@ -140,6 +140,10 @@ describe('currency', () => {
     expect(ticketCurrency(state({ status: 'stale', staleBecause: ['story_edited', 'pr_pushed'], changedPrIds: [1] }))?.label).toBe(
       'Ticket edited since',
     );
+    // A person's comment on a check with a criterion not done.
+    const commented = ticketCurrency(state({ status: 'stale', staleBecause: ['new_comments'], changedPrIds: [] }));
+    expect(commented?.label).toBe('New comments since');
+    expect(commented?.title).toMatch(/Someone commented on the ticket/);
   });
 
   it('coverage is "met of total", toned by the worst', () => {
@@ -148,6 +152,10 @@ describe('currency', () => {
     expect(coverageTone(state().counts)).toBe('bad');
     expect(coverageTone({ met: 2, partlyMet: 0, notMet: 0, unclear: 0, notChecked: 0, total: 2 })).toBe('ok');
     expect(coverageTone({ met: 1, partlyMet: 1, notMet: 0, unclear: 0, notChecked: 0, total: 2 })).toBe('partial');
+    // Met outside code changes is done (green) but named apart.
+    const outside = { met: 1, metOutsideCode: 1, partlyMet: 0, notMet: 0, unclear: 0, notChecked: 0, total: 2 };
+    expect(coverageTone(outside)).toBe('ok');
+    expect(coverageLabel(outside)).toBe('1 met + 1 outside code of 2');
   });
 
   it('a compact reading exists only once something is known', () => {

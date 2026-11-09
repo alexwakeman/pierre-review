@@ -2138,11 +2138,26 @@ does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-re
 `ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
 route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
 
-- **Ticket comments** ([TRACKERS.md](TRACKERS.md) § Ticket comments): a tracker ticket's people
-  comments ride the prompt in their own `TICKET COMMENTS` fence (oldest first, ≤ 6000 chars, newest
-  kept), with a system-prompt rule (discussion, may change scope, cite author + date, never a
-  requirement alone). Outside the fingerprint: a run stores `comments_seen` and the state's
-  `newComments` says "n new comments since this check" — a comment never re-bills an automatic run.
+- **Ticket comments** ([TRACKERS.md](TRACKERS.md) § Ticket comments): READ AGAIN from the tracker
+  before every run (comments only — the story text stays as stored), then a tracker ticket's people
+  comments ride the prompt in their own `TICKET COMMENTS` fence (oldest first, each headed `[C3]
+  Author, YYYY-MM-DD:`, ≤ 6000 chars, newest kept), with a system-prompt rule (discussion, may change
+  scope, cite author + date, never a requirement alone). Outside the fingerprint: a run stores
+  `comments_seen`; the state's `newComments` says "n new comments since this check", and a person's new
+  comment makes the check stale (`new_comments`) ONLY while it has a criterion not done.
+- **Met outside code changes** (`met_outside_code`, label "Met outside code changes"): no PR delivers
+  the criterion and it needs no code, but a PERSON's ticket comment says plainly the work was done
+  outside the code (a setting, content, a manual step, a decision). The model names the comment's ref
+  in `metByComment` ('C3'). ⚠ THE SERVER GUARANTEE (reconcile.ts): it survives only when the ref
+  resolves to a comment IN THE PROMPT (`ticketCommentsBlock(…).shownRefs` — the people's comments only;
+  bots never reach a prompt) and the model named no place for code (`expectedIn`); else `unclear`. A
+  PR in `deliveredBy`/`evidence` makes it plain `met`. `metBy {commentId, author, createdAt}` is copied
+  from the STORED comment, never model text. It is NOT demoted by the "met nobody can point at" rule.
+  It is DONE — never an item, never posted, never a Fill gaps gap, the chip may go green — but every
+  count names it apart ("4 met + 1 outside code of 6"). ONE predicate for "done / a gap": shared
+  `criterionDone` / `criterionIsGap` (criterion-status.ts), and ONE count, `criterionCounts`; an
+  unknown status is a gap. The SPA shows it as a done line with a comment mark and "Per Dana Lee's
+  comment, <date>", a button that opens the ticket's Comments at that comment.
 - **Keyed per TICKET, not per PR.** Ident `<provider>:<root>#<KEY>` — `jira:<apiRoot>#<KEY>` today,
   unchanged since the plugin era (members from core's stored tickets, `ticketMembers` — any workspace
   of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers) or
@@ -2240,38 +2255,44 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   Lane order: a PR-review click > a ticket click > a PR-review auto run > a ticket auto run; each
   side pumps the other when a run ends. The claim key `acct:ident` is taken SYNCHRONOUSLY.
 - **Cascade** (`sweep.ts`, every minute, only where auto review is on): a PR that opened, pushed or
-  left re-queues the tickets it is on — ONE HOP, never transitive — under the same `autoReviewDue`
-  rule (first run at once; a re-run at once when no run of the ticket started or finished in the 5
-  min before the change, else 5 min quiet / 20 min max; NO CI hold), keyed `acct:ident` with the
-  fingerprint as the head. A change seen while the ticket's run is in flight never cancels it — it
-  opens the burst then (`HELD` key), so the 5 quiet minutes count from the LAST change seen while held (each one restarts the quiet clock; the burst start, and so the 20-minute ceiling, never moves), not the run's end. Its OWN per-workspace `TICKET_REVIEW_DAILY_CAP` (20), counted from rows (an automatic run
-  writes its row when queued), charged to the starting workspace. A first run needs a member opened
-  after auto review was switched on, or the kick an auto PR review sends (`onAutoReviewLaunched`).
-  ⚠ A ticket whose run is queued or running WAITS (stays in `watching`), never is forgotten: the
-  run's fingerprint was fixed at prepare time, so a member pushed meanwhile is judged again once it
-  ends — the PR snapshot has already moved on, so nothing else would bring it back. ⚠ The same when
-  the lane fills mid-tick: every candidate not yet reached waits. A refused attempt, one that ended
-  without an answer (budget, turns) or a cancelled one on the same fingerprint is not retried; one
-  that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
-  it is.
-- ⚠ **ONE BUSY TICKET CANNOT SPEND THE DAY** (2026-10-28: one ticket's PR was pushed 11 times, each
-  push re-checked it, the 20 checks were gone by 11:40, and BMD-1086 — whose two new PRs joined that
-  afternoon — never updated; the story view said only "2 PRs changed since"). A PUSH-ONLY re-check
-  (`sweep.ts` `pushOnlyChange`: the same story and the same members in the same states as the last
-  succeeded run, only heads moved) is limited twice: at most `TICKET_REVIEW_PUSH_RECHECKS_PER_DAY`
-  (3, env-overridable) `cascade` rows of THAT ticket per UTC day (`countCascadeTicketReviewsSince`),
-  and never the workspace cap's last slots (shared `repeatRunLimit`: all but min(5, cap/4)). A
-  ticket's first check and a PR joining, leaving or merging are held only by the cap itself. ⚠
-  "Push-only" is judged against the last success OR a NEWER attempt that got as far as its members
-  (`latestAttempt.members`): else, once the check queued for a PR joining FAILS, every later push
-  reads as "a PR joined" again and escapes both limits.
-- **The wait is said.** The sweeper keeps WHY it holds a stale ticket (`sweep-waits.ts`: `settling` /
-  `ticket_limit` / `daily_limit`, in memory) and the states route serves it as
-  `TicketReviewState.waiting` while the ticket is stale; the story view's header prints it beside
-  "N PRs changed since" ("daily limit reached", "next update tomorrow", "update due soon"; the
-  reason is the title). Re-check (a click) is never held by any of it. When an account has no
-  auto-enabled workspace left, the sweeper drops its watches AND their wait reasons (nothing will
-  re-check them automatically, so nothing says "daily limit reached").
+  left re-queues the tickets it is on — ONE HOP, never transitive. WHEN is decided by ONE pure rule
+  (below), never an in-memory timer. Charged to the starting workspace. A first run needs a member
+  opened after auto review was switched on, or the kick an auto PR review sends
+  (`onAutoReviewLaunched`). ⚠ A ticket whose run is queued or running WAITS (stays in `watching`),
+  never is forgotten: the run's fingerprint was fixed at prepare time, so a member pushed meanwhile is
+  judged again once it ends — the PR snapshot has already moved on, so nothing else would bring it
+  back. ⚠ The same when the lane fills mid-tick: every candidate not yet reached waits. A refused
+  attempt, one that ended without an answer (budget, turns) or a cancelled one on the same fingerprint
+  is not retried; one that THREW or was cut off by a restart stores no fingerprint (`retryable`, the
+  boot reconcile), so it is. Every queued run stores its `cause` (`ticket_reviews.cause`: `first` ·
+  `pushed` — only when nothing but heads moved · `joined` · `left` · `merged` · `story_edited`).
+- **The automatic story check's clock** (2026-11-09, BMD-1175). ONE pure rule,
+  `review/ticket-review/auto-plan.ts` `ticketAutoCheckPlan`, read from STORED rows by ONE reader
+  (`auto-inputs.ts` `loadTicketAutoState`) — the sweeper acts on it and the states route shows it
+  (`TicketReviewState.autoCheck`), so the time the reader is promised is the time kept, across a
+  restart. THE GRACE WINDOW: due `TICKET_AUTO_GRACE_MS` (2 min, shared) after the newest change — a
+  push to ANY member (`pull_requests.head_seen_at`, when Limn SAW the head move; never the commit's
+  committedAt, which can be old for a late push), a PR joining (`tracker_tickets.linked_at`), a member
+  merging, the ticket changing (`changed_at`: story text, a PR leaving). Every change restarts it, and a
+  FIRST check waits too (the tracker links a ticket's PRs minutes apart: on 2026-11-09 five of the
+  day's 20 checks ran on part of a ticket, each followed by a "PR joined" re-check). THE CEILING:
+  `TICKET_AUTO_MAX_WAIT_MS` (20 min) from the burst's first change — changes each under 2 min apart,
+  after the latest run; one column only holds a PR's newest push, so `pull_requests.head_burst_at`
+  keeps where its run of pushes began. NO CI hold. THE LIMITS: the per-workspace
+  `TICKET_REVIEW_DAILY_CAP` (60), counted from rows (an automatic run writes its row when queued) —
+  ⚠ never for a ticket with a PR the READER owns (author, or the person a Limn-opened PR is for) — and
+  the spend budget. ⚠ **NO PER-TICKET LIMIT** (removed 2026-11-09): the old "3 push re-checks per
+  ticket per day" counted every `cascade` row, so a PR joining and two story edits used it up and ten
+  real pushes waited until midnight; the grace window now folds a burst into one check and the spend
+  budget is the money brake. A hold is said before a time that would not be kept (`ai_not_ready`,
+  `over_budget`, `daily_limit` come before `settling`).
+- **The wait is said, in one line, in both places** — the PR pane's AI Review tab (`TicketCoverage.tsx`)
+  and the Ticket / story view (`OpenPrsCards.tsx` `StoryCurrencyLine`), through ONE component,
+  `TicketAutoCheckLine` (formatter `lib/ticketReview.ts` `ticketAutoCheckWords`): "Story check starts
+  in 1m 40s — waiting 2 quiet minutes after the last push to backend#615", "Story check starts at
+  00:00 UTC — the daily limit of automatic checks is reached", "No automatic story check — auto review
+  is off in this workspace" (the detail is the title). Nothing while up to date or running. The
+  countdown ticks locally (never a fetch). Re-check (a click) is never held by any of it.
 - **The summary is at most THREE short sentences of 20 words** (2026-10-28; tightened 2026-10-31, one
   fact per sentence, no clauses joined by semicolons): how far the PRs together deliver the ticket,
   then the most important thing still left (or that nothing is) — no bullets, no criteria list, no

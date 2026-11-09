@@ -12,6 +12,7 @@ import {
   type ClaudeTicketCriterionStatus as SprintCriterionStatus,
   type SprintNodeBuild,
   type SprintTicketCheck,
+  type TicketAssessment,
   type TicketCriterion,
 } from '@pierre-review/shared';
 import { foldSprintBuilds } from './sprint-builds.js';
@@ -167,6 +168,26 @@ describe('"Fill gaps": the card check carries its missing items and run id', () 
   const run = (missing: number) => ({ id: 42, status: 'succeeded', assessment: assessment(missing), completedAt: new Date('2026-10-30T00:00:00Z') });
   const live = new Map([[1, { headSha: 'h', state: 'open' }]]);
   const members = [{ prId: 1, headSha: 'h', prState: 'open' as const }];
+
+  it("a person's comment the run did not see makes it stale only while a criterion is not done", () => {
+    const seen = { ...run(0), commentsSeen: { ids: ['c1'] } };
+    expect(sprintTicketCheckOf(seen, members, live, [], ['c1'])!.stale).toBe(false);
+    expect(sprintTicketCheckOf(seen, members, live, [], ['c1', 'c2'])!.stale).toBe(true);
+    // Every criterion done (met + met outside code): a new comment changes nothing.
+    const done = {
+      ...seen,
+      assessment: {
+        ...(seen.assessment as unknown as TicketAssessment),
+        criteria: (seen.assessment as unknown as TicketAssessment).criteria.map((c, i) => ({ ...c, status: i === 0 ? 'met' : 'met_outside_code' })),
+      },
+    } as never;
+    const c = sprintTicketCheckOf(done, members, live, [], ['c1', 'c2'])!;
+    expect(c.stale).toBe(false);
+    expect(c).toMatchObject({ met: 1, metOutsideCode: 1, notMet: 0 });
+    expect(storyBuildCheckGaps(c)).toBe(0);
+    // A run from before comments were read is never stale by them.
+    expect(sprintTicketCheckOf(run(0), members, live, [], ['c1', 'c2'])!.stale).toBe(false);
+  });
 
   it('counts the missing items and names the run', () => {
     const c = sprintTicketCheckOf(run(2), members, live, [{ prId: 1, state: 'open' }]);

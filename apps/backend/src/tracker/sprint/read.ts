@@ -15,6 +15,7 @@ import { deriveAc, linkColumns, readAcFieldSettings, settingFor } from '../store
 import type { FetchedTicket, TrackerCall } from '../types.js';
 import { accessFingerprint, backoffCode } from '../worker.js';
 import { afterSprintRead } from './hooks.js';
+import { pruneOrphanComments, writeTicketComments } from '../comments.js';
 import { listGithubMilestone } from './github.js';
 import { listJiraSprint } from './jira.js';
 import { listLinearCycle } from './linear.js';
@@ -332,6 +333,16 @@ async function storeSprintList(
       // ⚠ firstSeenAt is insert-only.
       .onConflictDoUpdate({ target: [st.accountId, st.workspaceId, st.ident], set: values })
       .execute();
+    // The ticket's comments, when the list answer carried them WHOLE (Jira's `fields.comment`; the
+    // other trackers' lists carry none — `undefined`, nothing written). docs/TRACKERS.md § Ticket
+    // comments. Never fails the read.
+    if (tk.comments !== undefined) {
+      try {
+        await writeTicketComments(ctx, accountId, { provider: call.provider, apiRoot: call.apiRoot, issueKey: tk.key }, tk.comments, at);
+      } catch (err) {
+        ctx.log.warn({ accountId, workspaceId, code: codeOf(err), route: 'tracker-sprint' }, 'sprint ticket comments not stored');
+      }
+    }
   }
   const idents = [...seen];
   await ctx.db
@@ -346,11 +357,20 @@ async function storeSprintList(
       ),
     )
     .execute();
-  const pruned: Array<{ ident: string }> = await ctx.db
+  const pruned: Array<{ ident: string; provider: string; apiRoot: string; issueKey: string }> = await ctx.db
     .delete(st)
     .where(and(eq(st.accountId, accountId), eq(st.workspaceId, workspaceId), lt(st.lastSeenAt, new Date(nowMs - SPRINT_PRUNE_MS))))
-    .returning({ ident: st.ident })
+    .returning({ ident: st.ident, provider: st.provider, apiRoot: st.apiRoot, issueKey: st.issueKey })
     .execute();
+  // Their comments go too, unless a PR or another workspace's sprint still names the ticket (the
+  // worker's own prune rule, comments.ts `pruneOrphanComments`).
+  if (pruned.length > 0) {
+    try {
+      await pruneOrphanComments(ctx, accountId, pruned);
+    } catch (err) {
+      ctx.log.warn({ accountId, workspaceId, code: codeOf(err), route: 'tracker-sprint' }, 'sprint ticket comments not pruned');
+    }
+  }
   // A pruned ticket's accepted repos go with it (keyed by ident, not by a foreign key), so a ticket
   // that comes back months later starts with the code's suggestions, not a stale choice.
   if (pruned.length > 0) {

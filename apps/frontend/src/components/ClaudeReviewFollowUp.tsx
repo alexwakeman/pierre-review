@@ -29,6 +29,7 @@ import {
   followUpLeftOutSentence,
   STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
+  criterionDone,
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
 import type {
@@ -839,7 +840,7 @@ function CriterionRow({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   // MET is one compact line: tick, ref, criterion, where. Nothing to act on, so no card.
-  if (c.status === 'met') {
+  if (criterionDone(c.status)) {
     return (
       <li className="flex items-baseline gap-2 px-1 text-body">
         <span className="shrink-0 self-center text-ui-success" aria-label="Met">

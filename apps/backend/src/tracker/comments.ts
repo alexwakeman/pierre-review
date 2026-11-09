@@ -3,6 +3,7 @@ import { and, asc, eq, notInArray } from 'drizzle-orm';
 import {
   TICKET_COMMENTS_KEPT,
   TICKET_COMMENT_BODY_MAX,
+  criterionDone,
   type TicketComment,
   type TrackerProvider,
 } from '@pierre-review/shared';
@@ -191,8 +192,25 @@ export function newCommentsSince(
 }
 
 /**
+ * THE ONE RULE for "a person's comment makes the story check stale" (docs/TRACKERS.md § Ticket
+ * comments): the latest succeeded check did not see a current people's comment AND it still has a
+ * criterion that is not done (shared `criterionDone` — a comment may settle unmet, partly met or
+ * unclear work). A check from before comments were read (`seen` null) is never made stale by them.
+ * Read by the states route, the sweeper (auto-inputs.ts), This Sprint's cards and its Refresh. Pure.
+ */
+export function newCommentsMakeStale(
+  latest: { commentsSeen?: { ids: readonly string[] } | null; assessment: { criteria: ReadonlyArray<{ status: string }> } | null } | null | undefined,
+  current: ReadonlyArray<{ id: string }>,
+): boolean {
+  if (latest == null || latest.assessment == null) return false;
+  if (newCommentsSince(latest.commentsSeen, current) === 0) return false;
+  return latest.assessment.criteria.some((c) => !criterionDone(c.status));
+}
+
+/**
  * Delete the comments of these tickets when NO `tracker_tickets` row of this account names them any
- * more (the worker pruned the last PR's key). A ticket still named by any PR keeps its comments.
+ * more (the worker pruned the last PR's key) AND no `sprint_tickets` row does (a sprint ticket with no
+ * PR yet keeps the comments the sprint read wrote). A ticket still named by either keeps its comments.
  */
 export async function pruneOrphanComments(
   ctx: TrackerContext,
@@ -216,9 +234,23 @@ export async function pruneOrphanComments(
       .limit(1)
       .execute()) as Array<{ id: number }>;
     if (still.length > 0) continue;
+    if (await namedBySprint(ctx, accountId, k)) continue;
     await ctx.db
       .delete(t)
       .where(and(eq(t.accountId, accountId), eq(t.provider, k.provider), eq(t.apiRoot, k.apiRoot), eq(t.issueKey, k.issueKey)))
       .execute();
   }
+}
+
+/** A `sprint_tickets` row of this account names the ticket. A narrow test schema without the table: false. */
+async function namedBySprint(ctx: TrackerContext, accountId: number, k: TicketIdentity): Promise<boolean> {
+  const st = ctx.schema.sprintTickets;
+  if (st == null) return false;
+  const rows = (await ctx.db
+    .select({ id: st.id })
+    .from(st)
+    .where(and(eq(st.accountId, accountId), eq(st.provider, k.provider), eq(st.apiRoot, k.apiRoot), eq(st.issueKey, k.issueKey)))
+    .limit(1)
+    .execute()) as Array<{ id: number }>;
+  return rows.length > 0;
 }

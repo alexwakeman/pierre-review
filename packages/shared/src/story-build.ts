@@ -22,8 +22,10 @@ import type {
   AiProviderId,
   ClaudeTicketCriterionStatus,
   TicketAssessment,
+  TicketCriterionMetBy,
 } from './types.js';
 import { criterionTextOnly } from './prose.js';
+import { criterionIsGap } from './criterion-status.js';
 
 // ---- caps (each spelled once) ---------------------------------------------------------------------
 
@@ -163,10 +165,13 @@ export type StoryBuildPhase =
 export interface StoryBuildCoverageCriterion {
   ref: string;
   text: string;
-  /** The ticket check's verdict; `not_checked` when no check ran. A gap is anything but `met`. */
+  /** The ticket check's verdict; `not_checked` when no check ran. A gap is anything not DONE (shared
+   *  `criterionDone`: `met`, or `met_outside_code`). */
   verdict: ClaudeTicketCriterionStatus;
-  /** The PRs that deliver it (a `met` criterion), local ids. */
+  /** The PRs that deliver it (a `met` criterion), local ids. [] for `met_outside_code`. */
   coveredByPrIds: number[];
+  /** `met_outside_code` only: the person's ticket comment it rests on. */
+  metBy?: TicketCriterionMetBy | null;
 }
 
 /** Something the ticket asks for outside its criteria (the ticket check's `missing` items). `ref` is `M1`…. */
@@ -196,7 +201,7 @@ export interface StoryBuildCoverage {
 
 /** Is this criterion a gap the build should close? */
 export function storyBuildIsGap(c: Pick<StoryBuildCoverageCriterion, 'verdict'>): boolean {
-  return c.verdict !== 'met';
+  return criterionIsGap(c.verdict);
 }
 
 /** Why a repository is a candidate. */

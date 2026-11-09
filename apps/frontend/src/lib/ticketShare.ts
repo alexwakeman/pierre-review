@@ -10,6 +10,7 @@
 // `expectedIn.prId`, else `expectedIn.repoId` against this PR's repo. An item that names NO owner is
 // this PR's too: its post already lands on the PR being viewed (`postTargetOf`), and leaving it out
 // would leave it postable nowhere (the stack view has no Post buttons).
+import { criterionDone } from '@pierre-review/shared';
 import type {
   ReviewDocReference,
   TicketAssessment,
@@ -29,6 +30,8 @@ export interface PrTicketShare {
   notRequested: TicketNotRequestedItem[];
   /** Criteria met by other PRs (and not by this one). */
   metElsewhere: number;
+  /** Criteria met outside code changes (a person's ticket comment) — done, named apart. */
+  metOutsideCode?: number;
   /** Unmet criteria and missing items that belong in another PR or repo. */
   todoElsewhere: number;
 }
@@ -58,13 +61,18 @@ export function prTicketShare(
   const missingByRef = new Map(assessment.missing.map((m) => [m.ref, m]));
   const criteria: TicketCriterion[] = [];
   let metElsewhere = 0;
+  let metOutsideCode = 0;
   let todoElsewhere = 0;
   for (const c of assessment.criteria) {
     if (c.deliveredBy.includes(pr.id)) {
       criteria.push(c);
       continue;
     }
-    if (c.status === 'met') {
+    if (c.status === 'met_outside_code') {
+      metOutsideCode += 1;
+      continue;
+    }
+    if (criterionDone(c.status)) {
       metElsewhere += 1;
       continue;
     }
@@ -80,7 +88,7 @@ export function prTicketShare(
     else missing.push(i);
   }
   const notRequested = assessment.notRequested.filter((g) => g.prId === pr.id);
-  return { criteria, missing, notRequested, metElsewhere, todoElsewhere };
+  return { criteria, missing, notRequested, metElsewhere, metOutsideCode, todoElsewhere };
 }
 
 /**
@@ -111,12 +119,15 @@ export function prCardOf(members: readonly Pick<TicketReviewMember, 'prId' | 'ca
   return members.find((m) => m.prId === prId)?.card ?? null;
 }
 
-/** "3 more criteria are met by other PRs. 1 more is still to do in another PR." — null when none. */
-export function shareRestLine(share: Pick<PrTicketShare, 'metElsewhere' | 'todoElsewhere'>): string | null {
+/** "3 more criteria are met by other PRs. 1 more is met outside code changes. 1 more is still to do in
+ *  another PR." — null when none. */
+export function shareRestLine(share: Pick<PrTicketShare, 'metElsewhere' | 'todoElsewhere' | 'metOutsideCode'>): string | null {
   const parts: string[] = [];
   const m = share.metElsewhere;
+  const o = share.metOutsideCode ?? 0;
   const t = share.todoElsewhere;
   if (m > 0) parts.push(m === 1 ? '1 more criterion is met by another PR.' : `${m} more criteria are met by other PRs.`);
+  if (o > 0) parts.push(o === 1 ? '1 more is met outside code changes.' : `${o} more are met outside code changes.`);
   if (t > 0) parts.push(t === 1 ? '1 more is still to do in another PR.' : `${t} more are still to do in other PRs.`);
   return parts.length > 0 ? parts.join(' ') : null;
 }
