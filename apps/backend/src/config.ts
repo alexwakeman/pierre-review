@@ -1,6 +1,9 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { defaultDocsDir, migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
+import { isScratchEnv, scratchGithubMode, scratchRefusal, ScratchRefusedError } from './scratch.js';
+import { installScratchFetchGuard } from './scratch-guard.js';
 import {
   SPRINT_PATHS_BUDGET_USD_DEFAULT,
   SPRINT_PATHS_DAILY_CAP_DEFAULT,
@@ -10,12 +13,16 @@ import {
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
 
+// A SCRATCH backend (`pnpm dev:scratch`, LIMN_SCRATCH=1 — scratch.ts) loads ONLY `.env.scratch`:
+// `.env` can name the real database, clone folder or ENCRYPTION_KEY, and a scratch run must never
+// inherit one it forgot to set.
+const scratchMode = isScratchEnv();
+
 // Load .env from the repo root and (optionally) apps/backend before reading
 // any config. Node's loader no-ops politely if a file is missing.
-for (const envPath of [
-  resolve(backendRoot, '../../.env'),
-  resolve(backendRoot, '.env'),
-]) {
+for (const envPath of scratchMode
+  ? [resolve(backendRoot, '../../.env.scratch')]
+  : [resolve(backendRoot, '../../.env'), resolve(backendRoot, '.env')]) {
   try {
     process.loadEnvFile(envPath);
   } catch {
@@ -60,8 +67,21 @@ if (!process.env.VITEST) {
 // in-memory "is-syncing" guard, so two of them double-sync every repo against the
 // GitHub rate limit and contend on the SQLite write lock. DATABASE_URL / --db
 // override this; a relative override resolves under apps/backend.
-const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
+//
+// ⚠ UNDER TEST THE DEFAULT IS THE RUN'S OWN FOLDER. db/client.ts opens `dbPath` at IMPORT time, so a
+// test that imported it before setting DATABASE_URL used to open the reader's real dev database (the
+// 2026-10-07 acme leak). Under vitest an unset DATABASE_URL is `<LIMN_TEST_RUN_DIR>/default.sqlite`,
+// and the dev default is refused outright.
+const DEV_DEFAULT_DB = './data/pierre-review.sqlite';
+const rawDbUrl =
+  process.env.DATABASE_URL ??
+  (process.env.VITEST
+    ? join(process.env.LIMN_TEST_RUN_DIR ?? tmpdir(), `default-${process.pid}.sqlite`)
+    : DEV_DEFAULT_DB);
 const dbPath = isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl);
+if (process.env.VITEST && dbPath === resolve(backendRoot, DEV_DEFAULT_DB)) {
+  throw new Error(`A test may not open the dev database ${dbPath}. Set DATABASE_URL to a scratch path.`);
+}
 
 // ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
 // DEFAULT ON. This is the PRIMARY sync strategy: cadence by activity bucket, plus a
@@ -154,6 +174,9 @@ export const config = {
   // The ledger, the commit trailer and the GraphQL review id are recorded either way.
   limnAttributeAll: process.env.LIMN_ATTRIBUTE_ALL !== 'false',
   port: intFromEnv('PORT', 4000),
+  // A SCRATCH backend (`pnpm dev:scratch`; scratch.ts, scratch-guard.ts): null for every real one.
+  // `github` is LIMN_SCRATCH_GITHUB — 'off' (no token), 'read' (writes blocked), 'write'.
+  scratch: scratchMode ? { github: scratchGithubMode() } : null,
   host: process.env.HOST ?? '127.0.0.1',
   dbPath,
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
@@ -535,3 +558,18 @@ export const config = {
 } as const;
 
 export type Config = typeof config;
+
+// A scratch backend refuses to start on the real database, data folder or ports, then installs the
+// write guard BEFORE any other module can call fetch (docs/TESTING.md § Scratch stack).
+if (config.scratch) {
+  const reason = scratchRefusal({
+    dbPath: config.dbPath,
+    dataDir: config.dataDir,
+    cloneDir: config.cloneDir,
+    docsDir: config.docsDir,
+    port: config.port,
+    frontendPort: intFromEnv('FRONTEND_PORT', 5173),
+  });
+  if (reason) throw new ScratchRefusedError(reason);
+  installScratchFetchGuard(config.scratch.github);
+}

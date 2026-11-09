@@ -146,6 +146,62 @@ CLI and its files into a temp directory at run time (nothing on disk in the repo
 `*-main.ts` entries (on the list) and `run.ts` (imported, so in the graph); `local-scorer` spawns
 `ml/scorer-process.ts` (added to the list that day). Nothing else is read from the repo.
 
+## Scratch stack (`pnpm dev:scratch`)
+
+The reader's own Limn is `pnpm dev` in the MAIN checkout: `tsx watch` on `apps/backend/data/pierre-review.sqlite`,
+data dir `~/.limn`. An edit in that checkout restarts it. So **an agent edits in a git worktree and checks
+its work on `pnpm dev:scratch` from that worktree**, never on the main checkout's servers.
+
+`scripts/dev-scratch.mjs` (seeding: `scripts/lib/scratch-seed.mjs`):
+
+| Flag | Default | What |
+|---|---|---|
+| `--seed demo\|copy\|empty` | `demo` | `demo`: the fictional acme/* data of `pnpm demo`. `copy`: a snapshot of the real dev DB (below). `empty`: migrations only. |
+| `--slot N` | `0` | ports `4200+10N` (API) / `5373+10N` (SPA); folder `<repo>/.scratch/<N>/` (gitignored). |
+| `--github off\|read\|write` | `off`; `read` for `copy` | `off`: a failing `gh` first on the PATH, no token variable. `read`: the reader's `gh` token, every write blocked in code. `write`: real writes; ask the reader each time. |
+| `--sync` | off | the scheduler (sync, auto review, tracker, Slack). It spends the SAME hourly GitHub budget as the real Limn. |
+| `--codex` | off | allow Codex; sign in again into the scratch Codex home (Settings → AI). `~/.limn/codex` is never shared: a token refresh could sign the real Limn out. |
+| `--ml` | off | ML scoring, with `~/.limn`'s downloaded model linked in. |
+| `--reseed` · `--keep-tracker` · `--no-frontend` | | replace the DB · keep tracker/Sonar/wiki tokens in a copy · API only |
+
+Claude is on: `<slot>/ai-runtime` links to `~/.limn/ai-runtime` and the machine's Claude login is used.
+`LIMN_AI_AUTO_INSTALL=false`, so the scratch stack never writes the linked runtime.
+
+**The backend's own guards** (they apply however the process starts, with `LIMN_SCRATCH=1`):
+
+- `config.ts` loads ONLY `<repo>/.env.scratch` (never `.env`, which can name the real DB or
+  `ENCRYPTION_KEY`) and REFUSES TO START (`scratch.ts` `scratchRefusal`) on a DB under `~/.limn`,
+  `~/.pierre-review` or any checkout's `apps/backend/data/`, a data dir that is or is inside `~/.limn`,
+  a clone or docs dir outside the data dir, port 4000 or frontend port 5173. Paths are compared after
+  `realpath`, so a symlink does not get past it.
+- Unless `--github write`, the WRITE GUARD (`scratch-guard.ts`) answers every write with a 403 it never
+  sends: `globalThis.fetch` (GitHub REST and GraphQL mutations, Slack, Linear/Notion/Jira writes, any
+  PUT/PATCH/DELETE off loopback), plus `limnWrite`, `pushRef`/`pushForceWithLease` and the tracker's
+  `node:https` transport. Model calls and loopback pass. It does not see a child process other than
+  `git push`; the `gh` CLI is only used to read.
+- The Claude session cleanup (`ai/session-litter.ts`) does not run: the folder it cleans is the machine's.
+
+**One backend per data dir, every mode** (`instance-lock.ts`): `start()` takes `<dataDir>/server.lock`
+(pid, port, DB) before any sweep. A live holder refuses the start and names itself; a dead pid's lock
+(a crash, a SIGKILL) is taken over; the lock goes on exit. So a forgotten `LIMN_DATA_DIR` can no longer
+let one backend's boot sweeps (sandbox labels, worktree GC) delete another's live work. ⚠ The installed
+`limn` next to `pnpm dev` now refuses: both default to `~/.limn`.
+
+**The copy seed**: the source is the `.sqlite` the `:4000` process has open (`lsof`), else the main
+checkout's `apps/backend/data/pierre-review.sqlite`. It is opened READ-ONLY and copied with SQLite's
+online backup (consistent while the real Limn writes). Then a scrub turns off auto review, auto post
+(and its verdict / resolve), auto fix and Push automatically, auto diagrams, team claims, dependency
+automation; deletes armed merges and Slack targets; and nulls the tracker, Sonar and wiki tokens
+(`--keep-tracker` keeps them; they stay sealed without `.env`'s key). Each statement runs alone, so a
+missing column is named and skipped. The scrub stops automatic work from STARTING; the write guard is
+the real protection. The copy holds every PR body: it stays 0600 in the gitignored `.scratch/`.
+
+`dev:scratch` refuses to run from the main checkout while `:4000` is served from it, and frees its own
+ports only when the holder runs from THIS checkout.
+
+**Under vitest**, an unset `DATABASE_URL` is `<LIMN_TEST_RUN_DIR>/default-<pid>.sqlite`, and the dev
+default path throws: an import-time DB client can no longer open the real dev DB.
+
 ## The invariants and the tests that guard them
 
 ⚠ **Never delete, skip or weaken these to save time.** A slow one moves to `slow` (still run on
@@ -170,6 +226,8 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 | AI Fix's MERGE: only a merge with parents (PR head, base tip), no marker left and fixes on top is pushable; the item never in an auto fix | `coding/ai-fix/merge-verify.test.ts`, `sandbox/session/fix-merge-session-flow-db.test.ts` (slow), `coding/ai-fix/review-seed.test.ts`, `merge/dependency-automation-ai.test.ts` (fast) | both |
 | The worktree sweep keeps a tree a live job uses | `review/worktree-gc-policy.test.ts` (fast), `review/worktree-gc.test.ts` (slow) | both |
 | `isRetryableGithubError` keeps 403/429 out | `github/client.test.ts` | fast |
+| One backend per data dir (live holder refuses, stale lock taken over) | `instance-lock.test.ts` | fast |
+| A scratch backend refuses the real DB / data dir / ports, and writes nothing (fetch guard, `limnWrite`, git push, tracker transport) | `scratch.test.ts` | fast |
 | Derived thread state | `sync/derive-thread-state.test.ts` + `sync/__fixtures__/threads/` | fast |
 | zod from the SDK's own install | `ai/runtime.test.ts` | fast |
 

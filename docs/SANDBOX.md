@@ -209,6 +209,11 @@ removes the repo store (`limn-repo-store-<instance>`), by its `limn.store` label
 the daemon refuses while a sandbox mounts it. A store maintenance container is `--rm` and carries
 `limn.managed` + `limn.role=setup`, so a leftover one is swept like any other.
 
+⚠ **The sweep trusts that ONE backend owns the data dir.** `start()` takes `<dataDir>/server.lock`
+(`instance-lock.ts`) before any sweep: a second backend on the same data dir (a worktree's
+`pnpm dev:backend` with only `PORT` changed, the CLI beside `pnpm dev`) refuses to start rather than
+remove the first one's live sandboxes. A dead holder's lock is taken over. docs/TESTING.md § Scratch stack.
+
 ## The egress proxy (`apps/backend/src/sandbox/proxy/`)
 
 One container per session, from the sandbox image, non-root, read-only root, 1 CPU / 256 MB, on the

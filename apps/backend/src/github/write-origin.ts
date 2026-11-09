@@ -16,6 +16,7 @@
 // no database. A ledger failure never fails or blocks the GitHub write (it is logged to stderr only).
 import type { LimnActionKind, LimnActionOrigin } from '@pierre-review/shared';
 import type { LimnActionIds } from '../db/limn-actions.js';
+import { assertScratchWriteAllowed } from '../scratch-guard.js';
 
 export interface LimnWriteOrigin {
   limn: LimnActionOrigin;
@@ -62,6 +63,8 @@ export async function limnWrite<T>(
   run: () => Promise<T>,
   idsOf: (result: T) => LimnWriteResult,
 ): Promise<T> {
+  // A scratch backend without `--github write` writes nothing (scratch-guard.ts); before the ledger.
+  assertScratchWriteAllowed(`a GitHub write (${kind})`);
   if (!isLimnOrigin(origin)) return run();
   let rowId: number | null = null;
   let ledger: typeof import('../db/limn-actions.js') | null = null;

@@ -8,6 +8,8 @@ release/
 *.tsbuildinfo
 
 # Local DB + env
+# `pnpm dev:scratch`'s folders (scripts/dev-scratch.mjs): a copied database holds real PR data.
+.scratch/
 *.sqlite
 *.sqlite-*
 *.db
