@@ -11,6 +11,8 @@ import { coverReports, coverSummary, reconcileReplies, type RepliesPlan } from '
 import { buildCoverPrompt } from './replies-check-prompt.js';
 import { prLevelStillOpenItems, stillOpenCandidates } from './still-open.js';
 import { coverTarget } from './pair.js';
+import { autoVerdictFor, findingsNotApproved, withCoverHold, type PairCoverHold } from './auto-verdict.js';
+import { NO_EARLIER_OPEN } from './earlier-open.js';
 
 const OLD = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -173,5 +175,39 @@ describe('the cover pass', () => {
       "Checked Codex's 3 open findings: 1 dealt with, 1 still open, 1 not checked.",
     );
     expect(coverSummary([{ status: 'reply_accepted' }], 'claude')).toBe("Checked Claude's 1 open finding: 1 dealt with.");
+  });
+});
+
+describe('the cover holds the pair’s verdict (2026-11-09)', () => {
+  const hold = (open: [number, number], unchecked: [number, number]): PairCoverHold => ({
+    by: 'Codex',
+    open: { blockers: open[0], warnings: open[1] },
+    unchecked: { blockers: unchecked[0], warnings: unchecked[1] },
+  });
+  const run = [{ by: 'Claude', verdict: 'APPROVE' as const, summary: 'Fine.' }];
+  const warning = { id: 1, severity: 'warning' as const, title: 'w', included: true, story: null } as never;
+
+  it('open blockers count as earlier blockers; open warnings and EVERY unchecked one hold the approval only', () => {
+    expect(withCoverHold(NO_EARLIER_OPEN, hold([1, 2], [3, 4]))).toEqual({ total: 10, blockers: 1, warnings: 9, nits: 0, questions: 0 });
+    expect(withCoverHold(NO_EARLIER_OPEN, null)).toEqual(NO_EARLIER_OPEN);
+    expect(autoVerdictFor('APPROVE', [], undefined, withCoverHold(NO_EARLIER_OPEN, hold([0, 0], [2, 0])))).toBe('COMMENT');
+    expect(autoVerdictFor('APPROVE', [], undefined, withCoverHold(NO_EARLIER_OPEN, hold([1, 0], [0, 0])))).toBe('REQUEST_CHANGES');
+    expect(autoVerdictFor('APPROVE', [], undefined, withCoverHold(NO_EARLIER_OPEN, hold([0, 0], [0, 0])))).toBe('APPROVE');
+  });
+
+  it('the reason names the other provider’s points in plain English', () => {
+    expect(findingsNotApproved(run, [], undefined, NO_EARLIER_OPEN, hold([0, 2], [0, 0]))?.text).toBe(
+      'Not approved: 2 earlier Codex points are still open.',
+    );
+    expect(findingsNotApproved(run, [], undefined, NO_EARLIER_OPEN, hold([0, 0], [0, 1]))?.text).toBe(
+      'Not approved: 1 earlier Codex point was not checked.',
+    );
+    expect(findingsNotApproved(run, [], undefined, NO_EARLIER_OPEN, hold([0, 1], [1, 0]))?.text).toBe(
+      'Not approved: 1 earlier Codex point is still open. 1 earlier Codex point was not checked.',
+    );
+    expect(findingsNotApproved(run, [warning], undefined, NO_EARLIER_OPEN, hold([0, 1], [0, 0]))?.text).toBe(
+      'Not approved: a warning and 1 earlier Codex point are still open.',
+    );
+    expect(findingsNotApproved(run, [], undefined, NO_EARLIER_OPEN, hold([0, 0], [0, 0]))).toBeNull();
   });
 });

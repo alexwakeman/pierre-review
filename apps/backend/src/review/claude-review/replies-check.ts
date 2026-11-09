@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { and, asc, desc, eq, gt, gte, inArray, isNull, ne, or } from 'drizzle-orm';
 import {
+  aiProviderName,
   aiRunProvider,
+  isStillOpenFollowUp,
   type AiProviderId,
   type ClaudeAutoPostWire,
   type ClaudeNotApproved,
@@ -38,7 +40,8 @@ import {
 import {
   autoPostWireOf,
   insertQueuedReview,
-  judgedSinceByProvider,
+  isSettledJudgement,
+  latestJudgementsSinceByProvider,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
   markReviewCancelled,
@@ -57,6 +60,7 @@ import {
 } from './follow-up.js';
 import type { ReviewFollowUpReport } from '../../platform/contract.js';
 import type { AutoPostDeps } from './auto-post.js';
+import type { PairCoverHold } from './auto-verdict.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
 import { peerTexts, pickReviewNonce } from './prompts.js';
 import { checkOutPeers } from '../peer-checkouts.js';
@@ -139,6 +143,20 @@ interface Job {
   // A COVER PASS (`startCoverCheck`): the failed half's provider, whose open findings it checks, and
   // the coverage its row records (the pair's start: it claims no reply the pair did not already see).
   cover?: { failed: AiProviderId; coverageMs: number | null };
+  // Called ONCE when the job ends (ran, failed, cancelled or dropped from the lane): the pair waits
+  // on it before it posts (`runCoverCheck`).
+  onDone?: () => void;
+}
+
+/** End a job's waiter (once). */
+function jobDone(job: Job): void {
+  const done = job.onDone;
+  job.onDone = undefined;
+  try {
+    done?.();
+  } catch {
+    /* a waiter never fails the lane */
+  }
 }
 
 const claimed = new Map<string, number>();
@@ -530,8 +548,11 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
 // as a replies pass (`kind = 'replies'`, so every "latest review" reader skips it and its items
 // overlay the chain like a pass's), with `followUp.cover` naming the failed provider. It may mark a
 // finding addressed (auto resolve may then close the thread) but never disputes one and never pushes
-// back; it changes no outcome. An AUTO pair's cover asks the spend budget first (skipped, never
-// queued, when over). Nothing to check (every open finding already judged since) ⇒ no row, no model.
+// back. ⚠ THE PAIR POSTS AFTER IT (changed 2026-11-09, manager.ts `startPairCover` → `runCoverCheck`):
+// its still-open warning-or-above items count as earlier points in the pair's auto verdict, and a
+// cover that could not check them (failed, skipped, cancelled) holds the approval (`pairCoverHold`).
+// An AUTO pair's cover asks the spend budget first (skipped, never queued, when over). Nothing to
+// check (every open finding already SETTLED since) ⇒ no row, no model.
 
 export interface StartCoverCheckArgs {
   accountId: number;
@@ -544,9 +565,11 @@ export interface StartCoverCheckArgs {
   pressed?: boolean;
   // The pair's first half: the cover records the pair's start as its coverage.
   pairId: number;
+  // Called once the queued pass ends (only when the outcome is 'queued').
+  onDone?: () => void;
 }
 
-/** The failed provider's open findings no run of the survivor's provider judged since. DB-only. */
+/** The failed provider's open findings no run of the survivor's provider SETTLED since. DB-only. */
 export async function planCoverCheck(
   ctx: AgentContext,
   accountId: number,
@@ -557,14 +580,19 @@ export async function planCoverCheck(
   const settled = await loadSettledByReplyFindings(ctx, prId, accountId, ALL_RUNS);
   const chain = await loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, new Set(settled.map((f) => f.id)), failed, true);
   if (!chain || chain.findings.length === 0) return null;
-  const judged = await judgedSinceByProvider(ctx, prId, accountId, survivor, chain.reviewId, ALL_RUNS);
-  const open = chain.findings.filter((f) => !judged.has(f.id));
+  // Only what the survivor's provider SETTLED since is left out; one it last judged still open is
+  // checked again, with that judgement as its prior status (so a same-head re-check keeps it).
+  const latest = await latestJudgementsSinceByProvider(ctx, prId, accountId, survivor, chain.reviewId, ALL_RUNS);
+  const open = chain.findings.filter((f) => !isSettledJudgement(latest.get(f.id)));
   if (open.length === 0) return null;
   const attached = await attachFindingThreads(ctx, accountId, prId, open);
   return {
     reviewId: chain.reviewId,
     headSha: chain.headSha,
-    findings: attached.map((f) => ({ ...f, carried: true, raisedBy: failed })),
+    findings: attached.map((f) => {
+      const j = latest.get(f.id);
+      return { ...f, carried: true, raisedBy: failed, ...(j ? { priorStatus: j } : {}) };
+    }),
   };
 }
 
@@ -627,6 +655,7 @@ export async function startCoverCheck(ctx: AgentContext, a: StartCoverCheckArgs)
         commentsThroughMs: null,
         pressed: a.pressed === true,
         cover: { failed: a.failed, coverageMs: start[0]?.createdAt.getTime() ?? null },
+        ...(a.onDone ? { onDone: a.onDone } : {}),
       };
       claimed.set(key, reviewId);
       phaseByKey.set(key, 'queued');
@@ -643,6 +672,83 @@ export async function startCoverCheck(ctx: AgentContext, a: StartCoverCheckArgs)
     ctx.log.warn(`cover check pr ${a.prId}: ${err instanceof Error ? err.message : String(err)}`);
     return { outcome: 'refused', reason: 'nothing_to_check' };
   }
+}
+
+// The longest a pair waits for its cover pass before it posts anyway (then as UNCHECKED: no approval
+// while the failed provider's warning-or-above findings are open).
+export const COVER_WAIT_MAX_MS = 30 * 60_000;
+
+/**
+ * START A PAIR'S COVER PASS AND WAIT FOR IT (docs/CLAUDE-REVIEW.md § Claude + Codex → A FAILED HALF IS
+ * COVERED, changed 2026-11-09): the pair posts only after it. Resolves to the cover row's id once the
+ * pass ended (ran, failed or was cancelled), or null when none was queued (nothing to check, over the
+ * budget, refused, busy). At most `maxWaitMs`; then null-or-the-row as it stands. Never throws.
+ */
+export async function runCoverCheck(
+  ctx: AgentContext,
+  a: Omit<StartCoverCheckArgs, 'onDone'>,
+  maxWaitMs = COVER_WAIT_MAX_MS,
+): Promise<{ result: StartRepliesCheckResult; coverReviewId: number | null }> {
+  let markDone: () => void = () => {};
+  const ended = new Promise<void>((resolve) => {
+    markDone = resolve;
+  });
+  const result = await startCoverCheck(ctx, { ...a, onDone: () => markDone() });
+  if (result.outcome !== 'queued') return { result, coverReviewId: null };
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, maxWaitMs);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  await Promise.race([ended, timedOut]);
+  if (timer) clearTimeout(timer);
+  return { result, coverReviewId: result.reviewId };
+}
+
+const sevCount = (sev: string | null | undefined): 'blockers' | 'warnings' | null =>
+  sev === 'blocker' ? 'blockers' : sev === 'warning' ? 'warnings' : null;
+
+/**
+ * WHAT THE COVER LEFT FOR THE PAIR'S VERDICT (auto-verdict.ts `PairCoverHold`), DB-only. With a
+ * SUCCEEDED cover row: its still-open warning-or-above items are `open`, its 'not_checked' ones
+ * (over the cap) `unchecked`. With none (the cover failed, was cancelled, skipped by the budget gate,
+ * refused, or is still running past the wait): every warning-or-above finding of the failed provider
+ * the survivor's provider has not settled (`planCoverCheck`) is `unchecked`. Never throws: a failed
+ * read counts nothing as checked — every open one of the failed chain, else zero.
+ */
+export async function pairCoverHold(
+  ctx: AgentContext,
+  a: { accountId: number; prId: number; failed: AiProviderId; survivor: AiProviderId; coverReviewId: number | null },
+): Promise<PairCoverHold> {
+  const hold: PairCoverHold = { by: aiProviderName(a.failed), open: { blockers: 0, warnings: 0 }, unchecked: { blockers: 0, warnings: 0 } };
+  try {
+    if (a.coverReviewId != null) {
+      const cr = sch(ctx).claudeReviews;
+      const rows = (await ctx.db
+        .select({ status: cr.status, followUp: cr.followUp, kind: cr.kind })
+        .from(cr)
+        .where(and(eq(cr.id, a.coverReviewId), eq(cr.accountId, a.accountId), eq(cr.prId, a.prId)))
+        .execute()) as Array<{ status: string; followUp: ClaudeReviewFollowUpRecord | null; kind: string | null }>;
+      const row = rows[0];
+      if (row?.status === 'succeeded' && row.kind === 'replies' && row.followUp?.cover != null) {
+        for (const it of row.followUp.items ?? []) {
+          const k = sevCount(it.severity);
+          if (k == null) continue;
+          if (it.status === 'not_checked') hold.unchecked[k] += 1;
+          else if (isStillOpenFollowUp(it.status)) hold.open[k] += 1;
+        }
+        return hold;
+      }
+    }
+    const planned = await planCoverCheck(ctx, a.accountId, a.prId, a.failed, a.survivor);
+    for (const f of planned?.findings ?? []) {
+      const k = sevCount(f.severity);
+      if (k != null) hold.unchecked[k] += 1;
+    }
+  } catch (err) {
+    ctx.log.warn(`cover check pr ${a.prId}: could not read what it left open: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return hold;
 }
 
 /** Run one cover group (re-planned at run time) and store it. The row's items, or null (failed / none). */
@@ -775,6 +881,7 @@ export function requestRepliesCheckCancel(accountId: number, prId: number): bool
   claimed.delete(k);
   phaseByKey.delete(k);
   for (const g of job.groups) void markReviewCancelled(job.ctx, g.reviewId).catch(() => {});
+  jobDone(job);
   return true;
 }
 
@@ -808,6 +915,7 @@ function launch(job: Job): void {
       controllers.delete(k);
       phaseByKey.delete(k);
       claimed.delete(k);
+      jobDone(job);
       pump();
       pumpReviewLane();
     });
@@ -1106,7 +1214,8 @@ async function afterPass(
   const last = succeeded[succeeded.length - 1]!;
   if (job.cover) {
     // A COVER PASS: auto resolve only (its own switches and claimed records). It never pushes back
-    // (it checks the other provider's findings) and changes no outcome.
+    // (it checks the other provider's findings) and posts no outcome of its own: the pair's one post,
+    // which waits for this pass, reads what it left open (`pairCoverHold`).
     try {
       const { maybeAutoResolveFindings } = await import('./auto-resolve.js');
       for (const r of succeeded) {

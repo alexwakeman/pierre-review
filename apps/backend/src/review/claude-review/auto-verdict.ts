@@ -32,6 +32,42 @@ import {
 import { isReaderIgnoredFinding } from './finding-facts.js';
 import { NO_EARLIER_OPEN, type EarlierOpen } from './earlier-open.js';
 
+/**
+ * A CLAUDE + CODEX PAIR WITH A FAILED HALF (docs/CLAUDE-REVIEW.md § Claude + Codex → A FAILED HALF IS
+ * COVERED): the failed provider's earlier warning-or-above findings, as the cover pass left them
+ * BEFORE the review posts. `open`: judged still open (not / partly addressed) — counted as earlier
+ * points (a blocker requests changes, a warning holds the approval). `unchecked`: not judged at this
+ * head (the cover failed, was skipped, or left one over its cap) — they hold the APPROVAL only, never
+ * ask for changes. `by`: the failed provider's name ("Codex"), for the reason line.
+ */
+export interface PairCoverHold {
+  by: string;
+  open: { blockers: number; warnings: number };
+  unchecked: { blockers: number; warnings: number };
+}
+
+/** Does the hold count anything? */
+export function coverHoldCounts(c: PairCoverHold | null | undefined): boolean {
+  return c != null && c.open.blockers + c.open.warnings + c.unchecked.blockers + c.unchecked.warnings > 0;
+}
+
+/**
+ * The earlier points a verdict reads, with the cover hold added: its still-open blockers as earlier
+ * blockers, its still-open warnings AND every unchecked one as earlier warnings (an unchecked point
+ * holds the approval; it never requests changes). Pure.
+ */
+export function withCoverHold(e: EarlierOpen, c: PairCoverHold | null | undefined): EarlierOpen {
+  if (!coverHoldCounts(c)) return e;
+  const h = c!;
+  const unchecked = h.unchecked.blockers + h.unchecked.warnings;
+  return {
+    ...e,
+    total: e.total + h.open.blockers + h.open.warnings + unchecked,
+    blockers: e.blockers + h.open.blockers,
+    warnings: e.warnings + h.open.warnings + unchecked,
+  };
+}
+
 /** The two workspace rules every verdict reads. */
 export interface VerdictRules {
   pairStrictness: PairVerdictStrictness;
@@ -273,16 +309,22 @@ export function findingsNotApproved(
   // severities): an earlier blocker / warning holds like a finding ("1 earlier warning is still
   // open."); the rest are named in the tail, never as "no findings".
   stillOpen: number | EarlierOpen = 0,
+  // A pair whose other half failed: the failed provider's warning-or-above findings the cover pass
+  // left open or could not check (`PairCoverHold`). Named apart: "2 earlier Codex points are still
+  // open." / "1 earlier Codex point was not checked." NOT included in `stillOpen`.
+  cover: PairCoverHold | null = null,
 ): ClaudeNotApproved | null {
   const earlier: EarlierOpen = typeof stillOpen === 'number' ? { ...NO_EARLIER_OPEN, total: stillOpen } : stillOpen;
   const counted = countedOf(findings);
   const n = (sev: ClaudeFindingSeverity) => counted.filter((f) => f.severity === sev).length;
   const blockers = n('blocker');
   const warnings = n('warning');
-  if (blockers + warnings + earlier.blockers + earlier.warnings > 0) {
-    return {
-      heldReason: 'open_findings',
-      text: sentence(
+  const coverOpen = cover ? cover.open.blockers + cover.open.warnings : 0;
+  const coverUnchecked = cover ? cover.unchecked.blockers + cover.unchecked.warnings : 0;
+  if (blockers + warnings + earlier.blockers + earlier.warnings + coverOpen + coverUnchecked > 0) {
+    const parts: string[] = [];
+    if (blockers + warnings + earlier.blockers + earlier.warnings + coverOpen > 0) {
+      parts.push(
         openText(
           [
             [blockers, 'blocker'],
@@ -291,10 +333,16 @@ export function findingsNotApproved(
           [
             [earlier.blockers, 'blocker'],
             [earlier.warnings, 'warning'],
+            [coverOpen, `${cover?.by ?? ''} point`],
           ],
         ),
-      ),
-    };
+      );
+    }
+    if (coverUnchecked > 0) {
+      const t = `${coverUnchecked} earlier ${cover!.by} point${coverUnchecked === 1 ? ' was' : 's were'} not checked.`;
+      parts.push(parts.length > 0 ? `${t[0]!.toUpperCase()}${t.slice(1)}` : t);
+    }
+    return { heldReason: 'open_findings', text: sentence(parts.join(' ')) };
   }
   const nits = n('nit');
   const questions = n('question');

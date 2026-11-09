@@ -620,9 +620,15 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     (`loadPriorReviewForFollowUp` → `loadProviderChain` for the other provider, read as a pair half
     reads it): each joins as carried with `raisedBy`, inline or PR-level alike. One is left out when
     this chain already lists it, an eligible finding here re-raises it, it re-raises one this chain
-    lists (`priorFindingId`), or a run of THIS provider judged it after the other provider's newest
-    word on it (`judgedSinceByProvider` past the other chain's anchor) — so a working chain on the
-    other provider is not judged twice. With no run of this provider yet, the other chain alone
+    lists (`priorFindingId`), or a run of THIS provider SETTLED it after the other provider's newest
+    word on it (`latestJudgementsSinceByProvider` past the other chain's anchor, the newest judgement
+    wins; settled = anything but `isStillOpenFollowUp`: addressed, no longer applies, reply accepted)
+    — so a working chain on the other provider is not judged twice. ⚠ **NEVER DROPPED WHILE OPEN**
+    (fixed 2026-11-09): one this provider last judged not / partly addressed (a cover pass's, a single
+    run's) keeps coming, its latest judgement as `priorStatus` (the same-head lock keeps it). Before
+    the fix ANY judgement dropped it, so a cover's `not_addressed` lost the finding for good once the
+    own chain anchored on a pair half (pair → Codex fails + cover → pair → Codex fails → Claude
+    alone; pinned in `replies-check-pipeline.test.ts` "the other provider's chain over many runs"). With no run of this provider yet, the other chain alone
     anchors the follow-up. They go LAST in the prompt (`selectPriorFindings`, under the same 40 /
     24k cap; one left over is `not_checked` and carried again), each fenced with "(raised by Codex in
     an earlier review, at head …)", plus ONE rule line only when such a finding is shown
@@ -636,23 +642,42 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     HALF CARRIES NOTHING THE OTHER PROVIDER RAISED** (`inPair`): no cross chain, and no carried item
     whose raising run was the other provider's (an earlier cross carry, a merged-away duplicate's kept
     finding) — one judge per thread.
-  - ⚠ **A FAILED HALF IS COVERED** (decided 2026-11-09). When one half fails or never starts
+  - ⚠ **A FAILED HALF IS COVERED — BEFORE THE POST** (decided 2026-11-09; the user's rule: in a
+    pair where both halves succeed neither checks the other, but whenever only one provider ran,
+    that one follows up every still-open finding the other left). When one half fails or never starts
     (`coverTarget`: not when the reader stopped the pair, nor when a teammate's Limn holds the other
-    half), the half that succeeded runs a SHORT follow-up-only COVER PASS straight after the pair ends
-    (`startPairCover`, once the pair's seat is released; `finishInterruptedPairs` does the same for a
-    half a restart interrupted): replies-check.ts `startCoverCheck`, through the replies lane, the
-    same agent, tools, path guard and `submit_replies` (whose status gains the four code statuses; a
+    half), the half that succeeded runs a SHORT follow-up-only COVER PASS once the pair's seat is
+    released (`startPairCover` → replies-check.ts `runCoverCheck`; `finishInterruptedPairs` does the
+    same for a half a restart interrupted): `startCoverCheck`, through the replies lane, the same
+    agent, tools, path guard and `submit_replies` (whose status gains the four code statuses; a
     replies pass stores those as `not_checked`). It plans the failed provider's chain minus what the
-    survivor's provider judged since (`planCoverCheck`), reconciles through the REVIEW's gate
-    (`selectPriorFindings` + `reconcileFollowUp`, so same-head locks and the reply gate hold), and is
-    stored as a `kind = 'replies'` row with `followUp.cover = {provider}` (every "latest review"
-    reader skips it; its items overlay the chain like a pass's). Same rules as above: never disputes,
-    no pushback, no outcome change; auto resolve only. An AUTO pair's cover asks the spend budget
-    first (skipped, never queued, when over); it counts toward the per-PR daily cap of automatic
-    passes. Its row records the pair's start as its coverage, so it claims no reply the pair had not
-    seen. Labelled "Checked Codex's findings" (`repliesRunLabel`); summary "Checked Codex's 3 open
-    findings: 1 dealt with, 2 still open." The failed provider is NOT re-run (usage limits are hours);
-    when it next succeeds, its own chain takes the findings back.
+    survivor's provider SETTLED since (`planCoverCheck`; one it judged still open is checked again,
+    its judgement as `priorStatus`), reconciles through the REVIEW's gate (`selectPriorFindings` +
+    `reconcileFollowUp`, so same-head locks and the reply gate hold), and is stored as a `kind =
+    'replies'` row with `followUp.cover = {provider}` (every "latest review" reader skips it; its
+    items overlay the chain like a pass's). Never disputes, no pushback, no still-open comment on the
+    other provider's findings; auto resolve only. An AUTO pair's cover asks the spend budget first
+    (skipped, never queued, when over); it counts toward the per-PR daily cap of automatic passes. Its
+    row records the pair's start as its coverage, so it claims no reply the pair had not seen.
+    Labelled "Checked Codex's findings" (`repliesRunLabel`); summary "Checked Codex's 3 open findings:
+    1 dealt with, 2 still open." The failed provider is NOT re-run (usage limits are hours); when it
+    next succeeds, its own chain takes the findings back.
+    ⚠ **THE PAIR'S RUN-END HOOKS WAIT FOR IT** (changed 2026-11-09; before, the cover "changed no
+    outcome" and ran after the post): `endPair` consolidates as before, then — with a cover due —
+    holds `runEnded` (auto-post, Slack, Sonar, diagrams, auto fix) until the cover ends (ran, failed,
+    cancelled; at most `COVER_WAIT_MAX_MS`, 30 min); both halves' `autoPosted` (the team claims' final
+    lines) wait on that one post. What the cover left becomes the post's `cover` (`pairCoverHold`,
+    auto-verdict.ts `PairCoverHold`, warning-or-above only): its still-open items are `open` — an
+    earlier blocker ⇒ REQUEST_CHANGES, an earlier warning holds the approval (`withCoverHold` adds
+    them to the run's earlier points, so a single half's COMMENT is never promoted over them); its
+    `not_checked` ones, or — with no succeeded cover row (it failed, the budget gate skipped it, the
+    lane was busy or refused it) — every warning-or-above finding of the failed provider not yet
+    settled, are `unchecked`: they hold the APPROVAL only (never a request for changes), and an
+    unchecked blocker also blocks lifting a Limn block. The pair always posts. The reason names them
+    apart (`findingsNotApproved`'s `cover`): "Not approved: 2 earlier Codex points are still open." /
+    "Not approved: 1 earlier Codex point was not checked." Both halves succeeded ⇒ no cover, no wait,
+    no extra cost. Pinned by `pair-pipeline.test.ts` (the cover runs before the one post),
+    `pair-auto-post.test.ts` (the verdict and reason) and `cross-provider-follow-up.test.ts`.
   - ⚠ A group whose POSTED member is milder than an unposted one is LEFT ALONE (both kept): the
     posted one can never be withdrawn and a blocker is never merged into something milder.
   - The merge pass's usage is recorded when the completion SETTLES — also after the 90 s timeout
@@ -698,7 +723,8 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   with nothing else to post, the reason alone (§ THE REASON). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
   `auto_post`, then on the first's (its record names the second, `viaPairReviewId`) — both BEFORE any
   write; a first half someone else claimed keeps its findings out; a failure is recorded on both and
-  never retried. Only one half succeeded ⇒ that half posts alone, as any auto run. Auto resolve and
+  never retried. Only one half succeeded ⇒ that half posts alone, as any auto run — but only after the
+  cover pass, whose leftovers hold its verdict (A FAILED HALF IS COVERED, above). Auto resolve and
   pushback run for both halves (each claims per thread; a kept finding of a merge is judged by one
   half only — see THE NEXT FOLLOW-UP above). The Slack signal, Sonar post, auto fix and
   design diagrams run ONCE, at the pair's end, on the second half when it succeeded, else the first.
@@ -3325,7 +3351,10 @@ auto-posting: claim before any GitHub write, never retried.
     verdict: "Claude gave no verdict." (`pair_strict` in a strict pair, `model_comment` for a single
     run, a relaxed pair's asker, or "neither Claude nor Codex approved. No findings are open."; the
     replies outcome's silent half: "… It raised no findings."); leftovers the rule forbids ("Not
-    approved: a question is still open.");
+    approved: a question is still open."); a pair whose other half failed names that provider's
+    warning-or-above findings its cover left open or could not check apart ("Not approved: 2 earlier
+    Codex points are still open." / "… 1 earlier Codex point was not checked.", § Claude + Codex → A
+    FAILED HALF IS COVERED);
   - or the GATE'S, when a wanted APPROVE was held (`heldReasonText`): "your own pull request.",
     "your own review on GitHub still stands.", "the earlier request for changes still
     stands.", "couldn’t read the earlier reviews on GitHub.", "High impact." / "impact unknown.",

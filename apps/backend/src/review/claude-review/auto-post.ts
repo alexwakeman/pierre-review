@@ -120,7 +120,9 @@ import {
   promotedModelVerdict,
   reasonMayPost,
   safeReasonText,
+  withCoverHold,
   withReason,
+  type PairCoverHold,
   type VerdictRules,
   type VerdictRun,
 } from './auto-verdict.js';
@@ -850,7 +852,10 @@ export type AutoPostOutcome =
  */
 export async function maybeAutoPostReview(
   ctx: AgentContext,
-  a: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null },
+  // `cover`: a pair whose other half failed — what its cover pass left open or unchecked, read
+  // BEFORE this post (manager.ts `startPairCover`); it holds the verdict (auto-verdict.ts
+  // `PairCoverHold`).
+  a: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null; cover?: PairCoverHold | null },
   deps: AutoPostDeps = defaultAutoPostDeps,
   resolveDeps?: AutoResolveDeps,
   stillOpenDeps?: StillOpenDeps,
@@ -908,7 +913,8 @@ async function autoPostReview(
     prId,
     reviewId,
     pairFirstReviewId,
-  }: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null },
+    cover = null,
+  }: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null; cover?: PairCoverHold | null },
   deps: AutoPostDeps,
 ): Promise<AutoPostOutcome> {
   const ws = await readWorkspaceAutoPostForPr(ctx, accountId, prId);
@@ -923,7 +929,7 @@ async function autoPostReview(
   if (!pressed && !ws.settings.enabled) {
     // "KEEP IT IN LIMN" posts nothing — but Limn's OWN earlier automatic approval is still corrected
     // (gap 7): a later auto run at a new head that does not approve withdraws it.
-    await withdrawApprovalWhenKept(ctx, { accountId, prId, review, pairFirstReviewId: pairFirstReviewId ?? null }, ws, deps);
+    await withdrawApprovalWhenKept(ctx, { accountId, prId, review, pairFirstReviewId: pairFirstReviewId ?? null, cover }, ws, deps);
     return { kind: 'off' };
   }
   if (review.autoPost != null) return { kind: 'already_claimed' };
@@ -957,11 +963,16 @@ async function autoPostReview(
   // EARLIER POINTS THE RUN(S) HOLD OPEN (decision D1, ./earlier-open.ts): an earlier blocker or
   // warning still open holds the verdict like a finding; the rest name themselves in the line
   // ("1 earlier point is still open.").
-  const earlierOpen: EarlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+  const runsEarlier: EarlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+  // A PAIR WITH A FAILED HALF: the failed provider's warning-or-above findings its cover pass left
+  // open count as earlier points; the ones it could not check hold the approval (never a request for
+  // changes). Every verdict read below takes the sum; the reason names them apart ("2 earlier Codex
+  // points are still open.").
+  const earlierOpen: EarlierOpen = withCoverHold(runsEarlier, cover);
   // A SINGLE run's COMMENT with NOTHING open is an approve candidate (every gate below still holds
   // it); a pair's folded verdict is never promoted (auto-verdict.ts `promotedModelVerdict`).
   const runVerdict = first ? runVerdict0 : promotedModelVerdict(runVerdict0, allFindings, earlierOpen);
-  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, earlierOpen) : null;
+  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, runsEarlier, cover) : null;
   // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
   // other writer has it, and its findings leave this post.
   const claimFirst = async (rec: ClaudeAutoPostRecord): Promise<boolean> =>
@@ -1020,9 +1031,11 @@ async function autoPostReview(
   // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows. (A pair: either
   // half's.)
   const unjudgedBlockers = runs.flatMap((r) => unsettledEarlierBlockers(r));
+  // An earlier blocker of the failed half's provider that the cover could not check is just as open.
+  const uncheckedCoverBlockers = cover?.unchecked.blockers ?? 0;
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
-  const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
+  const mayLift = noBlocker && unjudgedBlockers.length === 0 && uncheckedCoverBlockers === 0 && limnBlockIds.size > 0;
   // WITHDRAWING LIMN'S OWN APPROVAL (./approval-withdraw.ts): a run at a NEW head that does not
   // approve (whatever the auto-verdict switch says now) dismisses Limn's earlier AUTOMATIC approval
   // that still stands, BEFORE it posts. A DB pre-check first, so an ordinary run reads nothing more.
@@ -1036,7 +1049,7 @@ async function autoPostReview(
   // point behind the block settled), so an ordinary run costs no extra GitHub read.
   let readerLogin: string | null = null;
   let teammateCandidates: TeammateLiftCandidate[] = [];
-  if (ws.settings.liftTeammateBlocks && !facts.authorIsMe && noBlocker && unjudgedBlockers.length === 0) {
+  if (ws.settings.liftTeammateBlocks && !facts.authorIsMe && noBlocker && unjudgedBlockers.length === 0 && uncheckedCoverBlockers === 0) {
     try {
       readerLogin = await deps.accountLogin(accountId);
       teammateCandidates = await loadTeammateLiftCandidates(ctx, {
@@ -1110,7 +1123,7 @@ async function autoPostReview(
   // Limn's own block stands: every blocker behind it must be JUDGED settled before it is lifted —
   // none left unjudged in this run's follow-up, and none of the blocking run's own blockers that
   // never reached GitHub (only a posted finding is ever followed up, so nothing would judge it).
-  let blockersRemain = unjudgedBlockers.length > 0;
+  let blockersRemain = unjudgedBlockers.length > 0 || uncheckedCoverBlockers > 0;
   if (!blockersRemain && noBlocker && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && standing.reviewId != null) {
     try {
       blockersRemain = (await loadUnpostedBlockersOfBlock(ctx, accountId, prId, standing.reviewId, earlier)).length > 0;
@@ -1470,7 +1483,7 @@ async function autoPostReview(
  */
 export async function withdrawApprovalWhenKept(
   ctx: AgentContext,
-  a: { accountId: number; prId: number; review: ClaudeReview; pairFirstReviewId: number | null },
+  a: { accountId: number; prId: number; review: ClaudeReview; pairFirstReviewId: number | null; cover?: PairCoverHold | null },
   ws: { pairStrictness: VerdictRules['pairStrictness']; settings: { approveLeftovers: VerdictRules['approveLeftovers'] } },
   deps: AutoPostDeps,
 ): Promise<ClaudeApprovalWithdrawal | null> {
@@ -1489,7 +1502,7 @@ export async function withdrawApprovalWhenKept(
     const runs: ClaudeReview[] = first ? [first, review] : [review];
     const allFindings = runs.flatMap((r) => r.findings);
     const rules: VerdictRules = { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers };
-    const earlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+    const earlierOpen = withCoverHold(await earlierOpenForRuns(ctx, prId, runs), a.cover);
     const runVerdict = first
       ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness)
       : promotedModelVerdict(review.verdict, allFindings, earlierOpen);

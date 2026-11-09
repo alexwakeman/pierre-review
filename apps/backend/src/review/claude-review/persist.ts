@@ -39,7 +39,7 @@ import type {
   ReviewRouteReason,
   StoredPrFile,
 } from '@pierre-review/shared';
-import { aiRunProvider, CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
+import { aiRunProvider, CLAUDE_FINDING_LENSES, isStillOpenFollowUp, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
@@ -1802,9 +1802,10 @@ export async function getReviewPeerContexts(
  * findings: that provider's chain is loaded the same way (`loadProviderChain`) and its findings join
  * as carried, `raisedBy` the other provider, after this provider's own. One is left out when this
  * chain already lists it, an eligible finding here re-raises it, it re-raises one this chain lists,
- * or a run of THIS provider judged it
- * after the other provider's newest word on it (its chain's anchor) — so a working chain on the other
- * provider is never judged twice. With no run of this provider yet, the other chain alone anchors the
+ * or a run of THIS provider SETTLED it
+ * after the other provider's newest word on it (its chain's anchor: `latestJudgementsSinceByProvider`,
+ * the newest judgement wins). One this provider last judged still OPEN keeps coming, with that
+ * judgement as its prior status, so it is never dropped while open. With no run of this provider yet, the other chain alone anchors the
  * follow-up. A PAIR HALF never carries the other provider's findings (one judge per thread); a half
  * that fails is covered by the cover pass (replies-check.ts `startCoverCheck`).
  */
@@ -1847,10 +1848,16 @@ export async function loadPriorReviewForFollowUp(
   const reraises = new Set(links.filter((l) => l.priorFindingId != null && listed.has(l.priorFindingId)).map((l) => l.id));
   candidates = candidates.filter((f) => !reraises.has(f.id));
   if (candidates.length === 0) return own;
-  const judged = await judgedSinceByProvider(ctx, prId, accountId, provider, theirs.reviewId, beforeReviewId);
+  // ⚠ Only a finding THIS provider SETTLED since the other's newest word on it is left out. One it
+  // judged still open (a cover pass's or a single run's not / partly addressed) keeps coming, with
+  // that judgement as its prior status, until it is settled — never dropped while open.
+  const latest = await latestJudgementsSinceByProvider(ctx, prId, accountId, provider, theirs.reviewId, beforeReviewId);
   const cross = candidates
-    .filter((f) => !judged.has(f.id))
-    .map((f): PriorFindingForFollowUp => ({ ...f, carried: true, raisedBy: other }));
+    .filter((f) => !isSettledJudgement(latest.get(f.id)))
+    .map((f): PriorFindingForFollowUp => {
+      const j = latest.get(f.id);
+      return { ...f, carried: true, raisedBy: other, ...(j ? { priorStatus: j } : {}) };
+    });
   if (cross.length === 0) return own;
   if (!own) return { reviewId: theirs.reviewId, headSha: theirs.headSha, findings: cross, leftOut: [] };
   return { ...own, findings: [...own.findings, ...cross] };
@@ -1861,19 +1868,29 @@ function withoutFollowedThrough(c: PriorReviewForFollowUp & { followedThrough: n
   return rest;
 }
 
+/** One judgement of an earlier finding, as a carried item keeps it (`PriorFindingForFollowUp.priorStatus`). */
+export type LatestJudgement = NonNullable<PriorFindingForFollowUp['priorStatus']>;
+
+/** A judgement that SETTLES a finding (addressed, no longer applies, a reply accepted): anything but
+ *  a still-open status (shared `isStillOpenFollowUp`). No judgement (absent) settles nothing. */
+export function isSettledJudgement(j: LatestJudgement | null | undefined): boolean {
+  return j != null && !isStillOpenFollowUp(j.status);
+}
+
 /**
- * The finding ids a SUCCEEDED run of `provider` (a full review or a replies pass) gave a judgement
- * (any status but 'not_checked') with an id in (afterId, beforeId). Account-scoped. The cross carry's
- * "already judged since" test.
+ * The LATEST judgement (any status but 'not_checked') a SUCCEEDED run of `provider` (a full review or
+ * a replies pass, a cover pass included) gave each earlier finding, from runs with an id in
+ * (afterId, beforeId) — the newer run wins. Account-scoped. The cross carry and the cover plan read
+ * it: a finding whose latest judgement SETTLED it is left out; one judged still open keeps coming.
  */
-export async function judgedSinceByProvider(
+export async function latestJudgementsSinceByProvider(
   ctx: AgentContext,
   prId: number,
   accountId: number,
   provider: AiProviderId,
   afterId: number,
   beforeId: number,
-): Promise<Set<number>> {
+): Promise<Map<number, LatestJudgement>> {
   const { cr } = tables(ctx);
   const rows = (await ctx.db
     .select({ provider: cr.provider, model: cr.model, followUp: cr.followUp })
@@ -1888,12 +1905,14 @@ export async function judgedSinceByProvider(
         or(isNull(cr.kind), eq(cr.kind, 'replies')),
       ),
     )
+    .orderBy(asc(cr.id))
     .execute()) as Array<{ provider: string | null; model: string | null; followUp: ClaudeReviewFollowUpRecord | null }>;
-  const out = new Set<number>();
+  const out = new Map<number, LatestJudgement>();
   for (const r of rows) {
     if (aiRunProvider(r.provider, r.model) !== provider) continue;
     for (const it of r.followUp?.items ?? []) {
-      if (Number.isInteger(it.priorFindingId) && it.status !== 'not_checked') out.add(it.priorFindingId);
+      if (!Number.isInteger(it.priorFindingId) || it.status === 'not_checked') continue;
+      out.set(it.priorFindingId, { status: it.status, explanation: it.explanation ?? null, ...(it.how ? { how: it.how } : {}) });
     }
   }
   return out;

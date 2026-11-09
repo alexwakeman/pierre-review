@@ -278,6 +278,7 @@ When the verdict is not an approval, the review ends with one line saying why. T
 | Situation | Line |
 |---|---|
 | Blockers or warnings open, new or earlier | "Not approved: 2 warnings are still open." · "Not approved: 1 earlier warning is still open." · "Not approved: a blocker and 2 earlier warnings are still open." |
+| A pair whose Codex (or Claude) half failed: the other checked its earlier warnings first | "Not approved: 2 earlier Codex points are still open." · "Not approved: 1 earlier Codex point was not checked." (the check failed or was skipped) |
 | A model asked for changes | "Not approved: Codex asked for changes. <its first sentence>" |
 | A model only commented, something open | "Not approved: Claude did not approve. A nit is still open." (or "1 earlier point is still open." / "A ticket criterion is still unmet.") |
 | Pair, neither approved | "Not approved: neither Claude nor Codex approved. No findings are open." |

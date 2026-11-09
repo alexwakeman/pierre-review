@@ -315,6 +315,56 @@ describe('the verdict over the union', () => {
   });
 });
 
+// ⚠ A FAILED HALF IS COVERED BEFORE THE POST (docs/CLAUDE-REVIEW.md § Claude + Codex, 2026-11-09): the
+// surviving half posts alone, and what the cover left of the failed provider's warning-or-above
+// findings holds its verdict (manager.ts hands it in as `cover`).
+describe('a pair with a failed half: the cover holds the verdict', () => {
+  beforeEach(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: true } as any });
+  });
+  const hold = (open: [number, number], unchecked: [number, number]) => ({
+    by: 'Codex',
+    open: { blockers: open[0], warnings: open[1] },
+    unchecked: { blockers: unchecked[0], warnings: unchecked[1] },
+  });
+
+  it('nothing left open ⇒ the surviving half approves as usual', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', [], { role: 'first' }, 'APPROVE');
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: first, cover: hold([0, 0], [0, 0]) }, deps() as any);
+    expect(out).toMatchObject({ kind: 'done', record: { verdict: { wanted: 'APPROVE', submitted: 'APPROVE' } } });
+  });
+
+  it('a Codex warning the cover found still open ⇒ never approved (nor promoted), and the reason names it', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', [], { role: 'first' }, 'APPROVE');
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: first, cover: hold([0, 2], [0, 0]) }, deps() as any);
+    expect(out).toMatchObject({ kind: 'done', record: { verdict: { wanted: 'COMMENT', submitted: 'COMMENT' } } });
+    expect((out as any).record.verdict.reasonText).toBe('Not approved: 2 earlier Codex points are still open.');
+    // A model COMMENT with nothing else open is not promoted over it either.
+    const pr2 = await makePr();
+    const f2 = await half(pr2, 'claude', [], { role: 'first' }, 'COMMENT');
+    const out2 = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: f2, cover: hold([0, 1], [0, 0]) }, deps() as any);
+    expect((out2 as any).record.verdict).toMatchObject({ wanted: 'COMMENT', reasonText: 'Not approved: 1 earlier Codex point is still open.' });
+  });
+
+  it('a Codex blocker the cover found still open counts as an earlier blocker', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', [], { role: 'first' }, 'APPROVE');
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: first, cover: hold([1, 0], [0, 0]) }, deps() as any);
+    expect(out).toMatchObject({ kind: 'done', record: { verdict: { wanted: 'REQUEST_CHANGES' } } });
+  });
+
+  it('the cover could not check them (failed / skipped) ⇒ still posts, never approves, never asks for changes', async () => {
+    const prId = await makePr();
+    const first = await half(prId, 'claude', [], { role: 'first' }, 'APPROVE');
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: first, cover: hold([0, 0], [1, 1]) }, deps() as any);
+    expect(out).toMatchObject({ kind: 'done', record: { verdict: { wanted: 'COMMENT', submitted: 'COMMENT' } } });
+    expect((out as any).record.verdict.reasonText).toBe('Not approved: 2 earlier Codex points were not checked.');
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the routes: Claude + Codex start, Post (one review)', () => {
   const app = async (signedIn: { claude: boolean; codex: boolean }) => {
     const { default: Fastify } = await import('fastify');

@@ -840,8 +840,12 @@ describe('the other provider’s open findings', () => {
     expect(replyCalls).toEqual([]);
   });
 
-  it('afterwards nothing is left to cover, and the next Claude run carries only the still-open one', async () => {
-    expect(await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude')).toBeNull();
+  it('afterwards only the still-open one is left — to a later cover and to the next Claude run alike', async () => {
+    // The addressed one is settled; the one judged still open keeps coming, with that judgement.
+    const again = await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude');
+    expect(again?.findings.map((f) => [f.title, f.raisedBy, f.priorStatus?.status ?? null])).toEqual([
+      ['Retry loop never stops', 'codex', 'not_addressed'],
+    ]);
     const single = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, Number.MAX_SAFE_INTEGER, new Set(), 'claude');
     expect(single?.findings.map((f) => [f.title, f.raisedBy, f.priorStatus?.status ?? null])).toEqual([
       ['Retry loop never stops', 'codex', 'not_addressed'],
@@ -872,5 +876,154 @@ describe('the other provider’s open findings', () => {
     if ('refused' in planned) return;
     expect(planned.full.id).toBe(cl);
     expect(planned.findings.map((f) => f.title)).toEqual(['Unchecked input']);
+  });
+});
+
+// ⚠ A STILL-OPEN FINDING OF THE OTHER PROVIDER IS NEVER DROPPED (2026-11-09). Each run below is a row
+// as the manager / the cover pass would store it; the loader is asked what the NEXT run follows up.
+// Only a finding this provider SETTLED drops out; one it judged still open (a cover pass's or a single
+// run's not / partly addressed) keeps coming, with that judgement as its prior status.
+describe('the other provider’s chain over many runs', () => {
+  const head = (c: string) => c.repeat(40);
+  const NEXT = Number.MAX_SAFE_INTEGER;
+  type Status = 'addressed' | 'partly_addressed' | 'not_addressed' | 'no_longer_applies' | 'reply_accepted';
+
+  async function row(
+    pr: number,
+    at: string,
+    provider: 'claude' | 'codex',
+    o: {
+      pair?: { role: 'first' } | { role: 'second'; pairId: number };
+      kind?: 'replies';
+      failed?: boolean;
+      findings?: Array<ReturnType<typeof finding>>;
+      items?: Array<{ id: number; title: string; status: Status }>;
+      cover?: 'claude' | 'codex';
+    } = {},
+  ): Promise<number> {
+    const id = await persist.insertQueuedReview(ctx, pr, at, 'claude-opus-5-5', 1, [], 'auto', provider, false, o.pair ?? null, o.kind);
+    if (o.failed) {
+      await persist.markReviewFailed(ctx, id, 'Codex could not finish: usage limit');
+      return id;
+    }
+    await persist.saveReviewSuccess(ctx, id, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [], findings: o.findings ?? [],
+      ...(o.items
+        ? {
+            followUp: {
+              priorReviewId: 0, priorHeadSha: at, headMoved: true, changesSinceShown: false,
+              items: o.items.map((it, i) => ({
+                ref: `P${i + 1}`, priorFindingId: it.id, sent: true, carried: true, status: it.status,
+                explanation: `${it.status}.`, path: PATH, line: 2, side: 'RIGHT' as const, severity: 'warning' as const,
+                title: it.title, raisedBy: 'codex' as const,
+              })),
+              ...(o.cover ? { cover: { provider: o.cover } } : {}),
+            },
+          }
+        : {}),
+    } as any);
+    return id;
+  }
+
+  /** A pair at `at`: Claude's half succeeds (no findings); Codex's succeeds with `codexFindings`, or fails. */
+  async function pair(pr: number, at: string, codexFindings: Array<ReturnType<typeof finding>> | 'fails'): Promise<{ first: number; second: number }> {
+    const first = await row(pr, at, 'claude', { pair: { role: 'first' } });
+    const second =
+      codexFindings === 'fails'
+        ? await row(pr, at, 'codex', { pair: { role: 'second', pairId: first }, failed: true })
+        : await row(pr, at, 'codex', { pair: { role: 'second', pairId: first }, findings: codexFindings });
+    return { first, second };
+  }
+
+  /** The pair-ok start: Codex raised W and Z (both warnings, both posted). */
+  async function start(): Promise<{ pr: number; W: number; Z: number }> {
+    const pr = await makePr();
+    const { second } = await pair(pr, head('1'), [finding('W: retry never stops', 'warning', 2), finding('Z: unchecked input', 'warning', 3)]);
+    const ids = new Map((await persist.getClaudeReviewById(ctx, second, 1))!.findings.map((f) => [f.title, f.id] as const));
+    const W = ids.get('W: retry never stops')!;
+    const Z = ids.get('Z: unchecked input')!;
+    for (const id of [W, Z]) await persist.markFindingPosted(ctx, id, String(5000 + id));
+    return { pr, W, Z };
+  }
+  const followed = async (pr: number, provider: 'claude' | 'codex' = 'claude') =>
+    ((await persist.loadPriorReviewForFollowUp(ctx, pr, 1, NEXT, new Set(), provider))?.findings ?? []).map((f) => [
+      f.title,
+      f.raisedBy ?? null,
+      f.priorStatus?.status ?? null,
+    ]);
+
+  it('pair ok → pair whose Codex half fails (cover: W open, Z addressed) → Claude alone → Claude alone: W kept until settled', async () => {
+    const { pr, W, Z } = await start();
+    // A pair half never carries Codex's findings; nor does a cover plan exist before a failure.
+    expect((await persist.loadPriorReviewForFollowUp(ctx, pr, 1, NEXT, new Set(), 'claude', true))?.findings ?? []).toEqual([]);
+    const p2 = await pair(pr, head('2'), 'fails');
+    expect((await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude'))?.findings.map((f) => f.title)).toEqual(['W: retry never stops', 'Z: unchecked input']);
+    await row(pr, head('2'), 'claude', {
+      kind: 'replies', cover: 'codex',
+      items: [{ id: W, title: 'W: retry never stops', status: 'not_addressed' }, { id: Z, title: 'Z: unchecked input', status: 'addressed' }],
+    });
+    expect(p2.first).toBeGreaterThan(0);
+    // Claude alone, three times: W is followed up every time, with the latest judgement, until settled.
+    expect(await followed(pr)).toEqual([['W: retry never stops', 'codex', 'not_addressed']]);
+    await row(pr, head('3'), 'claude', { items: [{ id: W, title: 'W: retry never stops', status: 'partly_addressed' }] });
+    expect(await followed(pr)).toEqual([['W: retry never stops', 'codex', 'partly_addressed']]);
+    await row(pr, head('4'), 'claude', { items: [{ id: W, title: 'W: retry never stops', status: 'not_addressed' }] });
+    expect(await followed(pr)).toEqual([['W: retry never stops', 'codex', 'not_addressed']]);
+    await row(pr, head('5'), 'claude', { items: [{ id: W, title: 'W: retry never stops', status: 'addressed' }] });
+    expect(await followed(pr)).toEqual([]);
+    // Codex's own chain is untouched: when Codex next runs it takes W and Z back itself.
+    expect((await followed(pr, 'codex')).map((f) => f[0])).toEqual(['W: retry never stops', 'Z: unchecked input']);
+  });
+
+  it('⚠ two failed pairs in a row and a failed second cover, then Claude alone: W (judged open by the FIRST cover) is still followed up', async () => {
+    const { pr, W, Z } = await start();
+    await pair(pr, head('2'), 'fails');
+    await row(pr, head('2'), 'claude', {
+      kind: 'replies', cover: 'codex',
+      items: [{ id: W, title: 'W: retry never stops', status: 'not_addressed' }, { id: Z, title: 'Z: unchecked input', status: 'no_longer_applies' }],
+    });
+    // The second failed pair: its Claude half carries nothing of Codex's, and the cover plan still
+    // holds W (judged open, so checked again) with that judgement.
+    await pair(pr, head('3'), 'fails');
+    expect(
+      (await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude'))?.findings.map((f) => [f.title, f.priorStatus?.status ?? null]),
+    ).toEqual([['W: retry never stops', 'not_addressed']]);
+    // That cover fails (no row of judgements).
+    await row(pr, head('3'), 'claude', { kind: 'replies', failed: true });
+    // Claude alone: its own chain anchors on the pair half (which judged nothing of Codex's) — W must
+    // still come through the cross carry. Before the fix it was dropped here, forever.
+    expect(await followed(pr)).toEqual([['W: retry never stops', 'codex', 'not_addressed']]);
+    // …and once more after another Claude-only run that judged it still open.
+    await row(pr, head('4'), 'claude', { items: [{ id: W, title: 'W: retry never stops', status: 'partly_addressed' }] });
+    expect(await followed(pr)).toEqual([['W: retry never stops', 'codex', 'partly_addressed']]);
+  });
+
+  it('a settled judgement (reply accepted) drops it for good; a later cover has nothing to check', async () => {
+    const { pr, W, Z } = await start();
+    await pair(pr, head('2'), 'fails');
+    await row(pr, head('2'), 'claude', {
+      kind: 'replies', cover: 'codex',
+      items: [{ id: W, title: 'W: retry never stops', status: 'reply_accepted' }, { id: Z, title: 'Z: unchecked input', status: 'addressed' }],
+    });
+    await pair(pr, head('3'), 'fails');
+    expect(await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude')).toBeNull();
+    expect(await followed(pr)).toEqual([]);
+  });
+
+  it('what the cover left holds the pair’s verdict: open ones counted, unchecked ones when it did not run', async () => {
+    const { pr, W, Z } = await start();
+    await pair(pr, head('2'), 'fails');
+    // No cover row yet (it failed, was skipped or is still running): both warnings are unchecked.
+    expect(await rc.pairCoverHold(ctx, { accountId: 1, prId: pr, failed: 'codex', survivor: 'claude', coverReviewId: null })).toEqual({
+      by: 'Codex', open: { blockers: 0, warnings: 0 }, unchecked: { blockers: 0, warnings: 2 },
+    });
+    const cover = await row(pr, head('2'), 'claude', {
+      kind: 'replies', cover: 'codex',
+      items: [{ id: W, title: 'W: retry never stops', status: 'not_addressed' }, { id: Z, title: 'Z: unchecked input', status: 'addressed' }],
+    });
+    expect(await rc.pairCoverHold(ctx, { accountId: 1, prId: pr, failed: 'codex', survivor: 'claude', coverReviewId: cover })).toEqual({
+      by: 'Codex', open: { blockers: 0, warnings: 1 }, unchecked: { blockers: 0, warnings: 0 },
+    });
   });
 });

@@ -44,6 +44,24 @@ vi.mock('../../sonar/post.js', () => ({ maybeAutoPostSonar: async () => {} }));
 vi.mock('../../coding/ai-fix/auto-fix.js', () => ({ maybeStartAutoFix: async () => ({ status: 'not_own' }) }));
 vi.mock('../diagrams/trigger.js', () => ({ maybeDrawDiagramsAfterReview: async () => {} }));
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+// THE COVER PASS's agent (replies-check-agent.ts): scripted, and records how many auto posts had
+// happened when it ran (the post must wait for it).
+const coverCalls: Array<{ provider: string; autoPostsSoFar: number }> = [];
+let coverAnswer: 'not_addressed' | 'fails' = 'not_addressed';
+vi.mock('./replies-check-agent.js', () => ({
+  runRepliesCheckAgent: async (args: any) => {
+    coverCalls.push({ provider: args.provider, autoPostsSoFar: autoPostCalls.length });
+    const base = { ranOn: { provider: args.provider, model: 'claude-sonnet-5', effort: 'medium' }, aborted: false, costUsd: null, inputTokens: 1, outputTokens: 1, numTurns: 1 };
+    if (coverAnswer === 'fails') return { ...base, submitted: false, failureReason: 'The check failed.' };
+    return { ...base, submitted: true, replies: [{ ref: 'P1', status: 'not_addressed', explanation: 'Still unbounded.', how: 'Bound it.' }] };
+  },
+}));
+vi.mock('../ticket-review/prepare.js', async (orig) => ({
+  ...(await orig<typeof import('../ticket-review/prepare.js')>()),
+  prepareMemberWorktrees: async () => {
+    throw new Error('no clone in tests');
+  },
+}));
 
 const HEAD = 'e'.repeat(40);
 const DIFF = ['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -0,0 +1,2 @@', '+a', '+b'].join('\n');
@@ -368,6 +386,74 @@ describe('an auto pair', () => {
       expect(signals.map((s) => s.reviewId)).toEqual([first!.id]);
     } finally {
       (ctx.review as any).runReview = orig;
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
+    }
+  });
+});
+
+// ⚠ A FAILED HALF IS COVERED BEFORE THE POST (2026-11-09): Codex raised a warning on an earlier head
+// (posted); the auto pair's Codex half fails; Claude checks that warning FIRST, and the one auto post
+// carries what it left (`cover`), so the verdict cannot approve over it.
+describe('an auto pair whose Codex half fails, with an earlier Codex warning open', () => {
+  async function earlierCodexWarning(prId: number): Promise<void> {
+    const id = await persist.insertQueuedReview(ctx, prId, 'd'.repeat(40), 'claude-opus-5-5', 1, [], 'auto', 'codex');
+    await persist.saveReviewSuccess(ctx, id, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null, numTurns: 1,
+      excludedFiles: [], findings: [finding('Retry loop never stops', 5)],
+    } as any);
+    const f = (await persist.getClaudeReviewById(ctx, id, 1))!.findings[0]!;
+    await persist.markFindingPosted(ctx, f.id, String(9000 + f.id));
+  }
+  async function runPair(prId: number): Promise<{ first: ClaudeReview }> {
+    const orig = ctx.review.runReview;
+    (ctx.review as any).runReview = async (args: RunReviewArgs) => {
+      if (args.provider === 'codex') {
+        return { submitted: false, failureReason: 'usage limit', ranOn: { provider: 'codex', model: 'gpt-6.1-sol' }, costUsd: null, inputTokens: null, outputTokens: null, numTurns: 1, aborted: false } as any;
+      }
+      return orig(args);
+    };
+    try {
+      manager.enqueueAutoReview(ctx, 1, prId, wsId);
+      const runs = await settled(prId, 3);
+      for (let i = 0; i < 300 && autoPostCalls.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      return { first: runs.find((r) => r.pair?.role === 'first')! };
+    } finally {
+      (ctx.review as any).runReview = orig;
+    }
+  }
+  beforeEach(async () => {
+    coverCalls.length = 0;
+    coverAnswer = 'not_addressed';
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'both' });
+  });
+
+  it('Claude checks it BEFORE the one post; still open ⇒ the post carries it as an open Codex point', async () => {
+    const prId = await newPr();
+    await earlierCodexWarning(prId);
+    try {
+      const { first } = await runPair(prId);
+      expect(coverCalls).toEqual([{ provider: 'claude', autoPostsSoFar: 0 }]);
+      expect(autoPostCalls).toEqual([
+        { accountId: 1, prId, reviewId: first.id, cover: { by: 'Codex', open: { blockers: 0, warnings: 1 }, unchecked: { blockers: 0, warnings: 0 } } },
+      ]);
+      // The cover row is a replies-pass row: the latest review is still the pair.
+      expect((await persist.getLatestClaudeReview(ctx, prId, 1))!.kind ?? null).toBeNull();
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
+    }
+  });
+
+  it('the cover itself fails ⇒ the pair still posts, the warning UNCHECKED (no approval)', async () => {
+    const prId = await newPr();
+    await earlierCodexWarning(prId);
+    coverAnswer = 'fails';
+    try {
+      const { first } = await runPair(prId);
+      expect(coverCalls).toHaveLength(1);
+      expect(autoPostCalls).toEqual([
+        { accountId: 1, prId, reviewId: first.id, cover: { by: 'Codex', open: { blockers: 0, warnings: 0 }, unchecked: { blockers: 0, warnings: 1 } } },
+      ]);
+    } finally {
       await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
     }
   });
