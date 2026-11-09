@@ -2015,6 +2015,11 @@ reappears.
     shows. Any other row opens it READ-ONLY (no live Story / CI check under it) under `PastReviewBar` ("Your review · Comment · 4 Nov · 70cc9b5 ·
     read-only", "Back to now"): an own run through `useClaudeReviewById` (`ClaudesReview` without
     `team`, its own findings list), a teammate's from `teammateReviews` (`PastTeammateReview`).
+    `teamView.decisions` (2026-11-09) add what no row shows: a withdrawn verdict reads "Approve
+    (withdrawn)" on its row (`reviewOutcomeWord`), the reader's replies pass shows its Approve /
+    Request changes, and a teammate's decisive replies pass is a DECISION-ONLY row (`target: null`:
+    not a button, a link to GitHub). "Where this PR stands" keeps a withdrawn verdict as the row's
+    note (`withdrawnNote`: "approval from 9 Nov withdrawn: 3 warnings found at 951c4aa").
   - **NEWEST ALWAYS SHOWS** (`nextShownReview` over `newestReviewKey(latest own id, newest teammate
     review)`): when the key changes — a run queued by anyone or anything, a teammate review imported —
     a past pick gives way to now. The first read never moves a pick.

@@ -22,7 +22,7 @@
 // verdict is recorded (`skipped` + why), nothing posts.
 // ⚠ A MANUAL pass never writes: its row's `verdict` shows what the outcome WOULD be.
 // ⚠ Never throws.
-import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import {
   aiRunProviderName,
   autoPostFooter,
@@ -73,6 +73,7 @@ import {
   repliesNotApproved,
   repliesReviewBody,
   repliesVerdict,
+  teammateStillOpenHold,
 } from './replies-pass.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -149,12 +150,14 @@ export async function computeRepliesOutcome(
   const earlierOpen = await earlierOpenForRuns(ctx, prId, halves, (id) =>
     isSettledFinding({ id, priorFindingId: priorById.get(id) ?? null }, settledIds, (x) => priorById.get(x)),
   );
+  // THE TEAM HOLD: a teammate's Limn judged a point this pass settled still open, after the full review.
+  const teamHold = dissent == null ? await teammateHoldForPass(ctx, accountId, prId, items, full) : null;
   const input = {
     open,
     unjudgedEarlierBlockers: unjudged.length,
     items,
     leftovers: rules.approveLeftovers,
-    dissent,
+    dissent: dissent ?? teamHold,
     earlier: earlierOpen,
   };
   const why = repliesNotApproved(input);
@@ -168,6 +171,49 @@ export async function computeRepliesOutcome(
     heldApproval: why?.held === true,
     autoVerdict: rules.autoVerdict,
   };
+}
+
+/**
+ * The team hold's inputs (replies-pass.ts `teammateStillOpenHold`), DB only: the finding comments of
+ * the replies this pass accepted, and every teammate review imported on the PR with its judgements.
+ * A failed read holds nothing (logged).
+ */
+async function teammateHoldForPass(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  items: readonly ClaudeFollowUpItemRecord[],
+  full: ClaudeReview,
+): Promise<ClaudeNotApproved | null> {
+  try {
+    const acceptedIds = [...new Set(items.filter((it) => it.status === 'reply_accepted').map((it) => it.priorFindingId))];
+    if (acceptedIds.length === 0) return null;
+    const crf = s(ctx).claudeReviewFindings;
+    const cr = s(ctx).claudeReviews;
+    const users = s(ctx).users;
+    const comments = (await ctx.db
+      .select({ c: crf.githubCommentId })
+      .from(crf)
+      .where(inArray(crf.id, acceptedIds))
+      .execute()) as Array<{ c: string | null }>;
+    const settled = new Set(comments.map((r) => r.c).filter((c): c is string => c != null));
+    if (settled.size === 0) return null;
+    const mates = (await ctx.db
+      .select({ postedAt: cr.postedAt, createdAt: cr.createdAt, teammate: cr.teammate, login: users.githubLogin })
+      .from(cr)
+      .innerJoin(users, eq(users.id, cr.sourceUserId))
+      .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.kind, 'teammate')))
+      .execute()) as Array<{ postedAt: Date | null; createdAt: Date; teammate: { judged?: Array<{ commentId: string; outcome: string }> } | null; login: string }>;
+    const since = new Date(full.finishedAt ?? full.createdAt).getTime();
+    return teammateStillOpenHold(
+      settled,
+      mates.map((m) => ({ login: m.login, at: (m.postedAt ?? m.createdAt).getTime(), judged: m.teammate?.judged ?? [] })),
+      since,
+    );
+  } catch (err) {
+    ctx.log.warn(`replies outcome pr ${prId}: could not read teammates' judgements: ${errText(err)}`);
+    return null;
+  }
 }
 
 /**

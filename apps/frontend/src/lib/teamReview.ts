@@ -24,7 +24,9 @@ import {
   type ClaudeReviewStatus,
   type ClaudeReviewSummary,
   type ClaudeReviewVerdict,
+  type ClaudeReviewWithdrawal,
   type ClaudeTeamAuthor,
+  type ClaudeTeamDecision,
   type ClaudeTeammatePoster,
   type ClaudeTeammateReview,
   type ClaudeTeamPoint,
@@ -72,7 +74,8 @@ export interface StandingRow {
   sha: string | null;
   at: string | null;
   // What GitHub still holds for them: "still blocking on GitHub", "Request changes from 3 Nov still
-  // blocking on GitHub", "approval stands on GitHub", "dismissed on GitHub". null = nothing to say.
+  // blocking on GitHub", "approval stands on GitHub", "approval from 9 Nov withdrawn: 3 warnings found
+  // at 951c4aa", "dismissed on GitHub". null = nothing to say.
   note: string | null;
   // Their Request changes is still in force (the strictest verdict): the row is flagged.
   blocking: boolean;
@@ -80,6 +83,17 @@ export interface StandingRow {
 
 function standingAt(s: ClaudeReviewStanding): string | null {
   return s.latest?.at ?? s.inForce?.at ?? null;
+}
+
+/** "withdrawn" when Limn took it back, "dismissed" when a person did or it is not known. */
+const withdrawnWord = (byLimn: boolean | null): string => (byLimn === true ? 'withdrawn' : 'dismissed');
+
+/** A verdict no longer in force, in one phrase: "approval from 9 Nov withdrawn: 3 warnings found at
+ *  951c4aa", "request for changes from 3 Nov dismissed". */
+export function withdrawnNote(w: ClaudeReviewWithdrawal): string {
+  const what = w.verdict === 'APPROVE' ? 'approval' : w.verdict === 'REQUEST_CHANGES' ? 'request for changes' : 'verdict';
+  const head = `${what} from ${shortDay(w.postedAt)} ${withdrawnWord(w.byLimn)}`;
+  return w.reason != null ? `${head}: ${w.reason}` : head;
 }
 
 /** One reviewer's line. */
@@ -94,6 +108,8 @@ export function standingRow(s: ClaudeReviewStanding): StandingRow {
     } else {
       note = sameReview ? 'approval stands on GitHub' : `Approval from ${shortDay(force.at)} stands on GitHub`;
     }
+  } else if (s.withdrawn != null) {
+    note = withdrawnNote(s.withdrawn);
   } else if (s.dismissed) {
     note = 'dismissed on GitHub';
   }
@@ -378,7 +394,8 @@ export type ShownReview = { kind: 'own'; id: number } | { kind: 'teammate'; revi
 
 export interface ReviewListItem {
   key: string;
-  target: ShownReview;
+  // What a click opens. null = a DECISION-ONLY row (a teammate's replies pass): nothing to open.
+  target: ShownReview | null;
   // The stored runs it stands for (a pair: both halves).
   runIds: number[];
   you: boolean;
@@ -391,6 +408,10 @@ export interface ReviewListItem {
   // What ran it: "Claude + Codex", "Codex", "Replies checked", "Skipped"; null when unknown.
   what: string | null;
   auto: boolean;
+  // Its verdict no longer stands on GitHub (`ClaudeTeamDecision.withdrawn`): "Approve (withdrawn)".
+  withdrawn?: { byLimn: boolean | null } | null;
+  // A decision-only row's GitHub review.
+  githubUrl?: string | null;
 }
 
 const inFlight = (s: ClaudeReviewStatus): boolean => s === 'queued' || s === 'running';
@@ -404,11 +425,15 @@ function pairStatus(halves: readonly Pick<ClaudeReviewSummary, 'status'>[]): Cla
 
 /**
  * EVERY REVIEW ON THE PR, newest first: the reader's runs (a Claude + Codex pair ONCE, addressed by its
- * latest half's id; a replies pass too) and every teammate's posted review.
+ * latest half's id; a replies pass too) and every teammate's posted review. `decisions` (the server's
+ * `teamView.decisions`) add what no row shows: a run's verdict that was WITHDRAWN on GitHub ("Approve
+ * (withdrawn)"), the reader's replies pass's Approve / Request changes, and a teammate's decisive
+ * replies pass as a row of its own (decision only: nothing to open). A Comment is never added.
  */
 export function reviewsOnPr(
   history: readonly ClaudeReviewSummary[],
   teammateReviews: readonly ClaudeTeammateReview[],
+  decisions: readonly ClaudeTeamDecision[] = [],
 ): ReviewListItem[] {
   const out: ReviewListItem[] = [];
   const pairs = new Map<number, ClaudeReviewSummary[]>();
@@ -473,8 +498,49 @@ export function reviewsOnPr(
       auto: t.run === 'auto',
     });
   }
+  for (const d of decisions) {
+    const ref = d.ref;
+    const row =
+      ref == null
+        ? undefined
+        : ref.kind === 'own'
+          ? out.find((x) => x.you && x.runIds.includes(ref.id))
+          : out.find((x) => x.target?.kind === 'teammate' && x.target.reviewId === ref.reviewId);
+    if (row != null) {
+      // The row's own verdict stays (a pair's, a teammate's); a replies pass has none of its own.
+      if (row.verdict == null && row.status === 'succeeded') row.verdict = d.verdict;
+      if (d.withdrawn != null) row.withdrawn = { byLimn: d.withdrawn.byLimn };
+      continue;
+    }
+    // No row: a teammate's replies pass (or a run this list does not hold). Decisive or withdrawn only.
+    if (d.verdict == null && d.withdrawn == null) continue;
+    out.push({
+      key: `decision-${d.key}`,
+      target: null,
+      runIds: [],
+      you: d.you,
+      poster: d.poster,
+      who: d.you || d.poster == null ? 'You' : teammateName(d.poster),
+      verdict: d.verdict,
+      status: 'succeeded',
+      sha: d.headSha ? d.headSha.slice(0, 7) : null,
+      at: d.at,
+      what: d.run === 'replies' ? REPLIES_WORD : null,
+      auto: d.run === 'auto',
+      withdrawn: d.withdrawn != null ? { byLimn: d.withdrawn.byLimn } : null,
+      githubUrl: d.githubUrl,
+    });
+  }
   // Stable: equal times keep the reader's order (newest first), then teammates'.
   return out.map((x, i) => ({ x, i })).sort((a, b) => b.x.at.localeCompare(a.x.at) || a.i - b.i).map(({ x }) => x);
+}
+
+/** "Approve", "Approve (withdrawn)", "Request changes (dismissed)"; "Withdrawn" with no verdict. */
+export function reviewOutcomeWord(item: Pick<ReviewListItem, 'verdict' | 'withdrawn'>): string | null {
+  const w = item.withdrawn != null ? withdrawnWord(item.withdrawn.byLimn) : null;
+  if (item.verdict == null) return w != null ? `${w[0]!.toUpperCase()}${w.slice(1)}` : null;
+  const v = CLAUDE_VERDICT_LABEL[item.verdict];
+  return w != null ? `${v} (${w})` : v;
 }
 
 const STATUS_WORD: Record<ClaudeReviewStatus, string> = {
@@ -487,7 +553,7 @@ const STATUS_WORD: Record<ClaudeReviewStatus, string> = {
 
 /** After the name: "Request changes · 3 Nov · 8a8ec14 · Claude + Codex · Auto review", or "Running · …". */
 export function reviewListLine(item: ReviewListItem): string {
-  const outcome = item.status !== 'succeeded' ? STATUS_WORD[item.status] : item.verdict != null ? CLAUDE_VERDICT_LABEL[item.verdict] : null;
+  const outcome = item.status !== 'succeeded' ? STATUS_WORD[item.status] : reviewOutcomeWord(item);
   return [outcome, shortDay(item.at), item.sha, item.what, item.auto ? AUTO_WORD : null]
     .filter((x): x is string => x != null && x !== '')
     .join(' · ');
@@ -502,11 +568,11 @@ export function reviewListLine(item: ReviewListItem): string {
  */
 export function nowReviewKey(items: readonly ReviewListItem[], latestReviewId: number | null): string | null {
   if (latestReviewId != null) return items.find((i) => i.runIds.includes(latestReviewId))?.key ?? null;
-  return items.find((i) => i.target.kind === 'teammate')?.key ?? null;
+  return items.find((i) => i.target?.kind === 'teammate')?.key ?? null;
 }
 
 export function itemShows(item: ReviewListItem, shown: ShownReview): boolean {
-  if (shown.kind !== item.target.kind) return false;
+  if (item.target == null || shown.kind !== item.target.kind) return false;
   return shown.kind === 'own' ? item.runIds.includes(shown.id) : item.target.kind === 'teammate' && item.target.reviewId === shown.reviewId;
 }
 

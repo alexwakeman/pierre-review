@@ -319,12 +319,21 @@ describe('a later run withdraws it', () => {
     const { pr } = await approvedPr();
     // Every finding already on GitHub (none here) and auto verdict off: nothing but the withdrawal.
     await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: false } });
-    const b = await run(pr, H2, [], 'COMMENT');
+    // (The model asked for changes but raised nothing: no blocker, so not a block; not an approval.)
+    const b = await run(pr, H2, [], 'REQUEST_CHANGES');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
     expect(postReview).not.toHaveBeenCalled();
     expect(dismissReview).toHaveBeenCalledTimes(1);
     expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: not approved at 91482c8.');
     expect(await rec(b)).toMatchObject({ status: 'posted', error: null, withdrewApproval: { how: 'withdrawn' } });
+  });
+
+  it('a COMMENT with NOTHING open is an approve candidate: it never withdraws the approval', async () => {
+    const { pr } = await approvedPr();
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: false } });
+    const b = await run(pr, H2, [], 'COMMENT');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
+    expect(dismissReview).not.toHaveBeenCalled();
   });
 });
 

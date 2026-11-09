@@ -1933,20 +1933,25 @@ export async function getFeed(
     .execute();
   if (rows.length === 0) return { events: [], users: [] };
 
-  // Verdicts for review_submitted events (refId → reviews.state).
+  // Verdicts for review_submitted events (refId → reviews.state); a review_dismissed event's
+  // content is GitHub's dismissal message (migration 0183).
   const reviewIds = rows
-    .filter((r) => r.type === 'review_submitted' && r.refTable === 'reviews' && r.refId != null)
+    .filter(
+      (r) => (r.type === 'review_submitted' || r.type === 'review_dismissed') && r.refTable === 'reviews' && r.refId != null,
+    )
     .map((r) => r.refId as number);
   const reviewStateById = new Map<number, ReviewState>();
   const reviewBodyById = new Map<number, string | null>();
+  const dismissalMessageById = new Map<number, string | null>();
   if (reviewIds.length > 0) {
     for (const r of await db
-      .select({ id: reviews.id, state: reviews.state, body: reviews.body })
+      .select({ id: reviews.id, state: reviews.state, body: reviews.body, dismissalMessage: reviews.dismissalMessage })
       .from(reviews)
       .where(inArray(reviews.id, reviewIds))
       .execute()) {
       reviewStateById.set(r.id, r.state as ReviewState);
       reviewBodyById.set(r.id, r.body);
+      dismissalMessageById.set(r.id, r.dismissalMessage);
     }
   }
 
@@ -2016,6 +2021,9 @@ export async function getFeed(
       content = body;
     } else if (r.type === 'review_submitted' && r.refId != null) {
       content = reviewBodyById.get(r.refId) ?? null;
+    } else if (r.type === 'review_dismissed' && r.refId != null) {
+      content = dismissalMessageById.get(r.refId) ?? null;
+      excerpt = content ? truncate(content, 160) : null;
     }
     return {
       id: r.id,
@@ -6826,6 +6834,7 @@ function feedPrEventChip(kind: string): FeedPrEventChip | null {
     case 'pr_reopened':
       return 'opened';
     case 'review_submitted':
+    case 'review_dismissed':
       return 'reviewed';
     case 'pr_merged':
       return 'merged';

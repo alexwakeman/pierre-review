@@ -199,6 +199,7 @@ export const EVENT_META: Record<
   review_comment: { label: 'Review comment', color: '#f59e0b', shape: 'dot' },
   pr_comment: { label: 'PR comment', color: '#a78bfa', shape: 'square' },
   commit_pushed: { label: 'Commit', color: '#6b7280', shape: 'diamond' },
+  review_dismissed: { label: 'Review dismissed', color: '#9ca3af', shape: 'triangle' },
 };
 
 // ── The Feed's "PR events" bucket, and the four chips that partition it ──────────────────────
@@ -221,6 +222,7 @@ export function feedPrEventChip(kind: string): FeedPrEventChip | null {
     case 'pr_reopened':
       return 'opened';
     case 'review_submitted':
+    case 'review_dismissed':
       return 'reviewed';
     case 'pr_merged':
       return 'merged';

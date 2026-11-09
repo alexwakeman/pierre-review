@@ -1521,6 +1521,16 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0183_review_dismissals` — when, by whom and why a review was dismissed
+
+`ALTER TABLE reviews ADD dismissed_at integer, dismissed_by_user_id integer REFERENCES users(id),
+dismissal_message text` — filled by `persistPr` from the PR walk's new `reviewDismissals` selection
+(ReviewDismissedEvent, `last: 10`, a leaf connection), which also writes one `events` row per
+dismissal (type `review_dismissed`, TYPE-level only, no CHECK). [DATA-MODEL.md](DATA-MODEL.md) §
+`events`; [TEAM-REVIEW.md](TEAM-REVIEW.md) § When Limn takes its approval back. On an existing
+table, so erasure and export already cover it. Additive, no backfill: a PR gains its dismissals on its
+next walk. Journal `idx` 183, `when` sqlite `1792569679027` (written as 0184 on its own branch; renumbered at integration).
+
 ### `0182_ticket_auto_clock` — the automatic story check's stored clock
 
 Four nullable columns, bare `ADD COLUMN`: `pull_requests.head_seen_at` and `head_burst_at` (integer

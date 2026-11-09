@@ -69,6 +69,8 @@ export function markerVisual(ev: TimelineEvent): MarkerVisual {
         default:
           return { svg: bubble(C.commented), color: C.commented, label: 'Review comment' };
       }
+    case 'review_dismissed':
+      return { svg: dashedCircle(C.dismissed), color: C.dismissed, label: 'Review dismissed', round: true };
     default:
       return { svg: filledCircle(C.lifecycle), color: C.lifecycle, label: 'Event', round: true };
   }

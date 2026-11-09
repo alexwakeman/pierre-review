@@ -89,7 +89,7 @@ describe('the rule', () => {
     expect(findingsNotApproved([run], [], undefined, e({ total: 1 }))).toBeNull();
     // The old number-only call still reads as "total".
     expect(findingsNotApproved([{ ...run, verdict: 'COMMENT' }], [], undefined, 1)?.text).toBe(
-      'Not approved: Claude left a comment, not an approval. 1 earlier point is still open.',
+      'Not approved: Claude did not approve. 1 earlier point is still open.',
     );
     expect(blockerWarningCounts([], e({ blockers: 1, warnings: 2 }))).toEqual({ blockers: 1, warnings: 2 });
     expect(openFindingsReason([], 'severe', 'nits_questions', e({ blockers: 1 }))?.text).toBe('Not approved: 1 earlier blocker is still open.');

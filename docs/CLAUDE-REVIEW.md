@@ -1486,6 +1486,14 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 
 ### The replies pass (judge just the replies, 2026-10-27)
 
+**THE TEAM HOLD** (user decision 2026-11-09, PR 221270): the pass's APPROVE is HELD — a COMMENT with
+the reason, through the usual held-approval path — when a teammate's Limn review posted AFTER the full
+review the outcome rests on judged a point this pass settled (`j=<id>:n` or `:o` on the finding
+comment of an accepted reply) as still open, and no newer teammate judgement settled it
+(replies-pass.ts `teammateStillOpenHold`, `heldReason: 'team_open'`: "Not approved: robin-dunn’s Limn
+judged a point still open."). Two machines disagreeing about one thread never leave an approval in
+force on the word of one of them.
+
 A reply on one of Limn's posted findings used to wait for the next full review. A REPLIES PASS judges
 JUST the replies, cheaply, at the current head. Pure half `claude-review/replies-pass.ts`; I/O
 `replies-check.ts` (+ `-agent`, `-prompt`, `-schema`, `-routes`); the outcome `replies-outcome.ts`.
@@ -3140,15 +3148,30 @@ auto-posting: claim before any GitHub write, never retried.
     Blockers and warnings ALWAYS hold; praise never counts (`leftoverAllowed`). Read by
     `autoVerdictFor` (single runs and pairs) and `repliesVerdict`. Settings: "Approve with open
     findings", three radios under Approve, dimmed while the verdict switch is off.
+- **A COMMENT WITH NOTHING OPEN IS AN APPROVE CANDIDATE** (user decision 2026-11-09, PR 221287).
+  A SINGLE run whose model said COMMENT while NOTHING is open — no counted finding but praise, no
+  earlier point held open, no unmet ticket criterion (`nothingOpen`) — is read as APPROVE
+  (`promotedModelVerdict`, applied by each single-run caller of `autoVerdictFor`: the auto post, the
+  posting-off withdrawal, `findingsNotApproved`). It then goes through EVERY gate: impact, own PR,
+  the reader's standing review; a held one gets the gate's reason (own PR stays in Limn). ⚠ Never a
+  PAIR: its two verdicts fold by the workspace's strictness, and 'strict' means both halves
+  approved. ⚠ REQUEST_CHANGES and no verdict are never promoted. Such a run never withdraws Limn's
+  earlier approval. The review prompt now states the verdict rule (both providers, one shared
+  text): APPROVE when no blocker or warning remains; REQUEST_CHANGES only with a blocker; COMMENT
+  only with a warning, a nit or question to answer, or a one-sentence reason in the summary.
 - **THE REASON — ALWAYS ONE WHEN NOT APPROVED** (migration 0145). While the auto verdict is on, a run
   that does not end in an APPROVE gets ONE plain-English line, "Not approved: …":
   - from the findings and the model(s) (`findingsNotApproved`, pure — null EXACTLY when
     `autoVerdictFor` would approve), in order: blockers / warnings still open ("Not approved: 2
     warnings are still open."); the model(s) — a model that asked for changes: "Not approved: Codex
     asked for changes. <its summary's first sentence, clipped at a sentence end>"; one that only
-    COMMENTED: "Not approved: Claude left a comment, not an approval." plus what is open, "No findings
-    are open." / "A nit is still open." — ⚠ NEVER its summary (since 2026-11-05: a COMMENT's summary
-    often says "The change is sound", which beside "didn’t approve" confused readers on PR #592); no
+    COMMENTED: "Not approved: Claude did not approve." plus what is open ("A nit is still open." /
+    "1 earlier point is still open." / "A ticket criterion is still unmet." — unmet story findings
+    are named, so the line never says "No findings are open." beside a ticket gap) — ⚠ NEVER its
+    summary (since 2026-11-05: a COMMENT's summary often says "The change is sound", which beside
+    "didn’t approve" confused readers on PR #592), and ⚠ NEVER the word "comment" as the verdict's
+    name (2026-11-09, PR 221287: "left a comment, not an approval" read as "there are comments to
+    find" on a review with none); no
     verdict: "Claude gave no verdict." (`pair_strict` in a strict pair, `model_comment` for a single
     run, a relaxed pair's asker, or "neither Claude nor Codex approved. No findings are open."; the
     replies outcome's silent half: "… It raised no findings."); leftovers the rule forbids ("Not
@@ -3738,6 +3761,22 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
 - Example (PR 203001): the reader's Claude + Codex pair asked for changes on 3 Nov and it was
   posted; Robin's Limn commented on 4 Nov. Shown: "Request changes" with "Latest: Robin · Comment ·
   4 Nov". Dismissing the reader's review on GitHub lifts it.
+- **A WITHDRAWN VERDICT STAYS VISIBLE** (2026-11-09, PR 221270; migration 0183). `withdrawnVerdict`
+  (pure, beside `teamStandings`): a reviewer's most recent DECISIVE Limn review — Approve / Request
+  changes, or a dismissed one — when it was DISMISSED, even after a later Comment became their newest
+  (`dismissed` stays "the newest was dismissed"). Its verdict comes from the dismissed body's marker
+  `d=` (never the GitHub state, never guessed: no `d=` ⇒ null); its time, who and reason from the
+  synced ReviewDismissedEvent (`reviews.dismissed_*`). → `ClaudeReviewStanding.withdrawn`; the tab's
+  row note "approval from 9 Nov withdrawn: 3 warnings found at 951c4aa" ("dismissed" when a person
+  did it or it is unknown; lib/teamReview.ts `withdrawnNote`). ⚠ Limn reviews only: a person's own
+  dismissed review is never read as Limn's.
+- **DECISIONS NO ROW SHOWS** (`teamDecisions` / `loadTeamDecisions` → `teamView.decisions`): every
+  synced Limn review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /
+  `REQUEST_CHANGES`; a Comment never) or DISMISSED, with the list row it belongs to (the reader's run
+  by GitHub review id, a teammate's imported review by node id) and its withdrawal. "Reviews on this
+  PR" marks that row "Approve (withdrawn)", gives the reader's replies pass its verdict, and lists a
+  teammate's decisive replies pass as a DECISION-ONLY row (nothing to open; a link to GitHub). ⚠ The
+  teammate importer still skips replies passes: they never become `claude_reviews` rows.
 
 ### Judgements travel with a post (2026-11-04)
 

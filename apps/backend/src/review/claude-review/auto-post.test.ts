@@ -784,6 +784,36 @@ describe('auto verdict', () => {
     });
   });
 
+  it('a COMMENT with NOTHING open is promoted to an approve candidate; the gates still hold it', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    // Someone else's PR: the promoted APPROVE goes out.
+    const theirs = await makePr({ author: 'alice' });
+    const a = await run(theirs, [], 'auto', 'COMMENT');
+    expect((await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: theirs, reviewId: a }, deps())).kind).toBe('done');
+    expect(postReview.mock.calls[0]![0].verdict).toBe('APPROVE');
+    expect((await persist.getClaudeReviewById(ctx, a, 1))?.autoPost?.verdict).toMatchObject({ wanted: 'APPROVE', submitted: 'APPROVE' });
+    // The reader's own PR: held by the own-PR gate, with that reason (kept in Limn).
+    postReview.mockClear();
+    const own = await makePr({ author: 'me' });
+    const b = await run(own, [], 'auto', 'COMMENT');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: own, reviewId: b }, deps());
+    expect(postReview).not.toHaveBeenCalled();
+    expect((await persist.getClaudeReviewById(ctx, b, 1))?.autoPost?.verdict).toMatchObject({
+      wanted: 'APPROVE',
+      submitted: 'COMMENT',
+      heldReason: 'own_pr',
+      reasonText: 'Not approved: your own pull request.',
+    });
+    // A nit open keeps the model's COMMENT, and the reason never calls the verdict "a comment".
+    const nit = await makePr({ author: 'alice' });
+    const c = await run(nit, [{ severity: 'nit', title: 'Rename' }], 'auto', 'COMMENT');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: nit, reviewId: c }, deps());
+    expect((await persist.getClaudeReviewById(ctx, c, 1))?.autoPost?.verdict).toMatchObject({
+      wanted: 'COMMENT',
+      reasonText: 'Not approved: Claude did not approve. A nit is still open.',
+    });
+  });
+
   it('a clean approved run APPROVES even with nothing to post', async () => {
     await setPost(true, { scope: 'all', autoVerdict: true });
     const pr = await makePr({ author: 'alice' });

@@ -7,7 +7,18 @@ import {
   parseLimnReviewMarker,
   type ClaudeTeammateReview,
 } from '@pierre-review/shared';
-import { foldAllTeamFindings, githubStandingReview, teamStandings, type AllFindingsOwn, type StandingGithubReview, type StandingsInput } from './team-view.js';
+import {
+  foldAllTeamFindings,
+  githubStandingReview,
+  teamDecisions,
+  teamStandings,
+  withdrawnVerdict,
+  type AllFindingsOwn,
+  type DecisionReviewInput,
+  type StandingGithubReview,
+  type StandingsInput,
+} from './team-view.js';
+import { teammateStillOpenHold } from './replies-pass.js';
 import { judgedOutcomeOfFollowUp, judgedOutcomeOfThread } from './post-meta.js';
 import { mergeStandingBlocks } from './teammate-anchor.js';
 
@@ -338,5 +349,120 @@ describe('mergeStandingBlocks', () => {
   it('no block: the prior is returned unchanged (same object)', () => {
     const prior = { reviewId: 10, headSha: 'a'.repeat(40), findings: [] };
     expect(mergeStandingBlocks(prior, [])).toBe(prior);
+  });
+});
+
+// PR 221270 (DEFRA/bng-metric-frontend#474): Robin's replies pass APPROVED at 14:05 (marker d=APPROVE),
+// his auto review withdrew it at 16:41 and posted a Comment 4 seconds later. The approval must not
+// vanish: the standing row keeps a note, and the review list keeps the verdict, withdrawn.
+describe('a withdrawn Limn verdict (migration 0183)', () => {
+  const dismissedApprove = (over: Partial<StandingGithubReview> = {}) =>
+    gh(2, 'RV_5826965513', 'dismissed', '2026-11-09T14:05:09Z', {
+      markerVerdict: 'APPROVE',
+      dismissedAt: t('2026-11-09T16:41:46Z'),
+      dismissalMessage: 'Limn withdrew its approval: 3 warnings found at 951c4aa.',
+      ...over,
+    });
+  const laterComment = gh(2, 'RV_5829226544', 'commented', '2026-11-09T16:41:50Z');
+
+  it('decisive, then dismissed, then a Comment: the withdrawal survives the newer Comment', () => {
+    expect(withdrawnVerdict([dismissedApprove(), laterComment])).toEqual({
+      verdict: 'APPROVE',
+      postedAt: '2026-11-09T14:05:09.000Z',
+      at: '2026-11-09T16:41:46.000Z',
+      byLimn: true,
+      reason: '3 warnings found at 951c4aa',
+    });
+    const input = base();
+    input.teammates = [{ reviewId: 1419, poster: ROBIN, verdict: 'COMMENT', at: t('2026-11-09T16:41:50Z'), headSha: '951c4aa'.padEnd(40, '0'), nodeId: 'RV_5829226544' }];
+    input.github = [gh(ME, 'RV_601', 'changes_requested', '2026-11-03T10:00:00Z'), dismissedApprove(), laterComment];
+    const robin = teamStandings(input).reviewers.find((r) => !r.you)!;
+    expect(robin).toMatchObject({ inForce: null, dismissed: false, withdrawn: { verdict: 'APPROVE', byLimn: true } });
+  });
+
+  it('a later decisive review replaces it; an older Limn without d= is withdrawn with no verdict; a person’s dismissal is "not Limn"', () => {
+    expect(withdrawnVerdict([dismissedApprove(), gh(2, 'RV_9', 'approved', '2026-11-09T17:00:00Z')])).toBeNull();
+    expect(withdrawnVerdict([dismissedApprove({ markerVerdict: null, dismissalMessage: null, dismissedAt: null })])).toMatchObject({
+      verdict: null,
+      at: null,
+      byLimn: null,
+      reason: null,
+    });
+    expect(withdrawnVerdict([dismissedApprove({ dismissalMessage: 'Stale.' })])).toMatchObject({ byLimn: false, reason: 'Stale' });
+    // A person's own dismissed review (no Limn marker) is never Limn's.
+    expect(withdrawnVerdict([dismissedApprove({ limn: false })])).toBeNull();
+  });
+
+  it('the decisions fold: a decisive replies pass is listed, a Comment one is not; a dismissed review carries its withdrawal', () => {
+    const marker = (k: string, d: string) => `body\n\n<!-- pierre:claude-review v=1 a=x h=7f8ea893 k=${k} d=${d} lv=1.0.13 -->`;
+    const row = (nodeId: string, state: DecisionReviewInput['state'], body: string | null, over: Partial<DecisionReviewInput> = {}): DecisionReviewInput => ({
+      nodeId,
+      databaseId: nodeId.replace(/\D/g, ''),
+      authorId: 2,
+      state,
+      submittedAt: t('2026-11-09T14:05:09Z'),
+      body,
+      dismissedAt: null,
+      dismissalMessage: null,
+      ...over,
+    });
+    const out = teamDecisions({
+      reviews: [
+        row('RV_1', 'dismissed', marker('replies', 'APPROVE'), {
+          dismissedAt: t('2026-11-09T16:41:46Z'),
+          dismissalMessage: 'Limn withdrew its approval: 3 warnings found at 951c4aa.',
+        }),
+        row('RV_2', 'commented', marker('replies', 'COMMENT')),
+        row('RV_3', 'approved', marker('replies', 'APPROVE'), { authorId: ME, submittedAt: t('2026-11-08T10:00:00Z') }),
+        row('RV_4', 'changes_requested', marker('auto', 'REQUEST_CHANGES')),
+        row('RV_5', 'dismissed', 'LGTM'),
+        row('RV_6', 'dismissed', marker('auto', 'REQUEST_CHANGES'), { submittedAt: t('2026-11-07T10:00:00Z') }),
+      ],
+      readerUserIds: new Set([ME]),
+      posters: new Map([[2, ROBIN]]),
+      ownPosted: new Map([['3', 77]]),
+      teammateByNode: new Map([['RV_6', 1364]]),
+      prUrl: 'https://github.com/DEFRA/bng-metric-frontend/pull/474',
+    });
+    expect(out.map((d) => [d.key, d.verdict, d.run, d.ref, d.withdrawn?.byLimn ?? null])).toEqual([
+      ['RV_1', 'APPROVE', 'replies', null, true],
+      ['RV_3', 'APPROVE', 'replies', { kind: 'own', id: 77 }, null],
+      ['RV_6', 'REQUEST_CHANGES', 'auto', { kind: 'teammate', reviewId: 1364 }, null],
+    ]);
+    expect(out[0]).toMatchObject({
+      poster: { login: 'robin-dunn' },
+      headSha: '7f8ea893',
+      githubUrl: 'https://github.com/DEFRA/bng-metric-frontend/pull/474#pullrequestreview-1',
+      withdrawn: { reason: '3 warnings found at 951c4aa', at: '2026-11-09T16:41:46.000Z' },
+    });
+  });
+});
+
+describe('the team hold on a replies pass’s APPROVE (decision 2026-11-09)', () => {
+  const since = t('2026-11-09T13:00:00Z');
+  it('a teammate’s newer "still open" on a point the pass settled holds it; older or addressed does not', () => {
+    const settled = new Set(['4512556766']);
+    expect(
+      teammateStillOpenHold(settled, [{ login: 'alexwakeman', at: t('2026-11-09T13:30:00Z'), judged: [{ commentId: '4512556766', outcome: 'still_open' }] }], since),
+    ).toEqual({ heldReason: 'team_open', text: 'Not approved: alexwakeman’s Limn judged a point still open.' });
+    // Older than the full review: not a newer judgement.
+    expect(
+      teammateStillOpenHold(settled, [{ login: 'alexwakeman', at: t('2026-11-09T12:00:00Z'), judged: [{ commentId: '4512556766', outcome: 'not_addressed' }] }], since),
+    ).toBeNull();
+    // The newest judgement of the point wins: a later "addressed" settles it.
+    expect(
+      teammateStillOpenHold(
+        settled,
+        [
+          { login: 'alexwakeman', at: t('2026-11-09T13:30:00Z'), judged: [{ commentId: '4512556766', outcome: 'not_addressed' }] },
+          { login: 'sam-li', at: t('2026-11-09T13:40:00Z'), judged: [{ commentId: '4512556766', outcome: 'addressed' }] },
+        ],
+        since,
+      ),
+    ).toBeNull();
+    // A point the pass did not settle never holds it.
+    expect(
+      teammateStillOpenHold(settled, [{ login: 'alexwakeman', at: t('2026-11-09T13:30:00Z'), judged: [{ commentId: '1', outcome: 'still_open' }] }], since),
+    ).toBeNull();
   });
 });

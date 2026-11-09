@@ -546,7 +546,7 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
       expect(postReview).toHaveBeenCalledTimes(1);
       const sent = postReview.mock.calls[0]![0];
       expect(sent.verdict).toBe('COMMENT');
-      expect(sent.body.startsWith('Not approved: Codex left a comment, not an approval. It raised no findings.')).toBe(true);
+      expect(sent.body.startsWith('Not approved: Codex did not approve. It raised no findings.')).toBe(true);
       const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
       expect(pass.autoPost).toMatchObject({ verdict: { heldReason: 'pair_strict' } });
       // Relaxed: the same outcome approves.
