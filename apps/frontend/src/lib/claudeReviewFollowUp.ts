@@ -6,10 +6,12 @@
 // this module only orders and paints what it was sent. The caps and the criteria split are NOT
 // retyped here either — they live once in `@pierre-review/shared` (`claude-review.ts`).
 import {
+  aiProviderName,
   checkClaudeReviewTicket,
   checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
   isThreadToFix,
+  judgementHowOf,
   storyMissingRef,
   storyName,
   TICKET_CRITERION_STATUS_LABEL,
@@ -406,12 +408,18 @@ export function settledEarlierRows(
  *     earlier and hides this run's text (it was never posted).
  */
 export function replyActions(
-  item: Pick<ClaudeFollowUpItem, 'status' | 'response' | 'threadId' | 'threadResolved' | 'autoResolve' | 'pushback'>,
+  item: Pick<ClaudeFollowUpItem, 'status' | 'response' | 'threadId' | 'threadResolved' | 'autoResolve' | 'pushback' | 'prComment'>,
   reviewId: number,
 ): { note: string | null; showText: boolean; canPost: boolean; canResolve: boolean } {
   const text = (item.response ?? '').trim();
-  const hasThread = item.threadId != null;
-  const UNCLEAR = 'Couldn’t confirm the reply posted. Check the thread on GitHub.';
+  // A PR-LEVEL finding (posted as a PR comment) has no thread: Limn writes a new PR comment that
+  // links it, and "resolving" hides the finding comment as resolved.
+  const prLevel = item.threadId == null && item.prComment != null;
+  const hasThread = item.threadId != null || prLevel;
+  const where = prLevel ? 'about this comment' : 'on this thread';
+  const UNCLEAR = prLevel
+    ? 'Couldn’t confirm the reply posted. Check the pull request on GitHub.'
+    : 'Couldn’t confirm the reply posted. Check the thread on GitHub.';
   if (item.status === 'reply_accepted') {
     const ar = item.autoResolve ?? null;
     const mine = ar != null && ar.byReviewId === reviewId;
@@ -420,15 +428,15 @@ export function replyActions(
     const resolved = item.threadResolved === true || ar?.status === 'resolved';
     let note: string | null = null;
     if (ar != null && !mine) {
-      if (replyMayBeOn) note = 'Limn already replied on this thread earlier.';
+      if (replyMayBeOn) note = `Limn already replied ${where} earlier.`;
     } else if (ar != null) {
-      if (ar.status === 'resolved') note = `Replied and resolved${how}.`;
+      if (ar.status === 'resolved') note = ar.replyCommentId == null && prLevel ? 'Marked resolved.' : `Replied and resolved${how}.`;
       else if (ar.status === 'resolving') note = `Replying${how}…`;
       else if (ar.replyCommentId != null) note = `Replied${how}, but couldn’t resolve: ${ar.error?.trim() || 'GitHub did not accept it.'}`;
       else if (ar.refused === true) note = `Couldn’t reply${how}: ${ar.error?.trim() || 'GitHub did not accept it.'}`;
       else note = UNCLEAR;
     }
-    if (note == null && resolved) note = 'The thread is resolved.';
+    if (note == null && resolved) note = prLevel ? 'The comment is marked resolved.' : 'The thread is resolved.';
     return {
       note,
       showText: !(ar != null && !mine && replyMayBeOn),
@@ -443,7 +451,7 @@ export function replyActions(
     const mayBeOn = pb != null && !(pb.status === 'failed' && pb.refused === true);
     let note: string | null = null;
     if (pb != null && !mine) {
-      if (mayBeOn) note = 'Limn already pushed back on this thread earlier.';
+      if (mayBeOn) note = prLevel ? 'Limn already said this is still open.' : 'Limn already pushed back on this thread earlier.';
     } else if (pb != null) {
       if (pb.status === 'posted') note = `Posted${how}.`;
       else if (pb.status === 'posting') note = `Posting${how}…`;
@@ -458,6 +466,40 @@ export function replyActions(
     };
   }
   return { note: null, showText: true, canPost: false, canResolve: false };
+}
+
+/**
+ * May the row offer "Post still open"? A NOT (or partly) ADDRESSED item, with a one-line "how" to
+ * post, on a thread GitHub shows RESOLVED (Limn writes nothing there by itself) — or on a PR-LEVEL
+ * finding that Limn has not called still open yet (once per finding, ever). Pure.
+ */
+export function stillOpenPostable(
+  item: Pick<ClaudeFollowUpItem, 'status' | 'how' | 'explanation' | 'threadId' | 'threadResolved' | 'prComment' | 'pushback' | 'raisedBy'>,
+): boolean {
+  if (item.status !== 'not_addressed' && item.status !== 'partly_addressed') return false;
+  // The other provider's finding: the check never says "still open" on GitHub.
+  if (item.raisedBy != null) return false;
+  if (judgementHowOf(item) == null) return false;
+  // A PR-LEVEL finding: once per finding, ever — offered until Limn said it (or GitHub refused it).
+  if (item.threadId == null && item.prComment != null) {
+    const pb = item.pushback ?? null;
+    return pb == null || (pb.status === 'failed' && pb.refused === true);
+  }
+  return item.threadId != null && item.threadResolved === true;
+}
+
+/**
+ * Who raised a finding the OTHER provider checked: "Raised by Codex · checked by Claude". null for
+ * the run's own finding. `by`: the provider that ran the check (default Claude). Pure.
+ */
+export function raisedByLine(item: Pick<ClaudeFollowUpItem, 'raisedBy'>, by = 'Claude'): string | null {
+  if (item.raisedBy == null) return null;
+  return `Raised by ${aiProviderName(item.raisedBy)} · checked by ${by}`;
+}
+
+/** Is this item a PR-LEVEL finding (posted as a PR comment, so it has no thread)? Pure. */
+export function isPrLevelItem(item: Pick<ClaudeFollowUpItem, 'threadId' | 'prComment'>): boolean {
+  return item.threadId == null && item.prComment != null;
 }
 
 /**

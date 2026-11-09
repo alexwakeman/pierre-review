@@ -109,6 +109,30 @@ describe('limnReviewMarker / parseLimnReviewMarker', () => {
     });
   });
 
+  it('carries each judgement\'s one-line how in `jr=`, which an older reader ignores', () => {
+    const m = limnReviewMarker('n1', {
+      headSha: SHA,
+      judged: [
+        { commentId: '12', outcome: 'addressed', reason: 'rowSelect now reads rowid — café' },
+        { commentId: '13', outcome: 'still_open', reason: 'Add the guard' },
+        { commentId: '14', outcome: 'no_longer_applies' },
+      ],
+    });
+    // Nothing in the value can close the comment or carry markup.
+    expect(m).toMatch(/ jr=12:[A-Za-z0-9+/]+,13:[A-Za-z0-9+/]+ -->$/);
+    expect(parseLimnReviewMarker(m)?.judged).toEqual([
+      { commentId: '12', outcome: 'addressed', reason: 'rowSelect now reads rowid — café' },
+      { commentId: '13', outcome: 'still_open', reason: 'Add the guard' },
+      { commentId: '14', outcome: 'no_longer_applies' },
+    ]);
+    // A malformed reason is dropped; the outcome never is.
+    const bad = m.replace(/jr=12:[A-Za-z0-9+/]+/, 'jr=12:!!');
+    expect(parseLimnReviewMarker(bad)?.judged?.[0]).toEqual({ commentId: '12', outcome: 'addressed' });
+    // A reason for an id `j=` does not name is ignored.
+    const stray = limnReviewMarker('n1', { headSha: SHA, judged: [{ commentId: '12', outcome: 'addressed' }] }).replace(' -->', ' jr=99:eA -->');
+    expect(parseLimnReviewMarker(stray)?.judged).toEqual([{ commentId: '12', outcome: 'addressed' }]);
+  });
+
   it('strips the marker from the summary text', () => {
     expect(stripLimnReviewMarker(`Two issues.\n\n${limnReviewMarker('q', { run: 'auto' })}`)).toBe('Two issues.');
   });

@@ -1,5 +1,6 @@
 import {
   aiProviderName,
+  stillOpenByName,
   stillOpenLabel,
   type AiProviderId,
   type ClaudeThreadJudgement,
@@ -143,6 +144,9 @@ export interface ClaudeThreadMarker {
   /** Set on a thread rooted on one of Claude's own findings: the outcome pill, shown INSTEAD of the
    *  validity pill (which is then null). */
   finding: ClaudeFindingPill | null;
+  /** The outcome is a TEAMMATE'S Limn's newer word ("Robin’s Limn"); the pill reads
+   *  "Robin’s Limn: addressed". null = the reader's own Limn (or not a finding). */
+  findingBy?: string | null;
   /** null when Claude judged only the code, not the comment. */
   validity: ClaudeValidityPill | null;
   /** null when Claude judged only the comment, not the code (never both null). */
@@ -170,11 +174,16 @@ export interface ClaudeThreadMarker {
 
 export type ThreadPill = { kind: 'derived' } | { kind: 'claude'; marker: ClaudeThreadMarker };
 
+/** A finding's outcome pill as words: "Addressed", or "Robin’s Limn: addressed" for a teammate's. */
+export function claudeFindingWords(finding: ClaudeFindingPill, findingBy?: string | null): string {
+  return findingBy ? `${findingBy}: ${CLAUDE_FINDING_LABEL[finding].toLowerCase()}` : CLAUDE_FINDING_LABEL[finding];
+}
+
 export function claudeMarkerLabel(
-  m: Pick<ClaudeThreadMarker, 'validity' | 'state'> & { finding?: ClaudeFindingPill | null },
+  m: Pick<ClaudeThreadMarker, 'validity' | 'state'> & { finding?: ClaudeFindingPill | null; findingBy?: string | null },
 ): string {
   return [
-    m.finding != null ? CLAUDE_FINDING_LABEL[m.finding] : null,
+    m.finding != null ? claudeFindingWords(m.finding, m.findingBy) : null,
     m.validity != null ? CLAUDE_VALIDITY_LABEL[m.validity] : null,
     m.state != null ? CLAUDE_STATE_LABEL[m.state] : null,
   ]
@@ -198,22 +207,33 @@ export function threadPillFor(
   if (j.finding != null) {
     const finding = claudeFindingPill(j.finding);
     const state: ClaudeStatePill | null = thread.derivedState === 'resolved' ? 'resolved' : null;
+    // A TEAMMATE'S Limn made the newest word (the server's fold): the label names it.
+    const by = j.finding.judgedBy ?? null;
+    const findingBy = by != null ? stillOpenByName({ you: false, login: by.login, name: by.name }) : null;
+    const label = claudeMarkerLabel({ finding, validity: null, state, findingBy });
     return {
       kind: 'claude',
       marker: {
         finding,
+        findingBy,
         validity: null,
         state,
-        label: claudeMarkerLabel({ finding, validity: null, state }),
+        label,
         stale,
-        reason: claudeFindingReason(j.finding, provider),
+        // THE ONE-LINE "HOW" (how it was dealt with, or what is still needed); the templated fact
+        // only for a judgement with no words at all.
+        reason: j.reason?.trim() ? j.reason.trim() : by != null ? null : claudeFindingReason(j.finding, provider),
         explanation: j.explanation,
         reviewId: j.finding.reviewId,
         checkId: null,
         finishedAt: pr.finishedAt,
         assessedAtHead: j.assessedAtHead,
         provider,
-        stillOpen: teammateStillOpen(j),
+        // The same teammate's still-open is already the pill ("Robin’s Limn: not addressed"): once.
+        stillOpen:
+          by != null && j.stillOpen != null && !j.stillOpen.by.you && j.stillOpen.by.login === by.login
+            ? null
+            : teammateStillOpen(j),
       },
     };
   }

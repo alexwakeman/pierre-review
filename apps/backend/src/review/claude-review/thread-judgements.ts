@@ -14,6 +14,7 @@ import {
   aiRunProvider,
   isStillOpenFollowUp,
   isStillOpenThread,
+  judgementHowOf,
   limnFindingPost,
   parseStillOpenMarker,
   stillOpenReasonOf,
@@ -21,6 +22,7 @@ import {
   threadAssessmentCounts,
   type ClaudeStillOpenBy,
   type ClaudeThreadStillOpen,
+  type LimnJudgedOutcome,
   type TeammateReviewRecord,
 } from '@pierre-review/shared';
 import type { ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
@@ -505,7 +507,9 @@ export function findingJudgementsFromFollowUps(
         threadId,
         ...findingMirror(finding),
         explanation: it.explanation ?? null,
-        reason: null,
+        // THE ONE-LINE "HOW" (shared `judgementHowOf`): the model's line, else the explanation's
+        // first sentence on a row from before the field.
+        reason: judgementHowOf(it),
         // Read the thread's CURRENT resolved state from the thread itself.
         resolved: false,
         assessedAtHead: r.headSha,
@@ -586,6 +590,9 @@ export interface StillOpenWord {
   reason: string | null;
   severity: ClaudeThreadStillOpen['severity'];
   headSha: string | null;
+  // A teammate's word only: what its `j=` entry said, and its one-line "how" (`jr=`), when sent.
+  outcome?: LimnJudgedOutcome;
+  how?: string | null;
 }
 
 /** The newer word wins (ties: the reader's own). Pure. */
@@ -593,6 +600,34 @@ export function newerStillOpenWord(own: StillOpenWord | undefined, mate: StillOp
   if (own == null) return mate;
   if (mate == null) return own;
   return mate.at > own.at ? mate : own;
+}
+
+/**
+ * A thread judgement of the reader's own Limn finding, REPLACED by a newer teammate Limn's word: the
+ * outcome becomes that word (still open / not addressed → 'not_addressed'), labelled with who judged
+ * it, its one line the teammate's "how" (or still-open reason), its head the teammate's. The model
+ * text of the reader's older judgement is dropped: it was about older code. Pure.
+ */
+export function teammateFindingJudgement(j: ClaudeThreadJudgement, mate: StillOpenWord): ClaudeThreadJudgement {
+  if (j.finding == null || mate.by.you || mate.outcome == null) return j;
+  const status = mate.outcome === 'addressed' ? 'addressed' : mate.outcome === 'no_longer_applies' ? 'no_longer_applies' : 'not_addressed';
+  const finding: ClaudeThreadFindingOutcome = {
+    status,
+    acceptKind: null,
+    replyAuthor: null,
+    reviewId: j.finding.reviewId,
+    judgedBy: { login: mate.by.login, name: mate.by.name },
+  };
+  const { provider: _ownProvider, ...rest } = j;
+  return {
+    ...rest,
+    ...findingMirror(finding),
+    finding,
+    explanation: null,
+    reason: (mate.how ?? '').trim() || (mate.reason ?? '').trim() || null,
+    assessedAtHead: mate.headSha ?? j.assessedAtHead,
+    carried: false,
+  };
 }
 
 const firstSentenceOf = (t: string | null | undefined): string | null => {
@@ -704,13 +739,16 @@ export async function teammateStillOpenWordsForPrs(
         : undefined;
       const rootPost = limnFindingPost(list[0]?.body, { threadRoot: true });
       const map = out.get(m.prId) ?? new Map<number, StillOpenWord>();
+      const how = typeof j.reason === 'string' && j.reason.trim() !== '' ? j.reason.trim() : null;
       map.set(threadId, {
         open,
         at,
         by,
-        reason: reply != null ? stillOpenReasonOf(reply.body) || null : null,
+        reason: (reply != null ? stillOpenReasonOf(reply.body) || null : null) ?? (open ? how : null),
         severity: rootPost != null && !rootPost.stillOpen ? sevOf(rootPost.severity) : null,
         headSha: m.headSha ?? null,
+        outcome: j.outcome,
+        how,
       });
       out.set(m.prId, map);
     }
@@ -766,7 +804,7 @@ export async function getThreadJudgements(
           open: isStillOpenFollowUp(j.finding.status),
           at: finishedOf.get(j.finding.reviewId) ?? 0,
           by: { you: true },
-          reason: firstSentenceOf(j.explanation),
+          reason: (j.reason ?? '').trim() || firstSentenceOf(j.explanation),
           severity: null,
           headSha: j.assessedAtHead,
         });
@@ -782,6 +820,17 @@ export async function getThreadJudgements(
       }
     }
     const mates = mateWords.get(prId);
+    // THE NEWEST WORD MOVES THE PILL (docs/TEAM-REVIEW.md): on a thread rooted on the reader's own
+    // Limn finding, a teammate's Limn that judged it AFTER the reader's newest own judgement replaces
+    // the outcome, labelled with who judged it (`finding.judgedBy`). Ties: the reader's own.
+    for (let i = 0; i < judgements.length; i += 1) {
+      const j = judgements[i]!;
+      if (j.finding == null) continue;
+      const mate = mates?.get(j.threadId);
+      if (mate == null || mate.by.you || mate.outcome == null) continue;
+      if (!(mate.at > (finishedOf.get(j.finding.reviewId) ?? 0))) continue;
+      judgements[i] = teammateFindingJudgement(j, mate);
+    }
     const words = new Map<number, StillOpenWord>();
     for (const id of new Set([...ownWords.keys(), ...(mates?.keys() ?? [])])) {
       const w = newerStillOpenWord(ownWords.get(id), mates?.get(id));

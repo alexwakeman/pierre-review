@@ -461,8 +461,10 @@ size, cache reads). It never runs a model and never starts the usage probe.
     (`aiModelChoiceLabel`: "Codex · GPT-6.1 Sol (most thorough)"). Never word a provider by hand.
   - **In-situ comparison**: a Codex review of a head Claude already reviewed runs, and both stay in
     history, each labelled (`mixed-providers.test.ts`). Auto review's one-run-per-head counts either
-    provider. ⚠ A second review still gets the earlier one as its "Previous review" follow-up, so
-    the two are NOT independent. The thread fold lets the newer run win and carries its provider.
+    provider. ⚠ The two are NOT independent: a run anchors its "Previous review" on its OWN
+    provider's latest run, and ALSO follows up the other provider's still-open findings, labelled as
+    that provider's (§ Claude + Codex → CROSS-PROVIDER FOLLOW-UP, decided 2026-11-09, every run, auto
+    and manual). The thread fold lets the newer run win and carries its provider.
   - Run cost follows the RUN's provider (`runCostText(…, provider)`): a Codex run on ChatGPT shows
     no figure, never US$. `useRunCostText()` judges a run of the OTHER provider (a per-run pick) by
     that provider's own reading (`['ai-budget', other]`, read only while it holds a credential), so a
@@ -611,6 +613,46 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     (two halves could otherwise auto-resolve and push back on one comment, or resolve it and re-raise
     it as a blocker). The next pair's second half drops a re-raise of the SAME earlier finding
     (`isPairRepeat`), and the next consolidation catches the rest.
+  - ⚠ **CROSS-PROVIDER FOLLOW-UP** (decided 2026-11-09; before it each provider followed only its own
+    chain, so a Codex finding was judged by nobody once Codex hit its usage limit — PR 221270's
+    warning 2101). EVERY run that is NOT a pair half (auto and manual alike) anchors on its own
+    provider's latest run as before, AND follows up the OTHER provider's still-open findings
+    (`loadPriorReviewForFollowUp` → `loadProviderChain` for the other provider, read as a pair half
+    reads it): each joins as carried with `raisedBy`, inline or PR-level alike. One is left out when
+    this chain already lists it, an eligible finding here re-raises it, it re-raises one this chain
+    lists (`priorFindingId`), or a run of THIS provider judged it after the other provider's newest
+    word on it (`judgedSinceByProvider` past the other chain's anchor) — so a working chain on the
+    other provider is not judged twice. With no run of this provider yet, the other chain alone
+    anchors the follow-up. They go LAST in the prompt (`selectPriorFindings`, under the same 40 /
+    24k cap; one left over is `not_checked` and carried again), each fenced with "(raised by Codex in
+    an earlier review, at head …)", plus ONE rule line only when such a finding is shown
+    (`pushCrossProviderRule`), so `prompt-golden.json` holds. One raised at this very head keeps the
+    other provider's answer (else `not_addressed`) in code, like an own one. ⚠ **THE CHECKER NEVER
+    DISPUTES THE OTHER PROVIDER'S FINDING** (`isCrossDispute`): a `reply_disputed` on it is stored as
+    plain `not_addressed` (no reply text), auto pushback skips it, and no still-open comment (thread or
+    PR-level) is planned for it; it MAY mark it addressed, and auto resolve may then close the thread
+    or hide the PR comment. The stored item carries `raisedBy`; the AI review panel shows "Raised by
+    Codex · checked by Claude" (`raisedByLine`) and never offers "Post still open" on it. ⚠ **A PAIR
+    HALF CARRIES NOTHING THE OTHER PROVIDER RAISED** (`inPair`): no cross chain, and no carried item
+    whose raising run was the other provider's (an earlier cross carry, a merged-away duplicate's kept
+    finding) — one judge per thread.
+  - ⚠ **A FAILED HALF IS COVERED** (decided 2026-11-09). When one half fails or never starts
+    (`coverTarget`: not when the reader stopped the pair, nor when a teammate's Limn holds the other
+    half), the half that succeeded runs a SHORT follow-up-only COVER PASS straight after the pair ends
+    (`startPairCover`, once the pair's seat is released; `finishInterruptedPairs` does the same for a
+    half a restart interrupted): replies-check.ts `startCoverCheck`, through the replies lane, the
+    same agent, tools, path guard and `submit_replies` (whose status gains the four code statuses; a
+    replies pass stores those as `not_checked`). It plans the failed provider's chain minus what the
+    survivor's provider judged since (`planCoverCheck`), reconciles through the REVIEW's gate
+    (`selectPriorFindings` + `reconcileFollowUp`, so same-head locks and the reply gate hold), and is
+    stored as a `kind = 'replies'` row with `followUp.cover = {provider}` (every "latest review"
+    reader skips it; its items overlay the chain like a pass's). Same rules as above: never disputes,
+    no pushback, no outcome change; auto resolve only. An AUTO pair's cover asks the spend budget
+    first (skipped, never queued, when over); it counts toward the per-PR daily cap of automatic
+    passes. Its row records the pair's start as its coverage, so it claims no reply the pair had not
+    seen. Labelled "Checked Codex's findings" (`repliesRunLabel`); summary "Checked Codex's 3 open
+    findings: 1 dealt with, 2 still open." The failed provider is NOT re-run (usage limits are hours);
+    when it next succeeds, its own chain takes the findings back.
   - ⚠ A group whose POSTED member is milder than an unposted one is LEFT ALONE (both kept): the
     posted one can never be withdrawn and a blocker is never merged into something milder.
   - The merge pass's usage is recorded when the completion SETTLES — also after the 90 s timeout
@@ -1269,6 +1311,10 @@ of this.
   again, when its earlier finding is itself eligible — the re-raise saved ignored because it was
   already on the commit (below), or one the reader never posted. The original comment, which IS
   on the PR, is followed up instead; once the re-raise is posted, the chain runs through it.
+- **THE OTHER PROVIDER'S CHAIN** joins after this one (§ Claude + Codex → CROSS-PROVIDER FOLLOW-UP):
+  its still-open findings come carried, `raisedBy` the other provider, last in the prompt; never on a
+  pair half. A carried item whose raising run was the other provider's keeps `raisedBy` on every
+  later run.
 - ⚠ **"HAS THE CODE MOVED?" IS PER FINDING.** Each loaded finding carries the head of the review
   that RAISED it (`PriorFindingForFollowUp.headSha`; the carried query selects `cr.headSha`), and
   `findingHeadMoved` compares THAT with this run's head. The plan-level `headMoved` (previous
@@ -1484,6 +1530,57 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 - Open PRs cards: "Earlier: N fixed · N settled · N still open" — accepted is settled, disputed is
   open.
 
+#### PR-level findings: a PR comment, no thread (2026-11-09)
+
+**Why (PR DEFRA/bng-metric-template#12, local 221266):** a Codex blocker that could not be placed on a
+line was posted as a PR COMMENT. The author answered it (and the story check) in ONE later PR comment
+that neither linked nor quoted it. The next review re-judged the blocker on the code alone, repeated
+the claim the reply rebutted, and said only "Not approved: a blocker is still open." Every rule above
+read threads; a PR comment has none. Now a PR-level finding has the same lifecycle.
+
+- **Owner.** `loadPrLevelOwners` (`finding-replies.ts`): the first POSTED finding up
+  `prior_finding_id` of EITHER kind (`loadThreadOwners` with `anyKind`), kept when it was posted as a
+  PR comment (`posted_comment_kind = 'pr_comment'`). Its `github_comment_id` is the identity. No
+  schema change.
+- **Replies = the PR conversation after it** (`loadFindingConversations`, pure fold
+  `reply-text.ts` `buildConversationPool`): every later PR comment AND non-empty review body by a
+  person — never automation, never Limn's (a `limn:` attribution or ANY login's marker), the reader's
+  own unmarked ones count — after the finding comment's GitHub time. ONE pool per PR with refs
+  `C1…Cn` (oldest first), so a comment answering two findings is sent ONCE (`### PR conversation`,
+  its own nonce fence). Per finding: the ones that LINK (`issuecomment-<id>`) or QUOTE it (title or
+  first line, ≥ 12 characters) first, then newest; at most 5, 1,500 characters each.
+  `PriorFindingForFollowUp.conversation`. The rules and pool appear ONLY when a finding lists a
+  comment, so every other prompt is byte-identical (`prompt-golden.json` unchanged).
+- ⚠ **THE GATE NEEDS A CITATION.** GitHub does not thread PR comments, so a reply status on a
+  PR-level finding stands ONLY with `replyRef` naming one of ITS listed comments (`judgeReplyReport`;
+  `submit_review` `followUp[].replyRef`, `submit_replies` `replyRef`, both providers — Codex's strict
+  schema derives from the same zod shape). No ref, or another finding's, ⇒ unreported. A deferred
+  blocker is still refused. The item stores `replyRef`, `reply {author, excerpt, url}` and
+  `prComment {findingId, commentId, url}`.
+- **It starts a replies pass** like a reply on a thread: `newestPrLevelReplyTimes`
+  (db/review-threads-for-review.ts) — a person's PR comment or review body after one of Limn's PR-level
+  findings (own or a teammate's imported one) — is folded into `newestOwn` (`foldPrLevelReply`, never
+  a Check threads input). Same 5-minute settle, daily cap and budget gate; the pass runs on the
+  owner's provider; coverage counts the comment's time.
+- **GitHub writes** (`pr-level-writes.ts`), each a NEW PR comment that links the finding and carries
+  `<!-- pierre:claude-review-followup on=<finding comment id> act=still_open|ack -->` (Limn-posted for
+  every reader; any Limn's marker counts as said). Claim before write, never retried by a run, own
+  findings only (`ownOnly`; a teammate's are judged and shown, never written on):
+  - **Addressed / no longer applies / accepted** — under the auto-resolve switches (path A or B):
+    ONE acknowledgement ("Addressed in abc1234: <how>", or the answer to the reply), THEN the finding
+    comment is HIDDEN as RESOLVED (`minimizeIssueComment`, ledger kind `resolve`). Recorded on the
+    owner's `auto_resolve` (`minimized: true`).
+  - **Still open / disputed** — ONE "**Still open:** <reason>" PR comment, **AT MOST ONCE PER
+    FINDING, EVER**: the owner's `pushback` record (shared by the pushback of a disputed reply on an
+    auto run, `still-open.ts` on a posted review, and the tab's buttons) and any Limn's
+    `act=still_open` marker.
+- **The panel.** A PR-level row shows "PR comment" (the finding's comment), "@who commented: …"
+  (linked), the status chip and the how, with "Post reply" / "Post still open" (the same route) and
+  **"Mark resolved"** — the hide alone, `POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/resolve`
+  (`manual-reply.ts` `markPrLevelResolved`, `github_write` tier).
+- Pinned by `pr-level-findings-pipeline.test.ts` (the 221266 shape: one PR comment answering two
+  findings) and `pr-level-findings.test.ts`.
+
 ### The replies pass (judge just the replies, 2026-10-27)
 
 **THE TEAM HOLD** (user decision 2026-11-09, PR 221270): the pass's APPROVE is HELD — a COMMENT with
@@ -1509,6 +1606,19 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   only Codex's findings, so a reply on a Claude thread that landed while the Claude half ran is still
   judged. The sweeper's candidate read applies the same rule to a pair's coverage of own-finding
   replies (`pairOwnCoveredMs`: the pair's EARLIER-reaching half).
+  ⚠ **EACH PROVIDER'S CHAIN, ALWAYS** (2026-11-09): the plan reads both providers' chains (each as a
+  pair half reads it), after a single run too, so a reply on a Codex comment after a Claude-only run
+  is judged. After a single run a finding the full review itself sent to the model takes the full
+  review as its base; any other takes its own chain's run. A thread whose owner's provider cannot run
+  is judged by the default as the OTHER provider's (`raisedBy`): it may be accepted, never disputed
+  (a dispute is stored as `not_addressed`). A COVER PASS (§ Claude + Codex) is a row of this lane too.
+- **A MOVED head a teammate's claim holds (2026-11-09).** The full review of the new head is skipped
+  for the claim, so a reply the reader wrote after the push would wait for the next push. The sweeper
+  instead asks `startRepliesCheck` at that head (auto.ts, the re-review loop's `heldByTeammate` branch,
+  `teamClaimRepliesDue`: at most once per head per settle wait) — the same per-PR daily cap, holds and
+  ONE budget gate; the pass plans from the DB and refuses with no row when no reply waits. The pass
+  never needed the same head: it reads the code at the current head. Pinned by
+  `team-claim-replies.test.ts`.
 - **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
   reply on a Limn finding is newer than what the full reviews AND the replies passes at that head
   covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
@@ -1523,8 +1633,10 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   `AiRunGate kind="thread_check"`), `POST /api/prs/:id/claude-review/replies`. ⚠ Never while a FULL
   review of the PR is queued or running (`reviewHeldForPr` — it judges the replies itself; refused
   `review_in_progress`, re-checked at launch), never on a closed PR.
+- **PR-level findings** (§ Replies → PR-level findings) are judged in the same pass: a person's PR
+  comment after one starts it, its block lists the PR conversation refs, and `replyRef` is required.
 - **The run.** Per thread, the PROVIDER of the run that OWNS it (the first inline-posted finding up
-  the chain; `followUpProvider`: the owner's when it can still run, else the default); one agent run
+  the chain, or a PR-level finding's owner; `followUpProvider`: the owner's when it can still run, else the default); one agent run
   per provider group, Claude first, one after the other in the ONE shared review slot. STANDARD depth
   (`claude-sonnet-5`; Codex resolves the role to Terra), the Effort setting (`agenticRunEffort`),
   read-only: Read/Glob/Grep in the PR's read-only worktree behind the path guard (no checkout ⇒ the
@@ -1824,6 +1936,44 @@ derived states.
   (Addressed · Partly addressed · Not addressed · No longer applies · Reply accepted · Fix later ·
   Pushed back, `claudeFindingPill`) plus "Resolved" when GitHub says so, a templated reason line and
   Claude's explanation under More. A PR whose reviews only followed up findings is listed too.
+- **THE ONE-LINE HOW ON THE PILL (2026-11-09).** A finding judgement's `reason` is the item's how
+  (shared `judgementHowOf`: `how`, else the explanation's first sentence on an older row), so the
+  line under "Not addressed · Resolved" says what is still needed. The templated line is the fallback
+  only for a judgement with no words at all.
+- ⚠ **THE NEWEST WORD MOVES THE PILL (owner decision 2026-11-09; docs/TEAM-REVIEW.md D5).** On a
+  thread of the reader's own Limn finding, a teammate's Limn word (`j=`, imported) NEWER than the
+  reader's newest own follow-up (its review's `finished_at` vs the teammate post) replaces the
+  outcome (`teammateFindingJudgement`: addressed / no longer applies as is, still open or not
+  addressed → `not_addressed`), with `finding.judgedBy` naming the teammate; the pill reads
+  "Robin’s Limn: addressed" (`claudeFindingWords`), its line the teammate's how (or still-open reason),
+  its head the teammate's; the reader's older explanation is dropped. Ties: the reader's own. Pinned
+  by `thread-judgement-how.test.ts` and `apps/frontend/test/claudeThreadMarker.test.ts`.
+
+### The one-line how (2026-11-09)
+
+Every follow-up item and every thread judgement carries ONE line (≤ `JUDGEMENT_HOW_MAX` = 120
+characters): addressed / no longer applies → HOW it was dealt with; not / partly addressed → the ONE
+thing still needed; reply accepted → the accepted reason (reply disputed → what is still needed).
+
+- **Asked of the model, both providers.** `submit_review`'s `followUp[].how` and `submit_replies`'
+  `how` (optional, nullable, no `.max()` — a long line never rejects the whole call; the Codex strict
+  schema is DERIVED from the same zod shape, `ai/result-schemas.ts`). The "Previous review" and
+  replies prompts ask for it; a thread's `reason` description and prompt line now say the same.
+  Neither section is in `prompt-golden.json`, so the golden is unchanged.
+- **Stored** on `ClaudeFollowUpItemRecord.how` (no migration: part of the follow-up JSON), clipped by
+  shared `oneLineHow`. A status the code LOCKED (same head) keeps the earlier run's how, carried on
+  `priorStatus.how`; the model's how is kept only when it agreed with the lock. Absent on older rows:
+  every reader falls back to the explanation's first sentence (`judgementHowOf`).
+- **Shown** on the thread pill line (above) and as a bold line on the AI Review follow-up row
+  (`FollowUpRow`, only when the field is set: an older row's explanation opens with the same sentence).
+- **Posted** after "Addressed in abc1234:" (auto resolve, § Auto-posting), carried in `jr=` (§ Judgements
+  travel with a post), and used as the "Still open:" reason (`stillOpenCandidates`).
+- **Not addressed on a thread the reader resolved: Limn writes nothing by itself** (still-open.ts
+  `resolvedByReader`, from `review_threads.resolved_by_login`; docs/TEAM-REVIEW.md D4). The row offers
+  **Post still open** (`stillOpenPostable`), the same `POST …/follow-up/:priorFindingId/reply` route
+  (manual-reply.ts `postStillOpenByHand`): ONE "Still open: \<how\>" reply with no footer, claimed in
+  `claude_still_open_posts` (`reply:<thread>:<head>`, shared with the automatic still-open post) BEFORE
+  the write, never retried, never a reopen. A second press is a 409.
 
 ## CI review (why checks failed — its own process)
 
@@ -3286,7 +3436,13 @@ auto-posting: claim before any GitHub write, never retried.
   as of abc1234." (footer + finding marker), THEN `setReviewThreadResolved` + `stampThreadResolved` +
   the PR change signal + settle. `auto_resolved_at` on success; a failure (reply or resolve) is
   recorded with GitHub's error and shown on the finding ("Couldn’t resolve automatically: …"), never
-  retried. A thread not synced yet, or already resolved, records nothing.
+  retried. A thread not synced yet records nothing. ⚠ **THE HOW (2026-11-09)**: the reply reads
+  "Addressed in abc1234: \<how\>" when the item has a one-line how (§ The one-line how), made safe by
+  shared `stillOpenReasonText`. ⚠ **A thread the person ALREADY RESOLVED**: an `addressed` /
+  `no_longer_applies` item with a how gets the REPLY ONLY (no resolve, footer "Checked by Limn's …
+  review."), and only while no Limn reply (any Limn's marker) follows the person's last comment there
+  (`limnRepliedAfterLastPerson`); same claim, record `alreadyResolved: true`. Anything else on a
+  resolved thread records nothing.
 - **RESOLVE MY LIMN THREADS WHEN ADDRESSED** (`autoPost.resolveOwnPrs` in the same overrides JSON,
   no column; ⚠ ON BY DEFAULT — absent reads on, a stored false is off; Settings → Auto review, outside
   the dimmed auto-post block). The SAME writer (`auto-resolve.ts`, path B) on the reader's OWN PR
@@ -3314,7 +3470,8 @@ auto-posting: claim before any GitHub write, never retried.
   `findFindingThread`, followed into the reader's own continuation) and unresolved; the finding has
   no `auto_resolve`. Same claim-before-write, never-retry, one reply per thread then the resolve,
   stamp, settle + change signal. The reply: "Addressed in abc1234 (checked by Robin’s Limn)." /
-  "No longer applies as of abc1234 (checked by Robin’s Limn)." + "_Resolved by Limn._" + the finding
+  "No longer applies as of abc1234 (checked by Robin’s Limn)." — or, when that Limn's marker sent a
+  how (`jr=`), "Addressed in abc1234 (checked by Robin’s Limn): \<how\>" — + "_Resolved by Limn._" + the finding
   marker; the name is the teammate's first name (else login), reduced to letters, digits and spaces.
   The record carries `why: 'teammate'`, `checkedBy: <login>`, `byReviewId` = the imported teammate
   review; the tab reads "Resolved automatically (checked by robin’s Limn)". ⚠ **THE TRUST GATE**
@@ -3793,6 +3950,15 @@ row (`teammate.judged`, no migration: it is part of the marker record) and serve
 `ClaudeTeammateReview.judged`. Without it, the reader's Limn learns of a teammate's judgement only
 when the thread is resolved or replied to. An older post has no `j=`: nothing is assumed.
 
+**The how travels too (`jr=`, 2026-11-09).** Beside `j=`, `jr=<comment id>:<base64>,…` carries each
+entry's one-line how (the follow-up item's `how`, else its explanation's first sentence; a thread
+judgement's `reason`), UTF-8 then standard base64 without padding — an alphabet that cannot close the
+comment — only for ids `j=` names, within `LIMN_META_JUDGED_REASONS_CHARS` (6,000; later reasons are
+left out whole). Shared `limnJudgedReasonsValue` / `parseLimnJudgedReasons`; the parse is tolerant
+(a malformed entry is dropped, never the outcome) and the text is untrusted: one line, ≤ 120
+characters, made safe again before any post. A Limn from before it ignores the key. Stored as
+`teammate.judged[].reason`. Pinned by `limn-review-meta.test.ts`.
+
 ### Every finding (2026-11-04)
 
 `teamView.allFindings: ClaudeTeamPoint[]` (`team-view.ts` `foldAllTeamFindings`, pure) lists every
@@ -3881,6 +4047,8 @@ inline comment and reopened nothing — the PR author could not find the "open p
 every open point a Limn review holds is LOCATABLE: recorded, said on its thread, and listed for the
 author. And the prose may not name an open point that is not recorded.
 
+- **A PR-LEVEL finding** (posted as a PR comment, no thread) gets ONE "**Still open:** <reason>" PR
+  comment linking it, at most once per finding EVER (§ Replies → PR-level findings).
 - **THE JUDGEMENT** (shared `still-open.ts`, ONE rule): a follow-up item `not_addressed` /
   `partly_addressed` / `reply_disputed` on an earlier Limn finding (`isStillOpenFollowUp`), or a thread
   judgement whose comment holds up (`valid` / `partly_valid`) and is `not_addressed` /
@@ -3928,6 +4096,11 @@ author. And the prose may not name an open point that is not recorded.
   - ⚠ **THE READER'S OWN PR (decision D2, `facts.ownPr` = `prAuthorIsAccount`)**: never `unresolve`,
     never a new thread. The reply only: once per head on an unresolved thread, ONCE EVER on a resolved
     one (`repliedBefore`: any Limn's still-open marker on the thread, or any `reply:<node>:*` claim).
+  - ⚠ **A THREAD THE READER RESOLVED (decision D4, 2026-11-09; `facts.resolvedByReader`, from
+    `review_threads.resolved_by_login` = the account's login, kept only while GitHub's live read still
+    says resolved)**: NOTHING — no reply, no reopen, no new thread, on any PR. The reader's resolve is
+    their decision; Limn shows what is still needed and the row's "Post still open" posts it (§ The
+    one-line how). The reason posted anywhere is the item's how first, its explanation on an older row.
   - ⚠ **READ GITHUB LIVE BEFORE WRITING (gap 3)**: when the synced facts plan a write, ONE small GraphQL
     read of that thread (`deps.liveThread`: `node(id)` → `isResolved`, its last 100 comments, and the
     PR's thread roots for `c=`), outside any transaction, is folded in (`mergeLiveFacts`: reply-at-head,

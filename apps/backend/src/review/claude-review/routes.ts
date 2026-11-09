@@ -850,6 +850,42 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     },
   );
 
+  // "Mark resolved" on a PR-LEVEL finding (posted as a PR comment, so it has no thread): hides the
+  // finding comment as RESOLVED on GitHub (manual-reply.ts `markPrLevelResolved`). Claims the owner's
+  // auto-resolve record first: a second click answers 409.
+  app.post(
+    '/api/claude-reviews/:reviewId/follow-up/:priorFindingId/resolve',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['reviewId', 'priorFindingId'],
+          properties: { reviewId: { type: 'integer' }, priorFindingId: { type: 'integer' } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const { reviewId, priorFindingId } = req.params as { reviewId: number; priorFindingId: number };
+      const accountId = ctx.accountIdOf(req);
+      const { markPrLevelResolved } = await import('./manual-reply.js');
+      const out = await markPrLevelResolved(ctx, { accountId, reviewId, priorFindingId });
+      if (out.kind === 'not_found') {
+        reply.status(404);
+        return { error: 'NotFound', message: `Review ${reviewId} has no PR comment to resolve for ${priorFindingId}` };
+      }
+      if (out.kind === 'conflict') {
+        reply.status(409);
+        return { error: out.code, message: out.message };
+      }
+      if (out.result.status === 'failed') {
+        reply.status(502);
+        return { error: 'GitHubError', message: out.result.error ?? 'GitHub did not hide the comment.' };
+      }
+      return out.result;
+    },
+  );
+
   // Post a single GitHub review (or, with ?dryRun=true, the exact payload without posting). A CLAUDE +
   // CODEX PAIR is ONE review: either half's id posts the pair's CONSOLIDATED findings (pair-view.ts —
   // merged-away duplicates are never read), each comment naming who raised it on the severity lead

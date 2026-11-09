@@ -39,7 +39,18 @@
 // ⚠ A RESOLVED thread with a reply is judged the SAME way (it is no longer settled on sight): the
 // prompt says it was resolved and by whom, it is selected last, and auto-pushback.ts never posts on
 // it (a manual "Post reply" still may).
+// ⚠ A PR-LEVEL finding (posted as a PR comment) has no thread: its replies are the PR conversation
+// after it (`conversation`), and a reply status stands ONLY when the model cites one of ITS comments
+// by `replyRef` (`judgeReplyReport`). Otherwise exactly as above.
+// ⚠ THE OTHER PROVIDER'S FINDINGS (`raisedBy`, persist.ts `loadPriorReviewForFollowUp`'s cross carry
+// and the cover pass, replies-check.ts). A run on one provider also follows up the other provider's
+// still-open findings. They go LAST (after own and carried), and a finding raised at this very head
+// keeps the other provider's answer (or 'not_addressed') in code, like an own one. The checker may
+// mark them addressed (auto resolve may then close the thread) but NEVER disputes one: a
+// 'reply_disputed' report on such a finding is stored as 'not_addressed' with no reply text
+// (`isCrossDispute`), and no pushback or still-open comment is written for it.
 import type {
+  AiProviderId,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeFollowUpItemRecord,
@@ -47,8 +58,16 @@ import type {
   ClaudeFollowUpLeftOutRecord,
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
+import { oneLineHow } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
-import { RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
+import {
+  RESPONSE_CHARS,
+  judgeableReplies,
+  replyExcerpt,
+  type FindingConversation,
+  type FindingReply,
+  type PrConversationReply,
+} from './reply-text.js';
 
 // ---- caps (the prompt block's budget) ----
 export const PRIOR_FINDINGS_MAX = 40;
@@ -90,7 +109,7 @@ export interface PriorFindingForFollowUp {
   carried: boolean;
   // A CARRIED, still-open item: the status the previous run gave it (and that run's explanation).
   // Absent for a 'not_checked' carry and for the previous review's own findings.
-  priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null } | null;
+  priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null } | null;
   // Its GitHub thread (finding-replies.ts), attached before selection. `replies` = the people's
   // replies after the root (never automation, never Limn's own). Absent ⇒ no thread was found.
   thread?: {
@@ -105,11 +124,27 @@ export interface PriorFindingForFollowUp {
     isResolved?: boolean;
     resolvedBy?: string | null;
   } | null;
+  // A PR-LEVEL finding (posted as a PR comment, no thread): the PR conversation after it
+  // (finding-replies.ts `loadFindingConversations`). Absent ⇒ inline, or none found.
+  conversation?: FindingConversation | null;
+  // THE OTHER PROVIDER raised it (a cross-provider carry, or a cover pass): this run checks it but
+  // never disputes it (see the header). Always `carried` too. Absent ⇒ this run's own provider.
+  raisedBy?: AiProviderId;
 }
 
-/** Does this earlier finding have a person's reply to judge? */
-export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread'>): boolean {
-  return judgeableReplies(f.thread?.replies).length > 0;
+/** Does this earlier finding have a person's reply to judge (on its thread, or in the PR conversation)? */
+export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): boolean {
+  return judgeableReplies(f.thread?.replies).length > 0 || (f.conversation?.replies.length ?? 0) > 0;
+}
+
+/** The PR comment a reply status on a PR-level finding cites, or null (no ref, or not one of its own). */
+export function citedConversationReply(
+  f: Pick<PriorFindingForFollowUp, 'conversation'>,
+  replyRef: unknown,
+): PrConversationReply | null {
+  if (typeof replyRef !== 'string' || !f.conversation) return null;
+  const ref = replyRef.trim().toUpperCase();
+  return f.conversation.replies.find((r) => r.ref === ref) ?? null;
 }
 
 /**
@@ -144,7 +179,7 @@ export interface FollowUpPlan {
   omitted: PriorFindingForFollowUp[];
   // Finding id → the status decided in CODE because the head has not moved since the previous
   // review (see the header). Empty whenever the head moved.
-  locked: Map<number, { status: ClaudeFollowUpStatus; explanation: string | null }>;
+  locked: Map<number, { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null }>;
 }
 
 /** The templated explanation of a status the code decided because nothing has moved. */
@@ -250,6 +285,7 @@ function promptSize(f: PriorFindingForFollowUp): number {
     Math.min(f.diffHunk?.length ?? 0, PRIOR_HUNK_CHARS) +
     Math.min(f.suggestion?.length ?? 0, PRIOR_SUGGESTION_CHARS) +
     (f.thread?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
+    (f.conversation?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
     200
   );
 }
@@ -268,12 +304,17 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
   const live = prior.findings.filter((f) => !isResolvedWithReplies(f));
   const closedByReply = prior.findings.filter(isResolvedWithReplies);
   const own = live.filter((f) => !f.carried).sort(bySeverityThenId);
-  const carried = live.filter((f) => f.carried).sort(bySeverityThenId);
+  const carried = live.filter((f) => f.carried && !f.raisedBy).sort(bySeverityThenId);
+  // The other provider's findings go after this provider's own and carried ones, so they never crowd
+  // one out of the cap (one left over is 'not_checked' and carried again).
+  const cross = live.filter((f) => f.raisedBy).sort(bySeverityThenId);
   const ordered = [
     ...own,
     ...carried,
+    ...cross,
     ...closedByReply.filter((f) => !f.carried).sort(bySeverityThenId),
-    ...closedByReply.filter((f) => f.carried).sort(bySeverityThenId),
+    ...closedByReply.filter((f) => f.carried && !f.raisedBy).sort(bySeverityThenId),
+    ...closedByReply.filter((f) => f.raisedBy).sort(bySeverityThenId),
   ];
   const sent: FollowUpPlan['sent'] = [];
   const omitted: PriorFindingForFollowUp[] = [];
@@ -293,8 +334,22 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
   // head, so nothing can have addressed them; a carried open item keeps the previous run's answer
   // (given at this head). A carried 'not_checked' item was never judged, so the model still is.
   const locked: FollowUpPlan['locked'] = new Map();
+  // THE OTHER PROVIDER'S finding raised at this very head: nothing can have addressed it either. It
+  // keeps that provider's last answer when one was carried, else 'not_addressed'.
+  for (const f of ordered) {
+    if (!f.raisedBy || findingHeadMoved({ headSha }, f)) continue;
+    locked.set(
+      f.id,
+      f.priorStatus
+        ? f.priorStatus.status === 'reply_disputed'
+          ? { status: 'not_addressed', explanation: f.priorStatus.explanation, how: f.priorStatus.how ?? null }
+          : { ...f.priorStatus }
+        : { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION },
+    );
+  }
   if (prior.headSha === headSha) {
     for (const f of ordered) {
+      if (f.raisedBy) continue;
       if (!f.carried && !findingHeadMoved({ headSha }, f)) {
         locked.set(f.id, { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION });
       } else if (f.carried && f.priorStatus) {
@@ -303,7 +358,7 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
         locked.set(
           f.id,
           f.priorStatus.status === 'reply_disputed'
-            ? { status: 'not_addressed', explanation: f.priorStatus.explanation }
+            ? { status: 'not_addressed', explanation: f.priorStatus.explanation, how: f.priorStatus.how ?? null }
             : { ...f.priorStatus },
         );
       }
@@ -365,28 +420,45 @@ function clipResponse(s: unknown): string | null {
  *   - the posted text is Claude's, clipped, else a templated one.
  */
 export function judgeReplyReport(
-  f: Pick<PriorFindingForFollowUp, 'severity' | 'thread'>,
-  r: Pick<ReviewFollowUpReport, 'status' | 'acceptKind' | 'reply'>,
-): Pick<ClaudeFollowUpItemRecord, 'status' | 'acceptKind' | 'response' | 'reply' | 'deferralRefused'> | null {
+  f: Pick<PriorFindingForFollowUp, 'severity' | 'thread' | 'conversation'>,
+  r: Pick<ReviewFollowUpReport, 'status' | 'acceptKind' | 'reply' | 'replyRef'>,
+): Pick<ClaudeFollowUpItemRecord, 'status' | 'acceptKind' | 'response' | 'reply' | 'deferralRefused' | 'replyRef'> | null {
   if (!isReplyStatus(r.status) || !hasReplies(f)) return null;
-  const people = judgeableReplies(f.thread!.replies);
-  const last = people[people.length - 1]!;
-  const reply = replyExcerpt(last);
+  const people = judgeableReplies(f.thread?.replies);
+  let reply: ClaudeFollowUpItemRecord['reply'];
+  let cited: Pick<ClaudeFollowUpItemRecord, 'replyRef'> = {};
+  if (people.length > 0) {
+    reply = replyExcerpt(people[people.length - 1]!);
+  } else {
+    // ⚠ A PR-LEVEL finding: GitHub does not thread PR comments, so the model must NAME the comment it
+    // judged, and it must be one listed for THIS finding. No valid ref ⇒ unreported.
+    const c = citedConversationReply(f, r.replyRef);
+    if (!c) return null;
+    reply = { ...replyExcerpt(c), url: c.url };
+    cited = { replyRef: c.ref };
+  }
   const text = clipResponse(r.reply);
   if (r.status === 'reply_accepted') {
     const kind = r.acceptKind === 'not_valid' || r.acceptKind === 'deferred' ? r.acceptKind : null;
     if (kind == null) return null;
     if (kind === 'deferred' && f.severity === 'blocker') {
-      return { status: 'reply_disputed', acceptKind: null, response: BLOCKER_DEFERRAL_TEXT, reply, deferralRefused: true };
+      return { status: 'reply_disputed', acceptKind: null, response: BLOCKER_DEFERRAL_TEXT, reply, deferralRefused: true, ...cited };
     }
     return {
       status: 'reply_accepted',
       acceptKind: kind,
       response: text ?? (kind === 'deferred' ? ACCEPT_DEFERRED_TEXT : ACCEPT_NOT_VALID_TEXT),
       reply,
+      ...cited,
     };
   }
-  return { status: 'reply_disputed', acceptKind: null, response: text ?? DISPUTE_TEXT, reply };
+  return { status: 'reply_disputed', acceptKind: null, response: text ?? DISPUTE_TEXT, reply, ...cited };
+}
+
+/** The `prComment` an item of a PR-level finding carries (none for an inline one). */
+export function prCommentOf(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): Pick<ClaudeFollowUpItemRecord, 'prComment'> {
+  if (f.thread || !f.conversation) return {};
+  return { prComment: { findingId: f.conversation.ownerFindingId, commentId: f.conversation.commentId, url: f.conversation.url } };
 }
 
 function clipExplanation(s: unknown): string | null {
@@ -406,8 +478,11 @@ function recordFor(
   statusCarried = false,
   extra: Partial<ClaudeFollowUpItemRecord> = {},
 ): ClaudeFollowUpItemRecord {
+  // `how` only when there is one (an absent key reads as "no how", as on every older row).
+  const { how, ...rest } = extra;
   return {
-    ...extra,
+    ...rest,
+    ...(how ? { how } : {}),
     ref,
     priorFindingId: f.id,
     sent,
@@ -423,7 +498,18 @@ function recordFor(
     priorPosted: f.posted,
     ...(statusCarried ? { statusCarried: true } : {}),
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
+    ...prCommentOf(f),
+    ...(f.raisedBy ? { raisedBy: f.raisedBy } : {}),
   };
+}
+
+/**
+ * THE CROSS-PROVIDER RULE over a judged reply: a run never disputes the OTHER provider's finding. True
+ * ⇒ the 'reply_disputed' is stored as plain 'not_addressed' (still open, no reply text, no pushback).
+ * Pure.
+ */
+export function isCrossDispute(f: Pick<PriorFindingForFollowUp, 'raisedBy'>, status: ClaudeFollowUpStatus): boolean {
+  return f.raisedBy != null && status === 'reply_disputed';
 }
 
 /**
@@ -436,7 +522,7 @@ function recordFor(
 function lockFor(
   locked: FollowUpPlan['locked'],
   f: PriorFindingForFollowUp,
-): { status: ClaudeFollowUpStatus; explanation: string | null } | undefined {
+): { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null } | undefined {
   const lock = locked.get(f.id);
   if (lock && !f.priorStatus && isResolvedWithReplies(f)) return undefined;
   return lock;
@@ -453,13 +539,16 @@ export function reconcileFollowUp(
   reported: ReadonlyArray<ReviewFollowUpReport> | undefined,
 ): ClaudeFollowUpItemRecord[] {
   const known = new Set(plan.sent.map((s) => s.ref));
-  const byRef = new Map<string, { status: ClaudeFollowUpStatus; explanation: string | null; raw: ReviewFollowUpReport }>();
+  const byRef = new Map<
+    string,
+    { status: ClaudeFollowUpStatus; explanation: string | null; how: string | null; raw: ReviewFollowUpReport }
+  >();
   for (const r of reported ?? []) {
     if (!r || typeof r.ref !== 'string') continue;
     const ref = r.ref.trim().toUpperCase();
     if (!known.has(ref) || byRef.has(ref)) continue;
     if (!REPORTABLE.has(r.status)) continue;
-    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation), raw: r });
+    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation), how: oneLineHow(r.how), raw: r });
   }
   const locked = plan.locked ?? new Map();
   const out: ClaudeFollowUpItemRecord[] = [];
@@ -471,12 +560,19 @@ export function reconcileFollowUp(
     // stands only on a finding that had some, and may override a same-head lock.
     if (hit && isReplyStatus(hit.status)) {
       const judged = judgeReplyReport(finding, hit.raw);
+      if (judged && isCrossDispute(finding, judged.status)) {
+        // The other provider's finding: never disputed (`isCrossDispute`).
+        out.push(recordFor(plan, finding, ref, true, 'not_addressed', hit.explanation, false, { how: hit.how }));
+        continue;
+      }
       if (judged) {
         out.push(
           recordFor(plan, finding, ref, true, judged.status, hit.explanation, false, {
+            how: hit.how,
             ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
             response: judged.response ?? null,
             reply: judged.reply ?? null,
+            ...(judged.replyRef ? { replyRef: judged.replyRef } : {}),
             ...(judged.deferralRefused ? { deferralRefused: true } : {}),
           }),
         );
@@ -487,13 +583,15 @@ export function reconcileFollowUp(
     const lock = hit ? lockIfReported : lockFor(locked, finding);
     if (lock) {
       // The code decides; Claude's words are kept only when it agreed.
-      const explanation = hit && hit.status === lock.status && hit.explanation ? hit.explanation : lock.explanation;
-      out.push(recordFor(plan, finding, ref, true, lock.status, explanation, true));
+      const agreed = hit != null && hit.status === lock.status ? hit : null;
+      const explanation = agreed?.explanation ? agreed.explanation : lock.explanation;
+      const how = agreed?.how ? agreed.how : (lock.how ?? null);
+      out.push(recordFor(plan, finding, ref, true, lock.status, explanation, true, { how }));
       continue;
     }
     out.push(
       hit
-        ? recordFor(plan, finding, ref, true, hit.status, hit.explanation)
+        ? recordFor(plan, finding, ref, true, hit.status, hit.explanation, false, { how: hit.how })
         : recordFor(plan, finding, ref, true, 'not_checked', null),
     );
   }
@@ -501,7 +599,7 @@ export function reconcileFollowUp(
     const lock = lockFor(locked, finding);
     out.push(
       lock
-        ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true)
+        ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true, { how: lock.how ?? null })
         : recordFor(plan, finding, null, false, 'not_checked', null),
     );
   }

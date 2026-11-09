@@ -31,12 +31,24 @@
 //      resolve uses, then `stampThreadResolved` and the PR change signal;
 //   5. the record settles `resolved` (+ `auto_resolved_at`) or `failed` with GitHub's error (a
 //      permission refusal, a deleted thread…). A failure is shown, never retried.
+//   THE ONE-LINE "HOW" (2026-11-09): the reply names how it was dealt with — "Addressed in abc1234:
+//   <how>" — from the item's `how` (shared `judgementHowOf`), made safe like every posted reason.
+//   A THREAD THE PERSON ALREADY RESOLVED (step 2's exception): an `addressed` / `no_longer_applies`
+//   item with a how gets the REPLY ONLY — no resolve — and only while NO Limn reply follows the
+//   person's last comment there (`limnRepliedAfterLastPerson`), so the thread says how without
+//   repeat replies. Same claim, record `alreadyResolved: true`. A not-addressed judgement on such a
+//   thread posts nothing here (still-open.ts leaves the reader's own resolve alone too).
+//   A PR-LEVEL FINDING (posted as a PR comment: no thread; `loadPrLevelOwners`): same paths, same
+//   record and claim — ONE acknowledgement PR comment linking it, then the finding comment is hidden
+//   as RESOLVED (pr-level-writes.ts `closePrLevelFinding`).
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import {
   aiRunProviderName,
   autoPostFooter,
   continuationThreadMap,
+  judgementHowOf,
+  stillOpenReasonText,
   type AiProviderName,
   type ClaudeFollowUpStatus,
   type ClaudeReplyAcceptKind,
@@ -47,7 +59,15 @@ import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
 import { getClaudeReviewById } from './persist.js';
 import { findFindingThread } from './finding-thread.js';
-import { followOwnContinuation, isClearReplyRefusal, loadPrThreads, loadThreadOwners } from './finding-replies.js';
+import {
+  followOwnContinuation,
+  isClearReplyRefusal,
+  loadPrThreads,
+  loadPrLevelOwners,
+  loadThreadOwners,
+  type ReplyComment,
+} from './finding-replies.js';
+import { closePrLevelFinding } from './pr-level-writes.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -66,27 +86,56 @@ export function resolvableStatus(status: ClaudeFollowUpStatus): AutoResolveOutco
   return status === 'addressed' || status === 'no_longer_applies' || status === 'reply_accepted' ? status : null;
 }
 
+/** "Addressed in abc1234: <how>" — the templated lead, with the one-line how when there is one. */
+export function addressedLead(outcome: 'addressed' | 'no_longer_applies', headSha: string, how: string | null = null): string {
+  const short = headSha.slice(0, 7);
+  const text = stillOpenReasonText(how);
+  const base = outcome === 'addressed' ? `Addressed in ${short}` : `No longer applies as of ${short}`;
+  return text ? `${base}: ${text}` : `${base}.`;
+}
+
 /** The reply posted on the thread before it is resolved. An accepted reply gets Claude's
- *  acknowledgement (`response`) instead of the templated lead. */
+ *  acknowledgement (`response`) instead of the templated lead. `alreadyResolved`: the person had
+ *  resolved it, so Limn only replies (the footer says so). */
 export function autoResolveReplyBody(
   outcome: AutoResolveOutcome,
   headSha: string,
   response: string | null = null,
   by: AiProviderName = 'Claude',
   why: FindingAutoResolveRecord['why'] = undefined,
+  how: string | null = null,
+  alreadyResolved = false,
 ): string {
-  const short = headSha.slice(0, 7);
   const lead =
     outcome === 'reply_accepted' && response && response.trim()
       ? response.trim()
-      : outcome === 'addressed'
-        ? `Addressed in ${short}.`
-        : outcome === 'reply_accepted'
-          ? 'Thanks, that settles it.'
-          : `No longer applies as of ${short}.`;
+      : outcome === 'reply_accepted'
+        ? 'Thanks, that settles it.'
+        : addressedLead(outcome, headSha, how);
   // Path B is the reader's own run, not an automatic post: the footer says what Limn did.
-  const footer = why === 'own_pr' ? `_Resolved by Limn’s ${by} review._` : autoPostFooter(by);
+  const footer = alreadyResolved
+    ? `_Checked by Limn’s ${by} review._`
+    : why === 'own_pr'
+      ? `_Resolved by Limn’s ${by} review._`
+      : autoPostFooter(by);
   return `${lead}\n\n${footer}\n\n${FINDING_MARKER}`;
+}
+
+const LIMN_MARKER_RE = /<!--\s*pierre:claude-review/i;
+
+/**
+ * Does a Limn reply (any Limn: its hidden marker) follow the last PERSON'S comment in this thread?
+ * The root is the finding itself; with no person's reply, any Limn reply after the root counts.
+ * `comments` oldest first, the root first. Pure.
+ */
+export function limnRepliedAfterLastPerson(
+  comments: ReadonlyArray<Pick<ReplyComment, 'body' | 'authorIsAutomation' | 'authorLogin'>>,
+): boolean {
+  let last = 0;
+  comments.forEach((c, i) => {
+    if (i > 0 && !c.authorIsAutomation && c.authorLogin && !LIMN_MARKER_RE.test(c.body ?? '')) last = i;
+  });
+  return comments.slice(last + 1).some((c) => LIMN_MARKER_RE.test(c.body ?? ''));
 }
 
 // The thread matcher is shared with the review read (`ClaudeFinding.threadId`).
@@ -167,14 +216,19 @@ async function autoResolve(
   // Path A (the workspace's auto resolve) or path B (the reader's own PR); B needs the PR facts.
   const autoPath = ws.settings.enabled && ws.settings.autoResolve && review.trigger === 'auto';
   if (!autoPath && !ws.settings.resolveOwnPrs) return null;
-  type Wanted = { outcome: AutoResolveOutcome; acceptKind: ClaudeReplyAcceptKind | null; response: string | null };
+  type Wanted = { outcome: AutoResolveOutcome; acceptKind: ClaudeReplyAcceptKind | null; response: string | null; how: string | null };
   const wanted = new Map<number, Wanted>();
   for (const it of review.followUp?.items ?? []) {
     const outcome = resolvableStatus(it.status);
     if (!outcome) continue;
     // An accepted reply is answered with its acknowledgement; with none there is nothing to say.
     if (outcome === 'reply_accepted' && !(it.response ?? '').trim()) continue;
-    wanted.set(it.priorFindingId, { outcome, acceptKind: it.acceptKind ?? null, response: it.response ?? null });
+    wanted.set(it.priorFindingId, {
+      outcome,
+      acceptKind: it.acceptKind ?? null,
+      response: it.response ?? null,
+      how: outcome === 'reply_accepted' ? null : judgementHowOf(it),
+    });
   }
   if (wanted.size === 0) return null;
 
@@ -199,24 +253,81 @@ async function autoResolve(
   const candidates = [...target.keys()]
     .map((id) => byId.get(id)!)
     .filter((f) => f.autoResolve == null);
-  if (candidates.length === 0) return null;
+
+  const result: AutoResolveResult = { resolved: [], failed: [] };
+  let wroteAny = false;
+
+  // A PR-LEVEL finding (posted as a PR comment, no thread): ONE acknowledgement linking it, then the
+  // finding comment is hidden as RESOLVED (pr-level-writes.ts). Same switches, same record, same claim.
+  const prLevel = await loadPrLevelOwners(
+    ctx,
+    accountId,
+    prId,
+    [...wanted.keys()].filter((id) => !owners.has(id)),
+    { ownOnly: true },
+  );
+  const prLevelDone = new Set<number>();
+  for (const [wantedId, owner] of prLevel) {
+    if (prLevelDone.has(owner.id) || owner.autoResolve != null) continue;
+    prLevelDone.add(owner.id);
+    const want = wanted.get(wantedId)!;
+    const lead =
+      want.outcome === 'reply_accepted'
+        ? (want.response ?? '').trim() || 'Thanks, that settles it.'
+        : addressedLead(want.outcome, review.headSha, want.how);
+    const footer = why === 'own_pr' ? `_Resolved by Limn’s ${aiRunProviderName(review)} review._` : autoPostFooter(aiRunProviderName(review));
+    const r = await closePrLevelFinding(
+      ctx,
+      {
+        accountId,
+        prId,
+        reviewId,
+        owner,
+        footer,
+        how: 'auto',
+        lead,
+        outcome: want.outcome,
+        acceptKind: want.acceptKind,
+        headSha: review.headSha,
+        ...(why ? { why } : {}),
+      },
+    );
+    if (r.kind !== 'done') continue;
+    wroteAny = wroteAny || r.commentId != null || r.status === 'resolved';
+    (r.status === 'resolved' ? result.resolved : result.failed).push(owner.id);
+  }
+  if (candidates.length === 0) {
+    if (wroteAny) {
+      await deps.notePrChanged(accountId, [prId]).catch(() => {});
+      await postDeps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    }
+    return prLevelDone.size > 0 ? result : null;
+  }
 
   const t = s(ctx);
   const crf = t.claudeReviewFindings;
   const { threads, comments } = await loadPrThreads(ctx, prId);
   const accountLogin = await postDeps.accountLogin(accountId);
 
-  const result: AutoResolveResult = { resolved: [], failed: [] };
   const taken = new Set<number>();
-  let wroteAny = false;
   for (const f of candidates) {
     const found = findFindingThread(f, threads, comments, accountLogin, taken);
     // A point continued in a new thread (still-open.ts) is resolved THERE (the reader's own only).
     const thread = found ? followOwnContinuation(found, threads, comments, continuationThreadMap(comments), accountLogin) : null;
-    if (!thread || thread.isResolved) continue;
-    taken.add(thread.id);
+    if (!thread) continue;
     const want = target.get(f.id)!;
     const outcome = want.outcome;
+    // The person already resolved it: say how, once, only when no Limn reply follows their last word.
+    const alreadyResolved = thread.isResolved;
+    if (
+      alreadyResolved &&
+      (outcome === 'reply_accepted' ||
+        want.how == null ||
+        limnRepliedAfterLastPerson(comments.filter((c) => c.threadId === thread.id)))
+    ) {
+      continue;
+    }
+    taken.add(thread.id);
     const rec: FindingAutoResolveRecord = {
       status: 'resolving',
       at: nowIso(),
@@ -227,6 +338,7 @@ async function autoResolve(
       replyCommentId: null,
       error: null,
       ...(why ? { why } : {}),
+      ...(alreadyResolved ? { alreadyResolved: true } : {}),
     };
     // ⚠ THE CLAIM, BEFORE ANY WRITE.
     const claimed = (await ctx.db
@@ -243,19 +355,24 @@ async function autoResolve(
       const { commentId } = await deps.reply(
         accountId,
         thread.githubNodeId,
-        autoResolveReplyBody(outcome, review.headSha, want.response, aiRunProviderName(review), why),
+        autoResolveReplyBody(outcome, review.headSha, want.response, aiRunProviderName(review), why, want.how, alreadyResolved),
       );
       wroteAny = true;
       final = { ...final, replyCommentId: commentId };
-      try {
-        await deps.resolve(accountId, thread.githubNodeId);
-        resolvedAt = new Date();
+      if (alreadyResolved) {
+        // Nothing to resolve: the reply was the whole write.
         final = { ...final, status: 'resolved', at: nowIso() };
-        await deps.stamp(thread.id, accountId).catch((err) =>
-          ctx.log.warn(`auto resolve finding ${f.id}: could not stamp the thread: ${errText(err)}`),
-        );
-      } catch (err) {
-        final = { ...final, status: 'failed', at: nowIso(), error: errText(err) };
+      } else {
+        try {
+          await deps.resolve(accountId, thread.githubNodeId);
+          resolvedAt = new Date();
+          final = { ...final, status: 'resolved', at: nowIso() };
+          await deps.stamp(thread.id, accountId).catch((err) =>
+            ctx.log.warn(`auto resolve finding ${f.id}: could not stamp the thread: ${errText(err)}`),
+          );
+        } catch (err) {
+          final = { ...final, status: 'failed', at: nowIso(), error: errText(err) };
+        }
       }
     } catch (err) {
       // No reply id: whether one landed depends on how GitHub failed (`refused` = clearly not).

@@ -1,12 +1,21 @@
 // THE REPLIES PASS on the AI Review tab — the pure words (docs/CLAUDE-REVIEW.md § The replies pass).
 // A pass judges only people's replies on Limn's own posted findings; the tab shows "Check replies"
 // while some wait, and one line about the newest pass.
-import type { ClaudeRepliesCheckRun, ClaudeRepliesCheckState } from '@pierre-review/shared';
+import { aiProviderName, type AiProviderId, type ClaudeRepliesCheckRun, type ClaudeRepliesCheckState } from '@pierre-review/shared';
 import { autoLiftLine, autoPostFailureLine, autoVerdictLine, notApprovedLine } from './autoPost.js';
 import { relativeTime } from './ui.js';
 
 /** The history list's and the run header's label for a replies pass. */
 export const REPLIES_CHECK_LABEL = 'Replies checked';
+
+/**
+ * A `kind = 'replies'` row's label: a COVER pass (one half of a Claude + Codex pair failed, the other
+ * checked its findings) says whose findings it checked; any other reads REPLIES_CHECK_LABEL.
+ */
+export function repliesRunLabel(review: { followUp?: { cover?: { provider: AiProviderId } } | null }): string {
+  const cover = review.followUp?.cover;
+  return cover ? `Checked ${aiProviderName(cover.provider)}'s findings` : REPLIES_CHECK_LABEL;
+}
 
 /** "Check replies" is offered: replies wait for a judgement and no pass is running. */
 export function canCheckReplies(s: ClaudeRepliesCheckState | null | undefined): boolean {

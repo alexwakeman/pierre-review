@@ -323,7 +323,7 @@ export function pushReviewThreadsSection(
   );
   lines.push('- explanation: one or two sentences that name the code you checked');
   lines.push(
-    `- reason: ONE line, at most ${THREAD_REASON_CHARS} characters, that says why — shown under the verdict`,
+    `- reason: ONE line, at most ${THREAD_REASON_CHARS} characters, that says why — shown under the verdict. For addressed, how it was dealt with; for not_addressed or partly_addressed, the one thing still needed to resolve it`,
   );
   lines.push(
     '- draftReply (optional): a short reply the author could post, such as a polite, specific pushback on a not_valid comment.',

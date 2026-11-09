@@ -159,6 +159,14 @@ describe('pure', () => {
     expect(tr.teammateCheckerName('robin', '@evil <b>x</b>')).toBe('evil’s Limn');
   });
 
+  it('the reply carries the teammate Limn\'s how (`jr=`), made safe', () => {
+    expect(tr.teammateResolveReplyBody('addressed', HEAD, 'Robin’s Limn', 'rowSelect reads rowid @bob').split('\n')[0]).toBe(
+      'Addressed in abcdef1 (checked by Robin’s Limn): rowSelect reads rowid @\u200bbob',
+    );
+    const w = { reviewId: 1, login: 'robin', name: null, at: 1, judged: [{ commentId: '1', outcome: 'addressed' as const, reason: 'Fixed the guard' }] };
+    expect(tr.teammateResolveWords([w], null).get('1')?.how).toBe('Fixed the guard');
+  });
+
   it('the newest word per comment wins; the reader\'s own newer run wins over both', () => {
     const w = (at: number, outcome: any) => ({ reviewId: at, login: 'robin', name: null, at, judged: [{ commentId: '1', outcome }] });
     expect(tr.teammateResolveWords([w(1, 'addressed')], null).get('1')?.outcome).toBe('addressed');

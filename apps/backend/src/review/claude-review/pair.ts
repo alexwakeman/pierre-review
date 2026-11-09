@@ -141,3 +141,27 @@ export async function readAutoReviewProvidersForPr(
     return 'default';
   }
 }
+
+/**
+ * A PAIR WITH ONE FAILED HALF: who covers whom (null = no cover). One half succeeded and the other
+ * failed or never started, and the reader did not stop the pair: the provider that succeeded checks
+ * the failed provider's open findings (replies-check.ts `startCoverCheck`). A half a teammate's Limn
+ * holds ('claimed') is that teammate's to judge. Pure.
+ */
+export function coverTarget(a: {
+  firstProvider: AiProviderId;
+  secondProvider: AiProviderId | null;
+  firstSucceeded: boolean;
+  // null = the second half never started.
+  secondSucceeded: boolean | null;
+  notStarted?: 'budget' | 'claimed' | 'stopped' | 'error' | null;
+  stopped?: boolean;
+}): { survivor: AiProviderId; failed: AiProviderId } | null {
+  if (a.stopped || a.secondProvider == null || a.secondProvider === a.firstProvider) return null;
+  if (a.secondSucceeded == null && (a.notStarted === 'claimed' || a.notStarted === 'stopped')) return null;
+  const second = a.secondSucceeded === true;
+  if (a.firstSucceeded === second) return null;
+  return a.firstSucceeded
+    ? { survivor: a.firstProvider, failed: a.secondProvider }
+    : { survivor: a.secondProvider, failed: a.firstProvider };
+}

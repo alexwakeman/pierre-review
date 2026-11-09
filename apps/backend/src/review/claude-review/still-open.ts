@@ -25,6 +25,9 @@
 //     same point (`c=` names the earlier thread's root comment; once per thread, ever, by any Limn);
 //     a nit, a question or a point with no known severity is left as it is. ⚠ A CONTINUATION thread
 //     (its root carries `c=`) is never continued again: one new thread per point, ever.
+//   • ⚠ A THREAD THE READER RESOLVED (2026-11-09): nothing at all — a person's resolve is their
+//     decision. Limn shows "Not addressed · Resolved" and what is still needed in Limn only, and the
+//     reader can press to post it (manual-reply.ts, "Post still open").
 //   • ⚠ THE READER'S OWN PR (decision D2): never a reopen, never a new thread. The reply only: once
 //     per head on an unresolved thread, ONCE EVER on a resolved one (any Limn's still-open reply there,
 //     or this account's reply claim, counts).
@@ -39,6 +42,10 @@
 // (finding-replies.ts) and the thread loader (db/review-threads-for-review.ts) follow shared
 // `continuationThreadMap`, so the run's judgement, this file's writes and the author's still-open
 // card all land on the continuation.
+//
+// PR-LEVEL FINDINGS (posted as a PR comment: GitHub gives them no thread): ONE "**Still open:**
+// <reason>" PR comment linking the finding, AT MOST ONCE PER FINDING, EVER — the owner row's `pushback`
+// record (shared with a disputed reply's pushback) and any Limn's marker (pr-level-writes.ts).
 //
 // ⚠ CLAIM BEFORE EVERY WRITE: a row in `claude_still_open_posts` (the unique claim key is the
 // compare-and-set) BEFORE the GitHub call, then settled `posted` / `failed` with GitHub's words.
@@ -127,9 +134,12 @@ export function stillOpenCandidates(
         mine.set(threadId, null);
         continue;
       }
+      // The OTHER provider's finding: a cross-provider check never says "still open" on GitHub.
+      if (it.raisedBy) continue;
       mine.set(threadId, {
         threadId,
-        reason: it.explanation,
+        // The one-line "how" (what is still needed) first; the explanation on an older row.
+        reason: (it.how ?? '').trim() || it.explanation,
         severity: sev(it.severity),
         source: 'follow_up',
         priorFindingId: it.priorFindingId,
@@ -153,6 +163,8 @@ export interface StillOpenThreadFacts {
   severity: StillOpenSeverity | null;
   // The PR is the reader's own (decision D2).
   ownPr?: boolean;
+  // The READER resolved the thread (its `resolvedByLogin` is the account's login): nothing is written.
+  resolvedByReader?: boolean;
 }
 
 export interface StillOpenPlan {
@@ -163,6 +175,7 @@ export interface StillOpenPlan {
 
 /** THE PER-THREAD RULE (header). Pure. */
 export function planStillOpen(f: StillOpenThreadFacts): StillOpenPlan {
+  if (f.resolved && f.resolvedByReader === true) return { reply: false, reopen: false, escalate: false };
   if (!f.resolved) return { reply: !f.repliedAtHead, reopen: false, escalate: false };
   // D2: the reader's own PR — the reply only, once ever on a resolved thread; never reopen or continue.
   if (f.ownPr === true) return { reply: !f.repliedAtHead && f.repliedBefore !== true, reopen: false, escalate: false };
@@ -188,6 +201,7 @@ export function stillOpenThreadFacts(a: {
   claims: ReadonlySet<string>;
   severity: StillOpenSeverity | null;
   ownPr?: boolean;
+  resolvedByReader?: boolean;
 }): StillOpenThreadFacts {
   const node = a.thread.githubNodeId;
   const [root, ...replies] = a.threadComments;
@@ -206,6 +220,7 @@ export function stillOpenThreadFacts(a: {
     escalatedBefore: a.claims.has(claimKey('escalate', node)) || continued || isContinuation,
     severity: a.severity,
     ownPr: a.ownPr === true,
+    ...(a.resolvedByReader === true && a.thread.isResolved ? { resolvedByReader: true } : {}),
   };
 }
 
@@ -244,6 +259,8 @@ export function mergeLiveFacts(
     escalatedBefore: synced.escalatedBefore || l.escalatedBefore,
     severity: synced.severity,
     ownPr: synced.ownPr,
+    // Who resolved it is the sync's word; it holds only while GitHub still says resolved.
+    ...(synced.resolvedByReader === true && live.isResolved ? { resolvedByReader: true } : {}),
   };
 }
 
@@ -258,7 +275,9 @@ export function claimKey(action: 'reply' | 'reopen' | 'escalate' | 'read', threa
 /** The reply on the thread: the lead, the reason, the footer, the markers. */
 export function stillOpenReplyBody(reason: string | null, headSha: string, footer: string, reopened: boolean): string {
   const text = stillOpenReasonText(reason) || 'This is not addressed yet.';
-  return `${STILL_OPEN_LEAD} ${text}\n\n${footer}\n\n${FINDING_MARKER}\n${stillOpenMarker({ headSha, reopened })}`;
+  // No footer on a reply the reader pressed (manual-reply.ts): it is theirs, not an automatic post.
+  const foot = footer.trim() !== '' ? `\n\n${footer}` : '';
+  return `${STILL_OPEN_LEAD} ${text}${foot}\n\n${FINDING_MARKER}\n${stillOpenMarker({ headSha, reopened })}`;
 }
 
 /** The text of a NEW thread that continues an earlier one (the seam adds the lead, footer, marker). */
@@ -381,6 +400,8 @@ export interface StillOpenResult {
   failed: number[];
   // Threads left alone because the live read failed (recorded as this head's reply claim).
   unread: number[];
+  // PR-LEVEL findings (posted as a PR comment) that got their ONE "Still open:" PR comment (owner ids).
+  prLevel?: number[];
 }
 
 /**
@@ -430,6 +451,11 @@ async function postStillOpen(
       .execute()) as Array<{ owner: string; name: string; number: number; headSha: string | null }>
   )[0];
   if (pr == null || pr.headSha == null || pr.headSha.toLowerCase() !== review.headSha.toLowerCase()) return null;
+  const footer = runs.length > 1 ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
+
+  // PR-LEVEL FINDINGS (posted as a PR comment: no thread): ONE "Still open:" PR comment linking the
+  // finding, EVER (pr-level-writes.ts; the owner's `pushback` record). The later half's word wins.
+  const prLevelDone = await postPrLevelStillOpens(ctx, { accountId, prId, reviewId, runs, footer });
 
   const comments = (await ctx.db
     .select({ id: rc.id, threadId: rc.threadId, databaseId: rc.databaseId, body: rc.body, createdAt: rc.createdAt })
@@ -449,13 +475,36 @@ async function postStillOpen(
     if (post != null && !post.stillOpen) limnRoots.set(threadId, { severity: sev(post.severity) });
   }
   const candidates = stillOpenCandidates(runs, limnRoots);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    if (prLevelDone.length === 0) return null;
+    await deps.notePrChanged(accountId, [prId]).catch(() => {});
+    await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    return { replied: [], reopened: [], escalated: [], failed: [], unread: [], prLevel: prLevelDone };
+  }
 
   const threads = (await ctx.db
-    .select({ id: rt.id, githubNodeId: rt.githubNodeId, path: rt.path, line: rt.line, isResolved: rt.isResolved, isOutdated: rt.isOutdated })
+    .select({
+      id: rt.id,
+      githubNodeId: rt.githubNodeId,
+      path: rt.path,
+      line: rt.line,
+      isResolved: rt.isResolved,
+      isOutdated: rt.isOutdated,
+      resolvedByLogin: rt.resolvedByLogin,
+    })
     .from(rt)
     .where(and(eq(rt.prId, prId), inArray(rt.id, candidates.map((c) => c.threadId))))
-    .execute()) as Array<{ id: number; githubNodeId: string; path: string; line: number | null; isResolved: boolean; isOutdated: boolean }>;
+    .execute()) as Array<{
+    id: number;
+    githubNodeId: string;
+    path: string;
+    line: number | null;
+    isResolved: boolean;
+    isOutdated: boolean;
+    resolvedByLogin: string | null;
+  }>;
+  const { accountLoginOf } = await import('./finding-replies.js');
+  const readerLogin = (await accountLoginOf(ctx, accountId))?.toLowerCase() ?? null;
   const threadOf = new Map(threads.map((x) => [x.id, x]));
   const claimRows = (await ctx.db
     .select({ key: sop.claimKey })
@@ -468,9 +517,8 @@ async function postStillOpen(
   const { prAuthorIsAccount } = await import('../../coding/ai-fix/auto-fix.js');
   const ownPr = await prAuthorIsAccount(ctx, accountId, prId);
 
-  const footer = runs.length > 1 ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
-  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [], unread: [] };
-  let wrote = false;
+  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [], unread: [], ...(prLevelDone.length > 0 ? { prLevel: prLevelDone } : {}) };
+  let wrote = prLevelDone.length > 0;
 
   // ⚠ THE CLAIM: insert-or-nothing on the unique (account, key). true = this call owns the write.
   const claim = async (
@@ -526,6 +574,7 @@ async function postStillOpen(
       claims,
       severity: c.severity,
       ownPr,
+      resolvedByReader: readerLogin != null && (thread.resolvedByLogin ?? '').toLowerCase() === readerLogin,
     });
     if (nothingPlanned(planStillOpen(synced))) continue;
     // A live read that failed at this head already: nothing more on this thread at this head.
@@ -649,4 +698,55 @@ async function postStillOpen(
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return result;
+}
+
+/**
+ * The PR-level points the run(s) hold open (`isStillOpenFollowUp`, the later run's word winning), by
+ * the follow-up's finding id → the reason (the one-line how, else the explanation). Pure.
+ */
+export function prLevelStillOpenItems(runs: readonly JudgingRun[]): Map<number, string | null> {
+  const out = new Map<number, string | null>();
+  for (const r of runs) {
+    for (const it of r.followUp?.items ?? []) {
+      if (it == null || it.prComment == null || it.status === 'not_checked') continue;
+      if (!isStillOpenFollowUp(it.status)) {
+        out.delete(it.priorFindingId);
+        continue;
+      }
+      if (it.raisedBy) continue;
+      out.set(it.priorFindingId, (it.how ?? '').trim() || it.explanation || null);
+    }
+  }
+  return out;
+}
+
+/** Post the PR-level "Still open:" comments (own findings only). The owner ids that got one. */
+async function postPrLevelStillOpens(
+  ctx: AgentContext,
+  a: { accountId: number; prId: number; reviewId: number; runs: readonly JudgingRun[]; footer: string },
+): Promise<number[]> {
+  const items = prLevelStillOpenItems(a.runs);
+  if (items.size === 0) return [];
+  const [{ loadPrLevelOwners }, { postPrLevelStillOpen }] = await Promise.all([
+    import('./finding-replies.js'),
+    import('./pr-level-writes.js'),
+  ]);
+  const owners = await loadPrLevelOwners(ctx, a.accountId, a.prId, [...items.keys()], { ownOnly: true });
+  const done: number[] = [];
+  const seen = new Set<number>();
+  for (const [id, owner] of owners) {
+    if (seen.has(owner.id) || owner.pushback != null) continue;
+    seen.add(owner.id);
+    const r = await postPrLevelStillOpen(ctx, {
+      accountId: a.accountId,
+      prId: a.prId,
+      reviewId: a.reviewId,
+      owner,
+      footer: a.footer,
+      how: 'auto',
+      reason: items.get(id) ?? null,
+    });
+    if (r.kind === 'done' && r.status === 'posted') done.push(owner.id);
+  }
+  return done;
 }

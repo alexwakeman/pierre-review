@@ -4940,6 +4940,14 @@ export interface FindingAutoResolveRecord {
   why?: 'own_pr' | 'teammate';
   // why 'teammate' only: the teammate's GitHub login.
   checkedBy?: string;
+  // true = the person had ALREADY RESOLVED the thread, so Limn only replied (the "how"), once, and
+  // only because no Limn reply followed the person's last comment there. No resolve was sent;
+  // `status: 'resolved'` then means "the reply landed on a resolved thread". Absent = false.
+  alreadyResolved?: boolean;
+  // A PR-LEVEL finding (a PR comment, no thread): true once GitHub hid the finding comment as
+  // RESOLVED (`minimizeComment`), GitHub's nearest thing to resolving it. `status: 'resolved'` on such
+  // a record means the acknowledgement landed AND the comment was hidden. Absent = false.
+  minimized?: boolean;
 }
 
 // The ONE pushback reply an auto run posted on a finding's thread
@@ -7146,6 +7154,12 @@ export interface ClaudeFollowUpItemRecord {
   status: ClaudeFollowUpStatus;
   // Claude's one- or two-sentence explanation. null when not reported.
   explanation: string | null;
+  // THE ONE-LINE "HOW" (≤ JUDGEMENT_HOW_MAX characters, shared `judgementHowOf`): addressed / no
+  // longer applies → how it was dealt with; not / partly addressed → the one thing still needed;
+  // reply_accepted → the accepted reason. Shown on the thread pill line and the follow-up row, and
+  // posted after "Addressed in abc1234:". A status the code locked keeps the earlier run's. Absent /
+  // null on rows from before the field (readers fall back to the explanation's first sentence).
+  how?: string | null;
   // The earlier finding's anchor (lines are from the head of the review that raised it).
   path: string;
   line: number | null;
@@ -7170,8 +7184,12 @@ export interface ClaudeFollowUpItemRecord {
   // The text Limn would post on the thread: the short acknowledgement (accepted) or the pushback
   // (disputed). Posted automatically on an auto run when the workspace allows it, else a draft.
   response?: string | null;
-  // The latest person's reply Claude judged (author login + a short excerpt).
-  reply?: { author: string; excerpt: string } | null;
+  // The latest person's reply Claude judged (author login + a short excerpt). On a PR-LEVEL finding
+  // (`prComment`) it is the PR comment the model cited (`replyRef`), with its github.com link.
+  reply?: { author: string; excerpt: string; url?: string | null } | null;
+  // A PR-LEVEL finding only: the ref ('C1'…) of the PR comment the model cited as the answer to this
+  // finding. GitHub does not thread PR comments, so a reply status stands only with a valid ref.
+  replyRef?: string | null;
   // true ⇒ Claude accepted a "fix it later" on a BLOCKER and the server refused it (a blocker is
   // fixed in this PR). `response` is then the server's templated pushback.
   deferralRefused?: boolean;
@@ -7180,6 +7198,16 @@ export interface ClaudeFollowUpItemRecord {
   // found at run time, whatever the status.
   threadId?: number | null;
   threadFindingId?: number | null;
+  // A PR-LEVEL finding (posted as a PR comment, so it has no thread): the finding row that owns that
+  // comment (the first POSTED one up the re-raise chain), the comment's id and its github.com link.
+  // Set whenever such an owner was found at run time. Absent on an inline finding and on older rows.
+  prComment?: { findingId: number; commentId: string | null; url: string | null } | null;
+  // THE OTHER PROVIDER raised it (docs/CLAUDE-REVIEW.md § Claude + Codex, cross-provider follow-up):
+  // a run on one provider followed up the other's still-open finding, or a COVER pass checked a
+  // failed pair half's findings. The run's own provider is the checker. Such an item may be marked
+  // addressed (and auto-resolved) but never disputed: the server turns a dispute into
+  // not_addressed, and no pushback or still-open comment is written for it. Absent ⇒ the run's own.
+  raisedBy?: AiProviderId;
 }
 
 // An earlier finding a review SETTLED by accepting a person's reply on its GitHub thread. Read-only
@@ -7231,6 +7259,10 @@ export interface ClaudeReviewFollowUpRecord {
   // row. Its threads are the author's: this run never replies on or resolves them. Absent ⇒ the
   // reader's own previous review.
   teammate?: { userId: number; login: string };
+  // A COVER PASS (a `kind = 'replies'` row): one half of a Claude + Codex pair failed or never
+  // started, so the half that succeeded checked the failed provider's open findings at this head.
+  // `provider` = the failed one. Absent on every other run.
+  cover?: { provider: AiProviderId };
 }
 
 // Why a previous review's finding was left out of the follow-up:
@@ -7607,7 +7639,8 @@ export interface TeammateReviewRecord {
   // databaseId. Absent = none (and on every older import).
   // `still_open` (`o`, 2026-11-05): not addressed and held open; the id may be ANY thread's root
   // comment (a person's too). docs/CLAUDE-REVIEW.md § Still-open points.
-  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open' }>;
+  // `reason` (`jr=`, 2026-11-09): that Limn's one-line "how" for the entry, when it sent one.
+  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open'; reason?: string }>;
   // A PAIR's finding comments by node id → who raised each (from the comment's lead tag, "Codex",
   // "Claude + Codex"). Absent on a single run (its `runs[0].provider` raised every finding).
   findingProviders?: Record<string, AiProviderId[]>;
@@ -8500,6 +8533,10 @@ export interface ClaudeThreadFindingOutcome {
   replyAuthor: string | null;
   /** The review whose follow-up said so. */
   reviewId: number;
+  /** Set when a TEAMMATE'S Limn made this word: its posted review (`j=`) judged the finding NEWER
+   *  than the reader's own Limn did, and the newest word wins (docs/TEAM-REVIEW.md). The pill then
+   *  reads "Robin’s Limn: addressed". `reviewId` stays the reader's own last review. Absent = yours. */
+  judgedBy?: { login: string; name: string | null } | null;
 }
 
 export interface ClaudeThreadJudgementsForPr {

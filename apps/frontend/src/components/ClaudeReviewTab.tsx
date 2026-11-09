@@ -129,7 +129,7 @@ import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { RepliesCheckLine } from './RepliesCheckLine.js';
-import { REPLIES_CHECK_LABEL } from '../lib/repliesCheck.js';
+import { repliesRunLabel } from '../lib/repliesCheck.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
@@ -1525,7 +1525,7 @@ export function ClaudesReview({
             )}
             {review.kind === 'replies' && (
               <span className="text-meta text-ui-mute">
-                {REPLIES_CHECK_LABEL}
+                {repliesRunLabel(review)}
               </span>
             )}
             {review.reviewMode != null && (
@@ -1863,7 +1863,7 @@ function ReviewRailStatus({
         <ReviewedAgo at={review.finishedAt} />
         {review.trigger === 'auto' && <span>{AUTO_REVIEW_LABEL}</span>}
         {review.fresh === true && <span>{FRESH_REVIEW_LABEL}</span>}
-        {review.kind === 'replies' && <span>{REPLIES_CHECK_LABEL}</span>}
+        {review.kind === 'replies' && <span>{repliesRunLabel(review)}</span>}
         {review.reviewMode != null && <span>{REVIEW_MODE_LABEL[review.reviewMode]} review</span>}
       </div>
       {cost != null && <p className="break-words text-meta text-ui-mute">{cost}</p>}

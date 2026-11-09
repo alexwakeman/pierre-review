@@ -154,3 +154,23 @@ describe('settled in an earlier review', () => {
     expect(settledEarlierRows({ followUp: null, settledEarlier: undefined })).toEqual([]);
   });
 });
+
+// A PR-LEVEL finding (posted as a PR comment, no thread): the same buttons — "Post reply", and
+// "Mark resolved" in place of "Resolve" — with words about the comment, not a thread.
+describe('replyActions on a PR-level finding', () => {
+  const pr = { threadId: null, prComment: { findingId: 9, commentId: '1', url: 'https://github.com/o/r/pull/1#issuecomment-1' } };
+  it('offers Post reply and Mark resolved on an accepted reply with nothing posted yet', () => {
+    expect(replyActions(item({ ...pr, response: 'Fair.' }), 7)).toMatchObject({ canPost: true, canResolve: true });
+  });
+  it('a hide alone reads "Marked resolved."', () => {
+    const ar = { status: 'resolved' as const, at: 'x', outcome: 'reply_accepted' as const, byReviewId: 7, headSha: 'a', replyCommentId: null, error: null, minimized: true, manual: true };
+    expect(replyActions(item({ ...pr, response: 'Fair.', autoResolve: ar }), 7)).toMatchObject({ note: 'Marked resolved.', canPost: false, canResolve: false });
+  });
+  it('an earlier still-open comment blocks a second one', () => {
+    const pb = { status: 'posted' as const, at: 'x', byReviewId: 3, commentId: '5', error: null };
+    expect(replyActions(item({ ...pr, status: 'reply_disputed', response: 'No.', pushback: pb }), 7)).toMatchObject({
+      note: 'Limn already said this is still open.',
+      canPost: false,
+    });
+  });
+});

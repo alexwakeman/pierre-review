@@ -249,6 +249,102 @@ export async function newestReviewCommentTimes(
   return out;
 }
 
+/**
+ * THE PR-LEVEL HALF of "a reply on Limn's own finding" (docs/CLAUDE-REVIEW.md § The replies pass): a
+ * Limn finding posted as a PR COMMENT has no thread, so its replies are the PR conversation after it.
+ * Per PR that has such a finding (posted, not praise; the reader's own or a teammate's imported one),
+ * the newest PERSON'S PR comment or non-empty review body created after the earliest such finding
+ * and after `since`. Never automation (users.is_bot / github_type 'Bot'), never Limn's (a `limn:`
+ * attribution, or the hidden marker), and only authors `countsAuthor` keeps. PRs with none are
+ * absent. The sweeper folds it into `newestOwn` (db/queries.ts `getAutoReviewCandidates`).
+ */
+export async function newestPrLevelReplyTimes(
+  accountId: number,
+  prIds: readonly number[],
+  since: Date,
+  countsAuthor?: CountsAuthor,
+): Promise<Map<number, Date>> {
+  const out = new Map<number, Date>();
+  if (prIds.length === 0) return out;
+  const { claudeReviews: cr, claudeReviewFindings: crf, prComments: pc, reviews: rv, users } = schema;
+  const findings = await db
+    .select({ prId: cr.prId, postedAt: crf.postedAt, commentId: crf.githubCommentId })
+    .from(crf)
+    .innerJoin(cr, eq(cr.id, crf.reviewId))
+    .where(
+      and(
+        eq(cr.accountId, accountId),
+        inArray(cr.prId, [...prIds]),
+        isNotNull(crf.postedAt),
+        eq(crf.postedCommentKind, 'pr_comment'),
+        sql`${crf.severity} <> 'praise'`,
+      ),
+    )
+    .execute();
+  // GitHub's own time for the finding comment when it is synced (the pool's clock,
+  // finding-replies.ts), else when Limn recorded the post.
+  const commentIds = [...new Set(findings.map((f) => f.commentId).filter((x): x is string => x != null))];
+  const synced = new Map<string, number>();
+  if (commentIds.length > 0) {
+    for (const r of await db
+      .select({ prId: pc.prId, databaseId: pc.databaseId, createdAt: pc.createdAt })
+      .from(pc)
+      .where(and(inArray(pc.prId, [...new Set(findings.map((f) => f.prId))]), inArray(pc.databaseId, commentIds)))
+      .execute()) {
+      if (r.databaseId) synced.set(`${r.prId}:${r.databaseId}`, r.createdAt.getTime());
+    }
+  }
+  const firstPosted = new Map<number, number>();
+  for (const f of findings) {
+    const t = (f.commentId ? synced.get(`${f.prId}:${f.commentId}`) : undefined) ?? f.postedAt?.getTime?.() ?? null;
+    if (t == null) continue;
+    firstPosted.set(f.prId, Math.min(firstPosted.get(f.prId) ?? Number.POSITIVE_INFINITY, t));
+  }
+  if (firstPosted.size === 0) return out;
+  const ids = [...firstPosted.keys()];
+  const [comments, reviewRows] = await Promise.all([
+    db
+      .select({
+        prId: pc.prId,
+        createdAt: pc.createdAt,
+        body: pc.body,
+        limnPostedBy: pc.limnPostedByUserId,
+        authorId: pc.authorId,
+        isBot: users.isBot,
+        type: users.githubType,
+      })
+      .from(pc)
+      .leftJoin(users, eq(users.id, pc.authorId))
+      .where(and(inArray(pc.prId, ids), gt(pc.createdAt, since)))
+      .execute(),
+    db
+      .select({
+        prId: rv.prId,
+        createdAt: rv.submittedAt,
+        body: rv.body,
+        limnPostedBy: rv.limnPostedByUserId,
+        authorId: rv.authorId,
+        isBot: users.isBot,
+        type: users.githubType,
+      })
+      .from(rv)
+      .leftJoin(users, eq(users.id, rv.authorId))
+      .where(and(inArray(rv.prId, ids), gt(rv.submittedAt, since), sql`${rv.state} <> 'pending'`))
+      .execute(),
+  ]);
+  for (const r of [...comments, ...reviewRows]) {
+    const body = (r.body ?? '').trim();
+    if (!body || r.limnPostedBy != null || LIMN_MARKER.test(body)) continue;
+    if (r.isBot || r.type === 'Bot') continue;
+    if (countsAuthor && !countsAuthor(r.authorId ?? null)) continue;
+    const at = r.createdAt.getTime();
+    if (at <= (firstPosted.get(r.prId) ?? Number.POSITIVE_INFINITY)) continue;
+    const prev = out.get(r.prId);
+    if (!prev || at > prev.getTime()) out.set(r.prId, r.createdAt);
+  }
+  return out;
+}
+
 export interface ReviewThreadCommentForReview {
   authorLogin: string | null;
   authorIsBot: boolean;

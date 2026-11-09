@@ -1,6 +1,7 @@
 import type { z as Zod } from "zod";
 import { loadZod } from "../ai/runtime.js";
 import { buildDocCitationsField, buildDocReferencesField } from "../reference-docs/review-refs.js";
+import { JUDGEMENT_HOW_MAX } from "@pierre-review/shared";
 import { THREAD_REASON_CHARS } from "./claude-review/threads.js";
 
 // ⚠ zod is NOT imported here as a value. It comes from the AI runtime (ai/runtime.ts), the SAME
@@ -138,6 +139,15 @@ function buildBaseReviewShape(z: ZodNs) {
             .describe(
               "One or two sentences naming what changed, or saying that nothing did.",
             ),
+          // ⚠ NOT required and no `.max()`, like a thread's `reason`: a line a few characters over
+          // (or missing) must never reject the whole submit call. The server clips it (`oneLineHow`).
+          how: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              `ONE line, at most ${JUDGEMENT_HOW_MAX} characters. addressed or no_longer_applies: how it was dealt with. not_addressed or partly_addressed: the one thing still needed to resolve it. reply_accepted: the reason you accepted.`,
+            ),
           acceptKind: z
             .enum(["not_valid", "deferred"])
             .nullable()
@@ -151,6 +161,13 @@ function buildBaseReviewShape(z: ZodNs) {
             .optional()
             .describe(
               "Only with a reply_ status: the short reply to post on the thread. For reply_accepted one sentence acknowledging it; for reply_disputed a short, polite, specific pushback.",
+            ),
+          replyRef: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              "Only with a reply_ status on a finding that lists PR comments (C1, C2, …): the ref of the PR comment that answers this finding.",
             ),
         }),
       )
@@ -187,7 +204,9 @@ export function buildThreadReportItem(z: ZodNs) {
       .string()
       .nullable()
       .optional()
-      .describe(`One line, at most ${THREAD_REASON_CHARS} characters: why. Shown under the verdict.`),
+      .describe(
+        `One line, at most ${THREAD_REASON_CHARS} characters: why. addressed: how it was dealt with. not_addressed or partly_addressed: the one thing still needed to resolve it. Shown under the verdict.`,
+      ),
     draftReply: z
       .string()
       .nullable()

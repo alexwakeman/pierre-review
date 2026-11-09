@@ -747,3 +747,130 @@ describe('review fixes: pair coverage, the outcome anchor, the daily cap', () =>
     expect(await read()).toBe(before + 2);
   });
 });
+
+// ⚠ CLAUDE + CODEX, EACH COVERS THE OTHER (docs/CLAUDE-REVIEW.md § Claude + Codex). The PR 221270
+// shape: a Codex review posted findings at an older head (one inline with a person's reply, one as a
+// PR comment), then a pair at the current head whose Codex half failed on its usage limit.
+describe('the other provider’s open findings', () => {
+  const OLD = 'c'.repeat(40);
+  let pr = 0;
+  let codexRun = 0;
+  let pairFirst = 0;
+  const ids = new Map<string, number>();
+
+  beforeAll(async () => {
+    pr = await makePr();
+    codexRun = await persist.insertQueuedReview(ctx, pr, OLD, 'claude-opus-5-5', 1, [], 'auto', 'codex');
+    await persist.saveReviewSuccess(ctx, codexRun, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [],
+      findings: [
+        finding('Retry loop never stops', 'blocker', 2),
+        { ...finding('Handle the stored-value refusal', 'warning', 3), line: null, anchored: false, fileInDiff: false },
+      ],
+    });
+    for (const f of (await persist.getClaudeReviewById(ctx, codexRun, 1))!.findings) ids.set(f.title, f.id);
+    const inline = ids.get('Retry loop never stops')!;
+    await persist.markFindingPosted(ctx, inline, String(1000 + inline));
+    await thread(pr, [
+      { authorId: users.me!, at: Date.now() - 2 * HOUR, body: `Retry loop never stops.${MARK}`, databaseId: String(1000 + inline) },
+      { authorId: users.alice!, at: Date.now() - HOUR, body: 'It is bounded by the caller.' },
+    ]);
+    await persist.markFindingPosted(ctx, ids.get('Handle the stored-value refusal')!, '88001', 'pr_comment');
+    // The pair at the current head: Claude's half succeeded (no findings), Codex's failed.
+    pairFirst = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'auto', 'claude', false, { role: 'first' });
+    await persist.saveReviewSuccess(ctx, pairFirst, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [], findings: [],
+    });
+    const second = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'auto', 'codex', false, { role: 'second', pairId: pairFirst });
+    await persist.markReviewFailed(ctx, second, "Codex could not finish: You've hit your usage limit");
+  });
+
+  it('a pair half never carries them; the next single Claude run does, as Codex’s (inline and PR-level)', async () => {
+    const next = Number.MAX_SAFE_INTEGER;
+    const half = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, next, new Set(), 'claude', true);
+    expect(half?.findings ?? []).toEqual([]);
+    const single = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, next, new Set(), 'claude');
+    expect(single?.findings.map((f) => [f.title, f.carried, f.raisedBy])).toEqual([
+      ['Retry loop never stops', true, 'codex'],
+      ['Handle the stored-value refusal', true, 'codex'],
+    ]);
+  });
+
+  it('the cover pass plans the failed half’s open findings', async () => {
+    const planned = await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude');
+    expect(planned?.reviewId).toBe(codexRun);
+    expect(planned?.findings.map((f) => [f.title, f.raisedBy])).toEqual([
+      ['Retry loop never stops', 'codex'],
+      ['Handle the stored-value refusal', 'codex'],
+    ]);
+    // The PR-level one carries its PR comment (the previous step's lifecycle).
+    expect(planned?.findings[1]!.conversation?.commentId ?? null).toBe('88001');
+  });
+
+  it('runs on Claude, may mark one addressed, never disputes, and stores a kind=replies row naming Codex', async () => {
+    agentCalls.length = 0;
+    script = () => ({
+      replies: [
+        // P1: the inline blocker — the model disputes the reply; stored as plain not_addressed.
+        { ref: 'P1', status: 'reply_disputed', reply: 'The caller does not bound it.', explanation: 'Still unbounded.', how: 'Bound the loop.' },
+        // P2: the PR-level warning, dealt with in the code.
+        { ref: 'P2', status: 'addressed', explanation: 'The refusal is now handled first.', how: 'Handled before the generic map.' },
+      ],
+    });
+    const started = await rc.startCoverCheck(ctx, {
+      accountId: 1, prId: pr, survivor: 'claude', failed: 'codex', trigger: 'manual', pairId: pairFirst,
+    });
+    expect(started).toMatchObject({ outcome: 'queued', threads: 2 });
+    await settleFor(pr);
+    expect(agentCalls.map((a) => a.provider)).toEqual(['claude']);
+    expect(agentCalls[0].prompt).toContain('## Earlier findings to check');
+    expect(agentCalls[0].prompt).toContain('Never dispute a reply');
+    const rows = await passRows(pr);
+    const cover = (await persist.getClaudeReviewById(ctx, rows[rows.length - 1]!.id, 1))!;
+    expect(cover).toMatchObject({ kind: 'replies', provider: 'claude', status: 'succeeded' });
+    expect(cover.followUp?.cover).toEqual({ provider: 'codex' });
+    expect(cover.followUp?.items.map((i) => [i.title, i.status, i.raisedBy, i.response ?? null])).toEqual([
+      ['Retry loop never stops', 'not_addressed', 'codex', null],
+      ['Handle the stored-value refusal', 'addressed', 'codex', null],
+    ]);
+    expect(cover.summary).toBe("Checked Codex's 2 open findings: 1 dealt with, 1 still open.");
+    // Nothing was posted on GitHub (no pushback from a cross-provider check).
+    expect(replyCalls).toEqual([]);
+  });
+
+  it('afterwards nothing is left to cover, and the next Claude run carries only the still-open one', async () => {
+    expect(await rc.planCoverCheck(ctx, 1, pr, 'codex', 'claude')).toBeNull();
+    const single = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, Number.MAX_SAFE_INTEGER, new Set(), 'claude');
+    expect(single?.findings.map((f) => [f.title, f.raisedBy, f.priorStatus?.status ?? null])).toEqual([
+      ['Retry loop never stops', 'codex', 'not_addressed'],
+    ]);
+  });
+
+  it('a reply on a Codex comment after a Claude-only run is judged by the replies pass', async () => {
+    const pr2 = await makePr();
+    const cx = await persist.insertQueuedReview(ctx, pr2, OLD, 'claude-opus-5-5', 1, [], 'manual', 'codex');
+    await persist.saveReviewSuccess(ctx, cx, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [], findings: [finding('Unchecked input', 'warning', 2)],
+    });
+    const fid = (await persist.getClaudeReviewById(ctx, cx, 1))!.findings[0]!.id;
+    await persist.markFindingPosted(ctx, fid, String(1000 + fid));
+    // A Claude-only run since (it read no follow-up), then the reply.
+    const cl = await persist.insertQueuedReview(ctx, pr2, HEAD, 'claude-opus-5-5', 1, [], 'manual', 'claude');
+    await persist.saveReviewSuccess(ctx, cl, {
+      scope: 'diff_only', summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
+      numTurns: 1, excludedFiles: [], findings: [],
+    });
+    await thread(pr2, [
+      { authorId: users.me!, at: Date.now() - HOUR, body: `Unchecked input.${MARK}`, databaseId: String(1000 + fid) },
+      { authorId: users.alice!, at: LATER, body: EXPLAIN },
+    ]);
+    const planned = await rc.planRepliesCheck(ctx, 1, pr2);
+    expect('refused' in planned).toBe(false);
+    if ('refused' in planned) return;
+    expect(planned.full.id).toBe(cl);
+    expect(planned.findings.map((f) => f.title)).toEqual(['Unchecked input']);
+  });
+});

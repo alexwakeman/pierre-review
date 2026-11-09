@@ -5,7 +5,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ClaudeRepliesCheckRun } from '@pierre-review/shared';
-import { canCheckReplies, checkRepliesButtonText, repliesCheckLine, repliesCountsText } from '../src/lib/repliesCheck.js';
+import {
+  REPLIES_CHECK_LABEL,
+  canCheckReplies,
+  checkRepliesButtonText,
+  repliesCheckLine,
+  repliesCountsText,
+  repliesRunLabel,
+} from '../src/lib/repliesCheck.js';
 
 const run = (over: Partial<ClaudeRepliesCheckRun> = {}): ClaudeRepliesCheckRun => ({
   reviewId: 9,
@@ -61,5 +68,12 @@ describe('the replies pass, in words', () => {
     // Reviews on this PR labels a pass (lib/teamReview.ts `reviewsOnPr`).
     expect(readFileSync(join(import.meta.dirname, '../src/lib/teamReview.ts'), 'utf8')).toMatch(/REPLIES_CHECK_LABEL/);
     expect(src('RepliesCheckLine.tsx')).toMatch(/<AiRunGate kind="thread_check">/);
+    // A cover pass is labelled by whose findings it checked.
+    expect(src('ClaudeReviewTab.tsx')).toMatch(/repliesRunLabel\(review\)/);
+  });
+
+  it('labels a cover pass by the provider whose findings it checked', () => {
+    expect(repliesRunLabel({ followUp: { cover: { provider: 'codex' } } })).toBe("Checked Codex's findings");
+    expect(repliesRunLabel({ followUp: null })).toBe(REPLIES_CHECK_LABEL);
   });
 });

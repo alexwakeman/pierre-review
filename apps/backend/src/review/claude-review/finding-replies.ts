@@ -2,6 +2,11 @@
 // finding, read so a re-review can judge the reply (accept it, or push back once). CORE, DB-only.
 // docs/CLAUDE-REVIEW.md § Replies to Limn's findings.
 //
+// A PR-LEVEL finding (posted as a PR comment: GitHub gives it no thread) gets the PR CONVERSATION
+// after it instead (`loadFindingConversations`): the people's later PR comments and review bodies,
+// in ONE pool per PR with refs C1…Cn, linked / quoting ones first. The model must cite the ref it
+// judged (follow-up.ts `judgeReplyReport`).
+//
 // Which thread: the finding's own, or — when the finding is an unposted re-raise — the thread of
 // its first INLINE-POSTED ancestor along `prior_finding_id` (`loadThreadOwners`, the walk auto
 // resolve uses too), matched by the ONE matcher (finding-thread.ts `findFindingThread`).
@@ -15,7 +20,7 @@
 // Each reply is CLIPPED (REPLY_CHARS) and only the last REPLIES_MAX are kept. Everything here was
 // written by people on an attacker-influenced pull request: prompts.ts fences it with the run's
 // nonce as data, never instructions.
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   continuationThreadMap,
   PUSHBACK_REPLY_MARKER,
@@ -25,7 +30,13 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { automationVendorFor, isLikelyBot } from '../../sync/bot-detection.js';
 import { findFindingThread, type ThreadComment, type ThreadRow } from './finding-thread.js';
-import type { FindingReply } from './reply-text.js';
+import {
+  buildConversationPool,
+  type FindingConversation,
+  type FindingReply,
+  type PoolComment,
+  type PoolFinding,
+} from './reply-text.js';
 export { REPLY_EXCERPT_CHARS, RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -170,7 +181,9 @@ export async function loadThreadOwners(
   accountId: number,
   prId: number,
   ids: readonly number[],
-  opts: { ownOnly?: boolean } = {},
+  // `anyKind`: stop at the first POSTED finding of EITHER kind — an inline comment or a PR comment
+  // (a PR-level finding's owner, `loadPrLevelOwners`). Default: inline only, as before.
+  opts: { ownOnly?: boolean; anyKind?: boolean } = {},
 ): Promise<Map<number, ThreadOwnerRow>> {
   const t = sch(ctx);
   const cr = t.claudeReviews;
@@ -196,7 +209,8 @@ export async function loadThreadOwners(
           .innerJoin(cr, eq(cr.id, crf.reviewId))
           .where(and(inArray(crf.id, want), eq(cr.accountId, accountId), eq(cr.prId, prId), ownOnly))
           .execute()) as ThreadOwnerRow[]);
-  const isInlinePosted = (f: ThreadOwnerRow): boolean => f.postedAt != null && f.postedCommentKind === 'inline';
+  const isInlinePosted = (f: ThreadOwnerRow): boolean =>
+    f.postedAt != null && (opts.anyKind === true ? f.postedCommentKind != null : f.postedCommentKind === 'inline');
   const byId = new Map<number, ThreadOwnerRow>();
   const out = new Map<number, ThreadOwnerRow>();
   const cursor = new Map<number, number>(ids.map((id) => [id, id]));
@@ -353,6 +367,200 @@ export async function loadFindingThreadContexts(
   return out;
 }
 
+// ---- PR-LEVEL FINDINGS (posted as a PR comment: no thread) ----
+
+// Every PR-level write Limn makes about a finding ("Still open", the acknowledgement) carries this
+// marker naming the finding comment, so ANY Limn (a teammate's, or this one with a lost record) sees
+// it was said. Its `pierre:claude-review` prefix makes it Limn-posted for every reader.
+const PR_LEVEL_MARKER_RE = /<!--\s*pierre:claude-review-followup\s+on=(\d+)\s+act=([a-z_]+)\s*-->/i;
+
+export type PrLevelAct = 'still_open' | 'ack';
+
+/** The hidden marker of a PR-level write about one finding comment. */
+export function prLevelFollowUpMarker(findingCommentId: string | null, act: PrLevelAct): string {
+  const id = /^\d{1,20}$/.test(findingCommentId ?? '') ? findingCommentId : '0';
+  return `<!-- pierre:claude-review-followup on=${id} act=${act} -->`;
+}
+
+/** The PR-level marker a body carries, or null. Pure. */
+export function parsePrLevelMarker(body: string | null | undefined): { on: string; act: string } | null {
+  const m = PR_LEVEL_MARKER_RE.exec(body ?? '');
+  return m ? { on: m[1]!, act: m[2]!.toLowerCase() } : null;
+}
+
+/** The github.com links of a PR's conversation. */
+export function issueCommentUrl(pr: PrRef | null, commentId: string | null): string | null {
+  return pr && commentId ? `https://github.com/${pr.owner}/${pr.name}/pull/${pr.number}#issuecomment-${commentId}` : null;
+}
+export function prReviewUrl(pr: PrRef | null, reviewId: string | null): string | null {
+  return pr && reviewId ? `https://github.com/${pr.owner}/${pr.name}/pull/${pr.number}#pullrequestreview-${reviewId}` : null;
+}
+
+export interface PrRef {
+  owner: string;
+  name: string;
+  number: number;
+}
+
+/** The PR's repo and number (for links), account-scoped. null when not found. */
+export async function prRefOf(ctx: AgentContext, accountId: number, prId: number): Promise<PrRef | null> {
+  const t = sch(ctx);
+  const rows = (await ctx.db
+    .select({ owner: t.repos.owner, name: t.repos.name, number: t.pullRequests.number })
+    .from(t.pullRequests)
+    .innerJoin(t.repos, eq(t.repos.id, t.pullRequests.repoId))
+    .where(and(eq(t.pullRequests.id, prId), eq(t.pullRequests.accountId, accountId)))
+    .limit(1)
+    .execute()) as PrRef[];
+  return rows[0] ?? null;
+}
+
+/** One synced PR comment or review body, with who TRULY posted it and whether that is automation. */
+export interface ConversationRow {
+  kind: 'comment' | 'review';
+  databaseId: string | null;
+  body: string;
+  authorLogin: string | null;
+  authorIsAutomation: boolean;
+  // Limn posted it (a `limn:` attribution, or the hidden marker).
+  fromLimn: boolean;
+  createdAtMs: number;
+}
+
+/** Every PR comment and every non-empty, submitted review body of the PR, oldest first. */
+export async function loadPrConversationRows(ctx: AgentContext, prId: number): Promise<ConversationRow[]> {
+  const t = sch(ctx);
+  const pc = t.prComments;
+  const rv = t.reviews;
+  const [comments, reviews] = await Promise.all([
+    ctx.db
+      .select({
+        databaseId: pc.databaseId,
+        body: pc.body,
+        limnPostedBy: pc.limnPostedByUserId,
+        authorLogin: t.users.githubLogin,
+        authorIsBot: t.users.isBot,
+        authorType: t.users.githubType,
+        createdAt: pc.createdAt,
+      })
+      .from(pc)
+      .leftJoin(t.users, eq(t.users.id, sql`coalesce(${pc.limnPostedByUserId}, ${pc.authorId})`))
+      .where(eq(pc.prId, prId))
+      .execute() as Promise<Array<{ databaseId: string | null; body: string | null; limnPostedBy: number | null; authorLogin: string | null; authorIsBot: boolean | null; authorType: string | null; createdAt: Date | null }>>,
+    ctx.db
+      .select({
+        databaseId: rv.databaseId,
+        body: rv.body,
+        limnPostedBy: rv.limnPostedByUserId,
+        authorLogin: t.users.githubLogin,
+        authorIsBot: t.users.isBot,
+        authorType: t.users.githubType,
+        createdAt: rv.submittedAt,
+      })
+      .from(rv)
+      .leftJoin(t.users, eq(t.users.id, sql`coalesce(${rv.limnPostedByUserId}, ${rv.authorId})`))
+      .where(and(eq(rv.prId, prId), ne(rv.state, 'pending')))
+      .execute() as Promise<Array<{ databaseId: string | null; body: string | null; limnPostedBy: number | null; authorLogin: string | null; authorIsBot: boolean | null; authorType: string | null; createdAt: Date | null }>>,
+  ]);
+  const rows: ConversationRow[] = [];
+  for (const [kind, list] of [['comment', comments], ['review', reviews]] as const) {
+    for (const r of list) {
+      const body = r.body ?? '';
+      if (kind === 'review' && body.trim() === '') continue;
+      rows.push({
+        kind,
+        databaseId: r.databaseId ?? null,
+        body,
+        authorLogin: r.authorLogin ?? null,
+        authorIsAutomation: isAutomationAuthor(r),
+        fromLimn: r.limnPostedBy != null || LIMN_MARKER.test(body),
+        createdAtMs: r.createdAt?.getTime?.() ?? 0,
+      });
+    }
+  }
+  return rows.sort((a, b) => a.createdAtMs - b.createdAtMs);
+}
+
+/** Has any Limn already said "Still open" (or pushed back) about this finding comment on the PR? */
+export function prLevelHasStillOpen(rows: readonly Pick<ConversationRow, 'body' | 'fromLimn'>[], findingCommentId: string | null): boolean {
+  if (!findingCommentId) return false;
+  return rows.some((r) => {
+    const m = r.fromLimn ? parsePrLevelMarker(r.body) : null;
+    return m != null && m.on === findingCommentId && m.act === 'still_open';
+  });
+}
+
+/** Has any Limn already acknowledged / closed this finding comment on the PR? */
+export function prLevelHasAck(rows: readonly Pick<ConversationRow, 'body' | 'fromLimn'>[], findingCommentId: string | null): boolean {
+  if (!findingCommentId) return false;
+  return rows.some((r) => {
+    const m = r.fromLimn ? parsePrLevelMarker(r.body) : null;
+    return m != null && m.on === findingCommentId && m.act === 'ack';
+  });
+}
+
+/**
+ * For each id: its PR-LEVEL owner — the first POSTED finding up the re-raise chain, when that one was
+ * posted as a PR comment. An id whose first posted ancestor is inline (it has a thread) is absent.
+ */
+export async function loadPrLevelOwners(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  ids: readonly number[],
+  opts: { ownOnly?: boolean } = {},
+): Promise<Map<number, ThreadOwnerRow>> {
+  const all = await loadThreadOwners(ctx, accountId, prId, ids, { ...opts, anyKind: true });
+  return new Map([...all].filter(([, o]) => o.postedCommentKind === 'pr_comment'));
+}
+
+/**
+ * Each PR-level finding's conversation (reply-text.ts `buildConversationPool`): the people's PR
+ * comments and review bodies after the finding comment — never automation, never Limn's (any
+ * login's marker or `limn:` attribution) — in ONE pool per PR with refs C1…Cn. The reader's own
+ * unmarked comments count: they are a person answering. A finding with no PR-level owner is absent.
+ */
+export async function loadFindingConversations(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  findings: ReadonlyArray<{ id: number; title: string }>,
+): Promise<Map<number, FindingConversation>> {
+  if (findings.length === 0) return new Map();
+  const owners = await loadPrLevelOwners(ctx, accountId, prId, findings.map((f) => f.id));
+  if (owners.size === 0) return new Map();
+  const [rows, pr] = await Promise.all([loadPrConversationRows(ctx, prId), prRefOf(ctx, accountId, prId)]);
+  const pool: PoolComment[] = rows
+    .filter((r) => !r.fromLimn && !r.authorIsAutomation && r.authorLogin)
+    .map((r) => ({
+      author: r.authorLogin!,
+      body: norm(r.body.replace(/<!--[\s\S]*?-->/g, '')),
+      atMs: r.createdAtMs,
+      commentId: r.databaseId,
+      kind: r.kind,
+      url: r.kind === 'comment' ? issueCommentUrl(pr, r.databaseId) : prReviewUrl(pr, r.databaseId),
+    }))
+    .filter((c) => c.body !== '');
+  const poolFindings: PoolFinding[] = [];
+  for (const f of findings) {
+    const o = owners.get(f.id);
+    if (!o) continue;
+    const postedAtMs = o.postedAt instanceof Date ? o.postedAt.getTime() : Number(o.postedAt) || 0;
+    poolFindings.push({
+      findingId: f.id,
+      ownerFindingId: o.id,
+      commentId: o.githubCommentId,
+      url: issueCommentUrl(pr, o.githubCommentId),
+      // GitHub's own time for the finding comment when it is synced, else when Limn posted it.
+      postedAtMs: rows.find((r) => r.kind === 'comment' && r.databaseId != null && r.databaseId === o.githubCommentId)?.createdAtMs ?? postedAtMs,
+      title: f.title,
+      body: o.editedBody && o.editedBody.trim() ? o.editedBody : o.body,
+      pushedBack: pushbackMayBePosted(o.pushback) || prLevelHasStillOpen(rows, o.githubCommentId),
+    });
+  }
+  return buildConversationPool(pool, poolFindings, REPLY_CHARS);
+}
+
 /**
  * The reader's OWN continuation of a thread (shared `continuationThreadMap`: its root carries the
  * still-open `c=` marker naming this thread's root), else the thread itself. Own = the root's poster is
@@ -393,6 +601,8 @@ export async function accountLoginOf(ctx: AgentContext, accountId: number): Prom
 export async function attachFindingThreads<
   F extends {
     id: number;
+    title: string;
+    conversation?: FindingConversation | null;
     thread?: {
       threadId: number;
       threadFindingId: number;
@@ -413,8 +623,20 @@ export async function attachFindingThreads<
       findings.map((f) => f.id),
       login,
     );
+    // A PR-LEVEL finding (no thread): the PR conversation after it. A failure costs these only.
+    const conversations = await loadFindingConversations(
+      ctx,
+      accountId,
+      prId,
+      findings.filter((f) => !byId.has(f.id)),
+    ).catch((err: unknown) => {
+      ctx.log.warn(`claude review pr ${prId}: PR comments not read: ${err instanceof Error ? err.message : String(err)}`);
+      return new Map<number, FindingConversation>();
+    });
     return findings.map((f) => {
       const t = byId.get(f.id);
+      const c = conversations.get(f.id);
+      if (!t && c) return { ...f, conversation: c };
       return t
         ? {
             ...f,

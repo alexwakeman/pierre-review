@@ -141,6 +141,12 @@ describe('the per-thread rule', () => {
     // A reply at this head already: unresolve without a second reply.
     expect(planStillOpen({ ...base, resolved: true, repliedAtHead: true })).toEqual({ reply: false, reopen: true, escalate: false });
   });
+  it('a thread the READER resolved: nothing at all, on any PR (their resolve is their decision)', () => {
+    expect(planStillOpen({ ...base, resolved: true, resolvedByReader: true })).toEqual({ reply: false, reopen: false, escalate: false });
+    expect(planStillOpen({ ...base, resolved: true, resolvedByReader: true, ownPr: true })).toEqual({ reply: false, reopen: false, escalate: false });
+    // Unresolved again: the flag says nothing.
+    expect(planStillOpen({ ...base, resolvedByReader: true })).toEqual({ reply: true, reopen: false, escalate: false });
+  });
   it('reopened before: a new thread only for a warning or a blocker, once', () => {
     const again = { ...base, resolved: true, reopenedBefore: true };
     expect(planStillOpen(again)).toEqual({ reply: false, reopen: false, escalate: true });

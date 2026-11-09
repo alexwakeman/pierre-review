@@ -15,6 +15,10 @@
 // Open PRs "Earlier:" counts, auto resolve, auto pushback, the manual "Post reply") reads it with no
 // special case. The gate is the review's: `judgeReplyReport` (a deferred blocker is disputed, etc.).
 //
+// A PR-LEVEL finding (posted as a PR comment) is sent the same way: its "replies" are the PR
+// conversation after it (`conversation`, one pool per PR with refs C1…), and the model must cite the
+// comment it judged (`replyRef`) — the same gate.
+//
 // THE OUTCOME (`repliesVerdict`): after the pass, the PR's open findings at the current head are the
 // latest full review's counted findings, minus the ones a reply settled. A disputed blocker wants
 // REQUEST_CHANGES; no blocker and no warning left — and nothing the workspace's `approveLeftovers`
@@ -28,10 +32,12 @@ import type {
   ClaudeFollowUpStatus,
   ClaudeNotApproved,
 } from '@pierre-review/shared';
+import { aiProviderName, oneLineHow, type AiProviderId } from '@pierre-review/shared';
 import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
 import type { EarlierOpen } from './earlier-open.js';
-import { judgeReplyReport, type PriorFindingForFollowUp } from './follow-up.js';
+import { isCrossDispute, judgeReplyReport, prCommentOf, type PriorFindingForFollowUp } from './follow-up.js';
 import { judgeableReplies } from './reply-text.js';
+import type { ReviewFollowUpReport } from '../../platform/contract.js';
 
 // ---- caps ----
 /** At most this many threads in one pass (the rest wait for the next pass or review). */
@@ -119,10 +125,11 @@ export function judgedThroughFor(
   return (id) => Math.max(baseOf(id), byId.get(id) ?? 0);
 }
 
-/** The newest judgeable reply's time on a finding's thread (ms), or null. */
-export function newestJudgeableReplyMs(f: Pick<PriorFindingForFollowUp, 'thread'>): number | null {
+/** The newest judgeable reply's time on a finding's thread — or, for a PR-level finding, in the PR
+ *  conversation listed for it (ms), or null. */
+export function newestJudgeableReplyMs(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): number | null {
   let best: number | null = null;
-  for (const r of judgeableReplies(f.thread?.replies)) {
+  for (const r of [...judgeableReplies(f.thread?.replies), ...(f.conversation?.replies ?? [])]) {
     const t = Date.parse(r.at);
     if (Number.isFinite(t) && (best == null || t > best)) best = t;
   }
@@ -163,6 +170,7 @@ function cost(f: PriorFindingForFollowUp, code: CodeAround | null): number {
     Math.min(f.body.length, REPLIES_PASS_BODY_CHARS) +
     Math.min(code?.text.length ?? 0, REPLIES_PASS_CODE_CHARS) +
     (f.thread?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
+    (f.conversation?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
     200
   );
 }
@@ -197,6 +205,7 @@ export function repliesPlanTexts(plan: RepliesPlan): string[] {
     out.push(f.path, f.title, f.body);
     if (code) out.push(code.text);
     for (const r of f.thread?.replies ?? []) out.push(r.author, r.body);
+    for (const r of f.conversation?.replies ?? []) out.push(r.author, r.body);
   }
   return out;
 }
@@ -210,6 +219,9 @@ export interface RepliesReport {
   acceptKind?: unknown;
   reply?: unknown;
   explanation?: unknown;
+  how?: unknown;
+  // A PR-level finding: the PR comment ('C1'…) that answers it.
+  replyRef?: unknown;
 }
 
 const clip = (s: unknown, max: number): string | null => {
@@ -244,6 +256,8 @@ function itemFor(
     headMoved: f.headSha !== plan.headSha,
     priorPosted: f.posted,
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
+    ...prCommentOf(f),
+    ...(f.raisedBy ? { raisedBy: f.raisedBy } : {}),
   };
 }
 
@@ -273,17 +287,26 @@ export function reconcileReplies(plan: RepliesPlan, reported: ReadonlyArray<Repl
           status,
           acceptKind: r?.acceptKind === 'not_valid' || r?.acceptKind === 'deferred' ? r.acceptKind : null,
           reply: typeof r?.reply === 'string' ? r.reply : null,
+          replyRef: typeof r?.replyRef === 'string' ? r.replyRef : null,
         })
       : null;
     if (!judged) {
       out.push(itemFor(plan, finding, ref, true, 'not_checked', explanation));
       continue;
     }
+    // The OTHER provider's finding (the owner's provider could not run): never disputed.
+    if (isCrossDispute(finding, judged.status)) {
+      out.push(itemFor(plan, finding, ref, true, 'not_addressed', explanation, oneLineHow(r?.how) ? { how: oneLineHow(r?.how) } : {}));
+      continue;
+    }
     out.push(
       itemFor(plan, finding, ref, true, judged.status, explanation, {
         ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
+        // The one-line "how": the accepted reason, or what is still needed (shared `oneLineHow`).
+        ...(oneLineHow(r?.how) ? { how: oneLineHow(r?.how) } : {}),
         response: judged.response ?? null,
         reply: judged.reply ?? null,
+        ...(judged.replyRef ? { replyRef: judged.replyRef } : {}),
         ...(judged.deferralRefused ? { deferralRefused: true } : {}),
       }),
     );
@@ -457,6 +480,20 @@ export function repliesReviewBody(verdict: 'APPROVE' | 'REQUEST_CHANGES', blocke
   return name ? `Replies checked: “${name}” is still a blocker.` : 'Replies checked: a blocker is still open.';
 }
 
+/** A COVER PASS's stored summary (replies-check.ts `startCoverCheck`), templated from the statuses. */
+export function coverSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 'status'>[], failed: AiProviderId): string {
+  const closed = items.filter((i) => i.status === 'addressed' || i.status === 'no_longer_applies' || i.status === 'reply_accepted').length;
+  const unchecked = items.filter((i) => i.status === 'not_checked').length;
+  const open = items.length - closed - unchecked;
+  const parts: string[] = [];
+  if (closed > 0) parts.push(`${closed} dealt with`);
+  if (open > 0) parts.push(`${open} still open`);
+  if (unchecked > 0) parts.push(`${unchecked} not checked`);
+  const n = items.length;
+  const head = `Checked ${aiProviderName(failed)}'s ${n} open ${n === 1 ? 'finding' : 'findings'}`;
+  return parts.length > 0 ? `${head}: ${parts.join(', ')}.` : `${head}.`;
+}
+
 /** The run's stored summary: what the pass found, templated from the server-checked statuses. */
 export function repliesSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 'status'>[]): string {
   const accepted = items.filter((i) => i.status === 'reply_accepted').length;
@@ -467,4 +504,22 @@ export function repliesSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 's
   if (disputed > 0) parts.push(`${disputed} still open`);
   if (unchecked > 0) parts.push(`${unchecked} not checked`);
   return parts.length > 0 ? `Replies checked: ${parts.join(', ')}.` : 'Replies checked.';
+}
+
+/** The cover pass's report → the review's follow-up reports (the review's gate reconciles them). Pure. */
+export function coverReports(replies: ReadonlyArray<RepliesReport> | null | undefined): ReviewFollowUpReport[] {
+  const out: ReviewFollowUpReport[] = [];
+  for (const r of replies ?? []) {
+    if (!r || typeof r.ref !== 'string' || typeof r.status !== 'string') continue;
+    out.push({
+      ref: r.ref,
+      status: r.status as ReviewFollowUpReport['status'],
+      explanation: typeof r.explanation === 'string' ? r.explanation : '',
+      how: typeof r.how === 'string' ? r.how : null,
+      acceptKind: r.acceptKind === 'not_valid' || r.acceptKind === 'deferred' ? r.acceptKind : null,
+      reply: typeof r.reply === 'string' ? r.reply : null,
+      replyRef: typeof r.replyRef === 'string' ? r.replyRef : null,
+    });
+  }
+  return out;
 }

@@ -12,21 +12,36 @@
 //   - An accepted reply is answered AND resolved, exactly like auto resolve.
 // The in-process `inFlight` set is claimed SYNCHRONOUSLY so two clicks cannot both pass the
 // re-claim of a refused record (local-only feature: one process).
+//
+// "POST STILL OPEN" (2026-11-09): a NOT (or partly) ADDRESSED item says what is still needed (its
+// one-line `how`). Limn writes nothing by itself on a thread the reader resolved (still-open.ts), so
+// the reader may press to post that line as a "Still open:" reply. It claims the SAME still-open
+// record an automatic post would (`claude_still_open_posts`, `reply:<thread>:<head>`), so at most one
+// still-open reply per thread per head, whoever writes first. Never a reopen, never retried.
+//
+// A PR-LEVEL FINDING (posted as a PR comment: no thread; `postPrLevelByHand`): "Post reply" on a
+// disputed reply and "Post still open" are the ONE "Still open:" PR comment (ever); on an accepted
+// reply it is the acknowledgement, then the finding comment is hidden as RESOLVED. "Mark resolved"
+// (`markPrLevelResolved`) is the hide alone. Same records, same claims (pr-level-writes.ts).
 import { and, eq, isNull } from 'drizzle-orm';
 import {
   FINDING_REPLY_MARKER,
+  judgementHowOf,
   type FindingAutoResolveRecord,
+  type ClaudeFollowUpItem,
   type FindingPushbackRecord,
   type FollowUpReplyResult,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { getReviewView } from './persist.js';
+import { closePrLevelFinding, postPrLevelStillOpen, type PrLevelWriteResult } from './pr-level-writes.js';
 import { findFindingThread } from './finding-thread.js';
 import {
   PUSHBACK_MARKER,
   accountLoginOf,
   isClearReplyRefusal,
   loadPrThreads,
+  loadPrLevelOwners,
   loadThreadOwners,
   pushbackMayBePosted,
   resolveReplyMayBePosted,
@@ -120,6 +135,35 @@ export async function postFollowUpReply(
   const review = await getReviewView(ctx, reviewId, accountId);
   if (!review || review.status !== 'succeeded') return { kind: 'not_found' };
   const item = review.followUp?.items.find((it) => it.priorFindingId === priorFindingId);
+  // A PR-LEVEL finding (posted as a PR comment: no thread) — its own branch (pr-level-writes.ts).
+  if (item?.prComment != null) {
+    const prLevel = await loadPrLevelOwners(ctx, accountId, review.prId, [priorFindingId], { ownOnly: true });
+    const owner = prLevel.get(priorFindingId);
+    if (owner) {
+      if (inFlight.has(owner.id)) return conflict('InProgress', 'Already posting this reply.');
+      inFlight.add(owner.id);
+      try {
+        return await postPrLevelByHand(ctx, { accountId, reviewId, review, item, owner }, deps);
+      } finally {
+        inFlight.delete(owner.id);
+      }
+    }
+  }
+  // A not (or partly) addressed item with something to say: "Post still open". Without a line,
+  // there is no reply to post (404, as before).
+  const how = item && (item.status === 'not_addressed' || item.status === 'partly_addressed') ? judgementHowOf(item) : null;
+  if (item && how) {
+    const owners = await loadThreadOwners(ctx, accountId, review.prId, [priorFindingId], { ownOnly: true });
+    const owner = owners.get(priorFindingId);
+    if (!owner) return conflict('NoThread', 'This comment has no thread on GitHub.');
+    if (inFlight.has(owner.id)) return conflict('InProgress', 'Already posting this reply.');
+    inFlight.add(owner.id);
+    try {
+      return await postStillOpenByHand(ctx, { accountId, reviewId, review, how, owner, severity: item.severity }, deps);
+    } finally {
+      inFlight.delete(owner.id);
+    }
+  }
   if (!item || (item.status !== 'reply_accepted' && item.status !== 'reply_disputed')) return { kind: 'not_found' };
   const status = item.status;
   const text = (item.response ?? '').trim();
@@ -244,4 +288,169 @@ async function post(
     kind: 'done',
     result: { status: final.status === 'resolved' ? 'resolved' : 'posted', commentId, error: final.error },
   };
+}
+
+/** "Post still open": ONE "Still open: <what is still needed>" reply, claimed like still-open.ts. */
+async function postStillOpenByHand(
+  ctx: AgentContext,
+  a: {
+    accountId: number;
+    reviewId: number;
+    review: { prId: number; headSha: string };
+    how: string;
+    owner: ThreadOwnerRow;
+    severity: string;
+  },
+  deps: ManualReplyDeps,
+): Promise<ManualReplyOutcome> {
+  const { accountId, reviewId, review, how, owner } = a;
+  const sop = s(ctx).claudeStillOpenPosts;
+  if (!sop) return { kind: 'not_found' };
+  const { threads, comments } = await loadPrThreads(ctx, review.prId);
+  const login = await accountLoginOf(ctx, accountId);
+  const thread = findFindingThread(owner, threads, comments, login, new Set<number>());
+  if (!thread) return conflict('NoThread', 'The thread is not synced yet. Try again in a moment.');
+  const { claimKey, stillOpenReplyBody } = await import('./still-open.js');
+  const { stillOpenReasonText } = await import('@pierre-review/shared');
+  const key = claimKey('reply', thread.githubNodeId, review.headSha);
+  const severity = ['blocker', 'warning', 'nit', 'question'].includes(a.severity) ? a.severity : null;
+  // ⚠ THE CLAIM, BEFORE THE WRITE: insert-or-nothing on the unique (account, key).
+  const rows = (await ctx.db
+    .insert(sop)
+    .values({
+      accountId,
+      prId: review.prId,
+      threadId: thread.id,
+      threadNodeId: thread.githubNodeId,
+      claimKey: key,
+      action: 'reply',
+      reviewId,
+      headSha: review.headSha,
+      status: 'posting',
+      reason: stillOpenReasonText(how) || null,
+      severity,
+    })
+    .onConflictDoNothing({ target: [sop.accountId, sop.claimKey] })
+    .returning({ id: sop.id })
+    .execute()) as Array<{ id: number }>;
+  if (rows.length === 0) return conflict('AlreadyPosted', 'Limn already said this is still open at this commit.');
+  const claimId = rows[0]!.id;
+  const settle = async (status: 'posted' | 'failed', commentId: string | null, error: string | null): Promise<void> => {
+    await ctx.db
+      .update(sop)
+      .set({ status, commentId, error, updatedAt: new Date() })
+      .where(eq(sop.id, claimId))
+      .execute()
+      .catch((err: unknown) => ctx.log.warn(`still open by hand finding ${owner.id}: could not record the result: ${errText(err)}`));
+  };
+  try {
+    const { commentId } = await deps.reply(
+      accountId,
+      { id: thread.id, nodeId: thread.githubNodeId, prId: review.prId },
+      stillOpenReplyBody(how, review.headSha, '', false),
+    );
+    await settle('posted', commentId, null);
+    await deps.notePrChanged(accountId, review.prId).catch(() => {});
+    return { kind: 'done', result: { status: 'posted', commentId, error: null } };
+  } catch (err) {
+    await settle('failed', null, errText(err));
+    return { kind: 'done', result: { status: 'failed', commentId: null, error: errText(err) } };
+  }
+}
+
+/** A PR-level write's answer, as the route reads it. */
+function prLevelOutcome(r: PrLevelWriteResult, already: string): ManualReplyOutcome {
+  if (r.kind === 'skipped') {
+    if (r.why === 'no_comment' || r.why === 'no_pr') return conflict('NoComment', 'The finding comment is not known yet. Try again in a moment.');
+    return conflict('AlreadyPosted', already);
+  }
+  return { kind: 'done', result: { status: r.status, commentId: r.commentId, error: r.error } };
+}
+
+/**
+ * "Post reply" / "Post still open" on a PR-LEVEL finding: a disputed reply or a not (or partly)
+ * addressed point is ONE "Still open:" PR comment, ever; an accepted reply is the acknowledgement,
+ * then the finding comment is hidden as RESOLVED. Same records and claims as the automatic writes.
+ */
+async function postPrLevelByHand(
+  ctx: AgentContext,
+  a: {
+    accountId: number;
+    reviewId: number;
+    review: { prId: number; headSha: string };
+    item: ClaudeFollowUpItem;
+    owner: ThreadOwnerRow;
+  },
+  deps: ManualReplyDeps,
+): Promise<ManualReplyOutcome> {
+  const { accountId, reviewId, review, item, owner } = a;
+  const common = { accountId, prId: review.prId, reviewId, owner, footer: '', how: 'reader_pressed' as const, manual: true };
+  let out: ManualReplyOutcome;
+  if (item.status === 'reply_accepted') {
+    const text = (item.response ?? '').trim();
+    if (!text) return conflict('NothingToPost', 'There is no reply to post.');
+    out = prLevelOutcome(
+      await closePrLevelFinding(ctx, {
+        ...common,
+        lead: text,
+        outcome: 'reply_accepted',
+        acceptKind: item.acceptKind ?? null,
+        headSha: review.headSha,
+      }),
+      'Limn already replied about this comment.',
+    );
+  } else if (item.status === 'reply_disputed') {
+    const text = (item.response ?? '').trim();
+    if (!text) return conflict('NothingToPost', 'There is no reply to post.');
+    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: text }), 'Limn already said this is still open.');
+  } else if (item.status === 'not_addressed' || item.status === 'partly_addressed') {
+    const how = judgementHowOf(item);
+    if (!how) return { kind: 'not_found' };
+    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: how }), 'Limn already said this is still open.');
+  } else {
+    return { kind: 'not_found' };
+  }
+  if (out.kind === 'done' && out.result.status !== 'failed') await deps.notePrChanged(accountId, review.prId).catch(() => {});
+  return out;
+}
+
+/**
+ * "Mark resolved" on a PR-LEVEL finding: hide the finding comment as RESOLVED (no reply), the twin of
+ * "Resolve" on a thread. Claims the owner's `auto_resolve` record first, so it never runs twice.
+ */
+export async function markPrLevelResolved(
+  ctx: AgentContext,
+  { accountId, reviewId, priorFindingId }: { accountId: number; reviewId: number; priorFindingId: number },
+  deps: Pick<ManualReplyDeps, 'notePrChanged'> = defaultManualReplyDeps,
+): Promise<ManualReplyOutcome> {
+  const review = await getReviewView(ctx, reviewId, accountId);
+  if (!review || review.status !== 'succeeded') return { kind: 'not_found' };
+  const item = review.followUp?.items.find((it) => it.priorFindingId === priorFindingId);
+  if (!item || item.prComment == null) return { kind: 'not_found' };
+  const owner = (await loadPrLevelOwners(ctx, accountId, review.prId, [priorFindingId], { ownOnly: true })).get(priorFindingId);
+  if (!owner) return conflict('NoComment', 'This is not your Limn’s comment.');
+  if (inFlight.has(owner.id)) return conflict('InProgress', 'Already resolving this comment.');
+  inFlight.add(owner.id);
+  try {
+    const outcome =
+      item.status === 'addressed' || item.status === 'no_longer_applies' || item.status === 'reply_accepted' ? item.status : 'reply_accepted';
+    const r = await closePrLevelFinding(ctx, {
+      accountId,
+      prId: review.prId,
+      reviewId,
+      owner,
+      footer: '',
+      how: 'reader_pressed',
+      manual: true,
+      lead: null,
+      outcome,
+      acceptKind: item.acceptKind ?? null,
+      headSha: review.headSha,
+    });
+    const out = prLevelOutcome(r, 'This comment is already resolved.');
+    if (out.kind === 'done' && out.result.status !== 'failed') await deps.notePrChanged(accountId, review.prId).catch(() => {});
+    return out;
+  } finally {
+    inFlight.delete(owner.id);
+  }
 }

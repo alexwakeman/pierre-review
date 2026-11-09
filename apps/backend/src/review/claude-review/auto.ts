@@ -148,12 +148,30 @@ const waitingNow = new Map<string, ClaudeAutoReviewWaiting>();
 // row: it had nothing to judge, or the PR's daily cap was used. That half of the burst is settled
 // until a newer reply (or a new head); a restart asks once more (no model: a refusal reads the DB).
 const repliesSettled = new Map<string, { headSha: string; ms: number }>();
+// `${accountId}:${prId}` → { head, when } the sweeper last asked for a replies pass on a MOVED head
+// whose full review a teammate's claim holds (`teamClaimRepliesDue`). One ask per head per settle wait.
+const teamClaimRepliesTried = new Map<string, { headSha: string; atMs: number }>();
+
+/**
+ * A MOVED head whose full review a teammate's Limn holds (the team claim): the reader's own replies
+ * on their Limn findings would wait for the next push, so a REPLIES PASS judges them at this head
+ * instead (docs/CLAUDE-REVIEW.md § The replies pass). Asked at most once per head per settle wait;
+ * the pass itself refuses (no row, no model) when no reply waits. Pure.
+ */
+export function teamClaimRepliesDue(
+  tried: { headSha: string; atMs: number } | undefined,
+  headSha: string,
+  nowMs: number,
+): boolean {
+  return tried == null || tried.headSha !== headSha || nowMs - tried.atMs >= AUTO_REREVIEW_SETTLE_MS;
+}
 
 /** Test hook. */
 export function _resetAutoReReviewForTest(): void {
   headSeen.clear();
   waitingNow.clear();
   repliesSettled.clear();
+  teamClaimRepliesTried.clear();
 }
 
 /** Why the sweeper is holding this PR's auto review, or null. Account-checked (the key carries it). */
@@ -725,7 +743,28 @@ export async function runAutoReviewSweep(
           continue;
         }
         waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
-        if (await heldByTeammate(prId, headSha)) continue;
+        if (await heldByTeammate(prId, headSha)) {
+          // A teammate's Limn holds this MOVED head's full review. The reader's replies on their own
+          // Limn findings since the last own review are judged by a replies pass at this head — the
+          // same per-PR daily cap, the ONE budget gate (inside `startRepliesCheck`) and the same holds.
+          if (commentsAtMs == null && teamClaimRepliesDue(teamClaimRepliesTried.get(k), headSha, nowMs)) {
+            teamClaimRepliesTried.set(k, { headSha, atMs: nowMs });
+            const rc = await import('./replies-check.js');
+            if (!rc.repliesCheckHeld(ws.accountId, prId) && rc.repliesCheckAutoRoom() > 0) {
+              const used = await rc.countAutoRepliesPassesSince(ctx, ws.accountId, prId, nowMs - REPLIES_PASS_WINDOW_MS);
+              if (used < REPLIES_PASS_AUTO_DAILY_CAP) {
+                const r = await rc.startRepliesCheck(ctx, {
+                  accountId: ws.accountId,
+                  prId,
+                  trigger: 'auto',
+                  ...(pressed ? { pressed: true } : {}),
+                });
+                if (r.outcome === 'queued') result.repliesQueued = (result.repliesQueued ?? 0) + 1;
+              }
+            }
+          }
+          continue;
+        }
         if (budget <= 0) {
           result.capped = true;
           // A MOVED HEAD is a head never reviewed: said on the PR. A same-head comment burst is not.

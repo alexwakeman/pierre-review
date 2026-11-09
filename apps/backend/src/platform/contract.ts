@@ -269,10 +269,16 @@ export interface ReviewFollowUpReport {
     | 'reply_accepted'
     | 'reply_disputed';
   explanation: string;
+  // ONE line: how it was dealt with / the one thing still needed / the accepted reason (follow-up.ts
+  // clips it with shared `oneLineHow`). Optional: an older model answer leaves it out.
+  how?: string | null;
   // 'reply_accepted' only: how the reply settled it.
   acceptKind?: 'not_valid' | 'deferred' | null;
   // The reply-status text: the one-sentence acknowledgement, or the pushback.
   reply?: string | null;
+  // A PR-LEVEL finding only: the ref ('C1'…) of the PR comment that answers it. A reply status on such
+  // a finding stands only with a ref the prompt listed for it (follow-up.ts `judgeReplyReport`).
+  replyRef?: string | null;
 }
 
 // One OTHER reviewer's open thread, as Claude judged it ('R1'… as the prompt named them). Core-only

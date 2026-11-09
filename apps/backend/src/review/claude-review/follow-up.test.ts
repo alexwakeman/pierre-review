@@ -455,3 +455,45 @@ describe('legacy story findings and the follow-up', () => {
     for (const f of out) expect(f).not.toHaveProperty('story');
   });
 });
+
+// THE ONE-LINE "HOW" (docs/CLAUDE-REVIEW.md § The one-line how): kept one line and clipped, absent
+// when the model gave none, and carried with a status the code locked.
+describe('the one-line how', () => {
+  const HEAD = 'a'.repeat(40);
+  const OLDER = 'c'.repeat(40);
+
+  it('keeps the model\'s how on one line, clipped to 120 characters', () => {
+    const plan = selectPriorFindings(review([prior({ posted: true })], OLDER), HEAD);
+    const items = reconcileFollowUp(plan, [
+      { ref: 'P1', status: 'addressed', explanation: 'Fixed.', how: `rowSelect now\n reads rowid ${'x'.repeat(200)}` },
+    ]);
+    expect(items[0]!.how!.startsWith('rowSelect now reads rowid')).toBe(true);
+    expect(items[0]!.how!.length).toBeLessThanOrEqual(120);
+  });
+
+  it('leaves the key out when the model gave none (as on every older row)', () => {
+    const plan = selectPriorFindings(review([prior({ posted: true })], OLDER), HEAD);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'Fixed.', how: '  ' }]);
+    expect('how' in items[0]!).toBe(false);
+  });
+
+  it('a carried open item keeps the earlier how on the same head', () => {
+    const carried = prior({
+      posted: true,
+      carried: true,
+      headSha: OLDER,
+      priorStatus: { status: 'not_addressed', explanation: 'Still open.', how: 'Check the null id before the insert' },
+    });
+    const plan = selectPriorFindings(review([carried], HEAD), HEAD);
+    const items = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'x', how: 'ignored' }]);
+    expect(items[0]).toMatchObject({ status: 'not_addressed', statusCarried: true, how: 'Check the null id before the insert' });
+  });
+
+  it('a lock takes the model\'s how only when it agreed with the status', () => {
+    const plan = selectPriorFindings(review([prior({ posted: true })], HEAD), HEAD);
+    const agreed = reconcileFollowUp(plan, [{ ref: 'P1', status: 'not_addressed', explanation: 'x', how: 'Add the guard' }]);
+    expect(agreed[0]!.how).toBe('Add the guard');
+    const disagreed = reconcileFollowUp(plan, [{ ref: 'P1', status: 'addressed', explanation: 'x', how: 'Done' }]);
+    expect(disagreed[0]!.how).toBeUndefined();
+  });
+});

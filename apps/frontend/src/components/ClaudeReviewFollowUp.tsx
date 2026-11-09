@@ -50,7 +50,8 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useResolveThread } from '../hooks/usePrWrites.js';
-import { followUpReplyMutationKey, usePostFollowUpReply } from '../hooks/useClaudeReview.js';
+import { followUpReplyMutationKey, usePostFollowUpReply, useResolvePrLevelFinding } from '../hooks/useClaudeReview.js';
+import { PrCommentLink, ReplyVerbLink } from './FollowUpGithubLinks.js';
 import {
   acCandidateLabel,
   browserAcMemory,
@@ -90,10 +91,13 @@ import {
   notCheckedReason,
   partitionFollowUp,
   RESOLVED_ON_GITHUB_CHIP,
+  isPrLevelItem,
   isResolvedPushback,
   replyActions,
   replyStatusHeading,
   settledEarlierHeading,
+  raisedByLine,
+  stillOpenPostable,
   storyFindingIdFor,
   storyItemChipLabel,
   ticketsPanelHint,
@@ -1097,20 +1101,25 @@ function ReplyBlock({
   // Shared key: a remount mid-post still sees the post in flight.
   const posting = useIsMutating({ mutationKey: followUpReplyMutationKey(reviewId ?? 0, item.priorFindingId) }) > 0;
   const resolve = useResolveThread();
+  // A PR-LEVEL finding (a PR comment, no thread): "Mark resolved" hides the finding comment.
+  const markResolved = useResolvePrLevelFinding(prId ?? 0, reviewId ?? 0, item.priorFindingId);
   const heading = replyStatusHeading(item);
   if (heading == null) return null;
   const actions = replyActions(item, reviewId ?? 0);
+  const prLevel = isPrLevelItem(item);
   const threadId = item.threadId ?? null;
   const posted = post.isSuccess;
-  const resolved = resolve.isSuccess;
-  const canWrite = prId != null && reviewId != null && threadId != null;
-  const error = post.error ?? resolve.error;
+  const resolved = prLevel ? markResolved.isSuccess : resolve.isSuccess;
+  const resolving = prLevel ? markResolved.isPending : resolve.isPending;
+  const canWrite = prId != null && reviewId != null && (threadId != null || prLevel);
+  const error = post.error ?? (prLevel ? markResolved.error : resolve.error);
   const accepted = item.status === 'reply_accepted';
   return (
     <div className="mt-1 space-y-1">
       {item.reply != null && (
         <p className={`text-meta ${MUTED}`}>
-          @{item.reply.author} replied: “{item.reply.excerpt}”
+          @{item.reply.author} <ReplyVerbLink url={item.reply.url ?? null} verb={prLevel ? 'commented' : 'replied'} />: “
+          {item.reply.excerpt}”
         </p>
       )}
       {item.deferralRefused === true && (
@@ -1139,10 +1148,12 @@ function ReplyBlock({
             <button
               type="button"
               className={BTN}
-              disabled={resolve.isPending || posting}
-              onClick={() => resolve.mutate({ prId: prId!, threadId: threadId!, resolved: true })}
+              disabled={resolving || posting}
+              onClick={() =>
+                prLevel ? markResolved.mutate() : resolve.mutate({ prId: prId!, threadId: threadId!, resolved: true })
+              }
             >
-              {resolve.isPending ? 'Resolving…' : 'Resolve'}
+              {resolving ? 'Resolving…' : prLevel ? 'Mark resolved' : 'Resolve'}
             </button>
           )}
           {resolved && <span className={`text-meta ${MUTED}`}>Resolved.</span>}
@@ -1150,6 +1161,45 @@ function ReplyBlock({
       )}
       {error != null && (
         <p className={`text-meta ${ERROR_TEXT}`}>{error instanceof Error ? error.message : String(error)}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A NOT (or partly) ADDRESSED finding on a thread the reader RESOLVED: Limn posts nothing there by
+ * itself (a person's resolve is their decision), so the row offers "Post still open" — ONE
+ * "Still open: <what is still needed>" reply. The server claims the thread's still-open record first,
+ * so it can never post twice at one commit.
+ */
+function StillOpenBlock({
+  item,
+  prId,
+  reviewId,
+}: {
+  item: ClaudeFollowUpItem;
+  prId?: number;
+  reviewId?: number;
+}): JSX.Element | null {
+  const post = usePostFollowUpReply(prId ?? 0, reviewId ?? 0, item.priorFindingId);
+  const posting = useIsMutating({ mutationKey: followUpReplyMutationKey(reviewId ?? 0, item.priorFindingId) }) > 0;
+  if (prId == null || reviewId == null || !stillOpenPostable(item)) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      {post.isSuccess ? (
+        <span className={`text-meta ${MUTED}`}>Posted.</span>
+      ) : (
+        <>
+          <span className={`text-meta ${MUTED}`}>
+            {isPrLevelItem(item) ? 'Not said on GitHub yet.' : 'You resolved this thread. Limn posted nothing there.'}
+          </span>
+          <button type="button" className={BTN} disabled={posting} onClick={() => post.mutate()}>
+            {posting ? 'Posting…' : 'Post still open'}
+          </button>
+        </>
+      )}
+      {post.error != null && (
+        <p className={`text-meta ${ERROR_TEXT}`}>{post.error instanceof Error ? post.error.message : String(post.error)}</p>
       )}
     </div>
   );
@@ -1213,9 +1263,13 @@ export function FollowUpRow({
         {isResolvedPushback(item) && (
           <span className={`${CHIP} ${RESOLVED_ON_GITHUB_CHIP.cls}`}>{RESOLVED_ON_GITHUB_CHIP.label}</span>
         )}
-        {item.carried && <span className={`text-meta ${MUTED}`}>from an earlier review</span>}
+        {raisedByLine(item, by) != null ? (
+          <span className={`text-meta ${MUTED}`}>{raisedByLine(item, by)}</span>
+        ) : (
+          item.carried && <span className={`text-meta ${MUTED}`}>from an earlier review</span>
+        )}
       </div>
-      <div className="mt-0.5">
+      <div className="mt-0.5 flex flex-wrap items-center gap-2">
         <CodeAnchorRef
           path={anchor.path}
           line={anchor.line}
@@ -1223,7 +1277,15 @@ export function FollowUpRow({
           inChangeset={anchor.inChangeset}
           onOpenInChanges={onOpenInChanges}
         />
+        {isPrLevelItem(item) && <PrCommentLink url={item.prComment?.url ?? null} />}
       </div>
+      {/* THE ONE-LINE HOW: how it was dealt with, or the one thing still needed. A row from before
+          the field has none; its explanation (below) opens with the same sentence. */}
+      {item.how != null && item.how.trim() !== '' && (
+        <p className="mt-1 text-body font-medium text-ui-ink" data-testid="follow-up-how">
+          <PrRefText text={item.how.trim()} />
+        </p>
+      )}
       {item.explanation != null && item.explanation !== '' ? (
         <p className={`mt-1 ${REVIEW_PROSE}`}>
           <PrRefText text={item.explanation} />
@@ -1233,6 +1295,7 @@ export function FollowUpRow({
       ) : null}
       {/* Without actions the block keeps its text and drops its buttons (they need prId + reviewId). */}
       <ReplyBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
+      <StillOpenBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
       {actions && reraised != null && (
         <button
           type="button"
