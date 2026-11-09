@@ -28,6 +28,7 @@ import type {
 } from '../github/queries.js';
 import {
   hasLimnReviewMarker,
+  isLimnDismissalMessage,
   isLimnStatusContext,
   isLimnThreadReply,
   limnFindingPost,
@@ -1284,6 +1285,49 @@ export async function persistPr(
           dedupeKey: `review_submitted:${r.id}`,
         });
       }
+    }
+
+    // ---- review dismissals (migration 0184) ----
+    // WHEN, BY WHOM and WHY a review was dismissed: stamped on the review row and kept as one
+    // `review_dismissed` event per dismissal (dedupeKey on the event's node id). Absent / nulled
+    // selection = not received = nothing written; a dismissal is never cleared.
+    for (const d of pr.reviewDismissals?.nodes ?? []) {
+      const at = toDate(d?.createdAt ?? null);
+      if (d == null || !d.id || at == null) continue;
+      const reviewRow = d.review?.id
+        ? (
+            await tx
+              .select({ id: reviews.id })
+              .from(reviews)
+              .where(and(eq(reviews.prId, prId), eq(reviews.githubNodeId, d.review.id)))
+              .execute()
+          )[0]
+        : undefined;
+      const a = d.actor ?? null;
+      const actor = a && (a.__typename === 'User' || a.__typename === 'Bot') && a.login ? ({ ...a } as GqlActor) : null;
+      const personId = actor ? await resolver.resolve(tx, actor) : null;
+      // Limn's own withdrawal ("Limn withdrew its approval: …") is the poster's Limn bot's action.
+      const limnBot =
+        wideLimn && personId != null && isLimnDismissalMessage(d.dismissalMessage) ? await limnBots.botFor(actor?.login) : null;
+      const actorId = limnBot ?? personId;
+      if (reviewRow != null) {
+        await tx
+          .update(reviews)
+          .set({ dismissedAt: at, dismissedByUserId: actorId, dismissalMessage: d.dismissalMessage ?? null })
+          .where(eq(reviews.id, reviewRow.id))
+          .execute();
+      }
+      await upsertEvent(tx, {
+        accountId,
+        repoId,
+        actorId,
+        prId,
+        type: 'review_dismissed',
+        occurredAt: at,
+        refTable: reviewRow != null ? 'reviews' : null,
+        refId: reviewRow?.id ?? null,
+        dedupeKey: `review_dismissed:${d.id}`,
+      });
     }
 
     // ---- review threads + comments ----

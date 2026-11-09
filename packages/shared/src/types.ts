@@ -85,7 +85,9 @@ export type EventType =
   | 'review_submitted'
   | 'review_comment'
   | 'pr_comment'
-  | 'commit_pushed';
+  | 'commit_pushed'
+  // A review was dismissed (GitHub's ReviewDismissedEvent; refId = the dismissed review).
+  | 'review_dismissed';
 
 export const EVENT_TYPES: EventType[] = [
   'pr_opened',
@@ -97,6 +99,7 @@ export const EVENT_TYPES: EventType[] = [
   'review_comment',
   'pr_comment',
   'commit_pushed',
+  'review_dismissed',
 ];
 
 // Coarse buckets used for the event-type filter toggles in the UI.
@@ -117,6 +120,7 @@ export const EVENT_CATEGORY_BY_TYPE: Record<EventType, EventCategory> = {
   review_comment: 'review_comments',
   pr_comment: 'pr_comments',
   commit_pushed: 'commits',
+  review_dismissed: 'reviews',
 };
 
 export interface User {
@@ -4755,7 +4759,10 @@ export type AutoVerdictHeldReason =
   | 'impact'
   | 'open_findings'
   | 'model_comment'
-  | 'pair_strict';
+  | 'pair_strict'
+  // A replies pass's APPROVE held: a teammate's Limn judged, after the full review, a point this pass
+  // settled still open (replies-pass.ts `teammateStillOpenHold`).
+  | 'team_open';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
@@ -7714,6 +7721,9 @@ export interface ClaudeTeamReviewView {
   // named by provider — and every teammate's), with its state now (`foldAllTeamFindings`). Absent on
   // an older server.
   allFindings?: ClaudeTeamPoint[];
+  // DECISIVE VERDICTS NO REVIEW ROW SHOWS (`ClaudeTeamDecision`): replies passes' Approve / Request
+  // changes and withdrawn Limn reviews. Absent on an older server.
+  decisions?: ClaudeTeamDecision[];
 }
 
 /** Who raised or judged something: the reader (`you`) or a teammate (`poster`). */
@@ -7816,6 +7826,44 @@ export interface ClaudeReviewStanding {
   inForce: (ClaudeReviewStandingRef & { verdict: 'REQUEST_CHANGES' | 'APPROVE' }) | null;
   // Their newest Limn review on GitHub was dismissed.
   dismissed: boolean;
+  // Their most recent DECISIVE Limn review (Approve / Request changes) was dismissed — kept even after
+  // a later Comment review replaced it as the newest ("approval from 9 Nov withdrawn: 3 warnings found
+  // at 951c4aa"). Absent/null = none (or an older server).
+  withdrawn?: ClaudeReviewWithdrawal | null;
+}
+
+/** A Limn review's dismissal, as the AI Review tab names it (migration 0184). */
+export interface ClaudeReviewWithdrawal {
+  // What it had said: from Limn's marker (`d=`), never guessed. null = an older Limn wrote no `d=`.
+  verdict: 'APPROVE' | 'REQUEST_CHANGES' | null;
+  // When that review was posted (ISO-8601).
+  postedAt: string;
+  // When it was dismissed (ISO-8601); null = no dismissal event synced yet.
+  at: string | null;
+  // Limn dismissed it itself ("Limn withdrew its approval: …") — true; a person — false; null = unknown.
+  byLimn: boolean | null;
+  // GitHub's dismissal message without Limn's lead words ("3 warnings found at 951c4aa"); null = none.
+  reason: string | null;
+}
+
+/**
+ * A DECISIVE Limn verdict on GitHub that the review list cannot show from a review row
+ * (`ClaudeTeamReviewView.decisions`): a replies pass's Approve / Request changes (a replies pass is
+ * never a review row), and a dismissed Limn review (any run) with its withdrawal. `ref` names the
+ * list row it belongs to; null = a row of its own (a teammate's replies pass).
+ */
+export interface ClaudeTeamDecision {
+  key: string; // the GitHub review's node id
+  you: boolean;
+  poster: ClaudeTeammatePoster | null;
+  // From Limn's marker; a Comment is never listed. null = dismissed, verdict unknown (older Limn).
+  verdict: 'APPROVE' | 'REQUEST_CHANGES' | null;
+  run: 'auto' | 'manual' | 'replies' | null;
+  at: string; // ISO-8601, when it was posted
+  headSha: string | null;
+  githubUrl: string | null;
+  ref: { kind: 'own'; id: number } | { kind: 'teammate'; reviewId: number } | null;
+  withdrawn: Omit<ClaudeReviewWithdrawal, 'verdict' | 'postedAt'> | null;
 }
 
 export interface ClaudeReviewStandings {

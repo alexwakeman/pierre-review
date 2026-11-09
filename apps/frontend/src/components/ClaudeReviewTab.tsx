@@ -2232,8 +2232,8 @@ export function ClaudeReviewTab({
   // EVERY REVIEW ON THE PR (the reader's runs, a pair once, and teammates' posted reviews), newest
   // first; the first row is now. Hooks below MUST run unconditionally — before any early return.
   const reviewItems = useMemo(
-    () => reviewsOnPr(data?.history ?? [], data?.teammateReviews ?? []),
-    [data?.history, data?.teammateReviews],
+    () => reviewsOnPr(data?.history ?? [], data?.teammateReviews ?? [], data?.teamView?.decisions ?? []),
+    [data?.history, data?.teammateReviews, data?.teamView?.decisions],
   );
   // A pick of the reader's latest review (either half of a pair) is now.
   const latestItem = review != null ? reviewItems.find((i) => i.runIds.includes(review.id)) ?? null : null;
@@ -2241,7 +2241,7 @@ export function ClaudeReviewTab({
     shown == null || (latestItem != null && itemShows(latestItem, shown));
   const shownItem = !viewingLatest && shown != null ? reviewItems.find((i) => itemShows(i, shown)) ?? null : null;
   const { data: historicReview } = useClaudeReviewById(
-    !viewingLatest && shown?.kind === 'own' ? (shownItem?.target.kind === 'own' ? shownItem.target.id : shown.id) : null,
+    !viewingLatest && shown?.kind === 'own' ? (shownItem?.target?.kind === 'own' ? shownItem.target.id : shown.id) : null,
   );
   const pastTeammate =
     !viewingLatest && shown?.kind === 'teammate'

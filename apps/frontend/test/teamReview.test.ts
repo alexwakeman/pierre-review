@@ -87,6 +87,24 @@ describe('where this PR stands', () => {
     expect(row.blocking).toBe(false);
   });
 
+  it('PR 221270: an approval withdrawn under a newer Comment keeps a one-line note', () => {
+    const robinWithdrawn: ClaudeReviewStanding = {
+      ...robinComment,
+      withdrawn: {
+        verdict: 'APPROVE',
+        postedAt: '2026-11-09T14:05:09Z',
+        at: '2026-11-09T16:41:46Z',
+        byLimn: true,
+        reason: '3 warnings found at 951c4aa',
+      },
+    };
+    const row = standingRows({ reviewers: [robinWithdrawn], blocking: null, latest: robinWithdrawn.latest })[0]!;
+    expect(row.note).toBe('approval from 9 Nov withdrawn: 3 warnings found at 951c4aa');
+    // A person's dismissal says "dismissed"; with no reason, the phrase stops.
+    const byPerson = { ...robinWithdrawn, withdrawn: { ...robinWithdrawn.withdrawn!, byLimn: false, reason: null } };
+    expect(standingRows({ reviewers: [byPerson], blocking: null, latest: byPerson.latest })[0]!.note).toBe('approval from 9 Nov dismissed');
+  });
+
   it('nothing to show without standings', () => {
     expect(standingRows(undefined)).toEqual([]);
     expect(standingRows({ reviewers: [], blocking: null, latest: null })).toEqual([]);
@@ -265,6 +283,37 @@ describe('reviews on this PR', () => {
       'Failed · 2 Nov · 8a8ec14 · Claude · Auto review',
     ]);
     expect(items[1]!.runIds).toEqual([11, 10]);
+  });
+
+  it('decisions: a teammate’s replies-pass Approve is its own row; a withdrawn verdict says so; a replies pass of yours shows its verdict', () => {
+    const withDecisions = reviewsOnPr(
+      [run(12, { kind: 'replies', verdict: null, createdAt: '2026-11-05T10:00:00Z', finishedAt: '2026-11-05T10:01:00Z' }), ...history],
+      [mateReview()],
+      [
+        {
+          key: 'RV_9',
+          you: false,
+          poster: robin,
+          verdict: 'APPROVE',
+          run: 'replies',
+          at: '2026-11-09T14:05:09Z',
+          headSha: '7f8ea893',
+          githubUrl: 'https://github.com/acme/x/pull/1#pullrequestreview-9',
+          ref: null,
+          withdrawn: { at: '2026-11-09T16:41:46Z', byLimn: true, reason: '3 warnings found at 951c4aa' },
+        },
+        { key: 'RV_8', you: true, poster: null, verdict: 'APPROVE', run: 'replies', at: '2026-11-05T10:01:00Z', headSha: null, githubUrl: null, ref: { kind: 'own', id: 12 }, withdrawn: null },
+      ],
+    );
+    expect(withDecisions.map(reviewListLine)).toEqual([
+      'Approve (withdrawn) · 9 Nov · 7f8ea89 · Replies checked',
+      'Approve · 5 Nov · 8a8ec14 · Replies checked',
+      'Comment · 4 Nov · 1c4bd65 · Claude',
+      'Request changes · 3 Nov · 8a8ec14 · Claude + Codex',
+      'Failed · 2 Nov · 8a8ec14 · Claude · Auto review',
+    ]);
+    expect(withDecisions[0]!.target).toBeNull();
+    expect(itemShows(withDecisions[0]!, { kind: 'teammate', reviewId: 20 })).toBe(false);
   });
 
   it("either half of a pair shows the pair's row", () => {

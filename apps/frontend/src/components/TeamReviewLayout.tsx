@@ -2,7 +2,7 @@ import { Fragment, useState, type ReactNode } from 'react';
 import type { ClaudeFinding, ClaudeReviewStandings, ClaudeTeamPoint, ClaudeTeammatePoster, ClaudeTeammateReview } from '@pierre-review/shared';
 import { useMe } from '../hooks/useTriage.js';
 import { VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
-import { dateTime } from '../lib/ui.js';
+import { dateTime, safeExternalUrl } from '../lib/ui.js';
 import { REVIEW_ITEM_GROUP, REVIEW_META } from '../lib/reviewStyles.js';
 import {
   itemShows,
@@ -18,7 +18,7 @@ import {
   type ShownReview,
 } from '../lib/teamReview.js';
 import { FOCUS_RING, cx } from './ui/index.js';
-import { ChevronIcon } from './Icons.js';
+import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { teammateVersionLines } from '../lib/teammateReviews.js';
@@ -224,12 +224,41 @@ export function ReviewsOnPrSection({
         {items.map((item) => {
           const isNow = item.key === nowKey;
           const current = shown == null ? isNow : itemShows(item, shown);
+          const target = item.target;
+          if (target == null) {
+            // A DECISION-ONLY row (a teammate's replies pass): nothing to open in Limn.
+            const href = safeExternalUrl(item.githubUrl);
+            return (
+              <li
+                key={item.key}
+                title={dateTime(item.at)}
+                className="-mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 px-1.5 py-1 text-meta text-ui-ink"
+                data-testid="review-decision-row"
+              >
+                <PersonAvatar you={item.you} poster={item.poster} size={14} />
+                <span className="shrink-0 font-medium">{item.who}</span>
+                <span className="min-w-0 flex-1 truncate text-ui-mute">{reviewListLine(item)}</span>
+                {href != null && (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open this review on GitHub"
+                    title="Open on GitHub"
+                    className={cx('hit inline-flex shrink-0 items-center rounded-ui p-0.5 text-ui-mute hover:text-ui-ink', FOCUS_RING)}
+                  >
+                    <ExternalLinkIcon size={12} />
+                  </a>
+                )}
+              </li>
+            );
+          }
           return (
             <li key={item.key}>
               <button
                 type="button"
                 aria-current={current ? 'true' : undefined}
-                onClick={() => onShow(isNow ? null : item.target)}
+                onClick={() => onShow(isNow ? null : target)}
                 title={dateTime(item.at)}
                 className={cx(
                   'hit -mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-ui px-1.5 py-1 text-left text-meta',

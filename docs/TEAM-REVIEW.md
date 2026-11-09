@@ -320,6 +320,18 @@ sequenceDiagram
 - **How Limn reads a dismissal:** a reviewer's newest verdict-type review decides their standing,
   and a dismissed one counts as nothing. "Changes requested → approved → approval dismissed" reads
   as no verdict, matching GitHub's "review required" (since 1.0.2).
+- **A withdrawn approval is never lost** (1.0.14). Limn reads each dismissal from the PR timeline:
+  when, who and the message. "Where this PR stands" keeps one note on the person's row even after
+  their later Comment: "Robin · Comment · 9 Nov · 951c4aa · approval from 9 Nov withdrawn: 3 warnings
+  found at 951c4aa". "Reviews on this PR" keeps the review as "Approve (withdrawn)". The verdict is
+  the one Limn's hidden marker says it posted; a review from an older Limn without it reads
+  "Withdrawn".
+- **A replies check's Approve or Request changes shows** in "Reviews on this PR" ("Approve · 9 Nov ·
+  7f8ea89 · Replies checked"). A teammate's is a row of its own, with a link to GitHub; a Comment
+  outcome is never listed.
+- **A replies check does not approve over another Limn.** If a teammate's Limn review, posted after
+  the review the check rests on, still judged one of the settled points open, the approval is held
+  and one short comment says why: "Not approved: robin-dunn’s Limn judged a point still open." 
 
 ### Lifting "changes requested"
 
@@ -601,7 +613,7 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 
 | A teammate on… | Still does |
 |---|---|
-| before 1.0.14 | **Verdicts:** posts "Not approved: Claude left a comment, not an approval. No findings are open." when its model only commented with nothing open (a newer Limn approves through the gates); says "No findings are open." beside an unmet ticket criterion. |
+| before 1.0.14 | **Verdicts:** posts "Not approved: Claude left a comment, not an approval. No findings are open." when its model only commented with nothing open (a newer Limn approves through the gates); says "No findings are open." beside an unmet ticket criterion; a replies check approves even when a teammate's newer Limn review still holds a settled point open. **Team:** loses a withdrawn approval once a later Comment replaces it; never lists a replies check's verdict. |
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |
 | before 1.0.2 | Shows a reviewer as "requested changes" after their later approval was dismissed. |
 | before 1.0.3 | Writes no "Still open:" replies, never reopens, may claim an open point it never recorded. Reads a new "still open" judgement as "not addressed". |

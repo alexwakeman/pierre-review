@@ -1521,6 +1521,18 @@ counts the tab's badge — the list is the newest AI review per PR and looking n
 reviews list). On an existing table, so erasure and export already cover it. Additive, no backfill.
 Journal `idx` 167, `when` sqlite `1792224077016`.
 
+### `0184_review_dismissals` — when, by whom and why a review was dismissed
+
+`ALTER TABLE reviews ADD dismissed_at integer, dismissed_by_user_id integer REFERENCES users(id),
+dismissal_message text` — filled by `persistPr` from the PR walk's new `reviewDismissals` selection
+(ReviewDismissedEvent, `last: 10`, a leaf connection), which also writes one `events` row per
+dismissal (type `review_dismissed`, TYPE-level only, no CHECK). [DATA-MODEL.md](DATA-MODEL.md) §
+`events`; [TEAM-REVIEW.md](TEAM-REVIEW.md) § When Limn takes its approval back. On an existing
+table, so erasure and export already cover it. Additive, no backfill: a PR gains its dismissals on its
+next walk. Journal `when` sqlite `1792569679028`; its `idx` is its POSITION (`migrations-journal.test.ts`):
+182 on its own branch, 184 once 0182 / 0183 (reserved by parallel work, their `when` values below this
+one) are journalled before it.
+
 ### `0181_workspace_flow_view` — Chronology's two views
 
 `ALTER TABLE workspaces ADD COLUMN flow_view text` — NULL = the default view, "People + bots"

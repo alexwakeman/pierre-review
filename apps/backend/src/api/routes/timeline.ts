@@ -20,6 +20,7 @@ const EVENT_TYPES: EventType[] = [
   'review_comment',
   'pr_comment',
   'commit_pushed',
+  'review_dismissed',
 ];
 const PR_STATUSES: PrStatus[] = ['draft', 'open', 'merged', 'closed'];
 const REVIEW_FILTER_STATES: ReviewState[] = [

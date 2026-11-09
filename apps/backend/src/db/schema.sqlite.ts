@@ -729,6 +729,12 @@ export const reviews = sqliteTable(
     // stored under the poster's `limn:<login>` bot in `authorId`; the person is kept HERE. NULL on
     // every other review. "Is this my own review" reads `trueAuthorId(reviews)`.
     limnPostedByUserId: integer('limn_posted_by_user_id').references(() => users.id),
+    // THE DISMISSAL (migration 0184), from the PR timeline's ReviewDismissedEvent: when, by whom (the
+    // Limn bot for a "Limn withdrew…" one) and GitHub's message. NULL = no dismissal seen. Set only
+    // from a received event, never cleared.
+    dismissedAt: integer('dismissed_at', { mode: 'timestamp' }),
+    dismissedByUserId: integer('dismissed_by_user_id').references(() => users.id),
+    dismissalMessage: text('dismissal_message'),
   },
   (t) => ({
     prIdx: index('rv_pr_idx').on(t.prId),
@@ -845,6 +851,8 @@ export const events = sqliteTable(
         'review_comment',
         'pr_comment',
         'commit_pushed',
+        // A review was dismissed (migration 0184; TYPE-level only, no CHECK): refTable 'reviews'.
+        'review_dismissed',
       ],
     }).notNull(),
     occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),

@@ -15,7 +15,13 @@
 // This module opens NO database at import (the loader takes an executor).
 import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { aiRunProvider, postedFindingDisplay } from '@pierre-review/shared';
+import {
+  aiRunProvider,
+  dismissalReasonText,
+  isLimnDismissalMessage,
+  parseLimnReviewMarker,
+  postedFindingDisplay,
+} from '@pierre-review/shared';
 import type {
   AiProviderId,
   ClaudeFindingReminder,
@@ -28,7 +34,9 @@ import type {
   ClaudeReviewStandingRef,
   ClaudeReviewStandings,
   ClaudeReviewVerdict,
+  ClaudeReviewWithdrawal,
   ClaudeTeamAuthor,
+  ClaudeTeamDecision,
   ClaudeTeamFinding,
   ClaudeTeamPoint,
   ClaudeTeamPointState,
@@ -475,7 +483,8 @@ export async function loadTeamReviewView(
     threadJudgements: currentThreadJudgements,
     threadJudgedBy: own != null && ownReviewed ? { reviewId: own.id, at: ownAt } : null,
   });
-  const extra = { reviewCount, allFindings, ...(standings != null ? { standings } : {}) };
+  const decisions = await loadTeamDecisions(exec, accountId, prId, prUrl, teammateReviews);
+  const extra = { reviewCount, allFindings, decisions, ...(standings != null ? { standings } : {}) };
 
   if (teammateReviews.length === 0)
     return { lead: own != null ? 'own' : null, teammateReviewId: null, findings: [], alsoRaisedBy: [], ...extra };
@@ -548,6 +557,11 @@ export interface StandingGithubReview {
   submittedAt: number; // ms
   // Its body carries Limn's summary marker.
   limn: boolean;
+  // A DISMISSED Limn review only (migration 0184): the verdict its marker says it posted (`d=`; null =
+  // none), and the dismissal from the PR timeline (absent / null = not synced).
+  markerVerdict?: ClaudeReviewVerdict | null;
+  dismissedAt?: number | null;
+  dismissalMessage?: string | null;
 }
 
 export interface StandingsInput {
@@ -578,6 +592,31 @@ export function githubStandingReview(reviews: readonly StandingGithubReview[]): 
   for (const r of sorted) {
     if (r.state === 'commented' || r.state === 'pending') continue;
     return r.state === 'dismissed' ? null : r;
+  }
+  return null;
+}
+
+/**
+ * A reviewer's WITHDRAWN verdict (pure): their most recent DECISIVE Limn review — an Approve / Request
+ * changes, or a dismissed one — when it was dismissed. A later Comment never hides it (it does not
+ * replace a verdict on GitHub either); a later decisive review does. ⚠ Limn reviews only: a person's
+ * own dismissed review is never read as Limn's. The verdict comes from the marker, never guessed.
+ */
+export function withdrawnVerdict(reviews: readonly StandingGithubReview[]): ClaudeReviewWithdrawal | null {
+  const sorted = reviews.filter((r) => r.limn).sort((a, b) => b.submittedAt - a.submittedAt || b.nodeId.localeCompare(a.nodeId));
+  for (const r of sorted) {
+    if (r.state === 'commented' || r.state === 'pending') continue;
+    if (r.state !== 'dismissed') return null;
+    const v = r.markerVerdict;
+    // A dismissed Limn Comment cannot happen on GitHub; one that says so is not a verdict withdrawn.
+    if (v === 'COMMENT') continue;
+    return {
+      verdict: v ?? null,
+      postedAt: isoOf(r.submittedAt),
+      at: r.dismissedAt != null ? isoOf(r.dismissedAt) : null,
+      byLimn: r.dismissalMessage != null ? isLimnDismissalMessage(r.dismissalMessage) : null,
+      reason: dismissalReasonText(r.dismissalMessage),
+    };
   }
   return null;
 }
@@ -622,6 +661,7 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
           : null,
       inForce: ownInForce,
       dismissed: newestLimn(mine)?.state === 'dismissed',
+      withdrawn: withdrawnVerdict(mine),
     });
   }
 
@@ -654,6 +694,7 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
             }
           : null,
       dismissed: newestLimn(theirs)?.state === 'dismissed',
+      withdrawn: withdrawnVerdict(theirs),
     });
   }
   mates.sort((a, b) => ms(b.latest!.at) - ms(a.latest!.at));
@@ -774,6 +815,10 @@ export async function loadTeamStandingsForPrs(
             state: reviews.state,
             submittedAt: reviews.submittedAt,
             limn: sql<number>`coalesce(${reviews.body}, '') like '%pierre:claude-review%'`,
+            // A dismissed review's body only (its marker names the verdict it posted): the rest stay unread.
+            dismissedBody: sql<string | null>`case when ${reviews.state} = 'dismissed' then ${reviews.body} end`,
+            dismissedAt: reviews.dismissedAt,
+            dismissalMessage: reviews.dismissalMessage,
           })
           .from(reviews)
           .where(and(inArray(reviews.prId, [...prsWith]), inArray(trueAuthorId(reviews), authorIds)))
@@ -804,11 +849,186 @@ export async function loadTeamStandingsForPrs(
             state: g.state,
             submittedAt: g.submittedAt.getTime(),
             limn: !!g.limn,
+            ...dismissalFacts(g),
           })),
       }),
     );
   }
   return out;
+}
+
+/** A synced review row's dismissal facts as the folds read them (`StandingGithubReview`). */
+function dismissalFacts(g: {
+  state: string;
+  dismissedBody?: string | null;
+  dismissedAt?: Date | null;
+  dismissalMessage?: string | null;
+}): Pick<StandingGithubReview, 'markerVerdict' | 'dismissedAt' | 'dismissalMessage'> {
+  if (g.state !== 'dismissed') return {};
+  return {
+    markerVerdict: parseLimnReviewMarker(g.dismissedBody ?? null)?.verdict ?? null,
+    dismissedAt: g.dismissedAt != null ? g.dismissedAt.getTime() : null,
+    dismissalMessage: g.dismissalMessage ?? null,
+  };
+}
+
+// ── DECISIVE VERDICTS NO REVIEW ROW SHOWS (docs/TEAM-REVIEW.md § When Limn takes its approval back) ──
+//
+// A replies pass is a run, never a review row (`kind = 'replies'` on the reader's side; the teammate
+// importer skips it), yet its Approve / Request changes is a real verdict on GitHub; and a withdrawn
+// Limn review reads on GitHub only as DISMISSED. `teamDecisions` lists both from the synced `reviews`
+// rows that carry Limn's summary marker — the verdict from the marker's `d=`, never the GitHub state.
+
+/** One synced Limn review as `teamDecisions` reads it. */
+export interface DecisionReviewInput {
+  nodeId: string;
+  databaseId: string | null;
+  authorId: number;
+  state: StandingGithubReview['state'];
+  submittedAt: number; // ms
+  body: string | null;
+  dismissedAt: number | null;
+  dismissalMessage: string | null;
+}
+
+/**
+ * THE DECISIONS FOLD (pure): every Limn review on the PR that is a DECISIVE replies pass (Approve /
+ * Request changes; a Comment is never listed) or was DISMISSED, with the row it belongs to — the
+ * reader's run (`ownPosted`, by GitHub review id) or a teammate's imported review (by node id) — and
+ * its withdrawal. Newest first. ⚠ A review without Limn's marker is never listed.
+ */
+export function teamDecisions(input: {
+  reviews: readonly DecisionReviewInput[];
+  readerUserIds: ReadonlySet<number>;
+  posters: ReadonlyMap<number, ClaudeTeammatePoster>;
+  ownPosted: ReadonlyMap<string, number>; // GitHub review databaseId → the reader's run id
+  teammateByNode: ReadonlyMap<string, number>; // GitHub review node id → teammate review id
+  prUrl: string | null;
+}): ClaudeTeamDecision[] {
+  const out: ClaudeTeamDecision[] = [];
+  for (const r of input.reviews) {
+    const meta = parseLimnReviewMarker(r.body);
+    if (meta == null) continue;
+    const you = input.readerUserIds.has(r.authorId);
+    const poster = you ? null : (input.posters.get(r.authorId) ?? null);
+    if (!you && poster == null) continue;
+    const verdict = meta.verdict === 'APPROVE' || meta.verdict === 'REQUEST_CHANGES' ? meta.verdict : null;
+    const dismissed = r.state === 'dismissed';
+    if (!(dismissed ? meta.verdict !== 'COMMENT' : meta.run === 'replies' && verdict != null)) continue;
+    const ownRun = r.databaseId != null ? input.ownPosted.get(r.databaseId) : undefined;
+    const mateRun = input.teammateByNode.get(r.nodeId);
+    out.push({
+      key: r.nodeId,
+      you,
+      poster,
+      verdict,
+      run: meta.run,
+      at: isoOf(r.submittedAt),
+      headSha: meta.headSha,
+      githubUrl: input.prUrl != null && r.databaseId != null ? `${input.prUrl}#pullrequestreview-${r.databaseId}` : null,
+      ref: you
+        ? ownRun != null
+          ? { kind: 'own', id: ownRun }
+          : null
+        : mateRun != null
+          ? { kind: 'teammate', reviewId: mateRun }
+          : null,
+      withdrawn: dismissed
+        ? {
+            at: r.dismissedAt != null ? isoOf(r.dismissedAt) : null,
+            byLimn: r.dismissalMessage != null ? isLimnDismissalMessage(r.dismissalMessage) : null,
+            reason: dismissalReasonText(r.dismissalMessage),
+          }
+        : null,
+    });
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** The decisions of one PR (DB only, account-scoped): `teamDecisions` over its Limn reviews. */
+export async function loadTeamDecisions(
+  exec: Executor,
+  accountId: number,
+  prId: number,
+  prUrl: string | null,
+  teammateReviews: readonly ClaudeTeammateReview[],
+): Promise<ClaudeTeamDecision[]> {
+  const { users, reviews, accounts } = schema;
+  const rows = await exec
+    .select({
+      nodeId: reviews.githubNodeId,
+      databaseId: reviews.databaseId,
+      authorId: trueAuthorId(reviews),
+      state: reviews.state,
+      submittedAt: reviews.submittedAt,
+      body: reviews.body,
+      dismissedAt: reviews.dismissedAt,
+      dismissalMessage: reviews.dismissalMessage,
+    })
+    .from(reviews)
+    .where(
+      and(
+        eq(reviews.prId, prId),
+        sql`coalesce(${reviews.body}, '') like '%pierre:claude-review%'`,
+        // Only what can be listed: a replies pass or a dismissed review (the fold checks the marker).
+        sql`(${reviews.state} = 'dismissed' or ${reviews.body} like '%k=replies%')`,
+      ),
+    )
+    .execute();
+  if (rows.length === 0) return [];
+  const login = (
+    await exec.select({ login: accounts.githubLogin }).from(accounts).where(eq(accounts.id, accountId)).limit(1).execute()
+  )[0]?.login;
+  const authorIds = [...new Set(rows.map((r) => r.authorId).filter((a): a is number => a != null))];
+  const people =
+    authorIds.length === 0
+      ? []
+      : await exec
+          .select({ id: users.id, login: users.githubLogin, displayName: users.displayName, avatarUrl: users.avatarUrl })
+          .from(users)
+          .where(inArray(users.id, authorIds))
+          .execute();
+  const readerUserIds = new Set(
+    people.filter((p) => login != null && p.login.toLowerCase() === login.toLowerCase()).map((p) => p.id),
+  );
+  const own = await exec
+    .select({ id: cr.id, postedReviewId: cr.postedReviewId, autoPost: cr.autoPost })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), ownRunsOnly(cr.kind)))
+    .execute();
+  const ownPosted = new Map<string, number>();
+  for (const r of own) {
+    if (r.postedReviewId != null) ownPosted.set(String(r.postedReviewId), r.id);
+    const gh = (r.autoPost as { githubReviewId?: string | number | null } | null)?.githubReviewId;
+    if (gh != null) ownPosted.set(String(gh), r.id);
+  }
+  const mates = await exec
+    .select({ id: cr.id, nodeId: cr.sourceReviewNodeId })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.kind, 'teammate')))
+    .execute();
+  const shown = new Set(teammateReviews.map((t) => t.reviewId));
+  return teamDecisions({
+    reviews: rows
+      .filter((r) => r.authorId != null)
+      .map((r) => ({
+        nodeId: r.nodeId,
+        databaseId: r.databaseId ?? null,
+        authorId: r.authorId as number,
+        state: r.state,
+        submittedAt: r.submittedAt.getTime(),
+        body: r.body,
+        dismissedAt: r.dismissedAt != null ? r.dismissedAt.getTime() : null,
+        dismissalMessage: r.dismissalMessage ?? null,
+      })),
+    readerUserIds,
+    posters: new Map(people.filter((p) => !readerUserIds.has(p.id)).map((p) => [p.id, { userId: p.id, login: p.login, displayName: p.displayName, avatarUrl: p.avatarUrl }])),
+    ownPosted,
+    teammateByNode: new Map(
+      mates.filter((m) => m.nodeId != null && shown.has(m.id)).map((m) => [m.nodeId as string, m.id]),
+    ),
+    prUrl,
+  });
 }
 
 // ── EVERY FINDING ON THE PR (docs/CLAUDE-REVIEW.md § Teammates' reviews → Every finding) ─────────────

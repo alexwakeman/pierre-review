@@ -161,8 +161,14 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   two accounts with a decoy path bucket so a dropped join leaks rather than finding nothing.
 - **`events`** — the timeline feed; `accountId`, unique `(accountId, dedupeKey)`, typed
   (`pr_opened`/`pr_merged`/`pr_closed`/`review_submitted`/`review_comment`/`pr_comment`/
-  `commit_pushed`). Only *substantive* reviews emit an event (an empty `commented` review is
-  suppressed so it doesn't duplicate inline markers).
+  `commit_pushed`/`review_dismissed`). Only *substantive* reviews emit an event (an empty `commented` review is
+  suppressed so it doesn't duplicate inline markers). `review_dismissed` (migration `0184`) is one
+  GitHub ReviewDismissedEvent: dedupeKey `review_dismissed:<event node id>`, refTable `reviews`, the
+  actor the person who dismissed it (the Limn bot for Limn's own "Limn withdrew…" / lift messages).
+- **`reviews.dismissed_at` / `dismissed_by_user_id` / `dismissal_message`** (migration `0184`): when,
+  by whom and why a review was dismissed, from the PR walk's `reviewDismissals` (the newest 10
+  ReviewDismissedEvents). Set only from a received event, never cleared; NULL = none seen. The
+  reviews API reports only DISMISSED, so this is the one record of a withdrawal's time and reason.
 - **`reviewRequests`** — *ephemeral* pending requests (`userId` or `teamName`, surfaced as
   `requestedReviewers`); re-derived each sync (GitHub drops the request once a review lands).
 - **`prViews`** — last-viewed SHA + ts per PR ("new since you looked"); **`syncState`** —

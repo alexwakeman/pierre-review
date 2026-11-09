@@ -234,6 +234,26 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   ) {
     ${REVIEW_REQUEST_HISTORY_NODE}
   }
+  # REVIEW DISMISSALS (migration 0184): when, by whom and why a review was dismissed — the reviews
+  # API reports only DISMISSED. The NEWEST 10 (\`last\`). A LEAF connection like
+  # reviewRequestHistory above (\`actor\` and \`review\` are objects), so the same measured-free cost
+  # note holds. Do not add a connection under it.
+  reviewDismissals: timelineItems(itemTypes: [REVIEW_DISMISSED_EVENT], last: 10) {
+    nodes {
+      __typename
+      ... on ReviewDismissedEvent {
+        id
+        createdAt
+        dismissalMessage
+        actor {
+          __typename
+          ... on User { id login }
+          ... on Bot { id login }
+        }
+        review { id }
+      }
+    }
+  }
   headCommit: commits(last: 1) {
     nodes {
       commit {
@@ -833,6 +853,16 @@ export interface GqlLabel {
   color: string;
 }
 
+/** One ReviewDismissedEvent as the PR walk selects it (`reviewDismissals`). */
+export interface GqlReviewDismissedEvent {
+  __typename?: string;
+  id?: string;
+  createdAt?: string;
+  dismissalMessage?: string | null;
+  actor?: { __typename: string; id?: string; login?: string } | null;
+  review?: { id?: string | null } | null;
+}
+
 export interface GqlReviewRequestEvent {
   __typename?: string;
   id?: string | null;
@@ -943,6 +973,9 @@ export interface GqlPullRequest {
   // hand-built fixtures, and NULLED by graphqlTolerant when the token may not read it — both mean
   // "not received", which persistPr must not record as "never requested".
   reviewRequestHistory?: { nodes: Array<GqlReviewRequestEvent | null> } | null;
+  // The newest review dismissals (ReviewDismissedEvent, last 10). Optional: absent on hand-built
+  // fixtures, nulled by graphqlTolerant — both "not received", which writes nothing.
+  reviewDismissals?: { nodes: Array<GqlReviewDismissedEvent | null> } | null;
   headCommit: { nodes: GqlHeadCommit[] };
   commits: { nodes: GqlCommitNode[] };
   reviews: { nodes: GqlReview[] };

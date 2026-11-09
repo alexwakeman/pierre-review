@@ -1486,6 +1486,14 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 
 ### The replies pass (judge just the replies, 2026-10-27)
 
+**THE TEAM HOLD** (user decision 2026-11-09, PR 221270): the pass's APPROVE is HELD — a COMMENT with
+the reason, through the usual held-approval path — when a teammate's Limn review posted AFTER the full
+review the outcome rests on judged a point this pass settled (`j=<id>:n` or `:o` on the finding
+comment of an accepted reply) as still open, and no newer teammate judgement settled it
+(replies-pass.ts `teammateStillOpenHold`, `heldReason: 'team_open'`: "Not approved: robin-dunn’s Limn
+judged a point still open."). Two machines disagreeing about one thread never leave an approval in
+force on the word of one of them.
+
 A reply on one of Limn's posted findings used to wait for the next full review. A REPLIES PASS judges
 JUST the replies, cheaply, at the current head. Pure half `claude-review/replies-pass.ts`; I/O
 `replies-check.ts` (+ `-agent`, `-prompt`, `-schema`, `-routes`); the outcome `replies-outcome.ts`.
@@ -3732,6 +3740,22 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
 - Example (PR 203001): the reader's Claude + Codex pair asked for changes on 3 Nov and it was
   posted; Robin's Limn commented on 4 Nov. Shown: "Request changes" with "Latest: Robin · Comment ·
   4 Nov". Dismissing the reader's review on GitHub lifts it.
+- **A WITHDRAWN VERDICT STAYS VISIBLE** (2026-11-09, PR 221270; migration 0184). `withdrawnVerdict`
+  (pure, beside `teamStandings`): a reviewer's most recent DECISIVE Limn review — Approve / Request
+  changes, or a dismissed one — when it was DISMISSED, even after a later Comment became their newest
+  (`dismissed` stays "the newest was dismissed"). Its verdict comes from the dismissed body's marker
+  `d=` (never the GitHub state, never guessed: no `d=` ⇒ null); its time, who and reason from the
+  synced ReviewDismissedEvent (`reviews.dismissed_*`). → `ClaudeReviewStanding.withdrawn`; the tab's
+  row note "approval from 9 Nov withdrawn: 3 warnings found at 951c4aa" ("dismissed" when a person
+  did it or it is unknown; lib/teamReview.ts `withdrawnNote`). ⚠ Limn reviews only: a person's own
+  dismissed review is never read as Limn's.
+- **DECISIONS NO ROW SHOWS** (`teamDecisions` / `loadTeamDecisions` → `teamView.decisions`): every
+  synced Limn review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /
+  `REQUEST_CHANGES`; a Comment never) or DISMISSED, with the list row it belongs to (the reader's run
+  by GitHub review id, a teammate's imported review by node id) and its withdrawal. "Reviews on this
+  PR" marks that row "Approve (withdrawn)", gives the reader's replies pass its verdict, and lists a
+  teammate's decisive replies pass as a DECISION-ONLY row (nothing to open; a link to GitHub). ⚠ The
+  teammate importer still skips replies passes: they never become `claude_reviews` rows.
 
 ### Judgements travel with a post (2026-11-04)
 

@@ -403,6 +403,47 @@ export function repliesNotApproved(i: RepliesVerdictInput): { reason: ClaudeNotA
   return null;
 }
 
+/** One teammate's posted Limn review as the team hold reads it (`claude_reviews` kind 'teammate'). */
+export interface TeammateJudgement {
+  login: string;
+  at: number; // ms, when it was posted
+  judged: ReadonlyArray<{ commentId: string; outcome: string }>;
+}
+
+/**
+ * THE TEAM HOLD (user decision 2026-11-09, PR 221270): a replies pass may not APPROVE while another
+ * Limn — a teammate's posted review NEWER than the full review the outcome rests on (`since`, ms) —
+ * judged a point this pass settled (`settledCommentIds`: the finding comments of its accepted
+ * replies) as not addressed or still open. Two machines disagree about the same thread: the approval
+ * is held and the reason says whose Limn holds it ("Not approved: robin-dunn’s Limn judged a point
+ * still open."). null = no such judgement. Pure.
+ */
+export function teammateStillOpenHold(
+  settledCommentIds: ReadonlySet<string>,
+  teammates: readonly TeammateJudgement[],
+  since: number,
+): ClaudeNotApproved | null {
+  if (settledCommentIds.size === 0) return null;
+  // The NEWEST judgement of each settled point across the teammates' newer reviews decides it.
+  const newest = new Map<string, { login: string; at: number; outcome: string }>();
+  for (const t of teammates) {
+    if (!(t.at > since)) continue;
+    for (const j of t.judged) {
+      if (!settledCommentIds.has(j.commentId)) continue;
+      const cur = newest.get(j.commentId);
+      if (cur == null || t.at > cur.at) newest.set(j.commentId, { login: t.login, at: t.at, outcome: j.outcome });
+    }
+  }
+  const open = [...newest.values()].filter((v) => v.outcome === 'not_addressed' || v.outcome === 'still_open');
+  if (open.length === 0) return null;
+  const who = [...new Set(open.map((o) => o.login))].sort();
+  const name = who.length === 1 ? `${who[0]}’s Limn` : 'a teammate’s Limn';
+  return {
+    heldReason: 'team_open',
+    text: `Not approved: ${name} judged ${open.length === 1 ? 'a point' : `${open.length} points`} still open.`,
+  };
+}
+
 /** The disputed blocker the REQUEST_CHANGES body names (the first), or null. */
 export function disputedBlockerTitle(items: readonly Pick<ClaudeFollowUpItemRecord, 'status' | 'severity' | 'title'>[]): string | null {
   return items.find((it) => it.status === 'reply_disputed' && it.severity === 'blocker')?.title ?? null;
