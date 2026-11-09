@@ -224,6 +224,54 @@ export async function addIssueComment(
   );
 }
 
+// ---- Hide a PR comment as RESOLVED (GraphQL minimizeComment) ----
+
+interface MinimizeResponse {
+  minimizeComment: { minimizedComment: { isMinimized: boolean } | null } | null;
+}
+
+const MINIMIZE_MUTATION = /* GraphQL */ `
+  mutation MinimizeComment($input: MinimizeCommentInput!) {
+    minimizeComment(input: $input) {
+      minimizedComment {
+        isMinimized
+      }
+    }
+  }
+`;
+
+/**
+ * Hide an issue-level (PR) comment as RESOLVED — GitHub's nearest thing to resolving a thread for a
+ * comment that has none (a Limn finding posted as a PR comment). `commentNodeId` is the comment's
+ * node id (pr_comments.github_node_id); with only its numeric id, pass `lookup` and it is read first.
+ */
+export async function minimizeIssueComment(
+  token: string,
+  target: { nodeId: string } | { owner: string; name: string; databaseId: string },
+  origin: WriteOrigin,
+): Promise<{ isMinimized: boolean }> {
+  let nodeId: string;
+  if ('nodeId' in target) {
+    nodeId = target.nodeId;
+  } else {
+    const c = await ghRestGetFor<{ node_id: string }>(token, `/repos/${target.owner}/${target.name}/issues/comments/${target.databaseId}`);
+    nodeId = c.node_id;
+  }
+  return limnWrite(
+    origin,
+    'resolve',
+    {},
+    async () => {
+      const gql = getGraphqlClientFor(token);
+      const res = await gql<MinimizeResponse>(MINIMIZE_MUTATION, { input: { subjectId: nodeId, classifier: 'RESOLVED' } });
+      const m = res.minimizeComment?.minimizedComment;
+      if (!m) throw new Error('GitHub returned no comment for the hide.');
+      return { isMinimized: m.isMinimized };
+    },
+    () => ({ githubNodeId: nodeId, detail: 'minimized' }),
+  );
+}
+
 // ---- Submit a PR review (REST) ----
 
 interface RestReview {

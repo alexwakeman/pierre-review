@@ -276,7 +276,7 @@ import { blastSignalsFor } from './blast-radius.js';
 import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupling.js';
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
-import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
+import { newestPrLevelReplyTimes, newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
 import { limnBotUserIdForUser, limnBotUserIds, limnReplyAttribution } from './limn-bots.js';
 import { prOwnerId } from './true-author.js';
@@ -10218,13 +10218,22 @@ export async function getAutoReviewCandidates(
   // findings newer than the REVIEWS saw still needs a full review, whatever a check covered.
   if (reReview.length < opts.limit && sameHead.length > 0) {
     const since = new Date(Math.min(...sameHead.map((p) => p.coveredMs)));
-    const [newest, checkRows] = await Promise.all([
+    const counts = countsAuthorFrom(botSet, new Set(reviewerBots));
+    const [newest, prLevel, checkRows] = await Promise.all([
       newestReviewCommentTimes(
         accountId,
         sameHead.map((p) => p.prId),
         since,
         // ⚠ Only a PERSON or a REVIEW bot re-triggers (CI / coverage / deploy / dependency bots never).
-        countsAuthorFrom(botSet, new Set(reviewerBots)),
+        counts,
+      ),
+      // A PERSON'S PR comment after one of Limn's PR-LEVEL findings is a reply to it (no thread): it
+      // starts a replies pass exactly like a reply on a Limn thread (folded into `newestOwn` below).
+      newestPrLevelReplyTimes(
+        accountId,
+        sameHead.map((p) => p.prId),
+        since,
+        counts,
       ),
       db
         .select({
@@ -10252,7 +10261,7 @@ export async function getAutoReviewCandidates(
       if (!prev || c.id > prev.id) latestCheck.set(c.prId, c);
     }
     for (const p of sameHead) {
-      const t = newest.get(p.prId);
+      const t = foldPrLevelReply(newest.get(p.prId), prLevel.get(p.prId));
       if (!t) continue;
       const at = t.newest.getTime();
       const ck = latestCheck.get(p.prId);
@@ -10282,6 +10291,21 @@ export async function getAutoReviewCandidates(
     }
   }
   return { prIds, autoToday, reReview, inFlightMoved, retry };
+}
+
+/**
+ * Fold a PR-level reply time (`newestPrLevelReplyTimes`) into a PR's comment times: it is a reply on
+ * Limn's OWN finding (`newestOwn`), and the burst's newest comment; never a Check threads input
+ * (`newestOther` unchanged). Pure.
+ */
+export function foldPrLevelReply(
+  t: { newest: Date; newestOwn: Date | null; newestOther?: Date | null } | undefined,
+  prLevel: Date | undefined,
+): { newest: Date; newestOwn: Date | null; newestOther?: Date | null } | undefined {
+  if (!prLevel) return t;
+  if (!t) return { newest: prLevel, newestOwn: prLevel, newestOther: null };
+  const later = (a: Date | null | undefined, b: Date): Date => (a && a.getTime() >= b.getTime() ? a : b);
+  return { ...t, newest: later(t.newest, prLevel), newestOwn: later(t.newestOwn, prLevel) };
 }
 
 /**

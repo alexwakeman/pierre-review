@@ -17,6 +17,8 @@
 //      re-triggers an auto review). The thread is NOT resolved;
 //   5. the record settles `posted` (+ the comment id) or `failed` with GitHub's error. Shown, never
 //      retried. A later run may still ACCEPT a newer reply on the same thread.
+// A PR-LEVEL finding (posted as a PR comment: no thread) gets ONE "Still open:" PR comment linking it
+// instead, ever (pr-level-writes.ts `postPrLevelStillOpen`; the same `pushback` record and claim).
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import { aiRunProviderName, autoPostFooter, continuationThreadMap, type AiProviderName, type FindingPushbackRecord } from '@pierre-review/shared';
@@ -26,10 +28,12 @@ import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type Aut
 import { defaultAutoResolveDeps, type AutoResolveDeps } from './auto-resolve.js';
 import { getClaudeReviewById } from './persist.js';
 import { findFindingThread } from './finding-thread.js';
+import { postPrLevelStillOpen } from './pr-level-writes.js';
 import {
   PUSHBACK_MARKER,
   isClearReplyRefusal,
   loadPrThreads,
+  loadPrLevelOwners,
   loadThreadOwners,
   threadHasPushback,
   followOwnContinuation,
@@ -98,14 +102,45 @@ async function autoPushback(
     ownerRows.set(row.id, row);
   }
   const candidates = [...ownerRows.values()].filter((f) => f.pushback == null);
-  if (candidates.length === 0) return null;
+  const result: AutoPushbackResult = { posted: [], failed: [] };
+  let wroteAny = false;
+
+  // A PR-LEVEL finding (no thread): the ONE "Still open:" PR comment linking it, ever
+  // (pr-level-writes.ts) — the pushback text is its reason.
+  const prLevel = await loadPrLevelOwners(ctx, accountId, prId, [...wanted.keys()].filter((id) => !owners.has(id)), { ownOnly: true });
+  const prLevelDone = new Set<number>();
+  for (const [wantedId, owner] of prLevel) {
+    if (prLevelDone.has(owner.id) || owner.pushback != null) continue;
+    prLevelDone.add(owner.id);
+    const r = await postPrLevelStillOpen(ctx, {
+      accountId,
+      prId,
+      reviewId,
+      owner,
+      footer: autoPostFooter(aiRunProviderName(review)),
+      how: 'auto',
+      reason: wanted.get(wantedId)!,
+    });
+    if (r.kind !== 'done') continue;
+    if (r.status === 'posted') {
+      wroteAny = true;
+      result.posted.push(owner.id);
+    } else {
+      result.failed.push(owner.id);
+    }
+  }
+  if (candidates.length === 0) {
+    if (wroteAny) {
+      await deps.notePrChanged(accountId, [prId]).catch(() => {});
+      await postDeps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    }
+    return prLevelDone.size > 0 ? result : null;
+  }
 
   const { threads, comments } = await loadPrThreads(ctx, prId);
   const accountLogin = await postDeps.accountLogin(accountId);
   const crf = s(ctx).claudeReviewFindings;
-  const result: AutoPushbackResult = { posted: [], failed: [] };
   const taken = new Set<number>();
-  let wroteAny = false;
   for (const f of candidates) {
     const found = findFindingThread(f, threads, comments, accountLogin, taken);
     // A point continued in a new thread (still-open.ts) is answered THERE.

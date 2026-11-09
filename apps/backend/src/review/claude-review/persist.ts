@@ -582,7 +582,9 @@ async function withThreadState(
   prId: number,
   fu: ClaudeReviewFollowUp,
 ): Promise<ClaudeReviewFollowUp> {
-  const ownerIds = [...new Set(fu.items.map((it) => it.threadFindingId).filter((x): x is number => x != null))];
+  // A PR-LEVEL finding's owner (`prComment.findingId`) holds its records the same way.
+  const ownerOf = (it: ClaudeReviewFollowUp['items'][number]): number | null => it.threadFindingId ?? it.prComment?.findingId ?? null;
+  const ownerIds = [...new Set(fu.items.map(ownerOf).filter((x): x is number => x != null))];
   const threadIds = [...new Set(fu.items.map((it) => it.threadId).filter((x): x is number => x != null))];
   if (ownerIds.length === 0 && threadIds.length === 0) return fu;
   const { cr, crf } = tables(ctx);
@@ -609,8 +611,9 @@ async function withThreadState(
   return {
     ...fu,
     items: fu.items.map((it) => {
-      if (it.threadFindingId == null && it.threadId == null) return it;
-      const o = it.threadFindingId != null ? ownerById.get(it.threadFindingId) : undefined;
+      const owner = ownerOf(it);
+      if (owner == null && it.threadId == null) return it;
+      const o = owner != null ? ownerById.get(owner) : undefined;
       return {
         ...it,
         threadResolved: it.threadId != null ? (resolvedById.get(it.threadId) ?? null) : null,

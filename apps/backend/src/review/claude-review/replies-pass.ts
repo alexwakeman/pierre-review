@@ -15,6 +15,10 @@
 // Open PRs "Earlier:" counts, auto resolve, auto pushback, the manual "Post reply") reads it with no
 // special case. The gate is the review's: `judgeReplyReport` (a deferred blocker is disputed, etc.).
 //
+// A PR-LEVEL finding (posted as a PR comment) is sent the same way: its "replies" are the PR
+// conversation after it (`conversation`, one pool per PR with refs C1…), and the model must cite the
+// comment it judged (`replyRef`) — the same gate.
+//
 // THE OUTCOME (`repliesVerdict`): after the pass, the PR's open findings at the current head are the
 // latest full review's counted findings, minus the ones a reply settled. A disputed blocker wants
 // REQUEST_CHANGES; no blocker and no warning left — and nothing the workspace's `approveLeftovers`
@@ -31,7 +35,7 @@ import type {
 import { oneLineHow } from '@pierre-review/shared';
 import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
 import type { EarlierOpen } from './earlier-open.js';
-import { judgeReplyReport, type PriorFindingForFollowUp } from './follow-up.js';
+import { judgeReplyReport, prCommentOf, type PriorFindingForFollowUp } from './follow-up.js';
 import { judgeableReplies } from './reply-text.js';
 
 // ---- caps ----
@@ -120,10 +124,11 @@ export function judgedThroughFor(
   return (id) => Math.max(baseOf(id), byId.get(id) ?? 0);
 }
 
-/** The newest judgeable reply's time on a finding's thread (ms), or null. */
-export function newestJudgeableReplyMs(f: Pick<PriorFindingForFollowUp, 'thread'>): number | null {
+/** The newest judgeable reply's time on a finding's thread — or, for a PR-level finding, in the PR
+ *  conversation listed for it (ms), or null. */
+export function newestJudgeableReplyMs(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): number | null {
   let best: number | null = null;
-  for (const r of judgeableReplies(f.thread?.replies)) {
+  for (const r of [...judgeableReplies(f.thread?.replies), ...(f.conversation?.replies ?? [])]) {
     const t = Date.parse(r.at);
     if (Number.isFinite(t) && (best == null || t > best)) best = t;
   }
@@ -164,6 +169,7 @@ function cost(f: PriorFindingForFollowUp, code: CodeAround | null): number {
     Math.min(f.body.length, REPLIES_PASS_BODY_CHARS) +
     Math.min(code?.text.length ?? 0, REPLIES_PASS_CODE_CHARS) +
     (f.thread?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
+    (f.conversation?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
     200
   );
 }
@@ -198,6 +204,7 @@ export function repliesPlanTexts(plan: RepliesPlan): string[] {
     out.push(f.path, f.title, f.body);
     if (code) out.push(code.text);
     for (const r of f.thread?.replies ?? []) out.push(r.author, r.body);
+    for (const r of f.conversation?.replies ?? []) out.push(r.author, r.body);
   }
   return out;
 }
@@ -212,6 +219,8 @@ export interface RepliesReport {
   reply?: unknown;
   explanation?: unknown;
   how?: unknown;
+  // A PR-level finding: the PR comment ('C1'…) that answers it.
+  replyRef?: unknown;
 }
 
 const clip = (s: unknown, max: number): string | null => {
@@ -246,6 +255,7 @@ function itemFor(
     headMoved: f.headSha !== plan.headSha,
     priorPosted: f.posted,
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
+    ...prCommentOf(f),
   };
 }
 
@@ -275,6 +285,7 @@ export function reconcileReplies(plan: RepliesPlan, reported: ReadonlyArray<Repl
           status,
           acceptKind: r?.acceptKind === 'not_valid' || r?.acceptKind === 'deferred' ? r.acceptKind : null,
           reply: typeof r?.reply === 'string' ? r.reply : null,
+          replyRef: typeof r?.replyRef === 'string' ? r.replyRef : null,
         })
       : null;
     if (!judged) {
@@ -288,6 +299,7 @@ export function reconcileReplies(plan: RepliesPlan, reported: ReadonlyArray<Repl
         ...(oneLineHow(r?.how) ? { how: oneLineHow(r?.how) } : {}),
         response: judged.response ?? null,
         reply: judged.reply ?? null,
+        ...(judged.replyRef ? { replyRef: judged.replyRef } : {}),
         ...(judged.deferralRefused ? { deferralRefused: true } : {}),
       }),
     );

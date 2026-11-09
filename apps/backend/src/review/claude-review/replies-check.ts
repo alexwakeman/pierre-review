@@ -302,7 +302,9 @@ async function ownerProviders(
   ctx: AgentContext,
   findings: readonly PriorFindingForFollowUp[],
 ): Promise<Map<number, AiProviderId>> {
-  const ownerIds = [...new Set(findings.map((f) => f.thread?.threadFindingId).filter((x): x is number => x != null))];
+  // The thread's owner, or a PR-level finding's (the row that posted the PR comment).
+  const ownerOf = (f: PriorFindingForFollowUp): number | undefined => f.thread?.threadFindingId ?? f.conversation?.ownerFindingId;
+  const ownerIds = [...new Set(findings.map(ownerOf).filter((x): x is number => x != null))];
   const out = new Map<number, AiProviderId>();
   if (ownerIds.length === 0) return out;
   const t = sch(ctx);
@@ -314,7 +316,7 @@ async function ownerProviders(
     .execute()) as Array<{ id: number; provider: string | null; model: string | null }>;
   const byOwner = new Map(rows.map((r) => [r.id, aiRunProvider(r.provider, r.model)]));
   for (const f of findings) {
-    const owner = f.thread?.threadFindingId;
+    const owner = ownerOf(f);
     const p = owner != null ? byOwner.get(owner) : undefined;
     if (p) out.set(f.id, p);
   }

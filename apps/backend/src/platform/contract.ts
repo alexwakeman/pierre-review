@@ -276,6 +276,9 @@ export interface ReviewFollowUpReport {
   acceptKind?: 'not_valid' | 'deferred' | null;
   // The reply-status text: the one-sentence acknowledgement, or the pushback.
   reply?: string | null;
+  // A PR-LEVEL finding only: the ref ('C1'…) of the PR comment that answers it. A reply status on such
+  // a finding stands only with a ref the prompt listed for it (follow-up.ts `judgeReplyReport`).
+  replyRef?: string | null;
 }
 
 // One OTHER reviewer's open thread, as Claude judged it ('R1'… as the prompt named them). Core-only

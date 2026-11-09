@@ -4937,6 +4937,10 @@ export interface FindingAutoResolveRecord {
   // only because no Limn reply followed the person's last comment there. No resolve was sent;
   // `status: 'resolved'` then means "the reply landed on a resolved thread". Absent = false.
   alreadyResolved?: boolean;
+  // A PR-LEVEL finding (a PR comment, no thread): true once GitHub hid the finding comment as
+  // RESOLVED (`minimizeComment`), GitHub's nearest thing to resolving it. `status: 'resolved'` on such
+  // a record means the acknowledgement landed AND the comment was hidden. Absent = false.
+  minimized?: boolean;
 }
 
 // The ONE pushback reply an auto run posted on a finding's thread
@@ -7168,8 +7172,12 @@ export interface ClaudeFollowUpItemRecord {
   // The text Limn would post on the thread: the short acknowledgement (accepted) or the pushback
   // (disputed). Posted automatically on an auto run when the workspace allows it, else a draft.
   response?: string | null;
-  // The latest person's reply Claude judged (author login + a short excerpt).
-  reply?: { author: string; excerpt: string } | null;
+  // The latest person's reply Claude judged (author login + a short excerpt). On a PR-LEVEL finding
+  // (`prComment`) it is the PR comment the model cited (`replyRef`), with its github.com link.
+  reply?: { author: string; excerpt: string; url?: string | null } | null;
+  // A PR-LEVEL finding only: the ref ('C1'…) of the PR comment the model cited as the answer to this
+  // finding. GitHub does not thread PR comments, so a reply status stands only with a valid ref.
+  replyRef?: string | null;
   // true ⇒ Claude accepted a "fix it later" on a BLOCKER and the server refused it (a blocker is
   // fixed in this PR). `response` is then the server's templated pushback.
   deferralRefused?: boolean;
@@ -7178,6 +7186,10 @@ export interface ClaudeFollowUpItemRecord {
   // found at run time, whatever the status.
   threadId?: number | null;
   threadFindingId?: number | null;
+  // A PR-LEVEL finding (posted as a PR comment, so it has no thread): the finding row that owns that
+  // comment (the first POSTED one up the re-raise chain), the comment's id and its github.com link.
+  // Set whenever such an owner was found at run time. Absent on an inline finding and on older rows.
+  prComment?: { findingId: number; commentId: string | null; url: string | null } | null;
 }
 
 // An earlier finding a review SETTLED by accepting a person's reply on its GitHub thread. Read-only

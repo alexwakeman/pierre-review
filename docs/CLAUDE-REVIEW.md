@@ -1484,6 +1484,57 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 - Open PRs cards: "Earlier: N fixed · N settled · N still open" — accepted is settled, disputed is
   open.
 
+#### PR-level findings: a PR comment, no thread (2026-11-09)
+
+**Why (PR DEFRA/bng-metric-template#12, local 221266):** a Codex blocker that could not be placed on a
+line was posted as a PR COMMENT. The author answered it (and the story check) in ONE later PR comment
+that neither linked nor quoted it. The next review re-judged the blocker on the code alone, repeated
+the claim the reply rebutted, and said only "Not approved: a blocker is still open." Every rule above
+read threads; a PR comment has none. Now a PR-level finding has the same lifecycle.
+
+- **Owner.** `loadPrLevelOwners` (`finding-replies.ts`): the first POSTED finding up
+  `prior_finding_id` of EITHER kind (`loadThreadOwners` with `anyKind`), kept when it was posted as a
+  PR comment (`posted_comment_kind = 'pr_comment'`). Its `github_comment_id` is the identity. No
+  schema change.
+- **Replies = the PR conversation after it** (`loadFindingConversations`, pure fold
+  `reply-text.ts` `buildConversationPool`): every later PR comment AND non-empty review body by a
+  person — never automation, never Limn's (a `limn:` attribution or ANY login's marker), the reader's
+  own unmarked ones count — after the finding comment's GitHub time. ONE pool per PR with refs
+  `C1…Cn` (oldest first), so a comment answering two findings is sent ONCE (`### PR conversation`,
+  its own nonce fence). Per finding: the ones that LINK (`issuecomment-<id>`) or QUOTE it (title or
+  first line, ≥ 12 characters) first, then newest; at most 5, 1,500 characters each.
+  `PriorFindingForFollowUp.conversation`. The rules and pool appear ONLY when a finding lists a
+  comment, so every other prompt is byte-identical (`prompt-golden.json` unchanged).
+- ⚠ **THE GATE NEEDS A CITATION.** GitHub does not thread PR comments, so a reply status on a
+  PR-level finding stands ONLY with `replyRef` naming one of ITS listed comments (`judgeReplyReport`;
+  `submit_review` `followUp[].replyRef`, `submit_replies` `replyRef`, both providers — Codex's strict
+  schema derives from the same zod shape). No ref, or another finding's, ⇒ unreported. A deferred
+  blocker is still refused. The item stores `replyRef`, `reply {author, excerpt, url}` and
+  `prComment {findingId, commentId, url}`.
+- **It starts a replies pass** like a reply on a thread: `newestPrLevelReplyTimes`
+  (db/review-threads-for-review.ts) — a person's PR comment or review body after one of Limn's PR-level
+  findings (own or a teammate's imported one) — is folded into `newestOwn` (`foldPrLevelReply`, never
+  a Check threads input). Same 5-minute settle, daily cap and budget gate; the pass runs on the
+  owner's provider; coverage counts the comment's time.
+- **GitHub writes** (`pr-level-writes.ts`), each a NEW PR comment that links the finding and carries
+  `<!-- pierre:claude-review-followup on=<finding comment id> act=still_open|ack -->` (Limn-posted for
+  every reader; any Limn's marker counts as said). Claim before write, never retried by a run, own
+  findings only (`ownOnly`; a teammate's are judged and shown, never written on):
+  - **Addressed / no longer applies / accepted** — under the auto-resolve switches (path A or B):
+    ONE acknowledgement ("Addressed in abc1234: <how>", or the answer to the reply), THEN the finding
+    comment is HIDDEN as RESOLVED (`minimizeIssueComment`, ledger kind `resolve`). Recorded on the
+    owner's `auto_resolve` (`minimized: true`).
+  - **Still open / disputed** — ONE "**Still open:** <reason>" PR comment, **AT MOST ONCE PER
+    FINDING, EVER**: the owner's `pushback` record (shared by the pushback of a disputed reply on an
+    auto run, `still-open.ts` on a posted review, and the tab's buttons) and any Limn's
+    `act=still_open` marker.
+- **The panel.** A PR-level row shows "PR comment" (the finding's comment), "@who commented: …"
+  (linked), the status chip and the how, with "Post reply" / "Post still open" (the same route) and
+  **"Mark resolved"** — the hide alone, `POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/resolve`
+  (`manual-reply.ts` `markPrLevelResolved`, `github_write` tier).
+- Pinned by `pr-level-findings-pipeline.test.ts` (the 221266 shape: one PR comment answering two
+  findings) and `pr-level-findings.test.ts`.
+
 ### The replies pass (judge just the replies, 2026-10-27)
 
 A reply on one of Limn's posted findings used to wait for the next full review. A REPLIES PASS judges
@@ -1522,8 +1573,10 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   `AiRunGate kind="thread_check"`), `POST /api/prs/:id/claude-review/replies`. ⚠ Never while a FULL
   review of the PR is queued or running (`reviewHeldForPr` — it judges the replies itself; refused
   `review_in_progress`, re-checked at launch), never on a closed PR.
+- **PR-level findings** (§ Replies → PR-level findings) are judged in the same pass: a person's PR
+  comment after one starts it, its block lists the PR conversation refs, and `replyRef` is required.
 - **The run.** Per thread, the PROVIDER of the run that OWNS it (the first inline-posted finding up
-  the chain; `followUpProvider`: the owner's when it can still run, else the default); one agent run
+  the chain, or a PR-level finding's owner; `followUpProvider`: the owner's when it can still run, else the default); one agent run
   per provider group, Claude first, one after the other in the ONE shared review slot. STANDARD depth
   (`claude-sonnet-5`; Codex resolves the role to Terra), the Effort setting (`agenticRunEffort`),
   read-only: Read/Glob/Grep in the PR's read-only worktree behind the path guard (no checkout ⇒ the
@@ -3882,6 +3935,8 @@ inline comment and reopened nothing — the PR author could not find the "open p
 every open point a Limn review holds is LOCATABLE: recorded, said on its thread, and listed for the
 author. And the prose may not name an open point that is not recorded.
 
+- **A PR-LEVEL finding** (posted as a PR comment, no thread) gets ONE "**Still open:** <reason>" PR
+  comment linking it, at most once per finding EVER (§ Replies → PR-level findings).
 - **THE JUDGEMENT** (shared `still-open.ts`, ONE rule): a follow-up item `not_addressed` /
   `partly_addressed` / `reply_disputed` on an earlier Limn finding (`isStillOpenFollowUp`), or a thread
   judgement whose comment holds up (`valid` / `partly_valid`) and is `not_addressed` /

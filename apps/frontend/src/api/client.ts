@@ -1539,6 +1539,12 @@ export const api = {
     fetch(`/api/claude-reviews/${reviewId}/follow-up/${priorFindingId}/reply`, jsonBody('POST')).then((r) =>
       handle<FollowUpReplyResult>(r),
     ),
+  // "Mark resolved" on a PR-level follow-up item: the server hides the finding comment as RESOLVED
+  // on GitHub, claiming the record first (a second click answers 409).
+  resolvePrLevelFinding: (reviewId: number, priorFindingId: number) =>
+    fetch(`/api/claude-reviews/${reviewId}/follow-up/${priorFindingId}/resolve`, jsonBody('POST')).then((r) =>
+      handle<FollowUpReplyResult>(r),
+    ),
   activeClaudeReviews: () =>
     get<ActiveReviewsResponse>('/api/claude-reviews/active'),
   // One entry per PR (its most-recent succeeded review) within the timeline

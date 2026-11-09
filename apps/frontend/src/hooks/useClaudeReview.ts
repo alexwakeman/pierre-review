@@ -366,6 +366,26 @@ export function usePostFollowUpReply(prId: number, reviewId: number, priorFindin
   });
 }
 
+// "Mark resolved" on a PR-LEVEL follow-up item (a finding posted as a PR comment, no thread): hides
+// the finding comment as RESOLVED on GitHub. Shares the reply's mutation key, so the two never run
+// at once for one item.
+export function useResolvePrLevelFinding(prId: number, reviewId: number, priorFindingId: number) {
+  const qc = useQueryClient();
+  const refresh = (): void => {
+    void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+    void qc.invalidateQueries({ queryKey: ['claude-review-by-id', reviewId] });
+  };
+  return useMutation({
+    mutationKey: followUpReplyMutationKey(reviewId, priorFindingId),
+    mutationFn: () => api.resolvePrLevelFinding(reviewId, priorFindingId),
+    onSuccess: () => {
+      refresh();
+      void invalidateAfterPrWrite(qc, prId);
+    },
+    onError: refresh,
+  });
+}
+
 export function useCancelReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({

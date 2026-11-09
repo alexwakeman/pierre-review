@@ -43,6 +43,10 @@
 // `continuationThreadMap`, so the run's judgement, this file's writes and the author's still-open
 // card all land on the continuation.
 //
+// PR-LEVEL FINDINGS (posted as a PR comment: GitHub gives them no thread): ONE "**Still open:**
+// <reason>" PR comment linking the finding, AT MOST ONCE PER FINDING, EVER — the owner row's `pushback`
+// record (shared with a disputed reply's pushback) and any Limn's marker (pr-level-writes.ts).
+//
 // ⚠ CLAIM BEFORE EVERY WRITE: a row in `claude_still_open_posts` (the unique claim key is the
 // compare-and-set) BEFORE the GitHub call, then settled `posted` / `failed` with GitHub's words.
 // NEVER RETRIED. A new thread refused because the head moved wrote nothing, so its claim is released.
@@ -394,6 +398,8 @@ export interface StillOpenResult {
   failed: number[];
   // Threads left alone because the live read failed (recorded as this head's reply claim).
   unread: number[];
+  // PR-LEVEL findings (posted as a PR comment) that got their ONE "Still open:" PR comment (owner ids).
+  prLevel?: number[];
 }
 
 /**
@@ -443,6 +449,11 @@ async function postStillOpen(
       .execute()) as Array<{ owner: string; name: string; number: number; headSha: string | null }>
   )[0];
   if (pr == null || pr.headSha == null || pr.headSha.toLowerCase() !== review.headSha.toLowerCase()) return null;
+  const footer = runs.length > 1 ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
+
+  // PR-LEVEL FINDINGS (posted as a PR comment: no thread): ONE "Still open:" PR comment linking the
+  // finding, EVER (pr-level-writes.ts; the owner's `pushback` record). The later half's word wins.
+  const prLevelDone = await postPrLevelStillOpens(ctx, { accountId, prId, reviewId, runs, footer });
 
   const comments = (await ctx.db
     .select({ id: rc.id, threadId: rc.threadId, databaseId: rc.databaseId, body: rc.body, createdAt: rc.createdAt })
@@ -462,7 +473,12 @@ async function postStillOpen(
     if (post != null && !post.stillOpen) limnRoots.set(threadId, { severity: sev(post.severity) });
   }
   const candidates = stillOpenCandidates(runs, limnRoots);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    if (prLevelDone.length === 0) return null;
+    await deps.notePrChanged(accountId, [prId]).catch(() => {});
+    await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    return { replied: [], reopened: [], escalated: [], failed: [], unread: [], prLevel: prLevelDone };
+  }
 
   const threads = (await ctx.db
     .select({
@@ -499,9 +515,8 @@ async function postStillOpen(
   const { prAuthorIsAccount } = await import('../../coding/ai-fix/auto-fix.js');
   const ownPr = await prAuthorIsAccount(ctx, accountId, prId);
 
-  const footer = runs.length > 1 ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
-  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [], unread: [] };
-  let wrote = false;
+  const result: StillOpenResult = { replied: [], reopened: [], escalated: [], failed: [], unread: [], ...(prLevelDone.length > 0 ? { prLevel: prLevelDone } : {}) };
+  let wrote = prLevelDone.length > 0;
 
   // ⚠ THE CLAIM: insert-or-nothing on the unique (account, key). true = this call owns the write.
   const claim = async (
@@ -681,4 +696,54 @@ async function postStillOpen(
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return result;
+}
+
+/**
+ * The PR-level points the run(s) hold open (`isStillOpenFollowUp`, the later run's word winning), by
+ * the follow-up's finding id → the reason (the one-line how, else the explanation). Pure.
+ */
+export function prLevelStillOpenItems(runs: readonly JudgingRun[]): Map<number, string | null> {
+  const out = new Map<number, string | null>();
+  for (const r of runs) {
+    for (const it of r.followUp?.items ?? []) {
+      if (it == null || it.prComment == null || it.status === 'not_checked') continue;
+      if (!isStillOpenFollowUp(it.status)) {
+        out.delete(it.priorFindingId);
+        continue;
+      }
+      out.set(it.priorFindingId, (it.how ?? '').trim() || it.explanation || null);
+    }
+  }
+  return out;
+}
+
+/** Post the PR-level "Still open:" comments (own findings only). The owner ids that got one. */
+async function postPrLevelStillOpens(
+  ctx: AgentContext,
+  a: { accountId: number; prId: number; reviewId: number; runs: readonly JudgingRun[]; footer: string },
+): Promise<number[]> {
+  const items = prLevelStillOpenItems(a.runs);
+  if (items.size === 0) return [];
+  const [{ loadPrLevelOwners }, { postPrLevelStillOpen }] = await Promise.all([
+    import('./finding-replies.js'),
+    import('./pr-level-writes.js'),
+  ]);
+  const owners = await loadPrLevelOwners(ctx, a.accountId, a.prId, [...items.keys()], { ownOnly: true });
+  const done: number[] = [];
+  const seen = new Set<number>();
+  for (const [id, owner] of owners) {
+    if (seen.has(owner.id) || owner.pushback != null) continue;
+    seen.add(owner.id);
+    const r = await postPrLevelStillOpen(ctx, {
+      accountId: a.accountId,
+      prId: a.prId,
+      reviewId: a.reviewId,
+      owner,
+      footer: a.footer,
+      how: 'auto',
+      reason: items.get(id) ?? null,
+    });
+    if (r.kind === 'done' && r.status === 'posted') done.push(owner.id);
+  }
+  return done;
 }

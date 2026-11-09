@@ -39,6 +39,9 @@
 // ⚠ A RESOLVED thread with a reply is judged the SAME way (it is no longer settled on sight): the
 // prompt says it was resolved and by whom, it is selected last, and auto-pushback.ts never posts on
 // it (a manual "Post reply" still may).
+// ⚠ A PR-LEVEL finding (posted as a PR comment) has no thread: its replies are the PR conversation
+// after it (`conversation`), and a reply status stands ONLY when the model cites one of ITS comments
+// by `replyRef` (`judgeReplyReport`). Otherwise exactly as above.
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -49,7 +52,14 @@ import type {
 } from '@pierre-review/shared';
 import { oneLineHow } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
-import { RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
+import {
+  RESPONSE_CHARS,
+  judgeableReplies,
+  replyExcerpt,
+  type FindingConversation,
+  type FindingReply,
+  type PrConversationReply,
+} from './reply-text.js';
 
 // ---- caps (the prompt block's budget) ----
 export const PRIOR_FINDINGS_MAX = 40;
@@ -106,11 +116,24 @@ export interface PriorFindingForFollowUp {
     isResolved?: boolean;
     resolvedBy?: string | null;
   } | null;
+  // A PR-LEVEL finding (posted as a PR comment, no thread): the PR conversation after it
+  // (finding-replies.ts `loadFindingConversations`). Absent ⇒ inline, or none found.
+  conversation?: FindingConversation | null;
 }
 
-/** Does this earlier finding have a person's reply to judge? */
-export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread'>): boolean {
-  return judgeableReplies(f.thread?.replies).length > 0;
+/** Does this earlier finding have a person's reply to judge (on its thread, or in the PR conversation)? */
+export function hasReplies(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): boolean {
+  return judgeableReplies(f.thread?.replies).length > 0 || (f.conversation?.replies.length ?? 0) > 0;
+}
+
+/** The PR comment a reply status on a PR-level finding cites, or null (no ref, or not one of its own). */
+export function citedConversationReply(
+  f: Pick<PriorFindingForFollowUp, 'conversation'>,
+  replyRef: unknown,
+): PrConversationReply | null {
+  if (typeof replyRef !== 'string' || !f.conversation) return null;
+  const ref = replyRef.trim().toUpperCase();
+  return f.conversation.replies.find((r) => r.ref === ref) ?? null;
 }
 
 /**
@@ -251,6 +274,7 @@ function promptSize(f: PriorFindingForFollowUp): number {
     Math.min(f.diffHunk?.length ?? 0, PRIOR_HUNK_CHARS) +
     Math.min(f.suggestion?.length ?? 0, PRIOR_SUGGESTION_CHARS) +
     (f.thread?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
+    (f.conversation?.replies ?? []).reduce((n, r) => n + r.body.length + r.author.length + 40, 0) +
     200
   );
 }
@@ -366,28 +390,45 @@ function clipResponse(s: unknown): string | null {
  *   - the posted text is Claude's, clipped, else a templated one.
  */
 export function judgeReplyReport(
-  f: Pick<PriorFindingForFollowUp, 'severity' | 'thread'>,
-  r: Pick<ReviewFollowUpReport, 'status' | 'acceptKind' | 'reply'>,
-): Pick<ClaudeFollowUpItemRecord, 'status' | 'acceptKind' | 'response' | 'reply' | 'deferralRefused'> | null {
+  f: Pick<PriorFindingForFollowUp, 'severity' | 'thread' | 'conversation'>,
+  r: Pick<ReviewFollowUpReport, 'status' | 'acceptKind' | 'reply' | 'replyRef'>,
+): Pick<ClaudeFollowUpItemRecord, 'status' | 'acceptKind' | 'response' | 'reply' | 'deferralRefused' | 'replyRef'> | null {
   if (!isReplyStatus(r.status) || !hasReplies(f)) return null;
-  const people = judgeableReplies(f.thread!.replies);
-  const last = people[people.length - 1]!;
-  const reply = replyExcerpt(last);
+  const people = judgeableReplies(f.thread?.replies);
+  let reply: ClaudeFollowUpItemRecord['reply'];
+  let cited: Pick<ClaudeFollowUpItemRecord, 'replyRef'> = {};
+  if (people.length > 0) {
+    reply = replyExcerpt(people[people.length - 1]!);
+  } else {
+    // ⚠ A PR-LEVEL finding: GitHub does not thread PR comments, so the model must NAME the comment it
+    // judged, and it must be one listed for THIS finding. No valid ref ⇒ unreported.
+    const c = citedConversationReply(f, r.replyRef);
+    if (!c) return null;
+    reply = { ...replyExcerpt(c), url: c.url };
+    cited = { replyRef: c.ref };
+  }
   const text = clipResponse(r.reply);
   if (r.status === 'reply_accepted') {
     const kind = r.acceptKind === 'not_valid' || r.acceptKind === 'deferred' ? r.acceptKind : null;
     if (kind == null) return null;
     if (kind === 'deferred' && f.severity === 'blocker') {
-      return { status: 'reply_disputed', acceptKind: null, response: BLOCKER_DEFERRAL_TEXT, reply, deferralRefused: true };
+      return { status: 'reply_disputed', acceptKind: null, response: BLOCKER_DEFERRAL_TEXT, reply, deferralRefused: true, ...cited };
     }
     return {
       status: 'reply_accepted',
       acceptKind: kind,
       response: text ?? (kind === 'deferred' ? ACCEPT_DEFERRED_TEXT : ACCEPT_NOT_VALID_TEXT),
       reply,
+      ...cited,
     };
   }
-  return { status: 'reply_disputed', acceptKind: null, response: text ?? DISPUTE_TEXT, reply };
+  return { status: 'reply_disputed', acceptKind: null, response: text ?? DISPUTE_TEXT, reply, ...cited };
+}
+
+/** The `prComment` an item of a PR-level finding carries (none for an inline one). */
+export function prCommentOf(f: Pick<PriorFindingForFollowUp, 'thread' | 'conversation'>): Pick<ClaudeFollowUpItemRecord, 'prComment'> {
+  if (f.thread || !f.conversation) return {};
+  return { prComment: { findingId: f.conversation.ownerFindingId, commentId: f.conversation.commentId, url: f.conversation.url } };
 }
 
 function clipExplanation(s: unknown): string | null {
@@ -427,6 +468,7 @@ function recordFor(
     priorPosted: f.posted,
     ...(statusCarried ? { statusCarried: true } : {}),
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
+    ...prCommentOf(f),
   };
 }
 
@@ -485,6 +527,7 @@ export function reconcileFollowUp(
             ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
             response: judged.response ?? null,
             reply: judged.reply ?? null,
+            ...(judged.replyRef ? { replyRef: judged.replyRef } : {}),
             ...(judged.deferralRefused ? { deferralRefused: true } : {}),
           }),
         );

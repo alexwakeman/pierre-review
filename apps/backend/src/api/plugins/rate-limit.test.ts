@@ -94,6 +94,8 @@ describe('tierFor — ticket review', () => {
   it('puts posting the story gaps on the GitHub-write bucket', () => {
     expect(tiers('POST', '/api/ticket-reviews/7/post')).toEqual(['github_write']);    // "Post reply" on a follow-up reply status: one thread reply, no model.
     expect(tiers('POST', '/api/claude-reviews/7/follow-up/12/reply')).toEqual(['github_write']);
+    // "Mark resolved" on a PR-level follow-up item: one GitHub hide, no model.
+    expect(tiers('POST', '/api/claude-reviews/7/follow-up/12/resolve')).toEqual(['github_write']);
   });
   it('puts the team-claim Clear (one commit-status write) on the GitHub-write bucket', () => {
     expect(tiers('POST', '/api/prs/7/claude-review/team-claim/clear')).toEqual(['github_write']);

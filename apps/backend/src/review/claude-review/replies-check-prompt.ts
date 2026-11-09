@@ -8,7 +8,14 @@
 // re-rolled while any fenced text contains it (`pickReviewNonce`).
 import type { AgentProviderId } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
-import { pushRelatedPeerBlocks, relatedCheckoutsSection, type PromptPeer } from './prompts.js';
+import {
+  conversationLine,
+  pushConversationPool,
+  pushConversationRules,
+  pushRelatedPeerBlocks,
+  relatedCheckoutsSection,
+  type PromptPeer,
+} from './prompts.js';
 import { linkedLandedBranch, type LinkedPr } from './replies-linked-prs.js';
 import {
   REPLIES_PASS_BODY_CHARS,
@@ -18,7 +25,7 @@ import {
 } from './replies-pass.js';
 
 const SUBMIT_SENTENCE =
-  'Call submit_replies EXACTLY ONCE with { replies }: one entry per thread ref (T1, T2, …), each with status, acceptKind (reply_accepted only), reply, explanation and how. Do not write prose outside the tool call.';
+  'Call submit_replies EXACTLY ONCE with { replies }: one entry per thread ref (T1, T2, …), each with status, acceptKind (reply_accepted only), reply, explanation, how and, for a finding posted as a PR comment, replyRef. Do not write prose outside the tool call.';
 
 /** The system prompt for a provider. */
 export function repliesSystemPrompt(provider: AgentProviderId): string {
@@ -110,7 +117,10 @@ export function buildRepliesPrompt(args: {
       'Where a thread says Limn already pushed back once, Limn will not post another reply there: still judge it honestly.',
     );
   }
+  const conversations = plan.sent.map((s) => s.finding.conversation);
+  if (conversations.some((c) => (c?.replies.length ?? 0) > 0)) pushConversationRules(lines);
   lines.push('');
+  pushConversationPool(lines, conversations, nonce);
   for (const { ref, finding: f, code } of plan.sent) {
     const where = f.line != null ? `${f.path}:${f.line}` : `${f.path} (whole file)`;
     const body: string[] = [`Where: ${where}`, `Severity: ${f.severity}`, `Title: ${clip(f.title, REPLIES_PASS_TITLE_CHARS)}`];
@@ -122,10 +132,14 @@ export function buildRepliesPrompt(args: {
       body.push('Code it was about (the head it was raised at):');
       body.push(clip(f.diffHunk, 1_200));
     }
-    body.push('Replies on GitHub (oldest first):');
-    for (const r of f.thread?.replies ?? []) {
-      body.push(r.fromLimn ? `@${r.author} (posted from Limn):` : `@${r.author}:`);
-      body.push(r.body);
+    if (f.conversation && f.conversation.replies.length > 0) {
+      body.push(conversationLine(f.conversation));
+    } else {
+      body.push('Replies on GitHub (oldest first):');
+      for (const r of f.thread?.replies ?? []) {
+        body.push(r.fromLimn ? `@${r.author} (posted from Limn):` : `@${r.author}:`);
+        body.push(r.body);
+      }
     }
     const links = linkedByFinding.get(f.id) ?? [];
     if (links.length > 0) {

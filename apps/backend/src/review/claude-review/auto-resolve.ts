@@ -38,6 +38,9 @@
 //   person's last comment there (`limnRepliedAfterLastPerson`), so the thread says how without
 //   repeat replies. Same claim, record `alreadyResolved: true`. A not-addressed judgement on such a
 //   thread posts nothing here (still-open.ts leaves the reader's own resolve alone too).
+//   A PR-LEVEL FINDING (posted as a PR comment: no thread; `loadPrLevelOwners`): same paths, same
+//   record and claim — ONE acknowledgement PR comment linking it, then the finding comment is hidden
+//   as RESOLVED (pr-level-writes.ts `closePrLevelFinding`).
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import {
@@ -60,9 +63,11 @@ import {
   followOwnContinuation,
   isClearReplyRefusal,
   loadPrThreads,
+  loadPrLevelOwners,
   loadThreadOwners,
   type ReplyComment,
 } from './finding-replies.js';
+import { closePrLevelFinding } from './pr-level-writes.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -248,16 +253,63 @@ async function autoResolve(
   const candidates = [...target.keys()]
     .map((id) => byId.get(id)!)
     .filter((f) => f.autoResolve == null);
-  if (candidates.length === 0) return null;
+
+  const result: AutoResolveResult = { resolved: [], failed: [] };
+  let wroteAny = false;
+
+  // A PR-LEVEL finding (posted as a PR comment, no thread): ONE acknowledgement linking it, then the
+  // finding comment is hidden as RESOLVED (pr-level-writes.ts). Same switches, same record, same claim.
+  const prLevel = await loadPrLevelOwners(
+    ctx,
+    accountId,
+    prId,
+    [...wanted.keys()].filter((id) => !owners.has(id)),
+    { ownOnly: true },
+  );
+  const prLevelDone = new Set<number>();
+  for (const [wantedId, owner] of prLevel) {
+    if (prLevelDone.has(owner.id) || owner.autoResolve != null) continue;
+    prLevelDone.add(owner.id);
+    const want = wanted.get(wantedId)!;
+    const lead =
+      want.outcome === 'reply_accepted'
+        ? (want.response ?? '').trim() || 'Thanks, that settles it.'
+        : addressedLead(want.outcome, review.headSha, want.how);
+    const footer = why === 'own_pr' ? `_Resolved by Limn’s ${aiRunProviderName(review)} review._` : autoPostFooter(aiRunProviderName(review));
+    const r = await closePrLevelFinding(
+      ctx,
+      {
+        accountId,
+        prId,
+        reviewId,
+        owner,
+        footer,
+        how: 'auto',
+        lead,
+        outcome: want.outcome,
+        acceptKind: want.acceptKind,
+        headSha: review.headSha,
+        ...(why ? { why } : {}),
+      },
+    );
+    if (r.kind !== 'done') continue;
+    wroteAny = wroteAny || r.commentId != null || r.status === 'resolved';
+    (r.status === 'resolved' ? result.resolved : result.failed).push(owner.id);
+  }
+  if (candidates.length === 0) {
+    if (wroteAny) {
+      await deps.notePrChanged(accountId, [prId]).catch(() => {});
+      await postDeps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
+    }
+    return prLevelDone.size > 0 ? result : null;
+  }
 
   const t = s(ctx);
   const crf = t.claudeReviewFindings;
   const { threads, comments } = await loadPrThreads(ctx, prId);
   const accountLogin = await postDeps.accountLogin(accountId);
 
-  const result: AutoResolveResult = { resolved: [], failed: [] };
   const taken = new Set<number>();
-  let wroteAny = false;
   for (const f of candidates) {
     const found = findFindingThread(f, threads, comments, accountLogin, taken);
     // A point continued in a new thread (still-open.ts) is resolved THERE (the reader's own only).

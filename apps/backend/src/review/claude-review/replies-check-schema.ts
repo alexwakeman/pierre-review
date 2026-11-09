@@ -39,6 +39,13 @@ export function buildSubmitRepliesShape(z: ZodNs) {
             .nullable()
             .optional()
             .describe('One or two sentences naming the code you checked.'),
+          replyRef: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              "Only with a reply_ status on a finding posted as a PR comment: the ref (C1, C2, …) of the PR comment that answers it.",
+            ),
           // No `.max()`: the server clips it (shared `oneLineHow`), so a long line never rejects the call.
           how: z
             .string()

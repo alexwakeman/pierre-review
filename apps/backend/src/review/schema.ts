@@ -162,6 +162,13 @@ function buildBaseReviewShape(z: ZodNs) {
             .describe(
               "Only with a reply_ status: the short reply to post on the thread. For reply_accepted one sentence acknowledging it; for reply_disputed a short, polite, specific pushback.",
             ),
+          replyRef: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              "Only with a reply_ status on a finding that lists PR comments (C1, C2, …): the ref of the PR comment that answers this finding.",
+            ),
         }),
       )
       .optional()
