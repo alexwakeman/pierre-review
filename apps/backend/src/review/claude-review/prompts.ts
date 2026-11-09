@@ -284,6 +284,9 @@ function pushPreviousReviewSection(
   lines.push('- no_longer_applies: the code it was about is gone or rewritten.');
   lines.push('');
   lines.push('Give a one- or two-sentence explanation that names what changed, or that nothing did.');
+  lines.push(
+    'Also give `how`: ONE line of at most 120 characters. For addressed or no_longer_applies, how it was dealt with. For not_addressed or partly_addressed, the one thing still needed to resolve it. For reply_accepted, the reason you accepted.',
+  );
   if (plan.sent.some((s) => hasReplies(s.finding))) {
     lines.push('');
     lines.push(

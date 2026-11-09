@@ -1501,6 +1501,13 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   only Codex's findings, so a reply on a Claude thread that landed while the Claude half ran is still
   judged. The sweeper's candidate read applies the same rule to a pair's coverage of own-finding
   replies (`pairOwnCoveredMs`: the pair's EARLIER-reaching half).
+- **A MOVED head a teammate's claim holds (2026-11-09).** The full review of the new head is skipped
+  for the claim, so a reply the reader wrote after the push would wait for the next push. The sweeper
+  instead asks `startRepliesCheck` at that head (auto.ts, the re-review loop's `heldByTeammate` branch,
+  `teamClaimRepliesDue`: at most once per head per settle wait) — the same per-PR daily cap, holds and
+  ONE budget gate; the pass plans from the DB and refuses with no row when no reply waits. The pass
+  never needed the same head: it reads the code at the current head. Pinned by
+  `team-claim-replies.test.ts`.
 - **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
   reply on a Limn finding is newer than what the full reviews AND the replies passes at that head
   covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
@@ -1816,6 +1823,44 @@ derived states.
   (Addressed · Partly addressed · Not addressed · No longer applies · Reply accepted · Fix later ·
   Pushed back, `claudeFindingPill`) plus "Resolved" when GitHub says so, a templated reason line and
   Claude's explanation under More. A PR whose reviews only followed up findings is listed too.
+- **THE ONE-LINE HOW ON THE PILL (2026-11-09).** A finding judgement's `reason` is the item's how
+  (shared `judgementHowOf`: `how`, else the explanation's first sentence on an older row), so the
+  line under "Not addressed · Resolved" says what is still needed. The templated line is the fallback
+  only for a judgement with no words at all.
+- ⚠ **THE NEWEST WORD MOVES THE PILL (owner decision 2026-11-09; docs/TEAM-REVIEW.md D5).** On a
+  thread of the reader's own Limn finding, a teammate's Limn word (`j=`, imported) NEWER than the
+  reader's newest own follow-up (its review's `finished_at` vs the teammate post) replaces the
+  outcome (`teammateFindingJudgement`: addressed / no longer applies as is, still open or not
+  addressed → `not_addressed`), with `finding.judgedBy` naming the teammate; the pill reads
+  "Robin’s Limn: addressed" (`claudeFindingWords`), its line the teammate's how (or still-open reason),
+  its head the teammate's; the reader's older explanation is dropped. Ties: the reader's own. Pinned
+  by `thread-judgement-how.test.ts` and `apps/frontend/test/claudeThreadMarker.test.ts`.
+
+### The one-line how (2026-11-09)
+
+Every follow-up item and every thread judgement carries ONE line (≤ `JUDGEMENT_HOW_MAX` = 120
+characters): addressed / no longer applies → HOW it was dealt with; not / partly addressed → the ONE
+thing still needed; reply accepted → the accepted reason (reply disputed → what is still needed).
+
+- **Asked of the model, both providers.** `submit_review`'s `followUp[].how` and `submit_replies`'
+  `how` (optional, nullable, no `.max()` — a long line never rejects the whole call; the Codex strict
+  schema is DERIVED from the same zod shape, `ai/result-schemas.ts`). The "Previous review" and
+  replies prompts ask for it; a thread's `reason` description and prompt line now say the same.
+  Neither section is in `prompt-golden.json`, so the golden is unchanged.
+- **Stored** on `ClaudeFollowUpItemRecord.how` (no migration: part of the follow-up JSON), clipped by
+  shared `oneLineHow`. A status the code LOCKED (same head) keeps the earlier run's how, carried on
+  `priorStatus.how`; the model's how is kept only when it agreed with the lock. Absent on older rows:
+  every reader falls back to the explanation's first sentence (`judgementHowOf`).
+- **Shown** on the thread pill line (above) and as a bold line on the AI Review follow-up row
+  (`FollowUpRow`, only when the field is set: an older row's explanation opens with the same sentence).
+- **Posted** after "Addressed in abc1234:" (auto resolve, § Auto-posting), carried in `jr=` (§ Judgements
+  travel with a post), and used as the "Still open:" reason (`stillOpenCandidates`).
+- **Not addressed on a thread the reader resolved: Limn writes nothing by itself** (still-open.ts
+  `resolvedByReader`, from `review_threads.resolved_by_login`; docs/TEAM-REVIEW.md D4). The row offers
+  **Post still open** (`stillOpenPostable`), the same `POST …/follow-up/:priorFindingId/reply` route
+  (manual-reply.ts `postStillOpenByHand`): ONE "Still open: \<how\>" reply with no footer, claimed in
+  `claude_still_open_posts` (`reply:<thread>:<head>`, shared with the automatic still-open post) BEFORE
+  the write, never retried, never a reopen. A second press is a 409.
 
 ## CI review (why checks failed — its own process)
 
@@ -3242,7 +3287,13 @@ auto-posting: claim before any GitHub write, never retried.
   as of abc1234." (footer + finding marker), THEN `setReviewThreadResolved` + `stampThreadResolved` +
   the PR change signal + settle. `auto_resolved_at` on success; a failure (reply or resolve) is
   recorded with GitHub's error and shown on the finding ("Couldn’t resolve automatically: …"), never
-  retried. A thread not synced yet, or already resolved, records nothing.
+  retried. A thread not synced yet records nothing. ⚠ **THE HOW (2026-11-09)**: the reply reads
+  "Addressed in abc1234: \<how\>" when the item has a one-line how (§ The one-line how), made safe by
+  shared `stillOpenReasonText`. ⚠ **A thread the person ALREADY RESOLVED**: an `addressed` /
+  `no_longer_applies` item with a how gets the REPLY ONLY (no resolve, footer "Checked by Limn's …
+  review."), and only while no Limn reply (any Limn's marker) follows the person's last comment there
+  (`limnRepliedAfterLastPerson`); same claim, record `alreadyResolved: true`. Anything else on a
+  resolved thread records nothing.
 - **RESOLVE MY LIMN THREADS WHEN ADDRESSED** (`autoPost.resolveOwnPrs` in the same overrides JSON,
   no column; ⚠ ON BY DEFAULT — absent reads on, a stored false is off; Settings → Auto review, outside
   the dimmed auto-post block). The SAME writer (`auto-resolve.ts`, path B) on the reader's OWN PR
@@ -3270,7 +3321,8 @@ auto-posting: claim before any GitHub write, never retried.
   `findFindingThread`, followed into the reader's own continuation) and unresolved; the finding has
   no `auto_resolve`. Same claim-before-write, never-retry, one reply per thread then the resolve,
   stamp, settle + change signal. The reply: "Addressed in abc1234 (checked by Robin’s Limn)." /
-  "No longer applies as of abc1234 (checked by Robin’s Limn)." + "_Resolved by Limn._" + the finding
+  "No longer applies as of abc1234 (checked by Robin’s Limn)." — or, when that Limn's marker sent a
+  how (`jr=`), "Addressed in abc1234 (checked by Robin’s Limn): \<how\>" — + "_Resolved by Limn._" + the finding
   marker; the name is the teammate's first name (else login), reduced to letters, digits and spaces.
   The record carries `why: 'teammate'`, `checkedBy: <login>`, `byReviewId` = the imported teammate
   review; the tab reads "Resolved automatically (checked by robin’s Limn)". ⚠ **THE TRUST GATE**
@@ -3733,6 +3785,15 @@ row (`teammate.judged`, no migration: it is part of the marker record) and serve
 `ClaudeTeammateReview.judged`. Without it, the reader's Limn learns of a teammate's judgement only
 when the thread is resolved or replied to. An older post has no `j=`: nothing is assumed.
 
+**The how travels too (`jr=`, 2026-11-09).** Beside `j=`, `jr=<comment id>:<base64>,…` carries each
+entry's one-line how (the follow-up item's `how`, else its explanation's first sentence; a thread
+judgement's `reason`), UTF-8 then standard base64 without padding — an alphabet that cannot close the
+comment — only for ids `j=` names, within `LIMN_META_JUDGED_REASONS_CHARS` (6,000; later reasons are
+left out whole). Shared `limnJudgedReasonsValue` / `parseLimnJudgedReasons`; the parse is tolerant
+(a malformed entry is dropped, never the outcome) and the text is untrusted: one line, ≤ 120
+characters, made safe again before any post. A Limn from before it ignores the key. Stored as
+`teammate.judged[].reason`. Pinned by `limn-review-meta.test.ts`.
+
 ### Every finding (2026-11-04)
 
 `teamView.allFindings: ClaudeTeamPoint[]` (`team-view.ts` `foldAllTeamFindings`, pure) lists every
@@ -3868,6 +3929,11 @@ author. And the prose may not name an open point that is not recorded.
   - ⚠ **THE READER'S OWN PR (decision D2, `facts.ownPr` = `prAuthorIsAccount`)**: never `unresolve`,
     never a new thread. The reply only: once per head on an unresolved thread, ONCE EVER on a resolved
     one (`repliedBefore`: any Limn's still-open marker on the thread, or any `reply:<node>:*` claim).
+  - ⚠ **A THREAD THE READER RESOLVED (decision D4, 2026-11-09; `facts.resolvedByReader`, from
+    `review_threads.resolved_by_login` = the account's login, kept only while GitHub's live read still
+    says resolved)**: NOTHING — no reply, no reopen, no new thread, on any PR. The reader's resolve is
+    their decision; Limn shows what is still needed and the row's "Post still open" posts it (§ The
+    one-line how). The reason posted anywhere is the item's how first, its explanation on an older row.
   - ⚠ **READ GITHUB LIVE BEFORE WRITING (gap 3)**: when the synced facts plan a write, ONE small GraphQL
     read of that thread (`deps.liveThread`: `node(id)` → `isResolved`, its last 100 comments, and the
     PR's thread roots for `c=`), outside any transaction, is folded in (`mergeLiveFacts`: reply-at-head,

@@ -48,6 +48,7 @@ import {
   resolveTicketDraft,
   resolveTicketDrafts,
   sortFindingsForDisplay,
+  stillOpenPostable,
   placeStoryFindings,
   storyChipLabel,
   storyFindingIdFor,
@@ -636,5 +637,23 @@ describe('source guards', () => {
     expect(src).not.toMatch(/dangerouslySetInnerHTML/);
     // maxLength would silently cut a paste; the counter and the check's message say what is over.
     expect(src).not.toMatch(/maxLength/);
+  });
+});
+
+// "POST STILL OPEN" (docs/CLAUDE-REVIEW.md § The one-line how): offered only where Limn posts
+// nothing by itself — a not (or partly) addressed item on a thread GitHub shows resolved.
+describe('stillOpenPostable', () => {
+  const base = { status: 'not_addressed' as const, how: 'Check the id first', explanation: null, threadId: 4, threadResolved: true };
+  it('a not-addressed item with a line, on a resolved thread', () => {
+    expect(stillOpenPostable(base)).toBe(true);
+    expect(stillOpenPostable({ ...base, status: 'partly_addressed' })).toBe(true);
+    // An older row: the explanation's first sentence is the line.
+    expect(stillOpenPostable({ ...base, how: null, explanation: 'The id is unchecked. More.' })).toBe(true);
+  });
+  it('never on an open thread, an addressed item, no thread or nothing to say', () => {
+    expect(stillOpenPostable({ ...base, threadResolved: false })).toBe(false);
+    expect(stillOpenPostable({ ...base, status: 'addressed' })).toBe(false);
+    expect(stillOpenPostable({ ...base, threadId: null })).toBe(false);
+    expect(stillOpenPostable({ ...base, how: null })).toBe(false);
   });
 });

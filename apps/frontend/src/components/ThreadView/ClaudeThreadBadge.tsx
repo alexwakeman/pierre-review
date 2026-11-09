@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { aiProviderName, type ThreadDetail } from '@pierre-review/shared';
 import {
-  CLAUDE_FINDING_LABEL,
   CLAUDE_STATE_LABEL,
+  claudeFindingWords,
   CLAUDE_VALIDITY_LABEL,
   threadPillFor,
   type ClaudeFindingPill,
@@ -75,7 +75,7 @@ export function ClaudeThreadPills({
           data-testid="claude-thread-finding"
         >
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
-          {CLAUDE_FINDING_LABEL[marker.finding]}
+          {claudeFindingWords(marker.finding, marker.findingBy)}
           {marker.state == null && marker.stale && (
             <span className="text-ui-mute">· earlier commit</span>
           )}
@@ -112,7 +112,7 @@ export function ClaudeThreadPills({
               the judgement's own. */}
           {teammateOnly ? null : (
             <p>
-              From {by}, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
+              From {marker.findingBy ?? by}, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
             </p>
           )}
           {marker.stale && <p>The pull request has new commits since.</p>}
@@ -122,7 +122,12 @@ export function ClaudeThreadPills({
               it posted, it said so on the thread, and reopened the thread if it was resolved.
             </p>
           )}
-          {teammateOnly ? null : marker.finding != null ? (
+          {teammateOnly ? null : marker.finding != null && marker.findingBy ? (
+            <p>
+              {by} posted this comment. {marker.findingBy} checked it after your Limn did, and the
+              newest check wins. Resolved is GitHub’s own state.
+            </p>
+          ) : marker.finding != null ? (
             <p>
               {by} posted this comment. The pill says what the latest review that checked it
               found: in the code, or in a reply on the thread. Resolved is GitHub’s own state.

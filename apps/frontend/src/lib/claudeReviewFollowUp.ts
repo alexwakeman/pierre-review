@@ -10,6 +10,7 @@ import {
   checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
   isThreadToFix,
+  judgementHowOf,
   storyMissingRef,
   storyName,
   TICKET_CRITERION_STATUS_LABEL,
@@ -456,6 +457,17 @@ export function replyActions(
     };
   }
   return { note: null, showText: true, canPost: false, canResolve: false };
+}
+
+/**
+ * May the row offer "Post still open"? A NOT (or partly) ADDRESSED item, with a one-line "how" to
+ * post, on a thread GitHub shows RESOLVED (Limn writes nothing there by itself). Pure.
+ */
+export function stillOpenPostable(
+  item: Pick<ClaudeFollowUpItem, 'status' | 'how' | 'explanation' | 'threadId' | 'threadResolved'>,
+): boolean {
+  if (item.status !== 'not_addressed' && item.status !== 'partly_addressed') return false;
+  return item.threadId != null && item.threadResolved === true && judgementHowOf(item) != null;
 }
 
 /**

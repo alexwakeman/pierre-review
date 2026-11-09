@@ -162,6 +162,35 @@ export function stillOpenReasonText(raw: string | null | undefined): string {
   return `${(sp > 40 ? cut.slice(0, sp) : cut).trimEnd()}…`;
 }
 
+// ── THE ONE-LINE "HOW" OF A JUDGEMENT (docs/CLAUDE-REVIEW.md § The one-line how) ─────────────────
+
+/** The longest "how" a judgement keeps (the thread assessment's `reason` has the same limit). */
+export const JUDGEMENT_HOW_MAX = 120;
+
+/** A model's one-line "how": whitespace collapsed, clipped to JUDGEMENT_HOW_MAX. null when empty. Pure. */
+export function oneLineHow(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const one = raw.replace(/\s+/g, ' ').trim();
+  if (one === '') return null;
+  return one.length > JUDGEMENT_HOW_MAX ? `${one.slice(0, JUDGEMENT_HOW_MAX - 1).trimEnd()}…` : one;
+}
+
+/** The first sentence of a longer text, clipped like a "how". null when empty. Pure. */
+export function firstSentenceHow(text: string | null | undefined): string | null {
+  const one = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (one === '') return null;
+  const m = /^(.+?[.!?])(?=\s|$)/.exec(one);
+  return oneLineHow(m?.[1] ?? one);
+}
+
+/**
+ * The "how" of one follow-up item as every surface shows it: the model's own line, else (a row from
+ * before the field) the first sentence of its explanation. null when neither says anything. Pure.
+ */
+export function judgementHowOf(it: { how?: string | null; explanation?: string | null }): string | null {
+  return oneLineHow(it.how) ?? firstSentenceHow(it.explanation);
+}
+
 /** Who made a still-open judgement shown on a thread. */
 export type ClaudeStillOpenBy =
   | { you: true }

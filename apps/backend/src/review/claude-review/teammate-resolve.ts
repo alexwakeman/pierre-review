@@ -33,7 +33,13 @@
 // DB reads and one GitHub write per thread; never inside the sync transaction (a kick from
 // sync/teammate-review-hooks.ts). Never throws.
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { continuationThreadMap, stillOpenByName, type FindingAutoResolveRecord, type TeammateReviewRecord } from '@pierre-review/shared';
+import {
+  continuationThreadMap,
+  stillOpenByName,
+  stillOpenReasonText,
+  type FindingAutoResolveRecord,
+  type TeammateReviewRecord,
+} from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
@@ -58,13 +64,21 @@ export function teammateCheckerName(login: string, name: string | null): string 
   return stillOpenByName({ you: false, login: safe(login) || 'a teammate', name: name != null ? safe(name) || null : null });
 }
 
-/** The reply posted before the thread is resolved, crediting the teammate's Limn. Pure. */
-export function teammateResolveReplyBody(outcome: TeammateResolveOutcome, headSha: string, checker: string): string {
+/**
+ * The reply posted before the thread is resolved, crediting the teammate's Limn. `how`: that Limn's
+ * one-line "how" from its marker (`jr=`) — untrusted text, made safe like every posted reason; absent
+ * on a word from an older Limn (the bare line, as before). Pure.
+ */
+export function teammateResolveReplyBody(
+  outcome: TeammateResolveOutcome,
+  headSha: string,
+  checker: string,
+  how: string | null = null,
+): string {
   const short = headSha.slice(0, 7);
-  const lead =
-    outcome === 'addressed'
-      ? `Addressed in ${short} (checked by ${checker}).`
-      : `No longer applies as of ${short} (checked by ${checker}).`;
+  const text = stillOpenReasonText(how);
+  const base = outcome === 'addressed' ? `Addressed in ${short}` : `No longer applies as of ${short}`;
+  const lead = text ? `${base} (checked by ${checker}): ${text}` : `${base} (checked by ${checker}).`;
   return `${lead}\n\n_Resolved by Limn._\n\n${FINDING_MARKER}`;
 }
 
@@ -84,15 +98,17 @@ export interface TeammateWord {
 export function teammateResolveWords(
   words: readonly TeammateWord[],
   ownNewerThan: number | null,
-): Map<string, { outcome: TeammateResolveOutcome; word: TeammateWord }> {
-  const newest = new Map<string, { outcome: string; word: TeammateWord }>();
+): Map<string, { outcome: TeammateResolveOutcome; word: TeammateWord; how?: string | null }> {
+  const newest = new Map<string, { outcome: string; word: TeammateWord; how: string | null }>();
   for (const w of [...words].sort((a, b) => a.at - b.at || a.reviewId - b.reviewId)) {
-    for (const j of w.judged) newest.set(j.commentId, { outcome: j.outcome, word: w });
+    for (const j of w.judged) newest.set(j.commentId, { outcome: j.outcome, word: w, how: j.reason ?? null });
   }
-  const out = new Map<string, { outcome: TeammateResolveOutcome; word: TeammateWord }>();
+  const out = new Map<string, { outcome: TeammateResolveOutcome; word: TeammateWord; how?: string | null }>();
   for (const [id, v] of newest) {
     if (ownNewerThan != null && ownNewerThan >= v.word.at) continue;
-    if (v.outcome === 'addressed' || v.outcome === 'no_longer_applies') out.set(id, { outcome: v.outcome, word: v.word });
+    if (v.outcome === 'addressed' || v.outcome === 'no_longer_applies') {
+      out.set(id, { outcome: v.outcome, word: v.word, ...(v.how ? { how: v.how } : {}) });
+    }
   }
   return out;
 }
@@ -311,7 +327,7 @@ async function resolveOnTeammateWord(
     let final: FindingAutoResolveRecord = rec;
     let resolvedAt: Date | null = null;
     try {
-      const body = teammateResolveReplyBody(want.outcome, head, teammateCheckerName(want.word.login, want.word.name));
+      const body = teammateResolveReplyBody(want.outcome, head, teammateCheckerName(want.word.login, want.word.name), want.how ?? null);
       const { commentId } = await deps.reply(accountId, thread.githubNodeId, body);
       wroteAny = true;
       final = { ...final, replyCommentId: commentId };

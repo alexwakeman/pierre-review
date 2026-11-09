@@ -101,7 +101,7 @@ Claims are **on by default**.
 |---|---|
 | A person opens a PR (after auto review was switched on) | Reviews it on the next one-minute tick. |
 | New commits | Reviews at once if nothing ran in the last 5 minutes; otherwise waits for 5 quiet minutes, never more than 20 minutes after the first push. A run in progress is never cancelled. |
-| A reply on one of your Limn's posted findings | A short "replies pass" (§ 7), after 5 quiet minutes. At most 5 a day per PR. |
+| A reply on one of your Limn's posted findings | A short "replies pass" (§ 7), after 5 quiet minutes. At most 5 a day per PR. Also on a new commit a teammate's claim holds, so a reply after a push is not left waiting. |
 | Another new comment in an unresolved thread, by a person or a review bot | A light "Check threads" pass. At most 30 a day per workspace. |
 | A thread is resolved, CI finishes, a deploy or coverage bot comments, your own Limn posts | **Nothing.** Resolving adds no comment, so it starts nothing. |
 
@@ -178,6 +178,9 @@ stateDiagram-v2
 - No run is recorded, no daily allowance is spent. Your Limn looks again when the lease could end,
   every 30 minutes after a "reviewed", or at once on a new commit or when Robin's review syncs.
 - On your own PR, Robin's posted review still closes your fixed Limn threads: see § 6 Resolving.
+- **Your replies are still judged (2026-11-09).** When you reply on your own Limn's findings after a
+  push and Robin's claim makes your Limn skip that commit, your Limn runs a **replies pass** at that
+  commit instead (§ 7): the same 5-a-day cap per PR and the same spend budget. Robin keeps the review.
 
 ---
 
@@ -346,6 +349,12 @@ comment ("Holds up / Partly / Doesn't hold" and "Addressed / Partly addressed / 
 outcome pill for a Limn finding ("Not addressed"). Newest judgement wins. No Limn reply ("Still
 open:", a pushback, an acknowledgement, a resolve reply) counts as a reply.
 
+**Newest judgement wins, whoever's Limn made it (2026-11-09).** On a thread of your own Limn's finding,
+a teammate's Limn that judged it after your Limn did replaces your pill, and the pill names it:
+"Robin's Limn: addressed". The line under the pill is the one-line **how**: how it was dealt with, or
+the one thing still needed. Your own resolve changes no judgement: a finding your Limn still finds not
+addressed reads "Not addressed · Resolved", with what is still needed under it.
+
 ### How a later review judges earlier comments
 
 - **Your own Limn's findings** get a follow-up: addressed, partly addressed, not addressed, no longer
@@ -356,6 +365,10 @@ open:", a pushback, an acknowledgement, a resolve reply) counts as a reply.
 - The posted review's hidden marker carries its judgements of **Limn findings** (addressed, not
   addressed, no longer applies, still open) and "still open" on any other thread — at most 50. Whether
   a person's point "holds up" is never shared; teammates see only the "Still open:" replies.
+- **Every judgement has a one-line how** (≤ 120 characters): addressed → how it was dealt with; not or
+  partly addressed → the one thing still needed; reply accepted → why. The marker carries it too
+  (`jr=`, 2026-11-09), so a teammate's Limn can say how when it resolves your thread. A Limn from
+  before it ignores the extra key.
 
 ### Still-open points: every open point has a place
 
@@ -373,6 +386,10 @@ flowchart TD
 
 On **the reader's own PR** (decision D2) Limn never reopens a thread and never starts a new one. It
 only replies: once per commit on an open thread, and once, ever, on a resolved thread.
+
+**A thread YOU resolved (decision D4, 2026-11-09):** Limn writes nothing there by itself — your resolve
+is your decision. Limn shows "Not addressed · Resolved" and what is still needed, in Limn only. The
+follow-up row offers **Post still open** to post that line yourself (once per commit).
 
 - Written only when the review is posted (automatic with posting on, or "Review and post"), and only
   if the PR has not moved past the reviewed commit. Never on another review bot's thread.
@@ -397,9 +414,15 @@ Limn resolves **only its own reader's Limn findings**, never a teammate's or a p
 
 | Setting | Default | When | Reply |
 |---|---|---|---|
-| "Resolve my Limn threads when addressed" | On | Your own PR, after any of your runs | "Addressed in abc1234." / "No longer applies as of abc1234." — "_Resolved by Limn's Claude review._" |
-| (the same setting) | On | Your own PR, open, when a teammate's posted review found your Limn finding addressed or no longer applies **at the PR's latest commit**, and no run of yours at that commit is newer | "Addressed in abc1234 (checked by Robin's Limn)." — "_Resolved by Limn._" |
+| "Resolve my Limn threads when addressed" | On | Your own PR, after any of your runs | "Addressed in abc1234: \<how\>" / "No longer applies as of abc1234: \<how\>" — "_Resolved by Limn's Claude review._" |
+| (the same setting) | On | Your own PR, open, when a teammate's posted review found your Limn finding addressed or no longer applies **at the PR's latest commit**, and no run of yours at that commit is newer | "Addressed in abc1234 (checked by Robin's Limn): \<how\>" — "_Resolved by Limn._" |
 | "Resolve Limn's threads once fixed" | Off | Any PR, automatic runs with posting on | Same wording, with the automatic-post footer |
+
+With no how (a run, or a teammate's Limn, from before it) the reply ends after the commit, as before.
+
+**A thread someone already resolved** gets ONE reply with the how — "Addressed in abc1234: \<how\>",
+no resolve — and only when no Limn reply follows the person's last comment there. So everyone sees how
+it was fixed, without repeat replies.
 
 The teammate row is how your fixed threads close while your Limn steps aside (§ 3). Your Limn acts
 on the teammate's word only when it is the newest word at that commit: a later "still open" from any
@@ -619,6 +642,8 @@ version.
 |---|---|---|
 | D1 | An earlier warning or blocker that a review judges still open stops an approval, like a new one; an earlier blocker means "request changes". | § 5 |
 | D2 | On the reader's own PR, Limn never reopens a thread and never starts a new one; it may only reply "Still open:". | § 6 |
+| D4 | A thread the reader resolved is the reader's decision (2026-11-09): a "not addressed" judgement there posts nothing by itself (Limn shows what is still needed; "Post still open" posts it); an "addressed" one posts its how once, only when no Limn reply follows the person's last comment. | § 6 |
+| D5 | Newest judgement wins on the thread pill (2026-11-09), your Limn's or a teammate's, labelled with who made it. | § 6 |
 | D3 | Limn's actions never count as the person (2026-11-08): a reply to your Limn's finding does not summon you; a PR your Limn opened is still yours; a request only your Limn answered still stands. Chronology shows two views, "People" and "People + bots", so Limn's effect on the waits is visible. | § 8 |
 
 ### Gaps that remain

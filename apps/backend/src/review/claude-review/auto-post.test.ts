@@ -1303,6 +1303,7 @@ describe('auto resolve', () => {
     priorFindingId: number,
     status: 'addressed' | 'no_longer_applies' | 'not_addressed',
     trigger: 'auto' | 'manual' = 'auto',
+    how: string | null = null,
   ) {
     const id = await persist.insertQueuedReview(ctx, pr, 'abcdef1234567', 'claude-opus-5-5' as any, 1, [], trigger);
     await persist.saveReviewSuccess(ctx, id, {
@@ -1321,12 +1322,35 @@ describe('auto resolve', () => {
         headMoved: true,
         changesSinceShown: true,
         items: [
-          { ref: 'P1', priorFindingId, sent: true, carried: false, status, explanation: null, path: 'src/p.ts', line: 10, side: 'RIGHT', severity: 'blocker', title: 'Null deref' },
+          { ref: 'P1', priorFindingId, sent: true, carried: false, status, explanation: null, ...(how ? { how } : {}), path: 'src/p.ts', line: 10, side: 'RIGHT', severity: 'blocker', title: 'Null deref' },
         ],
       },
     } as any);
     return id;
   }
+
+  it('pure: the reply says HOW after the short sha, made safe', async () => {
+    const ar = await import('./auto-resolve.js');
+    expect(ar.autoResolveReplyBody('addressed', 'abcdef1234567', null, 'Claude', undefined, 'rowSelect now reads rowid')).toMatch(
+      /^Addressed in abcdef1: rowSelect now reads rowid\n/,
+    );
+    expect(ar.addressedLead('no_longer_applies', 'abcdef1234567', 'The helper is gone @robin')).toBe(
+      'No longer applies as of abcdef1: The helper is gone @\u200brobin',
+    );
+    expect(ar.addressedLead('addressed', 'abcdef1234567', null)).toBe('Addressed in abcdef1.');
+  });
+
+  it('pure: a Limn reply after the person\'s last comment', async () => {
+    const ar = await import('./auto-resolve.js');
+    const root = { body: 'finding <!-- pierre:claude-review-finding v=1 -->', authorIsAutomation: true, authorLogin: 'limn:me' };
+    const person = { body: 'Fixed in 5e8e6ff', authorIsAutomation: false, authorLogin: 'me' };
+    const limn = { body: 'Addressed. <!-- pierre:claude-review-finding v=1 -->', authorIsAutomation: true, authorLogin: 'limn:me' };
+    expect(ar.limnRepliedAfterLastPerson([root])).toBe(false);
+    expect(ar.limnRepliedAfterLastPerson([root, person])).toBe(false);
+    expect(ar.limnRepliedAfterLastPerson([root, person, limn])).toBe(true);
+    expect(ar.limnRepliedAfterLastPerson([root, limn, person])).toBe(false);
+    expect(ar.limnRepliedAfterLastPerson([root, limn])).toBe(true);
+  });
 
   it('pure: the reply names the short sha and carries the footer + marker', async () => {
     const ar = await import('./auto-resolve.js');
@@ -1510,6 +1534,49 @@ describe('auto resolve', () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it('addressed on a thread the person ALREADY RESOLVED: ONE reply with the how, no resolve, once', async () => {
+    await setPost(true, { autoResolve: true });
+    const { pr, first, finding, thread } = await postedFinding();
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, thread.id)).execute();
+    // No how ⇒ nothing to say: nothing posted.
+    const bare = await followUpRun(pr, first, finding.id, 'addressed');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: bare }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+    const id = await followUpRun(pr, first, finding.id, 'addressed', 'auto', 'rowSelect now reads rowid');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(String(reply.mock.calls[0]![2])).toMatch(/^Addressed in abcdef1: rowSelect now reads rowid/);
+    expect(resolve).not.toHaveBeenCalled();
+    const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
+    expect(row.autoResolve).toMatchObject({ status: 'resolved', alreadyResolved: true, replyCommentId: 'RPL1' });
+    const again = await followUpRun(pr, id, finding.id, 'addressed', 'auto', 'still fine');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: again }, deps(), rdeps());
+    expect(reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('a resolved thread whose last word is already a Limn reply gets nothing', async () => {
+    await setPost(true, { autoResolve: true });
+    const { pr, first, finding, thread } = await postedFinding();
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, thread.id)).execute();
+    await db
+      .insert(schema.reviewComments)
+      .values({
+        prId: pr,
+        threadId: thread.id,
+        githubNodeId: `RC_limn${pr}`,
+        databaseId: `8${pr}`,
+        authorId: users['me'],
+        body: 'Addressed in abc1234 (checked by Robin’s Limn).\n\n<!-- pierre:claude-review-finding v=1 -->',
+        createdAt: new Date(Date.now() + 1000),
+      })
+      .execute();
+    const id = await followUpRun(pr, first, finding.id, 'addressed', 'auto', 'rowSelect now reads rowid');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
+    expect(reply).not.toHaveBeenCalled();
+  });
+
   it('reply disputed: ONE pushback per thread, ever — never resolved, auto-post switch alone', async () => {
     await setPost(true, { autoResolve: false });
     const { pr, first, finding, thread } = await postedFinding();
@@ -1566,6 +1633,21 @@ describe('auto resolve', () => {
       notePrChanged: vi.fn(async () => {}),
     };
   }
+
+  it('Post still open: a not-addressed item on a thread the reader resolved posts its how ONCE per commit', async () => {
+    const { postFollowUpReply } = await import('./manual-reply.js');
+    const { pr, first, finding, thread } = await postedFinding();
+    await db.update(schema.reviewThreads).set({ isResolved: true }).where((await import('drizzle-orm')).eq(schema.reviewThreads.id, thread.id)).execute();
+    const id = await followUpRun(pr, first, finding.id, 'not_addressed', 'manual', 'Check the id before the insert');
+    const m = mdeps();
+    const out = await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m);
+    expect(out).toMatchObject({ kind: 'done', result: { status: 'posted', commentId: 'MAN1' } });
+    expect(String(m.reply.mock.calls[0]![2])).toMatch(/^\*\*Still open:\*\* Check the id before the insert\n/);
+    expect(m.resolve).not.toHaveBeenCalled();
+    const again = await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m);
+    expect(again).toMatchObject({ kind: 'conflict', code: 'AlreadyPosted' });
+    expect(m.reply).toHaveBeenCalledTimes(1);
+  });
 
   it('Post reply (disputed) on a RESOLVED thread still posts by hand (only the automatic pushback skips it)', async () => {
     const { postFollowUpReply } = await import('./manual-reply.js');

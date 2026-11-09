@@ -1922,7 +1922,11 @@ export async function loadPriorReviewForFollowUp(
       !reraisedByEligible.has(it.priorFindingId)
     ) {
       // Kept with the answer that run gave: on a same-head re-run it stands (follow-up.ts).
-      openNotReraised.set(it.priorFindingId, { status: it.status, explanation: it.explanation ?? null });
+      openNotReraised.set(it.priorFindingId, {
+        status: it.status,
+        explanation: it.explanation ?? null,
+        ...(it.how ? { how: it.how } : {}),
+      });
     }
   }
   const mergedKept = new Set(inPair ? [] : keptForMerged.filter((id) => !seen.has(id) && !reraisedByEligible.has(id)));

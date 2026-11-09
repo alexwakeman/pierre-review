@@ -293,6 +293,43 @@ describe("Claude's own findings on their threads", () => {
     expect(threadStateBucket({ id: 2, derivedState: 'resolved' }, p)).toBe('resolved');
   });
 
+  it('THE ONE-LINE HOW: the judgement\'s reason is the line under the pill ("Not addressed · Resolved")', () => {
+    const p = pr([{ ...finding(5, 'not_addressed'), reason: 'Check the id before the insert' }]);
+    const pill = threadPillFor({ id: 5, derivedState: 'resolved' }, p);
+    if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
+    expect(pill.marker).toMatchObject({ label: 'Not addressed · Resolved', reason: 'Check the id before the insert', findingBy: null });
+  });
+
+  it("a TEAMMATE'S newer word wears its name: \"Robin’s Limn: addressed\"", () => {
+    const p = pr([
+      {
+        ...finding(6, 'addressed', { judgedBy: { login: 'robin-dunn', name: 'Robin Dunn' } }),
+        reason: 'rowSelect now reads rowid',
+      },
+      finding(7, 'addressed', { judgedBy: { login: 'robin-dunn', name: null } }),
+    ]);
+    const pill = threadPillFor({ id: 6, derivedState: 'resolved' }, p);
+    if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
+    expect(pill.marker).toMatchObject({
+      finding: 'addressed',
+      findingBy: 'Robin’s Limn',
+      label: 'Robin’s Limn: addressed · Resolved',
+      reason: 'rowSelect now reads rowid',
+    });
+    // No how sent (an older Limn): no line, never the templated "Claude’s comment…" about the reader’s own run.
+    const bare = threadPillFor({ id: 7, derivedState: 'untouched' }, p);
+    if (bare.kind !== 'claude') throw new Error('expected a Claude marker');
+    expect(bare.marker).toMatchObject({ label: 'robin-dunn’s Limn: addressed', reason: null });
+  });
+
+  it("the same teammate's still-open is shown once (the pill already names it)", () => {
+    const so = { by: { you: false as const, login: 'robin-dunn', name: 'Robin Dunn' }, reason: 'Add the guard', at: null, headSha: HEAD, severity: null, path: 'a.ts', line: 1, threadResolved: false };
+    const p = pr([{ ...finding(8, 'not_addressed', { judgedBy: { login: 'robin-dunn', name: 'Robin Dunn' } }), reason: 'Add the guard', stillOpen: so }]);
+    const pill = threadPillFor({ id: 8, derivedState: 'untouched' }, p);
+    if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
+    expect(pill.marker).toMatchObject({ label: 'Robin’s Limn: not addressed', stillOpen: null, reason: 'Add the guard' });
+  });
+
   it('an ordinary judgement carries no finding pill', () => {
     const pill = threadPillFor({ id: 9, derivedState: 'untouched' }, pr([judgement(9, 'valid', 'addressed')]));
     expect(pill.kind === 'claude' && pill.marker.finding).toBe(null);

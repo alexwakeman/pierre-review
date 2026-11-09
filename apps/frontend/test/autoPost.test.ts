@@ -121,6 +121,9 @@ describe('skips, verdicts and resolves', () => {
   it('auto resolve: resolved, or the error', () => {
     const r = { at: minsAgo(1), outcome: 'addressed' as const, byReviewId: 2, headSha: 'abc', replyCommentId: null };
     expect(autoResolveLabel({ ...r, status: 'resolved', error: null })).toBe('Resolved automatically');
+    expect(autoResolveLabel({ ...r, status: 'resolved', error: null, alreadyResolved: true })).toBe(
+      'Said how it was fixed (the thread was already resolved)',
+    );
     expect(autoResolveLabel({ ...r, status: 'failed', error: '403' })).toBe('Couldn’t resolve automatically: 403');
     expect(autoResolveLabel(null)).toBeNull();
   });

@@ -39,6 +39,14 @@ export function buildSubmitRepliesShape(z: ZodNs) {
             .nullable()
             .optional()
             .describe('One or two sentences naming the code you checked.'),
+          // No `.max()`: the server clips it (shared `oneLineHow`), so a long line never rejects the call.
+          how: z
+            .string()
+            .nullable()
+            .optional()
+            .describe(
+              'ONE line, at most 120 characters. reply_accepted: the reason you accepted. reply_disputed: the one thing still needed to resolve it.',
+            ),
         }),
       )
       .describe('One entry per thread in the message, each ref once.'),

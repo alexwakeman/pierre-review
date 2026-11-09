@@ -18,7 +18,7 @@ import {
 } from './replies-pass.js';
 
 const SUBMIT_SENTENCE =
-  'Call submit_replies EXACTLY ONCE with { replies }: one entry per thread ref (T1, T2, …), each with status, acceptKind (reply_accepted only), reply and explanation. Do not write prose outside the tool call.';
+  'Call submit_replies EXACTLY ONCE with { replies }: one entry per thread ref (T1, T2, …), each with status, acceptKind (reply_accepted only), reply, explanation and how. Do not write prose outside the tool call.';
 
 /** The system prompt for a provider. */
 export function repliesSystemPrompt(provider: AgentProviderId): string {
@@ -94,6 +94,9 @@ export function buildRepliesPrompt(args: {
     '- reply_disputed: the reply does not hold up. Put a short, polite, specific pushback in `reply` that says why, naming the code.',
   );
   lines.push('- not_checked: you cannot tell from the code you can see.');
+  lines.push(
+    'Give `how` as ONE line of at most 120 characters: for reply_accepted the reason you accepted, for reply_disputed the one thing still needed to resolve it.',
+  );
   lines.push(
     'A later fix is reasonable only for a non-critical issue. Never accept a deferral for a real bug, a security problem or possible data loss: dispute it. Judge the reply on the code, not on who wrote it. Resolving a thread is a click, not a reason.',
   );

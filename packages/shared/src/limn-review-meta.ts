@@ -25,6 +25,11 @@
 //       still-open entry is written as TWO tokens, `<id>:n,<id>:o`. A Limn from before `o` parses
 //       `[anx]` only and keeps the first entry per id, so it reads `n` (not addressed — what it
 //       understood before) and skips the `o` token; this parser lets the `o` upgrade that `n`.
+//   jr  (2026-11-09) THE ONE-LINE "HOW" of some `j=` entries: `<comment id>:<base64>` pairs,
+//       comma-separated, the text UTF-8 then standard base64 without padding (an alphabet that can
+//       never close the comment). Only ids that `j=` names; at most LIMN_META_JUDGED_REASONS_CHARS in
+//       all (later entries are left out whole). A Limn from before it ignores the key; a reader takes
+//       it as untrusted text (one line, clipped, made safe before it is ever posted).
 //   lift  `1` = THE POSTER'S CONSENT: a teammate's Limn may lift this poster's Limn block (dismiss
 //       their standing Request changes) once every point behind it is addressed (docs/CLAUDE-REVIEW.md
 //       § Lifting a teammate's block). Written only while the poster's workspace setting
@@ -52,6 +57,92 @@ export interface LimnJudgedFinding {
   // The finding comment's GitHub databaseId (digits).
   commentId: string;
   outcome: LimnJudgedOutcome;
+  // The one-line "how" (`jr=`). Absent = none sent.
+  reason?: string;
+}
+
+/** The most characters the `jr=` value may take (later reasons are left out whole). */
+export const LIMN_META_JUDGED_REASONS_CHARS = 6_000;
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+// UTF-8 + base64 by hand: this module runs in the browser and in Node, and its lib has neither
+// TextEncoder nor btoa. `encodeURIComponent` / `decodeURIComponent` do the UTF-8 part.
+function utf8ToBase64(text: string): string {
+  const bin = encodeURIComponent(text).replace(/%([0-9A-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+  let out = '';
+  for (let i = 0; i < bin.length; i += 3) {
+    const a = bin.charCodeAt(i);
+    const b = i + 1 < bin.length ? bin.charCodeAt(i + 1) : -1;
+    const c = i + 2 < bin.length ? bin.charCodeAt(i + 2) : -1;
+    out += B64[a >> 2]! + B64[((a & 3) << 4) | (b < 0 ? 0 : b >> 4)]!;
+    if (b >= 0) out += B64[((b & 15) << 2) | (c < 0 ? 0 : c >> 6)]!;
+    if (c >= 0) out += B64[c & 63]!;
+  }
+  return out;
+}
+
+function base64ToUtf8(b64: string): string | null {
+  if (b64.length % 4 === 1) return null;
+  let bits = 0;
+  let acc = 0;
+  let hex = '';
+  for (const ch of b64) {
+    const v = B64.indexOf(ch);
+    if (v < 0) return null;
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      hex += `%${((acc >> bits) & 255).toString(16).padStart(2, '0')}`;
+    }
+  }
+  try {
+    return decodeURIComponent(hex);
+  } catch {
+    return null;
+  }
+}
+
+const cleanJudgedReason = (raw: string | null | undefined): string => {
+  const one = (raw ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return one.length > 120 ? `${one.slice(0, 119).trimEnd()}…` : one;
+};
+
+/**
+ * The `jr=` value: the reasons of the entries `limnJudgedValue` keeps, in its order, within
+ * LIMN_META_JUDGED_REASONS_CHARS. '' ⇒ omitted.
+ */
+export function limnJudgedReasonsValue(judged: readonly LimnJudgedFinding[] | null | undefined): string {
+  const kept = new Set(parseLimnJudged(limnJudgedValue(judged)).map((j) => j.commentId));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  let size = 0;
+  for (const j of judged ?? []) {
+    const id = String(j.commentId ?? '');
+    if (!kept.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const text = cleanJudgedReason(j.reason);
+    if (text === '') continue;
+    const tok = `${id}:${utf8ToBase64(text)}`;
+    if (size + tok.length + 1 > LIMN_META_JUDGED_REASONS_CHARS) break;
+    size += tok.length + 1;
+    out.push(tok);
+  }
+  return out.join(',');
+}
+
+/** Parse a `jr=` value into comment id → reason (tolerant: a malformed entry is skipped). */
+export function parseLimnJudgedReasons(v: string | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (v == null) return out;
+  for (const tok of v.split(',')) {
+    const m = /^(\d{1,20}):([A-Za-z0-9+/]{1,400})$/.exec(tok.trim());
+    if (!m || out.has(m[1]!)) continue;
+    const text = cleanJudgedReason(base64ToUtf8(m[2]!));
+    if (text !== '') out.set(m[1]!, text);
+  }
+  return out;
 }
 
 /** The most judgements one marker carries (the rest are left out, never truncated mid-entry). */
@@ -166,6 +257,8 @@ export function limnReviewMarker(nonce: string, meta?: Partial<LimnReviewMeta> |
     if (lv) parts.push(`lv=${lv}`);
     const j = limnJudgedValue(meta.judged);
     if (j) parts.push(`j=${j}`);
+    const jr = j ? limnJudgedReasonsValue(meta.judged) : '';
+    if (jr) parts.push(`jr=${jr}`);
     if (meta.liftConsent === true) parts.push('lift=1');
   }
   return `<!-- pierre:claude-review ${parts.join(' ')} -->`;
@@ -192,7 +285,7 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
     const k = tok.slice(0, eq).toLowerCase();
     if (!kv.has(k)) kv.set(k, tok.slice(eq + 1));
   }
-  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv', 'j', 'lift'];
+  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv', 'j', 'jr', 'lift'];
   const legacy = !keys.some((k) => kv.has(k));
   const clean = (v: string | undefined): string | null => {
     const c = limnMetaValue(v);
@@ -216,7 +309,11 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
   const k = kv.get('k');
   const d = kv.get('d');
   const h = clean(kv.get('h'));
-  const judged = parseLimnJudged(kv.get('j'));
+  const reasons = parseLimnJudgedReasons(kv.get('jr'));
+  const judged = parseLimnJudged(kv.get('j')).map((x) => {
+    const reason = reasons.get(x.commentId);
+    return reason != null ? { ...x, reason } : x;
+  });
   return {
     legacy,
     headSha: h != null && /^[0-9a-f]{7,64}$/i.test(h) ? h.toLowerCase() : null,

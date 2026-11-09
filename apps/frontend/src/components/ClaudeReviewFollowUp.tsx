@@ -93,6 +93,7 @@ import {
   replyActions,
   replyStatusHeading,
   settledEarlierHeading,
+  stillOpenPostable,
   storyFindingIdFor,
   storyItemChipLabel,
   ticketsPanelHint,
@@ -1154,6 +1155,43 @@ function ReplyBlock({
   );
 }
 
+/**
+ * A NOT (or partly) ADDRESSED finding on a thread the reader RESOLVED: Limn posts nothing there by
+ * itself (a person's resolve is their decision), so the row offers "Post still open" — ONE
+ * "Still open: <what is still needed>" reply. The server claims the thread's still-open record first,
+ * so it can never post twice at one commit.
+ */
+function StillOpenBlock({
+  item,
+  prId,
+  reviewId,
+}: {
+  item: ClaudeFollowUpItem;
+  prId?: number;
+  reviewId?: number;
+}): JSX.Element | null {
+  const post = usePostFollowUpReply(prId ?? 0, reviewId ?? 0, item.priorFindingId);
+  const posting = useIsMutating({ mutationKey: followUpReplyMutationKey(reviewId ?? 0, item.priorFindingId) }) > 0;
+  if (prId == null || reviewId == null || !stillOpenPostable(item)) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      {post.isSuccess ? (
+        <span className={`text-meta ${MUTED}`}>Posted.</span>
+      ) : (
+        <>
+          <span className={`text-meta ${MUTED}`}>You resolved this thread. Limn posted nothing there.</span>
+          <button type="button" className={BTN} disabled={posting} onClick={() => post.mutate()}>
+            {posting ? 'Posting…' : 'Post still open'}
+          </button>
+        </>
+      )}
+      {post.error != null && (
+        <p className={`text-meta ${ERROR_TEXT}`}>{post.error instanceof Error ? post.error.message : String(post.error)}</p>
+      )}
+    </div>
+  );
+}
+
 // EXPORTED FOR THE AI FIX PICKER (AiFix/FixPicker.tsx): the same card with `actions={false}` (no
 // Post reply / Resolve, no "Raised again below") and its tick box in `selection`.
 export function FollowUpRow({
@@ -1223,6 +1261,13 @@ export function FollowUpRow({
           onOpenInChanges={onOpenInChanges}
         />
       </div>
+      {/* THE ONE-LINE HOW: how it was dealt with, or the one thing still needed. A row from before
+          the field has none; its explanation (below) opens with the same sentence. */}
+      {item.how != null && item.how.trim() !== '' && (
+        <p className="mt-1 text-body font-medium text-ui-ink" data-testid="follow-up-how">
+          <PrRefText text={item.how.trim()} />
+        </p>
+      )}
       {item.explanation != null && item.explanation !== '' ? (
         <p className={`mt-1 ${REVIEW_PROSE}`}>
           <PrRefText text={item.explanation} />
@@ -1232,6 +1277,7 @@ export function FollowUpRow({
       ) : null}
       {/* Without actions the block keeps its text and drops its buttons (they need prId + reviewId). */}
       <ReplyBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
+      <StillOpenBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
       {actions && reraised != null && (
         <button
           type="button"

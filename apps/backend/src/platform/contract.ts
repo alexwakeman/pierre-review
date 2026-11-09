@@ -269,6 +269,9 @@ export interface ReviewFollowUpReport {
     | 'reply_accepted'
     | 'reply_disputed';
   explanation: string;
+  // ONE line: how it was dealt with / the one thing still needed / the accepted reason (follow-up.ts
+  // clips it with shared `oneLineHow`). Optional: an older model answer leaves it out.
+  how?: string | null;
   // 'reply_accepted' only: how the reply settled it.
   acceptKind?: 'not_valid' | 'deferred' | null;
   // The reply-status text: the one-sentence acknowledgement, or the pushback.

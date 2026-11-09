@@ -4933,6 +4933,10 @@ export interface FindingAutoResolveRecord {
   why?: 'own_pr' | 'teammate';
   // why 'teammate' only: the teammate's GitHub login.
   checkedBy?: string;
+  // true = the person had ALREADY RESOLVED the thread, so Limn only replied (the "how"), once, and
+  // only because no Limn reply followed the person's last comment there. No resolve was sent;
+  // `status: 'resolved'` then means "the reply landed on a resolved thread". Absent = false.
+  alreadyResolved?: boolean;
 }
 
 // The ONE pushback reply an auto run posted on a finding's thread
@@ -7134,6 +7138,12 @@ export interface ClaudeFollowUpItemRecord {
   status: ClaudeFollowUpStatus;
   // Claude's one- or two-sentence explanation. null when not reported.
   explanation: string | null;
+  // THE ONE-LINE "HOW" (≤ JUDGEMENT_HOW_MAX characters, shared `judgementHowOf`): addressed / no
+  // longer applies → how it was dealt with; not / partly addressed → the one thing still needed;
+  // reply_accepted → the accepted reason. Shown on the thread pill line and the follow-up row, and
+  // posted after "Addressed in abc1234:". A status the code locked keeps the earlier run's. Absent /
+  // null on rows from before the field (readers fall back to the explanation's first sentence).
+  how?: string | null;
   // The earlier finding's anchor (lines are from the head of the review that raised it).
   path: string;
   line: number | null;
@@ -7595,7 +7605,8 @@ export interface TeammateReviewRecord {
   // databaseId. Absent = none (and on every older import).
   // `still_open` (`o`, 2026-11-05): not addressed and held open; the id may be ANY thread's root
   // comment (a person's too). docs/CLAUDE-REVIEW.md § Still-open points.
-  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open' }>;
+  // `reason` (`jr=`, 2026-11-09): that Limn's one-line "how" for the entry, when it sent one.
+  judged?: Array<{ commentId: string; outcome: 'addressed' | 'not_addressed' | 'no_longer_applies' | 'still_open'; reason?: string }>;
   // A PAIR's finding comments by node id → who raised each (from the comment's lead tag, "Codex",
   // "Claude + Codex"). Absent on a single run (its `runs[0].provider` raised every finding).
   findingProviders?: Record<string, AiProviderId[]>;
@@ -8447,6 +8458,10 @@ export interface ClaudeThreadFindingOutcome {
   replyAuthor: string | null;
   /** The review whose follow-up said so. */
   reviewId: number;
+  /** Set when a TEAMMATE'S Limn made this word: its posted review (`j=`) judged the finding NEWER
+   *  than the reader's own Limn did, and the newest word wins (docs/TEAM-REVIEW.md). The pill then
+   *  reads "Robin’s Limn: addressed". `reviewId` stays the reader's own last review. Absent = yours. */
+  judgedBy?: { login: string; name: string | null } | null;
 }
 
 export interface ClaudeThreadJudgementsForPr {

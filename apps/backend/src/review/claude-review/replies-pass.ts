@@ -28,6 +28,7 @@ import type {
   ClaudeFollowUpStatus,
   ClaudeNotApproved,
 } from '@pierre-review/shared';
+import { oneLineHow } from '@pierre-review/shared';
 import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
 import type { EarlierOpen } from './earlier-open.js';
 import { judgeReplyReport, type PriorFindingForFollowUp } from './follow-up.js';
@@ -210,6 +211,7 @@ export interface RepliesReport {
   acceptKind?: unknown;
   reply?: unknown;
   explanation?: unknown;
+  how?: unknown;
 }
 
 const clip = (s: unknown, max: number): string | null => {
@@ -282,6 +284,8 @@ export function reconcileReplies(plan: RepliesPlan, reported: ReadonlyArray<Repl
     out.push(
       itemFor(plan, finding, ref, true, judged.status, explanation, {
         ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
+        // The one-line "how": the accepted reason, or what is still needed (shared `oneLineHow`).
+        ...(oneLineHow(r?.how) ? { how: oneLineHow(r?.how) } : {}),
         response: judged.response ?? null,
         reply: judged.reply ?? null,
         ...(judged.deferralRefused ? { deferralRefused: true } : {}),

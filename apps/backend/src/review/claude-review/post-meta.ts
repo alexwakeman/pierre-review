@@ -11,6 +11,8 @@ import {
   type ClaudeThreadValidity,
   isStillOpenFollowUp,
   isStillOpenThread,
+  judgementHowOf,
+  oneLineHow,
   type LimnJudgedFinding,
   type LimnJudgedOutcome,
   type LimnReviewMeta,
@@ -66,8 +68,15 @@ export function judgedOutcomeOfThread(
 
 /** The parts of a run the judgements are read from (one run, or both halves of a pair). */
 export interface JudgingRun {
-  followUp?: { items: ReadonlyArray<{ priorFindingId: number; status: ClaudeFollowUpStatus }> } | null;
-  threadAssessments?: ReadonlyArray<{ threadId: number; addressed: ClaudeThreadAddressed; validity?: ClaudeThreadValidity }> | null;
+  followUp?: {
+    items: ReadonlyArray<{ priorFindingId: number; status: ClaudeFollowUpStatus; how?: string | null; explanation?: string | null }>;
+  } | null;
+  threadAssessments?: ReadonlyArray<{
+    threadId: number;
+    addressed: ClaudeThreadAddressed;
+    validity?: ClaudeThreadValidity;
+    reason?: string | null;
+  }> | null;
 }
 
 /**
@@ -90,17 +99,19 @@ export async function loadJudgedForPost(
     if (!cr || !crf || !rc) return [];
     const out: LimnJudgedFinding[] = [];
     const seen = new Set<string>();
-    const push = (commentId: string | null | undefined, outcome: LimnJudgedOutcome | null): void => {
-      if (commentId == null || outcome == null || seen.has(commentId) || out.length >= LIMN_META_MAX_JUDGED) return;
+    // Each entry carries its one-line "how" (`jr=`) when the run gave one.
+    type Word = { outcome: LimnJudgedOutcome; reason: string | null };
+    const push = (commentId: string | null | undefined, w: Word | null | undefined): void => {
+      if (commentId == null || w == null || seen.has(commentId) || out.length >= LIMN_META_MAX_JUDGED) return;
       seen.add(commentId);
-      out.push({ commentId, outcome });
+      out.push({ commentId, outcome: w.outcome, ...(w.reason ? { reason: w.reason } : {}) });
     };
     // 1. The follow-up: the latest half's word on a finding wins (halves in order, later overrides).
-    const byFinding = new Map<number, LimnJudgedOutcome>();
+    const byFinding = new Map<number, Word>();
     for (const r of runs)
       for (const it of r.followUp?.items ?? []) {
         const o = judgedOutcomeOfFollowUp(it.status);
-        if (o != null) byFinding.set(it.priorFindingId, o);
+        if (o != null) byFinding.set(it.priorFindingId, { outcome: o, reason: judgementHowOf(it) });
       }
     if (byFinding.size > 0) {
       const rows = (await ctx.db
@@ -114,11 +125,11 @@ export async function loadJudgedForPost(
     // 2. Thread judgements of threads whose ROOT is a Limn finding (a teammate's: the reader's own
     //    findings are never thread-judged, the follow-up covers them), and still-open judgements of
     //    every other thread.
-    const byThread = new Map<number, LimnJudgedOutcome>();
+    const byThread = new Map<number, Word>();
     for (const r of runs)
       for (const t of r.threadAssessments ?? []) {
         const o = judgedOutcomeOfThread(t.addressed, t.validity ?? 'not_checked');
-        if (o != null) byThread.set(t.threadId, o);
+        if (o != null) byThread.set(t.threadId, { outcome: o, reason: oneLineHow(t.reason) });
       }
     if (byThread.size > 0) {
       const comments = (await ctx.db
@@ -132,12 +143,13 @@ export async function loadJudgedForPost(
         if (cur == null || c.createdAt.getTime() < cur.createdAt.getTime() || (c.createdAt.getTime() === cur.createdAt.getTime() && c.id < cur.id))
           root.set(c.threadId, c);
       }
-      for (const [threadId, outcome] of [...byThread].sort((a, b) => a[0] - b[0])) {
+      for (const [threadId, w] of [...byThread].sort((a, b) => a[0] - b[0])) {
         const c = root.get(threadId);
+        const outcome = w.outcome;
         // A Limn finding's thread carries every outcome. ANY other thread — a person's comment —
         // only a still-open one (docs/CLAUDE-REVIEW.md § Still-open points): a teammate's Limn shows
         // it on that thread; an older Limn reads its `n` and finds no finding of that id.
-        if (c != null && (c.limn != null || outcome === 'still_open')) push(c.databaseId, outcome);
+        if (c != null && (c.limn != null || outcome === 'still_open')) push(c.databaseId, w);
       }
     }
     return out;

@@ -208,6 +208,8 @@ export function approvalWithdrawLines(
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */
 export function autoResolveLabel(r: FindingAutoResolveRecord | null | undefined): string | null {
   if (r == null) return null;
+  // The person had resolved it already: Limn only said how it was fixed (no resolve).
+  if (r.status === 'resolved' && r.alreadyResolved === true) return 'Said how it was fixed (the thread was already resolved)';
   if (r.status === 'resolved') {
     // Resolved on a teammate's Limn's word (gap 13): their review found it fixed at this commit.
     return r.why === 'teammate' && r.checkedBy ? `Resolved automatically (checked by ${r.checkedBy}’s Limn)` : 'Resolved automatically';

@@ -47,6 +47,7 @@ import type {
   ClaudeFollowUpLeftOutRecord,
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
+import { oneLineHow } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
 import { RESPONSE_CHARS, judgeableReplies, replyExcerpt, type FindingReply } from './reply-text.js';
 
@@ -90,7 +91,7 @@ export interface PriorFindingForFollowUp {
   carried: boolean;
   // A CARRIED, still-open item: the status the previous run gave it (and that run's explanation).
   // Absent for a 'not_checked' carry and for the previous review's own findings.
-  priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null } | null;
+  priorStatus?: { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null } | null;
   // Its GitHub thread (finding-replies.ts), attached before selection. `replies` = the people's
   // replies after the root (never automation, never Limn's own). Absent ⇒ no thread was found.
   thread?: {
@@ -144,7 +145,7 @@ export interface FollowUpPlan {
   omitted: PriorFindingForFollowUp[];
   // Finding id → the status decided in CODE because the head has not moved since the previous
   // review (see the header). Empty whenever the head moved.
-  locked: Map<number, { status: ClaudeFollowUpStatus; explanation: string | null }>;
+  locked: Map<number, { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null }>;
 }
 
 /** The templated explanation of a status the code decided because nothing has moved. */
@@ -303,7 +304,7 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
         locked.set(
           f.id,
           f.priorStatus.status === 'reply_disputed'
-            ? { status: 'not_addressed', explanation: f.priorStatus.explanation }
+            ? { status: 'not_addressed', explanation: f.priorStatus.explanation, how: f.priorStatus.how ?? null }
             : { ...f.priorStatus },
         );
       }
@@ -406,8 +407,11 @@ function recordFor(
   statusCarried = false,
   extra: Partial<ClaudeFollowUpItemRecord> = {},
 ): ClaudeFollowUpItemRecord {
+  // `how` only when there is one (an absent key reads as "no how", as on every older row).
+  const { how, ...rest } = extra;
   return {
-    ...extra,
+    ...rest,
+    ...(how ? { how } : {}),
     ref,
     priorFindingId: f.id,
     sent,
@@ -436,7 +440,7 @@ function recordFor(
 function lockFor(
   locked: FollowUpPlan['locked'],
   f: PriorFindingForFollowUp,
-): { status: ClaudeFollowUpStatus; explanation: string | null } | undefined {
+): { status: ClaudeFollowUpStatus; explanation: string | null; how?: string | null } | undefined {
   const lock = locked.get(f.id);
   if (lock && !f.priorStatus && isResolvedWithReplies(f)) return undefined;
   return lock;
@@ -453,13 +457,16 @@ export function reconcileFollowUp(
   reported: ReadonlyArray<ReviewFollowUpReport> | undefined,
 ): ClaudeFollowUpItemRecord[] {
   const known = new Set(plan.sent.map((s) => s.ref));
-  const byRef = new Map<string, { status: ClaudeFollowUpStatus; explanation: string | null; raw: ReviewFollowUpReport }>();
+  const byRef = new Map<
+    string,
+    { status: ClaudeFollowUpStatus; explanation: string | null; how: string | null; raw: ReviewFollowUpReport }
+  >();
   for (const r of reported ?? []) {
     if (!r || typeof r.ref !== 'string') continue;
     const ref = r.ref.trim().toUpperCase();
     if (!known.has(ref) || byRef.has(ref)) continue;
     if (!REPORTABLE.has(r.status)) continue;
-    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation), raw: r });
+    byRef.set(ref, { status: r.status, explanation: clipExplanation(r.explanation), how: oneLineHow(r.how), raw: r });
   }
   const locked = plan.locked ?? new Map();
   const out: ClaudeFollowUpItemRecord[] = [];
@@ -474,6 +481,7 @@ export function reconcileFollowUp(
       if (judged) {
         out.push(
           recordFor(plan, finding, ref, true, judged.status, hit.explanation, false, {
+            how: hit.how,
             ...(judged.acceptKind ? { acceptKind: judged.acceptKind } : {}),
             response: judged.response ?? null,
             reply: judged.reply ?? null,
@@ -487,13 +495,15 @@ export function reconcileFollowUp(
     const lock = hit ? lockIfReported : lockFor(locked, finding);
     if (lock) {
       // The code decides; Claude's words are kept only when it agreed.
-      const explanation = hit && hit.status === lock.status && hit.explanation ? hit.explanation : lock.explanation;
-      out.push(recordFor(plan, finding, ref, true, lock.status, explanation, true));
+      const agreed = hit != null && hit.status === lock.status ? hit : null;
+      const explanation = agreed?.explanation ? agreed.explanation : lock.explanation;
+      const how = agreed?.how ? agreed.how : (lock.how ?? null);
+      out.push(recordFor(plan, finding, ref, true, lock.status, explanation, true, { how }));
       continue;
     }
     out.push(
       hit
-        ? recordFor(plan, finding, ref, true, hit.status, hit.explanation)
+        ? recordFor(plan, finding, ref, true, hit.status, hit.explanation, false, { how: hit.how })
         : recordFor(plan, finding, ref, true, 'not_checked', null),
     );
   }
@@ -501,7 +511,7 @@ export function reconcileFollowUp(
     const lock = lockFor(locked, finding);
     out.push(
       lock
-        ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true)
+        ? recordFor(plan, finding, null, false, lock.status, lock.explanation, true, { how: lock.how ?? null })
         : recordFor(plan, finding, null, false, 'not_checked', null),
     );
   }
