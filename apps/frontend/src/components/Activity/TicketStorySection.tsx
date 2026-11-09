@@ -18,6 +18,10 @@
 //      (`afterCriteria`) — only where agentic AI runs and the ticket has a PR.
 //   2. THE TICKET AS WRITTEN — the StoryDisclosure ("As written in Jira"): the stored tracker row read
 //      through any PR on the ticket, else the ticket review's snapshot, else the sprint read's text.
+//      Its own copy of the comments is left out (`withComments={false}`): they are 3.
+//   3. THE COMMENTS, OPEN (TicketComments.tsx `StoryComments`): "Comments (n)", the newest few, "Show
+//      all n", "New since the check" — from the story view's stored read (`GET /api/ticket-story`
+//      `comments`, every tracker, a ticket with no PR too). Nothing when there are none.
 //
 // Between 1 and 2, where agentic AI runs: the DOCS CHECK block (StoryDocsAlignment.tsx). Its
 // per-criterion notes sit UNDER the criteria rows of 1 (both lists, through `docsItems`) only when the
@@ -25,9 +29,10 @@
 // docs block draws its own numbered list.
 //
 // ⚠ NOTHING HERE MAY MOUNT ON A BOARD. Every read (brief, review, docs, design) starts on mount, which
-// is fine in one story tab and would be one request per stack on Open PRs. The brief read
-// (`GET /api/ticket-story`) runs only when there is no ticket review to show.
-import { useId, useMemo, useState, type ReactNode } from 'react';
+// is fine in one story tab and would be one request per stack on Open PRs. The story read
+// (`GET /api/ticket-story`) is StoryViewBody's own — the same query key, so no second request.
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   TRACKER_PROVIDER_LABEL,
   storyDocsItemsByN,
@@ -50,6 +55,9 @@ import { InfoButton } from '../InfoModal.js';
 import { ReviewPrRefsProvider } from '../ReviewPrRefs.js';
 import { MemberCards, TicketResults } from '../TicketReviewParts.js';
 import { StoryDisclosure } from '../TicketStory.js';
+import { StoryComments } from '../TicketComments.js';
+import { newSinceCheckIds } from '../../lib/ticketComments.js';
+import { workspaceKey } from '../../hooks/useActivity.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail, StoryDocsRailSummary } from './StoryDocsAlignment.js';
 import { InRail, StorySectionNav, useInRail } from '../Ticket/StoryLayout.js';
@@ -156,10 +164,13 @@ function StoryBody({
   design: StoryDesign;
 }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
-  const reviewed = state?.latestRunId != null;
-  // The brief (and the sprint read's text) only when there is no ticket review to lead with.
-  const storyQ = useTicketStory(reviewed ? null : workspaceId, reviewed ? null : ticket.ident);
+  // The story view's own stored read (StoryViewBody holds the same key, so no request of its own): the
+  // brief and the sprint read's text lead only when there is no ticket review; the comments always.
+  const storyQ = useTicketStory(workspaceId, ticket.ident);
   const summary = storySummaryOf(state, storyQ.data);
+  const comments = storyQ.data?.comments;
+  const newIds = useMemo(() => newSinceCheckIds(comments ?? [], state), [comments, state]);
+  useRefetchCommentsAfterCheck(workspaceId, ticket.ident, state);
   const jiraRef = useMemo<TicketRef | null>(
     () => (ticket.url != null ? { key: ticket.key, url: ticket.url, provider: ticket.provider ?? 'jira', canFetchDetails: true } : null),
     [ticket.key, ticket.url, ticket.provider],
@@ -201,11 +212,27 @@ function StoryBody({
             stored={[fallback]}
             url={ticket.url}
             label={`As written in ${tracker}`}
+            withComments={false}
           />
         </>
       )}
+      <StoryComments comments={comments} newIds={newIds} />
     </>
   );
+}
+
+/** A story check reads the ticket's comments again before it runs (docs/TRACKERS.md § Ticket comments
+ *  → Fresh at every check), and the states read counts the ones it did not see. When either moves
+ *  after mount, read the stored comments again — never on mount (the story view's read is in hand). */
+function useRefetchCommentsAfterCheck(workspaceId: number | null, ident: string, state: TicketReviewState | undefined): void {
+  const qc = useQueryClient();
+  const sig = `${state?.checkedAt ?? ''}|${state?.newComments ?? 0}`;
+  const prev = useRef(sig);
+  useEffect(() => {
+    if (sig === prev.current) return;
+    prev.current = sig;
+    void qc.invalidateQueries({ queryKey: ['ticket-story', workspaceKey(workspaceId), ident] });
+  }, [qc, sig, workspaceId, ident]);
 }
 
 /** The docs check's server state, read once per Story section and handed to the heading's button and
@@ -383,6 +410,7 @@ function ReviewSummary({
           stored={[review.ticket]}
           url={ticket.url}
           label={`As written in ${tracker}`}
+          withComments={false}
         />
       </div>
     </ReviewPrRefsProvider>

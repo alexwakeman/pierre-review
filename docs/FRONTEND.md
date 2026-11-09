@@ -4145,7 +4145,8 @@ board.
 - **Two DB-only reads, both free**: `GET /api/ticket-prs` (`useTicketPrs`, key
   `['ticket-prs','ws:<id>',ident]`: the PRs + the freshest tracker row) and `GET /api/ticket-story`
   (`useTicketStory`, key `['ticket-story','ws:<id>',ident]`: the sprint read's row — type, assignee,
-  epic, the text — and the CURRENT brief). The header ticket is `storyViewTicket` (`lib/ticketStory.ts`):
+  epic, the text — the CURRENT brief, and the ticket's stored people `comments`, every tracker, also
+  on `found: false`). The header ticket is `storyViewTicket` (`lib/ticketStory.ts`):
   a sprint ticket leads with the sprint row, any other with the PR row, each field falling back.
 - Lists only THIS workspace's repos and counts the rest ("N in other workspaces"). Neither read finding
   the ticket → "This ticket isn't on this workspace's tracker." — never a 404. `workspaceId === null`
@@ -4183,16 +4184,29 @@ pills):
    (`STORY_MISSING_HEADING`, ⓘ `STORY_MISSING_EXPLAINER`), each led by its title — the M-code is never
    drawn; else the CURRENT sprint brief's summary + numbered criteria ("Worked out
    from the description" when derived; the ⓘ explains it; "Show all N criteria" past 10); else
-   "Reading this ticket…" while the brief pass will still read it; else nothing. `GET /api/ticket-story`
-   is asked only when there is no ticket review. A ticket that is not in a sprint read has no brief:
+   "Reading this ticket…" while the brief pass will still read it; else nothing. The brief leads only
+   when there is no ticket review; `GET /api/ticket-story` itself is StoryViewBody's read (the same key —
+   the section makes no request of its own) and is always in hand for the comments (4). A ticket that is not in a sprint read has no brief:
    "for any story not already summarised", the sprint builder's brief pass is what writes one.
 2. **The ticket as written** — `StoryDisclosure` labelled "As written in Jira" (the tracker's name): the
    stored tracker row read through any PR on the ticket, else the ticket review's snapshot, else the
-   sprint read's text (`storyFallbackTicket`, for a ticket with no PR).
+   sprint read's text (`storyFallbackTicket`, for a ticket with no PR). ⚠ It passes
+   `withComments={false}`: the comments are 4, never twice (a Story check block's disclosure,
+   TicketCoverage, keeps its own collapsed copy).
 3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
    (the server's `too_few_prs`). When the last finished review skipped drawing it on a limit, the
    slot's `autoSkipped` is the status line (`autoSkippedLine`, `lib/sequenceDiagrams.ts`).
+4. **Comments** — `StoryComments` (`components/TicketComments.tsx`, pure half `lib/ticketComments.ts`,
+   test/storyComments.test.ts), the LAST thing in the Ticket box, OPEN: "Comments (n)", the newest
+   `STORY_COMMENTS_SHOWN` (3) in stored order (oldest first), "Show all n"; author · relative date (full
+   date on hover) · markdown body. Bots never reach the wire. "New since the check" marks a comment
+   created after the latest check's `checkedAt`, only while the states read counts `newComments > 0`. A
+   "Met outside code changes" citation (`showTicketComment`) opens the list in full when the comment is
+   older than the newest few, scrolls to it and focuses it. From `GET /api/ticket-story` `comments` —
+   so the ticket tab, the PR's Story tab and This Sprint's tray all have them, PR or no PR. When the
+   states' `checkedAt` / `newComments` move after mount (a check re-read the comments), the section
+   invalidates its `['ticket-story', ws, ident]` key — never on mount. None stored → nothing.
 
 Between 1 and 2 (after `MemberCards` on the review path, after the brief on the other), with `me.ai`
 only: **the docs check** — `Activity/StoryDocsAlignment.tsx`, the SPA half of "Check a story against the

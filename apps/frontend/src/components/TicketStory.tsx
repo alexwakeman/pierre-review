@@ -4,7 +4,8 @@
 //                      "As written in Jira" of the Story section (Activity/TicketStorySection.tsx):
 //                      the key linked to Jira, the title, description and acceptance criteria, and
 //                      for a Jira ticket the field the criteria come from (chosen in Settings → Integrations), and the
-//                      people's comments, collapsed (TicketComments.tsx).
+//                      people's comments, collapsed (TicketComments.tsx) — except in the story view, whose
+//                      Story section shows them OPEN under the disclosure (`withComments={false}` here).
 //   (The Open PRs ticket-key modal is GONE, 2026-10-18: the key opens the story view instead,
 //    whose Story section carries this disclosure.)
 //
@@ -37,11 +38,13 @@ function JiraStory({
   jiraRef,
   fallback,
   linkKey,
+  withComments,
 }: {
   prId: number;
   jiraRef: TicketRef;
   fallback: ClaudeReviewTicket | null;
   linkKey: boolean;
+  withComments: boolean;
 }): JSX.Element {
   const { data, isLoading, isError, error } = useStoredJiraTicket(prId, jiraRef.key, true);
   const openSettings = useSettingsModal((st) => st.openSettings);
@@ -80,8 +83,9 @@ function JiraStory({
           </div>
         }
       />
-      {/* The people's comments, from the same stored read (docs/TRACKERS.md § Ticket comments). */}
-      <TicketComments comments={data.comments} />
+      {/* The people's comments, from the same stored read (docs/TRACKERS.md § Ticket comments) —
+          left out where the host shows them itself (the story view's StoryComments). */}
+      {withComments && <TicketComments comments={data.comments} />}
     </div>
   );
 }
@@ -114,6 +118,7 @@ export function StoryDisclosure({
   url,
   label = 'Ticket',
   linkKey = true,
+  withComments = true,
 }: {
   /** Any PR on the ticket (the stored tracker row is read through it); null = none, so only `stored`. */
   prId: number | null;
@@ -125,6 +130,8 @@ export function StoryDisclosure({
   label?: string;
   /** false: the key is plain text, no link into the tracker (the Story check). */
   linkKey?: boolean;
+  /** false: the people's comments are shown by the host (the story view), not here — never twice. */
+  withComments?: boolean;
 }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -147,7 +154,7 @@ export function StoryDisclosure({
         <div id={bodyId} className="mt-1.5 rounded-ui border border-ui-line p-2">
           {source.kind === 'jira' ? (
             // `source` is 'jira' only with a PR to read through (above).
-            prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} linkKey={linkKey} />
+            prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} linkKey={linkKey} withComments={withComments} />
           ) : (
             <StoredStory ticket={source.ticket} url={url} linkKey={linkKey} />
           )}

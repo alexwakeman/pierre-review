@@ -560,6 +560,65 @@ describe('GET /api/ticket-story', () => {
     // With no ref row, the old out-of-sprint row again: nothing will brief it.
     expect((await get(id('ENG-5'))).json()).toMatchObject({ briefState: 'none', ticket: { title: 'Story ENG-5' } });
   });
+
+  it('carries the ticket\'s stored PEOPLE comments, oldest first, for every tracker — this account only, found:false too', async () => {
+    const shared = await import('@pierre-review/shared');
+    const tc = schema.trackerTicketComments;
+    const at = (iso: string) => new Date(iso);
+    const row = (accountId: number, provider: string, apiRoot: string, issueKey: string, commentId: string, o: Record<string, unknown> = {}) => ({
+      accountId,
+      provider,
+      apiRoot,
+      issueKey,
+      commentId,
+      authorName: 'Amy',
+      authorId: null,
+      isBot: false,
+      body: `Comment ${commentId}`,
+      createdAt: at('2026-11-01T10:00:00Z'),
+      updatedAt: null,
+      fetchedAt: new Date(),
+      ...o,
+    });
+    const LINEAR = 'https://linear.app/acme';
+    const NOTION = `https://www.notion.so/${'a'.repeat(32)}`;
+    await db
+      .insert(tc)
+      .values([
+        // Jira ENG-1 (a sprint ticket): two people (newest stored first, served oldest first) and a bot.
+        row(1, 'jira', ROOT, 'ENG-1', 'j2', { authorName: 'Zed', body: 'Drop the 30-day rule.', createdAt: at('2026-11-03T10:00:00Z') }),
+        row(1, 'jira', ROOT, 'ENG-1', 'j1', { createdAt: at('2026-11-02T10:00:00Z') }),
+        row(1, 'jira', ROOT, 'ENG-1', 'jbot', { authorName: 'Automation for Jira', isBot: true }),
+        // Another tenant's comment on the SAME ticket: never served.
+        row(2, 'jira', ROOT, 'ENG-1', 'jforeign', { authorName: 'Mallory' }),
+        // GitHub Issues, Linear, Notion — no sprint row, so found:false, comments still served.
+        row(1, 'github', shared.GITHUB_TRACKER_ROOT, 'acme/web#12', 'g1'),
+        row(1, 'linear', LINEAR, 'ENG-123', 'l1'),
+        row(1, 'notion', NOTION, 'ENG-42', 'n1'),
+      ])
+      .execute();
+    const jira = (await get(id('ENG-1'))).json() as any;
+    expect(jira.found).toBe(true);
+    expect(jira.comments).toEqual([
+      { id: 'j1', author: 'Amy', createdAt: '2026-11-02T10:00:00.000Z', updatedAt: null, body: 'Comment j1' },
+      { id: 'j2', author: 'Zed', createdAt: '2026-11-03T10:00:00.000Z', updatedAt: null, body: 'Drop the 30-day rule.' },
+    ]);
+    for (const [provider, root, key, cid] of [
+      ['github', shared.GITHUB_TRACKER_ROOT + '/acme/web', '12', 'g1'],
+      ['linear', LINEAR, 'ENG-123', 'l1'],
+      ['notion', NOTION, 'ENG-42', 'n1'],
+    ] as const) {
+      const ident = shared.ticketIdent(provider, root, key);
+      expect(shared.parseTicketIdent(ident)).not.toBeNull();
+      const body = (await get(ident)).json() as any;
+      expect(body).toMatchObject({ found: false, ticket: null });
+      expect(body.comments.map((c: any) => c.id)).toEqual([cid]);
+    }
+    // Nothing stored → [] (a sprint ticket and an unparseable ident alike).
+    expect(((await get(id('ENG-2'))).json() as any).comments).toEqual([]);
+    expect(((await get('not an ident')).json() as any).comments).toEqual([]);
+    await db.delete(tc).execute();
+  });
 });
 
 describe('ticket checks and the change token', () => {

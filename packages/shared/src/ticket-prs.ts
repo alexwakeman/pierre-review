@@ -1,5 +1,6 @@
 import type { JiraStatusCategory, TimelinePr, TrackerProvider } from './types.js';
 import type { SprintBrief, SprintBriefState } from './sprint-graph.js';
+import type { TicketComment } from './ticket-comments.js';
 
 // THE STORY VIEW (the ticket tab) — one ticket's story and pull requests, in isolation (docs/FRONTEND.md § The story view;
 // docs/API.md § GET /api/ticket-prs). CORE and FREE: PR data is free, so the tab is free wherever it
@@ -92,6 +93,10 @@ export interface TicketStoryResponse {
   brief: SprintBrief | null;
   /** The ticket's text as the sprint read stored it ('' when empty); null when not found. */
   story: { description: string; acceptanceCriteria: string } | null;
+  /** The people's comments on the ticket as stored (`tracker_ticket_comments`, every tracker; bots
+   *  left out), OLDEST first, ≤ TICKET_COMMENTS_KEPT. Read per ticket, so present even when `found` is
+   *  false (a ticket with PRs but no sprint text). [] when none are stored. Absent from an older server. */
+  comments: TicketComment[];
 }
 
 // ── The story view's status picker — A TRACKER WRITE (Jira only) ───────────────────────────

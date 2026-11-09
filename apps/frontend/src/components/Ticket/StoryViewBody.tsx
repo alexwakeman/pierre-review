@@ -25,7 +25,8 @@ import { StoryBuildEntryProvider, type StoryBuildEntryFacts } from '../StoryBuil
 // / "Open build", StoryBuild/StoryBuildEntry.tsx); elsewhere that action reads the view's own facts.
 //
 // TWO stored reads, both DB-only and free: GET /api/ticket-prs (the PRs + the freshest tracker row) and
-// GET /api/ticket-story (the sprint read's row + the CURRENT brief). Only this workspace's repos are
+// GET /api/ticket-story (the sprint read's row + the CURRENT brief + the ticket's stored people comments,
+// which the Story section shows open — TicketComments.tsx `StoryComments`). Only this workspace's repos are
 // listed; PRs elsewhere are counted. `workspaceId === null` renders nothing (not resolved).
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;

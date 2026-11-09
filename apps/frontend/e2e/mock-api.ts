@@ -2289,6 +2289,7 @@ export async function installMockApi(
           briefState: 'none',
           brief: null,
           story: null,
+          comments: [],
         } satisfies TicketStoryResponse);
       }
       if (path.endsWith('/api/merged-prs')) return json(route, MERGED_PRS);

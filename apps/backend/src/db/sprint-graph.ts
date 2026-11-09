@@ -2,7 +2,9 @@ import { isSprintPassRunning } from './sprint-pass-flights.js';
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
   isBlockingRelation,
+  isTrackerIdent,
   parseTicketIdent,
+  trackerTicketRow,
   sprintSourceTitle,
   parseTicketLinkBlockers,
   trackerTicketIdent,
@@ -17,6 +19,7 @@ import {
   type SprintColumn,
   type SprintSource,
   type SprintStatusLayout,
+  type TicketComment,
   type TicketStoryResponse,
   type TicketStoryTicket,
   type TrackerProvider,
@@ -623,7 +626,10 @@ export async function getTicketStory(
   ident: string,
   opts: { aiEnabled: boolean },
 ): Promise<TicketStoryResponse> {
-  const none: TicketStoryResponse = { workspaceId, ident, found: false, ticket: null, briefState: 'none', brief: null, story: null };
+  // The people's comments are stored per TICKET (not per sprint row), so they ride every answer —
+  // `found: false` too (a ticket with PRs but no sprint text still has its discussion).
+  const comments = await storedTicketComments(accountId, ident);
+  const none: TicketStoryResponse = { workspaceId, ident, found: false, ticket: null, briefState: 'none', brief: null, story: null, comments };
   if (parseTicketIdent(ident) == null) return none;
   const { workspaceSite } = await import('./stories.js');
   const site = await workspaceSite(accountId, workspaceId);
@@ -667,13 +673,30 @@ export async function getTicketStory(
     inSprint,
   };
   const story = { description: row.description ?? '', acceptanceCriteria: row.acceptanceCriteria ?? '' };
-  if (!opts.aiEnabled) return { workspaceId, ident, found: true, ticket, briefState: 'off', brief: null, story };
+  if (!opts.aiEnabled) return { workspaceId, ident, found: true, ticket, briefState: 'off', brief: null, story, comments };
   const input = sprintBriefInput(row, site.provider);
   const brief = (await currentSprintBriefs(accountId, workspaceId, [{ ident, input }])).get(ident) ?? null;
   // The brief pass reads the graph: a sprint ticket and the tickets it leads to (ref rows). An old
   // out-of-sprint row is not read again, so "pending" would wait for ever — it says nothing instead.
   const briefState: TicketStoryResponse['briefState'] = brief != null ? 'current' : row === own && !inSprint ? 'none' : 'pending';
-  return { workspaceId, ident, found: true, ticket, briefState, brief, story };
+  return { workspaceId, ident, found: true, ticket, briefState, brief, story, comments };
+}
+
+/** One ticket's stored PEOPLE comments (docs/TRACKERS.md § Ticket comments), oldest first, this
+ *  account only — every tracker (Jira, GitHub Issues, Linear, Notion). DB only: the worker and the
+ *  story check write them, a view never reads the tracker. [] for an unparseable / pasted ident or a
+ *  failed read (the story view shows nothing rather than an error). */
+async function storedTicketComments(accountId: number, ident: string): Promise<TicketComment[]> {
+  const parsed = parseTicketIdent(ident);
+  if (!isTrackerIdent(parsed)) return [];
+  try {
+    const { readTicketComments, peopleComments, toWireComment } = await import('../tracker/comments.js');
+    // readTicketComments reads `ctx.db` + `ctx.schema` only (the core client and schema).
+    const ctx = { db, schema } as unknown as import('../tracker/context.js').TrackerContext;
+    return peopleComments(await readTicketComments(ctx, accountId, trackerTicketRow(parsed))).map(toWireComment);
+  } catch {
+    return [];
+  }
 }
 
 /** The brief pass's to-do list: graph NODES (sprint first, then ghosts by depth) with no current

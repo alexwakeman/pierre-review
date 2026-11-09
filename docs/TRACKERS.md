@@ -266,9 +266,13 @@ are given it as discussion — never as the story.
   that restarts the 2-minute grace window, cause `commented`), This Sprint's cards (`stale`) and its
   Refresh. The sweeper finds such tickets through `listChangedTicketIdents` (people comments stored since
   its last tick). A check from before comments were read is never made stale by them.
-- **SHOWN** under the ticket as written (`components/TicketComments.tsx`, in `StoryDisclosure`):
-  "Comments (n)", collapsed, author · date · body. They ride `GET /api/prs/:id/tracker-ticket`
-  (`JiraTicketDetails.comments`), already click-gated — no request of their own.
+- **SHOWN** in the STORY VIEW, open (`components/TicketComments.tsx` `StoryComments`, the Story
+  section's last block — the ticket tab, the PR's Story tab, This Sprint's tray): "Comments (n)", the
+  newest 3 then "Show all n", "New since the check". They ride the story view's stored read
+  `GET /api/ticket-story` (`comments`, every tracker, a ticket with no PR too) — no request of their own
+  (docs/FRONTEND.md § The Story section). A Story check block's "Ticket" disclosure still shows them
+  collapsed from `GET /api/prs/:id/tracker-ticket` (`JiraTicketDetails.comments`, click-gated); the story
+  view's "As written in …" disclosure leaves that copy out.
 - **A NEW ADAPTER** (as Notion did) plugs in by returning `FetchedTicket.comments` from its
   `reader.fetchTicket` — `{id, authorName, authorId, isBot, body (markdown), createdAt, updatedAt}`,
   `isBot` by its own rule, `undefined` when its answer did not carry them. Nothing else changes: the
