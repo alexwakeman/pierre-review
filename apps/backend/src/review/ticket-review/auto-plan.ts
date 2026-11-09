@@ -82,12 +82,16 @@ export function ticketAutoDueAt(
   nowMs: number,
 ): { dueAtMs: number | null; last: TicketAutoChange | null } {
   const seen = changes.filter((c) => Number.isFinite(c.atMs) && c.atMs <= nowMs).sort((a, b) => a.atMs - b.atMs);
-  const last = seen[seen.length - 1] ?? null;
+  const floor = lastRunAtMs ?? -Infinity;
+  // The change the check waits on is the newest one the latest run did NOT see — anything after it,
+  // or an unseen comment (the caller lists only comments the run did not see, whatever their date) —
+  // never a push the run already checked. With none, the newest change overall (as before).
+  const unseen = seen.filter((c) => c.atMs > floor || c.kind === 'commented');
+  const last = unseen[unseen.length - 1] ?? seen[seen.length - 1] ?? null;
   if (last == null) return { dueAtMs: null, last: null };
   // The burst: walk back from the newest change while each step is shorter than the window and
   // after the latest run (that run saw everything before it: a burst that began before it counts
   // from the run).
-  const floor = lastRunAtMs ?? -Infinity;
   const startOf = (c: TicketAutoChange): number => Math.max(Math.min(c.sinceMs ?? c.atMs, c.atMs), floor);
   let burstStart = last.atMs > floor ? startOf(last) : last.atMs;
   for (let i = seen.length - 2; i >= 0; i -= 1) {

@@ -37,6 +37,13 @@ const base = (over: Partial<TicketAutoPlanInputs> = {}): TicketAutoPlanInputs =>
 });
 
 describe('ticketAutoDueAt', () => {
+  it('⚠ an unseen comment is the change waited on, never a push the latest run already checked', () => {
+    const comment: TicketAutoChange = { atMs: at(-5), prId: null, kind: 'commented' };
+    // Run at 0 saw the push at -1; the comment from -5 is unseen. The wait names the comment.
+    const r = ticketAutoDueAt([comment, push(-1)], at(0), at(0.5));
+    expect(r.last).toEqual(comment);
+    expect(r.dueAtMs).toBe(at(-3));
+  });
   it('is 2 minutes after the newest change; a push to another member restarts it', () => {
     expect(TICKET_AUTO_GRACE_MS).toBe(2 * MIN);
     expect(ticketAutoDueAt([push(0)], null, at(1)).dueAtMs).toBe(at(2));
