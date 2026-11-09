@@ -38,7 +38,8 @@ loop while iterating, and the plain form is the check before pushing.
   - The ONNX scorer (only where `packages/ml` holds the weights): `ml/local-scorer`, `ml/model`.
   - A real container daemon: `sandbox/runtime/docker-real` (the sandbox image, the egress proxy and
     an internal network; builds the image once, needs the internet; skipped with its reason when no
-    daemon answers — [SANDBOX.md](SANDBOX.md) § Testing); `sandbox/workspace/mirror-real` (real git on a
+    daemon answers — [SANDBOX.md](SANDBOX.md) § Testing); `sandbox/session/fix-merge-store-real` (real git,
+    no daemon: the MERGE item's fetch into a repository that borrows the repo store); `sandbox/workspace/mirror-real` (real git on a
     blobless cache, then the workspace mirror end to end in a real sandbox; its Docker part skips the
     same way); `sandbox/services/services-real` (services on a real daemon: a refused file, a build from
     the sandbox, `limn-svc` from inside, and the BNG backend file when its clone is on the machine —

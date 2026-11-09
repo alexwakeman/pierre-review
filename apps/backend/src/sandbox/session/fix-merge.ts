@@ -113,6 +113,21 @@ export function fixRowHasWork(r: { patch?: string | null; mergeJson?: unknown; m
 
 // ---- 2. the two commits into the sandbox ------------------------------------------------------------------
 
+/**
+ * Every fetch inside a sandbox repository, which may BORROW the repo store's objects (`alternates`),
+ * passes `core.alternateRefsCommand=true` (docs/SANDBOX.md § The repo store).
+ *
+ * ⚠ Why: a DEEPENING fetch (`--depth`) runs its connectivity check WITHOUT `--not --all` but still with
+ * `--alternate-refs`, so every store keep ref becomes a POSITIVE tip to walk. A keep ref is a depth-1 cut
+ * whose parent the store does not have, and the store's `shallow` file does NOT travel through alternates:
+ * git only reads the shallow file of the repository it runs in. So the walk fails on an unrelated commit
+ * ("Failed to traverse parents of commit …", "remote did not send all necessary objects") as soon as the
+ * store holds a second keep ref. The flag gives git no alternate refs at all; objects are still read
+ * through alternates, and the fetched commit is still checked against this repository's own shallow file.
+ * Pinned by fix-merge-store-real.test.ts.
+ */
+const NO_ALTERNATE_REFS = '-c core.alternateRefsCommand=true';
+
 /** As the agent: a depth-1 repository's `.git` arrives as a tar on stdin and is fetched in as `$2`. */
 export const FETCH_INTO_REPO_SCRIPT = [
   'set -e',
@@ -121,7 +136,7 @@ export const FETCH_INTO_REPO_SCRIPT = [
   'trap \'rm -rf "$tmp"\' EXIT',
   'tar -x --no-same-owner --exclude="._*" -f - -C "$tmp" 2>/tmp/limn-merge-tar.err || { cat /tmp/limn-merge-tar.err >&2; exit 1; }',
   'cd "$repo"',
-  `git -c protocol.file.allow=always fetch --quiet --no-tags --no-write-fetch-head --depth 1 "$tmp" "+${SANDBOX_BASE_REF}:$ref"`,
+  `git ${NO_ALTERNATE_REFS} -c protocol.file.allow=always fetch --quiet --no-tags --no-write-fetch-head --depth 1 "$tmp" "+${SANDBOX_BASE_REF}:$ref"`,
   '[ "$(git rev-parse "$ref")" = "$sha" ] || { echo "The commit did not arrive." >&2; exit 1; }',
   'git rev-parse "$ref"',
 ].join('\n');
@@ -156,8 +171,9 @@ export async function fetchCommitIntoSandbox(
   }
   const done = await h.done;
   await drain;
-  if (done.code !== 0) throw new Error(`Bringing ${source.sha.slice(0, 7)} into ${repoPath} failed: ${stderr.trim().split('\n').slice(-2).join(' ').slice(0, 300)}`);
-  if (stdout.trim().split('\n').pop() !== source.sha) throw new Error(`Bringing ${source.sha.slice(0, 7)} into ${repoPath} did not reach it.`);
+  // The message is git's own last lines; the caller says what was being brought in.
+  if (done.code !== 0) throw new Error(stderr.trim().split('\n').slice(-2).join(' ').slice(0, 300) || (done.timedOut ? 'timed out' : `exit ${done.code}`));
+  if (stdout.trim().split('\n').pop() !== source.sha) throw new Error(`commit ${source.sha.slice(0, 7)} did not arrive.`);
 }
 
 // ---- 3. the merge, started by Limn (and again by the agent, from the same file) ---------------------------
@@ -219,7 +235,8 @@ export async function startMergeInSandbox(
 export const RESTORE_BUNDLE_SCRIPT = [
   'set -e',
   'cd "$1"',
-  `git fetch --quiet --no-tags --no-write-fetch-head "$2" "+${OUT_REF}:refs/limn/restored"`,
+  // Not a deepening fetch, so the store's refs are only negative here; the flag guards a later `--depth`.
+  `git ${NO_ALTERNATE_REFS} fetch --quiet --no-tags --no-write-fetch-head "$2" "+${OUT_REF}:refs/limn/restored"`,
   'git reset --quiet --hard refs/limn/restored',
   'rm -f "$2"',
   'git rev-parse HEAD',

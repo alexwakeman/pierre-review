@@ -567,6 +567,8 @@ function fixSubject(
         const source = await seams.prepare({ repoId: req.repoId, owner: req.owner, name: req.name, baseRef: m.baseRef, baseSha: w.sha, remoteRef: `refs/heads/${m.baseRef}`, pinRef: aiFixMergeRef(fixId, w.pin) });
         try {
           await fetchCommitIntoSandbox(l.runtime, l.container, repoPath, w.ref, source, (d) => seams.tarGitDir(d));
+        } catch (err) {
+          throw new SessionFail(`Limn could not bring ${m.baseRef} into the sandbox: ${scrub(err)}`);
         } finally {
           await source.cleanup().catch(() => {});
         }
@@ -576,6 +578,7 @@ function fixSubject(
       if (r?.mergeBundle) return;
       m.conflictedFiles = await startMergeInSandbox(l.runtime, l.container, repoPath, m.baseRef);
     } catch (err) {
+      if (err instanceof SessionFail) throw err;
       throw new SessionFail(`The merge of ${m.baseRef} could not be started: ${scrub(err)}`);
     }
     await saveMerge();

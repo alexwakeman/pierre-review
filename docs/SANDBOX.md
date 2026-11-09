@@ -518,6 +518,17 @@ an edit, an untracked file, hooks and an fsmonitor that would leave a mark): eve
 and `git status` are unchanged, and nothing ran. Measured on the BNG folder: no file under any `.git` was
 newer than the run's start, and `git status` was unchanged.
 
+⚠ **Every `git fetch` inside a store-borrowing repository passes `-c core.alternateRefsCommand=true`.**
+git reads only the `shallow` file of the repository it runs in, so the store's depth-1 cuts are not cuts
+there. A DEEPENING fetch (`--depth`/`--deepen`) checks connectivity with the alternate refs as POSITIVE
+tips (no `--not --all`), walks an older keep ref, misses its parent and fails ("Failed to traverse parents
+of commit …", "remote did not send all necessary objects") once the store holds a second keep ref. The
+flag gives git no alternate refs; objects are still borrowed. Copying the store's `shallow` file in is NOT
+a fix (another session adds keep refs later). The fetches today: the MERGE item's (`FETCH_INTO_REPO_SCRIPT`)
+and Resume's (`RESTORE_BUNDLE_SCRIPT`, not deepening; the flag guards a later `--depth`). `STORE_FETCH` runs
+in the store itself, which borrows nothing. Pinned by `session/fix-merge-store-real.test.ts` (`slow`, real
+git, no daemon), whose control runs the same fetch WITHOUT the flag and must still fail.
+
 ⚠ **The sandbox cannot write the store** (shared by every session): the mount is read-only and every
 file is root's (the maintenance container runs as root; the agent is uid 1001). Pinned by
 `store-real.test.ts`.
@@ -935,7 +946,7 @@ here.
 | Step | Where | What |
 |---|---|---|
 | **The commits** | host, `bases` (before the mirror) | `resolveMergePlan`: the base branch's tip NOW (Resume reuses the one picked at the start) and the merge base of it and the PR head, from Limn's clone cache; pinned as `refs/pierre/ai-fix/<fixId>/merge/{head,base,merge-base}` (dropped with the fix's other refs). No common commit ⇒ the boot fails in one line. Written to `ai_fixes.merge_json` (migration 0178). |
-| **Into the sandbox** | `afterMirror` | Both commits through the MIRROR SEAMS (`prepare` = the clone cache's depth-1 copy, the same tar stream), fetched into the PR repository as `refs/limn/merge-target` and `refs/limn/merge-base`. The repository stays SHALLOW: the PR head, the base tip and the merge base, each with its whole tree, no history between (FIX.md says `git log` is cut). |
+| **Into the sandbox** | `afterMirror` | Both commits through the MIRROR SEAMS (`prepare` = the clone cache's depth-1 copy, the same tar stream), fetched into the PR repository as `refs/limn/merge-target` and `refs/limn/merge-base`, with `core.alternateRefsCommand=true` (⚠ § The repo store: without it a store with two keep refs fails every such fetch). A failure fails the session in one line, "Limn could not bring `<base>` into the sandbox: `<git's line>`"; it is never retried. The repository stays SHALLOW: the PR head, the base tip and the merge base, each with its whole tree, no history between (FIX.md says `git log` is cut). |
 | **Limn starts the merge** | sandbox, before the agent | `~/.limn/start-merge.sh` (`START_MERGE_SCRIPT`, also the agent's "start again"): `git merge-recursive <merge base> -- HEAD <base tip>` — git's own three-way merge with the EXPLICIT merge base (a shallow repository cannot find it, and the image's git 2.39 has no `merge-tree --merge-base`); the conflicts stay in the index and the files, `MERGE_HEAD` is the base tip, so the agent's `git commit` makes a MERGE COMMIT with parents (PR head, base tip). A snapshot of the automatic merge WITH the markers is kept (`refs/limn/auto-merge`). The conflicted files are one notice and `merge_json.conflictedFiles`. |
 | **FIX.md** | seed | "First: the merge conflicts (MERGE)": the two refs and their shas, judgement over taking a side, read the lines around each hunk (nothing twice, nothing lost, no marker), `git add` + `git commit --no-edit`, never `--abort` / `--squash` / rebase / amend, how to start again, build and test, then the other fixes on top, cite MERGE. The system prompt adds one sentence. Golden: `__fixtures__/seed-fix-merge.md`. |
 | **Out of the sandbox** | after every build turn | `EXTRACT_MERGE_SCRIPT` (as the agent): `refs/limn/out` = HEAD plus ONE commit over any uncommitted change (a throw-away index); the merge commit = the oldest merge on the first-parent line since the PR head; the fix = merge..out (the row's `patch`, shown as the fix); the resolution = the merge commit against the automatic merge (`AiFix.merge.resolutionDiff`, ≤ 1 MB); a BUNDLE `refs/limn/out ^<PR head> ^<base tip>` (≤ 4 MB, else invalid, never cut) — REAL COMMITS, never a flattened patch, because GitHub sees conflicts resolved only through a merge commit. `MERGE_HEAD` still there ⇒ "not finished". |
@@ -977,7 +988,10 @@ Measured live, 2026-11-07 (`session/fix-merge-session.live.test.ts`): see § Tes
   yes; shallow, partial, missing commit, not a repository no), then with a daemon a test-named store
   filled from a DIRTY clone, a sandbox repository at exactly the commit with a patch out, the sandbox
   unable to write the store, a second base copying 4–5 objects and the same base none, the reader's clone
-  untouched; the store volume is removed after.
+  untouched; the store volume is removed after. `session/fix-merge-store-real.test.ts` (`slow`, real git,
+  no daemon): the MERGE item's fetches into a repository built by `IN_SANDBOX_FROM_STORE` from a store
+  holding an older keep ref whose parent it lacks — without `core.alternateRefsCommand=true` the fetch
+  fails as it did on #610, with it both commits arrive and the merge starts; a stored bundle comes back.
 - **Services**: the policy over normalised models shaped like the BNG backend file, every refusal and
   rewrite (`policy.test.ts`); the controller over the fake runtime — the verbs, a refused file never
   reaching compose, clashes, builds, `run` (`controller.test.ts`); the relay as REAL Node processes —

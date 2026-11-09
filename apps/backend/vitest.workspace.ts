@@ -83,6 +83,8 @@ export const SLOW_TESTS = [
   'src/coding/story-build/push-stack-db.test.ts',
   // Moved 2026-11-07 by the time budget: real git for the stacked extraction after Approve (the sandbox script and the host's bundle check)
   'src/sandbox/session/plan-session-flow-db.test.ts',
+  // Moved 2026-11-09 by the time budget: real git, a scratch store and sandbox repositories per case
+  'src/sandbox/session/fix-merge-store-real.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every
