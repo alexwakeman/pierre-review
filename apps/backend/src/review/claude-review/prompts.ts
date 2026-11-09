@@ -285,7 +285,7 @@ function pushPreviousReviewSection(
   lines.push('');
   lines.push('Give a one- or two-sentence explanation that names what changed, or that nothing did.');
   lines.push(
-    'Also give `how`: ONE line of at most 120 characters. For addressed or no_longer_applies, how it was dealt with. For not_addressed or partly_addressed, the one thing still needed to resolve it. For reply_accepted, the reason you accepted.',
+    'Also give `how`: ONE line of at most 120 characters. For addressed or no_longer_applies, how it was dealt with. For not_addressed or partly_addressed, the one thing still needed to resolve it.',
   );
   if (plan.sent.some((s) => hasReplies(s.finding))) {
     lines.push('');
@@ -301,6 +301,7 @@ function pushPreviousReviewSection(
     lines.push(
       'A later fix is reasonable only for a non-critical issue. Never accept a deferral for a real bug, a security problem or possible data loss: dispute it. Do not use either status on a finding with no replies. Do not raise a finding you accept again. Raise one you dispute again in `findings` with `priorRef`, exactly like not_addressed.',
     );
+    lines.push('With reply_accepted, `how` is the reason you accepted; with reply_disputed, the one thing still needed.');
     if (plan.sent.some((s) => isResolvedWithReplies(s.finding))) {
       lines.push(
         'Some of those threads were resolved on GitHub. Resolving is a click, not a reason: judge the reply on the code exactly as for an open thread.',
