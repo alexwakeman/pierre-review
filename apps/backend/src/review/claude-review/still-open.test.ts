@@ -305,7 +305,7 @@ describe('the prose guard', () => {
     const n = stillOpenCountOf([{ followUpItems: [{ status: 'not_addressed', priorFindingId: 1, threadId: 9 }], threadAssessments: [{ threadId: 9, validity: 'valid', addressed: 'addressed' }] }]);
     expect(n).toBe(1);
     expect(findingsNotApproved([{ by: 'Claude', verdict: 'COMMENT', summary: 'Sound.' }], [], undefined, 1)?.text).toBe(
-      'Not approved: Claude left a comment, not an approval. 1 earlier point is still open.',
+      'Not approved: Claude did not approve. 1 earlier point is still open.',
     );
   });
 });

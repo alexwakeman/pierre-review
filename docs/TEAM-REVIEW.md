@@ -276,10 +276,16 @@ When the verdict is not an approval, the review ends with one line saying why. T
 |---|---|
 | Blockers or warnings open, new or earlier | "Not approved: 2 warnings are still open." · "Not approved: 1 earlier warning is still open." · "Not approved: a blocker and 2 earlier warnings are still open." |
 | A model asked for changes | "Not approved: Codex asked for changes. <its first sentence>" |
-| A model only commented | "Not approved: Claude left a comment, not an approval. No findings are open." (or "A nit is still open." / "1 earlier point is still open.") |
+| A model only commented, something open | "Not approved: Claude did not approve. A nit is still open." (or "1 earlier point is still open." / "A ticket criterion is still unmet.") |
 | Pair, neither approved | "Not approved: neither Claude nor Codex approved. No findings are open." |
 | Leftovers not allowed | "Not approved: a question is still open." (or "1 earlier question is still open.") |
 | Gates | "your own pull request." · "your own review on GitHub still stands." · "the earlier request for changes still stands." · "High impact." · "couldn't read the earlier reviews on GitHub." · "GitHub refused it." |
+
+A single model that only commented while NOTHING is open (no finding, no earlier point, no unmet
+ticket criterion) is treated as an approval: it still goes through the impact, own-PR and
+standing-review gates, and a held one says why. A Claude + Codex pair is never promoted this way:
+its own strict / relaxed rule decides. The line never calls the verdict "a comment" (Limn 1.0.14
+on; older Limns still post "left a comment, not an approval").
 
 The own-PR, own-review, couldn't-read and refused reasons show in Limn only. If a review has nothing
 else to post, the line goes out alone as one short comment, at most once per PR and commit — but
@@ -595,6 +601,7 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 
 | A teammate on… | Still does |
 |---|---|
+| before 1.0.14 | **Verdicts:** posts "Not approved: Claude left a comment, not an approval. No findings are open." when its model only commented with nothing open (a newer Limn approves through the gates); says "No findings are open." beside an unmet ticket criterion. |
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |
 | before 1.0.2 | Shows a reviewer as "requested changes" after their later approval was dismissed. |
 | before 1.0.3 | Writes no "Still open:" replies, never reopens, may claim an open point it never recorded. Reads a new "still open" judgement as "not addressed". |

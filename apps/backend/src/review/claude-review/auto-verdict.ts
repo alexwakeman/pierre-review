@@ -74,6 +74,39 @@ type VerdictFinding = Pick<ClaudeFinding, 'severity' | 'included' | 'story'> &
 const countedOf = <F extends VerdictFinding>(findings: readonly F[]): F[] =>
   findings.filter((f) => f.story == null && !isReaderIgnoredFinding(f));
 
+// A story finding still open: an unmet ticket criterion (or a missing item) the reader did not ignore.
+// It never counts as a finding of the verdict, but it IS open: it names itself in the line and stops a
+// COMMENT from being read as "nothing open".
+const openStoryOf = (findings: readonly VerdictFinding[]): number =>
+  findings.filter((f) => f.story != null && !isReaderIgnoredFinding(f)).length;
+
+/**
+ * NOTHING IS OPEN (decision 2026-11-09): no counted finding other than praise, no earlier point held
+ * open, no unmet ticket criterion. A SINGLE run whose model only COMMENTED on such a run is read as an
+ * APPROVE CANDIDATE (`promotedModelVerdict`), which still goes through every gate (impact, own PR,
+ * the reader's standing review). ⚠ Never a PAIR: its two verdicts fold by the workspace's own
+ * strictness (`pairVerdict`), and "strict" means both halves approved. Pure.
+ */
+export function nothingOpen(findings: readonly VerdictFinding[], earlier: EarlierOpen | null = null): boolean {
+  return (
+    countedOf(findings).every((f) => f.severity === 'praise') &&
+    openStoryOf(findings) === 0 &&
+    (earlier?.total ?? 0) === 0 &&
+    (earlier?.blockers ?? 0) + (earlier?.warnings ?? 0) + (earlier?.nits ?? 0) + (earlier?.questions ?? 0) === 0
+  );
+}
+
+/** A SINGLE run's model verdict as the rule reads it: a COMMENT with nothing open is promoted to
+ *  APPROVE; the rest as given (REQUEST_CHANGES and no verdict are never promoted). Every single-run
+ *  caller of `autoVerdictFor` passes its verdict through this; a pair's folded verdict never. Pure. */
+export function promotedModelVerdict(
+  modelVerdict: ClaudeReview['verdict'],
+  findings: readonly VerdictFinding[],
+  earlier: EarlierOpen | null = null,
+): ClaudeReview['verdict'] {
+  return modelVerdict === 'COMMENT' && nothingOpen(findings, earlier) ? 'APPROVE' : modelVerdict;
+}
+
 /** How many blockers and warnings a run's verdict counts (the same findings `autoVerdictFor` reads,
  *  plus the earlier ones it holds open). */
 export function blockerWarningCounts(
@@ -98,7 +131,8 @@ function earlierHoldsApproval(e: EarlierOpen | null | undefined, leftovers: Appr
 }
 
 /**
- * The verdict an auto post wants — the model's, made STRICTER. Counts the run's non-story findings a
+ * The verdict an auto post wants — the model's, made STRICTER. (A single run's COMMENT with NOTHING
+ * open arrives here already promoted by its caller, `promotedModelVerdict`.) Counts the run's non-story findings a
  * reader did not ignore (whatever the kind toggles say): any blocker ⇒ REQUEST_CHANGES; APPROVE only
  * when the model approved and every open finding is one `leftovers` allows (never a warning);
  * everything else ⇒ COMMENT. `earlier`: the earlier points the run holds open (./earlier-open.ts) —
@@ -195,9 +229,10 @@ const sentence = (t: string): string => `Not approved: ${t}`;
 
 /**
  * A model that did not approve, in words. REQUEST_CHANGES: "Codex asked for changes. <its first
- * sentence>" (its summary says why). COMMENT: "Claude left a comment, not an approval." then `tail`,
- * the plain fact about what is open ("No findings are open.") — ⚠ NEVER its summary: a COMMENT's
- * summary often reads "The change is sound…", which beside "not approved" only confuses (PR #592).
+ * sentence>" (its summary says why). COMMENT: "Claude did not approve." then `tail`, the plain fact
+ * about what is open ("A nit is still open.") — ⚠ NEVER its summary: a COMMENT's summary often reads
+ * "The change is sound…", which beside "not approved" only confuses (PR #592). ⚠ Never the word
+ * "comment" as a verdict name: a reader takes it as "Claude left comments" when there are none.
  * No verdict at all: "Claude gave no verdict." then `tail`.
  */
 export function dissentText(run: VerdictRun, tail: string | null = null): string {
@@ -206,20 +241,21 @@ export function dissentText(run: VerdictRun, tail: string | null = null): string
     const lead = `${run.by} asked for changes.`;
     return why ? `${lead} ${why}` : lead;
   }
-  const lead = run.verdict === 'COMMENT' ? `${run.by} left a comment, not an approval.` : `${run.by} gave no verdict.`;
+  const lead = run.verdict === 'COMMENT' ? `${run.by} did not approve.` : `${run.by} gave no verdict.`;
   return tail ? `${lead} ${tail}` : lead;
 }
 
 /** What is still open once no blocker or warning is: "No findings are open." / "A nit is still open."
  *  `stillOpen`: earlier points the review holds open (docs/CLAUDE-REVIEW.md § Still-open points) —
- *  "1 earlier point is still open." — so the line never says "no findings" beside a held-open point. */
-export function minorTail(nits: number, questions: number, stillOpen = 0): string {
-  const earlier =
-    stillOpen > 0 ? `${stillOpen === 1 ? '1 earlier point is' : `${stillOpen} earlier points are`} still open.` : null;
-  if (nits + questions === 0) return earlier ?? 'No findings are open.';
-  const t = openText([[nits, 'nit'], [questions, 'question']]);
-  const minor = `${t[0]!.toUpperCase()}${t.slice(1)}`;
-  return earlier ? `${minor} ${earlier[0]!.toUpperCase()}${earlier.slice(1)}` : minor;
+ *  "1 earlier point is still open." — so the line never says "no findings" beside a held-open point.
+ *  `storyOpen`: unmet ticket criteria — "A ticket criterion is still unmet." — likewise. */
+export function minorTail(nits: number, questions: number, stillOpen = 0, storyOpen = 0): string {
+  const parts: string[] = [];
+  if (nits + questions > 0) parts.push(openText([[nits, 'nit'], [questions, 'question']]));
+  if (stillOpen > 0) parts.push(`${stillOpen === 1 ? '1 earlier point is' : `${stillOpen} earlier points are`} still open.`);
+  if (storyOpen > 0) parts.push(storyOpen === 1 ? 'a ticket criterion is still unmet.' : `${storyOpen} ticket criteria are still unmet.`);
+  if (parts.length === 0) return 'No findings are open.';
+  return parts.map((t) => `${t[0]!.toUpperCase()}${t.slice(1)}`).join(' ');
 }
 
 /**
@@ -263,7 +299,7 @@ export function findingsNotApproved(
   const nits = n('nit');
   const questions = n('question');
   // No blocker or warning is open here: say so plainly beside a model that only commented.
-  const tail = minorTail(nits, questions, earlier.total);
+  const tail = minorTail(nits, questions, earlier.total, openStoryOf(findings));
   if (runs.length >= 2) {
     const [a, b] = runs as [VerdictRun, VerdictRun];
     const folded = pairVerdict(a.verdict, b.verdict, rules.pairStrictness);
@@ -281,7 +317,8 @@ export function findingsNotApproved(
     }
   } else {
     const only = runs[0];
-    if (only == null || only.verdict !== 'APPROVE') {
+    // A single run's COMMENT with NOTHING open is an approve candidate (`promotedModelVerdict`).
+    if (only == null || promotedModelVerdict(only.verdict, findings, earlier) !== 'APPROVE') {
       return { heldReason: 'model_comment', text: sentence(dissentText(only ?? { by: 'Claude', verdict: null, summary: null }, tail)) };
     }
   }

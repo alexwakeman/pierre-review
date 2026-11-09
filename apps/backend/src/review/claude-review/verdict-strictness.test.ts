@@ -31,9 +31,11 @@ import {
   findingsNotApproved,
   leftoverAllowed,
   pairVerdict,
+  promotedModelVerdict,
   repliesDissent,
   type VerdictRules,
 } from './auto-verdict.js';
+import { NO_EARLIER_OPEN } from './earlier-open.js';
 import { repliesNotApproved, repliesVerdict } from './replies-pass.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -46,7 +48,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 const CLAUDE_SUMMARY = 'The fixture update matches the metric change. Nothing else moved.';
 const CODEX_SUMMARY =
   'The code change is small, but the binary fixture change cannot be verified from this diff. A deeper worktree review is recommended to inspect the changed GeoPackage records.';
-const CODEX_REASON = 'Not approved: Codex left a comment, not an approval. No findings are open.';
+const CODEX_REASON = 'Not approved: Codex did not approve. No findings are open.';
 
 const STRICT: VerdictRules = { pairStrictness: 'strict', approveLeftovers: 'nits_questions' };
 const RELAXED: VerdictRules = { pairStrictness: 'relaxed', approveLeftovers: 'nits_questions' };
@@ -103,19 +105,33 @@ describe('the rules, pure', () => {
   it('a single run that only commented: said plainly, with what is open — never its summary (PR #592)', () => {
     // robin-dunn's review on #592: COMMENT, nothing open, a summary saying the change is sound.
     const sound = [{ by: 'Claude', verdict: 'COMMENT' as const, summary: 'The change is sound: the guard covers every caller.' }];
-    expect(findingsNotApproved(sound, [], STRICT)).toEqual({
-      heldReason: 'model_comment',
-      text: 'Not approved: Claude left a comment, not an approval. No findings are open.',
-    });
+    // NOTHING OPEN ⇒ an approve candidate (decision 2026-11-09): no model reason; the gates decide.
+    expect(findingsNotApproved(sound, [], STRICT)).toBeNull();
+    expect(promotedModelVerdict('COMMENT', [])).toBe('APPROVE');
+    expect(autoVerdictFor(promotedModelVerdict('COMMENT', []), [])).toBe('APPROVE');
     // Praise and reader-ignored findings are not open.
-    expect(findingsNotApproved(sound, [f('praise'), { ...f('nit'), included: false }], STRICT)?.text).toBe(
-      'Not approved: Claude left a comment, not an approval. No findings are open.',
+    expect(findingsNotApproved(sound, [f('praise'), { ...f('nit'), included: false }], STRICT)).toBeNull();
+    // REQUEST_CHANGES and no verdict are never promoted; a pair's fold never is (strict = both approved).
+    expect(promotedModelVerdict('REQUEST_CHANGES', [])).toBe('REQUEST_CHANGES');
+    expect(promotedModelVerdict(null, [])).toBeNull();
+    // Something open keeps the COMMENT: a nit, an earlier point, an unmet ticket criterion.
+    expect(promotedModelVerdict('COMMENT', [f('nit')])).toBe('COMMENT');
+    expect(promotedModelVerdict('COMMENT', [], { ...NO_EARLIER_OPEN, total: 1 })).toBe('COMMENT');
+    const unmet = { severity: 'warning' as const, included: true, story: { index: 0, ref: 'AC2' } };
+    expect(promotedModelVerdict('COMMENT', [unmet])).toBe('COMMENT');
+    expect(findingsNotApproved(sound, [unmet], STRICT)?.text).toBe(
+      'Not approved: Claude did not approve. A ticket criterion is still unmet.',
     );
+    expect(findingsNotApproved(sound, [unmet, unmet, f('nit')], STRICT)?.text).toBe(
+      'Not approved: Claude did not approve. A nit is still open. 2 ticket criteria are still unmet.',
+    );
+    // ⚠ "comment" is never the verdict's name in a reason.
+    expect(findingsNotApproved(sound, [f('nit')], STRICT)?.text).not.toMatch(/comment/i);
     expect(findingsNotApproved(sound, [f('nit'), f('question'), f('question')], STRICT)?.text).toBe(
-      'Not approved: Claude left a comment, not an approval. A nit and 2 questions are still open.',
+      'Not approved: Claude did not approve. A nit and 2 questions are still open.',
     );
     expect(findingsNotApproved([{ by: 'Codex', verdict: 'COMMENT', summary: null }], [f('nit')], STRICT)?.text).toBe(
-      'Not approved: Codex left a comment, not an approval. A nit is still open.',
+      'Not approved: Codex did not approve. A nit is still open.',
     );
     // No verdict at all.
     expect(findingsNotApproved([{ by: 'Claude', verdict: null, summary: 'x.' }], [], STRICT)?.text).toBe(
@@ -170,7 +186,7 @@ describe('the rules, pure', () => {
       { by: 'Codex', verdict: 'COMMENT' as const, summary: CODEX_SUMMARY, raised: 0 },
     ];
     const strict = repliesDissent(halves, 'strict');
-    expect(strict).toEqual({ heldReason: 'pair_strict', text: 'Not approved: Codex left a comment, not an approval. It raised no findings.' });
+    expect(strict).toEqual({ heldReason: 'pair_strict', text: 'Not approved: Codex did not approve. It raised no findings.' });
     expect(repliesVerdict({ ...base, open: [], dissent: strict })).toBeNull();
     expect(repliesNotApproved({ ...base, open: [], dissent: strict })).toEqual({ reason: strict, held: true });
     expect(repliesDissent(halves, 'relaxed')).toBeNull();
@@ -457,10 +473,9 @@ describe('the reason on read', () => {
       text: 'Not approved: your own pull request.',
     });
     const theirs = await makePr();
+    // A COMMENT with nothing open is an approve candidate: no reason on someone else's PR.
     const b = await run(theirs, 'claude', [], 'COMMENT', CODEX_SUMMARY, null, 'manual');
-    expect((await na.notApprovedForView(ctx, 1, await persist.getReviewView(ctx, b, 1)))?.text).toBe(
-      'Not approved: Claude left a comment, not an approval. No findings are open.',
-    );
+    expect(await na.notApprovedForView(ctx, 1, await persist.getReviewView(ctx, b, 1))).toBeNull();
   });
 
   it('the manual pair’s suggested verdict follows the strictness (the consolidation)', async () => {

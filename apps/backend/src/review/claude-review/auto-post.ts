@@ -117,6 +117,7 @@ import {
   blockerWarningCounts,
   findingsNotApproved,
   pairVerdict,
+  promotedModelVerdict,
   reasonMayPost,
   safeReasonText,
   withReason,
@@ -950,13 +951,16 @@ async function autoPostReview(
   // THE WORKSPACE'S VERDICT RULES (migration 0145): strict / relaxed for a pair, and what may stay open.
   const rules: VerdictRules = { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers };
   // The run's verdict as `autoVerdictFor` reads it: a pair's is both runs' together.
-  const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
+  const runVerdict0 = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
   // WHY NOT APPROVED, from the findings and the model(s) — only while the auto verdict is on.
   const verdictRuns: VerdictRun[] = runs.map((r) => ({ by: aiRunProviderName(r), verdict: r.verdict, summary: r.summary }));
   // EARLIER POINTS THE RUN(S) HOLD OPEN (decision D1, ./earlier-open.ts): an earlier blocker or
   // warning still open holds the verdict like a finding; the rest name themselves in the line
   // ("1 earlier point is still open.").
   const earlierOpen: EarlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+  // A SINGLE run's COMMENT with NOTHING open is an approve candidate (every gate below still holds
+  // it); a pair's folded verdict is never promoted (auto-verdict.ts `promotedModelVerdict`).
+  const runVerdict = first ? runVerdict0 : promotedModelVerdict(runVerdict0, allFindings, earlierOpen);
   const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules, earlierOpen) : null;
   // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
   // other writer has it, and its findings leave this post.
@@ -1485,8 +1489,10 @@ export async function withdrawApprovalWhenKept(
     const runs: ClaudeReview[] = first ? [first, review] : [review];
     const allFindings = runs.flatMap((r) => r.findings);
     const rules: VerdictRules = { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers };
-    const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
     const earlierOpen = await earlierOpenForRuns(ctx, prId, runs);
+    const runVerdict = first
+      ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness)
+      : promotedModelVerdict(review.verdict, allFindings, earlierOpen);
     if (autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) === 'APPROVE') return null;
 
     const pctx = await getReviewPostContext(ctx, review.id, accountId);
