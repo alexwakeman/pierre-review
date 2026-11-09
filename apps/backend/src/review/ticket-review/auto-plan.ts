@@ -14,7 +14,8 @@ import {
 //
 //   THE GRACE WINDOW. quietSince = the newest change: a push to ANY member PR (`head_seen_at`, when
 //   Limn saw the head move), a PR joining (`tracker_tickets.linked_at`), a member merging, the ticket
-//   changing (`changed_at`). The check is due TICKET_AUTO_GRACE_MS (2 min) after it — every change
+//   changing (`changed_at`), a person's comment the latest check did not see (only while it has a
+//   criterion not done — auto-inputs.ts). The check is due TICKET_AUTO_GRACE_MS (2 min) after it — every change
 //   restarts the window, and a ticket's FIRST check waits too (its PRs are often linked minutes
 //   apart; 2026-11-09 BMD-1175: five of the day's checks ran on part of a ticket, each followed by a
 //   "PR joined" re-check).

@@ -228,6 +228,25 @@ describe('store rules', () => {
     expect(accepted.map((r: any) => r.ident)).toEqual([ident('ENG-1')]);
   });
 
+  it('stores the comments a ticket carried (whole only); a pruned sprint-only ticket takes them with it', async () => {
+    const c = (id: string) => ({ id, authorName: 'Dana Lee', authorId: 'a1', isBot: false, body: `c${id}`, createdAt: new Date(T0 - DAY), updatedAt: null });
+    const tc = schema.trackerTicketComments;
+    const stored = async (key: string) =>
+      (await db.select().from(tc).where(and(eq(tc.accountId, 1), eq(tc.issueKey, key))).execute()).map((r: any) => r.commentId).sort();
+    // ENG-9 has no PR (sprint-only); ENG-1 is on a PR. No `comments` (another tracker's list) writes nothing.
+    listed.tickets = [ticket('ENG-1', { comments: [c('1')] }), ticket('ENG-9', { comments: [c('2'), c('3')] }), ticket('ENG-10')];
+    await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0));
+    expect(await stored('ENG-1')).toEqual(['1']);
+    expect(await stored('ENG-9')).toEqual(['2', '3']);
+    expect(await stored('ENG-10')).toEqual([]);
+    // 91 days unseen: ENG-9's sprint row is pruned and, with no PR naming it, its comments go too.
+    // ENG-1 is still on a PR: its comments stay.
+    listed.tickets = [];
+    await read.readWorkspaceSprint(ctx, 1, wsA, opts(T0 + 91 * DAY));
+    expect(await stored('ENG-9')).toEqual([]);
+    expect(await stored('ENG-1')).toEqual(['1']);
+  });
+
   it('stores the sprint\'s own dates on every read; a read with none clears them', async () => {
     const sr = schema.sprintReads;
     const datesOf = async () => {

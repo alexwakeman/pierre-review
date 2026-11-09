@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import {
+  criterionDone,
   type AiFixPickerItem,
   type AiFixPickerPreview,
   type AiFixPickerSection,
@@ -316,7 +317,7 @@ export function FixPicker({
         const ctx = { review: run, viewedPrId: pr.id, changedPaths: NO_PATHS, actions: false, selection };
         if (ti.status === 'missing') return <MissingRow key={item.key} item={ti} {...ctx} />;
         const c = run.assessment?.criteria.find((x) => x.ref === ti.ref);
-        if (c == null || c.status === 'met') break;
+        if (c == null || criterionDone(c.status)) break;
         return <CriterionRow key={item.key} c={c} item={ti} {...ctx} />;
       }
       default:

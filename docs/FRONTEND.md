@@ -3674,9 +3674,11 @@ and `GET /api/prs/:id` — ⚠ never on the lean `/api/timeline`.
   the "merge" cards, My Turn's ready-to-land and auto-merge.
 - **"Criteria 3/4"** (`criteria: PrCriteriaCheck[]`, one per ticket): the latest SUCCEEDED ticket
   review of the ticket that had this PR as a member (`db/pr-criteria.ts`, three batched queries, no
-  AI, no tracker call). ⚠ **"Met" is `status === 'met'` ONLY** — `partly_met`, `not_met`, `unclear`,
-  `not_checked` are not met. Tone (`criteriaCheckTone`): all met → green; any `not_met` → red; else
-  amber. "· older commit" when the run read a head other than the PR's current one. A check with no
+  AI, no tracker call). ⚠ **"Done" is shared `criterionDone`** — `met`, or `met_outside_code` ("Met
+  outside code changes", a person's ticket comment; counted apart as `metOutsideCode`); `partly_met`,
+  `not_met`, `unclear`, `not_checked` are not. The label counts every done criterion; the title names
+  the outside-code ones apart ("2 met + 1 outside code of 4 acceptance criteria"). Tone
+  (`criteriaCheckTone`): all done → green; any `not_met` → red; else amber. "· older commit" when the run read a head other than the PR's current one. A check with no
   criteria, or none at all, draws nothing. Several tickets → one chip each, keyed ("BMD-7 criteria
   3/4"). Click → `useOpenStory()` (a pasted `manual:` story has no tab: plain text).
 - **"Large"** is the existing large-PR flag (`LargePrFlag`, `largePrFlag()` in `lib/ui.ts`): its

@@ -2,6 +2,7 @@
 // the action, the story view's entry, the repository words, the push gating and the error words.
 // React-free so test/storyBuild.test.ts pins it. A session's own pure half is lib/sandboxSession.ts.
 import {
+  criterionCounts,
   isStoryBuildOpen,
   isTrackerIdent,
   parseTicketIdent,
@@ -82,24 +83,19 @@ export function storyStageOfCategory(category: JiraStatusCategory | null | undef
 export function storyViewCheck(state: TicketReviewState | null | undefined, run: TicketReview | null | undefined): SprintTicketCheck | null {
   if (state == null || state.latestRunId == null || run == null || run.id !== state.latestRunId || run.assessment == null) return null;
   const a = run.assessment;
-  const c: SprintTicketCheck = {
-    met: 0,
-    partlyMet: 0,
-    notMet: 0,
-    unsettled: 0,
-    total: a.criteria.length,
+  const n = criterionCounts(a.criteria);
+  return {
+    met: n.met,
+    metOutsideCode: n.metOutsideCode,
+    partlyMet: n.partlyMet,
+    notMet: n.notMet,
+    unsettled: n.unsettled,
+    total: n.total,
     missing: Array.isArray(a.missing) ? a.missing.length : 0,
     reviewId: run.id,
     checkedAt: state.checkedAt ?? run.completedAt ?? run.createdAt,
     stale: state.status === 'stale' || state.staleBecause.length > 0,
   };
-  for (const x of a.criteria) {
-    if (x.status === 'met') c.met += 1;
-    else if (x.status === 'partly_met') c.partlyMet += 1;
-    else if (x.status === 'not_met') c.notMet += 1;
-    else c.unsettled += 1;
-  }
-  return c;
 }
 
 /** A full session as the board's coarse build (`db/sprint-builds.ts foldSprintBuilds`): null unless OPEN;

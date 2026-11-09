@@ -7,6 +7,7 @@ import type {
   TicketReviewStaleReason,
   TicketReviewState,
 } from '@pierre-review/shared';
+import { criterionCounts } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 // "IS THIS TICKET REVIEW STILL TRUE?" — answered by the SERVER, never the model.
@@ -169,15 +170,17 @@ export function staleReasons(
 /** Criteria counts of one stored assessment. */
 export function criteriaCounts(a: TicketAssessment | null): TicketReviewState['counts'] {
   if (a == null) return null;
-  const c = { met: 0, partlyMet: 0, notMet: 0, unclear: 0, notChecked: 0, total: a.criteria.length };
-  for (const x of a.criteria) {
-    if (x.status === 'met') c.met += 1;
-    else if (x.status === 'partly_met') c.partlyMet += 1;
-    else if (x.status === 'not_met') c.notMet += 1;
-    else if (x.status === 'unclear') c.unclear += 1;
-    else c.notChecked += 1;
-  }
-  return c;
+  // The shared count (`criterionCounts`): outside-code criteria are done but counted apart.
+  const c = criterionCounts(a.criteria);
+  return {
+    met: c.met,
+    metOutsideCode: c.metOutsideCode,
+    partlyMet: c.partlyMet,
+    notMet: c.notMet,
+    unclear: c.unclear,
+    notChecked: c.notChecked,
+    total: c.total,
+  };
 }
 
 /**
@@ -198,6 +201,9 @@ export function deriveTicketReviewState(args: {
   } | null;
   runningRunId: number | null;
   live: { ticketHash: string; members: readonly FingerprintMember[] } | null;
+  // A person commented since the latest run AND it still has a criterion not done
+  // (tracker/comments.ts `newCommentsMakeStale`). Never part of the fingerprint.
+  newCommentsStale?: boolean;
 }): TicketReviewState {
   const { ident, latest, runningRunId, live } = args;
   const base: TicketReviewState = {
@@ -222,6 +228,10 @@ export function deriveTicketReviewState(args: {
       base.staleBecause = reasons;
       base.changedPrIds = changedPrIds;
     }
+  }
+  if (latest != null && args.newCommentsStale === true) {
+    moved = true;
+    base.staleBecause = [...base.staleBecause, 'new_comments'];
   }
   if (runningRunId != null) base.status = 'running';
   else if (latest == null) base.status = 'none';

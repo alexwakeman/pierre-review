@@ -17,6 +17,7 @@
 // figure). Claude's own explanations are shown separately, as Claude's text — CLAUDE.md's rule
 // that a model-derived and a code-derived figure are labelled apart.
 import { NOTION_ROOT_RE } from './notion-tracker.js';
+import { criterionCounts } from './criterion-status.js';
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingStory,
@@ -227,6 +228,7 @@ export const FOLLOW_UP_STATUS_LABEL: Record<ClaudeFollowUpStatus, string> = {
 
 export const TICKET_CRITERION_STATUS_LABEL: Record<ClaudeTicketCriterionStatus, string> = {
   met: 'Met',
+  met_outside_code: 'Met outside code changes',
   partly_met: 'Partly met',
   not_met: 'Not met',
   unclear: "Can't tell from the code",
@@ -401,14 +403,17 @@ export function followUpLeftOutSentence(
   return `Left out: ${parts.join(', ')}.`;
 }
 
-/** "4 of 6 criteria met." / "1 of 1 criterion met." — null when there are no criteria. */
+/** "4 of 6 criteria met." / "1 of 1 criterion met." / "4 met + 1 outside code of 6 criteria." — null
+ *  when there are no criteria. Outside-code criteria are done but named apart (`criterionCounts`). */
 export function ticketCriteriaSentence(
-  a: Pick<ClaudeTicketAssessment, 'criteria'> | null | undefined,
+  a: { criteria: ReadonlyArray<{ status: ClaudeTicketCriterionStatus | string }> } | null | undefined,
 ): string | null {
   if (!a || a.criteria.length === 0) return null;
-  const met = a.criteria.filter((c) => c.status === 'met').length;
-  const total = a.criteria.length;
-  return `${met} of ${total} ${total === 1 ? 'criterion' : 'criteria'} met.`;
+  const c = criterionCounts(a.criteria);
+  const noun = c.total === 1 ? 'criterion' : 'criteria';
+  return c.metOutsideCode > 0
+    ? `${c.met} met + ${c.metOutsideCode} outside code of ${c.total} ${noun}.`
+    : `${c.met} of ${c.total} ${noun} met.`;
 }
 
 // ---- story findings ----

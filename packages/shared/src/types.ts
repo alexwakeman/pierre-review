@@ -7060,8 +7060,13 @@ export type ClaudeTicketAlignment =
   | 'unclear'
   | 'not_checked';
 
+// 'met_outside_code' ("Met outside code changes") is the STORY CHECK's only (ticket review): no PR
+// delivers it, but a PERSON's comment on the ticket says the work was done outside the code (a
+// setting, content, a manual step). The server keeps it only with a real citation (`metBy`). It is
+// DONE — never a gap — yet every count names it apart from `met` (shared `criterionDone`).
 export type ClaudeTicketCriterionStatus =
   | 'met'
+  | 'met_outside_code'
   | 'partly_met'
   | 'not_met'
   | 'unclear'
@@ -8752,6 +8757,18 @@ export interface TicketCriterion {
   deliveredBy: number[];
   evidence: TicketEvidence[];
   expectedIn: TicketExpectedIn | null;
+  // `met_outside_code` only: the person's ticket comment that says it was done, copied from the
+  // STORED comment the run was given (never from model text). Absent on every other status.
+  metBy?: TicketCriterionMetBy | null;
+}
+
+// The ticket comment a "Met outside code changes" verdict rests on.
+export interface TicketCriterionMetBy {
+  // The tracker's own comment id (the story view's `TicketComment.id`).
+  commentId: string;
+  author: string;
+  // ISO-8601.
+  createdAt: string;
 }
 
 // Something the ticket asks for that no member does. `ref` is 'M1'….
@@ -8818,7 +8835,9 @@ export interface TicketReviewItem {
 //   pr_left       a PR the run judged no longer names it, or was closed without merging
 //   pr_pushed     a member's head moved
 //   pr_merged     a member merged (its head did not move)
-export type TicketReviewStaleReason = 'story_edited' | 'pr_added' | 'pr_left' | 'pr_pushed' | 'pr_merged';
+// 'new_comments': a person commented on the ticket since the latest check AND that check still has a
+// criterion that is not done (a comment may settle it). Never a fingerprint change.
+export type TicketReviewStaleReason = 'story_edited' | 'pr_added' | 'pr_left' | 'pr_pushed' | 'pr_merged' | 'new_comments';
 
 // Is a ticket's latest run still true? SERVER-COMPUTED: the stored fingerprint against one built
 // from the synced heads now — never the model's call.
@@ -8839,6 +8858,9 @@ export interface TicketReviewState {
   // Criteria counts of the latest succeeded run; null without one.
   counts: {
     met: number;
+    // "Met outside code changes" (a person's comment) — done, but counted apart from `met`. Absent
+    // from an older server (read as 0).
+    metOutsideCode?: number;
     partlyMet: number;
     notMet: number;
     unclear: number;
@@ -8854,8 +8876,9 @@ export interface TicketReviewState {
   // on a pasted story, or from a server before it.
   autoCheck?: TicketAutoCheck | null;
   // People's comments on the ticket that the latest succeeded run did not see (docs/TRACKERS.md §
-  // Ticket comments). Comments never make a run stale; this only says the reader may re-run. Absent /
-  // 0 when none, or when that run predates comment reading.
+  // Ticket comments). They make the run stale ('new_comments') only while it has a criterion that is
+  // not done; otherwise this is only a note. Absent / 0 when none, or when that run predates comment
+  // reading.
   newComments?: number;
 }
 
@@ -8881,8 +8904,9 @@ export type TicketAutoCheckReason =
   | 'no_floor'
   | 'already_tried';
 // The newest change the grace window counts from: a push to a member PR (or its opening), a PR
-// joining the ticket, a member merging, or the ticket itself changing (story text, a PR leaving).
-export type TicketAutoChangeKind = 'pushed' | 'joined' | 'merged' | 'ticket_changed';
+// joining the ticket, a member merging, the ticket itself changing (story text, a PR leaving), or a
+// person's comment the latest check did not see (only while that check has a criterion not done).
+export type TicketAutoChangeKind = 'pushed' | 'joined' | 'merged' | 'ticket_changed' | 'commented';
 export interface TicketAutoCheck {
   status: TicketAutoCheckStatus;
   reason: TicketAutoCheckReason | null;

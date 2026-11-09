@@ -306,13 +306,18 @@ over STORED rows (`auto-inputs.ts`), so it survives a restart and the time shown
 `status` `up_to_date` · `running` · `waiting` (`reason` `settling` with `startsAt` = 2 quiet minutes
 after `lastChange`, or `lane_full`) · `due` (starts within a minute) · `held` (`daily_limit` with
 `startsAt` = 00:00 UTC, `over_budget`, `ai_not_ready`) · `off` (`auto_off`, `too_many_prs`,
-`no_floor`, `already_tried`). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed',
+`no_floor`, `already_tried`). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed'|'commented',
 at}`. Absent on a pasted (`manual:`) ticket, or when it could not be read (the read never fails on it).
 (Replaced `waiting` / `TicketReviewWait`, 2026-11-09.)
 `newComments` (optional) counts the ticket's people comments the latest succeeded run was not given
-(`ticket_reviews.comments_seen`); absent / 0 when none or the run predates comment reading. ⚠ Never a
-`staleBecause` reason: a comment does not make a run stale or start an automatic one
-([TRACKERS.md](TRACKERS.md) § Ticket comments).
+(`ticket_reviews.comments_seen`); absent / 0 when none or the run predates comment reading. They make the
+run stale — `staleBecause` gains `'new_comments'` (last), and an automatic re-check may start — ONLY
+while the run has a criterion that is not done ([TRACKERS.md](TRACKERS.md) § Ticket comments).
+`counts.metOutsideCode` (optional; absent from an older server) counts the `met_outside_code`
+criteria apart from `met`. A criterion (`TicketCriterion`) may be `status: 'met_outside_code'` with
+`metBy {commentId, author, createdAt}` (the person's ticket comment it rests on; absent on every other
+status) — DONE, never an item ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review). The same count is
+`metOutsideCode?` on `PrCriteriaCheck`, `SprintTicketCheck` and `StoryReviewSummary`.
 
 | Route | Contract |
 |---|---|

@@ -26,7 +26,8 @@ import {
 //   1. CANDIDATES. The tickets of PRs that CHANGED since the last tick — a new head, a new open PR,
 //      or a PR that stopped being open (merged or closed) — read through the tracker's
 //      `ticketsForPr` plus the tickets this PR was already judged on; the tracker's
-//      `listChangedTicketIdents` (a PR joined or left, the story was edited); the tickets of a PR
+//      `listChangedTicketIdents` (a PR joined or left, the story was edited, a person's comment was
+//      stored — it re-checks only while the latest check has a criterion not done); the tickets of a PR
 //      whose auto PR review just launched (the kick — claude-review/manager.ts
 //      `onAutoReviewLaunched` — so a PR's first auto review and its tickets' check start together);
 //      and tickets still waiting from earlier ticks. ⚠ ONE HOP: only the tickets the changed PR is itself on. A ticket that merely

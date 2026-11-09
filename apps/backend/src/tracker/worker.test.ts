@@ -962,4 +962,44 @@ describe('9. ticket comments', () => {
     await pass();
     expect(stored()).toEqual([]);
   });
+
+  // THE STORY CHECK'S COMMENTS-ONLY RE-READ (./comments-refresh.ts).
+  it('a story check re-reads ONLY the comments: the story text and changed_at stay; one read per 2 minutes', async () => {
+    const { refreshTicketComments, _resetCommentsRefreshForTest, COMMENTS_FRESH_MS } = await import('./comments-refresh.js');
+    _resetCommentsRefreshForTest();
+    jira.set('ENG-7', { comment: page({ id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' }) });
+    await pass();
+    const before = (await rows(A, [10])).find((r) => r.issueKey === 'ENG-7')!;
+    // The ticket moved on in Jira: a new title AND a new comment. Only the comment lands.
+    jira.set('ENG-7', {
+      summary: 'Renamed in Jira',
+      comment: page(
+        { id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' },
+        { id: '2', who: 'Sam Ito', at: '2026-09-02T10:00:00.000+0000', body: 'Uploaded the copy in the CMS.' },
+      ),
+    });
+    calls.length = 0;
+    expect(await refreshTicketComments(ctx, A, ident, [WS_A], { nowMs: clock, transport })).toEqual({ fresh: true });
+    expect(calls.filter((u) => u.includes('ENG-7'))).toHaveLength(1);
+    expect(stored().map((r) => r.comment_id)).toEqual(['1', '2']);
+    const after = (await rows(A, [10])).find((r) => r.issueKey === 'ENG-7')!;
+    expect(after.title).toBe(before.title);
+    expect(after.changedAt).toEqual(before.changedAt);
+    // Within the window: no second read.
+    expect(await refreshTicketComments(ctx, A, ident, [WS_A], { nowMs: clock + COMMENTS_FRESH_MS - 1, transport })).toEqual({ fresh: true });
+    expect(calls.filter((u) => u.includes('ENG-7'))).toHaveLength(1);
+  });
+
+  it('the re-read never throws: a failure or no matching tracker keeps the stored copy', async () => {
+    const { refreshTicketComments, _resetCommentsRefreshForTest } = await import('./comments-refresh.js');
+    _resetCommentsRefreshForTest();
+    jira.set('ENG-7', { comment: page({ id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' }) });
+    await pass();
+    jira.set('ENG-7', { status: 500 });
+    expect((await refreshTicketComments(ctx, A, ident, [WS_A], { nowMs: clock, transport })).fresh).toBe(false);
+    expect(stored().map((r) => r.comment_id)).toEqual(['1']);
+    // The Linear workspace is not this ticket's site.
+    expect(await refreshTicketComments(ctx, A, ident, [WS_A_LINEAR], { nowMs: clock, transport })).toEqual({ fresh: false, skipped: 'no_call' });
+    expect(await refreshTicketComments(ctx, A, 'manual:7:abc', [WS_A], { nowMs: clock, transport })).toEqual({ fresh: false, skipped: 'not_tracker' });
+  });
 });

@@ -260,6 +260,9 @@ export function sprintCodeAsked(n: { ghost: boolean; stage: SprintStage | null; 
  *  `criteriaCount`. */
 export interface SprintTicketCheck {
   met: number;
+  /** "Met outside code changes" (shared `criterionDone`): done, never a gap, named apart. Absent from
+   *  an older server (read as 0). */
+  metOutsideCode?: number;
   partlyMet: number;
   notMet: number;
   /** Criteria the check could not settle (unclear or not checked). */
@@ -274,7 +277,8 @@ export interface SprintTicketCheck {
   /** ISO-8601 of the run's completion. */
   checkedAt: string;
   /** A member PR was added, left, pushed or merged since that run (a DB-only compare of the run's
-   *  stored members against the synced pull requests). ⚠ An edit to the ticket TEXT is not detected
+   *  stored members against the synced pull requests), or a person commented on the ticket since it
+   *  while it still has a criterion that is not done. ⚠ An edit to the ticket TEXT is not detected
    *  here — the Story check's own state says so. */
   stale: boolean;
 }

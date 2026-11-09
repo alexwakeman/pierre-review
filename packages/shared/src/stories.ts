@@ -48,6 +48,8 @@ export interface StoryReviewSummary {
   id: number;
   alignment: ClaudeTicketAlignment;
   met: number;
+  /** "Met outside code changes": done (shared `criterionDone`), counted apart. Absent from an older server. */
+  metOutsideCode?: number;
   partlyMet: number;
   notMet: number;
   unclear: number;

@@ -116,6 +116,7 @@ export function reviewSummaryOf(
     id,
     alignment: a.alignment,
     met: count('met'),
+    metOutsideCode: count('met_outside_code'),
     partlyMet: count('partly_met'),
     notMet: count('not_met'),
     unclear: count('unclear'),

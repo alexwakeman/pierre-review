@@ -38,7 +38,7 @@ import {
   getTicketStateInputs,
 } from './persist.js';
 import { jiraMemberIds, jiraStoryFor, ticketCommentsFor, workspaceOfPr } from './prepare.js';
-import { newCommentsSince } from '../../tracker/comments.js';
+import { newCommentsMakeStale, newCommentsSince } from '../../tracker/comments.js';
 import {
   getTicketRunStatus,
   startTicketReview,
@@ -181,16 +181,19 @@ async function statesFor(
       const story = await jiraStoryFor(accountId, ident, memberIds);
       if (story) live = { ticketHash: ticketHash(story), members: await readLiveMembers(ctx, accountId, memberIds) };
     }
+    // People's comments the latest check did not see (docs/TRACKERS.md § Ticket comments). They make it
+    // STALE only while it still has a criterion not done (`newCommentsMakeStale`); otherwise they are a
+    // note. A run from before comments were read says nothing.
+    const current = inp?.latest?.commentsSeen != null && isTrackerIdent(parsed) ? await ticketCommentsFor(accountId, ident) : [];
     const state = deriveTicketReviewState({
       ident,
       latest: inp?.latest ?? null,
       runningRunId: inp?.runningRunId ?? null,
       live,
+      newCommentsStale: newCommentsMakeStale(inp?.latest, current),
     });
-    // People's comments the latest check did not see — never a staleness reason, only a note the reader
-    // may act on (docs/TRACKERS.md § Ticket comments). A run from before comments were read says nothing.
-    if (inp?.latest?.commentsSeen != null && isTrackerIdent(parsed)) {
-      const n = newCommentsSince(inp.latest.commentsSeen, await ticketCommentsFor(accountId, ident));
+    if (current.length > 0) {
+      const n = newCommentsSince(inp!.latest!.commentsSeen, current);
       if (n > 0) state.newComments = n;
     }
     // When the automatic check will start, or why it will not — the sweeper's own rule (auto-plan.ts)

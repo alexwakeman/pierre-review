@@ -40,6 +40,7 @@ export * from './limn-review-meta.js';
 export * from './limn-actions.js';
 export * from './prose.js';
 export * from './ticket-comments.js';
+export * from './criterion-status.js';
 export * from './notion-tracker.js';
 export * from './story-build.js';
 export * from './repo-status.js';

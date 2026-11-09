@@ -14,6 +14,8 @@
 //   8. ⚠ NO CI hold: a member's running CI never delays a re-run.
 //   9. ⚠ BMD-1175: no per-ticket limit; PRs joining restart the window, so a ticket whose PRs are
 //      linked minutes apart gets ONE first check with all of them.
+//  10. A person's comment the latest check did not see re-checks it (cause 'commented', the grace
+//      window from the comment) ONLY while it has a criterion not done.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/sweep-db
 import { rmSync } from 'node:fs';
@@ -563,5 +565,113 @@ describe('the story of a ticket', () => {
     } finally {
       providers._overrideTicketSourceForTest({ ticketStory: saved });
     }
+  });
+});
+
+describe("a person's comment the latest check did not see", () => {
+  const TC = 'jira:https://acme.atlassian.net/rest/api/3#BMD-77';
+  const comments: Record<string, Array<{ id: string; createdAt: string }>> = {};
+
+  /** A succeeded run of TC at today's inputs that saw comment c1, with these verdicts. */
+  async function seedRun(statuses: string[]): Promise<void> {
+    const ids = [pr.z!];
+    const live = await fp.readLiveMembers(ctx, 1, ids);
+    const h = fp.ticketHash(story('BMD-77'));
+    const id = await persist.insertQueuedTicketReview(ctx, {
+      accountId: 1,
+      workspaceId: ws,
+      ident: TC,
+      ticketKey: 'BMD-77',
+      ticketTitle: null,
+      ticket: null,
+      originPrId: ids[0]!,
+      trigger: 'manual',
+      model: 'm',
+    });
+    await persist.markTicketReviewRunning(ctx, 1, id, {
+      ticket: story('BMD-77'),
+      ticketHash: h,
+      fingerprint: fp.fingerprint(h, live),
+      prCount: live.length,
+      members: live.map((m) => ({ ...m, checkedOut: true })),
+      commentsSeen: { ids: ['c1'], count: 1, hash: 'x' },
+    });
+    await persist.saveTicketReviewSuccess(ctx, 1, id, {
+      alignment: 'partly_aligned',
+      summary: null,
+      assessment: {
+        alignment: 'partly_aligned',
+        summary: null,
+        criteria: statuses.map((status, i) => ({
+          ref: `AC${i + 1}`,
+          index: i,
+          text: 't',
+          status: status as never,
+          explanation: null,
+          deliveredBy: [],
+          evidence: [],
+          expectedIn: null,
+        })),
+        missing: [],
+        notRequested: [],
+      },
+      costUsd: null,
+      inputTokens: null,
+      outputTokens: null,
+      numTurns: 1,
+      items: [],
+    });
+  }
+
+  const state = async (nowMs: number) => {
+    const { loadTicketAutoState } = await import('./auto-inputs.js');
+    return loadTicketAutoState(
+      ctx,
+      TC,
+      {
+        accountId: 1,
+        enabled: new Map([[ws, ENABLED_AT]]),
+        viaPrId: null,
+        kicked: false,
+        aiReady: true,
+        overBudget: false,
+        laneRoom: 20,
+        held: false,
+        dailyCap: 500,
+        readerUserId: null,
+      },
+      nowMs,
+    );
+  };
+
+  beforeAll(() => {
+    membership[TC] = ['z'];
+    providers._overrideTicketSourceForTest({
+      ticketComments: async (_a, ident) =>
+        (comments[ident] ?? []).map((c) => ({ id: c.id, author: 'Dana Lee', createdAt: c.createdAt, updatedAt: null, body: 'Done in the CMS.' })),
+    });
+  });
+  afterAll(() => {
+    delete membership[TC];
+    providers._overrideTicketSourceForTest({ ticketComments: undefined });
+  });
+
+  it('re-checks (cause "commented", grace window from the comment) only while a criterion is not done', async () => {
+    await endQueuedRuns();
+    const nowMs = Date.now();
+    comments[TC] = [{ id: 'c1', createdAt: new Date(nowMs - 3_600_000).toISOString() }];
+    await seedRun(['met', 'not_met']);
+    expect((await state(nowMs))!.plan.status).toBe('up_to_date');
+    // A new comment one minute ago: waiting out the 2 quiet minutes, then due as 'commented'.
+    comments[TC] = [...comments[TC]!, { id: 'c2', createdAt: new Date(nowMs - 60_000).toISOString() }];
+    const waiting = (await state(nowMs))!;
+    expect(waiting.plan.status).toBe('waiting');
+    expect(waiting.plan.lastChange?.kind).toBe('commented');
+    const due = (await state(nowMs + 61_000))!;
+    expect(due.plan.status).toBe('due');
+    expect(due.cause).toBe('commented');
+    // The same new comment on a check whose criteria are all DONE (met + met outside code): nothing to re-check.
+    await seedRun(['met', 'met_outside_code']);
+    expect((await state(nowMs + 61_000))!.plan.status).toBe('up_to_date');
   });
 });

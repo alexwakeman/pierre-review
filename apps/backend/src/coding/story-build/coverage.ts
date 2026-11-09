@@ -8,9 +8,10 @@ import type { StoryBuildTicketPr } from './inputs.js';
 // boot (`latestTicketCheck`) for TICKET.md's verdicts.
 //
 //   no check                every criterion is a gap                                  state 'none'
-//   a stored check          its verdicts: `met` is done (with the PRs that deliver it), anything else
-//                           — partly_met / not_met / unclear / not_checked — is a gap, and every
-//                           `missing` item (M1…) is a gap too                         state 'checked'
+//   a stored check          its verdicts: DONE (shared `criterionDone`) is not a gap — `met` with
+//                           the PRs that deliver it, `met_outside_code` with the comment it rests on
+//                           (no PRs) — anything else — partly_met / not_met / unclear / not_checked —
+//                           is a gap, and every `missing` item (M1…) is a gap too    state 'checked'
 //
 // The fold itself (`foldCoverage`) is PURE.
 
@@ -40,6 +41,7 @@ export function foldCoverage(a: {
         text: criterionTextOnly(c.text, c.ref),
         verdict: c.status,
         coveredByPrIds: c.status === 'met' ? [...new Set(c.deliveredBy)] : [],
+        ...(c.status === 'met_outside_code' && c.metBy != null ? { metBy: c.metBy } : {}),
       })),
       missing: assessment.missing.map((m) => ({ ref: m.ref, text: m.title })),
       existingPrs,

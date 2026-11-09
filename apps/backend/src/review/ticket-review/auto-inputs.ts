@@ -5,7 +5,8 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import { utcDayStartMs } from '../claude-review/auto.js';
 import { fingerprint, readLiveMembers, staleReasons, ticketHash, type LiveMember } from './fingerprint.js';
 import { countAutoTicketReviewsSince, getTicketStateInputs } from './persist.js';
-import { jiraStoryFor } from './prepare.js';
+import { jiraStoryFor, ticketCommentsFor } from './prepare.js';
+import { newCommentsMakeStale } from '../../tracker/comments.js';
 import { ticketAutoCheckPlan, type TicketAutoChange, type TicketAutoPlan } from './auto-plan.js';
 
 // THE AUTOMATIC STORY CHECK'S INPUTS, read from stored rows — ONE reader for the sweeper (sweep.ts,
@@ -17,7 +18,7 @@ const s = (ctx: AgentContext): any => ctx.schema as any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Why the sweeper queued a run (ticket_reviews.cause, migration 0182). NULL = a manual run.
-export type TicketReviewCause = 'first' | 'pushed' | 'joined' | 'left' | 'merged' | 'story_edited';
+export type TicketReviewCause = 'first' | 'pushed' | 'joined' | 'left' | 'merged' | 'story_edited' | 'commented';
 
 export interface TicketAutoContext {
   accountId: number;
@@ -119,6 +120,7 @@ export function causeOf(
   if (reasons.includes('pr_merged')) return 'merged';
   if (reasons.includes('story_edited')) return 'story_edited';
   if (reasons.includes('pr_pushed')) return 'pushed';
+  if (reasons.includes('new_comments')) return 'commented';
   return null;
 }
 
@@ -152,10 +154,16 @@ export async function loadTicketAutoState(
   const fp = fingerprint(liveHash, live);
   const st = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
   const first = st?.latest == null;
-  const needsRun = first || st!.latest!.fingerprint !== fp;
+  // A person's comment the latest check did not see re-checks it ONLY while it still has a criterion
+  // not done (tracker/comments.ts `newCommentsMakeStale`; docs/TRACKERS.md § Ticket comments).
+  const comments = st?.latest?.commentsSeen != null ? await ticketCommentsFor(accountId, ident) : [];
+  const commentsStale = !first && newCommentsMakeStale(st?.latest, comments);
+  const needsRun = first || st!.latest!.fingerprint !== fp || commentsStale;
   const attempt = st?.latestAttempt;
   const alreadyTried = attempt != null && attempt.id > (st?.latest?.id ?? 0) && attempt.fingerprint === fp;
-  const reasons = st?.latest != null ? staleReasons(st.latest, { ticketHash: liveHash, members: live }).reasons : [];
+  const reasons: TicketReviewStaleReason[] =
+    st?.latest != null ? staleReasons(st.latest, { ticketHash: liveHash, members: live }).reasons : [];
+  if (commentsStale) reasons.push('new_comments');
 
   // ---- the changes the grace window counts from ----
   const liveIds = live.map((m) => m.prId);
@@ -175,6 +183,15 @@ export async function loadTicketAutoState(
     // A row's `changed_at` is also stamped when it is first written (= its join): not a second change.
     const changed = m.changedAtMs ?? null;
     if (changed != null && changed !== linked) changes.push({ atMs: changed, prId: null, kind: 'ticket_changed' });
+  }
+
+  // Each comment that check did not see restarts the grace window from when it was written.
+  if (commentsStale) {
+    const seen = new Set(st?.latest?.commentsSeen?.ids ?? []);
+    for (const c of comments) {
+      const at = Date.parse(c.createdAt);
+      if (!seen.has(c.id) && Number.isFinite(at)) changes.push({ atMs: at, prId: null, kind: 'commented' });
+    }
   }
 
   // ---- the onboarding floor (a first check only) ----

@@ -1211,8 +1211,9 @@ function StoryViewHeader({
 }
 
 /** The criteria counts the rail lists under the coverage pill, in verdict order; zeros are left out. */
-const RAIL_COUNT_WORDS: ReadonlyArray<{ key: 'met' | 'partlyMet' | 'notMet' | 'unclear' | 'notChecked'; label: string }> = [
+const RAIL_COUNT_WORDS: ReadonlyArray<{ key: 'met' | 'metOutsideCode' | 'partlyMet' | 'notMet' | 'unclear' | 'notChecked'; label: string }> = [
   { key: 'met', label: 'Met' },
+  { key: 'metOutsideCode', label: 'Met outside code changes' },
   { key: 'partlyMet', label: 'Partly met' },
   { key: 'notMet', label: 'Not met' },
   { key: 'unclear', label: 'Can’t tell' },
@@ -1237,7 +1238,7 @@ function StoryRailCheck({
   counts: TicketReviewState['counts'];
   children: ReactNode;
 }): JSX.Element {
-  const rows = counts != null ? RAIL_COUNT_WORDS.filter((w) => counts[w.key] > 0) : [];
+  const rows = counts != null ? RAIL_COUNT_WORDS.filter((w) => (counts[w.key] ?? 0) > 0) : [];
   const hasStatus = cat != null || t.status != null;
   return (
     <div className="space-y-3" data-testid="story-rail-check">

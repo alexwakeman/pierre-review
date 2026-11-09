@@ -7,7 +7,7 @@ import { TICKET_REVIEW_MAX_PRS, type SprintGraphPr } from '@pierre-review/shared
 import type { AgentContext } from '../agent-context.js';
 import type { TicketStateInputs } from './persist.js';
 import type { StartTicketArgs } from './manager.js';
-import { orderSprintChecks, runSprintTicketChecks, type SprintCheckDeps, type SprintCheckLive } from './sprint-checks.js';
+import { orderSprintChecks, runSprintTicketChecks, sprintCheckPickOf, type SprintCheckDeps, type SprintCheckLive } from './sprint-checks.js';
 import type { LiveMember } from './fingerprint.js';
 
 const pr = (prId: number, state: SprintGraphPr['state']): SprintGraphPr => ({
@@ -141,5 +141,30 @@ describe('runSprintTicketChecks', () => {
   it('orderSprintChecks is deterministic on ties', () => {
     const p = (ident: string, never: boolean, newestMs: number) => ({ ident, never, newestMs, live: live('f', []), originPrId: 1 });
     expect(orderSprintChecks([p('B', false, 5), p('A', false, 5), p('C', true, 1)]).map((x) => x.ident)).toEqual(['C', 'A', 'B']);
+  });
+});
+
+describe("a person's new comment", () => {
+  const cand = { ident: 'B-1', key: 'B-1', title: 'B1', prs: [pr(9, 'open')] };
+  const withRun = (statuses: string[]): TicketStateInputs => ({
+    latest: {
+      id: 1,
+      fingerprint: 'fp',
+      ticketHash: 'h',
+      alignment: null,
+      assessment: { alignment: 'partly_aligned', summary: null, criteria: statuses.map((status) => ({ status })), missing: [], notRequested: [] } as never,
+      completedAt: null,
+      members: [],
+      commentsSeen: { ids: ['c1'], count: 1, hash: 'x' },
+    },
+    runningRunId: null,
+    latestAttempt: null,
+  });
+  const lv = (commentIds: string[]): SprintCheckLive => ({ ...live('fp', [member(9, 1)]), commentIds });
+
+  it('re-checks a current check only while it has a criterion not done', () => {
+    expect(sprintCheckPickOf(cand, withRun(['met', 'not_met']), lv(['c1']))).toBeNull();
+    expect(sprintCheckPickOf(cand, withRun(['met', 'not_met']), lv(['c1', 'c2']))).not.toBeNull();
+    expect(sprintCheckPickOf(cand, withRun(['met', 'met_outside_code']), lv(['c1', 'c2']))).toBeNull();
   });
 });

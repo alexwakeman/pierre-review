@@ -98,6 +98,25 @@ describe('deriveTicketReviewState', () => {
     ).toBe('running');
   });
 
+  it("a person's new comment: stale ('new_comments') only when the caller says a criterion is not done", () => {
+    const live = { ticketHash: h, members: [a, b] };
+    const st = deriveTicketReviewState({ ident: 'x', latest, runningRunId: null, live, newCommentsStale: true });
+    expect(st.status).toBe('stale');
+    expect(st.staleBecause).toEqual(['new_comments']);
+    expect(deriveTicketReviewState({ ident: 'x', latest, runningRunId: null, live, newCommentsStale: false }).status).toBe('current');
+    // Joined to a code move, both are named.
+    const both = deriveTicketReviewState({
+      ident: 'x',
+      latest,
+      runningRunId: null,
+      live: { ticketHash: h, members: [a, { ...b, headSha: 'b2' }] },
+      newCommentsStale: true,
+    });
+    expect(both.staleBecause).toEqual(['pr_pushed', 'new_comments']);
+    // No run yet: nothing to be stale.
+    expect(deriveTicketReviewState({ ident: 'x', latest: null, runningRunId: null, live, newCommentsStale: true }).status).toBe('none');
+  });
+
   it('with no live answer the latest run is current; a run never prepared is stale', () => {
     expect(deriveTicketReviewState({ ident: 'x', latest, runningRunId: null, live: null }).status).toBe('current');
     expect(

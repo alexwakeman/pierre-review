@@ -6,6 +6,8 @@
 //   3. Unreported ⇒ `not_checked`; unknown statuses and empty texts are dropped and refs renumber.
 //   4. Items: every not_met / partly_met criterion and every missing item, owned by the member
 //      Claude named in `expectedIn` (else null), with a path only when a member owns it.
+//   5. `met_outside_code` survives only with a citation of a comment IN THE PROMPT; `metBy` is the
+//      stored comment; a delivering PR makes it `met`; it is never an item.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/reconcile
 import { describe, expect, it } from 'vitest';
@@ -178,6 +180,68 @@ describe('reconcileTicketReview — the summary is two plain sentences', () => {
       ['AC1', 'AC1/AC8 - links work'],
       ['AC2', 'AC3: export works'],
       ['AC3', 'npm test runs as two jobs'],
+    ]);
+  });
+});
+
+describe('reconcileTicketReview — met outside code changes', () => {
+  // The comments IN THE PROMPT, by ref — people only (bots never reach a prompt).
+  const comments = new Map([
+    ['C1', { id: '10001', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z' }],
+    ['C3', { id: '10003', author: ' ', createdAt: '2026-03-06T09:00:00.000Z' }],
+  ]);
+  const outside = (over: Record<string, unknown>) => ({ text: 'CSV', status: 'met_outside_code', explanation: 'Done in the admin screen.', ...over });
+
+  it('keeps it with a cited comment, and stores the STORED comment, never model text', () => {
+    const { assessment, items } = reconcileTicketReview(
+      ticket,
+      members,
+      { alignment: 'aligned', criteria: [outside({ metByComment: '[c1]' }), outside({ text: 'PDF', metByComment: 'C3' })] },
+      comments,
+    );
+    expect(assessment.criteria.map((c) => [c.status, c.metBy, c.deliveredBy, c.expectedIn])).toEqual([
+      ['met_outside_code', { commentId: '10001', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z' }, [], null],
+      ['met_outside_code', { commentId: '10003', author: 'Someone', createdAt: '2026-03-06T09:00:00.000Z' }, [], null],
+    ]);
+    // Done: never an item, never posted.
+    expect(items).toEqual([]);
+  });
+
+  it('no citation, a ref not in the prompt (a cut-off or a bot comment), or a place for the code ⇒ unclear', () => {
+    const { assessment } = reconcileTicketReview(
+      ticket,
+      members,
+      {
+        alignment: 'aligned',
+        criteria: [
+          outside({}),
+          outside({ text: 'PDF', metByComment: 'C2' }),
+          outside({ text: 'Email', metByComment: 'C1', expectedIn: { pr: 'PR1' } }),
+        ],
+      },
+      comments,
+    );
+    expect(assessment.criteria.map((c) => [c.status, c.metBy ?? null])).toEqual([
+      ['unclear', null],
+      ['unclear', null],
+      ['unclear', null],
+    ]);
+    // With no comments given at all, nothing outside code survives.
+    expect(reconcileTicketReview(ticket, members, { alignment: 'aligned', criteria: [outside({ metByComment: 'C1' })] }).assessment.criteria[0]!.status).toBe(
+      'unclear',
+    );
+  });
+
+  it('a PR named as delivering it makes it a plain met; an unread member never demotes it', () => {
+    const { assessment } = reconcileTicketReview(
+      ticket,
+      [members[0]!, { ...members[1]!, checkedOut: false }],
+      { alignment: 'aligned', criteria: [outside({ metByComment: 'C1', deliveredBy: ['PR1'] }), outside({ text: 'PDF', metByComment: 'C1' })] },
+      comments,
+    );
+    expect(assessment.criteria.map((c) => [c.status, c.deliveredBy, c.metBy ?? null])).toEqual([
+      ['met', [11], null],
+      ['met_outside_code', [], { commentId: '10001', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z' }],
     ]);
   });
 });

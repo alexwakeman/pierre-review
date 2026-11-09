@@ -23,8 +23,10 @@ export interface SessionTicketPr {
 export interface SessionTicketGap {
   ref: string;
   text: string;
-  /** 'met' criteria are listed too, so the agent does not redo them. */
+  /** Done criteria ('met', 'met_outside_code') are listed too, so the agent does not redo them. */
   verdict: string;
+  /** 'met_outside_code' only: the person's ticket comment it rests on. */
+  metBy?: { author: string; createdAt: string } | null;
 }
 
 export interface SessionTicket {
@@ -134,7 +136,12 @@ export async function readSessionTicket(
       cov == null
         ? null
         : {
-            criteria: cov.criteria.map((c) => ({ ref: c.ref, text: c.text, verdict: c.verdict })),
+            criteria: cov.criteria.map((c) => ({
+              ref: c.ref,
+              text: c.text,
+              verdict: c.verdict,
+              ...(c.metBy != null ? { metBy: { author: c.metBy.author, createdAt: c.metBy.createdAt } } : {}),
+            })),
             missing: cov.missing.map((m) => ({ ref: m.ref, text: m.text })),
             note: cov.note,
           },

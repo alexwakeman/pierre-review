@@ -10,6 +10,12 @@
 //   • A `met` MUST NAME WHO DELIVERS IT. With no member left in `deliveredBy` and no evidence, it is
 //     demoted to `unclear` — the server never keeps a "met" nobody can point at. Evidence alone
 //     fills `deliveredBy`.
+//   • `met_outside_code` ("Met outside code changes") MUST CITE A PERSON'S COMMENT the prompt gave
+//     (`metByComment`: 'C3'). The server keeps it only when the ref resolves to a comment IN THE
+//     PROMPT — the people's comments only (bots never reach a prompt) — and stores `metBy` from that
+//     STORED comment, never from model text. No resolvable citation, or a place the code should go
+//     (`expectedIn`): `unclear`. A PR named as delivering it: `met`. It is never posted and never an
+//     item. It is NOT demoted by the "met nobody can point at" rule: the comment is what it points at.
 //   • A MEMBER THAT COULD NOT BE CHECKED OUT may deliver anything. While one exists, no criterion
 //     may be `not_met` — it reads `unclear` (the prompt says so too; this is the guarantee) — and no
 //     missing item becomes a postable item.
@@ -29,7 +35,9 @@ import {
   type ClaudeTicketAlignment,
   type ClaudeTicketCriterionStatus,
   type TicketAssessment,
+  type TicketComment,
   type TicketCriterion,
+  type TicketCriterionMetBy,
   type TicketEvidence,
   type TicketExpectedIn,
   type TicketMissingItem,
@@ -69,7 +77,14 @@ export interface TicketReport {
 
 const EVIDENCE_MAX = 10;
 const ALIGNMENTS: ReadonlySet<string> = new Set(['aligned', 'partly_aligned', 'not_aligned', 'unclear']);
-const STATUSES: ReadonlySet<string> = new Set(['met', 'partly_met', 'not_met', 'unclear']);
+const STATUSES: ReadonlySet<string> = new Set(['met', 'met_outside_code', 'partly_met', 'not_met', 'unclear']);
+
+/** 'C3', 'c3', '[C3]', 'C 3' → 'C3'; anything else → null. */
+function commentRefOf(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const m = /^\[?\s*c\s*(\d{1,4})\s*\]?$/i.exec(raw.trim());
+  return m ? `C${Number(m[1])}` : null;
+}
 
 function clip(s: unknown, max: number): string | null {
   if (typeof s !== 'string') return null;
@@ -134,6 +149,9 @@ export function reconcileTicketReview(
   ticket: Pick<ClaudeReviewTicket, 'acceptanceCriteria'>,
   members: readonly ReconcileMember[],
   reported: TicketReport | null | undefined,
+  // The PEOPLE's comments IN THE PROMPT by ref (prompts.ts `ticketCommentsBlock(…).shownRefs`): the only
+  // citations a `met_outside_code` may make. Absent / empty ⇒ no such verdict survives.
+  comments: ReadonlyMap<string, Pick<TicketComment, 'id' | 'author' | 'createdAt'>> = new Map(),
 ): ReconciledTicketReview {
   const member = memberIndex(members);
   const anyUnchecked = members.some((m) => !m.checkedOut);
@@ -204,6 +222,18 @@ export function reconcileTicketReview(
       for (const e of evidence) delivered.add(e.prId);
 
       let status = c.status as ClaudeTicketCriterionStatus;
+      let metBy: TicketCriterionMetBy | null = null;
+      if (status === 'met_outside_code') {
+        const cited = (() => {
+          const ref = commentRefOf(c.metByComment);
+          return ref != null ? (comments.get(ref) ?? null) : null;
+        })();
+        // A PR delivers it after all: that is a plain met.
+        if (delivered.size > 0) status = 'met';
+        // No comment it can point at, or the model also said where the code should go: not shown.
+        else if (cited == null || expectedInOf(c.expectedIn, member, members) != null) status = 'unclear';
+        else metBy = { commentId: cited.id, author: cited.author.trim() || 'Someone', createdAt: cited.createdAt };
+      }
       // A "met" nobody can point at is not a met.
       if (status === 'met' && delivered.size === 0) status = 'unclear';
       // An unread member may be the one that delivers it.
@@ -223,6 +253,7 @@ export function reconcileTicketReview(
         deliveredBy: members.map((m) => m.prId).filter((id) => delivered.has(id)),
         evidence,
         expectedIn,
+        ...(metBy != null ? { metBy } : {}),
       });
       criterionWhere.push(where(c, expectedIn?.prId ?? null));
     }

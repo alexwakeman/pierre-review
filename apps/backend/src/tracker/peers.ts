@@ -174,6 +174,19 @@ export async function listChangedTicketIdents(
       .from(t)
       .where(and(eq(t.accountId, accountId), gte(t.changedAt, new Date(sinceMs))))
       .execute()) as Array<{ provider: TrackerProvider; apiRoot: string; issueKey: string }>;
+    // Tickets whose people's comments were stored since (a read that carried them): a comment the
+    // latest check did not see may make it stale (comments.ts `newCommentsMakeStale` — the sweeper's
+    // rule decides; this only names the ticket). A narrow test schema without the table: none.
+    const c = ctx.schema.trackerTicketComments;
+    if (c != null) {
+      rows.push(
+        ...((await ctx.db
+          .selectDistinct({ provider: c.provider, apiRoot: c.apiRoot, issueKey: c.issueKey })
+          .from(c)
+          .where(and(eq(c.accountId, accountId), eq(c.isBot, false), gte(c.fetchedAt, new Date(sinceMs))))
+          .execute()) as Array<{ provider: TrackerProvider; apiRoot: string; issueKey: string }>),
+      );
+    }
     return [...new Set(rows.map((r) => trackerTicketIdent(r.provider, r.apiRoot, r.issueKey)))].sort();
   } catch (err) {
     ctx.log.warn({ accountId, code: codeOf(err) }, 'ticket review: changed tickets not read');

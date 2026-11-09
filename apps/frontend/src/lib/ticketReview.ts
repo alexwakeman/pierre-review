@@ -1,6 +1,7 @@
 import {
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
+  criteriaDoneWords,
   jiraApiRoot,
   isTrackerIdent,
   ticketIdentForLink,
@@ -123,7 +124,7 @@ export interface TicketCurrency {
   title: string;
 }
 
-const CHANGE_VERB: Record<Exclude<TicketReviewStaleReason, 'story_edited'>, string> = {
+const CHANGE_VERB: Record<Exclude<TicketReviewStaleReason, 'story_edited' | 'new_comments'>, string> = {
   pr_pushed: 'pushed since',
   pr_merged: 'merged since',
   pr_added: 'added',
@@ -136,6 +137,7 @@ const REASON_SENTENCE: Record<TicketReviewStaleReason, string> = {
   pr_left: 'A PR no longer names this ticket.',
   pr_pushed: 'A PR was pushed.',
   pr_merged: 'A PR was merged.',
+  new_comments: 'Someone commented on the ticket, and a criterion is not done yet.',
 };
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -166,6 +168,7 @@ export function ticketCurrency(
       const first = reasons[0];
       if (first == null) return { tone: 'stale', label: 'Changed since', title };
       if (first === 'story_edited') return { tone: 'stale', label: 'Ticket edited since', title };
+      if (first === 'new_comments') return { tone: 'stale', label: 'New comments since', title };
       const ids = state.changedPrIds;
       if (ids.length > 1) return { tone: 'stale', label: `${ids.length} PRs changed since`, title };
       const one = ids.length === 1 ? labelOf(ids[0]!) : null;
@@ -176,8 +179,9 @@ export function ticketCurrency(
 
 /**
  * "2 new comments since this check" — people commented on the ticket after the latest check
- * (docs/TRACKERS.md § Ticket comments). A comment never makes a check stale; this only tells the reader
- * a Re-check would see them. null when there are none (or while a check runs).
+ * (docs/TRACKERS.md § Ticket comments). They make the check stale only while a criterion is not done
+ * (the server's 'new_comments'); this line tells the reader either way. null when there are none (or
+ * while a check runs).
  */
 export function newCommentsWords(
   state: Pick<TicketReviewState, 'status' | 'newComments'> | null | undefined,
@@ -221,6 +225,8 @@ export function ticketAutoCheckWords(
         return `${pr} joined the ticket`;
       case 'merged':
         return `${pr} merged`;
+      case 'commented':
+        return 'the last comment on the ticket';
       default:
         return 'the ticket changed';
     }
@@ -235,7 +241,7 @@ export function ticketAutoCheckWords(
         const wait = after != null ? ` — waiting 2 quiet minutes after ${after}` : '';
         return {
           label: `Story check starts in ${shortDuration(startsMs - nowMs)}${wait}`,
-          title: 'Every push, joining PR or ticket change restarts the 2 minutes. After 20 minutes of changes it starts anyway.',
+          title: 'Every push, joining PR, ticket change or new comment restarts the 2 minutes. After 20 minutes of changes it starts anyway.',
         };
       }
       return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
@@ -272,18 +278,19 @@ export function ticketAutoCheckWords(
 
 // ---- coverage ----
 
-/** "4 of 6 met"; null when the run had no criteria. */
+/** "4 of 6 met" / "4 met + 1 outside code of 6"; null when the run had no criteria. */
 export function coverageLabel(counts: TicketReviewState['counts']): string | null {
   if (counts == null || counts.total === 0) return null;
-  return `${counts.met} of ${counts.total} met`;
+  const outside = counts.metOutsideCode ?? 0;
+  return outside > 0 ? criteriaDoneWords(counts) : `${counts.met} of ${counts.total} met`;
 }
 
 export type CoverageTone = 'ok' | 'partial' | 'bad' | 'muted';
 
-/** All met → ok; any not met → bad; otherwise (partly met / can't tell) → partial. */
+/** All DONE (met, or met outside code) → ok; any not met → bad; otherwise (partly met / can't tell) → partial. */
 export function coverageTone(counts: TicketReviewState['counts']): CoverageTone {
   if (counts == null || counts.total === 0) return 'muted';
-  if (counts.met === counts.total) return 'ok';
+  if (counts.met + (counts.metOutsideCode ?? 0) === counts.total) return 'ok';
   if (counts.notMet > 0) return 'bad';
   return 'partial';
 }
@@ -560,4 +567,22 @@ export function membersWithCards(
 /** True when a card has anything beyond its summary to expand into. */
 export function cardHasDetail(card: Pick<TicketPrCard, 'interfaces' | 'looseEnds'>): boolean {
   return card.interfaces.length > 0 || card.looseEnds.length > 0;
+}
+
+// ---- met outside code changes ----
+
+/** "Per Dana Lee's comment, 4 Mar" — the citation line of a "Met outside code changes" criterion
+ *  (`metBy`, copied by the server from the stored comment). null without one. */
+export function metByWords(metBy: TicketCriterion['metBy'], fmt: (iso: string) => string): string | null {
+  if (metBy == null) return null;
+  const who = metBy.author.trim() !== '' ? metBy.author.trim() : 'someone';
+  return `Per ${who}'s comment, ${fmt(metBy.createdAt)}`;
+}
+
+/** The event a citation sends so the ticket's Comments list opens on that comment (TicketComments.tsx). */
+export const SHOW_TICKET_COMMENT_EVENT = 'limn:show-ticket-comment';
+
+/** Open the ticket's Comments list, where it is on screen, at this comment. */
+export function showTicketComment(commentId: string): void {
+  window.dispatchEvent(new CustomEvent(SHOW_TICKET_COMMENT_EVENT, { detail: { commentId } }));
 }

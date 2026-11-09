@@ -184,6 +184,8 @@ describe('templated sentences', () => {
     });
     expect(ticketCriteriaSentence(a('met', 'met', 'not_met', 'met', 'met', 'unclear'))).toBe('4 of 6 criteria met.');
     expect(ticketCriteriaSentence(a('met'))).toBe('1 of 1 criterion met.');
+    // Met outside code changes is done, but named apart.
+    expect(ticketCriteriaSentence(a('met', 'met', 'met', 'met', 'met_outside_code', 'not_met'))).toBe('4 met + 1 outside code of 6 criteria.');
     expect(ticketCriteriaSentence(a())).toBeNull();
     expect(ticketCriteriaSentence(null)).toBeNull();
   });

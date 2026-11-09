@@ -92,8 +92,13 @@ function buildBaseTicketReviewShape(z: ZodNs) {
       .array(
         z.object({
           text: z.string().describe('The criterion in one short sentence, as you read it from the acceptance criteria.'),
-          status: z.enum(['met', 'partly_met', 'not_met', 'unclear']),
+          status: z.enum(['met', 'met_outside_code', 'partly_met', 'not_met', 'unclear']),
           explanation: z.string(),
+          metByComment: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("met_outside_code only: the ref of the ticket comment that says it was done, e.g. 'C3'."),
           deliveredBy: z
             .array(memberRef)
             .optional()

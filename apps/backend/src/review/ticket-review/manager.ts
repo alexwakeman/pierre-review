@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
+  TICKET_COMMENTS_PROMPT_CHARS,
   isTrackerIdent,
   trackerTicketRow,
   parseTicketIdent,
@@ -56,6 +57,7 @@ import {
   loadLegacyStoryFindings,
   memberRepos,
   prepareMemberWorktrees,
+  refreshTicketCommentsForRun,
   resolveTicketInputs,
   ticketCommentsFor,
 } from './prepare.js';
@@ -65,6 +67,7 @@ import {
   buildTicketReviewPrompt,
   capMemberDiffs,
   membersIndex,
+  ticketCommentsBlock,
   ticketReviewUntrustedTexts,
   type PromptDefaultBranch,
   type PromptMember,
@@ -379,9 +382,11 @@ async function runPipeline(
   }
   const { ticket, ticketHash: hash, members } = inputs;
   const fp = fingerprint(hash, members);
-  // The people's comments on the ticket (docs/TRACKERS.md § Ticket comments) — a tracker ticket only.
-  // ⚠ NOT in the hash or the fingerprint: the run stores what it saw (`commentsSeen`) so the SPA can
-  // say "n new comments since this check" without a comment ever re-billing an automatic run.
+  // The people's comments on the ticket (docs/TRACKERS.md § Ticket comments) — a tracker ticket only,
+  // READ AGAIN from the tracker first (comments only; the story text stays as stored). ⚠ NOT in the
+  // hash or the fingerprint: the run stores what it saw (`commentsSeen`); a person's later comment
+  // makes it stale only while it has a criterion not done (tracker/comments.ts `newCommentsMakeStale`).
+  await refreshTicketCommentsForRun(accountId, job.ident, [job.workspaceId]);
   const comments = await ticketCommentsFor(accountId, job.ident);
   const repos = await memberRepos(ctx, accountId, members);
   await markTicketReviewRunning(ctx, accountId, runId, {
@@ -662,6 +667,8 @@ async function runPipeline(
         checkedOut: m.checkedOut,
       })),
       res.payload as TicketReport | null,
+      // The comments IN THE PROMPT, by ref: the only citations a "Met outside code changes" may make.
+      ticketCommentsBlock(comments, TICKET_COMMENTS_PROMPT_CHARS, { refs: true }).shownRefs,
     );
     // The library passages, CHECKED (a bad link or a quote not in its section is dropped). Only a run
     // that read the library carries `references` at all.

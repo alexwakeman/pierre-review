@@ -6,7 +6,7 @@ import {
   type SprintStatusAutoOrder,
 } from '@pierre-review/shared';
 import { extractAcCandidates } from '../jira/candidates.js';
-import { assigneeOf, isTicketKey, jiraAuthHeader, linksField, statusOf } from '../jira/client.js';
+import { assigneeOf, isTicketKey, jiraAuthHeader, jiraCommentPage, linksField, statusOf } from '../jira/client.js';
 import { JiraFetchError, jiraGetJson } from '../jira/fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from '../jira/text.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
@@ -22,7 +22,9 @@ import { busiestSprintDates, sprintDate, type SprintFetchedTicket, type SprintLi
 //     Software) → the status fallback, `no_sprint_concept`; no issues → `none_active`.
 //   • Each issue is read with `fields=*all&expand=names,schema` and folded by the SAME pieces the
 //     one-ticket reader uses (candidates, status, assignee, blocking links, the workspace's criteria
-//     field), so a ticket reads the same here as on a pull request.
+//     field), so a ticket reads the same here as on a pull request. The `*all` answer's
+//     `fields.comment` is kept when WHOLE and stored as the ticket's comments (docs/TRACKERS.md §
+//     Ticket comments) — no extra call; a thread cut short is left to the story check's own re-read.
 //   • THE STATUS ORDER (docs/TRACKERS.md § The status order): the active sprint's board (`boardId`
 //     on a Cloud sprint object, `rapidViewId=` in an old Server string) holding the most tickets →
 //     `GET /rest/agile/1.0/board/{id}/configuration` (columns → status ids, in column order) +
@@ -242,6 +244,7 @@ export function toJiraSprintTicket(
         .map((x) => x.trim().slice(0, 100))
         .slice(0, 20)
     : null;
+  const commentPage = jiraCommentPage(f.comment);
   const projectKey = typeof asRecord(f.project)?.key === 'string' ? (asRecord(f.project)!.key as string) : key.split('-')[0]!;
   const updated = trackerDate(f, 'updated');
   return {
@@ -261,6 +264,10 @@ export function toJiraSprintTicket(
     components,
     sprintName: inSprint ? (active[0]?.name ?? null) : null,
     issueUpdatedAt: updated ?? null,
+    // The comments, from the `*all` answer's `fields.comment` — only when Jira sent them WHOLE. A
+    // thread cut short is left unknown (no extra call from the list read; the story check reads the
+    // ticket again before it runs). docs/TRACKERS.md § Ticket comments.
+    ...(commentPage?.complete ? { comments: commentPage.comments } : {}),
   };
 }
 

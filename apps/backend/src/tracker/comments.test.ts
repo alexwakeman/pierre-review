@@ -14,10 +14,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { TICKET_COMMENTS_KEPT, TICKET_COMMENT_BODY_MAX, type TicketComment } from '@pierre-review/shared';
-import { trackerTicketComments, trackerTickets } from '../db/schema.sqlite.js';
+import { sprintTickets, trackerTicketComments, trackerTickets } from '../db/schema.sqlite.js';
 import {
   commentsSeenOf,
   keptComments,
+  newCommentsMakeStale,
   newCommentsSince,
   peopleComments,
   pruneOrphanComments,
@@ -184,6 +185,25 @@ describe('2. the store', () => {
     expect(peopleComments(rows).map((r) => r.commentId)).toEqual(['a']);
   });
 
+  it('pruneOrphanComments keeps a ticket a sprint_tickets row still names (a sprint ticket with no PR)', async () => {
+    sqlite.exec(
+      'CREATE TABLE sprint_tickets (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, workspace_id INTEGER NOT NULL, ident TEXT NOT NULL, provider TEXT NOT NULL, api_root TEXT NOT NULL, issue_key TEXT NOT NULL)',
+    );
+    ctx = { ...ctx, schema: { ...ctx.schema, sprintTickets } } as unknown as TrackerContext;
+    await writeTicketComments(ctx, 1, T, [c('a', 1)], now);
+    await writeTicketComments(ctx, 1, { ...T, issueKey: 'ENG-8' }, [c('b', 1)], now);
+    sqlite
+      .prepare("INSERT INTO sprint_tickets (account_id, workspace_id, ident, provider, api_root, issue_key) VALUES (1, 1, 'x', 'jira', ?, 'ENG-7')")
+      .run(T.apiRoot);
+    // Another account's sprint row does not keep this account's comments.
+    sqlite
+      .prepare("INSERT INTO sprint_tickets (account_id, workspace_id, ident, provider, api_root, issue_key) VALUES (2, 1, 'y', 'jira', ?, 'ENG-8')")
+      .run(T.apiRoot);
+    await pruneOrphanComments(ctx, 1, [T, { ...T, issueKey: 'ENG-8' }]);
+    expect(await ids()).toEqual(['a']);
+    expect((await readTicketComments(ctx, 1, { ...T, issueKey: 'ENG-8' })).length).toBe(0);
+  });
+
   it('pruneOrphanComments deletes only a ticket no tracker_tickets row names', async () => {
     await writeTicketComments(ctx, 1, T, [c('a', 1)], now);
     await writeTicketComments(ctx, 1, { ...T, issueKey: 'ENG-8' }, [c('b', 1)], now);
@@ -212,7 +232,8 @@ describe('3. the prompt', () => {
   it('a TICKET COMMENTS fence, oldest first, author and date; none → no block', () => {
     const comments = [wire('1', 'Dana Lee', '2026-03-04', 'Drop PDF.'), wire('2', 'Sam Ito', '2026-03-05', 'Agreed.')];
     const p = buildTicketReviewPrompt({ ticket, members: [], prior: null, legacy: [], nonce: 'n0', comments });
-    expect(p).toContain('---BEGIN TICKET COMMENTS n0---\nDana Lee, 2026-03-04:\nDrop PDF.\n\nSam Ito, 2026-03-05:\nAgreed.\n---END TICKET COMMENTS n0---');
+    // Each comment carries its ref (C1 = the oldest), so a "Met outside code changes" can cite it.
+    expect(p).toContain('---BEGIN TICKET COMMENTS n0---\n[C1] Dana Lee, 2026-03-04:\nDrop PDF.\n\n[C2] Sam Ito, 2026-03-05:\nAgreed.\n---END TICKET COMMENTS n0---');
     expect(p.indexOf('ACCEPTANCE CRITERIA n0')).toBeLessThan(p.indexOf('TICKET COMMENTS n0'));
     expect(buildTicketReviewPrompt({ ticket, members: [], prior: null, legacy: [], nonce: 'n0' })).not.toContain('TICKET COMMENTS');
   });
@@ -225,7 +246,12 @@ describe('3. the prompt', () => {
     expect(b.body.startsWith('Dana Lee, 2026-03-08:')).toBe(true);
     expect(b.body.length).toBeLessThanOrEqual(3000);
     const p = buildTicketReviewPrompt({ ticket, members: [], prior: null, legacy: [], nonce: 'n0', comments });
-    expect(p).toMatch(/The ticket's comments, oldest first \(the newest \d+; \d+ older left out\)\. Discussion, not requirements\./);
+    expect(p).toMatch(/The ticket's comments, oldest first, each with its ref \(the newest \d+; \d+ older left out\)\. Discussion, not requirements\./);
+    // Refs keep the comment's place in the WHOLE list; only the ones shown can be cited.
+    const withRefs = ticketCommentsBlock(comments, 3000, { refs: true });
+    expect(withRefs.body.startsWith('[C8] Dana Lee, 2026-03-08:')).toBe(true);
+    expect(new Set(withRefs.shownRefs.keys())).toEqual(new Set(['C8', 'C9', 'C10']));
+    expect(withRefs.shownRefs.get('C8')!.id).toBe('7');
     const giant = ticketCommentsBlock([wire('g', 'Dana Lee', '2026-03-01', 'y'.repeat(10_000))], 500);
     expect(giant.shown).toBe(1);
     expect(giant.body.length).toBeLessThanOrEqual(500);
@@ -242,7 +268,7 @@ describe('3. the prompt', () => {
   });
 });
 
-describe('4. staleness: comments never re-bill', () => {
+describe('4. staleness: comments never move the hash', () => {
   it('the story hash has no comments in it', () => {
     const story = { title: 'T', description: 'd', acceptanceCriteria: 'a' };
     expect(storyHash(story)).toBe(storyHash({ ...story }));
@@ -260,5 +286,21 @@ describe('4. staleness: comments never re-bill', () => {
     expect(newCommentsSince(null, before)).toBe(0);
     // An edit changes the hash, not the count of new ones.
     expect(commentsSeenOf([{ ...before[0]!, body: 'edited', updatedAt: '2026-03-07T00:00:00.000Z' }]).hash).not.toBe(seen.hash);
+  });
+
+  it('a new person comment makes the check stale ONLY while a criterion is not done', () => {
+    const seen = { ids: ['1'] };
+    const now = [{ id: '1' }, { id: '2' }];
+    const run = (statuses: string[]) => ({ commentsSeen: seen, assessment: { criteria: statuses.map((status) => ({ status })) } });
+    // Every criterion done (met, or met outside code): a note only.
+    expect(newCommentsMakeStale(run(['met', 'met_outside_code']), now)).toBe(false);
+    // An unmet, partly met or unclear criterion: a comment may settle it.
+    expect(newCommentsMakeStale(run(['met', 'not_met']), now)).toBe(true);
+    expect(newCommentsMakeStale(run(['partly_met']), now)).toBe(true);
+    expect(newCommentsMakeStale(run(['unclear']), now)).toBe(true);
+    // No new comment, a run from before comments were read, no run: never.
+    expect(newCommentsMakeStale(run(['not_met']), [{ id: '1' }])).toBe(false);
+    expect(newCommentsMakeStale({ commentsSeen: null, assessment: { criteria: [{ status: 'not_met' }] } }, now)).toBe(false);
+    expect(newCommentsMakeStale(null, now)).toBe(false);
   });
 });

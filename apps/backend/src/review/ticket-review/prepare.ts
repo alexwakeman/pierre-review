@@ -71,6 +71,24 @@ export async function ticketCommentsFor(accountId: number, ident: string): Promi
   }
 }
 
+/**
+ * Read a tracker ticket's comments again before a story check runs (docs/TRACKERS.md § Ticket
+ * comments → Fresh at every check): comments only, never the story text, at most once per ticket per
+ * COMMENTS_FRESH_MS. `workspaceIds`: the run's workspace first, then the ticket's other member
+ * workspaces (the first whose tracker is this ticket's site is used). Never throws; false = the
+ * stored copy is used.
+ */
+export async function refreshTicketCommentsForRun(accountId: number, ident: string, workspaceIds: readonly number[]): Promise<boolean> {
+  if (!isTrackerIdent(parseTicketIdent(ident))) return false;
+  try {
+    const members = await getTicketSource().ticketMembers(accountId, ident).catch(() => []);
+    const ws = [...new Set([...workspaceIds, ...members.map((m) => m.workspaceId)])];
+    return (await getTicketSource().refreshComments(accountId, ident, ws)).fresh;
+  } catch {
+    return false;
+  }
+}
+
 /** The PR ids the tracker's stored rows list on a ticket ([] when unknown). */
 export async function jiraMemberIds(accountId: number, ident: string): Promise<number[]> {
   try {

@@ -2138,11 +2138,26 @@ does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-re
 `ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
 route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
 
-- **Ticket comments** ([TRACKERS.md](TRACKERS.md) § Ticket comments): a tracker ticket's people
-  comments ride the prompt in their own `TICKET COMMENTS` fence (oldest first, ≤ 6000 chars, newest
-  kept), with a system-prompt rule (discussion, may change scope, cite author + date, never a
-  requirement alone). Outside the fingerprint: a run stores `comments_seen` and the state's
-  `newComments` says "n new comments since this check" — a comment never re-bills an automatic run.
+- **Ticket comments** ([TRACKERS.md](TRACKERS.md) § Ticket comments): READ AGAIN from the tracker
+  before every run (comments only — the story text stays as stored), then a tracker ticket's people
+  comments ride the prompt in their own `TICKET COMMENTS` fence (oldest first, each headed `[C3]
+  Author, YYYY-MM-DD:`, ≤ 6000 chars, newest kept), with a system-prompt rule (discussion, may change
+  scope, cite author + date, never a requirement alone). Outside the fingerprint: a run stores
+  `comments_seen`; the state's `newComments` says "n new comments since this check", and a person's new
+  comment makes the check stale (`new_comments`) ONLY while it has a criterion not done.
+- **Met outside code changes** (`met_outside_code`, label "Met outside code changes"): no PR delivers
+  the criterion and it needs no code, but a PERSON's ticket comment says plainly the work was done
+  outside the code (a setting, content, a manual step, a decision). The model names the comment's ref
+  in `metByComment` ('C3'). ⚠ THE SERVER GUARANTEE (reconcile.ts): it survives only when the ref
+  resolves to a comment IN THE PROMPT (`ticketCommentsBlock(…).shownRefs` — the people's comments only;
+  bots never reach a prompt) and the model named no place for code (`expectedIn`); else `unclear`. A
+  PR in `deliveredBy`/`evidence` makes it plain `met`. `metBy {commentId, author, createdAt}` is copied
+  from the STORED comment, never model text. It is NOT demoted by the "met nobody can point at" rule.
+  It is DONE — never an item, never posted, never a Fill gaps gap, the chip may go green — but every
+  count names it apart ("4 met + 1 outside code of 6"). ONE predicate for "done / a gap": shared
+  `criterionDone` / `criterionIsGap` (criterion-status.ts), and ONE count, `criterionCounts`; an
+  unknown status is a gap. The SPA shows it as a done line with a comment mark and "Per Dana Lee's
+  comment, <date>", a button that opens the ticket's Comments at that comment.
 - **Keyed per TICKET, not per PR.** Ident `<provider>:<root>#<KEY>` — `jira:<apiRoot>#<KEY>` today,
   unchanged since the plugin era (members from core's stored tickets, `ticketMembers` — any workspace
   of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers) or

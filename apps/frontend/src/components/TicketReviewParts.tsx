@@ -24,6 +24,7 @@ import {
   STORY_MISSING_EXPLAINER,
   STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
+  criterionDone,
   criterionTextOnly,
   storySummaryProse,
   type ClaudeFindingSide,
@@ -48,6 +49,8 @@ import {
 } from '../lib/claudeReviewFollowUp.js';
 import {
   expectedInLabel,
+  metByWords,
+  showTicketComment,
   itemsByRef,
   memberLabel,
   memberPrIdsOf,
@@ -62,8 +65,9 @@ import {
   TICKET_PR_CARD_KIND_LABEL,
   type TicketCurrency,
 } from '../lib/ticketReview.js';
-import { CheckIcon, ChevronIcon, WarningIcon } from './Icons.js';
+import { CheckIcon, ChevronIcon, CommentIcon, WarningIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
+import { formatDate } from '../lib/ui.js';
 import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
@@ -292,21 +296,45 @@ export function CriterionRow({
   // The criterion's ref ("AC1") opens the PRs that deliver it, or where it belongs (2026-11-01: listed
   // under every criterion they were clutter). An unmet row's code in OTHER PRs joins that popover too
   // (2026-11-03): only the viewed PR's own files stay under the row, as jumps into Changes.
-  const codeIn = c.status === 'met' ? [] : evidenceElsewhere(c, review.members, viewedPrId, doneIn);
+  const codeIn = criterionDone(c.status) ? [] : evidenceElsewhere(c, review.members, viewedPrId, doneIn);
   const ownEvidence = c.evidence.filter((ev) => viewedPrId != null && ev.prId === viewedPrId);
   const ref = <CriterionRef label={c.ref} doneIn={doneIn} codeIn={codeIn} belongs={belongs} />;
-  // MET is one compact line: tick, ref, criterion, who delivered it.
-  if (c.status === 'met') {
+  // MET is one compact line: tick, ref, criterion, who delivered it. MET OUTSIDE CODE CHANGES is the
+  // same done line with a comment mark, its label, and the comment it rests on (a button that opens
+  // the ticket's Comments at it).
+  if (criterionDone(c.status)) {
+    const outside = c.status === 'met_outside_code';
+    const cite = outside ? metByWords(c.metBy, formatDate) : null;
     const line = (
       <>
         {/* The tick and the ref are ONE unit on the first line, however far the criterion wraps. */}
         <span className="inline-flex shrink-0 items-center gap-1.5 leading-5">
-          <span className="text-ui-success" aria-label="Met">
-            <CheckIcon size={12} />
+          <span className="text-ui-success" aria-label={TICKET_CRITERION_STATUS_LABEL[c.status]}>
+            {outside ? <CommentIcon size={12} /> : <CheckIcon size={12} />}
           </span>
           {ref}
         </span>
-        <span className="min-w-0 break-words leading-5">{criterionTextOnly(c.text, c.ref)}</span>
+        <span className="min-w-0 break-words leading-5">
+          {criterionTextOnly(c.text, c.ref)}
+          {outside && (
+            <span className="block text-meta text-ui-mute">
+              {TICKET_CRITERION_STATUS_LABEL.met_outside_code}
+              {cite != null && c.metBy != null && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="hit underline decoration-dotted underline-offset-2 hover:text-ui-ink"
+                    title="Show this comment in the ticket's comments"
+                    onClick={() => showTicketComment(c.metBy!.commentId)}
+                  >
+                    {cite}
+                  </button>
+                </>
+              )}
+            </span>
+          )}
+        </span>
       </>
     );
     if (docs == null) return <li className="flex items-start gap-2 px-1 text-body">{line}</li>;
