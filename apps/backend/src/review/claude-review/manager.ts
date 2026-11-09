@@ -47,6 +47,7 @@ import {
 } from './prompts.js';
 import { PAIR_ORDER, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
 import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
+import { coverTarget } from './pair.js';
 import { markPairBusy } from './pair-view.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import {
@@ -157,8 +158,9 @@ interface QueueItem {
   // ONE HALF OF A CLAUDE + CODEX PAIR (pair.ts; docs/CLAUDE-REVIEW.md § Claude + Codex). Absent on an
   // ordinary run.
   pair?: PairState;
-  // Set when the run ends: did it succeed?
+  // Set when the run ends: did it succeed? And was it stopped (its abort fired)?
   succeeded?: boolean;
+  aborted?: boolean;
   // Set (synchronously) when the run has ended. A pair's END belongs to whichever half ends LAST.
   done?: boolean;
   // Set when the run (or its whole pair) ends: the auto-post it started, if any. The team claim's
@@ -193,6 +195,9 @@ interface PairState {
   pressed?: boolean;
   // Second half: the FIRST half's run (its team-claim line, if any, is finished when the pair ends).
   first?: QueueItem;
+  // First half: set at the pair's end when ONE half succeeded and the other failed or never started
+  // (`coverTarget`): the cover pass to start once the pair's seat is released (`startPairCover`).
+  cover?: { survivor: AgentProviderId; failed: AgentProviderId };
 }
 
 /** Does this pair half still have a partner that has not ended (running, or its row being written)? */
@@ -763,6 +768,8 @@ function launch(item: QueueItem): void {
   void Promise.race([runPipeline(item, controller, emit), hardStop])
     .then((succeeded) => {
       item.succeeded = succeeded;
+      // The reader's stop (a watchdog interrupt aborts too, but it is a failure, not a stop).
+      item.aborted = controller.signal.aborted && item.interrupt == null;
     })
     .catch(async (err) => {
       // Unexpected error in prepare/persist (runReview itself never throws). Record it.
@@ -819,10 +826,36 @@ function launch(item: QueueItem): void {
       if (ends) {
         claimed.delete(prId);
         emitDone(ctx, prId, item.accountId, reviewId);
+        if (item.pair) startPairCover(item);
       }
       pump();
       pumpPeers();
     });
+}
+
+/** Start the cover pass `endPair` decided on, once the pair's seat is released. Never throws. */
+function startPairCover(item: QueueItem): void {
+  const [first] = pairHalves(item) as [QueueItem];
+  const p = first.pair;
+  const cover = p?.cover;
+  if (!p || !cover) return;
+  p.cover = undefined;
+  void import('./replies-check.js')
+    .then((m) =>
+      m.startCoverCheck(first.ctx, {
+        accountId: first.accountId,
+        prId: first.prId,
+        survivor: cover.survivor,
+        failed: cover.failed,
+        trigger: first.trigger,
+        pressed: first.trigger === 'manual' || p.pressed === true,
+        pairId: p.pairId,
+      }),
+    )
+    .then((r) => {
+      if (r.outcome === 'queued') first.ctx.log.info(`claude review pr ${first.prId}: ${cover.survivor} checks ${cover.failed}'s open findings (run ${r.reviewId})`);
+    })
+    .catch((err) => first.ctx.log.warn(`claude review pr ${first.prId}: cover check: ${err instanceof Error ? err.message : String(err)}`));
 }
 
 /** Both halves of the pair `item` belongs to (the first, then the second when it ran). */
@@ -867,6 +900,16 @@ async function endPair(item: QueueItem, emit: ((p: ClaudeReviewProgress) => void
         : { reviewId: (second ?? first).reviewId, succeeded: false };
   const autoPosted = runEnded(first, end);
   for (const half of pairHalves(item)) half.autoPosted = autoPosted;
+  // ONE HALF FAILED: the other covers its open findings (started once the seat is released).
+  const cover = coverTarget({
+    firstProvider: first.provider,
+    secondProvider: p.secondProvider ?? null,
+    firstSucceeded: first.succeeded === true,
+    secondSucceeded: second ? second.succeeded === true : null,
+    notStarted: p.notStarted ?? null,
+    stopped: p.stopped === true || first.aborted === true || second?.aborted === true,
+  });
+  if (cover) p.cover = cover;
 }
 
 function emitDone(ctx: AgentContext, prId: number, accountId: number, reviewId: number): void {
@@ -1168,6 +1211,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
         finishItemClaim(first);
         claimed.delete(prId);
         emitDone(ctx, prId, accountId, first.reviewId);
+        startPairCover(first);
       } else {
         markPairBusy(pair.pairId, false);
       }
@@ -2098,6 +2142,25 @@ export async function finishInterruptedPairs(
       };
       await runEnded(item, { reviewId: survivor.id, succeeded: true }, { slackSignal: false });
       ended.push(pairId);
+      // The half the restart interrupted: the survivor covers its open findings.
+      const failedHalf = survivor === first ? second : first;
+      const survivorProvider = survivor.provider ?? 'claude';
+      const failedProvider = failedHalf?.provider ?? 'claude';
+      if (failedHalf && failedHalf.status !== 'cancelled' && failedProvider !== survivorProvider) {
+        void import('./replies-check.js')
+          .then((m) =>
+            m.startCoverCheck(ctx, {
+              accountId: r.accountId,
+              prId: r.prId,
+              survivor: survivorProvider,
+              failed: failedProvider,
+              trigger: item.trigger,
+              pressed: item.trigger === 'manual',
+              pairId,
+            }),
+          )
+          .catch(() => {});
+      }
       ctx.log.info(`claude review pr ${r.prId}: ended pair ${pairId} interrupted by a restart`);
     } catch (err) {
       ctx.log.warn(`claude review pr ${r.prId}: ending interrupted pair ${pairId} failed: ${err instanceof Error ? err.message : String(err)}`);

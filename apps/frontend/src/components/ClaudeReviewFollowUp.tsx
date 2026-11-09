@@ -95,6 +95,7 @@ import {
   replyActions,
   replyStatusHeading,
   settledEarlierHeading,
+  raisedByLine,
   stillOpenPostable,
   storyFindingIdFor,
   storyItemChipLabel,
@@ -1261,7 +1262,11 @@ export function FollowUpRow({
         {isResolvedPushback(item) && (
           <span className={`${CHIP} ${RESOLVED_ON_GITHUB_CHIP.cls}`}>{RESOLVED_ON_GITHUB_CHIP.label}</span>
         )}
-        {item.carried && <span className={`text-meta ${MUTED}`}>from an earlier review</span>}
+        {raisedByLine(item, by) != null ? (
+          <span className={`text-meta ${MUTED}`}>{raisedByLine(item, by)}</span>
+        ) : (
+          item.carried && <span className={`text-meta ${MUTED}`}>from an earlier review</span>
+        )}
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-2">
         <CodeAnchorRef

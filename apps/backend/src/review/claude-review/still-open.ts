@@ -134,6 +134,8 @@ export function stillOpenCandidates(
         mine.set(threadId, null);
         continue;
       }
+      // The OTHER provider's finding: a cross-provider check never says "still open" on GitHub.
+      if (it.raisedBy) continue;
       mine.set(threadId, {
         threadId,
         // The one-line "how" (what is still needed) first; the explanation on an older row.
@@ -711,6 +713,7 @@ export function prLevelStillOpenItems(runs: readonly JudgingRun[]): Map<number, 
         out.delete(it.priorFindingId);
         continue;
       }
+      if (it.raisedBy) continue;
       out.set(it.priorFindingId, (it.how ?? '').trim() || it.explanation || null);
     }
   }

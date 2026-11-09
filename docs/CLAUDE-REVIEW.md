@@ -461,8 +461,10 @@ size, cache reads). It never runs a model and never starts the usage probe.
     (`aiModelChoiceLabel`: "Codex · GPT-6.1 Sol (most thorough)"). Never word a provider by hand.
   - **In-situ comparison**: a Codex review of a head Claude already reviewed runs, and both stay in
     history, each labelled (`mixed-providers.test.ts`). Auto review's one-run-per-head counts either
-    provider. ⚠ A second review still gets the earlier one as its "Previous review" follow-up, so
-    the two are NOT independent. The thread fold lets the newer run win and carries its provider.
+    provider. ⚠ The two are NOT independent: a run anchors its "Previous review" on its OWN
+    provider's latest run, and ALSO follows up the other provider's still-open findings, labelled as
+    that provider's (§ Claude + Codex → CROSS-PROVIDER FOLLOW-UP, decided 2026-11-09, every run, auto
+    and manual). The thread fold lets the newer run win and carries its provider.
   - Run cost follows the RUN's provider (`runCostText(…, provider)`): a Codex run on ChatGPT shows
     no figure, never US$. `useRunCostText()` judges a run of the OTHER provider (a per-run pick) by
     that provider's own reading (`['ai-budget', other]`, read only while it holds a credential), so a
@@ -611,6 +613,46 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     (two halves could otherwise auto-resolve and push back on one comment, or resolve it and re-raise
     it as a blocker). The next pair's second half drops a re-raise of the SAME earlier finding
     (`isPairRepeat`), and the next consolidation catches the rest.
+  - ⚠ **CROSS-PROVIDER FOLLOW-UP** (decided 2026-11-09; before it each provider followed only its own
+    chain, so a Codex finding was judged by nobody once Codex hit its usage limit — PR 221270's
+    warning 2101). EVERY run that is NOT a pair half (auto and manual alike) anchors on its own
+    provider's latest run as before, AND follows up the OTHER provider's still-open findings
+    (`loadPriorReviewForFollowUp` → `loadProviderChain` for the other provider, read as a pair half
+    reads it): each joins as carried with `raisedBy`, inline or PR-level alike. One is left out when
+    this chain already lists it, an eligible finding here re-raises it, it re-raises one this chain
+    lists (`priorFindingId`), or a run of THIS provider judged it after the other provider's newest
+    word on it (`judgedSinceByProvider` past the other chain's anchor) — so a working chain on the
+    other provider is not judged twice. With no run of this provider yet, the other chain alone
+    anchors the follow-up. They go LAST in the prompt (`selectPriorFindings`, under the same 40 /
+    24k cap; one left over is `not_checked` and carried again), each fenced with "(raised by Codex in
+    an earlier review, at head …)", plus ONE rule line only when such a finding is shown
+    (`pushCrossProviderRule`), so `prompt-golden.json` holds. One raised at this very head keeps the
+    other provider's answer (else `not_addressed`) in code, like an own one. ⚠ **THE CHECKER NEVER
+    DISPUTES THE OTHER PROVIDER'S FINDING** (`isCrossDispute`): a `reply_disputed` on it is stored as
+    plain `not_addressed` (no reply text), auto pushback skips it, and no still-open comment (thread or
+    PR-level) is planned for it; it MAY mark it addressed, and auto resolve may then close the thread
+    or hide the PR comment. The stored item carries `raisedBy`; the AI review panel shows "Raised by
+    Codex · checked by Claude" (`raisedByLine`) and never offers "Post still open" on it. ⚠ **A PAIR
+    HALF CARRIES NOTHING THE OTHER PROVIDER RAISED** (`inPair`): no cross chain, and no carried item
+    whose raising run was the other provider's (an earlier cross carry, a merged-away duplicate's kept
+    finding) — one judge per thread.
+  - ⚠ **A FAILED HALF IS COVERED** (decided 2026-11-09). When one half fails or never starts
+    (`coverTarget`: not when the reader stopped the pair, nor when a teammate's Limn holds the other
+    half), the half that succeeded runs a SHORT follow-up-only COVER PASS straight after the pair ends
+    (`startPairCover`, once the pair's seat is released; `finishInterruptedPairs` does the same for a
+    half a restart interrupted): replies-check.ts `startCoverCheck`, through the replies lane, the
+    same agent, tools, path guard and `submit_replies` (whose status gains the four code statuses; a
+    replies pass stores those as `not_checked`). It plans the failed provider's chain minus what the
+    survivor's provider judged since (`planCoverCheck`), reconciles through the REVIEW's gate
+    (`selectPriorFindings` + `reconcileFollowUp`, so same-head locks and the reply gate hold), and is
+    stored as a `kind = 'replies'` row with `followUp.cover = {provider}` (every "latest review"
+    reader skips it; its items overlay the chain like a pass's). Same rules as above: never disputes,
+    no pushback, no outcome change; auto resolve only. An AUTO pair's cover asks the spend budget
+    first (skipped, never queued, when over); it counts toward the per-PR daily cap of automatic
+    passes. Its row records the pair's start as its coverage, so it claims no reply the pair had not
+    seen. Labelled "Checked Codex's findings" (`repliesRunLabel`); summary "Checked Codex's 3 open
+    findings: 1 dealt with, 2 still open." The failed provider is NOT re-run (usage limits are hours);
+    when it next succeeds, its own chain takes the findings back.
   - ⚠ A group whose POSTED member is milder than an unposted one is LEFT ALONE (both kept): the
     posted one can never be withdrawn and a blocker is never merged into something milder.
   - The merge pass's usage is recorded when the completion SETTLES — also after the 90 s timeout
@@ -1269,6 +1311,10 @@ of this.
   again, when its earlier finding is itself eligible — the re-raise saved ignored because it was
   already on the commit (below), or one the reader never posted. The original comment, which IS
   on the PR, is followed up instead; once the re-raise is posted, the chain runs through it.
+- **THE OTHER PROVIDER'S CHAIN** joins after this one (§ Claude + Codex → CROSS-PROVIDER FOLLOW-UP):
+  its still-open findings come carried, `raisedBy` the other provider, last in the prompt; never on a
+  pair half. A carried item whose raising run was the other provider's keeps `raisedBy` on every
+  later run.
 - ⚠ **"HAS THE CODE MOVED?" IS PER FINDING.** Each loaded finding carries the head of the review
   that RAISED it (`PriorFindingForFollowUp.headSha`; the carried query selects `cr.headSha`), and
   `findingHeadMoved` compares THAT with this run's head. The plan-level `headMoved` (previous
@@ -1552,6 +1598,12 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   only Codex's findings, so a reply on a Claude thread that landed while the Claude half ran is still
   judged. The sweeper's candidate read applies the same rule to a pair's coverage of own-finding
   replies (`pairOwnCoveredMs`: the pair's EARLIER-reaching half).
+  ⚠ **EACH PROVIDER'S CHAIN, ALWAYS** (2026-11-09): the plan reads both providers' chains (each as a
+  pair half reads it), after a single run too, so a reply on a Codex comment after a Claude-only run
+  is judged. After a single run a finding the full review itself sent to the model takes the full
+  review as its base; any other takes its own chain's run. A thread whose owner's provider cannot run
+  is judged by the default as the OTHER provider's (`raisedBy`): it may be accepted, never disputed
+  (a dispute is stored as `not_addressed`). A COVER PASS (§ Claude + Codex) is a row of this lane too.
 - **A MOVED head a teammate's claim holds (2026-11-09).** The full review of the new head is skipped
   for the claim, so a reply the reader wrote after the push would wait for the next push. The sweeper
   instead asks `startRepliesCheck` at that head (auto.ts, the re-review loop's `heldByTeammate` branch,

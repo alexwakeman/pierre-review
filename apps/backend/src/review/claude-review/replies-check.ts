@@ -38,6 +38,7 @@ import {
 import {
   autoPostWireOf,
   insertQueuedReview,
+  judgedSinceByProvider,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
   markReviewCancelled,
@@ -48,7 +49,13 @@ import {
   saveReviewSuccess,
 } from './persist.js';
 import { attachFindingThreads } from './finding-replies.js';
-import type { PriorFindingForFollowUp } from './follow-up.js';
+import {
+  reconcileFollowUp,
+  selectPriorFindings,
+  type FollowUpPlan,
+  type PriorFindingForFollowUp,
+} from './follow-up.js';
+import type { ReviewFollowUpReport } from '../../platform/contract.js';
 import type { AutoPostDeps } from './auto-post.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
 import { peerTexts, pickReviewNonce } from './prompts.js';
@@ -56,6 +63,8 @@ import { checkOutPeers } from '../peer-checkouts.js';
 import { linkedPrsFor, linkedRunPeer, type LinkedPr } from './replies-linked-prs.js';
 import {
   REPLIES_PASS_CODE_CONTEXT_LINES,
+  coverReports,
+  coverSummary,
   judgedThroughFor,
   newestJudgeableReplyMs,
   planRepliesPass,
@@ -66,7 +75,13 @@ import {
   type CodeAround,
   type JudgingRun,
 } from './replies-pass.js';
-import { buildRepliesPrompt, repliesSystemPrompt } from './replies-check-prompt.js';
+import {
+  buildCoverPrompt,
+  buildRepliesPrompt,
+  coverPlanTexts,
+  coverSystemPrompt,
+  repliesSystemPrompt,
+} from './replies-check-prompt.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
 
 // THE REPLIES PASS — the I/O half (docs/CLAUDE-REVIEW.md § The replies pass; the pure half is
@@ -121,6 +136,9 @@ interface Job {
   commentsThroughMs: number | null;
   // A reader's press of the sweep: the budget is not asked again.
   pressed: boolean;
+  // A COVER PASS (`startCoverCheck`): the failed half's provider, whose open findings it checks, and
+  // the coverage its row records (the pair's start: it claims no reply the pair did not already see).
+  cover?: { failed: AiProviderId; coverageMs: number | null };
 }
 
 const claimed = new Map<string, number>();
@@ -143,13 +161,22 @@ interface FullReviewMeta {
   commentsThrough: Date | null;
   // A Claude + Codex pair half: the FIRST half's id. NULL on an ordinary run.
   pairId: number | null;
+  // Its follow-up record (which earlier findings it judged).
+  followUp: ClaudeReviewFollowUpRecord | null;
 }
 
 /** The latest succeeded FULL review that read code (the one the follow-up chain anchors on). */
 async function latestFullReview(ctx: AgentContext, accountId: number, prId: number): Promise<FullReviewMeta | null> {
   const cr = sch(ctx).claudeReviews;
   const rows = (await ctx.db
-    .select({ id: cr.id, headSha: cr.headSha, createdAt: cr.createdAt, commentsThrough: cr.commentsThrough, pairId: cr.pairId })
+    .select({
+      id: cr.id,
+      headSha: cr.headSha,
+      createdAt: cr.createdAt,
+      commentsThrough: cr.commentsThrough,
+      pairId: cr.pairId,
+      followUp: cr.followUp,
+    })
     .from(cr)
     .where(
       and(
@@ -226,15 +253,13 @@ export async function planRepliesCheck(
   if (!full) return { refused: 'no_review' };
   const settled = await loadSettledByReplyFindings(ctx, prId, accountId, ALL_RUNS);
   const settledIds = new Set(settled.map((f) => f.id));
-  // A CLAUDE + CODEX PAIR is ONE review in two runs: each half's posted findings (and their replies)
-  // are this pass's to judge, so read each provider's chain — the pair's two halves are the latest
-  // run of each. An ordinary review reads the latest run alone.
-  const priors =
-    full.pairId != null
-      ? await Promise.all(
-          (['claude', 'codex'] as const).map((p) => loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, settledIds, p)),
-        )
-      : [await loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, settledIds)];
+  // EACH PROVIDER'S CHAIN, always: a Claude + Codex pair is ONE review in two runs (each half's posted
+  // findings and their replies are this pass's to judge), and after a run on one provider the other
+  // provider's comments are still on the PR. Each chain is read as a pair half reads it (its own
+  // findings only), so a finding is listed by the chain of the provider that raised it.
+  const priors = await Promise.all(
+    (['claude', 'codex'] as const).map((p) => loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, settledIds, p, true)),
+  );
   const seen = new Set<number>();
   const priorFindings = priors
     .flatMap((p) => p?.findings ?? [])
@@ -249,7 +274,7 @@ export async function planRepliesCheck(
       commentsThroughMs: p.commentsThrough?.getTime() ?? null,
       items: p.followUp?.items ?? [],
     })),
-    full.pairId != null ? await pairBaseRuns(ctx, accountId, prId, priors) : undefined,
+    await baseRunsFor(ctx, accountId, prId, full, priors),
   );
   const findings = unjudgedReplyFindings(attached, judged);
   if (findings.length === 0) return { refused: 'nothing_to_check' };
@@ -259,6 +284,25 @@ export async function planRepliesCheck(
     if (t != null && (newest == null || t > newest)) newest = t;
   }
   return { full, findings, newestReplyMs: newest };
+}
+
+/**
+ * Each finding's judged-through base. A PAIR: the half whose chain listed it (`pairBaseRuns`). A
+ * single run: the same, except a finding the full review itself followed up (sent to the model — its
+ * own, or the other provider's carried across) takes the full review.
+ */
+async function baseRunsFor(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  full: FullReviewMeta,
+  priors: ReadonlyArray<{ reviewId: number; findings: ReadonlyArray<{ id: number }> } | null>,
+): Promise<Map<number, JudgingRun>> {
+  const base = await pairBaseRuns(ctx, accountId, prId, priors);
+  if (full.pairId == null) {
+    for (const it of full.followUp?.items ?? []) if (it.sent) base.delete(it.priorFindingId);
+  }
+  return base;
 }
 
 /**
@@ -477,6 +521,229 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
   }
 }
 
+// ---- THE COVER PASS (docs/CLAUDE-REVIEW.md § Claude + Codex, a failed half is covered) ----
+//
+// One half of a Claude + Codex pair failed or never started. Its provider's open findings would then
+// be judged by nobody at this head (the half that ran is a pair half: it never carries the other
+// provider's findings). Straight after the pair ends, the provider that succeeded runs a SHORT
+// follow-up-only pass over them, through this lane: the same agent, tools, path guard and row shape
+// as a replies pass (`kind = 'replies'`, so every "latest review" reader skips it and its items
+// overlay the chain like a pass's), with `followUp.cover` naming the failed provider. It may mark a
+// finding addressed (auto resolve may then close the thread) but never disputes one and never pushes
+// back; it changes no outcome. An AUTO pair's cover asks the spend budget first (skipped, never
+// queued, when over). Nothing to check (every open finding already judged since) ⇒ no row, no model.
+
+export interface StartCoverCheckArgs {
+  accountId: number;
+  prId: number;
+  // The half that succeeded (it runs the pass) and the one that failed (whose findings it checks).
+  survivor: AiProviderId;
+  failed: AiProviderId;
+  trigger: ClaudeReviewTrigger;
+  // A reader's press started the pair: the budget is not asked again.
+  pressed?: boolean;
+  // The pair's first half: the cover records the pair's start as its coverage.
+  pairId: number;
+}
+
+/** The failed provider's open findings no run of the survivor's provider judged since. DB-only. */
+export async function planCoverCheck(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  failed: AiProviderId,
+  survivor: AiProviderId,
+): Promise<{ reviewId: number; headSha: string; findings: PriorFindingForFollowUp[] } | null> {
+  const settled = await loadSettledByReplyFindings(ctx, prId, accountId, ALL_RUNS);
+  const chain = await loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, new Set(settled.map((f) => f.id)), failed, true);
+  if (!chain || chain.findings.length === 0) return null;
+  const judged = await judgedSinceByProvider(ctx, prId, accountId, survivor, chain.reviewId, ALL_RUNS);
+  const open = chain.findings.filter((f) => !judged.has(f.id));
+  if (open.length === 0) return null;
+  const attached = await attachFindingThreads(ctx, accountId, prId, open);
+  return {
+    reviewId: chain.reviewId,
+    headSha: chain.headSha,
+    findings: attached.map((f) => ({ ...f, carried: true, raisedBy: failed })),
+  };
+}
+
+/** Queue a pair's cover pass. Never throws; the outcome names why nothing was queued. */
+export async function startCoverCheck(ctx: AgentContext, a: StartCoverCheckArgs): Promise<StartRepliesCheckResult> {
+  try {
+    if (!AGENTIC_AI_ENABLED) return { outcome: 'disabled' };
+    if (a.survivor === a.failed) return { outcome: 'refused', reason: 'nothing_to_check' };
+    const key = keyOf(a.accountId, a.prId);
+    const held = claimed.get(key);
+    if (held != null) return { outcome: 'already_running', reviewId: held > 0 ? held : null };
+    if (reviewHeldForPr(a.prId)) return { outcome: 'refused', reason: 'review_in_progress' };
+    const auto = a.trigger === 'auto';
+    if (lane.filter((j) => isAuto(j) === auto).length >= (auto ? AUTO_MAX : MANUAL_MAX)) return { outcome: 'busy' };
+    claimed.set(key, -1);
+    try {
+      const pr = await getCiPrContext(ctx, a.accountId, a.prId);
+      if (!pr || !pr.headSha) {
+        claimed.delete(key);
+        return { outcome: 'not_found' };
+      }
+      if (pr.state !== 'open') {
+        claimed.delete(key);
+        return { outcome: 'not_open' };
+      }
+      if (auto && !a.pressed && !(await automaticRunAllowed(ctx, a.accountId, 'cover check', a.survivor))) {
+        claimed.delete(key);
+        return { outcome: 'over_budget' };
+      }
+      const planned = await planCoverCheck(ctx, a.accountId, a.prId, a.failed, a.survivor);
+      if (!planned) {
+        claimed.delete(key);
+        return { outcome: 'refused', reason: 'nothing_to_check' };
+      }
+      const cr = sch(ctx).claudeReviews;
+      const start = (await ctx.db
+        .select({ createdAt: cr.createdAt })
+        .from(cr)
+        .where(and(eq(cr.id, a.pairId), eq(cr.accountId, a.accountId)))
+        .execute()) as Array<{ createdAt: Date }>;
+      const reviewId = await insertQueuedReview(
+        ctx,
+        a.prId,
+        pr.headSha,
+        REPLIES_CHECK_MODEL,
+        a.accountId,
+        [],
+        a.trigger,
+        a.survivor,
+        false,
+        null,
+        'replies',
+      );
+      const job: Job = {
+        ctx,
+        accountId: a.accountId,
+        prId: a.prId,
+        trigger: a.trigger,
+        groups: [{ provider: a.survivor, reviewId, findingIds: planned.findings.map((f) => f.id) }],
+        commentsThroughMs: null,
+        pressed: a.pressed === true,
+        cover: { failed: a.failed, coverageMs: start[0]?.createdAt.getTime() ?? null },
+      };
+      claimed.set(key, reviewId);
+      phaseByKey.set(key, 'queued');
+      const firstAuto = lane.findIndex(isAuto);
+      if (!auto && firstAuto >= 0) lane.splice(firstAuto, 0, job);
+      else lane.push(job);
+      pump();
+      return { outcome: 'queued', reviewId, threads: planned.findings.length };
+    } catch (err) {
+      claimed.delete(key);
+      throw err;
+    }
+  } catch (err) {
+    ctx.log.warn(`cover check pr ${a.prId}: ${err instanceof Error ? err.message : String(err)}`);
+    return { outcome: 'refused', reason: 'nothing_to_check' };
+  }
+}
+
+/** Run one cover group (re-planned at run time) and store it. The row's items, or null (failed / none). */
+async function runCoverGroup(
+  job: Job,
+  failed: AiProviderId,
+  g: Group,
+  run: {
+    headSha: string;
+    pr: NonNullable<Awaited<ReturnType<typeof getCiPrContext>>>;
+    worktreePath: string | null;
+    scratch: string;
+    controller: AbortController;
+  },
+): Promise<{ reviewId: number; items: ClaudeFollowUpItemRecord[] } | null> {
+  const { ctx, accountId, prId } = job;
+  const { headSha, pr, worktreePath } = run;
+  const planned = await planCoverCheck(ctx, accountId, prId, failed, g.provider);
+  if (!planned) {
+    await markReviewFailed(ctx, g.reviewId, 'Nothing left to check: the findings were judged meanwhile.');
+    return null;
+  }
+  await markReviewRunning(ctx, g.reviewId);
+  const plan: FollowUpPlan = selectPriorFindings({ reviewId: planned.reviewId, headSha: planned.headSha, findings: planned.findings }, headSha);
+  const code = new Map<number, CodeAround>();
+  if (worktreePath) {
+    for (const { finding: f } of plan.sent) {
+      const c = codeAround(worktreePath, f.path, f.line);
+      if (c) code.set(f.id, c);
+    }
+  }
+  // Every sent finding decided in code (raised at this head, nothing moved): no model.
+  const needsModel = plan.sent.some(({ finding: f }) => !plan.locked.has(f.id) || f.thread?.replies.length || f.conversation?.replies.length);
+  let reported: ReviewFollowUpReport[] = [];
+  let telemetry: { costUsd: number | null; inputTokens: number | null; outputTokens: number | null; numTurns: number | null } = {
+    costUsd: null,
+    inputTokens: null,
+    outputTokens: null,
+    numTurns: 0,
+  };
+  let usageRecorded = false;
+  if (needsModel) {
+    const nonce = pickReviewNonce([pr.title, ...coverPlanTexts(plan, code)]);
+    const prompt = buildCoverPrompt({
+      repoFullName: `${pr.owner}/${pr.name}`,
+      number: pr.number,
+      title: pr.title,
+      headSha,
+      worktreePath,
+      plan,
+      code,
+      nonce,
+      provider: g.provider,
+    });
+    const { runRepliesCheckAgent } = await import('./replies-check-agent.js');
+    const res = await runRepliesCheckAgent({
+      model: REPLIES_CHECK_MODEL,
+      cwd: run.scratch,
+      worktrees: worktreePath ? [worktreePath] : [],
+      systemPrompt: coverSystemPrompt(g.provider),
+      prompt,
+      applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
+      abortController: run.controller,
+      usage: { accountId, prId, repoId: pr.repoId ?? null },
+      provider: g.provider,
+    });
+    if (res.ranOn) await markReviewRanOn(ctx, g.reviewId, res.ranOn);
+    telemetry = { costUsd: res.costUsd, inputTokens: res.inputTokens, outputTokens: res.outputTokens, numTurns: res.numTurns };
+    usageRecorded = res.usageRecorded === true;
+    if (res.aborted) {
+      await markReviewCancelled(ctx, g.reviewId);
+      return null;
+    }
+    if (!res.submitted) {
+      await markReviewFailed(ctx, g.reviewId, res.failureReason ?? 'The check of the other review failed.', telemetry);
+      return null;
+    }
+    reported = coverReports(res.replies);
+  }
+  const items = reconcileFollowUp(plan, reported);
+  await saveReviewSuccess(ctx, g.reviewId, {
+    scope: worktreePath ? 'worktree' : 'diff_only',
+    summary: coverSummary(items, failed),
+    verdict: 'COMMENT',
+    ...telemetry,
+    ...(usageRecorded ? { usageRecorded: true } : {}),
+    excludedFiles: [],
+    findings: [],
+    followUp: {
+      priorReviewId: planned.reviewId,
+      priorHeadSha: planned.headSha,
+      headMoved: planned.headSha !== headSha,
+      changesSinceShown: false,
+      items,
+      cover: { provider: failed },
+    },
+    threadAssessments: null,
+  });
+  return { reviewId: g.reviewId, items };
+}
+
 /** Is a pass of this PR queued or running here? */
 export function repliesCheckHeld(accountId: number, prId: number): boolean {
   return claimed.has(keyOf(accountId, prId));
@@ -601,17 +868,32 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
     } catch {
       worktreePath = null;
     }
-    const related = await relatedCheckouts(ctx, accountId, prId, headSha, peerCleanups);
+    // A cover pass reads the PR's own code only (it checks findings, not replies that point elsewhere).
+    const related: RelatedCheckouts = job.cover
+      ? { peers: [], linked: [], paths: new Map() }
+      : await relatedCheckouts(ctx, accountId, prId, headSha, peerCleanups);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-replies-check-'));
     for (const g of job.groups) {
       if (controller.signal.aborted) {
         await markReviewCancelled(ctx, g.reviewId).catch(() => {});
         continue;
       }
+      if (job.cover) {
+        const done = await runCoverGroup(job, job.cover.failed, g, { headSha, pr, worktreePath, scratch, controller });
+        if (done) succeeded.push(done);
+        continue;
+      }
       // Re-plan at run time (a reply may have landed while it waited); keep this group's threads.
       const planned = await planRepliesCheck(ctx, accountId, prId);
       const want = new Set(g.findingIds);
-      const findings = 'refused' in planned ? [] : planned.findings.filter((f) => want.has(f.id));
+      const wanted = 'refused' in planned ? [] : planned.findings.filter((f) => want.has(f.id));
+      // A thread whose owner's provider could not run is judged by this one as the OTHER provider's
+      // finding (`raisedBy`): it may be accepted, never disputed (follow-up.ts `isCrossDispute`).
+      const owners = wanted.length > 0 ? await ownerProviders(ctx, wanted) : new Map<number, AiProviderId>();
+      const findings = wanted.map((f) => {
+        const owner = owners.get(f.id);
+        return owner != null && owner !== g.provider ? { ...f, raisedBy: owner } : f;
+      });
       if ('refused' in planned || findings.length === 0) {
         await markReviewFailed(ctx, g.reviewId, 'Nothing left to check: the replies were judged meanwhile.');
         continue;
@@ -718,6 +1000,11 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
       const through = passCoverageMs(st.newestSentMs, job.commentsThroughMs, omittedReplyMs);
       if (through > 0) await markReviewCommentsSeen(ctx, st.reviewId, new Date(through));
     }
+    // A cover pass covers no reply the pair had not already seen (the sweeper's coverage reads every
+    // `kind = 'replies'` row at the head).
+    if (job.cover?.coverageMs != null) {
+      for (const r of succeeded) await markReviewCommentsSeen(ctx, r.reviewId, new Date(job.cover.coverageMs));
+    }
   } finally {
     await cleanupWorktree?.().catch(() => {});
     for (const c of peerCleanups) await c().catch(() => {});
@@ -817,6 +1104,19 @@ async function afterPass(
 ): Promise<void> {
   const { accountId, prId } = job;
   const last = succeeded[succeeded.length - 1]!;
+  if (job.cover) {
+    // A COVER PASS: auto resolve only (its own switches and claimed records). It never pushes back
+    // (it checks the other provider's findings) and changes no outcome.
+    try {
+      const { maybeAutoResolveFindings } = await import('./auto-resolve.js');
+      for (const r of succeeded) {
+        await maybeAutoResolveFindings(ctx, { accountId, prId, reviewId: r.reviewId }, autoDeps.post, autoDeps.resolve);
+      }
+    } catch (err) {
+      ctx.log.warn(`cover check pr ${prId}: after the pass: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
   try {
     {
       // The existing writers, on their own switches and claimed records (at most ONE pushback per

@@ -18,6 +18,8 @@
 import { docsReviewPromptBlock } from '../../reference-docs/review-refs.js';
 import { randomBytes } from 'node:crypto';
 import {
+  aiProviderName,
+  type AiProviderId,
   sonarConditionSentence,
   sonarFailingConditions,
   sonarMetricLabel,
@@ -318,6 +320,8 @@ function pushPreviousReviewSection(
   lines.push(
     'If you cannot see the code a finding is about (its file is not in the diff shown and you cannot read it), leave its ref out of `followUp` rather than guess. It is recorded as not checked and asked about again next time.',
   );
+  // THE OTHER PROVIDER'S findings (only when one is shown, so a run without one reads exactly as before).
+  pushCrossProviderRule(lines, plan.sent.map((s) => s.finding));
   lines.push('');
   // ⚠ PER FINDING: a finding carried from an OLDER review was raised at an older head than the
   // previous review's, so "the head has not moved" is true of the previous review's own findings
@@ -346,7 +350,8 @@ function pushPreviousReviewSection(
   for (const { ref, finding: f } of plan.sent) {
     const where = f.line != null ? `${f.path}:${f.line} (${f.side})` : `${f.path} (whole file)`;
     const body: string[] = [`Where: ${where}`];
-    if (f.carried) body.push(`(from an earlier review, at head ${shortSha(f.headSha)})`);
+    if (f.raisedBy) body.push(`(raised by ${aiProviderName(f.raisedBy)} in an earlier review, at head ${shortSha(f.headSha)})`);
+    else if (f.carried) body.push(`(from an earlier review, at head ${shortSha(f.headSha)})`);
     if (!f.posted) body.push('(Not posted to GitHub yet.)');
     body.push(`Severity: ${f.severity}`);
     body.push(`Title: ${clipBlock(f.title, PRIOR_TITLE_CHARS)}`);
@@ -379,6 +384,21 @@ function pushPreviousReviewSection(
     fence(lines, `PREVIOUS FINDING ${ref}`, nonce, body.join('\n'));
   }
   lines.push('');
+}
+
+/**
+ * THE OTHER PROVIDER'S FINDINGS: the one rule line, only when such a finding is shown. Shared by the
+ * review's "Previous review" section and the cover pass (replies-check-prompt.ts).
+ */
+export function pushCrossProviderRule(
+  lines: string[],
+  findings: ReadonlyArray<{ raisedBy?: AiProviderId }>,
+): void {
+  const by = [...new Set(findings.flatMap((f) => (f.raisedBy ? [aiProviderName(f.raisedBy)] : [])))];
+  if (by.length === 0) return;
+  lines.push(
+    `Findings marked "raised by ${by.join(' or ')}" come from another reviewer's earlier review. Judge them the same way. Never dispute a reply on one: when the reply does not hold up, answer not_addressed.`,
+  );
 }
 
 /**

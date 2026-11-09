@@ -267,7 +267,7 @@ describe('ticket + follow-up persistence', () => {
     expect(prior?.findings.map((f) => f.title)).toEqual(['legacy']);
   });
 
-  it('with a provider named, follows up only on that provider’s latest earlier run', async () => {
+  it('with a provider named, anchors on that provider’s latest earlier run and carries the other’s open findings', async () => {
     const claudeRun = await persist.insertQueuedReview(ctx, otherPrId, 'p'.repeat(40), 'claude-opus-5-5', 1);
     await persist.saveReviewSuccess(ctx, claudeRun, success([finding({ title: 'from claude' })]));
     await persist.markFindingPosted(ctx, (await persist.getClaudeReviewById(ctx, claudeRun, 1))!.findings[0]!.id, 'c-cl', 'pr_comment');
@@ -282,7 +282,20 @@ describe('ticket + follow-up persistence', () => {
     // A Claude run passes over the Codex one (an old NULL-provider row on a Claude model reads as Claude).
     const forClaude = await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next, new Set(), 'claude');
     expect(forClaude?.reviewId).toBe(claudeRun);
-    expect(forClaude?.findings.map((f) => f.title)).toEqual(['from claude']);
+    // The Codex finding is still open: it is checked too, as Codex's, after Claude's own.
+    expect(forClaude?.findings.map((f) => [f.title, f.carried, f.raisedBy ?? null])).toEqual([
+      ['from claude', false, null],
+      ['from codex', true, 'codex'],
+    ]);
+    // A PAIR HALF never carries the other provider's findings (one judge per thread).
+    const half = await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next, new Set(), 'claude', true);
+    expect(half?.findings.map((f) => f.title)).toEqual(['from claude']);
+    // The Codex chain carries Claude's open finding the same way.
+    const forCodex = await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next, new Set(), 'codex');
+    expect(forCodex?.findings.map((f) => [f.title, f.raisedBy ?? null])).toEqual([
+      ['from codex', null],
+      ['from claude', 'claude'],
+    ]);
   });
 
   it("another account's PR ⇒ null", async () => {

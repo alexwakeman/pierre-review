@@ -171,21 +171,31 @@ describe('a manual run on the provider it names', () => {
     await postAll(codexFirst.id);
   });
 
-  it('a Claude run next reviews afresh: the Codex review is not its "Previous review"', async () => {
+  it('a Claude run next follows up the Codex run’s open finding, as Codex’s', async () => {
     claudeSecond = await runToEnd('claude', 'claude-sonnet-5');
     expect(runArgs[1]!.provider).toBe('claude');
-    expect(runArgs[1]!.prompt).not.toContain('## Previous review');
+    // No Claude run yet: the Codex run anchors the follow-up, and its finding is checked as Codex's.
+    expect(runArgs[1]!.prompt).toContain('## Previous review');
+    expect(runArgs[1]!.prompt).toContain('codex finding 1');
+    expect(runArgs[1]!.prompt).toContain('(raised by Codex in an earlier review');
     expect(claudeSecond).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5' });
+    expect(claudeSecond.followUp?.priorReviewId).toBe(codexFirst.id);
+    expect(claudeSecond.followUp?.items.map((i) => [i.title, i.raisedBy ?? null])).toEqual([['codex finding 1', 'codex']]);
     await postAll(claudeSecond.id);
   });
 
-  it('a second Codex run follows up on the first Codex run, not on the Claude one in between', async () => {
+  it('a second Codex run follows up on the first Codex run, and on the Claude finding in between as Claude’s', async () => {
     codexThird = await runToEnd('codex');
     expect(runArgs[2]!.provider).toBe('codex');
     expect(runArgs[2]!.prompt).toContain('## Previous review');
     expect(runArgs[2]!.prompt).toContain('codex finding 1');
-    expect(runArgs[2]!.prompt).not.toContain('claude finding 2');
+    expect(runArgs[2]!.prompt).toContain('claude finding 2');
+    expect(runArgs[2]!.prompt).toContain('(raised by Claude in an earlier review');
     expect(codexThird.followUp?.priorReviewId).toBe(codexFirst.id);
+    expect(codexThird.followUp?.items.map((i) => [i.title, i.raisedBy ?? null])).toEqual([
+      ['codex finding 1', null],
+      ['claude finding 2', 'claude'],
+    ]);
   });
 
   it('a queued row is labelled by the provider it was asked to run on, not the default', async () => {
@@ -201,8 +211,10 @@ describe('the history', () => {
     const history = await persist.listClaudeReviewHistory(ctx, prId, 1);
     expect(history.map((h) => [h.provider, h.status, h.findingCount])).toEqual([
       ['codex', 'cancelled', 0],
-      ['codex', 'succeeded', 2], // its own finding + the earlier one it carries (both stored on the run)
-      ['claude', 'succeeded', 1],
+      // Its own finding + the re-raises of the two still-open earlier ones (Codex's and Claude's).
+      ['codex', 'succeeded', 3],
+      // Its own finding + the re-raise of Codex's still-open one.
+      ['claude', 'succeeded', 2],
       ['codex', 'succeeded', 1],
     ]);
   });

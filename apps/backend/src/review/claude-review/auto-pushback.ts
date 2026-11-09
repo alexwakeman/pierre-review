@@ -85,7 +85,8 @@ async function autoPushback(
   const wanted = new Map<number, string>();
   for (const it of review.followUp?.items ?? []) {
     const text = (it.response ?? '').trim();
-    if (it.status === 'reply_disputed' && text) wanted.set(it.priorFindingId, text);
+    // Never on the OTHER provider's finding (a cross-provider check never pushes back).
+    if (it.status === 'reply_disputed' && text && !it.raisedBy) wanted.set(it.priorFindingId, text);
   }
   if (wanted.size === 0) return null;
 

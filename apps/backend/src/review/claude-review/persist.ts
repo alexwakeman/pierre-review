@@ -1796,6 +1796,17 @@ export async function getReviewPeerContexts(
  *
  * Every finding carries the head of the review that RAISED it (`cr.headSha` via the join), because
  * "has the code moved since?" is asked per finding, never against the previous review's head.
+ *
+ * ⚠ THE OTHER PROVIDER'S CHAIN (docs/CLAUDE-REVIEW.md § Claude + Codex, cross-provider follow-up).
+ * With a `provider` and NOT a pair half, the run also follows up the OTHER provider's still-open
+ * findings: that provider's chain is loaded the same way (`loadProviderChain`) and its findings join
+ * as carried, `raisedBy` the other provider, after this provider's own. One is left out when this
+ * chain already lists it, an eligible finding here re-raises it, it re-raises one this chain lists,
+ * or a run of THIS provider judged it
+ * after the other provider's newest word on it (its chain's anchor) — so a working chain on the other
+ * provider is never judged twice. With no run of this provider yet, the other chain alone anchors the
+ * follow-up. A PAIR HALF never carries the other provider's findings (one judge per thread); a half
+ * that fails is covered by the cover pass (replies-check.ts `startCoverCheck`).
  */
 export async function loadPriorReviewForFollowUp(
   ctx: AgentContext,
@@ -1805,15 +1816,100 @@ export async function loadPriorReviewForFollowUp(
   // TRAILING: earlier findings SETTLED BY A REPLY (`loadSettledByReplyFindings`) — left out of the
   // follow-up entirely, own and carried alike. Absent ⇒ none.
   settledIds: ReadonlySet<number> = new Set(),
-  // TRAILING: follow up only on the latest earlier run BY THIS PROVIDER, so a Codex review after a
-  // Claude one (or the reverse) reviews afresh instead of grading the other's findings — the two
-  // stay comparable side by side. Absent ⇒ the latest run, whichever provider ran it.
+  // TRAILING: the chain anchors on the latest earlier run BY THIS PROVIDER, and the other
+  // provider's open findings join it (above). Absent ⇒ the latest run, whichever provider ran it,
+  // with no cross carry.
   provider?: AiProviderId,
-  // TRAILING: this run is a HALF OF A CLAUDE + CODEX PAIR. A merged-away duplicate's kept finding is
-  // then NOT carried here: the other half (the kept finding's own provider) follows it up, so the
-  // pair has ONE judge per thread — never two halves resolving and disputing the same comment.
+  // TRAILING: this run is a HALF OF A CLAUDE + CODEX PAIR. Nothing the OTHER provider raised is then
+  // carried here (a merged-away duplicate's kept finding, an earlier cross carry, the other chain):
+  // the other half (its own provider) follows it up, so the pair has ONE judge per thread — never two
+  // halves resolving and disputing the same comment.
   inPair = false,
 ): Promise<PriorReviewForFollowUp | null> {
+  const chain = await loadProviderChain(ctx, prId, accountId, beforeReviewId, settledIds, provider, inPair);
+  const own: PriorReviewForFollowUp | null = chain ? withoutFollowedThrough(chain) : null;
+  if (!provider || inPair) return own;
+  const other: AiProviderId = provider === 'claude' ? 'codex' : 'claude';
+  // The other chain, read as a pair half would read it: its own findings only, never ours.
+  const theirs = await loadProviderChain(ctx, prId, accountId, beforeReviewId, settledIds, other, true);
+  if (!theirs || theirs.findings.length === 0) return own;
+  const listed = new Set([...(own?.findings.map((f) => f.id) ?? []), ...(chain?.followedThrough ?? [])]);
+  let candidates = theirs.findings.filter((f) => !listed.has(f.id));
+  if (candidates.length === 0) return own;
+  // A RE-RAISE of a finding this chain lists (the other provider raised our point again) is followed
+  // up through ours, never twice.
+  const { crf } = tables(ctx);
+  const links = (await ctx.db
+    .select({ id: crf.id, priorFindingId: crf.priorFindingId })
+    .from(crf)
+    .where(inArray(crf.id, candidates.map((f) => f.id)))
+    .execute()) as Array<{ id: number; priorFindingId: number | null }>;
+  const reraises = new Set(links.filter((l) => l.priorFindingId != null && listed.has(l.priorFindingId)).map((l) => l.id));
+  candidates = candidates.filter((f) => !reraises.has(f.id));
+  if (candidates.length === 0) return own;
+  const judged = await judgedSinceByProvider(ctx, prId, accountId, provider, theirs.reviewId, beforeReviewId);
+  const cross = candidates
+    .filter((f) => !judged.has(f.id))
+    .map((f): PriorFindingForFollowUp => ({ ...f, carried: true, raisedBy: other }));
+  if (cross.length === 0) return own;
+  if (!own) return { reviewId: theirs.reviewId, headSha: theirs.headSha, findings: cross, leftOut: [] };
+  return { ...own, findings: [...own.findings, ...cross] };
+}
+
+function withoutFollowedThrough(c: PriorReviewForFollowUp & { followedThrough: number[] }): PriorReviewForFollowUp {
+  const { followedThrough: _drop, ...rest } = c;
+  return rest;
+}
+
+/**
+ * The finding ids a SUCCEEDED run of `provider` (a full review or a replies pass) gave a judgement
+ * (any status but 'not_checked') with an id in (afterId, beforeId). Account-scoped. The cross carry's
+ * "already judged since" test.
+ */
+export async function judgedSinceByProvider(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  provider: AiProviderId,
+  afterId: number,
+  beforeId: number,
+): Promise<Set<number>> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ provider: cr.provider, model: cr.model, followUp: cr.followUp })
+    .from(cr)
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(cr.accountId, accountId),
+        eq(cr.status, 'succeeded'),
+        gt(cr.id, afterId),
+        lt(cr.id, beforeId),
+        or(isNull(cr.kind), eq(cr.kind, 'replies')),
+      ),
+    )
+    .execute()) as Array<{ provider: string | null; model: string | null; followUp: ClaudeReviewFollowUpRecord | null }>;
+  const out = new Set<number>();
+  for (const r of rows) {
+    if (aiRunProvider(r.provider, r.model) !== provider) continue;
+    for (const it of r.followUp?.items ?? []) {
+      if (Number.isInteger(it.priorFindingId) && it.status !== 'not_checked') out.add(it.priorFindingId);
+    }
+  }
+  return out;
+}
+
+/** One provider's chain (the body of `loadPriorReviewForFollowUp`, without the cross carry), plus the
+ *  earlier ids an eligible finding of its anchor re-raises (`followedThrough`). */
+async function loadProviderChain(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  beforeReviewId: number,
+  settledIds: ReadonlySet<number>,
+  provider: AiProviderId | undefined,
+  inPair: boolean,
+): Promise<(PriorReviewForFollowUp & { followedThrough: number[] }) | null> {
   const { cr, crf, prs, repos } = tables(ctx);
   const candidates = (await ctx.db
     .select({ id: cr.id, headSha: cr.headSha, followUp: cr.followUp, provider: cr.provider, model: cr.model })
@@ -1936,7 +2032,7 @@ export async function loadPriorReviewForFollowUp(
   const carriedIds = [...new Set([...notChecked, ...openNotReraised.keys(), ...mergedKept])];
   if (carriedIds.length > 0) {
     const carriedRows = (await ctx.db
-      .select({ finding: crf, headSha: cr.headSha })
+      .select({ finding: crf, headSha: cr.headSha, provider: cr.provider, model: cr.model })
       .from(crf)
       .innerJoin(cr, eq(cr.id, crf.reviewId))
       .innerJoin(prs, eq(prs.id, cr.prId))
@@ -1945,7 +2041,7 @@ export async function loadPriorReviewForFollowUp(
         and(inArray(crf.id, carriedIds), eq(cr.prId, prId), eq(repos.accountId, accountId)),
       )
       .orderBy(asc(crf.id))
-      .execute()) as Array<{ finding: FindingRow; headSha: string }>;
+      .execute()) as Array<{ finding: FindingRow; headSha: string; provider: string | null; model: string | null }>;
     // The reader IGNORED a re-raise of these in the previous review: for one never posted that is
     // the reader's latest word on the issue, so it is not carried back. (A POSTED one is still on
     // the pull request and is carried, as before.)
@@ -1954,12 +2050,21 @@ export async function loadPriorReviewForFollowUp(
         .filter((f) => f.priorFindingId != null && followUpLeftOutReason(f) === 'ignored')
         .map((f) => f.priorFindingId as number),
     );
-    for (const { finding, headSha } of carriedRows) {
+    for (const { finding, headSha, provider: by, model } of carriedRows) {
       // The ONE rule (`isFollowUpEligible`) applies to carried findings exactly as to own ones.
       if (seen.has(finding.id) || !isFollowUpEligible(finding)) continue;
       if (finding.postedAt == null && ignoredReraiseOf.has(finding.id)) continue;
+      // Raised by the OTHER provider (a merged-away duplicate's kept finding, an earlier cross carry):
+      // a pair half leaves it to the other half; any other run checks it as the other's (`raisedBy`).
+      const raisedBy = provider ? aiRunProvider(by, model) : null;
+      const foreign = raisedBy != null && raisedBy !== provider;
+      if (foreign && inPair) continue;
       seen.add(finding.id);
-      findings.push({ ...toPrior(finding, headSha, true), priorStatus: openNotReraised.get(finding.id) ?? null });
+      findings.push({
+        ...toPrior(finding, headSha, true),
+        priorStatus: openNotReraised.get(finding.id) ?? null,
+        ...(foreign ? { raisedBy } : {}),
+      });
     }
   }
   // ⚠ Filtered AFTER the carry bookkeeping above, so a settled finding still counts as "seen" and
@@ -1975,6 +2080,9 @@ export async function loadPriorReviewForFollowUp(
     headSha: row.headSha,
     findings: settledIds.size > 0 ? findings.filter((f) => !settledIds.has(f.id)) : findings,
     leftOut,
+    // Every earlier id this chain already speaks for: its anchor's rows, what it carries, and the ones
+    // an eligible finding of the anchor re-raises (the cross carry never sends those again).
+    followedThrough: [...seen, ...reraisedByEligible],
   };
 }
 

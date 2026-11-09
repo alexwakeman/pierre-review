@@ -32,11 +32,12 @@ import type {
   ClaudeFollowUpStatus,
   ClaudeNotApproved,
 } from '@pierre-review/shared';
-import { oneLineHow } from '@pierre-review/shared';
+import { aiProviderName, oneLineHow, type AiProviderId } from '@pierre-review/shared';
 import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
 import type { EarlierOpen } from './earlier-open.js';
-import { judgeReplyReport, prCommentOf, type PriorFindingForFollowUp } from './follow-up.js';
+import { isCrossDispute, judgeReplyReport, prCommentOf, type PriorFindingForFollowUp } from './follow-up.js';
 import { judgeableReplies } from './reply-text.js';
+import type { ReviewFollowUpReport } from '../../platform/contract.js';
 
 // ---- caps ----
 /** At most this many threads in one pass (the rest wait for the next pass or review). */
@@ -256,6 +257,7 @@ function itemFor(
     priorPosted: f.posted,
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
     ...prCommentOf(f),
+    ...(f.raisedBy ? { raisedBy: f.raisedBy } : {}),
   };
 }
 
@@ -290,6 +292,11 @@ export function reconcileReplies(plan: RepliesPlan, reported: ReadonlyArray<Repl
       : null;
     if (!judged) {
       out.push(itemFor(plan, finding, ref, true, 'not_checked', explanation));
+      continue;
+    }
+    // The OTHER provider's finding (the owner's provider could not run): never disputed.
+    if (isCrossDispute(finding, judged.status)) {
+      out.push(itemFor(plan, finding, ref, true, 'not_addressed', explanation, oneLineHow(r?.how) ? { how: oneLineHow(r?.how) } : {}));
       continue;
     }
     out.push(
@@ -432,6 +439,20 @@ export function repliesReviewBody(verdict: 'APPROVE' | 'REQUEST_CHANGES', blocke
   return name ? `Replies checked: “${name}” is still a blocker.` : 'Replies checked: a blocker is still open.';
 }
 
+/** A COVER PASS's stored summary (replies-check.ts `startCoverCheck`), templated from the statuses. */
+export function coverSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 'status'>[], failed: AiProviderId): string {
+  const closed = items.filter((i) => i.status === 'addressed' || i.status === 'no_longer_applies' || i.status === 'reply_accepted').length;
+  const unchecked = items.filter((i) => i.status === 'not_checked').length;
+  const open = items.length - closed - unchecked;
+  const parts: string[] = [];
+  if (closed > 0) parts.push(`${closed} dealt with`);
+  if (open > 0) parts.push(`${open} still open`);
+  if (unchecked > 0) parts.push(`${unchecked} not checked`);
+  const n = items.length;
+  const head = `Checked ${aiProviderName(failed)}'s ${n} open ${n === 1 ? 'finding' : 'findings'}`;
+  return parts.length > 0 ? `${head}: ${parts.join(', ')}.` : `${head}.`;
+}
+
 /** The run's stored summary: what the pass found, templated from the server-checked statuses. */
 export function repliesSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 'status'>[]): string {
   const accepted = items.filter((i) => i.status === 'reply_accepted').length;
@@ -442,4 +463,22 @@ export function repliesSummary(items: readonly Pick<ClaudeFollowUpItemRecord, 's
   if (disputed > 0) parts.push(`${disputed} still open`);
   if (unchecked > 0) parts.push(`${unchecked} not checked`);
   return parts.length > 0 ? `Replies checked: ${parts.join(', ')}.` : 'Replies checked.';
+}
+
+/** The cover pass's report → the review's follow-up reports (the review's gate reconciles them). Pure. */
+export function coverReports(replies: ReadonlyArray<RepliesReport> | null | undefined): ReviewFollowUpReport[] {
+  const out: ReviewFollowUpReport[] = [];
+  for (const r of replies ?? []) {
+    if (!r || typeof r.ref !== 'string' || typeof r.status !== 'string') continue;
+    out.push({
+      ref: r.ref,
+      status: r.status as ReviewFollowUpReport['status'],
+      explanation: typeof r.explanation === 'string' ? r.explanation : '',
+      how: typeof r.how === 'string' ? r.how : null,
+      acceptKind: r.acceptKind === 'not_valid' || r.acceptKind === 'deferred' ? r.acceptKind : null,
+      reply: typeof r.reply === 'string' ? r.reply : null,
+      replyRef: typeof r.replyRef === 'string' ? r.replyRef : null,
+    });
+  }
+  return out;
 }

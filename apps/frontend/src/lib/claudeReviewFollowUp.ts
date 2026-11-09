@@ -6,6 +6,7 @@
 // this module only orders and paints what it was sent. The caps and the criteria split are NOT
 // retyped here either — they live once in `@pierre-review/shared` (`claude-review.ts`).
 import {
+  aiProviderName,
   checkClaudeReviewTicket,
   checkClaudeReviewTickets,
   CLAUDE_REVIEW_TICKET_LIMITS,
@@ -471,9 +472,11 @@ export function replyActions(
  * finding that Limn has not called still open yet (once per finding, ever). Pure.
  */
 export function stillOpenPostable(
-  item: Pick<ClaudeFollowUpItem, 'status' | 'how' | 'explanation' | 'threadId' | 'threadResolved' | 'prComment' | 'pushback'>,
+  item: Pick<ClaudeFollowUpItem, 'status' | 'how' | 'explanation' | 'threadId' | 'threadResolved' | 'prComment' | 'pushback' | 'raisedBy'>,
 ): boolean {
   if (item.status !== 'not_addressed' && item.status !== 'partly_addressed') return false;
+  // The other provider's finding: the check never says "still open" on GitHub.
+  if (item.raisedBy != null) return false;
   if (judgementHowOf(item) == null) return false;
   // A PR-LEVEL finding: once per finding, ever — offered until Limn said it (or GitHub refused it).
   if (item.threadId == null && item.prComment != null) {
@@ -481,6 +484,15 @@ export function stillOpenPostable(
     return pb == null || (pb.status === 'failed' && pb.refused === true);
   }
   return item.threadId != null && item.threadResolved === true;
+}
+
+/**
+ * Who raised a finding the OTHER provider checked: "Raised by Codex · checked by Claude". null for
+ * the run's own finding. `by`: the provider that ran the check (default Claude). Pure.
+ */
+export function raisedByLine(item: Pick<ClaudeFollowUpItem, 'raisedBy'>, by = 'Claude'): string | null {
+  if (item.raisedBy == null) return null;
+  return `Raised by ${aiProviderName(item.raisedBy)} · checked by ${by}`;
 }
 
 /** Is this item a PR-LEVEL finding (posted as a PR comment, so it has no thread)? Pure. */

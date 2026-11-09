@@ -48,6 +48,7 @@ import {
   resolveTicketDraft,
   resolveTicketDrafts,
   sortFindingsForDisplay,
+  raisedByLine,
   stillOpenPostable,
   placeStoryFindings,
   storyChipLabel,
@@ -650,6 +651,9 @@ describe('stillOpenPostable', () => {
     // An older row: the explanation's first sentence is the line.
     expect(stillOpenPostable({ ...base, how: null, explanation: 'The id is unchecked. More.' })).toBe(true);
   });
+  it('never on the OTHER provider’s finding (a cross-provider check never says still open)', () => {
+    expect(stillOpenPostable({ ...base, raisedBy: 'codex' })).toBe(false);
+  });
   it('never on an open thread, an addressed item, no thread or nothing to say', () => {
     expect(stillOpenPostable({ ...base, threadResolved: false })).toBe(false);
     expect(stillOpenPostable({ ...base, status: 'addressed' })).toBe(false);
@@ -665,5 +669,13 @@ describe('stillOpenPostable', () => {
     expect(stillOpenPostable({ ...pr, pushback: { ...rec, status: 'failed' as const } })).toBe(false);
     expect(stillOpenPostable({ ...pr, pushback: { ...rec, status: 'failed' as const, refused: true } })).toBe(true);
     expect(stillOpenPostable({ ...pr, status: 'addressed' })).toBe(false);
+  });
+});
+
+describe('raisedByLine', () => {
+  it('names who raised it and who checked it, only for the other provider’s finding', () => {
+    expect(raisedByLine({ raisedBy: 'codex' }, 'Claude')).toBe('Raised by Codex · checked by Claude');
+    expect(raisedByLine({ raisedBy: 'claude' }, 'Codex')).toBe('Raised by Claude · checked by Codex');
+    expect(raisedByLine({})).toBeNull();
   });
 });

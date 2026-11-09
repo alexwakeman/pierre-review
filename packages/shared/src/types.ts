@@ -7190,6 +7190,12 @@ export interface ClaudeFollowUpItemRecord {
   // comment (the first POSTED one up the re-raise chain), the comment's id and its github.com link.
   // Set whenever such an owner was found at run time. Absent on an inline finding and on older rows.
   prComment?: { findingId: number; commentId: string | null; url: string | null } | null;
+  // THE OTHER PROVIDER raised it (docs/CLAUDE-REVIEW.md § Claude + Codex, cross-provider follow-up):
+  // a run on one provider followed up the other's still-open finding, or a COVER pass checked a
+  // failed pair half's findings. The run's own provider is the checker. Such an item may be marked
+  // addressed (and auto-resolved) but never disputed: the server turns a dispute into
+  // not_addressed, and no pushback or still-open comment is written for it. Absent ⇒ the run's own.
+  raisedBy?: AiProviderId;
 }
 
 // An earlier finding a review SETTLED by accepting a person's reply on its GitHub thread. Read-only
@@ -7241,6 +7247,10 @@ export interface ClaudeReviewFollowUpRecord {
   // row. Its threads are the author's: this run never replies on or resolves them. Absent ⇒ the
   // reader's own previous review.
   teammate?: { userId: number; login: string };
+  // A COVER PASS (a `kind = 'replies'` row): one half of a Claude + Codex pair failed or never
+  // started, so the half that succeeded checked the failed provider's open findings at this head.
+  // `provider` = the failed one. Absent on every other run.
+  cover?: { provider: AiProviderId };
 }
 
 // Why a previous review's finding was left out of the follow-up:

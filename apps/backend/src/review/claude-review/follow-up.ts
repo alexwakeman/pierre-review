@@ -42,7 +42,15 @@
 // ⚠ A PR-LEVEL finding (posted as a PR comment) has no thread: its replies are the PR conversation
 // after it (`conversation`), and a reply status stands ONLY when the model cites one of ITS comments
 // by `replyRef` (`judgeReplyReport`). Otherwise exactly as above.
+// ⚠ THE OTHER PROVIDER'S FINDINGS (`raisedBy`, persist.ts `loadPriorReviewForFollowUp`'s cross carry
+// and the cover pass, replies-check.ts). A run on one provider also follows up the other provider's
+// still-open findings. They go LAST (after own and carried), and a finding raised at this very head
+// keeps the other provider's answer (or 'not_addressed') in code, like an own one. The checker may
+// mark them addressed (auto resolve may then close the thread) but NEVER disputes one: a
+// 'reply_disputed' report on such a finding is stored as 'not_addressed' with no reply text
+// (`isCrossDispute`), and no pushback or still-open comment is written for it.
 import type {
+  AiProviderId,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeFollowUpItemRecord,
@@ -119,6 +127,9 @@ export interface PriorFindingForFollowUp {
   // A PR-LEVEL finding (posted as a PR comment, no thread): the PR conversation after it
   // (finding-replies.ts `loadFindingConversations`). Absent ⇒ inline, or none found.
   conversation?: FindingConversation | null;
+  // THE OTHER PROVIDER raised it (a cross-provider carry, or a cover pass): this run checks it but
+  // never disputes it (see the header). Always `carried` too. Absent ⇒ this run's own provider.
+  raisedBy?: AiProviderId;
 }
 
 /** Does this earlier finding have a person's reply to judge (on its thread, or in the PR conversation)? */
@@ -293,12 +304,17 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
   const live = prior.findings.filter((f) => !isResolvedWithReplies(f));
   const closedByReply = prior.findings.filter(isResolvedWithReplies);
   const own = live.filter((f) => !f.carried).sort(bySeverityThenId);
-  const carried = live.filter((f) => f.carried).sort(bySeverityThenId);
+  const carried = live.filter((f) => f.carried && !f.raisedBy).sort(bySeverityThenId);
+  // The other provider's findings go after this provider's own and carried ones, so they never crowd
+  // one out of the cap (one left over is 'not_checked' and carried again).
+  const cross = live.filter((f) => f.raisedBy).sort(bySeverityThenId);
   const ordered = [
     ...own,
     ...carried,
+    ...cross,
     ...closedByReply.filter((f) => !f.carried).sort(bySeverityThenId),
-    ...closedByReply.filter((f) => f.carried).sort(bySeverityThenId),
+    ...closedByReply.filter((f) => f.carried && !f.raisedBy).sort(bySeverityThenId),
+    ...closedByReply.filter((f) => f.raisedBy).sort(bySeverityThenId),
   ];
   const sent: FollowUpPlan['sent'] = [];
   const omitted: PriorFindingForFollowUp[] = [];
@@ -318,8 +334,22 @@ export function selectPriorFindings(prior: PriorReviewForFollowUp, headSha: stri
   // head, so nothing can have addressed them; a carried open item keeps the previous run's answer
   // (given at this head). A carried 'not_checked' item was never judged, so the model still is.
   const locked: FollowUpPlan['locked'] = new Map();
+  // THE OTHER PROVIDER'S finding raised at this very head: nothing can have addressed it either. It
+  // keeps that provider's last answer when one was carried, else 'not_addressed'.
+  for (const f of ordered) {
+    if (!f.raisedBy || findingHeadMoved({ headSha }, f)) continue;
+    locked.set(
+      f.id,
+      f.priorStatus
+        ? f.priorStatus.status === 'reply_disputed'
+          ? { status: 'not_addressed', explanation: f.priorStatus.explanation, how: f.priorStatus.how ?? null }
+          : { ...f.priorStatus }
+        : { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION },
+    );
+  }
   if (prior.headSha === headSha) {
     for (const f of ordered) {
+      if (f.raisedBy) continue;
       if (!f.carried && !findingHeadMoved({ headSha }, f)) {
         locked.set(f.id, { status: 'not_addressed', explanation: UNCHANGED_HEAD_EXPLANATION });
       } else if (f.carried && f.priorStatus) {
@@ -469,7 +499,17 @@ function recordFor(
     ...(statusCarried ? { statusCarried: true } : {}),
     ...(f.thread ? { threadId: f.thread.threadId, threadFindingId: f.thread.threadFindingId } : {}),
     ...prCommentOf(f),
+    ...(f.raisedBy ? { raisedBy: f.raisedBy } : {}),
   };
+}
+
+/**
+ * THE CROSS-PROVIDER RULE over a judged reply: a run never disputes the OTHER provider's finding. True
+ * ⇒ the 'reply_disputed' is stored as plain 'not_addressed' (still open, no reply text, no pushback).
+ * Pure.
+ */
+export function isCrossDispute(f: Pick<PriorFindingForFollowUp, 'raisedBy'>, status: ClaudeFollowUpStatus): boolean {
+  return f.raisedBy != null && status === 'reply_disputed';
 }
 
 /**
@@ -520,6 +560,11 @@ export function reconcileFollowUp(
     // stands only on a finding that had some, and may override a same-head lock.
     if (hit && isReplyStatus(hit.status)) {
       const judged = judgeReplyReport(finding, hit.raw);
+      if (judged && isCrossDispute(finding, judged.status)) {
+        // The other provider's finding: never disputed (`isCrossDispute`).
+        out.push(recordFor(plan, finding, ref, true, 'not_addressed', hit.explanation, false, { how: hit.how }));
+        continue;
+      }
       if (judged) {
         out.push(
           recordFor(plan, finding, ref, true, judged.status, hit.explanation, false, {
