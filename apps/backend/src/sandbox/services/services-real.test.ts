@@ -97,9 +97,11 @@ describe.skipIf(!serverVersion)('services on a real daemon', () => {
           'FROM alpine:3.20',
           'COPY message.txt /www/index.html',
           // Steps run on the session network: no direct route out, the proxy answers by name.
+          // `getent` asks the libc resolver (what wget/npm use); busybox `nslookup` fails against
+          // Docker's embedded DNS in a classic-builder step even when the name resolves.
           // The run's own id in the step makes it uncacheable: a layer left by an earlier run (one
           // killed before its sweep) would otherwise be reused and print nothing.
-          `RUN echo probe ${owner.sessionId} >/dev/null; (wget -Y off -q -T 5 -O /dev/null http://registry.npmjs.org/ && echo DIRECT-OK) || echo NO-DIRECT; (nslookup limn-proxy >/dev/null 2>&1 && echo PROXY-RESOLVES) || true`,
+          `RUN echo probe ${owner.sessionId} >/dev/null; (wget -Y off -q -T 5 -O /dev/null http://registry.npmjs.org/ && echo DIRECT-OK) || echo NO-DIRECT; ((getent hosts limn-proxy || nslookup limn-proxy) >/dev/null 2>&1 && echo PROXY-RESOLVES) || true`,
           'RUN wget -q -T 20 -O /dev/null "http://registry.npmjs.org/" || true',
           // One answer per connection (busybox `nc -l` serves one, then the loop listens again).
           'CMD ["sh", "-c", "cat /www/index.html; while true; do { printf \'HTTP/1.0 200 OK\\\\r\\\\n\\\\r\\\\n\'; cat /www/index.html; } | nc -l -p 8080 >/dev/null; done"]',
