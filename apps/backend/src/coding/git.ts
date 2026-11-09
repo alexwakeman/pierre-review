@@ -1,4 +1,5 @@
 import { recordLimnPush, type WriteOrigin } from '../github/write-origin.js';
+import { assertScratchWriteAllowed } from '../scratch-guard.js';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -190,12 +191,22 @@ function pushUrl(owner: string, name: string, token: string): string {
   return `https://x-access-token:${token}@github.com/${owner}/${name}.git`;
 }
 
+/** A scratch backend without `--github write` never pushes (scratch-guard.ts): a coded refusal. */
+function assertScratchPush(t: PushTarget): void {
+  try {
+    assertScratchWriteAllowed(`a git push to ${t.owner}/${t.name}:${t.remoteBranch}`);
+  } catch (err) {
+    throw codedError('PUSH_DENIED', err instanceof Error ? err.message : String(err));
+  }
+}
+
 /**
  * Push a local committish to a remote branch via an explicit tokenized URL (never the
  * clone's persisted remote). Throws a coded 'PUSH_DENIED' error on failure (no write
  * access, protected branch, non-fast-forward on an existing branch).
  */
 export async function pushRef(t: PushTarget): Promise<void> {
+  assertScratchPush(t);
   await assertPushTarget(t.remoteBranch, t.protect);
   try {
     await git(
@@ -223,6 +234,7 @@ export async function pushRef(t: PushTarget): Promise<void> {
 export async function pushForceWithLease(
   t: PushTarget & { leaseSha: string },
 ): Promise<void> {
+  assertScratchPush(t);
   await assertPushTarget(t.remoteBranch, t.protect);
   try {
     await git(

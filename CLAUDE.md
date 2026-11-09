@@ -109,11 +109,8 @@ Tailwind + `vis-timeline`, Zustand, TanStack Query · `@octokit/graphql` (one fa
 ```
 pierre-review/
 ├─ apps/
-│  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ · db/ · github/ · sync/ · merge/ ·
-│  │             conflict/ · review/ · coding/ · tracker/ · sonar/ · reference-docs/ · ml/ ·
-│  │             platform/ · api/{routes,plugins}/
-│  ├─ frontend/  the SPA (base `/app/`): App.tsx · store/ · hooks/ · api/client.ts · components/ ·
-│  │             lib/ui.ts
+│  ├─ backend/   the Fastify server, sync and agents (src/)
+│  ├─ frontend/  the SPA (base `/app/`)
 │  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
 │  └─ site/      the website service: landing + /api/contact (node:http, no runtime deps)
 └─ packages/
@@ -136,6 +133,7 @@ All from the repo root unless noted.
 | `pnpm sync:once owner/repo` | one-off sync of one repo without the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
 | `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` reuses the DB |
+| `pnpm dev:scratch` | a throwaway stack, run from a WORKTREE (`:4200`/`:5373`); `--seed demo\|copy\|empty` |
 | `pnpm shots` | the README's screenshots (`apps/landing/public/shots/`) |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
@@ -601,9 +599,13 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 
 ## Verifying changes
 
-`pnpm test:changed` (inner loop), `pnpm test` + `pnpm typecheck` for backend logic. For UI,
-`pnpm dev` is usually running (real-DB cases: `sqlite3`); deep-link with `?pr=<id>`, `?repos=<ids>`
-on `/app/`. New id-routes: `verify:isolation`.
+`pnpm test:changed` (inner loop), `pnpm test` + `pnpm typecheck` for backend logic. For UI, run
+`pnpm dev:scratch`; deep-link with `?pr=<id>`, `?repos=<ids>` on `/app/`.
+New id-routes: `verify:isolation`.
+
+⚠ **The reader's Limn is `pnpm dev` in the MAIN checkout (tsx watch): agents edit in a git worktree
+and test on `pnpm dev:scratch`, never there.** One backend per data dir is enforced; a scratch backend
+blocks every write in code (docs/TESTING.md § Scratch stack).
 
 ⚠ **`apps/frontend/test/` does not run in CI** (the frontend's `test` script is a no-op) and is
 not typechecked — run it by hand: `./apps/backend/node_modules/.bin/vitest run --root

@@ -14,6 +14,18 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // The one-time ~/.pierre-review → ~/.limn move already ran: config.ts does it on import, before it
   // resolves any path inside the data directory (data-dir.ts).
 
+  // ONE BACKEND PER DATA DIRECTORY (instance-lock.ts), before ANY sweep below: the clone, worktree and
+  // sandbox sweeps are keyed on the data directory, so a second backend on it would delete the first
+  // one's live work. A live holder refuses this start; a dead one's lock is taken over.
+  {
+    const { acquireInstanceLock } = await import('./instance-lock.js');
+    const lock = acquireInstanceLock(config.dataDir, { port: config.port, dbPath: config.dbPath });
+    if (lock.tookOverFrom) {
+      console.log(`lock: took over the lock of process ${lock.tookOverFrom.pid}, which is no longer running`);
+    }
+    process.once('exit', lock.release);
+  }
+
   // Apply any pending migrations before serving.
   await runMigrations();
 
@@ -135,8 +147,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 
   // The one-off cleanup of the transcripts older Limn agent runs left under ~/.claude/projects
   // (ai/session-litter.ts): once per machine (a flag in the data dir), only Limn-named directories,
-  // in the background, bounded. After listen, never awaited.
-  void import('./ai/session-litter.js')
+  // in the background, bounded. After listen, never awaited. Never from a scratch backend: the folder
+  // it cleans is the machine's, not the scratch data folder's.
+  if (!config.scratch) void import('./ai/session-litter.js')
     .then(({ defaultSessionCleanupPlaces, runBootSessionCleanup }) =>
       runBootSessionCleanup({ ...defaultSessionCleanupPlaces(), dataDir: config.dataDir }),
     )

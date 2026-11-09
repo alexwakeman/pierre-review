@@ -3,6 +3,7 @@ import type { LookupAddress, LookupAllOptions, LookupOneOptions } from 'node:dns
 import { request as httpRequest } from 'node:http';
 import type { IncomingMessage, RequestOptions } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { activeScratchMode, ScratchWriteBlockedError, scratchWriteRefusal } from '../../scratch-guard.js';
 import { BlockList, isIP } from 'node:net';
 
 // ⚠ THE ONE OUTBOUND HELPER FOR EVERY JIRA CALL. The Jira base URL is TYPED BY THE CUSTOMER, so a
@@ -250,6 +251,18 @@ export type JiraTransport = (
 
 export const nodeTransport: JiraTransport = (url, headers, opts, init) =>
   new Promise<RawResponse>((resolve, reject) => {
+    // A scratch backend sends no tracker write (scratch-guard.ts): this transport is node:https, not
+    // fetch, so the fetch guard cannot see it. A 403 that was never sent.
+    const mode = activeScratchMode();
+    if (init != null && mode !== null && mode !== 'write') {
+      const refusal = scratchWriteRefusal(url.href, init.method, init.body);
+      if (refusal) {
+        const message = new ScratchWriteBlockedError(refusal).message;
+        console.warn(`[scratch] ${message}`);
+        resolve({ status: 403, contentType: 'application/json', body: JSON.stringify({ message }) });
+        return;
+      }
+    }
     const reqOpts: RequestOptions = {
       method: init?.method ?? 'GET',
       headers: init != null ? { ...headers, 'content-length': String(Buffer.byteLength(init.body)) } : headers,
