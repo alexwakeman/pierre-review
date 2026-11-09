@@ -54,7 +54,7 @@ describe('the PR-event chip partition', () => {
     expect(byChip.get('opened')?.sort()).toEqual(
       ['pr_opened', 'pr_ready_for_review', 'pr_reopened'].sort(),
     );
-    expect(byChip.get('reviewed')).toEqual(['review_submitted']);
+    expect(byChip.get('reviewed')?.sort()).toEqual(['review_dismissed', 'review_submitted']);
     expect(byChip.get('merged')).toEqual(['pr_merged']);
     expect(byChip.get('closed')).toEqual(['pr_closed']);
   });
