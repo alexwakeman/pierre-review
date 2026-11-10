@@ -111,7 +111,9 @@ export function parseUsageProbe(resp: unknown, nowMs: number): AiUsageReading | 
       const t = typeof o.resets_at === 'string' ? Date.parse(o.resets_at) : NaN;
       const utilization = u != null && u >= 0 && u <= 150 ? u : null;
       const resetsAtMs = Number.isFinite(t) ? t : null;
-      if (utilization == null && resetsAtMs == null) continue;
+      // A `five_hour` entry with no figures yet (an idle session) still says the account HAS a 5-hour
+      // window (shared `hasFiveHourWindow`): keep it as an observation. Any other empty window is skipped.
+      if (utilization == null && resetsAtMs == null && key !== 'five_hour') continue;
       out = withWindow(out, key, { utilization, resetsAtMs, observedAtMs: nowMs });
       any = true;
     }

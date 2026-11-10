@@ -63,7 +63,8 @@ export default function Page(): JSX.Element {
         same limits.
       </Quote>
       <p>
-        Claude limits each five-hour session and each week. That is why Limn&rsquo;s budget is a share of both.
+        Claude limits each week, and on some plans each five-hour session too. Limn&rsquo;s budget is a share of the
+        week, and of the session where your plan has one.
       </p>
 
       <H2 id="spend-budget">The spend budget</H2>
@@ -83,8 +84,10 @@ export default function Page(): JSX.Element {
           The budget is <b>on by default at 50% of your week</b>. Change the share, or switch the budget off.
         </li>
         <li>
-          Limn takes the same share of each five-hour session (50% of the week means 50% of each session). Open{' '}
-          <Ui>Set a separate 5-hour limit</Ui> to choose a different share; <Ui>Use the weekly share</Ui> goes back.
+          If your plan limits each five-hour session, Limn takes the same share of it (50% of the week means 50% of each
+          session). Open <Ui>Set a separate 5-hour limit</Ui> to choose a different share; <Ui>Use the weekly share</Ui>{' '}
+          goes back. Anthropic has removed the five-hour limit from some plans. Limn shows the five-hour bar and
+          setting only when your provider has reported a five-hour limit in the last 12 hours.
         </li>
         <li>
           Everything is shown in <b>percentages of your plan</b>, never in dollars.
@@ -92,11 +95,12 @@ export default function Page(): JSX.Element {
         <li>
           Claude: Limn adds up what its own runs use and compares it with your subscription&rsquo;s usual weekly
           allowance. Anthropic does not publish exact figures, so this is an estimate. Choose{' '}
-          <Ui>Your subscription</Ui> (<Ui>Pro</Ui>, <Ui>Max 5x</Ui>, <Ui>Max 20x</Ui> or <Ui>Team</Ui>) if Limn asks;
-          when Claude reports only &ldquo;Max&rdquo;, Limn asks which one rather than guess.
+          <Ui>Your subscription</Ui> (<Ui>Pro</Ui>, <Ui>Max 5x</Ui>, <Ui>Ultra</Ui> or <Ui>Team</Ui>) if Limn asks;
+          when Claude reports only &ldquo;Max&rdquo;, Limn asks whether it is Max 5x or Ultra rather than guess.
         </li>
         <li>
-          Codex: ChatGPT reports how much of its weekly and five-hour limits your account has used, in whole percent.
+          Codex: ChatGPT reports how much of its weekly limit, and five-hour limit where there is one, your account
+          has used, in whole percent.
           Limn&rsquo;s share is that figure times the part of your Codex use that came from its own runs, so it moves in
           coarse steps.
         </li>

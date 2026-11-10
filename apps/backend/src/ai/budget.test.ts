@@ -11,6 +11,8 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   AI_CYCLE_COST_FALLBACKS,
+  AI_FIVE_HOUR_WINDOW_RECENT_MS,
+  hasFiveHourWindow,
   SUBSCRIPTION_ESTIMATES,
   AI_BUDGET_SHARE_MAX,
   aiBudgetSettingsView,
@@ -158,14 +160,14 @@ describe('decideAiBudget — Limn’s share of the week (subscription)', () => {
     }
   });
 
-  it('⚠ Claude says "max": the reader must pick Max 5x or Max 20x; until then nothing blocks', () => {
+  it('⚠ Claude says "max": the reader must pick Max 5x or Ultra; until then nothing blocks', () => {
     const ledger = [{ atMs: NOW - H, usd: 10_000 }];
     const s = decide({ reading: reading('max', NOW + D), ledger });
     expect(s.overBudget).toBe(false);
     expect(s.subscription).toMatchObject({ subscription: null, reportedSubscription: 'max', pickFrom: ['max5x', 'max20x'] });
     expect(s.subscription!.usedSharePct).toBeNull();
     expect(s.subscription!.reviewsPerDay).toBeNull();
-    expect(s.reason).toMatch(/Max 5x or Max 20x/);
+    expect(s.reason).toMatch(/Max 5x or Ultra/);
     // A pick of the pair is used; a pick outside it is not.
     const picked = decide({ settings: on({ subscription: 'max20x' }), reading: reading('max', NOW + D), ledger });
     expect(picked.subscription).toMatchObject({ subscription: 'max20x', subscriptionSource: 'picked' });
@@ -301,6 +303,78 @@ describe('decideAiBudget — Limn’s share of a 5-hour session (subscription)',
     expect(s.subscription).toBeNull();
     expect(s.overBudget).toBe(false);
     expect(s.limitedBy).toBeNull();
+  });
+});
+
+describe('the 5-hour window is shown and judged only while it was reported lately', () => {
+  // Anthropic dropped the 5-hour limit for some plans: only a recent five_hour reading says the
+  // account has one (AI_FIVE_HOUR_WINDOW_RECENT_MS). Pro at 5%: $0.75 a session.
+  const weekOnly: AiUsageReading = {
+    subscriptionType: 'pro',
+    week: { utilization: 30, resetsAtMs: NOW + 2 * D, observedAtMs: NOW - 60_000 },
+  };
+  const withFive = (observedAtMs: number): AiUsageReading => ({
+    ...weekOnly,
+    fiveHour: { utilization: 3, resetsAtMs: null, observedAtMs },
+  });
+  const busySession = [{ atMs: NOW - H, usd: 0.8 }];
+
+  it('hasFiveHourWindow: true only within the one constant; never reported is false', () => {
+    expect(hasFiveHourWindow(null, NOW)).toBe(false);
+    expect(hasFiveHourWindow(weekOnly, NOW)).toBe(false);
+    expect(hasFiveHourWindow(withFive(NOW - 60_000), NOW)).toBe(true);
+    expect(hasFiveHourWindow(withFive(NOW - AI_FIVE_HOUR_WINDOW_RECENT_MS), NOW)).toBe(true);
+    expect(hasFiveHourWindow(withFive(NOW - AI_FIVE_HOUR_WINDOW_RECENT_MS - 1), NOW)).toBe(false);
+  });
+
+  it('⚠ weekly-only plan: a busy session never pauses, and no 5-hour share is reported', () => {
+    for (const r of [weekOnly, withFive(NOW - 10 * D)]) {
+      const s = decide({ reading: r, ledger: busySession });
+      expect(s.overBudget).toBe(false);
+      expect(s.limitedBy).toBeNull();
+      expect(s.subscription!.fiveHourUsedSharePct).toBeNull();
+      // The week still judges as before.
+      expect(s.subscription!.usedSharePct).toBeCloseTo((0.8 / 170) * 100, 2);
+    }
+    // The same spend with a recent 5-hour reading pauses on the session.
+    expect(decide({ reading: withFive(NOW - 60_000), ledger: busySession }).limitedBy).toBe('five_hour');
+  });
+
+  it('the usage view hides the 5-hour window and share until it is reported; the week shows whenever known', () => {
+    const args = { settings: on(), route: 'login' as const, ledger: busySession, nowMs: NOW, todayFromMs: NOW - 12 * H };
+    const off = aiUsageView({ ...args, reading: withFive(NOW - 10 * D) });
+    expect(off.fiveHourLimit).toBe(false);
+    expect(off.account!.fiveHour).toBeNull();
+    expect(off.limn.fiveHourSharePct).toBeNull();
+    expect(off.account!.week).toMatchObject({ usedPct: 30 });
+    expect(off.limn.weekSharePct).not.toBeNull();
+    const live = aiUsageView({ ...args, reading: { ...withFive(NOW - 60_000), fiveHour: { utilization: 3, resetsAtMs: NOW + H, observedAtMs: NOW - 60_000 } } });
+    expect(live.fiveHourLimit).toBe(true);
+    expect(live.account!.fiveHour).toMatchObject({ usedPct: 3 });
+    expect(live.limn.fiveHourSharePct).toBeCloseTo((0.8 / 15) * 100, 2);
+    // An API key has no 5-hour limit to show.
+    expect(aiUsageView({ ...args, route: 'api_key', reading: withFive(NOW - 60_000) }).fiveHourLimit).toBe(false);
+  });
+
+  it('Codex: a weekly-only ChatGPT reading never pauses on the 5-hour share', () => {
+    const r: AiUsageReading = { week: { utilization: 10, resetsAtMs: NOW + 2 * D, observedAtMs: NOW - 60_000 } };
+    const s = decide({ provider: 'codex', reading: r, ledger: [{ atMs: NOW - H, usd: 0, inputTokens: 100 }] });
+    expect(s.subscription!.fiveHourUsedSharePct).toBeNull();
+    expect(s.limitedBy).not.toBe('five_hour');
+  });
+
+  it('the probe: a five_hour entry with no figures still counts as a 5-hour window', () => {
+    const r = B.parseUsageProbe(
+      { subscription_type: 'max', rate_limits_available: true, rate_limits: { five_hour: { utilization: null, resets_at: null } } },
+      NOW,
+    );
+    expect(hasFiveHourWindow(r, NOW)).toBe(true);
+    // A probe naming the week only leaves the 5-hour observation as it was (it ages out).
+    const weekly = B.parseUsageProbe(
+      { subscription_type: 'max', rate_limits_available: true, rate_limits: { seven_day: { utilization: 70, resets_at: new Date(NOW + D).toISOString() }, five_hour: null } },
+      NOW,
+    );
+    expect(weekly!.fiveHour ?? null).toBeNull();
   });
 });
 
@@ -487,6 +561,8 @@ describe('resolveAiSubscription — the one subscription rule', () => {
     expect(resolveAiSubscription('TEAM', null).kind).toBe('team');
     expect(resolveAiSubscription('max', null)).toEqual({ kind: null, source: null, pickFrom: ['max5x', 'max20x'] });
     expect(resolveAiSubscription('max', 'max5x').kind).toBe('max5x');
+    // Ultra (the plan that was Max 20x) settles it from the report.
+    expect(resolveAiSubscription('ultra', 'max5x')).toEqual({ kind: 'max20x', source: 'reading', pickFrom: null });
     expect(resolveAiSubscription('enterprise', null).kind).toBeNull();
     expect(resolveAiSubscription(null, 'pro')).toMatchObject({ kind: 'pro', source: 'picked' });
   });

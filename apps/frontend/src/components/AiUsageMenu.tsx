@@ -193,9 +193,9 @@ function LimnShareInfo(): JSX.Element {
   return (
     <InfoButton title="Limn’s share">
       <p>
-        The share of your plan’s allowance that Limn’s own runs used: this 5-hour session and this week. The
-        windows are your provider’s own and reset when it says; when Limn has not read a reset time yet it counts the
-        last 5 hours and the last 7 days.
+        The share of your plan’s allowance that Limn’s own runs used this week, and this 5-hour session when your
+        plan has one. The windows are your provider’s own and reset when it says; when Limn has not read a reset time
+        yet it counts the last 7 days and the last 5 hours.
       </p>
       <p>
         The bar runs to Limn’s limit, {AI_BUDGET_DEFAULTS.weekSharePct}% of the week unless you change it in AI spend

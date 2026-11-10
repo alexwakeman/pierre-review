@@ -258,20 +258,29 @@ The credential route picks the mode (`decideAiBudget`, pure):
   when Claude's weekly reset has been read and is still ahead (then `resumesAt` = the reset),
   otherwise the last 7 days (`resumesAt` = when enough spend rolls out).
   **The 5-hour share** is measured the same way against `SUBSCRIPTION_ESTIMATES[sub].fiveHour`
-  (Pro 15, Max 5x 75, Max 20x 200, Team 20 — internal, never shown), over `[reset − 5 h, reset)`
+  (Pro 15, Max 5x 75, Ultra 200, Team 20 — internal, never shown), over `[reset − 5 h, reset)`
   when Claude's `five_hour` reset has been read and is ahead, else the rolling last 5 hours. Its
   setting `fiveHourSharePct` is NULL by default = it FOLLOWS `weekSharePct` ("5% a week → 5% a
   session" — a guess, stated as one); a number (1–50) sets it separately, `null` returns it to
   following. Over EITHER share pauses automatic runs: `limitedBy` names which (`'week'` when both),
   `resumesAt` is the later clearing, and the reason is "Limn has used its share of this 5-hour
-  session." for the 5-hour one. ⚠ **The US$ arithmetic is internal** — `status.subscription` carries
+  session." for the 5-hour one. ⚠ **The 5-hour window is DETECTED, never assumed** (Anthropic dropped
+  it for some plans, 2026-11): shared `hasFiveHourWindow(reading, now)` is true only while a
+  `five_hour` window was observed within `AI_FIVE_HOUR_WINDOW_RECENT_MS` (12 h — the ONE constant; a
+  plan with the window reports it on every 5-minute probe, an idle one as an empty `five_hour` entry
+  the probe parser still keeps). False ⇒ `fiveHourUsedSharePct` null, the 5-hour share NEVER pauses a
+  run (Claude and Codex alike), `usage.fiveHourLimit` false, `account.fiveHour` and
+  `limn.fiveHourSharePct` null — so the header, the popover and Settings show no 5-hour bar, setting
+  or wording (unknown ⇒ hidden, never a fake 0%). The week shows whenever known. A stored separate
+  `fiveHourSharePct` is kept. ⚠ **The US$ arithmetic is internal** — `status.subscription` carries
   only percentages, the subscription, `reviewsPerDay`, the window kinds and the resets (a test
   asserts no dollar field); US$ is for the API key alone. No "pause at N% of Claude's own figure":
   Claude's usage NEVER blocks. The pure rules (`decideAiBudget`, `aiUsageView`, `rollingSpend`)
   live in packages/shared; `ai/budget.ts` gathers the inputs.
 - **Which subscription** — ONE rule, shared `resolveAiSubscription`: Claude's report of `pro` /
-  `team` is used directly (a pick does not override it); `max` needs the reader to pick Max 5x or
-  Max 20x (the picker offers only the pair, one line asks which); `enterprise` / anything else /
+  `team` is used directly (a pick does not override it), and `ultra` reads as `max20x`; `max` needs
+  the reader to pick Max 5x or Ultra (the picker offers only the pair, one line asks which). Anthropic
+  renamed Max 20x to **Ultra** (2026-11): the label is "Ultra", the stored key stays `max20x`; `enterprise` / anything else /
   no report → the reader picks from all four. Until known: never blocks, `reason` asks for a pick.
 - **The reading** gives the subscription type, the reset times and the header's account-wide
   figures — never a decision. It holds the `five_hour`, `seven_day` and per-model `seven_day_*`

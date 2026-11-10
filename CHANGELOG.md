@@ -29,6 +29,8 @@ no internals.
 - The Timeline is now optional and off by default. Switch it on in Settings → Features. While it is
   off, it leaves the sidebar, `g t` and the search menu, a link to it opens Open pull requests, and
   pull requests open in their own tab instead of a Focus tab.
+- AI usage and Settings → AI spend show the 5-hour session bar and setting only when your plan has a 5-hour limit; weekly-only plans see the week alone, and a 5-hour share no longer pauses automatic runs on them.
+- Claude's Max 20x plan is now called Ultra everywhere Limn names it.
 
 ### Removed
 

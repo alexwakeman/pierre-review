@@ -258,7 +258,7 @@ describe('the usage popover', () => {
   const now = Date.parse('2026-10-24T09:00:00.000Z');
   it('subscription: Limn’s share with limits, Claude’s windows, runs and tokens; no US$', () => {
     const d = usageDetailOf(resp({}), now);
-    expect(d.heading).toBe('Claude Max 20x');
+    expect(d.heading).toBe('Claude Ultra');
     const flat = d.sections.flatMap((s) => s.rows.map((r) => `${r.label}: ${r.value}`));
     expect(flat).toContain('This week: 2% · limit 5%');
     expect(flat).toContain('This 5-hour session: 0.4% · limit 5%');
@@ -318,7 +318,7 @@ describe('the usage popover', () => {
     const codexStatus = status({ provider: 'codex', enabled: false, mode: 'off', subscription: null });
     const all = usageDetailsOf({ ...resp({}), others: [{ provider: 'codex', status: codexStatus, usage: codexUsage }] }, now);
     expect(all.map((d) => [d.provider, d.heading])).toEqual([
-      ['claude', 'Claude Max 20x'],
+      ['claude', 'Claude Ultra'],
       ['codex', 'Codex · ChatGPT Plus'],
     ]);
     // Both draw Limn's bars: Claude's against its limit, Codex's (no limit) against 50%.
