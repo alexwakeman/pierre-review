@@ -45,7 +45,7 @@ export default function Page(): JSX.Element {
       <p>
         With Jira as a workspace&rsquo;s issue tracker, Limn links each pull request to the Jira tickets it names,
         reads those tickets, and uses them in the story check, the ticket view, This Sprint and the AI review&rsquo;s
-        open points. Limn reads Jira with a token you save in Settings. It writes to Jira in exactly two places, and
+        open points. Limn reads Jira with a token you save in Settings. It writes to Jira in exactly three places, and
         only when you press the button.
       </p>
 
@@ -66,8 +66,8 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         The token acts as you. It needs to be able to browse the projects whose tickets you want Limn to read. To
-        change a status from Limn, it also needs permission to transition those issues; to update a ticket&rsquo;s
-        text, permission to edit them.
+        change a status from Limn, it also needs permission to transition those issues; to assign one, permission to
+        assign them; to update a ticket&rsquo;s text, permission to edit them.
       </p>
 
       <H2 id="set-it-up">Set it up</H2>
@@ -117,8 +117,8 @@ export default function Page(): JSX.Element {
       <H2 id="choose-the-ticket-fields">Choose the ticket fields</H2>
       <p>
         Jira sites often have several fields called &ldquo;Acceptance Criteria&rdquo;, and each issue type can use a
-        different one. Once Limn has read some tickets, <Ui>Ticket fields</Ui> under the Issue tracker section lists
-        each issue type with two menus:
+        different one. Once Limn has read some tickets, <Ui>Ticket fields</Ui> under the Issue tracker section is a
+        table: one row per issue type, with a <Ui>Criteria</Ui> column and an <Ui>Open points</Ui> column:
       </p>
       <ul>
         <li>
@@ -171,12 +171,18 @@ export default function Page(): JSX.Element {
       </p>
 
       <H2 id="what-limn-writes">What Limn writes</H2>
-      <p>Limn writes to Jira in exactly two places. Both happen only when you press, and neither is ever retried.</p>
+      <p>Limn writes to Jira in exactly three places. Each happens only when you press, and none is ever retried.</p>
       <H3 id="change-a-status">Change a status</H3>
       <p>
         In a ticket&rsquo;s <DocLink to="this-sprint/story-view#change-the-status-in-jira">story view</DocLink>, the
         status chip is a menu. Opening it asks Jira which statuses the ticket can move to; picking one makes that
         transition at once. Limn lists only transitions it can make without Jira&rsquo;s own form.
+      </p>
+      <H3 id="assign-a-ticket">Assign a ticket</H3>
+      <p>
+        In a ticket&rsquo;s <DocLink to="this-sprint/story-view#assign-the-ticket">story view</DocLink>, the assignee
+        is a menu. Opening it lists the people Jira lets you assign in the ticket&rsquo;s project, and{' '}
+        <Ui>Unassigned</Ui>. Picking one assigns the ticket at once.
       </p>
       <H3 id="update-the-ticket">Update the ticket</H3>
       <p>
@@ -186,7 +192,7 @@ export default function Page(): JSX.Element {
         same field Limn read them from.
       </p>
       <Warning>
-        Both writes are made with the workspace&rsquo;s Jira token, so they show in Jira as made by that
+        All three writes are made with the workspace&rsquo;s Jira token, so they show in Jira as made by that
         token&rsquo;s owner. Nothing else in Limn writes to Jira: no background job, no automation and no comment.
       </Warning>
 

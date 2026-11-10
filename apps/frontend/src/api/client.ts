@@ -210,6 +210,9 @@ import type {
   TicketUpdateResponse,
   TicketStatusChangeResponse,
   TicketTransitionsResponse,
+  TicketAssignBody,
+  TicketAssignResponse,
+  TicketAssignablesResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -1080,6 +1083,16 @@ export const api = {
   setTicketStatus: (workspaceId: number, body: TicketStatusChangeBody) =>
     fetch(withQuery('/api/ticket-status', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
       handle<TicketStatusChangeResponse>(r),
+    ),
+  // The story view's assignee picker (Jira, GitHub Issues, Linear) — a TRACKER WRITE. The GET is made
+  // when the picker opens (kept a few minutes on the server); the POST assigns and settles.
+  ticketAssignables: (workspaceId: number, ident: string) =>
+    get<TicketAssignablesResponse>(
+      withQuery('/api/ticket-assignees', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
+  setTicketAssignee: (workspaceId: number, body: TicketAssignBody) =>
+    fetch(withQuery('/api/ticket-assignee', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<TicketAssignResponse>(r),
     ),
   // The build plan's ticket update (Jira only) — the other tracker write: the reader's press, once.
   updateTicket: (workspaceId: number, body: TicketUpdateBody) =>

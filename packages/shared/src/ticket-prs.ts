@@ -34,6 +34,8 @@ export interface TicketPrsTicket {
   url: string | null;
   provider: TrackerProvider;
   status: { name: string; category: JiraStatusCategory | null } | null;
+  /** The freshest row's assignee (null = nobody). Absent from an older server. */
+  assignee?: { name: string; avatarUrl: string | null } | null;
 }
 
 export interface TicketPrsResponse {
@@ -145,6 +147,62 @@ export interface TicketStatusChangeResponse {
 
 /** The one-line refusal when the saved token may not change an issue. */
 export const TICKET_STATUS_NO_PERMISSION = 'Your Jira token cannot change this issue.';
+
+// ── The story view's assignee picker — A TRACKER WRITE (Jira, GitHub Issues, Linear) ────────────────
+//
+//   GET  /api/ticket-assignees?workspace=<id>&ident=…  →  TicketAssignablesResponse
+//   POST /api/ticket-assignee?workspace=<id>  { ident, assigneeId }  →  TicketAssignResponse
+//
+// docs/TRACKERS.md § The assignee change. The GET is made when the picker OPENS, never on mount: the
+// people the tracker lets this ticket be assigned to (Jira: the project's assignable users; GitHub
+// Issues: the repository's assignable users; Linear: the team's active members), kept for a few
+// minutes per workspace. The POST assigns the ticket to one of them (or nobody), reads the assignee
+// back and writes it to every stored row of that ticket. Both refuse a ticket Limn holds no row for,
+// a tracker that cannot assign (Notion), and an ident on another site. Every failure answers a
+// sentence Limn wrote.
+
+/** The trackers whose tickets Limn can assign. Notion is read-only in Limn. */
+export const TICKET_ASSIGN_PROVIDERS: readonly TrackerProvider[] = ['jira', 'github', 'linear'];
+
+export function canAssignTickets(provider: TrackerProvider | null | undefined): boolean {
+  return provider != null && TICKET_ASSIGN_PROVIDERS.includes(provider);
+}
+
+/** The longest assignee id the POST accepts. */
+export const TICKET_ASSIGNEE_ID_MAX = 256;
+
+export interface TicketAssignable {
+  /** The tracker's own id for the person, as the POST sends it back. */
+  id: string;
+  /** How the ticket names its assignee once assigned (GitHub: the login). */
+  name: string;
+  /** A second line that tells two people apart (GitHub: the full name); null when none. */
+  detail: string | null;
+  /** https only — render through `safeExternalUrl`. */
+  avatarUrl: string | null;
+}
+
+export interface TicketAssignablesResponse {
+  workspaceId: number;
+  ident: string;
+  /** Sorted by name. */
+  users: TicketAssignable[];
+  /** The tracker had more people than Limn lists. */
+  truncated: boolean;
+}
+
+export interface TicketAssignBody {
+  ident: string;
+  /** A `TicketAssignable.id`; null = unassign. */
+  assigneeId: string | null;
+}
+
+export interface TicketAssignResponse {
+  workspaceId: number;
+  ident: string;
+  /** The assignee after the change (null = nobody). */
+  assignee: { name: string; avatarUrl: string | null } | null;
+}
 
 // ── THE TICKET UPDATE (the reader's press in the build tab's plan panel) ─────────────────────────────
 //

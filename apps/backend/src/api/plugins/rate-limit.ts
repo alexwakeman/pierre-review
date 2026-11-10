@@ -488,6 +488,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // The other tracker write (tracker/ticket-update.ts): the plan's ticket update — one Jira PUT, the
   // same spend as a transition.
   if (method === 'POST' && path === '/api/ticket-update') return [TIERS.search, TIERS.read];
+  // The assignee picker (tracker/assignee.ts): GET /api/ticket-assignees lists the tracker's
+  // assignable people (Jira / Linear quota with the saved token, or the reader's GitHub quota) on
+  // the picker's open → `search`. POST /api/ticket-assignee is a WRITE on that tracker — on GitHub
+  // Issues a GitHub write — so `search` + `github_write`. EXACT `===`, method-checked.
+  if (!mutating && path === '/api/ticket-assignees') return [TIERS.search, TIERS.read];
+  if (method === 'POST' && path === '/api/ticket-assignee') return [TIERS.search, TIERS.githubWrite];
 
   // ---- AI generation ----
   // (The annotations routes — the blast-radius impact note — are REMOVED, 2026-10-30.)

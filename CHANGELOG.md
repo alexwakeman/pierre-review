@@ -13,6 +13,19 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- This Sprint and the story view: assign a ticket. On Jira, GitHub Issues and Linear the assignee in the
+  story view's header is a menu of the people your tracker lets you assign, plus "Unassigned". The
+  ticket changes at once and the People board follows. On GitHub the person you pick becomes the
+  issue's only assignee. Notion tickets show the assignee as before.
+- The story view shows the assignee of a ticket that has pull requests but is not in the sprint.
+
+### Fixed
+
+- Settings → Integrations → Ticket fields: the menus now line up in two columns, "Criteria" and "Open
+  points", one row per issue type.
+
 ## [1.0.22] - 2026-11-10
 
 ### Changed

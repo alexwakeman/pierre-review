@@ -108,8 +108,12 @@ export default function Page(): JSX.Element {
 
       <H2 id="what-limn-writes">What Limn writes</H2>
       <p>
-        Nothing. Limn does not change issues, their status or their labels. The status in the story view is shown,
-        not changed, and a plan&rsquo;s draft ticket update can be copied but not written back.
+        One thing, only when you pick it: the assignee. In a ticket&rsquo;s{' '}
+        <DocLink to="this-sprint/story-view#assign-the-ticket">story view</DocLink>, the assignee is a menu of the
+        people GitHub lets you assign in the issue&rsquo;s repository, and <Ui>Unassigned</Ui>. The person you pick
+        becomes the issue&rsquo;s only assignee, set as you. Limn does not change an issue&rsquo;s status or labels:
+        the status in the story view is shown, not changed, and a plan&rsquo;s draft ticket update can be copied but
+        not written back.
       </p>
 
       <H2 id="troubleshooting">Troubleshooting</H2>

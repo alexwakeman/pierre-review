@@ -74,7 +74,8 @@ export default function Page(): JSX.Element {
       <H3>Ticket fields</H3>
       <p>
         Jira sites often have several fields called &ldquo;Acceptance Criteria&rdquo;, and each issue type can use a
-        different one. Once a token is saved, choose the field for each issue type. <Ui>Limn picks</Ui> uses the field
+        different one. Once a token is saved, a table lists each issue type with a <Ui>Criteria</Ui> menu and an{' '}
+        <Ui>Open points</Ui> menu. <Ui>Limn picks</Ui> uses the field
         whose name best matches. <Ui>Open points</Ui> are what the ticket left undecided; a review lists them with the
         code that depends on them, and they never block it. A change applies at once to every stored ticket of that
         type. See <DocLink to="story-checks/acceptance-criteria">Acceptance criteria</DocLink>.
@@ -83,8 +84,9 @@ export default function Page(): JSX.Element {
         When another workspace already has a tracker, <Ui>Copy from another workspace</Ui> copies its settings here.
       </Note>
       <Note title="What Limn writes to your tracker">
-        Limn only reads trackers, with two exceptions on Jira, both made only when you press the button: changing a
-        ticket&rsquo;s status, and updating a ticket from a plan.
+        Limn only reads trackers, with these exceptions, each made only when you pick or press: assigning a ticket
+        (Jira, GitHub Issues and Linear), and on Jira changing a ticket&rsquo;s status and updating a ticket from a
+        plan. See <DocLink to="this-sprint/story-view#assign-the-ticket">Assign the ticket</DocLink>.
       </Note>
 
       <H2 id="sonarcloud">SonarCloud</H2>

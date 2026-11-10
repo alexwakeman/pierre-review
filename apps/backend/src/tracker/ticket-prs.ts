@@ -77,10 +77,17 @@ export async function ticketPrs(
   const siteRoot = adapter.siteRoot(issue.baseUrl);
   if (siteRoot == null || siteRoot !== row.apiRoot) return empty;
 
-  // The ticket's own facts: the freshest READ row on this site (title, browse URL, status).
+  // The ticket's own facts: the freshest READ row on this site (title, browse URL, status, assignee).
   const t = ctx.schema.trackerTickets;
   const metaRows = (await ctx.db
-    .select({ title: t.title, url: t.url, statusName: t.statusName, statusCategory: t.statusCategory })
+    .select({
+      title: t.title,
+      url: t.url,
+      statusName: t.statusName,
+      statusCategory: t.statusCategory,
+      assigneeName: t.assigneeName,
+      assigneeAvatarUrl: t.assigneeAvatarUrl,
+    })
     .from(t)
     .where(
       and(
@@ -94,7 +101,14 @@ export async function ticketPrs(
     )
     .orderBy(desc(t.fetchedAt), desc(t.id))
     .limit(1)
-    .execute()) as Array<{ title: string | null; url: string; statusName: string | null; statusCategory: string | null }>;
+    .execute()) as Array<{
+    title: string | null;
+    url: string;
+    statusName: string | null;
+    statusCategory: string | null;
+    assigneeName: string | null;
+    assigneeAvatarUrl: string | null;
+  }>;
   const meta = metaRows[0];
   const category = meta?.statusCategory;
   const ticket: TicketPrsTicket | null =
@@ -111,6 +125,10 @@ export async function ticketPrs(
                   name: meta.statusName,
                   category: category === 'new' || category === 'indeterminate' || category === 'done' ? (category as JiraStatusCategory) : null,
                 }
+              : null,
+          assignee:
+            meta.assigneeName != null && meta.assigneeName !== ''
+              ? { name: meta.assigneeName, avatarUrl: meta.assigneeAvatarUrl ?? null }
               : null,
         };
 

@@ -14,9 +14,10 @@ import { BlockList, isIP } from 'node:net';
 //
 // What it enforces, in BOTH modes:
 //   • GET, with two exceptions through the same transport and guard: the Linear GraphQL POST to its
-//     FIXED host (linear/client.ts, a read), and the TWO TRACKER WRITES — the Jira status transition
-//     the reader picks (`jiraPostJson`, ../status-change.ts) and the ticket update the reader presses
-//     (`jiraPutJson`, ../ticket-update.ts). Nothing else writes to a tracker;
+//     FIXED host (linear/client.ts: a read, or the assignee change's mutation), and the reader's
+//     TRACKER WRITES — the Jira status transition the reader picks (`jiraPostJson`, ../status-change.ts),
+//     the ticket update the reader presses (`jiraPutJson`, ../ticket-update.ts) and the assignee the
+//     reader picks (`jiraPutJson`, ../assignee.ts). Nothing else writes to a tracker;
 //   • a hard TIMEOUT (10s for the whole exchange) and a RESPONSE SIZE CAP;
 //   • NO REDIRECTS. Node's http client never follows one, and any 3xx is an error — following it
 //     would forward the Authorization header to a host nobody chose;

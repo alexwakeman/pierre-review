@@ -598,7 +598,7 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 
   // This sprint: the refresh kicks a tracker read, Ask bills one Haiku completion per turn; everything
-  // else is a DB read. Nothing writes to a tracker. "Check against code" is gone.
+  // else is a DB read. Only a reader's pick writes to a tracker. "Check against code" is gone.
   it('tiers This sprint per route', () => {
     expect(tiers('GET', '/api/sprint-graph')).toEqual(['read']);
     // The change token the SPA polls: DB only.
@@ -608,13 +608,18 @@ describe('tierFor — GitHub quota spenders', () => {
     // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
-    // The story view's status picker — the one tracker write: Jira quota on both.
+    // The story view's status picker — a tracker write: Jira quota on both.
     expect(tiers('GET', '/api/ticket-status/transitions')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-status')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-status/transitions')).not.toEqual(['search', 'read']);
     expect(tiers('PUT', '/api/ticket-status')).not.toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-update')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/ticket-update')).not.toEqual(['search', 'read']);
+    // The assignee picker: the list spends tracker quota; the pick is a tracker (or GitHub) write.
+    expect(tiers('GET', '/api/ticket-assignees')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/ticket-assignee')).toEqual(['search', 'github_write']);
+    expect(tiers('POST', '/api/ticket-assignees')).not.toEqual(['search', 'read']);
+    expect(tiers('PUT', '/api/ticket-assignee')).not.toEqual(['search', 'github_write']);
     // With AI on (local) a refresh may start up to three ticket checks — agent runs.
     expect(tiers('POST', '/api/sprint-stories/refresh')).toEqual(
       config.aiEnabled ? ['search', 'ai', 'ai_hourly'] : ['search', 'read'],

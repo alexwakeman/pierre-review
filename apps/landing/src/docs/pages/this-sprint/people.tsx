@@ -14,7 +14,10 @@ export default function Page(): JSX.Element {
         stand-ups: who has which tickets, how far each person&rsquo;s tickets have got, and where one person&rsquo;s
         work waits on another&rsquo;s.
       </p>
-
+      <p>
+        To give a ticket to someone else, open it and pick them from the assignee menu (Jira, GitHub Issues and
+        Linear). See <DocLink to="this-sprint/story-view#assign-the-ticket">Assign the ticket</DocLink>.
+      </p>
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

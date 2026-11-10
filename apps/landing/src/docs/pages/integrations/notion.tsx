@@ -139,8 +139,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="what-limn-writes">What Limn writes</H2>
       <p>
-        Nothing. Limn only reads Notion. It never changes a page, a property or a comment, and the status in the
-        story view is shown, not changed.
+        Nothing. Limn only reads Notion. It never changes a page, a property or a comment, and the status and the
+        assignee in the story view are shown, not changed.
       </p>
 
       <H2 id="troubleshooting">Troubleshooting</H2>

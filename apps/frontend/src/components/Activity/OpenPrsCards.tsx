@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
-import { landsAfterOf } from '@pierre-review/shared';
+import { TRACKER_PROVIDER_LABEL, canAssignTickets, landsAfterOf } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
@@ -89,6 +89,7 @@ import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { PrChips } from './PrChips.js';
 import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
+import { TicketAssigneePicker } from '../Ticket/TicketAssigneePicker.js';
 import { PageHeader } from '../ui/PageHeader.js';
 import { InRail, useInRail } from '../Ticket/StoryLayout.js';
 import { FloatingLayer } from '../ui/FloatingLayer.js';
@@ -1053,7 +1054,7 @@ function TicketStatusChip({
   single: boolean;
 }): JSX.Element {
   return single && t.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
-    // The story view's Jira ticket: the chip is the status picker (the one tracker write).
+    // The story view's Jira ticket: the chip is the status picker (a tracker write).
     <TicketStatusPicker
       ident={t.ident}
       status={t.status ?? STATUS_WORD[cat ?? 'new']}
@@ -1083,6 +1084,24 @@ function TicketPeopleAndStatus({
     <>
       {status && <TicketStatusChip t={t} cat={cat} single={single} />}
       {t.issueType != null && <span className="text-meta text-ui-mute">{t.issueType}</span>}
+      {single && t.ident != null && canAssignTickets(t.provider) ? (
+        // The story view's ticket on a tracker Limn can assign: the assignee is the picker.
+        <TicketAssigneePicker
+          ident={t.ident}
+          assignee={t.assignee ?? null}
+          trackerLabel={TRACKER_PROVIDER_LABEL[t.provider ?? 'jira']}
+        />
+      ) : (
+        <TicketAssigneeFact t={t} />
+      )}
+    </>
+  );
+}
+
+/** The ticket's assignee as a plain fact (every tracker Limn cannot assign, and every card). */
+function TicketAssigneeFact({ t }: { t: NonNullable<OpenPrsStack['ticket']> }): JSX.Element {
+  return (
+    <>
       {t.assignee != null && (
         <span className="inline-flex items-center gap-1.5">
           <span
