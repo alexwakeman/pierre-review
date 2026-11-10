@@ -1466,7 +1466,7 @@ export const claudeReviews = sqliteTable(
     postOnFinish: integer('post_on_finish', { mode: 'boolean' }),
     // WHAT THE TEAM CLAIM DID FOR THIS RUN (migration 0134; review/claude-review/team-claim.ts): the
     // GitHub status line it posted ("Marked on GitHub"), or why it ran without one. NULL = no claim
-    // was attempted (a manual run, or "Mark auto reviews on GitHub" off).
+    // was attempted (a manual run, or before team claims were always on).
     teamClaim: text('team_claim', { mode: 'json' }).$type<ClaudeTeamClaimRecord>(),
     // A CLAUDE + CODEX PAIR (migration 0135; docs/CLAUDE-REVIEW.md § Claude + Codex): `pairId` = the
     // FIRST run's id, on both halves; `pairRole` 'first' | 'second'; `pairDropped` = the second run's

@@ -30,7 +30,6 @@ let closeDb: (() => Promise<void> | void) | undefined;
 let tc: typeof import('./team-claim.js');
 let ledger: typeof import('./team-claim-ledger.js');
 let rel: typeof import('./team-claim-release.js');
-let settings: typeof import('./auto-settings.js');
 let ctx: AgentContext;
 let workspaceId = 0;
 let prId = 0;
@@ -112,7 +111,6 @@ beforeAll(async () => {
   tc = await import('./team-claim.js');
   ledger = await import('./team-claim-ledger.js');
   rel = await import('./team-claim-release.js');
-  settings = await import('./auto-settings.js');
   await db
     .insert(schema.accounts)
     .values({ id: 1, githubUserId: 'U_me', githubLogin: 'me', isLocal: true })
@@ -157,7 +155,6 @@ beforeAll(async () => {
     .execute();
   reviewId = r.id;
   ctx = { db, schema, log: { info: () => {}, warn: () => {}, error: () => {} } } as any as AgentContext;
-  await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
 });
 
 afterAll(async () => {
@@ -169,7 +166,6 @@ beforeEach(async () => {
   tc._resetTeamClaimsForTest();
   rel._resetTeamClaimReleaseForTest();
   await db.delete(schema.teamClaimLines).execute();
-  await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
 });
 
 describe('the ledger around a claim', () => {
@@ -321,11 +317,10 @@ describe('releaseStaleOwnClaims (the reconciler)', () => {
     expect(await rowById(b)).toMatchObject({ state: 'released', lastError: 'no_access' });
   });
 
-  it('works with the team-claims switch OFF: what we posted is still released', async () => {
+  it('what we posted is released after a restart', async () => {
     const f = fakeGh();
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
     tc._resetTeamClaimsForTest();
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res.released).toBe(1);
@@ -513,15 +508,5 @@ describe("releaseExpiredTeammateLines (a teammate's stale line)", () => {
     await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, { ...f.gh, listLines: async () => [{ id: 2, state: 'pending', description: 'x', createdAtMs: NOW - MIN, login: 'bob' }] });
     await rel.releaseExpiredTeammateLines(ctx, { ...notBusy, gh: f.gh, nowMs: later });
     expect(f.posts).toHaveLength(n);
-  });
-
-  it('a workspace with team claims OFF releases nothing of a teammate', async () => {
-    const f = fakeGh();
-    f.seed('limn/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - 5 * MIN, login: 'bob' });
-    await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
-    const res = await rel.releaseExpiredTeammateLines(ctx, { ...notBusy, gh: f.gh, nowMs: NOW + 40 * MIN });
-    expect(res.released).toBe(0);
-    expect(f.posts).toEqual([]);
   });
 });

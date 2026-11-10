@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 import {
   TEAM_CLAIM_DESCRIPTION_MAX,
@@ -227,7 +228,6 @@ let db: any;
 let schema: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let tc: typeof import('./team-claim.js');
-let settings: typeof import('./auto-settings.js');
 let ctx: AgentContext;
 let workspaceId = 0;
 let prId = 0;
@@ -281,7 +281,6 @@ beforeAll(async () => {
   await runMigrations();
   const q = await import('../../db/queries.js');
   tc = await import('./team-claim.js');
-  settings = await import('./auto-settings.js');
   await db
     .insert(schema.accounts)
     .values({ id: 1, githubUserId: 'U_me', githubLogin: 'me', isLocal: true })
@@ -333,26 +332,17 @@ beforeEach(async () => {
   await db.delete(schema.teamClaimLines).execute();
 });
 
-describe('the workspace switch', () => {
-  it('is ON by default (0159: only a stored false is off), and the one writer turns it off and on', async () => {
-    // A workspace that never touched the switch (NULL) reads ON.
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
-    expect(await tc.teamClaimsOnForPr(ctx, 1, prId)).toBe(true);
-    const off = await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
-    expect(off?.teamClaimsEnabled).toBe(false);
+describe('always on (2026-11-10)', () => {
+  it('a stored false in the dormant column is ignored: the claim still goes up', async () => {
+    await db.update(schema.workspaces).set({ teamClaimsEnabled: false }).where(eq(schema.workspaces.id, workspaceId)).execute();
     const f = fakeGh();
-    expect((await tc.claimBeforeAutoRun(ctx, target(), {}, f.gh)).kind).toBe('off');
-    expect(f.posts).toEqual([]);
-    const on = await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
-    expect(on?.teamClaimsEnabled).toBe(true);
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
+    expect((await tc.claimBeforeAutoRun(ctx, target(), {}, f.gh)).kind).toBe('run');
+    expect(f.posts.length).toBeGreaterThan(0);
+    await db.update(schema.workspaces).set({ teamClaimsEnabled: null }).where(eq(schema.workspaces.id, workspaceId)).execute();
   });
 });
 
 describe('claimBeforeAutoRun', () => {
-  beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
-  });
 
   it('free ⇒ posts "<login> is reviewing with Claude" and runs, marked', async () => {
     const f = fakeGh();
@@ -508,7 +498,6 @@ describe('claimBeforeAutoRun', () => {
 
 describe('finish and clear', () => {
   beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
 
   it('success ⇒ "me reviewed · N comments" with the review link, recorded on the run row', async () => {
@@ -574,7 +563,6 @@ describe('finish and clear', () => {
 
 describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () => {
   beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
 
   it('a skip is recorded durably with their line and name; a Codex claim at the same head keeps the Claude skip', async () => {
@@ -640,19 +628,6 @@ describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () =>
     }
     expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toEqual([]);
   });
-
-  it('migration 0159 switches every existing workspace ON (also one switched off)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { eq } = await import('drizzle-orm');
-    const sqlText = readFileSync(new URL('../../db/migrations/0159_team_claims_default_on.sql', import.meta.url), 'utf8');
-    const update = sqlText.split('--> statement-breakpoint')[0]!.split('\n').filter((l) => !l.startsWith('--')).join('\n').trim();
-    expect(update).toBe('UPDATE `workspaces` SET `team_claims_enabled` = 1;');
-    await db.update(schema.workspaces).set({ teamClaimsEnabled: false }).where(eq(schema.workspaces.id, workspaceId)).execute();
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(false);
-    const { sql } = await import('drizzle-orm');
-    await db.run(sql.raw(update));
-    expect((await settings.readWorkspaceAutoReview(ctx, 1, workspaceId))?.teamClaimsEnabled).toBe(true);
-  });
 });
 
 describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
@@ -701,7 +676,6 @@ describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
 
 describe('gap 5: a late final line is never posted blind', () => {
   beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
 
   it("a teammate's newer success ⇒ nothing posted, the row closed 'superseded', the record says so", async () => {
@@ -757,7 +731,6 @@ describe('gap 5: a late final line is never posted blind', () => {
 
 describe("gap 6: Clear for a teammate's claim survives a restart", () => {
   beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
   it("the stored 'is reviewing' line offers Clear with no memory; a 'reviewed' one does not", async () => {
     const seen = await import('./team-claim-seen.js');
@@ -803,7 +776,6 @@ describe("gap 6: Clear for a teammate's claim survives a restart", () => {
 describe('gap 4: manual reviews and team claims', () => {
   const mt = () => ({ accountId: 1, prId, owner: 'acme', name: 'api', number: 7, headSha: 'head1' });
   beforeAll(async () => {
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
   beforeEach(async () => {
     await db.delete(schema.teamClaimSeen).execute();
@@ -870,12 +842,6 @@ describe('gap 4: manual reviews and team claims', () => {
       claude: 'author',
     });
     await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, prId)).execute();
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
-    expect(await m.markPostedReviewLines(ctx, mt(), { runs: [{ provider: 'claude', comments: 1 }], verdict: 'COMMENT', reviewUrl: null }, g.gh)).toEqual({
-      claude: 'off',
-    });
-    expect(await m.readTeammateLinesForManualRun(ctx, mt(), ['claude'], g.gh)).toBe('off');
     expect(g.posts).toEqual([]);
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
   });
 });

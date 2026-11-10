@@ -205,9 +205,8 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   since 2026-11-05**: it gated the PUSH path, which was removed (GitHub's own "dismiss stale
   approvals" rule does that per repo). Never read or written; kept, never dropped.
 - **TEAM CLAIMS** (migration `0134`, docs/CLAUDE-REVIEW.md § Team claims): `workspaces.teamClaimsEnabled`
-  (`team_claims_enabled`, nullable, no default — ⚠ since `0159` NULL reads ON, only a stored false is off
-  (`0159` set every existing row to 1); the ONE
-  writer is `setWorkspaceAutoReview`) and `claudeReviews.teamClaim` (`team_claim`, JSON
+  (`team_claims_enabled` — ⚠ DORMANT since 2026-11-10: claims are always on; never read or written,
+  kept, never dropped) and `claudeReviews.teamClaim` (`team_claim`, JSON
   `ClaudeTeamClaimRecord {context, state: 'marked'|'unmarked', reason, lastLine, at}`: the GitHub status
   line an AUTO run posted, or why it ran without one; NULL = no claim attempted — a manual run, or the
   switch off). A SKIPPED auto run (a teammate's Limn holds the head) writes NO run row: the skip lives in

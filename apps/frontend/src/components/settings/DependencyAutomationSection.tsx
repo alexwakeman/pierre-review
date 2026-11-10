@@ -182,7 +182,6 @@ export function DependencyAutomationSection(): JSX.Element {
           <p className="mt-2">
             When a teammate also runs Limn, each action first puts a “limn/deps” status on the commit, such as “alex
             handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already did.
-            The “Mark auto reviews on GitHub” setting turns these statuses off too.
           </p>
           <p className="mt-2">
             Update size is read from the version numbers in the pull request. When Limn can’t read it, only “All updates”

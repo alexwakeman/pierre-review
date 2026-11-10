@@ -40,18 +40,20 @@ export default function Page(): JSX.Element {
       <H2 id="sharing-the-work">Sharing the work</H2>
       <ClaimLinesMock />
       <p>
-        The rule is one automatic review per model per commit, across the whole team. With{' '}
-        <Ui>Mark auto reviews on GitHub</Ui> on (the default, in <Ui>Settings → AI review</Ui>), each automatic review
+        The rule is one automatic review per model per commit, across the whole team. Each automatic review
         posts a status line on the pull request's latest commit, <b>limn/review-claude</b> or <b>limn/review-codex</b>:
         "alex is reviewing with Claude", then "alex reviewed · 3 comments". Another teammate's Limn reads the line and
-        skips that model on that commit. A different model still reviews it.
+        skips that model on that commit. A different model still reviews it. This is always on; there is no setting.
       </p>
       <ul>
         <li>If two Limns claim at nearly the same moment, the earlier claim wins and the other stands down.</li>
         <li>A review that does not finish frees its line, so another Limn can take the commit.</li>
         <li>A claim that is not renewed lapses after 25 minutes, for example when a laptop is closed mid-review.</li>
         <li>A new commit starts the race again.</li>
-        <li>Claiming needs write access to the repository. Without it, Limn reviews without a line.</li>
+        <li>
+          Claiming needs write access to the repository. Without it, GitHub refuses the line and Limn reviews without
+          one. Nothing is shown, and the review is not held up.
+        </li>
       </ul>
       <Warning>
         Do not make <b>limn/</b> lines required checks in branch protection. A line that is still pending would block
@@ -102,7 +104,7 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: '1', k: 'Approve or request changes', a: 'Never: always a comment.', r: 'Yes, within the workspace rules.' },
           { _key: '2', k: 'Holds the commit against others', a: 'No: other Limns ignore its lines.', r: 'Yes.' },
-          { _key: '3', k: 'Resolves its own fixed threads', a: 'Yes, on by default.', r: 'Only with Resolve Limn’s threads once fixed (off by default).' },
+          { _key: '3', k: 'Resolves its own fixed threads', a: 'Yes, on by default.', r: 'Yes, on its automatic runs while posting is on.' },
           { _key: '4', k: 'Auto AI Fix', a: 'Optional, off by default.', r: 'Never on someone else’s pull request.' },
           { _key: '5', k: 'Resolves a teammate’s thread', a: 'Never.', r: 'Never.' },
         ]}
@@ -149,27 +151,21 @@ export default function Page(): JSX.Element {
 
       <H2 id="lifting-changes-requested">Lifting "changes requested"</H2>
       <p>
-        Your own Limn's <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. A teammate's Limn
-        block is lifted only when both of you agree, in <Ui>Settings → AI review</Ui>, under{' '}
-        <Ui>Teammates’ Limn “changes requested”</Ui> (both off by default):
+        Your own Limn's <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. A teammate's Limn{' '}
+        <Ui>Request changes</Ui> is lifted the same way, with no setting: this is how Limn works. Every review a Limn
+        posts says, in its hidden marker, that a teammate's Limn may lift it, unless its comments do not show every
+        blocker behind it.
       </p>
-      <ul>
-        <li>
-          The teammate ticks <Ui>Let a teammate’s Limn dismiss my Limn’s “changes requested” once every point is fixed</Ui>.
-        </li>
-        <li>
-          You tick <Ui>Dismiss a teammate’s Limn “changes requested” once every point is fixed</Ui>.
-        </li>
-      </ul>
       <p>
-        Then, when your run at the latest commit finds every point behind their block fixed and no blocker of its own,
+        When your run at the latest commit finds every point behind their block fixed and no blocker of its own,
         your Limn posts its review and dismisses theirs, once, with a message such as "Limn (alex) checked all 3 points
-        are addressed at 70cc9b5." Whether your review approves is decided by the usual rules. A review someone wrote
-        by hand is never dismissed. Dismissing needs write access, and branch protection can restrict it.
+        are addressed at 70cc9b5." Whether your review approves is decided by the usual rules, including the impact
+        boxes. A review someone wrote by hand is never dismissed. Dismissing needs write access, and branch protection can restrict it.
       </p>
       <H3>When the teammate's Limn is away</H3>
       <p>
-        Without either box, your Limn still dismisses a teammate's Limn <Ui>Request changes</Ui> when all of these hold:
+        A review from an older Limn, or one whose comments do not show every blocker, does not carry that word. Your
+        Limn still dismisses such a teammate's Limn <Ui>Request changes</Ui> when all of these hold:
         your review approves the latest commit; their block came from their Limn's automatic run; every point in every
         Limn review of theirs on the pull request is fixed at that commit; their Limn has not reviewed or claimed that
         commit; and they have done nothing on GitHub that Limn has seen for 4 hours, by hand or through their Limn. A

@@ -997,7 +997,11 @@ Fix, "Merge conflicts"), and dependency automation's conflict run (`resolveConfl
 red too, with "Fix them with AI" on, the CI-only seed with the merge REQUIRED — the CI review's fixable items
 ride in the same session), add a MERGE to the session. The agent merges and resolves FIRST, then fixes the other items on top. Owner decision
 2026-11-07: the host-side "Resolve with Claude" is removed; conflicts are resolved by hand in the resolver or
-here.
+here. ⚠ **AN AUTO FIX** (the unattended own-PR run after an auto review) carries the item ONLY with the
+workspace's "Merge conflicts with the base branch" under Always include (`AutoFixInclude.conflicts`, OFF by
+default; 2026-11-10 — before, never). Nothing else changes for it: the host checks below gate every push (an
+invalid merge pushes nothing, not even the fixes on top), and "Push automatically" decides whether a valid
+one is pushed after the session closes or waits for the reader's Push.
 
 | Step | Where | What |
 |---|---|---|
@@ -1090,7 +1094,7 @@ Measured live, 2026-11-07 (`session/fix-merge-session.live.test.ts`): see § Tes
   new-branch push refused), a marker left and a merge never committed both refusing Push. The unattended
   caller: `merge/dependency-automation-ai.test.ts` (seams) and `session/fix-deps-session-flow-db.test.ts`
   (`slow`, the same real-git fake runtime, NO click: conflict only, CI only, conflicting AND red in ONE
-  session counted once, a refused merge pushing nothing and logged, a person's Stop winning). The auto fix's exclusion: `review-seed.test.ts`.
+  session counted once, a refused merge pushing nothing and logged, a person's Stop winning). The auto fix's switch (OFF by default, on only by `include.conflicts`): `review-seed.test.ts`.
   `session/fix-merge-session.live.test.ts` (`live`, `LIMN_SANDBOX_LIVE=claude`) runs one real merge.
 - **The real-daemon test** (`docker-real.test.ts`, the `slow` project): a sandbox on an internal network
   reaches `registry.npmjs.org` through the proxy, is refused `example.com` (logged against the sandbox

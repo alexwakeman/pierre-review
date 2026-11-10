@@ -2178,6 +2178,19 @@ reappears.
   the story alignment pills are unchanged.
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled`. OFF per workspace until switched on.
+  - ⚠ **ALWAYS ON, NO SWITCH (2026-11-10)**: the team claim status lines (was "Mark auto reviews on
+    GitHub"), resolving Limn's own threads once fixed (was "Resolve Limn’s threads once fixed") and
+    lifting a teammate's Limn "changes requested" (was the two "Teammates’ Limn “changes requested”"
+    boxes). Each is SAID ONCE behind the ⓘ it belongs to (the section's own ⓘ for the status lines,
+    "Posting automatically" for the other two) — never a disabled checkbox. Their wire fields are gone.
+  - ⚠ **PROVIDER-NEUTRAL WORDS**: an auto review may be Claude's, Codex's or both, so the section never
+    names one provider for what the review found: "Limn reviews each new PR…", "Limn’s findings",
+    "Threads my agent says to fix". A provider is named only where one is meant ("Claude only" in the
+    provider menu, "When Claude and Codex disagree"). The MANUAL fix picker still names the run that
+    made the review (`pickerSectionLabel(section, by)`): there one provider is meant.
+  - **Auto AI Fix → Always include** (`FIX_ROWS`, one checkbox per `AutoFixInclude` key): "Merge
+    conflicts with the base branch" FIRST (OFF by default; the merge item, docs/SANDBOX.md § The
+    merge), then the findings and thread sections. The ⓘ says the merge is checked before any push.
   - **Design diagrams** ride the SAME section and Save: "Draw a design diagram after each review"
     (`autoDiagramsEnabled`, ON by default; only a stored false reads off). ⚠ NOT dimmed by auto review
     — a diagram follows EVERY review, yours or automatic. Sent only when changed. The ⓘ says it saves

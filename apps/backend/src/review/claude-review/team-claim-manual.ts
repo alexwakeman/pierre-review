@@ -27,7 +27,6 @@ import {
   reviewedLine,
   sameGithubLogin,
   teamClaimContext,
-  teamClaimsOnForPr,
   teammateHolds,
   type TeamClaimGithub,
 } from './team-claim.js';
@@ -44,7 +43,7 @@ export interface ManualClaimTarget {
   headSha: string;
 }
 
-export type ManualSeenOutcome = 'off' | 'no_login' | 'read';
+export type ManualSeenOutcome = 'no_login' | 'read';
 
 /** Read the providers' lines once and store what a teammate holds (see the header). Never throws. */
 export async function readTeammateLinesForManualRun(
@@ -55,7 +54,6 @@ export async function readTeammateLinesForManualRun(
   nowMs: () => number = Date.now,
 ): Promise<ManualSeenOutcome> {
   try {
-    if (!(await teamClaimsOnForPr(ctx, t.accountId, t.prId))) return 'off';
     const login = await gh.login(t.accountId).catch(() => null);
     if (!login) return 'no_login';
     const author = await prAuthorLogin(ctx, t.accountId, t.prId);
@@ -112,7 +110,6 @@ export interface PostedRunLine {
 
 export type MarkPostedOutcome =
   | 'posted'
-  | 'off' // team claims off for the workspace
   | 'no_login'
   | 'author' // the reader's own PR: their lines hold nothing
   | 'teammate' // a teammate's success or live claim stands
@@ -137,7 +134,6 @@ export async function markPostedReviewLines(
   };
   try {
     if (post.runs.length === 0) return out;
-    if (!(await teamClaimsOnForPr(ctx, t.accountId, t.prId))) return all('off');
     const login = await gh.login(t.accountId).catch(() => null);
     if (!login) return all('no_login');
     const author = await prAuthorLogin(ctx, t.accountId, t.prId);

@@ -36,16 +36,12 @@ describe('teammateLiftLines', () => {
 
 describe('the settings', () => {
   const src = readFileSync(new URL('../src/components/settings/AutoReviewSection.tsx', import.meta.url), 'utf8');
-  it('offers both opt-ins, saved with the auto-post settings, explained behind an ⓘ', () => {
-    // Each label says what is dismissed, by whom and when; never "block" (read as an approval).
-    expect(src).toContain('Let a teammate’s Limn dismiss my Limn’s “changes requested” once every point is fixed');
-    expect(src).toContain('Dismiss a teammate’s Limn “changes requested” once every point is fixed');
-    expect(src).toContain('Neither box dismisses or adds an approval.');
+  it('always on (2026-11-10): no switch, said once behind the posting ⓘ', () => {
+    expect(src).not.toContain('teamLiftConsent');
+    expect(src).not.toContain('liftTeammateBlocks');
     expect(src).not.toContain('Limn block');
-    expect(src).toContain('teamLiftConsent: liftConsent');
-    expect(src).toContain('liftTeammateBlocks: liftTeammates');
-    expect(src).toContain('<InfoButton title="Teammates’ Limn “changes requested”">');
+    expect(src).toContain('When a teammate’s Limn requested changes and every point is fixed');
     // The away path is explained in the same ⓘ.
-    expect(src).toContain('Without either box, when the teammate’s Limn is away');
+    expect(src).toContain('their Limn has not looked at the latest commit or done anything on GitHub for 4 hours');
   });
 });

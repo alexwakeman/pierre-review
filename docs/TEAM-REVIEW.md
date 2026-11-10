@@ -2,7 +2,8 @@
 
 **Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
 diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
-2026-11-05 (Limn 1.0.5); § 4 "A teammate's verdict" and § 3's catch-up on 2026-11-10. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+2026-11-05 (Limn 1.0.5); § 4 "A teammate's verdict" and § 3's catch-up on 2026-11-10; claims, resolving
+Limn's threads and lifting a teammate's block made always on (no settings) on 2026-11-10. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
@@ -166,11 +167,13 @@ stateDiagram-v2
 - **The author never holds a commit for the reviewers.** Because the author cannot approve, their
   Limn's lines are ignored by everyone else's Limn. It does not work the other way: the author's own
   Limn still steps aside for a reviewer's claim (their review would only be a comment on their own PR).
+- **Claims are always on (2026-11-10).** There is no setting: this is how Limn shares work on a team.
 - **If a claim cannot be read or written** (no write access, GitHub error), the review runs without
-  a line. Claims never block a review outright.
+  a line. Claims never block a review outright. When GitHub refuses the write, Limn logs it once per
+  repo and shows the reader nothing.
 - **Never make a `limn/` line a required check** in branch protection or a ruleset: a line still
   reading "reviewing" would block merges. Limn does not read branch rules, so it cannot warn per repo;
-  the claims setting's ⓘ says "Don't make limn/ lines required checks." (gap 11).
+  the Auto review ⓘ says "Don't make limn/ statuses required checks." (gap 11).
 
 ### Pairs and usage limits
 
@@ -222,7 +225,7 @@ flowchart TB
 | Can approve or request changes | **Never.** Always a comment. | Yes, within the settings (§ 5). |
 | Holds the commit against others | **No** — other Limns ignore its lines. | Yes. |
 | Steps aside for others | Yes, for a reviewer's claim on the same model. | Yes, for another reviewer's claim. |
-| Resolves its own threads when fixed | Yes, on by default ("Resolve my Limn threads when addressed"), after any run. | Only with the workspace's "Resolve Limn's threads once fixed" (off by default), on automatic runs. |
+| Resolves its own threads when fixed | Yes, on by default ("Resolve my Limn threads when addressed"), after any run. | Yes, on automatic runs while posting is on. Always on (no setting since 2026-11-10). |
 | Auto AI Fix | Optional, off by default; at most 3 per PR a day; pushes only if "Push automatically" is on. | Never on someone else's PR. |
 | Writes on the other's threads | Never resolves a teammate's thread. On its own PR, may post "Still open:" but never reopens a thread or starts a new one (decision D2). | Never resolves a teammate's thread. May post one "Still open:" reply per thread per commit and reopen a thread once, ever (§ 6). |
 
@@ -397,19 +400,25 @@ sequenceDiagram
 
 - **Your own Limn's block** is lifted by your next run that finds no blocker: an approval replaces
   it, or it is dismissed with "Claude's blocking findings are fixed." No setting needed.
-- **A teammate's Limn block** is lifted only with consent from both people (both off by default).
-  Consent rides each post made after ticking; a post sent with the Post button never carries it.
+- **A teammate's Limn block** is lifted the same way. **Always on, no setting (2026-11-10)**: this is
+  how Limn works. Approvals stay limited by the impact boxes and "Approve or request changes for me",
+  so lifting a block never approves on its own.
+- **The consent rides the post.** Every review Limn posts automatically (an auto run or "Review and
+  post") carries it in its hidden marker, unless the post's comments leave out a blocker behind its
+  verdict. A post sent with the Post button never carries it. Until 2026-11-10 two boxes (one on each
+  side, both off by default) decided this; a post made then without the box carries no consent.
 
-| Robin ticks | Alex ticks | Then |
-|---|---|---|
-| "Let a teammate's Limn dismiss my Limn's 'changes requested' once every point is fixed" | "Dismiss a teammate's Limn 'changes requested' once every point is fixed" | When Alex's run at the PR's latest commit finds every point behind Robin's block fixed and no blocker of its own, Alex's Limn posts its review, then dismisses Robin's block: "Limn (alex) checked all 3 points are addressed at 70cc9b5." Once, never retried. |
+| Robin's post | Then |
+|---|---|
+| An automatic Limn "changes requested" with its blockers in its comments | When Alex's run at the PR's latest commit finds every point behind Robin's block fixed and no blocker of its own, Alex's Limn posts its review, then dismisses Robin's block: "Limn (alex) checked all 3 points are addressed at 70cc9b5." Once, never retried. |
 
 Never dismissed by this: any approval, a review typed by hand, a review sent with the Post button.
 
 #### When the teammate's Limn is away (2026-11-10)
 
-A block should not sit on a PR because its owner is on holiday. With **neither** box ticked, your
-Limn still dismisses a teammate's Limn "changes requested" when every one of these holds:
+A block should not sit on a PR because its owner is on holiday. When the post carries **no consent**
+(an older Limn, or a post whose comments leave out a blocker), your Limn still dismisses a teammate's
+Limn "changes requested" when every one of these holds:
 
 | Condition | How Limn knows |
 |---|---|
@@ -514,7 +523,7 @@ Limn resolves **only its own reader's Limn findings**, never a teammate's or a p
 |---|---|---|---|
 | "Resolve my Limn threads when addressed" | On | Your own PR, after any of your runs | "Addressed in abc1234: \<how\>" / "No longer applies as of abc1234: \<how\>" — "_Resolved by Limn's Claude review._" |
 | (the same setting) | On | Your own PR, open, when a teammate's posted review found your Limn finding addressed or no longer applies **at the PR's latest commit**, and no run of yours at that commit is newer | "Addressed in abc1234 (checked by Robin's Limn): \<how\>" — "_Resolved by Limn._" |
-| "Resolve Limn's threads once fixed" | Off | Any PR, automatic runs with posting on | Same wording, with the automatic-post footer |
+| (always on, no setting since 2026-11-10; was "Resolve Limn's threads once fixed", off) | On | Any PR, automatic runs with posting on | Same wording, with the automatic-post footer |
 
 With no how (a run, or a teammate's Limn, from before it) the reply ends after the commit, as before.
 
@@ -555,8 +564,8 @@ flowchart TD
 
 - **What counts as a person's answer:** a reply with text by a person, without any Limn marker.
 - **An accepted reply settles the finding for good**: it is never raised again. Its acknowledgement
-  goes out only as the resolve reply, so on a teammate's PR with "Resolve Limn's threads once fixed"
-  off (the default) nothing is posted. The acknowledgement and pushback are the model's own sentence;
+  goes out only as the resolve reply, so on a teammate's PR it is posted on automatic runs with
+  posting on, and otherwise nothing is posted. The acknowledgement and pushback are the model's own sentence;
   the fallbacks are "Thanks for explaining. That makes sense." and "Thanks for the reply. I still
   think this needs changing in this pull request."
 - **Pushback** goes only on automatic runs with posting on, on an unresolved thread, from your
@@ -637,7 +646,7 @@ All names and times are illustrative; every step follows the current rules.
 1. Alex's Limn posts a warning on Bob's PR: "this can be null".
 2. Bob replies: "Can't be null; upstream validates."
 3. Five quiet minutes later Alex's replies pass disputes it and posts one pushback from Alex's account. The thread stays open.
-4. Bob replies with a link to the upstream check. The next pass accepts. If Alex's workspace has "Resolve Limn's threads once fixed" on, Alex's Limn posts a one-sentence acknowledgement and resolves the thread; with it off (the default) nothing is posted and the finding is settled in Alex's Limn.
+4. Bob replies with a link to the upstream check. The next pass accepts. On an automatic run with posting on, Alex's Limn posts a one-sentence acknowledgement and resolves the thread; on a manual run nothing is posted and the finding is settled in Alex's Limn.
 5. Had it disputed again, Limn would post nothing more; the point would be raised again in the next full review.
 
 ### 9.8 Resolved too early: reopen once, then a new thread
@@ -648,14 +657,14 @@ All names and times are illustrative; every step follows the current rules.
 5. Bob's My Turn card and the Overview's "Still open" list now point to the new thread. Later reviews judge the new thread, not the old one. If Bob resolves the new thread too, it is reopened once more, and then left alone.
 
 ### 9.9 A teammate's block is lifted
-1. Carol's Limn requests changes on Bob's PR (1 blocker, 1 warning). Carol has ticked "Let a teammate's Limn dismiss my Limn's 'changes requested'…".
-2. Bob fixes both. Alex has ticked "Dismiss a teammate's Limn 'changes requested'…".
+1. Carol's Limn requests changes on Bob's PR (1 blocker, 1 warning), automatically. Its marker carries the consent.
+2. Bob fixes both. No one ticks anything: there is no setting.
 3. Alex's run at Bob's latest commit judges both points fixed and finds no blocker. It posts Alex's review, then dismisses Carol's block: "Limn (alex) checked all 2 points are addressed at 70cc9b5."
-4. Without Carol's tick, her block stays; Alex's approval could still go out.
+4. Had Carol sent her review with the Post button, her block would stay; Alex's approval could still go out.
 
 ### 9.10 A teammate on holiday
-1. Friday 16:00 Robin's Limn requests changes on Dana's PR at commit A (1 blocker, 1 warning). Robin has ticked nothing. Robin goes on holiday.
-2. Monday 09:00 Dana pushes commit B with both fixes. Alex has ticked nothing either; his "Approve or request changes for me" is on.
+1. Friday 16:00 Robin's older Limn requests changes on Dana's PR at commit A (1 blocker, 1 warning); its post carries no consent. Robin goes on holiday.
+2. Monday 09:00 Dana pushes commit B with both fixes. Alex's "Approve or request changes for me" is on.
 3. 09:05 Alex's auto review at B judges both of Robin's points addressed, finds nothing new and approves.
 4. Robin's Limn has no line at B and Robin has posted nothing since Friday. Alex's Limn dismisses Robin's review: "Limn (alex) checked all 2 points are addressed at 4d2c9e1. robin's Limn has not reviewed it and has been away for 2 days."
 5. Had Robin's Limn claimed B, or Robin (or his Limn) commented anywhere in the last 4 hours, nothing would be dismissed; Alex's approval would still go out. The same if Robin had sent his review with the Post button, or if an earlier review of his held a blocker Alex's run has not judged fixed at B.
@@ -719,18 +728,17 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Auto reviews a day | 20 | Daily cap (1–500). |
 | Auto reviews use | Claude + Codex when both signed in | One merged review. |
 | When Claude and Codex disagree | Strict | Strict: both must approve. Relaxed: one approves, neither asks for changes. |
-| Mark auto reviews on GitHub (claims) | On | Status lines; the team shares the work per model. |
+| Claims (status lines) | Always on, no setting | The team shares the work per model. |
 | When an auto review finishes | Post to GitHub | Or keep it in Limn (invisible to teammates). Limn still withdraws its own earlier automatic approval when a later run does not approve. |
 | Which PRs | Mine | Or every PR. "Mine" includes a PR whose author's own Limn review waits for a teammate's verdict (§ 4). |
 | What to post | Blockers, warnings, questions, CI failures, story gaps, SonarCloud | Nits and "not asked for" off. |
 | Approve or request changes for me | On | Off means every post is a comment. |
 | Approve at High / Medium / Low impact | All on | An unticked level gets a comment. |
 | Approve with open findings | Nits and questions | Or nits only, or nothing. |
-| Resolve Limn's threads once fixed | Off | Any PR, automatic runs with posting on. |
+| Resolving Limn's threads once fixed | Always on, no setting | Any PR, automatic runs with posting on. |
 | Resolve my Limn threads when addressed | On | Your own PRs, any run. |
-| Let a teammate's Limn dismiss my Limn's "changes requested"… | Off | Consent on the blocked side. |
-| Dismiss a teammate's Limn "changes requested"… | Off | The lifting side. Without either box, an away teammate's Limn review is still dismissed when your review approves (§ 5). |
-| Auto AI Fix on your own PRs / Push automatically | Off / Off | Fix after an auto review; push only if allowed. |
+| Lifting a teammate's Limn "changes requested" | Always on, no setting | Once every point is fixed at the latest commit. A post with no consent is still dismissed when its owner is away and your review approves (§ 5). |
+| Auto AI Fix on your own PRs / Push automatically | Off / Off | Fix after an auto review; push only if allowed. "Merge conflicts with the base branch" (off) lets it merge the base first; a merge Limn's check refuses is never pushed. |
 
 ---
 
@@ -740,6 +748,7 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 
 | A teammate on… | Still does |
 |---|---|
+| before the next release after 1.0.22 | Keeps the claims, "Resolve Limn's threads once fixed" and the two lift boxes as settings: its lines go up only while its claims setting is on, and its posts carry the lift consent only while its box is on (so a newer Limn lifts such a block only by the away path). |
 | before 1.0.20 | Writes no `ov=` on its own-PR posts, so a teammate's newer Limn still picks the PR up but cannot sort a held approval first. As a teammate, never picks up an author's own review first, never waits for the sync after a break. |
 | before 1.0.14 | **Verdicts:** posts "Not approved: Claude left a comment, not an approval. No findings are open." when its model only commented with nothing open (a newer Limn approves through the gates); says "No findings are open." beside an unmet ticket criterion; a replies check approves even when a teammate's newer Limn review still holds a settled point open. **Team:** loses a withdrawn approval once a later Comment replaces it; never lists a replies check's verdict. |
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |

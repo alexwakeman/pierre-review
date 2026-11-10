@@ -67,7 +67,6 @@ let db: any;
 let schema: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let m: typeof import('./team-claim-skip.js');
-let settings: typeof import('./auto-settings.js');
 let ctx: AgentContext;
 let workspaceId = 0;
 let repoId = 0;
@@ -130,7 +129,6 @@ beforeAll(async () => {
   await runMigrations();
   const q = await import('../../db/queries.js');
   m = await import('./team-claim-skip.js');
-  settings = await import('./auto-settings.js');
   await db
     .insert(schema.accounts)
     .values({ id: 1, githubUserId: 'U_me', githubLogin: 'me', isLocal: true })
@@ -153,7 +151,6 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: true });
 });
 
 describe('postAutoSkipLines', () => {
@@ -197,16 +194,6 @@ describe('postAutoSkipLines', () => {
       'Cleared by me: auto review skipped · Claude not signed in',
     ]);
     expect(f.posts.every((p) => p.state === 'success')).toBe(true);
-  });
-
-  it('posts nothing while team claims are off for the workspace', async () => {
-    const f = fakeGh();
-    m._setSkipLineGithubForTest(f.gh);
-    const pr = await makePr();
-    await settings.setWorkspaceAutoReview(ctx, 1, workspaceId, { teamClaimsEnabled: false });
-    expect(await m.postAutoSkipLines(ctx, { accountId: 1, prId: pr }, [{ provider: 'claude', reason: 'budget' }], NOW)).toEqual(['off']);
-    expect(f.posts).toEqual([]);
-    expect(await rows(pr)).toEqual([]);
   });
 
   it('never over a line that means something: a pending claim, or a "reviewed" line — recorded, not re-read', async () => {

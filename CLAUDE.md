@@ -448,9 +448,9 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`). Plan
   first is a chat-mode session. URL paths kept (`/api/pro/prs/:id/ai-fix*`). ⚠ **The MERGE item**
   ("Resolve merge conflicts", `sandbox/session/fix-merge.ts`): the agent merges first; out as REAL
-  commits (a bundle); the host checks parents + markers; only a VALID merge pushes (never in an auto fix).
-- **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
-  context.
+  commits (a bundle); the host checks parents + markers; only a VALID merge pushes. Auto fix: only
+  with `include.conflicts` (OFF).
+- **Moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform's.
 - **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),
   [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; a Sonar snapshot is
   kept only when SonarCloud analysed THIS head; the docs crawl is same-host, LINEAR scanners over

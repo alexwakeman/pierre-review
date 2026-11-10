@@ -162,7 +162,9 @@ describe('the mounts', () => {
     expect(s.indexOf('Keep it in Limn')).toBeLessThan(s.indexOf('Auto AI Fix on your own PRs'));
     expect(s).toContain('Your own PRs, and PRs you are asked to review or have reviewed or commented on');
     expect(s).toContain('Approve or request changes for me');
-    expect(s).toContain('Resolve Limn’s threads once fixed');
+    // Resolving Limn's own fixed threads is always on: said behind the posting ⓘ, never a switch.
+    expect(s).not.toContain('Resolve Limn’s threads once fixed');
+    expect(s).toContain('When a later review finds a posted comment fixed, Limn replies and resolves its thread.');
     expect(s).toContain('Push automatically');
     expect(s).toContain('Every PR auto review covers');
     for (const k of ['blockers', 'warnings', 'nits', 'questions', 'storyGaps', 'notAskedFor']) {
@@ -178,8 +180,18 @@ describe('the mounts', () => {
     // outside the posting block (it acts with posting and auto review off).
     expect(s).toContain('const storedResolveOwn = storedPost?.resolveOwnPrs !== false;');
     expect(s).toContain('resolveOwnPrs: resolveOwn,');
-    expect(s.indexOf('data-resolve-own')).toBeGreaterThan(s.indexOf('Resolve Limn’s threads once fixed'));
-    expect(s.indexOf('data-resolve-own')).toBeLessThan(s.indexOf('data-teammate-lift'));
+    expect(s.indexOf('data-resolve-own')).toBeGreaterThan(s.indexOf('Approve or request changes for me'));
+    // Always on, no switch (2026-11-10): team claims, auto resolve, the teammate lift.
+    for (const gone of ['autoResolve', 'teamClaimsEnabled', 'teamLiftConsent', 'liftTeammateBlocks', 'data-teammate-lift']) {
+      expect(s).not.toContain(gone);
+    }
+    // SonarCloud issues are posted inline now: no "one PR comment" on its row.
+    expect(s).toContain("{ key: 'sonar', label: 'SonarCloud issues' }");
+    // Auto AI Fix rows are provider-neutral (Claude, Codex or both) and offer the merge, OFF by default.
+    expect(s).toContain("{ key: 'findings', label: 'Limn’s findings' }");
+    expect(s).toContain("{ key: 'judgedThreads', label: 'Threads my agent says to fix' }");
+    expect(s).toContain("{ key: 'conflicts', label: 'Merge conflicts with the base branch' }");
+    expect(s).not.toMatch(/Threads \$\{name\}|\$\{name\}’s findings/);
   });
 
   it('the Claude Review tab and Story check render the chip and the failure line', () => {

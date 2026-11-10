@@ -3,7 +3,8 @@
 // Settings → Auto review). CORE, free, local-only, like the rest of AI Fix.
 //
 // THE GATE, every part re-read at push time (the first that fails decides):
-//   1. the fix is an AUTO fix, SUCCEEDED, with a non-empty patch, never pushed;
+//   1. the fix is an AUTO fix, SUCCEEDED, with work to push (a non-empty patch, or — with the merge item —
+//      a merge Limn checked as VALID: `fixRowHasWork`), never pushed;
 //   2. the workspace holding the PR's repo still has auto AI Fix ON and `autoPush` ON;
 //   3. the PR's author IS the account's own GitHub user (`prAuthorIsAccount`) — never anyone else's;
 //   4. then `pushFix` with target 'existing' — the Push button's own path: write access re-checked,
@@ -17,6 +18,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 import { getFixById, markFixPushFailed } from './persist.js';
 import { pushFix, type PushFixOutcome } from './push.js';
+import { fixRowHasWork } from '../../sandbox/session/fix-merge.js';
 
 export type AutoPushDecision =
   | { status: 'pushed'; branch: string }
@@ -44,7 +46,7 @@ export async function maybeAutoPushFix(
   try {
     const row = await getFixById(ctx, accountId, fixId);
     if (!row || row.trigger !== 'auto') return { status: 'skipped', reason: 'not_auto' };
-    if (row.status !== 'succeeded' || !(row.patch ?? '').trim() || row.pushedAt != null)
+    if (row.status !== 'succeeded' || !fixRowHasWork(row) || row.pushedAt != null)
       return { status: 'skipped', reason: 'not_pushable' };
     const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, row.prId);
     if (!ws?.enabled || !ws.settings.autoPush) return { status: 'skipped', reason: 'off' };

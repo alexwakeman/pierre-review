@@ -2237,11 +2237,11 @@ export async function installMockApi(
             dailyCap: 20,
             autoFixEnabled: false,
             autoDiagramsEnabled: true,
-            teamClaimsEnabled: true,
             autoReviewProviders: 'default',
             pairStrictness: 'strict',
             autoFix: {
               include: {
+                conflicts: false,
                 findings: true,
                 earlierFindings: true,
                 judgedThreads: true,
@@ -2267,12 +2267,9 @@ export async function installMockApi(
                 notAskedFor: false,
               },
               autoVerdict: true,
-              autoResolve: false,
               resolveOwnPrs: true,
               approveImpact: { high: true, medium: true, low: true },
               approveLeftovers: 'nits_questions',
-              teamLiftConsent: false,
-              liftTeammateBlocks: false,
             },
           },
         } satisfies WorkspaceAutoReviewResponse);

@@ -48,8 +48,9 @@ import { MERGE_ITEM_KEY, MERGE_ITEM_REF, mergeItemBody } from '../../sandbox/ses
 //               first). Q, not S: S is the story's.
 //   S<t>-AC<n>  an acceptance criterion of ticket t judged not met or partly met, and
 //   MERGE       "Resolve merge conflicts with <base>" — the PR conflicts with its base (`getFixMergeOffer`). Listed
-//               and shown FIRST; the agent merges and resolves before every other item (fix-merge.ts). Never
-//               in an AUTO fix (`AUTO_FIX_RESOLVES_CONFLICTS`).
+//               and shown FIRST; the agent merges and resolves before every other item (fix-merge.ts). In an
+//               AUTO fix only when the workspace's "Always include" ticks it (`AutoFixInclude.conflicts`,
+//               OFF by default, 2026-11-10).
 //   S<t>-M<n>   something ticket t asked for that is missing — BOTH from the TICKET review
 //               (review/ticket-review/), never from the PR review, and ONLY the items whose owner is
 //               THIS PR (`ticketItems`, the caller's `getOwnedTicketItemsForPr`).
@@ -194,7 +195,7 @@ export function fixableCiItems(items: readonly CiReviewItem[]): CiReviewItem[] {
 
 /** Which `AutoFixInclude` switch governs a picker section (story: never in an auto fix). */
 const SECTION_SWITCH: Record<AiFixPickerSection, keyof AutoFixInclude | null> = {
-  conflicts: null,
+  conflicts: 'conflicts',
   findings: 'findings',
   earlier_findings: 'earlierFindings',
   judged_threads: 'judgedThreads',
@@ -204,13 +205,6 @@ const SECTION_SWITCH: Record<AiFixPickerSection, keyof AutoFixInclude | null> = 
   style_bots: 'styleBots',
   story: null,
 };
-
-/**
- * THE ONE SWITCH for the merge item in an AUTO fix (owner decision 2026-11-07: off). True ⇒ an auto fix of a
- * conflicting PR also merges its base and resolves the conflicts. Dependency automation is separate: it
- * asks for the merge itself (its own conflict path, docs/MERGE-CI-TRUNK.md § Dependency automation).
- */
-export const AUTO_FIX_RESOLVES_CONFLICTS = false;
 
 /** The merge item's candidate. `priority` below every other item: it is shown first and never cut. */
 function mergeCandidate(baseRef: string): SeedCandidate {
@@ -617,7 +611,6 @@ function unjudgedAssessment(t: SeedThread): ClaudeThreadAssessment {
 export function isSelected(c: SeedCandidate, sel: SeedSelection): boolean {
   if (sel.kind === 'keys') return sel.keys.includes(c.key);
   if (sel.kind === 'sections') {
-    if (c.section === 'conflicts') return AUTO_FIX_RESOLVES_CONFLICTS;
     const sw = SECTION_SWITCH[c.section];
     return sw == null ? false : sel.include[sw];
   }

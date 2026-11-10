@@ -18,7 +18,7 @@ import './teams.css';
 //   · only AUTO reviews claim; a review the reader starts never claims or checks;
 //   · one line per PROVIDER (limn/review-claude, limn/review-codex), not per model;
 //   · a review "kept in Limn" posts nothing, so it holds nothing and nobody sees it;
-//   · "Mark auto reviews on GitHub" is ON by default, auto review itself is OFF;
+//   · claims are ALWAYS ON (no setting since 2026-11-10); auto review itself is OFF until switched on;
 //   · the PR author's own lines never hold the commit.
 // When the product changes one of these, change this page in the same commit.
 //
@@ -147,8 +147,7 @@ export default function Teams(): JSX.Element {
               'Claims are per commit. A new push frees the pull request.',
               'Only auto reviews claim. A review you start yourself never checks or posts a line.',
               <>
-                On by default, as “Mark auto reviews on GitHub” in Settings → Auto review. Auto
-                review itself is off until you switch it on.
+                Always on, with no setting. Auto review itself is off until you switch it on.
               </>,
             ]}
           />

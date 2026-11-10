@@ -685,7 +685,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId, a.pressed === true))) return;
     } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
-    // TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts): a teammate's Limn already holds
+    // TEAM CLAIMS (team-claim.ts, always on): a teammate's Limn already holds
     // this head for this provider ⇒ drop the item with NO row (a skip is not a failure: no retry
     // count, no daily-cap use; the tab shows it from memory). Otherwise claim it. Never throws.
     // A PAIR claims per half, each on its own provider's context: a first half skipped this way is
@@ -1099,7 +1099,7 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
         ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
-    // The head's SonarCloud issues as ONE PR comment, under the same switch (its own kind).
+    // The head's SonarCloud issues as ONE GitHub review (inline where it can), under the same switch (its own kind).
     void import('../../sonar/post.js')
       .then((m) => m.maybeAutoPostSonar(ctx, { accountId: item.accountId, prId, headSha: item.headSha }))
       .catch((err) =>

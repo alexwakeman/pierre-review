@@ -102,8 +102,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>A one-sentence acknowledgement, then a resolve</b>, for an accepted reply, where Limn is allowed to resolve:
-          your own pull request, or another pull request with <Ui>Resolve Limn's threads once fixed</Ui> on. Otherwise
-          nothing is posted and the finding is settled in Limn only.
+          your own pull request, or another pull request after an automatic review while posting is on. Otherwise nothing
+          is posted and the finding is settled in Limn only.
         </li>
       </ul>
       <Warning>

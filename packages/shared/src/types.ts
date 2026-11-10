@@ -4459,26 +4459,20 @@ export interface SetWorkspaceAutoReviewBody {
   pairStrictness?: PairVerdictStrictness;
   // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
   dailyCap?: number;
-  // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
-  teamClaimsEnabled?: boolean;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
   // keeps its stored value.
   autoPost?: {
     enabled?: boolean;
     scope?: AutoPostScope;
     kinds?: Partial<AutoPostKinds>;
-    // `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`.
+    // `WorkspaceAutoPostSettings.autoVerdict`.
     autoVerdict?: boolean;
-    autoResolve?: boolean;
     // `WorkspaceAutoPostSettings.resolveOwnPrs`.
     resolveOwnPrs?: boolean;
     // `WorkspaceAutoPostSettings.approveImpact`; a level left out keeps its stored value.
     approveImpact?: Partial<AutoApproveImpact>;
     // `WorkspaceAutoPostSettings.approveLeftovers`.
     approveLeftovers?: ApproveLeftovers;
-    // `WorkspaceAutoPostSettings.teamLiftConsent` / `.liftTeammateBlocks`.
-    teamLiftConsent?: boolean;
-    liftTeammateBlocks?: boolean;
   };
   // Auto AI Fix's contents + push switch (`WorkspaceAutoReviewSettings.autoFix`). Each field
   // optional; an `include` section left out keeps its stored value.
@@ -4530,11 +4524,8 @@ export interface WorkspaceAutoReviewSettings {
   // may a SUCCEEDED AUTO review post to GitHub without a click? ON by default (NULL reads on; only a
   // stored false is off). AUTO runs only — a review you start yourself keeps the Post button.
   autoPost: WorkspaceAutoPostSettings;
-  // TEAM CLAIMS — "Mark auto reviews on GitHub" (`workspaces.team_claims_enabled`, migration 0134).
-  // Each AUTO review posts a status line on the PR's head (limn/review-claude | limn/review-codex)
-  // so teammates' Limn skips a commit someone is already reviewing with the same provider. OFF by
-  // default (only a stored true is on). Needs write access to the repo. Absent on older servers.
-  teamClaimsEnabled?: boolean;
+  // TEAM CLAIMS (each AUTO review's limn/review-claude | limn/review-codex status line) are ALWAYS ON
+  // since 2026-11-10 — no setting. `workspaces.team_claims_enabled` (migration 0134) is DORMANT.
 }
 
 // Who runs a workspace's auto reviews: the default provider, or Claude then Codex as one pair.
@@ -4576,8 +4567,8 @@ export interface AutoPostKinds {
   ciFailures: boolean;
   // A ticket review's unmet / partly met criteria and missing pieces.
   storyGaps: boolean;
-  // The PR's SonarCloud issues at the reviewed head, as ONE PR comment per (PR, head) — after an AUTO
-  // review, when the workspace has SonarCloud set up (docs/SONARCLOUD.md). Default ON, inside
+  // The PR's SonarCloud issues at the reviewed head, as ONE GitHub review per (PR, head): inline on the
+  // lines they flag, the rest in its summary — after an AUTO review, when the workspace has SonarCloud set up (docs/SONARCLOUD.md). Default ON, inside
   // auto-posting. Stored record: `sonar_snapshots.post` (`SonarPostRecord`).
   sonar: boolean;
   // A ticket review's "Not asked for" items.
@@ -4614,30 +4605,21 @@ export interface WorkspaceAutoPostSettings {
   // WHAT MAY STAY OPEN ON AN APPROVE (`workspaces.approve_leftovers`, migration 0145; NULL = the
   // default 'nits_questions'). Read by every verdict: single runs, pairs, the replies outcome.
   approveLeftovers: ApproveLeftovers;
-  // AUTO RESOLVE (default OFF): a Limn-posted inline finding thread that a later review's
-  // follow-up judges 'addressed' / 'no_longer_applies' gets a short reply and is resolved. ONLY
-  // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
-  // `auto_resolve`, `FindingAutoResolveRecord`), never retried.
-  autoResolve: boolean;
+  // AUTO RESOLVE is ALWAYS ON since 2026-11-10 (no setting): while auto-posting is on, a Limn-posted
+  // finding that a later AUTO review's follow-up judges 'addressed' / 'no_longer_applies' gets a short
+  // reply and its thread is resolved. ONLY Limn's own threads; once per finding
+  // (`claude_review_findings.auto_resolved_at` + `auto_resolve`, `FindingAutoResolveRecord`), never retried.
   // RESOLVE MY LIMN THREADS WHEN ADDRESSED (default ON — absent reads on, a stored false is off):
   // on the reader's OWN PR (drafts too), ANY succeeded run of theirs — manual, "Review and post",
   // auto, or a replies pass — closes the reader's own Limn finding threads its follow-up judged
-  // fixed, through the same claimed record as `autoResolve` (`why: 'own_pr'`). Independent of
-  // `enabled` and `autoResolve`. Never a teammate's Limn thread.
+  // fixed, through the same claimed record as auto resolve (`why: 'own_pr'`). Independent of
+  // `enabled`. Never a teammate's Limn thread.
   resolveOwnPrs: boolean;
-  // LIFTING A TEAMMATE'S LIMN BLOCK (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). TWO
-  // opt-ins, both OFF by default, both needed:
-  //  - `teamLiftConsent` — the BLOCKED side: "Let a teammate's Limn dismiss my Limn's “changes
-  //    requested” once every point is fixed". Carried as `lift=1` in the hidden marker of every review this reader
-  //    posts while it is on (a teammate's Limn can only read GitHub).
-  //  - `liftTeammateBlocks` — the LIFTING side: "Dismiss a teammate's Limn “changes requested” once
-  //    every point is fixed". Neither ever dismisses an approval. With it on, a run that follows up on a consented, standing teammate block and
-  //    finds every point behind it settled dismisses that block and posts its own review.
-  teamLiftConsent: boolean;
-  liftTeammateBlocks: boolean;
+  // LIFTING A TEAMMATE'S LIMN BLOCK (docs/CLAUDE-REVIEW.md § Lifting a teammate's block) is ALWAYS ON
+  // since 2026-11-10 (no setting): every review Limn posts carries the consent (`lift=1`) when its
+  // comments hold every blocker behind it, and a run that finds every point behind a consented,
+  // standing teammate block settled dismisses that block. Never an approval.
 }
-export const AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT = false;
-export const AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS = false;
 export const AUTO_POST_DEFAULT_AUTO_VERDICT = true;
 // Per blast-radius level: may an automatic APPROVE be sent on a PR at that level?
 export interface AutoApproveImpact {
@@ -4646,29 +4628,29 @@ export interface AutoApproveImpact {
   low: boolean;
 }
 export const AUTO_POST_DEFAULT_APPROVE_IMPACT: AutoApproveImpact = { high: true, medium: true, low: true };
-export const AUTO_POST_DEFAULT_AUTO_RESOLVE = false;
 export const AUTO_POST_DEFAULT_RESOLVE_OWN_PRS = true;
 
 // What `workspaces.auto_post_settings` stores: OVERRIDES ONLY (NULL / a missing field = the default).
+// ⚠ DORMANT KEYS (2026-11-10): `autoResolve`, `teamLiftConsent`, `liftTeammateBlocks` may sit in an
+// older row. Never read; the next Save rewrites the overrides without them.
 export interface StoredAutoPostSettings {
   scope?: AutoPostScope;
   kinds?: Partial<AutoPostKinds>;
   autoVerdict?: boolean;
-  autoResolve?: boolean;
   resolveOwnPrs?: boolean;
   approveImpact?: Partial<AutoApproveImpact>;
-  teamLiftConsent?: boolean;
-  liftTeammateBlocks?: boolean;
 }
 
 // ---- Auto AI Fix contents + push (workspaces.auto_fix_settings, migration 0091 / pg 0078) ----
 // WHICH sections of a review-seeded fix an AUTO fix always includes — the same sections as the
-// manual fix picker (`AiFixPickerSection`, minus 'story' and 'conflicts': an auto fix never carries
-// story items, and never resolves merge conflicts — backend `AUTO_FIX_RESOLVES_CONFLICTS`).
+// manual fix picker (`AiFixPickerSection`, minus 'story': an auto fix never carries story items).
 export interface AutoFixInclude {
-  findings: boolean;          // this run's Claude findings (never ignored ones)
-  earlierFindings: boolean;   // earlier findings not yet addressed
-  judgedThreads: boolean;     // other reviewers' threads Claude judged to fix
+  // "Resolve merge conflicts with <base>" when the PR conflicts with its base (OFF by default,
+  // 2026-11-10). The host's merge checks still gate every push (docs/SANDBOX.md § The merge).
+  conflicts: boolean;
+  findings: boolean;          // this run's findings, Claude's and Codex's alike (never ignored ones)
+  earlierFindings: boolean;   // earlier findings not yet addressed (a pair's cover pass included)
+  judgedThreads: boolean;     // other reviewers' threads the review judged to fix
   untouchedThreads: boolean;  // unresolved threads nobody has answered (derived_state 'untouched')
   ciFailures: boolean;        // the latest CI review's causes at the current head
   sonar: boolean;             // SonarCloud issues at the current head (docs/SONARCLOUD.md)
@@ -4682,6 +4664,7 @@ export interface AutoFixSettings {
   autoPush: boolean;
 }
 export const AUTO_FIX_DEFAULT_INCLUDE: AutoFixInclude = {
+  conflicts: false,
   findings: true,
   earlierFindings: true,
   judgedThreads: true,
@@ -7533,7 +7516,7 @@ export interface ClaudeReview {
   // The other code this run read, read-only: ticket peers and related repos' companion changes
   // (docs/CLAUDE-REVIEW.md § Related repos). Only what was checked out. null/absent = none.
   alsoRead?: ReviewPeerRead[] | null;
-  // What the TEAM CLAIM did for this run (an auto run with "Mark auto reviews on GitHub" on).
+  // What the TEAM CLAIM did for this run (an auto run).
   // null/absent = no claim was attempted.
   teamClaim?: ClaudeTeamClaimRecord | null;
   // A CLAUDE + CODEX PAIR (migration 0135): this run is one half. Absent on an ordinary run.
@@ -8108,7 +8091,7 @@ export interface ClaudeReviewResponse {
 }
 
 // ---- TEAM CLAIMS (docs/CLAUDE-REVIEW.md § Team claims; review/claude-review/team-claim.ts) ----
-// "Mark auto reviews on GitHub" (per workspace, OFF by default): an AUTO review posts a commit
+// TEAM CLAIMS (always on since 2026-11-10): an AUTO review posts a commit
 // status on the PR's head (`limn/review-claude` / `limn/review-codex`, one per provider) so a
 // teammate's Limn skips a commit someone is already reviewing with the same provider.
 

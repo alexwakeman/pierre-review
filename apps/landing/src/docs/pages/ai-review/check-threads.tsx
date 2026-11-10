@@ -111,7 +111,9 @@ export default function Page(): JSX.Element {
         "Not approved" line names it. See <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
       </p>
       <Note>
-        AI Fix offers <Ui>Threads Claude says need a fix</Ui>: the threads a judgement found valid and not addressed.
+        AI Fix offers the threads a judgement found valid and not addressed, named for the agent that judged them,
+        for example <Ui>Threads Claude says need a fix</Ui>. In Auto AI Fix they are{' '}
+        <Ui>Threads my agent says to fix</Ui>.
         See <DocLink to="ai-fix/what-to-fix">Choose what to fix</DocLink>.
       </Note>
     </>

@@ -20,7 +20,6 @@ import {
   normalizeChangeReport,
   REVIEW_ITEM_BODY_MAX,
   type SeedTicketItem,
-  AUTO_FIX_RESOLVES_CONFLICTS,
   MERGE_FIRST_LINE,
   MERGE_ONLY_SEED_INTRO,
 } from './review-seed.js';
@@ -655,12 +654,17 @@ describe('the merge item ("Resolve merge conflicts with <base>")', () => {
     expect(s.sentRefs).toEqual(['F1']);
   });
 
-  it('NEVER in an AUTO fix (sections), whatever its switches say — one constant decides', () => {
-    expect(AUTO_FIX_RESOLVES_CONFLICTS).toBe(false);
-    const all = { findings: true, earlierFindings: true, judgedThreads: true, untouchedThreads: true, ciFailures: true, sonar: true, styleBots: true };
-    const s = buildReviewSeed(r(), { nonce, merge, selection: { kind: 'sections', include: all } });
-    expect(s.sentRefs).toEqual(['F1']);
-    expect(s.items.some((i) => i.kind === 'merge_conflicts')).toBe(false);
+  it('in an AUTO fix (sections) only with its own switch on — OFF by default', () => {
+    const rest = { findings: true, earlierFindings: true, judgedThreads: true, untouchedThreads: true, ciFailures: true, sonar: true, styleBots: true };
+    const off = buildReviewSeed(r(), { nonce, merge, selection: { kind: 'sections', include: { ...rest, conflicts: false } } });
+    expect(off.sentRefs).toEqual(['F1']);
+    expect(off.items.some((i) => i.kind === 'merge_conflicts')).toBe(false);
+    expect(AUTO_FIX_DEFAULT_INCLUDE.conflicts).toBe(false);
+    const on = buildReviewSeed(r(), { nonce, merge, selection: { kind: 'sections', include: { ...rest, conflicts: true } } });
+    expect(on.items.map((i) => [i.ref, i.kind])).toEqual([['MERGE', 'merge_conflicts'], ['F1', 'finding']]);
+    // No conflict, no merge item, whatever the switch says.
+    const none = buildReviewSeed(r(), { nonce, selection: { kind: 'sections', include: { ...rest, conflicts: true } } });
+    expect(none.items.some((i) => i.kind === 'merge_conflicts')).toBe(false);
   });
 });
 

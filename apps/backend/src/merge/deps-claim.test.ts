@@ -193,19 +193,17 @@ describe('the lifecycle (fake GitHub)', () => {
     return { g, posted };
   }
 
-  it('the switch off, or no login: nothing is read or posted', async () => {
-    const { g, posted } = fakeGithub('alex', [line('robin', 'pending', handlingLine('robin', 'ai_fix'), 0)]);
+  it('no login: nothing is read or posted', async () => {
+    const { g, posted } = fakeGithub(null, []);
     setDepsClaimGithubForTest(g);
-    expect(await readDepsClaim(target, false, log)).toEqual({ login: null, hold: null });
-    setDepsClaimGithubForTest(fakeGithub(null, []).g);
-    expect(await readDepsClaim(target, true, log)).toEqual({ login: null, hold: null });
+    expect(await readDepsClaim(target, log)).toEqual({ login: null, hold: null });
     expect(posted).toEqual([]);
   });
 
   it('free → pending, then the done line, on limn/deps', async () => {
     const { g, posted } = fakeGithub('alex', []);
     setDepsClaimGithubForTest(g);
-    const read = await readDepsClaim(target, true, log);
+    const read = await readDepsClaim(target, log);
     expect(read).toEqual({ login: 'alex', hold: null });
     const { handle, hold } = await postDepsClaim(read.login, target, log);
     expect(hold).toBeNull();
@@ -219,7 +217,7 @@ describe('the lifecycle (fake GitHub)', () => {
   it('a teammate’s fresh claim is read as a hold; nothing is posted', async () => {
     const { g, posted } = fakeGithub('alex', [line('robin', 'pending', handlingLine('robin', 'approve'), -1)]);
     setDepsClaimGithubForTest(g);
-    const read = await readDepsClaim(target, true, log, Date.now());
+    const read = await readDepsClaim(target, log, Date.now());
     expect(read.hold).toMatchObject({ kind: 'handling', login: 'robin' });
     expect(posted).toEqual([]);
   });
@@ -229,7 +227,7 @@ describe('the lifecycle (fake GitHub)', () => {
       beforeReRead: [{ id: 0, state: 'pending', description: handlingLine('robin', 'ai_fix'), createdAtMs: Date.now() - 1000, login: 'robin' }],
     });
     setDepsClaimGithubForTest(g);
-    expect((await readDepsClaim(target, true, log)).hold).toBeNull(); // read 1: free
+    expect((await readDepsClaim(target, log)).hold).toBeNull(); // read 1: free
     const out = await postDepsClaim('alex', target, log); // read 2: robin raced in first
     expect(out.hold).toMatchObject({ kind: 'handling', login: 'robin' });
     expect(out.handle.login).toBeNull(); // nothing more is posted for this claim

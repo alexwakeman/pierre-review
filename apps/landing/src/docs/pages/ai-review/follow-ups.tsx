@@ -127,8 +127,8 @@ export default function Page(): JSX.Element {
       <p>
         On your own pull requests, <Ui>Resolve my Limn threads when addressed</Ui> (on by default) replies "Addressed
         in" and the commit, with the one-line how, then resolves the thread. It acts after any review you run, and
-        only on your own Limn's findings. On other people's pull requests, <Ui>Resolve Limn's threads once fixed</Ui>{' '}
-        (off by default) does the same after automatic reviews. Limn never resolves a teammate's or a person's
+        only on your own Limn's findings. On other people's pull requests, Limn does the same after automatic reviews
+        while posting is on (always, with no setting). Limn never resolves a teammate's or a person's
         thread. See <DocLink to="settings/ai-review">Settings → AI review</DocLink>.
       </p>
 

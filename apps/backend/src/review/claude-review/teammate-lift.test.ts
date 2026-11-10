@@ -118,12 +118,12 @@ describe("lifting a teammate's Limn block", () => {
     const out = await go(prId, run);
     expect(out.kind).toBe('done');
     // The reader's own review went out first: COMMENT (the auto verdict is off), with the judgements
-    // and the reader's (absent) consent in its marker.
+    // and the reader's consent (always given since 2026-11-10: no blocker is left out) in its marker.
     expect(postReview).toHaveBeenCalledTimes(1);
     const posted = postReview.mock.calls[0]![0];
     expect(posted.verdict).toBe('COMMENT');
     expect(posted.limnMeta.judged.map((j: any) => j.outcome)).toEqual(['addressed', 'addressed', 'addressed']);
-    expect(posted.limnMeta.liftConsent).toBe(false);
+    expect(posted.limnMeta.liftConsent).toBe(true);
     // Then the dismissal. The nit is left out of the count (the default approve rule lets nits stay).
     expect(dismissReview).toHaveBeenCalledTimes(1);
     expect(dismissReview.mock.calls[0]!.slice(1)).toEqual([
@@ -152,7 +152,7 @@ describe("lifting a teammate's Limn block", () => {
   });
 
   it('with the auto verdict on and nothing open, the reader’s review is an APPROVE', async () => {
-    await setPost({ liftTeammateBlocks: true, autoVerdict: true });
+    await setPost({ autoVerdict: true });
     const { prId, findings } = await blockedPr();
     const run = await readerRun(prId, allAddressed(findings), { verdict: 'APPROVE' });
     await go(prId, run);
@@ -161,23 +161,13 @@ describe("lifting a teammate's Limn block", () => {
   });
 
   it('a nit the reader’s approve rule does not allow open must be settled too', async () => {
-    await setPost({ liftTeammateBlocks: true, approveLeftovers: 'none' });
+    await setPost({ approveLeftovers: 'none' });
     const { prId, findings } = await blockedPr();
     const nit = findings.find((f: any) => f.severity === 'nit');
     const run = await readerRun(prId, findings.map((f: any) => ({ id: f.id, status: f.id === nit.id ? 'not_addressed' : 'addressed' })));
     await go(prId, run);
     expect(dismissReview).not.toHaveBeenCalled();
-    await setPost({ liftTeammateBlocks: true, approveLeftovers: 'nits_questions' });
-  });
-
-  it('the lifting setting off: nothing is dismissed (and nothing is posted for it)', async () => {
-    await setPost({ liftTeammateBlocks: false });
-    const { prId, teammateId, findings } = await blockedPr();
-    const run = await readerRun(prId, allAddressed(findings));
-    expect(await go(prId, run)).toEqual({ kind: 'skipped', reason: 'nothing_new' });
-    expect(postReview).not.toHaveBeenCalled();
-    expect(dismissReview).not.toHaveBeenCalled();
-    expect(await teammateLiftOf(teammateId)).toBeNull();
+    await setPost({ approveLeftovers: 'nits_questions' });
   });
 
   it('no consent in robin’s post: never dismissed', async () => {
@@ -227,7 +217,7 @@ describe("lifting a teammate's Limn block", () => {
   });
 
   it('the poster’s own post withholds lift=1 when a blocker behind its verdict was posted earlier', async () => {
-    await setPost({ liftTeammateBlocks: false, teamLiftConsent: true, autoVerdict: true, kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true } });
+    await setPost({ autoVerdict: true, kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true } });
     const { prId } = await blockedPr();
     const r1 = await readerRun(prId, [], { findings: [{ severity: 'blocker', title: 'Lock leak' }] });
     await go(prId, r1);
@@ -240,7 +230,7 @@ describe("lifting a teammate's Limn block", () => {
     expect(posted.verdict).toBe('REQUEST_CHANGES');
     expect(posted.includedFindings.map((x: any) => x.severity)).toEqual(['nit']);
     expect(posted.limnMeta.liftConsent).toBe(false);
-    await setPost({ liftTeammateBlocks: true, teamLiftConsent: false, autoVerdict: false, kinds: AUTO_POST_DEFAULT_KINDS });
+    await setPost({ autoVerdict: false, kinds: AUTO_POST_DEFAULT_KINDS });
   });
 
   it('a blocker in the reader’s own run holds it', async () => {
@@ -318,13 +308,11 @@ describe("lifting a teammate's Limn block", () => {
     expect(listed[0]!.lift).toMatchObject({ status: 'failed', error: 'Must have admin rights to Repository.' });
   });
 
-  it('the consent rides the reader’s own posts while their setting is on', async () => {
-    await setPost({ liftTeammateBlocks: true, teamLiftConsent: true });
+  it('the consent rides the reader’s own posts, with no setting (always on since 2026-11-10)', async () => {
     const { prId, findings } = await blockedPr();
     const run = await readerRun(prId, allAddressed(findings));
     await go(prId, run);
     expect(postReview.mock.calls[0]![0].limnMeta.liftConsent).toBe(true);
-    await setPost({ teamLiftConsent: false });
   });
 });
 

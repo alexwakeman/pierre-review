@@ -9,11 +9,10 @@ export const meta: DocMeta = {
 function AutoReviewPicture(): JSX.Element {
   return (
     <Illustration
-      label="The Auto review settings: Review new PRs automatically on, Mark auto reviews on GitHub on, Post to GitHub chosen."
+      label="The Auto review settings: Review new PRs automatically on, Claude + Codex chosen, Post to GitHub chosen."
       caption="The first rows of Auto review for one workspace."
     >
       <SettingsRow label="Review new PRs automatically" hint="Only PRs opened after you turn this on." control={<Toggle on />} />
-      <SettingsRow label="Mark auto reviews on GitHub" hint="For teams where more than one person runs Limn." control={<Toggle on />} />
       <SettingsRow label="Auto reviews use" control={<Pill tone="blue">Claude + Codex</Pill>} />
       <SettingsRow label="When an auto review finishes" control={<Pill tone="blue">Post to GitHub</Pill>} />
     </Illustration>
@@ -53,14 +52,13 @@ export default function Page(): JSX.Element {
         More on how auto review decides when to run: <DocLink to="ai-review/auto-review">Auto review</DocLink>.
       </p>
 
-      <H3>Mark auto reviews on GitHub</H3>
+      <H3 id="status-on-github">Status on GitHub</H3>
       <p>
-        For teams where more than one person runs Limn. Each auto review puts a status line on the pull
-        request&rsquo;s latest commit, such as <Ui>limn/review-claude</Ui>. A teammate&rsquo;s Limn then skips a commit
-        someone is already reviewing with the same provider. It needs write access to the repository; without it,
-        Limn reviews without a line. On by default.
+        Each auto review puts a status on the pull request&rsquo;s latest commit, such as <Ui>limn/review-claude</Ui>.
+        A teammate&rsquo;s Limn then skips a commit someone is already reviewing with the same provider. This is
+        always on. Without write access to the repository, Limn reviews without a status.
       </p>
-      <Warning>Do not make <Ui>limn/</Ui> status lines required checks. A line that is still pending would block merges.</Warning>
+      <Warning>Do not make <Ui>limn/</Ui> statuses required checks. A pending status would block merges.</Warning>
 
       <H3>Auto reviews use</H3>
       <p>
@@ -124,7 +122,7 @@ export default function Page(): JSX.Element {
           <Ui>CI failure reasons, in one PR comment</Ui>
         </li>
         <li>
-          <Ui>SonarCloud issues, in one PR comment</Ui>
+          <Ui>SonarCloud issues</Ui>: on the lines they flag where possible, the rest in the review&rsquo;s summary
         </li>
         <li>
           <Ui>Story gaps, on the PR they belong to</Ui>
@@ -160,8 +158,8 @@ export default function Page(): JSX.Element {
       <H2 id="resolving">Resolving threads</H2>
       <ul>
         <li>
-          <Ui>Resolve Limn&rsquo;s threads once fixed</Ui> (off by default): when a later review finds a posted comment
-          fixed, Limn replies and resolves it.
+          While posting is on, when a later auto review finds a posted comment fixed, Limn replies and resolves its
+          thread. This is always on.
         </li>
         <li>
           <Ui>Resolve my Limn threads when addressed</Ui> (on by default): on your own pull requests, drafts too, when
@@ -172,13 +170,10 @@ export default function Page(): JSX.Element {
       </ul>
       <H3>Teammates&rsquo; Limn &ldquo;changes requested&rdquo;</H3>
       <p>
-        Two boxes deal with a review that a teammate&rsquo;s Limn posted as &ldquo;changes requested&rdquo;. When every
-        point is fixed at the latest commit and your own review finds no blocker, your Limn can dismiss that review and
-        post its own. Both people must agree: the teammate ticks{' '}
-        <Ui>Let a teammate&rsquo;s Limn dismiss my Limn&rsquo;s &ldquo;changes requested&rdquo; once every point is fixed</Ui>
-        , and you tick <Ui>Dismiss a teammate&rsquo;s Limn &ldquo;changes requested&rdquo; once every point is fixed</Ui>
-        . A review someone wrote by hand is never dismissed. When the teammate&rsquo;s Limn has been away for 4
-        hours and your review approves, your Limn dismisses it without either box. See{' '}
+        When a teammate&rsquo;s Limn posted &ldquo;changes requested&rdquo;, every point is fixed at the latest commit
+        and your own review finds no blocker, your Limn dismisses that review and posts its own. This is always on.
+        Whether your review approves is still decided by <Ui>Approve or request changes for me</Ui> and the impact
+        boxes. A review someone wrote by hand is never dismissed. See{' '}
         <DocLink to="ai-review/team-reviews#lifting-changes-requested">Reviewing as a team</DocLink>.
       </p>
 
@@ -191,9 +186,15 @@ export default function Page(): JSX.Element {
       </p>
       <ul>
         <li>
-          <Ui>Always include</Ui>: choose what the fix works on: the review&rsquo;s findings, earlier findings not fixed
-          yet, threads the AI says to fix, threads nobody has answered, CI failure reasons, SonarCloud issues, and style
-          bot comments (the last is off by default).
+          <Ui>Always include</Ui>: choose what the fix works on: <Ui>Merge conflicts with the base branch</Ui> (off by
+          default), <Ui>Limn&rsquo;s findings</Ui> (from Claude, Codex or both), earlier findings not fixed yet,{' '}
+          <Ui>Threads my agent says to fix</Ui>, threads nobody has answered, CI failure reasons, SonarCloud issues, and
+          style bot comments (off by default).
+        </li>
+        <li>
+          With <Ui>Merge conflicts with the base branch</Ui> ticked, a pull request that conflicts with its base is
+          merged first. Limn checks the merge before any push: two parents and no conflict markers left. A merge that
+          fails the check is never pushed.
         </li>
         <li>
           <Ui>Push automatically</Ui> (off by default): pushes a finished fix to the pull request&rsquo;s branch. It is

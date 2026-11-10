@@ -13,6 +13,31 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → AI review → Auto AI Fix: "Merge conflicts with the base branch" under Always include (off
+  by default). With it on, an automatic fix of a pull request that conflicts with its base merges the
+  base first. Limn checks the merge before any push, and a merge that fails the check is never pushed.
+
+### Changed
+
+- Settings → AI review: three settings are now always on and their switches are gone: the status Limn
+  puts on a commit it is reviewing (was "Mark auto reviews on GitHub"), resolving Limn's threads once a
+  later automatic review finds them fixed (was "Resolve Limn's threads once fixed"), and dismissing a
+  teammate's Limn "changes requested" once every point is fixed (was the two "Teammates' Limn “changes
+  requested”" boxes). Approvals are still limited by the impact boxes. When GitHub refuses the status
+  (no write access), the review goes ahead without it and nothing is shown.
+- Settings → AI review → Auto AI Fix: the rows no longer name one provider. "Claude's findings" is now
+  "Limn's findings" (Claude's and Codex's alike), and "Threads Claude says to fix" is now "Threads my
+  agent says to fix". The Auto review description says "Limn reviews…".
+- Settings → AI review → What to post: "SonarCloud issues, in one PR comment" is now "SonarCloud
+  issues": they are posted on the lines they flag.
+
+### Fixed
+
+- AI Fix: when one half of a Claude + Codex review failed, the earlier findings the other half then
+  found still open were left out of the fix. They are now included with the other earlier findings.
+
 ## [1.0.22] - 2026-11-10
 
 ### Changed

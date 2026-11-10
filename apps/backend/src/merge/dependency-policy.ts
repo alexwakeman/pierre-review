@@ -423,7 +423,6 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
         maxLevel: workspaces.dependencyMaxLevel,
         securityOnly: workspaces.dependencySecurityOnly,
         ecosystems: workspaces.dependencyEcosystems,
-        teamClaims: workspaces.teamClaimsEnabled,
       })
       .from(workspaces)
       .where(eq(workspaces.dependencyAutoMerge, true))
@@ -489,7 +488,7 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
           // recorded; otherwise the claim row + our pending line BEFORE the arm. Nothing armed ⇒ the
           // claim is given back (the row goes; the line says free), so the next sweep may try again.
           const claim = await beginDependencyAction(
-            { claimsOn: ws.teamClaims !== false, log },
+            { log },
             { id: pr.id, accountId: ws.accountId, owner: pr.owner, name: pr.name, headSha: pr.headSha! },
             'arm_merge',
             Date.now(),

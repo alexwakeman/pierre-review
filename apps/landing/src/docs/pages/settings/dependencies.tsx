@@ -98,9 +98,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           When a teammate also runs Limn, each action first puts a <Ui>limn/deps</Ui> status on the commit, such as
-          &ldquo;alex handling · fixing CI&rdquo;. Limn skips a commit a teammate is already working on. The{' '}
-          <Ui>Mark auto reviews on GitHub</Ui> setting on the <DocLink to="settings/ai-review">AI review</DocLink> tab
-          turns these statuses off too.
+          &ldquo;alex handling · fixing CI&rdquo;. Limn skips a commit a teammate is already working on.
         </li>
       </ul>
       <Note>Limn acts only while it is running on your computer. Nothing is merged or approved while it is stopped.</Note>

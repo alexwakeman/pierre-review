@@ -9,8 +9,8 @@
 //
 // THE RULE, in order:
 //   0. the run SUCCEEDED, and ONE of two paths allows it:
-//      A. (the workspace's auto resolve) auto-posting is ON for the PR's workspace AND its
-//         `autoResolve` switch is on (OFF by default); the run is an AUTO run; the PR passes
+//      A. (the workspace's auto resolve, ALWAYS ON since 2026-11-10 — no switch) auto-posting is ON
+//         for the PR's workspace; the run is an AUTO run; the PR passes
 //         `autoPostEligibility` (open, not a draft, not bot-authored, in scope);
 //      B. (`why: 'own_pr'`, "Resolve my Limn threads when addressed", `resolveOwnPrs`, ON by
 //         default) the PR is the READER'S OWN and open — a draft too; ANY trigger (manual, "Review
@@ -214,7 +214,7 @@ async function autoResolve(
   const review = await getClaudeReviewById(ctx, reviewId, accountId);
   if (!review || review.prId !== prId || review.status !== 'succeeded') return null;
   // Path A (the workspace's auto resolve) or path B (the reader's own PR); B needs the PR facts.
-  const autoPath = ws.settings.enabled && ws.settings.autoResolve && review.trigger === 'auto';
+  const autoPath = ws.settings.enabled && review.trigger === 'auto';
   if (!autoPath && !ws.settings.resolveOwnPrs) return null;
   type Wanted = { outcome: AutoResolveOutcome; acceptKind: ClaudeReplyAcceptKind | null; response: string | null; how: string | null };
   const wanted = new Map<number, Wanted>();

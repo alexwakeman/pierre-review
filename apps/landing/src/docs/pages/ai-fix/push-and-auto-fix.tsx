@@ -105,8 +105,18 @@ export default function Page(): JSX.Element {
       <ul>
         <li>Only your own pull requests. Other people's pull requests are never fixed automatically.</li>
         <li>
-          It works on the sections ticked under <Ui>Always include</Ui> (by default all except style bot comments). It
-          never fixes ticket gaps and never resolves merge conflicts, and it never plans first.
+          It works on the sections ticked under <Ui>Always include</Ui> (by default all except style bot comments and
+          merge conflicts). It never fixes ticket gaps, and it never plans first.
+        </li>
+        <li>
+          <Ui>Limn&rsquo;s findings</Ui> are every finding of the review, from Claude, Codex or both. When one half of a
+          Claude + Codex review fails, what the other found still open of its earlier findings counts too.
+        </li>
+        <li>
+          With <Ui>Merge conflicts with the base branch</Ui> ticked, a pull request that conflicts with its base is
+          merged first, then fixed on top. Limn checks the merge before any push: two parents and no conflict markers
+          left. A merge that fails the check is never pushed. <Ui>Push automatically</Ui> still decides whether a good
+          one is pushed or waits for you.
         </li>
         <li>It runs one build turn, then the sandbox closes. The fix waits in the <Ui>AI Fix</Ui> tab, marked <Ui>Auto fix</Ui>.</li>
         <li>

@@ -105,8 +105,10 @@ export default function Page(): JSX.Element {
         press a button. See <DocLink to="merging/resolve-conflicts">Resolve conflicts</DocLink>.
       </p>
       <Note>
-        An automatic fix never resolves merge conflicts. Dependency automation can, for a trusted bot's update, when you
-        switch that on. See <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
+        An automatic fix resolves merge conflicts only when you tick <Ui>Merge conflicts with the base branch</Ui> under{' '}
+        <DocLink to="ai-fix/push-and-auto-fix#auto-fix">Auto fix</DocLink> (off by default). Dependency automation can,
+        for a trusted bot's update, when you switch that on. See{' '}
+        <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
       </Note>
     </>
   );
