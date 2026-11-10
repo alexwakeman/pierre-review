@@ -501,6 +501,9 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('DELETE', '/api/workspaces/3/sandbox/allowed-hosts')).toEqual(['read']);
     // The runtime status (`docker version` + `info`, cached 10 s server-side): `read`, decided, EXACT.
     expect(tiers('GET', '/api/sandbox/runtime')).toEqual(['read']);
+    // The running count and "Stop all" (local CLI processes on a click; no model, no GitHub): `read`, EXACT.
+    expect(tiers('GET', '/api/sandbox/running')).toEqual(['read']);
+    expect(tiers('POST', '/api/sandbox/stop-all')).toEqual(['read']);
   });
 
   // The ML label surface spends NO GitHub quota and NO Anthropic credit — the model is called

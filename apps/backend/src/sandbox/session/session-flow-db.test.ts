@@ -426,7 +426,7 @@ describe('limits, teardown, restart and resume', () => {
     await M._idleCloseForTest(id);
     const after = await read(id);
     expect(after.session).toMatchObject({ phase: 'failed', live: false, resumable: false });
-    expect(after.error).toBe(`Closed after 60 minutes with nothing happening. ${M.GONE_LINE}`);
+    expect(after.error).toBe(`Closed after 15 minutes with nothing happening. ${M.GONE_LINE}`);
     expect(fake.resources().filter((x) => x.sessionId === sid)).toEqual([]);
     // The ticket is free again.
     expect(M.openSessionCount()).toBe(0);

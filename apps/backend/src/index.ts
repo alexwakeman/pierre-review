@@ -180,6 +180,15 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
       /* repair, never a precondition */
     });
 
+  // THE PERIODIC SANDBOX SWEEP (sandbox/session/janitor.ts): while a session has made resources since the
+  // last clean sweep, every few minutes, whatever a session's own close could not remove goes. This
+  // process holds the data dir's lock (above), so the sweep is this install's alone.
+  if (config.aiEnabled) {
+    void import('./sandbox/session/janitor.js')
+      .then(({ startSandboxJanitor }) => startSandboxJanitor(app.log))
+      .catch((err: unknown) => app.log.warn({ err }, 'sandbox: the periodic sweep did not start'));
+  }
+
   // A CI-history backfill a restart left OWED (its parked follow-on job lived only in memory):
   // queue each such repo's walk, whose follow-ons run it. After listen, never awaited.
   if (!config.disableScheduler) {
@@ -201,8 +210,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
 /* ═════════════════════════════ shutting down ═════════════════════════════ */
 
 /**
- * THE PROCESS'S ONE SIGTERM HANDLER — and it exists for exactly one thing: letting an IN-FLIGHT
- * PUSH finish.
+ * THE PROCESS'S ONE SIGTERM HANDLER — and it exists for two things: letting an IN-FLIGHT PUSH
+ * finish, then removing the running SANDBOXES (a container or microVM outlives the process otherwise;
+ * docs/SANDBOX.md § Every end removes the sandbox). SIGINT and SIGHUP remove the sandboxes only.
  *
  * ⚠ IT DOES NOT PRESERVE SESSIONS, AND IT MUST NOT GROW INTO SOMETHING THAT DOES. A restart loses
  * every conflict-resolver session and that is the correct behaviour, argued at length in
@@ -243,7 +253,43 @@ function installShutdownHandler(app: FastifyInstance): void {
     shutdownStarted = true;
     void drainAndClose(app);
   });
+  // Ctrl-C and a closed terminal: no drain (a person is in front of it), but the SANDBOXES go first —
+  // without this a container or microVM kept running until the next start's sweep. A second signal
+  // exits at once.
+  for (const sig of ['SIGINT', 'SIGHUP'] as const) {
+    process.on(sig, () => {
+      if (shutdownStarted) process.exit(sig === 'SIGINT' ? 130 : 129);
+      shutdownStarted = true;
+      void (async () => {
+        try {
+          await teardownSandboxes(app);
+        } finally {
+          process.exit(sig === 'SIGINT' ? 130 : 129);
+        }
+      })();
+    });
+  }
 }
+
+/**
+ * Remove every live sandbox before the process ends (sandbox/session/manager.ts
+ * `teardownSandboxesForShutdown`, bounded). Never throws. Free when agentic AI is off (no session exists).
+ */
+async function teardownSandboxes(app: FastifyInstance): Promise<void> {
+  if (!config.aiEnabled) return;
+  try {
+    const { stopSandboxJanitor } = await import('./sandbox/session/janitor.js');
+    stopSandboxJanitor();
+    const { teardownSandboxesForShutdown } = await import('./sandbox/session/manager.js');
+    const n = await teardownSandboxesForShutdown(SANDBOX_TEARDOWN_MS);
+    if (n > 0) app.log.info(`shutdown: removed ${n} running sandbox${n === 1 ? '' : 'es'}`);
+  } catch (err) {
+    app.log.warn({ err }, 'shutdown: the sandboxes could not all be removed; the next start removes them');
+  }
+}
+
+/** How long a shutdown waits for the sandboxes to be removed before it force-removes them. */
+const SANDBOX_TEARDOWN_MS = 10_000;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -278,6 +324,9 @@ async function drainAndClose(app: FastifyInstance): Promise<void> {
     if (left > 0) {
       app.log.warn(`SIGTERM: closing with ${left} resolver job(s) still running`);
     }
+
+    // The sandboxes go before the process: a container or microVM outlives Limn otherwise.
+    await teardownSandboxes(app);
 
     await Promise.race([app.close(), sleep(5_000)]);
   } catch (err) {

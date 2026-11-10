@@ -9,7 +9,7 @@
 //                                  backend under its feet.
 import { createDockerRuntime, resolveCliProgram } from './docker.js';
 import { createMicrosandboxRuntime, resolveMsbProgram } from './microsandbox.js';
-import type { RuntimeDetection, RuntimeKind, SandboxRuntime, SweepResult } from './types.js';
+import type { RunningSandbox, RuntimeDetection, RuntimeKind, SandboxRuntime, SweepResult } from './types.js';
 
 export type RuntimeChoice = 'auto' | 'docker' | 'microsandbox';
 
@@ -63,7 +63,15 @@ export function createAutoRuntime(o: { docker: SandboxRuntime; microsandbox: San
     stats: (s) => target().stats(s),
     destroy: (s) => target().destroy(s),
     sweep: (live, x) => target().sweep(live, x),
+    listSandboxes: () => target().listSandboxes(),
   };
+  Object.defineProperty(r, 'destroySync', {
+    enumerable: true,
+    get: () => {
+      const t = target();
+      return t.destroySync ? t.destroySync.bind(t) : undefined;
+    },
+  });
   // Only Docker has the kept repo store (workspace/store.ts checks for it).
   Object.defineProperty(r, 'repoStore', { enumerable: true, get: () => target().repoStore });
   // Only a runtime whose proxy is not a container has it (egress.ts checks for the method).
@@ -163,23 +171,77 @@ export function sweepSandboxesAtBoot(
     const all = await sweepAllBackends(opts.liveSessionIds ?? [], { env });
     return all && all.swept.length > 0 ? all.result : null;
   };
-  const p = run();
-  bootSweep = p;
+  return gate(run());
+}
+
+/**
+ * A SWEEP WHILE LIMN RUNS (the periodic sweep, Settings' "Stop all"): every labelled resource of THIS
+ * install whose session is not live goes. `liveSessionIds` is read in the SAME tick the gate is set, so a
+ * session registered after it waits for this sweep to end before it creates anything (`sweepSettled`).
+ * The backend in use is swept through the PROCESS's runtime object (microsandbox's host proxies live
+ * there); any other installed backend through a fresh one. ⚠ Only the backend that holds the data dir's
+ * lock may call this (index.ts takes it before any sweep).
+ */
+export function sweepSandboxesNow(opts: {
+  liveSessionIds: () => Iterable<string>;
+  backends?: SandboxRuntime[];
+  env?: NodeJS.ProcessEnv;
+}): Promise<{ result: SweepResult; swept: RuntimeKind[]; problems: string[] } | null> {
+  const live = [...opts.liveSessionIds()];
+  const env = opts.env ?? process.env;
+  const backends = opts.backends ?? backendsInUse(env);
+  return gate(sweepAllBackends(live, { env, backends }));
+}
+
+/** The process's runtime, then every OTHER installed backend (fresh objects). */
+function backendsInUse(env: NodeJS.ProcessEnv): SandboxRuntime[] {
+  const active = sandboxRuntime(env);
+  if (active.kind === 'fake') return [active];
+  return [
+    active,
+    ...(active.kind !== 'docker' && resolveCliProgram({ env }) ? [createDockerRuntime({ env })] : []),
+    ...(active.kind !== 'microsandbox' && resolveMsbProgram({ env }) ? [createMicrosandboxRuntime({ env })] : []),
+  ];
+}
+
+/**
+ * The RUNNING sandboxes of this install, on every installed backend that answers (Settings → Sandbox).
+ * `null` when no backend answers.
+ */
+export async function listRunningSandboxes(opts: { backends?: SandboxRuntime[]; env?: NodeJS.ProcessEnv } = {}): Promise<RunningSandbox[] | null> {
+  const env = opts.env ?? process.env;
+  const out: RunningSandbox[] = [];
+  let answered = false;
+  for (const b of opts.backends ?? backendsInUse(env)) {
+    const d = await b.detect();
+    if (!d.daemonReachable) continue;
+    answered = true;
+    out.push(...(await b.listSandboxes()));
+  }
+  return answered ? out : null;
+}
+
+let sweepInFlight: Promise<unknown> = Promise.resolve();
+
+function gate<T>(p: Promise<T>): Promise<T> {
+  const prev = sweepInFlight;
+  sweepInFlight = Promise.allSettled([prev, p]);
   return p;
 }
 
-let bootSweep: Promise<unknown> = Promise.resolve();
-
 /**
- * Resolves once the boot sweep (if one started) has finished, whatever its result. ⚠ The session
- * manager waits on it before it creates anything: a session booted while the sweep ran would have its
- * fresh resources removed as "not live".
+ * Resolves once every sweep started so far (the boot sweep, a periodic one, "Stop all") has finished,
+ * whatever its result. ⚠ The session manager waits on it before it creates anything: a session booted
+ * while a sweep ran would have its fresh resources removed as "not live".
  */
-export function bootSweepSettled(): Promise<void> {
-  return bootSweep.then(
+export function sweepSettled(): Promise<void> {
+  return sweepInFlight.then(
     () => undefined,
     () => undefined,
   );
 }
+
+/** The boot's name for `sweepSettled` (kept: the session manager and its tests read it). */
+export const bootSweepSettled = sweepSettled;
 
 export type * from './types.js';

@@ -2,6 +2,7 @@
 // own. `SANDBOX_CLI=podman` (or Settings) names Podman, which takes the same verbs. Every argv is built
 // by spec.ts / image.ts; every resource is labelled (labels.ts); every call has a timeout except the
 // image pull/build, which the caller can cancel.
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -448,6 +449,30 @@ export function createDockerRuntime(opts: DockerRuntimeOptions = {}): SandboxRun
     async sweep(liveSessionIds, o = {}) {
       const live = new Set(liveSessionIds);
       return removeWhere((session) => !live.has(session), o.dryRun === true);
+    },
+
+    async listSandboxes() {
+      if (!runner) return [];
+      // `ps` without `--all`: running containers only.
+      const r = await run(['ps', ...managedFilter, '--filter', `label=${LABEL_ROLE}=sandbox`, '--format', `{{.Names}}\t{{.Label "${LABEL_SESSION}"}}`], { timeoutMs: LIST_TIMEOUT });
+      if (r.code !== 0) throw new Error(`Listing sandboxes failed: ${lastLines(r.stderr, 2)}`);
+      return lines(r.stdout).map((l) => {
+        const [name, sessionId] = l.split('\t');
+        return { name: name ?? '', sessionId: sessionId ?? '' };
+      }).filter((s) => s.name !== '');
+    },
+
+    destroySync(sessionIds) {
+      if (!program || opts.runner) return;
+      for (const id of sessionIds) {
+        try {
+          const ps = spawnSync(program, ['ps', '--all', '--quiet', ...managedFilter, '--filter', `label=${LABEL_SESSION}=${id}`], { env, encoding: 'utf8', timeout: 10_000 });
+          const ids = lines(ps.stdout ?? '');
+          if (ids.length > 0) spawnSync(program, ['rm', '--force', '--volumes', ...ids], { env, stdio: 'ignore', timeout: 20_000 });
+        } catch {
+          /* the next sweep removes it */
+        }
+      }
     },
   };
 

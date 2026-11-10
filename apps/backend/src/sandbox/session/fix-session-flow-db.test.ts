@@ -565,6 +565,9 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     const f = await until(prC, (x) => x.session?.phase === 'built' && !x.session.live, 'closed after its turn');
     expect(f.status).toBe('succeeded');
     expect(f.unattended).toBe(true);
+    // Closed after its one turn: its sandbox is gone at once (the changes are on the row).
+    const closedSid = (fake.calls.filter((c) => c.method === 'startSandbox').at(-1)!.args[0] as { sessionId: string }).sessionId;
+    expect(fake.resources().filter((x) => x.sessionId === closedSid)).toEqual([]);
     expect(f.trigger).toBe('auto');
     expect(f.patch).toBe(PATCH);
     // An unattended session never gets the ticket.
@@ -583,6 +586,31 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     release();
     await until(prC, (x) => x.id === id2 && x.session?.phase === 'discarded', 'cancelled');
     expect((await readFix(prC)).status).toBe('cancelled');
+  });
+
+  it('"Stop all" (Settings → Sandbox) cancels a running UNATTENDED fix: nothing pushed, nothing left running', async () => {
+    extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+    reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: c', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+    let release: () => void = () => {};
+    gate = new Promise<void>((res) => (release = res));
+    const r = await AF.startFix(ctx, { accountId: 1, prId: prC, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Once more.', trigger: 'auto' });
+    expect(r.status).toBe('queued');
+    const id = (r as { fixId: number }).fixId;
+    const end = Date.now() + 5_000;
+    while (M.liveSession(`fix:${id}`)?.driver?.busy() !== true && Date.now() < end) await new Promise((res) => setTimeout(res, 10));
+    const sid = (await rowOf(id)).sandboxRef as string;
+    expect(fake.resources().some((x) => x.sessionId === sid && x.role === 'sandbox')).toBe(true);
+    const pushesBefore = pushes.length;
+    const { stopAllSandboxes } = await import('./janitor.js');
+    const res = await stopAllSandboxes({ backends: [fake] });
+    release();
+    expect(res).toMatchObject({ stopped: 1, running: 0, problem: null });
+    expect(fake.resources().filter((x) => x.sessionId === sid)).toEqual([]);
+    const f = await until(prC, (x) => x.id === id && x.session?.phase === 'discarded', 'cancelled');
+    expect(f.status).toBe('cancelled');
+    expect(f.error).toBe('Stopped from Settings.');
+    expect(pushes.length).toBe(pushesBefore);
+    expect(AF.isFixRunning(prC)).toBe(false);
   });
 
   it('⚠ an unattended fix: Claude gets the US$ cap (a manual one never does); the session CLOSES, then "Push automatically" pushes it', async () => {

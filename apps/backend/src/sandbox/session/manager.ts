@@ -15,7 +15,14 @@
 //
 // LIMITS: ≤ LIMN_SANDBOX_MAX_SESSIONS sandboxes at once (default 2) — story AND fix sessions, and the
 // slots an AI Fix start has reserved; ONE build-mode turn at a time on the machine; a session with no turn
-// and no reader action for LIMN_SANDBOX_IDLE_MINUTES (60) is closed.
+// and no reader action for LIMN_SANDBOX_IDLE_MINUTES (15) is closed; one turn running longer than
+// LIMN_SANDBOX_TURN_MAX_MINUTES (120) is stopped.
+// EVERY END REMOVES THE SANDBOX (docs/SANDBOX.md § Every end removes the sandbox): `closeSession` runs
+// `runtime.destroy` (the container or VM, its proxy, services, network and volumes) whatever closed it —
+// discard, push, idle, the agent ending, a failed boot, a turn past its cap, Settings' "Stop all". A
+// shutdown tears every live sandbox down (`teardownSandboxesForShutdown`), the process's 'exit' removes
+// what is still there (`destroyLeftSync`), and the periodic sweep (janitor.ts) removes anything a failed
+// removal left.
 // A closed session (idle, a restart, the agent ending) KEEPS its stored patches — it can be pushed, or
 // RESUMED (booted again from the same bases with the patches applied); with no patch it says the work
 // is gone. Every story turn is a reader's click, so the ONE budget gate (review/budget-gate.ts) has
@@ -118,7 +125,15 @@ export const NO_STORY_LINE = 'There is no story text or criteria to build from.'
 export const AGENT_ENDED_LINE = 'The agent stopped.';
 export const NO_RUNTIME_LINE = 'No container runtime is running on this computer.';
 
+export const STOPPED_LINE = 'Stopped from Settings.';
+
 export const idleLine = (minutes: number): string => `Closed after ${minutes} minutes with nothing happening.`;
+export const turnTimeoutLine = (minutes: number): string => `The agent worked for ${minutes} minutes without finishing, so it was stopped.`;
+
+/** After a turn past its cap is interrupted: how long it may take to end before the session is closed. */
+const TURN_STOP_GRACE_MS = 60_000;
+/** "Stop all": how long a manual session's running turn may take to stop (its work is then stored). */
+const STOP_TURN_WAIT_MS = 30_000;
 
 /** The build turn's instruction. The ticket and the rules are in the seed; this only starts the work. */
 export function buildInstruction(o: { ticketChanged: boolean; extra: string | null }): string {
@@ -257,6 +272,8 @@ export interface Live extends SubjectLive {
   agentState: SandboxAgentState | null;
   /** A turn is running (set in the same tick as the click). */
   turn: boolean;
+  /** Counts turns: a turn's watchdog acts only on its own turn. */
+  turnSeq: number;
   lastAgentText: string;
   /** The running turn's FINAL agent texts (plan first reads the plan block from them). */
   turnTexts: string[];
@@ -353,9 +370,14 @@ function touch(l: Live): void {
 async function idleClose(l: Live): Promise<void> {
   if (l.closing) return;
   if (l.turn) return touch(l);
-  const minutes = Math.round(sessionLimits().idleMs / 60_000);
-  const kept = await l.subject.hasStoredWork();
-  await closeSession(l, { phase: kept ? await keptPhaseOf(l) : 'failed', error: `${idleLine(minutes)} ${kept ? KEPT_LINE : GONE_LINE}` });
+  await closeKeepingWork(l, idleLine(Math.round(sessionLimits().idleMs / 60_000)));
+}
+
+/** Close a session, keeping what it stored: `built` (or the subject's kept phase) with work, `failed` without. */
+async function closeKeepingWork(l: Live, line: string): Promise<void> {
+  if (l.closing) return void (await l.closed?.catch(() => {}));
+  const kept = await l.subject.hasStoredWork().catch(() => false);
+  await closeSession(l, { phase: kept ? await keptPhaseOf(l) : 'failed', error: `${line} ${kept ? KEPT_LINE : GONE_LINE}` });
 }
 
 const keptPhase = (p: SandboxSessionPhase): SandboxSessionPhase => (p === 'pushed' ? 'pushed' : 'built');
@@ -496,6 +518,7 @@ export function newLive(
     layoutRoot: null,
     agentState: null,
     turn: false,
+    turnSeq: 0,
     lastAgentText: '',
     turnTexts: [],
     planSource: null,
@@ -635,6 +658,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     const layout = resolved.layout;
 
     begin('network');
+    trackResources(l);
     const net = await rt.createNetwork(l.owner);
     const volume = await rt.createVolume(l.owner, 'ws');
     step(l, 'network', 'done');
@@ -916,6 +940,12 @@ export function liveServiceRuns(l: Pick<Live, 'services'>): ServiceRunRecord[] {
  * which may ask for ONE automatic follow-up turn, claimed here in the same tick), and settles the phase.
  */
 function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; planSource?: BuildPlanSource }): void {
+  // THE TURN'S CAP: a turn past LIMN_SANDBOX_TURN_MAX_MINUTES is interrupted (its work is then stored as
+  // after any stop); one that does not end after that is closed with the session.
+  const seq = ++l.turnSeq;
+  const { turnMaxMs } = sessionLimits();
+  const watchdog = setTimeout(() => void turnTimedOut(l, seq, turnMaxMs), turnMaxMs);
+  watchdog.unref?.();
   void (async () => {
     let after: 'keep' | 'close' = 'keep';
     let afterChat: AfterChatTurn | null = null;
@@ -936,6 +966,7 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
     } catch (err) {
       if (!l.closing) addItem(l, { kind: 'error', code: 'session', text: scrub(err) });
     } finally {
+      clearTimeout(watchdog);
       try {
         if (o.build && !l.closing && l.container) after = await l.subject.afterBuildTurn(l);
         if (o.build && after === 'keep' && !l.closing && l.subject.buildFollowUp) buildFollow = await l.subject.buildFollowUp(l);
@@ -968,6 +999,15 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
       }
     }
   })();
+}
+
+async function turnTimedOut(l: Live, seq: number, maxMs: number, graceMs = TURN_STOP_GRACE_MS): Promise<void> {
+  if (l.closing || !l.turn || l.turnSeq !== seq) return;
+  const line = turnTimeoutLine(Math.round(maxMs / 60_000));
+  notice(l, line);
+  await l.driver?.interrupt().catch(() => {});
+  await new Promise<void>((r) => setTimeout(r, graceMs).unref?.());
+  if (!l.closing && l.turn && l.turnSeq === seq) await closeKeepingWork(l, line);
 }
 
 /** One reader message: a chat turn, or (after Start build) a build turn. Any subject. */
@@ -1177,7 +1217,7 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
       for (const e of l.egress.log.snapshot()) putNetworkEntry(l.state, e);
       l.egress.close();
     }
-    await l.runtime.destroy(l.owner.sessionId).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: removing it failed`));
+    await destroyNow(l);
     if (building === l.key) building = null;
     if (o.error) addItem(l, { kind: 'notice', text: o.error });
     if (l.saveTimer) clearTimeout(l.saveTimer);
@@ -1204,7 +1244,109 @@ async function reapAfterClose(l: Live): Promise<void> {
   await l.driver?.close().catch(() => {});
   await l.services?.close().catch(() => {});
   l.egress?.close();
-  await l.runtime.destroy(l.owner.sessionId).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: removing it failed`));
+  await destroyNow(l);
+}
+
+// ---- removal: every end, a shutdown, the process's exit -------------------------------------------------------
+
+/** Sessions whose resources may still exist (from their first create until a destroy reported none left). */
+const undestroyed = new Map<string, SandboxRuntime>();
+/** A session made resources since the last clean periodic sweep (janitor.ts runs only then). */
+let usedSinceSweep = false;
+let exitHooked = false;
+
+function trackResources(l: Live): void {
+  undestroyed.set(l.owner.sessionId, l.runtime);
+  usedSinceSweep = true;
+  if (exitHooked) return;
+  exitHooked = true;
+  // A crash or a signal whose handler could not finish: 'exit' runs only synchronous code.
+  process.on('exit', destroyLeftSync);
+}
+
+/** Remove one session's resources; a removal that reported a problem leaves it for the periodic sweep. */
+async function destroyNow(l: Live): Promise<void> {
+  const r = await l.runtime.destroy(l.owner.sessionId).catch((err: unknown) => {
+    l.ctx.log.warn({ err }, `sandbox session ${l.key}: removing it failed`);
+    return null;
+  });
+  if (r && r.errors.length === 0) undestroyed.delete(l.owner.sessionId);
+  else if (r) l.ctx.log.warn({ errors: r.errors.slice(0, 5) }, `sandbox session ${l.key}: some of it was not removed; the periodic sweep tries again`);
+}
+
+/** LAST RESORT, synchronous: force-remove the containers / VMs of every session not yet removed. */
+export function destroyLeftSync(): void {
+  const byRuntime = new Map<SandboxRuntime, string[]>();
+  for (const [id, rt] of undestroyed) byRuntime.set(rt, [...(byRuntime.get(rt) ?? []), id]);
+  undestroyed.clear();
+  for (const [rt, ids] of byRuntime) {
+    try {
+      rt.destroySync?.(ids);
+    } catch {
+      /* the next sweep removes it */
+    }
+  }
+}
+
+/** The periodic sweep's gate: true once a session made resources, until a sweep found nothing live. */
+export function sandboxesNeedSweep(): boolean {
+  return usedSinceSweep;
+}
+
+/**
+ * A sweep removed every resource of every session that is not live: those need no 'exit' fallback, and
+ * with no session live the periodic sweep can rest.
+ */
+export function noteSweptClean(): void {
+  const liveIds = new Set(liveSandboxIds());
+  for (const id of [...undestroyed.keys()]) if (!liveIds.has(id)) undestroyed.delete(id);
+  if (live.size === 0 && reserved.size === 0) usedSinceSweep = false;
+}
+
+/**
+ * SETTINGS → SANDBOX → "Stop all": close every live session. A MANUAL session's running turn is stopped
+ * first and its work stored (as after Stop), then it closes keeping its changes (`built`, resumable). An
+ * UNATTENDED fix closes as `discarded` (a person's cancel wins: nothing is pushed). Returns how many.
+ */
+export async function stopAllSessions(): Promise<number> {
+  const all = [...live.values()].filter((l) => !l.closing);
+  await Promise.all(
+    all.map(async (l) => {
+      if (l.subject.unattended) return closeSession(l, { phase: 'discarded', error: STOPPED_LINE });
+      if (l.turn && l.driver) {
+        await l.driver.interrupt().catch(() => {});
+        const until = Date.now() + STOP_TURN_WAIT_MS;
+        while (l.turn && !l.closing && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+      }
+      return closeKeepingWork(l, STOPPED_LINE);
+    }),
+  );
+  return all.length;
+}
+
+/**
+ * LIMN IS STOPPING (SIGTERM, SIGINT, SIGHUP; index.ts): remove every live sandbox, bounded by `timeoutMs`,
+ * then force-remove whatever is left. No row is written: the restart reconcile settles the rows, as after
+ * a crash. Returns how many sessions were live.
+ */
+export async function teardownSandboxesForShutdown(timeoutMs = 15_000): Promise<number> {
+  const all = [...live.values()];
+  if (all.length === 0 && undestroyed.size === 0) return 0;
+  const work = Promise.all(
+    all.map(async (l) => {
+      l.closing = true;
+      l.abort.abort();
+      if (l.idleTimer) clearTimeout(l.idleTimer);
+      l.idleTimer = null;
+      l.egress?.close();
+      await destroyNow(l);
+    }),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise<void>((r) => (timer = setTimeout(r, timeoutMs)))]);
+  if (timer) clearTimeout(timer);
+  destroyLeftSync();
+  return all.length;
 }
 
 export async function discardSession(ctx: AgentContext, accountId: number, buildId: number): Promise<{ status: 'discarded' | 'not_ready' | 'not_found' }> {
@@ -1707,6 +1849,23 @@ export async function _closeAllSessionsForTest(): Promise<void> {
   await Promise.all([...live.values()].map((l) => closeSession(l, { phase: 'discarded', error: null })));
   reserved.clear();
   building = null;
+}
+
+/** Test seam: the turn-cap watchdog of one session's running turn, now (the grace as given). */
+export async function _turnTimeoutForTest(key: SessionKey, graceMs = 0): Promise<void> {
+  const l = live.get(key);
+  if (l) await turnTimedOut(l, l.turnSeq, sessionLimits().turnMaxMs, graceMs);
+}
+
+/** Test seam: forget what the removal bookkeeping holds. */
+export function _resetRemovalForTest(): void {
+  undestroyed.clear();
+  usedSinceSweep = false;
+}
+
+/** Test seam: the sessions whose resources may still exist. */
+export function _undestroyedForTest(): string[] {
+  return [...undestroyed.keys()];
 }
 
 /** Test seam: run the idle teardown of one session now. */

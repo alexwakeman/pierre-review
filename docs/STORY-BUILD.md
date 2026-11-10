@@ -355,7 +355,8 @@ pushed.
 | Limit | Default |
 |---|---|
 | `LIMN_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 2 |
-| `LIMN_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes; its patches stay) | 60 |
+| `LIMN_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes: its sandbox is removed, its patches stay) | 15 |
+| `LIMN_SANDBOX_TURN_MAX_MINUTES` (one agent turn running longer is stopped; SANDBOX.md § Every end removes the sandbox) | 120 |
 | `STORY_BUILD_PATCH_MAX_BYTES` (one repository's patch; larger is refused, never cut) | 4 MB |
 | The plan block (`BUILD_PLAN_MAX_BYTES`) · revisions per session (`BUILD_PLAN_MAX_REVISIONS`) | 128 KB · 12 |
 | Planned PRs per repository · in all · points of contention · evidence per point | 3 · 6 · 12 · 1–4 |

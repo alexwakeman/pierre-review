@@ -13,7 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Sandbox: one line says how many Limn sandboxes are running now, with "Stop all" to stop
+  them. Stored changes are kept; an automatic AI Fix that is running is cancelled.
+
 ### Changed
+
+- Sandboxes (AI Fix, Implement story): a sandbox is stopped and removed whenever its session ends,
+  whatever ended it, including Limn stopping (Ctrl-C included). A session with nothing to do now closes
+  after 15 minutes (was 60); its changes are kept and Resume starts a new sandbox. One turn of the AI
+  that runs for more than 2 hours is stopped. Every few minutes, Limn removes any sandbox of its own that
+  no open session uses.
 
 - AI Review: the right-hand column starts with the pull request's latest commit (click to open it,
   or copy it) under "Where this PR stands". "Reviews on this PR" lines up in columns (who, when,

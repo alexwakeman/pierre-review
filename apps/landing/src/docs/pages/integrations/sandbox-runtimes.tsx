@@ -141,8 +141,14 @@ export default function Page(): JSX.Element {
           <Ui>Settings → Sandbox</Ui>, under <Ui>Resources</Ui>.
         </li>
         <li>At most two sessions are open on this computer at a time, and one of them builds.</li>
-        <li>A session with nothing to do closes after an hour; its changes are kept.</li>
-        <li>Discard removes a session's containers, network and volumes. Limn also removes leftovers when it starts.</li>
+        <li>A session with nothing to do closes after 15 minutes; its changes are kept.</li>
+        <li>
+          When a session ends, for any reason, Limn removes its containers, network and volumes. Every few minutes, and
+          when it starts, it also removes any of its own that no open session uses.
+        </li>
+        <li>
+          <Ui>Settings → Sandbox</Ui> says how many Limn sandboxes are running, and <Ui>Stop all</Ui> stops them.
+        </li>
       </ul>
       <Tip>
         Sandboxes use disk space. With Limn stopped, <code>limn sandbox prune</code> removes everything left over (add{' '}
@@ -164,6 +170,7 @@ export default function Page(): JSX.Element {
           { _key: '5', w: 'A tool cannot reach a host', d: 'Allow the host in the Network panel.' },
           { _key: '6', w: 'Behind a company proxy or VPN', d: 'Set the runtime’s own proxy so it can pull images. Inside the sandbox, requests still go through Limn’s allow-list.' },
           { _key: '7', w: 'microsandbox is installed but not used', d: 'msb doctor must pass. An Intel Mac cannot run it; Linux needs /dev/kvm.' },
+          { _key: '8', w: 'Sandboxes still running after you closed the tab', d: 'A session with nothing to do closes after 15 minutes. To stop them now, select Stop all in Settings → Sandbox.' },
         ]}
       />
       <p>

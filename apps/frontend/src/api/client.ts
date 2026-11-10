@@ -255,7 +255,9 @@ import type {
   FlowPointersResponse,
   SandboxFolderCheck,
   SandboxFolderCheckBody,
+  SandboxRunningStatus,
   SandboxRuntimeStatus,
+  SandboxStopAllResult,
   SandboxWorkspaceSettings,
   SandboxWorkspaceSettingsBody,
   WorkspacesResponse,
@@ -636,6 +638,10 @@ export const api = {
   // The container runtime on THIS computer (not workspace-scoped; cached 10 s server-side): the build
   // tab's start state and Settings → Sandbox's status line.
   sandboxRuntime: () => get<SandboxRuntimeStatus>('/api/sandbox/runtime'),
+  // This Limn's sandboxes running now (read from the runtime; Settings → Sandbox, never polled) and
+  // "Stop all" (every session closed, every leftover removed).
+  sandboxRunning: () => get<SandboxRunningStatus>('/api/sandbox/running'),
+  stopAllSandboxes: () => fetch('/api/sandbox/stop-all', jsonBody('POST', {})).then((r) => handle<SandboxStopAllResult>(r)),
   // MOVE one repo into this workspace. Membership is the only write (see `setWorkspaceRepos`) —
   // the repo was already fully live wherever it was, and it stays fully live here.
   // To take a repo OUT of a workspace, move it into the Default one — there is no delete route.

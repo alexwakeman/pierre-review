@@ -149,6 +149,18 @@ describe('sweep and destroy', () => {
     expect(appInstance({ LIMN_DATA_DIR: '/a' })).not.toBe(appInstance({ LIMN_DATA_DIR: '/b' }));
   });
 
+  it('lists the RUNNING sandboxes of this install only (role sandbox, its own label value)', async () => {
+    const cli = scripted([[/^ps --filter label=limn\.managed=1 --filter label=limn\.role=sandbox/, { stdoutText: 'limn-a-sandbox\ta\nlimn-b-sandbox\tb\n' }]]);
+    expect(await createDockerRuntime({ runner: cli, instance: '1' }).listSandboxes()).toEqual([
+      { name: 'limn-a-sandbox', sessionId: 'a' },
+      { name: 'limn-b-sandbox', sessionId: 'b' },
+    ]);
+    // Never `--all`: a stopped container is not running.
+    expect(cli.calls[0]!.args).not.toContain('--all');
+    const broken = scripted([[/^ps /, { code: 1, stderr: 'Cannot connect to the Docker daemon' }]]);
+    await expect(createDockerRuntime({ runner: broken, instance: '1' }).listSandboxes()).rejects.toThrow(/Cannot connect/);
+  });
+
   it("a test instance's sweep filters on its own label value", async () => {
     const cli = scripted([[/./, { stdoutText: '' }]]);
     await createDockerRuntime({ runner: cli, instance: 'test-1' }).sweep([]);
