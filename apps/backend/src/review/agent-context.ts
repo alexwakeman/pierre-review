@@ -25,6 +25,7 @@ import {
   type ReviewThreadsForReview,
 } from '../db/review-threads-for-review.js';
 import type { CheckLogsResponse } from '@pierre-review/shared';
+import type { VerdictPickupCandidate } from '../db/teammate-verdict-pickup.js';
 import type {
   ApplyAndPushArgs,
   ApplyAndPushResult,
@@ -134,7 +135,14 @@ export interface AgentContext {
         provider: 'claude' | 'codex';
         attempts: number;
       }>;
+      // A TEAMMATE'S VERDICT (db/teammate-verdict-pickup.ts): PRs nobody but their author has given a
+      // Limn verdict at the head, in pick-up order — started FIRST. Absent on an older host ⇒ none.
+      verdictNeeded?: VerdictPickupCandidate[];
     } | null>;
+    // CATCH-UP ON RETURN (sync/heads-fresh.ts): has every repo of this workspace been checked against
+    // GitHub, with no change left unwalked, since `sinceMs`? The sweeper holds its first pass after a
+    // boot, a wake or a long gap until it has. Absent ⇒ treated as fresh (no hold).
+    workspaceHeadsFreshSince?(accountId: number, workspaceId: number, sinceMs: number): Promise<boolean>;
     // The OTHER reviewers' open threads on a PR + the newest qualifying comment
     // (db/review-threads-for-review.ts). Absent ⇒ the review assesses no threads.
     loadReviewThreads?(accountId: number, prId: number): Promise<ReviewThreadsForReview>;
@@ -214,6 +222,8 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     queries: {
       getAutoReviewCandidates: (accountId, workspaceId, opts) =>
         hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),
+      workspaceHeadsFreshSince: async (accountId, workspaceId, sinceMs) =>
+        (await import('../sync/heads-fresh.js')).workspaceHeadsFreshSince(accountId, workspaceId, sinceMs),
       // `newestCommentAt` (→ comments_through) counts only the authors who may re-trigger an auto
       // review — the SAME filter the candidate read uses, so seen and new cannot disagree.
       loadReviewThreads: async (accountId, prId) =>

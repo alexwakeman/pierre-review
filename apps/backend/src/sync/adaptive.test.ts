@@ -433,3 +433,19 @@ describe('health backoff on consecutive failures', () => {
     expect(isDue(1, T0 + 20 * SEC)).toBe(true);
   });
 });
+
+describe('checkedCleanSince (the auto review catch-up gate)', () => {
+  it('false until GitHub answered after the gap; false while a seen change waits for its walk', async () => {
+    const a = await import('./adaptive.js');
+    a.__resetAdaptiveState();
+    expect(a.checkedCleanSince(901, 0)).toBe(false);
+    a.recordFullWalk(901, 5_000);
+    expect(a.checkedCleanSince(901, 5_000)).toBe(true);
+    expect(a.checkedCleanSince(901, 5_001)).toBe(false);
+    a.markDirty(901, 6_000);
+    a.noteSettle(901, 7_000);
+    expect(a.checkedCleanSince(901, 5_000)).toBe(false);
+    a.recordFullWalk(901, 8_000, 6_500);
+    expect(a.checkedCleanSince(901, 7_000)).toBe(true);
+  });
+});

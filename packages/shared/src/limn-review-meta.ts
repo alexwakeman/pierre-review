@@ -206,6 +206,10 @@ export interface LimnReviewMeta {
   judged?: LimnJudgedFinding[];
   // `lift=1`: the poster consents to a teammate's Limn lifting this block. Absent / false = no.
   liftConsent?: boolean;
+  // `ov=` (2026-11-10, docs/TEAM-REVIEW.md § 4): on the poster's OWN PR, the verdict Limn chose but
+  // could not send (GitHub forbids self-approval, so the post is a comment). A teammate's Limn reads
+  // it to say "alex's own review approved" and to pick the PR up for a verdict first. Absent = none.
+  ownPrVerdict?: 'APPROVE' | 'REQUEST_CHANGES';
 }
 
 /** What `parseLimnReviewMarker` found. `legacy` = the marker carried none of the metadata keys. */
@@ -260,6 +264,7 @@ export function limnReviewMarker(nonce: string, meta?: Partial<LimnReviewMeta> |
     const jr = j ? limnJudgedReasonsValue(meta.judged) : '';
     if (jr) parts.push(`jr=${jr}`);
     if (meta.liftConsent === true) parts.push('lift=1');
+    if (meta.ownPrVerdict === 'APPROVE' || meta.ownPrVerdict === 'REQUEST_CHANGES') parts.push(`ov=${meta.ownPrVerdict}`);
   }
   return `<!-- pierre:claude-review ${parts.join(' ')} -->`;
 }
@@ -285,7 +290,7 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
     const k = tok.slice(0, eq).toLowerCase();
     if (!kv.has(k)) kv.set(k, tok.slice(eq + 1));
   }
-  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv', 'j', 'jr', 'lift'];
+  const keys = ['h', 'k', 's', 'p', 'm', 'e', 'd', 'lv', 'j', 'jr', 'lift', 'ov'];
   const legacy = !keys.some((k) => kv.has(k));
   const clean = (v: string | undefined): string | null => {
     const c = limnMetaValue(v);
@@ -326,6 +331,10 @@ export function parseLimnReviewMarker(body: string | null | undefined): ParsedLi
     ...(judged.length > 0 ? { judged } : {}),
     // Only when the post consented.
     ...(kv.get('lift') === '1' ? { liftConsent: true } : {}),
+    // Only on an own-PR post whose verdict was held (a comment went out instead).
+    ...(kv.get('ov') === 'APPROVE' || kv.get('ov') === 'REQUEST_CHANGES'
+      ? { ownPrVerdict: kv.get('ov') as 'APPROVE' | 'REQUEST_CHANGES' }
+      : {}),
   };
 }
 

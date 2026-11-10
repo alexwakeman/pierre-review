@@ -7654,6 +7654,9 @@ export interface TeammateReviewRecord {
   // The poster's marker carried `lift=1`: they consent to a teammate's Limn lifting this block once
   // every point is addressed (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). Absent = no.
   liftConsent?: boolean;
+  // The marker's `ov=`: posted on the poster's OWN PR, the verdict their Limn chose but could not send
+  // (docs/TEAM-REVIEW.md § 4, "A teammate's verdict"). Absent = none, or not their own PR.
+  ownPrVerdict?: 'APPROVE' | 'REQUEST_CHANGES';
 }
 
 /** Which rule let the reader's Limn dismiss a teammate's Limn block: both people's opt-ins
@@ -8058,6 +8061,11 @@ export interface ClaudeReviewResponse {
   // An AUTO review holds this PR: 'queued' (waiting in the auto lane, no row yet) or 'running'.
   // While set, starting a manual review answers 409 AutoReviewInProgress. null/absent = free.
   autoReview?: 'queued' | 'running' | null;
+  // Why a QUEUED auto review went ahead of the rest (a teammate's verdict). null/absent = an ordinary item.
+  autoReviewWhy?: ClaudeAutoReviewWhy | null;
+  // The reader's OWN PR waits for a teammate's Limn verdict at its head. null/absent = not waiting, or
+  // nothing says a teammate's Limn would review it.
+  teammateVerdictWait?: ClaudeTeammateVerdictWait | null;
   // The auto-review sweeper is HOLDING this PR's next auto review, and why (in memory; a manual run
   // is NOT locked by it). null/absent = not waiting.
   autoReviewWaiting?: ClaudeAutoReviewWaiting | null;
@@ -8164,6 +8172,31 @@ export interface ClearTeamClaimResponse {
 /** Why an auto review is waiting: the head's CI is still running, or new comments / new pushes are
  *  still arriving (the 5-minute quiet wait, at most 20 minutes from the first one). */
 export type ClaudeAutoReviewWaiting = 'ci' | 'comments' | 'commits';
+
+/**
+ * WHY AN AUTO REVIEW WAS QUEUED AHEAD OF THE REST (docs/TEAM-REVIEW.md § 4, "A teammate's verdict"):
+ * nobody but the PR's author has given a Limn verdict at its head. 'author_review': the author's own
+ * Limn reviewed this head (it can never approve their own PR) — `authorVerdict` is what it would have
+ * sent. 'moved': new commits since the last Limn review, all of them a teammate's.
+ */
+export interface ClaudeAutoReviewWhy {
+  kind: 'teammate_verdict';
+  reason: 'author_review' | 'moved';
+  authorLogin: string | null;
+  authorVerdict: 'APPROVE' | 'REQUEST_CHANGES' | null;
+}
+
+/**
+ * ON THE READER'S OWN PR: their Limn's review is on GitHub at the head, no teammate's Limn has
+ * reviewed that head yet, and a teammate's Limn has run auto reviews in this workspace lately (so one
+ * will pick it up). Absent when nothing says a teammate's Limn would: Limn cannot see a teammate's
+ * settings, so it says nothing rather than guess.
+ */
+export interface ClaudeTeammateVerdictWait {
+  headSha: string;
+  // When the reader's own Limn review at this head was posted (ISO-8601).
+  since: string;
+}
 
 /** At most this many AUTO fixes per PR in any rolling 24 hours (coding/ai-fix/auto-fix.ts). Shared
  *  so the Claude Review tab's skip line prints the same number the gate counts to. */
@@ -10978,6 +11011,9 @@ export interface WaitingOnOthersCard extends InsightCardBase, InsightPrRef {
   targetHours: number;
   /** Set when `waitHours` is over `targetHours`. */
   overReviewTarget?: ReviewTargetOver;
+  /** The reader's own Limn reviewed the head and no teammate's Limn has yet (`ClaudeTeammateVerdictWait`):
+   *  "Waiting for a teammate's Limn to review". Absent otherwise. */
+  limnVerdictWait?: true;
   /** May the reader REQUEST reviewers here (WRITE/MAINTAIN/ADMIN) — the VISIBILITY gate for Nudge and
    *  Ask someone else; the route re-checks. */
   viewerCanPush: boolean;

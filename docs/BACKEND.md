@@ -753,6 +753,10 @@ WORKING hours ("With sam · 6h"). It is READ-ONLY information.
   asked for changes after both the last push and the newest request — the author's move. A muted
   repository's PRs have no My Turn card, so they can be listed here: the reader's own ball rule
   decides.
+- **"Waiting for a teammate's Limn to review"** (2026-11-10). `limnVerdictWait: true` on a row whose
+  head the reader's own Limn review is posted at and no teammate's Limn has reviewed, when a teammate's
+  Limn ran an AUTO review in the workspace within 14 days (`db/teammate-verdict-wait.ts`; AI on only).
+  A label beside the ref, never a holder, a count or a score (docs/TEAM-REVIEW.md § 4).
 - **The clock.** Per holder: the NEWEST stored `requested` event naming them (a re-request — and a
   Nudge — restarts it), else the PR's `firstReviewRequestedAt`, else `openedAt`, clamped to the PR's
   life; a team is matched to its events by slug (`teamSlugOf`, and `owner/slug` for a locally stamped

@@ -516,7 +516,7 @@ export interface PostReviewArgs {
   // § Teammates' reviews): how the review ran, so a teammate's Limn can show it. The seam fills the
   // head (`reviewHeadSha`), the verdict and the Limn version itself. OPTIONAL: absent ⇒ the bare marker.
   // `judged`: the earlier Limn findings on GitHub this review judged (post-meta.ts `loadJudgedForPost`).
-  limnMeta?: Pick<LimnReviewMeta, 'run' | 'pair' | 'runs' | 'judged' | 'liftConsent'> | null;
+  limnMeta?: Pick<LimnReviewMeta, 'run' | 'pair' | 'runs' | 'judged' | 'liftConsent' | 'ownPrVerdict'> | null;
 }
 
 export type PostReviewOutcome =

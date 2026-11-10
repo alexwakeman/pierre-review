@@ -282,6 +282,7 @@ import { limnBotUserIdForUser, limnBotUserIds, limnReplyAttribution } from './li
 import { prOwnerId } from './true-author.js';
 import { limnDischargedReviewRequests } from './limn-discharged-requests.js';
 import { ownRunsOnly } from './teammate-reviews.js';
+import { verdictPickupCandidates, type VerdictPickupCandidate } from './teammate-verdict-pickup.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -6615,6 +6616,13 @@ export async function getWorkspaceInsights(
         const at = r.submittedAt.getTime();
         if (at > (newestChanges.get(r.prId) ?? -Infinity)) newestChanges.set(r.prId, at);
       }
+      // A TEAMMATE'S VERDICT (db/teammate-verdict-wait.ts): the reader's own Limn reviewed the head and
+      // no teammate's Limn has yet. A label on the row only; never a count or a score.
+      const limnWaits = config.aiEnabled
+        ? await (await import('./teammate-verdict-wait.js'))
+            .teammateVerdictWaits(db, accountId, viewerId, candidates.map((p) => p.id), now)
+            .catch(() => new Map<number, unknown>())
+        : new Map<number, unknown>();
       for (const p of candidates) {
         const holders = waits.get(p.id);
         const first = holders?.[0];
@@ -6635,6 +6643,7 @@ export async function getWorkspaceInsights(
           targetHours,
           ...(over != null ? { overReviewTarget: over } : {}),
           viewerCanPush: writableRepoIds.has(p.repoId),
+          ...(limnWaits.has(p.id) ? { limnVerdictWait: true as const } : {}),
         });
       }
     }
@@ -9993,6 +10002,7 @@ export async function getAutoReviewCandidates(
   reReview: AutoReReviewCandidate[];
   inFlightMoved: Array<{ prId: number; headSha: string }>;
   retry: AutoRetryCandidate[];
+  verdictNeeded: VerdictPickupCandidate[];
 } | null> {
   const owned = (
     await db
@@ -10004,7 +10014,7 @@ export async function getAutoReviewCandidates(
   )[0];
   if (!owned) return null;
   const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
-  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [], retry: [] };
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [], retry: [], verdictNeeded: [] };
 
   const autoRows = await db
     .select({ id: claudeReviews.id })
@@ -10025,12 +10035,13 @@ export async function getAutoReviewCandidates(
     )
     .execute();
   const autoToday = autoRows.length;
-  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [] };
+  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [], verdictNeeded: [] };
 
   const open = await db
     .select({
       id: pullRequests.id,
       authorId: pullRequests.authorId,
+      limnOpenedForUserId: pullRequests.limnOpenedForUserId,
       openedAt: pullRequests.openedAt,
       headSha: pullRequests.headSha,
     })
@@ -10045,9 +10056,9 @@ export async function getAutoReviewCandidates(
     )
     .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
     .execute();
-  if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [] };
+  if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [], verdictNeeded: [] };
 
-  const [bots, allRuns, reviewerBots] = await Promise.all([
+  const [bots, allRuns, reviewerBots, readerUserId] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
     db
       .select({
@@ -10064,6 +10075,10 @@ export async function getAutoReviewCandidates(
         model: claudeReviews.model,
         kind: claudeReviews.kind,
         pairId: claudeReviews.pairId,
+        // A TEAMMATE'S imported review (kind 'teammate'): who posted it, when, and its `ov=`.
+        sourceUserId: claudeReviews.sourceUserId,
+        postedAt: claudeReviews.postedAt,
+        teammate: claudeReviews.teammate,
       })
       .from(claudeReviews)
       .where(
@@ -10077,6 +10092,7 @@ export async function getAutoReviewCandidates(
       )
       .execute(),
     automatedReviewerUserIds(accountId, workspaceId, 'review'),
+    getAccountUserId(accountId),
   ]);
   const botSet = new Set(bots);
   // ⚠ A REPLIES PASS (kind 'replies') is NOT a review: it neither settles a head nor counts as a
@@ -10092,8 +10108,30 @@ export async function getAutoReviewCandidates(
   // its later pushes un-re-reviewed for ever, because the floor filtered the whole candidate read.
   const afterFloor = (r: (typeof open)[number]): boolean =>
     r.openedAt != null && r.openedAt.getTime() >= opts.openedSinceMs;
+  // A TEAMMATE'S VERDICT (db/teammate-verdict-pickup.ts): PRs nobody but their author has given a Limn
+  // verdict at the head, in pick-up order. The sweeper starts these FIRST; they are left out of the
+  // first-review list so no PR is offered twice.
+  const verdictNeeded = verdictPickupCandidates({
+    prs: human.map((r) => ({ id: r.id, ownerId: prOwnerId(r), headSha: r.headSha })),
+    rows: allRuns
+      .filter((r) => r.kind == null || r.kind === 'teammate')
+      .map((r) => ({
+        prId: r.prId,
+        headSha: r.headSha,
+        kind: r.kind === 'teammate' ? ('teammate' as const) : ('own' as const),
+        status: r.status,
+        createdAtMs: r.createdAt.getTime(),
+        finishedAtMs: r.finishedAt?.getTime() ?? null,
+        sourceUserId: r.sourceUserId ?? null,
+        postedAtMs: r.postedAt?.getTime() ?? null,
+        ownPrVerdict: r.teammate?.ownPrVerdict ?? null,
+      })),
+    readerUserId,
+    floorMs: opts.openedSinceMs,
+  }).slice(0, opts.limit);
+  const pickedUp = new Set(verdictNeeded.map((v) => v.prId));
   const prIds = human
-    .filter((r) => afterFloor(r) && !hasRun.has(r.id))
+    .filter((r) => afterFloor(r) && !hasRun.has(r.id) && !pickedUp.has(r.id))
     .slice(0, opts.limit)
     .map((r) => r.id);
   // RE-REVIEW: a PR already reviewed (a SUCCEEDED run, manual or auto) whose synced head has
@@ -10299,7 +10337,7 @@ export async function getAutoReviewCandidates(
       if (reReview.length >= opts.limit) break;
     }
   }
-  return { prIds, autoToday, reReview, inFlightMoved, retry };
+  return { prIds, autoToday, reReview, inFlightMoved, retry, verdictNeeded };
 }
 
 /**

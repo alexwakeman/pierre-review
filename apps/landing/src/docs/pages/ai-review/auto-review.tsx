@@ -2,6 +2,7 @@ import type { DocMeta } from '../../types';
 import {
   DocLink,
   H2,
+  H3,
   Illustration,
   MiniTable,
   Note,
@@ -112,6 +113,20 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-review/replies-pass">Replies to findings</DocLink> and{' '}
         <DocLink to="ai-review/check-threads">Check threads</DocLink> for the two lighter passes.
       </p>
+      <H3 id="first-in-the-queue">First in the queue: a verdict a teammate is waiting for</H3>
+      <p>
+        Some pull requests go ahead of the rest. A teammate reviewed their own pull request with their Limn, which can
+        never approve it, so your Limn gives the verdict; one their Limn would have approved goes first. Also first: new
+        commits on a pull request that only teammates' Limns reviewed before. Never your own pull requests. See{' '}
+        <DocLink to="ai-review/team-reviews#a-teammates-verdict">Reviewing as a team</DocLink>.
+      </p>
+      <H3 id="after-a-break">After a break</H3>
+      <p>
+        When Limn starts, or your computer wakes after five minutes or more, auto review waits until your repositories
+        have synced, so it never reviews a commit that has since moved. It waits 30 minutes at most. Then it reviews
+        what changed while you were away, the verdicts teammates wait for first, within the daily limit and the spend
+        budget.
+      </p>
       <p>
         When a pull request has failing checks, the CI review looks at them on its own too. See{' '}
         <DocLink to="ai-review/ci-review">CI review</DocLink>.
@@ -143,7 +158,8 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           In the <Ui>AI Review</Ui> tab: <Ui>Auto review queued</Ui> or <Ui>Auto review running</Ui> beside the Run
-          button, or <Ui>Auto review waiting for pushes to settle</Ui> while it waits.
+          button, or <Ui>Auto review waiting for pushes to settle</Ui> while it waits. A review queued first says why:{' '}
+          <Ui>Queued: needs a verdict (alex’s own review approved)</Ui>.
         </li>
         <li>
           A failed automatic review shows one line with <Ui>Retry</Ui>.

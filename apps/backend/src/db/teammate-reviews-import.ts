@@ -247,6 +247,7 @@ export async function importTeammateReviews(accountId: number, prId: number): Pr
           : {}),
         ...(meta.judged != null && meta.judged.length > 0 ? { judged: meta.judged } : {}),
         ...(meta.liftConsent === true ? { liftConsent: true } : {}),
+        ...(meta.ownPrVerdict != null ? { ownPrVerdict: meta.ownPrVerdict } : {}),
         ...(meta.pair ? pairProviders(parsed) : {}),
       };
       const first = meta.runs[0];

@@ -171,6 +171,9 @@ export interface AutoPostPrFacts {
   openRequestOfMe?: boolean;
   // The reader wrote a review, a review comment or a PR comment on it (synced rows).
   participatedByMe?: boolean;
+  // The PR AUTHOR's own Limn review is on GitHub at the PR's head: a teammate's verdict is owed there
+  // (docs/TEAM-REVIEW.md § 4), so under the scope 'mine' the PR counts as the reader's to answer.
+  authorLimnAtHead?: boolean;
 }
 
 /** May auto-posting write on this PR? null = yes; else why not. */
@@ -178,7 +181,9 @@ export function autoPostEligibility(f: AutoPostPrFacts, scope: AutoPostScope): A
   if (f.state !== 'open') return 'not_open';
   if (f.isDraft) return 'draft';
   if (f.authorIsBot) return 'bot_author';
-  if (scope === 'mine' && !f.authorIsMe && !f.requestedOfMe && f.participatedByMe !== true) return 'not_yours';
+  if (scope === 'mine' && !f.authorIsMe && !f.requestedOfMe && f.participatedByMe !== true && f.authorLimnAtHead !== true) {
+    return 'not_yours';
+  }
   return null;
 }
 
@@ -707,11 +712,16 @@ export async function readAutoPostPrFacts(
 ): Promise<AutoPostPrFacts | null> {
   const t = s(ctx);
   const rows = (await ctx.db
-    .select({ state: t.pullRequests.state, isDraft: t.pullRequests.isDraft, authorId: trueAuthorId(t.pullRequests) })
+    .select({
+      state: t.pullRequests.state,
+      isDraft: t.pullRequests.isDraft,
+      authorId: trueAuthorId(t.pullRequests),
+      headSha: t.pullRequests.headSha,
+    })
     .from(t.pullRequests)
     .where(and(eq(t.pullRequests.id, prId), eq(t.pullRequests.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ state: AutoPostPrFacts['state']; isDraft: boolean | null; authorId: number | null }>;
+    .execute()) as Array<{ state: AutoPostPrFacts['state']; isDraft: boolean | null; authorId: number | null; headSha: string | null }>;
   const pr = rows[0];
   if (!pr) return null;
   const [authorIsBot, authorIsMe, me] = await Promise.all([
@@ -765,7 +775,36 @@ export async function readAutoPostPrFacts(
     const hits = await Promise.all([by(t.reviews, false), by(t.reviewComments, true), by(t.prComments, true)]);
     participatedByMe = hits.some((h) => h.length > 0);
   }
-  return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, openRequestOfMe, participatedByMe };
+  // A TEAMMATE'S VERDICT OWED: the author's own Limn review (an imported teammate review by the PR's
+  // author) at the PR's head. Read only when nothing else already makes it the reader's.
+  let authorLimnAtHead = false;
+  if (!authorIsMe && !requestedOfMe && !participatedByMe && pr.authorId != null && pr.headSha) {
+    const hits = (await ctx.db
+      .select({ id: t.claudeReviews.id })
+      .from(t.claudeReviews)
+      .where(
+        and(
+          eq(t.claudeReviews.accountId, accountId),
+          eq(t.claudeReviews.prId, prId),
+          eq(t.claudeReviews.kind, 'teammate'),
+          eq(t.claudeReviews.sourceUserId, pr.authorId),
+          eq(t.claudeReviews.headSha, pr.headSha),
+        ),
+      )
+      .limit(1)
+      .execute()) as unknown[];
+    authorLimnAtHead = hits.length > 0;
+  }
+  return {
+    state: pr.state,
+    isDraft: pr.isDraft === true,
+    authorIsBot,
+    authorIsMe,
+    requestedOfMe,
+    openRequestOfMe,
+    participatedByMe,
+    ...(authorLimnAtHead ? { authorLimnAtHead: true } : {}),
+  };
 }
 
 /**
@@ -1321,6 +1360,12 @@ async function autoPostReview(
   };
   // The poster's consent rides only a post whose comments hold every blocker behind it.
   const liftConsent = ws.settings.teamLiftConsent && blockersAllInPost(allFindings, picked.toPost);
+  // ON THE READER'S OWN PR the verdict can only be a comment (GitHub forbids self-approval). The verdict
+  // Limn would have sent rides the marker (`ov=`) so a teammate's Limn knows to give one (docs/TEAM-REVIEW.md
+  // § 4, "A teammate's verdict"). Read whatever the auto-verdict switch says: it is a fact about the run.
+  const ownPrHeld = facts.authorIsMe ? autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) : null;
+  const ownPrVerdict = ownPrHeld === 'APPROVE' || ownPrHeld === 'REQUEST_CHANGES' ? ownPrHeld : null;
+  const ownPrMeta = ownPrVerdict != null ? { ownPrVerdict } : {};
   const submit = (ev: AutoVerdictEvent) =>
     ctx.review.postReview({
       owner: pctx.owner,
@@ -1344,8 +1389,9 @@ async function autoPostReview(
               })),
               judged,
               liftConsent,
+              ...ownPrMeta,
             }
-          : { ...limnMetaForReview(review), judged, liftConsent },
+          : { ...limnMetaForReview(review), judged, liftConsent, ...ownPrMeta },
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
       // comment carries its own provider's footer and names who raised it.
       includedFindings: picked.toPost.map((f) => toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), tagOf(f))),

@@ -109,3 +109,12 @@ describe('the keys', () => {
     expect(approveOffered(card({ kind: 'stalled_review' }), 9)).toBe(false);
   });
 });
+
+describe("a teammate's verdict (docs/TEAM-REVIEW.md § 4)", () => {
+  const waiting = (o: Record<string, unknown> = {}) =>
+    card({ kind: 'waiting_on_others', holders: [{ userId: 2, teamName: null, since: '2026-11-10T08:00:00Z', workHours: 2 }], waitHours: 2, targetHours: 4, ...o });
+  it('a "Waiting on others" row whose head your Limn reviewed says it waits for a teammate’s Limn', () => {
+    expect(pendingRowSummary(waiting({ limnVerdictWait: true }), ctx).note).toBe('Waiting for a teammate’s Limn to review');
+    expect(pendingRowSummary(waiting(), ctx).note).toBeUndefined();
+  });
+});

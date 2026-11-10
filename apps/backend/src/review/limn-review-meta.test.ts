@@ -17,6 +17,15 @@ import {
 const SHA = 'a'.repeat(40);
 
 describe('limnReviewMarker / parseLimnReviewMarker', () => {
+  it("carries an own-PR post's held verdict (`ov=`, docs/TEAM-REVIEW.md § 4); an unknown value reads as none", () => {
+    const m = limnReviewMarker('ov1', { headSha: SHA, run: 'auto', verdict: 'COMMENT', ownPrVerdict: 'APPROVE' });
+    expect(m).toContain(' ov=APPROVE');
+    expect(parseLimnReviewMarker(m)).toMatchObject({ verdict: 'COMMENT', ownPrVerdict: 'APPROVE', legacy: false });
+    expect(parseLimnReviewMarker(limnReviewMarker('ov2', { headSha: SHA }))).not.toHaveProperty('ownPrVerdict');
+    expect(parseLimnReviewMarker('<!-- pierre:claude-review v=1 a=x ov=MERGE -->')).not.toHaveProperty('ownPrVerdict');
+    // An older parser ignores the key: the rest of the marker reads the same.
+    expect(parseLimnReviewMarker('<!-- pierre:claude-review v=1 a=x ov=APPROVE -->')).toMatchObject({ legacy: false, verdict: null });
+  });
   it('round-trips a single run', () => {
     const m = limnReviewMarker('abc123', {
       headSha: SHA,

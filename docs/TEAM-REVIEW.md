@@ -2,7 +2,7 @@
 
 **Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
 diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
-2026-11-05 (Limn 1.0.5). **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+2026-11-05 (Limn 1.0.5); § 4 "A teammate's verdict" and § 3's catch-up on 2026-11-10. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
@@ -50,7 +50,7 @@ What travels between Limns:
 | Signal on GitHub | What it tells another Limn |
 |---|---|
 | A **status line** on the PR's latest commit, one per model ("alex is reviewing with Claude", "alex reviewed · 3 comments", "Cleared by alex…") | Who is reviewing this commit with which model, and whether it is done. Never CI. |
-| A **posted review** with a hidden marker at the end | That it is a Limn review; the commit it read; the model(s); the verdict sent; the Limn version; its judgement of earlier threads; whether the poster lets a teammate's Limn lift their "changes requested". |
+| A **posted review** with a hidden marker at the end | That it is a Limn review; the commit it read; the model(s); the verdict sent; the Limn version; its judgement of earlier threads; whether the poster lets a teammate's Limn lift their "changes requested"; on the poster's own PR, the verdict their Limn would have sent (§ 4). |
 | **Finding comments** with a severity word ("**Warning**") and a hidden marker | A Limn finding, raised by that person's Limn. Every Limn treats it as a bot ("Limn · alex"), never as the person. |
 | A **`Limn-Run:` line** at the end of a commit message | A commit Limn made (AI Fix, a conflict resolution, Implement, a branch update). Every Limn treats it as the bot's, never the person's. |
 | **"Still open:" replies** with a hidden marker | Which commit it was said at, and whether this thread has already been reopened once. |
@@ -104,10 +104,27 @@ Claims are **on by default**.
 | A reply on one of your Limn's posted findings | A short "replies pass" (§ 7), after 5 quiet minutes. At most 5 a day per PR. Also on a new commit a teammate's claim holds, so a reply after a push is not left waiting. |
 | Another new comment in an unresolved thread, by a person or a review bot | A light "Check threads" pass. At most 30 a day per workspace. |
 | A thread is resolved, CI finishes, a deploy or coverage bot comments, your own Limn posts | **Nothing.** Resolving adds no comment, so it starts nothing. |
+| The author's own Limn reviewed their PR, and no teammate's Limn has reviewed that commit | Reviews it **first**, ahead of other automatic reviews (§ 4, "A teammate's verdict"). |
+| Your Limn starts, or the computer wakes after 5 minutes or more | **Waits for the first sync** (30 minutes at most), then catches up: below. |
 
 Limits: 20 automatic reviews a day per workspace by default (a pair counts once; a skip because a
 teammate has the commit counts nothing). A failed run is retried only when the error is temporary,
 at most 3 tries per commit (after 1 hour, then 4 hours, or when the usage limit resets).
+
+### Catching up after a break (2026-11-10)
+
+Your Limn only runs while your computer is on. When it starts again (a boot, a wake from sleep, or a gap
+of 5 minutes or more between its one-minute checks), heads may have moved while it was off. So:
+
+1. **It waits for the first sync.** Each workspace's automatic reviews wait until every repo in it was
+   checked against GitHub after the break, with no change left unread. Never longer than 30 minutes (a
+   repo that cannot sync must not stop auto review). A review you start, or "Run auto reviews now",
+   never waits.
+2. **Then it reviews what it missed**, from what GitHub now says, however long the break was (days are
+   fine: it reads every open PR, not a time window). First the verdicts teammates wait for (§ 4), the
+   longest wait first, at most 5 a minute; then new PRs and moved heads as usual. The daily limit, the
+   spend budget and claims all apply; over the budget a due head gets the "skipped · budget" line.
+   Never your own PR in the verdict path.
 
 ### How a claim works
 
@@ -228,6 +245,34 @@ How the two Limns read each other:
 - **Teammates' Limn posts wake your Limn.** A teammate's Limn findings count as review-bot comments,
   so a new teammate review can start a Check threads pass on every other Limn (within the 30 a day).
 
+### A teammate's verdict (2026-11-10)
+
+The author's own Limn review is never a verdict: GitHub does not let an author approve. So when the
+author's Limn reviews their own PR, **another person's Limn must give the verdict**, and does so first.
+
+```mermaid
+flowchart TD
+  A["Alex's Limn reviews Alex's own PR at commit C<br/>posts a comment; its marker says it would approve"] --> S{"Robin's Limn, next tick:<br/>auto review on in the workspace?"}
+  S -- no --> N["Nothing. Alex's tab says nothing either,<br/>unless a teammate's Limn ran auto reviews lately"]
+  S -- yes --> Q["Queued FIRST:<br/>'Queued: needs a verdict (alex's own review approved)'"]
+  Q --> C{"Claim on C (§ 3)"}
+  C -- "Sam's Limn claimed first" --> W["Robin's Limn steps aside"]
+  W -- "Sam's line not renewed for 25 minutes" --> C
+  C -- free --> R["Robin's Limn reviews C and posts:<br/>approve / request changes / comment (§ 5)"]
+  R --> D["Alex's tab: the wait line goes"]
+```
+
+| Question | Answer |
+|---|---|
+| Which PRs? | Not the reader's own. **(a)** The author's own Limn review is on GitHub at the PR's latest commit, posted since auto review was switched on in the reader's workspace. **(b)** New commits on a PR that only teammates' Limns reviewed before (a PR the reader's Limn reviewed is the ordinary re-review). Settled by: any run of the reader's at that commit, or a non-author teammate's Limn review there (that is the verdict). |
+| What order? | The author's Limn would have **approved** first ("ov=APPROVE" in its marker, since 2026-11-10), then other author reviews, then (b); within each, the longest wait first. Ahead of every other automatic review in the queue; reviews you start still go first. |
+| How many? | At most 5 a minute. Same start rule as any new commit, same claims, same spend budget. |
+| The daily limit? | **Counted, not exempt.** The list grows with other people's PRs, and on an API key the spend budget is unset by default, so the daily limit is the one count that stops a runaway. Being first means the limit is spent on these first. |
+| Who takes it? | **Exactly one teammate per model**, by the ordinary claim (§ 3): the author's lines are ignored, the earliest live claim wins, a claim not renewed for 25 minutes is taken over. |
+| Does it post under "Which PRs: Mine"? | Yes. A PR whose author's own Limn review is at the latest commit counts as the reader's, so the verdict reaches GitHub. |
+| What does the author see? | "Waiting for a teammate's Limn to review" in the AI Review tab and on the Pending "Waiting on others" row, while their own Limn review is the only one at the latest commit. **Only with evidence**: a teammate's Limn posted an automatic review in the workspace in the last 14 days. Limn cannot read a teammate's settings, so without that it says nothing rather than promise a review. |
+| What does the teammate see? | "Queued: needs a verdict (alex's own review approved)" ("…asked for changes", "…own review", or "…new commits since the last Limn review"). |
+
 ---
 
 ## 5. Verdicts and approvals
@@ -268,8 +313,9 @@ flowchart TD
   SonarCloud results. Nits are not. Nothing already on GitHub is posted again.
 - **The replies pass can change the verdict** (§ 7): a disputed blocker can turn into "request
   changes"; once everything is settled it can approve, through the same gates.
-- **Which PRs:** by default "mine" — your own PRs, PRs you are or were asked to review, or PRs you
-  already reviewed or commented on. A request to a GitHub team does not count.
+- **Which PRs:** by default "mine" — your own PRs, PRs you are or were asked to review, PRs you
+  already reviewed or commented on, or a PR whose author's own Limn review waits for a teammate's
+  verdict at its latest commit (§ 4). A request to a GitHub team does not count.
 
 ### The "Not approved" line
 
@@ -610,6 +656,19 @@ All names and times are illustrative; every step follows the current rules.
 3. If Bob resolves it and it is reopened once and resolved again, it is left alone: a person's comment has no severity, so no new thread.
 4. For the same reason the open question does not stop Alex's approval; the "Not approved" line, if any, names it as "1 earlier point is still open."
 
+### 9.13 The author's own Limn approves; a teammate gives the verdict
+1. 14:00 Alex's Limn reviews Alex's own PR #40 at commit F. It would approve, but it can only comment; its marker says so.
+2. 14:01 Robin's and Sam's Limns both import the review. Each queues #40 ahead of its other automatic reviews: "Queued: needs a verdict (alex's own review approved)".
+3. 14:02 Robin's Limn claims F with Claude first; Sam's Limn steps aside ("Robin Dunn is reviewing this commit with Claude").
+4. Robin closes his laptop at 14:05. His claim is not renewed; at 14:27 the lease ends and Sam's Limn takes over, reviews F and approves through the § 5 gates.
+5. Alex's tab showed "Waiting for a teammate's Limn to review" until Sam's review synced; then the line goes.
+
+### 9.14 Back after three days
+1. Friday 17:00 Robin shuts his laptop. Over the weekend Dana pushes to #41 (which Robin's Limn reviewed on Friday) and Carol's own Limn reviews her new PR #42.
+2. Monday 09:00 Robin's Limn starts. Its database still holds Friday's heads, so auto review waits.
+3. 09:01 The first sync has checked every repo: #41's head is Dana's Monday commit.
+4. 09:01 Robin's Limn queues #42 first (Carol's own review waits for a verdict), then #41's new head — within the daily limit and the spend budget. Robin's own PRs are never in the verdict path.
+
 ### 9.12 A manual review holds the commit
 1. 11:00 Dana pushes commit D. Alex presses Review on Dana's PR. Bob's automatic review claimed D with Claude at 10:59.
 2. Alex's run starts at once. His AI Review tab says "Bob is reviewing this commit with Claude".
@@ -627,6 +686,8 @@ All names and times are illustrative; every step follows the current rules.
 - Dismiss anyone's approval to lift a block; dismiss a review typed by hand.
 - Dismiss a teammate's Limn review while their Limn is active on the PR's latest commit, or unless its
   own review approves (the away path, § 5).
+- Pick up the reader's own PR for a teammate's verdict, or start any automatic review after a break
+  before the repos have synced (30 minutes at most).
 - Edit or delete a teammate's comment, or resolve a teammate's or a person's thread.
 - Reopen a thread more than once, or post more than one pushback per thread.
 - Reopen a thread, or start a new thread about an open point, on the reader's own PR.
@@ -650,7 +711,7 @@ All are per workspace, in Settings → Auto review, except where noted.
 | When Claude and Codex disagree | Strict | Strict: both must approve. Relaxed: one approves, neither asks for changes. |
 | Mark auto reviews on GitHub (claims) | On | Status lines; the team shares the work per model. |
 | When an auto review finishes | Post to GitHub | Or keep it in Limn (invisible to teammates). Limn still withdraws its own earlier automatic approval when a later run does not approve. |
-| Which PRs | Mine | Or every PR. |
+| Which PRs | Mine | Or every PR. "Mine" includes a PR whose author's own Limn review waits for a teammate's verdict (§ 4). |
 | What to post | Blockers, warnings, questions, CI failures, story gaps, SonarCloud | Nits and "not asked for" off. |
 | Approve or request changes for me | On | Off means every post is a comment. |
 | Approve at High / Medium / Low impact | All on | An unticked level gets a comment. |
@@ -669,6 +730,7 @@ Every rule is written so an older Limn on the team stays safe, but older Limns b
 
 | A teammate on… | Still does |
 |---|---|
+| before 1.0.20 | Writes no `ov=` on its own-PR posts, so a teammate's newer Limn still picks the PR up but cannot sort a held approval first. As a teammate, never picks up an author's own review first, never waits for the sync after a break. |
 | before 1.0.14 | **Verdicts:** posts "Not approved: Claude left a comment, not an approval. No findings are open." when its model only commented with nothing open (a newer Limn approves through the gates); says "No findings are open." beside an unmet ticket criterion; a replies check approves even when a teammate's newer Limn review still holds a settled point open. **Team:** loses a withdrawn approval once a later Comment replaces it; never lists a replies check's verdict. |
 | before 1.0.1 | Withdraws its own automatic approval on every push while its "Withdraw Limn's approval when new commits are pushed" setting is on — the default (0.1.182–1.0.0); waits out the 25-minute lease even when a review is already posted. |
 | before 1.0.2 | Shows a reviewer as "requested changes" after their later approval was dismissed. |

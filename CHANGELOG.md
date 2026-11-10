@@ -13,8 +13,25 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Auto review: a pull request whose author reviewed it with their own Limn (which can never approve
+  it) is picked up by a teammate's Limn for the verdict, ahead of other automatic reviews, and first
+  when the author's Limn would have approved. One teammate takes it through the usual status line; if
+  their Limn stops renewing it for 25 minutes, another takes over. It counts toward the daily limit
+  and asks the spend budget like any automatic review. The teammate's AI Review tab says why, for
+  example "Queued: needs a verdict (alex’s own review approved)".
+- Your own pull request: the AI Review tab and the "Waiting on others" row say "Waiting for a
+  teammate’s Limn to review" while your Limn's review is the only one at the latest commit, when a
+  teammate's Limn has run automatic reviews in the workspace in the last two weeks.
+- Auto review after a break: when Limn starts or the computer wakes, auto review waits (30 minutes at
+  most) until your repositories have synced, then reviews what changed while you were away, the
+  verdicts teammates wait for first.
+
 ### Changed
 
+- Auto review, "Which PRs: Mine": a pull request whose author's own Limn review waits for a teammate's
+  verdict now counts as yours, so the verdict reaches GitHub.
 - AI Review: the right-hand column starts with the pull request's latest commit (click to open it,
   or copy it) under "Where this PR stands". "Reviews on this PR" lines up in columns (who, when,
   commit, outcome, what ran it), shows the newest 10 with "Show all" for the rest, and the column is

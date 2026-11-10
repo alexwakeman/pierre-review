@@ -216,6 +216,10 @@ describe('the pure rules', () => {
     expect(ap.autoPostEligibility({ ...base, isDraft: true }, 'all')).toBe('draft');
     expect(ap.autoPostEligibility({ ...base, authorIsBot: true }, 'all')).toBe('bot_author');
   });
+  it("eligibility: under 'mine', a PR whose author's own Limn review is at the head is the reader's to answer", () => {
+    expect(ap.autoPostEligibility({ ...base, authorLimnAtHead: true }, 'mine')).toBeNull();
+    expect(ap.autoPostEligibility({ ...base, authorLimnAtHead: true, isDraft: true }, 'mine')).toBe('draft');
+  });
   it('kinds: praise is never a kind', () => {
     expect(ap.kindOfSeverity('praise')).toBeNull();
     expect(ap.kindOfSeverity('question')).toBe('questions');
