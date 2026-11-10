@@ -449,7 +449,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   first is a chat-mode session. URL paths kept (`/api/pro/prs/:id/ai-fix*`). ⚠ **The MERGE item**
   ("Resolve merge conflicts", `sandbox/session/fix-merge.ts`): the agent merges first; out as REAL
   commits (a bundle); the host checks parents + markers; only a VALID merge pushes. Auto fix: only
-  with `include.conflicts` (OFF).
+  if `include.conflicts` (OFF).
 - **Moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform's.
 - **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),
   [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; a Sonar snapshot is
@@ -520,7 +520,7 @@ Monitoring, Slack.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
   RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are the
   reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion)
-  (`tracker/status-change.ts`, `ticket-update.ts`, `assignee.ts`); nothing else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
+  (`tracker/status-change.ts`, `ticket-update.ts`, `assignee.ts`); nothing else writes. Customer-typed hosts use `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)
