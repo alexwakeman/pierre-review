@@ -190,8 +190,12 @@ export function storyViewTicket(
     out.status = status.name;
     if (status.category != null) out.statusCategory = status.category;
   }
-  // Only the sprint row carries the type and the assignee.
+  // Only the sprint row carries the type.
   if (storyTicket?.issueType != null) out.issueType = storyTicket.issueType;
-  if (storyTicket?.assignee != null) out.assignee = { name: storyTicket.assignee.name, avatarUrl: storyTicket.assignee.avatarUrl };
+  // The assignee: the lead row's, null included ("Unassigned" is a fact); the other row's only when the
+  // lead does not carry the field (an older server's PR row).
+  const assigneeOf = (t: TicketPrsTicket | TicketStoryTicket | null | undefined) => (t == null ? undefined : t.assignee);
+  const assignee = assigneeOf(lead) !== undefined ? assigneeOf(lead) : assigneeOf(other);
+  if (assignee != null) out.assignee = { name: assignee.name, avatarUrl: assignee.avatarUrl };
   return out;
 }

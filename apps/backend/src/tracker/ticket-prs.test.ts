@@ -182,6 +182,8 @@ describe('the ticket tab read', () => {
       url: `${ACME}/browse/ENG-7`,
       provider: 'jira',
       status: { name: 'In Progress', category: 'indeterminate' },
+      // The freshest row's assignee; none stored → null (the header says "Unassigned").
+      assignee: null,
     });
   });
 

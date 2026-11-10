@@ -61,6 +61,8 @@ import type {
   TicketLinksResponse,
   TicketMergedPrsResponse,
   TicketStoryResponse,
+  TicketAssignablesResponse,
+  TicketAssignResponse,
   WorkspaceTrackerSettings,
   TrackerCopySourcesResponse,
   WorkspaceSonarSettings,
@@ -2307,6 +2309,23 @@ export async function installMockApi(
           story: null,
           comments: [],
         } satisfies TicketStoryResponse);
+      }
+      // The story view's assignee picker (click-gated: only when it opens) and its pick.
+      if (path.endsWith('/api/ticket-assignees')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          users: [{ id: 'acc:demo-1', name: 'Amy Pond', detail: null, avatarUrl: null }],
+          truncated: false,
+        } satisfies TicketAssignablesResponse);
+      }
+      if (path.endsWith('/api/ticket-assignee')) {
+        const body = (route.request().postDataJSON() ?? {}) as { ident?: string; assigneeId?: string | null };
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: body.ident ?? '',
+          assignee: body.assigneeId != null ? { name: 'Amy Pond', avatarUrl: null } : null,
+        } satisfies TicketAssignResponse);
       }
       if (path.endsWith('/api/merged-prs')) return json(route, MERGED_PRS);
       if (path.endsWith('/api/ticket-merged-prs')) {

@@ -48,6 +48,7 @@ import { registerTicketPrsRoute } from './ticket-prs.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
 import { registerTicketStatusRoutes } from './status-change.js';
 import { registerTicketUpdateRoutes } from './ticket-update.js';
+import { registerTicketAssigneeRoutes } from './assignee.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 import { registerAcFieldSettingsRoutes } from './ac-field-settings.js';
 import { storedOpenPoints } from './open-points-pr.js';
@@ -327,6 +328,7 @@ export function registerTrackerRoutes(
   registerManualTicketLinkRoute(app, ctx, opts);
   registerTicketStatusRoutes(app, ctx, opts);
   registerTicketUpdateRoutes(app, ctx, opts);
+  registerTicketAssigneeRoutes(app, ctx, opts);
   registerAcFieldSettingsRoutes(app, ctx);
   registerTrackerCopyRoutes(app, ctx);
 

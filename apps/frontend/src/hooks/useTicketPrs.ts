@@ -1,6 +1,9 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SPRINT_READ_INTERVAL_MS,
+  type TicketAssignResponse,
+  type TicketAssignable,
+  type TicketAssignablesResponse,
   type TicketPrsResponse,
   type TicketStatusChangeResponse,
   type TicketStoryResponse,
@@ -83,6 +86,73 @@ export function useSetTicketStatus(workspaceId: number | null, ident: string) {
           d?.ticket != null ? { ...d, ticket: { ...d.ticket, status } } : d,
         );
       }
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
+        qc.invalidateQueries({ queryKey: ['ticket-story'] }),
+        qc.invalidateQueries({ queryKey: ['sprint-graph', workspaceKey(workspaceId)] }),
+        qc.invalidateQueries({ queryKey: ['sprint-graph-token', workspaceKey(workspaceId)] }),
+        qc.invalidateQueries({ queryKey: ['ticket-links'] }),
+        qc.invalidateQueries({ queryKey: ['jira-ticket'] }),
+      ]);
+    },
+  });
+}
+
+// ── The story view's assignee picker (Jira, GitHub Issues, Linear) — a TRACKER WRITE ───────────────
+
+/** The people the tracker lets this ticket be assigned to. ⚠ CLICK-GATED: enabled only while the
+ *  picker is OPEN, never on mount (the server keeps the list a few minutes). */
+export function useTicketAssignables(workspaceId: number | null, ident: string | null, open: boolean) {
+  return useQuery<TicketAssignablesResponse>({
+    queryKey: ['ticket-assignees', workspaceKey(workspaceId), ident],
+    queryFn: workspaceId == null || ident == null ? skipToken : () => api.ticketAssignables(workspaceId, ident),
+    enabled: open,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+type ShownAssignee = { name: string; avatarUrl: string | null } | null;
+
+/**
+ * Assign the ticket to the person the reader picked (null = nobody). OPTIMISTIC: the story view's two
+ * reads show the pick at once and go back to what they held when the tracker refuses. Never retried.
+ * On success they hold what the tracker reports, and every read that shows an assignee refetches.
+ */
+export function useSetTicketAssignee(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  const prsKey = ['ticket-prs', `ws:${workspaceId}`, ident];
+  const storyKey = ['ticket-story', workspaceKey(workspaceId), ident];
+  const show = (assignee: ShownAssignee): void => {
+    qc.setQueryData<TicketPrsResponse>(prsKey, (d) => (d?.ticket != null ? { ...d, ticket: { ...d.ticket, assignee } } : d));
+    qc.setQueryData<TicketStoryResponse>(storyKey, (d) => (d?.ticket != null ? { ...d, ticket: { ...d.ticket, assignee } } : d));
+  };
+  return useMutation<
+    TicketAssignResponse,
+    Error,
+    TicketAssignable | null,
+    { prs: TicketPrsResponse | undefined; story: TicketStoryResponse | undefined }
+  >({
+    mutationKey: ['ticket-assignee', workspaceKey(workspaceId), ident],
+    retry: false,
+    mutationFn: (user) => {
+      if (workspaceId == null) throw new Error('No workspace yet.');
+      return api.setTicketAssignee(workspaceId, { ident, assigneeId: user?.id ?? null });
+    },
+    onMutate: async (user) => {
+      await Promise.all([qc.cancelQueries({ queryKey: prsKey }), qc.cancelQueries({ queryKey: storyKey })]);
+      const before = { prs: qc.getQueryData<TicketPrsResponse>(prsKey), story: qc.getQueryData<TicketStoryResponse>(storyKey) };
+      show(user == null ? null : { name: user.name, avatarUrl: user.avatarUrl });
+      return before;
+    },
+    onError: (_err, _user, before) => {
+      if (before == null) return;
+      qc.setQueryData(prsKey, before.prs);
+      qc.setQueryData(storyKey, before.story);
+    },
+    onSuccess: (res) => {
+      show(res.assignee);
       return Promise.all([
         qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
         qc.invalidateQueries({ queryKey: ['ticket-story'] }),

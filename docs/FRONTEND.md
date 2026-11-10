@@ -4204,7 +4204,8 @@ board.
   `single`; 2026-10-28 — the shared stack header squeezed the title into a narrow column beside seven
   items). Two rows, never side by side: the key and "Open in <tracker>" (small), then the TITLE on the
   full width; then ONE meta row that wraps as whole groups — status picker, type and assignee
-  (`TicketPeopleAndStatus`, shared with the board header); the facts as chips of one kind (coverage
+  (`TicketPeopleAndStatus`, shared with the board header; in the story view the assignee is the
+  `TicketAssigneePicker` on Jira / GitHub Issues / Linear, docs/TRACKERS.md § The assignee change); the facts as chips of one kind (coverage
   "3 of 10 met", the roll-up "1 failing CI", "2 PRs"); and, `ml-auto` from `sm`, the ticket review's
   currency as ONE quiet line ("2 PRs changed since · reviewed 52 mins ago") and the automatic check's
   ONE line (`TicketAutoCheckLine` over the state's `autoCheck`: "Story check starts in 1m 40s — waiting

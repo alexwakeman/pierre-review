@@ -3740,7 +3740,26 @@ check(
     payload: { ident: `jira:${SITE}#ENG-2`, transitionId: '21' },
   });
   check("POST /api/ticket-status naming B's workspace and B's ticket, as A → 404 (A's own Default)", bOnlyPost.statusCode === 404);
+  // The OTHER kind of tracker write (tracker/assignee.ts): the same gate shape, the same settle rule.
+  const bOnlyAssignees = await app.inject({
+    method: 'GET',
+    url: `/api/ticket-assignees?workspace=${defaultA}&ident=${encodeURIComponent(`jira:${SITE}#ENG-2`)}`,
+  });
+  check("GET /api/ticket-assignees for a ticket only B holds, as A → 404", bOnlyAssignees.statusCode === 404);
+  const bOnlyAssign = await app.inject({
+    method: 'POST',
+    url: `/api/ticket-assignee?workspace=${defaultB}`,
+    payload: { ident: `jira:${SITE}#ENG-2`, assigneeId: null },
+  });
+  check("POST /api/ticket-assignee naming B's workspace and B's ticket, as A → 404 (A's own Default)", bOnlyAssign.statusCode === 404);
   await db.update(tt).set({ issueKey: 'ENG-1' }).where(and(eq(tt.accountId, 2), eq(tt.issueKey, 'ENG-2'))).execute();
+  const { writeTicketAssignee } = await import('../src/tracker/assignee.js');
+  await writeTicketAssignee(tctx, 1, 'jira', SITE, 'ENG-1', IDENT, { name: 'Ada A', avatarUrl: null, accountId: 'acc-a' });
+  const afterAssign = await db.select().from(tt).where(and(eq(tt.apiRoot, SITE), eq(tt.issueKey, 'ENG-1'))).execute();
+  check(
+    "writeTicketAssignee(A, shared ticket) moves A's row only",
+    afterAssign.find((r) => r.accountId === 1)?.assigneeName === 'Ada A' && afterAssign.find((r) => r.accountId === 2)?.assigneeName !== 'Ada A',
+  );
 
   // GITHUB ISSUES (docs/TRACKERS.md § GitHub Issues): both accounts' PRs CLOSE the same issue, and
   // each has a stored row — so a dropped account predicate on the stored links, the peers or the

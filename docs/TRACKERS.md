@@ -518,8 +518,9 @@ reader of `stage` works whatever the buckets are.
 
 ## The status change — A TRACKER WRITE (`tracker/status-change.ts`)
 
-Limn writes to a tracker in exactly TWO places, both Jira, both a reader's press: this one, and the
-build plan's ticket update (§ The ticket update), which passes THIS gate. The status change is
+Limn writes to a tracker in exactly THREE places, each a reader's press: this one and the build plan's
+ticket update (§ The ticket update, which passes THIS gate), both Jira; and the assignee change (§ The
+assignee change), on Jira, GitHub Issues and Linear. The status change is
 **the Jira status transition the reader picks** from
 the story view's status chip (`components/Ticket/TicketStatusPicker.tsx`, mounted by the story view's
 one stack header — so the story TAB and This Sprint's story TRAY share it). Jira only; GitHub Issues,
@@ -586,6 +587,57 @@ Approve only). Jira only; on GitHub Issues, Linear and Notion the draft stays ed
   (`readSessionTicket`), so the build gets the new text. Refusals are the status change's sentences
   (403 → `TICKET_STATUS_NO_PERMISSION`, 400 → "Jira refused this change."). No worker, no automation,
   no retry; the SPA asks once ("Replace the ticket's … in Jira?"). Rate tier `[search, read]`.
+
+## The assignee change — THE THIRD TRACKER WRITE (`tracker/assignee.ts`)
+
+Owner decision 2026-11-10: the story view's assignee (`components/Ticket/TicketAssigneePicker.tsx`, mounted
+by the one stack header's `TicketPeopleAndStatus`, so the story TAB and This Sprint's story TRAY share it)
+is a menu of the people the tracker lets this ticket be assigned to, plus "Unassigned". **Jira, GitHub
+Issues and Linear** (shared `TICKET_ASSIGN_PROVIDERS` / `canAssignTickets`). ⚠ **Notion has no picker**:
+Limn writes nothing to Notion (an internal integration is usually read-only, and a people property offers
+no list of who may hold it); the routes answer `400 CannotAssign` with that sentence.
+
+- **The list** — `GET /api/ticket-assignees?workspace=&ident=` → `TicketAssignablesResponse` (`{id, name,
+  detail, avatarUrl}`, sorted by name, ≤ `ASSIGNABLES_MAX` (500), `truncated`). Made when the picker OPENS,
+  never on mount (`useTicketAssignables`, `enabled: open`). Kept IN MEMORY per (account, workspace,
+  provider, site, scope) for `ASSIGNABLES_TTL_MS` (10 min), so reopening costs nothing; nothing is stored.
+  - **Jira**: `GET /rest/api/2/user/assignable/search?project=<key prefix>` (plus `&username=` on Server /
+    Data Center, which searches by it), pages of 100 until an EMPTY page (Cloud may answer fewer than
+    `maxResults` while more exist), ≤ 5 pages. Inactive users and `accountType: 'app'` are dropped. The id
+    is `acc:<accountId>` (Cloud) or `name:<username>` (Server). Scope = the project.
+  - **GitHub Issues**: `repository.assignableUsers` (GraphQL, the account's token), ≤ 5 pages of 100.
+    `name` = the LOGIN (what the reader stores as the assignee), `detail` = the full name. Scope = the repo.
+  - **Linear**: `issue(id: KEY).team.members`, active only, ≤ 5 pages. `name` = the display name, else the
+    full name (the reader's rule). Scope = the team key.
+- **The change** — `POST /api/ticket-assignee?workspace=` `{ident, assigneeId}` (null = unassign; the body
+  schema is a TYPE UNION, never `anyOf`) → `TicketAssignResponse {assignee}`. ⚠ A non-null id must be ON
+  THE TRACKER'S LIST (the cached one, else read now), else `400 UnknownAssignee` before any write.
+  - Jira: `PUT …/issue/{key}/assignee` (`jiraPutJson`) `{accountId}` / `{name}`; unassign sends
+    `{accountId: null}` on Cloud (`*.atlassian.net`, `*.jira.com`) and `{name: null}` elsewhere. Then
+    `GET …?fields=assignee`.
+  - GitHub: one query for the issue's node id and current assignees, then ONE mutation document
+    (`removeAssigneesFromAssignable` the others + `addAssigneesToAssignable` the pick). ⚠ The pick becomes
+    the ONLY assignee (Limn shows one). The reader's own press: nothing is ledgered.
+  - Linear: `issueUpdate(id: KEY, input: {assigneeId})`; the answer carries the new assignee.
+- **SETTLE** (`writeTicketAssignee`): the assignee the tracker reported goes to every stored row of the
+  ticket IN THIS ACCOUNT — `tracker_tickets` on that site (name, account id, avatar), `sprint_tickets` and
+  `sprint_ref_tickets` by ident. `changed_at` does not move. A failed Jira re-read stores WHO WAS PICKED
+  (the 2xx is the tracker's positive statement) and marks the PR rows due.
+- **The gate** (`assignGate`) is the status change's, for any assigning provider: the workspace's EFFECTIVE
+  tracker (the GitHub default included), the ident on its site, a row Limn holds in this account — else
+  `404 TicketNotFound` before any call. Refusals are our own sentence (`502 TrackerError`): 403 → "Your
+  Jira token / Your GitHub account / The saved Linear key cannot assign this issue."; a refused write →
+  "<Tracker> refused this change."; else the reader's own `errorMessage`.
+- **The SPA is OPTIMISTIC**: the pick shows at once in the story view's two caches (`ticket-prs`,
+  `ticket-story`) and is put back on failure, the refusal one line beside the trigger; on success the
+  sprint graph + token, `ticket-links` and `jira-ticket` refetch. The choices are one pure fold
+  (`lib/ticketAssignees.ts` `assigneeChoices`: Unassigned first, then the current assignee; typing narrows
+  by every word without case or accents; ≤ 50 drawn).
+- `GET /api/ticket-prs`' ticket carries the freshest PR row's `assignee` (absent from an older server), so a
+  ticket with PRs but no sprint row shows its assignee too (`storyViewTicket`: the LEAD row's, null included).
+- Rate tiers: the GET `[search, read]`, the POST `[search, github_write]` (on GitHub Issues it is a GitHub
+  write). `verify:isolation` pins the gate and the settle. No worker, no automation, no retry.
+
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 
 Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`

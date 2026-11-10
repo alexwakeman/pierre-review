@@ -111,7 +111,13 @@ export default function Page(): JSX.Element {
       </p>
 
       <H2 id="what-limn-writes">What Limn writes</H2>
-      <p>Nothing. Limn does not change issues, states, cycles or comments in Linear.</p>
+      <p>
+        One thing, only when you pick it: the assignee. In a ticket&rsquo;s{' '}
+        <DocLink to="this-sprint/story-view#assign-the-ticket">story view</DocLink>, the assignee is a menu of the
+        active members of the issue&rsquo;s team, and <Ui>Unassigned</Ui>. The change is made with the saved Linear
+        key, so it shows as made by the key&rsquo;s owner, and the key needs write access. Limn does not change
+        states, cycles or comments.
+      </p>
 
       <H2 id="troubleshooting">Troubleshooting</H2>
       <MiniTable

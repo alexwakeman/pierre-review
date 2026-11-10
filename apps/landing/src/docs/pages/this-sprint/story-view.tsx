@@ -75,7 +75,10 @@ export default function Page(): JSX.Element {
       <H3 id="the-header">The header</H3>
       <ul>
         <li>The key, a link <Ui>Open in Jira</Ui> (or the name of your tracker), and the title.</li>
-        <li>The status, the issue type and the assignee. On Jira the status is a menu (see below).</li>
+        <li>
+          The status, the issue type and the assignee. On Jira the status is a menu, and on Jira, GitHub Issues and
+          Linear the assignee is a menu (see below).
+        </li>
         <li>
           Facts as chips: how many criteria are met (&ldquo;3 of 4 met&rdquo;), failing CI across the pull
           requests, and the number of pull requests.
@@ -141,6 +144,7 @@ export default function Page(): JSX.Element {
           Nothing is pushed until you press Push. See <DocLink to="implement-story/overview">Implement story</DocLink>.
         </li>
         <li>On Jira, change the ticket&rsquo;s status from the status menu.</li>
+        <li>On Jira, GitHub Issues and Linear, assign the ticket from the assignee menu.</li>
       </Steps>
 
       <H2 id="change-the-status-in-jira">Change the status in Jira</H2>
@@ -153,6 +157,21 @@ export default function Page(): JSX.Element {
         made when you pick the status. Limn lists only statuses it can make without Jira&rsquo;s own form, and says
         &ldquo;Your Jira token cannot change this issue.&rdquo; when the token may not. On GitHub Issues, Linear and
         Notion the status is shown and not changed.
+      </Warning>
+      <H2 id="assign-the-ticket">Assign the ticket</H2>
+      <p>
+        On Jira, GitHub Issues and Linear the assignee is a menu. Opening it asks your tracker who can be assigned
+        this ticket: on Jira the people assignable in the ticket&rsquo;s project, on GitHub the people assignable in
+        the issue&rsquo;s repository, on Linear the active members of the ticket&rsquo;s team. Type to find a person,
+        or pick <Ui>Unassigned</Ui>. The ticket changes at once; Limn then reads the assignee back and shows it
+        everywhere, including the People board. If the tracker refuses, the menu shows the person you had before and
+        says why in one line.
+      </p>
+      <Warning>
+        This writes to your tracker: on Jira as the owner of the workspace&rsquo;s Jira token, on GitHub as you, on
+        Linear as the owner of the saved Linear key. There is no confirm step. On GitHub, the person you pick becomes
+        the issue&rsquo;s only assignee. Limn keeps the list of people for 10 minutes, so a new team member can take
+        that long to appear. On Notion the assignee is shown and not changed: Limn only reads Notion.
       </Warning>
       <Note>
         The story view reads what Limn has already stored. Opening it does not call your tracker. Limn reads the

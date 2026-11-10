@@ -18,6 +18,11 @@ no internals.
 - Settings → AI review → Auto AI Fix: "Merge conflicts with the base branch" under Always include (off
   by default). With it on, an automatic fix of a pull request that conflicts with its base merges the
   base first. Limn checks the merge before any push, and a merge that fails the check is never pushed.
+- This Sprint and the story view: assign a ticket. On Jira, GitHub Issues and Linear the assignee in the
+  story view's header is a menu of the people your tracker lets you assign, plus "Unassigned". The
+  ticket changes at once and the People board follows. On GitHub the person you pick becomes the
+  issue's only assignee. Notion tickets show the assignee as before.
+- The story view shows the assignee of a ticket that has pull requests but is not in the sprint.
 
 ### Changed
 
@@ -51,6 +56,8 @@ no internals.
   found still open were left out of the fix. They are now included with the other earlier findings.
 - Implement and AI Fix brought no Claude notes unless a local folder was set, and none was set by
   default. The notes of each repository's clone now come in without a setting.
+- Settings → Integrations → Ticket fields: the menus now line up in two columns, "Criteria" and "Open
+  points", one row per issue type.
 
 ## [1.0.22] - 2026-11-10
 

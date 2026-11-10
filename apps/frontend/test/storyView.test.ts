@@ -123,6 +123,22 @@ describe('the header ticket', () => {
       url: null,
     });
   });
+
+  it('the assignee is the lead row’s, null included; an older PR row without it falls back', () => {
+    // Out of the sprint: the PR row leads, and its "nobody" is a fact, not a gap.
+    const out = { ...sprint, inSprint: false };
+    expect(storyViewTicket(IDENT, { key: 'BMD-7', title: null }, { ...prs, assignee: null }, out).assignee).toBeUndefined();
+    expect(storyViewTicket(IDENT, { key: 'BMD-7', title: null }, { ...prs, assignee: { name: 'Rory', avatarUrl: null } }, out).assignee).toEqual({
+      name: 'Rory',
+      avatarUrl: null,
+    });
+    // A PR row from an older server (no field) → the sprint row's.
+    expect(storyViewTicket(IDENT, { key: 'BMD-7', title: null }, prs, out).assignee?.name).toBe('Amy Pond');
+    // A PR-only ticket shows its PR row's assignee.
+    expect(storyViewTicket(IDENT, { key: 'BMD-7', title: null }, { ...prs, assignee: { name: 'Rory', avatarUrl: null } }, null).assignee?.name).toBe(
+      'Rory',
+    );
+  });
 });
 
 describe('the story view’s one stack', () => {
