@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-11-10
+
 ### Changed
 
 - Docs: the Claude pages present your own Claude Code login and an Anthropic API key as two equal
