@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- The Timeline is now optional and off by default. Switch it on in Settings → Features. While it is
+  off, it leaves the sidebar, `g t` and the search menu, a link to it opens Open pull requests, and
+  pull requests open in their own tab instead of a Focus tab.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed

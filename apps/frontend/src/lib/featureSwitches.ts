@@ -4,6 +4,7 @@ import { FEATURE_IDS, type FeatureId, type FeatureSettings, type FeaturesStatus 
 
 /** Each switch's words: the name and the one line under it (what it needs, where it waits on something). */
 export const FEATURE_WORDS: Record<FeatureId, { label: string; hint: string }> = {
+  timeline: { label: 'Timeline', hint: 'Every pull request drawn over time, with its reviews, comments and commits.' },
   feed: { label: 'Feed', hint: 'One stream of everything happening in this workspace.' },
   reports: { label: 'Reports', hint: 'Shows once your first repository has finished syncing 90 days.' },
   sprint: {

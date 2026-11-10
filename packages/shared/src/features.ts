@@ -1,20 +1,27 @@
 // SETTINGS → FEATURES — which sidebar destinations show (docs/FRONTEND.md § Features shown).
 //
-// Hiding changes VISIBILITY ONLY: the sidebar, the phone's bottom bar and the ⌘K palette leave a
-// hidden destination out. A deep link (`?view=sprint`, `?activityRepo=bots` …) still opens it, and no
-// background work (syncs, ML scoring, tracker reads) changes with a switch.
+// For Feed, Reports, This Sprint and Bots Monitoring, hiding changes VISIBILITY ONLY: the sidebar, the
+// phone's bottom bar and the ⌘K palette leave a hidden destination out. A deep link (`?view=sprint`,
+// `?activityRepo=bots` …) still opens it, and no background work (syncs, ML scoring, tracker reads)
+// changes with a switch.
 //
-// One rule for all four: a stored switch wins; with none stored, the DEFAULT applies:
-//   • an EXISTING install (the account had repositories before migration 0153) shows everything;
+// ⚠ THE TIMELINE IS THE EXCEPTION: off means OFF. No sidebar entry, no `g t`, no ⌘K entry, no Focus
+// tabs, no `/api/timeline` board fetch, and `?view=timeline` (or a legacy `?pr=<id>`) lands on the
+// default view instead (docs/FRONTEND.md § Features shown). Its default is OFF for EVERY install,
+// existing ones too: it was never a switch before, so no stored value can say the reader chose it.
+//
+// One rule for all five: a stored switch wins; with none stored, the DEFAULT applies:
+//   • the Timeline is off;
+//   • an EXISTING install (the account had repositories before migration 0153) shows the other four;
 //   • otherwise Bots Monitoring and Feed start hidden, Reports shows once a repository's 90-day
 //     backfill has finished, and This Sprint shows once a sprint source exists.
 // Stored as overrides only (`accounts.feature_settings`), so a later change to a default reaches
 // everyone who never touched the switch.
 
-export type FeatureId = 'bots' | 'feed' | 'reports' | 'sprint';
+export type FeatureId = 'bots' | 'feed' | 'reports' | 'sprint' | 'timeline';
 
 /** Settings order. */
-export const FEATURE_IDS: readonly FeatureId[] = ['feed', 'reports', 'sprint', 'bots'];
+export const FEATURE_IDS: readonly FeatureId[] = ['timeline', 'feed', 'reports', 'sprint', 'bots'];
 
 /** The stored switches, overrides only. An absent key = the default. */
 export type FeatureSettings = Partial<Record<FeatureId, boolean>>;
@@ -42,6 +49,8 @@ export type FeaturesStatus = Record<FeatureId, FeatureStatus>;
 
 /** The default for one feature, from the facts. */
 export function featureDefault(id: FeatureId, facts: FeatureFacts): boolean {
+  // Off for everyone, before the existing-install rule (see the header).
+  if (id === 'timeline') return false;
   if (facts.existingInstall) return true;
   switch (id) {
     case 'bots':

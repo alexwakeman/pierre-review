@@ -641,10 +641,12 @@ first-onboarding lookback; docs/FRONTEND.md § Pending on the first landing.
 
 ## `accounts.feature_settings` + `accounts.features_existing_install` (CORE — Settings → Features)
 
-Migration `0153`. `feature_settings` is JSON holding OVERRIDES ONLY — `{feed?, reports?, sprint?,
-bots?}` booleans, whether each sidebar destination shows; NULL = every default applies.
+Migration `0153`. `feature_settings` is JSON holding OVERRIDES ONLY — `{timeline?, feed?, reports?,
+sprint?, bots?}` booleans, whether each sidebar destination shows; NULL = every default applies.
 `features_existing_install` (integer boolean, NOT NULL default 0) is stamped ONCE by the migration for an
-account that already had repos, and is never written again: its defaults show everything. Both are
+account that already had repos, and is never written again: its defaults show everything except the
+Timeline, which defaults OFF for every account (no migration: `timeline` was never stored before, so an
+absent key already means off). Both are
 resolved by shared `resolveFeatures` with the DB-only facts from `db/feature-gates.ts` (a finished
 backfill; a sprint source). Visibility only — nothing else reads them. Written only by `PUT
 /api/me/feature-settings`; exported with the account; erased with the `accounts` row (no new table, so

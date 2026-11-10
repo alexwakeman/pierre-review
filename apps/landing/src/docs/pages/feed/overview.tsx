@@ -93,7 +93,10 @@ export default function Page(): JSX.Element {
           Open a comment card to read it in full, react to it, reply, or view it on GitHub. Long comments are
           shortened until you open them.
         </li>
-        <li>Choose the Focus button on a card to open that pull request in a Focus tab on the Timeline.</li>
+        <li>
+          With the Timeline on, choose the Focus button on a card to open that pull request in a Focus tab on the
+          Timeline.
+        </li>
         <li>Choose a person's name to see their recent activity.</li>
       </ul>
       <H3>One pull request, one repository, one person</H3>

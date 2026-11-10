@@ -55,8 +55,13 @@ export const DESTINATIONS: readonly Destination[] = [
  * SETTINGS → FEATURES (shared features.ts): the destinations a switch can hide. Hiding is VISIBILITY
  * ONLY — the sidebar, the bottom bar, the key sheet and ⌘K leave it out, while a deep link, the
  * `g` keys and every background job still reach it.
+ *
+ * ⚠ EXCEPT THE TIMELINE: off is off. It is listed only on an explicit `visible: true` (no switches
+ * on the wire = off), and `g t`, a deep link and every Focus entry point go nowhere while it is off
+ * (store/pinnedTabs.ts `gateTimelineTab`).
  */
 export const DESTINATION_FEATURE: Partial<Record<DestinationId, FeatureId>> = {
+  timeline: 'timeline',
   feed: 'feed',
   insights: 'reports',
   sprint: 'sprint',
@@ -64,7 +69,7 @@ export const DESTINATION_FEATURE: Partial<Record<DestinationId, FeatureId>> = {
 };
 
 /** What decides whether a destination is listed. `features` absent (an older server, or /api/me not
- *  loaded yet) lists everything, as before Features existed. */
+ *  loaded yet) lists everything but the Timeline, as before Features existed. */
 export interface NavGates {
   aiOn: boolean;
   features: FeaturesStatus | undefined;
@@ -73,6 +78,7 @@ export interface NavGates {
 export function isDestinationShown(d: Destination, gates: NavGates): boolean {
   if (d.aiOnly === true && !gates.aiOn) return false;
   const f = DESTINATION_FEATURE[d.id];
+  if (f === 'timeline') return gates.features?.timeline?.visible === true;
   if (f == null || gates.features == null) return true;
   return gates.features[f]?.visible !== false;
 }
@@ -121,6 +127,7 @@ export function currentLocation(
     if (activityRepoId === 'docs-search') return 'docs';
     return activityRepoId ?? 'open-prs';
   }
+  // A stale key: App draws the board, or (Timeline off) nothing until the store moves to Activity.
   if (!isFixedView(activeTab) && !tabs.some((t) => t.key === activeTab)) return 'timeline';
   return null;
 }
@@ -128,6 +135,7 @@ export function currentLocation(
 /** Go to a destination or a repo console — the click of the old tab row / rail, nothing more. */
 export function goTo(to: DestinationId | number): void {
   const tabs = usePinnedTabs.getState();
+  // With the Timeline off this does nothing (showTimeline is gated), so `g t` goes nowhere.
   if (to === 'timeline') tabs.showTimeline();
   else if (to === 'sprint') tabs.showSprint();
   else {

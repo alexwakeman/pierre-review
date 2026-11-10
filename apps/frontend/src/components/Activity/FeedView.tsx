@@ -31,7 +31,7 @@ import { useBotColors } from '../../hooks/useBotColors.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters, type FeedAuthors } from '../../store/filters.js';
-import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
+import { usePinnedTabs, useTimelineOn, type TabMeta } from '../../store/pinnedTabs.js';
 import {
   botVendorMeta,
   buildQuotedReply,
@@ -305,6 +305,8 @@ export function FeedView({
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
+  // Settings → Features → Timeline off: no Focus button on the rows.
+  const timelineOn = useTimelineOn();
 
   // Detected reviewers for the ACTIVE WORKSPACE (CORE / free) → the actor→row map that lets
   // in-house AI / Pierre actors carry a vendor tag (login-based vendors don't need it).
@@ -1513,7 +1515,7 @@ export function FeedView({
               innerRef={getInnerRef(item.id)}
               onOpen={open}
               onOpenThread={openThread}
-              onFocus={focus}
+              onFocus={timelineOn ? focus : undefined}
             />
           ))}
           {win.bottom > 0 && <li aria-hidden style={{ height: win.bottom }} />}
@@ -1866,7 +1868,8 @@ type FeedRowProps = {
   innerRef: (el: HTMLLIElement | null) => void;
   onOpen: (item: ConsolidatedFeedItem) => void;
   onOpenThread: (item: ConsolidatedFeedItem, threadId: number) => void;
-  onFocus: (item: ConsolidatedFeedItem) => void;
+  /** Absent while the Timeline is off (no Focus tabs). */
+  onFocus?: (item: ConsolidatedFeedItem) => void;
 };
 
 function FeedRowImpl({
@@ -2065,7 +2068,7 @@ function FeedRowImpl({
           )}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1">
-            {item.prId != null && (
+            {item.prId != null && onFocus != null && (
               <button
                 type="button"
                 onClick={(e) => {

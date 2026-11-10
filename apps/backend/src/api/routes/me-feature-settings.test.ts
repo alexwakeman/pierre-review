@@ -6,7 +6,8 @@
 //  2. A NEW install starts with Feed and Bots Monitoring hidden; Reports shows once a repo's backfill
 //     has finished; This Sprint once a sprint source exists (a configured Jira/Linear/Notion tracker
 //     not yet read as "no sprint", or a read that found a sprint / a milestone with a due date).
-//  3. An EXISTING install shows everything; a stored switch still wins.
+//  3. An EXISTING install shows everything but the Timeline; a stored switch still wins.
+//  5. The Timeline is OFF by default for every install, and a stored `timeline: true` turns it on.
 //  4. The PUT stores overrides only, echoes what was stored, and /api/me agrees at once.
 import { readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -100,7 +101,7 @@ describe('migration 0153', () => {
 
 describe('GET /api/me features', () => {
   it('a new install hides Feed and Bots, and Reports and This Sprint until their facts hold', async () => {
-    expect(await visible()).toEqual({ feed: false, reports: false, sprint: false, bots: false });
+    expect(await visible()).toEqual({ timeline: false, feed: false, reports: false, sprint: false, bots: false });
   });
 
   it('Reports shows once a repository has finished its backfill', async () => {
@@ -143,13 +144,15 @@ describe('GET /api/me features', () => {
     expect((await visible()).sprint).toBe(true);
   });
 
-  it('an existing install shows everything by default', async () => {
+  it('an existing install shows everything by default except the Timeline', async () => {
     await db.delete(schema.sprintReads).execute();
     await db.delete(schema.workspaceTrackers).execute();
     await db.delete(schema.syncState).execute();
     await setExisting(true);
     const f = (await me()).features;
-    expect(Object.values(f).every((s: any) => s.visible && s.defaultOn && s.setting === null)).toBe(true);
+    const { timeline, ...rest } = f;
+    expect(Object.values(rest).every((s: any) => s.visible && s.defaultOn && s.setting === null)).toBe(true);
+    expect(timeline).toEqual({ visible: false, setting: null, defaultOn: false });
     await setExisting(false);
   });
 });
@@ -166,8 +169,16 @@ describe('PUT /api/me/feature-settings', () => {
   it('a stored switch beats an existing install', async () => {
     await setExisting(true);
     await put({ settings: { reports: false } });
-    expect(await visible()).toEqual({ feed: true, reports: false, sprint: true, bots: true });
+    expect(await visible()).toEqual({ timeline: false, feed: true, reports: false, sprint: true, bots: true });
     await setExisting(false);
+  });
+
+  it('the Timeline turns on only by a stored switch', async () => {
+    const res = await put({ settings: { timeline: true } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().featureSettings).toEqual({ timeline: true });
+    expect(res.json().features.timeline).toEqual({ visible: true, setting: true, defaultOn: false });
+    expect((await visible()).timeline).toBe(true);
   });
 
   it('null resets every switch; a non-boolean is refused', async () => {

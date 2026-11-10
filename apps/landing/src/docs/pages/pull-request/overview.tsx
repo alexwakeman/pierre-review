@@ -82,7 +82,7 @@ export default function Page(): JSX.Element {
           <Ui>Open full-screen in its own tab</Ui> (when it is open in a pane).
         </li>
         <li>
-          <Ui>Show on the timeline</Ui> and <Ui>Focus in its own timeline tab</Ui>. See{' '}
+          <Ui>Show on the timeline</Ui> and <Ui>Focus in its own timeline tab</Ui>, when the Timeline is on. See{' '}
           <DocLink to="timeline/focus-a-pull-request">Focus one pull request</DocLink>.
         </li>
         <li>

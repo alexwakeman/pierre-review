@@ -14,6 +14,7 @@ describe('resolveFeatures: the defaults', () => {
   it('a new install hides Feed and Bots; Reports and This Sprint wait on their facts', () => {
     const f = resolveFeatures(null, NEW);
     expect(Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.visible]))).toEqual({
+      timeline: false,
       feed: false,
       reports: false,
       sprint: false,
@@ -23,8 +24,11 @@ describe('resolveFeatures: the defaults', () => {
     expect(ready.reports.visible && ready.sprint.visible).toBe(true);
     expect(ready.feed.visible || ready.bots.visible).toBe(false);
   });
-  it('an existing install shows everything; a stored switch wins either way', () => {
-    expect(Object.values(resolveFeatures(null, EXISTING)).every((s) => s.visible)).toBe(true);
+  it('an existing install shows everything but the Timeline; a stored switch wins either way', () => {
+    const { timeline, ...rest } = resolveFeatures(null, EXISTING);
+    expect(Object.values(rest).every((s) => s.visible)).toBe(true);
+    expect(timeline).toEqual({ visible: false, setting: null, defaultOn: false });
+    expect(resolveFeatures({ timeline: true }, EXISTING).timeline.visible).toBe(true);
     const f = resolveFeatures({ reports: false, feed: true }, NEW);
     expect(f.feed).toEqual({ visible: true, setting: true, defaultOn: false });
     expect(resolveFeatures({ reports: false }, EXISTING).reports.visible).toBe(false);
@@ -54,13 +58,16 @@ describe('nextFeatureSettings: overrides only', () => {
 });
 
 describe('the sidebar gate', () => {
-  it('lists every destination when /api/me carries no switches (older server, or not loaded)', () => {
-    expect(ids({ aiOn: true, features: undefined })).toEqual(DESTINATIONS.map((d) => d.id));
+  it('lists every destination but the Timeline when /api/me carries no switches (older server, or not loaded)', () => {
+    expect(ids({ aiOn: true, features: undefined })).toEqual(DESTINATIONS.map((d) => d.id).filter((id) => id !== 'timeline'));
   });
   it('leaves out a hidden destination, and keeps the AI gate', () => {
     const shown = ids({ aiOn: false, features: resolveFeatures(null, NEW) });
-    expect(shown).toEqual(['open-prs', 'attention', 'timeline']);
-    expect(ids({ aiOn: true, features: resolveFeatures(null, EXISTING) })).toEqual(DESTINATIONS.map((d) => d.id));
+    expect(shown).toEqual(['open-prs', 'attention']);
+    expect(ids({ aiOn: true, features: resolveFeatures(null, EXISTING) })).toEqual(
+      DESTINATIONS.map((d) => d.id).filter((id) => id !== 'timeline'),
+    );
+    expect(ids({ aiOn: true, features: resolveFeatures({ timeline: true }, EXISTING) })).toEqual(DESTINATIONS.map((d) => d.id));
   });
   it('a deep link to a hidden destination still lands there', () => {
     const features = resolveFeatures(null, NEW);

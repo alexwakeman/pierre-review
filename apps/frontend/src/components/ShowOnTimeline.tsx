@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { EventType } from '@pierre-review/shared';
 import { useFilters } from '../store/filters.js';
-import { usePinnedTabs, type TabMeta } from '../store/pinnedTabs.js';
+import { usePinnedTabs, useTimelineOn, type TabMeta } from '../store/pinnedTabs.js';
 import { MagnifierIcon } from './Icons.js';
 
 // The PR whose detail is currently open, so a per-thread / per-comment "Show" can open
@@ -33,7 +33,8 @@ export function ShowOnTimeline({
   // Render as a text link with this wording instead of the magnifier icon.
   label?: string;
   className?: string;
-}): JSX.Element {
+}): JSX.Element | null {
+  const timelineOn = useTimelineOn();
   const showEventOnTimeline = useFilters((s) => s.showEventOnTimeline);
   const focusEventInTab = useFilters((s) => s.focusEventInTab);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
@@ -51,6 +52,9 @@ export function ShowOnTimeline({
       showEventOnTimeline(prId, at, event);
     }
   };
+
+  // Settings → Features → Timeline off: there is no timeline to show it on.
+  if (!timelineOn) return null;
 
   if (label != null) {
     return (

@@ -110,8 +110,10 @@ await db
     avatarUrl: null,
     isLocal: true,
     lastLoginAt: now,
-    // Settings → Features: the demo is an EXISTING install, so every destination shows.
+    // Settings → Features: the demo is an EXISTING install, so every destination shows, and the
+    // Timeline (off by default for everyone) is switched on, as a reader who uses it would have.
     featuresExistingInstall: true,
+    featureSettings: { timeline: true },
   })
   .where(eq(schema.accounts.id, 1))
   .execute();

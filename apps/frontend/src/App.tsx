@@ -34,7 +34,7 @@ import { ConflictResolverOverlay } from './components/conflicts/ConflictResolver
 import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.js';
 import { DependencyMergeToast } from './components/Activity/DependencyMergeAll.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
-import { useUrlState } from './hooks/useUrlState.js';
+import { markUrlCorrection, useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
@@ -43,7 +43,7 @@ import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
 import { useNotificationPref, notificationsSupported } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
-import { boardSlotMode, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
+import { boardSlotMode, gateTimelineTab, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { Wordmark } from './components/Wordmark';
 import { CommandPalette } from './components/ui/CommandPalette.js';
@@ -94,6 +94,25 @@ export default function App(): JSX.Element {
   const settingsOpen = useSettingsModal((s) => s.open);
   const settingsFocus = useSettingsModal((s) => s.focus);
   const closeSettings = useSettingsModal((s) => s.closeSettings);
+
+  // SETTINGS → FEATURES → TIMELINE (shared features.ts): off by default, and off means no board, no
+  // Focus tabs and no board fetch. Seated once /api/me has answered (a failed /api/me reads as off);
+  // until then the store's null gates nothing and the slot below mounts no board. A move off the
+  // board here is a CORRECTION (`view=timeline` from a link, a Focus tab from storage): it replaces
+  // the history entry instead of pushing one.
+  const timelineSetting = me.data != null || !me.isPending ? me.data?.features?.timeline?.visible === true : null;
+  useEffect(() => {
+    if (timelineSetting == null) return;
+    const tabsApi = usePinnedTabs.getState();
+    if (tabsApi.timelineOn === timelineSetting) return;
+    const moves =
+      !timelineSetting &&
+      (gateTimelineTab(tabsApi.activeTab, tabsApi.tabs, false) !== tabsApi.activeTab ||
+        tabsApi.tabs.some((t) => t.kind === 'pr-focus'));
+    if (moves) markUrlCorrection();
+    tabsApi.setTimelineOn(timelineSetting);
+  }, [timelineSetting]);
+  const timelineOn = usePinnedTabs((s) => s.timelineOn === true);
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews. Shared pref
   // (the Claude-review banner reads it too); the watcher fires only while granted + enabled. The
@@ -169,7 +188,7 @@ export default function App(): JSX.Element {
   const phoneLayout = useTimelineLayout((s) => s.phone);
   // …and so may a touch tablet below lg (useTimelineListCapable).
   const listCapable = useTimelineListCapable();
-  const phoneTimelineList = listCapable && phoneLayout === 'list' && boardMode == null;
+  const phoneTimelineList = timelineOn && listCapable && phoneLayout === 'list' && boardMode == null;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -290,7 +309,8 @@ export default function App(): JSX.Element {
                 mode = a PR's own timeline — each a keyed remount so vis tears down cleanly
                 (never reconfigured in place). */}
             <section ref={timelineSectionRef} className="relative min-h-0 flex-1 overflow-hidden">
-              {boardMode == null ? (
+              {/* Timeline off (or not known yet): no board at all — every view is an overlay. */}
+              {!timelineOn ? null : boardMode == null ? (
                 <Timeline key="board" />
               ) : (
                 <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
