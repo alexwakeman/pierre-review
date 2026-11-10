@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-11-10
+
 ### Added
 
 - Documentation at limn-review.com/docs: every page and tab of the app, AI review, AI Fix,
