@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-11-10
+
 ### Added
 
 - Open tabs: hover a tab in the sidebar (or move to it with the keyboard) to see a short card that
