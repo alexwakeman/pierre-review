@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-11-10
+
 ### Added
 
 - Settings → Sandbox: one line says how many Limn sandboxes are running now, with "Stop all" to stop
