@@ -105,17 +105,6 @@ const SECTION_DEFS: readonly SectionDef[] = [
     ],
   },
   {
-    id: 'feed',
-    title: 'Feed',
-    group: 'The app',
-    writer: 'W1',
-    blurb: 'One stream of activity across every repository in the workspace.',
-    pages: [
-      { slug: 'overview' },
-      { slug: 'people-and-bots' },
-    ],
-  },
-  {
     id: 'docs-library',
     title: 'Docs library',
     group: 'The app',
@@ -127,6 +116,17 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'read-and-ask' },
       { slug: 'search' },
       { slug: 'docs-in-reviews' },
+    ],
+  },
+  {
+    id: 'feed',
+    title: 'Feed',
+    group: 'The app',
+    writer: 'W1',
+    blurb: 'One stream of activity across every repository in the workspace.',
+    pages: [
+      { slug: 'overview' },
+      { slug: 'people-and-bots' },
     ],
   },
   {

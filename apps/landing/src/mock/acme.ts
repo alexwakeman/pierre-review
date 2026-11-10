@@ -48,7 +48,7 @@ export const STORY = {
   title: 'Partial refunds',
   criteria: [
     { n: 1, text: 'Partial refund keeps the order open', status: 'Met', tone: 'green' },
-    { n: 2, text: 'Customer gets one email', status: 'At risk', tone: 'amber' },
+    { n: 2, text: 'Customer gets one email', status: 'Partly met', tone: 'amber' },
     { n: 3, text: 'No refunds after 30 days', status: 'Not met', tone: 'red' },
     { n: 4, text: 'Refund reaches the daily ledger', status: 'Met', tone: 'green' },
   ] as { n: number; text: string; status: string; tone: Tone }[],
