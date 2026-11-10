@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.20] - 2026-11-10
+
 ### Changed
 
 - AI Review: the right-hand column starts with the pull request's latest commit (click to open it,
