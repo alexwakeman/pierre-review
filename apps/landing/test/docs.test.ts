@@ -61,6 +61,12 @@ describe('the docs cover the app', () => {
     const labels = all(/\{ id: '[^']+', label: '([^']+)'/g, block(app('components/shell/nav.ts'), 'export const DESTINATIONS', '];', 'nav.ts'));
     expect([...SIDEBAR_LABELS]).toEqual(labels);
   });
+
+  it('the app\'s "?" button links only to docs pages that exist', () => {
+    const keys = all(/'([a-z-]+\/[a-z-]+)'/g, app('lib/docsLink.ts'));
+    expect(keys.length, 'read no docs keys from lib/docsLink.ts').toBeGreaterThan(5);
+    for (const key of keys) expect(pageForKey(key), `lib/docsLink.ts → ${key}`).not.toBeNull();
+  });
 });
 
 describe('the manifest', () => {

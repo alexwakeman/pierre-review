@@ -7,8 +7,8 @@ import { weightPhrase } from './settings/myTurnSettingsForm.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { useAiProvider } from '../hooks/useAiCapabilities.js';
 
-// Compact, scrollable help overlay opened from the sidebar's "?" button, ⌘K or the key sheet. A very brief
-// tour of the core flows — tracking repos, the timeline, focus mode, navigation.
+// Compact, scrollable help overlay opened from ⌘K ("Help and keyboard shortcuts"); the sidebar's
+// "?" opens the public docs instead (lib/docsLink.ts). A very brief tour of the core flows — tracking repos, the timeline, focus mode, navigation.
 // Dismissed via the backdrop, the X, or Escape. The Escape handler runs in the
 // capture phase and stops propagation so a stray dismiss doesn't also reach the
 // global keyboard hook (which would exit focus / clear the selection).

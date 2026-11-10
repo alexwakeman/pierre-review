@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from '../router';
 import { useSeo } from '../lib/seo';
-import { REPO_URL } from '../lib/site';
+import { REPO_URL, SITE_NAME } from '../lib/site';
+import { analyticsConfigured } from '../lib/analytics';
+import { changeCookieChoice } from '../components/Footer';
 import { GROUPS, PAGES, neighbours, pageForPath, sectionFor } from './manifest';
 import type { PageEntry, SectionEntry } from './types';
 import { DOCS_ROOT, docRoute } from './routes';
@@ -24,12 +26,32 @@ import './docs.css';
 //   article      breadcrumbs, title, summary, body, "Edit this page" / "Report a problem",
 //                previous / next.
 //   on this page the page's H2s (toc.ts), on the right at wide widths, at the top otherwise.
+//   legal line   the docs have NO site footer (App.tsx). One line ends the layout instead:
+//                Privacy, Cookies, Terms and "Cookie settings" (the consent-withdrawal control
+//                must be on every page). Contact is in the header; the changelog is in the
+//                contents and behind the version.
 //
 // The prerendered HTML is the first state: the current section open, the drawer closed, no
 // search. Collapsed lists are in the HTML with `hidden`, so every link is there for a crawler.
 // ---------------------------------------------------------------------------
 
 const SEARCH_LIMIT = 40;
+
+function DocsLegal(): JSX.Element {
+  return (
+    <nav className="dx-legal" aria-label="Legal">
+      <span>© 2026 {SITE_NAME}</span>
+      <Link to="/privacy">Privacy</Link>
+      <Link to="/cookies">Cookies</Link>
+      <Link to="/terms">Terms</Link>
+      {analyticsConfigured() && (
+        <button type="button" onClick={changeCookieChoice}>
+          Cookie settings
+        </button>
+      )}
+    </nav>
+  );
+}
 
 function matches(p: PageEntry, words: string[]): boolean {
   const hay = `${p.meta.title} ${p.meta.summary} ${sectionFor(p.section)?.title ?? ''}`.toLowerCase();
@@ -368,6 +390,7 @@ export function DocsApp({ path }: { path: string }): JSX.Element {
         </nav>
         {main}
       </div>
+      <DocsLegal />
       {drawer ? (
         <div className="dx-drawer-wrap" onKeyDown={onDrawerKey}>
           <button type="button" className="dx-scrim" aria-label="Close the contents" tabIndex={-1} onClick={close} />

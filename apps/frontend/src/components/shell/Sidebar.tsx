@@ -14,6 +14,7 @@ import { useNotificationToggle } from '../../hooks/useNotificationPref.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { useMe, useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 import { openPrsTabCount } from '../../lib/openPrsTab.js';
+import { docsUrlForView } from '../../lib/docsLink.js';
 import { storyTabLabels } from '../../lib/ticketTab.js';
 import { storyBuildTabLabels } from '../../lib/storyBuildTab.js';
 import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
@@ -811,7 +812,10 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
   const me = useMe();
   const meUser = me.data?.user ?? null;
   const openSettings = useSettingsModal((s) => s.openSettings);
-  const setHelpOpen = useShell((s) => s.setHelpOpen);
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const tabs = usePinnedTabs((s) => s.tabs);
+  const activityRepoId = useFilters((s) => s.activityRepoId);
+  const docsHref = docsUrlForView(activeTab, tabs, activityRepoId);
   const setShortcutsOpen = useShell((s) => s.setShortcutsOpen);
   const notif = useNotificationToggle();
   const small = cx(
@@ -840,15 +844,18 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
             <BellIcon size={SIDEBAR_ICON} filled={notif.enabled} />
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setHelpOpen(true)}
-          aria-label="Help"
-          title="Help — what is Limn and how to use it"
+        {/* The public docs, on the page for where the reader is (lib/docsLink.ts). The in-app help
+            sheet stays in ⌘K ("Help and keyboard shortcuts"); the key sheet is the next button. */}
+        <a
+          href={docsHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open the Limn docs"
+          title="Open the Limn docs"
           className={small}
         >
           <QuestionIcon size={SIDEBAR_ICON} />
-        </button>
+        </a>
         <button
           type="button"
           onClick={() => setShortcutsOpen(true)}

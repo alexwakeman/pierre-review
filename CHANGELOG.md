@@ -28,6 +28,12 @@ no internals.
 - AI Review: the earlier findings are part of "Findings". Still-open ones sit under "Open" with the
   new findings; the rest under "Resolved or addressed". Each earlier finding says in one line how it
   was dealt with, or what is still needed, with the reply and its buttons on the same row.
+- The "?" button at the foot of the sidebar opens the Limn docs in a new browser tab, on the page
+  for where you are (Pending opens the Pending docs). The in-app help is in Search or jump ("Help and
+  keyboard shortcuts"), the "?" key still opens the shortcut sheet, and Search or jump has "Open the
+  Limn docs".
+- The docs website: the pages under /docs no longer have the site footer. They end on one line with
+  Privacy, Cookies, Terms and Cookie settings.
 
 ### Removed
 

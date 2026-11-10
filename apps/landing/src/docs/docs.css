@@ -12,7 +12,7 @@
   --dx-toc-w: 230px;
   --dx-link: #e6c98f;
   --dx-line: #2c2d33;
-  padding-bottom: clamp(64px, 8vw, 120px);
+  padding-bottom: 24px;
 }
 
 /* ---- the docs bar ----------------------------------------------------- */
@@ -760,6 +760,38 @@
   font: 500 14px/1 'Albert Sans', system-ui, sans-serif;
   padding: 8px 12px;
   cursor: pointer;
+}
+
+/* ---- the legal line: the docs' only footer (DocsApp.tsx DocsLegal) ----- */
+.lb.docs .dx-legal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 20px;
+  margin-top: clamp(48px, 6vw, 96px);
+  padding: 16px 20px 0;
+  border-top: 1px solid var(--dx-line);
+  font-size: 14px;
+  color: var(--muted);
+}
+.lb.docs .dx-legal a {
+  text-decoration: none;
+}
+.lb.docs .dx-legal a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.lb.docs .dx-legal button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.lb.docs .dx-legal button:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 /* ---- breakpoints ------------------------------------------------------ */

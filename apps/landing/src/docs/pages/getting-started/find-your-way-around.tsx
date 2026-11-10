@@ -58,8 +58,10 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>The foot:</b> the sync state, your AI usage, the bell for{' '}
-          <DocLink to="pending/notifications">My Turn notifications</DocLink>, <Ui>Help</Ui>, the keyboard
-          shortcuts, light or dark, and your account menu. <Ui>Settings</Ui> is in the account menu.
+          <DocLink to="pending/notifications">My Turn notifications</DocLink>, the <Ui>?</Ui> button (these docs, in a
+          new browser tab, on the page for where you are), the keyboard shortcuts, light or dark, and your
+          account menu. <Ui>Settings</Ui> is in the account menu. The short in-app help is in{' '}
+          <Ui>Search or jump</Ui>: <Ui>Help and keyboard shortcuts</Ui>.
         </li>
       </ol>
 
