@@ -95,6 +95,13 @@ jobs:
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Releasing v$NEXT"
 
+      # THE CHANGELOG (docs/RELEASE.md § The changelog): everything under "## [Unreleased]" in
+      # CHANGELOG.md moves under "## [<version>] - <today>", in the SAME commit as the bump, so the
+      # docs site's changelog and version always agree with npm. An empty Unreleased gets a
+      # one-line maintenance entry. Idempotent on a re-run.
+      - name: Move Unreleased into the changelog
+        run: node scripts/changelog-release.mjs "${{ steps.bump.outputs.version }}"
+
       # THE SANDBOX IMAGE (docs/RELEASE.md § The sandbox image; docs/SANDBOX.md § The image). Built for
       # amd64 + arm64 from apps/backend/sandbox-image and pushed to GHCR as <version>; its manifest-list
       # DIGEST goes to `pnpm package`, which pins it in the release manifest (`limnSandboxImage`).
@@ -165,7 +172,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/backend/package.json
+          git add apps/backend/package.json CHANGELOG.md
           git commit -m "chore(release): bump to ${{ steps.bump.outputs.version }} [skip ci]"
           git tag "v${{ steps.bump.outputs.version }}"
           # Atomic: the commit and tag land together or not at all, so a rejected

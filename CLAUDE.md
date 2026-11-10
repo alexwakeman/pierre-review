@@ -11,11 +11,10 @@ organisations where ≤ 3 people use it; a commercial licence above that, via th
 competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.
 
-> **How to use this file.** This is the lean operating guide: the mental model, the commands,
-> and the invariants and landmines you must know BEFORE editing. Per-area depth lives in the
-> topic docs below — read the matching doc before non-trivial work in its area, and put NEW
-> detail there, not here. **This file has a hard size budget** (under 48k bytes); anything
-> discoverable by grepping the code or reading a route/table definition does not belong in it.
+> **How to use this file.** The lean operating guide: the mental model, the commands, and the
+> invariants and landmines to know BEFORE editing. Per-area depth is in the topic docs below —
+> read the matching one before non-trivial work in its area; put NEW detail there. **Hard size
+> budget: under 48k bytes**; nothing discoverable by grepping code or a route/table belongs here.
 
 ## Doc map
 
@@ -55,7 +54,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
                    idempotent)                  detail on demand) zustand, RQ)
 ```
 
-- **Sync** pulls PR activity into the DB; fully idempotent.
+- **Sync** pulls PR activity into the DB.
 - **The API** is a thin read layer; the timeline endpoint is deliberately _lean_, heavy detail
   fetched on demand.
 - **The frontend** is a timeline-first dashboard: server state in React Query, UI/filter state
@@ -97,8 +96,8 @@ credits, Stripe billing, the cloud benchmark collection ([docs/BACKEND.md](docs/
 
 ## Stack
 
-pnpm workspaces, TS + ESM, Node ≥22 · Fastify + Drizzle (SQLite), `node-cron`, pino · React + Vite +
-Tailwind + `vis-timeline`, Zustand, TanStack Query · `@octokit/graphql` (one fat query/repo) + REST.
+pnpm workspaces, TS + ESM, Node ≥22 · Fastify + Drizzle (SQLite), pino · React + Vite + Tailwind +
+`vis-timeline`, Zustand, TanStack Query · `@octokit/graphql` + REST.
 
 ## Repo layout
 
@@ -114,7 +113,7 @@ pierre-review/
 │  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
 │  └─ site/      the website service: landing + /api/contact (node:http, no runtime deps)
 └─ packages/
-   ├─ shared/    the contract between the apps (types + the few shared folds)
+   ├─ shared/    the contract between the apps (types + shared folds)
    └─ ml/        pierre-ml submodule: model assets + the Python severity-api. NOT a pnpm workspace.
 ```
 
@@ -124,7 +123,6 @@ All from the repo root unless noted.
 
 | Command | What it does |
 |---|---|
-| `pnpm install` | install all workspaces |
 | `pnpm dev` | backend (`:4000`) + frontend (`:5173`); bot comments scored in-process |
 | `pnpm dev:backend` / `dev:frontend` / `dev:ml` / `dev:site` | run one side only |
 | `pnpm build` · `pnpm typecheck` | recursive build · `tsc --noEmit` everywhere — **run typecheck before calling work done** |
@@ -580,7 +578,6 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
   `set:` — it builds `set:` from the provenance flags, and `role` is DERIVED.
 - **When a unique index CHANGES, every `onConflictDoUpdate` on that table must change with it** —
   a stale target type-checks and fails only when a row is actually written.
-- **Keep `/api/timeline` lean** — detail on demand via `/api/prs/:id`.
 - **A new GitHub-write route must STAMP or SETTLE-AND-VERIFY, THEN CASCADE**
   (`settlePrAfterWrite`, stating the expected effect; a merge calls `noteMergeLanded`); the SPA
   refetches through `invalidateAfterPrWrite`. ⚠ `visible:false` with a non-null `commentId` means
@@ -641,6 +638,9 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   CLICKABLE HTML mock (`apps/landing/src/components/mock/`, data in `src/mock/acme.ts`) — no product
   screenshots. ⚠ **A user-visible change a mock mirrors updates that mock IN THE SAME COMMIT**
   (mock → component table: [apps/landing/README.md](apps/landing/README.md)).
+- ⚠ **THE USER DOCS (`/docs`)**: a user-visible change updates its docs page and `CHANGELOG.md`
+  Unreleased in the same commit; remove sections for removed features
+  ([apps/landing/src/docs/CONTRIBUTING.md](apps/landing/src/docs/CONTRIBUTING.md)).
 
 ## Migrations
 

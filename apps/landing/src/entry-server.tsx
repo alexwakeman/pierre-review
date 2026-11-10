@@ -3,6 +3,17 @@ import App from './App';
 import { setStaticPath } from './router';
 import { ROUTE_SEO, NOT_FOUND_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE } from './lib/routes';
 import { SITE_NAME } from './lib/site';
+import { loadDocs } from './docs-loader';
+import { docsRouteSeo } from './docs/seo';
+
+/** Load the docs chunk once, before the first render() of a docs route (prerender.mjs awaits it). */
+export async function prepare(): Promise<void> {
+  await loadDocs();
+}
+
+/** Every docs route (/docs and each page) with its title and description, in reading order. */
+export const DOC_ROUTE_SEO = docsRouteSeo();
+export const DOC_PATHS = Object.keys(DOC_ROUTE_SEO);
 
 // Build-time render entry. Vite bundles this for Node (`vite build --ssr`), and
 // prerender.mjs calls render() once per route to bake real HTML into dist/.

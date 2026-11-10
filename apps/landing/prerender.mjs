@@ -108,9 +108,24 @@ execFileSync(
   { cwd: here, stdio: 'inherit' },
 );
 
-const { render, ROUTE_SEO, NOT_FOUND_SEO, PRERENDER_PATHS, SITE_URL, OG_IMAGE, SITE_NAME } = await import(
-  join(ssrDir, 'entry-server.js')
-);
+const {
+  render,
+  ROUTE_SEO: SITE_ROUTE_SEO,
+  NOT_FOUND_SEO,
+  PRERENDER_PATHS: SITE_PATHS,
+  DOC_ROUTE_SEO,
+  DOC_PATHS,
+  SITE_URL,
+  OG_IMAGE,
+  SITE_NAME,
+  prepare,
+} = await import(join(ssrDir, 'entry-server.js'));
+// The docs are their own chunk; load it once so render() stays synchronous.
+await prepare();
+
+// The marketing pages, then the docs (/docs and every page in the docs manifest).
+const ROUTE_SEO = { ...SITE_ROUTE_SEO, ...DOC_ROUTE_SEO };
+const PRERENDER_PATHS = [...SITE_PATHS, ...DOC_PATHS];
 
 // ---- 2. Render each route into the built shell ---------------------------------
 const template = readFileSync(join(dist, 'index.html'), 'utf8');
@@ -151,7 +166,7 @@ for (const path of PRERENDER_PATHS) {
 
   smallest = Math.min(smallest, html.length);
   written.push(path);
-  log(`${path.padEnd(14)} → ${(html.length / 1024).toFixed(1)} KB`);
+  if (!path.startsWith('/docs/')) log(`${path.padEnd(14)} → ${(html.length / 1024).toFixed(1)} KB`);
 }
 
 // ---- 3. Guardrails --------------------------------------------------------------
@@ -177,7 +192,13 @@ if (written.length !== PRERENDER_PATHS.length) {
       `a route was skipped: ${PRERENDER_PATHS.filter((p) => !written.includes(p)).join(', ')}`,
   );
 }
-if (written.length < 9) {
+// The docs: ~120 pages from the docs manifest. Same reasoning as the floor below — a manifest
+// that lost its sections would shrink DOC_PATHS with it. Lower this by hand when pages go.
+if (DOC_PATHS.length < 100) {
+  throw new Error(`only ${DOC_PATHS.length} docs routes — expected at least 100 (the docs manifest lost pages?)`);
+}
+log(`docs           → ${DOC_PATHS.length} pages`);
+if (written.length - DOC_PATHS.length < 9) {
   throw new Error(
     `only ${written.length} routes prerendered — expected at least 9. ` +
       `If you deliberately removed a route, lower this floor in the same change.`,
@@ -235,6 +256,21 @@ log(`aliased ${Object.keys(ALIASES).length} legacy routes → the surviving page
   html = replaceBetween(html, APP_MARKERS, body, 'app');
   writeFileSync(join(dist, '404.html'), html);
   log(`404 page        → ${(html.length / 1024).toFixed(1)} KB`);
+}
+
+// The sitemap: public/sitemap.xml lists the marketing pages by hand; every docs route is added
+// here from the manifest, so a new docs page is in the sitemap without anyone remembering it.
+{
+  const file = join(dist, 'sitemap.xml');
+  const xml = readFileSync(file, 'utf8');
+  if (!xml.includes('</urlset>')) throw new Error('dist/sitemap.xml has no </urlset>');
+  const today = new Date().toISOString().slice(0, 10);
+  const entries = DOC_PATHS.map(
+    (p) =>
+      `  <url>\n    <loc>${SITE_URL}${p}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>${p === '/docs' ? '0.8' : '0.6'}</priority>\n  </url>`,
+  ).join('\n');
+  writeFileSync(file, xml.replace('</urlset>', `${entries}\n</urlset>`));
+  log(`sitemap        → +${DOC_PATHS.length} docs routes`);
 }
 
 rmSync(ssrDir, { recursive: true, force: true });

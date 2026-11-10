@@ -17,6 +17,8 @@ import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
 import Terms from './pages/Terms';
+import { DocsRoute } from './docs-loader';
+import { isDocsPath } from './docs/routes';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
@@ -74,6 +76,8 @@ function NotFound(): JSX.Element {
 
 export default function App(): JSX.Element {
   const path = useRoute();
+  // /docs and every page under it: the docs layout, in its own chunk (docs-loader.tsx).
+  const docs = isDocsPath(path);
   const Page = ROUTES[path] ?? NotFound;
 
   // Re-arm analytics on mount for a visitor who consented on a PREVIOUS visit: the
@@ -96,7 +100,7 @@ export default function App(): JSX.Element {
       <div className="lb-app">
         <Nav />
         <main>
-          <Page />
+          {docs ? <DocsRoute path={path} /> : <Page />}
         </main>
         <Footer />
         <CookieBanner />

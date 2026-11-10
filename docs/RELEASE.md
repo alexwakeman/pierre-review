@@ -31,13 +31,16 @@ On every release run it:
    --no-git-tag-version`, default `patch`), and then skips forward past any version
    whose tag already exists. So a run never reuses or collides with an existing
    version even if `main`, the tags, and npm have drifted apart.
+4a. **Moves the changelog**: `node scripts/changelog-release.mjs <version>` moves everything under
+   `## [Unreleased]` in `CHANGELOG.md` to `## [<version>] - <today>` (see
+   [The changelog](#the-changelog)).
 4b. **Publishes the sandbox image** to GHCR (amd64 + arm64) and hands its digest to step 5 — NON-FATAL;
    see [The sandbox image](#the-sandbox-image).
 5. **Builds** the publishable package with `pnpm package`
    (`scripts/build-release.mjs` assembles `./release`, copies the bumped version
    into `release/package.json`, and self-verifies — it exits non-zero on any
    problem).
-6. **Commits & pushes** the bump as `chore(release): bump to X.Y.Z [skip ci]`
+6. **Commits & pushes** the bump (`apps/backend/package.json` + `CHANGELOG.md`) as `chore(release): bump to X.Y.Z [skip ci]`
    plus a `vX.Y.Z` git tag to `main`, in a single **atomic** push
    (`git push --atomic`) — so a rejected push never leaves a dangling tag behind.
 7. **Publishes** `./release` to npm with `npm publish --access public`,
@@ -318,6 +321,28 @@ It is **not enabled by default.** To turn it on:
 
 ---
 
+## The changelog
+
+`CHANGELOG.md` at the repository root is the user-facing record of every release, from 1.0.14
+(2026-11-09) on. It is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) shaped:
+`## [Unreleased]`, then `## [x.y.z] - YYYY-MM-DD` newest first, each with `### Added` /
+`Changed` / `Fixed` / `Removed` and one `- ` line per change. The landing renders it at
+`/docs/changelog` (parsed at build time).
+
+- **WE write the entries, in the same commit as the change**: a user-visible change adds a line
+  under `## [Unreleased]`, in plain English, naming the screen in the app's own words. No file
+  names, no internals. A change nobody using Limn would notice gets no line.
+- **The release workflow names the version.** `scripts/changelog-release.mjs <version>` (step
+  4a) moves the Unreleased text under the new heading and leaves an empty `## [Unreleased]` on
+  top; the bump commit carries it with `package.json`. Never type a version heading by hand. An
+  empty Unreleased still gets its heading with "Maintenance release: no changes you would notice",
+  so the newest heading is ALWAYS the npm version — `apps/landing/test/docs.test.ts` checks that,
+  and that the file parses (a release heading with no date fails it).
+- **The site follows the release.** The bump commit is a `chore(release):` commit, which never
+  triggers a push run, so `deploy-site.yml` also runs on `workflow_run` after every successful
+  Release and rebuilds from the newest `main`. The docs header shows the version from
+  `apps/backend/package.json`, read when the landing is built.
+
 ## The website (`deploy-site.yml`)
 
 limn-review.com is a separate deploy, unrelated to the npm release: ONE small Node
@@ -329,10 +354,12 @@ database and no sign-in in it. The static demo that used to live at `/demo/` was
 
 `.github/workflows/deploy-site.yml` runs on pushes to `main` that touch `apps/landing`,
 `apps/site`, the `Dockerfile`, `.dockerignore`,
-`railway.json`, the lockfile or the root `package.json` (plus manual dispatch; the release
-bot's `chore(release):` commits never redeploy):
+`railway.json`, `CHANGELOG.md`, the lockfile or the root `package.json`, plus manual dispatch and
+a `workflow_run` after every successful Release (the release bot's `chore(release):` push itself
+never redeploys; the workflow_run does, so the docs show the released version and changelog):
 
-1. **test** — `pnpm --filter @pierre-review/site test` and the landing build (the
+1. **test** — `pnpm --filter @pierre-review/site test`, the landing's docs test
+   (`apps/landing/test/docs.test.ts`) and the landing build (the
    prerender guardrails throw on a contentless page, so a broken prerender fails here,
    not on the live site).
 2. **build-and-push** — `docker build` of the root `Dockerfile` (landing, then the site

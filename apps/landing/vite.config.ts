@@ -1,11 +1,21 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+// The docs header shows the current Limn version: the npm package's, from the backend's
+// package.json, which the release workflow bumps (apps/landing/src/docs/version.ts).
+const LIMN_VERSION: string = JSON.parse(
+  readFileSync(new URL('../backend/package.json', import.meta.url), 'utf8'),
+).version;
 
 // Public marketing site. Independent of the timeline SPA; served at `/` by the tiny
 // site service in apps/site (which also serves the contact form's API). A distinct dev port keeps it from colliding with the frontend (5173).
 export default defineConfig({
   plugins: [react()],
   base: '/',
+  define: {
+    __LIMN_VERSION__: JSON.stringify(LIMN_VERSION),
+  },
   server: {
     port: 5174,
     // The contact form is the only thing on this site that talks to a server, and

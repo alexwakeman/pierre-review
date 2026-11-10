@@ -24,6 +24,7 @@ plus the three legal ones:
 | `/teams` | `pages/Teams.tsx` | For teams: several teammates each running Limn, with GitHub as the go-between — team claims (one review per commit per provider), the author can't approve their own PR, one review across teammates, Waiting on others, what it never does, and the licence above the free size |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
+| `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner. Terms summarise the Limn License and defer to it |
 
 **THE DESIGN IS ONE DARK "BOARD OF TILES"**, on every page. `src/board.css` holds the
@@ -123,6 +124,42 @@ tables together. `prerender.mjs` also writes `dist/404.html`, which `apps/site` 
 Everything is mobile-first; the app itself is desktop-only today (called out on the site),
 so the marketing pages are the phone-friendly surface.
 
+## The docs (`/docs`)
+
+The user documentation lives in `src/docs/` (its own chunk: the marketing pages never load it).
+**How to write and keep it current: [`src/docs/CONTRIBUTING.md`](src/docs/CONTRIBUTING.md).**
+The rule: a user-visible change updates its docs page and `CHANGELOG.md`'s Unreleased in the same
+commit; a removed feature removes its docs.
+
+- **One file per page**, `src/docs/pages/<section>/<slug>.tsx` (`meta` + a hook-free body), listed
+  in reading order in ONE manifest, `src/docs/manifest.ts`, which also maps the app's sidebar
+  destinations, pull request tabs, Settings tabs, Pending / Reports / Bots Monitoring tabs to their
+  pages (`APP_COVERAGE`).
+- **The layout** (`DocsApp.tsx`, `docs.css`): a left-hand contents list whose sections stay
+  collapsed until pressed (the current section opens by itself), a drawer below 961px, search over
+  titles and summaries, breadcrumbs, "On this page", previous / next, "Edit this page" and
+  "Report a problem". The header shows the current Limn version (`apps/backend/package.json`,
+  read at build time) and links to the changelog.
+- **The changelog** (`/docs/changelog`) is `CHANGELOG.md` at the repository root, parsed at build
+  time. The release workflow moves its Unreleased entries under the new version
+  (`docs/RELEASE.md` § The changelog), and `deploy-site.yml` rebuilds the site after every release.
+- **Pictures are HTML mocks** from `src/docs/kit.tsx` (which re-exports the mock kit below), never
+  screenshots.
+- **Prerendered**: `prerender.mjs` writes every docs route with its own title and description, and
+  adds each to `dist/sitemap.xml`.
+- **Tested**: `test/docs.test.ts` (`pnpm --filter @pierre-review/landing test`, run by CI, the
+  release and the site deploy).
+
+The docs sections mirror the app:
+
+| Docs section | The app (`apps/frontend/src/…`) |
+|---|---|
+| Open pull requests, Pending, This Sprint, Timeline, Docs library, Feed, Reports, Bots Monitoring | the sidebar's destinations (`components/shell/nav.ts` `DESTINATIONS`), each area's tabs |
+| The pull request view | `components/PrDetail.tsx` `TAB_LABELS` (one page per tab) |
+| Settings | `components/settings/settingsTabs.ts` `SETTINGS_TABS` (one page per tab) |
+| AI review, Story checks, AI Fix, Implement story, Merging | the AI Review / AI Fix / Ticket tabs, the story view, the merge controls and the conflict resolver |
+| Integrations | one page per vendor: GitHub, Claude, Codex, Jira, GitHub Issues, Linear, Notion, Confluence, SonarCloud, Slack, Docker and microsandbox |
+
 ## Google Analytics (fill in later)
 
 GA4 is wired but silent until you provide a Measurement ID (`G-XXXXXXXXXX`). Either:
@@ -166,4 +203,5 @@ responsive regressions.
 
 ## Commands
 
-`pnpm --filter @pierre-review/landing {dev,build,preview,typecheck}` — dev server on `:5174`.
+`pnpm --filter @pierre-review/landing {dev,build,preview,typecheck,test}` — dev server on `:5174`;
+`test` is the docs test.

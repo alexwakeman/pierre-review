@@ -8,7 +8,11 @@ name: Deploy site
 # and no private code in this image. It replaced deploy-cloud.yml, which built the old
 # hosted app with the private Pro plugin.
 #
-# Runs on pushes to main that touch the site (see `paths`) and on manual dispatch.
+# Runs on pushes to main that touch the site (see `paths`), on manual dispatch, and AFTER EVERY
+# SUCCESSFUL RELEASE (workflow_run): the release workflow bumps apps/backend/package.json and moves
+# CHANGELOG.md's Unreleased entries under the new version in a `chore(release):` commit that never
+# triggers a push run, so this rebuild is what puts the released version and its changelog on
+# limn-review.com/docs (docs/RELEASE.md § The changelog).
 #
 # Repo secrets (all optional):
 #   VITE_GA_ID       build-time Google Analytics id, inlined into the landing bundles.
@@ -33,11 +37,16 @@ name: Deploy site
 
 on:
   workflow_dispatch: {}
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
   push:
     branches: [main]
     paths:
       - 'apps/landing/**'
       - 'apps/site/**'
+      - 'CHANGELOG.md'
       - 'Dockerfile'
       - '.dockerignore'
       - 'railway.json'
@@ -60,7 +69,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     # The release workflow's `chore(release): bump … [skip ci]` commits never redeploy.
-    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    # A workflow_run deploy (after a release) runs only when the release succeeded; it checks out
+    # the newest main, which holds the bump commit.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore(release):')) }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -71,6 +82,10 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @pierre-review/landing... --filter @pierre-review/site...
       - name: Site service tests
         run: pnpm --filter @pierre-review/site test
+      # The docs: every app page/tab has a docs page, no stubs, no images, no broken links, and
+      # the changelog's newest release is the package version.
+      - name: Landing tests (the docs)
+        run: pnpm --filter @pierre-review/landing test
       - name: Landing build (prerender guardrails)
         run: pnpm --filter @pierre-review/landing build
 

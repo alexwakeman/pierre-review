@@ -20,5 +20,7 @@ apps/backend/.env
 .claude
 docs
 *.md
+# The landing renders the changelog into /docs/changelog at build time.
+!CHANGELOG.md
 .DS_Store
 **/.DS_Store
