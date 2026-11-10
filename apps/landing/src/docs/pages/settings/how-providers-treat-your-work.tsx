@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, ExtLink, H2, H3, MiniTable, Note, Quote, Ui, Warning } from '../../kit';
+import { DocLink, ExtLink, H2, H3, MiniTable, Note, Quote, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'How Anthropic and OpenAI treat your work',
@@ -17,8 +17,6 @@ const A_UPDATE = 'https://www.anthropic.com/news/updates-to-our-consumer-terms';
 const A_UPDATE_T = `Updates to Consumer Terms and Privacy Policy, Anthropic, 28 August 2025 (${CHECKED})`;
 const A_LEGAL = 'https://code.claude.com/docs/en/legal-and-compliance';
 const A_LEGAL_T = `Legal and compliance - Claude Code Docs (${CHECKED})`;
-const A_SDK = 'https://code.claude.com/docs/en/agent-sdk/overview';
-const A_SDK_T = `Agent SDK overview - Claude Code Docs (${CHECKED})`;
 const O_AUTH = 'https://learn.chatgpt.com/docs/auth.md';
 const O_AUTH_T = `Authentication, Codex docs (${CHECKED})`;
 const O_PRICING = 'https://learn.chatgpt.com/docs/pricing';
@@ -217,39 +215,32 @@ export default function Page(): JSX.Element {
         harm.
       </Quote>
 
+      <H2 id="your-claude-login">Using your own Claude login</H2>
+      <p>
+        Limn is a program you run on your own computer. When it uses Claude, it uses the Claude Code login you made
+        yourself, through Anthropic&rsquo;s own sign-in, for your own work. Limn never sees, stores or forwards that
+        login, there is no Limn server in between, and no one else&rsquo;s requests go through your account.
+      </p>
+      <p>Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, which Limn uses:</p>
+      <Quote source={A_LEGAL_T} href={A_LEGAL}>
+        Developers building products or services that interact with Claude&apos;s capabilities, including those using
+        the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider.
+        Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to
+        route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users.
+      </Quote>
+      <p>
+        Limn offers no Claude sign-in of its own and routes nothing on anyone&rsquo;s behalf: each person runs Limn
+        with their own access. Anthropic&rsquo;s plan limits assume ordinary, individual use, and its consumer terms
+        limit automated access outside an API key (<ExtLink href={A_CONSUMER}>{A_CONSUMER_T}</ExtLink>).
+      </p>
+      <Note title="When to choose an API key">
+        An Anthropic API key works exactly the same in Limn and is a first-class choice. Choose it when your
+        organisation prefers commercial terms, when you want API billing kept apart from personal plans, or when you
+        run a lot of automatic reviews, fixes or dependency updates. See{' '}
+        <DocLink to="integrations/claude#set-it-up">Set up Claude</DocLink>.
+      </Note>
+
       <H2 id="caveats">Caveats</H2>
-      <Warning title="Read these before you rely on a subscription">
-        <p>
-          Anthropic has not reviewed or approved Limn. Limn runs on your computer, uses the Claude Code login you made
-          yourself through Anthropic&rsquo;s own sign-in, and does not copy or store your Claude credentials.
-          Even so, Anthropic&rsquo;s pages say that products built on its Agent SDK, as Limn is, should use API keys:
-        </p>
-        <Quote source={A_SDK_T} href={A_SDK}>
-          Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate
-          limits for their products, including agents built on the Claude Agent SDK. Use the API key authentication
-          methods described in the Quickstart instead.
-        </Quote>
-        <Quote source={A_LEGAL_T} href={A_LEGAL}>
-          Developers building products or services that interact with Claude&apos;s capabilities, including those using
-          the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider.
-          Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to
-          route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users.
-        </Quote>
-        <Quote source={A_LEGAL_T} href={A_LEGAL}>
-          Moreover, developers may not collect, store, or intermediate Claude.ai credentials or session tokens — sign-in
-          to a Claude account must complete through Anthropic&apos;s own flow.
-        </Quote>
-        <p>The consumer terms also list, among the things you may not do:</p>
-        <Quote source={A_CONSUMER_T} href={A_CONSUMER}>
-          Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit
-          it, to access the Services through automated or non-human means, whether through a bot, script, or otherwise.
-        </Quote>
-        <p>
-          Automatic runs (auto review, auto fix, dependency automation) are automated use. If you want the clearest
-          position, use an Anthropic API key, at least for automatic runs. You remain responsible for using your
-          account within your plan&rsquo;s terms.
-        </p>
-      </Warning>
       <ul>
         <li>
           &ldquo;Not trained on by default&rdquo; applies to Anthropic only under commercial terms (an API key, Team or

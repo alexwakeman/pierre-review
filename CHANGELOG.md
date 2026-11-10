@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Docs: the Claude pages present your own Claude Code login and an Anthropic API key as two equal
+  choices, with plain steps for each, and a short factual note on Anthropic's policy in place of
+  the earlier warnings.
+
 ## [1.0.16] - 2026-11-10
 
 ### Added

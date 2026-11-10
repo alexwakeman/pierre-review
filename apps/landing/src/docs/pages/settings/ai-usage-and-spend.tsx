@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Quote, SettingsRow, Stat, Steps, TextBox, Tip, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Quote, SettingsRow, Stat, Steps, TextBox, Tip, Toggle, Ui, WhoItHelps } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI subscription usage and spend',
@@ -150,13 +150,14 @@ export default function Page(): JSX.Element {
         Advertised usage limits for Pro, Max, and Ultra plans assume ordinary, individual usage of Claude Code and the
         Agent SDK.
       </Quote>
-      <Warning title="Your plan's terms apply">
-        Limn runs on your own login and your own limits, under your own plan&rsquo;s terms. Anthropic has not reviewed
-        or approved Limn, and its terms limit automated use of subscription accounts. If you turn on auto review, auto
-        fix or dependency automation across busy repositories, an Anthropic API key is the clearer choice. Read{' '}
-        <DocLink to="settings/how-providers-treat-your-work">How Anthropic and OpenAI treat your work</DocLink> before you
-        decide.
-      </Warning>
+      <Note title="Choosing between your login and an API key">
+        Both work the same in Limn. On your own Claude Code login, Limn&rsquo;s runs share your plan&rsquo;s limits,
+        which assume ordinary, individual use. An Anthropic API key is billed separately at API prices, falls under
+        Anthropic&rsquo;s commercial terms, and is the route Anthropic recommends for products built on its Agent SDK.
+        If you turn on auto review, auto fix or dependency automation across busy repositories, or your organisation
+        prefers it, use an API key. See{' '}
+        <DocLink to="settings/how-providers-treat-your-work#your-claude-login">Using your own Claude login</DocLink>.
+      </Note>
       <Tip>
         While the budget is on, a small meter beside each Run button shows how much of Limn&rsquo;s share is used, so
         you can see the effect of a run before you start it.

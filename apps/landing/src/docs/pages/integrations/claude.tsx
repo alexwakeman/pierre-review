@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui, WhoItHelps } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Claude (Anthropic)',
@@ -16,17 +16,22 @@ export default function Page(): JSX.Element {
         reviews on both.
       </p>
       <WhoItHelps
-        developer="Use the Claude subscription you already pay for, with Claude's models reviewing and fixing your pull requests."
+        developer="Use your own Claude access, your Claude Code login or an Anthropic API key, with Claude's models reviewing and fixing your pull requests."
         manager="Each person brings their own Claude access; Limn's automatic use is capped at a share of their week."
       />
 
       <H2 id="what-you-need">What you need</H2>
+      <p>One of these two. Both are fully supported; choose the one that suits you or your organisation.</p>
       <ul>
         <li>
-          A Claude subscription that includes Claude Code (Pro, Max, Ultra, Team or Enterprise), signed in on this computer;
-          or
+          <b>Your Claude Code login</b>: a Claude plan that includes Claude Code (Pro, Max, Ultra, Team or
+          Enterprise), signed in on this computer. Runs count against your plan&rsquo;s limits.
         </li>
-        <li>An Anthropic API key from the Claude Console, billed at API prices.</li>
+        <li>
+          <b>An Anthropic API key</b> from the Claude Console. Runs are billed at API prices to your organisation, and
+          Anthropic&rsquo;s commercial terms apply. This is the route Anthropic recommends for products built on its
+          Agent SDK.
+        </li>
       </ul>
       <p>
         You do not need to install anything for Limn itself: Limn downloads the Claude programs it needs (about 110 MB)
@@ -52,7 +57,12 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>Create an API key in the Claude Console.</li>
         <li>
-          Start Limn with the key in the environment: <code>ANTHROPIC_API_KEY=… npx limn-review</code>.
+          Start Limn with the key in the environment: <code>ANTHROPIC_API_KEY=… npx limn-review</code>. To make it
+          permanent, export <code>ANTHROPIC_API_KEY</code> in your shell profile.
+        </li>
+        <li>
+          If you are also signed in to Claude Code and want the key to be used, add{' '}
+          <code>LIMN_AI_USE_API_KEY=true</code> the same way.
         </li>
         <li>
           The Claude line reads <Ui>Using ANTHROPIC_API_KEY.</Ui>
@@ -100,11 +110,14 @@ export default function Page(): JSX.Element {
         your account; see <DocLink to="settings/how-providers-treat-your-work#anthropic">How Anthropic and OpenAI treat
         your work</DocLink>.
       </p>
-      <Warning title="Subscriptions and automatic runs">
-        Anthropic sets its subscription limits for ordinary, individual use, and its terms limit automated use of
-        subscription accounts. Limn runs on your own login and limits, under your plan&rsquo;s terms; Anthropic has not
-        approved Limn. For heavy automatic use, an API key is the clearer choice.
-      </Warning>
+      <Note title="Your login stays yours">
+        Limn runs on your computer, for your own work, with the Claude Code login you made through Anthropic&rsquo;s
+        own sign-in. Limn never sees, stores or forwards that login, and there is no Limn server in between.
+        Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, and its plan limits assume
+        ordinary, individual use. If your organisation prefers that route, or you run a lot of automatic reviews and
+        fixes, use an API key. See{' '}
+        <DocLink to="settings/how-providers-treat-your-work#your-claude-login">Using your own Claude login</DocLink>.
+      </Note>
 
       <H2 id="limits-and-spend">Limits and spend</H2>
       <p>
