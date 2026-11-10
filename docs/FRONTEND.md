@@ -164,7 +164,8 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   author's name — the reader's own first, then A–Z, then "Other" for tabs with no author
   (`lib/sidebarTabGroups.ts`, test/sidebarTabGroups.test.ts). The author is the tab's own
   `TabMeta.authorLogin/authorDisplayName`, never a fetch. The list has no drag reorder; the top
-  bar's strip keeps its own, ungrouped), and the
+  bar's strip keeps its own, ungrouped. Each row's browser tooltip is replaced by THE TAB HOVER CARD,
+  § below), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
   the bell, Help, the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
   ⚠ **RENDERED ONCE, NEVER UNMOUNTED**: below `lg` the closed drawer is `display: none`, because
@@ -612,6 +613,38 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   switches and tab round-trips; cross-view jumps set it explicitly (e.g. Show-in-feed →
   `setRepoConsoleTab(repoId,'bots')` BEFORE `setActivityRepo`, isolation set AFTER — the
   setter clears `feedIsolatedPrId`).
+
+### The tab hover card (`components/shell/TabHoverCard.tsx`, `lib/tabHoverCard.ts`)
+
+Hovering a row under the sidebar's **Open tabs** (or focusing it from the keyboard) shows a short card
+beside it that says which tab it is. It REPLACES the row's `title` tooltip (the top bar's strip below `lg`
+keeps its `title`: it is a touch surface). Every tab kind has one:
+
+- **PR / PR focus**: repo + number, title, Author, State (Open / Draft / Merged / Closed, then the
+  `mergeVerdict()` label in its tone on an open PR), CI (`prHeaderCi` — open PRs only, a merged PR's CI is
+  history), Review (GitHub's decision in `ReviewDecisionPill`'s words; "Reviews optional" for null), AI review
+  (with `me.ai.enabled` only: `reviewCellFor` → `LeadVerdict`, `leadCurrency`, `pairModelsLabel(ranOn)`; the
+  Open PRs column's words) and Threads (counts by derived state, most urgent first, `DERIVED_STATE_META`).
+- **Ticket / build**: key, title, and from the CACHE only (`['ticket-story', …]`, `['ticket-prs', …]`, what the
+  story view read while open) Status, Assignee, Sprint, Pull requests. Nothing is fetched for them.
+- **Person / bot**: who, the account, the vendor kind and the repo a bot tab covers. **Singletons**: the tab's
+  own icon, words and the sentence that was its tooltip.
+
+Behaviour: `useHover` (mouse only) + `useFocus` + `useDismiss` (Escape, and a press on the tab) + `useRole`
+tooltip (`aria-describedby` while shown). Opens after 350 ms; the list is ONE `FloatingDelayGroup`, so once a
+card has shown the next tab's opens at once. Closes 120 ms after the pointer leaves the tab. The panel is
+`pointer-events-none`, placed once `right-start` beside the tab (flips left): it never follows the mouse and
+cannot hold itself open. A right-click closes it before the tab menu opens.
+
+⚠ **FAST, AND NOTHING PER CARD.** The body mounts only while shown and paints from the cache
+(`prTabFacts`): the batched summary and the cached `['pr', id]` detail (the NEWER read wins), then a row of any
+cached `['open-prs', …]` list, then the tab's `TabMeta`. A fact no source holds is UNKNOWN and its row is left
+out (a lean Open PRs row knows approved / changes requested, never "review required"). The PR card adds at
+most two batched DB-only reads, shared by every card and 30 s fresh (`staleTime`), so running down the list
+asks for nothing more: `usePrTabSummaries` (`POST /api/prs/tab-summaries`, every PR tab's id in ONE key, never
+persisted) and, with AI on, `useClaudeReviewStates(prTabIds, …, { staleTime })` — the Open PRs column's own
+query and key family, so its invalidations reach the card. Never a GitHub call, never `['pr', id]` fetched
+from a hover.
 
 ### Features shown — Settings → Features (`nav.ts` `isDestinationShown`, shared `features.ts`)
 

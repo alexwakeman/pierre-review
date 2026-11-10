@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Open tabs: hover a tab in the sidebar (or move to it with the keyboard) to see a short card that
+  says which tab it is. For a pull request: its repository, author, state, CI, review, AI review and
+  threads. For a ticket, a person, a bot or a list: what that tab shows.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed

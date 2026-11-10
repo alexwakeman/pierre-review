@@ -287,12 +287,14 @@ export function useGenerateReview(prId: number) {
  * 5s only while one of the listed PRs is queued or running. The list is capped at the route's
  * limit; rows past it get no reading (the caller renders nothing for them).
  */
-export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean) {
+export function useClaudeReviewStates(prIds: readonly number[], enabled: boolean, opts: { staleTime?: number } = {}) {
   const ids = [...new Set(prIds)].sort((a, b) => a - b).slice(0, CLAUDE_REVIEW_STATES_MAX_IDS);
   return useQuery<ClaudeReviewStatesResponse>({
     queryKey: [...CLAUDE_REVIEW_STATES_KEY, ids.join(',')],
     queryFn: () => api.claudeReviewStates(ids),
     enabled: enabled && ids.length > 0,
+    // The tab hover card passes one, so moving from tab to tab reads the cache instead of asking again.
+    ...(opts.staleTime != null ? { staleTime: opts.staleTime } : {}),
     // …or while a fix runs, so "Fixing…" turns into "Fix ready" without a reload.
     refetchInterval: (q) =>
       anyReviewInFlight(q.state.data?.states) || anyFixRunning(q.state.data?.states) ? 5000 : false,

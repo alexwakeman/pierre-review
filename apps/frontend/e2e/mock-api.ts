@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  PrTabSummariesResponse,
   ActiveReviewsResponse,
   AiFix,
   AiFixPickerPreview,
@@ -313,6 +314,8 @@ const OPEN_PRS: OpenPrsResponse = {
 // The Open PRs Claude Review strip's ONE batched read. Never requested while `ai.enabled` is false
 // (below); typed and served so a spec that flips it gets the real shape, not the `{}` catch-all.
 const CLAUDE_REVIEW_STATES: ClaudeReviewStatesResponse = { states: [] };
+// The open-tabs hover card's batch (hover only): nothing stored, so a card shows its tab meta.
+const PR_TAB_SUMMARIES: PrTabSummariesResponse = { prs: [] };
 // The ticket review's two boot-time reads (the PR pane's Story check, the Open PRs stack pills).
 // Both gate on `ai.enabled` like the strip above; typed so a spec that flips it gets real shapes.
 // No tracker in e2e, so no ticket states. A spec that adds one carries `autoCheck` (the automatic
@@ -2019,6 +2022,7 @@ export async function installMockApi(
       if (path.includes('/api/timeline')) return json(route, TIMELINE);
       if (path.includes('/api/open-prs')) return json(route, OPEN_PRS);
       if (path.endsWith('/api/claude-review/states')) return json(route, CLAUDE_REVIEW_STATES);
+      if (path.endsWith('/api/prs/tab-summaries')) return json(route, PR_TAB_SUMMARIES);
       // The review banner's poll (AI on): nothing running.
       if (path.endsWith('/api/claude-reviews/active')) return json(route, { reviews: [] } satisfies ActiveReviewsResponse);
       // The thread cards' Claude marker (one batched POST per screen): no judged run here, except

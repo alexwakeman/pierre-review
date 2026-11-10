@@ -176,6 +176,10 @@ check(
 );
 
 // The PR pane's review waits (GET /api/prs/:id/review-waits) — id-addressed, so ownership → null → 404.
+const { getPrTabSummaries } = await import('../src/db/pr-tab-summaries.js');
+const tabSumA = await getPrTabSummaries(1, [A.prId, B.prId]);
+check("getPrTabSummaries(A, [A.pr, B.pr]) returns only A's PR", tabSumA.length === 1 && tabSumA[0]!.id === A.prId);
+check('getPrTabSummaries(A, [B.pr]) returns nothing (IDOR blocked)', (await getPrTabSummaries(1, [B.prId])).length === 0);
 check('getPrReviewWaits(A.pr, A) returns the waits', (await q.getPrReviewWaits(A.prId, 1)) != null);
 check('getPrReviewWaits(B.pr, A) returns null (IDOR blocked)', (await q.getPrReviewWaits(B.prId, 1)) === null);
 // "Ask someone else" (GET /api/prs/:id/reviewer-candidate) — the ownership half only: the own-PR
