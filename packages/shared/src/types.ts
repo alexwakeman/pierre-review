@@ -7656,16 +7656,16 @@ export interface TeammateReviewRecord {
   liftConsent?: boolean;
 }
 
-/**
- * THE READER'S LIMN LIFTING A TEAMMATE'S BLOCK (`claude_reviews.teammate_lift` on the teammate's
- * imported review, migration 0165; review/claude-review/teammate-lift.ts). ONE attempt per teammate
- * review, ever: claimed ('dismissing') BEFORE the GitHub write, then settled. Never retried.
- */
 /** Which rule let the reader's Limn dismiss a teammate's Limn block: both people's opt-ins
  *  ('consent'), or the teammate's Limn being away while the reader's review approves ('away',
  *  2026-11-10; docs/TEAM-REVIEW.md § 5). */
 export type TeammateLiftWhy = 'consent' | 'away';
 
+/**
+ * THE READER'S LIMN LIFTING A TEAMMATE'S BLOCK (`claude_reviews.teammate_lift` on the teammate's
+ * imported review, migration 0165; review/claude-review/teammate-lift.ts). ONE attempt per teammate
+ * review, ever: claimed ('dismissing') BEFORE the GitHub write, then settled. Never retried.
+ */
 export interface TeammateLiftRecord {
   // Absent = 'consent' (every record before the away path).
   why?: TeammateLiftWhy;

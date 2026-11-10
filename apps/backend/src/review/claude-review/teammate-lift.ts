@@ -38,10 +38,15 @@
 // reader's review APPROVES. Every condition above holds except (a) and (b), and instead:
 //   - the reader's review goes out as an APPROVE and lands as one (auto verdict on, its gates clear —
 //     a COMMENT or a refused approve never dismisses on this path);
+//   - the block came from the teammate's AUTO run (`k=auto` in the marker, imported and LIVE): a review
+//     they sent with the Post button (or "Review and post") is their own judgement, never dismissed;
+//   - THE POINTS are every counted finding across ALL of the teammate's Limn reviews on the PR
+//     (`countedFindings`), not just the block's own: a block can rest on an earlier blocker its re-post
+//     left out. Each must be settled at this head (teammate-anchor.ts sends them all to the follow-up);
 //   - THE TEAMMATE IS AWAY (`teammateAwayHold`): their Limn has no `limn/review-*` line at this head
 //     (read LIVE before the write), no review at this head, no review after the block on GitHub, and
-//     wrote nothing Limn has seen for TEAMMATE_AWAY_AFTER_MS (`teammateLastSeenMs`: their Limn's
-//     reviews, finding comments and replies, imported reviews and claim lines this Limn saw).
+//     wrote nothing Limn has seen for TEAMMATE_AWAY_AFTER_MS (`teammateLastSeenMs`: anything synced
+//     they wrote on any PR of the account — by hand or through their Limn — and their claim lines).
 // A read that fails holds it. Recorded with `why: 'away'`; the message says why
 // (`teammateAwayLiftMessage`), still in the "Limn (alex) checked …" form every Limn already reads as
 // Limn's dismissal.
@@ -82,6 +87,15 @@ export function pointsBehindBlock(findings: readonly BlockFinding[], leftovers: 
   // rests on something else (a blocker posted in an EARLIER review, which a re-post leaves out). Its
   // comments cannot explain the block, so there is nothing this check can settle: never lifted.
   if (!findings.some((f) => f.severity == null || f.severity === 'blocker' || f.severity === 'warning')) return [];
+  return countedFindings(findings, leftovers);
+}
+
+/**
+ * THE COUNTED FINDINGS of a review, with no fail-safe: every blocker, warning and unlabelled finding,
+ * and each nit / question the reader's approve rule does not let stay open. Praise never. The away
+ * path reads them across every Limn review the poster sent on the PR.
+ */
+export function countedFindings(findings: readonly BlockFinding[], leftovers: ApproveLeftovers): BlockFinding[] {
   return findings.filter((f) => f.severity !== 'praise' && (f.severity == null || !leftoverAllowed(f.severity, leftovers)));
 }
 
@@ -130,6 +144,7 @@ export type TeammateLiftHold =
   | 'head_moved'
   // The away path only:
   | 'not_approving'
+  | 'not_auto'
   | 'teammate_active'
   | 'teammate_recent'
   | 'teammate_unknown';
@@ -165,6 +180,9 @@ export interface TeammateLiftFacts {
   why?: TeammateLiftWhy;
   // The away path: the reader's review approves.
   approves?: boolean;
+  // The away path: the block came from the teammate's AUTO run (marker `k=auto`). A manual Post is
+  // their own judgement and is never dismissed.
+  auto?: boolean;
   away?: TeammateAwayFacts;
   // (b) the reader's workspace setting.
   settingOn: boolean;
@@ -198,6 +216,7 @@ export function teammateLiftHold(f: TeammateLiftFacts): TeammateLiftHold | null 
   if (!f.limn) return 'not_limn';
   if (away) {
     if (f.approves !== true) return 'not_approving';
+    if (f.auto !== true) return 'not_auto';
     const h = f.away != null ? teammateAwayHold(f.away) : 'teammate_unknown';
     if (h != null) return h;
   } else if (!f.consent) return 'no_consent';
@@ -244,9 +263,10 @@ const ms = (v: Date | number | null | undefined): number | null => {
 };
 
 /**
- * THE NEWEST THING THIS LIMN HAS SEEN FROM A TEAMMATE'S LIMN (DB only, account-scoped), epoch ms:
- * their imported Limn reviews, the reviews / finding comments / replies their Limn posted (stored with
- * `limn_posted_by_user_id` = them), and their claim lines this Limn stood down for. null = nothing.
+ * THE NEWEST THING THIS LIMN HAS SEEN FROM A TEAMMATE (DB only, account-scoped), epoch ms: their
+ * imported Limn reviews; every review, review comment and PR comment they wrote on any of the
+ * account's PRs, by hand (`author_id` = them) or through their Limn (`limn_posted_by_user_id` = them);
+ * and their claim lines this Limn stood down for. A person active by hand is not away. null = nothing.
  */
 export async function teammateLastSeenMs(
   ctx: AgentContext,
@@ -275,15 +295,18 @@ export async function teammateLastSeenMs(
     [t.reviewComments, t.reviewComments?.createdAt],
     [t.prComments, t.prComments?.createdAt],
   ] as const) {
-    if (!tbl?.limnPostedByUserId || !col || !prs) continue;
-    await one(
-      ctx.db
-        .select({ at: max(col) })
-        .from(tbl)
-        .innerJoin(prs, eq(prs.id, tbl.prId))
-        .where(and(eq(prs.accountId, accountId), eq(tbl.limnPostedByUserId, posterUserId)))
-        .execute(),
-    );
+    if (!col || !prs) continue;
+    for (const who of [tbl?.authorId, tbl?.limnPostedByUserId]) {
+      if (!who) continue;
+      await one(
+        ctx.db
+          .select({ at: max(col) })
+          .from(tbl)
+          .innerJoin(prs, eq(prs.id, tbl.prId))
+          .where(and(eq(prs.accountId, accountId), eq(who, posterUserId)))
+          .execute(),
+      );
+    }
   }
   const tcs = t.teamClaimSeen;
   if (tcs) {
@@ -435,16 +458,44 @@ export async function loadTeammateLiftCandidates(
     }
     if (a.awayPath !== true) continue;
     // THE AWAY PATH, as far as the DB can tell (the live line read and the landed APPROVE come later).
+    // Its points: the block's own (the fail-safe above still applies), plus every counted finding of
+    // the poster's OTHER Limn reviews on this PR — an earlier blocker the block's re-post left out.
+    const awayPoints = [...points];
+    if (awayPoints.length > 0) {
+      const seen = new Set(awayPoints.map((p) => p.id));
+      const others = (await ctx.db
+        .select({ id: crf.id, severity: crf.severity, nodeId: crf.sourceCommentNodeId, teammate: cr.teammate })
+        .from(crf)
+        .innerJoin(cr, eq(cr.id, crf.reviewId))
+        .where(
+          and(eq(cr.prId, a.prId), eq(cr.accountId, a.accountId), eq(cr.kind, TEAMMATE_KIND), eq(cr.sourceUserId, b.poster!.userId)),
+        )
+        .execute()) as Array<{ id: number; severity: ClaudeFindingSeverity; nodeId: string | null; teammate: TeammateReviewRecord | null }>;
+      const counted = countedFindings(
+        others.map((f) => ({
+          id: f.id,
+          severity: f.nodeId != null && (f.teammate?.unlabelled ?? []).includes(f.nodeId) ? null : f.severity,
+        })),
+        a.leftovers,
+      );
+      for (const p of counted) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        awayPoints.push(p);
+      }
+    }
     const lastSeenMs = await teammateLastSeenMs(ctx, a.accountId, b.poster!.userId, b.poster!.login);
     const activeAtHead = await teammateSeenAtHead(ctx, a.accountId, a.prId, a.headSha, b.poster!.userId, b.poster!.login);
     const hold = teammateLiftHold({
       ...base,
+      points: awayPoints,
       why: 'away',
       approves: true,
+      auto: rec.run === 'auto',
       away: { activeAtHead, lastSeenMs, nowMs: a.nowMs ?? Date.now() },
     });
     if (hold != null) continue;
-    out.push({ ...cand, why: 'away', lastSeenMs });
+    out.push({ ...cand, points: awayPoints.length, why: 'away', lastSeenMs });
   }
   return out;
 }
@@ -485,7 +536,11 @@ export function liveLiftCheck(
     }
     if (r.state !== 'CHANGES_REQUESTED' || r.id == null || String(r.id) !== c.githubReviewId) return 'not_in_force';
     if (!hasLimnReviewMarker(r.body)) return 'not_limn';
-    if (c.why === 'away') return later ? 'teammate_active' : null;
+    if (c.why === 'away') {
+      // Only a block their AUTO run sent: a Post-button review is the person's own judgement.
+      if (parseLimnReviewMarker(r.body)?.run !== 'auto') return 'not_auto';
+      return later ? 'teammate_active' : null;
+    }
     if (parseLimnReviewMarker(r.body)?.liftConsent !== true) return 'no_consent';
     return null;
   }

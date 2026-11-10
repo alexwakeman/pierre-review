@@ -4072,17 +4072,27 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   TEAMMATE IS AWAY (`teammateAwayHold`, pure): no teammate review of theirs at the head
   (`claude_reviews.kind='teammate'`, `source_user_id`) and no `team_claim_seen` line of theirs there
   (`teammateSeenAtHead` — a block posted AT the head is itself "reviewed this commit"), and the newest
-  thing seen from their Limn (`teammateLastSeenMs`: imported Limn reviews' `posted_at`; `reviews` /
-  `review_comments` / `pr_comments` with `limn_posted_by_user_id` = them; `team_claim_seen.line_at` by
-  login; account-scoped) is older than **`TEAMMATE_AWAY_AFTER_MS` (4 h, the one constant)**. LIVE, before
-  any write: `liveLiftCheck(…, nowMs)` with `why: 'away'` skips the consent read but holds
+  thing seen from THEM (`teammateLastSeenMs`: imported Limn reviews' `posted_at`; `reviews` /
+  `review_comments` / `pr_comments` with `author_id` = them (by hand) OR `limn_posted_by_user_id` = them
+  (their Limn), on any PR of the account; `team_claim_seen.line_at` by login; account-scoped — a person
+  active by hand is not away) is older than **`TEAMMATE_AWAY_AFTER_MS` (4 h, the one constant)**. LIVE, before
+  any write: `liveLiftCheck(…, nowMs)` with `why: 'away'` skips the consent read but requires
+  `k=auto` in the LIVE marker (`not_auto` otherwise; the DB side reads the imported
+  `TeammateReviewRecord.run`) — a manual Post / "Review and post" is the person's judgement and is
+  never dismissed this way — and holds
   (`teammate_active`) on any COMMENTED review of theirs after the block inside the window (no
   `submittedAt` = recent; `AutoPostDeps.liveReviews` now carries it), and `AutoPostDeps.liveTeamLines`
   reads both `limn/review-*` contexts at the head — any line by them, or an unreadable read (null; the
   default returns null under VITEST), holds it. After the verdict gate an away candidate survives only
   when `verdict.submitted === 'APPROVE'`, and the dismissal runs only when the APPROVE LANDED as one (a
   refused approve re-sent as a COMMENT dismisses nothing). Same claim (`teammate_lift`, now with
-  `why: 'away'`), same never-retried write, same settle. Message `teammateAwayLiftMessage`: "Limn (alex)
+  `why: 'away'`), same never-retried write, same settle. ⚠ THE AWAY PATH'S POINTS are every counted
+  finding (`countedFindings`: blocker, warning, unlabelled, and leftovers not allowed) across ALL of the
+  poster's imported Limn reviews on the PR (`kind='teammate'`, same `source_user_id`), unioned with the
+  block's own (whose `pointsBehindBlock` fail-safe still applies): the consent path leans on the poster's
+  `blockersAllInPost` for a block resting on an earlier blocker, and the away path has no poster side.
+  `loadStandingBlockAnchors` therefore also sends the poster's EARLIER Limn reviews' findings to the
+  follow-up, so each can be judged. Message `teammateAwayLiftMessage`: "Limn (alex)
   checked all 3 points are addressed at 70cc9b5. robin's Limn has not reviewed it and has been away for 5
   hours." — the "Limn (x) checked " lead keeps `isLimnDismissalMessage` true on every Limn, an older one
   included. The run's record carries `liftedTeammateBlocks[].why = 'away'`; the tab says "Dismissed
