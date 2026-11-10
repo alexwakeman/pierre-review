@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { AppShell, DocLink, H2, H3, Illustration, Kbd, Note, Tip, Ui, WhoItHelps } from '../../kit';
+import { AppShell, DocLink, H2, H3, Illustration, Kbd, Note, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Find your way around',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         finds a page, a setting, a pull request or a ticket by name.
       </p>
 
-      <WhoItHelps
-        developer="Keep several pull requests open as tabs and move between them, and the board, with the keyboard."
-        manager="Go straight to the page you need, in the workspace you need, without hunting through menus."
-      />
 
       <H2 id="the-sidebar">The sidebar</H2>
       <p>From top to bottom, the sidebar holds:</p>

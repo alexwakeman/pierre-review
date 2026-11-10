@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Ready to land',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         nobody has approved yet.
       </p>
 
-      <WhoItHelps
-        developer="Land your team's ready work in one pass, or arm Merge when ready and move on."
-        manager="See how much finished work is sitting unmerged, and for how long."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <ul>

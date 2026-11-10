@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, MiniTable, Note, Pill, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, MiniTable, Note, Pill, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI reviews',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         looking at it never removes a row.
       </p>
 
-      <WhoItHelps
-        developer="See what the AI said overnight, on your pull requests and the ones you review, and open the review in one click."
-        manager="See every AI review the team ran, by whom, with the verdict and how many findings, in one place."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, MiniTable, Note, Stat, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, MiniTable, Note, Stat, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI usage',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         while AI is on.
       </p>
 
-      <WhoItHelps
-        developer="See which pull requests and features use the most of your allowance, and which setting would save the most."
-        manager="See what AI review costs the team per pull request and per story, and whether usage is rising week on week."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

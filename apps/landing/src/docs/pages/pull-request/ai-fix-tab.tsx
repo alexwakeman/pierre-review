@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Diff, DocLink, FindingRow, H2, Illustration, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Diff, DocLink, FindingRow, H2, Illustration, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI Fix tab',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         describes the tab; the <DocLink to="ai-fix/overview">AI Fix</DocLink> section explains it in full.
       </p>
 
-      <WhoItHelps
-        developer="Hand the review's small fixes to an agent, read the diff, and push it to your branch in one press."
-        manager="Turn agreed review findings into commits without the author losing a morning to them."
-      />
 
       <H2 id="what-you-can-do">What you can do</H2>
       <Steps>

@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { WorkspacesMock } from '../../../components/mock/setup';
-import { DocLink, H2, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Group repositories into workspaces',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         Switching the workspace changes all of them together. Each repository is in exactly one workspace.
       </p>
 
-      <WhoItHelps
-        developer="Keep the repositories you work in separate from the ones you only watch, and switch between them in one click."
-        manager="Give each team its own workspace, so that each team's reports, review targets and bot settings are its own."
-      />
 
       <H2 id="the-default-workspace">The Default workspace</H2>
       <p>

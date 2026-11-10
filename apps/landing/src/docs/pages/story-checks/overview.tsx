@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, DocLink, FindingRow, H2, H3, Illustration, Note, Pill, Steps, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Card, DocLink, FindingRow, H2, H3, Illustration, Note, Pill, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Check a pull request against its story',
@@ -47,10 +47,6 @@ export default function Page(): JSX.Element {
         answer.
       </p>
 
-      <WhoItHelps
-        developer="Find the criterion you missed before a reviewer or the product owner does, and see which of the ticket's pull requests is meant to do it."
-        manager="Know whether a ticket is really done before it moves to Product review, without reading the code. Every verdict names the pull request and the evidence."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

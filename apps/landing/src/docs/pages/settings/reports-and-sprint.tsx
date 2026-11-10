@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, MiniTable, Note, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, MiniTable, Note, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Reports and sprint',
@@ -26,10 +26,6 @@ export default function Page(): JSX.Element {
         long each kind of wait should take, and how long a sprint is. Reports and Chronology measure against these
         settings. Every setting here applies to this workspace only; other workspaces set their own.
       </p>
-      <WhoItHelps
-        developer="Waits are counted in working hours, so a pull request opened on Friday evening is not shown as two days late on Monday."
-        manager="Set the team's own targets for review and merge times, and line Reports up with your sprint boundaries."
-      />
 
       <H2 id="working-hours">Working hours and budgets</H2>
       <p>

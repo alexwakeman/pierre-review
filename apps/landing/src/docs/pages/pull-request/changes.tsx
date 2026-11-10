@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Diff, DocLink, H2, H3, Illustration, Kbd, Note, Thread, Ui, WhoItHelps } from '../../kit';
+import { Diff, DocLink, H2, H3, Illustration, Kbd, Note, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Changes tab',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         number on the tab counts the changed files.
       </p>
 
-      <WhoItHelps
-        developer="Review the code where the comments are, move between files and threads from the keyboard, and comment on a line."
-        manager="See the size and shape of a change, and which files drew the most comments."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <ul>

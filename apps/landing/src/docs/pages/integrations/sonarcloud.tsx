@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, ExtLink, Field, FindingRow, H2, H3, Illustration, Note, Pill, Section, Steps, TextBox, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, ExtLink, Field, FindingRow, H2, H3, Illustration, Note, Pill, Section, Steps, TextBox, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'SonarCloud',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         request as one GitHub review. Limn only reads from SonarCloud; it never changes anything there.
       </p>
 
-      <WhoItHelps
-        developer="See SonarCloud’s findings for your commit beside the AI review, with the flagged lines and how to fix them, and hand the ones you choose to AI Fix."
-        manager="Quality gate failures get acted on in the same place as review findings, rather than sitting on a separate dashboard."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

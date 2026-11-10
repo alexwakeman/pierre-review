@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, Tip, Toolbar, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, Tip, Toolbar, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Filter the timeline',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         the Timeline only. The other pages always cover the whole workspace.
       </p>
 
-      <WhoItHelps
-        developer="Show only your repositories and your own pull requests, or only the reviews."
-        manager="Show the maintainers of one repository over the last 30 days, or every stalled pull request."
-      />
 
       <Illustration
         label="The timeline's filter bar: Repos, Members, Status, Events and Threads menus, the Range choice, Now and Clear filters."

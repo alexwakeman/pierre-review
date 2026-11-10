@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, Field, H2, Illustration, MiniTable, Note, Section, Steps, TextBox, Ui, WhoItHelps } from '../../kit';
+import { DocLink, Field, H2, Illustration, MiniTable, Note, Section, Steps, TextBox, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The reporting window',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         figure that uses it, so you never have to guess which dates a number covers.
       </p>
 
-      <WhoItHelps
-        developer="A number on Reports always means the same dates as the number next to it, so two figures can be read together."
-        manager="Pick the window that matches how your team plans, sprint to date or a rolling week or fortnight, and every report follows it."
-      />
 
       <H2 id="the-three-choices">The three choices</H2>
       <MiniTable

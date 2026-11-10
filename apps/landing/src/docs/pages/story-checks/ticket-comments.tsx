@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Thread, Ui, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Ticket comments',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         ticket.
       </p>
 
-      <WhoItHelps
-        developer="Stop being marked down for a criterion the product owner dropped in a comment, and see a new comment that changes what you have to build."
-        manager="See that a criterion done outside the code, such as a setting or a content change, counts as done, with the comment that says so one click away."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

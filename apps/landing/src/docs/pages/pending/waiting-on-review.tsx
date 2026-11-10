@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Waiting on review',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         <Ui>Stalled review</Ui> or <Ui>Needs a reviewer</Ui>.
       </p>
 
-      <WhoItHelps
-        developer="Pick up a review nobody is doing, or see that yours is late and on whom."
-        manager="Spot reviews that have stalled, pull requests nobody was asked to review, and reviewers with too much waiting on them."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <H3>Stalled review</H3>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, SettingsRow, Steps, Toggle, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, Note, SettingsRow, Steps, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Pending settings',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         has one setting for you everywhere (<Ui>My Turn</Ui>) and one for the current workspace (
         <Ui>Pending mute</Ui>). The other Pending tabs follow fixed rules and have no settings.
       </p>
-      <WhoItHelps
-        developer="Keep My turn to the pull requests that are really waiting on you, and stop a noisy repository from notifying you."
-        manager="Opt in to see every new pull request in your repositories, not only the ones that name you."
-      />
 
       <H2 id="my-turn">My Turn</H2>
       <p>

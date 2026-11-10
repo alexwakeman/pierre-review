@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps, TextBox, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps, TextBox, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Docker and microsandbox',
@@ -32,10 +32,6 @@ export default function Page(): JSX.Element {
         one, Limn needs a container runtime, such as Docker Engine, Colima or Podman. Every route on this page is free.
         Limn finds the runtime by itself; you install it once.
       </p>
-      <WhoItHelps
-        developer="One install, then AI Fix and Implement can run tests and services safely, away from your own files."
-        manager="The agent with a shell is boxed in: no GitHub credentials, no access to the host, and a logged allow-list for the network."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

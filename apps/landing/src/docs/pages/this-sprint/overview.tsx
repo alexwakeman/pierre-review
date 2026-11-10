@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { SprintLanesMock } from '../../../components/mock/reports';
-import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'See the current sprint',
@@ -18,10 +18,6 @@ export default function Page(): JSX.Element {
         and what is done.
       </p>
 
-      <WhoItHelps
-        developer="See which tickets are yours, which ones wait on yours, and which ones have no pull request yet. Open any ticket to read the story and its check without going to the tracker."
-        manager="See the sprint's shape at a glance: how far it has got, which chains of work decide when it can finish, and where the effort goes. Every figure is counted from the tracker and GitHub."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <p>

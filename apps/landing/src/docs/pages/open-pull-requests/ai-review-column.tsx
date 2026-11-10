@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'See the AI review on each pull request',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         <Ui>Re-review</Ui> or <Ui>Open review</Ui>.
       </p>
 
-      <WhoItHelps
-        developer="Start a review of the pull requests nobody has reviewed yet, and see which of yours have findings to fix, without opening each one."
-        manager="See which open pull requests have had an AI review, what it said, and whether a teammate already ran one."
-      />
 
       <H2 id="what-you-see">What the column shows</H2>
       <ul>

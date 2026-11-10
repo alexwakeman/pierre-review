@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Kbd, Note, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Kbd, Note, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read the timeline',
@@ -52,10 +52,6 @@ export default function Page(): JSX.Element {
         last 14 days by default.
       </p>
 
-      <WhoItHelps
-        developer="See what your teammates are working on this week, and find the pull request someone mentioned by when it happened."
-        manager="See the shape of the team's work: long-running pull requests, quiet weeks, and where reviews cluster."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

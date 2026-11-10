@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, Diff, DocLink, FindingRow, H2, H3, Illustration, Log, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Chip, Diff, DocLink, FindingRow, H2, H3, Illustration, Log, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Fix a pull request with AI Fix',
@@ -43,10 +43,6 @@ export default function Page(): JSX.Element {
         project's own tests. You watch it work, read what it changed, and push the result to the pull request's
         branch. Nothing leaves your computer until you press <Ui>Push</Ui>.
       </p>
-      <WhoItHelps
-        developer="Clear a review's findings in one pass, tested, and spend your time checking the change instead of typing it."
-        manager="Small review fixes stop bouncing between author and reviewer, and every fix is still pushed by a person who read it."
-      />
 
       <H2 id="before-you-start">Before you start</H2>
       <ul>

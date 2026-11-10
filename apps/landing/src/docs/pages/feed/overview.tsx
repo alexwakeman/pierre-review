@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, Thread, Toolbar, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, Thread, Toolbar, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read the feed',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         default; switch to bots to see what the bots did. It covers the last 14 days.
       </p>
 
-      <WhoItHelps
-        developer="Catch up on what happened while you were away, across every repository, and reply to a comment from the card."
-        manager="Read the team's conversation in one place, and see what the review bots said, apart from the people."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>

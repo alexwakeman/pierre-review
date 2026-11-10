@@ -51,7 +51,7 @@ screen, search the docs for its words (`grep -rn "Old label" apps/landing/src/do
 
 ```tsx
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Dismiss a My Turn card',
@@ -62,7 +62,6 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>One paragraph: what this is and when you use it.</p>
-      <WhoItHelps developer="…" manager="…" />
       <H2 id="what-you-see">What you see</H2>
       …
       <H2 id="what-you-can-do">What you can do</H2>
@@ -100,7 +99,7 @@ Plain English, as the app's own copy (`CLAUDE.md` § Product voice), leaning on 
   ids, environment variables or code paths. The exception is something the reader must type or set
   (`npx limn-review`, `LIMN_AI_PROVIDER`), which goes in `<code>`.
 - Address the reader as "you". A developer and an engineering manager both read these pages; say
-  what each gets with `WhoItHelps` where the answer differs.
+  in the text what each gets where the answer differs. No per-page "who it helps" blocks.
 - British spelling, as the rest of the site ("licence" the noun, "organisation", "colour").
 - No "Pro", "paid", "upgrade" or credits wording: every feature is free under the Limn License
   (free for individuals and for organisations where no more than three people use it).
@@ -133,7 +132,6 @@ one. Where a picture helps, draw a small part of the screen in HTML:
 | `Note` | Something worth knowing that changes nothing if missed |
 | `Tip` | A quicker or better way |
 | `Warning` | Something that posts to GitHub, pushes code, spends money, loses work or surprises a teammate |
-| `WhoItHelps developer manager` | What the screen does for each reader |
 | `Steps` | A numbered procedure; each `li` one action |
 | `Ui` | A word on the app's screen |
 | `Kbd` | A key |

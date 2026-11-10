@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, DocLink, H2, H3, Illustration, Note, Pill, Ui, WhoItHelps } from '../../kit';
+import { Btn, Card, DocLink, H2, H3, Illustration, Note, Pill, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Bots settings',
@@ -42,10 +42,6 @@ export default function Page(): JSX.Element {
         <DocLink to="bots-monitoring/overview">Bots Monitoring</DocLink>, the Feed and the Timeline. Bot comment scoring
         applies to the whole computer; the classification applies to the current workspace only.
       </p>
-      <WhoItHelps
-        developer="Keep bots out of your Feed and Timeline, and correct Limn when it mistakes a person for a bot or the other way round."
-        manager="Put a price on each review bot so Bots Monitoring can show what the team pays for each finding it acts on."
-      />
 
       <H2 id="bot-comment-scoring">Bot comment scoring</H2>
       <p>

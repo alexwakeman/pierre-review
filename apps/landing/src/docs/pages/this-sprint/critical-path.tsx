@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Card, DocLink, FindingRow, H2, H3, Illustration, MiniTable, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Card, DocLink, FindingRow, H2, H3, Illustration, MiniTable, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The Critical path view',
@@ -48,10 +48,6 @@ export default function Page(): JSX.Element {
         risk they put on the sprint, then a short list of things worth a look.
       </p>
 
-      <WhoItHelps
-        developer="See whether the ticket you are on blocks someone else, and which unfinished ticket your own work waits on."
-        manager="See the few chains of work that put the end date at risk, with one sentence of advice for each, before the last days of the sprint."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <PathLane />

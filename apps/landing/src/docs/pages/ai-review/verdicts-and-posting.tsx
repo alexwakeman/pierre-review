@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Chip, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread, Ui, Warning, WhoItHelps } from '../../kit';
+import { Chip, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Verdicts and posting to GitHub',
@@ -38,10 +38,6 @@ export default function Page(): JSX.Element {
         a suggestion. On GitHub it becomes your review, posted under your account. This page explains when Limn posts,
         what it posts, and the rules it follows before it approves or asks for changes for you.
       </p>
-      <WhoItHelps
-        developer="You know exactly what will go out under your name, and why a review did not approve."
-        manager="The team sets the bar once (what is posted, when Limn may approve, at which impact) and every automatic review keeps it."
-      />
 
       <H2 id="when-limn-posts">When Limn posts</H2>
       <MiniTable

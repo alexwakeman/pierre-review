@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { ChronologyMock, OverTimeMock } from '../../../components/mock/reports';
-import { DocLink, H2, H3, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Chronology',
@@ -18,10 +18,6 @@ export default function Page(): JSX.Element {
         names no person.
       </p>
 
-      <WhoItHelps
-        developer="See whether your pull requests wait mostly for review or mostly for you, and what the quick ones on your team have in common."
-        manager="Find out whether the team is short of review time, slow to answer reviews or slow to land approved work, and track whether a change of process helped."
-      />
 
       <H2 id="what-it-measures">What it measures</H2>
       <ul>

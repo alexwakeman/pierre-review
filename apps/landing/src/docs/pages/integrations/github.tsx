@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, ExtLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, ExtLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'GitHub',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         not store your GitHub token.
       </p>
 
-      <WhoItHelps
-        developer="Use Limn with the access you already have. There is nothing to install in your organisation and nothing to ask an admin for."
-        manager="Limn sees exactly what each person’s own GitHub account can see, and every write it makes is under that person’s name."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

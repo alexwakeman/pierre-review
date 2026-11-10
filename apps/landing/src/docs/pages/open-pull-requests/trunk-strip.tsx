@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { CheckRow, DocLink, H2, H3, Illustration, Note, Ui, WhoItHelps } from '../../kit';
+import { CheckRow, DocLink, H2, H3, Illustration, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Check the default branches',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         the default branch of every repository in the workspace, with the result of its latest checks.
       </p>
 
-      <WhoItHelps
-        developer="Before you chase a red check on your own pull request, see whether the default branch is red too."
-        manager="See at a glance which repositories have a red default branch, which pull request broke it, and how often the branch is red over time."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>One row per repository, each with a coloured dot. Point at the dot to read its state:</p>

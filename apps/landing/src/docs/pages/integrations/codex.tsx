@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Codex (OpenAI)',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         your own ChatGPT sign-in. It can run every AI feature Limn has. When both Claude and Codex are signed in, Limn
         reviews each pull request with both at once, and merges the two into one review.
       </p>
-      <WhoItHelps
-        developer="Use your ChatGPT plan for reviews and fixes, or get a second opinion from Codex beside Claude."
-        manager="Two independent reviewers on every pull request, each person on their own ChatGPT plan."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

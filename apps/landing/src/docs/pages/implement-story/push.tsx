@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, Diff, DocLink, H2, H3, Illustration, Note, PrRow, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Chip, Diff, DocLink, H2, H3, Illustration, Note, PrRow, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Push the result',
@@ -41,10 +41,6 @@ export default function Page(): JSX.Element {
         <Ui>Push</Ui> sends one pull request's changes to a new branch on GitHub and opens the pull request, from your
         computer, under your GitHub account.
       </p>
-      <WhoItHelps
-        developer="Review small pull requests one at a time, then open them all, in the right order, with descriptions already written."
-        manager="Each pull request names the ticket, the criteria it covers and the decisions taken on the story, so reviewers start with the context."
-      />
 
       <H2 id="check-the-changes">Check the changes</H2>
       <StackPicture />

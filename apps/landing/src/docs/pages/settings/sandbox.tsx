@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Toggle, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Sandbox',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         The AI has a full shell there, but no GitHub sign-in and no route to the internet except the hosts you allow.
         The <Ui>Sandbox</Ui> tab checks the container runtime on this computer and sets what each session gets.
       </p>
-      <WhoItHelps
-        developer="Let the AI build and test your code the way you do, with your own notes and services, without giving it your machine."
-        manager="AI-written changes are tested before anyone pushes them, and the AI never holds the team's GitHub access."
-      />
 
       <H2 id="container-runtime">Container runtime</H2>
       <p>

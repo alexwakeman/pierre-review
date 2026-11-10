@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Thread, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Threads tab',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         The number on the tab counts the unresolved threads.
       </p>
 
-      <WhoItHelps
-        developer="Work through every comment on your pull request, reply and resolve them, and see which ones a later commit probably fixed."
-        manager="See how many threads are open on a pull request, and which come from people and which from bots."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <ul>

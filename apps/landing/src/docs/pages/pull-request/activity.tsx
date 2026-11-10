@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Thread, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Activity tab',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         counts the comments and reviews.
       </p>
 
-      <WhoItHelps
-        developer="Read the conversation in order, reply to a comment and see what changed since the last review."
-        manager="Follow a pull request's story from open to merge without switching between GitHub's tabs."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <ul>

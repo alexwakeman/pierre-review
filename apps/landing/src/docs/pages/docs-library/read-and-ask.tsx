@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Steps, TextBox, Thread, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Steps, TextBox, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read and ask',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         words. The answers come from your documents only, and each point links to the section it used.
       </p>
 
-      <WhoItHelps
-        developer="Get a quick answer to 'how do we version the webhook payload?' with a link straight to the paragraph, instead of searching three wikis."
-        manager="Let new team members ask the library first. When two documents disagree, the answer cites both, which shows you which document needs fixing."
-      />
 
       <H2 id="read-a-document">Read a document</H2>
       <Steps>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Replies to findings',
@@ -38,10 +38,6 @@ export default function Page(): JSX.Element {
         review. The replies pass reads just the replies to Limn's own findings, at the current commit, and decides
         for each one whether the finding still stands. It is short and cheap: a smaller model with a firm cost cap.
       </p>
-      <WhoItHelps
-        developer="When you explain why a finding is wrong, you get an answer in minutes, and an accepted reply is never raised again."
-        manager="Limn's comments behave like a reasonable reviewer: they listen, they push back once at most, and they let go."
-      />
 
       <H2 id="what-it-judges">What it judges</H2>
       <ReplyPicture />

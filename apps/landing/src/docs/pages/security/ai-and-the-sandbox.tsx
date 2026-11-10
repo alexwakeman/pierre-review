@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, MiniTable, Note, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, MiniTable, Note, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI agents and the sandbox',
@@ -28,10 +28,6 @@ export default function Page(): JSX.Element {
         pull request or ticket as untrusted, and limits what each agent can do. Most agents can only read. The two that
         can run commands, AI Fix and Implement story, run inside a sandbox that holds none of your credentials.
       </p>
-      <WhoItHelps
-        developer="Let the AI run your tests without letting a stranger's pull request run commands on your laptop."
-        manager="AI agents never hold the team's GitHub access, and nothing reaches GitHub until a person presses Push."
-      />
 
       <H2 id="what-each-agent-can-do">What each agent can do</H2>
       <Illustration label="A table of Limn's AI features: reviews and chats read only, AI Fix and Implement run commands in the sandbox." caption="Only two features can run commands, and only in the sandbox.">

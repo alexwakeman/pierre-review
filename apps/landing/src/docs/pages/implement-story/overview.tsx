@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Chip, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Implement a story',
@@ -42,10 +42,6 @@ export default function Page(): JSX.Element {
         it builds, tests and reports against each acceptance criterion. You review the changes and push them as new pull
         requests.
       </p>
-      <WhoItHelps
-        developer="Start a ticket from a tested first version, across every repository it touches, instead of an empty branch."
-        manager="Stories that are clear enough to build get built; stories that are not get their gaps named, with evidence, before anyone writes code."
-      />
 
       <H2 id="where-to-start">Where to start</H2>
       <p>

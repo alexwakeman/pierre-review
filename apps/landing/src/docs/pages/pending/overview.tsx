@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { PendingListMock } from '../../../components/mock/home';
-import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Work from the Pending board',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         the work it describes is done.
       </p>
 
-      <WhoItHelps
-        developer="Start the day on My turn, then work down Needs fixing and Ready to land. Approve, merge or dismiss from the keyboard."
-        manager="See the reviews that have stalled, the threads nobody answered and who has the most reviews waiting, without asking."
-      />
 
       <H2 id="the-tabs">The tabs</H2>
       <table>

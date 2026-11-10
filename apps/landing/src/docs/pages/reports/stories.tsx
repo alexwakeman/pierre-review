@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, Group, H2, Illustration, MiniTable, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, Group, H2, Illustration, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Stories',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         whether its latest ticket review found the acceptance criteria met.
       </p>
 
-      <WhoItHelps
-        developer="See which of your tickets are still flagged as falling short, and open the ticket and its pull requests in one tab."
-        manager="See which delivered stories met their criteria, which fell short and which nobody checked, and which stories took far longer than their size suggests."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <p>

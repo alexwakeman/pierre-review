@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The People view',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         work waits on another&rsquo;s.
       </p>
 
-      <WhoItHelps
-        developer="See your own tickets in one row, and the tickets of the people whose work yours waits on."
-        manager="See how the sprint's tickets are spread across the team and where hand-offs between people are. It is a view of the work, not a score."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

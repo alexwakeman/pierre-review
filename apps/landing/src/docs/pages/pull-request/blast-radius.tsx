@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Blast radius',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         and disagree. It is worked out from the list of changed files, with no AI.
       </p>
 
-      <WhoItHelps
-        developer="Know which pull requests need a careful read and which need only a glance."
-        manager="Let low-reach changes move quickly, and make sure high-reach ones get a real review."
-      />
 
       <H2 id="the-levels">The levels</H2>
       <H3>High: read it properly</H3>

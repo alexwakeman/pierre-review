@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, CheckRow, DocLink, H2, Illustration, Log, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, CheckRow, DocLink, H2, Illustration, Log, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'CI review',
@@ -34,10 +34,6 @@ export default function Page(): JSX.Element {
         failed, how sure it is, and whether this pull request can fix it. It is a run of its own, separate from the
         code review.
       </p>
-      <WhoItHelps
-        developer="Know in a minute whether the failure is your change or a flaky test, with the lines that show it."
-        manager="Fewer pull requests stalled on red checks that nobody has looked at, and a clear split between code failures and infrastructure noise."
-      />
 
       <H2 id="where-to-find-it">Where to find it</H2>
       <p>

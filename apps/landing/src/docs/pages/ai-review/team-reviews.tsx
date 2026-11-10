@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, MiniTable, Note, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, MiniTable, Note, Ui, Warning } from '../../kit';
 import { ClaimLinesMock } from '../../../components/mock/teams';
 
 export const meta: DocMeta = {
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         and writes only as its own person. This page explains how several Limns share the review work without
         repeating each other.
       </p>
-      <WhoItHelps
-        developer="Your teammate's Limn review shows in your AI Review tab, with who found what, and your Limn does not spend your subscription repeating it."
-        manager="A team of Limn users gets one automatic review per commit per model, not one per person, and every rule holds when two machines act at once."
-      />
 
       <H2 id="three-rules">Three rules</H2>
       <ol>

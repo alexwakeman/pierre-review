@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Toggle, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI review settings',
@@ -29,10 +29,6 @@ export default function Page(): JSX.Element {
         in the repositories a change depends on. Each workspace has its own settings. What a review does is explained
         in <DocLink to="ai-review/overview">AI review</DocLink>; this page lists the switches.
       </p>
-      <WhoItHelps
-        developer="Get a first review on every pull request you open before a teammate looks, and decide exactly what Limn may post for you."
-        manager="Turn on a consistent first-pass review for the whole workspace, with a daily cap and clear approval rules."
-      />
 
       <H2 id="auto-review">Auto review</H2>
       <p>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps, TextBox, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps, TextBox, Toggle, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Push the fix, and auto fix',
@@ -32,10 +32,6 @@ export default function Page(): JSX.Element {
         with your own GitHub sign-in; the sandbox never holds your GitHub credentials. This page also covers auto fix,
         which prepares a fix by itself after an auto review of your own pull request.
       </p>
-      <WhoItHelps
-        developer="Your review fixes are ready before you sit down, and you still push them yourself unless you choose otherwise."
-        manager="Automatic fixes are limited to the author's own pull requests, capped per day, and pushed only with an explicit setting."
-      />
 
       <H2 id="push">Push a fix</H2>
       <PushPicture />

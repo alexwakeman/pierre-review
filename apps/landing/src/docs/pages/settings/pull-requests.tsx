@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Pull requests',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         and how far its change can reach (its blast radius). Both settings apply to every workspace and take effect
         everywhere as soon as you save.
       </p>
-      <WhoItHelps
-        developer="Tune the Large flag and the Low, Medium and High chip so they match what your repository really treats as risky."
-        manager="One shared yardstick for size and risk across every repository, so a High in one team means the same as a High in another."
-      />
 
       <H2 id="large-pull-requests">Large pull requests</H2>
       <p>

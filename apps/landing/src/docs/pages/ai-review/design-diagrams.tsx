@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, DocLink, H2, Illustration, MiniTable, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { Btn, Chip, DocLink, H2, Illustration, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Design diagrams',
@@ -46,10 +46,6 @@ export default function Page(): JSX.Element {
         pull request: what touches the data, across the top, and each step down the page in the order it happens. It
         is drawn by a separate run, so it never delays the review.
       </p>
-      <WhoItHelps
-        developer="Understand a teammate's change before you read the diff, and check your own change does what you meant."
-        manager="See the shape of a change (which layers it touches, where it writes data) without reading code."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <FlowPicture />

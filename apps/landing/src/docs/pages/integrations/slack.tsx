@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Card, DocLink, ExtLink, Field, FindingRow, H2, H3, Illustration, Note, Section, Steps, TextBox, Ui, Warning, WhoItHelps } from '../../kit';
+import { Card, DocLink, ExtLink, Field, FindingRow, H2, H3, Illustration, Note, Section, Steps, TextBox, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Slack',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         webhook; it needs no Slack app permissions beyond that.
       </p>
 
-      <WhoItHelps
-        developer="See what needs review or fixing across the team when you open Slack, with links straight into Limn."
-        manager="Give the whole team, including people who do not run Limn, a daily picture of what is stuck, without a stand-up."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

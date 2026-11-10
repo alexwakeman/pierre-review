@@ -25,7 +25,7 @@ import type { Tone } from '../mock/acme';
 // THE DOCS KIT: what a docs page is written with. See CONTRIBUTING.md.
 //
 //  Structure   H2 (with an id: it goes in "On this page"), H3, Steps, Ui (an app label),
-//              Kbd, DocLink, WhoItHelps, Callout (Note / Tip / Warning), Stub.
+//              Kbd, DocLink, Callout (Note / Tip / Warning), Stub.
 //  Pictures    Illustration wraps a small HTML mock of a screen, captioned "Illustration".
 //              NEVER a screenshot or an <img> of the product. Draw with the landing's own mock
 //              pieces (re-exported below) plus AppShell, Toolbar, Card, Thread, SettingsRow,
@@ -138,25 +138,6 @@ export function Warning({ title, children }: { title?: ReactNode; children: Reac
 }
 
 /** "Who it helps": what this screen or feature does for a developer and for an engineering manager. */
-export function WhoItHelps({ developer, manager }: { developer?: ReactNode; manager?: ReactNode }): JSX.Element {
-  return (
-    <div className="dx-who" role="group" aria-label="Who it helps">
-      {developer ? (
-        <div>
-          <b>Developer</b>
-          <p>{developer}</p>
-        </div>
-      ) : null}
-      {manager ? (
-        <div>
-          <b>Engineering manager</b>
-          <p>{manager}</p>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /** A quoted passage from a vendor's policy, with its source. Quote exactly; link the page. */
 export function Quote({ source, href, children }: { source: string; href: string; children: ReactNode }): JSX.Element {
   return (

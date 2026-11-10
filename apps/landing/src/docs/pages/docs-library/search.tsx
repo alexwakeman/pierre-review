@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Card, DocLink, H2, Illustration, Kbd, Note, Steps, TextBox, Toolbar, Ui, WhoItHelps } from '../../kit';
+import { Card, DocLink, H2, Illustration, Kbd, Note, Steps, TextBox, Toolbar, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Search the docs',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         <DocLink to="docs-library/read-and-ask">chat</DocLink> when you want an answer.
       </p>
 
-      <WhoItHelps
-        developer="Find every place the docs mention 'idempotency key' before you change how it works."
-        manager="Check whether a rule is written down anywhere before you ask the team to write it."
-      />
 
       <H2 id="search">Search</H2>
       <Steps>

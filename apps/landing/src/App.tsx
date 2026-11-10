@@ -102,7 +102,8 @@ export default function App(): JSX.Element {
         <main>
           {docs ? <DocsRoute path={path} /> : <Page />}
         </main>
-        <Footer />
+        {/* The docs drop the big block wordmark: the footer is links only there. */}
+        <Footer wordmark={!docs} />
         <CookieBanner />
       </div>
     </>

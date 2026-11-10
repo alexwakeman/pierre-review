@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { AppShell, DocLink, H2, Illustration, Note, PrRow, Pill, Tabs, Ui, WhoItHelps } from '../../kit';
+import { AppShell, DocLink, H2, Illustration, Note, PrRow, Pill, Tabs, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'What Limn is',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         bots you already use. Limn runs on your computer. There is no Limn server and no Limn account.
       </p>
 
-      <WhoItHelps
-        developer="Open Limn and see the reviews you were asked for, the replies to your comments and your own pull requests that need a push, a fix or a merge, across every repository at once."
-        manager="See where work is stalled, who is waiting on whom, how long reviews take and what the review bots are worth, without asking anyone for a status update."
-      />
 
       <H2 id="what-it-does">What Limn does</H2>
       <ul>

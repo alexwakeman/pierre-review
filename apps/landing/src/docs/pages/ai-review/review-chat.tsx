@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, Chip, DocLink, H2, Illustration, Note, Steps, Thread, Ui, WhoItHelps } from '../../kit';
+import { Btn, Card, Chip, DocLink, H2, Illustration, Note, Steps, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Ask about a review',
@@ -36,10 +36,6 @@ export default function Page(): JSX.Element {
         would look like), ask in the <Ui>Review chat</Ui>. The chat knows the whole review and the code it read, so
         you do not have to explain the context.
       </p>
-      <WhoItHelps
-        developer="Get a finding explained in the terms of your own code, without leaving the pull request."
-        manager="A reviewer new to a codebase can learn from the review instead of guessing what a comment means."
-      />
 
       <H2 id="ask-a-question">Ask a question</H2>
       <Steps>

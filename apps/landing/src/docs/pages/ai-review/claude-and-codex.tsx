@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Chip, DocLink, FindingRow, H2, Illustration, MiniTable, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { Chip, DocLink, FindingRow, H2, Illustration, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Claude and Codex together',
@@ -35,10 +35,6 @@ export default function Page(): JSX.Element {
         both on the same commit and give you one review. In Limn's own tests, one Claude review and one Codex review,
         merged, found about four in five known issues; either one alone found about half.
       </p>
-      <WhoItHelps
-        developer="Fewer missed bugs, in one list, with nothing repeated."
-        manager="A stronger first review without a second tool, and without twice the noise on GitHub."
-      />
 
       <H2 id="when-it-runs">When it runs</H2>
       <ul>

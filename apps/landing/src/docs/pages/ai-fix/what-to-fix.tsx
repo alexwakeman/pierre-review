@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, DocLink, FindingRow, Group, H2, Illustration, MiniTable, Note, Tip, Ui, WhoItHelps } from '../../kit';
+import { Btn, Chip, DocLink, FindingRow, Group, H2, Illustration, MiniTable, Note, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Choose what to fix',
@@ -36,10 +36,6 @@ export default function Page(): JSX.Element {
         sections, each with a tick box. The agent is given exactly the items you tick, and nothing else. Each item is
         drawn with the same card you see on the <Ui>AI Review</Ui> tab, so you know what you are picking.
       </p>
-      <WhoItHelps
-        developer="Fix the points you agree with and leave the rest, without copying anything into a prompt."
-        manager="A fix stays focused on what the review asked for, so it is quicker to read before it is pushed."
-      />
 
       <H2 id="the-sections">The sections</H2>
       <PickerPicture />

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, SettingsRow, Toggle, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, Note, SettingsRow, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Features',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         the sidebar short. The choice applies to you in every workspace and takes effect as soon as you select the
         switch.
       </p>
-      <WhoItHelps
-        developer="Hide the pages you never open, so the sidebar shows only the places you work."
-        manager="Keep Reports and Bots Monitoring visible for yourself while a teammate hides them on their own Limn."
-      />
 
       <H2 id="the-switches">The switches</H2>
       <Illustration label="The Features tab with four switches, all on." caption="One switch per page the sidebar can hide.">

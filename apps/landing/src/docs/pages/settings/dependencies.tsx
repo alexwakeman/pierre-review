@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Dependencies settings',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         until you select <Ui>Save</Ui>. This page lists the settings; how the automation behaves day to day is in{' '}
         <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
       </p>
-      <WhoItHelps
-        developer="Stop babysitting version bumps: safe updates merge on their own once checks pass."
-        manager="Set one clear policy for the team's dependency updates: which sizes, which ecosystems, and which bots are trusted."
-      />
 
       <H2 id="what-limn-can-do">What Limn can do</H2>
       <Illustration label="The four dependency switches, all off." caption="The four actions. All start off.">

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Focus one pull request',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         when the fixes were pushed.
       </p>
 
-      <WhoItHelps
-        developer="Follow the back-and-forth on one long pull request without the rest of the board in the way."
-        manager="See how long a pull request waited between each step, and who it waited on."
-      />
 
       <H2 id="open-a-focus-tab">Open a Focus tab</H2>
       <p>Any of these opens one:</p>

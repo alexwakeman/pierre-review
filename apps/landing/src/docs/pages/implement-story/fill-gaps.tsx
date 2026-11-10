@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, FindingRow, H2, Illustration, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { Btn, DocLink, FindingRow, H2, Illustration, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Fill gaps',
@@ -33,10 +33,6 @@ export default function Page(): JSX.Element {
         the story check finds that, the story view offers <Ui>Fill gaps</Ui>. It is the same session as Implement story,
         but the agent is told what the check found and works only on those gaps.
       </p>
-      <WhoItHelps
-        developer="Finish a ticket's leftovers without rereading the whole story to find what is missing."
-        manager="Partly delivered stories get finished against their criteria, not left with a gap nobody noticed."
-      />
 
       <H2 id="when-it-is-offered">When it is offered</H2>
       <p>On the ticket's story view, in place of <Ui>Implement</Ui>, when all of these hold:</p>

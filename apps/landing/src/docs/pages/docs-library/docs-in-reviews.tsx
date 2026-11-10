@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Docs in reviews',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         workspace.
       </p>
 
-      <WhoItHelps
-        developer="Learn in the review, not in production, that the retry change breaks the documented idempotency rule, with the rule quoted."
-        manager="Make sure the team's written decisions are checked on every pull request, not only when the right reviewer is looking."
-      />
 
       <H2 id="turn-it-on">Turn it on</H2>
       <Steps>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { AppShell, DocLink, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Steps, Tabs, Tip, Toolbar, Ui, WhoItHelps } from '../../kit';
+import { AppShell, DocLink, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Steps, Tabs, Tip, Toolbar, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read the open pull requests list',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         sits at the top.
       </p>
 
-      <WhoItHelps
-        developer="Find the pull request you need in one list, see what it is waiting for, and open it, merge it or start its AI review from the row."
-        manager="See every piece of open work in the team at once, grouped by ticket, with what blocks each one."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, MiniTable, Note, Pill, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, MiniTable, Note, Pill, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Bot activity tab',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         tab. No AI is involved: it is counting and comparing.
       </p>
 
-      <WhoItHelps
-        developer="See whether a bot has finished with your pull request, or is still slow to come back."
-        manager="Spot a bot that is slower or noisier than usual on one pull request, as evidence for the bot's settings."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>One card per bot, with:</p>

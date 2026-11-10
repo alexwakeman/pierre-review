@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { CheckRow, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { CheckRow, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Can it land?',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         status. When GitHub only says “blocked”, Limn lists the likely reasons.
       </p>
 
-      <WhoItHelps
-        developer="Know what stands between your pull request and the merge button, without opening GitHub’s branch settings."
-        manager="See at a glance which approved work is really ready to land and which is stuck, and on what."
-      />
 
       <H2 id="the-statuses">The statuses</H2>
       <MiniTable

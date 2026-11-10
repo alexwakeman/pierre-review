@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Thread, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'What the thread states mean',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         need someone?
       </p>
 
-      <WhoItHelps
-        developer="Tell at a glance which comments on your pull request you still have to answer or fix."
-        manager="See how many review comments go unanswered across the workspace, and how many were fixed but never resolved."
-      />
 
       <H2 id="the-states">The four states</H2>
       <table>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, Illustration, Note, Ui, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, Illustration, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Ticket tab',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         the same ticket, and the story check. A pull request that names two tickets gets two tabs.
       </p>
 
-      <WhoItHelps
-        developer="Check the change against what the ticket asked for without leaving the pull request."
-        manager="See whether a pull request meets its story, and what else is still open for that ticket."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <ul>

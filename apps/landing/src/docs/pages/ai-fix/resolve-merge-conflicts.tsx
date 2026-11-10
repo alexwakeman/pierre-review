@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, Diff, DocLink, FindingRow, Group, H2, Illustration, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Chip, Diff, DocLink, FindingRow, Group, H2, Illustration, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Resolve merge conflicts with AI Fix',
@@ -39,10 +39,6 @@ export default function Page(): JSX.Element {
         conflicts, then fix the other items on top. Limn checks the merge itself before anything can be pushed. You
         review how each conflict was resolved, apart from the other changes.
       </p>
-      <WhoItHelps
-        developer="A pull request that fell behind is mergeable again in one run, with the review fixes in the same push."
-        manager="Conflicts stop holding up work, and a bad merge cannot reach the branch: Limn refuses it."
-      />
 
       <H2 id="when-it-is-offered">When it is offered</H2>
       <p>

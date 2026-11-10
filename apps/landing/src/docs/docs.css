@@ -440,28 +440,6 @@
 }
 
 /* who it helps */
-.lb.docs .dx-who {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--gap);
-  margin: 1.4em 0;
-}
-.lb.docs .dx-who > div {
-  background: #202126;
-  padding: 14px 18px;
-}
-.lb.docs .dx-who b {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: 4px;
-}
-.lb.docs .dx-who p {
-  margin: 0;
-}
 
 /* quotes */
 .lb.docs .dx-quote {

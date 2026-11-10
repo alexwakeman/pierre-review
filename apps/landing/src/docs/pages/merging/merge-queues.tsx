@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { CheckRow, DocLink, H2, Illustration, MiniTable, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { CheckRow, DocLink, H2, Illustration, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Merge queues',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         at a time, in the order you armed them. Limn never mixes up the two in what it shows you.
       </p>
 
-      <WhoItHelps
-        developer="Add a pull request to the queue from Limn, see its place and state, and take it out again, without opening GitHub."
-        manager="Arm a batch of approved pull requests on one repository and have them land in order, without each one breaking the next."
-      />
 
       <H2 id="the-two-queues">The two queues side by side</H2>
       <MiniTable

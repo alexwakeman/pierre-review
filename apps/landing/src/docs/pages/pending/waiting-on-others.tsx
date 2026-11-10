@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { PendingListMock } from '../../../components/mock/home';
-import { DocLink, H2, H3, Note, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Waiting on others',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         on this tab.
       </p>
 
-      <WhoItHelps
-        developer="See which of your pull requests are stuck on a reviewer, and nudge them or ask someone else, without leaving Limn."
-        manager="See how long the team's work waits on reviewers, against the workspace's review target."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>

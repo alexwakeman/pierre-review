@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, H3, Illustration, Note, Pill, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, H3, Illustration, Note, Pill, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI Review tab',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-review/overview">AI review</DocLink> section explains the review itself.
       </p>
 
-      <WhoItHelps
-        developer="Get a careful second reader on your change before a teammate sees it, and post only the findings you agree with."
-        manager="See what the AI found on a pull request, what was posted, and whether teammates' reviews agree."
-      />
 
       <H2 id="run-a-review">Run a review</H2>
       <p>

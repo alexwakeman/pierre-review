@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Integrations settings',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         tracker, SonarCloud and Slack. Every setting here applies to this workspace only. Each service has its own
         guide under Integrations; this page says what each section of the tab holds.
       </p>
-      <WhoItHelps
-        developer="Pull requests link to their tickets, and reviews check the work against the ticket's acceptance criteria and SonarCloud's findings."
-        manager="One tracker per workspace powers This Sprint and the story checks, and a Slack digest keeps the team on the same page."
-      />
 
       <H2 id="issue-tracker">Issue tracker</H2>
       <p>

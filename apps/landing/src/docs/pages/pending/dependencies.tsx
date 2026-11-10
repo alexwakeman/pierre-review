@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Dependencies',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         the list to <Ui>Security</Ui> or <Ui>Bumps</Ui>.
       </p>
 
-      <WhoItHelps
-        developer="Land the safe dependency updates in one pass, and see first the ones that fix a known security advisory."
-        manager="See how many dependency updates and security fixes are waiting, and whether any are stuck."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <H3>Security</H3>

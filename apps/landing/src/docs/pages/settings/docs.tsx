@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, TextBox, Toggle, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, TextBox, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Docs settings',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         Notion connections the library uses to add pages. Documents from GitHub need no connection: Limn reads them
         with your GitHub sign-in. Every setting here applies to this workspace only.
       </p>
-      <WhoItHelps
-        developer="Reviews that know your architecture notes and specifications, and say where a change disagrees with them."
-        manager="Keep the team's written decisions in front of every review without anyone pasting links."
-      />
 
       <H2 id="reference-docs">Use reference docs in AI Review</H2>
       <p>

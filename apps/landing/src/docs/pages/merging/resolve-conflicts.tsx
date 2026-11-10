@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, DocLink, H2, H3, Illustration, Note, Steps, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Chip, DocLink, H2, H3, Illustration, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Resolve conflicts by hand',
@@ -41,10 +41,6 @@ export default function Page(): JSX.Element {
         never picks a side for you, and nothing is pushed until you press the button.
       </p>
 
-      <WhoItHelps
-        developer="Resolve a conflict in a few clicks without checking the branch out, rebasing locally or losing your place."
-        manager="Conflicted pull requests stop being a reason work sits unmerged, and every resolution is a deliberate decision by a person."
-      />
 
       <H2 id="open-the-resolver">Open the resolver</H2>
       <p>

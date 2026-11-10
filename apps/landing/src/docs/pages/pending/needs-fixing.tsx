@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Needs fixing',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         <Ui>Do next</Ui>.
       </p>
 
-      <WhoItHelps
-        developer="Find the red builds and conflicts that block your team's work, with the failing checks named on the card."
-        manager="See how much of the open work is blocked by broken builds or conflicts, and in which repositories."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <H3>CI failing</H3>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Kbd, MiniTable, Pill, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Kbd, MiniTable, Pill, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'ROI',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         verdict sums it up.
       </p>
 
-      <WhoItHelps
-        developer="Know which bot’s threads are usually worth a reply, and which ones the team ships past."
-        manager="See the cost of each bot per thread your team actually used, and which bots to tune or turn off."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

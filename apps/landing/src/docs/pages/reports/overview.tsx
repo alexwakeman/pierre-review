@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { FlowMetricsMock, PeriodReportMock, WhereWorkMock } from '../../../components/mock/reports';
-import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Kbd, Note, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read the Overview',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         in. Every figure is counted from your GitHub data. No AI writes or changes a number on this tab.
       </p>
 
-      <WhoItHelps
-        developer="See whether reviews come faster or slower than last sprint, and open the pull requests behind any figure to find the ones that waited."
-        manager="Get a sprint-over-sprint view of throughput, review speed and CI health that you can check pull request by pull request, and copy into a report."
-      />
 
       <p>
         Reports covers every repository in the workspace. The repository picker on the <Ui>Timeline</Ui> does not

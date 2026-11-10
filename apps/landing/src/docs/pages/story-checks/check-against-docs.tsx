@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Btn, Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Check against docs',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         do about it. Every point quotes the passage it rests on.
       </p>
 
-      <WhoItHelps
-        developer="Find out before you build that the ticket asks for a 60-day refund window when the refund policy says 30."
-        manager="Catch a ticket that contradicts an agreed design or policy while it is still cheap to change, with the passage to show the team."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <ul>

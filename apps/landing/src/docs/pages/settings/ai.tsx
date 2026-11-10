@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         default, whether each one is ready and signed in, how hard the AI works, how much of your plan Limn may use on
         its own, and how much disk space AI runs take. Every setting here applies to you in every workspace.
       </p>
-      <WhoItHelps
-        developer="Choose between Claude and Codex, and trade depth for speed with one Effort setting."
-        manager="Cap how much of each person's AI plan Limn's automatic runs may use, so review never eats the week."
-      />
 
       <H2 id="provider">Choose the provider</H2>
       <p>

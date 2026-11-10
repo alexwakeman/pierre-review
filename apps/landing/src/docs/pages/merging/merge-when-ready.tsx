@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, CheckRow, DocLink, H2, Illustration, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, CheckRow, DocLink, H2, Illustration, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Merge when ready',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         code changes after you armed it, Limn does not merge it.
       </p>
 
-      <WhoItHelps
-        developer="Stop refreshing a pull request to see whether CI has finished. Arm it and move on to the next task."
-        manager="Approved work lands as soon as it can, in the order people armed it, without someone watching every build."
-      />
 
       <H2 id="arm-a-pull-request">Arm a pull request</H2>
       <Steps>

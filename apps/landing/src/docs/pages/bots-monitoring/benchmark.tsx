@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { BenchmarkMock } from '../../../components/mock/reports';
-import { DocLink, H2, H3, MiniTable, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Benchmark',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         is not possible, Limn says so and shows no number.
       </p>
 
-      <WhoItHelps
-        developer="Find out whether a bot is genuinely noisy or whether your team simply skips its comments."
-        manager="See what a bot costs per useful comment, and whether teams like yours get more out of it, before you renew or drop it."
-      />
 
       <H2 id="where-the-comparison-comes-from">Where the comparison comes from</H2>
       <p>

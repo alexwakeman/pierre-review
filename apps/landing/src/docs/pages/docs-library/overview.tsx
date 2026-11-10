@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { AppShell, Card, DocLink, H2, Illustration, Note, Pill, Ui, WhoItHelps } from '../../kit';
+import { AppShell, Card, DocLink, H2, Illustration, Note, Pill, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'What the docs library is for',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         summary each. Then you, the AI reviewer and the story check can all use the same library.
       </p>
 
-      <WhoItHelps
-        developer="Ask 'what does the refund policy say about partial refunds?' and get the answer with the passage, or have the AI review tell you when your change goes against the documented design."
-        manager="Make the team's agreed rules count in every review and story check, not only the ones the reviewer remembers. Every point quotes the document it comes from."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

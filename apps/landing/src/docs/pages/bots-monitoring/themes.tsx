@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, DocLink, H2, Illustration, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Btn, Card, DocLink, H2, Illustration, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Themes',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         code it clusters. You read a short summary instead of hundreds of comments. The tab shows only while AI is on.
       </p>
 
-      <WhoItHelps
-        developer="Learn the mistakes the bots catch most often in your code, so you can avoid them before review."
-        manager="See the recurring quality themes across the workspace, which can point to missing tests, a library that needs a wrapper, or a coding standard to agree."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

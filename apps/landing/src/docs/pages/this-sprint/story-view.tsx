@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, DocLink, FindingRow, H2, H3, Illustration, Kbd, Note, Pill, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Card, DocLink, FindingRow, H2, H3, Illustration, Kbd, Note, Pill, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: "Open a ticket's story",
@@ -48,10 +48,6 @@ export default function Page(): JSX.Element {
         ticket on the workspace&rsquo;s tracker, including a ticket with no pull request yet.
       </p>
 
-      <WhoItHelps
-        developer="Read the ticket, its comments and the check of your code against it in one place, then see the other pull requests on the same ticket, in any repository."
-        manager="See whether a ticket is really done: which criteria the code meets, which are missing, and whether someone signed one off in a comment."
-      />
 
       <H2 id="open-it">Open it</H2>
       <p>The same story view opens in two places:</p>

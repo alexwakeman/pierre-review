@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, Pill, Steps, Toolbar, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, Note, Pill, Steps, Toolbar, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'People or bots',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         bot cannot bury the team's conversation.
       </p>
 
-      <WhoItHelps
-        developer="Read what your teammates said without scrolling past every bot comment, then switch to Bots to check what the bots raised."
-        manager="See the bots' output on its own, to judge how much of it the team acts on."
-      />
 
       <Illustration
         label="The feed's People and Bots switch, with Bots selected."

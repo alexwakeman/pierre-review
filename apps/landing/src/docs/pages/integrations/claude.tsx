@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Claude (Anthropic)',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         stores no Claude credentials. When both Claude and Codex are signed in, Limn uses Claude by default and runs
         reviews on both.
       </p>
-      <WhoItHelps
-        developer="Use your own Claude access, your Claude Code login or an Anthropic API key, with Claude's models reviewing and fixing your pull requests."
-        manager="Each person brings their own Claude access; Limn's automatic use is capped at a share of their week."
-      />
 
       <H2 id="what-you-need">What you need</H2>
       <p>One of these two. Both are fully supported; choose the one that suits you or your organisation.</p>

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Note, Steps, Tip, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Note, Steps, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'My Turn notifications',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         notification names the workspace the items came from. It is off until you switch it on.
       </p>
 
-      <WhoItHelps
-        developer="Keep Limn in a background tab and hear about a review request or a reply when it happens, not when you next look."
-        manager="Stay responsive to the reviews and questions that wait on you, without watching the board."
-      />
 
       <H2 id="turn-them-on">Turn notifications on</H2>
       <Steps>

@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { AddReposMock } from '../../../components/mock/setup';
-import { DocLink, H2, H3, Note, Steps, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Add your repositories',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         read: your own, your organisation's, or a public one.
       </p>
 
-      <WhoItHelps
-        developer="Add the repositories you review and commit to. My turn then covers all of them."
-        manager="Add every repository the team works in, so that Reports and Chronology count all of the team's work."
-      />
 
       <H2 id="the-first-run">The first time you open Limn</H2>
       <p>

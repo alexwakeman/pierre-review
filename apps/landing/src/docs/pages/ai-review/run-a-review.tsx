@@ -13,8 +13,7 @@ import {
   Toolbar,
   Ui,
   Warning,
-  WhoItHelps,
-} from '../../kit';
+  } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Run a review',
@@ -64,10 +63,6 @@ export default function Page(): JSX.Element {
         result stays in Limn or goes to GitHub when it is done. This page walks through one review from start to
         post.
       </p>
-      <WhoItHelps
-        developer="Review your own pull request before you ask for a human review, or get a second opinion on a teammate's."
-        manager="The same steps for everyone, and a record of every review on the pull request."
-      />
 
       <H2 id="before-you-start">Before you start</H2>
       <ul>

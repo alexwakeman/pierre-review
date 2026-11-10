@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, Note, Steps, Thread, Ui, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, Illustration, Note, Steps, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Plan first',
@@ -40,10 +40,6 @@ export default function Page(): JSX.Element {
         items and the code, runs commands if it needs to, and proposes a plan. It cannot edit files until you press{' '}
         <Ui>Start fix</Ui>.
       </p>
-      <WhoItHelps
-        developer="Agree the approach in a minute of chat instead of rewriting a fix you did not want."
-        manager="Larger fixes get a short, reviewable plan before anything is built."
-      />
 
       <H2 id="start-with-a-plan">Start with a plan</H2>
       <PlanPicture />

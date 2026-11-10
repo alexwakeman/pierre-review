@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, CheckRow, DocLink, H2, H3, Illustration, Log, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Btn, CheckRow, DocLink, H2, H3, Illustration, Log, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Read CI logs',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         your code.
       </p>
 
-      <WhoItHelps
-        developer="See why a check failed in two clicks, and re-run a flaky job without opening GitHub Actions."
-        manager="Spend less of the team’s time on red builds that are not real failures."
-      />
 
       <H2 id="open-a-log">Open a log</H2>
       <Illustration

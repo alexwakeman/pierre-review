@@ -10,8 +10,7 @@ import {
   Tabs,
   Ui,
   Warning,
-  WhoItHelps,
-} from '../../kit';
+  } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'How AI review works',
@@ -62,10 +61,6 @@ export default function Page(): JSX.Element {
         each tied to a file and a line where it can be. The review runs on your computer, with your own Claude or
         Codex sign-in. Limn charges nothing for it.
       </p>
-      <WhoItHelps
-        developer="A first review in minutes, before a teammate looks. You see what to fix, and you decide what goes to GitHub."
-        manager="Every pull request gets a consistent first pass, with your team's own rules for what is posted and when Limn may approve."
-      />
 
       <H2 id="where-it-lives">Where it lives</H2>
       <p>

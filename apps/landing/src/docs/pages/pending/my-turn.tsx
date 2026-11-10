@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, Group, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, Group, H2, H3, Illustration, Kbd, Note, Pill, PrRow, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'My turn',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         true. Nothing about it is a to-do list you have to keep clean.
       </p>
 
-      <WhoItHelps
-        developer="One list of what you owe people, across every repository, oldest wait first. Nothing a bot did puts a card here."
-        manager="Your own reviews and replies in one place, so you are not the bottleneck on the team's work."
-      />
 
       <H2 id="the-groups">The groups</H2>
       <p>The tab has fixed groups, always in this order, with the longest wait first in each:</p>

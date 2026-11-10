@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, FindingRow, H2, H3, Illustration, MiniTable, Note, Ui, WhoItHelps } from '../../kit';
+import { DocLink, FindingRow, H2, H3, Illustration, MiniTable, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Acceptance criteria',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         criterion means.
       </p>
 
-      <WhoItHelps
-        developer="Know which line of the ticket each verdict is about, and why a criterion reads Can't tell rather than Not met."
-        manager="Know that a count like 3 of 4 met is counted from the ticket's own criteria, and that Limn says where it got them."
-      />
 
       <H2 id="where-limn-finds-them">Where Limn finds them</H2>
       <MiniTable

@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui, WhoItHelps } from '../../kit';
+import { Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The Theme view',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         sentence what that work involves, and its status columns show how far it has got.
       </p>
 
-      <WhoItHelps
-        developer="Find the other tickets in your area of work, and see who else is changing the same part of the product."
-        manager="See where the sprint's effort goes, which areas are nearly done and which have not started, without reading every ticket."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

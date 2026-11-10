@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Add documents',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         kind of source needs.
       </p>
 
-      <WhoItHelps
-        developer="Add the repository's own docs folder in a minute, read with your existing gh sign-in."
-        manager="Point the library at the Confluence space or Notion wiki the team already keeps. Limn checks it for changes, so the library does not go stale."
-      />
 
       <H2 id="the-kinds-of-source">The kinds of source</H2>
       <MiniTable

@@ -1,6 +1,6 @@
 import type { DocMeta } from '../../types';
 import { BotsSeverityMock } from '../../../components/mock/reports';
-import { DocLink, H2, H3, Kbd, Note, Steps, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Kbd, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'What Bots Monitoring shows',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         is, how often your team acts on it, and what it costs, for every repository in the workspace.
       </p>
 
-      <WhoItHelps
-        developer="See which bot’s comments are usually worth reading, and clear the bot threads that later commits already dealt with."
-        manager="Decide which bots to keep, tune or cancel, with the cost per useful comment and a comparison with other teams that run the same bot."
-      />
 
       <H2 id="the-tabs">The tabs</H2>
       <ul>

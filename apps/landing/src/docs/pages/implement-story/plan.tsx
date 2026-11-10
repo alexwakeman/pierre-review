@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, Chip, DocLink, FindingRow, Group, H2, H3, Illustration, Note, Steps, Ui, Warning, WhoItHelps } from '../../kit';
+import { Btn, Card, Chip, DocLink, FindingRow, Group, H2, H3, Illustration, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Plan the work',
@@ -43,10 +43,6 @@ export default function Page(): JSX.Element {
         reference documents, and says what it will build, where, and where it thinks the story is wrong or unclear. Limn
         checks every piece of evidence in the plan before you see it. Nothing is built until you approve the plan.
       </p>
-      <WhoItHelps
-        developer="Settle the questions a ticket leaves open in a few clicks, before any code is written, with the lines that raise each one."
-        manager="Gaps in a story come back as concrete points with evidence, and every decision is written into the pull request."
-      />
 
       <H2 id="what-the-plan-holds">What the plan holds</H2>
       <PlanPicture />

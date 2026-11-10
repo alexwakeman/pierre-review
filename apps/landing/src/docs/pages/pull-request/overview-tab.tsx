@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { CheckRow, DocLink, H2, H3, Illustration, Note, Ui, WhoItHelps } from '../../kit';
+import { CheckRow, DocLink, H2, H3, Illustration, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Overview tab',
@@ -14,10 +14,6 @@ export default function Page(): JSX.Element {
         then shows the AI review, the checks, the people and the description, in five sections, top to bottom.
       </p>
 
-      <WhoItHelps
-        developer="See what stands between your pull request and a merge, and open the failing check's log in one click."
-        manager="Read one pull request's state without opening GitHub: blockers, reviewers, checks and the ticket."
-      />
 
       <H2 id="can-it-land">Can it land</H2>
       <ul>

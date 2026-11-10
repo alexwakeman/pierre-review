@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Chip, DocLink, FindingRow, H2, Illustration, MiniTable, Note, Thread, Ui, WhoItHelps } from '../../kit';
+import { Chip, DocLink, FindingRow, H2, Illustration, MiniTable, Note, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Follow-up reviews',
@@ -34,10 +34,6 @@ export default function Page(): JSX.Element {
         checks each earlier finding against the code as it is now. You see, finding by finding, what was fixed, what
         is still open and why. Nothing is raised twice as if it were new.
       </p>
-      <WhoItHelps
-        developer="After you push a fix, you see at once which points are closed and the one thing left on each open one."
-        manager="A pull request's review history reads as a conversation that ends, not a pile of repeated comments."
-      />
 
       <H2 id="what-is-followed-up">What is followed up</H2>
       <p>The follow-up reads the latest finished review of the pull request and takes its findings that:</p>

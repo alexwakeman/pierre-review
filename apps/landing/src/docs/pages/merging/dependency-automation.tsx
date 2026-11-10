@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, SettingsRow, Steps, Toggle, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Dependency automation',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         off until you switch it on.
       </p>
 
-      <WhoItHelps
-        developer="Stop reviewing patch bumps by hand. The ones that pass CI land on their own; the rest wait for you on the Dependencies tab."
-        manager="Keep dependencies current with less of the team’s time, with clear limits on which updates are allowed through and a record of what was done."
-      />
 
       <H2 id="switch-it-on">Switch it on</H2>
       <Illustration

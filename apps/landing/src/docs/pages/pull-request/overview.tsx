@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Kbd, Note, Pill, Tabs, Tip, Ui, Warning, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Kbd, Note, Pill, Tabs, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Open a pull request',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         seconds while you have it open.
       </p>
 
-      <WhoItHelps
-        developer="Review, reply, resolve and merge in one place, with the review threads already sorted by state."
-        manager="See a pull request's whole state in one header: whether it can land, what blocks it, who reviewed it and how big it is."
-      />
 
       <H2 id="open-one">Open a pull request</H2>
       <ul>

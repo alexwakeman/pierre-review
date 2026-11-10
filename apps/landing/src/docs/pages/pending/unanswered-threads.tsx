@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, Thread, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, Note, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Unanswered threads',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         comment. Items are ordered by score.
       </p>
 
-      <WhoItHelps
-        developer="Find the review comments on your team's pull requests that nobody has answered, before the pull request is blocked on them."
-        manager="See how many review comments go unanswered, and on which pull requests."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <p>

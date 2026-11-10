@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, Note, Steps, TextBox, Thread, Ui, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, Illustration, Note, Steps, TextBox, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Ask about the sprint',
@@ -16,10 +16,6 @@ export default function Page(): JSX.Element {
         provider, the button and the heading say Codex instead of Claude.
       </p>
 
-      <WhoItHelps
-        developer="Ask which tickets touch the area you are about to change, or what PAY-146 waits on, without reading every card."
-        manager="Ask for a quick summary before a stand-up or a planning meeting: what is in review, what has no pull request, what is outside the sprint but blocking it."
-      />
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

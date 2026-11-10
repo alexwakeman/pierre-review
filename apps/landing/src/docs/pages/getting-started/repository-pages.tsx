@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { CheckRow, DocLink, FindingRow, H2, H3, Illustration, Note, Tabs, Ui, WhoItHelps } from '../../kit';
+import { CheckRow, DocLink, FindingRow, H2, H3, Illustration, Note, Tabs, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Repository pages',
@@ -15,10 +15,6 @@ export default function Page(): JSX.Element {
         its activity. It has two tabs, <Ui>Activity</Ui> and <Ui>Bots</Ui>.
       </p>
 
-      <WhoItHelps
-        developer="See at a glance whether the repository you own has a red default branch, conflicts or reviews waiting on you."
-        manager="Check the health of one repository, with its own charts and its own review bots, apart from the rest of the workspace."
-      />
 
       <H2 id="the-sidebar-dots">What the dots in the sidebar mean</H2>
       <p>Each repository line in the sidebar can carry up to two dots.</p>

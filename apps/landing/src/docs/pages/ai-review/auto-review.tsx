@@ -12,8 +12,7 @@ import {
   Toggle,
   Ui,
   Warning,
-  WhoItHelps,
-} from '../../kit';
+  } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Auto review',
@@ -44,10 +43,6 @@ export default function Page(): JSX.Element {
         when new commits arrive. You do not press anything. It uses the same models and the same rules as a review
         you start, and it runs on your own AI sign-in, so it is off until you switch it on.
       </p>
-      <WhoItHelps
-        developer="Every pull request you open or are asked to review already has a review waiting when you look."
-        manager="No pull request waits for a first review, and the daily limit and spend budget keep the cost known."
-      />
 
       <H2 id="turn-it-on">Turn it on</H2>
       <SettingsPicture />

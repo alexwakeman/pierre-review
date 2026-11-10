@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Chip, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, WhoItHelps } from '../../kit';
+import { Btn, Chip, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Check threads',
@@ -38,10 +38,6 @@ export default function Page(): JSX.Element {
         the code now deal with it? It reads only the threads that changed since they were last judged, so it is quick
         and cheap.
       </p>
-      <WhoItHelps
-        developer="Before you ask for another review, see which comments you have dealt with and which still need work."
-        manager="A plain answer on every open thread, so a pull request is not held up by comments nobody followed up."
-      />
 
       <H2 id="what-it-checks">What it checks</H2>
       <ThreadPills />

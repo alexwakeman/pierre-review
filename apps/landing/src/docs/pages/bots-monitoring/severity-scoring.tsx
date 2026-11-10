@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, Note, Pill, SettingsRow, Steps, Thread, Ui, WhoItHelps } from '../../kit';
+import { Btn, DocLink, H2, Illustration, Note, Pill, SettingsRow, Steps, Thread, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Severity scoring',
@@ -17,10 +17,6 @@ export default function Page(): JSX.Element {
         bot’s own severity label.
       </p>
 
-      <WhoItHelps
-        developer="Read the major and critical bot comments first, and leave the nits for later."
-        manager="See which bots raise real problems and which mostly raise nits, and which bots overstate how serious their findings are."
-      />
 
       <H2 id="set-it-up">Set it up</H2>
       <Illustration

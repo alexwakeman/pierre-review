@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, H3, Illustration, Note, Quote, SettingsRow, Stat, Steps, TextBox, Tip, Toggle, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, H3, Illustration, Note, Quote, SettingsRow, Stat, Steps, TextBox, Tip, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'AI subscription usage and spend',
@@ -18,10 +18,6 @@ export default function Page(): JSX.Element {
         account Limn uses, how much of it Limn may use on its own, and what happens when that share runs out. The
         settings are on the <DocLink to="settings/ai">AI</DocLink> tab, under <Ui>AI spend</Ui>.
       </p>
-      <WhoItHelps
-        developer="Automatic reviews never use up the week you need for your own Claude or Codex work."
-        manager="Each person's automatic AI use has a ceiling they chose, in plain percentages of their plan."
-      />
 
       <H2 id="which-account">Which account Limn uses</H2>
       <H3>Claude</H3>

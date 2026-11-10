@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, MiniTable, Note, Ui, WhoItHelps } from '../../kit';
+import { DocLink, H2, Illustration, MiniTable, Note, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Limn runs on your computer',
@@ -27,10 +27,6 @@ export default function Page(): JSX.Element {
         sign-in to Limn. Your code, your pull requests and Limn&rsquo;s view of them stay on your computer, apart from
         what Limn sends to the services you connect, which this section lists.
       </p>
-      <WhoItHelps
-        developer="Nothing to sign up for, and nothing of your code stored on someone else's server."
-        manager="No new vendor holding your source code: each person's Limn talks to GitHub and your AI provider directly, with their own access."
-      />
 
       <H2 id="what-runs-where">What runs where</H2>
       <Illustration label="A table of Limn's parts and where each runs: all on your computer, using your own GitHub and AI accounts." caption="Every part runs on your computer.">
