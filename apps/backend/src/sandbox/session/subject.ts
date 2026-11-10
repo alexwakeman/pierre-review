@@ -78,6 +78,8 @@ export interface SessionSubject {
   /** Who to bill and under which ledger feature (accountId is the session's). */
   readonly usage: Omit<SandboxUsageAccount, 'accountId'>;
   readonly maxTurns: number;
+  /** Nobody is watching (an auto fix, dependency automation): "Stop all" closes it as discarded. */
+  readonly unattended?: boolean;
   /** Claude's process-wide US$ cap (`--max-budget-usd`): an UNATTENDED fix only. Absent ⇒ none. */
   readonly maxBudgetUsd?: number;
   save(l: SubjectLive, patch: SessionRowPatch): Promise<void>;

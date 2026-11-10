@@ -13,6 +13,7 @@ import {
   type StoryBuildPushResponse,
   type SandboxFolderCheck,
   type SandboxNetworkAllowBody,
+  type SandboxRunningStatus,
   type SandboxRuntimeStatus,
   type SandboxSessionStartBody,
   type SandboxWorkspaceSettings,
@@ -286,6 +287,30 @@ export function useSandboxRuntime(enabled = true) {
     enabled,
     staleTime: 15_000,
     retry: false,
+  });
+}
+
+export const SANDBOX_RUNNING_KEY = ['sandbox-running'] as const;
+
+/** This Limn's sandboxes running now. Read when Settings → Sandbox opens and on "Check again": never polled. */
+export function useSandboxRunning(enabled = true) {
+  return useQuery<SandboxRunningStatus>({
+    queryKey: SANDBOX_RUNNING_KEY,
+    queryFn: () => api.sandboxRunning(),
+    enabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+}
+
+/** "Stop all": the count it answers replaces the cached one. */
+export function useStopAllSandboxes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.stopAllSandboxes(),
+    onSuccess: (r) => qc.setQueryData<SandboxRunningStatus>(SANDBOX_RUNNING_KEY, { running: r.running, problem: r.problem }),
   });
 }
 

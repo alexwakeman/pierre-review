@@ -101,9 +101,30 @@ export default function Page(): JSX.Element {
         On Linux with Docker, the sandbox shares your computer&rsquo;s kernel. On a Mac or on Windows, the container
         runtime adds a virtual machine as a second wall. Allow only the hosts a build needs.
       </Warning>
+      <H2 id="when-a-sandbox-is-removed">When a sandbox is removed</H2>
+      <p>
+        A sandbox runs only while its session is open. When the session ends, Limn stops and removes its container or
+        virtual machine, its proxy, its services, its network and its storage. A session ends when:
+      </p>
+      <ul>
+        <li>you discard it, or push an AI Fix;</li>
+        <li>an automatic run finishes, or you stop it;</li>
+        <li>nothing happens for 15 minutes (closing the browser counts as nothing happening);</li>
+        <li>one turn of the AI runs for more than 2 hours;</li>
+        <li>the AI stops, or the session fails to start;</li>
+        <li>
+          you select <Ui>Stop all</Ui> in <DocLink to="settings/sandbox">Settings → Sandbox</DocLink>;
+        </li>
+        <li>Limn stops, or restarts.</li>
+      </ul>
+      <p>
+        Changes the session stored are kept: you can push them, or resume the session, which starts a new sandbox.
+        Every few minutes, and when it starts, Limn also removes any sandbox of its own that no open session uses. It
+        never removes a sandbox of another Limn on the same computer, or anything it did not create.
+      </p>
       <Note>
-        Sandboxes are labelled and removed when you discard a session and when Limn starts. Run{' '}
-        <code>limn sandbox prune</code> with Limn stopped to remove any that are left.
+        If Limn was killed without warning, its sandboxes are removed the next time it starts. Run{' '}
+        <code>limn sandbox prune</code> with Limn stopped to remove them at once.
       </Note>
     </>
   );

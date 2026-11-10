@@ -123,6 +123,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // the answer is cached RUNTIME_STATUS_TTL_MS server-side so a loop cannot multiply them. `read`,
   // decided; EXACT `===` (`/api/sandbox` is a family other routes may join).
   if (path === '/api/sandbox/runtime') return [TIERS.read];
+  // THE RUNNING SANDBOXES + "STOP ALL": GET /api/sandbox/running, POST /api/sandbox/stop-all (same file).
+  // FOLLOWING THE TOKEN: no model, no GitHub — a few local CLI processes (`docker ps`, `docker rm`) for
+  // this install's labelled sandboxes; the SPA reads them on the reader's click only. `read`, decided;
+  // EXACT `===`.
+  if (path === '/api/sandbox/running' || path === '/api/sandbox/stop-all') return [TIERS.read];
   // THE AI PROVIDER CHOICE: PUT /api/ai/provider (api/routes/ai-provider.ts). One validated UPDATE of
   // one column, held in memory — no model, no GitHub, no process. `read`, decided; EXACT `===`.
   if (path === '/api/ai/provider') return [TIERS.read];

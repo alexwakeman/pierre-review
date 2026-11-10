@@ -7,7 +7,9 @@ import {
   SANDBOX_RESOURCE_LIMITS,
   type SandboxFolderCheck,
   type SandboxFolderCheckBody,
+  type SandboxRunningStatus,
   type SandboxRuntimeStatus,
+  type SandboxStopAllResult,
   type SandboxWorkspaceSettings,
   type SandboxWorkspaceSettingsBody,
 } from '@pierre-review/shared';
@@ -30,6 +32,9 @@ import { accountIdOf } from '../plugins/auth.js';
 //   GET    /api/sandbox/runtime       the container runtime on THIS computer (not workspace-scoped): the
 //                                     build tab's start state and Settings' status line. Local process
 //                                     checks only (`docker version` / `info`), cached RUNTIME_STATUS_TTL_MS.
+//   GET    /api/sandbox/running       how many sandboxes of this Limn run now (read from the runtime; the
+//                                     SPA reads it when Settings → Sandbox opens and on "Check again", never polled)
+//   POST   /api/sandbox/stop-all      closes every session and removes every leftover (sandbox/session/janitor.ts)
 
 const idParam = { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } } as const;
 const path = { type: ['string', 'null'], maxLength: SANDBOX_PATH_MAX } as const;
@@ -131,6 +136,16 @@ function currentRuntimeStatus(now = Date.now()): Promise<SandboxRuntimeStatus> {
 
 export async function sandboxSettingsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/sandbox/runtime', async () => (await currentRuntimeStatus()) satisfies SandboxRuntimeStatus);
+
+  app.get('/api/sandbox/running', async () => {
+    const { runningSandboxes } = await import('../../sandbox/session/janitor.js');
+    return (await runningSandboxes()) satisfies SandboxRunningStatus;
+  });
+
+  app.post('/api/sandbox/stop-all', async () => {
+    const { stopAllSandboxes } = await import('../../sandbox/session/janitor.js');
+    return (await stopAllSandboxes()) satisfies SandboxStopAllResult;
+  });
 
   app.get('/api/workspaces/:id/sandbox', { schema: { params: idParam } }, async (req, reply) => {
     const { id } = req.params as { id: number };

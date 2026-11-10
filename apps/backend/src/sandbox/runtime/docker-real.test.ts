@@ -111,4 +111,14 @@ describe.skipIf(!daemon)('sandbox on a real daemon', () => {
     const stats = await rt.stats(owner.sessionId);
     expect(stats.map((s) => s.role).sort()).toEqual(['proxy', 'sandbox']);
   }, 60_000);
+
+  // Last: it removes the containers the cases above use.
+  it("counts this install's running sandbox, and the 'exit' fallback force-removes its containers", async () => {
+    expect(await rt.listSandboxes()).toEqual([{ name: sandbox, sessionId: owner.sessionId }]);
+    rt.destroySync!([owner.sessionId]);
+    expect(await rt.listSandboxes()).toEqual([]);
+    const ps = spawnSync(docker, ['ps', '--all', '--quiet', '--filter', `label=limn.session=${owner.sessionId}`], { encoding: 'utf8' });
+    expect(ps.stdout.trim()).toBe('');
+  }, 60_000);
 });
+

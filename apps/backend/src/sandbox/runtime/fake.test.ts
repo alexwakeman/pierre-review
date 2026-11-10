@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeRuntime } from './fake.js';
-import { sweepSandboxesAtBoot } from './index.js';
+import { listRunningSandboxes, sweepSandboxesAtBoot, sweepSandboxesNow, sweepSettled } from './index.js';
 import { DEFAULT_RESOURCES } from './types.js';
 
 const owner = { sessionId: 's1', accountId: 1 };
@@ -57,5 +57,34 @@ describe('fake runtime', () => {
     const fake = createFakeRuntime();
     fake.setDetection({ daemonReachable: false, available: false });
     expect(await sweepSandboxesAtBoot({ runtime: fake })).toBeNull();
+  });
+
+  it('a sweep while Limn runs reads the live sessions in the same tick, and holds the gate until it ends', async () => {
+    const fake = createFakeRuntime();
+    fake.plant({ kind: 'container', name: 'limn-a-sandbox', sessionId: 'a', role: 'sandbox' });
+    fake.plant({ kind: 'container', name: 'limn-b-sandbox', sessionId: 'b', role: 'sandbox' });
+    let release: () => void = () => {};
+    const slow = { ...fake, sweep: async (live: Iterable<string>) => (await new Promise<void>((r) => (release = r)), fake.sweep(live)) };
+    let liveIds = ['b'];
+    const p = sweepSandboxesNow({ liveSessionIds: () => liveIds, backends: [slow as typeof fake] });
+    // A session registered after the call is not in this sweep's list: it must wait for the gate.
+    liveIds = ['a', 'b'];
+    let settled = false;
+    void sweepSettled().then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    release();
+    expect((await p)?.result.containers).toEqual(['limn-a-sandbox']);
+    await sweepSettled();
+    expect(fake.resources().map((r) => r.name)).toEqual(['limn-b-sandbox']);
+  });
+
+  it('counts the running sandboxes; null when no backend answers', async () => {
+    const fake = createFakeRuntime();
+    fake.plant({ kind: 'container', name: 'limn-a-sandbox', sessionId: 'a', role: 'sandbox' });
+    fake.plant({ kind: 'container', name: 'limn-a-proxy', sessionId: 'a', role: 'proxy' });
+    expect(await listRunningSandboxes({ backends: [fake] })).toEqual([{ name: 'limn-a-sandbox', sessionId: 'a' }]);
+    fake.setDetection({ daemonReachable: false, available: false });
+    expect(await listRunningSandboxes({ backends: [fake] })).toBeNull();
   });
 });

@@ -82,7 +82,9 @@ import type {
   StoryBuildSession,
   StoryBuildStartResponse,
   SandboxNetworkAllowResponse,
+  SandboxRunningStatus,
   SandboxRuntimeStatus,
+  SandboxStopAllResult,
   SandboxSessionActionResponse,
   SandboxSessionDiffResponse,
   SandboxSessionStreamEvent,
@@ -1849,6 +1851,8 @@ export async function installMockApi(
 
       // The container runtime and Settings → Sandbox (boot-time reads of the build tab and the modal).
       if (path === '/api/sandbox/runtime') return json(route, runtime);
+      if (path === '/api/sandbox/running') return json(route, { running: runtime.available ? 0 : null, problem: null } satisfies SandboxRunningStatus);
+      if (path === '/api/sandbox/stop-all') return json(route, { stopped: 0, running: 0, problem: null } satisfies SandboxStopAllResult);
       if (/\/api\/workspaces\/\d+\/sandbox$/.test(path)) return json(route, SANDBOX_SETTINGS);
 
       if (path.startsWith(STORY_BUILD_API.list)) {

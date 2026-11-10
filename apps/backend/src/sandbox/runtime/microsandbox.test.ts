@@ -210,6 +210,30 @@ describe('a session', () => {
     expect((await rt.sweep(['b'])).containers).toEqual(['limn-a-sandbox']);
   });
 
+  it('a destroy removes only its own socket folder; the sweep keeps every live session\'s', async () => {
+    const root = newRoot();
+    const { mkdirSync, existsSync } = await import('node:fs');
+    const dirs = Object.fromEntries(['a', 'b', 'gone'].map((id) => [id, socketDirFor(root, 'dtest', id)]));
+    for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
+    // A second runtime object (another backend list) knows none of these proxies.
+    const msb = scripted('/x/msb', [[/^ls /, { stdoutText: '[]' }], [/^rm /, { code: 0 }]]);
+    const rt = createMicrosandboxRuntime({ runner: msb, instance: 'dtest', socketRoot: root });
+    await rt.destroy('a');
+    expect([existsSync(dirs.a!), existsSync(dirs.b!), existsSync(dirs.gone!)]).toEqual([false, true, true]);
+    await rt.sweep(['b']);
+    expect([existsSync(dirs.b!), existsSync(dirs.gone!)]).toEqual([true, false]);
+  });
+
+  it('lists the running sandboxes of this instance', async () => {
+    const ls = JSON.stringify([
+      { name: 'limn-a-sandbox', status: 'running', labels: { 'limn.managed': 'dtest', 'limn.session': 'a', 'limn.role': 'sandbox' } },
+      { name: 'limn-b-sandbox', status: 'stopped', labels: { 'limn.managed': 'dtest', 'limn.session': 'b', 'limn.role': 'sandbox' } },
+      { name: 'other', status: 'running', labels: { 'limn.managed': 'dother', 'limn.session': 'c', 'limn.role': 'sandbox' } },
+    ]);
+    const rt = createMicrosandboxRuntime({ runner: scripted('/x/msb', [[/^ls /, { stdoutText: ls }]]), instance: 'dtest', socketRoot: newRoot() });
+    expect(await rt.listSandboxes()).toEqual([{ name: 'limn-a-sandbox', sessionId: 'a' }]);
+  });
+
   it('services are refused in one line', async () => {
     const rt = createMicrosandboxRuntime({ runner: scripted('/x/msb', []), socketRoot: newRoot() });
     expect((await rt.compose({ ...owner, project: 'p', compose: {}, call: { verb: 'ps' } })).stderr).toBe(SERVICES_NOT_ON_MICROSANDBOX);

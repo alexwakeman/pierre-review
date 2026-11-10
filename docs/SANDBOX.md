@@ -17,6 +17,7 @@ branch (§ AI Fix sessions). The product flows are [STORY-BUILD.md](STORY-BUILD.
 | § Troubleshooting | the usual failures, and what to do |
 | § Invariants | the rules the code keeps |
 | § The runtime layer … § Sessions | how each part works (runtime, image, labels, proxy, allow-list, credentials, drivers, mirror, services, microsandbox, sessions) |
+| § Every end removes the sandbox | how each way a session ends stops and removes its container or VM, the periodic sweep, shutdown, "Stop all" |
 | § Testing · § Spike results | the tests, and what the spikes measured |
 
 There is ONE path: with no container runtime, Implement and AI Fix say what is missing and link the setup
@@ -52,7 +53,7 @@ result in one line ("Runs in Docker Desktop 29.6.2"), or what is wrong.
 | `SANDBOX_RUNTIME=auto` (default) | microsandbox when `msb` is installed and `msb doctor` passes, else Docker. Fixed for the life of the process. |
 | `SANDBOX_RUNTIME=docker` · `=microsandbox` | Forces one backend. |
 | `SANDBOX_CLI=podman` (or an absolute path) | Another CLI with Docker's verbs, for the Docker backend. |
-| `LIMN_SANDBOX_MAX_SESSIONS` (2) · `LIMN_SANDBOX_IDLE_MINUTES` (60) | Open sessions on this computer; a session with nothing to do closes after this long (its changes are kept). |
+| `LIMN_SANDBOX_MAX_SESSIONS` (2) · `LIMN_SANDBOX_IDLE_MINUTES` (15) · `LIMN_SANDBOX_TURN_MAX_MINUTES` (120) | Open sessions on this computer; a session with nothing to do closes after this long (its sandbox is removed, its changes are kept); one agent turn running longer than the last is stopped. |
 | Settings → Sandbox, per workspace | CPUs, memory and disk per session (default 4 CPUs, 8 GB, 30 GB), the local folder, the Claude notes to bring, services, the always-allowed hosts. |
 
 There is no Settings switch for the backend: there is no per-computer settings store.
@@ -62,8 +63,9 @@ BNG backend (spike 4): the sandbox and seven services peaked at 1.9 GiB of memor
 about 1.3 GB; the BNG service images 2.4 GB; one session's clone with `node_modules` about 560 MB. The
 first session pulls (or builds) the image, which takes minutes; later sessions start in seconds.
 
-**Disk clean-up.** Discard removes a session's containers, network and volumes, and the boot sweep
-removes what a crash left. `limn sandbox prune [--dry-run]` (stop Limn first) removes every sandbox
+**Disk clean-up.** Every end of a session removes its containers, network and volumes (§ Every end
+removes the sandbox); a sweep every 5 minutes and the boot sweep remove what a failed removal or a crash
+left. Settings → Sandbox shows how many sandboxes run now, with **Stop all**. `limn sandbox prune [--dry-run]` (stop Limn first) removes every sandbox
 resource of this Limn install, built service images included. The repo store (§ The repo store) is KEPT
 by both; `limn sandbox prune --store` removes it too (the next session copies the repositories again). Limn keeps the sandbox image; remove old
 `limn-sandbox:local-*` tags with `docker image rm` when the disk is full.
@@ -99,7 +101,8 @@ the summary.
 | Behind a corporate proxy or VPN | The runtime must reach the registries to pull images, and the host must reach the model provider. Set the runtime's own proxy (Docker Desktop: Settings → Resources → Proxies; Colima: `colima start --env HTTPS_PROXY=…`). Inside the sandbox, every request still goes through Limn's proxy. |
 | Services do not start | The Services panel names each refused rule or failed service. `docker compose config` on the host shows the file as compose reads it. Services do not run on microsandbox yet. |
 | microsandbox is installed but not used | `msb doctor` must pass. An Intel Mac cannot run it (Apple Silicon only); Linux needs `/dev/kvm`. `SANDBOX_RUNTIME=docker` forces Docker. |
-| A session closed by itself | Nothing happened for 60 minutes, the agent ended, or Limn restarted. When it stored changes, it stays pushable and **Resume** starts it again. |
+| A session closed by itself | Nothing happened for 15 minutes, a turn ran past 120 minutes, the agent ended, Limn stopped, or someone pressed **Stop all**. When it stored changes, it stays pushable and **Resume** starts it again. |
+| Sandboxes still running after you closed the tab | A session with nothing to do closes after 15 minutes. Settings → Sandbox → **Stop all** closes every one now. |
 
 ## Invariants
 
@@ -109,7 +112,9 @@ the summary.
    `~/.config/gh`, `/`, `/proc`, `/sys`, `/dev` and `/run` as mount sources, even read-only.
 2. **On Docker, the sandbox's only route out is the proxy.** The sandbox joins ONLY the session's
    `--internal` network; the proxy joins that network and the runtime's default bridge.
-3. **Every sandbox resource carries Limn's labels** and is removed on discard and by the boot sweep.
+3. **Every sandbox resource carries Limn's labels** and is removed at EVERY end of its session, by the
+   periodic sweep and by the boot sweep (§ Every end removes the sandbox). A kept session keeps its
+   CHANGES (the stored patch), never a running container or VM.
 4. **The model credential stays on the host** (spike 3): the sandbox holds a per-session placeholder,
    the proxy swaps in the real one.
 5. **Nothing outside `sandbox/runtime/` starts a container CLI**, and no caller writes `docker run`
@@ -136,7 +141,7 @@ the summary.
 
 | File | What it holds |
 |---|---|
-| `types.ts` | `SandboxRuntime`, the one contract: `detect`, `ensureImage`, `createNetwork`, `createVolume`, `startProxy`, `startSandbox`, `exec` (streamed events + stdin), `run`, `copyIn`, `readFile`, `followLogs`, `networkMembers`, `startServices`/`stopServices`, `stats`, `destroy`, `sweep`, and the optional `repoStore` (Docker only: `ensure`, `exec`, `remove`). |
+| `types.ts` | `SandboxRuntime`, the one contract: `detect`, `ensureImage`, `createNetwork`, `createVolume`, `startProxy`, `startSandbox`, `exec` (streamed events + stdin), `run`, `copyIn`, `readFile`, `followLogs`, `networkMembers`, `startServices`/`stopServices`, `stats`, `destroy`, `sweep`, `listSandboxes` (the running ones, for Settings), the optional `destroySync` (the 'exit' fallback) and the optional `repoStore` (Docker only: `ensure`, `exec`, `remove`). |
 | `docker.ts` | The Docker backend: the `docker` CLI, no SDK. `SANDBOX_CLI=podman` (or an absolute path) names another CLI with the same verbs. |
 | `spec.ts` | Every `docker run` argv, as pure functions (pinned by `spec.test.ts`). |
 | `image.ts` | Which image, and where it comes from (below). |
@@ -145,7 +150,7 @@ the summary.
 | `tar.ts` | The tar stream `copyIn` sends to `tar -x` running as the agent. |
 | `fake.ts` | The in-memory runtime every caller's tests use (below). |
 | `microsandbox.ts`, `msb-spec.ts` | The microsandbox backend (`msb` CLI) and its argv/parsers. ⚠ **Untested** (§ microsandbox). |
-| `index.ts` | The runtime in use (`SANDBOX_RUNTIME`: `auto` picks microsandbox when healthy, else Docker), the boot sweep of every installed backend. |
+| `index.ts` | The runtime in use (`SANDBOX_RUNTIME`: `auto` picks microsandbox when healthy, else Docker), the boot sweep and the live sweep (`sweepSandboxesNow`) of every installed backend, the sweep gate (`sweepSettled`), the running count (`listRunningSandboxes`). |
 
 **The sandbox container** (`sandboxRunArgs`): `--user agent`, `--cap-drop ALL`, `--security-opt
 no-new-privileges`, `--init`, `--cpus`, `--memory` with the same `--memory-swap`, `--pids-limit`, ONE
@@ -200,6 +205,8 @@ Names are `limn-<session>-<suffix>` (`-sandbox`, `-proxy`, `-net`, `-vol-<key>`)
 and `sweep(liveSessions)` list each kind by the `limn.managed` filter, read each one's `limn.session`
 BY NAME (never by line position: a resource removed between the list and the inspect would shift the
 pairing), and remove containers, then networks, then volumes.
+
+**The periodic sweep** while Limn runs, and every way a session ends: § Every end removes the sandbox.
 
 **The boot sweep** (`index.ts` after listen, `sweepSandboxesAtBoot`): no session survives a restart
 (the session manager marks them failed), so every resource carrying this Limn's `limn.managed` value goes. It starts no
@@ -751,7 +758,8 @@ sessions, mounted from `registerAgenticRoutes`.
 | `manager.ts` | THE state machine: start, boot, turns, Start build, Stop, Allow, the patch extraction, close (discard, idle, the agent ending, a failed boot), resume, the restart reconcile, the wire (`sessionWire`) and the stream subscription. Every dependency is a seam (`setSessionDepsForTests`). |
 | `patches.ts` | The patch out of the sandbox (and back in, for Resume). |
 | `state.ts` | `session_json` (`SessionStateJson`), the conversation fold, the ONE wire mapper `toStoryBuildSession`. Pure. |
-| `limits.ts` | `LIMN_SANDBOX_MAX_SESSIONS` (2), `LIMN_SANDBOX_IDLE_MINUTES` (60), the patch cap, the turns per message. |
+| `limits.ts` | `LIMN_SANDBOX_MAX_SESSIONS` (2), `LIMN_SANDBOX_IDLE_MINUTES` (15), `LIMN_SANDBOX_TURN_MAX_MINUTES` (120), the patch cap, the turns per message. |
+| `janitor.ts` | The periodic sweep, the running count and "Stop all" (§ Every end removes the sandbox). |
 | `routes.ts` | The routes; the push and per-repository diff routes (`coding/story-build/routes-build.ts`) are registered from here. |
 | `subject.ts` | The SUBJECT contract: the machine serves Implement's story (`storySubject` in `manager.ts`) and AI Fix (`fix.ts`). |
 | `fix.ts` | The AI Fix subject and its actions (§ AI Fix sessions). |
@@ -803,8 +811,8 @@ Rows with a patch are `ready`, so the EXISTING `…/repos/:repoId/diff`, Push an
 
 **Closing.** Discard (any phase, a running turn included) closes the agent, the services and the proxy,
 `runtime.destroy(sessionId)`, and drops the pinned base refs. The same close runs on an IDLE session (no
-turn and no reader action for 60 minutes), when the agent process ends on its own, and when a boot
-fails. A session closed that way with a stored patch stays `built` (pushable) and RESUMABLE; without
+turn and no reader action for 15 minutes), when the agent process ends on its own, when a boot
+fails, when a turn will not stop after its cap, and on "Stop all" (§ Every end removes the sandbox). A session closed that way with a stored patch stays `built` (pushable) and RESUMABLE; without
 one it is `failed` and says the work is gone. **Resume** boots it again: the same bases (the rows'
 `base_sha`), each stored patch applied and committed in the fresh clone (so the next extraction gives
 the same patch plus the new work), the agent started in build mode. The agent's conversation does not
@@ -832,6 +840,54 @@ edits the setting above. `GET /api/sandbox/runtime` (`api/routes/sandbox-setting
 `runtimeStatusOf`, cached 10 s) gives both the runtime's one line. The Ticket panel reads
 `StoryBuildSession.ticket` (`SessionStateJson.criteria` + `openPoints`, rewritten at Start build), so
 it shows what TICKET.md holds, not the tracker's newest text.
+
+## Every end removes the sandbox (`session/manager.ts`, `session/janitor.ts`, `runtime/index.ts`)
+
+A session's sandbox (the container or microVM, its proxy, its services, its network and its volumes) lives
+only while the session is OPEN. Every end removes it at once, through ONE call, `closeSession` →
+`runtime.destroy(sessionId)`, which lists by `limn.managed` + `limn.session` and removes containers (with
+their anonymous volumes, `rm --force --volumes`), then networks, volumes and built service images. A KEPT
+session (`built` with a stored patch, or plan first's `plan_ready`) keeps its CHANGES on the row, never a
+running sandbox: Resume boots a new one on demand.
+
+| How the session ends | What closes it | Phase afterwards |
+|---|---|---|
+| Discard | the reader (`discardSession`, `discardFixSession`) | `discarded` |
+| Push | an AI Fix push (`closeFixAfterPush`); a story's push does NOT end the session (the reader may keep working), so its idle close does | `pushed` |
+| Success of an unattended run | the subject's `afterBuildTurn` → `close` (an auto fix, dependency automation) | `built` (then its own push rules) |
+| Stop | a manual session: the turn stops, the session stays; an unattended one closes | `discarded` (cancelled) |
+| Nothing happens | the idle close: no turn and no reader action for `LIMN_SANDBOX_IDLE_MINUTES` (ONE constant, `SANDBOX_IDLE_MINUTES_DEFAULT`, 15). The browser closing is this case: nothing in a session depends on a page being open. | kept phase with work, else `failed` |
+| A turn runs too long | the turn's watchdog (`LIMN_SANDBOX_TURN_MAX_MINUTES`, 120): the turn is interrupted (its work stored as after any stop); a turn that has not ended 60 s later closes the session | the session stays; or kept / `failed` |
+| The agent process ends | `agentEnded` (a build session's work is extracted first) | kept / `failed` |
+| The boot fails | `boot`'s catch; a close DURING a boot step re-runs the removal once the step returns (`reapAfterClose`) | kept / `failed` |
+| Settings → Sandbox → **Stop all** | `stopAllSessions`: a manual session's running turn is interrupted and its work stored (up to 30 s), then it closes keeping its changes; an UNATTENDED one closes as `discarded` (a person's cancel wins: nothing is pushed) | kept / `failed` / `discarded` |
+| Limn stops (SIGTERM, SIGINT, SIGHUP) | `index.ts` → `teardownSandboxesForShutdown` (after the SIGTERM drain), bounded at 10 s, then the 'exit' fallback; no row is written | the restart reconcile settles the rows |
+| Limn crashes | the process's `'exit'` handler `destroyLeftSync` force-removes the containers / VMs of every session not yet removed (`destroySync`: `docker rm --force --volumes`, `msb rm --force`, the host proxies killed); the next boot sweep removes the rest. A SIGKILL runs nothing: the boot sweep is the only cure. | the restart reconcile |
+
+**A removal that fails** (a daemon that refused, a timeout) is logged and the session id stays in the
+manager's `undestroyed` set. **The periodic sweep** (`janitor.ts`, every `SANDBOX_SWEEP_INTERVAL_MS`, 5
+minutes, started after listen when agentic AI is on) removes every resource of THIS data dir whose
+session is not live, on every installed backend: the backend in use through the PROCESS's runtime object
+(microsandbox's host proxies live there), any other through a fresh one. It runs only while a session has
+made resources since the last clean sweep, so a machine that never starts a sandbox never starts a
+container CLI for it. ⚠ It trusts the data dir's lock (§ Labels and the sweep): only the backend holding
+`server.lock` runs it, and it never touches another install's `limn.managed` value or an unlabelled
+resource. ⚠ **THE SWEEP GATE**: a sweep reads the live sessions in the same tick it sets the gate
+(`sweepSettled`, which `boot` awaits before it creates anything), so a session registered during a sweep
+waits for it and is never swept as "not live".
+
+**microsandbox**: `destroy` removes only its own session's socket folder; the sweep keeps the folder of
+every live session id (not only the proxies of the runtime object that runs it).
+
+**Settings → Sandbox** (`SandboxRuntimeSection.tsx`): one line, "2 Limn sandboxes are running.", read from
+the runtime (`GET /api/sandbox/running` → `listSandboxes` on every installed backend that answers) when
+the section opens and on **Check again**, never polled; **Stop all** (`POST /api/sandbox/stop-all`, after
+an inline confirm) closes every session, then sweeps every leftover, and answers the new count.
+
+Tests: `session/cleanup-flow-db.test.ts` (each end above, on the fake runtime; its `resources()` is the
+leak detector), `fix-session-flow-db.test.ts` (push, an unattended fix, Stop, Stop all), `runtime/fake.test.ts`
+(the gate, the count), `docker.test.ts` / `microsandbox.test.ts` (argv, the socket folders),
+`docker-real.test.ts` (the count and the 'exit' fallback on a real daemon; skipped when none answers).
 
 ## The plan and its checks (plan first; `session/plan.ts`, `session/plan-block.ts`, `workspace/plan-check.ts`, `coding/story-build/plan-verify.ts`)
 

@@ -30,6 +30,14 @@ export default function Page(): JSX.Element {
         Docker Desktop also works, under its own licence terms. Give the runtime at least 8 GB of memory. Step-by-step
         setup is in <DocLink to="integrations/sandbox-runtimes">Docker and microsandbox</DocLink>.
       </p>
+      <H3>Running sandboxes</H3>
+      <p>
+        Below the runtime line, one line says how many Limn sandboxes are running now, for example{' '}
+        <Ui>2 Limn sandboxes are running.</Ui> Limn reads it when you open the tab and when you select{' '}
+        <Ui>Check again</Ui>. <Ui>Stop all</Ui> stops and removes every one of them. Changes a session stored are kept:
+        you can still push them, or resume the session. A turn that is running stops. An automatic AI Fix that is
+        running is cancelled, and nothing is pushed.
+      </p>
 
       <H2 id="workspace-sandbox">What a session gets</H2>
       <p>The rest of the tab applies to the current workspace.</p>
@@ -82,7 +90,8 @@ export default function Page(): JSX.Element {
         pull requests, comments). Allow only the hosts a build really needs.
       </Warning>
       <Note>
-        Sandboxes use disk space. Stop Limn, then run <code>limn sandbox prune</code> to remove what is left over. See{' '}
+        A sandbox is removed when its session ends, and a session with nothing to do ends after 15 minutes. To remove
+        everything, including what a crash left, stop Limn and run <code>limn sandbox prune</code>. See{' '}
         <DocLink to="security/ai-and-the-sandbox">AI agents and the sandbox</DocLink>.
       </Note>
     </>

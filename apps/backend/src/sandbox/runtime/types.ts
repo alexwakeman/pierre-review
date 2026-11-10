@@ -289,6 +289,19 @@ export interface SandboxRuntime {
   stats(sessionId: string): Promise<ContainerStats[]>;
   /** Remove every container, network, volume and built image of one session. */
   destroy(sessionId: string): Promise<SweepResult>;
-  /** Remove every Limn resource whose session is not in `liveSessionIds` (boot + `limn sandbox prune`). */
+  /** Remove every Limn resource whose session is not in `liveSessionIds` (boot, the periodic sweep, `limn sandbox prune`). */
   sweep(liveSessionIds: Iterable<string>, opts?: { dryRun?: boolean }): Promise<SweepResult>;
+  /** The RUNNING sandboxes (role `sandbox`: one per session) of this Limn install. Settings → Sandbox's count. */
+  listSandboxes(): Promise<RunningSandbox[]>;
+  /**
+   * LAST RESORT, SYNCHRONOUS: force-remove the containers / VMs of these sessions. Only for the process's
+   * 'exit' (a crash, or a signal whose handler could not finish): nothing async runs there. Networks and
+   * volumes are left to the next sweep. Never throws.
+   */
+  destroySync?(sessionIds: readonly string[]): void;
+}
+
+export interface RunningSandbox {
+  name: string;
+  sessionId: string;
 }

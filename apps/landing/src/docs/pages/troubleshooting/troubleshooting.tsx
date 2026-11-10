@@ -126,6 +126,11 @@ export default function Page(): JSX.Element {
       <p>
         Stop Limn and run <code>limn sandbox prune</code>. Add <code>--dry-run</code> to see what it would remove first.
       </p>
+      <H3>Sandboxes keep running</H3>
+      <p>
+        A session with nothing to do closes after 15 minutes, and its sandbox goes with it. To stop them all now, select{' '}
+        <Ui>Stop all</Ui> in <Ui>Settings → Sandbox</Ui>.
+      </p>
 
       <H2 id="bot-scoring">Bot comment scoring</H2>
       <p>

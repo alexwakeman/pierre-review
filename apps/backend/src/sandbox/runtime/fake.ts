@@ -47,7 +47,7 @@ export type FakeExecHandler =
 
 type Matcher = string | RegExp | ((argv: string[], container: string) => boolean);
 
-interface FakeResource {
+export interface FakeResource {
   kind: 'container' | 'network' | 'volume' | 'image';
   name: string;
   sessionId: string;
@@ -62,6 +62,10 @@ export interface FakeRuntime extends SandboxRuntime {
   emitLog(container: string, line: string): void;
   files(container: string): Map<string, Buffer>;
   resources(): FakeResource[];
+  /** Put a resource there by hand (a leftover of a crash, another install's). */
+  plant(r: FakeResource): void;
+  /** While on, `destroy` removes nothing and reports an error (a daemon that refused). */
+  failDestroy(on: boolean): void;
   setDetection(d: Partial<RuntimeDetection>): void;
   /** Answer `compose` calls (default: exit 0, no output). Later registrations win. */
   onCompose(handler: (call: ComposeCall) => Partial<ExecResult> & { lines?: string[] } | Promise<Partial<ExecResult> & { lines?: string[] }>): void;
@@ -105,6 +109,7 @@ export function createFakeRuntime(): FakeRuntime {
   const resources = new Map<string, FakeResource>();
   const logs = new Map<string, EventQueue<ExecEvent>[]>();
   let detection = { ...FAKE_DETECTION };
+  let destroyFails = false;
   let composeHandler: (call: ComposeCall) => FakeAnswer | Promise<FakeAnswer> = () => ({});
   let buildHandler: (spec: ImageBuildSpec) => FakeAnswer | Promise<FakeAnswer> = () => ({});
   const record = (method: string, ...args: unknown[]): void => {
@@ -220,6 +225,12 @@ export function createFakeRuntime(): FakeRuntime {
     },
     files: filesOf,
     resources: () => [...resources.values()],
+    plant(r) {
+      resources.set(`${r.kind}:${r.name}`, { ...r });
+    },
+    failDestroy(on) {
+      destroyFails = on;
+    },
     setDetection(d) {
       detection = { ...detection, ...d };
     },
@@ -316,12 +327,22 @@ export function createFakeRuntime(): FakeRuntime {
     },
     async destroy(sessionId) {
       record('destroy', sessionId);
+      if (destroyFails) return { containers: [], networks: [], volumes: [], images: [], errors: [`${sessionId}: the daemon refused`] };
       return removeWhere((s) => s === sessionId);
     },
     async sweep(live, opts) {
       const set = new Set(live);
       record('sweep', [...set], opts);
       return removeWhere((s) => !set.has(s), opts?.dryRun === true);
+    },
+    async listSandboxes() {
+      record('listSandboxes');
+      return [...resources.values()].filter((r) => r.kind === 'container' && r.role === 'sandbox').map((r) => ({ name: r.name, sessionId: r.sessionId }));
+    },
+    destroySync(sessionIds) {
+      record('destroySync', [...sessionIds]);
+      const doomed = new Set(sessionIds);
+      for (const [key, res] of resources) if (res.kind === 'container' && doomed.has(res.sessionId)) resources.delete(key);
     },
   };
   return fake;

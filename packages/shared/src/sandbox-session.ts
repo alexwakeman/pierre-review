@@ -83,8 +83,29 @@ export const SANDBOX_SESSION_LIVE_PHASES: readonly SandboxSessionPhase[] = ['boo
 
 /** Open sessions (a running sandbox) per machine (LIMN_SANDBOX_MAX_SESSIONS). */
 export const SANDBOX_MAX_OPEN_SESSIONS_DEFAULT = 2;
-/** A session with no turn and no reader action for this long is closed (LIMN_SANDBOX_IDLE_MINUTES). */
-export const SANDBOX_IDLE_MINUTES_DEFAULT = 60;
+/**
+ * A session with no turn and no reader action for this long is closed: its sandbox is stopped and
+ * removed, its stored changes kept (Resume starts it again). LIMN_SANDBOX_IDLE_MINUTES.
+ */
+export const SANDBOX_IDLE_MINUTES_DEFAULT = 15;
+/** One agent turn running longer than this is stopped (LIMN_SANDBOX_TURN_MAX_MINUTES). */
+export const SANDBOX_TURN_MAX_MINUTES_DEFAULT = 120;
+
+/** `GET /api/sandbox/running`: the sandboxes of this Limn running now. `running` null: no runtime answered. */
+export interface SandboxRunningStatus {
+  running: number | null;
+  problem: string | null;
+}
+
+/** `POST /api/sandbox/stop-all`: every session closed, then every leftover removed. */
+export interface SandboxStopAllResult {
+  /** Sandboxes stopped (sessions closed, or leftovers removed). */
+  stopped: number;
+  /** Still running afterwards (null: no runtime answered). */
+  running: number | null;
+  /** One line when something could not be removed. */
+  problem: string | null;
+}
 /** A reader's message, in characters. */
 export const SANDBOX_MESSAGE_MAX = 8_000;
 /** Conversation items kept on the row (the oldest go first). */

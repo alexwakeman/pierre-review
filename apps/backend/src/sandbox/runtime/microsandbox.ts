@@ -18,7 +18,7 @@
 //     guest and gives no per-request log (docs/SANDBOX.md § Spike 5).
 //   • Writable storage is the VM's private disk (`--mount-owned`), removed with it; nothing else to
 //     sweep. Services (Docker in the VM) are not wired yet: the image has no Docker Engine.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -169,6 +169,14 @@ export function createMicrosandboxRuntime(opts: MicrosandboxRuntimeOptions = {})
     return r;
   };
   const labelsFor = (owner: SessionOwner, role: ResourceRole) => resourceLabels(instance, owner, role, extraLabels);
+  /** A session's socket folder (none when the data folder's path is too long: no proxy could start there). */
+  const dirOf = (sessionId: string): string[] => {
+    try {
+      return [socketDirFor(socketRoot, instance, sessionId)];
+    } catch {
+      return [];
+    }
+  };
   const sessionOfName = (name: string): string | null => {
     for (const p of proxies.values()) if (resourceName(p.sessionId, 'proxy') === name) return p.sessionId;
     return null;
@@ -466,12 +474,41 @@ export function createMicrosandboxRuntime(opts: MicrosandboxRuntimeOptions = {})
     },
 
     async destroy(sessionId) {
-      return removeWhere((session) => session === sessionId, false);
+      // Only THIS session's socket folder: another session's proxy may live in another runtime object.
+      return removeWhere((session) => session === sessionId, false, new Set(dirOf(sessionId)));
     },
 
     async sweep(liveSessionIds, o = {}) {
       const live = new Set(liveSessionIds);
-      return removeWhere((session) => !live.has(session), o.dryRun === true);
+      // Every socket folder but a live session's (by its id, not only this object's proxies).
+      const keep = new Set([...live].flatMap(dirOf));
+      return removeWhere((session) => !live.has(session), o.dryRun === true, null, keep);
+    },
+
+    async listSandboxes() {
+      if (!runner) return [];
+      return (await listManaged())
+        .filter((s) => s.labels[LABEL_ROLE] === 'sandbox' && (s.status == null || /run/i.test(s.status)))
+        .map((s) => ({ name: s.name, sessionId: s.labels[LABEL_SESSION] ?? '' }));
+    },
+
+    destroySync(sessionIds) {
+      for (const id of sessionIds) {
+        const p = proxies.get(resourceName(id, 'proxy'));
+        if (p) {
+          try {
+            p.child.kill('SIGKILL');
+          } catch {
+            /* gone */
+          }
+        }
+        if (!program || opts.runner) continue;
+        try {
+          spawnSync(program, ['rm', '--force', '--quiet', resourceName(id, 'sandbox')], { env, stdio: 'ignore', timeout: 20_000 });
+        } catch {
+          /* the next sweep removes it */
+        }
+      }
     },
   };
 
@@ -482,7 +519,11 @@ export function createMicrosandboxRuntime(opts: MicrosandboxRuntimeOptions = {})
     return parseMsbList(String(r.stdout)).filter((s) => s.labels[LABEL_MANAGED] === instance);
   }
 
-  async function removeWhere(doomed: (session: string) => boolean, dryRun: boolean): Promise<SweepResult> {
+  /**
+   * `only`: remove just these socket folders (destroy). `keep`: remove every other one (sweep). One of
+   * the two is always given, so a destroy never removes another session's sockets.
+   */
+  async function removeWhere(doomed: (session: string) => boolean, dryRun: boolean, only: Set<string> | null, keep: Set<string> = new Set()): Promise<SweepResult> {
     const result: SweepResult = { containers: [], networks: [], volumes: [], images: [], errors: [] };
     // Host proxies of this process first: they are what keeps a VM's way out open.
     for (const p of [...proxies.values()]) {
@@ -517,7 +558,9 @@ export function createMicrosandboxRuntime(opts: MicrosandboxRuntimeOptions = {})
       const inUse = new Set([...proxies.values()].map((p) => p.dir));
       for (const d of readdirSync(socketRoot)) {
         const full = join(socketRoot, d);
-        if (/^[0-9a-f]{12}$/.test(d) && !inUse.has(full)) rmSync(full, { recursive: true, force: true });
+        if (!/^[0-9a-f]{12}$/.test(d) || inUse.has(full) || keep.has(full)) continue;
+        if (only && !only.has(full)) continue;
+        rmSync(full, { recursive: true, force: true });
       }
     }
     return result;

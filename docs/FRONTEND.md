@@ -4482,7 +4482,9 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   / Waiting for you (the agent waits) / Ready to push / Pushed.
 - **Settings → Sandbox** (`settings/SandboxRuntimeSection.tsx` GLOBAL + `settings/SandboxSection.tsx`
   per WORKSPACE; `SettingsFocus 'sandbox'`, AI-only tab): the runtime line + Check again + How to set
-  up; then the local folder and its **Check** (CLICK-GATED: a bounded walk; found / not in your folder
+  up; the running count ("2 Limn sandboxes are running.", `useSandboxRunning`: read on open and on Check
+  again, NEVER polled) + **Stop all** (inline confirm; hidden at 0; docs/SANDBOX.md § Every end removes
+  the sandbox); then the local folder and its **Check** (CLICK-GATED: a bounded walk; found / not in your folder
   → where it goes / left out, not in this workspace), the Claude notes to bring (the check's projects;
   the first change turns the default into an explicit list, `sandboxSettingsForm.ts
   sandboxMemoryTicks`), ~/.claude/CLAUDE.md and skills, the starting folder, the services (repository +

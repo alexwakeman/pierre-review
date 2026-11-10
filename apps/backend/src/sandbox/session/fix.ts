@@ -387,6 +387,7 @@ function fixSubject(
     kind: 'fix',
     rowId: fixId,
     idPrefix: 'fx',
+    unattended,
     bootStep: 'task',
     usage: { repoId: facts.prRepoId, prId: facts.prId, features: { chat: 'ai_fix_plan', build: 'ai_fix' } },
     maxTurns: config.aiFixMaxTurns,
