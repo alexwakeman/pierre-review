@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.22] - 2026-11-10
+
 ### Changed
 
 - AI Review: "Where this PR stands" now uses the same columns as "Reviews on this PR", and both lists
