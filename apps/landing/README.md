@@ -24,7 +24,7 @@ plus the three legal ones and the docs:
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
-| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer and the consent banner. Terms summarise the Limn License and defer to it |
+| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Limn License and defer to it |
 
 **THE DESIGN IS ONE DARK "BOARD OF TILES"**, on every page. `src/board.css` holds the
 tokens (the dark ground, the four pigments lapis / verdigris / madder / gold), the self-hosted
@@ -116,7 +116,7 @@ server stands in front. Change both together. `prerender.mjs` also writes `dist/
   reloads of every route work. `Link` full-navigates API/external URLs and
   client-routes the rest.
 - **Shared UI**: `Nav.tsx` is the sticky header + mobile drawer; `Footer.tsx` the site
-  footer; `legal.tsx` the shell the three legal pages share; `CookieBanner.tsx` the consent
+  footer (every page but `/docs`, which ends on its own legal line); `legal.tsx` the shell the three legal pages share; `CookieBanner.tsx` the consent
   banner.
 - **Per-page SEO** (`src/lib/seo.ts`): `useSeo({ title, description, path })` sets the
   document title, meta description, canonical and Open Graph / Twitter tags on mount.

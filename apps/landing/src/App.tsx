@@ -131,8 +131,9 @@ export default function App(): JSX.Element {
             <Page />
           )}
         </main>
-        {/* The docs drop the big block wordmark: the footer is links only there. */}
-        <Footer wordmark={!docs} />
+        {/* The docs have no site footer: their own layout ends on one line of legal links
+            (DocsApp.tsx, DocsLegal). */}
+        {docs ? null : <Footer />}
         <CookieBanner />
       </div>
     </>

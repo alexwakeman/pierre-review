@@ -16,17 +16,19 @@ import { LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
 //     withdrawal to be as easy as granting and reachable from a persistent
 //     place — not only from a banner that has already been dismissed.
 //   · /privacy, /cookies and /terms.
+//
+// The docs (/docs/**) have no footer: DocsApp.tsx ends on one line that carries the
+// same compliance links (DocsLegal), so they are still on every page.
 // ---------------------------------------------------------------------------
 
-export default function Footer({ wordmark = true }: { wordmark?: boolean }): JSX.Element {
-  // Clearing the stored choice re-shows the banner (CookieBanner listens for the
-  // consent event). Hidden entirely when no measurement id is configured, since
-  // then there is genuinely no consent to withdraw.
-  const changeCookieChoice = useCallback(() => {
-    revokeAnalytics();
-    resetConsent();
-  }, []);
+/** "Cookie settings": clearing the stored choice re-shows the banner (CookieBanner listens for
+ *  the consent event). Shared with the docs' legal line. */
+export function changeCookieChoice(): void {
+  revokeAnalytics();
+  resetConsent();
+}
 
+export default function Footer(): JSX.Element {
   const backToTop = useCallback((e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -37,15 +39,13 @@ export default function Footer({ wordmark = true }: { wordmark?: boolean }): JSX
 
   return (
     <footer className="lb-foot">
-      {wordmark ? (
-        <div className="blocks" role="img" aria-label={SITE_NAME}>
-          {letters.map((ch, i) => (
-            <div key={i} className="blk" aria-hidden="true">
-              {ch}
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <div className="blocks" role="img" aria-label={SITE_NAME}>
+        {letters.map((ch, i) => (
+          <div key={i} className="blk" aria-hidden="true">
+            {ch}
+          </div>
+        ))}
+      </div>
 
       <div className="flinks">
         <div>
@@ -74,6 +74,7 @@ export default function Footer({ wordmark = true }: { wordmark?: boolean }): JSX
           <Link to="/privacy">Privacy</Link>
           <Link to="/cookies">Cookies</Link>
           <Link to="/terms">Terms and conditions</Link>
+          {/* Hidden when no measurement id is configured: there is no consent to withdraw. */}
           {analyticsConfigured() && (
             <button type="button" onClick={changeCookieChoice}>
               Cookie settings

@@ -32,7 +32,7 @@ screen, search the docs for its words (`grep -rn "Old label" apps/landing/src/do
 | The pages | `pages/<section>/<slug>.tsx` — one file per page |
 | Sections, order, writers, the app → page map | `manifest.ts` |
 | Components for writing a page | `kit.tsx` |
-| The layout (contents, search, breadcrumbs, prev/next) | `DocsApp.tsx`, `docs.css` |
+| The layout (contents, search, breadcrumbs, prev/next, the legal line at the bottom — the docs have no site footer) | `DocsApp.tsx`, `docs.css` |
 | URLs | `routes.ts` — `/docs/<section>/<slug>`; a slug equal to its section is `/docs/<section>` |
 | The changelog page | generated from `CHANGELOG.md` at the repository root (`changelog.ts`) |
 | The version in the header | `apps/backend/package.json`, read at build time (`version.ts`) |

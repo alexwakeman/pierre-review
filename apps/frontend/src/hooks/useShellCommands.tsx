@@ -4,6 +4,7 @@ import {
   BookIcon,
   BotIcon,
   CloseIcon,
+  ExternalLinkIcon,
   KeyboardIcon,
   MergeIcon,
   RepoIcon,
@@ -25,6 +26,7 @@ import { TAB_LABEL } from '../components/Activity/pendingTabs.js';
 import { SETTINGS_TABS } from '../components/settings/settingsTabs.js';
 import { useCommandProvider, useRegisterCommands, type Command } from '../components/ui/commands.js';
 import { indexUsers } from '../lib/ui.js';
+import { docsUrlForView } from '../lib/docsLink.js';
 import { getSyncRoundActions, useFilters } from '../store/filters.js';
 import { canPinTab, usePinnedTabs } from '../store/pinnedTabs.js';
 import { useSettingsModal } from '../store/settingsModal.js';
@@ -211,6 +213,18 @@ export function useShellCommands({
         run: () => getSyncRoundActions()?.syncAllShallow(),
       },
       { id: 'help', group: 'Help', title: 'Help and keyboard shortcuts', icon: <QuestionIcon size={14} />, keywords: ['keys', 'shortcuts'], run: openHelp },
+      {
+        id: 'limn-docs',
+        group: 'Help',
+        title: 'Open the Limn docs',
+        icon: <ExternalLinkIcon size={14} />,
+        keywords: ['documentation', 'manual', 'guide', 'website'],
+        run: () => {
+          const { activeTab, tabs } = usePinnedTabs.getState();
+          const url = docsUrlForView(activeTab, tabs, useFilters.getState().activityRepoId);
+          window.open(url, '_blank', 'noopener,noreferrer');
+        },
+      },
     ];
     for (const w of workspaces ?? []) {
       if (w.id === workspaceId) continue;

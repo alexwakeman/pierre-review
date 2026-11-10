@@ -21,7 +21,9 @@ export default function Page(): JSX.Element {
       <p>
         Every part of Limn can be reached from the keyboard. Press <Kbd>?</Kbd> anywhere to see the shortcut
         sheet, which lists the keys for the pages you have. Keys do nothing while you type in a text box.
-        Shortcuts are not printed on buttons; the sheet and <Ui>Search or jump</Ui> list them.
+        Shortcuts are not printed on buttons; the sheet and <Ui>Search or jump</Ui> list them. The{' '}
+        <Ui>?</Ui> button at the foot of the sidebar opens these docs, not the sheet; the{' '}
+        <Kbd>?</Kbd> key still opens the sheet.
       </p>
 
       <H2 id="anywhere">Anywhere</H2>

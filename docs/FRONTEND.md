@@ -167,7 +167,12 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   bar's strip keeps its own, ungrouped. Each row's browser tooltip is replaced by THE TAB HOVER CARD,
   § below), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
-  the bell, Help, the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
+  the bell, "?", the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
+  The "?" is a LINK, not a dialog: it opens the public docs (limn-review.com/docs) in a new tab on
+  the page for the current location (`lib/docsLink.ts` `docsUrlForView`; ⌘K "Open the Limn docs"
+  uses the same). The SPA never imports the landing, so the page keys are hard-coded there; the
+  landing's `test/docs.test.ts` fails if one is not a real docs page. `HelpModal` is reached only
+  from ⌘K ("Help and keyboard shortcuts"); the `?` KEY still opens the key sheet.
   ⚠ **RENDERED ONCE, NEVER UNMOUNTED**: below `lg` the closed drawer is `display: none`, because
   `SyncStatus` — the sync round's ONE driver — lives in its foot. Anything it must show while
   hidden is PORTALLED (the `SyncProgressModal`). The workspace scope keeper (`useWorkspaceSync`),

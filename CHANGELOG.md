@@ -19,6 +19,12 @@ no internals.
   or copy it) under "Where this PR stands". "Reviews on this PR" lines up in columns (who, when,
   commit, outcome, what ran it), shows the newest 10 with "Show all" for the rest, and the column is
   a little wider.
+- The "?" button at the foot of the sidebar opens the Limn docs in a new browser tab, on the page
+  for where you are (Pending opens the Pending docs). The in-app help is in Search or jump ("Help and
+  keyboard shortcuts"), the "?" key still opens the shortcut sheet, and Search or jump has "Open the
+  Limn docs".
+- The docs website: the pages under /docs no longer have the site footer. They end on one line with
+  Privacy, Cookies, Terms and Cookie settings.
 
 ### Removed
 
