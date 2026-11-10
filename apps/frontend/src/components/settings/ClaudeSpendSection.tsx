@@ -33,6 +33,10 @@ import { Select } from '../ui/index.js';
 // Claude's report is ambiguous) — percentages only, never US$; an API key gets a weekly US$ budget.
 // The server decides; this section only edits the settings and words the status.
 //
+// THE 5-HOUR PARTS (the separate 5-hour limit, its status line, its ⓘ paragraph) show ONLY while the
+// provider has reported a 5-hour window lately (`usage.fiveHourLimit`, shared `hasFiveHourWindow`):
+// some plans have a weekly limit only. A stored separate 5-hour share is kept, just not shown.
+//
 // It judges the ACTIVE provider (`status.provider`). On Codex with a ChatGPT sign-in there is no
 // subscription to pick: Codex reports its own 5-hour and weekly windows, shown here in percent, and
 // Limn's share is token-weighted (shared ai-budget.ts `codexShares`).
@@ -68,7 +72,9 @@ export function ClaudeSpendSection(): JSX.Element | null {
 
   const provider = data?.status.provider ?? 'claude';
   const name = aiProviderName(provider);
-  const info = <SpendInfo provider={provider} />;
+  // Unknown (still loading, an older server) ⇒ no 5-hour parts.
+  const fiveHourLimit = data?.usage.fiveHourLimit === true;
+  const info = <SpendInfo provider={provider} fiveHourLimit={fiveHourLimit} />;
 
   if (q.isError) {
     return (
@@ -145,7 +151,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
   const pickFrom = sub?.pickFrom ?? null;
   const reportedMax = sub?.reportedSubscription?.trim().toLowerCase() === 'max';
   const shareDirty = draft.weekSharePct !== String(settings.weekSharePct) || draft.subscription !== settings.subscription;
-  const fiveUsed = status.enabled ? fiveHourUsedSentence(status) : null;
+  const fiveUsed = status.enabled && fiveHourLimit ? fiveHourUsedSentence(status) : null;
   const perDay = shareDirty ? null : reviewsPerDayText(sub?.reviewsPerDay);
   const used = status.enabled ? usedSentence(status) : null;
 
@@ -195,38 +201,41 @@ export function ClaudeSpendSection(): JSX.Element | null {
               />
             </Field>
             {/* THE 5-HOUR SHARE: follows the weekly one unless the reader sets their own. Collapsed
-                by default; open when a separate figure is stored. Clearing it = same as weekly. */}
-            <details open={settings.fiveHourSharePct != null} data-testid="ai-budget-five-hour">
-              <summary className="hit cursor-pointer text-meta text-ui-mute">
-                Set a separate 5-hour limit
-              </summary>
-              <div className="mt-1.5 space-y-1.5">
-                <Field
-                  label="Limn’s share of each 5-hour session (%)"
-                  htmlFor="ai-budget-five-hour-share"
-                  hint={
-                    draft.fiveHourSharePct.trim() === ''
-                      ? `Same as your weekly share${parseShareHint(draft.weekSharePct)}`
-                      : `1 to ${AI_BUDGET_SHARE_MAX}`
-                  }
-                >
-                  <input
-                    id="ai-budget-five-hour-share"
-                    type="text"
-                    inputMode="numeric"
-                    className={NUM}
-                    placeholder={draft.weekSharePct}
-                    value={draft.fiveHourSharePct}
-                    onChange={(e) => set({ fiveHourSharePct: e.target.value })}
-                  />
-                </Field>
-                {draft.fiveHourSharePct.trim() !== '' && (
-                  <button type="button" className={BTN} onClick={() => set({ fiveHourSharePct: '' })}>
-                    Use the weekly share
-                  </button>
-                )}
-              </div>
-            </details>
+                by default; open when a separate figure is stored. Clearing it = same as weekly.
+                Only while the plan has a 5-hour window. */}
+            {fiveHourLimit && (
+              <details open={settings.fiveHourSharePct != null} data-testid="ai-budget-five-hour">
+                <summary className="hit cursor-pointer text-meta text-ui-mute">
+                  Set a separate 5-hour limit
+                </summary>
+                <div className="mt-1.5 space-y-1.5">
+                  <Field
+                    label="Limn’s share of each 5-hour session (%)"
+                    htmlFor="ai-budget-five-hour-share"
+                    hint={
+                      draft.fiveHourSharePct.trim() === ''
+                        ? `Same as your weekly share${parseShareHint(draft.weekSharePct)}`
+                        : `1 to ${AI_BUDGET_SHARE_MAX}`
+                    }
+                  >
+                    <input
+                      id="ai-budget-five-hour-share"
+                      type="text"
+                      inputMode="numeric"
+                      className={NUM}
+                      placeholder={draft.weekSharePct}
+                      value={draft.fiveHourSharePct}
+                      onChange={(e) => set({ fiveHourSharePct: e.target.value })}
+                    />
+                  </Field>
+                  {draft.fiveHourSharePct.trim() !== '' && (
+                    <button type="button" className={BTN} onClick={() => set({ fiveHourSharePct: '' })}>
+                      Use the weekly share
+                    </button>
+                  )}
+                </div>
+              </details>
+            )}
             {/* The subscription shows once the budget is saved on: until then the server has not
                 read Claude's report, so there is nothing to offer (a picker with no choices). */}
             {sub == null ? null : provider === 'codex' ? (
@@ -250,10 +259,10 @@ export function ClaudeSpendSection(): JSX.Element | null {
                 />
               </Field>
             )}
-            {/* Claude reports "max" without saying which: ask, never guess (5x and 20x differ fourfold). */}
+            {/* Claude reports "max" without saying which: ask, never guess (Max 5x and Ultra differ fourfold). */}
             {provider !== 'codex' && reportedMax && sub?.subscription == null && (
               <p className="text-body text-ui-warn" data-testid="ai-budget-pick-max">
-                Claude says you’re on Max. Which one?
+                Claude doesn’t say whether you’re on Max 5x or Ultra. Which one?
               </p>
             )}
           </>
@@ -314,7 +323,7 @@ function CodexWindows({ data }: { data: AiBudgetResponse }): JSX.Element | null 
 }
 
 /** The ⓘ: what the budget limits and how, for the provider it judges. */
-function SpendInfo({ provider }: { provider: 'claude' | 'codex' }): JSX.Element {
+function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; fiveHourLimit: boolean }): JSX.Element {
   const name = aiProviderName(provider);
   return (
     <InfoButton title="AI spend">
@@ -326,15 +335,17 @@ function SpendInfo({ provider }: { provider: 'claude' | 'codex' }): JSX.Element 
       {provider === 'codex' ? (
         <>
           <p className="mt-2">
-            On a ChatGPT plan, Codex reports how much of its weekly and 5-hour limits your account has
-            used, in whole percent. Limn's share is that figure times the part of your Codex tokens its
-            own runs used, so it moves in coarse steps. When its share is used, Limn stops starting
-            automatic runs until the window resets.
+            On a ChatGPT plan, Codex reports how much of its {fiveHourLimit ? 'weekly and 5-hour limits' : 'weekly limit'}{' '}
+            your account has used, in whole percent. Limn's share is that figure times the part of your
+            Codex tokens its own runs used, so it moves in coarse steps. When its share is used, Limn stops
+            starting automatic runs until the window resets.
           </p>
-          <p className="mt-2">
-            Limn takes the same share of a 5-hour window as of the week, unless you set a separate 5-hour
-            limit.
-          </p>
+          {fiveHourLimit && (
+            <p className="mt-2">
+              Limn takes the same share of a 5-hour window as of the week, unless you set a separate 5-hour
+              limit.
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -344,11 +355,13 @@ function SpendInfo({ provider }: { provider: 'claude' | 'codex' }): JSX.Element 
             allowance. That is an estimate, because Anthropic doesn't publish exact figures. When its share
             is used, Limn stops starting automatic runs until your week resets.
           </p>
-          <p className="mt-2">
-            Claude also limits each 5-hour session. Limn takes the same share of a session as of the week
-            (5% of the week means 5% of each session), unless you set a separate 5-hour limit. Over it,
-            automatic runs wait for the session to reset.
-          </p>
+          {fiveHourLimit && (
+            <p className="mt-2">
+              Your plan also limits each 5-hour session. Limn takes the same share of a session as of the
+              week (5% of the week means 5% of each session), unless you set a separate 5-hour limit. Over
+              it, automatic runs wait for the session to reset.
+            </p>
+          )}
           <p className="mt-2">With an API key, the limit is what Limn's runs cost over the last 7 days.</p>
         </>
       )}

@@ -2133,8 +2133,8 @@ while the tab is visible), feeds every surface below; the decision is the server
   a click inside the ⓘ's portalled popover does not)
   built by `usageDetailsOf`: ONE BLOCK PER PROVIDER IN USE — the default's (`status` + `usage`), then
   each of the response's `others` (every other provider signed in or run this week), each from
-  `usageDetailOf` and laid out the same: the heading ("Claude Max 20x", "Codex · ChatGPT Plus"), Limn's
-  share of this 5-hour session and of this week, runs and tokens this week, the provider's own account
+  `usageDetailOf` and laid out the same: the heading ("Claude Ultra", "Codex · ChatGPT Plus"), Limn's
+  share of this 5-hour session (only while `usage.fiveHourLimit`: the plan has one) and of this week, runs and tokens this week, the provider's own account
   windows as used / left / resets, "Updated N min ago"; one link to Settings → AI spend at the foot.
   Each share or window row has a bar under its text (`UsageRow.barPct`): Limn's rows fill against the
   reader's LIMIT, or — no limit set — against 50% (`limnShareScale`; `AI_BUDGET_SHARE_MAX`, the most

@@ -276,10 +276,11 @@ export default function GettingStarted(): JSX.Element {
               On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 50%
               unless you change it, from 1% to 100%. Limn adds up what its own runs use and compares that with the
               allowance. Allowances aren't published exactly, so this is an estimate. On Claude Max, Limn asks whether
-              it's Max 5x or Max 20x.
+              it's Max 5x or Ultra.
             </li>
             <li>
-              Each 5-hour session gets the same share as your week, unless you set it separately.
+              If your plan limits each 5-hour session, the session gets the same share as your week, unless you set
+              it separately.
             </li>
             <li>
               When Limn has used its share, it stops starting automatic runs until your week or session resets. Your

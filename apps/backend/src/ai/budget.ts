@@ -19,8 +19,9 @@
 //
 // SUBSCRIPTION: Limn's SHARE of the week = its own ai_usage spend in the current week ÷ the
 // subscription's estimated weekly allowance (SUBSCRIPTION_ESTIMATES); likewise of the 5-hour session
-// (the setting follows the weekly share unless the reader set its own). Over when EITHER share reaches
-// its setting. Each window is [reset − length, reset) when Claude's reset has been read and is still
+// (the setting follows the weekly share unless the reader set its own) — but only while the account HAS
+// a 5-hour window (shared `hasFiveHourWindow`: one reported in the last 12 hours; some plans are weekly
+// only). Over when EITHER share reaches its setting. Each window is [reset − length, reset) when Claude's reset has been read and is still
 // ahead, otherwise rolling. The pure rules live in packages/shared (`decideAiBudget`, `aiUsageView`);
 // the status carries percentages only.
 //

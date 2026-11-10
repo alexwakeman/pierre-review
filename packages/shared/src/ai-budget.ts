@@ -9,7 +9,8 @@
 // The credential route picks the mode:
 //   • Claude subscription (the Claude Code login) — LIMN'S SHARE of the weekly allowance
 //     (`weekSharePct`, 1–50, default 5) and of the 5-hour session allowance (`fiveHourSharePct`,
-//     1–50; null = SAME AS THE WEEKLY SHARE, the default). Limn adds up its OWN recorded spend
+//     1–50; null = SAME AS THE WEEKLY SHARE, the default) — the 5-hour one only while the account has a
+//     5-hour window (`hasFiveHourWindow`; Anthropic dropped it for some plans). Limn adds up its OWN recorded spend
 //     (ai_usage) in the current week / 5-hour window and divides it by the subscription's ESTIMATED
 //     allowance for that window (SUBSCRIPTION_ESTIMATES). Each window is Claude's real one when its
 //     reset time has been read and is still ahead, otherwise the rolling last 7 days / 5 hours.
@@ -38,7 +39,8 @@ export const AI_SUBSCRIPTION_KINDS: readonly AiSubscriptionKind[] = ['pro', 'max
 export const AI_SUBSCRIPTION_LABELS: Record<AiSubscriptionKind, string> = {
   pro: 'Pro',
   max5x: 'Max 5x',
-  max20x: 'Max 20x',
+  // Anthropic renamed Max 20x to Ultra (2026-11). The stored key stays `max20x`.
+  max20x: 'Ultra',
   team: 'Team',
 };
 
@@ -51,16 +53,16 @@ export const AI_SUBSCRIPTION_LABELS: Record<AiSubscriptionKind, string> = {
  * Source (as of 2026-10-24): third-party measurement priced at API list rates, cache reads and
  * writes included, for mostly-Sonnet Claude Code use, rounded to a best guess:
  *   • wokey.ai/claude-usage-limits — measured weekly across accounts, week to 2026-10-19
- *     (Pro ~$170/wk; Max 20x ~$1,643/wk; Team standard ~$185/wk);
+ *     (Pro ~$170/wk; Ultra, then Max 20x, ~$1,643/wk; Team standard ~$185/wk);
  *   • SemiAnalysis (Oct 2026, via explainx.ai) and botfarm.run (Feb–Mar 2026) for the ranges and
- *     for Max 5x, which no one measures directly (~49% of Max 20x).
- * Weekly ranges: Pro 125–270, Max 5x 520–1300, Max 20x 1100–2900, Team 150–250. Limits move often;
+ *     for Max 5x, which no one measures directly (~49% of Ultra).
+ * Weekly ranges: Pro 125–270, Max 5x 520–1300, Ultra 1100–2900, Team 150–250. Limits move often;
  * re-check these when Anthropic changes them.
  */
 export const SUBSCRIPTION_ESTIMATES: Record<AiSubscriptionKind, { week: number; fiveHour: number }> = {
   // `fiveHour`: the same sources' 5-hour session figures, rounded (Pro ~$15, Max 5x ~$75,
-  // Max 20x ~$200, Team standard ~$20). Rougher still than the week — a session's ceiling moves
-  // with demand.
+  // Ultra ~$200, Team standard ~$20). Rougher still than the week — a session's ceiling moves
+  // with demand. Used only while the account HAS a 5-hour window (`hasFiveHourWindow`).
   pro: { week: 170, fiveHour: 15 },
   max5x: { week: 800, fiveHour: 75 },
   max20x: { week: 1650, fiveHour: 200 },
@@ -217,8 +219,9 @@ export interface ResolvedAiSubscription {
 
 /**
  * THE ONE SUBSCRIPTION RULE. Claude's report of 'pro' or 'team' is used directly (a pick does not
- * override it). 'max' needs the reader to say Max 5x or Max 20x (the two differ about fourfold);
- * 'enterprise', anything else, or no report: the reader picks from them all. Pure.
+ * override it), and so is 'ultra' (Anthropic's name for the plan that was Max 20x). 'max' needs the
+ * reader to say Max 5x or Ultra (the two differ about fourfold); 'enterprise', anything else, or no
+ * report: the reader picks from them all. Pure.
  */
 export function resolveAiSubscription(
   reported: string | null | undefined,
@@ -226,6 +229,7 @@ export function resolveAiSubscription(
 ): ResolvedAiSubscription {
   const r = typeof reported === 'string' ? reported.trim().toLowerCase() : '';
   if (r === 'pro' || r === 'team') return { kind: r, source: 'reading', pickFrom: null };
+  if (r === 'ultra') return { kind: 'max20x', source: 'reading', pickFrom: null };
   if (r === 'max') {
     const pair: AiSubscriptionKind[] = ['max5x', 'max20x'];
     return picked != null && pair.includes(picked)
@@ -294,7 +298,8 @@ export interface AiBudgetSubscriptionStatus {
   fiveHourSharePct: number;
   /** True while the 5-hour share follows the weekly one (no separate setting). */
   fiveHourFollowsWeek: boolean;
-  /** How much of the current 5-hour session Limn's own runs have used, in % of the session's
+  /** Null while the account has no 5-hour window reported lately (`hasFiveHourWindow`).
+   *  How much of the current 5-hour session Limn's own runs have used, in % of the session's
    *  allowance. Null while the subscription is unknown. */
   fiveHourUsedSharePct: number | null;
   /** 'reset' = Claude's real 5-hour window (its reset was read and is ahead); 'rolling' = the last
@@ -469,7 +474,8 @@ export interface AiUsageLimnView {
   inputTokens: number | null;
   outputTokens: number | null;
   /** Login route with a known subscription: Limn's share of the week / of the 5-hour session, in
-   *  % of the ESTIMATED allowance — whether or not the budget is on. Null otherwise. */
+   *  % of the ESTIMATED allowance — whether or not the budget is on. Null otherwise; the 5-hour one
+   *  also null while the account has no 5-hour window (`fiveHourLimit` false). */
   weekSharePct: number | null;
   fiveHourSharePct: number | null;
 }
@@ -489,6 +495,12 @@ export interface AiUsageView {
   route: 'login' | 'api_key' | 'none';
   /** Login route only. */
   account: AiUsageAccountView | null;
+  /**
+   * True while the provider has reported a 5-hour window lately (`hasFiveHourWindow`): the 5-hour
+   * bars, the 5-hour setting and its wording show only then. False on an API key, before a reading,
+   * and on a plan with a weekly limit only. Absent from an older server ⇒ false.
+   */
+  fiveHourLimit?: boolean;
   limn: AiUsageLimnView;
   /** API key route only. ⚠ Null on a subscription — no US$ amount on that wire. */
   apiKey: AiUsageApiKeyView | null;
@@ -595,6 +607,27 @@ export function liveWeekReset(reading: AiUsageReading | null, nowMs: number): nu
 /** The 5-hour window's reset, when the reading has one still ahead (and no more than 5 hours ahead). */
 export function liveFiveHourReset(reading: AiUsageReading | null, nowMs: number): number | null {
   return liveReset(reading?.fiveHour, nowMs, AI_BUDGET_FIVE_HOUR_MS);
+}
+
+/**
+ * HOW LONG A 5-HOUR READING SAYS THE ACCOUNT HAS A 5-HOUR WINDOW. Anthropic dropped the 5-hour session
+ * limit for some subscriptions (weekly only), and a ChatGPT plan may drop it too. A plan that has the
+ * window reports it on every usage probe (every 5 minutes while Limn is in use) and on rate-limit
+ * events; one that does not, never does. So the window counts as present only while the provider
+ * reported it within this long. 12 hours: two full sessions, so a quiet spell never hides it, and short
+ * enough that a removed limit leaves the same day. The ONE constant: nothing else may judge it.
+ */
+export const AI_FIVE_HOUR_WINDOW_RECENT_MS = 12 * AI_BUDGET_HOUR_MS;
+
+/**
+ * Whether the account has a 5-hour window: the provider reported one within
+ * AI_FIVE_HOUR_WINDOW_RECENT_MS. Unknown (never reported, or not lately) ⇒ false: no 5-hour bar, no
+ * 5-hour setting, and the 5-hour share never pauses a run. Pure.
+ */
+export function hasFiveHourWindow(reading: AiUsageReading | null | undefined, nowMs: number): boolean {
+  const seen = reading?.fiveHour?.observedAtMs;
+  if (seen == null || !Number.isFinite(seen)) return false;
+  return nowMs - seen <= AI_FIVE_HOUR_WINDOW_RECENT_MS;
 }
 
 /** Spend in one window — [reset − length, now] when the reset is known, else rolling — against a line. */
@@ -712,10 +745,12 @@ function codexSubscriptionStatus(input: AiBudgetInput): {
   const fiveReset = liveFiveHourReset(reading, nowMs);
   const fiveShare = effectiveFiveHourSharePct(settings);
   const shares = codexShares({ reading, ledger: input.ledger, accountTokens: input.accountTokens, nowMs });
+  // No 5-hour window reported lately: no 5-hour share, and it never pauses a run.
+  const fiveHourShare = hasFiveHourWindow(reading, nowMs) ? shares.fiveHour : null;
   // ⚠ Over only with a LIVE RESET read: the window's own figure falls back at its reset, and without
   // one there is no moment the pause would end — so a share with no known reset is never over.
   const overWeek = weekReset != null && shares.week != null && shares.week >= settings.weekSharePct;
-  const overFiveHour = fiveReset != null && shares.fiveHour != null && shares.fiveHour >= fiveShare;
+  const overFiveHour = fiveReset != null && fiveHourShare != null && fiveHourShare >= fiveShare;
   return {
     sub: {
       // No Claude subscription kind and no picker: Codex reports its plan and its own windows.
@@ -731,7 +766,7 @@ function codexSubscriptionStatus(input: AiBudgetInput): {
       weekResetsAt: isoOf(weekReset),
       fiveHourSharePct: fiveShare,
       fiveHourFollowsWeek: settings.fiveHourSharePct == null,
-      fiveHourUsedSharePct: shares.fiveHour,
+      fiveHourUsedSharePct: fiveHourShare,
       fiveHourWindow: fiveReset != null ? 'reset' : 'rolling',
       fiveHourResetsAt: isoOf(fiveReset),
     },
@@ -779,18 +814,22 @@ function subscriptionStatus(input: AiBudgetInput): {
   }
   const est = SUBSCRIPTION_ESTIMATES[resolved.kind];
   const week = windowSpend(ledger, nowMs, AI_BUDGET_WEEK_MS, weekReset, (est.week * settings.weekSharePct) / 100);
-  const five = windowSpend(ledger, nowMs, AI_BUDGET_FIVE_HOUR_MS, fiveReset, (est.fiveHour * fiveShare) / 100);
+  // The 5-hour share only while Claude has reported a 5-hour window lately (some plans are weekly only):
+  // otherwise there is no share to show and nothing to pause on.
+  const five = hasFiveHourWindow(reading, nowMs)
+    ? windowSpend(ledger, nowMs, AI_BUDGET_FIVE_HOUR_MS, fiveReset, (est.fiveHour * fiveShare) / 100)
+    : null;
   return {
     sub: {
       ...base,
       usedSharePct: round2((week.usedUsd / est.week) * 100),
       reviewsPerDay: reviewsPerDayFor(settings.weekSharePct, est.week, cycleCostUsd(input.costs)),
-      fiveHourUsedSharePct: round2((five.usedUsd / est.fiveHour) * 100),
+      fiveHourUsedSharePct: five == null ? null : round2((five.usedUsd / est.fiveHour) * 100),
     },
     overWeek: week.over,
-    overFiveHour: five.over,
+    overFiveHour: five?.over ?? false,
     weekResumesAtMs: week.resumesAtMs,
-    fiveHourResumesAtMs: five.resumesAtMs,
+    fiveHourResumesAtMs: five?.resumesAtMs ?? null,
   };
 }
 
@@ -833,7 +872,7 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
   } else if (sub.subscription == null) {
     reason =
       sub.reportedSubscription?.trim().toLowerCase() === 'max'
-        ? 'Pick Max 5x or Max 20x so Limn can work out its share.'
+        ? 'Pick Max 5x or Ultra so Limn can work out its share.'
         : 'Pick your Claude subscription so Limn can work out its share.';
   }
   // Runs resume once EVERY window that is over has cleared: the later of the two.
@@ -890,6 +929,8 @@ export interface AiUsageViewInput {
 export function aiUsageView(input: AiUsageViewInput): AiUsageView {
   const { settings, route, reading, ledger, nowMs } = input;
   const login = route === 'login';
+  // The 5-hour window, only while the provider has reported one lately (unknown ⇒ hidden, never 0%).
+  const fiveHourLimit = login && hasFiveHourWindow(reading, nowMs);
   const weekReset = login ? liveWeekReset(reading, nowMs) : null;
   const weekFromMs = weekReset != null ? weekReset - AI_BUDGET_WEEK_MS : nowMs - AI_BUDGET_WEEK_MS;
   const fiveReset = login ? liveFiveHourReset(reading, nowMs) : null;
@@ -909,7 +950,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
   if (login && input.provider === 'codex') {
     // Codex: its own two windows, its plan as reported, and Limn's TOKEN-WEIGHTED shares. No Claude
     // subscription kind, no per-model windows, no US$ rate (a ChatGPT run has no price).
-    const fiveHour = windowView('five_hour', null, reading?.fiveHour, nowMs);
+    const fiveHour = fiveHourLimit ? windowView('five_hour', null, reading?.fiveHour, nowMs) : null;
     const week = windowView('seven_day', null, reading?.week, nowMs);
     const seen = [fiveHour, week].filter((w): w is AiUsageWindowView => w != null).map((w) => w.observedAt);
     account = {
@@ -922,14 +963,14 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
     };
     const shares = codexShares({ reading, ledger, accountTokens: input.accountTokens, nowMs });
     weekSharePct = shares.week;
-    fiveHourSharePct = shares.fiveHour;
+    fiveHourSharePct = fiveHourLimit ? shares.fiveHour : null;
   } else if (login) {
     const kind = resolveAiSubscription(reading?.subscriptionType ?? null, settings.subscription).kind;
     const models = Object.entries(reading?.models ?? {})
       .map(([k, w]) => windowView(k, aiUsageModelLabel(k), w, nowMs))
       .filter((w): w is AiUsageWindowView => w != null)
       .sort((a, b) => (a.key === 'seven_day_opus' ? -1 : b.key === 'seven_day_opus' ? 1 : a.key.localeCompare(b.key)));
-    const fiveHour = windowView('five_hour', null, reading?.fiveHour, nowMs);
+    const fiveHour = fiveHourLimit ? windowView('five_hour', null, reading?.fiveHour, nowMs) : null;
     const week = windowView('seven_day', null, reading?.week, nowMs);
     const seen = [fiveHour, week, ...models].filter((w): w is AiUsageWindowView => w != null).map((w) => w.observedAt);
     account = {
@@ -944,7 +985,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
       const est = SUBSCRIPTION_ESTIMATES[kind];
       const fiveUsd = spend(fiveFromMs, fiveReset != null);
       weekSharePct = round2((inWeek.reduce((s, r) => s + r.usd, 0) / est.week) * 100);
-      fiveHourSharePct = round2((fiveUsd / est.fiveHour) * 100);
+      fiveHourSharePct = fiveHourLimit ? round2((fiveUsd / est.fiveHour) * 100) : null;
       weekPctPerUsd = 100 / est.week;
     }
   }
@@ -952,6 +993,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
     ...(input.provider ? { provider: input.provider } : {}),
     route,
     account,
+    fiveHourLimit,
     limn: {
       weekFrom: new Date(weekFromMs).toISOString(),
       window: weekReset != null ? 'reset' : 'rolling',

@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- AI usage and Settings → AI spend show the 5-hour session bar and setting only when your plan has a 5-hour limit; weekly-only plans see the week alone, and a 5-hour share no longer pauses automatic runs on them.
+- Claude's Max 20x plan is now called Ultra everywhere Limn names it.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed
