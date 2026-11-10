@@ -9,7 +9,8 @@
 //
 //   NARROW   (container < TWO_COLUMN_MIN_PX) one column, capped at the config's `narrowClassName` — the
 //            view as it always was. Everything a rail would hold renders in place.
-//   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem) that flows with the page
+//   WIDE     a reading column (minmax(0, 70rem)) and a RIGHT RAIL (18–24rem; a config may set its own
+//            `wideGridClassName` — the AI Review tab's is 21–28rem) that flows with the page
 //            (part of it; decided 2026-11-01) — unless the config sets `sticky` (the AI Review tab,
 //            2026-11-03): then the rail STICKS just under the top of its scroll pane (the tab bar sits
 //            above the pane), and a rail taller than the pane scrolls with the page until its end
@@ -67,7 +68,12 @@ export interface RailLayoutConfig {
   wideClassName: string;
   /** The rail sticks under the top of its scroll pane (see the header). Default: it flows. */
   sticky?: boolean;
+  /** The wide grid's columns and gap, when the default (a 70rem reading column, an 18–24rem rail)
+   *  does not fit — a literal Tailwind class string. */
+  wideGridClassName?: string;
 }
+
+const DEFAULT_WIDE_GRID = 'grid grid-cols-[minmax(0,70rem)_minmax(18rem,24rem)] gap-x-10';
 
 /** The sticky rail's gap from the scroll pane's top (and bottom, when it is taller than the pane). */
 const STICK_GAP_PX = 8;
@@ -206,7 +212,7 @@ export function RailLayout({
   return (
     <Ctx.Provider value={value}>
       <div ref={setRoot} data-testid={`${n}-layout`} data-wide={wide ? 'true' : 'false'}>
-        <div className={wide ? 'grid grid-cols-[minmax(0,70rem)_minmax(18rem,24rem)] gap-x-10' : ''}>
+        <div className={wide ? (config.wideGridClassName ?? DEFAULT_WIDE_GRID) : ''}>
           <div ref={mainRef} className={wide ? 'min-w-0' : config.narrowClassName}>
             {children}
           </div>

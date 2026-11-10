@@ -31,7 +31,6 @@ import {
   type ClaudeTeammateReview,
   type ClaudeTeamPoint,
 } from '@pierre-review/shared';
-import { AUTO_REVIEW_LABEL as AUTO_WORD } from '../components/Activity/pendingLabels.js';
 import { withoutPraise } from './claudeReviewFollowUp.js';
 import { CLAUDE_VERDICT_LABEL, shortDay } from './claudeReviewColumn.js';
 import { REPLIES_CHECK_LABEL as REPLIES_WORD } from './repliesCheck.js';
@@ -551,12 +550,30 @@ const STATUS_WORD: Record<ClaudeReviewStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-/** After the name: "Request changes · 3 Nov · 8a8ec14 · Claude + Codex · Auto review", or "Running · …". */
+/** One row's cells, each its own column in "Reviews on this PR": "Request changes" · "3 Nov" ·
+ *  "8a8ec14" · "Claude + Codex". A run in flight or ended without a verdict reads its status. Who
+ *  started it (auto or by hand), its depth and its cost are not shown (2026-11-10). */
+export function reviewListCells(item: ReviewListItem): { outcome: string; day: string; sha: string; what: string } {
+  return {
+    outcome: (item.status !== 'succeeded' ? STATUS_WORD[item.status] : reviewOutcomeWord(item)) ?? '',
+    day: shortDay(item.at),
+    sha: item.sha ?? '',
+    what: item.what ?? '',
+  };
+}
+
+/** After the name: "Request changes · 3 Nov · 8a8ec14 · Claude + Codex", or "Running · …". */
 export function reviewListLine(item: ReviewListItem): string {
-  const outcome = item.status !== 'succeeded' ? STATUS_WORD[item.status] : reviewOutcomeWord(item);
-  return [outcome, shortDay(item.at), item.sha, item.what, item.auto ? AUTO_WORD : null]
-    .filter((x): x is string => x != null && x !== '')
-    .join(' · ');
+  const c = reviewListCells(item);
+  return [c.outcome, c.day, c.sha, c.what].filter((x) => x !== '').join(' · ');
+}
+
+/** "Reviews on this PR" lists this many of the newest; the rest wait behind "Show all n". */
+export const REVIEWS_LIST_MAX = 10;
+
+/** The rows on screen: the newest REVIEWS_LIST_MAX, or every one once expanded. */
+export function visibleReviewItems<T>(items: readonly T[], expanded: boolean): readonly T[] {
+  return expanded || items.length <= REVIEWS_LIST_MAX ? items : items.slice(0, REVIEWS_LIST_MAX);
 }
 
 /** Does `shown` stand for this item (a pair: either half)? */

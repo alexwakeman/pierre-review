@@ -572,6 +572,8 @@ export const TEAM = {
    */
   standing: {
     pr: PRS.refunds,
+    // The PR's latest commit, always at the top (TeamReviewLayout.tsx HeadCommitLine).
+    head: '8a8ec14',
     rows: [
       { name: 'Priya', verdict: 'Approve', tone: 'green', day: '3 Nov', sha: '1c4bd65', note: 'approval stands on GitHub' },
       { name: 'You', verdict: 'Comment', tone: 'grey', day: '3 Nov', sha: '8a8ec14', note: null },

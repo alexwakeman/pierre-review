@@ -1068,16 +1068,26 @@ would clip the agent log that widens LEFTWARDS out of the `run` piece (`RailWide
 flowed with the page and left an empty column beside the findings once scrolled past. The story view's
 rail still flows (no `sticky`). The slots:
   - `status` (rail; "Where this PR stands" also in place when narrow, above the run controls):
-    `StandingsSection` (§ Team layout), then `ReviewRailStatus`: who reviewed, the verdict (left out
-    while Where this PR stands shows), "On latest commit" / "N newer
-    commits" (`CurrencyPill showSha={false}`), when, auto / fresh / replies / depth, and the run's cost
-    (`useRunCostText`, the one formatter) — NO commit hash and NO model (2026-11-03); the review header
-    drops its pills and meta line then (narrow keeps the meta line);
+    `StandingsSection` (§ Team layout) — ALWAYS headed by the PR's latest commit ("Latest commit
+    8a8ec14", `HeadCommitLine`: 7 characters, mono, linked under the PR through `pushedCommitHref` +
+    `safeExternalUrl`, a Copy button for the full sha; the cross-reference for every review's commit),
+    on a past review too — then `ReviewRailStatus`: who reviewed, the verdict (left out while Where this
+    PR stands shows), "On latest commit" / "N newer commits" (`CurrencyPill showSha={false}`), when, and
+    "Replies checked" on a replies pass. ⚠ NO trigger ("Auto review"), "From scratch", depth ("Deep
+    review") or cost chip anywhere on the tab (2026-11-10 — the cost is in the run's ⓘ, `runCostLine`,
+    through `useRunCostText`); NO commit hash and NO model in the rail (2026-11-03); the review header
+    drops its pills and meta line then (narrow keeps the meta line: commit · model);
   - `run` (in place when narrow): the whole "Run a review" section — model picker, Run / Re-review in
-    its `AiRunGate`, the same-commit confirm, auto-review holds, team claims, live progress + Stop,
-    failures, the replies pass; its ⓘ ("Review only, or review and post") sits beside the section
+    its `AiRunGate`, the same-commit confirm, auto-review holds, team claims (a teammate holding the
+    commit, Clear — never "Marked on GitHub", removed 2026-11-10), live progress + Stop (no live token
+    or cost readout), failures, an auto fix that STARTED or failed on a fault the reader can fix
+    (`autoFixOutcomeLine`: `not_started` / `over_budget` / `no_sandbox`; routine skips such as "auto AI
+    Fix is off" say nothing), the replies pass ONLY while it runs (status + Cancel) or when the newest
+    one failed (`RepliesCheckLine`; NO "Check replies" button, removed 2026-11-10 — the pass starts by
+    itself); its ⓘ ("Review only, or review and post") sits beside the section
     title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Limn reviews so far ·
-    1 by Robin", `reviewCountLine` over `teamView.reviewCount`) and one row per review (§ Team layout);
+    1 by Robin", `reviewCountLine` over `teamView.reviewCount`) and one row per review (§ Team layout),
+    IN COLUMNS, the newest 10 only (§ Team layout);
   - `counts` (rail only, `ReviewRailCounts`): findings by severity (zeros left out), "Under Story check",
     "Threads to fix" (`validUnaddressed`) — each row scrolls to its section;
   - NO "On this page" (removed 2026-11-03; the sections still carry `data-review-section` for the
@@ -2063,7 +2073,14 @@ reappears.
     hand too. No hunk preview on a teammate's (their comment's diff hunk is not stored). A
     story-placed finding stays under Story check. The rail counts read the same open rows.
   - **Reviews on this PR** (`ReviewsOnPrSection`, `reviewsOnPr`): every review, the reader's (a pair
-    once) and teammates', newest first; the NOW row is found by identity (`nowReviewKey`: the latest
+    once) and teammates', newest first, IN COLUMNS (2026-11-10, one fixed grid template per row,
+    `REVIEW_ROW_GRID`): avatar · who · day (tabular) · commit (7-character mono, the same form as
+    "Latest commit") · outcome (verdict, or the status; failed in the danger ink) · what ran it
+    (`reviewListCells`; each cell truncates with a title, the row's title is the whole line + time).
+    No trigger, depth or cost. Only the newest `REVIEWS_LIST_MAX` (10) show; a ChevronIcon button
+    "Show all n" / "Show fewer" below the list opens the rest (`visibleReviewItems`, state local to the
+    section). The rail is wider than the story view's for it (`REVIEW_RAIL.wideGridClassName`: reading
+    column `minmax(0,66rem)`, rail 21–28rem, gap 2rem). The NOW row is found by identity (`nowReviewKey`: the latest
     full review's row, never position — a newer replies pass is a past run), `aria-current` marks what
     shows. Any other row opens it READ-ONLY (no live Story / CI check under it) under `PastReviewBar` ("Your review · Comment · 4 Nov · 70cc9b5 ·
     read-only", "Back to now"): an own run through `useClaudeReviewById` (`ClaudesReview` without
@@ -2149,7 +2166,8 @@ reappears.
   - **"Not approved: …"** (`lib/autoPost.ts` `notApprovedLine`): ONE line under the review's verdict
     in the AI Review tab header — the server's `ClaudeReview.notApproved`, else the record's
     `reasonText`; "… Posted on GitHub." when it went out alone. `autoVerdictLine` no longer repeats a
-    reason in the Post section; the replies line (`repliesCheckLine`) appends a pass's `notApproved`.
+    reason in the Post section. (The replies pass's own summary line, which appended a pass's
+    `notApproved`, was removed 2026-11-10: open the pass from Reviews on this PR.)
   - What it did is shown where the posts are: `lib/autoPost.ts` `postedChipLabel` turns a finding's
     "Posted" chip into "Posted automatically · <time ago>" (`ClaudeFinding.postedAuto`), the Post to
     GitHub pill does the same off `ClaudeReview.autoPost`, and `autoPostFailureLine` prints ONE amber

@@ -280,7 +280,8 @@ describe('the wiring', () => {
     // never the default's.
     // "Running Codex review" — and for a Claude + Codex pair, which half (lib/modelPick.ts).
     expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/label=\{pairRunningLabel\(aiProviderName\(liveProvider\), status\?\.pair\?\.role \?\? null, phase, status\?\.pair\?\.both === true\)\}/);
-    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/aiCredentialWords\(liveProvider\)/);
+    // No live cost readout while a review runs (removed 2026-11-10): the cost is in the run's ⓘ.
+    expect(read('components', 'ClaudeReviewTab.tsx')).not.toMatch(/estCostUsd/);
     // AI Fix's ⓘ names the PICKED provider.
     expect(read('components', 'AiFixTab.tsx')).toMatch(/\{pickedName\} reads the PR's code/);
     expect(read('components', 'AiSetup.tsx')).toMatch(/aiSignInLine\(ai\.provider\)/);

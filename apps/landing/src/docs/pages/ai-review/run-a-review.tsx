@@ -42,15 +42,13 @@ function RunControls(): JSX.Element {
 function RunningLine(): JSX.Element {
   return (
     <Illustration
-      label="A review in progress: the status line says Reviewing, a Deep review chip, a Stop button and the tokens used so far."
-      caption="While a review runs: what it is doing, how deep it goes, and what it has used so far."
+      label="A review in progress: the status line says Reviewing, then a Stop button."
+      caption="While a review runs: what it is doing, and how long it has taken."
     >
       <Toolbar>
         <span>Reviewing · 2 min</span>
-        <Chip tone="blue">Deep review</Chip>
         <Btn>Stop</Btn>
       </Toolbar>
-      <p className="muted">↓ 18k out · ↑ 41k in · 310k cache</p>
     </Illustration>
   );
 }
@@ -107,11 +105,9 @@ export default function Page(): JSX.Element {
       <RunningLine />
       <p>
         A status line says what the reviewer is doing (for example <Ui>Fetching the diff</Ui>,{' '}
-        <Ui>Cloning the worktree</Ui>, <Ui>Reviewing</Ui>, <Ui>Saving findings</Ui>) and how long it has taken. A chip
-        says the depth Limn chose: <Ui>Deep review</Ui> or <Ui>Quick review</Ui> (see{' '}
-        <DocLink to="ai-review/overview#what-a-review-does">How AI review works</DocLink>). Under it, a short log
-        shows what the reviewer is reading, and the tokens used so far. With an API key, an estimate of the cost
-        appears too. Limn charges nothing; the figure recorded when the run finishes is the one that counts.
+        <Ui>Cloning the worktree</Ui>, <Ui>Reviewing</Ui>, <Ui>Saving findings</Ui>) and how long it has taken. Under
+        it, a short log shows what the reviewer is reading. When it finishes, the tokens it used and its cost are
+        behind the ⓘ beside the review's summary. Limn charges nothing.
       </p>
       <p>
         Press <Ui>Stop</Ui> to end the run. You can leave the tab or open another pull request while it runs. A

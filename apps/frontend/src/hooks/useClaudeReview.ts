@@ -54,23 +54,18 @@ export function useClaudeReview(prId: number | null) {
   });
 }
 
-/** Start ("Check replies") or cancel a replies pass; the tab's query re-reads after either. */
+/** Cancel a running replies pass (it starts by itself); the tab's query re-reads after. */
 export function useRepliesCheck(prId: number) {
   const qc = useQueryClient();
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
   };
-  const start = useMutation({
-    mutationKey: ['replies-check-start', prId],
-    mutationFn: () => api.startRepliesCheck(prId),
-    onSettled: refresh,
-  });
   const cancel = useMutation({
     mutationKey: ['replies-check-cancel', prId],
     mutationFn: () => api.cancelRepliesCheck(prId),
     onSettled: refresh,
   });
-  return { start, cancel };
+  return { cancel };
 }
 
 /**

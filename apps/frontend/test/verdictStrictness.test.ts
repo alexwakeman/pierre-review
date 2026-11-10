@@ -12,10 +12,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { AiKindStatus, AiRunKind, ClaudeRepliesCheckRun, MeResponse } from '@pierre-review/shared';
+import type { AiKindStatus, AiRunKind, MeResponse } from '@pierre-review/shared';
 import { autoVerdictLine, notApprovedLine } from '../src/lib/autoPost.js';
 import { pairReviewReady } from '../src/lib/aiCapabilities.js';
-import { repliesCheckLine } from '../src/lib/repliesCheck.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (p: string): string => readFileSync(join(here, '../src', p), 'utf8');
@@ -59,28 +58,6 @@ describe('the not-approved line', () => {
     expect(autoVerdictLine({ status: 'posted', verdict: rc('already_requested') })).toBe('Changes already requested by Claude’s earlier review.');
     expect(autoVerdictLine({ status: 'posted', verdict: rc('refused') })).toBe(
       'Changes not requested: GitHub refused it, so the comments were posted on their own.',
-    );
-  });
-
-  it('a replies pass says why too, manual and automatic', () => {
-    const run = (over: Partial<ClaudeRepliesCheckRun>): ClaudeRepliesCheckRun => ({
-      reviewId: 9,
-      status: 'succeeded',
-      trigger: 'manual',
-      createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
-      finishedAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
-      error: null,
-      accepted: 1,
-      disputed: 0,
-      notChecked: 0,
-      verdict: null,
-      autoPost: null,
-      ...over,
-    });
-    const notApproved = { heldReason: 'open_findings' as const, text: 'Not approved: a question is still open.' };
-    expect(repliesCheckLine(run({ notApproved }))).toBe('Replies checked 2 hours ago: 1 accepted. Not approved: a question is still open.');
-    expect(repliesCheckLine(run({ trigger: 'auto', notApproved }))).toBe(
-      'Replies checked 2 hours ago: 1 accepted. Not approved: a question is still open.',
     );
   });
 

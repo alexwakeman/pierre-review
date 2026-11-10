@@ -20,8 +20,8 @@ export const meta: DocMeta = {
 function ReviewPicture(): JSX.Element {
   return (
     <Illustration
-      label="The AI Review tab of pull request 612, Partial refunds. The verdict is Request changes. A Deep review by Claude + Codex found one blocker, one warning and one nit."
-      caption="The AI Review tab after a review: the verdict, how deep the review went, then the findings."
+      label="The AI Review tab of pull request 612, Partial refunds. The verdict is Request changes. A review by Claude + Codex found one blocker, one warning and one nit."
+      caption="The AI Review tab after a review: the verdict, then the findings."
       title="#612 Partial refunds"
       meta="acme/payments"
     >
@@ -36,7 +36,7 @@ function ReviewPicture(): JSX.Element {
         ]}
       />
       <p>
-        <Chip tone="red">Request changes</Chip> <Chip tone="blue">Deep review</Chip> <Chip>Claude + Codex</Chip>
+        <Chip tone="red">Request changes</Chip> <Chip>Claude + Codex</Chip>
       </p>
       <FindingRow chip="Blocker" tone="red">
         RefundPolicy.allows() never reads paid_at, so refunds older than 30 days still go through.

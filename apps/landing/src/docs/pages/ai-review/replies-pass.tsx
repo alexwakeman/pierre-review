@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, Warning } from '../../kit';
+import { DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Replies to findings',
@@ -23,9 +23,6 @@ function ReplyPicture(): JSX.Element {
           { who: 'Dana Wu', when: '10:12', text: 'The API rejects negative amounts before this runs: see validate_refund().' },
         ]}
       />
-      <p>
-        <Btn>Check replies</Btn>
-      </p>
     </Illustration>
   );
 }
@@ -81,25 +78,23 @@ export default function Page(): JSX.Element {
       />
 
       <H2 id="when-it-starts">When it starts</H2>
-      <ul>
-        <li>
-          <b>By itself</b>, when auto review is on for the workspace: after 5 quiet minutes on the pull request, at most
-          5 a day per pull request, within your spend budget. It never runs while a full review is running, because a
-          full review checks the replies itself.
-        </li>
-        <li>
-          <b>When you press it</b>: <Ui>Check replies</Ui> on the <Ui>AI Review</Ui> tab, shown while replies are
-          waiting for a judgement. If none are, Limn says <Ui>Every reply already has a judgement.</Ui>
-        </li>
-      </ul>
       <p>
-        After it runs, one line on the tab sums up the pass, and the pass is listed in Reviews on this PR. It is not a
-        review: the next full review still follows up the latest full review.
+        By itself, when auto review is on for the workspace: after 5 quiet minutes on the pull request, at most 5 a day
+        per pull request, within your spend budget. It never runs while a full review is running, because a full review
+        checks the replies itself. There is no button for it.
+      </p>
+      <p>
+        While it runs, the <Ui>AI Review</Ui> tab shows <Ui>Checking replies</Ui> with <Ui>Cancel</Ui>. If it fails,
+        the tab shows the error. Each pass is listed in <Ui>Reviews on this PR</Ui> as <Ui>Replies checked</Ui>; open
+        it to see the judgements. It is not a review: the next full review still follows up the latest full review.
       </p>
 
       <H2 id="what-it-posts">What it posts</H2>
-      <p>A pass you start yourself posts nothing. Each reply it would make is a draft with a <Ui>Post reply</Ui> button.</p>
-      <p>An automatic pass, with posting on for the workspace, may write:</p>
+      <p>
+        With posting off for the workspace, it posts nothing: each reply it would make is a draft with a{' '}
+        <Ui>Post reply</Ui> button.
+      </p>
+      <p>With posting on for the workspace, it may write:</p>
       <ul>
         <li>
           <b>One pushback per thread, ever</b>, in the model's own words, on an open thread. Limn never resolves a
@@ -126,9 +121,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        A pass you start shows what it would do ("Would approve." or "Would request changes.") and changes nothing on
-        GitHub. An automatic pass posts its verdict as one short review only when it rests on an automatic review and
-        posting is on. See <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
+        It posts its verdict as one short review only when it rests on an automatic review and posting is on. See <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
       </p>
 
       <H2 id="replies-or-check-threads">Replies pass or Check threads</H2>
@@ -140,9 +133,9 @@ export default function Page(): JSX.Element {
         ]}
         rows={[
           { _key: 'w', k: 'Judges', r: "Replies on your Limn's own findings", c: "Everyone else's threads: people, review bots, teammates' Limn" },
-          { _key: 's', k: 'Starts', r: 'A reply on a Limn finding; or Check replies', c: 'A new comment in an open thread; or Check threads' },
+          { _key: 's', k: 'Starts', r: 'A reply on a Limn finding (by itself)', c: 'A new comment in an open thread; or Check threads' },
           { _key: 'c', k: 'Daily limit (automatic)', r: '5 per pull request', c: '30 per workspace' },
-          { _key: 'p', k: 'Posts', r: 'Automatic only: one pushback per thread, or an acknowledgement and a resolve', c: 'Nothing' },
+          { _key: 'p', k: 'Posts', r: 'With posting on: one pushback per thread, or an acknowledgement and a resolve', c: 'Nothing' },
           { _key: 'v', k: 'Verdict', r: 'Can request changes or approve', c: 'Changes no verdict by itself' },
         ]}
       />

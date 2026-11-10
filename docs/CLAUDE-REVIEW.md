@@ -868,8 +868,9 @@ Default, Low, Medium, High, Extra high, Max.
 "Reviews on this PR" (`components/TeamReviewLayout.tsx` `ReviewsOnPrSection`, rows from
 `lib/teamReview.ts reviewsOnPr`; replaced the "Showing …" drop-down on 2026-11-04) lists EVERY review:
 the reader's runs (all providers, all heads; `listClaudeReviewHistory` is uncapped) and every
-teammate's posted review, newest first. A row is "<avatar> You · Request changes · 3 Nov · 8a8ec14 ·
-Claude + Codex · Auto review" — the status ("Running", "Queued", "Failed") in place of the verdict
+teammate's posted review, newest first. A row is "<avatar> You · 3 Nov · 8a8ec14 · Request changes ·
+Claude + Codex", each part in its own aligned column (no "Auto review", depth or cost — 2026-11-10); the
+newest 10 show, "Show all n" opens the rest — the status ("Running", "Queued", "Failed") in place of the verdict
 when not finished. A Claude + Codex pair is ONE row, addressed by its latest half's id (either half's
 id shows it, `itemShows`); a replies pass reads "Replies checked". ONE row is NOW, found by IDENTITY
 (`nowReviewKey`): the row holding the reader's latest FULL review (with none, the newest teammate
@@ -1427,8 +1428,8 @@ reviews as if it were the first run on the PR (manager.ts `QueueItem.fresh`).
   library, the CI review beside a manual run. A `skip`-routed fresh run is an ordinary skip (it
   reads no code); the Check threads run it starts carries its own judgements as usual.
 - **Stored** on the run: `claude_reviews.fresh` (migration 0133; true, else NULL), served as
-  `ClaudeReview.fresh` / `ClaudeReviewSummary.fresh`; the tab's run pills and the history list say
-  "From scratch". There is no SPA control yet: the route takes it.
+  `ClaudeReview.fresh` / `ClaudeReviewSummary.fresh`; not shown on the tab (its "From scratch" chip was
+  removed 2026-11-10). There is no SPA control yet: the route takes it.
 - ⚠ **The NEXT ordinary run follows up the fresh run** (the newest succeeded one), so comments
   posted from runs BEFORE the fresh one leave the follow-up chain — that is the point of starting
   over. Auto review never sets it.
@@ -1664,8 +1665,9 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   (skipped, never queued). A refusal or the cap settles that half IN MEMORY (`repliesSettled`) so it
   is not asked every minute. ⚠ A pass's coverage (`comments_through`, `passCoverageMs`) stays just
   below the oldest reply it LEFT OUT over the 20-thread / 48k cap, so the next tick routes another
-  pass for those (the per-PR cap still bounds them). MANUAL: "Check replies" on the AI Review tab (`RepliesCheckLine`, behind
-  `AiRunGate kind="thread_check"`), `POST /api/prs/:id/claude-review/replies`. ⚠ Never while a FULL
+  pass for those (the per-PR cap still bounds them). MANUAL: `POST /api/prs/:id/claude-review/replies`
+  (the route stays; the tab's "Check replies" button was REMOVED 2026-11-10, so the SPA no longer
+  starts a pass by hand — it runs by itself, and a full review judges the replies too). ⚠ Never while a FULL
   review of the PR is queued or running (`reviewHeldForPr` — it judges the replies itself; refused
   `review_in_progress`, re-checked at launch), never on a closed PR.
 - **PR-level findings** (§ Replies → PR-level findings) are judged in the same pass: a person's PR
@@ -1760,9 +1762,9 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   `githubReviewId` + REQUEST_CHANGES make it Limn's own block for later lifts
   (`loadLimnAutoBlockIds`).
 - **The tab**: `ClaudeReviewResponse.repliesCheck {unjudged, live, latest}` (DB-only + the in-memory
-  phase): "Check replies (N)", the status line + Cancel while it runs (the tab re-reads every 5 s),
-  one line about the newest pass ("Replies checked 2 hours ago: 1 accepted, 1 still open.") with
-  Show (it is a run in the history). Pinned by `replies-pass.test.ts`, `replies-check-pipeline.test.ts`,
+  phase): the status line + Cancel while a pass runs (the tab re-reads every 5 s), and "Replies check
+  failed: <error>" when the newest pass failed (`RepliesCheckLine`, `repliesCheckFailedLine`). Nothing
+  else (2026-11-10): a finished pass is a row in Reviews on this PR ("Replies checked"). Pinned by `replies-pass.test.ts`, `replies-check-pipeline.test.ts`,
   `auto-sweep.test.ts` and `threads-db.test.ts`.
 
 ## Other reviewers' threads (people and review bots)
@@ -3068,9 +3070,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   (pending, naming us, posted later) does not count: the fold still finds us earliest. A teammate's
   free line does not count either. An unreadable history posts as before (a pending line left behind is
   worse). The reconciler already read first; a Clear is the reader's own choice and does not read.
-- **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Marked on GitHub,
-  then released" (`lastLine 'unfinished'`) / "Marked on GitHub; a teammate's line is newer"
-  (`'superseded'`) / "Not marked on GitHub: no write access" on the tab.
+- **THE RECORD** on the run row (`claude_reviews.team_claim`; `lastLine 'unfinished'` = released,
+  `'superseded'` = a teammate's line is newer, `state 'unmarked'` + `reason 'no_access'`). Served, NOT
+  shown: the tab's "Marked on GitHub" line was removed 2026-11-10.
 - **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
   when a pending Limn line sits on the PR's head — a teammate's live claim (the skip memory, else ⚠
   the STORED `team_claim_seen` "is reviewing" row at the head — 2026-11-05, gap 6: the button survives a
@@ -4459,7 +4461,8 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   container runtime ⇒ **`no_sandbox`**, every session taken or another session building ⇒
   **`sandbox_busy`** (or `fix_in_progress` when it is THIS PR's own fix that holds a session) —
   recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged and kept in memory per
-  review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`, one line in the Claude Review tab):
+  review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`; the AI Review tab shows a line only
+  for a started fix or a fault the reader can fix — `not_started`, `over_budget`, `no_sandbox`, 2026-11-10):
   `nothing_to_fix` (empty seed), `head_moved` (synced head ≠ reviewed head), `fix_in_progress`
   (a fix SESSION holds the PR — booting, building, a manual one open for follow-ups, a Plan first
   waiting; `startFix` claims it SYNCHRONOUSLY right after the check, so a click racing the auto

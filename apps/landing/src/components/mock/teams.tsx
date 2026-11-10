@@ -46,9 +46,12 @@ export function TeamStandingMock(): JSX.Element {
     <MockFrame
       title={prLabel(s.pr)}
       meta="AI Review"
-      label="Where pull request 612 stands: Priya approved on 3 Nov and her approval stands on GitHub; your own review, on your own pull request, is a comment."
+      label="Where pull request 612 stands, at its latest commit 8a8ec14: Priya approved on 3 Nov and her approval stands on GitHub; your own review, on your own pull request, is a comment."
     >
       <Group first>Where this PR stands</Group>
+      <p className="mk-head">
+        Latest commit <code>{s.head}</code>
+      </p>
       {s.rows.map((r) => (
         <div key={r.name} className="mk-stand">
           <b>{r.name}</b>

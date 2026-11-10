@@ -23,6 +23,9 @@ import {
   pairReviewIdsOf,
   raisedByLabel,
   reviewListLine,
+  reviewListCells,
+  visibleReviewItems,
+  REVIEWS_LIST_MAX,
   reviewsOnPr,
   standingLine,
   standingRows,
@@ -280,7 +283,7 @@ describe('reviews on this PR', () => {
     expect(items.map(reviewListLine)).toEqual([
       'Comment · 4 Nov · 1c4bd65 · Claude',
       'Request changes · 3 Nov · 8a8ec14 · Claude + Codex',
-      'Failed · 2 Nov · 8a8ec14 · Claude · Auto review',
+      'Failed · 2 Nov · 8a8ec14 · Claude',
     ]);
     expect(items[1]!.runIds).toEqual([11, 10]);
   });
@@ -310,10 +313,23 @@ describe('reviews on this PR', () => {
       'Approve · 5 Nov · 8a8ec14 · Replies checked',
       'Comment · 4 Nov · 1c4bd65 · Claude',
       'Request changes · 3 Nov · 8a8ec14 · Claude + Codex',
-      'Failed · 2 Nov · 8a8ec14 · Claude · Auto review',
+      'Failed · 2 Nov · 8a8ec14 · Claude',
     ]);
     expect(withDecisions[0]!.target).toBeNull();
     expect(itemShows(withDecisions[0]!, { kind: 'teammate', reviewId: 20 })).toBe(false);
+  });
+
+  it('splits each row into its columns; no trigger, depth or cost', () => {
+    expect(reviewListCells(items[2]!)).toEqual({ outcome: 'Failed', day: '2 Nov', sha: '8a8ec14', what: 'Claude' });
+    expect(items.every((i) => !/Auto review|Deep|Quick|US\$|% of your week/.test(reviewListLine(i)))).toBe(true);
+  });
+
+  it('lists the newest 10; the rest wait behind "Show all"', () => {
+    const many = Array.from({ length: 13 }, (_, i) => i);
+    expect(REVIEWS_LIST_MAX).toBe(10);
+    expect(visibleReviewItems(many, false)).toEqual(many.slice(0, 10));
+    expect(visibleReviewItems(many, true)).toEqual(many);
+    expect(visibleReviewItems(many.slice(0, 4), false)).toHaveLength(4);
   });
 
   it("either half of a pair shows the pair's row", () => {

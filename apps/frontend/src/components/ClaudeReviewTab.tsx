@@ -19,7 +19,6 @@ import type {
   PrDetail,
   PrFilesResponse,
   ReviewDocReference,
-  ReviewMode,
   User,
 } from '@pierre-review/shared';
 import {
@@ -70,7 +69,6 @@ import {
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
-import { aiCredentialWords } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
 import { cx, FOCUS_RING, Menu, Select } from './ui/index.js';
@@ -122,7 +120,6 @@ import {
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { AUTO_REVIEW_LABEL, FRESH_REVIEW_LABEL } from './Activity/pendingLabels.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
@@ -183,13 +180,6 @@ export type OpenInChanges = (
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
 
-// The resolved review mode (what actually ran). Depth is the router's call, never the reader's.
-const REVIEW_MODE_LABEL: Record<ReviewMode, string> = {
-  skip: 'Skipped',
-  diff_only: 'Quick',
-  worktree: 'Deep',
-};
-
 const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
   COMMENT: 'Comment',
   REQUEST_CHANGES: 'Request changes',
@@ -228,32 +218,20 @@ const PAIR_HOW_TEXT: Record<NonNullable<NonNullable<ClaudeReview['pair']>['how']
   single: 'Only one of the two reviews finished, so this is that review.',
 };
 
-function metaLine(
-  review: ClaudeReview,
-  costText: (usd: number | null | undefined, provider?: AiProviderId | null) => string | null,
-): string {
-  // A skipped run (nothing substantive to review) ran no model: it names none.
+function metaLine(review: ClaudeReview): string {
+  // A skipped run (nothing substantive to review) ran no model: it names none. The cost is behind the
+  // run's ⓘ (`runCostLine`), never on the page.
   const parts: string[] = [shortSha(review.headSha)];
-  // A Claude + Codex pair: both models, and each half's cost in its own provider's terms (US$ on an
-  // API key, a share of the week on a subscription — never summed across the two).
   const halves = review.pair?.halves;
-  if (halves != null && halves.length > 0) {
-    parts.push(pairModelsLabel(halves));
-    for (const h of halves) {
-      const c = costText(h.costUsd, h.provider);
-      if (c != null) parts.push(`${aiProviderName(h.provider)} ${c}`);
-    }
-    return parts.join(' · ');
-  }
-  if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model, review.effort));
-  const cost = costText(review.costUsd, aiRunProvider(review.provider, review.model));
-  if (cost != null) parts.push(cost);
+  if (halves != null && halves.length > 0) parts.push(pairModelsLabel(halves));
+  else if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model, review.effort));
   return parts.join(' · ');
 }
 
-// The rail's run line: the run's cost only — no commit, no model (the right-hand column names neither).
-// A pair: each half's cost in its own provider's terms, never summed. null when nothing is known.
-function railCostLine(
+// The run's cost, for its ⓘ only (2026-11-10: no cost chip on the page). A pair: each half's cost in its
+// own provider's terms (US$ on an API key, a share of the week on a subscription), never summed. null
+// when nothing is known.
+function runCostLine(
   review: ClaudeReview,
   costText: (usd: number | null | undefined, provider?: AiProviderId | null) => string | null,
 ): string | null {
@@ -1374,6 +1352,7 @@ export function ClaudesReview({
   ciCheck: ReactNode;
 }): JSX.Element {
   const costText = useRunCostText();
+  const runCost = runCostLine(storedReview, costText);
   // WHO WROTE IT: the provider that ran the run — or, for a Claude + Codex pair (the server's ONE
   // consolidated review), "Claude + Codex", each finding naming its own source.
   const by = reviewByName(storedReview);
@@ -1489,7 +1468,7 @@ export function ClaudesReview({
     <>
       {leadTeammate == null && (
         <RailPiece slot="status">
-          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} cost={railCostLine(review, costText)} showVerdict={showVerdict} />
+          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} showVerdict={showVerdict} />
         </RailPiece>
       )}
       <RailPiece slot="counts">
@@ -1513,24 +1492,9 @@ export function ClaudesReview({
             {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
             {currency != null && <CurrencyPill currency={currency} />}
             <ReviewedAgo at={review.finishedAt} />
-            {review.trigger === 'auto' && (
-              <span className="text-meta text-ui-mute">
-                {AUTO_REVIEW_LABEL}
-              </span>
-            )}
-            {review.fresh === true && (
-              <span className="text-meta text-ui-mute">
-                {FRESH_REVIEW_LABEL}
-              </span>
-            )}
             {review.kind === 'replies' && (
               <span className="text-meta text-ui-mute">
                 {repliesRunLabel(review)}
-              </span>
-            )}
-            {review.reviewMode != null && (
-              <span className="text-meta text-ui-mute">
-                {REVIEW_MODE_LABEL[review.reviewMode]} review
               </span>
             )}
           </>
@@ -1539,6 +1503,7 @@ export function ClaudesReview({
           <InfoButton title={storedReview.pair != null ? 'This review' : 'This run'}>
             <div className="space-y-2">
               {storedReview.pair?.how != null && <p>{PAIR_HOW_TEXT[storedReview.pair.how]}</p>}
+              {runCost != null && <p>Cost: {runCost}.</p>}
               <UsageBreakdown review={review} />
               {review.numTurns != null && <p>{review.numTurns} turns.</p>}
               {review.diffCapped && (
@@ -1554,7 +1519,7 @@ export function ClaudesReview({
           </InfoButton>
         }
       >
-        {!inRail && <div className="text-meta text-ui-mute">{metaLine(review, costText)}</div>}
+        {!inRail && <div className="text-meta text-ui-mute">{metaLine(review)}</div>}
         {/* WHY IT WAS NOT APPROVED (auto verdict on): one line under the verdict, always. */}
         {notApprovedLine(storedReview) != null && (
           <div className="text-meta text-ui-ink" data-not-approved>
@@ -1714,6 +1679,9 @@ const REVIEW_RAIL: RailLayoutConfig = {
   // The single column as it always was: max-w-5xl around the tab's own padding (px-5 = 2.5rem).
   narrowClassName: 'max-w-[61.5rem]',
   wideClassName: 'relative z-10 bg-ui-bg',
+  // A wider rail than the story view's (2026-11-10): "Reviews on this PR" lays its rows out in
+  // columns. At the 1080px breakpoint the reading column keeps ~44rem.
+  wideGridClassName: 'grid grid-cols-[minmax(0,66rem)_minmax(21rem,28rem)] gap-x-8',
 };
 
 /** The team layout's inputs (the latest run only; `ClaudeReviewResponse.teamView`). */
@@ -1836,24 +1804,23 @@ function PointFindingCard({ card, raisedBy, env }: { card: FindingCard; raisedBy
   );
 }
 
-/** The rail's first block: who reviewed, the verdict, whether it read the latest commit, when, and
- *  the cost. No commit hash and no model here (Reviews on this PR and the narrow header name them). */
+/** The rail's first block: who reviewed, the verdict, whether it read the latest commit, and when.
+ *  No commit hash, model, trigger, depth or cost here (the head line, the reviews list and the run's ⓘ
+ *  hold them). */
 function ReviewRailStatus({
   review,
   title,
   currency,
-  cost,
   showVerdict = true,
 }: {
   review: ClaudeReview;
   title: string;
   currency: ReviewCurrency | null;
-  cost: string | null;
   // false: "Where this PR stands" already names the verdict.
   showVerdict?: boolean;
 }): JSX.Element {
   return (
-    <div className="space-y-1.5" data-testid="review-rail-status">
+    <div className="mt-4 space-y-1.5 first:mt-0" data-testid="review-rail-status">
       <p className="text-meta text-ui-mute">{title}</p>
       <div className="flex flex-wrap items-center gap-2">
         {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
@@ -1861,12 +1828,8 @@ function ReviewRailStatus({
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">
         <ReviewedAgo at={review.finishedAt} />
-        {review.trigger === 'auto' && <span>{AUTO_REVIEW_LABEL}</span>}
-        {review.fresh === true && <span>{FRESH_REVIEW_LABEL}</span>}
         {review.kind === 'replies' && <span>{repliesRunLabel(review)}</span>}
-        {review.reviewMode != null && <span>{REVIEW_MODE_LABEL[review.reviewMode]} review</span>}
       </div>
-      {cost != null && <p className="break-words text-meta text-ui-mute">{cost}</p>}
     </div>
   );
 }
@@ -2227,7 +2190,6 @@ export function ClaudeReviewTab({
   // and self-invalidates the full review on the terminal `done` (so the finished
   // result loads without a poll).
   const { status } = useClaudeReviewStream(pr.id, isRunning);
-  const costText = useRunCostText();
 
   // EVERY REVIEW ON THE PR (the reader's runs, a pair once, and teammates' posted reviews), newest
   // first; the first row is now. Hooks below MUST run unconditionally — before any early return.
@@ -2337,16 +2299,12 @@ export function ClaudeReviewTab({
   };
 
   const phase = status?.progress?.phase ?? null;
-  // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
-  // Claude subscription, nothing when unknown.
-  // Judged by the provider the RUNNING row runs on (stamped at queue time), never the other one's.
   const liveRow = review != null && (review.status === 'running' || review.status === 'queued') ? review : null;
   // WHO IS RUNNING: the running row's provider (stamped at queue time with the reader's pick), never
   // the default's — a Codex run picked while Claude is the default reads "Running Codex review".
   // Before the row loads, the pick that started it.
   const liveProvider: AiProviderId =
     status?.pair?.provider ?? (liveRow ? aiRunProvider(liveRow.provider, liveRow.model) : modelPick.chosen.provider);
-  const liveCost = costText(status?.progress?.usage?.estCostUsd, liveProvider);
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
   // ⚠ The server posts the STORED draft body. Clicking Preview blurs the summary box, whose save
@@ -2394,13 +2352,16 @@ export function ClaudeReviewTab({
       <RailPiece slot="actions" inline>
         <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       </RailPiece>
-      {/* WHERE THIS PR STANDS (now): each Limn reviewer's newest verdict. In the rail when wide;
-          above the run controls when narrow. */}
-      {viewingLatest && standingsShown && (
-        <RailPiece slot="status" inline>
-          <StandingsSection standings={data?.teamView?.standings} />
-        </RailPiece>
-      )}
+      {/* WHERE THIS PR STANDS: the PR's latest commit (always — the cross-reference for each review's
+          commit), then each Limn reviewer's newest verdict (now only). In the rail when wide; above
+          the run controls when narrow. */}
+      <RailPiece slot="status" inline>
+        <StandingsSection
+          standings={viewingLatest ? data?.teamView?.standings : null}
+          headSha={pr.headSha ?? null}
+          prUrl={pr.githubUrl}
+        />
+      </RailPiece>
       {/* A teammate whose newest review here came from an older Limn: one plain "update" line. */}
       {viewingLatest && (data?.teammateReviews?.length ?? 0) > 0 && (
         <RailPiece slot="status" inline>
@@ -2520,7 +2481,7 @@ export function ClaudeReviewTab({
             </div>
           )}
 
-          {/* After an auto review of the reader's own PR: the auto fix started, or why not. */}
+          {/* After an auto review of the reader's own PR: the auto fix started (a skip says nothing). */}
           {viewingLatest && autoFixOutcomeLine(data?.autoFix) != null && (
             <div className="mt-2 text-meta text-ui-mute">
               {autoFixOutcomeLine(data?.autoFix)}
@@ -2562,19 +2523,6 @@ export function ClaudeReviewTab({
               }
               className="text-body"
             />
-            {review?.trigger === 'auto' && (
-              <span className="text-meta text-ui-mute">
-                {AUTO_REVIEW_LABEL}
-              </span>
-            )}
-            {status?.progress?.reviewMode != null && (
-              <span
-                className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent"
-                title="The review depth chosen for this run"
-              >
-                {REVIEW_MODE_LABEL[status.progress.reviewMode]} review
-              </span>
-            )}
             {status?.progress?.message != null && (
               <span className="text-meta text-ui-faint">
                 {status.progress.message}
@@ -2589,38 +2537,6 @@ export function ClaudeReviewTab({
               {cancel.isPending ? 'Stopping…' : 'Stop'}
             </button>
           </div>
-          {/* Live token usage + running cost estimate (once the agent has a turn). */}
-          {status?.progress?.usage && (
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-meta text-ui-mute">
-              <span
-                className="inline-flex items-center gap-1"
-                title="Output tokens generated so far"
-              >
-                <ArrowIcon dir="down" size={11} />
-                {fmtTokens(status.progress.usage.outputTokens)} out
-              </span>
-              <span
-                className="inline-flex items-center gap-1"
-                title="New (uncached) input tokens billed so far"
-              >
-                <ArrowIcon dir="up" size={11} />
-                {fmtTokens(status.progress.usage.inputTokens)} in
-              </span>
-              <span
-                className="inline-flex items-center gap-1"
-                title="Cached input tokens read so far (billed at ~10% of input)"
-              >
-                <RefreshIcon size={11} />
-                {fmtTokens(status.progress.usage.cacheReadTokens)} cache
-              </span>
-              <span
-                className="font-semibold text-ui-mute"
-                title={`Estimated so far, on ${aiCredentialWords(liveProvider)}. Limn charges nothing. The figure recorded when the run finishes is authoritative.`}
-              >
-                {liveCost != null && `~${liveCost}`}
-              </span>
-            </div>
-          )}
           {/* Live activity feed from the agent run (newest-last). */}
           <AgentActivityLog lines={status?.progress?.recentActivity} runKey={status?.reviewId ?? null} />
         </div>
@@ -2653,15 +2569,8 @@ export function ClaudeReviewTab({
         <div className="text-body text-ui-mute">Review cancelled.</div>
       )}
 
-      {/* The replies pass: "Check replies" while people's replies on Limn's findings wait, and the
-          newest pass (a run in the list below). */}
-      {data != null && (
-        <RepliesCheckLine
-          prId={pr.id}
-          state={data.repliesCheck}
-          onShow={(id) => showPick({ kind: 'own', id })}
-        />
-      )}
+      {/* A replies pass running now: its status line and Cancel (it starts by itself; nothing else). */}
+      {data != null && <RepliesCheckLine prId={pr.id} state={data.repliesCheck} />}
 
       </ReviewSection>
 
@@ -2669,6 +2578,7 @@ export function ClaudeReviewTab({
           Limn reviews so far, teammates' included (`teamView.reviewCount`). Any other row opens that
           review read-only. */}
       {data != null && (
+        <div className="mt-6">
         <ReviewsOnPrSection
           items={reviewItems}
           nowKey={nowReviewKey(reviewItems, review?.id ?? null)}
@@ -2676,6 +2586,7 @@ export function ClaudeReviewTab({
           countLine={reviewCountLine(data?.teamView?.reviewCount)}
           onShow={showPick}
         />
+        </div>
       )}
       </RailPiece>
 

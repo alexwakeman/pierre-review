@@ -33,11 +33,19 @@ no internals.
   pull requests open in their own tab instead of a Focus tab.
 - AI usage and Settings → AI spend show the 5-hour session bar and setting only when your plan has a 5-hour limit; weekly-only plans see the week alone, and a 5-hour share no longer pauses automatic runs on them.
 - Claude's Max 20x plan is now called Ultra everywhere Limn names it.
+- AI Review: the right-hand column starts with the pull request's latest commit (click to open it,
+  or copy it) under "Where this PR stands". "Reviews on this PR" lines up in columns (who, when,
+  commit, outcome, what ran it), shows the newest 10 with "Show all" for the rest, and the column is
+  a little wider.
 
 ### Removed
 
 - Website: the separate Getting started page. Its steps live in the docs' Getting started section,
   which gains a "Set up the rest" list, and the old address now goes there.
+- AI Review: the "Check replies" button (the replies check still runs by itself), the per-review
+  "Auto review", "From scratch", "Deep review" and cost labels (the cost is behind the review's ⓘ),
+  the live token count while a review runs, "Marked on GitHub", and routine "No auto fix" lines such
+  as "auto AI Fix is off for this workspace".
 
 ## [1.0.18] - 2026-11-10
 

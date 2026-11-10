@@ -737,6 +737,16 @@
   font-size: 11px;
   font-weight: 500;
 }
+/* "Latest commit 8a8ec14", above the "Where this PR stands" lines. */
+.lb .mk-head {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.lb .mk-head code {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 /* One "Where this PR stands" line: name, verdict, then day · commit · what GitHub still holds. */
 .lb .mk-stand {
   display: flex;

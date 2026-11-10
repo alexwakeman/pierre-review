@@ -7,10 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { ClaudeRepliesCheckRun } from '@pierre-review/shared';
 import {
   REPLIES_CHECK_LABEL,
-  canCheckReplies,
-  checkRepliesButtonText,
-  repliesCheckLine,
-  repliesCountsText,
+  repliesCheckFailedLine,
   repliesRunLabel,
 } from '../src/lib/repliesCheck.js';
 
@@ -30,36 +27,12 @@ const run = (over: Partial<ClaudeRepliesCheckRun> = {}): ClaudeRepliesCheckRun =
 });
 
 describe('the replies pass, in words', () => {
-  it('offers "Check replies" only while replies wait and nothing runs', () => {
-    expect(canCheckReplies({ unjudged: 2, live: null, latest: null })).toBe(true);
-    expect(canCheckReplies({ unjudged: 2, live: 'running', latest: null })).toBe(false);
-    expect(canCheckReplies({ unjudged: 0, live: null, latest: null })).toBe(false);
-    expect(canCheckReplies(null)).toBe(false);
-    expect(checkRepliesButtonText(1)).toBe('Check replies');
-    expect(checkRepliesButtonText(3)).toBe('Check 3 replies');
-  });
-
-  it('one line about the newest pass', () => {
-    expect(repliesCountsText({ accepted: 2, disputed: 0, notChecked: 1 })).toBe('2 accepted, 1 not checked.');
-    expect(repliesCheckLine(run())).toBe('Replies checked 2 hours ago: 1 accepted, 1 still open.');
-    // A manual pass never posts: it says what the outcome WOULD be.
-    expect(repliesCheckLine(run({ verdict: 'REQUEST_CHANGES' }))).toBe(
-      'Replies checked 2 hours ago: 1 accepted, 1 still open. Would request changes.',
-    );
-    expect(repliesCheckLine(run({ verdict: 'APPROVE', disputed: 0 }))).toBe('Replies checked 2 hours ago: 1 accepted. Would approve.');
-    // An auto pass says what its outcome review did.
-    expect(
-      repliesCheckLine(
-        run({
-          trigger: 'auto',
-          verdict: 'APPROVE',
-          autoPost: { status: 'posted', at: 'x', reason: null, error: null, postedCount: 0, verdict: { wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null } },
-        }),
-      ),
-    ).toBe('Replies checked 2 hours ago: 1 accepted, 1 still open. Approved automatically.');
-    expect(repliesCheckLine(run({ status: 'failed', error: 'usage limit' }))).toBe('Replies check failed: usage limit');
-    expect(repliesCheckLine(run({ status: 'running' }))).toBeNull();
-    expect(repliesCheckLine(null)).toBeNull();
+  it('says only that the newest pass failed, with its error', () => {
+    expect(repliesCheckFailedLine(run({ status: 'failed', error: 'usage limit' }))).toBe('Replies check failed: usage limit');
+    expect(repliesCheckFailedLine(run({ status: 'failed', error: '  ' }))).toBe('Replies check failed.');
+    expect(repliesCheckFailedLine(run())).toBeNull();
+    expect(repliesCheckFailedLine(run({ status: 'running' }))).toBeNull();
+    expect(repliesCheckFailedLine(null)).toBeNull();
   });
 
   it('is mounted on the AI Review tab, and a pass is labelled in Reviews on this PR', () => {
@@ -67,7 +40,9 @@ describe('the replies pass, in words', () => {
     expect(src('ClaudeReviewTab.tsx')).toMatch(/<RepliesCheckLine\b/);
     // Reviews on this PR labels a pass (lib/teamReview.ts `reviewsOnPr`).
     expect(readFileSync(join(import.meta.dirname, '../src/lib/teamReview.ts'), 'utf8')).toMatch(/REPLIES_CHECK_LABEL/);
-    expect(src('RepliesCheckLine.tsx')).toMatch(/<AiRunGate kind="thread_check">/);
+    // No "Check replies" button (2026-11-10): the pass starts by itself; the line keeps Cancel.
+    expect(src('RepliesCheckLine.tsx')).not.toMatch(/AiRunGate|start\.mutate|checkRepliesButtonText/);
+    expect(src('RepliesCheckLine.tsx')).toMatch(/Cancel/);
     // A cover pass is labelled by whose findings it checked.
     expect(src('ClaudeReviewTab.tsx')).toMatch(/repliesRunLabel\(review\)/);
   });

@@ -2,7 +2,7 @@
 // Limn's own status lines LISTED in the checks but never COUNTED as CI.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { teamClaimRecordLine, teamClaimSkipLine, teammateReviewLine } from '../src/lib/claudeAutoReview.js';
+import { teamClaimSkipLine, teammateReviewLine } from '../src/lib/claudeAutoReview.js';
 import { checksSummaryCounts } from '../src/components/ChecksTab.js';
 
 describe('team claim words', () => {
@@ -10,18 +10,6 @@ describe('team claim words', () => {
     expect(teamClaimSkipLine({ kind: 'reviewing', login: 'bob' })).toBe('Auto review skipped: being reviewed by @bob');
     expect(teamClaimSkipLine({ kind: 'reviewed', login: 'bob' })).toBe('Auto review skipped: already reviewed by @bob');
     expect(teamClaimSkipLine(null)).toBeNull();
-  });
-  it('says what the run did on GitHub', () => {
-    const base = { context: 'limn/review-claude', at: '2026-10-27T00:00:00Z' };
-    expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'reviewed' })).toBe('Marked on GitHub');
-    expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'cleared' })).toBe('Marked on GitHub, then cleared');
-    expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'unfinished' })).toBe('Marked on GitHub, then released');
-    expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'superseded' })).toBe('Marked on GitHub; a teammate’s line is newer');
-    expect(teamClaimRecordLine({ ...base, state: 'unmarked', reason: 'no_access', lastLine: null })).toBe(
-      'Not marked on GitHub: no write access',
-    );
-    expect(teamClaimRecordLine({ ...base, state: 'unmarked', reason: 'error', lastLine: null })).toBe('Not marked on GitHub');
-    expect(teamClaimRecordLine(null)).toBeNull();
   });
 });
 

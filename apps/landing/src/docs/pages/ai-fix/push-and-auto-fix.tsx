@@ -115,20 +115,21 @@ export default function Page(): JSX.Element {
       </ul>
       <H3>Why an auto fix did not start</H3>
       <p>
-        The <Ui>AI Review</Ui> tab says <Ui>Auto fix started. See the AI Fix tab.</Ui> or gives one reason, for example:
+        The <Ui>AI Review</Ui> tab says <Ui>Auto fix started. See the AI Fix tab.</Ui> when one starts. When one could
+        not start for a reason you can fix on this computer, it says why:
       </p>
       <MiniTable
         cols={[{ key: 'r', label: 'No auto fix: …' }]}
         rows={[
-          { _key: '1', r: 'the review found nothing to fix' },
-          { _key: '2', r: 'a finished fix is waiting to be pushed' },
-          { _key: '3', r: '3 auto fixes already ran on this PR in the last 24 hours' },
-          { _key: '4', r: 'the last auto fix could not address these items' },
-          { _key: '5', r: 'your AI spend budget is reached' },
-          { _key: '6', r: 'no container runtime is running on this computer' },
-          { _key: '7', r: 'the sandbox was busy' },
+          { _key: '1', r: 'the fixer could not start' },
+          { _key: '2', r: 'your AI spend budget is reached' },
+          { _key: '3', r: 'no container runtime is running on this computer' },
         ]}
       />
+      <p>
+        Other skips are not shown: nothing to fix, a finished fix waiting to be pushed, the daily limit, new commits, or
+        auto AI Fix off.
+      </p>
       <p>A skipped auto fix is not queued; the next auto review decides again.</p>
 
       <H2 id="push-automatically">Push automatically</H2>

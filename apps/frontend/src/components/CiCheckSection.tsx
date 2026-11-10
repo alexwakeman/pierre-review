@@ -47,7 +47,6 @@ import { ReviewSection } from './ReviewSection.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { AiRunLabel } from './AiRunLabel.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -146,11 +145,6 @@ export function CiCheckSection({
           {currency != null && <CurrencyPill currency={currency} />}
           {shown != null && <ReviewedAgo at={shown.completedAt} />}
           {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
-          {shown?.trigger === 'auto' && (
-            <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
-              {AUTO_REVIEW_LABEL}
-            </span>
-          )}
           {rows.length > 0 && <span className={`text-meta ${MUTED}`}>{ciFailingLabel(rows.length)}</span>}
           {countPills.map((p) => (
             <span key={p.key} className={`${REVIEW_CHIP} ${p.cls}`}>

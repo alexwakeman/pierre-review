@@ -51,8 +51,16 @@ export default function Page(): JSX.Element {
       <p>The tab reads top to bottom (on a wide screen, the facts and actions sit in a column on the right):</p>
       <ul>
         <li>
-          <b>Where this PR stands</b>: who reviewed it, the verdict, whether it is on the latest commit, and the
-          run's cost or share of your subscription.
+          <b>Where this PR stands</b>: the pull request's latest commit (seven characters; click it to open it on
+          GitHub, or copy the full commit), then each person's newest review and verdict.
+        </li>
+        <li>
+          <b>
+            <Ui>Reviews on this PR</Ui>
+          </b>
+          : every review, newest first, in columns: who, when, the commit it reviewed, the outcome, and what ran it.
+          Match a review's commit against the latest commit above. The newest 10 show; <Ui>Show all</Ui> opens the
+          rest. Click a review to open it read-only. A run's cost is behind the ⓘ beside its summary.
         </li>
         <li>
           <b>

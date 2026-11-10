@@ -1,7 +1,7 @@
 // Auto review's quiet states (lib/claudeAutoReview.ts): the header's "waiting" words, the one line
 // about the auto fix, and the Open PRs strip's AI Fix pill.
 import { describe, expect, it } from 'vitest';
-import { AUTO_FIX_DAILY_CAP, type ClaudeReviewPrState } from '@pierre-review/shared';
+import type { ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   AUTO_REVIEW_WAITING_LABEL,
   anyFixRunning,
@@ -70,19 +70,16 @@ describe('autoFixOutcomeLine', () => {
       'Auto fix started. See the AI Fix tab.',
     );
   });
-  it('a skip says why, with the cap the server counts to', () => {
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'cap' })).toBe(
-      `No auto fix: ${AUTO_FIX_DAILY_CAP} auto fixes already ran on this PR in the last 24 hours.`,
+  it('a skip shows only a fault the reader can fix here', () => {
+    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'no_sandbox' })).toBe(
+      'No auto fix: no container runtime is running on this computer.',
     );
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'fix_waiting' })).toBe(
-      'No auto fix: a finished fix is waiting to be pushed.',
+    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'over_budget' })).toBe(
+      'No auto fix: your AI spend budget is reached.',
     );
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'nothing_to_fix' })).toBe(
-      'No auto fix: the review found nothing to fix.',
-    );
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'off' })).toBe(
-      'No auto fix: auto AI Fix is off for this workspace.',
-    );
+    for (const reason of ['off', 'cap', 'fix_waiting', 'nothing_to_fix', 'head_moved'] as const) {
+      expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason })).toBeNull();
+    }
   });
 });
 

@@ -8,10 +8,13 @@ import {
   itemShows,
   pointCard,
   raisedByLabel,
+  reviewListCells,
   reviewListLine,
+  REVIEWS_LIST_MAX,
   standingLine,
   standingRows,
   teamFindingRows,
+  visibleReviewItems,
   type FindingCard,
   type RaisedBy,
   type ReviewListItem,
@@ -19,6 +22,8 @@ import {
 } from '../lib/teamReview.js';
 import { FOCUS_RING, cx } from './ui/index.js';
 import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
+import { CopyButton } from './CopyButton.js';
+import { pushedCommitHref } from '../lib/pushedSince.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { teammateVersionLines } from '../lib/teammateReviews.js';
@@ -41,18 +46,29 @@ function PersonAvatar({ you, poster, size = 16 }: { you: boolean; poster: Claude
 }
 
 /**
- * WHERE THIS PR STANDS: one line per Limn reviewer, newest review first — "You · Request changes ·
- * 3 Nov · 8a8ec14 · still blocking on GitHub". A Request changes still in force is flagged.
+ * WHERE THIS PR STANDS: the PR's latest commit (the cross-reference for every review's commit below,
+ * in the same 7-character form), then one line per Limn reviewer, newest review first — "You ·
+ * Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub". A Request changes still in force is
+ * flagged. The latest commit shows whenever it is known; the reviewer lines only on now.
  */
-export function StandingsSection({ standings }: { standings: ClaudeReviewStandings | null | undefined }): JSX.Element | null {
+export function StandingsSection({
+  standings,
+  headSha,
+  prUrl,
+}: {
+  standings: ClaudeReviewStandings | null | undefined;
+  // The PR's synced head (full sha); null when not synced.
+  headSha: string | null;
+  prUrl: string | null;
+}): JSX.Element | null {
   const rows = standingRows(standings);
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && headSha == null) return null;
   return (
     <ReviewSection
       title="Where this PR stands"
       info={
         <InfoButton title="Where this PR stands">
-          <p>Each person’s newest Limn review on this PR.</p>
+          <p>The PR’s latest commit, and each person’s newest Limn review on this PR.</p>
           <p>
             GitHub keeps a Request changes or an Approve in force until it is dismissed, or the same person
             reviews again with Request changes or Approve. A Comment does not replace it.
@@ -60,34 +76,66 @@ export function StandingsSection({ standings }: { standings: ClaudeReviewStandin
         </InfoButton>
       }
     >
-      <ul className="space-y-1" data-testid="review-standings" aria-label="Where this PR stands">
-        {rows.map((r) => (
-          <li key={r.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-body" title={standingLine(r)}>
-            <PersonAvatar you={r.you} poster={r.poster} />
-            <span className="font-medium text-ui-ink">{r.name}</span>
-            {r.verdictKind != null ? (
-              <span className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium ${VERDICT_CLASS[r.verdictKind]}`}>
-                <VerdictIcon verdict={r.verdictKind} size={12} />
-                {r.verdict}
-              </span>
-            ) : (
-              <span className="text-meta text-ui-mute">{r.verdict}</span>
-            )}
-            {r.day !== '' && (
-              <span className={REVIEW_META} title={r.at != null ? dateTime(r.at) : undefined}>
-                {r.day}
-              </span>
-            )}
-            {r.sha != null && <span className="font-mono text-meta text-ui-mute">{r.sha}</span>}
-            {r.note != null && (
-              <span className={r.blocking ? 'text-meta font-medium text-ui-danger' : REVIEW_META} data-blocking={r.blocking || undefined}>
-                {r.note}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+      <div className="space-y-2">
+        {headSha != null && <HeadCommitLine sha={headSha} prUrl={prUrl} />}
+        {rows.length > 0 && (
+          <ul className="space-y-1" data-testid="review-standings" aria-label="Where this PR stands">
+            {rows.map((r) => (
+              <li key={r.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-body" title={standingLine(r)}>
+                <PersonAvatar you={r.you} poster={r.poster} />
+                <span className="font-medium text-ui-ink">{r.name}</span>
+                {r.verdictKind != null ? (
+                  <span className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium ${VERDICT_CLASS[r.verdictKind]}`}>
+                    <VerdictIcon verdict={r.verdictKind} size={12} />
+                    {r.verdict}
+                  </span>
+                ) : (
+                  <span className="text-meta text-ui-mute">{r.verdict}</span>
+                )}
+                {r.day !== '' && (
+                  <span className={REVIEW_META} title={r.at != null ? dateTime(r.at) : undefined}>
+                    {r.day}
+                  </span>
+                )}
+                {r.sha != null && <span className="font-mono text-meta text-ui-mute">{r.sha}</span>}
+                {r.note != null && (
+                  <span className={r.blocking ? 'text-meta font-medium text-ui-danger' : REVIEW_META} data-blocking={r.blocking || undefined}>
+                    {r.note}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </ReviewSection>
+  );
+}
+
+/** "Latest commit 8a8ec14" — linked to the commit on GitHub (under the PR), and copyable. */
+function HeadCommitLine({ sha, prUrl }: { sha: string; prUrl: string | null }): JSX.Element {
+  const short = sha.slice(0, 7);
+  const href = safeExternalUrl(pushedCommitHref(prUrl, sha));
+  return (
+    <div className="flex items-center gap-2 text-meta text-ui-mute" data-testid="review-head-commit">
+      <span>Latest commit</span>
+      {href != null ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          title={`${sha} on GitHub`}
+          className={cx('rounded-ui font-mono font-medium text-ui-ink underline decoration-dotted underline-offset-2 hover:decoration-solid', FOCUS_RING)}
+        >
+          {short}
+        </a>
+      ) : (
+        <span className="font-mono font-medium text-ui-ink" title={sha}>
+          {short}
+        </span>
+      )}
+      <CopyButton text={sha} what="commit sha" title="Copy the full commit sha" />
+    </div>
   );
 }
 
@@ -193,9 +241,38 @@ export function TeamFindingsSection({
 }
 
 /**
- * REVIEWS ON THIS PR: every review, newest first — who, verdict, when, commit, and running or failed.
- * The first row is now; any other opens that review read-only.
+ * REVIEWS ON THIS PR: every review, newest first, IN COLUMNS — who, when, commit (the same 7-character
+ * form as "Latest commit" above), outcome, and what ran it. The newest REVIEWS_LIST_MAX show; "Show all
+ * n" opens the rest (local to the tab). The now row is the reader's latest review; any other opens that
+ * review read-only.
  */
+// Fixed column widths, so every row's cells line up: avatar · who · when · commit · outcome · what ran.
+const REVIEW_ROW_GRID =
+  'grid grid-cols-[14px_minmax(0,4rem)_3rem_4.5rem_minmax(4rem,1fr)_minmax(0,5.5rem)] items-center gap-x-1.5';
+
+function ReviewRowCells({ item, failed, trailing }: { item: ReviewListItem; failed: boolean; trailing?: ReactNode }): JSX.Element {
+  const c = reviewListCells(item);
+  return (
+    <>
+      <PersonAvatar you={item.you} poster={item.poster} size={14} />
+      <span className="truncate font-medium" title={item.who}>
+        {item.who}
+      </span>
+      <span className="truncate tabular-nums text-ui-mute">{c.day}</span>
+      <span className="truncate font-mono tabular-nums text-ui-mute">{c.sha}</span>
+      <span className={cx('truncate', failed ? 'text-ui-danger' : 'text-ui-ink')} title={c.outcome}>
+        {c.outcome}
+      </span>
+      <span className="flex min-w-0 items-center justify-end gap-1 text-ui-mute">
+        <span className="truncate" title={c.what}>
+          {c.what}
+        </span>
+        {trailing}
+      </span>
+    </>
+  );
+}
+
 export function ReviewsOnPrSection({
   items,
   nowKey,
@@ -212,7 +289,9 @@ export function ReviewsOnPrSection({
   countLine: string | null;
   onShow: (target: ShownReview | null) => void;
 }): JSX.Element | null {
+  const [expanded, setExpanded] = useState(false);
   if (items.length < 2) return countLine != null ? <div className="text-meta text-ui-mute" data-testid="review-count">{countLine}</div> : null;
+  const visible = visibleReviewItems(items, expanded);
   return (
     <ReviewSection title="Reviews on this PR">
       {countLine != null && (
@@ -221,35 +300,39 @@ export function ReviewsOnPrSection({
         </div>
       )}
       <ul className="space-y-0.5" data-testid="reviews-on-pr">
-        {items.map((item) => {
+        {visible.map((item) => {
           const isNow = item.key === nowKey;
           const current = shown == null ? isNow : itemShows(item, shown);
           const target = item.target;
+          const line = `${item.who} · ${reviewListLine(item)} · ${dateTime(item.at)}`;
           if (target == null) {
             // A DECISION-ONLY row (a teammate's replies pass): nothing to open in Limn.
             const href = safeExternalUrl(item.githubUrl);
             return (
               <li
                 key={item.key}
-                title={dateTime(item.at)}
-                className="-mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 px-1.5 py-1 text-meta text-ui-ink"
+                title={line}
+                className={cx('-mx-1.5 w-[calc(100%+0.75rem)] px-1.5 py-1 text-meta text-ui-ink', REVIEW_ROW_GRID)}
                 data-testid="review-decision-row"
               >
-                <PersonAvatar you={item.you} poster={item.poster} size={14} />
-                <span className="shrink-0 font-medium">{item.who}</span>
-                <span className="min-w-0 flex-1 truncate text-ui-mute">{reviewListLine(item)}</span>
-                {href != null && (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label="Open this review on GitHub"
-                    title="Open on GitHub"
-                    className={cx('hit inline-flex shrink-0 items-center rounded-ui p-0.5 text-ui-mute hover:text-ui-ink', FOCUS_RING)}
-                  >
-                    <ExternalLinkIcon size={12} />
-                  </a>
-                )}
+                <ReviewRowCells
+                  item={item}
+                  failed={false}
+                  trailing={
+                    href != null ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label="Open this review on GitHub"
+                        title="Open on GitHub"
+                        className={cx('hit inline-flex shrink-0 items-center rounded-ui p-0.5 text-ui-mute hover:text-ui-ink', FOCUS_RING)}
+                      >
+                        <ExternalLinkIcon size={12} />
+                      </a>
+                    ) : undefined
+                  }
+                />
               </li>
             );
           }
@@ -259,28 +342,32 @@ export function ReviewsOnPrSection({
                 type="button"
                 aria-current={current ? 'true' : undefined}
                 onClick={() => onShow(isNow ? null : target)}
-                title={dateTime(item.at)}
+                title={line}
                 className={cx(
-                  'hit -mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-ui px-1.5 py-1 text-left text-meta',
+                  'hit -mx-1.5 w-[calc(100%+0.75rem)] rounded-ui px-1.5 py-1 text-left text-meta',
+                  REVIEW_ROW_GRID,
                   current ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
                   FOCUS_RING,
                 )}
               >
-                <PersonAvatar you={item.you} poster={item.poster} size={14} />
-                <span className="shrink-0 font-medium">{item.who}</span>
-                <span
-                  className={cx(
-                    'min-w-0 flex-1 truncate',
-                    item.status === 'failed' ? 'text-ui-danger' : 'text-ui-mute',
-                  )}
-                >
-                  {reviewListLine(item)}
-                </span>
+                <ReviewRowCells item={item} failed={item.status === 'failed'} />
               </button>
             </li>
           );
         })}
       </ul>
+      {items.length > REVIEWS_LIST_MAX && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          className={cx('hit mt-1 inline-flex items-center gap-1 rounded-ui text-meta font-medium text-ui-ink', FOCUS_RING)}
+          data-testid="reviews-on-pr-toggle"
+        >
+          <ChevronIcon dir={expanded ? 'up' : 'down'} className="shrink-0" />
+          {expanded ? 'Show fewer' : `Show all ${items.length}`}
+        </button>
+      )}
     </ReviewSection>
   );
 }

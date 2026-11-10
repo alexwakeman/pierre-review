@@ -2,14 +2,14 @@ import { useState } from 'react';
 import type { ClaudeReviewResponse } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
 import { useClearTeamClaim } from '../hooks/useClaudeReview.js';
-import { teamClaimRecordLine, teamClaimSkipLine, teammateReviewLine } from '../lib/claudeAutoReview.js';
+import { teamClaimSkipLine, teammateReviewLine } from '../lib/claudeAutoReview.js';
 import { ReviewingNowIcon } from './Icons.js';
 
 // TEAM CLAIMS ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims) on the AI Review
-// tab: why the auto review here was skipped (a teammate's Limn holds this commit), what the latest
-// auto run's GitHub line did, and — when a pending Limn line sits on the PR's head — a Clear button
-// that replaces it with "Cleared by <you>" so any Limn can review the commit. Renders nothing when
-// none of it applies.
+// tab: why the auto review here was skipped (a teammate's Limn holds this commit) and — when a
+// pending Limn line sits on the PR's head — a Clear button that replaces it with "Cleared by <you>",
+// so any Limn can review the commit. Renders nothing when none of it applies. What the reader's own
+// auto run did on GitHub ("Marked on GitHub") is not shown (2026-11-10).
 // ⚠ A TEAMMATE'S LIVE CLAIM (`mine: false`: their Limn is reviewing this commit now) is cleared only
 // after a confirm that names them — clearing it frees the commit, so this Limn may review it a second
 // time while theirs still runs. This machine's own unfinished line clears in one press.
@@ -20,9 +20,8 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
   const teammates = (data?.teamClaimTeammates ?? []).map((t) => ({ line: teammateReviewLine(t), live: t.kind === 'reviewing' }));
   const skipLine = teammates.length > 0 ? null : teamClaimSkipLine(data?.teamClaimSkip);
   const skipLive = data?.teamClaimSkip?.kind === 'reviewing';
-  const recordLine = data?.review?.trigger === 'auto' ? teamClaimRecordLine(data.review.teamClaim) : null;
   const pending = data?.teamClaimPending ?? null;
-  if (teammates.length === 0 && skipLine == null && recordLine == null && pending == null) return null;
+  if (teammates.length === 0 && skipLine == null && pending == null) return null;
   const pendingLine =
     pending?.mine && skipLine == null && teammates.length === 0 ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
@@ -49,7 +48,6 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
         ) : (
           <div>{skipLine}</div>
         ))}
-      {skipLine == null && recordLine != null && pendingLine == null && <div>{recordLine}</div>}
       {pendingLine != null && <div>{pendingLine}</div>}
       {pending != null && (
         <div className="flex flex-wrap items-center gap-2">

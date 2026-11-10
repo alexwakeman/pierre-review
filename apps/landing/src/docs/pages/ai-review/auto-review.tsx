@@ -146,9 +146,6 @@ export default function Page(): JSX.Element {
           button, or <Ui>Auto review waiting for pushes to settle</Ui> while it waits.
         </li>
         <li>
-          An automatic review is labelled <Ui>Auto review</Ui> in the tab.
-        </li>
-        <li>
           A failed automatic review shows one line with <Ui>Retry</Ui>.
         </li>
         <li>

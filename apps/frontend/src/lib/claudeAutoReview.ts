@@ -1,12 +1,10 @@
 import {
-  AUTO_FIX_DAILY_CAP,
   type ClaudeAutoFixOutcome,
   type ClaudeAutoFixSkipReason,
   type ClaudeAutoReviewWaiting,
   type AutoReviewSweepResponse,
   type ClaudeReviewPrState,
   type ClaudeReviewResponse,
-  type ClaudeTeamClaimRecord,
   type ClaudeTeamClaimSkip,
   aiProviderName,
 } from '@pierre-review/shared';
@@ -22,25 +20,21 @@ export const AUTO_REVIEW_WAITING_LABEL: Record<ClaudeAutoReviewWaiting, string> 
   commits: 'Auto review waiting for pushes to settle',
 };
 
-const SKIP_TEXT: Record<ClaudeAutoFixSkipReason, string> = {
-  nothing_to_fix: 'the review found nothing to fix',
-  cap: `${AUTO_FIX_DAILY_CAP} auto fixes already ran on this PR in the last 24 hours`,
-  fix_in_progress: 'a fix for this PR is already running',
-  fix_waiting: 'a finished fix is waiting to be pushed',
-  already_tried: 'the last auto fix could not address these items',
-  head_moved: 'the PR has new commits since this review',
+// A SKIP is shown only when it is a fault the reader can fix on this computer (2026-11-10: the routine
+// skips — off, nothing to fix, a fix already waiting, the daily cap, new commits — said nothing the
+// reader acts on, and are no longer shown).
+const FAULT_TEXT: Partial<Record<ClaudeAutoFixSkipReason, string>> = {
   not_started: 'the fixer could not start',
-  off: 'auto AI Fix is off for this workspace',
   over_budget: 'your AI spend budget is reached',
   no_sandbox: 'no container runtime is running on this computer',
-  sandbox_busy: 'the sandbox was busy',
 };
 
-/** One line for the Claude Review tab, or null when there is nothing to say. */
+/** One line for the AI Review tab, or null when there is nothing to say. */
 export function autoFixOutcomeLine(outcome: ClaudeAutoFixOutcome | null | undefined): string | null {
   if (outcome == null) return null;
   if (outcome.status === 'started') return 'Auto fix started. See the AI Fix tab.';
-  return `No auto fix: ${SKIP_TEXT[outcome.reason] ?? 'skipped'}.`;
+  const fault = FAULT_TEXT[outcome.reason];
+  return fault != null ? `No auto fix: ${fault}.` : null;
 }
 
 /** The Open PRs strip's AI Fix pill, or null. */
@@ -137,18 +131,4 @@ export function teammateReviewLine(
   const raw = dot >= 0 ? (t.description ?? '').slice(dot + 3).trim() : '';
   const detail = raw === 'kept in Limn' ? 'not posted on GitHub' : raw;
   return `${who} reviewed this commit with ${by}${detail !== '' ? ` · ${detail}` : ''}`;
-}
-
-/** What the team claim did for one auto run, or null when none was attempted. */
-export function teamClaimRecordLine(rec: ClaudeTeamClaimRecord | null | undefined): string | null {
-  if (!rec) return null;
-  if (rec.state === 'unmarked') {
-    return rec.reason === 'no_access' ? 'Not marked on GitHub: no write access' : 'Not marked on GitHub';
-  }
-  if (rec.lastLine === 'cleared') return 'Marked on GitHub, then cleared';
-  // A run that did not finish: its line was released ("didn't finish · free to claim").
-  if (rec.lastLine === 'unfinished') return 'Marked on GitHub, then released';
-  // It ended after a teammate's newer line (gap 5): their line stands, ours was not posted.
-  if (rec.lastLine === 'superseded') return 'Marked on GitHub; a teammate’s line is newer';
-  return 'Marked on GitHub';
 }

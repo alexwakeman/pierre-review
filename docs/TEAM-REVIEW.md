@@ -484,7 +484,7 @@ open.
 
 When the author answers one of your Limn's findings, your Limn judges the reply without waiting for a
 full review: the **replies pass**. It starts after 5 quiet minutes (automatic, at most 5 a day per
-PR, within the spend budget) or when you press "Check replies". It is cheap (a smaller model, a hard
+PR, within the spend budget); there is no button for it on the AI Review tab. It is cheap (a smaller model, a hard
 cost cap) and never runs while a full review is running.
 
 ```mermaid
