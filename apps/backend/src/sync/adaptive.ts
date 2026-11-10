@@ -388,6 +388,16 @@ export function noteSettle(repoId: number, now: number, answered = true): void {
   if (answered) c.lastCheckedAt = now;
 }
 
+/**
+ * Has GitHub answered for this repo at or after `sinceMs`, with no change left that no walk has covered
+ * yet? Then its synced heads are current as of that answer (sync/heads-fresh.ts, the auto review's
+ * catch-up). In memory: false for a repo this process has not checked.
+ */
+export function checkedCleanSince(repoId: number, sinceMs: number): boolean {
+  const c = cadence.get(repoId);
+  return c != null && c.lastCheckedAt >= sinceMs && c.dirtyAt == null;
+}
+
 /** When GitHub last answered for this repo (probe, scheduled walk or settle read), or null. */
 export function lastCheckedAtFor(repoId: number): Date | null {
   const at = cadence.get(repoId)?.lastCheckedAt ?? 0;

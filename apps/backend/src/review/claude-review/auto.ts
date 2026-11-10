@@ -98,6 +98,22 @@
 // the item with NO row (not a failure). The sweeper then holds that PR (`teamClaimHeldHeadNow`) until
 // the remembered skip's recheck time, unless the synced head moved; a press reads GitHub afresh.
 //
+// A TEAMMATE'S VERDICT FIRST (2026-11-10; docs/TEAM-REVIEW.md § 4). An author's own Limn review can never
+// approve their PR. The candidate read lists PRs nobody but their author has given a Limn verdict at the
+// head (`verdictNeeded`, db/teammate-verdict-pickup.ts: the author's own review at the head — its held
+// APPROVE first — or a head moved past teammates' reviews only), never the reader's own PR. Each tick
+// starts these BEFORE first reviews and re-reviews, at most VERDICT_PICKUP_PER_TICK of them, through the
+// same start rule, team claim, ONE budget gate and daily cap; the lane puts them ahead of ordinary auto
+// items (manager.ts `priority`). ⚠ NOT EXEMPT FROM THE DAILY CAP: other people's PRs drive this list, and
+// on an API key the spend budget is unset by default, so the cap is the one count-based bound left.
+//
+// CATCH-UP ON RETURN. The first tick after a boot, or after a gap of AUTO_CATCH_UP_GAP_MS or more (the
+// machine slept, the process stalled), opens a catch-up: each workspace's pass waits until its repos'
+// heads were checked against GitHub after the gap (ctx.queries.workspaceHeadsFreshSince,
+// sync/heads-fresh.ts), so nothing is reviewed or claimed at a head that moved while Limn was off. Never
+// longer than AUTO_CATCH_UP_SYNC_WAIT_MAX_MS. Then the DB is the queue as always: the moved heads and the
+// verdicts owed are found by the ordinary read, however long the break was (it reads every open PR).
+//
 // AUTO FIX. When an auto run succeeds on the reader's OWN PR, manager.ts hands it to
 // coding/ai-fix/auto-fix.ts, which may start a review-seeded fix (never pushed).
 //
@@ -137,6 +153,22 @@ export const AUTO_REREVIEW_SETTLE_MS = 5 * 60 * 1000;
 export const AUTO_REREVIEW_MAX_WAIT_MS = 20 * 60 * 1000;
 /** The replies pass's per-PR cap counts automatic passes in this rolling window. */
 export const REPLIES_PASS_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** At most this many teammate-verdict pick-ups are queued per tick (all workspaces together). */
+export const VERDICT_PICKUP_PER_TICK = 5;
+/** A gap between ticks this long (the tick is every minute) opens a catch-up. */
+export const AUTO_CATCH_UP_GAP_MS = 5 * 60 * 1000;
+/** A catch-up never holds a workspace's pass longer than this waiting for its sync. */
+export const AUTO_CATCH_UP_SYNC_WAIT_MAX_MS = 30 * 60 * 1000;
+
+/** When a catch-up opens at this tick: the first tick (a boot), or one after a long gap. Pure. */
+export function catchUpOpensAt(prevTickMs: number | null, nowMs: number): number | null {
+  return prevTickMs == null || nowMs - prevTickMs >= AUTO_CATCH_UP_GAP_MS ? nowMs : null;
+}
+
+// The last scheduled tick (a press is not a tick), and the open catch-up: since when, and the
+// workspaces (`${accountId}:${workspaceId}`) whose heads were fresh since then.
+let lastTickMs: number | null = null;
+let catchUp: { sinceMs: number; fresh: Set<string> } | null = null;
 // `${accountId}:${prId}` → the re-review KEY last seen — `${headSha}|${commentsAtMs}` — when it was
 // first seen (the quiet clock), and when this burst began (the ceiling's clock, kept across key
 // changes). Pruned each full tick to the current candidates (and PRs with a run in flight whose head
@@ -168,6 +200,8 @@ export function teamClaimRepliesDue(
 
 /** Test hook. */
 export function _resetAutoReReviewForTest(): void {
+  lastTickMs = null;
+  catchUp = null;
   headSeen.clear();
   waitingNow.clear();
   repliesSettled.clear();
@@ -356,6 +390,10 @@ export interface AutoSweepResult {
   repliesQueued?: number;
   // Why the sweep stopped early, if it did.
   stopped: 'lane_full' | 'ai_not_ready' | null;
+  // Of `queued`, how many were teammate-verdict pick-ups (started first).
+  verdictPickups?: number;
+  // True when at least one workspace waited for its first sync after a boot, a wake or a long gap.
+  syncWait?: boolean;
   // True when the Claude spend budget paused at least one account's automatic runs this tick.
   overBudget?: boolean;
   // Of `queued`, how many were RETRIES of a failed auto run at the PR's current head.
@@ -402,6 +440,13 @@ export async function runAutoReviewSweep(
   const result: AutoSweepResult = { queued: 0, reQueued: 0, stopped: null };
   const candidatesOf = ctx.queries?.getAutoReviewCandidates?.bind(ctx.queries);
   if (!autoReviewAvailable(ctx) || !candidatesOf) return result;
+  // CATCH-UP ON RETURN (see the header): only a scheduled tick reads the gap — a press is no tick.
+  // Read before the re-entrancy guard: a tick that finds a slow sweep still running is still a tick.
+  if (!press) {
+    const opens = catchUpOpensAt(lastTickMs, nowMs);
+    if (opens != null) catchUp = { sinceMs: opens, fresh: new Set() };
+    lastTickMs = nowMs;
+  }
   if (sweeping) {
     // re-entrancy: a slow tick must not double-enqueue (and a press waits for the tick)
     if (press) result.busy = true;
@@ -460,7 +505,16 @@ export async function runAutoReviewSweep(
       budgetOk.set(accountId, ok);
       if (!ok) result.overBudget = true;
     }
+    // The workspace's heads are not yet checked since the catch-up opened: its pass waits (nothing
+    // queued, no clock touched). A press does not wait: the reader chose the run.
+    const waitsForSync = (ws: { accountId: number; workspaceId: number }): Promise<boolean> =>
+      pressed ? Promise.resolve(false) : catchUpWaitsForSync(ctx, ws, nowMs);
+    let pickedUp = 0;
     for (const ws of roster) {
+      if (await waitsForSync(ws)) {
+        result.syncWait = true;
+        continue;
+      }
       if (budgetOk.get(ws.accountId) === false) {
         // Over the spend budget: nothing is queued; the due heads are said on the PR (read-only pass).
         skipped.push(...(await dueHeadsHeld(ctx, nowMs, candidatesOf, ws, 'budget')));
@@ -489,6 +543,9 @@ export async function runAutoReviewSweep(
           ...res.prIds,
           ...(res.reReview ?? []).map((r) => r.prId),
           ...(res.retry ?? []).map((r) => r.prId),
+          // ⚠ A queued verdict pick-up has no row yet, so `autoToday` does not count it, and the read
+          // takes it out of `prIds`: without this line the daily cap is overshot.
+          ...(res.verdictNeeded ?? []).map((v) => v.prId),
         ]),
       ].filter((id) => waiting.has(id)).length;
       let budget = ws.dailyCap - res.autoToday - waitingHere;
@@ -502,9 +559,70 @@ export async function runAutoReviewSweep(
         const head = headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId));
         return head === held;
       };
+      // The settle key's clocks: a new push OR a new comment restarts the 5-minute quiet wait; the
+      // burst's start (the 20-minute ceiling's clock) is kept.
+      const clock = (k: string, key: string) => {
+        let seen = headSeen.get(k);
+        if (!seen) {
+          seen = { key, firstSeenMs: nowMs, burstStartMs: nowMs };
+          headSeen.set(k, seen);
+        } else if (seen.key !== key) {
+          seen.key = key;
+          seen.firstSeenMs = nowMs;
+        }
+        return seen;
+      };
+
+      // ---- A TEAMMATE'S VERDICT FIRST (see the header): oldest wait first, in the read's order ----
+      // Every listed PR is this loop's alone: the re-review loop below skips its moved head.
+      const verdictPrIds = new Set((res.verdictNeeded ?? []).map((v) => v.prId));
+      for (const v of res.verdictNeeded ?? []) {
+        if (!only(v.prId) || waiting.has(v.prId)) continue;
+        const k = `${ws.accountId}:${v.prId}`;
+        liveHeads.add(k);
+        livePrs.add(k);
+        if (pickedUp >= VERDICT_PICKUP_PER_TICK) continue;
+        const seen = clock(k, `${v.headSha}|`);
+        const due = autoReviewDue({
+          nowMs,
+          settle: { quietSinceMs: seen.firstSeenMs, burstStartMs: seen.burstStartMs, reason: 'head' },
+          lastRunAtMs: v.lastRunAtMs,
+          pressed,
+        });
+        if (!due.due) {
+          if (isSettleWait(due.reason)) waitingNow.set(k, due.reason);
+          continue;
+        }
+        waitingNow.delete(k);
+        if (await heldByTeammate(v.prId, v.headSha)) continue;
+        if (budget <= 0) {
+          result.capped = true;
+          skipped.push({ accountId: ws.accountId, prId: v.prId, headSha: v.headSha, reason: 'daily_cap' });
+          continue;
+        }
+        const r = enqueueAutoReview(ctx, ws.accountId, v.prId, ws.workspaceId, null, {
+          pressed,
+          priority: true,
+          why: { reason: v.reason, authorUserId: v.authorUserId, authorVerdict: v.authorVerdict },
+        });
+        if (r === 'queued' || r === 'already') headSeen.delete(k);
+        if (r === 'queued') {
+          result.queued += 1;
+          result.verdictPickups = (result.verdictPickups ?? 0) + 1;
+          pickedUp += 1;
+          budget -= 1;
+        } else if (r === 'full') {
+          result.stopped = 'lane_full';
+          break;
+        } else if (r === 'disabled') {
+          return result;
+        }
+      }
+      if (result.stopped) break;
+
       for (const prId of res.prIds) {
         if (!only(prId)) continue;
-        if (waiting.has(prId)) continue;
+        if (waiting.has(prId) || verdictPrIds.has(prId)) continue;
         if (await heldByTeammate(prId)) continue;
         if (budget <= 0) {
           result.capped = true;
@@ -588,20 +706,6 @@ export async function runAutoReviewSweep(
       }
       if (result.stopped) break;
 
-      // The settle key's clocks: a new push OR a new comment restarts the 5-minute quiet wait; the
-      // burst's start (the 20-minute ceiling's clock) is kept.
-      const clock = (k: string, key: string) => {
-        let seen = headSeen.get(k);
-        if (!seen) {
-          seen = { key, firstSeenMs: nowMs, burstStartMs: nowMs };
-          headSeen.set(k, seen);
-        } else if (seen.key !== key) {
-          seen.key = key;
-          seen.firstSeenMs = nowMs;
-        }
-        return seen;
-      };
-
       // ---- a run is in flight and the head moved past it: never cancel, start the clock ----
       for (const { prId, headSha } of res.inFlightMoved ?? []) {
         if (!only(prId)) continue;
@@ -621,6 +725,8 @@ export async function runAutoReviewSweep(
         liveHeads.add(k);
         livePrs.add(k);
         if (waiting.has(prId) || retried.has(prId)) continue;
+        // A moved head owed a teammate's verdict was the priority loop's (it shares this clock).
+        if (commentsAtMs == null && verdictPrIds.has(prId)) continue;
         // A same-head comment burst: a replies pass for a reply on a Limn finding, else a light
         // Check threads pass. The candidate read already carries the coverage and the reply times
         // (all filtered like the trigger); an older host without them falls back to the DB read.
@@ -792,7 +898,7 @@ export async function runAutoReviewSweep(
     }
     // Forget heads that are no longer candidates (reviewed, closed, switched off) — only after a
     // FULL pass, or a skipped workspace would restart its wait (a press covers one workspace).
-    if (!result.stopped && !result.overBudget && !pressed) {
+    if (!result.stopped && !result.overBudget && !result.syncWait && !pressed) {
       for (const k of headSeen.keys()) if (!liveHeads.has(k)) headSeen.delete(k);
       for (const k of waitingNow.keys()) if (!livePrs.has(k)) waitingNow.delete(k);
       for (const k of repliesSettled.keys()) if (!livePrs.has(k)) repliesSettled.delete(k);
@@ -824,6 +930,29 @@ type CandidatesOf = NonNullable<AgentContext['queries']['getAutoReviewCandidates
 export const AUTO_SKIP_LINES_PER_TICK = 25;
 
 /**
+ * THE CATCH-UP GATE (see the header): true while the open catch-up still waits for this workspace's
+ * heads to be checked since it opened. Every path that reads the synced heads asks it, the AI-not-ready
+ * skipped lines included, so nothing is said or started on a head read before the break.
+ */
+async function catchUpWaitsForSync(
+  ctx: AgentContext,
+  ws: { accountId: number; workspaceId: number },
+  nowMs: number,
+): Promise<boolean> {
+  const open = catchUp;
+  if (open == null) return false;
+  const k = `${ws.accountId}:${ws.workspaceId}`;
+  if (open.fresh.has(k)) return false;
+  const fresh = ctx.queries.workspaceHeadsFreshSince?.bind(ctx.queries);
+  const ok =
+    fresh == null ||
+    nowMs - open.sinceMs >= AUTO_CATCH_UP_SYNC_WAIT_MAX_MS ||
+    (await fresh(ws.accountId, ws.workspaceId, open.sinceMs).catch(() => false));
+  if (ok) open.fresh.add(k);
+  return !ok;
+}
+
+/**
  * The heads this workspace's tick WOULD have started — first reviews, and moved heads whose start rule
  * says go — without starting anything or touching a clock. Read-only: the spend budget and AI
  * readiness hold the whole workspace, so these are said on the PR instead. Not a held PR (a teammate's
@@ -850,13 +979,31 @@ async function dueHeadsHeld(
     return (headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId))) === h;
   };
   const out: SkippedHead[] = [];
+  // A teammate's verdict owed: due like a moved head (the same clock), said on the PR the same way.
+  const verdictPrIds = new Set<number>();
+  for (const v of res.verdictNeeded ?? []) {
+    verdictPrIds.add(v.prId);
+    if (waiting.has(v.prId)) continue;
+    const seen = headSeen.get(`${ws.accountId}:${v.prId}`);
+    const due = autoReviewDue({
+      nowMs,
+      settle: {
+        quietSinceMs: seen && seen.key === `${v.headSha}|` ? seen.firstSeenMs : nowMs,
+        burstStartMs: seen ? seen.burstStartMs : nowMs,
+        reason: 'head',
+      },
+      lastRunAtMs: v.lastRunAtMs,
+    });
+    if (!due.due || (await held(v.prId, v.headSha))) continue;
+    out.push({ accountId: ws.accountId, prId: v.prId, headSha: v.headSha, reason });
+  }
   for (const prId of res.prIds) {
     if (waiting.has(prId) || (await held(prId, null))) continue;
     out.push({ accountId: ws.accountId, prId, headSha: null, reason });
   }
   for (const cand of res.reReview ?? []) {
     const { prId, headSha, commentsAtMs, lastRunAtMs } = cand;
-    if (commentsAtMs != null || waiting.has(prId) || retrying.has(prId)) continue;
+    if (commentsAtMs != null || waiting.has(prId) || retrying.has(prId) || verdictPrIds.has(prId)) continue;
     const seen = headSeen.get(`${ws.accountId}:${prId}`);
     const due = autoReviewDue({
       nowMs,
@@ -882,6 +1029,8 @@ async function noteSkippedWhileHeld(
 ): Promise<void> {
   const heads: SkippedHead[] = [];
   for (const ws of await listAutoReviewWorkspaces(ctx)) {
+    // ⚠ A catch-up still waiting for this workspace's sync: its heads may be stale, so say nothing yet.
+    if (await catchUpWaitsForSync(ctx, ws, nowMs)) continue;
     heads.push(...(await dueHeadsHeld(ctx, nowMs, candidatesOf, ws, reason)));
     if (heads.length >= AUTO_SKIP_LINES_PER_TICK) break;
   }

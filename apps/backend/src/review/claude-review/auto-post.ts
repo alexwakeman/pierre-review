@@ -74,7 +74,7 @@
 // AUTO-only. "Review only" (and every older manual run) keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
 import { mergeOpenPoints, withOpenPointsBeforeFooter } from './open-points.js';
-import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { aiRunProvider, clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
   type AutoApproveImpact,
@@ -171,6 +171,13 @@ export interface AutoPostPrFacts {
   openRequestOfMe?: boolean;
   // The reader wrote a review, a review comment or a PR comment on it (synced rows).
   participatedByMe?: boolean;
+  // The PR AUTHOR's own Limn review is on GitHub at the PR's head: a teammate's verdict is owed there
+  // (docs/TEAM-REVIEW.md § 4), so under the scope 'mine' the PR counts as the reader's to answer.
+  authorLimnAtHead?: boolean;
+  // The head moved past every Limn review on the PR, all of them a teammate's, and no non-author
+  // teammate's Limn review is at the head: a teammate's verdict is owed there too (the 'moved'
+  // pick-up), so under the scope 'mine' the PR counts as the reader's to answer.
+  limnMovedNoVerdict?: boolean;
 }
 
 /** May auto-posting write on this PR? null = yes; else why not. */
@@ -178,7 +185,16 @@ export function autoPostEligibility(f: AutoPostPrFacts, scope: AutoPostScope): A
   if (f.state !== 'open') return 'not_open';
   if (f.isDraft) return 'draft';
   if (f.authorIsBot) return 'bot_author';
-  if (scope === 'mine' && !f.authorIsMe && !f.requestedOfMe && f.participatedByMe !== true) return 'not_yours';
+  if (
+    scope === 'mine' &&
+    !f.authorIsMe &&
+    !f.requestedOfMe &&
+    f.participatedByMe !== true &&
+    f.authorLimnAtHead !== true &&
+    f.limnMovedNoVerdict !== true
+  ) {
+    return 'not_yours';
+  }
   return null;
 }
 
@@ -316,6 +332,20 @@ export type ImpactLevel = 'high' | 'medium' | 'low' | 'unknown';
 /** May an automatic APPROVE go out at this impact level? ⚠ 'unknown' is judged as HIGH. */
 export function impactAllowsApprove(level: ImpactLevel, allowed: AutoApproveImpact): boolean {
   return allowed[level === 'unknown' ? 'high' : level];
+}
+
+/**
+ * THE VERDICT THE AUTHOR'S LIMN WOULD HAVE SENT on their own PR (the marker's `ov=`; docs/TEAM-REVIEW.md
+ * § 4, "A teammate's verdict"). The same switch and gates as off the PR: nothing with "Approve or request
+ * changes for me" off (`wanted` null), and an APPROVE only at an impact level the workspace allows. Pure.
+ */
+export function ownPrVerdictOf(
+  wanted: AutoVerdictEvent | null,
+  impact: { level: ImpactLevel; allowed: AutoApproveImpact } | null,
+): 'APPROVE' | 'REQUEST_CHANGES' | null {
+  if (wanted === 'REQUEST_CHANGES') return wanted;
+  if (wanted === 'APPROVE') return impact != null && impactAllowsApprove(impact.level, impact.allowed) ? wanted : null;
+  return null;
 }
 
 /** Is the wanted verdict sent? Only off the reader's own PR, at an impact level the workspace allows
@@ -707,11 +737,16 @@ export async function readAutoPostPrFacts(
 ): Promise<AutoPostPrFacts | null> {
   const t = s(ctx);
   const rows = (await ctx.db
-    .select({ state: t.pullRequests.state, isDraft: t.pullRequests.isDraft, authorId: trueAuthorId(t.pullRequests) })
+    .select({
+      state: t.pullRequests.state,
+      isDraft: t.pullRequests.isDraft,
+      authorId: trueAuthorId(t.pullRequests),
+      headSha: t.pullRequests.headSha,
+    })
     .from(t.pullRequests)
     .where(and(eq(t.pullRequests.id, prId), eq(t.pullRequests.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ state: AutoPostPrFacts['state']; isDraft: boolean | null; authorId: number | null }>;
+    .execute()) as Array<{ state: AutoPostPrFacts['state']; isDraft: boolean | null; authorId: number | null; headSha: string | null }>;
   const pr = rows[0];
   if (!pr) return null;
   const [authorIsBot, authorIsMe, me] = await Promise.all([
@@ -765,7 +800,43 @@ export async function readAutoPostPrFacts(
     const hits = await Promise.all([by(t.reviews, false), by(t.reviewComments, true), by(t.prComments, true)]);
     participatedByMe = hits.some((h) => h.length > 0);
   }
-  return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, openRequestOfMe, participatedByMe };
+  // A TEAMMATE'S VERDICT OWED (db/teammate-verdict-pickup.ts): the author's own Limn review at the
+  // PR's head, or a head that moved past teammates' Limn reviews with no verdict at it. Read only when
+  // nothing else already makes it the reader's.
+  let authorLimnAtHead = false;
+  let limnMovedNoVerdict = false;
+  if (!authorIsMe && !requestedOfMe && !participatedByMe && pr.authorId != null && pr.headSha) {
+    const posted = (await ctx.db
+      .select({ headSha: t.claudeReviews.headSha, sourceUserId: t.claudeReviews.sourceUserId })
+      .from(t.claudeReviews)
+      .where(
+        and(
+          eq(t.claudeReviews.accountId, accountId),
+          eq(t.claudeReviews.prId, prId),
+          eq(t.claudeReviews.kind, 'teammate'),
+          isNotNull(t.claudeReviews.postedAt),
+          isNotNull(t.claudeReviews.sourceUserId),
+        ),
+      )
+      .execute()) as Array<{ headSha: string; sourceUserId: number }>;
+    const others = posted.filter((r) => r.sourceUserId !== me);
+    authorLimnAtHead = others.some((r) => r.headSha === pr.headSha && r.sourceUserId === pr.authorId);
+    limnMovedNoVerdict =
+      !authorLimnAtHead &&
+      others.some((r) => r.headSha !== pr.headSha) &&
+      !others.some((r) => r.headSha === pr.headSha && r.sourceUserId !== pr.authorId);
+  }
+  return {
+    state: pr.state,
+    isDraft: pr.isDraft === true,
+    authorIsBot,
+    authorIsMe,
+    requestedOfMe,
+    openRequestOfMe,
+    participatedByMe,
+    ...(authorLimnAtHead ? { authorLimnAtHead: true } : {}),
+    ...(limnMovedNoVerdict ? { limnMovedNoVerdict: true } : {}),
+  };
 }
 
 /**
@@ -1321,6 +1392,21 @@ async function autoPostReview(
   };
   // The poster's consent rides only a post whose comments hold every blocker behind it.
   const liftConsent = ws.settings.teamLiftConsent && blockersAllInPost(allFindings, picked.toPost);
+  // ON THE READER'S OWN PR the verdict can only be a comment (GitHub forbids self-approval). The verdict
+  // Limn would have sent rides the marker (`ov=`) so a teammate's Limn knows to give one (docs/TEAM-REVIEW.md
+  // § 4, "A teammate's verdict"). Under the same switch and impact gate as off the PR (`ownPrVerdictOf`).
+  let ownPrImpact: { level: ImpactLevel; allowed: AutoApproveImpact } | null = null;
+  if (facts.authorIsMe && wanted === 'APPROVE') {
+    let level: ImpactLevel = 'unknown';
+    try {
+      level = (await deps.impactLevel?.(accountId, prId)) ?? 'unknown';
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the PR's impact: ${errText(err)}`);
+    }
+    ownPrImpact = { level, allowed: ws.settings.approveImpact };
+  }
+  const ownPrVerdict = facts.authorIsMe ? ownPrVerdictOf(wanted, ownPrImpact) : null;
+  const ownPrMeta = ownPrVerdict != null ? { ownPrVerdict } : {};
   const submit = (ev: AutoVerdictEvent) =>
     ctx.review.postReview({
       owner: pctx.owner,
@@ -1344,8 +1430,9 @@ async function autoPostReview(
               })),
               judged,
               liftConsent,
+              ...ownPrMeta,
             }
-          : { ...limnMetaForReview(review), judged, liftConsent },
+          : { ...limnMetaForReview(review), judged, liftConsent, ...ownPrMeta },
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
       // comment carries its own provider's footer and names who raised it.
       includedFindings: picked.toPost.map((f) => toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), tagOf(f))),

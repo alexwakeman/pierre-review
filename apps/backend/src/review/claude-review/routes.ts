@@ -1,7 +1,9 @@
+import { eq } from 'drizzle-orm';
 import { withOpenPointsBlock } from './open-points.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ActiveReviewsResponse,
+  ClaudeAutoReviewWhy,
   ClaudeFindingStory,
   ClaudeReview,
   ClaudeReviewListResponse,
@@ -12,6 +14,7 @@ import type {
   ClaudeReviewStatusResponse,
   ClaudeThreadJudgementsBody,
   ClaudeThreadJudgementsResponse,
+  ClaudeTeammateVerdictWait,
   ClearTeamClaimBody,
   ClearTeamClaimResponse,
   GenerateReviewBody,
@@ -40,6 +43,7 @@ import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
 import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
   autoReviewHold,
+  autoReviewQueueWhy,
   AGENTIC_AI_ENABLED,
   getReviewStatus,
   listActiveReviews,
@@ -270,6 +274,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const teamView = await loadTeamReviewView(ctx.db, accountId, id, latest, teammateReviews, threads.team).catch(
       () => undefined,
     );
+    // A TEAMMATE'S VERDICT (docs/TEAM-REVIEW.md § 4): why a queued auto item went first, and — on the
+    // reader's own PR — whether it waits for a teammate's Limn. DB + memory only.
+    const autoReviewWhy = autoReview === 'queued' ? await autoReviewWhyWire(ctx, accountId, id).catch(() => null) : null;
+    const teammateVerdictWait = await teammateVerdictWaitFor(ctx, accountId, id).catch(() => null);
     return {
       enabled: true,
       auth: auth.status,
@@ -279,6 +287,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       autoReview,
       // A hold in the lane outranks the sweeper's wait (it is already past it).
       autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
+      autoReviewWhy,
+      teammateVerdictWait,
       // A pair's auto fix ran from whichever half the hook named (the first when the second failed).
       autoFix: review
         ? ([review.id, ...(review.pair?.halves ?? []).map((h) => h.reviewId).filter((rid) => rid !== review.id).reverse()]
@@ -1040,4 +1050,28 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   // The older "Post both" path: a pair is one review now, so it is the same post (kept for a client
   // that still calls it). Rate limit: the Claude Review family's catch-all (`ai`), like Post review.
   app.post('/api/claude-reviews/:reviewId/post-pair', { schema: postSchema }, postReviewHandler);
+}
+
+/** Why a queued auto item went first, with the author's login resolved (`ClaudeAutoReviewWhy`). */
+async function autoReviewWhyWire(ctx: AgentContext, accountId: number, prId: number): Promise<ClaudeAutoReviewWhy | null> {
+  const why = autoReviewQueueWhy(prId, accountId);
+  if (why == null) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const users = (ctx.schema as any).users;
+  const row = (
+    (await ctx.db.select({ login: users.githubLogin }).from(users).where(eq(users.id, why.authorUserId)).limit(1).execute()) as Array<{
+      login: string | null;
+    }>
+  )[0];
+  return { kind: 'teammate_verdict', reason: why.reason, authorLogin: row?.login ?? null, authorVerdict: why.authorVerdict };
+}
+
+/** On the reader's own PR: waiting for a teammate's Limn verdict at the head (db/teammate-verdict-wait.ts). */
+async function teammateVerdictWaitFor(ctx: AgentContext, accountId: number, prId: number): Promise<ClaudeTeammateVerdictWait | null> {
+  const [{ teammateVerdictWaits }, { getAccountUserId }] = await Promise.all([
+    import('../../db/teammate-verdict-wait.js'),
+    import('../../auth/account.js'),
+  ]);
+  const waits = await teammateVerdictWaits(ctx.db, accountId, await getAccountUserId(accountId), [prId]);
+  return waits.get(prId) ?? null;
 }

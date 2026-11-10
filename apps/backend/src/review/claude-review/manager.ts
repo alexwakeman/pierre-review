@@ -237,6 +237,17 @@ interface AutoItem {
   // Queued by the READER's press ("Run auto reviews now" / "Retry"): the spend budget is not asked
   // again at start — the press was the reader's choice (the SPA's over-budget confirm already ran).
   pressed?: boolean;
+  // A TEAMMATE'S VERDICT (auto.ts; docs/TEAM-REVIEW.md § 4): queued AHEAD of every ordinary auto item
+  // (still behind every manual one, and behind earlier priority items). `why` is what the tab says.
+  priority?: boolean;
+  why?: AutoReviewQueueWhy;
+}
+
+/** Why a priority auto item was queued (the tab resolves the author's login from the id). */
+export interface AutoReviewQueueWhy {
+  reason: 'author_review' | 'moved';
+  authorUserId: number;
+  authorVerdict: 'APPROVE' | 'REQUEST_CHANGES' | null;
 }
 
 const claimed = new Set<number>(); // prIds running OR pending — the re-trigger guard
@@ -361,6 +372,12 @@ export type StartReviewResult =
  *  no row yet) = 'queued'; launched = 'running'; otherwise null. Account-checked, so another
  *  tenant's PR id answers null. */
 export type AutoReviewHold = 'queued' | 'running';
+/** Why a QUEUED auto item of this account's went ahead of the rest, or null (an ordinary item, or none). */
+export function autoReviewQueueWhy(prId: number, accountId: number): AutoReviewQueueWhy | null {
+  const a = startingAuto.get(prId) ?? autoPending.find((x) => x.prId === prId);
+  return a != null && a.accountId === accountId ? (a.why ?? null) : null;
+}
+
 export function autoReviewHold(prId: number, accountId: number): AutoReviewHold | null {
   const run = runningItems.get(prId) ?? startingPair.get(prId);
   if (run) return run.trigger === 'auto' && run.accountId === accountId ? 'running' : null;
@@ -525,12 +542,12 @@ export function enqueueAutoReview(
   // TRAILING: set for a re-review triggered by new review comments (see AutoItem).
   commentsAtMs: number | null = null,
   // TRAILING: a retry of a failed auto run, and/or a reader's press (see AutoItem).
-  opts: { retryOfReviewId?: number | null; pressed?: boolean } = {},
+  opts: { retryOfReviewId?: number | null; pressed?: boolean; priority?: boolean; why?: AutoReviewQueueWhy } = {},
 ): EnqueueAutoResult {
   if (!AGENTIC_AI_ENABLED) return 'disabled';
   if (claimed.has(prId) || autoPending.some((a) => a.prId === prId)) return 'already';
   if (autoPending.length >= REVIEW_AUTO_MAX_QUEUED) return 'full';
-  autoPending.push({
+  const item: AutoItem = {
     ctx,
     accountId,
     prId,
@@ -538,7 +555,13 @@ export function enqueueAutoReview(
     commentsAtMs,
     ...(opts.retryOfReviewId != null ? { retryOfReviewId: opts.retryOfReviewId } : {}),
     ...(opts.pressed ? { pressed: true } : {}),
-  });
+    ...(opts.priority ? { priority: true } : {}),
+    ...(opts.why ? { why: opts.why } : {}),
+  };
+  // A PRIORITY item goes ahead of every ordinary auto item, behind the priority items already waiting.
+  const at = opts.priority ? autoPending.findIndex((a) => a.priority !== true) : -1;
+  if (at >= 0) autoPending.splice(at, 0, item);
+  else autoPending.push(item);
   pump();
   return 'queued';
 }

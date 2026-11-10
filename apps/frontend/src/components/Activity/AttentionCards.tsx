@@ -3870,7 +3870,15 @@ export function AttentionCards({
           {s.reason}
           {toneWord !== '' && s.tone !== 'blocked' && <span className="sr-only"> · {toneWord}</span>}
         </span>
-        <RowTitle sub={s.ref != null ? <span className="max-sm:hidden">{s.ref}</span> : undefined}>{s.title}</RowTitle>
+        <RowTitle
+          sub={
+            s.ref != null || s.note != null ? (
+              <span className="max-sm:hidden">{[s.ref, s.note].filter((x) => x != null).join(' · ')}</span>
+            ) : undefined
+          }
+        >
+          {s.title}
+        </RowTitle>
         {err != null && <span className="max-w-[40%] shrink truncate text-meta text-ui-danger">{err}</span>}
         {s.size != null && (
           <RowMeta hideBelow="lg" className="w-[5.5rem] text-right">

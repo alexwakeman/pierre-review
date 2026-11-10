@@ -164,7 +164,7 @@ export default function Teams(): JSX.Element {
             review is a comment.
           </p>
           <p>
-            It never holds the commit either. A teammate’s {SITE_NAME} still reviews it, follows up
+            It never holds the commit either. A teammate’s {SITE_NAME} picks it up first, follows up
             on the points yours raised, and can approve.
           </p>
           <p>“Where this PR stands” shows each reviewer’s latest verdict, and what still holds on GitHub.</p>

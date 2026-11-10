@@ -2882,6 +2882,75 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
 
+### A teammate's verdict, first (2026-11-10)
+
+The plain-English design is docs/TEAM-REVIEW.md § 4 ("A teammate's verdict"). An author's own Limn
+review is never a verdict (GitHub forbids self-approval), so another Limn must give one.
+
+- **THE MARKER'S `ov=`** (shared `limnReviewMarker` / `parseLimnReviewMarker`, `LimnReviewMeta.ownPrVerdict`).
+  Auto-posting on the reader's OWN PR writes the verdict it WOULD have sent off the PR —
+  `APPROVE` or `REQUEST_CHANGES` (`ownPrVerdictOf`): only with "Approve or request changes for me"
+  on, and an APPROVE only at an impact level the workspace's `approveImpact` allows (unknown =
+  high). A switched-off author or a held approve writes no `ov=`, so no teammate reads "would
+  approve" the author's own settings would not have sent. The import keeps it on `TeammateReviewRecord.ownPrVerdict`. An older Limn ignores
+  the key; a post without it still triggers the pick-up, it only sorts after a held APPROVE.
+- **THE LIST** (`db/teammate-verdict-pickup.ts` `verdictPickupCandidates`, PURE; fed by
+  `getAutoReviewCandidates` as `verdictNeeded`). Never the reader's own PR (`prOwnerId`; no proven
+  reader ⇒ empty). `'author_review'`: an imported review by the PR's owner at the current head,
+  posted at or after `auto_review_enabled_at`. `'moved'`: the head moved past every Limn review on
+  the PR, all of them a teammate's, posted since the floor (the reader's own history stays the
+  ordinary moved-head re-review). Settled by: any reader run at the head (any status — a failed auto
+  run is § Retries'), a reader run in flight, a NON-author teammate's review at the head. Order: held
+  APPROVE, other author reviews, moved heads; then `waitingSinceMs` ascending. These PRs are taken
+  out of `prIds`, so nothing is offered twice.
+- **THE SWEEPER** (`auto.ts`). Each workspace's pass starts `verdictNeeded` BEFORE first reviews,
+  retries and re-reviews: the same start rule (`autoReviewDue`, settle reason `head`, the head's
+  clock shared with the re-review loop — which then skips that PR), the team-claim hold, the ONE
+  budget gate (over it, the due ones are said on the PR as "skipped · budget"), and the daily cap.
+  At most `VERDICT_PICKUP_PER_TICK` (5) a tick across workspaces. ⚠ **NOT EXEMPT FROM THE DAILY
+  CAP**, and a queued pick-up (no row yet, out of `prIds`) is counted in `waitingHere`, or the cap is
+  overshot tick after tick: own-PR ticket checks may be, because the reader's own pushes bound them; this list grows
+  with other people's PRs, and on an API key the spend budget is unset by default, so the cap is the
+  one count-based bound left. Prioritised means the cap is spent on these first.
+- **THE LANE** (`manager.ts`): `enqueueAutoReview(…, {priority: true, why})` inserts ahead of every
+  ordinary auto item (behind earlier priority items; manual items still go first).
+  `autoReviewQueueWhy` → `ClaudeReviewResponse.autoReviewWhy` (the author's login resolved in the
+  route): "Queued: needs a verdict (alex’s own review would approve)" (`autoReviewWhyLine`).
+- **ONE TEAMMATE TAKES IT** through the ordinary team claim (§ Team claims): the author's lines are
+  left out of the fold, the earliest live claim wins, a claimer silent past the 25-minute lease is
+  taken over. Nothing new is written for coordination.
+- **POSTING SCOPE.** Under "Which PRs: mine", `AutoPostPrFacts.authorLimnAtHead` (an imported
+  review by the PR's owner at the head) or `limnMovedNoVerdict` (teammates' Limn reviews only at
+  older heads, none by a non-author at the head: the `'moved'` case) makes the PR the reader's to
+  answer, so the verdict reaches GitHub. ⚠ Without the second, a `'moved'` pick-up ran first, posted
+  nothing for a reader not requested and not taking part, and its "reviewed" line still held the
+  head, so the teammate who WOULD post stepped aside.
+- **THE CATCH-UP GATE IS ONE FUNCTION** (`catchUpWaitsForSync`): the pass AND the AI-not-ready
+  skipped lines ask it, so a boot before the runtime is installed says nothing on a head read
+  before the break.
+- **THE AUTHOR'S SIDE** (`db/teammate-verdict-wait.ts`). On the reader's own open PR: their posted
+  review at the head, no teammate's Limn review there, AND a teammate's Limn AUTO review seen in the
+  same workspace within `TEAMMATE_AUTO_SEEN_MS` (14 days). Then `ClaudeReviewResponse.teammateVerdictWait`
+  and `WaitingOnOthersCard.limnVerdictWait` ("Waiting for a teammate’s Limn to review"). Without that
+  evidence it says nothing: Limn cannot read a teammate's settings, so "no teammate has auto review
+  on" is not knowable.
+
+### Catch-up on return (2026-11-10)
+
+- **WHEN.** The first tick after a boot, and any tick `AUTO_CATCH_UP_GAP_MS` (5 min) or more after
+  the previous one (the machine slept, the process stalled) opens a catch-up (`catchUpOpensAt`, pure).
+  A press is not a tick.
+- **WHAT IT WAITS FOR.** Each workspace's pass is held — nothing queued, no clock touched,
+  `AutoSweepResult.syncWait` — until `ctx.queries.workspaceHeadsFreshSince` (sync/heads-fresh.ts)
+  says every repo of the workspace was checked since the catch-up opened: adaptive polling, GitHub
+  answered (probe, walk, settle read) with no seen change left unwalked (`checkedCleanSince`); a
+  pinned SYNC_CRON, `sync_state`'s last completed sync. Never longer than
+  `AUTO_CATCH_UP_SYNC_WAIT_MAX_MS` (30 min: a repo that cannot sync must not stop auto review). A
+  press does not wait. A host without the seam does not wait.
+- **THEN NOTHING SPECIAL.** The DB is the queue: the candidate read covers every open PR however long
+  the break, so moved heads and owed verdicts are found as usual, the verdicts first, oldest wait
+  first, bounded by the per-tick pick-up cap, the lane and the daily cap, under the budget gate.
+
 ## Team claims ("Mark auto reviews on GitHub", 2026-10-27)
 
 For teams where more than one person runs Limn with auto review on the same repos. Per workspace, ON

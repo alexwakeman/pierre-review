@@ -130,7 +130,14 @@ import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { RepliesCheckLine } from './RepliesCheckLine.js';
 import { repliesRunLabel } from '../lib/repliesCheck.js';
 import { AiStatusLine } from './AiStatusLine.js';
-import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
+import {
+  AUTO_REVIEW_WAITING_LABEL,
+  autoFixOutcomeLine,
+  autoReviewWhyLine,
+  autoSweepResultLine,
+  failedAutoReviewLine,
+  TEAMMATE_VERDICT_WAIT_LINE,
+} from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
 import { TeammateChip, TeammateLeadSection } from './TeammateReviews.js';
@@ -2522,8 +2529,13 @@ export function ClaudeReviewTab({
             </AiRunGate>
             {autoHold != null && (
               <span className="text-meta text-ui-mute">
-                {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
+                {autoHold === 'running'
+                  ? 'Auto review running'
+                  : (autoReviewWhyLine(data?.autoReviewWhy) ?? 'Auto review queued')}
               </span>
+            )}
+            {autoHold == null && !isRunning && data?.teammateVerdictWait != null && (
+              <span className="text-meta text-ui-mute">{TEAMMATE_VERDICT_WAIT_LINE}</span>
             )}
             {isRunning && pressedPostLine(review) != null && (
               <span className="text-meta text-ui-mute">{pressedPostLine(review)}</span>

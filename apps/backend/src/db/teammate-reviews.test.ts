@@ -546,4 +546,66 @@ describe('standing verdicts and posted judgements (real DB)', () => {
     const { loadStandingBlockAnchors } = await import('../review/claude-review/teammate-anchor.js');
     expect(await loadStandingBlockAnchors({ db, schema, log: { warn() {} } } as any, await prIdOf(23), 1)).toEqual([]);
   });
+  it("an author's own Limn review at the head is owed a teammate's verdict (the candidate read)", async () => {
+    const { eq } = await import('drizzle-orm');
+    const ownPr = `Looks good to me.\n\n${limnReviewMarker('ov31', { headSha: HEAD, run: 'auto', verdict: 'COMMENT', ownPrVerdict: 'APPROVE' })}`;
+    await persist(
+      gqlPr(31, {
+        reviews: { nodes: [review('RV_31001', CAROL, ownPr, '2026-11-10T08:00:00Z')] },
+        comments: { nodes: [comment('IC_31002', ALICE, 'Taking a look.', '2026-11-10T08:05:00Z')] },
+      }),
+    );
+    const prId = await prIdOf(31);
+    await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prId)).execute();
+    expect((await teammateRows(prId))[0].teammate).toMatchObject({ ownPrVerdict: 'APPROVE' });
+    const floor = Date.parse('2026-11-01T00:00:00Z');
+    const read = () => queries.getAutoReviewCandidates(1, workspaceId, { openedSinceMs: floor, dayStartMs: floor, limit: 20 });
+    const first = await read();
+    expect(first?.verdictNeeded).toContainEqual(
+      expect.objectContaining({ prId, headSha: HEAD, reason: 'author_review', authorVerdict: 'APPROVE' }),
+    );
+    expect(first?.prIds).not.toContain(prId);
+
+    // Robin's Limn review at the head is the verdict: nothing owed any more.
+    const robin = `Approved.\n\n${limnReviewMarker('ov32', { headSha: HEAD, run: 'auto', verdict: 'APPROVE' })}`;
+    await persist(
+      gqlPr(31, {
+        reviews: {
+          nodes: [review('RV_31001', CAROL, ownPr, '2026-11-10T08:00:00Z'), review('RV_31003', ROBIN, robin, '2026-11-10T09:00:00Z', 'APPROVED')],
+        },
+        comments: { nodes: [comment('IC_31002', ALICE, 'Taking a look.', '2026-11-10T08:05:00Z')] },
+      }),
+    );
+    await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prId)).execute();
+    expect((await read())?.verdictNeeded.map((v) => v.prId)).not.toContain(prId);
+  });
+
+  it("the author's side: waiting for a teammate's Limn only with evidence one runs auto reviews", async () => {
+    const { eq } = await import('drizzle-orm');
+    const { teammateVerdictWaits } = await import('./teammate-verdict-wait.js');
+    const { getAccountUserId } = await import('../auth/account.js');
+    // ALICE (the reader) opened PR 32 and her Limn's review is posted at the head.
+    await persist(gqlPr(32, { author: ALICE }));
+    const prId = await prIdOf(32);
+    await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prId)).execute();
+    await db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha: HEAD, status: 'succeeded', model: 'claude-opus-5-5', postedAt: new Date('2026-11-10T08:00:00Z') })
+      .execute();
+    const me = await getAccountUserId(1);
+    expect(me).not.toBeNull();
+    const at = Date.parse('2026-11-10T09:00:00Z');
+    // Robin's auto reviews on other PRs of the workspace (2026-10-02) are older than two weeks: silent.
+    expect((await teammateVerdictWaits(db, 1, me, [prId], Date.parse('2026-11-30T00:00:00Z'))).size).toBe(0);
+    // Within two weeks of them: the wait shows.
+    expect((await teammateVerdictWaits(db, 1, me, [prId], Date.parse('2026-10-10T00:00:00Z'))).get(prId)).toEqual({
+      headSha: HEAD,
+      since: '2026-11-10T08:00:00.000Z',
+    });
+    // A teammate's Limn review at the head ends it.
+    const robin = `Fine.\n\n${limnReviewMarker('ov33', { headSha: HEAD, run: 'auto', verdict: 'APPROVE' })}`;
+    await persist(gqlPr(32, { author: ALICE, reviews: { nodes: [review('RV_32001', ROBIN, robin, '2026-11-10T08:30:00Z', 'APPROVED')] } }));
+    await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prId)).execute();
+    expect((await teammateVerdictWaits(db, 1, me, [prId], at)).size).toBe(0);
+  });
 });

@@ -1,3 +1,4 @@
+import { TEAMMATE_VERDICT_WAIT_LINE } from '../../lib/claudeAutoReview.js';
 import type { InsightCard, InsightPrRef, MyTurnDismissTarget } from '@pierre-review/shared';
 import {
   authorName,
@@ -45,6 +46,9 @@ export interface PendingRowSummary {
   /** Set when a review on this card is over the review target: the note, for the age cell's
    *  tooltip ("Over the 4h review target — waiting 9 working hours"). The cell turns amber. */
   overTarget?: string;
+  /** A short note beside the ref: on a "Waiting on others" row whose head the reader's own Limn
+   *  reviewed, "Waiting for a teammate’s Limn to review". Absent elsewhere. */
+  note?: string;
 }
 
 /** Does this card block a merge or a build? */
@@ -142,6 +146,7 @@ export function pendingRowSummary(card: InsightCard, ctx: HeadingContext): Pendi
     atIsOpened: heading.at == null && prCard?.openedAt != null,
     ...(card.kind === 'waiting_on_others' ? { waitText: workHoursShort(card.waitHours) } : {}),
     ...(over != null ? { overTarget: overTargetText(over) } : {}),
+    ...(card.kind === 'waiting_on_others' && card.limnVerdictWait === true ? { note: TEAMMATE_VERDICT_WAIT_LINE } : {}),
   };
 }
 

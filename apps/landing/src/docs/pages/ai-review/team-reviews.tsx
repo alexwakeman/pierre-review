@@ -114,6 +114,38 @@ export default function Page(): JSX.Element {
         repository.
       </p>
 
+      <H2 id="a-teammates-verdict">A teammate's verdict on your own review</H2>
+      <p>
+        Your Limn's review of your own pull request can never approve it: GitHub does not let an author approve. So a
+        teammate's Limn picks it up and gives the verdict. Their Limn queues it ahead of its other automatic reviews,
+        and first when your Limn would have approved. One teammate takes it, through the usual status line on the
+        commit. If that teammate's Limn stops renewing its line for 25 minutes, another teammate's Limn takes over.
+      </p>
+      <ul>
+        <li>
+          On your side, the <Ui>AI Review</Ui> tab and the <Ui>Waiting on others</Ui> row say{' '}
+          <Ui>Waiting for a teammate’s Limn to review</Ui>. Limn says this only when a teammate's Limn has run
+          automatic reviews in the workspace in the last two weeks. It cannot see your teammates' settings, so
+          otherwise it says nothing.
+        </li>
+        <li>
+          On the teammate's side, the <Ui>AI Review</Ui> tab says, for example,{' '}
+          <Ui>Queued: needs a verdict (alex’s own review would approve)</Ui>.
+        </li>
+        <li>
+          It needs auto review on in the teammate's workspace. It counts toward their daily limit and asks their
+          spend budget, like every automatic review.
+        </li>
+        <li>
+          Your Limn "would approve" only when your own <Ui>Approve or request changes for me</Ui> is on and your
+          workspace lets Limn approve at the pull request's impact level.
+        </li>
+        <li>
+          The teammate's Limn posts the verdict even when its <Ui>Which PRs</Ui> setting is the default (their own
+          PRs, and PRs they are asked to review or took part in).
+        </li>
+      </ul>
+
       <H2 id="lifting-changes-requested">Lifting "changes requested"</H2>
       <p>
         Your own Limn's <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. A teammate's Limn

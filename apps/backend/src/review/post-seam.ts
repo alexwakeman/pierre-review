@@ -133,6 +133,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
     runs: args.limnMeta?.runs ?? [],
     judged: args.limnMeta?.judged ?? [],
     liftConsent: args.limnMeta?.liftConsent === true,
+    ...(args.limnMeta?.ownPrVerdict != null ? { ownPrVerdict: args.limnMeta.ownPrVerdict } : {}),
   });
   const finalBody = args.body + `\n\n${marker}`;
 

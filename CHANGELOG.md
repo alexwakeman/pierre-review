@@ -21,6 +21,18 @@ no internals.
   default choice (Claude + Codex when both are signed in). The item is greyed out, with the reason,
   while AI is not set up or signed in, or a review is starting, queued or running. Over your AI spend
   budget it asks once more. "Review started for #615" shows in the bottom-right corner.
+- Auto review: a pull request whose author reviewed it with their own Limn (which can never approve
+  it) is picked up by a teammate's Limn for the verdict, ahead of other automatic reviews, and first
+  when the author's Limn would have approved. One teammate takes it through the usual status line; if
+  their Limn stops renewing it for 25 minutes, another takes over. It counts toward the daily limit
+  and asks the spend budget like any automatic review. The teammate's AI Review tab says why, for
+  example "Queued: needs a verdict (alex’s own review would approve)".
+- Your own pull request: the AI Review tab and the "Waiting on others" row say "Waiting for a
+  teammate’s Limn to review" while your Limn's review is the only one at the latest commit, when a
+  teammate's Limn has run automatic reviews in the workspace in the last two weeks.
+- Auto review after a break: when Limn starts or the computer wakes, auto review waits (30 minutes at
+  most) until your repositories have synced, then reviews what changed while you were away, the
+  verdicts teammates wait for first.
 
 ### Changed
 
@@ -38,6 +50,9 @@ no internals.
   Limn docs".
 - The docs website: the pages under /docs no longer have the site footer. They end on one line with
   Privacy, Cookies, Terms and Cookie settings.
+- Auto review, "Which PRs: Mine": a pull request that waits for a teammate's verdict (its author's own
+  Limn review is at the latest commit, or new commits came after teammates' Limn reviews) now counts
+  as yours, so the verdict reaches GitHub.
 
 ### Removed
 
