@@ -22,10 +22,12 @@ vi.mock('../github/rate-budget.js', () => ({
 
 import { graphqlTolerant } from '../github/client.js';
 import { isLimited, noteBudget, noteLimited } from '../github/rate-budget.js';
-import { drainReviewThreads } from './drain-review-threads.js';
+import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
 import {
   PR_REVIEW_THREADS_PAGE_QUERY,
+  PR_REVIEWS_PAGE_QUERY,
   REPO_ACTIVITY_QUERY,
+  type GqlReview,
   type GqlReviewThread,
   type GqlThreadPage,
 } from '../github/queries.js';
@@ -320,5 +322,59 @@ describe('PR_REVIEW_THREADS_PAGE_QUERY shape parity', () => {
   it('keeps the walk capped at 50 with the connection metadata that makes draining possible', () => {
     expect(REPO_ACTIVITY_QUERY).toContain('reviewThreads(first: 50)');
     expect(REPO_ACTIVITY_QUERY).toMatch(/reviewThreads\(first: 50\) \{\s*totalCount/);
+  });
+});
+
+// PR #615 shape (2026-11-10): 74 reviews, oldest first. The walk's first 50 stopped at 13:39, so a
+// teammate's APPROVED on the current head (16:33) never reached the DB and the standings read his
+// older review. The drain must append the newest reviews, in order, through the REVIEWS connection.
+describe('drainReviews', () => {
+  const review = (id: string, state = 'COMMENTED'): GqlReview =>
+    ({ id, fullDatabaseId: id, state, body: '', submittedAt: '2026-11-10T13:39:00Z', author: null }) as GqlReview;
+
+  it('appends the reviews past the first page, so the newest approval is persisted', async () => {
+    const page: GqlThreadPage<GqlReview> = {
+      totalCount: 74,
+      pageInfo: { hasNextPage: true, endCursor: 'r50' },
+      nodes: Array.from({ length: 50 }, (_, i) => review(`r${i + 1}`)),
+    };
+    mockGraphql.mockResolvedValueOnce({
+      repository: {
+        pullRequest: {
+          reviews: {
+            pageInfo: { hasNextPage: false, endCursor: 'r74' },
+            nodes: [
+              ...Array.from({ length: 23 }, (_, i) => review(`r${i + 51}`)),
+              review('r74', 'APPROVED'),
+            ],
+          },
+        },
+      },
+      rateLimit: { remaining: 4000, resetAt: '2030-01-01T00:00:00Z', cost: 1 },
+    });
+
+    const res = await drainReviews(page, { ...opts, log: makeLog() });
+
+    expect(mockGraphql).toHaveBeenCalledTimes(1);
+    expect(mockGraphql.mock.calls[0]![1]).toBe(PR_REVIEWS_PAGE_QUERY);
+    expect(mockGraphql.mock.calls[0]![2]).toEqual({ owner: 'o', name: 'n', number: 9016, cursor: 'r50' });
+    expect(res).toEqual({ added: 24, pages: 1, incomplete: false });
+    expect(page.nodes).toHaveLength(74);
+    expect(page.nodes.at(-1)).toMatchObject({ id: 'r74', state: 'APPROVED' });
+  });
+
+  it('issues no request for a PR with fifty reviews or fewer', async () => {
+    const page: GqlThreadPage<GqlReview> = { pageInfo: { hasNextPage: false, endCursor: 'x' }, nodes: [review('a')] };
+    expect(await drainReviews(page, { ...opts, log: makeLog() })).toEqual({ added: 0, pages: 0, incomplete: false });
+    expect(mockGraphql).not.toHaveBeenCalled();
+  });
+
+  it('the walk asks for the reviews pageInfo, and the continuation selects the same review fields', () => {
+    expect(REPO_ACTIVITY_QUERY).toMatch(/reviews\(first: 50\) \{\s*totalCount\s*pageInfo/);
+    expect(PR_REVIEWS_PAGE_QUERY).toContain('$cursor: String!');
+    expect(PR_REVIEWS_PAGE_QUERY).toContain('reviews(first: 50, after: $cursor)');
+    for (const field of ['fullDatabaseId', 'state', 'submittedAt', 'avatarUrl']) {
+      expect(PR_REVIEWS_PAGE_QUERY).toContain(field);
+    }
   });
 });

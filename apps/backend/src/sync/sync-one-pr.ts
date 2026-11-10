@@ -27,7 +27,7 @@ import {
 } from '../github/queries.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { ensureCommitFiles } from './commit-files.js';
-import { drainReviewThreads } from './drain-review-threads.js';
+import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
 import { createUserResolver, persistPr } from './upsert.js';
 import type { Logger } from './sync-repo.js';
 
@@ -182,6 +182,7 @@ async function runOnePrSync(
       token,
       log,
     });
+    await drainReviews(pr.reviews, { owner, name, number: prNumber, accountId, token, log });
 
     // Gather the commit SHAs whose changed files the thread-state heuristic needs —
     // commits that landed AFTER an unresolved thread's last comment (identical to the

@@ -168,11 +168,15 @@ describe('source guards', () => {
     expect(chat).toBeGreaterThan(ci);
     expect(tab).not.toMatch(/ciFailures/);
   });
-  it('the section never builds a log URL and shows how long ago the run finished', () => {
+  // 2026-11-10: no "reviewed … ago", no model and no "On latest commit" on the AI Review tab; when
+  // and with what is in the section's ⓘ.
+  it('the section never builds a log URL, and keeps when/which model behind the ⓘ', () => {
     const src = code('components/CiCheckSection.tsx');
     expect(src).not.toMatch(/logs?Url|blob/i);
     expect(src).not.toMatch(/dangerouslySetInnerHTML|href=/);
-    expect(src).toMatch(/<ReviewedAgo at=\{shown\.completedAt\}/);
+    expect(src).not.toMatch(/<ReviewedAgo|<AiRunLabel/);
+    expect(src).toMatch(/currency\.tone !== 'current' && <CurrencyPill/);
+    expect(src).toMatch(/Checked \{dateTime\(shown\.completedAt\)\}/);
   });
   it('the boards read CI from ONE batched states request, never per card', () => {
     for (const p of ['components/Activity/OpenPrsCards.tsx', 'components/Activity/AttentionCards.tsx']) {
@@ -185,11 +189,10 @@ describe('source guards', () => {
       expect(src).not.toMatch(/useCiReview|summary\.ci\b/);
     }
   });
-  it('Story check shows how long ago each ticket was checked, older PR-review stories included', () => {
+  it('Story check prints no "reviewed … ago" or model; the heading tooltip says when and with what', () => {
     const src = code('components/TicketCoverage.tsx');
-    expect(src).toMatch(/<ReviewedAgo at=\{shown\.completedAt\}/);
-    expect(src).toMatch(/<ReviewedAgo at=\{legacy\.finishedAt\}/);
-    expect(code('components/ClaudeReviewTab.tsx')).toMatch(/finishedAt: review\.finishedAt,/);
+    expect(src).not.toMatch(/<ReviewedAgo|<AiRunLabel/);
+    expect(src).toMatch(/`Checked \$\{dateTime\(shown\.completedAt\)\}/);
   });
   it('on a red-build card the CI pill displaces only the VERDICT, never a queued, running or failed review', () => {
     expect(code('components/Activity/PendingClaude.tsx')).toMatch(/if \(ciPill != null && cell\.kind === 'done'\) lead = null;/);

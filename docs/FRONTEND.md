@@ -1890,8 +1890,8 @@ reappears.
   keeps its tick beside the ref on the first line), and ONE Post button per unmet
   item (target named on the button; once posted, never offered again; `visible:false` = "It will
   show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
-  is a line above it; each block's header says how long ago the shown run finished (`ReviewedAgo` on
-  `completedAt`). Below the blocks, the paste box (`TicketPasteBox.tsx`, behind "Add tickets") adds
+  is a line above it; its heading's tooltip says when the shown run finished and with which model
+  (NO `ReviewedAgo` and no model label on the page, 2026-11-10). Below the blocks, the paste box (`TicketPasteBox.tsx`, behind "Add tickets") adds
   a ticket by its link or key; there is NO typed-story form (the "+ Add story" tabs, "Input
   manually" and `lib/storyTabs.ts` were REMOVED 2026-11-10), and with no tracker the box does not
   show. ⚠ **Open PRs
@@ -1992,8 +1992,9 @@ reappears.
 - **CI check is the CI REVIEW** (`CiCheckSection.tsx`, `hooks/useCiReview.ts`, pure half
   `lib/ciReview.ts`; docs/CLAUDE-REVIEW.md § CI review) — its own run, not part of Claude's review.
   `GET /api/prs/:id/ci-review` (polls only while `running`); it shows the latest SUCCEEDED run (read
-  by id while a newer one runs, failed or was refused), the currency pill ("On latest commit" /
-  "Pushed since" / "Other checks failing now" / "Passing now"), "reviewed X ago" on `completedAt`,
+  by id while a newer one runs, failed or was refused), the currency pill ONLY when not current
+  ("Pushed since" / "Other checks failing now" / "Passing now"; "On latest commit" and "reviewed X ago"
+  were dropped 2026-11-10 — when and which model are in the section's ⓘ),
   Check CI / Re-check (mutation key `['ci-review-start', prId]`), SSE progress, the refusal sentence
   (`ciRefusalSentence`), the summary (markdown) and one plain-text `CiFailureRow` per failing check
   (cause, "Fix:" suggestion, Why, path links into Changes, the check's details page — never a log
@@ -2156,7 +2157,7 @@ reappears.
 - **When did the review run? ONE component, `ReviewedAgo` (`components/ReviewedAgo.tsx`)** over
   `reviewedAgoLabel()` (`lib/claudeReviewColumn.ts`): muted "reviewed 2 days ago" (past a month,
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
-  Open PRs panel (NOT the AI Review tab's summary header, removed 2026-11-10), and at the end of
+  Open PRs panel (NOWHERE on the AI Review tab — summary, CI check and Story check, removed 2026-11-10), and at the end of
   a Pending card's one-line Claude summary on a finished run (`ClaudeReviewPrState.finishedAt`,
   falling back to a `claude_review` My Turn card's `since`). Reviews on this PR (docs/CLAUDE-REVIEW.md
   § The review tab's history) prints each review's day and 24-hour time, the full date on hover. A pair

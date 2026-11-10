@@ -114,6 +114,16 @@ describe('teamStandings', () => {
     expect(s.latest).toMatchObject({ you: true, reviewId: 11, verdict: 'APPROVE' });
   });
 
+  it("PR 221272: the reader's own PR — a run that would approve, posted as a Comment, reads Comment", () => {
+    const input = base();
+    input.ownLatest = { reviewId: 12, verdict: 'APPROVE', at: t('2026-11-10T16:56:00Z'), headSha: 'e'.repeat(40) };
+    input.ownPosted = [{ githubReviewId: '620', reviewId: 12, verdict: 'APPROVE', headSha: 'e'.repeat(40) }];
+    input.github = [gh(ME, 'RV_620', 'commented', '2026-11-10T16:56:00Z'), gh(2, 'RV_602', 'commented', '2026-11-04T10:00:00Z')];
+    const me = teamStandings(input).reviewers[0]!;
+    expect(me).toMatchObject({ you: true, inForce: null });
+    expect(me.latest).toMatchObject({ reviewId: 12, verdict: 'COMMENT' });
+  });
+
   it('several blocks: the newest is the one shown; every reviewer is listed, the reader first', () => {
     const input = base();
     input.teammates.push({ reviewId: 30, poster: SAM, verdict: 'REQUEST_CHANGES', at: t('2026-11-04T12:00:00Z'), headSha: 'f'.repeat(40), nodeId: 'RV_610' });

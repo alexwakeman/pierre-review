@@ -14,7 +14,8 @@
 // check's details page — the signed log URL never reaches the client. Pure half: lib/ciReview.ts.
 import { useMemo } from 'react';
 import type { ClaudeFindingSide, ClaudeReview, PrDetail } from '@pierre-review/shared';
-import { aiRunProviderName } from '@pierre-review/shared';
+import { aiRunLabel, aiRunProviderName } from '@pierre-review/shared';
+import { dateTime } from '../lib/ui.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import {
   useCiReview,
@@ -44,8 +45,6 @@ import { ArrowIcon, CheckIcon, SparkleIcon, WarningIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { Markdown } from './Markdown.js';
 import { ReviewSection } from './ReviewSection.js';
-import { ReviewedAgo } from './ReviewedAgo.js';
-import { AiRunLabel } from './AiRunLabel.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
@@ -142,9 +141,9 @@ export function CiCheckSection({
       section="ci"
       pills={
         <>
-          {currency != null && <CurrencyPill currency={currency} />}
-          {shown != null && <ReviewedAgo at={shown.completedAt} />}
-          {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
+          {/* NO RUN NAME, NO "reviewed … ago", NO "On latest commit" (2026-11-10, as the Summary
+              section): only a stale/running pill shows; when and which model is behind the ⓘ. */}
+          {currency != null && currency.tone !== 'current' && <CurrencyPill currency={currency} />}
           {rows.length > 0 && <span className={`text-meta ${MUTED}`}>{ciFailingLabel(rows.length)}</span>}
           {countPills.map((p) => (
             <span key={p.key} className={`${REVIEW_CHIP} ${p.cls}`}>
@@ -160,6 +159,12 @@ export function CiCheckSection({
             code, and says why it failed, how sure it is, and whether this PR can fix it.
           </p>
           <p className="mt-2">Checks outside GitHub Actions have no log to read, so they are listed only.</p>
+          {shown?.completedAt != null && (
+            <p className="mt-2">
+              Checked {dateTime(shown.completedAt)}
+              {shown.model != null && shown.model !== '' ? ` with ${aiRunLabel(shown.provider, shown.model)}` : ''}.
+            </p>
+          )}
           <p className="mt-2">When auto review is on, a check that fails is looked at on its own.</p>
           <p className="mt-2">
             When auto-posting is on, the causes {ai.providerName} is more than 50% sure of are posted to the PR

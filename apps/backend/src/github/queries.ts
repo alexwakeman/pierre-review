@@ -90,6 +90,29 @@ const REVIEW_THREAD_NODE_FIELDS = /* GraphQL */ `
   }
 `;
 
+// One review's fields — shared by the walk's first page and the reviews continuation, so a
+// drained review is the same shape persistPr already takes.
+const REVIEW_NODE_FIELDS = `
+      id
+      fullDatabaseId
+      state
+      body
+      submittedAt
+      author {
+        login
+        __typename
+        ... on User {
+          id
+          name
+          avatarUrl
+        }
+        ... on Bot {
+          id
+          avatarUrl
+        }
+      }
+`;
+
 // The full PR-node field selection, shared by the per-repo walk (REPO_ACTIVITY_QUERY)
 // and the single-PR targeted fetch (PR_ACTIVITY_ONE_QUERY) so their result shape can
 // NEVER drift — both feed the same persistPr(pr: GqlPullRequest, …) unchanged. Edit the
@@ -304,27 +327,17 @@ const PR_NODE_FIELDS = /* GraphQL */ `
       }
     }
   }
+  # Reviews come OLDEST FIRST, so a PR with more than fifty reviews used to lose its NEWEST ones
+  # (a teammate's approval on the current head read as "commented"). pageInfo turns that into a
+  # drain (sync/drain-review-threads.ts \`drainReviews\`), 1 point per extra page, only for the PRs
+  # that overflow — the same posture as reviewThreads below.
   reviews(first: 50) {
-    nodes {
-      id
-      fullDatabaseId
-      state
-      body
-      submittedAt
-      author {
-        login
-        __typename
-        ... on User {
-          id
-          name
-          avatarUrl
-        }
-        ... on Bot {
-          id
-          avatarUrl
-        }
-      }
+    totalCount
+    pageInfo {
+      hasNextPage
+      endCursor
     }
+    nodes {${REVIEW_NODE_FIELDS}    }
   }
   # ---- review threads: capped at 50, DRAINED on demand ---------------------------------
   #
@@ -602,6 +615,33 @@ export const PR_REVIEW_THREADS_PAGE_QUERY = /* GraphQL */ `
   }
 `;
 
+// The reviews continuation: same rules as the thread one above (REVIEWS ONLY, cursor required).
+export const PR_REVIEWS_PAGE_QUERY = /* GraphQL */ `
+  query PrReviewsPage(
+    $owner: String!
+    $name: String!
+    $number: Int!
+    $cursor: String!
+  ) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        reviews(first: 50, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {${REVIEW_NODE_FIELDS}          }
+        }
+      }
+    }
+    rateLimit {
+      remaining
+      resetAt
+      cost
+    }
+  }
+`;
+
 export const PR_DETAIL_THREADS_PAGE_QUERY = /* GraphQL */ `
   query PrDetailThreadsPage(
     $owner: String!
@@ -647,7 +687,8 @@ export interface GqlThreadPage<TNode> {
 export interface ThreadsPageResponse<TNode> {
   repository: {
     pullRequest: {
-      reviewThreads: GqlThreadPage<TNode>;
+      reviewThreads?: GqlThreadPage<TNode>;
+      reviews?: GqlThreadPage<TNode>;
     } | null;
   } | null;
   rateLimit?: { remaining: number; resetAt: string; cost: number } | null;
@@ -978,7 +1019,8 @@ export interface GqlPullRequest {
   reviewDismissals?: { nodes: Array<GqlReviewDismissedEvent | null> } | null;
   headCommit: { nodes: GqlHeadCommit[] };
   commits: { nodes: GqlCommitNode[] };
-  reviews: { nodes: GqlReview[] };
+  // The FIRST page; `drainReviews` appends the rest before persistPr reads it.
+  reviews: GqlThreadPage<GqlReview>;
   // `nodes` is the FIRST page; `totalCount`/`pageInfo` describe the rest of it and are both
   // optional so every hand-built fixture (and every tolerant-salvaged partial) still
   // typechecks. `sync/drain-review-threads.ts` appends the remaining pages into `nodes`

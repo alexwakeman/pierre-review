@@ -648,6 +648,12 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
           headSha: ownRun?.headSha ?? ownStand.markerHead ?? null,
         }
       : null;
+  // WHAT GITHUB HOLDS for the reader's newest run: posted as a Comment (their own PR — GitHub takes
+  // only a Comment from its author — or auto verdict off), it reads Comment, whatever the run decided.
+  const ownLatestPosted =
+    input.ownLatest != null ? input.ownPosted.find((p) => p.reviewId === input.ownLatest!.reviewId) : undefined;
+  const ownLatestOnGithub =
+    ownLatestPosted != null ? mine.find((r) => r.databaseId === ownLatestPosted.githubReviewId) : undefined;
   if (input.ownLatest != null || ownInForce != null) {
     reviewers.push({
       you: true,
@@ -658,7 +664,7 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
               you: true,
               poster: null,
               reviewId: input.ownLatest.reviewId,
-              verdict: input.ownLatest.verdict,
+              verdict: ownLatestOnGithub?.state === 'commented' ? 'COMMENT' : input.ownLatest.verdict,
               at: isoOf(input.ownLatest.at),
               headSha: input.ownLatest.headSha,
             }

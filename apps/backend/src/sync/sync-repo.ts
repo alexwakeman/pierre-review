@@ -14,7 +14,7 @@ import { gateBudget, noteBudget, noteLimited } from '../github/rate-budget.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/queries.js';
 import { ensureCommitFiles } from './commit-files.js';
-import { drainReviewThreads } from './drain-review-threads.js';
+import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
 import { syncBranchStatus } from './branch-status.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
 
@@ -366,8 +366,18 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
           log,
           shouldCancel: opts.shouldCancel,
         });
+        // The reviews tail too: standings, verdicts and My Turn read the NEWEST reviews.
+        const drainedReviews = await drainReviews(pr.reviews, {
+          owner,
+          name,
+          number: pr.number,
+          accountId,
+          token: opts.token,
+          log,
+          shouldCancel: opts.shouldCancel,
+        });
         graphqlMs += performance.now() - tDrain;
-        totalCost += drained.pages;
+        totalCost += drained.pages + drainedReviews.pages;
 
         const unresolved = pr.reviewThreads.nodes.filter(
           (t) => !t.isResolved && t.comments.nodes.length > 0,

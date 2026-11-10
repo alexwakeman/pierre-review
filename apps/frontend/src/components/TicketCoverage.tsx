@@ -8,7 +8,7 @@
 //   - one block per ticket the PR is on (`GET /api/prs/:id/ticket-reviews`), each with its own
 //     Check / Re-check (mutation key `['ticket-review-start', ident]`, shared with Open PRs);
 //   - a currency pill the SERVER computed ("Checked against 3 PRs", "web#412 pushed since"), and
-//     how long ago the shown run finished ("reviewed 2 hours ago");
+//     no "reviewed … ago" (when the shown run finished and its model are the heading's tooltip, never on the page);
 //   - criteria with status and attribution; ONE "Post N gaps to …" per PR the unmet items belong
 //     on, each posting its gaps as one collated comment;
 //   - SLIM where the story view holds the whole story (`slimStoryCheck`: a tracker ticket,
@@ -35,6 +35,7 @@ import { DocReferencesBlock } from './DocReferences.js';
 import { useMemo, type ReactNode } from 'react';
 import {
   TICKET_ALIGNMENT_LABEL,
+  aiRunLabel,
   type ClaudeFinding,
   type ClaudeReviewTicketEntry,
   type PrDetail,
@@ -42,6 +43,7 @@ import {
   type TicketReview,
 } from '@pierre-review/shared';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { dateTime } from '../lib/ui.js';
 import {
   useStartTicketReview,
   useTicketReviewById,
@@ -69,8 +71,6 @@ import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { REVIEW_CHIP } from '../lib/reviewStyles.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { ReviewedAgo } from './ReviewedAgo.js';
-import { AiRunLabel } from './AiRunLabel.js';
 import { TicketAutoCheckLine } from './TicketAutoCheckLine.js';
 import {
   CriterionRow,
@@ -203,7 +203,15 @@ function TicketBlock({
   return (
     <div aria-label={`Ticket ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h4 className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+        {/* No "reviewed … ago" and no model on the page (2026-11-10): both are the heading's tooltip. */}
+        <h4
+          className="flex min-w-0 flex-wrap items-baseline gap-x-2"
+          title={
+            shown?.completedAt != null
+              ? `Checked ${dateTime(shown.completedAt)}${shown.model != null && shown.model !== '' ? ` with ${aiRunLabel(shown.provider, shown.model)}` : ''}`
+              : undefined
+          }
+        >
           {/* Plain text: the PR's header links the ticket. No "Ticket" disclosure here (2026-11-10). */}
           {entry.ticketKey != null && (
             <span className="font-mono text-body font-semibold text-ui-ink">{entry.ticketKey}</span>
@@ -224,8 +232,6 @@ function TicketBlock({
             {comments.label}
           </span>
         )}
-        {shown != null && <ReviewedAgo at={shown.completedAt} />}
-        {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         <span className="ml-auto">
           {!running && (
             <AiRunGate kind="ticket_review">
@@ -320,7 +326,6 @@ function LegacyBlock({
       aside={
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
           <span className={`text-meta ${MUTED}`}>Checked on this PR only</span>
-          <ReviewedAgo at={legacy.finishedAt} />
         </span>
       }
     />

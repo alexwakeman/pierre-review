@@ -63,7 +63,9 @@ import { isLimited, noteBudget, noteLimited } from '../github/rate-budget.js';
 import {
   PR_DETAIL_THREADS_PAGE_QUERY,
   PR_REVIEW_THREADS_PAGE_QUERY,
+  PR_REVIEWS_PAGE_QUERY,
   type GqlDetailThread,
+  type GqlReview,
   type GqlReviewThread,
   type GqlThreadPage,
   type ThreadsPageResponse,
@@ -119,7 +121,7 @@ export async function drainReviewThreads(
   page: GqlThreadPage<GqlReviewThread>,
   opts: DrainOptions,
 ): Promise<ThreadDrainResult> {
-  return drain(page, PR_REVIEW_THREADS_PAGE_QUERY, opts);
+  return drain(page, PR_REVIEW_THREADS_PAGE_QUERY, opts, 'reviewThreads');
 }
 
 /** The hydration-shaped twin — same loop, text-only thread nodes. */
@@ -127,14 +129,32 @@ export async function drainDetailThreads(
   page: GqlThreadPage<GqlDetailThread>,
   opts: DrainOptions,
 ): Promise<ThreadDrainResult> {
-  return drain(page, PR_DETAIL_THREADS_PAGE_QUERY, opts);
+  return drain(page, PR_DETAIL_THREADS_PAGE_QUERY, opts, 'reviewThreads');
+}
+
+/**
+ * The same drain over the PR's REVIEWS. GitHub returns them oldest first too, so a PR past fifty
+ * reviews (a long back-and-forth plus bots) lost its NEWEST — a teammate's approval on the
+ * current head read as "commented" in the standings. Reviews upsert on node id and nothing prunes
+ * a missing one, so a partial drain is safe in the same way.
+ */
+export async function drainReviews(
+  page: GqlThreadPage<GqlReview> | null | undefined,
+  opts: DrainOptions,
+): Promise<ThreadDrainResult> {
+  // Absent on hand-built fixtures, nulled by a tolerant partial: nothing to continue.
+  if (page == null || !Array.isArray(page.nodes)) return NOTHING;
+  return drain(page, PR_REVIEWS_PAGE_QUERY, opts, 'reviews');
 }
 
 async function drain<TNode>(
   page: GqlThreadPage<TNode>,
   query: string,
   opts: DrainOptions,
+  connection: 'reviewThreads' | 'reviews',
 ): Promise<ThreadDrainResult> {
+  const what = connection === 'reviews' ? 'review(s)' : 'thread(s)';
+  const tag = connection === 'reviews' ? 'drainReviews' : 'drainReviewThreads';
   const { owner, name, number, accountId, token, log, shouldCancel } = opts;
 
   let cursor = nextCursor(page);
@@ -160,8 +180,8 @@ async function drain<TNode>(
   // for the walk itself.
   if (isLimited(accountId)) {
     log?.warn(
-      `drainReviewThreads ${owner}/${name}#${number}: rate-limited — keeping the first ` +
-        `${page.nodes.length} thread(s) of ${page.totalCount ?? '?'}`,
+      `${tag} ${owner}/${name}#${number}: rate-limited — keeping the first ` +
+        `${page.nodes.length} ${what} of ${page.totalCount ?? '?'}`,
     );
     return finish(cursor);
   }
@@ -172,9 +192,9 @@ async function drain<TNode>(
     if (shouldCancel?.()) return finish(cursor);
     if (pages >= MAX_CONTINUATION_PAGES) {
       log?.warn(
-        `drainReviewThreads ${owner}/${name}#${number}: stopped at the ` +
+        `${tag} ${owner}/${name}#${number}: stopped at the ` +
           `${MAX_CONTINUATION_PAGES}-page cap with ${page.nodes.length} of ` +
-          `${page.totalCount ?? '?'} thread(s) — investigate before raising this`,
+          `${page.totalCount ?? '?'} ${what} — investigate before raising this`,
       );
       return finish(cursor);
     }
@@ -187,7 +207,7 @@ async function drain<TNode>(
         { owner, name, number, cursor },
         (errors) => {
           log?.warn(
-            `drainReviewThreads ${owner}/${name}#${number}: partial GraphQL — keeping what ` +
+            `${tag} ${owner}/${name}#${number}: partial GraphQL — keeping what ` +
               `arrived${graphqlChecksHint(errors)}. ${summarizeGraphqlErrors(errors)}`,
           );
         },
@@ -199,8 +219,8 @@ async function drain<TNode>(
       const rl = isRateLimitError(err);
       if (rl.limited) noteLimited(accountId, rl.resumeAt);
       log?.warn(
-        `drainReviewThreads ${owner}/${name}#${number} failed after ${pages} page(s); ` +
-          `keeping ${page.nodes.length} thread(s). ` +
+        `${tag} ${owner}/${name}#${number} failed after ${pages} page(s); ` +
+          `keeping ${page.nodes.length} ${what}. ` +
           `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
       );
       return finish(cursor);
@@ -215,7 +235,7 @@ async function drain<TNode>(
       });
     }
 
-    const more = resp.repository?.pullRequest?.reviewThreads;
+    const more = resp.repository?.pullRequest?.[connection];
     // The PR went away mid-drain (deleted, access lost), or a partial nulled the node. The
     // first page is still a valid answer; stop rather than retry into the same wall.
     if (!more) return finish(cursor);
@@ -250,9 +270,9 @@ async function drain<TNode>(
     }
     if (dropped > 0) {
       log?.warn(
-        `drainReviewThreads ${owner}/${name}#${number}: dropped ${dropped} null thread node(s) ` +
+        `${tag} ${owner}/${name}#${number}: dropped ${dropped} null node(s) ` +
           `from a partial continuation — keeping ${page.nodes.length} of ` +
-          `${page.totalCount ?? '?'} thread(s)`,
+          `${page.totalCount ?? '?'} ${what}`,
       );
     }
 
@@ -262,7 +282,7 @@ async function drain<TNode>(
     // reassigning — comparing after would make every healthy advance look like a stall.
     const stalled = next !== null && next === cursor;
     if (stalled) {
-      log?.warn(`drainReviewThreads ${owner}/${name}#${number}: cursor did not advance — stopping`);
+      log?.warn(`${tag} ${owner}/${name}#${number}: cursor did not advance — stopping`);
       return finish(cursor);
     }
     cursor = next;
@@ -270,7 +290,7 @@ async function drain<TNode>(
 
   if (added > 0) {
     log?.info(
-      `drainReviewThreads ${owner}/${name}#${number}: +${added} thread(s) over ${pages} ` +
+      `${tag} ${owner}/${name}#${number}: +${added} ${what} over ${pages} ` +
         `continuation page(s) (${page.nodes.length} total)`,
     );
   }
