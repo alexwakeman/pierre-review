@@ -1,14 +1,12 @@
-import type { ReactNode } from 'react';
 import type { ClaudeReviewVerdict, ClaudeTeammatePoster, ClaudeTeammateReview } from '@pierre-review/shared';
-import { relativeTime, safeExternalUrl } from '../lib/ui.js';
+import { safeExternalUrl } from '../lib/ui.js';
 import { VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
-import { REVIEW_META } from '../lib/reviewStyles.js';
-import { teammateReviewTitle } from '../lib/teammateReviews.js';
+import { teammateName } from '../lib/teammateReviews.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { Monogram } from './CommentCard.js';
 import { ExternalLinkIcon } from './Icons.js';
 import { Markdown } from './Markdown.js';
-import { RailPiece, useRailWide } from './RailLayout.js';
+import { useRailWide } from './RailLayout.js';
 import { ReviewSection } from './ReviewSection.js';
 import { VerdictIcon } from './VerdictIcon.js';
 
@@ -81,8 +79,9 @@ export function TeammateChip({
 }
 
 /**
- * THE SUMMARY WHEN A TEAMMATE'S REVIEW IS THE NEWEST: "Robin's review", its verdict, posted on
- * GitHub, its summary. The reader's own older review stays in the history list.
+ * THE SUMMARY WHEN A TEAMMATE'S REVIEW IS THE NEWEST: "Summary", its verdict (unless "Where this PR
+ * stands" names it), a link to it on GitHub, and its summary. No "Robin's review" title and no "posted
+ * … ago" (2026-11-10): who and when are in "Where this PR stands" and "Reviews on this PR".
  */
 export function TeammateLeadSection({
   review: r,
@@ -93,54 +92,32 @@ export function TeammateLeadSection({
   showVerdict?: boolean;
 }): JSX.Element {
   const inRail = useRailWide('review');
-  const title = teammateReviewTitle(r);
   const url = safeExternalUrl(r.githubUrl);
-  const posted: ReactNode = (
-    <>
-      <span title={new Date(r.postedAt).toLocaleString()}>Posted on GitHub {relativeTime(r.postedAt)}</span>
-      {url && (
-        <a href={url} target="_blank" rel="noreferrer" className={LINK}>
-          Open
-          <ExternalLinkIcon size={11} aria-hidden />
-        </a>
-      )}
-    </>
-  );
   return (
-    <>
-      <RailPiece slot="status">
-        <div className="space-y-1.5" data-testid="review-rail-status">
-          <p className="text-meta text-ui-mute">{title}</p>
-          {showVerdict && r.verdict != null && (
-            <div className="flex flex-wrap items-center gap-2">
-              <TeammateVerdict verdict={r.verdict} />
-            </div>
+    <ReviewSection
+      title="Summary"
+      section="review"
+      pills={
+        <>
+          {showVerdict && r.verdict != null && <TeammateVerdict verdict={r.verdict} />}
+          {url && (
+            <a href={url} target="_blank" rel="noreferrer" className={LINK} title={`${teammateName(r.poster)}’s review on GitHub`}>
+              Open on GitHub
+              <ExternalLinkIcon size={11} aria-hidden />
+            </a>
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">{posted}</div>
-        </div>
-      </RailPiece>
-      <ReviewSection
-        title={title}
-        section="review"
-        pills={
-          inRail ? null : (
-            <>
-              {showVerdict && r.verdict != null && <TeammateVerdict verdict={r.verdict} />}
-              <span className={`flex flex-wrap items-center gap-x-2 ${REVIEW_META}`}>{posted}</span>
-            </>
-          )
-        }
-      >
-        <div data-testid="teammate-lead">
-          {r.summary.trim() !== '' ? (
-            <div className={inRail ? 'reading-measure' : undefined}>
-              <Markdown prRefs>{r.summary}</Markdown>
-            </div>
-          ) : (
-            <div className="text-meta text-ui-mute">No summary.</div>
-          )}
-        </div>
-      </ReviewSection>
-    </>
+        </>
+      }
+    >
+      <div data-testid="teammate-lead">
+        {r.summary.trim() !== '' ? (
+          <div className={inRail ? 'reading-measure' : undefined}>
+            <Markdown prRefs>{r.summary}</Markdown>
+          </div>
+        ) : (
+          <div className="text-meta text-ui-mute">No summary.</div>
+        )}
+      </div>
+    </ReviewSection>
   );
 }

@@ -167,7 +167,7 @@ export default function Teams(): JSX.Element {
             It never holds the commit either. A teammate’s {SITE_NAME} picks it up first, follows up
             on the points yours raised, and can approve.
           </p>
-          <p>“Where this PR stands” shows each reviewer’s latest verdict, and what still holds on GitHub.</p>
+          <p>“Where this PR stands” shows the verdict GitHub holds for each reviewer.</p>
         </div>
         <Shot className="tm-right">
           <TeamStandingMock />

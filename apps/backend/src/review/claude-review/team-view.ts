@@ -562,6 +562,9 @@ export interface StandingGithubReview {
   markerVerdict?: ClaudeReviewVerdict | null;
   dismissedAt?: number | null;
   dismissalMessage?: string | null;
+  // A Limn review only: the commit its marker says it reviewed (`h=`); null / absent = unknown. A
+  // teammate's replies pass is never a review row here, so this is the ONLY place its commit is read.
+  markerHead?: string | null;
 }
 
 export interface StandingsInput {
@@ -613,6 +616,7 @@ export function withdrawnVerdict(reviews: readonly StandingGithubReview[]): Clau
     return {
       verdict: v ?? null,
       postedAt: isoOf(r.submittedAt),
+      headSha: r.markerHead ?? null,
       at: r.dismissedAt != null ? isoOf(r.dismissedAt) : null,
       byLimn: r.dismissalMessage != null ? isLimnDismissalMessage(r.dismissalMessage) : null,
       reason: dismissalReasonText(r.dismissalMessage),
@@ -641,7 +645,7 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
           reviewId: ownRun?.reviewId ?? null,
           verdict: decisive(ownStand),
           at: isoOf(ownStand.submittedAt),
-          headSha: ownRun?.headSha ?? null,
+          headSha: ownRun?.headSha ?? ownStand.markerHead ?? null,
         }
       : null;
   if (input.ownLatest != null || ownInForce != null) {
@@ -690,7 +694,8 @@ export function teamStandings(input: StandingsInput): ClaudeReviewStandings {
               reviewId: row?.reviewId ?? null,
               verdict: decisive(stand),
               at: isoOf(stand.submittedAt),
-              headSha: row?.headSha ?? null,
+              // A replies pass (no imported row): the commit from its marker.
+              headSha: row?.headSha ?? stand.markerHead ?? null,
             }
           : null,
       dismissed: newestLimn(theirs)?.state === 'dismissed',
@@ -815,8 +820,9 @@ export async function loadTeamStandingsForPrs(
             state: reviews.state,
             submittedAt: reviews.submittedAt,
             limn: sql<number>`coalesce(${reviews.body}, '') like '%pierre:claude-review%'`,
-            // A dismissed review's body only (its marker names the verdict it posted): the rest stay unread.
-            dismissedBody: sql<string | null>`case when ${reviews.state} = 'dismissed' then ${reviews.body} end`,
+            // A Limn review's body only (its marker names the commit, and for a dismissed one the verdict
+            // it posted): the rest stay unread.
+            limnBody: sql<string | null>`case when coalesce(${reviews.body}, '') like '%pierre:claude-review%' then ${reviews.body} end`,
             dismissedAt: reviews.dismissedAt,
             dismissalMessage: reviews.dismissalMessage,
           })
@@ -849,7 +855,8 @@ export async function loadTeamStandingsForPrs(
             state: g.state,
             submittedAt: g.submittedAt.getTime(),
             limn: !!g.limn,
-            ...dismissalFacts(g),
+            markerHead: g.limnBody != null ? (parseLimnReviewMarker(g.limnBody)?.headSha ?? null) : null,
+            ...dismissalFacts({ ...g, dismissedBody: g.limnBody }),
           })),
       }),
     );

@@ -31,9 +31,27 @@ export function pairModelsLabel(
   return halves.map((h) => aiRunLabel(h.provider, h.model, h.effort)).join(' + ');
 }
 
-/** The one line under a pair's header when a half did not finish: "Codex didn't finish: <reason>". */
+/**
+ * The one line under a pair's header when a half did not finish: "Codex didn't finish: you've hit your
+ * usage limit". The stored reason may already lead with the same words ("Codex could not finish: You've
+ * hit …", the runner's own sentence): that lead is dropped, so the line says it ONCE.
+ */
 export function pairHalfFailedLine(failed: { provider: AiProviderId; reason: string }): string {
-  return `${aiProviderName(failed.provider)} didn't finish: ${failed.reason}`;
+  const name = aiProviderName(failed.provider);
+  return `${name} didn't finish: ${halfFailureReason(name, failed.reason)}`;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Sentence-opening words that read lower case after "didn't finish:"; a name ("Codex", "GitHub") never.
+const PLAIN_OPENERS = /^(?:You|Your|The|This|That|It|There|A|An|No|Not)\b/;
+
+/** A half's failure reason without a lead that repeats "<Name> could not / didn't finish". */
+export function halfFailureReason(name: string, reason: string): string {
+  let r = reason.trim();
+  const lead = new RegExp(`^${escapeRe(name)}\\s+(?:could not|couldn['’]t|did not|didn['’]t)\\s+finish\\s*[:.,-]?\\s*`, 'i');
+  r = r.replace(lead, '');
+  if (PLAIN_OPENERS.test(r)) r = r.charAt(0).toLowerCase() + r.slice(1);
+  return r === '' ? 'no reason given' : r;
 }
 
 /**

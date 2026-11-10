@@ -2,7 +2,7 @@
 // docs/CLAUDE-REVIEW.md § Teammates' reviews → The tab's team layout). The server folds once
 // (`ClaudeReviewResponse.teamView`: `standings`, `allFindings`); these are the words and the rules the
 // tab applies to it, so they can be tested:
-//   • `standingRows`     — "Where this PR stands": one line per Limn reviewer, newest first;
+//   • `standingRows`     — "Where this PR stands": one row per Limn reviewer, what GitHub holds;
 //   • `splitPointsByState` / `raisedByLabel` / `closedReason` — findings by their state now, across
 //     every review, each naming who raised it;
 //   • `reviewsOnPr`      — "Reviews on this PR": the reader's runs and teammates' posted reviews;
@@ -24,7 +24,6 @@ import {
   type ClaudeReviewStatus,
   type ClaudeReviewSummary,
   type ClaudeReviewVerdict,
-  type ClaudeReviewWithdrawal,
   type ClaudeTeamAuthor,
   type ClaudeTeamDecision,
   type ClaudeTeammatePoster,
@@ -32,7 +31,7 @@ import {
   type ClaudeTeamPoint,
 } from '@pierre-review/shared';
 import { withoutPraise } from './claudeReviewFollowUp.js';
-import { CLAUDE_VERDICT_LABEL, shortDay } from './claudeReviewColumn.js';
+import { CLAUDE_VERDICT_LABEL, shortDay, shortDayTime } from './claudeReviewColumn.js';
 import { REPLIES_CHECK_LABEL as REPLIES_WORD } from './repliesCheck.js';
 import { joinNames, teammateName } from './teammateReviews.js';
 
@@ -66,69 +65,72 @@ export interface StandingRow {
   you: boolean;
   poster: ClaudeTeammatePoster | null;
   name: string;
-  // The newest review's verdict word ("Request changes"); "Reviewed" when it had none.
+  // The verdict word as it stands on GitHub ("Approve", "Request changes", "Approve (withdrawn)"); the
+  // newest review's ("Comment") when GitHub holds no verdict of theirs; "Reviewed" when it had none.
   verdict: string;
   verdictKind: ClaudeReviewVerdict | null;
+  // Day and time, 24-hour clock: "9 Nov 14:04".
   day: string;
   sha: string | null;
   at: string | null;
-  // What GitHub still holds for them: "still blocking on GitHub", "Request changes from 3 Nov still
-  // blocking on GitHub", "approval stands on GitHub", "approval from 9 Nov withdrawn: 3 warnings found
-  // at 951c4aa", "dismissed on GitHub". null = nothing to say.
-  note: string | null;
   // Their Request changes is still in force (the strictest verdict): the row is flagged.
   blocking: boolean;
 }
 
+/** The moment a row reads: GitHub's verdict in force, else the withdrawn one, else the newest review. */
+function standingShown(s: ClaudeReviewStanding): { verdict: ClaudeReviewVerdict | null; at: string; headSha: string | null } | null {
+  const force = s.inForce;
+  const latest = s.latest;
+  if (force != null) {
+    // The same review as the newest one: its commit is known there too.
+    const same = latest != null && force.reviewId != null && force.reviewId === latest.reviewId;
+    return { verdict: force.verdict, at: force.at, headSha: force.headSha ?? (same ? latest.headSha : null) };
+  }
+  if (s.withdrawn != null) return { verdict: s.withdrawn.verdict, at: s.withdrawn.postedAt, headSha: s.withdrawn.headSha ?? null };
+  return latest != null ? { verdict: latest.verdict, at: latest.at, headSha: latest.headSha } : null;
+}
+
 function standingAt(s: ClaudeReviewStanding): string | null {
-  return s.latest?.at ?? s.inForce?.at ?? null;
+  return standingShown(s)?.at ?? null;
 }
 
 /** "withdrawn" when Limn took it back, "dismissed" when a person did or it is not known. */
 const withdrawnWord = (byLimn: boolean | null): string => (byLimn === true ? 'withdrawn' : 'dismissed');
 
-/** A verdict no longer in force, in one phrase: "approval from 9 Nov withdrawn: 3 warnings found at
- *  951c4aa", "request for changes from 3 Nov dismissed". */
-export function withdrawnNote(w: ClaudeReviewWithdrawal): string {
-  const what = w.verdict === 'APPROVE' ? 'approval' : w.verdict === 'REQUEST_CHANGES' ? 'request for changes' : 'verdict';
-  const head = `${what} from ${shortDay(w.postedAt)} ${withdrawnWord(w.byLimn)}`;
-  return w.reason != null ? `${head}: ${w.reason}` : head;
-}
-
-/** One reviewer's line. */
+/**
+ * ONE REVIEWER'S ROW — WHAT GITHUB HOLDS FOR THEM. GitHub keeps an Approve or a Request changes in
+ * force until it is dismissed or replaced by the same person's next decisive review; a Comment never
+ * replaces it. So the row reads the verdict IN FORCE (a teammate's replies-pass Approve, which no
+ * imported review row carries, included); a dismissed one reads "Approve (withdrawn)"; only with
+ * neither does it read their newest review. No explanatory note after it (2026-11-10).
+ */
 export function standingRow(s: ClaudeReviewStanding): StandingRow {
-  const shown = s.latest ?? s.inForce;
+  const shown = standingShown(s);
   const force = s.inForce;
-  const sameReview = force != null && (s.latest == null || (force.reviewId != null && force.reviewId === s.latest.reviewId));
-  let note: string | null = null;
-  if (force != null) {
-    if (force.verdict === 'REQUEST_CHANGES') {
-      note = sameReview ? 'still blocking on GitHub' : `Request changes from ${shortDay(force.at)} still blocking on GitHub`;
-    } else {
-      note = sameReview ? 'approval stands on GitHub' : `Approval from ${shortDay(force.at)} stands on GitHub`;
-    }
-  } else if (s.withdrawn != null) {
-    note = withdrawnNote(s.withdrawn);
-  } else if (s.dismissed) {
-    note = 'dismissed on GitHub';
-  }
   const verdictKind = shown?.verdict ?? null;
+  let verdict: string;
+  if (force == null && s.withdrawn != null) {
+    verdict = reviewOutcomeWord({ verdict: s.withdrawn.verdict, withdrawn: { byLimn: s.withdrawn.byLimn } }) ?? 'Withdrawn';
+  } else if (force == null && s.dismissed) {
+    verdict = reviewOutcomeWord({ verdict: verdictKind, withdrawn: { byLimn: null } }) ?? 'Dismissed';
+  } else {
+    verdict = verdictKind != null ? CLAUDE_VERDICT_LABEL[verdictKind] : 'Reviewed';
+  }
   return {
     key: personKey(s),
     you: s.you,
     poster: s.poster,
     name: authorName(s),
-    verdict: verdictKind != null ? CLAUDE_VERDICT_LABEL[verdictKind] : 'Reviewed',
+    verdict,
     verdictKind,
-    day: shown != null ? shortDay(shown.at) : '',
+    day: shown != null ? shortDayTime(shown.at) : '',
     sha: shown?.headSha != null && shown.headSha !== '' ? shown.headSha.slice(0, 7) : null,
     at: shown?.at ?? null,
-    note,
     blocking: force?.verdict === 'REQUEST_CHANGES',
   };
 }
 
-/** "Where this PR stands": one line per Limn reviewer, NEWEST REVIEW FIRST. [] = none. */
+/** "Where this PR stands": one line per Limn reviewer, NEWEST FIRST. [] = none. */
 export function standingRows(standings: ClaudeReviewStandings | null | undefined): StandingRow[] {
   const reviewers = standings?.reviewers ?? [];
   return reviewers
@@ -138,9 +140,9 @@ export function standingRows(standings: ClaudeReviewStandings | null | undefined
     .map(({ s }) => standingRow(s));
 }
 
-/** The line as text: "You · Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub". */
+/** The line as text (the row's hover title): "Robin · Approve · 9 Nov 14:04 · abd62e3". */
 export function standingLine(r: StandingRow): string {
-  return [r.name, r.verdict, r.day, r.sha, r.note].filter((x): x is string => x != null && x !== '').join(' · ');
+  return [r.name, r.verdict, r.day, r.sha].filter((x): x is string => x != null && x !== '').join(' · ');
 }
 
 // ---- FINDINGS BY STATE ----
@@ -550,13 +552,13 @@ const STATUS_WORD: Record<ClaudeReviewStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-/** One row's cells, each its own column in "Reviews on this PR": "Request changes" · "3 Nov" ·
+/** One row's cells, each its own column in "Reviews on this PR": "Request changes" · "3 Nov 14:04" ·
  *  "8a8ec14" · "Claude + Codex". A run in flight or ended without a verdict reads its status. Who
  *  started it (auto or by hand), its depth and its cost are not shown (2026-11-10). */
 export function reviewListCells(item: ReviewListItem): { outcome: string; day: string; sha: string; what: string } {
   return {
     outcome: (item.status !== 'succeeded' ? STATUS_WORD[item.status] : reviewOutcomeWord(item)) ?? '',
-    day: shortDay(item.at),
+    day: shortDayTime(item.at),
     sha: item.sha ?? '',
     what: item.what ?? '',
   };

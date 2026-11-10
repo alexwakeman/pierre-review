@@ -43,8 +43,8 @@ describe('the replies pass, in words', () => {
     // No "Check replies" button (2026-11-10): the pass starts by itself; the line keeps Cancel.
     expect(src('RepliesCheckLine.tsx')).not.toMatch(/AiRunGate|start\.mutate|checkRepliesButtonText/);
     expect(src('RepliesCheckLine.tsx')).toMatch(/Cancel/);
-    // A cover pass is labelled by whose findings it checked.
-    expect(src('ClaudeReviewTab.tsx')).toMatch(/repliesRunLabel\(review\)/);
+    // No run-name label in the summary's header (2026-11-10): a pass is named in Reviews on this PR.
+    expect(src('ClaudeReviewTab.tsx')).not.toMatch(/repliesRunLabel\(review\)/);
   });
 
   it('labels a cover pass by the provider whose findings it checked', () => {

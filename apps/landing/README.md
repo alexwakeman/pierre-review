@@ -74,7 +74,7 @@ are the app's own; never invent a feature for a mock.
 | `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
 | `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
 | `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Limn" label, "passed" / "running"), the `limn/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
-| `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingLine`), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`) |
+| `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingRow`, the grid of "Reviews on this PR"), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`, `shortDayTime`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
 | `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |

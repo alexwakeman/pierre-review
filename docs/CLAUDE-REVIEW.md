@@ -724,13 +724,15 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   consolidated findings (source on the severity lead, as above), the reader's draft (on the latest
   half) and verdict, and stamps each half's own findings; `409 PairIncomplete` while the pair runs.
   "Post both" / "Preview both" are gone; `…/post-pair` is kept as the same post.
-- **On screen** (`ClaudeReviewTab.tsx` `ClaudesReview`): ONE review — the header "Claude + Codex
-  review" (`PAIR_RUN_LABEL`), its secondary line both models (`pairModelsLabel`) and each half's cost in
-  its own provider's terms (`useRunCostText`: US$ on a key, a share of the week on a subscription,
-  never summed); one summary and verdict; ONE findings list ordered as any review, each finding with a
+- **On screen** (`ClaudeReviewTab.tsx` `ClaudesReview`): ONE review under the header "Summary" (no
+  run name since 2026-11-10; the reviews list names it "Claude + Codex", `PAIR_RUN_LABEL`); its ⓘ holds
+  both models (`pairModelsLabel`) and each half's cost in its own provider's terms (`useRunCostText`: US$
+  on a key, a share of the week on a subscription, never summed); one summary and verdict; ONE findings list ordered as any review, each finding with a
   quiet source chip ("Claude", "Codex", "Claude + Codex" — the lens chip's neutral 11px style, no
   colour per provider); a half that did not finish is one line under the header ("Codex didn't
-  finish: usage limit reached", `pairHalfFailedLine`). How it was merged sits behind the header's ⓘ
+  finish: you've hit your usage limit", `pairHalfFailedLine`). ⚠ The stored reason may already lead
+  with the runner's own "Codex could not finish: …" (`execFailure`): `halfFailureReason` drops that
+  lead so the line says it ONCE (PR 221272 read "Codex didn't finish: Codex could not finish: You’ve…"). How it was merged sits behind the header's ⓘ
   only. Reviews on this PR lists the pair as ONE row (§ The review tab's history). The progress
   line names the step: "Claude and Codex reviewing…" while both run (`ClaudeReviewStatusResponse.pair.both`),
   then the one still running ("Codex reviewing…"), then "Merging the two reviews…" (`pairRunningLabel`,
@@ -2931,7 +2933,8 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
 - **THE AUTHOR'S SIDE** (`db/teammate-verdict-wait.ts`). On the reader's own open PR: their posted
   review at the head, no teammate's Limn review there, AND a teammate's Limn AUTO review seen in the
   same workspace within `TEAMMATE_AUTO_SEEN_MS` (14 days). Then `ClaudeReviewResponse.teammateVerdictWait`
-  and `WaitingOnOthersCard.limnVerdictWait` ("Waiting for a teammate’s Limn to review"). Without that
+  and `WaitingOnOthersCard.limnVerdictWait` ("Waiting for a teammate’s Limn to review" — on the Pending
+  "Waiting on others" row only; the AI Review tab no longer prints it, 2026-11-10). Without that
   evidence it says nothing: Limn cannot read a teammate's settings, so "no teammate has auto review
   on" is not knowable.
 
@@ -3059,13 +3062,13 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   ⇒ the row goes), deleted by a Clear, and ⚠ deleted when this machine's own claim finds the head free
   (or its own) — or a stale "is reviewing" line would sit beside this machine's review for good. The GET serves the rows at the synced head as
   `ClaudeReviewResponse.teamClaimTeammates` (the name from the synced `users` table); the tab
-  (`TeamClaimLine`, `teammateReviewLine`) says "Robin Dunn reviewed this commit with Claude · no
-  comments" ("· 4 comments"; "kept in Limn" reads "not posted on GitHub") or "Robin Dunn is reviewing
-  this commit with Claude" — after a reload and after a restart. Both delete paths and the erasure
+  (`TeamClaimLine`, `teammateReviewLine`) says only "Robin Dunn is reviewing this commit with Claude"
+  — after a reload and after a restart. A FINISHED teammate review ("… reviewed this commit with
+  Claude · approved") is not printed (2026-11-10): Where this PR stands holds their verdict. Both delete paths and the erasure
   delete its rows.
 - ⚠ **A SKIP IS NOT A FAILURE AND WRITES NO ROW** — no retry count, no failure, no daily-cap use. It is
   remembered IN MEMORY per PR (`teamClaimSkipFor`), shown on the AI Review tab ("Auto review skipped:
-  being reviewed by @bob") and the Open PRs panel ("Being reviewed by @bob",
+  being reviewed by @bob"; the "already reviewed by" form is not shown there since 2026-11-10) and the Open PRs panel ("Being reviewed by @bob",
   `ClaudeReviewStatesResponse.teamClaimSkips`). The sweeper holds such a PR (no lane place) until the
   holder's lease ends + 30 s ("reviewing") or 30 min ("reviewed"), unless the synced head moved; a
   reader's press reads GitHub afresh. A restart forgets it and re-reads once.
@@ -3825,12 +3828,17 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 
 - **The tab's team layout** (2026-11-04; SPA only, `lib/teamReview.ts` + `components/TeamReviewLayout.tsx`;
   docs/FRONTEND.md § The AI Review tab → Team layout). On NOW (never on a past review):
-  - **Where this PR stands** (`standingRows` over `teamView.standings`): one line per Limn reviewer,
-    newest review first — "You · Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub",
-    "Robin · Comment · 4 Nov · 1c4bd65". An older block under a newer Comment of the same person reads
-    "Request changes from 3 Nov still blocking on GitHub"; an approval in force "approval stands on
-    GitHub"; a dismissed review "dismissed on GitHub". A blocking line is flagged. It replaces the
-    single verdict: the summary and the rail status show none while it is on screen.
+  - **Where this PR stands** (`standingRows` over `teamView.standings`): one row per Limn reviewer,
+    newest first, in the same columns as Reviews on this PR — "You · Request changes · 3 Nov 10:00 ·
+    8a8ec14", "Robin · Approve · 9 Nov 14:04 · abd62e3". ⚠ The row reads WHAT GITHUB HOLDS: the verdict
+    in force (`inForce`) when there is one, even under a newer Comment of the same person; a dismissed
+    one "Approve (withdrawn)"; else the newest review. PR 221269 (2026-11-10): robin-dunn's Limn
+    commented, then its replies pass APPROVED; a replies pass is never imported as a teammate row, so
+    `latest` stayed the Comment and the row read "Comment" while GitHub held an approval. The loader
+    now reads the commit of a Limn review from its marker (`StandingGithubReview.markerHead`,
+    `inForce.headSha`, `ClaudeReviewWithdrawal.headSha`). No note after the verdict (2026-11-10). A
+    blocking row is flagged. It replaces the single verdict: the summary shows none while it is on
+    screen.
   - **Findings by their state now, across every review** (`teamFindingRows` over
     `teamView.allFindings`): "Open" and a collapsed "Resolved or addressed (n)" whose rows say why
     (`closedReason`: "Resolved on GitHub", "Robin’s review found it addressed · 4 Nov"). ⚠ "Resolved
@@ -3840,7 +3848,8 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     raising review was a Claude + Codex pair ("You · Codex", "You · Claude + Codex"). EVERY ROW IS THE
     READER'S OWN FINDING CARD (docs/FRONTEND.md § Team layout). Only the reader's own findings of the
     latest run keep Post / Reword / Ignore; every other row keeps Copy, and a teammate's open point also
-    "Post reminder" (§ A reminder of a teammate's finding).
+    "Post reminder" (§ A reminder of a teammate's finding) — ⚠ never on the reader's OWN PR, where no
+    card offers a reminder (2026-11-10).
     An ignored point is left out unless it is a latest-run finding (its card shows it ignored).
   - **Reviews on this PR** (§ The review tab's history).
 - **One review** (`review/claude-review/team-view.ts`: `foldTeamReview`, pure; `loadTeamReviewView`
@@ -4014,9 +4023,10 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
   changes, or a dismissed one — when it was DISMISSED, even after a later Comment became their newest
   (`dismissed` stays "the newest was dismissed"). Its verdict comes from the dismissed body's marker
   `d=` (never the GitHub state, never guessed: no `d=` ⇒ null); its time, who and reason from the
-  synced ReviewDismissedEvent (`reviews.dismissed_*`). → `ClaudeReviewStanding.withdrawn`; the tab's
-  row note "approval from 9 Nov withdrawn: 3 warnings found at 951c4aa" ("dismissed" when a person
-  did it or it is unknown; lib/teamReview.ts `withdrawnNote`). ⚠ Limn reviews only: a person's own
+  synced ReviewDismissedEvent (`reviews.dismissed_*`); its commit from the marker's `h=`. →
+  `ClaudeReviewStanding.withdrawn`; the tab's row reads "Approve (withdrawn)" ("dismissed" when a person
+  did it or it is unknown; lib/teamReview.ts `standingRow` → `reviewOutcomeWord`; the reason is on
+  GitHub, no note on the row since 2026-11-10). ⚠ Limn reviews only: a person's own
   dismissed review is never read as Limn's.
 - **DECISIONS NO ROW SHOWS** (`teamDecisions` / `loadTeamDecisions` → `teamView.decisions`): every
   synced Limn review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /

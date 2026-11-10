@@ -81,18 +81,24 @@ describe('the AI Review tab wide layout', () => {
     expect(tab).toMatch(/<RailLayout config=\{REVIEW_RAIL\} oneColumn=\{oneColumn\}>/);
     expect(read('components/Ticket/StoryLayout.tsx')).toMatch(/<RailLayout config=\{embedded \? STORY_RAIL_EMBEDDED : STORY_RAIL\} oneColumn=\{oneColumn\}>/);
   });
-  it('actions and post render in place when narrow; status and counts are rail-only; no section nav', () => {
+  it('actions and post render in place when narrow; no run-name status block, no "In this review" counts; no section nav', () => {
     expect(tab).toMatch(/<RailPiece slot="actions" inline>/);
     expect(tab).toMatch(/<RailPiece slot="run" inline>/);
     expect(tab).toMatch(/<RailPiece slot="post" inline>/);
-    expect(tab).toMatch(/<RailPiece slot="status">/);
-    expect(tab).toMatch(/<RailPiece slot="counts">/);
+    // The rail's status slot holds the standings only (2026-11-10): no "Claude + Codex review / On
+    // latest commit / reviewed … ago" block, no "In this review" counts.
+    expect(tab).toMatch(/<RailPiece slot="status" inline>/);
+    expect(tab).not.toMatch(/<RailPiece slot="status">/);
+    expect(tab).not.toMatch(/<RailPiece slot="counts">/);
+    expect(tab).not.toMatch(/In this review/);
+    expect(tab).not.toMatch(/ReviewRailStatus|ReviewedAgo/);
+    expect(read('components/TeammateReviews.tsx')).not.toMatch(/<RailPiece|relativeTime/);
     expect(tab).not.toMatch(/<RailPiece slot="nav">/);
     expect(tab).not.toMatch(/RailSectionNav/);
   });
   it('the rail sticks; it names no commit or model, and "Also read" is gone', () => {
     expect(tab).toMatch(/sticky: true,/);
-    expect(tab).toMatch(/<CurrencyPill currency=\{currency\} showSha=\{false\} \/>/);
+    expect(tab).not.toMatch(/showSha=\{false\}/);
     expect(tab).not.toMatch(/meta=\{metaLine/);
     expect(tab).not.toMatch(/Also read/);
     expect(tab).toMatch(/reviewCountLine\(data\?\.teamView\?\.reviewCount\)/);

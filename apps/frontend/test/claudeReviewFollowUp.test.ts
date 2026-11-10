@@ -454,13 +454,13 @@ describe('source guards', () => {
         'Review threads',
         'Reviews and actions',
         'Run a review',
+        'Summary',
       ].sort(),
     );
-    // The run's own section names the provider that made it ("Claude's review" / "Codex's review"),
-    // or "Claude + Codex review" for a pair's one review (`reviewByName`).
-    expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
-      /<ReviewSection\s+title=\{storedReview\.pair != null \? `\$\{by\} review` : `\$\{by\}'s review`\}/,
-    );
+    // The run's own section is "Summary": no run name ("Codex's review", "Claude + Codex review",
+    // "Robin's review") anywhere on the tab (2026-11-10).
+    expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/`\$\{by\} review`|`\$\{by\}'s review`/);
+    expect(code(read('components/TeammateReviews.tsx'))).not.toMatch(/teammateReviewTitle/);
     // ONE story section: Story check (TicketCoverage.tsx). The old "User stories" one is gone.
     expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/'User stor(y|ies)'/);
     expect(code(read('components/TicketCoverage.tsx'))).toMatch(/<ReviewSection\s+title="Story check"/);

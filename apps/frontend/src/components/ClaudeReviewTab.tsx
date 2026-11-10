@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMe } from '../hooks/useTriage.js';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ClaudeFollowUpItem,
@@ -123,12 +124,10 @@ import {
 import { VerdictIcon } from './VerdictIcon.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
-import { ReviewedAgo } from './ReviewedAgo.js';
 import { EarlierFindingNote, FollowUpRow, SettledEarlierRow } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { RepliesCheckLine } from './RepliesCheckLine.js';
-import { repliesRunLabel } from '../lib/repliesCheck.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import {
   AUTO_REVIEW_WAITING_LABEL,
@@ -136,7 +135,6 @@ import {
   autoReviewWhyLine,
   autoSweepResultLine,
   failedAutoReviewLine,
-  TEAMMATE_VERDICT_WAIT_LINE,
 } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
@@ -145,7 +143,7 @@ import { alsoRaisedByFinding, alsoRaisedLabel, followUpItemWritable, leadingTeam
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
-import { RailLayout, RailPiece, useRailWide, useScrollToRailSection, type RailLayoutConfig } from './RailLayout.js';
+import { RailLayout, RailPiece, useRailWide, type RailLayoutConfig } from './RailLayout.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewOpenPointsSection } from './ClaudeReviewOpenPoints.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
@@ -207,14 +205,6 @@ function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Elemen
     </span>
   );
 }
-
-// Severity ordering for the flat findings list, plus per-severity pill colours.
-const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
-  'blocker',
-  'warning',
-  'nit',
-  'question',
-];
 
 // The rank + pill palette live in lib/claudeReviewFollowUp.ts, shared with the previous-review
 // list so an earlier comment's severity paints the same pill as a current finding's.
@@ -839,7 +829,9 @@ export function FindingRow({
   // ⚠ REMINDERS ARE ALLOWED, ALWAYS MARKED: a finding already on GitHub never offers the normal Post,
   // only "Post reminder" (the server marks the body and links the first comment).
   // A teammate's open point (`card`): its reminder posts as the reader, when the caller offers it.
-  const canRemind = card != null ? onPostReminder != null && post != null : canPostReminder(post, editable);
+  // ⚠ NEVER ON THE READER'S OWN PR: the caller passes no `onPostReminder` there (a reminder to
+  // yourself is noise), so no reminder button shows on any card.
+  const canRemind = onPostReminder != null && (card != null ? post != null : canPostReminder(post, editable));
   const reminderUrl =
     finding.reminder != null
       ? finding.reminder.postedCommentKind === 'pr_comment'
@@ -1334,7 +1326,10 @@ export function ClaudesReview({
   currentThreads = null,
   checkThreadsPrId = null,
   team = null,
+  ownPr = false,
 }: {
+  /** The reader wrote this PR: no "Post reminder" on any finding. */
+  ownPr?: boolean;
   /** THE TEAM LAYOUT (the latest run only): teammates' posted reviews folded in — the newest leads,
    *  findings by their state now across every review. null ⇒ this run alone (a past run). */
   team?: TeamLayout | null;
@@ -1509,7 +1504,7 @@ export function ClaudesReview({
       onToggle={(included) => onToggleFinding(f.id, included)}
       onReword={(editedBody) => onRewordFinding(f.id, editedBody)}
       onPostComment={() => onPostFinding(f.id)}
-      onPostReminder={() => onPostFinding(f.id, { reminder: true })}
+      onPostReminder={ownPr ? undefined : () => onPostFinding(f.id, { reminder: true })}
     />
   );
   // Every other point on the PR (a teammate's, an older run's, a closed one): the same card.
@@ -1522,7 +1517,7 @@ export function ClaudesReview({
     postErrorFindingId,
     postErrorMessage,
     onOpenInChanges,
-    onPostReminder: editable ? (findingId) => onPostFinding(findingId, { reminder: true }) : null,
+    onPostReminder: editable && !ownPr ? (findingId) => onPostFinding(findingId, { reminder: true }) : null,
   };
   const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
   // "Copy all" (the reader's own findings of this run) and the Story check note, in the Findings header.
@@ -1537,42 +1532,23 @@ export function ClaudesReview({
 
   return (
     <>
-      {leadTeammate == null && (
-        <RailPiece slot="status">
-          <ReviewRailStatus review={review} title={storedReview.pair != null ? `${by} review` : `${by}'s review`} currency={currency} showVerdict={showVerdict} />
-        </RailPiece>
-      )}
-      <RailPiece slot="counts">
-        <ReviewRailCounts
-          findings={
-            teamRows != null
-              ? teamRows.open.map((e) => (e.kind === 'own' ? e.finding : e.point))
-              : findings
-          }
-          storyFindings={placement.placed.size}
-          threads={(currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts) ?? null}
-        />
-      </RailPiece>
       {/* THE NEWEST REVIEW LEADS: a teammate's posted review newer than this one heads the tab. */}
+      {/* NO RUN NAME, NO "reviewed … ago" (2026-11-10): who reviewed, with what and when is in
+          "Where this PR stands" and "Reviews on this PR"; the models are behind the ⓘ. The verdict
+          shows here only when no standings do; a review of an older commit says so. */}
       {leadTeammate != null ? <TeammateLeadSection review={leadTeammate} showVerdict={showVerdict} /> : <ReviewSection
-        title={storedReview.pair != null ? `${by} review` : `${by}'s review`}
+        title="Summary"
         section="review"
         pills={
-          inRail ? null : <>
-            {/* The outcome leads; everything after it is about the run. */}
+          <>
             {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
-            {currency != null && <CurrencyPill currency={currency} />}
-            <ReviewedAgo at={review.finishedAt} />
-            {review.kind === 'replies' && (
-              <span className="text-meta text-ui-mute">
-                {repliesRunLabel(review)}
-              </span>
-            )}
+            {currency != null && currency.tone !== 'current' && <CurrencyPill currency={currency} />}
           </>
         }
         info={
           <InfoButton title={storedReview.pair != null ? 'This review' : 'This run'}>
             <div className="space-y-2">
+              <p>{metaLine(review)}</p>
               {storedReview.pair?.how != null && <p>{PAIR_HOW_TEXT[storedReview.pair.how]}</p>}
               {runCost != null && <p>Cost: {runCost}.</p>}
               <UsageBreakdown review={review} />
@@ -1590,7 +1566,6 @@ export function ClaudesReview({
           </InfoButton>
         }
       >
-        {!inRail && <div className="text-meta text-ui-mute">{metaLine(review)}</div>}
         {/* WHY IT WAS NOT APPROVED (auto verdict on): one line under the verdict, always. */}
         {notApprovedLine(storedReview) != null && (
           <div className="text-meta text-ui-ink" data-not-approved>
@@ -1727,7 +1702,7 @@ export function ClaudesReview({
 // and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). The rail STICKS under
 // the tab bar (`sticky`); taller than the pane, it scrolls with the page until its end shows. Narrow (the PR
 // drawer, a laptop, a phone) every piece renders in place, in today's order; rail-only extras vanish.
-export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'actions', 'post'] as const;
+export const REVIEW_RAIL_SLOTS = ['status', 'run', 'actions', 'post'] as const;
 export const REVIEW_SECTIONS = [
   { id: 'review', label: 'Summary' },
   { id: 'threads', label: 'Review threads' },
@@ -1884,96 +1859,6 @@ function PointFindingCard({
       // Another review's finding cites no section of this run's reference library.
       docReferences={null}
     />
-  );
-}
-
-/** The rail's first block: who reviewed, the verdict, whether it read the latest commit, and when.
- *  No commit hash, model, trigger, depth or cost here (the head line, the reviews list and the run's ⓘ
- *  hold them). */
-function ReviewRailStatus({
-  review,
-  title,
-  currency,
-  showVerdict = true,
-}: {
-  review: ClaudeReview;
-  title: string;
-  currency: ReviewCurrency | null;
-  // false: "Where this PR stands" already names the verdict.
-  showVerdict?: boolean;
-}): JSX.Element {
-  return (
-    <div className="mt-4 space-y-1.5 first:mt-0" data-testid="review-rail-status">
-      <p className="text-meta text-ui-mute">{title}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        {showVerdict && review.verdict != null && <VerdictBadge verdict={review.verdict} />}
-        {currency != null && <CurrencyPill currency={currency} showSha={false} />}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ui-mute">
-        <ReviewedAgo at={review.finishedAt} />
-        {review.kind === 'replies' && <span>{repliesRunLabel(review)}</span>}
-      </div>
-    </div>
-  );
-}
-
-const SEVERITY_PLURAL: Record<ClaudeFindingSeverity, [string, string]> = {
-  blocker: ['blocker', 'blockers'],
-  warning: ['warning', 'warnings'],
-  nit: ['nit', 'nits'],
-  question: ['question', 'questions'],
-  praise: ['praise', 'praise'],
-};
-
-/** The rail's counts: findings by severity (zeros left out) and the threads still to fix. Each row
- *  scrolls to its section. */
-function ReviewRailCounts({
-  findings,
-  storyFindings,
-  threads,
-}: {
-  // The reader's findings and teammates' still-open ones (a teammate's may carry no severity).
-  findings: ReadonlyArray<{ severity: ClaudeFindingSeverity | null }>;
-  storyFindings: number;
-  threads: ClaudeThreadAssessmentCounts | null;
-}): JSX.Element {
-  const go = useScrollToRailSection();
-  const bySeverity = SEVERITY_ORDER.map((sev) => ({ sev, n: findings.filter((f) => f.severity === sev).length })).filter((r) => r.n > 0);
-  const toFix = threads?.validUnaddressed ?? 0;
-  const row = (key: string, section: string, label: ReactNode, n: number): JSX.Element => (
-    <li key={key}>
-      <button
-        type="button"
-        onClick={() => go?.(section)}
-        className={cx('hit -mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-ui px-1.5 py-0.5 text-left text-body text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
-      >
-        <span className="min-w-0 flex-1">{label}</span>
-        <span className="tabular-nums text-ui-mute">{n}</span>
-      </button>
-    </li>
-  );
-  return (
-    <div data-testid="review-rail-counts">
-      <p className="mb-1 text-meta text-ui-mute">In this review</p>
-      <ul className="space-y-0.5">
-        {bySeverity.length === 0 && storyFindings === 0 ? (
-          <li className="text-body text-ui-mute">No line-level findings</li>
-        ) : (
-          bySeverity.map(({ sev, n }) =>
-            row(
-              sev,
-              'findings',
-              <span className={`inline-flex rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[sev]}`}>
-                {SEVERITY_PLURAL[sev][n === 1 ? 0 : 1]}
-              </span>,
-              n,
-            ),
-          )
-        )}
-        {storyFindings > 0 && row('story', 'stories', 'Under Story check', storyFindings)}
-        {threads != null && threads.total > 0 && row('threads', 'threads', 'Threads to fix', toFix)}
-      </ul>
-    </div>
   );
 }
 
@@ -2148,6 +2033,10 @@ export function ClaudeReviewTab({
 }): JSX.Element {
   const ai = useAiCapabilities();
   const { data, isLoading } = useClaudeReview(pr.id);
+  // THE READER'S OWN PR (the App-root `['me']` cache, no fetch): no "Post reminder" anywhere here.
+  const myLogin = useMe().data?.user?.login ?? null;
+  const authorLogin = pr.authorId != null ? (usersById.get(pr.authorId)?.githubLogin ?? null) : null;
+  const ownPr = myLogin != null && authorLogin != null && myLogin.toLowerCase() === authorLogin.toLowerCase();
   const review = data?.review ?? null;
   // The tab has this finished run on screen: the reader has SEEN it (My Turn's "New AI review"
   // card retires). Once per run, only while the server says it is unseen.
@@ -2378,7 +2267,7 @@ export function ClaudeReviewTab({
     postErrorFindingId,
     postErrorMessage,
     onOpenInChanges,
-    onPostReminder: viewingLatest ? (findingId) => postFinding.mutateAsync({ findingId, reminder: true }) : null,
+    onPostReminder: viewingLatest && !ownPr ? (findingId) => postFinding.mutateAsync({ findingId, reminder: true }) : null,
   };
 
   const phase = status?.progress?.phase ?? null;
@@ -2428,7 +2317,7 @@ export function ClaudeReviewTab({
     <QuietReviewSections>
     {/* Two columns from THIS box's width (REVIEW_RAIL): the content, and a rail of facts and actions.
         Narrow, one column exactly as before. */}
-    <div className="px-5 py-2 max-md:px-3">
+    <div className="px-5 pb-10 pt-2 max-md:px-3">
     <RailLayout config={REVIEW_RAIL} oneColumn={oneColumn}>
     <div className="space-y-7">
       {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
@@ -2534,9 +2423,6 @@ export function ClaudeReviewTab({
                   : (autoReviewWhyLine(data?.autoReviewWhy) ?? 'Auto review queued')}
               </span>
             )}
-            {autoHold == null && !isRunning && data?.teammateVerdictWait != null && (
-              <span className="text-meta text-ui-mute">{TEAMMATE_VERDICT_WAIT_LINE}</span>
-            )}
             {isRunning && pressedPostLine(review) != null && (
               <span className="text-meta text-ui-mute">{pressedPostLine(review)}</span>
             )}
@@ -2576,7 +2462,7 @@ export function ClaudeReviewTab({
             </div>
           )}
 
-          {/* Team claims: skipped for a teammate, marked on GitHub, or a pending line to clear. */}
+          {/* Team claims: a teammate's Limn reviewing now, or a pending line to clear. */}
           <TeamClaimLine prId={pr.id} data={data} />
 
           {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
@@ -2709,6 +2595,7 @@ export function ClaudeReviewTab({
               : null
           }
           checkThreadsPrId={canEdit ? pr.id : null}
+          ownPr={ownPr}
           // THE TEAM LAYOUT: teammates' posted reviews folded in (now only; `teamView`).
           team={canEdit ? team : null}
           prUrl={pr.githubUrl}

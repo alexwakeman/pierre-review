@@ -7891,6 +7891,8 @@ export interface ClaudeReviewWithdrawal {
   verdict: 'APPROVE' | 'REQUEST_CHANGES' | null;
   // When that review was posted (ISO-8601).
   postedAt: string;
+  // The commit it reviewed, from Limn's marker (`h=`); null / absent = unknown (an older server).
+  headSha?: string | null;
   // When it was dismissed (ISO-8601); null = no dismissal event synced yet.
   at: string | null;
   // Limn dismissed it itself ("Limn withdrew its approval: …") — true; a person — false; null = unknown.

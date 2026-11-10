@@ -24,11 +24,6 @@ export function alsoRaisedLabel(by: readonly Pick<ClaudeTeammatePoster, 'login' 
   return joinNames(['You', ...by.map(teammateName)]);
 }
 
-/** "Robin's review" — the teammate's first name when GitHub has one, else "@robin-dev's review". */
-export function teammateReviewTitle(r: Pick<ClaudeTeammateReview, 'poster'>): string {
-  return `${teammateName(r.poster)}’s review`;
-}
-
 /** What ran it: "Claude + Codex", or the ONE run label ("Claude · Opus 5.5 · medium"); null when the
  *  post carried no metadata (a legacy post). */
 export function teammateRunLabel(r: Pick<ClaudeTeammateReview, 'pair' | 'runs'>): string | null {

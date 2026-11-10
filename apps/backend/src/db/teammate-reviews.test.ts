@@ -532,6 +532,39 @@ describe('standing verdicts and posted judgements (real DB)', () => {
     expect(await loadStandingBlockAnchors(ctx, prId, 1)).toEqual([]);
   });
 
+  it("PR 221269: a teammate's replies-pass Approve is in force though only their Comment was imported", async () => {
+    // robin's Limn commented at 13:04 (imported as a teammate review), then its replies pass APPROVED
+    // at 14:04. A replies pass is never imported, so the standing reads the approval from the synced
+    // review row, its commit from the marker.
+    const comment1 = `Not approved: a nit is open.\n\n${limnReviewMarker('jj10', { headSha: HEAD, run: 'auto', runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: null }], verdict: 'COMMENT' })}`;
+    const approve = `Replies checked: the remaining points are settled.\n\n${limnReviewMarker('kk11', { headSha: HEAD, run: 'replies', verdict: 'APPROVE' })}`;
+    await persist(
+      gqlPr(25, {
+        reviews: {
+          nodes: [
+            review('RV_25801', ROBIN, comment1, '2026-11-09T13:04:51Z', 'COMMENTED'),
+            review('RV_25802', ROBIN, approve, '2026-11-09T14:04:21Z', 'APPROVED'),
+          ],
+        },
+      }),
+    );
+    const prId = await prIdOf(25);
+    expect((await teammateRows(prId)).map((r) => r.verdict)).toEqual(['COMMENT']);
+    const persistMod = await import('../review/claude-review/persist.js');
+    const [state] = await persistMod.getLatestReviewStates({ db, schema } as any, [prId], 1);
+    const robin = state!.standing!.reviewers.find((r) => !r.you)!;
+    expect(robin.latest).toMatchObject({ verdict: 'COMMENT' });
+    expect(robin.inForce).toMatchObject({ verdict: 'APPROVE', reviewId: null, at: '2026-11-09T14:04:21.000Z', headSha: HEAD });
+    expect(robin.withdrawn ?? null).toBeNull();
+    // Dismissed on GitHub: no longer in force; the withdrawal names the verdict and its commit.
+    const { eq } = await import('drizzle-orm');
+    await db.update(schema.reviews).set({ state: 'dismissed' }).where(eq(schema.reviews.githubNodeId, 'RV_25802')).execute();
+    const [after] = await persistMod.getLatestReviewStates({ db, schema } as any, [prId], 1);
+    const robinAfter = after!.standing!.reviewers.find((r) => !r.you)!;
+    expect(robinAfter.inForce).toBeNull();
+    expect(robinAfter.withdrawn).toMatchObject({ verdict: 'APPROVE', headSha: HEAD });
+  });
+
   it("a teammate's own later Approve lifts their block (no follow-up on it)", async () => {
     const block = `Fix first.\n\n${limnReviewMarker('hh88', { headSha: HEAD, run: 'auto', verdict: 'REQUEST_CHANGES' })}`;
     const ok = `All good.\n\n${limnReviewMarker('ii99', { headSha: HEAD, run: 'auto', verdict: 'APPROVE' })}`;

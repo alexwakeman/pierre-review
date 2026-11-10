@@ -576,15 +576,17 @@ export const TEAM = {
   },
   /**
    * #612 is dana's (the reader's) own pull request. "Where this PR stands" (TeamReviewLayout.tsx,
-   * lib/teamReview.ts standingLine): newest review first. The author's own review is a Comment.
+   * lib/teamReview.ts standingRow): one row per person, newest first, in the columns of "Reviews on
+   * this PR" — who · day and 24-hour time · commit · the verdict GitHub holds. No note after it. The
+   * author's own review is a Comment.
    */
   standing: {
     pr: PRS.refunds,
     // The PR's latest commit, always at the top (TeamReviewLayout.tsx HeadCommitLine).
     head: '8a8ec14',
     rows: [
-      { name: 'Priya', verdict: 'Approve', tone: 'green', day: '3 Nov', sha: '1c4bd65', note: 'approval stands on GitHub' },
-      { name: 'You', verdict: 'Comment', tone: 'grey', day: '3 Nov', sha: '8a8ec14', note: null },
-    ] as { name: string; verdict: string; tone: Tone; day: string; sha: string; note: string | null }[],
+      { name: 'Priya', verdict: 'Approve', day: '3 Nov 14:20', sha: '1c4bd65' },
+      { name: 'You', verdict: 'Comment', day: '3 Nov 11:05', sha: '8a8ec14' },
+    ] as { name: string; verdict: string; day: string; sha: string }[],
   },
 };

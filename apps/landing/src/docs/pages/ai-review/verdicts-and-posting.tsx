@@ -159,8 +159,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>A <Ui>Review only</Ui> run never writes. An approval you gave by hand, or sent with the Post button, is never touched.</li>
         <li>
-          A withdrawn approval is never lost from view. <Ui>Where this PR stands</Ui> keeps a note on the person's row,
-          and <Ui>Reviews on this PR</Ui> shows the review as "Approve (withdrawn)".
+          A withdrawn approval is never lost from view. <Ui>Where this PR stands</Ui> and <Ui>Reviews on this PR</Ui>{' '}
+          both show it as "Approve (withdrawn)".
         </li>
       </ul>
       <p>

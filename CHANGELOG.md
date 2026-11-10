@@ -13,6 +13,34 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- AI Review: "Where this PR stands" now uses the same columns as "Reviews on this PR", and both lists
+  show the time with the date ("10 Nov 14:04", 24-hour clock). The short note after each verdict is
+  gone.
+- AI Review: the review's summary is headed "Summary". The run name ("Codex's review", "Claude +
+  Codex review", "Robin's review") and "reviewed 1 day ago" are gone, and so is the block repeating
+  them on the right. The models and the cost stay behind the ⓘ.
+- AI Review: "Run a review" no longer says "Waiting for a teammate's Limn to review" or "@robin-dunn
+  reviewed this commit with Claude · approved"; the teammate's verdict is in "Where this PR stands".
+  A teammate's Limn reviewing the commit right now is still named. Pending's "Waiting on others" row
+  keeps its line.
+- AI Review: a little more space at the bottom of the tab.
+
+### Fixed
+
+- AI Review: "Where this PR stands" showed a teammate as having only commented when their Limn had
+  approved after checking replies. It now shows the verdict GitHub holds: an approval in force reads
+  "Approve", a withdrawn one "Approve (withdrawn)".
+- AI Review: on your own pull request, findings no longer offer "Post reminder".
+- AI Review: a review half that did not finish no longer repeats itself ("Codex didn't finish: Codex
+  could not finish: …"); it reads "Codex didn't finish: you've hit your usage limit".
+
+### Removed
+
+- AI Review: the "In this review" counts, the "Ticket" panel (the pull request's header links the
+  ticket), and the "Review threads" section when there are no other review threads.
+
 ## [1.0.21] - 2026-11-10
 
 ### Added

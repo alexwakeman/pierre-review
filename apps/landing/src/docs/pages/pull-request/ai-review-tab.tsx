@@ -52,13 +52,15 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <b>Where this PR stands</b>: the pull request's latest commit (seven characters; click it to open it on
-          GitHub, or copy the full commit), then each person's newest review and verdict.
+          GitHub, or copy the full commit), then one row per person, in the same columns as the reviews below: the
+          verdict GitHub holds for them, with its date, time and commit.
         </li>
         <li>
           <b>
             <Ui>Reviews on this PR</Ui>
           </b>
-          : every review, newest first, in columns: who, when, the commit it reviewed, the outcome, and what ran it.
+          : every review, newest first, in columns: who, the date and time (24-hour clock), the commit it reviewed, the
+          outcome, and what ran it.
           Match a review's commit against the latest commit above. The newest 10 show; <Ui>Show all</Ui> opens the
           rest. Click a review to open it read-only. A run's cost is behind the ⓘ beside its summary.
         </li>
@@ -66,13 +68,13 @@ export default function Page(): JSX.Element {
           <b>
             <Ui>Summary</Ui>
           </b>
-          : what the change does and the review's main points.
+          : what the change does and the review's main points. The models and the cost are behind the ⓘ.
         </li>
         <li>
           <b>
             <Ui>Review threads</Ui>
           </b>
-          : the AI's judgement of the open threads from people and bots.
+          : the AI's judgement of the open threads from people and bots. Not shown when there are none.
         </li>
         <li>
           <b>

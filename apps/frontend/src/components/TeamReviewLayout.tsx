@@ -1,9 +1,8 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import type { ClaudeFinding, ClaudeReviewStandings, ClaudeTeamPoint, ClaudeTeammatePoster, ClaudeTeammateReview } from '@pierre-review/shared';
 import { useMe } from '../hooks/useTriage.js';
-import { VERDICT_CLASS } from '../lib/claudeReviewFollowUp.js';
 import { dateTime, safeExternalUrl } from '../lib/ui.js';
-import { REVIEW_ITEM_GROUP, REVIEW_META } from '../lib/reviewStyles.js';
+import { REVIEW_ITEM_GROUP } from '../lib/reviewStyles.js';
 import {
   itemShows,
   pointCard,
@@ -28,7 +27,6 @@ import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { teammateVersionLines } from '../lib/teammateReviews.js';
 import { TeammateAvatar } from './TeammateReviews.js';
-import { VerdictIcon } from './VerdictIcon.js';
 
 // THE AI REVIEW TAB'S TEAM LAYOUT (docs/FRONTEND.md § The AI Review tab → Team layout). The pieces the
 // "now" view adds over the reader's own run: where the PR stands (each Limn reviewer's newest verdict),
@@ -47,9 +45,10 @@ function PersonAvatar({ you, poster, size = 16 }: { you: boolean; poster: Claude
 
 /**
  * WHERE THIS PR STANDS: the PR's latest commit (the cross-reference for every review's commit below,
- * in the same 7-character form), then one line per Limn reviewer, newest review first — "You ·
- * Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub". A Request changes still in force is
- * flagged. The latest commit shows whenever it is known; the reviewer lines only on now.
+ * in the same 7-character form), then one row per Limn reviewer, newest first, IN THE SAME COLUMNS AS
+ * "Reviews on this PR" (`ReviewGridCells`): avatar · who · day and time · commit · what GitHub holds for
+ * them. A Request changes still in force is flagged. No note after the verdict (2026-11-10). The latest
+ * commit shows whenever it is known; the reviewer rows only on now.
  */
 export function StandingsSection({
   standings,
@@ -68,10 +67,11 @@ export function StandingsSection({
       title="Where this PR stands"
       info={
         <InfoButton title="Where this PR stands">
-          <p>The PR’s latest commit, and each person’s newest Limn review on this PR.</p>
+          <p>The PR’s latest commit, and the verdict each person’s Limn holds on GitHub.</p>
           <p>
             GitHub keeps a Request changes or an Approve in force until it is dismissed, or the same person
-            reviews again with Request changes or Approve. A Comment does not replace it.
+            reviews again with Request changes or Approve. A Comment does not replace it. A person with no
+            verdict in force shows their newest review.
           </p>
         </InfoButton>
       }
@@ -79,30 +79,24 @@ export function StandingsSection({
       <div className="space-y-2">
         {headSha != null && <HeadCommitLine sha={headSha} prUrl={prUrl} />}
         {rows.length > 0 && (
-          <ul className="space-y-1" data-testid="review-standings" aria-label="Where this PR stands">
+          <ul className="space-y-0.5" data-testid="review-standings" aria-label="Where this PR stands">
             {rows.map((r) => (
-              <li key={r.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-body" title={standingLine(r)}>
-                <PersonAvatar you={r.you} poster={r.poster} />
-                <span className="font-medium text-ui-ink">{r.name}</span>
-                {r.verdictKind != null ? (
-                  <span className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium ${VERDICT_CLASS[r.verdictKind]}`}>
-                    <VerdictIcon verdict={r.verdictKind} size={12} />
-                    {r.verdict}
-                  </span>
-                ) : (
-                  <span className="text-meta text-ui-mute">{r.verdict}</span>
-                )}
-                {r.day !== '' && (
-                  <span className={REVIEW_META} title={r.at != null ? dateTime(r.at) : undefined}>
-                    {r.day}
-                  </span>
-                )}
-                {r.sha != null && <span className="font-mono text-meta text-ui-mute">{r.sha}</span>}
-                {r.note != null && (
-                  <span className={r.blocking ? 'text-meta font-medium text-ui-danger' : REVIEW_META} data-blocking={r.blocking || undefined}>
-                    {r.note}
-                  </span>
-                )}
+              <li
+                key={r.key}
+                title={`${standingLine(r)}${r.at != null ? ` · ${dateTime(r.at)}` : ''}`}
+                className={cx('-mx-1.5 w-[calc(100%+0.75rem)] px-1.5 py-1 text-meta text-ui-ink', REVIEW_ROW_GRID)}
+                data-blocking={r.blocking || undefined}
+              >
+                <ReviewGridCells
+                  you={r.you}
+                  poster={r.poster}
+                  who={r.name}
+                  day={r.day}
+                  sha={r.sha ?? ''}
+                  outcome={r.verdict}
+                  tone={r.blocking ? 'danger' : 'ink'}
+                  what={null}
+                />
               </li>
             ))}
           </ul>
@@ -278,30 +272,72 @@ export function TeamFindingsSection({
  * n" opens the rest (local to the tab). The now row is the reader's latest review; any other opens that
  * review read-only.
  */
-// Fixed column widths, so every row's cells line up: avatar · who · when · commit · outcome · what ran.
+// Fixed column widths, so every row's cells line up — in "Reviews on this PR" AND "Where this PR
+// stands", the same grid: avatar · who · day and time ("10 Nov 14:04") · commit · outcome · what ran
+// (the standings have no "what ran": their outcome spans that column too).
 const REVIEW_ROW_GRID =
-  'grid grid-cols-[14px_minmax(0,4rem)_3rem_4.5rem_minmax(4rem,1fr)_minmax(0,5.5rem)] items-center gap-x-1.5';
+  'grid grid-cols-[14px_minmax(0,4rem)_6rem_4.5rem_minmax(4rem,1fr)_minmax(0,5.5rem)] items-center gap-x-1.5';
+
+/** One row's cells in the shared grid (both lists). `tone: 'danger'` flags the outcome. */
+function ReviewGridCells({
+  you,
+  poster,
+  who,
+  day,
+  sha,
+  outcome,
+  tone,
+  what,
+  trailing,
+}: {
+  you: boolean;
+  poster: ClaudeTeammatePoster | null;
+  who: string;
+  day: string;
+  sha: string;
+  outcome: string;
+  tone: 'ink' | 'danger';
+  // null: no "what ran it" cell — the outcome spans its column too (the standings).
+  what: string | null;
+  trailing?: ReactNode;
+}): JSX.Element {
+  return (
+    <>
+      <PersonAvatar you={you} poster={poster} size={14} />
+      <span className="truncate font-medium" title={who}>
+        {who}
+      </span>
+      <span className="truncate tabular-nums text-ui-mute">{day}</span>
+      <span className="truncate font-mono tabular-nums text-ui-mute">{sha}</span>
+      <span className={cx('truncate', what == null && 'col-span-2', tone === 'danger' ? 'text-ui-danger' : 'text-ui-ink')} title={outcome}>
+        {outcome}
+      </span>
+      {what != null && (
+        <span className="flex min-w-0 items-center justify-end gap-1 text-ui-mute">
+          <span className="truncate" title={what}>
+            {what}
+          </span>
+          {trailing}
+        </span>
+      )}
+    </>
+  );
+}
 
 function ReviewRowCells({ item, failed, trailing }: { item: ReviewListItem; failed: boolean; trailing?: ReactNode }): JSX.Element {
   const c = reviewListCells(item);
   return (
-    <>
-      <PersonAvatar you={item.you} poster={item.poster} size={14} />
-      <span className="truncate font-medium" title={item.who}>
-        {item.who}
-      </span>
-      <span className="truncate tabular-nums text-ui-mute">{c.day}</span>
-      <span className="truncate font-mono tabular-nums text-ui-mute">{c.sha}</span>
-      <span className={cx('truncate', failed ? 'text-ui-danger' : 'text-ui-ink')} title={c.outcome}>
-        {c.outcome}
-      </span>
-      <span className="flex min-w-0 items-center justify-end gap-1 text-ui-mute">
-        <span className="truncate" title={c.what}>
-          {c.what}
-        </span>
-        {trailing}
-      </span>
-    </>
+    <ReviewGridCells
+      you={item.you}
+      poster={item.poster}
+      who={item.who}
+      day={c.day}
+      sha={c.sha}
+      outcome={c.outcome}
+      tone={failed ? 'danger' : 'ink'}
+      what={c.what}
+      trailing={trailing}
+    />
   );
 }
 

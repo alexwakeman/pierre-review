@@ -48,6 +48,19 @@ function base(): Input {
 }
 
 describe('teamStandings', () => {
+  it("PR 221269: a teammate's replies-pass Approve (no imported row) is in force, with the marker's commit", () => {
+    const input = base();
+    input.teammates = [{ reviewId: 1377, poster: ROBIN, verdict: 'COMMENT', at: t('2026-11-09T13:04:51Z'), headSha: 'd'.repeat(40), nodeId: 'RV_5826241621' }];
+    input.github = [
+      gh(ME, 'RV_601', 'changes_requested', '2026-11-03T10:00:00Z'),
+      gh(2, 'RV_5826241621', 'commented', '2026-11-09T13:04:51Z'),
+      gh(2, 'RV_5826955272', 'approved', '2026-11-09T14:04:21Z', { markerHead: 'd'.repeat(40) }),
+    ];
+    const robin = teamStandings(input).reviewers.find((r) => !r.you)!;
+    expect(robin.latest).toMatchObject({ reviewId: 1377, verdict: 'COMMENT' });
+    expect(robin.inForce).toMatchObject({ reviewId: null, verdict: 'APPROVE', at: '2026-11-09T14:04:21.000Z', headSha: 'd'.repeat(40) });
+  });
+
   it("203001: a teammate's later Comment does not lift the reader's Request changes", () => {
     const s = teamStandings(base());
     expect(s.blocking).toMatchObject({ you: true, reviewId: 10, verdict: 'REQUEST_CHANGES' });
@@ -369,10 +382,13 @@ describe('a withdrawn Limn verdict (migration 0183)', () => {
     expect(withdrawnVerdict([dismissedApprove(), laterComment])).toEqual({
       verdict: 'APPROVE',
       postedAt: '2026-11-09T14:05:09.000Z',
+      headSha: null,
       at: '2026-11-09T16:41:46.000Z',
       byLimn: true,
       reason: '3 warnings found at 951c4aa',
     });
+    // The marker's commit, when the loader read one.
+    expect(withdrawnVerdict([dismissedApprove({ markerHead: 'f'.repeat(40) })])?.headSha).toBe('f'.repeat(40));
     const input = base();
     input.teammates = [{ reviewId: 1419, poster: ROBIN, verdict: 'COMMENT', at: t('2026-11-09T16:41:50Z'), headSha: '951c4aa'.padEnd(40, '0'), nodeId: 'RV_5829226544' }];
     input.github = [gh(ME, 'RV_601', 'changes_requested', '2026-11-03T10:00:00Z'), dismissedApprove(), laterComment];

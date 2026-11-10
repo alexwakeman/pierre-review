@@ -46,7 +46,7 @@ export function TeamStandingMock(): JSX.Element {
     <MockFrame
       title={prLabel(s.pr)}
       meta="AI Review"
-      label="Where pull request 612 stands, at its latest commit 8a8ec14: Priya approved on 3 Nov and her approval stands on GitHub; your own review, on your own pull request, is a comment."
+      label="Where pull request 612 stands, at its latest commit 8a8ec14: Priya's approval, 3 Nov 14:20 at 1c4bd65, holds on GitHub; your own review, on your own pull request, is a comment."
     >
       <Group first>Where this PR stands</Group>
       <p className="mk-head">
@@ -55,10 +55,9 @@ export function TeamStandingMock(): JSX.Element {
       {s.rows.map((r) => (
         <div key={r.name} className="mk-stand">
           <b>{r.name}</b>
-          <Chip tone={r.tone}>{r.verdict}</Chip>
-          <span>
-            {[r.day, r.sha, r.note].filter((x): x is string => x != null).join(' · ')}
-          </span>
+          <span>{r.day}</span>
+          <code>{r.sha}</code>
+          <span className="mk-stand-v">{r.verdict}</span>
         </div>
       ))}
     </MockFrame>

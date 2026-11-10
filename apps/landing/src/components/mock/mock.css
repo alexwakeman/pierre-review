@@ -747,19 +747,24 @@
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-/* One "Where this PR stands" line: name, verdict, then day · commit · what GitHub still holds. */
+/* One "Where this PR stands" row, in the columns of "Reviews on this PR": who · day and time ·
+   commit · the verdict GitHub holds. */
 .lb .mk-stand {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 4.5rem) 6.5rem 4.5rem minmax(0, 1fr);
   align-items: center;
-  gap: 4px 10px;
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  background: #1a1b1f;
-  border: 1px solid #26272c;
-  border-radius: 3px;
-}
-.lb .mk-stand > span {
-  color: var(--muted);
+  gap: 0 10px;
+  padding: 6px 10px;
   font-size: 12.5px;
+}
+.lb .mk-stand > span,
+.lb .mk-stand > code {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.lb .mk-stand > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.lb .mk-stand > .mk-stand-v {
+  color: var(--ink);
 }

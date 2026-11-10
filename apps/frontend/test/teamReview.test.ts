@@ -34,6 +34,10 @@ import {
   teammateFindingCard,
 } from '../src/lib/teamReview.js';
 import { canPostReminder, effectivePost, postedChipLabel } from '../src/lib/autoPost.js';
+import { shortDayTime } from '../src/lib/claudeReviewColumn.js';
+
+// The day and time a row shows (local clock, so the test holds in any time zone).
+const dt = (iso: string): string => shortDayTime(iso);
 
 const robin: ClaudeTeammatePoster = { userId: 9, login: 'robin-dunn', displayName: 'Robin Dunn', avatarUrl: null };
 const you: ClaudeTeamAuthor = { you: true, poster: null };
@@ -58,54 +62,83 @@ describe('where this PR stands', () => {
     dismissed: false,
   };
 
-  it('one line per reviewer, newest first, the block flagged', () => {
+  it('one row per reviewer, newest first, the block flagged; day and 24-hour time, no note', () => {
     const rows = standingRows({ reviewers: [youBlocking, robinComment], blocking: youBlocking.inForce, latest: robinComment.latest });
     expect(rows.map(standingLine)).toEqual([
-      'Robin · Comment · 4 Nov · 1c4bd65',
-      'You · Request changes · 3 Nov · 8a8ec14 · still blocking on GitHub',
+      `Robin · Comment · ${dt('2026-11-04T09:00:00Z')} · 1c4bd65`,
+      `You · Request changes · ${dt('2026-11-03T10:00:00Z')} · 8a8ec14`,
     ]);
     expect(rows.map((r) => r.blocking)).toEqual([false, true]);
+    expect(rows.every((r) => !('note' in r))).toBe(true);
   });
 
-  it('an older block under a newer Comment of the same person names its day', () => {
+  it('the day carries the time, 24-hour clock', () => {
+    expect(shortDayTime(new Date(2026, 10, 9, 14, 4).toISOString())).toBe('9 Nov 14:04');
+    expect(shortDayTime(new Date(2026, 10, 9, 9, 5).toISOString())).toBe('9 Nov 09:05');
+    expect(shortDayTime('not a date')).toBe('');
+  });
+
+  it('a block still in force under a newer Comment of the same person: the row reads the block', () => {
     const later: ClaudeReviewStanding = {
       ...youBlocking,
       latest: { you: true, poster: null, reviewId: 11, verdict: 'COMMENT', at: '2026-11-05T10:00:00Z', headSha: SHA_B },
     };
-    expect(standingLine(standingRows({ reviewers: [later], blocking: later.inForce, latest: later.latest })[0]!)).toBe(
-      'You · Comment · 5 Nov · 1c4bd65 · Request changes from 3 Nov still blocking on GitHub',
-    );
+    const row = standingRows({ reviewers: [later], blocking: later.inForce, latest: later.latest })[0]!;
+    expect(standingLine(row)).toBe(`You · Request changes · ${dt('2026-11-03T10:00:00Z')} · 8a8ec14`);
+    expect(row.blocking).toBe(true);
   });
 
-  it('a dismissed review says so; an approval in force says it stands', () => {
+  it('a dismissed review says so; an approval in force reads Approve', () => {
     const dismissed: ClaudeReviewStanding = { ...youBlocking, inForce: null, dismissed: true };
-    expect(standingRows({ reviewers: [dismissed], blocking: null, latest: dismissed.latest })[0]!.note).toBe('dismissed on GitHub');
+    expect(standingRows({ reviewers: [dismissed], blocking: null, latest: dismissed.latest })[0]!.verdict).toBe('Request changes (dismissed)');
     const approved: ClaudeReviewStanding = {
       ...robinComment,
       latest: { ...robinComment.latest!, verdict: 'APPROVE' },
       inForce: { ...robinComment.latest!, verdict: 'APPROVE' },
     };
     const row = standingRows({ reviewers: [approved], blocking: null, latest: approved.latest })[0]!;
-    expect(row.note).toBe('approval stands on GitHub');
+    expect(row.verdict).toBe('Approve');
+    expect(row.verdictKind).toBe('APPROVE');
     expect(row.blocking).toBe(false);
   });
 
-  it('PR 221270: an approval withdrawn under a newer Comment keeps a one-line note', () => {
+  it('PR 221269: a teammate’s replies-pass Approve (no review row of its own) reads Approve, not their older Comment', () => {
+    // robin-dunn's Limn posted a Comment at 13:04 (an imported teammate review), then its replies pass
+    // APPROVED at 14:04 — a replies pass is never imported, so `latest` is still the Comment and the
+    // approval lives only in `inForce` (its commit from the marker).
+    const SHA = 'abd62e3'.padEnd(40, '0');
+    const robinApproved: ClaudeReviewStanding = {
+      you: false,
+      poster: robin,
+      latest: { you: false, poster: robin, reviewId: 1377, verdict: 'COMMENT', at: '2026-11-09T13:04:51Z', headSha: SHA },
+      inForce: { you: false, poster: robin, reviewId: null, verdict: 'APPROVE', at: '2026-11-09T14:04:21Z', headSha: SHA },
+      dismissed: false,
+      withdrawn: null,
+    };
+    const row = standingRows({ reviewers: [robinApproved], blocking: null, latest: robinApproved.latest })[0]!;
+    expect(standingLine(row)).toBe(`Robin · Approve · ${dt('2026-11-09T14:04:21Z')} · abd62e3`);
+    // An older server sent no commit for it: the column stays empty rather than borrowing the Comment's.
+    const noSha = { ...robinApproved, inForce: { ...robinApproved.inForce!, headSha: null } };
+    expect(standingRows({ reviewers: [noSha], blocking: null, latest: noSha.latest })[0]!.sha).toBeNull();
+  });
+
+  it('PR 221270: an approval withdrawn under a newer Comment reads withdrawn', () => {
     const robinWithdrawn: ClaudeReviewStanding = {
       ...robinComment,
       withdrawn: {
         verdict: 'APPROVE',
         postedAt: '2026-11-09T14:05:09Z',
+        headSha: '951c4aa'.padEnd(40, '0'),
         at: '2026-11-09T16:41:46Z',
         byLimn: true,
         reason: '3 warnings found at 951c4aa',
       },
     };
     const row = standingRows({ reviewers: [robinWithdrawn], blocking: null, latest: robinWithdrawn.latest })[0]!;
-    expect(row.note).toBe('approval from 9 Nov withdrawn: 3 warnings found at 951c4aa');
-    // A person's dismissal says "dismissed"; with no reason, the phrase stops.
+    expect(standingLine(row)).toBe(`Robin · Approve (withdrawn) · ${dt('2026-11-09T14:05:09Z')} · 951c4aa`);
+    // A person's dismissal says "dismissed".
     const byPerson = { ...robinWithdrawn, withdrawn: { ...robinWithdrawn.withdrawn!, byLimn: false, reason: null } };
-    expect(standingRows({ reviewers: [byPerson], blocking: null, latest: byPerson.latest })[0]!.note).toBe('approval from 9 Nov dismissed');
+    expect(standingRows({ reviewers: [byPerson], blocking: null, latest: byPerson.latest })[0]!.verdict).toBe('Approve (dismissed)');
   });
 
   it('nothing to show without standings', () => {
@@ -281,10 +314,11 @@ describe('reviews on this PR', () => {
   it("lists the reader's runs (a pair once) and teammates' reviews, newest first", () => {
     expect(items.map((i) => i.who)).toEqual(['Robin', 'You', 'You']);
     expect(items.map(reviewListLine)).toEqual([
-      'Comment · 4 Nov · 1c4bd65 · Claude',
-      'Request changes · 3 Nov · 8a8ec14 · Claude + Codex',
-      'Failed · 2 Nov · 8a8ec14 · Claude',
+      `Comment · ${dt(items[0]!.at)} · 1c4bd65 · Claude`,
+      `Request changes · ${dt(items[1]!.at)} · 8a8ec14 · Claude + Codex`,
+      `Failed · ${dt(items[2]!.at)} · 8a8ec14 · Claude`,
     ]);
+    expect(items.map((i) => dt(i.at).split(' ').slice(0, 2).join(' '))).toEqual(['4 Nov', '3 Nov', '2 Nov']);
     expect(items[1]!.runIds).toEqual([11, 10]);
   });
 
@@ -308,19 +342,21 @@ describe('reviews on this PR', () => {
         { key: 'RV_8', you: true, poster: null, verdict: 'APPROVE', run: 'replies', at: '2026-11-05T10:01:00Z', headSha: null, githubUrl: null, ref: { kind: 'own', id: 12 }, withdrawn: null },
       ],
     );
+    const w = withDecisions.map((i) => dt(i.at));
     expect(withDecisions.map(reviewListLine)).toEqual([
-      'Approve (withdrawn) · 9 Nov · 7f8ea89 · Replies checked',
-      'Approve · 5 Nov · 8a8ec14 · Replies checked',
-      'Comment · 4 Nov · 1c4bd65 · Claude',
-      'Request changes · 3 Nov · 8a8ec14 · Claude + Codex',
-      'Failed · 2 Nov · 8a8ec14 · Claude',
+      `Approve (withdrawn) · ${w[0]} · 7f8ea89 · Replies checked`,
+      `Approve · ${w[1]} · 8a8ec14 · Replies checked`,
+      `Comment · ${w[2]} · 1c4bd65 · Claude`,
+      `Request changes · ${w[3]} · 8a8ec14 · Claude + Codex`,
+      `Failed · ${w[4]} · 8a8ec14 · Claude`,
     ]);
     expect(withDecisions[0]!.target).toBeNull();
     expect(itemShows(withDecisions[0]!, { kind: 'teammate', reviewId: 20 })).toBe(false);
   });
 
   it('splits each row into its columns; no trigger, depth or cost', () => {
-    expect(reviewListCells(items[2]!)).toEqual({ outcome: 'Failed', day: '2 Nov', sha: '8a8ec14', what: 'Claude' });
+    expect(reviewListCells(items[2]!)).toEqual({ outcome: 'Failed', day: dt(items[2]!.at), sha: '8a8ec14', what: 'Claude' });
+    expect(reviewListCells(items[2]!).day).toMatch(/^2 Nov \d{2}:\d{2}$/);
     expect(items.every((i) => !/Auto review|Deep|Quick|US\$|% of your week/.test(reviewListLine(i)))).toBe(true);
   });
 
@@ -388,10 +424,11 @@ describe('the tab, by its source', () => {
     expect(box).not.toContain('startOpen');
   });
 
-  it('the Story check names the ticket without linking into the tracker', () => {
+  it('the Story check names the ticket without linking into the tracker, and holds no "Ticket" disclosure', () => {
     const coverage = read('../src/components/TicketCoverage.tsx');
     expect(coverage).not.toContain('JiraKeyLink');
-    expect(coverage.match(/<StoryDisclosure[^>]*linkKey=\{false\}/g)?.length).toBe(2);
+    // The PR's header links the ticket; the AI Review tab shows no collapsible copy of it (2026-11-10).
+    expect(coverage).not.toContain('<StoryDisclosure');
   });
 });
 

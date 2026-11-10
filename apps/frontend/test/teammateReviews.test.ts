@@ -9,7 +9,6 @@ import {
   teamFindingByLabel,
   followUpThreadsWritable,
   teammateReviewMeta,
-  teammateReviewTitle,
   teammateRunLabel,
   teammateVersionLines,
 } from '../src/lib/teammateReviews.js';
@@ -23,11 +22,6 @@ const base = {
 };
 
 describe('teammate review words', () => {
-  it("names whose review it is: first name, else the login", () => {
-    expect(teammateReviewTitle(base)).toBe('Robin’s review');
-    expect(teammateReviewTitle({ poster: { ...base.poster, displayName: null } })).toBe('@robin-dev’s review');
-  });
-
   it('says it is on GitHub, the commit, an auto run and what ran it', () => {
     expect(teammateReviewMeta(base)).toBe('Posted on GitHub · abcdef1 · Auto review · Claude Opus 5.5 · medium');
   });

@@ -18,6 +18,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AiKindStatus, AiRunKind, ClaudeFinding, ClaudeReview, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
 import { PAIR_PICK_LABEL, PAIR_PICK_VALUE, pairRunningLabel, resolveReviewModelPick } from '../src/lib/modelPick.js';
 import { itemShows, nowReviewKey, reviewListLine, reviewsOnPr } from '../src/lib/teamReview.js';
+import { shortDayTime } from '../src/lib/claudeReviewColumn.js';
+import { pairHalfFailedLine } from '@pierre-review/shared';
 import { ReviewsOnPrSection } from '../src/components/TeamReviewLayout.js';
 import { ClaudesReview } from '../src/components/ClaudeReviewTab.js';
 
@@ -110,7 +112,8 @@ describe('reviews on this PR', () => {
     const items = reviewsOnPr(history, []);
     expect(items.map((i) => i.target)).toEqual([13, 12, 11, 9].map((id) => ({ kind: 'own', id })));
     expect(items.find((i) => i.runIds.includes(10))).toMatchObject({ runIds: [11, 10], what: 'Claude + Codex' });
-    expect(reviewListLine(items[0]!)).toBe('27 Oct · abcdef1 · Replies checked');
+    expect(reviewListLine(items[0]!)).toBe(`${shortDayTime(items[0]!.at)} · abcdef1 · Replies checked`);
+    expect(shortDayTime(items[0]!.at)).toMatch(/^27 Oct \d{2}:\d{2}$/);
     // Either half's id shows the pair's row.
     const pair = items.find((i) => i.what === 'Claude + Codex')!;
     expect(itemShows(pair, { kind: 'own', id: 10 })).toBe(true);
@@ -119,7 +122,7 @@ describe('reviews on this PR', () => {
 
   it('a pair in flight reads as running; a pair with no second half yet is still one row', () => {
     const running = reviewsOnPr([run(21, { status: 'running', pair: { pairId: 20, role: 'second', otherReviewId: 20 } }), run(20, { pair: { pairId: 20, role: 'first', otherReviewId: 21 } })], []);
-    expect(running.map((i) => [i.runIds, reviewListLine(i)])).toEqual([[[21, 20], 'Running · 27 Oct · abcdef1 · Claude + Codex']]);
+    expect(running.map((i) => [i.runIds, reviewListLine(i)])).toEqual([[[21, 20], `Running · ${shortDayTime(running[0]!.at)} · abcdef1 · Claude + Codex`]]);
     const lone = reviewsOnPr([run(30, { status: 'running', pair: { pairId: 30, role: 'first', otherReviewId: null } })], []);
     expect(lone.map((i) => i.runIds)).toEqual([[30]]);
   });
@@ -203,10 +206,13 @@ describe('the consolidated review (one view)', () => {
       ),
     );
 
-  it('one header, both models, one summary, ONE findings list with a quiet source label on each', () => {
+  it('one "Summary" header (no run name, no "reviewed … ago"), one summary, ONE findings list with a quiet source label on each', () => {
     const html = render(review());
-    expect(html).toContain('Claude + Codex review');
-    expect(html).toContain('Claude Opus 5.5 + Codex · GPT-6.1 Sol');
+    expect(html).toContain('>Summary</h3>');
+    expect(html).not.toContain('Claude + Codex review');
+    expect(html).not.toMatch(/reviewed .* ago/);
+    // Both models are behind the header's ⓘ, never on the page.
+    expect(html).not.toContain('Claude Opus 5.5 + Codex · GPT-6.1 Sol');
     expect(html.match(/The lookup can crash\./g)?.length).toBe(1);
     expect(html.match(/data-finding-source="/g)?.length).toBe(3);
     expect(html).toMatch(/data-finding-source="both"[^>]*>Claude \+ Codex</);
@@ -230,9 +236,44 @@ describe('the consolidated review (one view)', () => {
     expect(html).toMatch(/data-pair-failed-half="true">Codex didn&#x27;t finish: usage limit reached</);
   });
 
+  it('PR 221272: the failed half reads its lead ONCE ("Codex didn’t finish: you’ve hit your usage limit")', () => {
+    expect(pairHalfFailedLine({ provider: 'codex', reason: 'Codex could not finish: You’ve hit your usage limit' })).toBe(
+      'Codex didn\'t finish: you’ve hit your usage limit',
+    );
+    expect(pairHalfFailedLine({ provider: 'claude', reason: 'Claude didn’t finish. The run was cancelled.' })).toBe(
+      'Claude didn\'t finish: the run was cancelled.',
+    );
+    // A reason that names something else keeps its capital; one without the lead is kept as it is.
+    expect(pairHalfFailedLine({ provider: 'codex', reason: 'Codex took too long and was stopped.' })).toBe(
+      'Codex didn\'t finish: Codex took too long and was stopped.',
+    );
+    expect(pairHalfFailedLine({ provider: 'codex', reason: 'GitHub refused the request' })).toBe('Codex didn\'t finish: GitHub refused the request');
+    expect(pairHalfFailedLine({ provider: 'codex', reason: 'Codex could not finish:' })).toBe('Codex didn\'t finish: no reason given');
+  });
+
+  it('the reader\'s OWN PR: a finding already on GitHub offers no "Post reminder"', () => {
+    const posted = { ...finding(1, 11, undefined, 'warning', 'Rename x'), postedAt: '2026-10-27T10:06:00Z', githubCommentId: '77', postedCommentKind: 'inline' as const };
+    const withProps = (ownPr: boolean): string =>
+      renderToStaticMarkup(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(ClaudesReview, {
+            review: review({ pair: null, findings: [posted] }), editable: true, prUrl: 'https://github.com/acme/api/pull/5', repoFullName: 'acme/api',
+            prHeadSha: 'abcdef1234', postingFindingId: null, postErrorFindingId: null, postErrorMessage: null, changedPaths: new Set<string>(),
+            onToggleFinding: () => {}, onRewordFinding: async () => {}, onPostFinding: async () => {},
+            storyCheck: () => null, ciCheck: null, ownPr,
+          }),
+        ),
+      );
+    expect(withProps(false)).toContain('Post reminder');
+    expect(withProps(true)).not.toContain('Post reminder');
+  });
+
   it('an ordinary run carries no source labels', () => {
     const html = render(review({ pair: null, findings: [{ ...finding(1, 11, undefined, 'nit', 'Rename x') }] }));
     expect(html).not.toContain('data-finding-source');
-    expect(html).toContain('Codex&#x27;s review');
+    expect(html).not.toContain('Codex&#x27;s review');
+    expect(html).toContain('>Summary</h3>');
   });
 });

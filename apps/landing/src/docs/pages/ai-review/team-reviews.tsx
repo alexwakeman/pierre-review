@@ -84,11 +84,12 @@ export default function Page(): JSX.Element {
         A teammate's posted Limn review is brought into your <Ui>AI Review</Ui> tab as their review, read-only. Each
         finding says who raised it: "You", "Robin", or "You and Robin" when both found the same point, which is shown
         once. You cannot reword or ignore their finding. The one thing you can do is <Ui>Post reminder</Ui>, which
-        posts the point again as you, linked to the first comment.
+        posts the point again as you, linked to the first comment. On your own pull request, no finding offers it.
       </p>
       <p>
-        <Ui>Where this PR stands</Ui> lists each person's standing on GitHub (approved, changes requested, comment),
-        with the date and commit. If a teammate runs a much older Limn, one line suggests they update.
+        <Ui>Where this PR stands</Ui> lists the verdict GitHub holds for each person (approved, changes requested,
+        withdrawn), or their newest review when GitHub holds none, with the date, time and commit. An approval from a
+        replies check counts. If a teammate runs a much older Limn, one line suggests they update.
       </p>
 
       <H2 id="author-and-reviewer">Author and reviewer</H2>
@@ -123,8 +124,8 @@ export default function Page(): JSX.Element {
       </p>
       <ul>
         <li>
-          On your side, the <Ui>AI Review</Ui> tab and the <Ui>Waiting on others</Ui> row say{' '}
-          <Ui>Waiting for a teammate’s Limn to review</Ui>. Limn says this only when a teammate's Limn has run
+          On your side, the <Ui>Waiting on others</Ui> row says <Ui>Waiting for a teammate’s Limn to review</Ui>.
+          When the teammate's review lands, its verdict shows in <Ui>Where this PR stands</Ui>. Limn says this only when a teammate's Limn has run
           automatic reviews in the workspace in the last two weeks. It cannot see your teammates' settings, so
           otherwise it says nothing.
         </li>

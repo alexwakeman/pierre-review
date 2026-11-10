@@ -236,7 +236,7 @@ export function ThreadRow({
 
 /**
  * Every other reviewer's open thread the run judged. Still to fix first; addressed and not-valid
- * ones behind "Show N more". null = the run did not assess threads → nothing.
+ * ones behind "Show N more". null = the run did not assess threads, or none → nothing.
  */
 export function ClaudeReviewThreadsSection({
   items,
@@ -258,7 +258,8 @@ export function ClaudeReviewThreadsSection({
   const activeName = useAiProviderName();
   const providerName = by ?? activeName;
   const parts = useMemo(() => partitionThreads(items ?? []), [items]);
-  if (items == null) return null;
+  // No other review threads: no section at all (2026-11-10).
+  if (items == null || items.length === 0) return null;
   const pills = threadCountPills(counts ?? threadAssessmentCounts(items));
   return (
     <ReviewSection
@@ -283,10 +284,7 @@ export function ClaudeReviewThreadsSection({
         </InfoButton>
       }
     >
-      {items.length === 0 ? (
-        <p className={`text-meta ${MUTED}`}>No other review threads.</p>
-      ) : (
-        <>
+      <>
           {parts.shown.length > 0 && (
             <ul className={REVIEW_ITEM_GROUP}>
               {parts.shown.map((t) => (
@@ -314,8 +312,7 @@ export function ClaudeReviewThreadsSection({
               )}
             </div>
           )}
-        </>
-      )}
+      </>
     </ReviewSection>
   );
 }

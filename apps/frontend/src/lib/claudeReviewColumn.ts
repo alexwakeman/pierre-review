@@ -140,6 +140,15 @@ export function shortDay(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
+/** "9 Nov 14:04": the day and the time, 24-hour clock (the AI Review tab's review lists). */
+export function shortDayTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${shortDay(iso)} ${hh}:${mm}`;
+}
+
 /** Who reviewed last, beside a standing block: "Latest: Robin · Comment · 4 Nov". */
 export function latestReviewerLine(latest: ClaudeReviewStandingRef): { text: string; title: string } {
   const who = latest.you || latest.poster == null ? 'You' : teammateName({ login: latest.poster.login, displayName: latest.poster.displayName });

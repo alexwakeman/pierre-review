@@ -17,7 +17,7 @@
 //     ticket", which opens the ticket's STORY VIEW tab (`useOpenStory`). The PR's contribution card
 //     ("What this PR adds") and the counts of the rest are the story view's, not shown here. The
 //     result pieces are shared with the stack (TicketReviewParts.tsx);
-//   - a collapsible "Story" per block (TicketStory.tsx): the ticket as markdown, read on open;
+//   - NO "Ticket" disclosure (removed 2026-11-10): the PR's header links the ticket;
 //   - an older PR review's stories that no ticket review covers, as read-only blocks of their own
 //     marked "Checked on this PR only" (ONE story section; the old "User stories" section is gone);
 //   - the paste box (TicketPasteBox.tsx): ticket links or keys, read from the PR's workspace
@@ -26,8 +26,7 @@
 //
 // Rules: every string from Claude renders as PLAIN TEXT (no href built from it), except the run's
 // summary (two plain sentences; only the leading prose of an older one), markdown through the sanitizing
-// <Markdown>; a PR reference in any of it ("api#12") is an in-app button via ReviewPrRefs.tsx. A
-// story's own text renders as markdown only inside the Story disclosure. Type scale:
+// <Markdown>; a PR reference in any of it ("api#12") is an in-app button via ReviewPrRefs.tsx. Type scale:
 // lib/reviewStyles.ts (the Findings card is the reference); icons from Icons.tsx; the explanation
 // lives in the ⓘ.
 // ⚠ Posting follows the post-write copy contract: once GitHub answered with a comment id, the
@@ -62,12 +61,10 @@ import {
   ticketProgressPct,
 } from '../lib/ticketReview.js';
 import { prTicketShare, shareDocReferences, slimStoryCheck } from '../lib/ticketShare.js';
-import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
 import { useOpenStory } from '../lib/ticketTab.js';
 import { AiRunGate } from './AiSetup.js';
 import { ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
 import { TicketPasteBox } from './TicketPasteBox.js';
-import { StoryDisclosure } from './TicketStory.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { REVIEW_CHIP } from '../lib/reviewStyles.js';
@@ -193,9 +190,6 @@ function TicketBlock({
   const refused = startRefusal ?? (review?.status === 'failed' ? review.refused : null);
   const failed = review?.status === 'failed' && review.refused == null ? (review.error ?? 'The check failed.') : null;
   const title = entry.ticketTitle ?? review?.ticketTitle ?? null;
-  const snapshot = shown?.ticket ?? review?.ticket ?? null;
-  const jiraRef = jiraRefFor(pr.tickets, entry.ticketKey);
-  const url = storyUrlOf(jiraRef, [snapshot]);
   // Where the story view holds the whole story, the pane shows only THIS PR's share of it.
   // `pr.tickets` is null exactly when the PR's workspace has no tracker (core, free since
   // apiVersion 23) — the same fact the Open PRs stacks need, with no extra request.
@@ -210,7 +204,7 @@ function TicketBlock({
     <div aria-label={`Ticket ${entry.ticketKey ?? title ?? ''}`} className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h4 className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          {/* Plain text, no link into the tracker: the story is right here (its "Ticket" disclosure). */}
+          {/* Plain text: the PR's header links the ticket. No "Ticket" disclosure here (2026-11-10). */}
           {entry.ticketKey != null && (
             <span className="font-mono text-body font-semibold text-ui-ink">{entry.ticketKey}</span>
           )}
@@ -248,7 +242,6 @@ function TicketBlock({
         </span>
       </div>
       {!running && <TicketAutoCheckLine autoCheck={state.autoCheck} labelOf={labelOf} className="block" />}
-      <StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[snapshot]} url={url} linkKey={false} />
       <div className="empty:hidden">
         <RegenProgressBar
           active={running}
@@ -314,8 +307,6 @@ function LegacyBlock({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   const { ticket } = entry;
-  const jiraRef = jiraRefFor(pr.tickets, ticket.key);
-  const url = storyUrlOf(jiraRef, [ticket]);
   const hasTitle = ticket.title != null && ticket.title.trim() !== '';
   return (
     <ClaudeReviewTicketResults
@@ -332,7 +323,6 @@ function LegacyBlock({
           <ReviewedAgo at={legacy.finishedAt} />
         </span>
       }
-      below={<StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[ticket]} url={url} linkKey={false} />}
     />
   );
 }
