@@ -231,7 +231,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
 
   if (isError) return <p className="text-body text-ui-danger">Could not load this sprint.</p>;
   if (isLoading || data == null || workspaceId == null) return <p className={`text-meta ${MUTED}`}>Loading…</p>;
-  // No tracker: one line and the way to set one up (Settings → Workspace → Issue tracker).
+  // No tracker: one line and the way to set one up (Settings → Integrations).
   if (!data.trackerOn) return <SprintTrackerSetup />;
   const reading = data.read.readAt == null && data.read.error == null;
   const sprintCount = data.nodes.filter((n) => !n.ghost).length;

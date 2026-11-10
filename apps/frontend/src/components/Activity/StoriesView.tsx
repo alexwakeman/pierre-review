@@ -168,7 +168,7 @@ function StoriesBlock({
       <div className="space-y-3">
         {header}
         <p className={`text-body ${MUTED}`}>
-          Stories needs an issue tracker. Add one in Settings → Workspace → Issue tracker.
+          Stories needs an issue tracker. Add one in Settings → Integrations.
         </p>
       </div>
     );

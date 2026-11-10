@@ -18,7 +18,7 @@ export function SprintTrackerSetup(): JSX.Element {
         <span>Connect Jira, Linear or GitHub Issues to see this sprint.</span>
         <InfoButton title="Setting up an issue tracker">
           <p>Each workspace has its own issue tracker, or none.</p>
-          <p>Set it in Settings → Workspace → Issue tracker. Limn then reads the tracker’s current sprint and shows it here.</p>
+          <p>Set it in Settings → Integrations. Limn then reads the tracker’s current sprint and shows it here.</p>
           <p>Open pull requests → Merged works without a tracker.</p>
         </InfoButton>
       </div>
