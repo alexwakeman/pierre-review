@@ -39,9 +39,7 @@
 //
 // ⚠ NEVER BLOCKS ON GITHUB: no login, an unreadable history or a refused write ⇒ the action goes
 //   ahead WITHOUT a line (logged), exactly like the review claims.
-// ⚠ THE SWITCH: the workspace's team-claims switch ("Mark auto reviews on GitHub",
-//   `workspaces.team_claims_enabled`, ON unless a stored false — migration 0159) governs these lines
-//   too: one team switch. Off ⇒ nothing is read or posted.
+// ⚠ ALWAYS ON, like the review claims (2026-11-10: the old team-claims switch is gone).
 // ⚠ NO LEDGER: a line left pending by a crash is released by the TTL, not by a reconciler — dependency
 //   actions take seconds (approve, rebase ask, arming) or are renewed while they run (AI runs).
 import { DEPENDENCY_CLAIM_CONTEXT, type DependencyAutomationActionKind } from '@pierre-review/shared';
@@ -321,12 +319,10 @@ export type DepsHold = Extract<DepsClaimDecision, { kind: 'handling' | 'handled'
  *  AI-pushed head whose CI is not green: do nothing yet (merge only). Never throws. */
 export async function readDepsClaim(
   target: DepsClaimTarget,
-  claimsOn: boolean,
   log: Log,
   nowMs: number = Date.now(),
   opts: Pick<DepsClaimFoldOpts, 'ciGreen'> = {},
 ): Promise<{ login: string | null; hold: DepsHold | null; awaitingCi?: true }> {
-  if (!claimsOn) return { login: null, hold: null };
   let login: string | null = null;
   try {
     login = await github.login(target.accountId);

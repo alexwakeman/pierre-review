@@ -19,7 +19,7 @@
 //   3. `fix_in_progress` — a fix SESSION holds this PR (booting, building, a manual session open for
 //                          follow-ups, or a Plan first waiting for Start fix — an auto fix would bury
 //                          it), OR an older row's plan is still open (being made or waiting);
-//   4. `fix_waiting`     — a finished fix with changes, never pushed, sits on the PR's CURRENT head
+//   4. `fix_waiting`     — a finished fix with changes (or a valid merge), never pushed, sits on the PR's CURRENT head
 //                          (the synced head, the REVIEWED head, or — only when an unpushed fix sits
 //                          on neither — the LIVE head, so a lagging sync cannot hide one);
 //   5. `cap`             — AUTO_FIX_DAILY_CAP auto fixes already started on this PR in the last 24h;
@@ -31,8 +31,14 @@
 // "Plan first" route calls `startPlan`; `startReviewFix` always builds straight away.
 //
 // ⚠ WHAT IT CARRIES is the workspace's "Always include" sections (`workspaces.auto_fix_settings`,
-// `resolveAutoFixSettings`; default every section but style-bot threads) — the same sections as the
-// manual fix picker, minus story items.
+// `resolveAutoFixSettings`; default every section but style-bot threads and merge conflicts) — the same
+// sections as the manual fix picker, minus story items. The source review is the WHOLE Limn review:
+// a Claude + Codex pair's two halves (`getReviewView`), and — when one half failed — what the other's
+// cover pass found still open of the failed half's earlier findings (manager.ts `loadSourceReview`).
+// ⚠ THE MERGE ITEM ("Resolve merge conflicts", `AutoFixInclude.conflicts`, OFF by default): with it on
+// and the PR conflicting with its base, the unattended agent merges first (fix-merge.ts). The host's
+// checks (two parents, no markers, fixes on top) still gate the push: an invalid merge pushes nothing,
+// and "Push automatically" still decides whether a valid one is pushed or waits for the reader.
 // ⚠ NOTHING IS PUSHED unless the workspace switched "Push automatically" on (`autoPush`, default
 // OFF): then a SUCCEEDED auto fix is pushed onto the PR's existing branch by auto-push.ts (own PR
 // only, never forced, a failure recorded and never retried). Otherwise it waits for a person's Push.
@@ -60,6 +66,7 @@ import {
 import type { AgentContext } from '../../review/agent-context.js';
 import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
 import { fixSandboxReadiness, type FixSandboxReadiness } from '../../sandbox/session/fix.js';
+import { fixRowHasWork } from '../../sandbox/session/fix-merge.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
@@ -140,6 +147,8 @@ interface FixRow {
   status: string;
   baseSha: string;
   patch: string | null;
+  mergeJson?: unknown;
+  mergeBundle?: string | null;
   pushedAt: unknown;
   trigger: string | null;
   createdAt: Date | number | null;
@@ -243,6 +252,7 @@ export async function maybeStartAutoFix(
         status: af.status,
         baseSha: af.baseSha,
         patch: af.patch,
+        ...(af.mergeJson ? { mergeJson: af.mergeJson, mergeBundle: af.mergeBundle } : {}),
         pushedAt: af.pushedAt,
         trigger: af.trigger,
         createdAt: af.createdAt,
@@ -267,7 +277,7 @@ export async function maybeStartAutoFix(
     if (loaded.review.headSha) heads.add(loaded.review.headSha);
     const atHead = (f: FixRow): boolean => heads.has(f.baseSha);
     const waiting = fixes.filter(
-      (f) => f.status === 'succeeded' && f.pushedAt == null && (f.patch ?? '').trim() !== '',
+      (f) => f.status === 'succeeded' && f.pushedAt == null && fixRowHasWork({ ...f, patch: (f.patch ?? '').trim() }),
     );
     if (waiting.length > 0 && !waiting.some(atHead) && deps.liveHeadSha) {
       const live = await deps.liveHeadSha(ctx, accountId, prId);

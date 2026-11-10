@@ -94,7 +94,7 @@ export default function Page(): JSX.Element {
           { _key: 'p', w: 'Pushes from AI Fix, Implement story and the conflict resolver', when: 'When you press Push, or if you switched on automatic pushing' },
           { _key: 'o', w: 'Open a pull request', when: 'When you press, from Implement story or the conflict resolver' },
           { _key: 'x', w: 'Re-run CI jobs, request reviewers, close or reopen', when: 'When you press the button' },
-          { _key: 's', w: 'limn/ commit statuses', when: 'With Mark auto reviews on GitHub (on by default), to tell teammates’ Limn a review is under way' },
+          { _key: 's', w: 'limn/ commit statuses', when: 'On each auto review and dependency action, to tell teammates’ Limn the work is under way' },
         ]}
       />
       <Warning title="Do not make limn/ statuses required">

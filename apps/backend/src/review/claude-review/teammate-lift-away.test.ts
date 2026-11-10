@@ -57,7 +57,7 @@ describe("dismissing an away teammate's Limn block", () => {
     lines = [{ login: 'alice-dev' }];
     liveTeamLines.mockClear();
     // Neither opt-in: robin gave no consent, the reader has not ticked "Dismiss a teammate's …".
-    await setPost({ liftTeammateBlocks: false, teamLiftConsent: false, autoVerdict: true });
+    await setPost({ autoVerdict: true });
   });
 
   it('the pure rules: away only with no line at the head and nothing seen for the window', () => {
@@ -72,7 +72,6 @@ describe("dismissing an away teammate's Limn block", () => {
     // The away path needs an approving review; consent is not asked.
     const base = {
       why: 'away' as const,
-      settingOn: false,
       authorIsMe: false,
       posterIsMe: false,
       inForce: true,
@@ -198,16 +197,16 @@ describe("dismissing an away teammate's Limn block", () => {
   });
 
   it('gated like the verdict: auto verdict off, an impact the reader does not approve, or their own PR', async () => {
-    await setPost({ liftTeammateBlocks: false, autoVerdict: false });
+    await setPost({ autoVerdict: false });
     let p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
     await goAway(p.prId, await approveRun(p.prId, p.findings));
     expect(dismissReview).not.toHaveBeenCalled();
-    await setPost({ liftTeammateBlocks: false, autoVerdict: true, approveImpact: { high: false, medium: false, low: false } });
+    await setPost({ autoVerdict: true, approveImpact: { high: false, medium: false, low: false } });
     p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
     await goAway(p.prId, await approveRun(p.prId, p.findings));
     expect(postReview.mock.calls.at(-1)![0].verdict).toBe('COMMENT');
     expect(dismissReview).not.toHaveBeenCalled();
-    await setPost({ liftTeammateBlocks: false, autoVerdict: true, approveImpact: { high: true, medium: true, low: true } });
+    await setPost({ autoVerdict: true, approveImpact: { high: true, medium: true, low: true } });
     p = await blockedPr({ consent: false, author: ALICE, blockHead: OLD_HEAD });
     await goAway(p.prId, await approveRun(p.prId, p.findings));
     expect(dismissReview).not.toHaveBeenCalled();

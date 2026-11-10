@@ -18,7 +18,6 @@ import { useMe } from '../../hooks/useTriage.js';
 import { pairReviewReady } from '../../lib/aiCapabilities.js';
 import { PAIR_PICK_LABEL } from '../../lib/modelPick.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { aiCredentialWords } from '@pierre-review/shared';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import {
@@ -70,15 +69,18 @@ import { Select } from '../ui/index.js';
  * set it up first), and the whole block is dimmed while auto review is off (it acts on auto runs
  * only). Same Save as the rest; only what changed is sent.
  *
- * Under it, two more switches ride the same `autoPost` object (migration 0091 / pg 0078):
- * `autoVerdict` (ON by default since 2026-11-04; the review's event becomes Claude's stricter
- * verdict — only when the reader's own last review was a comment, never on their own PR) and
- * `autoResolve` (OFF by default; Limn's own
- * threads, once a later review finds them fixed). `resolveOwnPrs` ("Resolve my Limn threads when
+ * Under it, `autoVerdict` rides the same `autoPost` object (migration 0091 / pg 0078; ON by default
+ * since 2026-11-04; the review's event becomes the stricter verdict — only when the reader's own last
+ * review was a comment, never on their own PR). `resolveOwnPrs` ("Resolve my Limn threads when
  * addressed", ON by default) sits outside the dimmed block: it acts on the reader's own PRs after
  * ANY run, with auto review off too. AUTO FIX gains "Always include" (one checkbox per
- * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
- * same route, dimmed while auto fix is off.
+ * fix-picker section; style bots and merge conflicts off by default) and "Push automatically" (OFF)
+ * — `autoFix` on the same route, dimmed while auto fix is off.
+ *
+ * ⚠ NO SWITCH, ALWAYS ON (2026-11-10): the team claim status lines ("Mark auto reviews on GitHub"),
+ * resolving Limn's own threads once fixed, and lifting a teammate's Limn "changes requested". Each
+ * is said once behind the ⓘ it belongs to. Provider-neutral words: the review may be Claude's,
+ * Codex's or both, so the rows say "Limn's findings" and "my agent", never one provider's name.
  *
  * DESIGN DIAGRAMS (`autoDiagramsEnabled`, `workspaces.auto_diagrams_enabled`, migration 0126) — ON
  * by default. A diagram is drawn after EVERY review, yours or automatic, so this switch is NOT
@@ -105,7 +107,7 @@ const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
   { key: 'nits', label: 'Nits' },
   { key: 'questions', label: 'Questions, on the line they ask about where possible' },
   { key: 'ciFailures', label: 'CI failure reasons, in one PR comment' },
-  { key: 'sonar', label: 'SonarCloud issues, in one PR comment' },
+  { key: 'sonar', label: 'SonarCloud issues' },
   { key: 'storyGaps', label: 'Story gaps, on the PR they belong to' },
   { key: 'notAskedFor', label: 'Work the story did not ask for' },
 ];
@@ -113,15 +115,16 @@ const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
 const sameKinds = (a: AutoPostKinds, b: AutoPostKinds): boolean =>
   KIND_ROWS.every(({ key }) => a[key] === b[key]);
 
-// `label` takes the active provider's name: an automatic fix starts from that provider's review.
-const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: (name: string) => string }> = [
-  { key: 'findings', label: (name) => `${name}’s findings` },
-  { key: 'earlierFindings', label: () => 'Earlier findings not fixed yet' },
-  { key: 'judgedThreads', label: (name) => `Threads ${name} says to fix` },
-  { key: 'untouchedThreads', label: () => 'Threads nobody has answered' },
-  { key: 'ciFailures', label: () => 'CI failure reasons' },
-  { key: 'sonar', label: () => 'SonarCloud issues' },
-  { key: 'styleBots', label: () => 'Style bot comments (SonarCloud, Codecov…)' },
+// Provider-neutral: an auto review may be Claude's, Codex's or both, and every Limn finding counts.
+const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
+  { key: 'conflicts', label: 'Merge conflicts with the base branch' },
+  { key: 'findings', label: 'Limn’s findings' },
+  { key: 'earlierFindings', label: 'Earlier findings not fixed yet' },
+  { key: 'judgedThreads', label: 'Threads my agent says to fix' },
+  { key: 'untouchedThreads', label: 'Threads nobody has answered' },
+  { key: 'ciFailures', label: 'CI failure reasons' },
+  { key: 'sonar', label: 'SonarCloud issues' },
+  { key: 'styleBots', label: 'Style bot comments (SonarCloud, Codecov…)' },
 ];
 const sameInclude = (a: AutoFixInclude, b: AutoFixInclude): boolean =>
   FIX_ROWS.every(({ key }) => a[key] === b[key]);
@@ -162,9 +165,6 @@ export function AutoReviewSection(): JSX.Element {
   // ON unless a stored false says otherwise (an older server sends nothing).
   const storedDiagrams = stored?.autoDiagramsEnabled !== false;
   const [diagramsOn, setDiagramsOn] = useState(storedDiagrams);
-  // TEAM CLAIMS ("Mark auto reviews on GitHub"): ON unless the workspace switched it off (0159).
-  const storedClaims = stored?.teamClaimsEnabled !== false;
-  const [claimsOn, setClaimsOn] = useState(storedClaims);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
@@ -185,17 +185,10 @@ export function AutoReviewSection(): JSX.Element {
   const [scope, setScope] = useState<AutoPostScope>(storedScope);
   const [kinds, setKinds] = useState<AutoPostKinds>(storedKinds);
   const storedVerdict = storedPost?.autoVerdict !== false;
-  const storedResolve = storedPost?.autoResolve === true;
   const [verdict, setVerdict] = useState(storedVerdict);
-  const [resolve, setResolve] = useState(storedResolve);
   // "Resolve my Limn threads when addressed": ON unless switched off. Own PRs, any run.
   const storedResolveOwn = storedPost?.resolveOwnPrs !== false;
   const [resolveOwn, setResolveOwn] = useState(storedResolveOwn);
-  // The two teammate-lift opt-ins (both OFF by default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
-  const storedLiftConsent = storedPost?.teamLiftConsent === true;
-  const storedLiftTeammates = storedPost?.liftTeammateBlocks === true;
-  const [liftConsent, setLiftConsent] = useState(storedLiftConsent);
-  const [liftTeammates, setLiftTeammates] = useState(storedLiftTeammates);
   const storedImpact: AutoApproveImpact = storedPost?.approveImpact ?? AUTO_POST_DEFAULT_APPROVE_IMPACT;
   const storedImpactKey = IMPACT_ROWS.map(({ key }) => (storedImpact[key] ? '1' : '0')).join('');
   const [impact, setImpact] = useState<AutoApproveImpact>(storedImpact);
@@ -218,9 +211,6 @@ export function AutoReviewSection(): JSX.Element {
     setDiagramsOn(storedDiagrams);
   }, [workspaceId, storedDiagrams]);
   useEffect(() => {
-    setClaimsOn(storedClaims);
-  }, [workspaceId, storedClaims]);
-  useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
   useEffect(() => {
@@ -241,17 +231,8 @@ export function AutoReviewSection(): JSX.Element {
     setVerdict(storedVerdict);
   }, [workspaceId, storedVerdict]);
   useEffect(() => {
-    setResolve(storedResolve);
-  }, [workspaceId, storedResolve]);
-  useEffect(() => {
     setResolveOwn(storedResolveOwn);
   }, [workspaceId, storedResolveOwn]);
-  useEffect(() => {
-    setLiftConsent(storedLiftConsent);
-  }, [workspaceId, storedLiftConsent]);
-  useEffect(() => {
-    setLiftTeammates(storedLiftTeammates);
-  }, [workspaceId, storedLiftTeammates]);
   useEffect(() => {
     setStrictness(storedStrictness);
   }, [workspaceId, storedStrictness]);
@@ -280,19 +261,16 @@ export function AutoReviewSection(): JSX.Element {
     scope !== storedScope ||
     !sameKinds(kinds, storedKinds) ||
     verdict !== storedVerdict ||
-    resolve !== storedResolve ||
     resolveOwn !== storedResolveOwn ||
     !sameImpact(impact, storedImpact) ||
-    leftovers !== storedLeftovers ||
-    liftConsent !== storedLiftConsent ||
-    liftTeammates !== storedLiftTeammates;
+    leftovers !== storedLeftovers;
   const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
 
   return (
     <SectionShell
       title="Auto review"
       headingId={AUTO_REVIEW_SECTION_HEADING_ID}
-      desc={`${ai.providerName} reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on ${aiCredentialWords(ai.provider)}.`}
+      desc="Limn reviews each new PR a person opens in this workspace, with the same model and budget as the Review button."
       info={
         <InfoButton title="Auto review">
           <p>
@@ -310,6 +288,13 @@ export function AutoReviewSection(): JSX.Element {
             These re-reviews count towards the daily limit. Reviews you start yourself always go
             first.
           </p>
+          <p>
+            Each auto review puts a status on the PR’s latest commit: limn/review-claude or
+            limn/review-codex. A teammate’s Limn then skips a commit someone is already reviewing
+            with the same provider. If a review doesn’t finish, Limn marks its status free to claim.
+            Without write access to the repo, Limn reviews without a status.
+          </p>
+          <p>Don’t make limn/ statuses required checks. A pending one would block merges.</p>
         </InfoButton>
       }
     >
@@ -328,31 +313,6 @@ export function AutoReviewSection(): JSX.Element {
           </span>
         </span>
       </label>
-      <div className={`flex items-start gap-1 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
-        <label className="flex items-start gap-2 text-ui-ink">
-          <CheckInput
-            className="mt-0.5"
-            checked={claimsOn}
-            onChange={(e) => setClaimsOn(e.target.checked)}
-          />
-          <span className="font-medium">Mark auto reviews on GitHub</span>
-        </label>
-        <InfoButton title="Mark auto reviews on GitHub">
-          <p>For teams where more than one person runs Limn.</p>
-          <p>
-            Each auto review posts a status line on the PR’s latest commit: limn/review-claude or
-            limn/review-codex. A teammate’s Limn then skips a commit someone is already reviewing
-            with the same provider. A different provider still reviews it.
-          </p>
-          <p>
-            If a review doesn’t finish, Limn marks its line free to claim, so a teammate’s Limn can
-            review the commit. You can also Clear a line from the AI Review tab.
-          </p>
-          <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
-          <p>Don’t make limn/ lines required checks. A line that is still pending would block merges.</p>
-          <p>On by default.</p>
-        </InfoButton>
-      </div>
       <div className={`space-y-1.5 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <div className="flex items-start gap-1">
           <div className="flex flex-wrap items-center gap-2 text-ui-ink">
@@ -465,6 +425,20 @@ export function AutoReviewSection(): JSX.Element {
               on GitHub. When nothing else is left to post, the reason goes out as one short comment,
               once per commit.
             </p>
+            <p>
+              When a later review finds a posted comment fixed, Limn replies and resolves its thread.
+            </p>
+            <p>
+              When a teammate’s Limn requested changes and every point is fixed at the PR’s latest
+              commit, your Limn dismisses that review and posts its own. Whether it approves is decided
+              by Approve or request changes. A review someone wrote by hand is never dismissed.
+            </p>
+            <p>
+              A teammate’s review from an older Limn is dismissed only when your Limn approves and
+              their Limn has not looked at the latest commit or done anything on GitHub for 4 hours.
+              Dismissing needs write access. If GitHub refuses, the AI Review tab says so and Limn
+              does not try again.
+            </p>
             <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
             <p>Posting and Approve or request changes are on by default.</p>
           </InfoButton>
@@ -570,21 +544,6 @@ export function AutoReviewSection(): JSX.Element {
               </label>
             ))}
           </fieldset>
-          <label className="flex items-start gap-2">
-            <CheckInput
-              className="mt-0.5"
-              checked={resolve}
-              onChange={(e) => setResolve(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium text-ui-ink">
-                Resolve Limn’s threads once fixed
-              </span>
-              <span className="mt-0.5 block text-meta text-ui-mute">
-                When a later review finds a posted comment fixed, Limn replies and resolves it.
-              </span>
-            </span>
-          </label>
         </div>
         )}
       </div>
@@ -605,46 +564,6 @@ export function AutoReviewSection(): JSX.Element {
           <p>On by default.</p>
         </InfoButton>
       </div>
-      <fieldset className="space-y-1 pl-5 text-body" data-teammate-lift>
-        <legend className="flex items-center gap-1 font-medium text-ui-ink">
-          Teammates’ Limn “changes requested”
-          <InfoButton title="Teammates’ Limn “changes requested”">
-            <p>
-              These two boxes are about one thing: a review a teammate’s Limn posted as “changes
-              requested”. Neither box dismisses or adds an approval.
-            </p>
-            <p>
-              Your Limn checks each point of that review on later reviews. When every point is fixed
-              at the PR’s latest commit, and your own review finds no blocker, your Limn dismisses the
-              teammate’s “changes requested” review and posts its own review. Whether that review
-              approves is decided by Approve or request changes, as for any review.
-            </p>
-            <p>
-              Both people must turn on their box. The teammate turns on the first box, so your Limn may
-              dismiss their Limn’s review. You turn on the second box, so your Limn does it. A review
-              someone wrote by hand is never dismissed.
-            </p>
-            <p>
-              Without either box, when the teammate’s Limn is away: if your Limn approves, every point
-              is fixed at the latest commit, and their Limn has not looked at that commit or done
-              anything on GitHub for 4 hours, your Limn dismisses their review. This needs “Approve or
-              request changes for me”.
-            </p>
-            <p>
-              Dismissing needs write access to the repository, and branch protection can restrict who
-              may dismiss. If GitHub refuses, the AI Review tab says so and Limn does not try again.
-            </p>
-          </InfoButton>
-        </legend>
-        <label className="flex items-start gap-2 text-ui-ink">
-          <CheckInput className="mt-0.5" checked={liftConsent} onChange={(e) => setLiftConsent(e.target.checked)} />
-          <span>Let a teammate’s Limn dismiss my Limn’s “changes requested” once every point is fixed</span>
-        </label>
-        <label className="flex items-start gap-2 text-ui-ink">
-          <CheckInput className="mt-0.5" checked={liftTeammates} onChange={(e) => setLiftTeammates(e.target.checked)} />
-          <span>Dismiss a teammate’s Limn “changes requested” once every point is fixed</span>
-        </label>
-      </fieldset>
       <div className={`pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <label className="flex flex-wrap items-center gap-1.5 text-ui-ink">
           <span>Up to</span>
@@ -696,6 +615,14 @@ export function AutoReviewSection(): JSX.Element {
             Other people’s PRs are never fixed automatically. At most {AUTO_FIX_DAILY_CAP} auto fixes per PR a day,
             and none while a fix is running or waiting to be pushed.
           </p>
+          <p>
+            Limn’s findings are every finding of the review, from Claude, Codex or both.
+          </p>
+          <p>
+            With Merge conflicts ticked, a PR that conflicts with its base branch is merged first and
+            the conflicts are resolved. Limn checks the merge before any push: two parents and no
+            conflict markers left. A merge that fails the check is never pushed.
+          </p>
         </InfoButton>
       </div>
       <div className={`space-y-1 pl-10 text-body ${on && fixOn ? '' : 'opacity-60'}`}>
@@ -708,7 +635,7 @@ export function AutoReviewSection(): JSX.Element {
                 checked={include[key]}
                 onChange={(e) => setInclude((v) => ({ ...v, [key]: e.target.checked }))}
               />
-              <span>{label(ai.providerName)}</span>
+              <span>{label}</span>
             </label>
           ))}
         </fieldset>
@@ -761,7 +688,6 @@ export function AutoReviewSection(): JSX.Element {
           (on !== storedOn ||
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
-            claimsOn !== storedClaims ||
             providers !== storedProviders ||
             strictness !== storedStrictness ||
             capDirty ||
@@ -774,7 +700,6 @@ export function AutoReviewSection(): JSX.Element {
             enabled: on,
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
-            ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
             ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
             ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
@@ -785,12 +710,9 @@ export function AutoReviewSection(): JSX.Element {
                     scope,
                     kinds,
                     autoVerdict: verdict,
-                    autoResolve: resolve,
                     resolveOwnPrs: resolveOwn,
                     approveImpact: impact,
                     approveLeftovers: leftovers,
-                    teamLiftConsent: liftConsent,
-                    liftTeammateBlocks: liftTeammates,
                   },
                 }
               : {}),

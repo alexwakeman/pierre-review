@@ -1413,15 +1413,17 @@ describe('auto resolve', () => {
     expect(ar.resolvableStatus('partly_addressed')).toBeNull();
   });
 
-  it('the workspace switch is off by default: nothing is replied or resolved', async () => {
+  it('no switch of its own: with auto-posting off, nothing is replied or resolved', async () => {
     const { pr, first, finding } = await postedFinding();
+    await setPost(false);
     const id = await followUpRun(pr, first, finding.id, 'addressed');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps(), rdeps());
     expect(reply).not.toHaveBeenCalled();
+    await setPost(true);
   });
 
   it('replies, THEN resolves, stamps, records — once only', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     const order: string[] = [];
     reply.mockImplementation(async () => {
@@ -1450,7 +1452,7 @@ describe('auto resolve', () => {
   });
 
   it('follows an unposted re-raise back to the inline-posted ancestor and resolves ITS thread', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     // Run 2 raises it again; the dedupe never posts the re-raise (no auto post is run for it).
     const mid = await run(pr, [{ severity: 'blocker', title: 'Null deref', path: 'src/p.ts', priorFindingId: finding.id }]);
@@ -1466,7 +1468,7 @@ describe('auto resolve', () => {
   });
 
   it('a failed resolve is recorded with the reply id and never retried', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding } = await postedFinding();
     resolve.mockImplementation(async () => {
       throw new Error('Resource not accessible by integration');
@@ -1485,7 +1487,7 @@ describe('auto resolve', () => {
   });
 
   it('a failed reply is recorded and the thread is not resolved', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding } = await postedFinding();
     reply.mockImplementation(async () => {
       throw new Error('403');
@@ -1498,7 +1500,7 @@ describe('auto resolve', () => {
   });
 
   it('only Limn’s own threads, only addressed / no longer applies', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     // Not addressed ⇒ nothing.
     const a = await postedFinding();
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: a.pr, reviewId: await followUpRun(a.pr, a.first, a.finding.id, 'not_addressed') }, deps(), rdeps());
@@ -1546,7 +1548,7 @@ describe('auto resolve', () => {
   }
 
   it('reply accepted: posts the acknowledgement, THEN resolves — once only', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     const order: string[] = [];
     reply.mockImplementation(async () => {
@@ -1574,7 +1576,7 @@ describe('auto resolve', () => {
   });
 
   it('reply accepted on an already-resolved thread: nothing posted', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     const { eq } = await import('drizzle-orm');
     await db.update(schema.reviewThreads).set({ isResolved: true }).where((await import('drizzle-orm')).eq(schema.reviewThreads.id, thread.id)).execute();
@@ -1585,7 +1587,7 @@ describe('auto resolve', () => {
   });
 
   it('addressed on a thread the person ALREADY RESOLVED: ONE reply with the how, no resolve, once', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     const { eq } = await import('drizzle-orm');
     await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, thread.id)).execute();
@@ -1606,7 +1608,7 @@ describe('auto resolve', () => {
   });
 
   it('a resolved thread whose last word is already a Limn reply gets nothing', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     const { eq } = await import('drizzle-orm');
     await db.update(schema.reviewThreads).set({ isResolved: true }).where(eq(schema.reviewThreads.id, thread.id)).execute();
@@ -1628,7 +1630,7 @@ describe('auto resolve', () => {
   });
 
   it('reply disputed: ONE pushback per thread, ever — never resolved, auto-post switch alone', async () => {
-    await setPost(true, { autoResolve: false });
+    await setPost(true);
     const { pr, first, finding, thread } = await postedFinding();
     reply.mockImplementation(async () => ({ commentId: 'PB1' }));
     const id = await replyRun(pr, first, finding.id, 'reply_disputed', { threadId: thread.id });
@@ -1727,7 +1729,7 @@ describe('auto resolve', () => {
     const again = await replyRun(pr, id, finding.id, 'reply_disputed', { trigger: 'manual', response: 'Still wrong.' });
     expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: again, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict' });
     // And the auto run sees the record and skips.
-    await setPost(true, { autoResolve: false });
+    await setPost(true);
     const auto = await replyRun(pr, id, finding.id, 'reply_disputed');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: auto }, deps(), rdeps());
     expect(m.reply).toHaveBeenCalledTimes(1);
@@ -1749,7 +1751,7 @@ describe('auto resolve', () => {
 
   it('after an auto pushback claimed the thread, Post reply is refused', async () => {
     const { postFollowUpReply } = await import('./manual-reply.js');
-    await setPost(true, { autoResolve: false });
+    await setPost(true);
     const { pr, first, finding } = await postedFinding();
     reply.mockImplementation(async () => ({ commentId: 'PB1' }));
     const id = await replyRun(pr, first, finding.id, 'reply_disputed');
@@ -1762,7 +1764,7 @@ describe('auto resolve', () => {
 
   it('an UNCLEAR failure is never offered again; a clear refusal may be retried by hand (never by the auto run)', async () => {
     const { postFollowUpReply } = await import('./manual-reply.js');
-    await setPost(true, { autoResolve: false });
+    await setPost(true);
     // Unclear (a 502): the reply may be on GitHub.
     const a = await postedFinding();
     reply.mockImplementation(async () => {
@@ -1802,7 +1804,7 @@ describe('auto resolve', () => {
     const [row] = (await findingsOf(first)).filter((r: any) => r.id === finding.id);
     expect(row.autoResolve).toMatchObject({ status: 'resolved', outcome: 'reply_accepted', manual: true, byReviewId: id });
     expect(await postFollowUpReply(ctx, { accountId: 1, reviewId: id, priorFindingId: finding.id }, m)).toMatchObject({ kind: 'conflict' });
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const auto = await replyRun(pr, id, finding.id, 'reply_accepted');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: auto }, deps(), rdeps());
     expect(reply).not.toHaveBeenCalled();
@@ -1819,7 +1821,7 @@ describe('auto resolve', () => {
   });
 
   it('manual runs and the switch off write nothing', async () => {
-    await setPost(true, { autoResolve: true });
+    await setPost(true);
     const a = await postedFinding();
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: a.pr, reviewId: await replyRun(a.pr, a.first, a.finding.id, 'reply_accepted', { trigger: 'manual' }) }, deps(), rdeps());
     const b = await postedFinding();
@@ -1841,7 +1843,7 @@ describe('auto resolve', () => {
     it('is ON by default: a MANUAL run on my own PR replies, THEN resolves, with posting and auto resolve off', async () => {
       await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { resolveOwnPrs: true } });
       const x = await postedFinding();
-      await setPost(false, { autoResolve: false });
+      await setPost(false);
       // The claim is written BEFORE the GitHub reply.
       let seenAtReply: any = 'unset';
       reply.mockImplementation(async () => {
@@ -1900,7 +1902,7 @@ describe('auto resolve', () => {
     });
 
     it('rides every run: an auto run with posting off, and "Review and post" via the post path', async () => {
-      await setPost(false, { resolveOwnPrs: true, autoResolve: false });
+      await setPost(false, { resolveOwnPrs: true });
       // Posting off: seed the inline post by hand-claiming it through a pressed run.
       const x = await postedFindingPressed();
       await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: x.pr, reviewId: await followUpRun(x.pr, x.first, x.finding.id, 'no_longer_applies') }, deps(), rdeps());

@@ -1,9 +1,9 @@
-// TEAM CLAIMS — "Mark auto reviews on GitHub" (docs/CLAUDE-REVIEW.md § Team claims).
+// TEAM CLAIMS (docs/CLAUDE-REVIEW.md § Team claims). ALWAYS ON since 2026-11-10 — no setting; the old
+// "Mark auto reviews on GitHub" switch (`workspaces.team_claims_enabled`) is DORMANT.
 //
 // Limn runs on each person's machine. When several people on one team switch auto review on for the
-// same repos, every install would review every new head. With this switch on (per workspace, ON by
-// default since 0159, `workspaces.team_claims_enabled`), an AUTO review marks the PR's head commit with a GitHub
-// COMMIT STATUS before it runs, so a teammate's Limn sees the line and skips that head:
+// same repos, every install would review every new head. So an AUTO review marks the PR's head commit
+// with a GitHub COMMIT STATUS before it runs, so a teammate's Limn sees the line and skips that head:
 //
 //     context  limn/review-claude | limn/review-codex   (ONE per provider family, the RUN's provider —
 //                                                         a different provider still reviews)
@@ -53,7 +53,8 @@
 //   A restart forgets it and re-reads GitHub once.
 // ⚠ NEVER BLOCKS A RUN ON GITHUB: an unreadable history runs WITHOUT a line (logged); a write GitHub
 //   refuses (403/404: no write access) runs without a line too — others' lines read in step 1 are
-//   still honoured. A claim's write is never retried; only the RELEASE of a line we posted is, by the
+//   still honoured. A refusal is LOGGED ONCE per repo per process (`logRefusedOnce`), never shown to
+//   the reader and never a failure of the review. A claim's write is never retried; only the RELEASE of a line we posted is, by the
 //   reconciler (idempotent: the same success line again).
 import type {
   AiProviderId,
@@ -457,7 +458,7 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
     );
   },
   async login(accountId) {
-    // ⚠ UNDER TEST the real adapter never reaches GitHub: the switch is ON by default (0159), so every
+    // ⚠ UNDER TEST the real adapter never reaches GitHub: claims are always on, so every
     // auto run in a test would otherwise read and write real commit statuses. No login ⇒ the run goes
     // ahead without a line. Tests of the claim pass their own fake adapter.
     if (process.env.VITEST) return null;
@@ -519,6 +520,15 @@ const unmarkedReason = (err: unknown, accountId: number): 'no_access' | 'error' 
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+// The repos whose claim write GitHub refused, so the log says it once per repo per process.
+const refusedRepos = new Set<string>();
+function logRefusedOnce(ctx: AgentContext, accountId: number, owner: string, name: string, why: string): void {
+  const key = `${accountId}:${owner}/${name}`.toLowerCase();
+  if (refusedRepos.has(key)) return;
+  refusedRepos.add(key);
+  ctx.log.info(`team claim ${owner}/${name}: GitHub refused the limn/ status (${why}); auto reviews here run without one`);
+}
+
 /** The posted GitHub review's page, or null. Built from our own stored values and validated. */
 export function postedReviewUrl(owner: string, name: string, number: number, githubReviewId: string | null): string | null {
   if (!githubReviewId || !/^\d+$/.test(githubReviewId)) return null;
@@ -543,6 +553,7 @@ const prPrefix = (accountId: number, prId: number): string => `${accountId}:${pr
 /** Test hook. */
 export function _resetTeamClaimsForTest(): void {
   skips.clear();
+  refusedRepos.clear();
   finishing.clear();
 }
 
@@ -612,24 +623,6 @@ function rememberSkip(accountId: number, prId: number, skip: ClaudeTeamClaimSkip
 }
 function forgetSkip(accountId: number, prId: number, provider: AiProviderId): void {
   skips.delete(skipKey(accountId, prId, provider));
-}
-
-// ---- the workspace switch ----
-
-/** Is "Mark auto reviews on GitHub" on for the workspace holding this PR's repo? ON unless a stored
- *  false (migration 0159). A repo in no workspace reads OFF. */
-export async function teamClaimsOnForPr(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
-  const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
-  if (!w?.teamClaimsEnabled) return false;
-  const rows = (await ctx.db
-    .select({ on: w.teamClaimsEnabled })
-    .from(prs)
-    .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
-    .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
-    .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
-    .limit(1)
-    .execute()) as Array<{ on: boolean | null }>;
-  return rows.length > 0 && rows[0]!.on !== false;
 }
 
 // ---- the lifecycle ----
@@ -790,8 +783,6 @@ export async function waitForClaimRelease(accountId: number, prId: number, headS
 }
 
 export type TeamClaimStart =
-  // The switch is off: run as before, no record.
-  | { kind: 'off' }
   // Run; `handle` carries the record (marked, or unmarked and why).
   | { kind: 'run'; handle: TeamClaimHandle }
   // A teammate holds the head: do NOT run (no row). Remembered for the tab.
@@ -811,12 +802,6 @@ export async function claimBeforeAutoRun(
 ): Promise<TeamClaimStart> {
   const now = opts.nowMs ?? Date.now;
   const { accountId, prId, owner, name, headSha, provider } = target;
-  try {
-    if (!(await teamClaimsOnForPr(ctx, accountId, prId))) return { kind: 'off' };
-  } catch (err) {
-    ctx.log.warn(`team claim pr ${prId}: switch unreadable: ${errText(err)}`);
-    return { kind: 'off' };
-  }
   const context = teamClaimContext(provider);
   const unmarked = (login: string, reason: 'no_access' | 'error'): TeamClaimStart => ({
     kind: 'run',
@@ -905,8 +890,10 @@ export async function claimBeforeAutoRun(
   try {
     await gh.postLine(accountId, owner, name, headSha, context, { state: 'pending', description });
   } catch (err) {
-    ctx.log.warn(`team claim pr ${prId}: status not written (${errText(err)}); reviewing without a line`);
     const kind = claimErrorKind(err, accountId);
+    // GitHub refused the write (no write access): say so ONCE per repo, then carry on quietly.
+    if (kind === 'no_access') logRefusedOnce(ctx, accountId, owner, name, errText(err));
+    else ctx.log.warn(`team claim pr ${prId}: status not written (${errText(err)}); reviewing without a line`);
     // Refused (no access) or rate-limited: GitHub wrote nothing, so there is nothing to release. Any
     // other failure may have landed: the row stays 'claiming' and the reconciler releases it once the
     // run is over.

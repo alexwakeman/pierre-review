@@ -118,7 +118,7 @@ export function failedAutoReviewLine(
   return null;
 }
 
-// ---- TEAM CLAIMS ("Mark auto reviews on GitHub") ----
+// ---- TEAM CLAIMS (always on) ----
 
 /** Why the auto review at this commit was skipped: a teammate's Limn holds it. */
 export function teamClaimSkipLine(skip: Pick<ClaudeTeamClaimSkip, 'kind' | 'login'> | null | undefined): string | null {

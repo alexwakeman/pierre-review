@@ -1519,7 +1519,7 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   GitHub did not settle it"), carried, counted in the auto verdict at its severity (a disputed
   blocker ⇒ `REQUEST_CHANGES`), and an AI Fix `P` seed item.
 - **GitHub writes — AUTO runs only** (except the own-PR resolve below), same claim-before-write /
-  never-retry / footer + marker rules: accepted + `autoResolve` on ⇒ auto resolve posts the
+  never-retry / footer + marker rules: accepted + auto-posting on ⇒ auto resolve (always on) posts the
   acknowledgement, then resolves (outcome `reply_accepted` + `acceptKind`; an already-resolved
   thread is a no-op). On the reader's OWN PR a MANUAL pass resolves too, under "Resolve my Limn
   threads when addressed" (§ Auto-posting → Resolve my Limn threads); its pushback stays auto-only. Disputed + auto-posting on
@@ -1709,7 +1709,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   pass has no findings: following up on it would drop the review's), folds the passes after the
   anchor over its items for the carry bookkeeping, and the accepted ones leave through the settled
   list as before.
-- **Writes — AUTO only, the existing switches and records:** accepted + `autoResolve` ⇒ auto resolve;
+- **Writes — AUTO only, the existing switches and records:** accepted + auto-posting ⇒ auto resolve;
   disputed + auto-posting ⇒ auto pushback (AT MOST ONE PER THREAD, EVER). A MANUAL pass writes
   nothing: drafts and "Post reply" as today.
 - **THE OUTCOME, BOTH WAYS** (`computeRepliesOutcome` + `repliesVerdict`, pure): ⚠ anchored like the
@@ -2954,9 +2954,17 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
   the break, so moved heads and owed verdicts are found as usual, the verdicts first, oldest wait
   first, bounded by the per-tick pick-up cap, the lane and the daily cap, under the budget gate.
 
-## Team claims ("Mark auto reviews on GitHub", 2026-10-27)
+## Team claims (2026-10-27; ALWAYS ON since 2026-11-10)
 
-For teams where more than one person runs Limn with auto review on the same repos. Per workspace, ON
+For teams where more than one person runs Limn with auto review on the same repos. ⚠ **ALWAYS ON since
+2026-11-10, NO SETTING** (the owner: "we should always be doing this, and it's not optional"): the
+"Mark auto reviews on GitHub" switch is gone from Settings, the route and the wire, and
+`workspaces.team_claims_enabled` is DORMANT (never read or written; `teamClaimsOnForPr` is deleted, and
+so are the `'off'` outcomes of the claim, the manual reads and the skip lines). The `limn/deps` lines
+(docs/MERGE-CI-TRUNK.md § Dependency automation) followed it: always on. ⚠ **A REFUSED WRITE NEVER
+STOPS A REVIEW**: GitHub refusing the status (403/404, no write access) runs the review without a line,
+as before, logs it ONCE per repo per process (`logRefusedOnce`, info level) and shows the reader
+nothing. History: per workspace, ON
 by default since 2026-11-02 (the owner: "Just on by default on all workspaces"; migration 0159 set every
 existing workspace on, a switched-off one included, and only a stored false is off — NULL reads ON in
 `autoReviewOf`, `setWorkspaceAutoReview` and `teamClaimsOnForPr`; ⚠ under vitest the real GitHub
@@ -3260,7 +3268,7 @@ where `config.aiEnabled` registers them.
 `AutoPostKinds.ciFailures` (default ON; record `ci_reviews.auto_post` = `CiAutoPostRecord`, one PR
 comment per (PR, head, failing set)); `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`
 (inside `auto_post_settings`; `autoVerdict` ON by default since 2026-11-04 — absent reads on, a stored
-`false` is the override — `autoResolve` OFF; records `ClaudeAutoPostRecord.verdict` =
+`false` is the override — `autoResolve` OFF, then ALWAYS ON with no key since 2026-11-10; records `ClaudeAutoPostRecord.verdict` =
 `ClaudeAutoVerdictRecord`, and per finding `claude_review_findings.auto_resolve` =
 `FindingAutoResolveRecord` + `auto_resolved_at`); skip reason `'already_posted'`
 (`alreadyPostedFindingIds`); `ci_review_items.confidence` (`ClaudeCiFailure.confidence`, 0-100);
@@ -3517,8 +3525,10 @@ auto-posting: claim before any GitHub write, never retried.
     withdraw (it runs at the same head). Pinned by `approval-withdraw.test.ts`.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
   resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
-- **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from
-  `maybeAutoPostReview` after the post, whatever it did). ⚠ The ONE automatic resolve, a deliberate
+- **AUTO RESOLVE** (`claude-review/auto-resolve.ts`, called from `maybeAutoPostReview` after the post,
+  whatever it did). ⚠ **ALWAYS ON since 2026-11-10, NO SETTING** — path A runs on every AUTO run while
+  auto-posting is on (it was `autoResolve`, "Resolve Limn's threads once fixed", OFF by default; the
+  JSON key is DORMANT: never read, dropped on the next write). ⚠ The ONE automatic resolve, a deliberate
   exception to bot-triage's "user-initiated only", scoped to LIMN'S OWN threads: an earlier finding
   posted INLINE whose thread root is by the account's login AND carries the marker (found by the stored
   comment id, else by path + the finding's text — a finding posted inside a review keeps no comment
@@ -3543,7 +3553,7 @@ auto-posting: claim before any GitHub write, never retried.
   (`authorIsMe`, open, a draft too) after ANY succeeded run of theirs: auto, "Review and post"
   (both through `maybeAutoPostReview`), a manual "Review only" run (`runEnded`, fire-and-forget, both
   halves of a pair) and a replies pass of either trigger (`afterPass`). Independent of auto-posting
-  and of `autoResolve`; path A (the workspace's auto resolve) wins when both hold. ⚠ Still
+  and of auto resolve; path A (the workspace's auto resolve) wins when both hold. ⚠ Still
   `ownOnly`: never a teammate's Limn thread on the reader's PR, never a person's. Same statuses
   (`addressed` / `no_longer_applies` / `reply_accepted`), same claim of
   `claude_review_findings.auto_resolve` BEFORE the reply (shared with "Post reply", so never two
@@ -4092,21 +4102,19 @@ may DISMISS that review and post its own (`review/claude-review/teammate-lift.ts
 `auto-post.ts`, so it runs for an AUTO run and a manual "Review and post" — never the Post button).
 The reader's OWN block is the other path (§ Auto-posting, the lift).
 
-- **Two opt-ins, both OFF by default, per workspace** (overrides JSON `workspaces.auto_post_settings`,
-  no column; Settings → Auto review → "Teammates' Limn “changes requested”", ⓘ — reworded 2026-11-05:
-  the owner read "block" as an approval, so each label names what is dismissed (a Limn "changes
-  requested" review, never an approval), by whom and when): (a) THE BLOCKED SIDE'S CONSENT,
-  `teamLiftConsent` — "Let a teammate's Limn dismiss my Limn's “changes requested” once every point is
-  fixed" —
-  written as `lift=1` in the marker of a review that reader's AUTO-POSTING sends while it is on (an
-  auto run, or "Review and post": Limn's own computed verdict), imported as `teammate.liftConsent`.
-  ⚠ The manual Post button NEVER writes it: the person chose that verdict and body, and a review a
+- **ALWAYS ON since 2026-11-10, NO SETTING** (the owner: "this is how Limn works fundamentally. We
+  limit approves based on impact anyway"). Before, two opt-ins per workspace, both OFF by default
+  (`teamLiftConsent` / `liftTeammateBlocks` in `workspaces.auto_post_settings`; both JSON keys are now
+  DORMANT: never read, dropped on the next write). What stays: (a) THE BLOCKED SIDE'S CONSENT —
+  `lift=1` in the marker of a review that reader's AUTO-POSTING sends (an auto run, or "Review and
+  post": Limn's own computed verdict), imported as `teammate.liftConsent`; written on every such post
+  now. ⚠ The manual Post button NEVER writes it: the person chose that verdict and body, and a review a
   person chose is never dismissed. ⚠ Nor does a post whose comments leave out a BLOCKER its verdict
   counts (`blockersAllInPost`: the blocker was already on GitHub from an earlier post, so the re-post
   omits it yet still requests changes): the other side reads the points from the post's own comments
-  only. (b) THE LIFTING SIDE'S SETTING, `liftTeammateBlocks` — "Dismiss a teammate's Limn
-  “changes requested” once every point is fixed". A post made with (a) off carries no consent, whatever the setting says later.
-- **The rule** (`teammateLiftHold`, pure, first failure decides): (b) on; not the reader's own PR; the
+  only. A post from before 2026-11-10 made without the opt-in carries no consent: only THE AWAY PATH
+  lifts it. (b) The lifting side's setting is gone: every reader's Limn lifts a consented block.
+- **The rule** (`teammateLiftHold`, pure, first failure decides): not the reader's own PR; the
   block is a teammate's (never the reader's — standings `you: false` AND the live login); still in
   force (DB standings, then the LIVE review list: the poster's newest decisive review is this
   CHANGES_REQUESTED); never tried before (`teammate_lift` NULL); the LIVE body carries LIMN'S SUMMARY
@@ -4449,7 +4457,7 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   its section, its default and its CARD (`AiFixPickerCard`: which Claude Review card draws it — a
   thread the review never judged gets a synthesized `not_checked` judgement, display only); the
   reader ticks cards; Start sends `include: <keys>` and the server
-  builds the seed from exactly those (`SeedSelection`). Sections: Claude's findings (never an
+  builds the seed from exactly those (`SeedSelection`). Sections: the review's findings (never an
   ignored one), earlier findings still open, threads Claude judged to fix, UNANSWERED threads
   (`derived_state = 'untouched'`, judged or not), CI failures, STYLE BOT threads (root author's
   role `quality_check` in the PR's workspace — the stored `workspace_reviewers` row first, then the
@@ -4541,12 +4549,22 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   the sandbox race answers `no_runtime` / `too_many` / `build_busy` ⇒ `no_sandbox` / `sandbox_busy`.
   ⚠ **WHAT IT CARRIES** is the workspace's
   "Always include" sections (`workspaces.auto_fix_settings.include`, overrides only, resolved by
-  `resolveAutoFixSettings`; default every section but style bots; never ticket items) — the same
-  selection reaches the rule-6 seed and the start. ⚠ **PUSHED ONLY UNDER "PUSH AUTOMATICALLY"**
+  `resolveAutoFixSettings`; default every section but style bots and merge conflicts; never ticket
+  items) — the same selection reaches the rule-6 seed and the start. ⚠ **EVERY LIMN FINDING COUNTS**
+  (2026-11-10): "Limn's findings" are the WHOLE review — a pair's two halves (`getReviewView`) — and,
+  when one half failed, the other half's COVER PASS (a `kind = 'replies'` row with `followUp.cover`,
+  at the review's head, before the PR's next full review) joins the follow-up, so the failed
+  provider's earlier findings it found still open are `P` items (`coding/ai-fix/manager.ts`
+  `withCoverFollowUp`, pinned by `cover-seed.test.ts`; manual picker and auto fix alike). Before, they
+  were dropped: the cover row is not part of the pair view. ⚠ **THE MERGE ITEM** (`include.conflicts`,
+  "Merge conflicts with the base branch", OFF by default, 2026-11-10): with it on and the PR
+  conflicting, the unattended session merges first (§ The merge item below); the host's checks still
+  gate the push, and a merge-only fix counts as work (`fixRowHasWork`: rule 4's waiting fix and the
+  auto push both use it). ⚠ **PUSHED ONLY UNDER "PUSH AUTOMATICALLY"**
   (`auto_fix_settings.autoPush`, OFF by default): `coding/ai-fix/auto-push.ts` runs from the fix
   subject's `onClosed` AFTER the unattended session is gone (phase `built`, status `succeeded`, a
-  non-empty patch; never from inside a live session) and re-checks at push time — auto + succeeded + non-empty +
-  unpushed, auto fix and autoPush still on, the reader's OWN PR — then pushes through the Push
+  non-empty patch or a VALID merge; never from inside a live session) and re-checks at push time — auto +
+  succeeded + work to push (`fixRowHasWork`) + unpushed, auto fix and autoPush still on, the reader's OWN PR — then pushes through the Push
   button's own path (`push.ts` `pushFix`, target `'existing'`, never forced, HEAD_MOVED refused,
   write access re-checked, the PR settled). A failure is written to the succeeded row's `error`
   ("Automatic push failed: …", shown in the AI Fix tab) and NEVER retried; a later manual push
@@ -4615,8 +4633,11 @@ finish it (judgement, no duplicated or dropped lines, `git commit` makes the mer
 fixes on top), and the host checks the agent's commits before anything can push ([SANDBOX.md](SANDBOX.md)
 § AI Fix sessions, "The merge"). Limn's check wins over the report: a merge that fails it is MERGE "not
 addressed" with Limn's reason, and the fix does not push at all. The reader reviews the resolution
-(`AiFix.merge.resolutionDiff`) apart from the fix on top (`AiFix.patch`). ⚠ **Never in an AUTO fix**
-(`review-seed.ts` `AUTO_FIX_RESOLVES_CONFLICTS = false`, ONE constant). Dependency automation's conflict
+(`AiFix.merge.resolutionDiff`) apart from the fix on top (`AiFix.patch`). ⚠ **In an AUTO fix only with
+the workspace's `AutoFixInclude.conflicts`** ("Merge conflicts with the base branch" under Always include,
+OFF by default; 2026-11-10 — it was never, by one constant, `AUTO_FIX_RESOLVES_CONFLICTS`, now deleted).
+The same host checks (parents, no markers, fixes on top) gate every push, and "Push automatically" still
+decides whether a valid merge is pushed or waits for the reader. Dependency automation's conflict
 path IS this item, unattended ([MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Dependency automation).
 
 The host-side "Resolve with Claude" (`coding/ai-resolve/`, `coding/agent.ts`, three `…/conflicts/ai-resolve`

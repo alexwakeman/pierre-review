@@ -570,8 +570,6 @@ export async function aiPushedHeads(accountId: number, prIds: number[]): Promise
 
 /** What every action carries into its claim. */
 export interface ClaimCtx {
-  /** The workspace's team-claims switch (`team_claims_enabled`, ON unless a stored false). */
-  claimsOn: boolean;
   log: FastifyBaseLogger;
 }
 
@@ -596,7 +594,7 @@ export async function beginDependencyAction(
 ): Promise<ActionClaim | null> {
   if (depsHeldNow(pr.accountId, pr.id, pr.headSha, familyOfAction(action), now)) return null;
   const target = { accountId: pr.accountId, prId: pr.id, owner: pr.owner, name: pr.name, headSha: pr.headSha, action };
-  const read = await readDepsClaim(target, c.claimsOn, c.log, now, opts);
+  const read = await readDepsClaim(target, c.log, now, opts);
   if (read.awaitingCi) {
     // An AI-pushed head (any machine's) whose CI is not green: not armed yet, no skip row.
     rememberDepsAwaitingCi(target, now);
@@ -833,7 +831,6 @@ export async function runDependencyAutomationTick(log: FastifyBaseLogger, now: n
       .select({
         accountId: workspaces.accountId,
         workspaceId: workspaces.id,
-        teamClaims: workspaces.teamClaimsEnabled,
         ...settingsColumns,
       })
       .from(workspaces)
@@ -843,7 +840,7 @@ export async function runDependencyAutomationTick(log: FastifyBaseLogger, now: n
       const settings = settingsOf(ws as SettingsRow);
       if (!settings.autoApprove && !settings.autoResolveConflicts && !settings.autoFix) continue;
       try {
-        const c: ClaimCtx = { claimsOn: ws.teamClaims !== false, log };
+        const c: ClaimCtx = { log };
         await tickWorkspace(ws.accountId, ws.workspaceId, settings, budget, c, now);
       } catch (err) {
         log.warn({ err, accountId: ws.accountId, workspaceId: ws.workspaceId }, 'dependency automation: workspace failed');

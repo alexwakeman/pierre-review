@@ -93,7 +93,7 @@
 // header. ⚠ WHO counts as a trigger is decided in the candidate read: only a person or a REVIEW
 // bot's comment (db/queries.ts `reReviewCommentAuthorFilter`).
 //
-// TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts). When on, the lane checks the head's
+// TEAM CLAIMS (team-claim.ts, always on). The lane checks the head's
 // `limn/review-<provider>` status before a run's row is written: a teammate's Limn holding it drops
 // the item with NO row (not a failure). The sweeper then holds that PR (`teamClaimHeldHeadNow`) until
 // the remembered skip's recheck time, unless the synced head moved; a press reads GitHub afresh.

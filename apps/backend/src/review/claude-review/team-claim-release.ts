@@ -18,8 +18,7 @@
 //     still works). 403/404 ⇒ closed with the error (no access: nothing we can do). A rate limit ⇒
 //     left for a later tick, and the pass stops (`noteLimited` already told the budget). A release is
 //     registered in flight (`trackClaimRelease`) and a claim at that head waits for it, so it never
-//     lands after the claim's own pending line. ⚠ It never reads the team-claims switch: a workspace
-//     switched OFF after claiming still gets its lines released. The row's own owner/name let it
+//     lands after the claim's own pending line. The row's own owner/name let it
 //     release a line after the PR or repo left Limn (the delete paths keep open rows).
 //   TEAMMATES' LINES (`releaseExpiredTeammateLines`): a "being reviewed by @bob" skip this Limn
 //     remembered, whose lease has ended and whose PR the sweeper did not take back: if the head's
@@ -47,7 +46,6 @@ import {
   sameGithubLogin,
   staleTeammateLine,
   teamClaimContext,
-  teamClaimsOnForPr,
   trackClaimRelease,
   unfinishedLine,
   type TeamClaimGithub,
@@ -290,10 +288,6 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
   for (const { accountId, prId, skip } of expiredReviewingSkips(nowMs)) {
     try {
       if (deps.held?.(prId)) continue; // the sweeper took it back: its own claim replaces the line
-      if (!(await teamClaimsOnForPr(ctx, accountId, prId))) {
-        forgetTeamClaimSkip(accountId, prId, skip.provider);
-        continue;
-      }
       if (await teammateLineReleased(ctx, accountId, prId, skip.headSha, skip.provider, skip.login)) {
         forgetTeamClaimSkip(accountId, prId, skip.provider);
         continue;

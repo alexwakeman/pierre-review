@@ -3,10 +3,11 @@
 // A teammate's Limn posted a review that REQUESTED CHANGES, and that request still stands on GitHub
 // (team-view.ts `teamStandings`). The reader's run follows up on its findings (teammate-anchor.ts
 // `loadStandingBlockAnchors`). When that run finds EVERY point behind the block settled, the reader's
-// Limn may DISMISS the teammate's review and post its own — but only with BOTH opt-ins on:
-//   (a) THE BLOCKED SIDE'S CONSENT: the teammate's post carries `lift=1` in its hidden marker (their
-//       workspace setting `teamLiftConsent`; shared limn-review-meta.ts). Read from the LIVE body;
-//   (b) THE LIFTING SIDE'S SETTING: the reader's workspace `liftTeammateBlocks`.
+// Limn may DISMISS the teammate's review and post its own. ALWAYS ON since 2026-11-10 (the two
+// workspace opt-ins, `teamLiftConsent` and `liftTeammateBlocks`, are gone), but it still needs
+//   (a) THE BLOCKED SIDE'S CONSENT: the teammate's post carries `lift=1` in its hidden marker (every
+//       post whose comments hold every blocker behind it; shared limn-review-meta.ts) — an older post
+//       without it is lifted only by the away path. Read from the LIVE body.
 // And ALL of (`teammateLiftHold`, pure — the first that fails decides):
 //   - the PR is not the reader's own (an author never lifts a block on their own work);
 //   - the block is a TEAMMATE'S, never the reader's own (that is auto-post.ts's own-lift path);
@@ -33,9 +34,9 @@
 //   recorded in GitHub's words ('failed') and shown in the AI Review tab; nothing tries again.
 // Then the cascade (`settlePrAfterWrite`) with the post.
 //
-// THE AWAY PATH (2026-11-10; docs/TEAM-REVIEW.md § 5 "When the teammate is away"): with NEITHER opt-in,
-// the reader's Limn still dismisses the teammate's Limn block when the teammate's Limn is AWAY and the
-// reader's review APPROVES. Every condition above holds except (a) and (b), and instead:
+// THE AWAY PATH (2026-11-10; docs/TEAM-REVIEW.md § 5 "When the teammate is away"): with no consent on
+// the post, the reader's Limn still dismisses the teammate's Limn block when the teammate's Limn is AWAY and the
+// reader's review APPROVES. Every condition above holds except (a), and instead:
 //   - the reader's review goes out as an APPROVE and lands as one (auto verdict on, its gates clear —
 //     a COMMENT or a refused approve never dismisses on this path);
 //   - the block came from the teammate's AUTO run (`k=auto` in the marker, imported and LIVE): a review
@@ -131,7 +132,6 @@ export const isSettledWord = (w: string | undefined): boolean => w != null && SE
 
 /** Why a teammate's block is NOT lifted. null = every condition holds. */
 export type TeammateLiftHold =
-  | 'setting_off'
   | 'own_pr'
   | 'own_review'
   | 'not_in_force'
@@ -175,8 +175,8 @@ export function teammateAwayHold(f: TeammateAwayFacts): TeammateLiftHold | null 
 }
 
 export interface TeammateLiftFacts {
-  // 'consent' (both opt-ins) or 'away' (neither: the teammate's Limn is away and the reader approves).
-  // Absent = 'consent'.
+  // 'consent' (the post's `lift=1`) or 'away' (none: the teammate's Limn is away and the reader
+  // approves). Absent = 'consent'.
   why?: TeammateLiftWhy;
   // The away path: the reader's review approves.
   approves?: boolean;
@@ -184,8 +184,6 @@ export interface TeammateLiftFacts {
   // their own judgement and is never dismissed.
   auto?: boolean;
   away?: TeammateAwayFacts;
-  // (b) the reader's workspace setting.
-  settingOn: boolean;
   authorIsMe: boolean;
   // The block's poster is the reader.
   posterIsMe: boolean;
@@ -208,7 +206,6 @@ export interface TeammateLiftFacts {
 /** THE RULE (pure): the first condition that fails, or null when the block may be lifted. */
 export function teammateLiftHold(f: TeammateLiftFacts): TeammateLiftHold | null {
   const away = f.why === 'away';
-  if (!away && !f.settingOn) return 'setting_off';
   if (f.authorIsMe) return 'own_pr';
   if (f.posterIsMe) return 'own_review';
   if (!f.inForce) return 'not_in_force';
@@ -383,8 +380,6 @@ export async function loadTeammateLiftCandidates(
     headSha: string;
     leftovers: ApproveLeftovers;
     readerLogin: string | null;
-    // The consent path: the reader's `liftTeammateBlocks`. Absent = on (the caller asked).
-    consentPath?: boolean;
     // The away path: the reader's run wants an APPROVE (the auto verdict is on and nothing is open).
     awayPath?: boolean;
     nowMs?: number;
@@ -432,7 +427,6 @@ export async function loadTeammateLiftCandidates(
       a.leftovers,
     );
     const base: TeammateLiftFacts = {
-      settingOn: a.consentPath !== false,
       authorIsMe: false,
       posterIsMe: me != null && b.poster!.login.toLowerCase() === me,
       inForce: true,
@@ -452,7 +446,7 @@ export async function loadTeammateLiftCandidates(
       login: b.poster!.login,
       points: points.length,
     };
-    if (a.consentPath !== false && teammateLiftHold(base) == null) {
+    if (teammateLiftHold(base) == null) {
       out.push({ ...cand, why: 'consent' });
       continue;
     }

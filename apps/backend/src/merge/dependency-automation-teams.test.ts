@@ -232,7 +232,6 @@ beforeEach(async () => {
   await db.delete(schema.reviews).execute();
   await setPr(botPr, { headSha: 'h1', ciStatus: 'success', mergeStateStatus: 'blocked', mergeable: 'mergeable' });
   await setPr(untrustedPr, { headSha: 'h1', ciStatus: 'success' });
-  await db.update(schema.workspaces).set({ teamClaimsEnabled: null }).execute();
   await auto.setDependencyAutomation(A, wsId, {
     autoMerge: false,
     autoApprove: false,
@@ -318,15 +317,6 @@ describe('team claims on dependency work', () => {
       teammateHandled: true,
     });
     expect(rows.find((r: any) => r.prId === botPr && r.action === 'arm_merge')).toMatchObject({ state: 'done' });
-  });
-
-  it('the team-claims switch off: nothing is read or posted, the action goes ahead', async () => {
-    await db.update(schema.workspaces).set({ teamClaimsEnabled: false }).execute();
-    await auto.setDependencyAutomation(A, wsId, { autoApprove: true });
-    lines = [teammateLine('pending', 'robin handling · approving', 60_000)];
-    await auto.runDependencyAutomationTick(log);
-    expect(gh.submitPrReview).toHaveBeenCalledTimes(1);
-    expect(posted).toEqual([]);
   });
 });
 

@@ -523,8 +523,8 @@ line), and its three routes, its menu item, its "Claude" chips and its AI Fix ca
 - **The item** (`coding/ai-fix/review-seed.ts` `mergeCandidate`, key `conflict:merge`, ref `MERGE`): offered
   in the fix picker, FIRST and TICKED, when the PR is open, its SYNCED merge state conflicts
   (`isConflicting`), it is not in a merge queue and the reader can push (`pr-context.ts`
-  `getFixMergeOffer`). It needs no AI review and no CI item. Never in an AUTO fix
-  (`AUTO_FIX_RESOLVES_CONFLICTS = false`, one constant).
+  `getFixMergeOffer`). It needs no AI review and no CI item. In an AUTO fix only with the workspace's
+  `AutoFixInclude.conflicts` (Settings → Auto review → Always include, OFF by default; 2026-11-10).
 - **The run** is the fix's own sandboxed session ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, "The
   merge"): Limn starts the merge of the base tip (pinned at the start) with the explicit merge base; the
   agent resolves FIRST, commits the MERGE COMMIT, then fixes the other items on top. The commits leave as
@@ -1174,9 +1174,9 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     0162), written once per (PR, head, action) and refreshed only when the holder changes; it is no
     attempt — never counted by the cap or the conflict steps, and a later claim TAKES THE ROW OVER. The
     hold is remembered in memory until the lease ends (+30 s) or 30 min ("handled"), per family.
-  - **THE SWITCH**: the workspace's team-claims switch ("Mark auto reviews on GitHub",
-    `team_claims_enabled`, ON unless a stored false) governs `limn/deps` too — one team switch. Off ⇒
-    nothing read or posted. ⚠ **NEVER BLOCKS ON GITHUB**: no login (always so under vitest), unreadable
+  - **ALWAYS ON** (2026-11-10), like the review claims: the old team-claims switch
+    (`team_claims_enabled`, now DORMANT) is gone, and `ClaimCtx` / `readDepsClaim` lost `claimsOn`.
+    ⚠ **NEVER BLOCKS ON GITHUB**: no login (always so under vitest), unreadable
     lines or a refused post ⇒ the action goes ahead unmarked (logged).
   - ⚠ **NEVER CI**: `limn/deps` starts `limn/`, so `isLimnStatusContext` (a prefix test) takes it out
     of every CI read, rollup and merge state, like the review lines; Limn still posts only pending and

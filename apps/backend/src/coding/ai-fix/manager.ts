@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt } from 'drizzle-orm';
 import type {
   AiFixPickerPreview,
   AiFixReviewItem,
@@ -12,7 +12,7 @@ import type {
 import type { AgentContext } from '../../review/agent-context.js';
 import { getFixMergeOffer, getFixPrContext } from './pr-context.js';
 import { MERGE_ITEM_REF } from '../../sandbox/session/fix-merge.js';
-import { getReviewView } from '../../review/claude-review/persist.js';
+import { getClaudeReviewById, getReviewView } from '../../review/claude-review/persist.js';
 import { currentThreadAssessmentsForPrs } from '../../review/claude-review/thread-judgements.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
 import {
@@ -79,8 +79,13 @@ async function loadSourceReview(
   if (reviewId == null) return null;
   // A Claude + Codex pair seeds from its ONE consolidated review (both halves' findings, merged-away
   // duplicates never read — pair-view.ts), never from one half.
-  const review = await getReviewView(ctx, reviewId, accountId);
-  if (!review || review.prId !== prId || review.status !== 'succeeded') return null;
+  const view = await getReviewView(ctx, reviewId, accountId);
+  if (!view || view.prId !== prId || view.status !== 'succeeded') return null;
+  // A pair with a failed half: what the other half's cover pass found still open counts too.
+  const review = await withCoverFollowUp(ctx, accountId, prId, view).catch((err: unknown) => {
+    ctx.log.warn({ err }, 'ai-fix: reading the pair\'s cover pass failed');
+    return view;
+  });
   // A later Check threads run judged threads since this review: when this IS the latest review,
   // its thread items come from THE ONE FOLD (the newer judgement per thread). Fails soft.
   try {
@@ -90,6 +95,47 @@ async function loadSourceReview(
     }
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix: folding the thread checks failed');
+  }
+  return review;
+}
+
+/**
+ * EVERY LIMN FINDING COUNTS. A Claude + Codex pair whose one half failed (or never started) is followed by
+ * the other half's COVER PASS (replies-check.ts `runCoverCheck`: a `kind = 'replies'` row, `followUp.cover`
+ * set) that judges the failed half's earlier open findings — the pair's own follow-up never holds them.
+ * Its items join the review's follow-up, so "Earlier findings not fixed yet" carries them like any other
+ * (an item the pair already judged keeps the pair's word). Only a SUCCEEDED cover at the review's head,
+ * newer than the pair and older than the PR's next full review. A pair whose two halves both succeeded,
+ * or a single run, is returned as it is.
+ */
+export async function withCoverFollowUp(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  review: ClaudeReview,
+): Promise<ClaudeReview> {
+  const halves = review.pair?.halves ?? [];
+  if (review.pair == null || (halves.length === 2 && halves.every((h) => h.status === 'succeeded'))) return review;
+  const cr = ctx.schema.claudeReviews;
+  const later = (await ctx.db
+    .select({ id: cr.id, kind: cr.kind, status: cr.status, headSha: cr.headSha })
+    .from(cr)
+    .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), gt(cr.id, review.id)))
+    .orderBy(cr.id)
+    .execute()) as Array<{ id: number; kind: string | null; status: string; headSha: string }>;
+  const nextFull = later.find((r) => r.kind == null)?.id ?? Infinity;
+  const candidates = later
+    .filter((r) => r.kind === 'replies' && r.status === 'succeeded' && r.headSha === review.headSha && r.id < nextFull)
+    .reverse();
+  for (const c of candidates) {
+    const cover = await getClaudeReviewById(ctx, c.id, accountId);
+    const fu = cover?.followUp;
+    if (!fu?.cover) continue;
+    const own = review.followUp?.items ?? [];
+    const seen = new Set(own.map((i) => i.priorFindingId));
+    const added = fu.items.filter((i) => !seen.has(i.priorFindingId));
+    if (added.length === 0) return review;
+    return { ...review, followUp: review.followUp ? { ...review.followUp, items: [...own, ...added] } : { ...fu, items: added } };
   }
   return review;
 }
@@ -126,8 +172,8 @@ async function loadSeedInputs(
       ctx.log.warn({ err }, 'ai-fix: loading SonarCloud issues failed');
       return [];
     }),
-    // The MERGE item, when the PR conflicts with its base (manual and auto alike: the selection decides,
-    // and an auto fix's sections never pick it — review-seed.ts `AUTO_FIX_RESOLVES_CONFLICTS`).
+    // The MERGE item, when the PR conflicts with its base (manual and auto alike: the selection decides;
+    // an auto fix picks it only with the workspace's `AutoFixInclude.conflicts` on, OFF by default).
     loadMergeOffer(ctx, accountId, prId),
   ]);
   return { ticketItems, ciItems, threads, sonarIssues, merge };

@@ -106,7 +106,7 @@ export default function Page(): JSX.Element {
       <Note title="Teams with more than one Limn">
         When a teammate also runs Limn, each action first puts a <code>limn/deps</code> status on the commit, such as
         “alex handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already
-        did. Turning off <Ui>Mark auto reviews on GitHub</Ui> turns these statuses off too.
+        did. This is always on.
       </Note>
 
       <H2 id="why-it-helps">Why it helps</H2>

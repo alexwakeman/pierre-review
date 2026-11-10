@@ -32,8 +32,9 @@
 //       it as untrusted text (one line, clipped, made safe before it is ever posted).
 //   lift  `1` = THE POSTER'S CONSENT: a teammate's Limn may lift this poster's Limn block (dismiss
 //       their standing Request changes) once every point behind it is addressed (docs/CLAUDE-REVIEW.md
-//       § Lifting a teammate's block). Written only while the poster's workspace setting
-//       `teamLiftConsent` is on; absent = no consent (and on every older post).
+//       § Lifting a teammate's block). Written on every post whose comments hold every
+//       blocker behind it (always on since 2026-11-10; before, only with the poster's opt-in);
+//       absent = no consent (and on every older post).
 // Nothing else: no secrets, no paths, no names. Every value is reduced to a small safe alphabet, so a
 // value can never close the comment or carry markup.
 //

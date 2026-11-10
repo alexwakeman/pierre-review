@@ -63,7 +63,7 @@
 //      never re-trigger an auto review;
 //   8. stamp what GitHub took (`markReviewPosted` with `auto`), settle the record (posted / partial
 //      / failed + the first error), then `settlePrAfterWrite`;
-//   9. AUTO RESOLVE (`./auto-resolve.ts`, only with `autoResolve` on) runs after, on its own rules,
+//   9. AUTO RESOLVE (`./auto-resolve.ts`, always on) runs after, on its own rules,
 //      then AUTO PUSHBACK (`./auto-pushback.ts`: one reply per thread, ever, on a disputed reply).
 //
 // ⚠ ONCE GITHUB 201s THERE IS NO RETRY, EVER. A failure is RECORDED (the Claude Review tab prints
@@ -1138,16 +1138,15 @@ async function autoPostReview(
     : new Map<string, LimnAutoApproval>();
   const mayWithdraw =
     !runApproves && [...limnApprovals.values()].some((x) => x.headSha !== review.headSha && x.withdrawal == null);
-  // LIFTING A TEAMMATE'S LIMN BLOCK (./teammate-lift.ts): the DB pre-check first (both opt-ins, every
-  // point behind the block settled), so an ordinary run costs no extra GitHub read. THE AWAY PATH
-  // needs no opt-in: the run wants an APPROVE and the teammate's Limn has been away (checked again
-  // live, and dismissed only once the APPROVE landed).
+  // LIFTING A TEAMMATE'S LIMN BLOCK (./teammate-lift.ts; always on since 2026-11-10): the DB pre-check
+  // first (the poster's consent imported, every point behind the block settled), so an ordinary run
+  // costs no extra GitHub read. THE AWAY PATH needs no consent: the run wants an APPROVE and the
+  // teammate's Limn has been away (checked again live, and dismissed only once the APPROVE landed).
   const nowMs = deps.nowMs?.() ?? Date.now();
   let readerLogin: string | null = null;
   let teammateCandidates: TeammateLiftCandidate[] = [];
   const awayPath = wanted === 'APPROVE';
   if (
-    (ws.settings.liftTeammateBlocks || awayPath) &&
     !facts.authorIsMe &&
     noBlocker &&
     unjudgedBlockers.length === 0 &&
@@ -1162,7 +1161,6 @@ async function autoPostReview(
         headSha: review.headSha,
         leftovers: rules.approveLeftovers,
         readerLogin,
-        consentPath: ws.settings.liftTeammateBlocks,
         awayPath,
         nowMs,
       });
@@ -1390,8 +1388,9 @@ async function autoPostReview(
           withReasonLine(reason, footer),
         );
   };
-  // The poster's consent rides only a post whose comments hold every blocker behind it.
-  const liftConsent = ws.settings.teamLiftConsent && blockersAllInPost(allFindings, picked.toPost);
+  // The poster's consent (always given since 2026-11-10) rides only a post whose comments hold every
+  // blocker behind it.
+  const liftConsent = blockersAllInPost(allFindings, picked.toPost);
   // ON THE READER'S OWN PR the verdict can only be a comment (GitHub forbids self-approval). The verdict
   // Limn would have sent rides the marker (`ov=`) so a teammate's Limn knows to give one (docs/TEAM-REVIEW.md
   // § 4, "A teammate's verdict"). Under the same switch and impact gate as off the PR (`ownPrVerdictOf`).

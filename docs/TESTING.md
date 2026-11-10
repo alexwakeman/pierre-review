@@ -224,7 +224,8 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 | The runtime CLI never gets a credential | `sandbox/runtime/host-env.test.ts` | fast |
 | The conflict resolver (no marker reaches a blob, the wand never picks a side, the commit blocked until every decidable region is decided) | `conflict/*` | slow |
 | AI Fix as a sandboxed session (start at once, the report file, left-out repos, Plan first, unattended runs, no runtime, caps) | `sandbox/session/fix-session-flow-db.test.ts`, `sandbox/workspace/fix-report.test.ts`, `coding/ai-fix/auto-fix.test.ts`, `merge/dependency-automation-teams.test.ts` | fast |
-| AI Fix's MERGE: only a merge with parents (PR head, base tip), no marker left and fixes on top is pushable; the item never in an auto fix | `coding/ai-fix/merge-verify.test.ts`, `sandbox/session/fix-merge-session-flow-db.test.ts` (slow), `coding/ai-fix/review-seed.test.ts`, `merge/dependency-automation-ai.test.ts` (fast) | both |
+| Every Limn finding reaches the fix seed: a failed pair half's cover pass joins the follow-up (`P` items) | `coding/ai-fix/cover-seed.test.ts` | fast |
+| AI Fix's MERGE: only a merge with parents (PR head, base tip), no marker left and fixes on top is pushable; the item in an auto fix only with `include.conflicts` (OFF by default) | `coding/ai-fix/merge-verify.test.ts`, `sandbox/session/fix-merge-session-flow-db.test.ts` (slow), `coding/ai-fix/review-seed.test.ts`, `merge/dependency-automation-ai.test.ts` (fast) | both |
 | The worktree sweep keeps a tree a live job uses | `review/worktree-gc-policy.test.ts` (fast), `review/worktree-gc.test.ts` (slow) | both |
 | `isRetryableGithubError` keeps 403/429 out | `github/client.test.ts` | fast |
 | One backend per data dir (live holder refuses, stale lock taken over) | `instance-lock.test.ts` | fast |

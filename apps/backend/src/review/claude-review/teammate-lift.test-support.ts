@@ -279,6 +279,6 @@ export function useLiftFixture(name: string): void {
     dismissReview.mockImplementation(async () => ({ ok: true }));
     settle.mockClear();
     live.head = HEAD;
-    await setPost({ liftTeammateBlocks: true, autoVerdict: false });
+    await setPost({ autoVerdict: false });
   });
 }

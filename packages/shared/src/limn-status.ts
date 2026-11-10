@@ -1,6 +1,6 @@
 // LIMN'S OWN COMMIT STATUSES ARE NOT CI (docs/CLAUDE-REVIEW.md § Team claims).
 //
-// With "Mark auto reviews on GitHub" on, an auto review posts a commit status on the PR's head
+// An auto review posts a commit status on the PR's head
 // (`limn/review-claude`, `limn/review-codex`) so teammates' Limn skips a commit someone is already
 // reviewing. GitHub folds those lines into the commit's check rollup like any CI, so every place
 // Limn reads CI must take them out again — or a pending "free to claim" line would read as CI

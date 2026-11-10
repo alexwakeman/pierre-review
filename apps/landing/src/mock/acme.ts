@@ -554,7 +554,7 @@ export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';
 // ---- reviewing as a team (/teams) ---------------------------------------------
 
 /**
- * Team claims ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims): the status
+ * Team claims (always on, docs/CLAUDE-REVIEW.md § Team claims): the status
  * lines each teammate's Limn posts on a commit, as the PR's checks list shows them
  * (components/CheckList.tsx: the "Limn" label, the state words "passed" / "running"). The lines'
  * own words are the backend's (review/claude-review/team-claim.ts). #1190 is Priya's pull request.

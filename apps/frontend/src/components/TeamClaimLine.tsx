@@ -5,7 +5,7 @@ import { useClearTeamClaim } from '../hooks/useClaudeReview.js';
 import { teamClaimSkipLine, teammateReviewLine } from '../lib/claudeAutoReview.js';
 import { ReviewingNowIcon } from './Icons.js';
 
-// TEAM CLAIMS ("Mark auto reviews on GitHub", docs/CLAUDE-REVIEW.md § Team claims) on the AI Review
+// TEAM CLAIMS (always on; docs/CLAUDE-REVIEW.md § Team claims) on the AI Review
 // tab: why the auto review here was skipped (a teammate's Limn holds this commit) and — when a
 // pending Limn line sits on the PR's head — a Clear button that replaces it with "Cleared by <you>",
 // so any Limn can review the commit. Renders nothing when none of it applies. What the reader's own

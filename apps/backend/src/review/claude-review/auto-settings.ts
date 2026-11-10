@@ -4,13 +4,10 @@ import {
   AUTO_FIX_DEFAULT_AUTO_PUSH,
   AUTO_FIX_DEFAULT_INCLUDE,
   AUTO_POST_DEFAULT_APPROVE_IMPACT,
-  AUTO_POST_DEFAULT_AUTO_RESOLVE,
   AUTO_POST_DEFAULT_AUTO_VERDICT,
   AUTO_POST_DEFAULT_KINDS,
-  AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS,
   AUTO_POST_DEFAULT_RESOLVE_OWN_PRS,
   AUTO_POST_DEFAULT_SCOPE,
-  AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT,
   type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
@@ -76,22 +73,22 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // ({ scope?, kinds? }; NULL = the product defaults), resolved through `resolveAutoPostSettings`.
 // Stored independently of `auto_review_enabled`: it only ever acts on AUTO runs, so it does nothing
 // while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` (ON by
-// default since 2026-11-04: absent = on, a stored false = off), `autoResolve` (OFF by default) and
-// `resolveOwnPrs` ("Resolve my Limn threads when addressed", ON by default: absent = on)
-// switches ride the same overrides JSON (no column), and so
-// does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
-// So do the two TEAMMATE-LIFT opt-ins, `teamLiftConsent` and `liftTeammateBlocks` (both OFF by
-// default; docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
+// default since 2026-11-04: absent = on, a stored false = off) and `resolveOwnPrs` ("Resolve my Limn
+// threads when addressed", ON by default: absent = on) switches ride the same overrides JSON (no
+// column), and so does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by
+// default).
+// ⚠ ALWAYS ON SINCE 2026-11-10, NO SETTING: auto resolve ("Resolve Limn's threads once fixed") and the
+// two TEAMMATE-LIFT opt-ins (docs/CLAUDE-REVIEW.md § Lifting a teammate's block). Their old JSON keys
+// (`autoResolve`, `teamLiftConsent`, `liftTeammateBlocks`) are DORMANT: never read, dropped on the next
+// write; the PUT schema no longer lists them.
 //
 // THE AUTO VERDICT'S TWO RULES ride the same route as two more columns (migration 0145), OVERRIDES
 // ONLY (NULL = today's rule): `pair_verdict_strictness` ('relaxed', else strict — wire
 // `pairStrictness`) and `approve_leftovers` ('nits' / 'none', else 'nits_questions' — wire
 // `autoPost.approveLeftovers`). `readVerdictRulesForPr` is what every verdict reads.
 //
-// TEAM CLAIMS ("Mark auto reviews on GitHub") ride the same route as one more column,
-// `team_claims_enabled` (migration 0134): may an AUTO review post a status line on the PR's head so
-// teammates' Limn skips it (team-claim.ts)? ⚠ ON BY DEFAULT since 2026-11-02 (migration 0159 switched
-// every workspace on) — only a stored false is off, in every reader and in the writer.
+// TEAM CLAIMS (an AUTO review's status line on the PR's head, team-claim.ts) are ALWAYS ON since
+// 2026-11-10 — no setting. `team_claims_enabled` (migration 0134) is DORMANT: never read or written.
 //
 // ⚠ `withdraw_approval_on_push` (migration 0165) is DORMANT since 2026-11-05: the push path it gated
 // was removed (GitHub's own "dismiss stale approvals" rule does that per repo). Never read or written.
@@ -147,26 +144,16 @@ export function resolveAutoPostSettings(
     scope: isScope(stored?.scope) ? stored!.scope! : AUTO_POST_DEFAULT_SCOPE,
     kinds,
     autoVerdict: typeof stored?.autoVerdict === 'boolean' ? stored.autoVerdict : AUTO_POST_DEFAULT_AUTO_VERDICT,
-    autoResolve: typeof stored?.autoResolve === 'boolean' ? stored.autoResolve : AUTO_POST_DEFAULT_AUTO_RESOLVE,
     resolveOwnPrs: typeof stored?.resolveOwnPrs === 'boolean' ? stored.resolveOwnPrs : AUTO_POST_DEFAULT_RESOLVE_OWN_PRS,
     approveImpact,
     approveLeftovers: resolveApproveLeftovers(approveLeftovers),
-    teamLiftConsent:
-      typeof stored?.teamLiftConsent === 'boolean' ? stored.teamLiftConsent : AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT,
-    liftTeammateBlocks:
-      typeof stored?.liftTeammateBlocks === 'boolean' ? stored.liftTeammateBlocks : AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS,
   };
 }
 
 /** The settings in force → what to store: only what differs from the product default (null = none). */
 export function autoPostOverrides(
   s: Pick<WorkspaceAutoPostSettings, 'scope' | 'kinds'> &
-    Partial<
-      Pick<
-        WorkspaceAutoPostSettings,
-        'autoVerdict' | 'autoResolve' | 'resolveOwnPrs' | 'approveImpact' | 'teamLiftConsent' | 'liftTeammateBlocks'
-      >
-    >,
+    Partial<Pick<WorkspaceAutoPostSettings, 'autoVerdict' | 'resolveOwnPrs' | 'approveImpact'>>,
 ): StoredAutoPostSettings | null {
   const out: StoredAutoPostSettings = {};
   if (s.scope !== AUTO_POST_DEFAULT_SCOPE) out.scope = s.scope;
@@ -174,15 +161,8 @@ export function autoPostOverrides(
   for (const k of AUTO_POST_KIND_KEYS) if (s.kinds[k] !== AUTO_POST_DEFAULT_KINDS[k]) kinds[k] = s.kinds[k];
   if (Object.keys(kinds).length > 0) out.kinds = kinds;
   if (s.autoVerdict !== undefined && s.autoVerdict !== AUTO_POST_DEFAULT_AUTO_VERDICT) out.autoVerdict = s.autoVerdict;
-  if (s.autoResolve !== undefined && s.autoResolve !== AUTO_POST_DEFAULT_AUTO_RESOLVE) out.autoResolve = s.autoResolve;
   if (s.resolveOwnPrs !== undefined && s.resolveOwnPrs !== AUTO_POST_DEFAULT_RESOLVE_OWN_PRS) {
     out.resolveOwnPrs = s.resolveOwnPrs;
-  }
-  if (s.teamLiftConsent !== undefined && s.teamLiftConsent !== AUTO_POST_DEFAULT_TEAM_LIFT_CONSENT) {
-    out.teamLiftConsent = s.teamLiftConsent;
-  }
-  if (s.liftTeammateBlocks !== undefined && s.liftTeammateBlocks !== AUTO_POST_DEFAULT_LIFT_TEAMMATE_BLOCKS) {
-    out.liftTeammateBlocks = s.liftTeammateBlocks;
   }
   if (s.approveImpact !== undefined) {
     const levels: Partial<AutoApproveImpact> = {};
@@ -232,8 +212,6 @@ interface AutoRow {
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
   autoDiagramsEnabled: boolean | null;
-  // "Mark auto reviews on GitHub" (migration 0134). Only a stored false is off (0159).
-  teamClaimsEnabled?: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
@@ -255,8 +233,6 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     pairStrictness: resolvePairStrictness(row?.pairStrictness),
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings, row?.approveLeftovers),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
-    // ON unless explicitly switched off (0159).
-    teamClaimsEnabled: row?.teamClaimsEnabled !== false,
   };
 }
 
@@ -265,18 +241,6 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
  * by auto-posting before it touches GitHub. A repo with no membership row (or an unknown PR) reads
  * null, i.e. OFF: this switch WRITES as the reader, so a workspace it cannot find never says yes.
  */
-/**
- * The BLOCKED side's consent (`teamLiftConsent`) for the PR's workspace: does a post carry `lift=1`?
- * Never throws — a failed read is no consent (docs/CLAUDE-REVIEW.md § Lifting a teammate's block).
- */
-export async function readTeamLiftConsent(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
-  try {
-    return (await readWorkspaceAutoPostForPr(ctx, accountId, prId))?.settings.teamLiftConsent === true;
-  } catch {
-    return false;
-  }
-}
-
 export async function readWorkspaceAutoPostForPr(
   ctx: AgentContext,
   accountId: number,
@@ -393,7 +357,6 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
   autoDiagramsEnabled: w.autoDiagramsEnabled,
-  ...(w.teamClaimsEnabled ? { teamClaimsEnabled: w.teamClaimsEnabled } : {}),
   dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
@@ -445,7 +408,6 @@ export async function setWorkspaceAutoReview(
     enabled,
     autoFixEnabled,
     autoDiagramsEnabled,
-    teamClaimsEnabled,
     dailyCap,
     autoPost,
     autoFix,
@@ -472,9 +434,6 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0126).
   const diagramsWas = existing.autoDiagramsEnabled !== false;
   const diagrams = autoDiagramsEnabled ?? diagramsWas;
-  // Only a stored false is off (ON by default, 0159).
-  const claimsWas = existing.teamClaimsEnabled !== false;
-  const claims = teamClaimsEnabled ?? claimsWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
@@ -484,12 +443,9 @@ export async function setWorkspaceAutoReview(
     scope: autoPost?.scope ?? postBefore.scope,
     kinds: { ...postBefore.kinds },
     autoVerdict: autoPost?.autoVerdict ?? postBefore.autoVerdict,
-    autoResolve: autoPost?.autoResolve ?? postBefore.autoResolve,
     resolveOwnPrs: autoPost?.resolveOwnPrs ?? postBefore.resolveOwnPrs,
     approveImpact: { ...postBefore.approveImpact },
     approveLeftovers: autoPost?.approveLeftovers ?? postBefore.approveLeftovers,
-    teamLiftConsent: autoPost?.teamLiftConsent ?? postBefore.teamLiftConsent,
-    liftTeammateBlocks: autoPost?.liftTeammateBlocks ?? postBefore.liftTeammateBlocks,
   };
   // The leftovers rule is its own column (migration 0145): NULL = the default.
   const leftoversStored: string | null = postAfter.approveLeftovers === 'nits_questions' ? null : postAfter.approveLeftovers;
@@ -527,7 +483,6 @@ export async function setWorkspaceAutoReview(
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
     autoDiagramsEnabled: diagrams,
-    teamClaimsEnabled: claims,
     dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
@@ -543,9 +498,6 @@ export async function setWorkspaceAutoReview(
   }
   if (autoDiagramsEnabled !== undefined && autoDiagramsEnabled !== diagramsWas) {
     set.autoDiagramsEnabled = autoDiagramsEnabled;
-  }
-  if (teamClaimsEnabled !== undefined && teamClaimsEnabled !== claimsWas) {
-    set.teamClaimsEnabled = teamClaimsEnabled;
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
@@ -601,9 +553,6 @@ function settingChanges(
   }
   if ('autoDiagramsEnabled' in set) {
     out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);
-  }
-  if ('teamClaimsEnabled' in set) {
-    out.push(['auto_review', `Mark auto reviews on GitHub ${onOff(next.teamClaimsEnabled === true)}`]);
   }
   if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
   if ('autoFixSettings' in set) {
@@ -807,7 +756,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             enabled: { type: 'boolean' },
             autoFixEnabled: { type: 'boolean' },
             autoDiagramsEnabled: { type: 'boolean' },
-            teamClaimsEnabled: { type: 'boolean' },
             autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
             pairStrictness: { type: 'string', enum: ['strict', 'relaxed'] },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
@@ -830,10 +778,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
                   properties: Object.fromEntries(AUTO_POST_KIND_KEYS.map((k) => [k, { type: 'boolean' }])),
                 },
                 autoVerdict: { type: 'boolean' },
-                autoResolve: { type: 'boolean' },
                 resolveOwnPrs: { type: 'boolean' },
-                teamLiftConsent: { type: 'boolean' },
-                liftTeammateBlocks: { type: 'boolean' },
                 approveImpact: {
                   type: 'object',
                   minProperties: 1,
@@ -875,10 +820,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             typeof post === 'object' &&
             (notBool(post, 'enabled') ||
               notBool(post, 'autoVerdict') ||
-              notBool(post, 'autoResolve') ||
-              notBool(post, 'resolveOwnPrs') ||
-              notBool(post, 'teamLiftConsent') ||
-              notBool(post, 'liftTeammateBlocks'))) ||
+              notBool(post, 'resolveOwnPrs'))) ||
           (kinds != null && typeof kinds === 'object' && Object.values(kinds).some((v) => typeof v !== 'boolean')) ||
           (impact != null && typeof impact === 'object' && Object.values(impact).some((v) => typeof v !== 'boolean'))
         ) {

@@ -32,7 +32,6 @@ import {
   newestLine,
   skippedLine,
   teamClaimContext,
-  teamClaimsOnForPr,
   type AutoSkipReason,
   type TeamClaimGithub,
 } from './team-claim.js';
@@ -54,7 +53,6 @@ export interface AutoSkip {
 
 export type AutoSkipOutcome =
   | 'posted'
-  | 'off' // team claims off for the workspace
   | 'not_eligible' // not open, a draft, a bot's PR, an unknown PR, or a review row at the head
   | 'already' // a row for this (PR, head, provider, reason) exists
   | 'not_needed' // another line already sits on the head
@@ -175,7 +173,6 @@ export async function postAutoSkipLines(
   const { accountId, prId } = a;
   const all = (o: AutoSkipOutcome): AutoSkipOutcome[] => skips.map(() => o);
   try {
-    if (!(await teamClaimsOnForPr(ctx, accountId, prId))) return all('off');
     const pr = await prFacts(ctx, accountId, prId);
     const headSha = a.headSha ?? pr?.headSha ?? null;
     if (!pr || !headSha || pr.headSha !== headSha || !pr.open || pr.draft) return all('not_eligible');
