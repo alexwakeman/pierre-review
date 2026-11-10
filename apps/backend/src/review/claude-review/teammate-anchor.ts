@@ -17,7 +17,7 @@
 // ⚠ NEVER A WRITE ON A TEAMMATE'S THREAD: auto resolve, the pushback and "Post reply" act only on the
 //   reader's own findings (finding-replies.ts `loadThreadOwners` with `ownOnly`). The judgements show
 //   in the reader's tab; the author's Limn resolves its own threads.
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 import { TEAMMATE_KIND, latestFullReviewAtOrBefore } from '../../db/teammate-reviews.js';
 import { loadTeamStandingsForPrs } from './team-view.js';
@@ -166,7 +166,7 @@ export interface StandingBlockAnchor {
 
 /**
  * Every teammate review on the PR whose Request changes is still in force (newest first), each with
- * its eligible findings. Account-scoped, DB only. `exceptReviewId`: the author anchor, already taken.
+ * its eligible findings, then that poster's EARLIER Limn reviews on the PR with theirs. Account-scoped, DB only. `exceptReviewId`: the author anchor, already taken.
  */
 export async function loadStandingBlockAnchors(
   ctx: AgentContext,
@@ -198,9 +198,24 @@ export async function loadStandingBlockAnchors(
     const f = r.inForce;
     if (r.you || r.poster == null || f == null || f.verdict !== 'REQUEST_CHANGES' || f.reviewId == null || f.headSha == null) continue;
     if (f.reviewId === exceptReviewId) continue;
+    const teammate = { userId: r.poster.userId, login: r.poster.login };
     const findings = (await loadTeammateFindings(ctx, prId, accountId, f.reviewId, f.headSha)).filter((x) => !settled(x.id));
-    if (findings.length === 0) continue;
-    out.push({ reviewId: f.reviewId, headSha: f.headSha, teammate: { userId: r.poster.userId, login: r.poster.login }, findings });
+    if (findings.length > 0) out.push({ reviewId: f.reviewId, headSha: f.headSha, teammate, findings });
+    // ⚠ THE POSTER'S EARLIER LIMN REVIEWS ON THIS PR join too (2026-11-10): a block can rest on a
+    // blocker posted in an earlier review that a re-post left out (deduped as already posted). The
+    // away path dismisses only when every one of them is settled (teammate-lift.ts), so each must
+    // reach a follow-up to be judged.
+    const earlier = (await ctx.db
+      .select({ id: cr.id, headSha: cr.headSha })
+      .from(cr)
+      .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.kind, TEAMMATE_KIND), eq(cr.sourceUserId, r.poster.userId)))
+      .orderBy(desc(cr.id))
+      .execute()) as Array<{ id: number; headSha: string | null }>;
+    for (const e of earlier) {
+      if (e.id === f.reviewId || e.id === exceptReviewId || e.headSha == null) continue;
+      const more = (await loadTeammateFindings(ctx, prId, accountId, e.id, e.headSha)).filter((x) => !settled(x.id));
+      if (more.length > 0) out.push({ reviewId: e.id, headSha: e.headSha, teammate, findings: more });
+    }
   }
   return out;
 }

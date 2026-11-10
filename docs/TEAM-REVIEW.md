@@ -350,6 +350,29 @@ sequenceDiagram
 
 Never dismissed by this: any approval, a review typed by hand, a review sent with the Post button.
 
+#### When the teammate's Limn is away (2026-11-10)
+
+A block should not sit on a PR because its owner is on holiday. With **neither** box ticked, your
+Limn still dismisses a teammate's Limn "changes requested" when every one of these holds:
+
+| Condition | How Limn knows |
+|---|---|
+| Your review **approves** the PR's latest commit, and GitHub took the approval | "Approve or request changes for me" is on, its gates are clear (impact, your own standing review), the approval landed. A comment never dismisses. |
+| Their block came from their Limn's **automatic** run | The hidden marker says `k=auto`, read on GitHub just before writing. A review they sent with the Post button or "Review and post" is their own judgement and is never dismissed this way. |
+| Every point they raised on the PR is settled **at that commit** | Each blocker, warning and unlabelled finding (plus the nits and questions your "Approve with open findings" does not allow) in **every** Limn review of theirs on the PR, not only the one that blocks, is addressed, no longer applies, or a reply was accepted. A block can rest on a blocker from an earlier review that a later post did not repeat. Your Limn follows up all of these, so these are its own judgements. |
+| Their Limn has **not looked at that commit** | No review of theirs at that commit, and no `limn/review-*` line of theirs on it (read on GitHub just before writing). |
+| They have been **away for 4 hours** | Nothing your Limn has seen from them in the last 4 hours on any PR in your Limn: no review, comment or reply, written by hand or by their Limn, and no claim line. No review of theirs on this PR on GitHub in that time either. One constant. |
+
+The rest is as for the consent path: it is the teammate's **Limn** review (its hidden marker, read live),
+never a person's; it still stands on GitHub; your run has no blocker; it runs only on an automatic review
+or "Review and post"; your review is posted first. Your Limn records the attempt on their review before
+writing (once, ever, by any run), never retries, and settles the PR afterwards. The message keeps the
+form every Limn reads as Limn's: "Limn (alex) checked all 3 points are addressed at 70cc9b5. robin's
+Limn has not reviewed it and has been away for 5 hours." Your AI Review tab says "Dismissed robin's
+request for changes: every point is addressed and robin's Limn is away."
+
+If any read fails (the commit's lines, the reviews), nothing is dismissed.
+
 ---
 
 ## 6. Threads: checking earlier comments
@@ -574,13 +597,20 @@ All names and times are illustrative; every step follows the current rules.
 3. Alex's run at Bob's latest commit judges both points fixed and finds no blocker. It posts Alex's review, then dismisses Carol's block: "Limn (alex) checked all 2 points are addressed at 70cc9b5."
 4. Without Carol's tick, her block stays; Alex's approval could still go out.
 
-### 9.10 A person's question
+### 9.10 A teammate on holiday
+1. Friday 16:00 Robin's Limn requests changes on Dana's PR at commit A (1 blocker, 1 warning). Robin has ticked nothing. Robin goes on holiday.
+2. Monday 09:00 Dana pushes commit B with both fixes. Alex has ticked nothing either; his "Approve or request changes for me" is on.
+3. 09:05 Alex's auto review at B judges both of Robin's points addressed, finds nothing new and approves.
+4. Robin's Limn has no line at B and Robin has posted nothing since Friday. Alex's Limn dismisses Robin's review: "Limn (alex) checked all 2 points are addressed at 4d2c9e1. robin's Limn has not reviewed it and has been away for 2 days."
+5. Had Robin's Limn claimed B, or Robin (or his Limn) commented anywhere in the last 4 hours, nothing would be dismissed; Alex's approval would still go out. The same if Robin had sent his review with the Post button, or if an earlier review of his held a blocker Alex's run has not judged fixed at B.
+
+### 9.11 A person's question
 1. Carol asks a question on Bob's PR. Alex's posted review judges it valid and not addressed and replies "**Still open:** …".
 2. The thread still reads as untouched (a Limn reply is not a reply). Bob gets "Alex's Limn: still open" in My Turn.
 3. If Bob resolves it and it is reopened once and resolved again, it is left alone: a person's comment has no severity, so no new thread.
 4. For the same reason the open question does not stop Alex's approval; the "Not approved" line, if any, names it as "1 earlier point is still open."
 
-### 9.11 A manual review holds the commit
+### 9.12 A manual review holds the commit
 1. 11:00 Dana pushes commit D. Alex presses Review on Dana's PR. Bob's automatic review claimed D with Claude at 10:59.
 2. Alex's run starts at once. His AI Review tab says "Bob is reviewing this commit with Claude".
 3. 11:12 Bob's Limn posts an approval with 2 nits, which are not posted. Its line reads "bob reviewed · approved", so Carol's Limn steps aside on Claude.
@@ -595,6 +625,8 @@ All names and times are illustrative; every step follows the current rules.
 - Override a review the reader gave by hand, or anything sent with the Post button.
 - Withdraw an approval because of a push alone.
 - Dismiss anyone's approval to lift a block; dismiss a review typed by hand.
+- Dismiss a teammate's Limn review while their Limn is active on the PR's latest commit, or unless its
+  own review approves (the away path, § 5).
 - Edit or delete a teammate's comment, or resolve a teammate's or a person's thread.
 - Reopen a thread more than once, or post more than one pushback per thread.
 - Reopen a thread, or start a new thread about an open point, on the reader's own PR.
@@ -626,7 +658,7 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Resolve Limn's threads once fixed | Off | Any PR, automatic runs with posting on. |
 | Resolve my Limn threads when addressed | On | Your own PRs, any run. |
 | Let a teammate's Limn dismiss my Limn's "changes requested"… | Off | Consent on the blocked side. |
-| Dismiss a teammate's Limn "changes requested"… | Off | The lifting side. |
+| Dismiss a teammate's Limn "changes requested"… | Off | The lifting side. Without either box, an away teammate's Limn review is still dismissed when your review approves (§ 5). |
 | Auto AI Fix on your own PRs / Push automatically | Off / Off | Fix after an auto review; push only if allowed. |
 
 ---

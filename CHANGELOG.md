@@ -18,6 +18,11 @@ no internals.
 - Open tabs: hover a tab in the sidebar (or move to it with the keyboard) to see a short card that
   says which tab it is. For a pull request: its repository, author, state, CI, review, AI review and
   threads. For a ticket, a person, a bot or a list: what that tab shows.
+- AI Review: when your Limn's review approves a pull request and a teammate's Limn "changes requested"
+  still stands, your Limn dismisses it if it came from their automatic run, every point in every Limn
+  review of theirs on the pull request is fixed at the latest commit, and the teammate has been away for
+  4 hours without their Limn looking at that commit. No setting is needed beyond
+  "Approve or request changes for me"; the AI Review tab says when it happened.
 
 ## [1.0.18] - 2026-11-10
 

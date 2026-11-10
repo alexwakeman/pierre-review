@@ -4800,7 +4800,14 @@ export interface ClaudeAutoPostRecord {
   // Set when this run lifted (or tried to lift) a TEAMMATE'S standing Limn block (docs/CLAUDE-REVIEW.md
   // § Lifting a teammate's block). The teammate review's own `TeammateLiftRecord` is the claim; this
   // is the run's copy. Absent otherwise.
-  liftedTeammateBlocks?: Array<{ teammateReviewId: number; login: string; status: TeammateLiftRecord['status']; error: string | null }>;
+  // `why` absent = 'consent'.
+  liftedTeammateBlocks?: Array<{
+    teammateReviewId: number;
+    login: string;
+    status: TeammateLiftRecord['status'];
+    error: string | null;
+    why?: TeammateLiftWhy;
+  }>;
   // A CLAUDE + CODEX PAIR posts ONE review for both runs, claimed on the SECOND run's record. The
   // first run's record names the second here (its findings went out in that review); absent otherwise.
   viaPairReviewId?: number | null;
@@ -7649,12 +7656,19 @@ export interface TeammateReviewRecord {
   liftConsent?: boolean;
 }
 
+/** Which rule let the reader's Limn dismiss a teammate's Limn block: both people's opt-ins
+ *  ('consent'), or the teammate's Limn being away while the reader's review approves ('away',
+ *  2026-11-10; docs/TEAM-REVIEW.md § 5). */
+export type TeammateLiftWhy = 'consent' | 'away';
+
 /**
  * THE READER'S LIMN LIFTING A TEAMMATE'S BLOCK (`claude_reviews.teammate_lift` on the teammate's
  * imported review, migration 0165; review/claude-review/teammate-lift.ts). ONE attempt per teammate
  * review, ever: claimed ('dismissing') BEFORE the GitHub write, then settled. Never retried.
  */
 export interface TeammateLiftRecord {
+  // Absent = 'consent' (every record before the away path).
+  why?: TeammateLiftWhy;
   // 'dismissing' = claimed, the write in flight (or cut off: never retried); 'dismissed' = GitHub took
   // it; 'failed' = GitHub refused (`error`, in GitHub's words — no permission, dismissal restricted).
   status: 'dismissing' | 'dismissed' | 'failed';

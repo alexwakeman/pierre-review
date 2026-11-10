@@ -32,13 +32,32 @@
 // ⚠ NEVER RETRIED — a refusal (403: no write access, dismissal restricted by branch protection) is
 //   recorded in GitHub's words ('failed') and shown in the AI Review tab; nothing tries again.
 // Then the cascade (`settlePrAfterWrite`) with the post.
-import { and, eq, isNull, lte } from 'drizzle-orm';
+//
+// THE AWAY PATH (2026-11-10; docs/TEAM-REVIEW.md § 5 "When the teammate is away"): with NEITHER opt-in,
+// the reader's Limn still dismisses the teammate's Limn block when the teammate's Limn is AWAY and the
+// reader's review APPROVES. Every condition above holds except (a) and (b), and instead:
+//   - the reader's review goes out as an APPROVE and lands as one (auto verdict on, its gates clear —
+//     a COMMENT or a refused approve never dismisses on this path);
+//   - the block came from the teammate's AUTO run (`k=auto` in the marker, imported and LIVE): a review
+//     they sent with the Post button (or "Review and post") is their own judgement, never dismissed;
+//   - THE POINTS are every counted finding across ALL of the teammate's Limn reviews on the PR
+//     (`countedFindings`), not just the block's own: a block can rest on an earlier blocker its re-post
+//     left out. Each must be settled at this head (teammate-anchor.ts sends them all to the follow-up);
+//   - THE TEAMMATE IS AWAY (`teammateAwayHold`): their Limn has no `limn/review-*` line at this head
+//     (read LIVE before the write), no review at this head, no review after the block on GitHub, and
+//     wrote nothing Limn has seen for TEAMMATE_AWAY_AFTER_MS (`teammateLastSeenMs`: anything synced
+//     they wrote on any PR of the account — by hand or through their Limn — and their claim lines).
+// A read that fails holds it. Recorded with `why: 'away'`; the message says why
+// (`teammateAwayLiftMessage`), still in the "Limn (alex) checked …" form every Limn already reads as
+// Limn's dismissal.
+import { and, eq, isNull, lte, max } from 'drizzle-orm';
 import {
   hasLimnReviewMarker,
   parseLimnReviewMarker,
   type ApproveLeftovers,
   type ClaudeFindingSeverity,
   type TeammateLiftRecord,
+  type TeammateLiftWhy,
   type TeammateReviewRecord,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -68,6 +87,15 @@ export function pointsBehindBlock(findings: readonly BlockFinding[], leftovers: 
   // rests on something else (a blocker posted in an EARLIER review, which a re-post leaves out). Its
   // comments cannot explain the block, so there is nothing this check can settle: never lifted.
   if (!findings.some((f) => f.severity == null || f.severity === 'blocker' || f.severity === 'warning')) return [];
+  return countedFindings(findings, leftovers);
+}
+
+/**
+ * THE COUNTED FINDINGS of a review, with no fail-safe: every blocker, warning and unlabelled finding,
+ * and each nit / question the reader's approve rule does not let stay open. Praise never. The away
+ * path reads them across every Limn review the poster sent on the PR.
+ */
+export function countedFindings(findings: readonly BlockFinding[], leftovers: ApproveLeftovers): BlockFinding[] {
   return findings.filter((f) => f.severity !== 'praise' && (f.severity == null || !leftoverAllowed(f.severity, leftovers)));
 }
 
@@ -113,9 +141,49 @@ export type TeammateLiftHold =
   | 'own_blocker'
   | 'no_points'
   | 'points_open'
-  | 'head_moved';
+  | 'head_moved'
+  // The away path only:
+  | 'not_approving'
+  | 'not_auto'
+  | 'teammate_active'
+  | 'teammate_recent'
+  | 'teammate_unknown';
+
+/**
+ * A teammate's Limn counts as AWAY after this long with nothing seen from it (no review, no finding,
+ * no reply, no claim line). Long enough that an auto review on a live machine (a new head is claimed
+ * within minutes, reviewed within the 20-minute settle) has had its chance many times over.
+ */
+export const TEAMMATE_AWAY_AFTER_MS = 4 * 60 * 60 * 1000;
+
+/** What the reader's Limn knows about whether the teammate's Limn is around. */
+export interface TeammateAwayFacts {
+  // A `limn/review-*` line by the teammate at the head (live), a review of theirs at the head, or a
+  // review of theirs on GitHub after the block. null = it could not be read.
+  activeAtHead: boolean | null;
+  // The newest thing Limn has seen from their Limn, epoch ms. null = nothing at all.
+  lastSeenMs: number | null;
+  nowMs: number;
+}
+
+/** THE AWAY RULE (pure): null when the teammate's Limn is away, else why not. */
+export function teammateAwayHold(f: TeammateAwayFacts): TeammateLiftHold | null {
+  if (f.activeAtHead == null) return 'teammate_unknown';
+  if (f.activeAtHead) return 'teammate_active';
+  if (f.lastSeenMs != null && f.nowMs - f.lastSeenMs < TEAMMATE_AWAY_AFTER_MS) return 'teammate_recent';
+  return null;
+}
 
 export interface TeammateLiftFacts {
+  // 'consent' (both opt-ins) or 'away' (neither: the teammate's Limn is away and the reader approves).
+  // Absent = 'consent'.
+  why?: TeammateLiftWhy;
+  // The away path: the reader's review approves.
+  approves?: boolean;
+  // The away path: the block came from the teammate's AUTO run (marker `k=auto`). A manual Post is
+  // their own judgement and is never dismissed.
+  auto?: boolean;
+  away?: TeammateAwayFacts;
   // (b) the reader's workspace setting.
   settingOn: boolean;
   authorIsMe: boolean;
@@ -139,13 +207,19 @@ export interface TeammateLiftFacts {
 
 /** THE RULE (pure): the first condition that fails, or null when the block may be lifted. */
 export function teammateLiftHold(f: TeammateLiftFacts): TeammateLiftHold | null {
-  if (!f.settingOn) return 'setting_off';
+  const away = f.why === 'away';
+  if (!away && !f.settingOn) return 'setting_off';
   if (f.authorIsMe) return 'own_pr';
   if (f.posterIsMe) return 'own_review';
   if (!f.inForce) return 'not_in_force';
   if (f.alreadyTried) return 'already_tried';
   if (!f.limn) return 'not_limn';
-  if (!f.consent) return 'no_consent';
+  if (away) {
+    if (f.approves !== true) return 'not_approving';
+    if (f.auto !== true) return 'not_auto';
+    const h = f.away != null ? teammateAwayHold(f.away) : 'teammate_unknown';
+    if (h != null) return h;
+  } else if (!f.consent) return 'no_consent';
   if (f.ownBlocker) return 'own_blocker';
   if (!f.atCurrentHead) return 'head_moved';
   if (f.points.length === 0) return 'no_points';
@@ -161,7 +235,124 @@ export function teammateLiftMessage(login: string, points: number, headSha: stri
     : `Limn (${login}) checked all ${points} points are addressed at ${sha}.`;
 }
 
+/** How long ago, in words a person reads at a glance: "5 hours", "2 days". */
+export function awayFor(ms: number): string {
+  const h = Math.max(1, Math.floor(ms / 3_600_000));
+  if (h < 48) return h === 1 ? '1 hour' : `${h} hours`;
+  const d = Math.floor(h / 24);
+  return `${d} days`;
+}
+
+/**
+ * GitHub's dismissal message on the AWAY path. It keeps the "Limn (alex) checked …" lead, so every Limn
+ * (an older one too: shared `isLimnDismissalMessage`) reads it as Limn's dismissal, never the person's.
+ * `awayMs` null = their Limn was never seen at all.
+ */
+export function teammateAwayLiftMessage(login: string, poster: string, points: number, headSha: string, awayMs: number | null): string {
+  const checked = teammateLiftMessage(login, points, headSha).replace(/\.$/, '');
+  const away = awayMs == null ? `${poster}'s Limn has not reviewed it` : `${poster}'s Limn has not reviewed it and has been away for ${awayFor(awayMs)}`;
+  return `${checked}. ${away}.`;
+}
+
 // ---- I/O ----
+
+const ms = (v: Date | number | null | undefined): number | null => {
+  if (v == null) return null;
+  const n = v instanceof Date ? v.getTime() : Number(v) < 1e12 ? Number(v) * 1000 : Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * THE NEWEST THING THIS LIMN HAS SEEN FROM A TEAMMATE (DB only, account-scoped), epoch ms: their
+ * imported Limn reviews; every review, review comment and PR comment they wrote on any of the
+ * account's PRs, by hand (`author_id` = them) or through their Limn (`limn_posted_by_user_id` = them);
+ * and their claim lines this Limn stood down for. A person active by hand is not away. null = nothing.
+ */
+export async function teammateLastSeenMs(
+  ctx: AgentContext,
+  accountId: number,
+  posterUserId: number,
+  posterLogin: string,
+): Promise<number | null> {
+  const t = s(ctx);
+  const seen: Array<number | null> = [];
+  const one = async (q: Promise<Array<{ at: Date | number | null }>>): Promise<void> => {
+    seen.push(ms((await q)[0]?.at));
+  };
+  const cr = t.claudeReviews;
+  if (cr?.sourceUserId && cr?.postedAt) {
+    await one(
+      ctx.db
+        .select({ at: max(cr.postedAt) })
+        .from(cr)
+        .where(and(eq(cr.accountId, accountId), eq(cr.kind, TEAMMATE_KIND), eq(cr.sourceUserId, posterUserId)))
+        .execute(),
+    );
+  }
+  const prs = t.pullRequests;
+  for (const [tbl, col] of [
+    [t.reviews, t.reviews?.submittedAt],
+    [t.reviewComments, t.reviewComments?.createdAt],
+    [t.prComments, t.prComments?.createdAt],
+  ] as const) {
+    if (!col || !prs) continue;
+    for (const who of [tbl?.authorId, tbl?.limnPostedByUserId]) {
+      if (!who) continue;
+      await one(
+        ctx.db
+          .select({ at: max(col) })
+          .from(tbl)
+          .innerJoin(prs, eq(prs.id, tbl.prId))
+          .where(and(eq(prs.accountId, accountId), eq(who, posterUserId)))
+          .execute(),
+      );
+    }
+  }
+  const tcs = t.teamClaimSeen;
+  if (tcs) {
+    await one(
+      ctx.db
+        .select({ at: max(tcs.lineAt) })
+        .from(tcs)
+        .where(and(eq(tcs.accountId, accountId), eq(tcs.login, posterLogin)))
+        .execute(),
+    );
+  }
+  const all = seen.filter((x): x is number => x != null);
+  return all.length > 0 ? Math.max(...all) : null;
+}
+
+/** Has the teammate's Limn reviewed `headSha`, or did this Limn see their claim line there? DB only. */
+export async function teammateSeenAtHead(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+  posterUserId: number,
+  posterLogin: string,
+): Promise<boolean> {
+  const t = s(ctx);
+  const cr = t.claudeReviews;
+  if (cr?.sourceUserId) {
+    const r = await ctx.db
+      .select({ id: cr.id })
+      .from(cr)
+      .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), eq(cr.kind, TEAMMATE_KIND), eq(cr.headSha, headSha), eq(cr.sourceUserId, posterUserId)))
+      .limit(1)
+      .execute();
+    if (r.length > 0) return true;
+  }
+  const tcs = t.teamClaimSeen;
+  if (tcs) {
+    const rows = (await ctx.db
+      .select({ login: tcs.login })
+      .from(tcs)
+      .where(and(eq(tcs.accountId, accountId), eq(tcs.prId, prId), eq(tcs.headSha, headSha)))
+      .execute()) as Array<{ login: string }>;
+    if (rows.some((x) => x.login.toLowerCase() === posterLogin.toLowerCase())) return true;
+  }
+  return false;
+}
 
 /** A teammate block that passed every DB-side condition: the live check and the write remain. */
 export interface TeammateLiftCandidate {
@@ -170,6 +361,10 @@ export interface TeammateLiftCandidate {
   posterUserId: number;
   login: string;
   points: number;
+  // Which path admitted it. 'away' still needs the live checks: no line at the head, an APPROVE that lands.
+  why: TeammateLiftWhy;
+  // The away path: when Limn last saw the teammate's Limn (epoch ms; null = never).
+  lastSeenMs?: number | null;
 }
 
 /**
@@ -188,6 +383,11 @@ export async function loadTeammateLiftCandidates(
     headSha: string;
     leftovers: ApproveLeftovers;
     readerLogin: string | null;
+    // The consent path: the reader's `liftTeammateBlocks`. Absent = on (the caller asked).
+    consentPath?: boolean;
+    // The away path: the reader's run wants an APPROVE (the auto verdict is on and nothing is open).
+    awayPath?: boolean;
+    nowMs?: number;
   },
 ): Promise<TeammateLiftCandidate[]> {
   const t = s(ctx);
@@ -231,8 +431,8 @@ export async function loadTeammateLiftCandidates(
       found.map((f) => ({ id: f.id, severity: f.nodeId != null && unlabelled.has(f.nodeId) ? null : f.severity })),
       a.leftovers,
     );
-    const hold = teammateLiftHold({
-      settingOn: true,
+    const base: TeammateLiftFacts = {
+      settingOn: a.consentPath !== false,
       authorIsMe: false,
       posterIsMe: me != null && b.poster!.login.toLowerCase() === me,
       inForce: true,
@@ -244,15 +444,58 @@ export async function loadTeammateLiftCandidates(
       atCurrentHead: true,
       points,
       words,
-    });
-    if (hold != null) continue;
-    out.push({
+    };
+    const cand = {
       teammateReviewId: id,
       githubReviewId: String(rec.githubReviewId),
       posterUserId: b.poster!.userId,
       login: b.poster!.login,
       points: points.length,
+    };
+    if (a.consentPath !== false && teammateLiftHold(base) == null) {
+      out.push({ ...cand, why: 'consent' });
+      continue;
+    }
+    if (a.awayPath !== true) continue;
+    // THE AWAY PATH, as far as the DB can tell (the live line read and the landed APPROVE come later).
+    // Its points: the block's own (the fail-safe above still applies), plus every counted finding of
+    // the poster's OTHER Limn reviews on this PR — an earlier blocker the block's re-post left out.
+    const awayPoints = [...points];
+    if (awayPoints.length > 0) {
+      const seen = new Set(awayPoints.map((p) => p.id));
+      const others = (await ctx.db
+        .select({ id: crf.id, severity: crf.severity, nodeId: crf.sourceCommentNodeId, teammate: cr.teammate })
+        .from(crf)
+        .innerJoin(cr, eq(cr.id, crf.reviewId))
+        .where(
+          and(eq(cr.prId, a.prId), eq(cr.accountId, a.accountId), eq(cr.kind, TEAMMATE_KIND), eq(cr.sourceUserId, b.poster!.userId)),
+        )
+        .execute()) as Array<{ id: number; severity: ClaudeFindingSeverity; nodeId: string | null; teammate: TeammateReviewRecord | null }>;
+      const counted = countedFindings(
+        others.map((f) => ({
+          id: f.id,
+          severity: f.nodeId != null && (f.teammate?.unlabelled ?? []).includes(f.nodeId) ? null : f.severity,
+        })),
+        a.leftovers,
+      );
+      for (const p of counted) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        awayPoints.push(p);
+      }
+    }
+    const lastSeenMs = await teammateLastSeenMs(ctx, a.accountId, b.poster!.userId, b.poster!.login);
+    const activeAtHead = await teammateSeenAtHead(ctx, a.accountId, a.prId, a.headSha, b.poster!.userId, b.poster!.login);
+    const hold = teammateLiftHold({
+      ...base,
+      points: awayPoints,
+      why: 'away',
+      approves: true,
+      auto: rec.run === 'auto',
+      away: { activeAtHead, lastSeenMs, nowMs: a.nowMs ?? Date.now() },
     });
+    if (hold != null) continue;
+    out.push({ ...cand, points: awayPoints.length, why: 'away', lastSeenMs });
   }
   return out;
 }
@@ -263,6 +506,8 @@ export interface LiftLiveReview {
   login: string | null;
   state: string;
   body?: string | null;
+  // ISO-8601, when GitHub has it (the away path reads it; absent = unknown, read as recent).
+  submittedAt?: string | null;
 }
 
 /**
@@ -272,21 +517,46 @@ export interface LiftLiveReview {
  */
 export function liveLiftCheck(
   reviews: readonly LiftLiveReview[],
-  c: Pick<TeammateLiftCandidate, 'githubReviewId' | 'login'>,
+  c: Pick<TeammateLiftCandidate, 'githubReviewId' | 'login'> & { why?: TeammateLiftWhy },
   readerLogin: string | null,
+  nowMs: number = Date.now(),
 ): TeammateLiftHold | null {
   const who = c.login.toLowerCase();
   if (readerLogin != null && readerLogin.toLowerCase() === who) return 'own_review';
+  // The away path: a review of theirs on GitHub after the block (a Comment, a thread reply) inside the
+  // away window means their Limn, or they, are around: never dismissed as away. No time = recent.
+  let later = false;
   for (let i = reviews.length - 1; i >= 0; i -= 1) {
     const r = reviews[i]!;
     if (r.login == null || r.login.toLowerCase() !== who) continue;
-    if (r.state === 'COMMENTED' || r.state === 'PENDING') continue;
+    if (r.state === 'COMMENTED' || r.state === 'PENDING') {
+      const at = r.submittedAt != null ? Date.parse(r.submittedAt) : NaN;
+      if (r.state === 'PENDING' || !Number.isFinite(at) || nowMs - at < TEAMMATE_AWAY_AFTER_MS) later = true;
+      continue;
+    }
     if (r.state !== 'CHANGES_REQUESTED' || r.id == null || String(r.id) !== c.githubReviewId) return 'not_in_force';
     if (!hasLimnReviewMarker(r.body)) return 'not_limn';
+    if (c.why === 'away') {
+      // Only a block their AUTO run sent: a Post-button review is the person's own judgement.
+      if (parseLimnReviewMarker(r.body)?.run !== 'auto') return 'not_auto';
+      return later ? 'teammate_active' : null;
+    }
     if (parseLimnReviewMarker(r.body)?.liftConsent !== true) return 'no_consent';
     return null;
   }
   return 'not_in_force';
+}
+
+/** One `limn/review-*` status line at the head, as the away check reads it. */
+export interface AwayLiveLine {
+  login: string | null;
+}
+
+/** Does the teammate hold any Limn line at the head (live)? null lines = unreadable. Pure. */
+export function teammateLineAtHead(lines: readonly AwayLiveLine[] | null, login: string): boolean | null {
+  if (lines == null) return null;
+  const who = login.toLowerCase();
+  return lines.some((l) => l.login != null && l.login.toLowerCase() === who);
 }
 
 const nowIso = (): string => new Date().toISOString();

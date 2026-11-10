@@ -170,12 +170,20 @@ export function autoLiftLine(
 }
 
 /** What this run did to TEAMMATES' Limn blocks (docs/CLAUDE-REVIEW.md § Lifting a teammate's block):
- *  one line each — dismissed, or why GitHub refused. [] when it lifted none. */
+ *  one line each — dismissed, or why GitHub refused. The away path (`why: 'away'`) says so. [] when it
+ *  lifted none. */
 export function teammateLiftLines(
   a: Pick<ClaudeAutoPostWire, 'liftedTeammateBlocks'> | null | undefined,
 ): Array<{ text: string; failed: boolean }> {
   return (a?.liftedTeammateBlocks ?? []).map((l) => {
-    if (l.status === 'dismissed') return { text: `Dismissed ${l.login}’s request for changes: every point is addressed.`, failed: false };
+    if (l.status === 'dismissed')
+      return {
+        text:
+          l.why === 'away'
+            ? `Dismissed ${l.login}’s request for changes: every point is addressed and ${l.login}’s Limn is away.`
+            : `Dismissed ${l.login}’s request for changes: every point is addressed.`,
+        failed: false,
+      };
     if (l.status === 'dismissing') return { text: `Dismissing ${l.login}’s request for changes.`, failed: false };
     const why = l.error != null && l.error.trim() !== '' ? l.error.trim() : 'GitHub did not accept it.';
     return { text: `Couldn’t dismiss ${l.login}’s request for changes: ${why}`, failed: true };

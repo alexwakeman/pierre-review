@@ -233,7 +233,8 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   may anchor a run's follow-up (`follow_up.teammate`; docs/CLAUDE-REVIEW.md § The author's own review).
   `teammateLift` (migration `0164`, JSON `TeammateLiftRecord`) on such a row is the reader's Limn's ONE
   claimed attempt to dismiss its standing Request changes (docs/CLAUDE-REVIEW.md § Lifting a
-  teammate's block); the import never writes it.
+  teammate's block — with the teammate's consent, or `why: 'away'` when their Limn is away); the
+  import never writes it.
 - **THE PUSH SUMMARY** (`claudeReviews.pushSummary` + `pushSummaryFromSha`, migration `0172`): a FULL
   review's ≤ 600-char plain-text summary of the pushes it covers, from `pushSummaryFromSha` EXCLUSIVE
   (NULL = the PR's first commit) to the row's `headSha`. NULL on replies passes, unmoved heads and older

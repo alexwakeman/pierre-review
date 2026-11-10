@@ -11,263 +11,28 @@
 //   5. A refusal (403) is recorded in GitHub's words and never retried.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/teammate-lift
-import { rmSync } from 'node:fs';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AUTO_POST_DEFAULT_KINDS, limnReviewMarker, parseLimnReviewMarker } from '@pierre-review/shared';
-import type { AgentContext } from '../agent-context.js';
-import type { GqlPullRequest } from '../../github/queries.js';
-
-const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-teammate-lift-test.sqlite`;
-process.env.DATABASE_URL = DB_PATH;
-process.env.DISABLE_SCHEDULER = 'true';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-let db: any;
-let schema: any;
-let closeDb: (() => Promise<void> | void) | undefined;
-let ctx: AgentContext;
-let ap: typeof import('./auto-post.js');
-let persist: typeof import('./persist.js');
-let settings: typeof import('./auto-settings.js');
-let upsert: typeof import('../../sync/upsert.js');
-let lift: typeof import('./teammate-lift.js');
-let repoId = 0;
-let wsId = 0;
-let prSeq = 0;
-
-const MARK = '<!-- pierre:claude-review-finding v=1 -->';
-const ROBIN = { login: 'robin-dev', id: 'U_robin', __typename: 'User' }; // the teammate
-const CAROL = { login: 'carol-dev', id: 'U_carol', __typename: 'User' }; // the PR author
-const ALICE = { login: 'alice-dev', id: 'U_alice', __typename: 'User' }; // the reader
-const HEAD = 'b'.repeat(40);
-
-const robinSummary = (consent: boolean): string =>
-  `Two things to fix before this lands.\n\n${limnReviewMarker('aa11', {
-    headSha: HEAD,
-    run: 'auto',
-    pair: false,
-    runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' }],
-    verdict: 'REQUEST_CHANGES',
-    limnVersion: '0.1.180',
-    liftConsent: consent,
-  })}`;
-
-function gqlPr(n: number, reviewBody: string, author: any = CAROL): GqlPullRequest {
-  const at = '2026-11-03T10:00:00Z';
-  return {
-    id: `PR_lift_${n}`,
-    number: n,
-    title: 'Parser fix',
-    body: null,
-    bodyText: '',
-    isDraft: false,
-    state: 'OPEN',
-    additions: 1,
-    deletions: 1,
-    changedFiles: 1,
-    files: { nodes: [] },
-    createdAt: '2026-11-01T00:00:00Z',
-    mergedAt: null,
-    closedAt: null,
-    updatedAt: '2026-11-03T00:00:00Z',
-    url: `https://github.com/acme/lift/pull/${n}`,
-    baseRefName: 'main',
-    headRefName: 'fix',
-    mergeable: null,
-    mergeStateStatus: null,
-    author,
-    mergedBy: null,
-    labels: { nodes: [] },
-    reviewRequests: { nodes: [] },
-    reviews: { nodes: [{ id: `RV_${n}`, fullDatabaseId: String(500 + n), state: 'CHANGES_REQUESTED', body: reviewBody, submittedAt: at, author: ROBIN }] },
-    reviewThreads: {
-      nodes: [
-        {
-          id: `T_${n}`,
-          isResolved: false,
-          isOutdated: false,
-          isCollapsed: false,
-          path: 'src/x.ts',
-          line: 12,
-          resolvedBy: null,
-          comments: {
-            nodes: [
-              { id: `C_${n}01`, fullDatabaseId: `${n}01`, body: `**Warning**\n\nThis can throw on an empty list.\n\n${MARK}`, createdAt: at, diffHunk: null, author: ROBIN },
-            ],
-          },
-        },
-      ],
-    },
-    comments: {
-      nodes: [
-        { id: `IC_${n}02`, fullDatabaseId: `${n}02`, body: `**Blocker** · \`src/y.ts:4\`\n\nThe lock is never released.\n\n${MARK}`, createdAt: at, diffHunk: null, author: ROBIN },
-        { id: `IC_${n}03`, fullDatabaseId: `${n}03`, body: `**Nit** · \`src/y.ts:9\`\n\nName this better.\n\n${MARK}`, createdAt: at, diffHunk: null, author: ROBIN },
-      ],
-    },
-    commits: { nodes: [] },
-    headRefOid: HEAD,
-  } as unknown as GqlPullRequest;
-}
-
-const postReview = vi.fn();
-const settle = vi.fn(async () => ({ visible: true }));
-const dismissReview = vi.fn(async (..._a: unknown[]): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true }));
-let liveHead = HEAD;
-let liveList: any[] = [];
-const deps = () => ({
-  ...ap.defaultAutoPostDeps,
-  livePr: vi.fn(async () => ({ headSha: liveHead, state: 'open' as const, draft: false, merged: false })),
-  liveReviews: vi.fn(async () => liveList),
-  accountLogin: vi.fn(async () => 'alice-dev'),
-  impactLevel: vi.fn(async () => 'low' as const),
-  isAutomation: vi.fn(async () => false),
+import { describe, expect, it } from 'vitest';
+import { AUTO_POST_DEFAULT_KINDS, parseLimnReviewMarker } from '@pierre-review/shared';
+import {
+  ALICE,
+  HEAD,
+  allAddressed,
+  autoPostOf,
+  blockedPr,
   dismissReview,
+  go,
+  live,
+  postReview,
+  readerRun,
+  robinSummary,
+  setPost,
   settle,
-});
+  teammateLiftOf,
+  useLiftFixture,
+} from './teammate-lift.test-support.js';
+import * as F from './teammate-lift.test-support.js';
 
-async function setPost(extra: Record<string, unknown>): Promise<void> {
-  await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: true, scope: 'all', ...extra } as any });
-}
-
-/** A PR with robin's Limn Request changes imported. Returns the PR id, the teammate row and its findings. */
-async function blockedPr(o: { consent?: boolean; body?: string; author?: any } = {}): Promise<{ prId: number; teammateId: number; findings: any[]; ghId: string }> {
-  prSeq += 1;
-  const body = o.body ?? robinSummary(o.consent ?? true);
-  await upsert.persistPr(gqlPr(prSeq, body, o.author ?? CAROL), repoId, upsert.createUserResolver(), new Map(), 1);
-  const { and, eq } = await import('drizzle-orm');
-  const prId = (await db.select({ id: schema.pullRequests.id }).from(schema.pullRequests).where(eq(schema.pullRequests.githubNodeId, `PR_lift_${prSeq}`)).execute())[0].id;
-  await db.update(schema.pullRequests).set({ headSha: HEAD }).where(eq(schema.pullRequests.id, prId)).execute();
-  const rows = await db
-    .select()
-    .from(schema.claudeReviews)
-    .where(and(eq(schema.claudeReviews.prId, prId), eq(schema.claudeReviews.kind, 'teammate')))
-    .execute();
-  const findings = await db.select().from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, rows[0]?.id ?? -1)).execute();
-  const ghId = String(500 + prSeq);
-  // On GitHub, live: robin's review still requests changes, then a thread reply (COMMENTED: never replaces it).
-  liveList = [
-    { id: ghId, login: 'robin-dev', state: 'CHANGES_REQUESTED', body },
-    { id: 9_000 + prSeq, login: 'carol-dev', state: 'COMMENTED', body: 'Fixed.' },
-  ];
-  return { prId, teammateId: rows[0]?.id, findings, ghId };
-}
-
-const followUpOf = (items: Array<{ id: number; status: string; severity?: string }>) => ({
-  priorReviewId: 0,
-  priorHeadSha: HEAD,
-  headMoved: false,
-  changesSinceShown: false,
-  items: items.map((it, i) => ({
-    ref: it.status === 'not_checked' ? null : `P${i + 1}`,
-    priorFindingId: it.id,
-    sent: it.status !== 'not_checked',
-    carried: true,
-    status: it.status,
-    explanation: null,
-    path: 'src/x.ts',
-    line: 12,
-    side: 'RIGHT',
-    severity: it.severity ?? 'warning',
-    title: 't',
-  })),
-});
-
-/** The reader's auto run at HEAD, judging the given teammate findings. */
-async function readerRun(
-  prId: number,
-  judged: Array<{ id: number; status: string }>,
-  o: { verdict?: 'COMMENT' | 'APPROVE'; findings?: Array<{ severity: string; title: string }>; head?: string } = {},
-): Promise<number> {
-  const id = await persist.insertQueuedReview(ctx, prId, o.head ?? HEAD, 'claude-opus-5-5' as any, 1, [], 'auto');
-  await persist.saveReviewSuccess(ctx, id, {
-    scope: 'diff_only',
-    summary: 'Every earlier point is dealt with.',
-    verdict: o.verdict ?? 'COMMENT',
-    costUsd: null,
-    inputTokens: null,
-    outputTokens: null,
-    numTurns: 1,
-    excludedFiles: [],
-    followUp: followUpOf(judged) as any,
-    findings: (o.findings ?? []).map((f, i) => ({
-      path: 'src/z.ts',
-      line: 30 + i,
-      side: 'RIGHT' as const,
-      severity: f.severity as any,
-      title: f.title,
-      body: f.title,
-      suggestion: null,
-      diffHunk: null,
-      anchored: true,
-      fileInDiff: true,
-      priorFindingId: null,
-    })),
-  });
-  return id;
-}
-
-const allAddressed = (findings: any[]) => findings.map((f) => ({ id: f.id, status: 'addressed' }));
-const teammateLiftOf = async (id: number) => {
-  const { eq } = await import('drizzle-orm');
-  return (await db.select({ l: schema.claudeReviews.teammateLift }).from(schema.claudeReviews).where(eq(schema.claudeReviews.id, id)).execute())[0].l;
-};
-const autoPostOf = async (id: number) => {
-  const { eq } = await import('drizzle-orm');
-  return (await db.select({ a: schema.claudeReviews.autoPost }).from(schema.claudeReviews).where(eq(schema.claudeReviews.id, id)).execute())[0].a;
-};
-const go = (prId: number, reviewId: number) => ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId }, deps());
-
-beforeAll(async () => {
-  for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
-  const { runMigrations } = await import('../../db/run-migrations.js');
-  const client = await import('../../db/client.js');
-  db = client.db;
-  schema = client.schema;
-  closeDb = client.closeDb;
-  await runMigrations();
-  const q = await import('../../db/queries.js');
-  await db.insert(schema.accounts).values({ id: 1, githubUserId: 'U_alice', githubLogin: 'alice-dev', isLocal: true }).onConflictDoNothing().execute();
-  await db.update(schema.accounts).set({ githubLogin: 'alice-dev' }).execute();
-  const [r] = await db.insert(schema.repos).values({ accountId: 1, owner: 'acme', name: 'lift', githubNodeId: 'R_lift' }).returning().execute();
-  repoId = r.id;
-  wsId = await q.ensureDefaultWorkspace(1);
-  await q.ensureRepoMemberships(1);
-  ap = await import('./auto-post.js');
-  persist = await import('./persist.js');
-  settings = await import('./auto-settings.js');
-  upsert = await import('../../sync/upsert.js');
-  lift = await import('./teammate-lift.js');
-  ctx = {
-    db,
-    schema,
-    runTransaction: client.runTransaction,
-    recordAiUsage: async () => {},
-    accountIdOf: () => 1,
-    review: { postReview, postFinding: vi.fn() },
-    log: { info: () => {}, warn: () => {}, error: () => {} },
-  } as any as AgentContext;
-});
-
-afterAll(async () => {
-  await closeDb?.();
-  for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
-});
-
-beforeEach(async () => {
-  postReview.mockReset();
-  postReview.mockImplementation(async (a: any) => ({
-    postedReviewId: `MY${prSeq}`,
-    inlineFindingIds: a.includedFindings.map((f: any) => f.id),
-    prComments: [],
-    commentCount: a.includedFindings.length,
-    prCommentCount: 0,
-  }));
-  dismissReview.mockReset();
-  dismissReview.mockImplementation(async () => ({ ok: true }));
-  settle.mockClear();
-  liveHead = HEAD;
-  await setPost({ liftTeammateBlocks: true, autoVerdict: false });
-});
+useLiftFixture('pierre-teammate-lift-test');
 
 describe('the pure rules', () => {
   it('the marker carries the consent as lift=1, and only when given', () => {
@@ -286,15 +51,15 @@ describe('the pure rules', () => {
       { id: 5, severity: null },
       { id: 6, severity: 'praise' as const },
     ];
-    expect(lift.pointsBehindBlock(fs, 'nits_questions').map((f) => f.id)).toEqual([1, 2, 5]);
-    expect(lift.pointsBehindBlock(fs, 'nits').map((f) => f.id)).toEqual([1, 2, 4, 5]);
-    expect(lift.pointsBehindBlock(fs, 'none').map((f) => f.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(F.lift.pointsBehindBlock(fs, 'nits_questions').map((f) => f.id)).toEqual([1, 2, 5]);
+    expect(F.lift.pointsBehindBlock(fs, 'nits').map((f) => f.id)).toEqual([1, 2, 4, 5]);
+    expect(F.lift.pointsBehindBlock(fs, 'none').map((f) => f.id)).toEqual([1, 2, 3, 4, 5]);
     // ⚠ FAIL SAFE: a REQUEST_CHANGES whose comments hold no blocker, warning or unlabelled finding
     // rests on something they do not show (a blocker posted earlier): no points, never lifted — not
     // even under the strictest approve rule. A block with no findings has no points.
-    expect(lift.pointsBehindBlock([{ id: 3, severity: 'nit' }], 'nits_questions')).toEqual([]);
-    expect(lift.pointsBehindBlock([{ id: 3, severity: 'nit' }, { id: 4, severity: 'question' }], 'none')).toEqual([]);
-    expect(lift.pointsBehindBlock([], 'none')).toEqual([]);
+    expect(F.lift.pointsBehindBlock([{ id: 3, severity: 'nit' }], 'nits_questions')).toEqual([]);
+    expect(F.lift.pointsBehindBlock([{ id: 3, severity: 'nit' }, { id: 4, severity: 'question' }], 'none')).toEqual([]);
+    expect(F.lift.pointsBehindBlock([], 'none')).toEqual([]);
   });
 
   it('judgements hold only at the head they read; a reply accepted holds across heads', () => {
@@ -302,7 +67,7 @@ describe('the pure rules', () => {
       headSha,
       followUp: { items: items.map(([priorFindingId, status]) => ({ priorFindingId, status })) },
     });
-    const w = lift.wordsAtHead(
+    const w = F.lift.wordsAtHead(
       [
         run('H1', [[1, 'addressed'], [2, 'reply_accepted'], [3, 'addressed']]),
         run('H2', [[3, 'not_addressed'], [4, 'addressed']]),
@@ -314,34 +79,34 @@ describe('the pure rules', () => {
     // 4: H2's code judgement does not hold at H3 (and 'not_checked' never counts). 5: judged here.
     expect([...w.entries()]).toEqual([[2, 'reply_accepted'], [5, 'addressed']]);
     // No head to hold to: every run counts.
-    expect(lift.wordsAtHead([run('H1', [[1, 'addressed']])], null).get(1)).toBe('addressed');
+    expect(F.lift.wordsAtHead([run('H1', [[1, 'addressed']])], null).get(1)).toBe('addressed');
   });
 
   it('the poster’s consent rides only a post whose comments hold every blocker behind it', () => {
     const f = (id: number, severity: string, more: Record<string, unknown> = {}) => ({ id, severity, included: true, story: null, ...more }) as any;
-    expect(ap.blockersAllInPost([f(1, 'blocker'), f(2, 'nit')], [f(1, 'blocker')])).toBe(true);
+    expect(F.ap.blockersAllInPost([f(1, 'blocker'), f(2, 'nit')], [f(1, 'blocker')])).toBe(true);
     // The blocker was posted in an EARLIER review, so this post's comments hold only the nit.
-    expect(ap.blockersAllInPost([f(1, 'blocker'), f(2, 'nit')], [f(2, 'nit')])).toBe(false);
+    expect(F.ap.blockersAllInPost([f(1, 'blocker'), f(2, 'nit')], [f(2, 'nit')])).toBe(false);
     // A blocker the reader ignored does not count (the verdict does not count it either).
-    expect(ap.blockersAllInPost([f(1, 'blocker', { included: false }), f(2, 'nit')], [f(2, 'nit')])).toBe(true);
-    expect(ap.blockersAllInPost([f(2, 'warning')], [])).toBe(true);
+    expect(F.ap.blockersAllInPost([f(1, 'blocker', { included: false }), f(2, 'nit')], [f(2, 'nit')])).toBe(true);
+    expect(F.ap.blockersAllInPost([f(2, 'warning')], [])).toBe(true);
   });
 
   it('the message names the reader, the count and the commit', () => {
-    expect(lift.teammateLiftMessage('alex', 3, '70cc9b5aaaa')).toBe('Limn (alex) checked all 3 points are addressed at 70cc9b5.');
-    expect(lift.teammateLiftMessage('alex', 1, '70cc9b5aaaa')).toBe('Limn (alex) checked the 1 point is addressed at 70cc9b5.');
+    expect(F.lift.teammateLiftMessage('alex', 3, '70cc9b5aaaa')).toBe('Limn (alex) checked all 3 points are addressed at 70cc9b5.');
+    expect(F.lift.teammateLiftMessage('alex', 1, '70cc9b5aaaa')).toBe('Limn (alex) checked the 1 point is addressed at 70cc9b5.');
   });
 
   it('the live check: standing, Limn-marked, consented — a later COMMENTED review never replaces it', () => {
     const c = { githubReviewId: '7', login: 'robin-dev' };
     const ok = [{ id: 7, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: robinSummary(true) }, { id: 8, login: 'robin-dev', state: 'COMMENTED', body: 'x' }];
-    expect(lift.liveLiftCheck(ok, c, 'alice-dev')).toBeNull();
-    expect(lift.liveLiftCheck([{ ...ok[0]!, body: 'Please fix the lock.' }], c, 'alice-dev')).toBe('not_limn');
-    expect(lift.liveLiftCheck([{ ...ok[0]!, body: robinSummary(false) }], c, 'alice-dev')).toBe('no_consent');
-    expect(lift.liveLiftCheck([...ok, { id: 9, login: 'robin-dev', state: 'DISMISSED', body: '' }], c, 'alice-dev')).toBe('not_in_force');
-    expect(lift.liveLiftCheck([...ok, { id: 9, login: 'robin-dev', state: 'APPROVED', body: '' }], c, 'alice-dev')).toBe('not_in_force');
-    expect(lift.liveLiftCheck(ok, c, 'robin-dev')).toBe('own_review');
-    expect(lift.liveLiftCheck([], c, 'alice-dev')).toBe('not_in_force');
+    expect(F.lift.liveLiftCheck(ok, c, 'alice-dev')).toBeNull();
+    expect(F.lift.liveLiftCheck([{ ...ok[0]!, body: 'Please fix the lock.' }], c, 'alice-dev')).toBe('not_limn');
+    expect(F.lift.liveLiftCheck([{ ...ok[0]!, body: robinSummary(false) }], c, 'alice-dev')).toBe('no_consent');
+    expect(F.lift.liveLiftCheck([...ok, { id: 9, login: 'robin-dev', state: 'DISMISSED', body: '' }], c, 'alice-dev')).toBe('not_in_force');
+    expect(F.lift.liveLiftCheck([...ok, { id: 9, login: 'robin-dev', state: 'APPROVED', body: '' }], c, 'alice-dev')).toBe('not_in_force');
+    expect(F.lift.liveLiftCheck(ok, c, 'robin-dev')).toBe('own_review');
+    expect(F.lift.liveLiftCheck([], c, 'alice-dev')).toBe('not_in_force');
   });
 });
 
@@ -364,7 +129,7 @@ describe("lifting a teammate's Limn block", () => {
     expect(dismissReview.mock.calls[0]!.slice(1)).toEqual([
       'acme',
       'lift',
-      prSeq,
+      F.prSeq,
       ghId,
       'Limn (alice-dev) checked all 2 points are addressed at bbbbbbb.',
     ]);
@@ -376,7 +141,7 @@ describe("lifting a teammate's Limn block", () => {
     expect(settle).toHaveBeenCalled();
     // The local review row is stamped dismissed: robin's block no longer stands.
     const { eq } = await import('drizzle-orm');
-    const rv = await db.select({ state: schema.reviews.state }).from(schema.reviews).where(eq(schema.reviews.databaseId, ghId)).execute();
+    const rv = await F.db.select({ state: F.schema.reviews.state }).from(F.schema.reviews).where(eq(F.schema.reviews.databaseId, ghId)).execute();
     expect(rv[0].state).toBe('dismissed');
 
     // A later run never dismisses it again.
@@ -437,7 +202,7 @@ describe("lifting a teammate's Limn block", () => {
     const { prId, findings } = await blockedPr();
     const [first, ...rest] = findings;
     const early = await readerRun(prId, [{ id: first.id, status: 'no_longer_applies' }]);
-    await db.update(schema.claudeReviews).set({ autoPost: { status: 'skipped' } }).where((await import('drizzle-orm')).eq(schema.claudeReviews.id, early)).execute();
+    await F.db.update(F.schema.claudeReviews).set({ autoPost: { status: 'skipped' } }).where((await import('drizzle-orm')).eq(F.schema.claudeReviews.id, early)).execute();
     const run = await readerRun(prId, rest.map((f: any) => ({ id: f.id, status: 'addressed' })));
     await go(prId, run);
     expect(dismissReview).toHaveBeenCalledTimes(1);
@@ -448,17 +213,17 @@ describe("lifting a teammate's Limn block", () => {
     const { prId, findings } = await blockedPr();
     const [first, ...rest] = findings;
     const early = await readerRun(prId, [{ id: first.id, status: 'addressed' }], { head: OLD });
-    await db.update(schema.claudeReviews).set({ autoPost: { status: 'skipped' } }).where((await import('drizzle-orm')).eq(schema.claudeReviews.id, early)).execute();
+    await F.db.update(F.schema.claudeReviews).set({ autoPost: { status: 'skipped' } }).where((await import('drizzle-orm')).eq(F.schema.claudeReviews.id, early)).execute();
     // The follow-up at HEAD gets the point again: it is not settled here.
     const { loadStandingBlockAnchors } = await import('./teammate-anchor.js');
-    const blocks = await loadStandingBlockAnchors(ctx, prId, 1, null, HEAD);
+    const blocks = await loadStandingBlockAnchors(F.ctx, prId, 1, null, HEAD);
     expect(blocks[0]!.findings.map((x) => x.id)).toContain(first.id);
     // Judged at the old head only (this run left it out): held.
     const run = await readerRun(prId, rest.map((f: any) => ({ id: f.id, status: 'addressed' })));
     await go(prId, run);
     expect(dismissReview).not.toHaveBeenCalled();
     // Settled points at the head being read are not sent again.
-    expect((await loadStandingBlockAnchors(ctx, prId, 1, null, HEAD))[0]!.findings.map((x) => x.id)).toEqual([first.id]);
+    expect((await loadStandingBlockAnchors(F.ctx, prId, 1, null, HEAD))[0]!.findings.map((x) => x.id)).toEqual([first.id]);
   });
 
   it('the poster’s own post withholds lift=1 when a blocker behind its verdict was posted earlier', async () => {
@@ -488,7 +253,7 @@ describe("lifting a teammate's Limn block", () => {
   it('the head moved since the run: no review, no dismissal', async () => {
     const { prId, teammateId, findings } = await blockedPr();
     const run = await readerRun(prId, allAddressed(findings));
-    liveHead = 'c'.repeat(40);
+    live.head = 'c'.repeat(40);
     const out = await go(prId, run);
     expect(out).toMatchObject({ kind: 'done', record: { status: 'failed' } });
     expect(postReview).not.toHaveBeenCalled();
@@ -507,12 +272,12 @@ describe("lifting a teammate's Limn block", () => {
     const { prId, findings, ghId } = await blockedPr();
     const run = await readerRun(prId, allAddressed(findings));
     // On GitHub now: the same review id, but its body has no marker (edited by hand) …
-    liveList = [{ id: ghId, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: 'Please fix the lock first.' }];
+    live.list = [{ id: ghId, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: 'Please fix the lock first.' }];
     await go(prId, run);
     expect(dismissReview).not.toHaveBeenCalled();
     // … or robin typed a newer Request changes of his own.
     const run2 = await readerRun(prId, allAddressed(findings));
-    liveList = [
+    live.list = [
       { id: ghId, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: robinSummary(true) },
       { id: 77, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: 'Still not right.' },
     ];
@@ -523,8 +288,8 @@ describe("lifting a teammate's Limn block", () => {
   it('the claim: a teammate review already claimed is never dismissed again', async () => {
     const { prId, teammateId, findings } = await blockedPr();
     // Another run claimed it (and was cut off mid-write).
-    expect(await lift.claimTeammateLift(ctx, 1, teammateId, { byReviewId: 1, headSha: HEAD, points: 2, message: 'm' })).toBe(true);
-    expect(await lift.claimTeammateLift(ctx, 1, teammateId, { byReviewId: 2, headSha: HEAD, points: 2, message: 'm' })).toBe(false);
+    expect(await F.lift.claimTeammateLift(F.ctx, 1, teammateId, { byReviewId: 1, headSha: HEAD, points: 2, message: 'm' })).toBe(true);
+    expect(await F.lift.claimTeammateLift(F.ctx, 1, teammateId, { byReviewId: 2, headSha: HEAD, points: 2, message: 'm' })).toBe(false);
     const run = await readerRun(prId, allAddressed(findings));
     await go(prId, run);
     expect(dismissReview).not.toHaveBeenCalled();
@@ -549,7 +314,7 @@ describe("lifting a teammate's Limn block", () => {
     expect(dismissReview).not.toHaveBeenCalled();
     // The teammate review shows the attempt (the AI Review tab reads it).
     const { listTeammateReviews } = await import('../../db/teammate-reviews.js');
-    const listed = await listTeammateReviews(db, 1, prId);
+    const listed = await listTeammateReviews(F.db, 1, prId);
     expect(listed[0]!.lift).toMatchObject({ status: 'failed', error: 'Must have admin rights to Repository.' });
   });
 
@@ -562,3 +327,7 @@ describe("lifting a teammate's Limn block", () => {
     await setPost({ teamLiftConsent: false });
   });
 });
+
+// THE AWAY PATH (2026-11-10; docs/TEAM-REVIEW.md § 5 "When the teammate is away"): no opt-in on
+// either side; the reader's review APPROVES, every point behind robin's block is settled at the head,
+// and robin's Limn is away — no line at the head, nothing seen for TEAMMATE_AWAY_AFTER_MS.
