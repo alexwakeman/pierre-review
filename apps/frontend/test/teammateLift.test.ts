@@ -26,6 +26,12 @@ describe('teammateLiftLines', () => {
       { text: 'Couldn’t dismiss kim’s request for changes: GitHub did not accept it.', failed: true },
     ]);
   });
+
+  it('says when the teammate’s Limn was away', () => {
+    expect(
+      teammateLiftLines({ liftedTeammateBlocks: [{ teammateReviewId: 1, login: 'robin', status: 'dismissed', error: null, why: 'away' }] }),
+    ).toEqual([{ text: 'Dismissed robin’s request for changes: every point is addressed and robin’s Limn is away.', failed: false }]);
+  });
 });
 
 describe('the settings', () => {
@@ -39,5 +45,7 @@ describe('the settings', () => {
     expect(src).toContain('teamLiftConsent: liftConsent');
     expect(src).toContain('liftTeammateBlocks: liftTeammates');
     expect(src).toContain('<InfoButton title="Teammates’ Limn “changes requested”">');
+    // The away path is explained in the same ⓘ.
+    expect(src).toContain('Without either box, when the teammate’s Limn is away');
   });
 });

@@ -41,9 +41,9 @@ const CAROL = { login: 'carol-dev', id: 'U_carol', __typename: 'User' }; // the 
 const ALICE = { login: 'alice-dev', id: 'U_alice', __typename: 'User' }; // the reader
 const HEAD = 'b'.repeat(40);
 
-const robinSummary = (consent: boolean): string =>
+const robinSummary = (consent: boolean, headSha: string = HEAD): string =>
   `Two things to fix before this lands.\n\n${limnReviewMarker('aa11', {
-    headSha: HEAD,
+    headSha,
     run: 'auto',
     pair: false,
     runs: [{ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' }],
@@ -130,9 +130,11 @@ async function setPost(extra: Record<string, unknown>): Promise<void> {
 }
 
 /** A PR with robin's Limn Request changes imported. Returns the PR id, the teammate row and its findings. */
-async function blockedPr(o: { consent?: boolean; body?: string; author?: any } = {}): Promise<{ prId: number; teammateId: number; findings: any[]; ghId: string }> {
+async function blockedPr(
+  o: { consent?: boolean; body?: string; author?: any; blockHead?: string } = {},
+): Promise<{ prId: number; teammateId: number; findings: any[]; ghId: string }> {
   prSeq += 1;
-  const body = o.body ?? robinSummary(o.consent ?? true);
+  const body = o.body ?? robinSummary(o.consent ?? true, o.blockHead ?? HEAD);
   await upsert.persistPr(gqlPr(prSeq, body, o.author ?? CAROL), repoId, upsert.createUserResolver(), new Map(), 1);
   const { and, eq } = await import('drizzle-orm');
   const prId = (await db.select({ id: schema.pullRequests.id }).from(schema.pullRequests).where(eq(schema.pullRequests.githubNodeId, `PR_lift_${prSeq}`)).execute())[0].id;
@@ -560,5 +562,193 @@ describe("lifting a teammate's Limn block", () => {
     await go(prId, run);
     expect(postReview.mock.calls[0]![0].limnMeta.liftConsent).toBe(true);
     await setPost({ teamLiftConsent: false });
+  });
+});
+
+// THE AWAY PATH (2026-11-10; docs/TEAM-REVIEW.md § 5 "When the teammate is away"): no opt-in on
+// either side; the reader's review APPROVES, every point behind robin's block is settled at the head,
+// and robin's Limn is away — no line at the head, nothing seen for TEAMMATE_AWAY_AFTER_MS.
+describe("dismissing an away teammate's Limn block", () => {
+  // robin's review was posted 2026-11-03T10:00Z; a day later his Limn has been quiet for 24 hours.
+  const DAY_LATER = Date.parse('2026-11-04T10:00:00Z');
+  // robin's Limn reviewed an OLDER commit; the PR is now at HEAD, which his Limn has not looked at.
+  const OLD_HEAD = 'a'.repeat(40);
+  let now = DAY_LATER;
+  let lines: Array<{ login: string | null }> | null = [];
+  const liveTeamLines = vi.fn(async () => lines);
+  const awayDeps = () => ({ ...deps(), liveTeamLines, nowMs: () => now });
+  const goAway = (prId: number, reviewId: number) => ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId }, awayDeps());
+  const approveRun = (prId: number, findings: any[], judged = allAddressed(findings)) => readerRun(prId, judged, { verdict: 'APPROVE' });
+
+  beforeEach(async () => {
+    now = DAY_LATER;
+    lines = [{ login: 'alice-dev' }];
+    liveTeamLines.mockClear();
+    // Neither opt-in: robin gave no consent, the reader has not ticked "Dismiss a teammate's …".
+    await setPost({ liftTeammateBlocks: false, teamLiftConsent: false, autoVerdict: true });
+  });
+
+  it('the pure rules: away only with no line at the head and nothing seen for the window', () => {
+    const at = Date.parse('2026-11-03T10:00:00Z');
+    expect(lift.teammateAwayHold({ activeAtHead: false, lastSeenMs: at, nowMs: at + lift.TEAMMATE_AWAY_AFTER_MS })).toBeNull();
+    expect(lift.teammateAwayHold({ activeAtHead: false, lastSeenMs: at, nowMs: at + lift.TEAMMATE_AWAY_AFTER_MS - 1 })).toBe('teammate_recent');
+    expect(lift.teammateAwayHold({ activeAtHead: true, lastSeenMs: null, nowMs: at })).toBe('teammate_active');
+    expect(lift.teammateAwayHold({ activeAtHead: null, lastSeenMs: null, nowMs: at })).toBe('teammate_unknown');
+    expect(lift.teammateLineAtHead([{ login: 'Robin-Dev' }], 'robin-dev')).toBe(true);
+    expect(lift.teammateLineAtHead([{ login: 'alice-dev' }], 'robin-dev')).toBe(false);
+    expect(lift.teammateLineAtHead(null, 'robin-dev')).toBeNull();
+    // The away path needs an approving review; consent is not asked.
+    const base = {
+      why: 'away' as const,
+      settingOn: false,
+      authorIsMe: false,
+      posterIsMe: false,
+      inForce: true,
+      alreadyTried: false,
+      consent: false,
+      limn: true,
+      ownBlocker: false,
+      atCurrentHead: true,
+      points: [{ id: 1, severity: 'warning' as const }],
+      words: new Map([[1, 'addressed']]),
+      away: { activeAtHead: false, lastSeenMs: at, nowMs: DAY_LATER },
+    };
+    expect(lift.teammateLiftHold({ ...base, approves: true })).toBeNull();
+    expect(lift.teammateLiftHold({ ...base, approves: false })).toBe('not_approving');
+    expect(lift.teammateLiftHold({ ...base, approves: true, limn: false })).toBe('not_limn');
+    expect(lift.teammateLiftHold({ ...base, approves: true, words: new Map([[1, 'not_addressed']]) })).toBe('points_open');
+  });
+
+  it('the live check on the away path: no consent needed; a recent later review of theirs holds it', () => {
+    const c = { githubReviewId: '7', login: 'robin-dev', why: 'away' as const };
+    const block = { id: 7, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: robinSummary(false) };
+    expect(lift.liveLiftCheck([block], c, 'alice-dev', DAY_LATER)).toBeNull();
+    const reply = (at: string | null) => ({ id: 8, login: 'robin-dev', state: 'COMMENTED', body: '', submittedAt: at });
+    expect(lift.liveLiftCheck([block, reply('2026-11-04T09:00:00Z')], c, 'alice-dev', DAY_LATER)).toBe('teammate_active');
+    expect(lift.liveLiftCheck([block, reply(null)], c, 'alice-dev', DAY_LATER)).toBe('teammate_active');
+    expect(lift.liveLiftCheck([block, reply('2026-11-03T11:00:00Z')], c, 'alice-dev', DAY_LATER)).toBeNull();
+    // A person's typed review is never dismissed.
+    expect(lift.liveLiftCheck([{ ...block, body: 'Please fix it.' }], c, 'alice-dev', DAY_LATER)).toBe('not_limn');
+  });
+
+  it('the message keeps the Limn lead and says why', async () => {
+    const { isLimnDismissalMessage } = await import('@pierre-review/shared');
+    const m = lift.teammateAwayLiftMessage('alex', 'robin', 3, 'abc1234ffff', 5 * 3_600_000);
+    expect(m).toBe("Limn (alex) checked all 3 points are addressed at abc1234. robin's Limn has not reviewed it and has been away for 5 hours.");
+    expect(isLimnDismissalMessage(m)).toBe(true);
+    expect(lift.awayFor(3 * 86_400_000)).toBe('3 days');
+    expect(lift.teammateAwayLiftMessage('alex', 'robin', 1, 'abc1234', null)).toBe(
+      "Limn (alex) checked the 1 point is addressed at abc1234. robin's Limn has not reviewed it.",
+    );
+  });
+
+  it('every point settled and robin away: the reader approves, then dismisses robin’s review once', async () => {
+    const { prId, teammateId, findings, ghId } = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    const run = await approveRun(prId, findings);
+    await goAway(prId, run);
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(postReview.mock.calls[0]![0].verdict).toBe('APPROVE');
+    expect(liveTeamLines).toHaveBeenCalledTimes(1);
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(dismissReview.mock.calls[0]!.slice(1)).toEqual([
+      'acme',
+      'lift',
+      prSeq,
+      ghId,
+      "Limn (alice-dev) checked all 2 points are addressed at bbbbbbb. robin-dev's Limn has not reviewed it and has been away for 24 hours.",
+    ]);
+    expect(await teammateLiftOf(teammateId)).toMatchObject({ status: 'dismissed', why: 'away', points: 2 });
+    expect(await autoPostOf(run)).toMatchObject({
+      status: 'posted',
+      liftedTeammateBlocks: [{ teammateReviewId: teammateId, login: 'robin-dev', status: 'dismissed', why: 'away' }],
+    });
+    expect(settle).toHaveBeenCalled();
+    // Claimed once: a later approving run never dismisses it again.
+    dismissReview.mockClear();
+    await goAway(prId, await approveRun(prId, findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+  });
+
+  it('a point still open holds it (the reader does not approve over it)', async () => {
+    const { prId, teammateId, findings } = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    const blocker = findings.find((f: any) => f.severity === 'blocker');
+    const run = await approveRun(prId, findings, findings.map((f: any) => ({ id: f.id, status: f.id === blocker.id ? 'not_addressed' : 'addressed' })));
+    await goAway(prId, run);
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(await teammateLiftOf(teammateId)).toBeNull();
+  });
+
+  it('robin’s Limn is active: a line at the head, a recent sighting, a recent reply, or an unreadable head', async () => {
+    // His `limn/review-*` line at the head (live).
+    lines = [{ login: 'robin-dev' }];
+    let p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(postReview.mock.calls.at(-1)![0].verdict).toBe('APPROVE');
+    // Seen an hour ago (his review was posted at 10:00).
+    lines = [];
+    now = Date.parse('2026-11-03T11:00:00Z');
+    p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(liveTeamLines).toHaveBeenCalledTimes(1); // the DB pre-check held it before any line read
+    // A thread reply of his on GitHub an hour ago.
+    now = DAY_LATER;
+    p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    liveList = [...liveList, { id: 88, login: 'robin-dev', state: 'COMMENTED', body: 'Still looking.', submittedAt: '2026-11-04T09:00:00Z' }];
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    // His block was posted at the head itself: his Limn has reviewed this commit.
+    p = await blockedPr({ consent: false });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    // The head's lines could not be read.
+    lines = null;
+    p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(await teammateLiftOf(p.teammateId)).toBeNull();
+  });
+
+  it('never a person’s review: no Limn marker on GitHub, never dismissed', async () => {
+    const { prId, findings, ghId } = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    liveList = [{ id: ghId, login: 'robin-dev', state: 'CHANGES_REQUESTED', body: 'Please fix the lock first.' }];
+    await goAway(prId, await approveRun(prId, findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+  });
+
+  it('gated like the verdict: auto verdict off, an impact the reader does not approve, or their own PR', async () => {
+    await setPost({ liftTeammateBlocks: false, autoVerdict: false });
+    let p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    await setPost({ liftTeammateBlocks: false, autoVerdict: true, approveImpact: { high: false, medium: false, low: false } });
+    p = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(postReview.mock.calls.at(-1)![0].verdict).toBe('COMMENT');
+    expect(dismissReview).not.toHaveBeenCalled();
+    await setPost({ liftTeammateBlocks: false, autoVerdict: true, approveImpact: { high: true, medium: true, low: true } });
+    p = await blockedPr({ consent: false, author: ALICE, blockHead: OLD_HEAD });
+    await goAway(p.prId, await approveRun(p.prId, p.findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+  });
+
+  it('a refused approve went out as a comment: nothing is dismissed', async () => {
+    const { prId, teammateId, findings } = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    postReview.mockImplementation(async (a: any) => {
+      if (a.verdict === 'APPROVE') throw Object.assign(new Error('Review cannot be approved'), { status: 422 });
+      return { postedReviewId: 'MYc', inlineFindingIds: [], prComments: [], commentCount: 0, prCommentCount: 0 };
+    });
+    await goAway(prId, await approveRun(prId, findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(await teammateLiftOf(teammateId)).toBeNull();
+  });
+
+  it('the claim: one already claimed by another run is never dismissed', async () => {
+    const { prId, teammateId, findings } = await blockedPr({ consent: false, blockHead: OLD_HEAD });
+    expect(await lift.claimTeammateLift(ctx, 1, teammateId, { byReviewId: 1, headSha: HEAD, points: 2, message: 'm', why: 'away' })).toBe(true);
+    await goAway(prId, await approveRun(prId, findings));
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect(await teammateLiftOf(teammateId)).toMatchObject({ status: 'dismissing', byReviewId: 1 });
   });
 });

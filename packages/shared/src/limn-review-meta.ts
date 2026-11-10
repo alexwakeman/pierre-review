@@ -525,7 +525,8 @@ export function isLimnBelowTeamMinimum(version: string | null | undefined, min: 
 
 /** Is this review DISMISSAL Limn's, by its GitHub message? Limn writes three: its own approval
  *  withdrawn ("Limn withdrew its approval: …", backend approval-withdraw.ts), a teammate's block
- *  lifted ("Limn (robin) checked …", teammate-lift.ts) and its own block lifted ("Claude's blocking
+ *  lifted ("Limn (robin) checked …", teammate-lift.ts — the away path too: "… checked … at abc1234.
+ *  bob's Limn has not reviewed it and has been away for 5 hours.") and its own block lifted ("Claude's blocking
  *  findings are fixed.", auto-post.ts `liftBlockMessage`). Pure. */
 export function isLimnDismissalMessage(message: string | null | undefined): boolean {
   const m = (message ?? '').trim();

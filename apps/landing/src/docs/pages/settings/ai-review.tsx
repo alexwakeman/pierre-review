@@ -177,8 +177,9 @@ export default function Page(): JSX.Element {
         post its own. Both people must agree: the teammate ticks{' '}
         <Ui>Let a teammate&rsquo;s Limn dismiss my Limn&rsquo;s &ldquo;changes requested&rdquo; once every point is fixed</Ui>
         , and you tick <Ui>Dismiss a teammate&rsquo;s Limn &ldquo;changes requested&rdquo; once every point is fixed</Ui>
-        . A review someone wrote by hand is never dismissed. See{' '}
-        <DocLink to="ai-review/team-reviews">Reviewing as a team</DocLink>.
+        . A review someone wrote by hand is never dismissed. When the teammate&rsquo;s Limn has been away for 4
+        hours and your review approves, your Limn dismisses it without either box. See{' '}
+        <DocLink to="ai-review/team-reviews#lifting-changes-requested">Reviewing as a team</DocLink>.
       </p>
 
       <H2 id="auto-fix">Auto AI Fix</H2>

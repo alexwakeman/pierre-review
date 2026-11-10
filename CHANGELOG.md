@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- AI Review: when your Limn's review approves a pull request and a teammate's Limn "changes requested"
+  still stands, your Limn dismisses it if every one of its points is fixed at the latest commit and the
+  teammate's Limn has been away for 4 hours without looking at that commit. No setting is needed beyond
+  "Approve or request changes for me"; the AI Review tab says when it happened.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed

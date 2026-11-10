@@ -625,6 +625,12 @@ export function AutoReviewSection(): JSX.Element {
               someone wrote by hand is never dismissed.
             </p>
             <p>
+              Without either box, when the teammate’s Limn is away: if your Limn approves, every point
+              is fixed at the latest commit, and their Limn has not looked at that commit or done
+              anything on GitHub for 4 hours, your Limn dismisses their review. This needs “Approve or
+              request changes for me”.
+            </p>
+            <p>
               Dismissing needs write access to the repository, and branch protection can restrict who
               may dismiss. If GitHub refuses, the AI Review tab says so and Limn does not try again.
             </p>

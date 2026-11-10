@@ -142,7 +142,10 @@ import {
   liveLiftCheck,
   loadTeammateLiftCandidates,
   settleTeammateLift,
+  teammateAwayLiftMessage,
+  teammateLineAtHead,
   teammateLiftMessage,
+  type AwayLiveLine,
   type TeammateLiftCandidate,
 } from './teammate-lift.js';
 import { trueAuthorId } from '../../db/true-author.js';
@@ -351,6 +354,8 @@ export interface LiveReview {
   state: string;
   // The review body (the live check of a teammate's block reads its marker). Absent = not read.
   body?: string | null;
+  // When it was submitted, ISO-8601 (the away path reads a teammate's later reviews). Absent = unknown.
+  submittedAt?: string | null;
 }
 
 /**
@@ -494,6 +499,11 @@ export interface AutoPostDeps {
   // The PR's blast-radius level through the shared resolver + the account's config (null = none
   // drawn). Optional so a test fake without it reads as unknown.
   impactLevel?(accountId: number, prId: number): Promise<'high' | 'medium' | 'low' | null>;
+  // Every `limn/review-*` status line on `sha`, LIVE (the away path: does the teammate hold a line at
+  // the head?). null = could not read; absent reads as null. Either way the away path holds.
+  liveTeamLines?(accountId: number, owner: string, name: string, sha: string): Promise<AwayLiveLine[] | null>;
+  // Now, epoch ms (tests pin it).
+  nowMs?(): number;
 }
 
 export const defaultAutoPostDeps: AutoPostDeps = {
@@ -524,14 +534,26 @@ export const defaultAutoPostDeps: AutoPostDeps = {
     const { getPrImpactLevel } = await import('../../db/blast-radius-query.js');
     return getPrImpactLevel(accountId, prId);
   },
+  async liveTeamLines(accountId, owner, name, sha) {
+    // ⚠ UNDER TEST the real adapter never reaches GitHub (as team-claim.ts's `login`): unreadable, so
+    // the away path holds. Tests of the away path pass their own.
+    if (process.env.VITEST) return null;
+    const { defaultTeamClaimGithub, teamClaimContext } = await import('./team-claim.js');
+    const out: AwayLiveLine[] = [];
+    for (const p of ['claude', 'codex'] as const) {
+      for (const l of await defaultTeamClaimGithub.listLines(accountId, owner, name, sha, teamClaimContext(p))) out.push({ login: l.login });
+    }
+    return out;
+  },
   async liveReviews(owner, name, prNumber) {
     const { ghRestGet } = await import('../../github/client.js');
     const out: LiveReview[] = [];
     for (let page = 1; page <= 10; page += 1) {
-      const rows = await ghRestGet<Array<{ id: number; user: { login: string } | null; state: string; body?: string | null }>>(
-        `/repos/${owner}/${name}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
-      );
-      for (const r of rows) out.push({ id: r.id, login: r.user?.login ?? null, state: r.state, body: r.body ?? null });
+      const rows = await ghRestGet<
+        Array<{ id: number; user: { login: string } | null; state: string; body?: string | null; submitted_at?: string | null }>
+      >(`/repos/${owner}/${name}/pulls/${prNumber}/reviews?per_page=100&page=${page}`);
+      for (const r of rows)
+        out.push({ id: r.id, login: r.user?.login ?? null, state: r.state, body: r.body ?? null, submittedAt: r.submitted_at ?? null });
       if (rows.length < 100) return out;
     }
     // More than 1,000 reviews: the latest one may be beyond what was read — never guess.
@@ -1046,10 +1068,20 @@ async function autoPostReview(
   const mayWithdraw =
     !runApproves && [...limnApprovals.values()].some((x) => x.headSha !== review.headSha && x.withdrawal == null);
   // LIFTING A TEAMMATE'S LIMN BLOCK (./teammate-lift.ts): the DB pre-check first (both opt-ins, every
-  // point behind the block settled), so an ordinary run costs no extra GitHub read.
+  // point behind the block settled), so an ordinary run costs no extra GitHub read. THE AWAY PATH
+  // needs no opt-in: the run wants an APPROVE and the teammate's Limn has been away (checked again
+  // live, and dismissed only once the APPROVE landed).
+  const nowMs = deps.nowMs?.() ?? Date.now();
   let readerLogin: string | null = null;
   let teammateCandidates: TeammateLiftCandidate[] = [];
-  if (ws.settings.liftTeammateBlocks && !facts.authorIsMe && noBlocker && unjudgedBlockers.length === 0 && uncheckedCoverBlockers === 0) {
+  const awayPath = wanted === 'APPROVE';
+  if (
+    (ws.settings.liftTeammateBlocks || awayPath) &&
+    !facts.authorIsMe &&
+    noBlocker &&
+    unjudgedBlockers.length === 0 &&
+    uncheckedCoverBlockers === 0
+  ) {
     try {
       readerLogin = await deps.accountLogin(accountId);
       teammateCandidates = await loadTeammateLiftCandidates(ctx, {
@@ -1059,6 +1091,9 @@ async function autoPostReview(
         headSha: review.headSha,
         leftovers: rules.approveLeftovers,
         readerLogin,
+        consentPath: ws.settings.liftTeammateBlocks,
+        awayPath,
+        nowMs,
       });
     } catch (err) {
       ctx.log.warn(`auto post review ${reviewId}: could not read teammates' blocks: ${errText(err)}`);
@@ -1115,10 +1150,20 @@ async function autoPostReview(
       ]);
       readerLogin = login;
       standing = ownStandingReview(reviews, login, limnBlockIds, new Set(limnApprovals.keys()));
-      teammateLifts = teammateCandidates.filter((c) => liveLiftCheck(reviews, c, login) == null);
+      teammateLifts = teammateCandidates.filter((c) => liveLiftCheck(reviews, c, login, nowMs) == null);
     } catch (err) {
       ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
     }
+  }
+  // THE AWAY PATH, LIVE: the teammate holds no `limn/review-*` line at the head. A failed read holds it.
+  if (teammateLifts.some((c) => c.why === 'away')) {
+    let lines: AwayLiveLine[] | null = null;
+    try {
+      lines = (await deps.liveTeamLines?.(accountId, pctx.owner, pctx.name, pctx.reviewHeadSha)) ?? null;
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the head's Limn lines: ${errText(err)}`);
+    }
+    teammateLifts = teammateLifts.filter((c) => c.why !== 'away' || teammateLineAtHead(lines, c.login) === false);
   }
   // Limn's own block stands: every blocker behind it must be JUDGED settled before it is lifted —
   // none left unjudged in this run's follow-up, and none of the blocking run's own blockers that
@@ -1140,6 +1185,8 @@ async function autoPostReview(
     }
     verdict = withReason(verdict, findingsReason);
   }
+  // The away path dismisses only under an APPROVE (its gates — impact, own review — may have held it).
+  if (verdict?.submitted !== 'APPROVE') teammateLifts = teammateLifts.filter((c) => c.why !== 'away');
   // The reason this run tells GitHub (none on an approval, none with the verdict switched off, none
   // for a Limn-only gate reason — own PR, unreadable reviews, a refusal: `reasonMayPost`).
   const reasonNow = (): string | null =>
@@ -1396,8 +1443,19 @@ async function autoPostReview(
   if (teammateLifts.length > 0 && landed && !reviewFailed) {
     const lifted: NonNullable<ClaudeAutoPostRecord['liftedTeammateBlocks']> = [];
     for (const c of teammateLifts) {
-      const message = teammateLiftMessage(readerLogin ?? 'you', c.points, pctx.reviewHeadSha);
-      const base = { byReviewId: reviewId, headSha: pctx.reviewHeadSha, points: c.points, message };
+      // The away path needs the APPROVE to have LANDED as one (a refused approve went out as a COMMENT).
+      if (c.why === 'away' && verdict?.submitted !== 'APPROVE') continue;
+      const message =
+        c.why === 'away'
+          ? teammateAwayLiftMessage(
+              readerLogin ?? 'you',
+              c.login,
+              c.points,
+              pctx.reviewHeadSha,
+              c.lastSeenMs != null ? Math.max(0, nowMs - c.lastSeenMs) : null,
+            )
+          : teammateLiftMessage(readerLogin ?? 'you', c.points, pctx.reviewHeadSha);
+      const base = { byReviewId: reviewId, headSha: pctx.reviewHeadSha, points: c.points, message, ...(c.why === 'away' ? { why: 'away' as const } : {}) };
       let claimed = false;
       try {
         claimed = await claimTeammateLift(ctx, accountId, c.teammateReviewId, base);
@@ -1424,7 +1482,7 @@ async function autoPostReview(
           ctx.log.warn(`auto post review ${reviewId}: could not stamp the dismissal: ${errText(err)}`),
         );
       }
-      lifted.push({ teammateReviewId: c.teammateReviewId, login: c.login, status, error });
+      lifted.push({ teammateReviewId: c.teammateReviewId, login: c.login, status, error, ...(c.why === 'away' ? { why: 'away' as const } : {}) });
     }
     if (lifted.length > 0) record.liftedTeammateBlocks = lifted;
   }

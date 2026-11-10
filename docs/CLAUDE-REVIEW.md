@@ -4066,6 +4066,27 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   for changes: every point is addressed." / "Couldn't dismiss robin's request for changes: <why>"
   (`teammateLiftLines`). The teammate review serves it as `ClaudeTeammateReview.lift`. The post settles
   the PR (`settlePrAfterWrite`) as every auto post does.
+- **THE AWAY PATH (2026-11-10)** — no opt-in on either side. A block is a candidate with `why: 'away'`
+  when (b) is off or (a) is absent, and: the run WANTS an APPROVE (`autoVerdictFor` with the auto verdict
+  on — so the auto-verdict switch gates it); every DB-side condition above except the consent; and THE
+  TEAMMATE IS AWAY (`teammateAwayHold`, pure): no teammate review of theirs at the head
+  (`claude_reviews.kind='teammate'`, `source_user_id`) and no `team_claim_seen` line of theirs there
+  (`teammateSeenAtHead` — a block posted AT the head is itself "reviewed this commit"), and the newest
+  thing seen from their Limn (`teammateLastSeenMs`: imported Limn reviews' `posted_at`; `reviews` /
+  `review_comments` / `pr_comments` with `limn_posted_by_user_id` = them; `team_claim_seen.line_at` by
+  login; account-scoped) is older than **`TEAMMATE_AWAY_AFTER_MS` (4 h, the one constant)**. LIVE, before
+  any write: `liveLiftCheck(…, nowMs)` with `why: 'away'` skips the consent read but holds
+  (`teammate_active`) on any COMMENTED review of theirs after the block inside the window (no
+  `submittedAt` = recent; `AutoPostDeps.liveReviews` now carries it), and `AutoPostDeps.liveTeamLines`
+  reads both `limn/review-*` contexts at the head — any line by them, or an unreadable read (null; the
+  default returns null under VITEST), holds it. After the verdict gate an away candidate survives only
+  when `verdict.submitted === 'APPROVE'`, and the dismissal runs only when the APPROVE LANDED as one (a
+  refused approve re-sent as a COMMENT dismisses nothing). Same claim (`teammate_lift`, now with
+  `why: 'away'`), same never-retried write, same settle. Message `teammateAwayLiftMessage`: "Limn (alex)
+  checked all 3 points are addressed at 70cc9b5. robin's Limn has not reviewed it and has been away for 5
+  hours." — the "Limn (x) checked " lead keeps `isLimnDismissalMessage` true on every Limn, an older one
+  included. The run's record carries `liftedTeammateBlocks[].why = 'away'`; the tab says "Dismissed
+  robin's request for changes: every point is addressed and robin's Limn is away."
 
 ## Still-open points (2026-11-05)
 

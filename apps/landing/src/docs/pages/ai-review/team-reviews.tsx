@@ -134,6 +134,15 @@ export default function Page(): JSX.Element {
         are addressed at 70cc9b5." Whether your review approves is decided by the usual rules. A review someone wrote
         by hand is never dismissed. Dismissing needs write access, and branch protection can restrict it.
       </p>
+      <H3>When the teammate's Limn is away</H3>
+      <p>
+        Without either box, your Limn still dismisses a teammate's Limn <Ui>Request changes</Ui> when all of these hold:
+        your review approves the latest commit; every point behind their block is fixed at that commit; and their Limn
+        has not reviewed or claimed that commit and has done nothing on GitHub for 4 hours. The message says why, for
+        example "Limn (alex) checked all 3 points are addressed at 70cc9b5. robin's Limn has not reviewed it and has
+        been away for 5 hours." It needs <Ui>Approve or request changes for me</Ui>, and runs only on an automatic
+        review or <Ui>Review and post</Ui>. It happens once per review and is never retried.
+      </p>
 
       <H2 id="still-open-on-github">Still-open points on GitHub</H2>
       <p>
