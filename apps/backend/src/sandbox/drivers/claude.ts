@@ -54,6 +54,15 @@ export const CLAUDE_PERMISSION_MODE: Record<SandboxAgentMode, 'plan' | 'bypassPe
   build: 'bypassPermissions',
 };
 
+/**
+ * The environment of `claude` in the sandbox: the session's, plus CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+ * so the CLAUDE.md of every repository passed with `--add-dir` (the ones outside the start folder) loads at
+ * the start, as the start folder's own does. Pure.
+ */
+export function claudeSandboxEnv(env: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  return { ...(env ?? {}), CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' };
+}
+
 /** The `claude` argv inside the sandbox. Pure. */
 export function claudeSandboxArgv(o: Pick<SandboxAgentStartOptions, 'choice' | 'systemPromptFile' | 'systemPrompt' | 'addDirs' | 'mode' | 'maxTurns' | 'maxBudgetUsd'>): string[] {
   const argv = [
@@ -103,7 +112,7 @@ export async function startClaudeDriver(o: SandboxAgentStartOptions): Promise<Sa
   };
 
   emit({ type: 'status', state: 'starting', mode, detail: null });
-  const handle: ExecHandle = o.runtime.exec(o.container, claudeSandboxArgv(o), { cwd: o.cwd, env: o.env, interactive: true });
+  const handle: ExecHandle = o.runtime.exec(o.container, claudeSandboxArgv(o), { cwd: o.cwd, env: claudeSandboxEnv(o.env), interactive: true });
   const write = (msg: unknown): void => handle.write(`${JSON.stringify(msg)}\n`);
 
   const exited = pumpJsonLines(handle, (v) => {

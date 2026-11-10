@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { SandboxAgentEvent } from '@pierre-review/shared';
 import { createFakeRuntime, type FakeExecContext } from '../runtime/fake.js';
-import { CLAUDE_SANDBOX_DISALLOWED_TOOLS, claudeSandboxArgv, startClaudeDriver } from './claude.js';
+import { CLAUDE_SANDBOX_DISALLOWED_TOOLS, claudeSandboxArgv, claudeSandboxEnv, startClaudeDriver } from './claude.js';
 import { SandboxAgentBusyError, SandboxAgentExitedError, type SandboxUsageRow } from './types.js';
 
 const OUT = readFileSync(fileURLToPath(new URL('./__fixtures__/claude-interactive.out.jsonl', import.meta.url)), 'utf8').split('\n').filter(Boolean);
@@ -67,6 +67,15 @@ function setup() {
   };
   return { fake, sent, events, rows, rateLimits, opts, refreshed: () => refreshed };
 }
+
+describe('the Claude environment in the sandbox', () => {
+  it('loads the CLAUDE.md of every repository passed with --add-dir, and keeps the session environment', () => {
+    expect(claudeSandboxEnv({ ANTHROPIC_BASE_URL: 'http://limn-proxy:8081' })).toEqual({
+      ANTHROPIC_BASE_URL: 'http://limn-proxy:8081',
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    });
+  });
+});
 
 describe('the Claude driver', () => {
   it('runs the recorded session: two chat turns, Start build, a build turn, Stop, another turn', async () => {

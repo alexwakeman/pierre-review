@@ -62,6 +62,20 @@ function gitConfigText(dir: string, entry: Dirent): string | null {
   return readText(join(common ? resolve(gitdir, common) : gitdir, 'config'));
 }
 
+/** The remote of the clone at `dir` (its `.git` folder or worktree file), read as text; null when none. */
+export function cloneRemote(dir: string): ParsedRemote | null {
+  let entry: Dirent | undefined;
+  try {
+    entry = readdirSync(dir, { withFileTypes: true }).find((e) => e.name === '.git');
+  } catch {
+    return null;
+  }
+  if (!entry) return null;
+  const text = gitConfigText(dir, entry);
+  const url = text ? pickRemote(remotesFromGitConfig(text)) : null;
+  return url ? parseGitRemote(url) : null;
+}
+
 export function scanFolder(
   root: string,
   opts: { projectKeys?: ReadonlySet<string>; maxDirs?: number; maxMs?: number; now?: () => number } = {},

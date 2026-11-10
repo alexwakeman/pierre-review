@@ -1,8 +1,10 @@
 // Settings → Workspace → Sandbox routes (api/routes/sandbox-settings.ts) on a THROWAWAY sqlite DB.
 // Pinned: no row = every default; PUT REPLACES (a field left out goes back to its default); the 400
 // carries `validateSandboxSettings`'s sentence; another account's workspace is a 404 on every route;
-// the check matches by remote and names a clone outside the workspace; the "Always allow" hosts go
-// through the proxy's own parser; erasure and export reach the table.
+// the check FINDS the reader's clones through their Claude projects (no folder setting), matches by
+// remote and names a clone outside the workspace; the removed `local_folder` / `start_dir` stay dormant;
+// the compose files come from Limn's clone cache; the "Always allow" hosts go through the proxy's own
+// parser; erasure and export reach the table.
 //
 // DATABASE_URL is set BEFORE the client is imported, and every value import is dynamic.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,7 +33,8 @@ const call = async (method: 'GET' | 'PUT' | 'POST' | 'DELETE', url: string, payl
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
-  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'limn-sandbox-settings-')));
+  // ⚠ Not `limn-…`: a Claude project under `<tmp>/limn-*` is Limn's own (ai/session-litter.ts) and never looked at.
+  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'sbx-settings-')));
   process.env.CLAUDE_CONFIG_DIR = join(scratch, 'claude');
   const { runMigrations } = await import('../../db/run-migrations.js');
   client = await import('../../db/client.js');
@@ -53,6 +56,10 @@ beforeAll(async () => {
     mkdirSync(join(folder, dir, '.git'), { recursive: true });
     writeFileSync(join(folder, dir, '.git', 'config'), `[remote "origin"]\n\turl = ${url}\n`);
   }
+  // Claude Code ran in the backend clone: that is how Limn finds the reader's clones.
+  const key = join(folder, 'bng-metric-backend').replace(/[^a-zA-Z0-9]/g, '-');
+  mkdirSync(join(scratch, 'claude', 'projects', key), { recursive: true });
+  writeFileSync(join(scratch, 'claude', 'projects', key, 'session.jsonl'), '{}');
 
   const { sandboxSettingsRoutes } = await import('./sandbox-settings.js');
   const { registerAccountContext } = await import('../plugins/auth.js');
@@ -78,11 +85,9 @@ describe('sandbox settings', () => {
     expect(r.status).toBe(200);
     expect(r.body).toEqual({
       workspaceId: own,
-      localFolder: null,
       memoryProjects: null,
       userClaudeMd: true,
       userSkills: false,
-      startDir: null,
       globalProxyEnv: false,
       resources: { cpus: null, memoryGb: null, diskGb: null },
       services: [],
@@ -91,12 +96,26 @@ describe('sandbox settings', () => {
   });
 
   it('PUT replaces the whole setting', async () => {
-    const folder = join(scratch, 'Projects', 'bng');
-    const a = await call('PUT', `/api/workspaces/${own}/sandbox`, { localFolder: `${folder}/`, userSkills: true, globalProxyEnv: true, resources: { cpus: 2 } });
+    const a = await call('PUT', `/api/workspaces/${own}/sandbox`, { userSkills: true, globalProxyEnv: true, resources: { cpus: 2 } });
     expect(a.status).toBe(200);
-    expect(a.body).toMatchObject({ localFolder: folder, userSkills: true, globalProxyEnv: true, resources: { cpus: 2, memoryGb: null, diskGb: null } });
-    const b = await call('PUT', `/api/workspaces/${own}/sandbox`, { localFolder: folder });
-    expect(b.body).toMatchObject({ localFolder: folder, userSkills: false, globalProxyEnv: false, resources: { cpus: null } });
+    expect(a.body).toMatchObject({ userSkills: true, globalProxyEnv: true, resources: { cpus: 2, memoryGb: null, diskGb: null } });
+    const b = await call('PUT', `/api/workspaces/${own}/sandbox`, {});
+    expect(b.body).toMatchObject({ userSkills: false, globalProxyEnv: false, resources: { cpus: null } });
+  });
+
+  it('keeps a stored local folder and starting folder DORMANT: never on the wire, never written, never cleared', async () => {
+    const t = client.schema.sandboxWorkspaceSettings;
+    const { eq } = await import('drizzle-orm');
+    await client.db.update(t).set({ localFolder: '/Users/old/folder', startDir: '/Users/old/folder/x' }).where(eq(t.workspaceId, own)).execute();
+    const r = await call('GET', `/api/workspaces/${own}/sandbox`);
+    expect(r.body).not.toHaveProperty('localFolder');
+    expect(r.body).not.toHaveProperty('startDir');
+    // The schema drops the old fields (Fastify's removeAdditional): a stale client cannot write them.
+    const stale = await call('PUT', `/api/workspaces/${own}/sandbox`, { localFolder: '/Users/x', startDir: '/Users/x/y' });
+    expect(stale.body).not.toHaveProperty('localFolder');
+    expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { userSkills: true })).status).toBe(200);
+    const [row] = await client.db.select().from(t).where(eq(t.workspaceId, own)).execute();
+    expect([row.localFolder, row.startDir]).toEqual(['/Users/old/folder', '/Users/old/folder/x']);
   });
 
   it('stores the picked compose files, normalised; PUT without them clears them', async () => {
@@ -122,14 +141,13 @@ describe('sandbox settings', () => {
       expect((r.body as { message: string }).message).toMatch(why);
     }
     expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { services: [services[1], services[1]] })).status).toBe(400);
-    // Leave the setting as the earlier test did (the tests below read the saved folder).
-    expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { localFolder: join(scratch, 'Projects', 'bng'), services: [services[1]] })).status).toBe(200);
+    expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { services: [services[1]] })).status).toBe(200);
   });
 
   it('refuses a bad value with one sentence, and the shape by schema', async () => {
-    const r = await call('PUT', `/api/workspaces/${own}/sandbox`, { localFolder: 'relative/path' });
+    const r = await call('PUT', `/api/workspaces/${own}/sandbox`, { memoryProjects: ['relative/path'] });
     expect(r.status).toBe(400);
-    expect(r.body).toEqual({ error: 'InvalidSandboxSettings', message: 'The local folder must be an absolute path without commas.' });
+    expect(r.body).toEqual({ error: 'InvalidSandboxSettings', message: 'Each memory project must be an absolute path.' });
     expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { resources: { cpus: 0 } })).status).toBe(400);
   });
 
@@ -137,28 +155,56 @@ describe('sandbox settings', () => {
     expect((await call('GET', `/api/workspaces/${foreign}/sandbox`)).status).toBe(404);
     expect((await call('PUT', `/api/workspaces/${foreign}/sandbox`, {})).status).toBe(404);
     expect((await call('POST', `/api/workspaces/${foreign}/sandbox/check`, {})).status).toBe(404);
+    expect((await call('GET', `/api/workspaces/${foreign}/sandbox/compose-files`)).status).toBe(404);
     expect((await call('POST', `/api/workspaces/${foreign}/sandbox/allowed-hosts`, { rule: 'example.org' })).status).toBe(404);
     expect((await call('DELETE', `/api/workspaces/${foreign}/sandbox/allowed-hosts`, { rule: 'example.org' })).status).toBe(404);
   });
 
-  it('checks the saved folder: matched by remote, the rest placed beside, the other workspace named', async () => {
+  it('finds the clones through Claude projects: matched by remote, the rest placed beside, the other workspace named', async () => {
     const folder = join(scratch, 'Projects', 'bng');
     const r = await call('POST', `/api/workspaces/${own}/sandbox/check`, {});
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({
       folder,
-      problem: null,
       matched: [{ fullName: 'DEFRA/bng-metric-backend', localPath: join(folder, 'bng-metric-backend'), alsoAt: [] }],
       notCloned: [{ fullName: 'DEFRA/bng-metric-frontend', sandboxPath: join(folder, 'bng-metric-frontend') }],
       outside: [{ fullName: 'DEFRA/cdp-app-config', localPath: join(folder, 'cdp-app-config') }],
       memories: [],
       startDir: folder,
-      startDirReason: 'folder',
     });
-    const none = await call('POST', `/api/workspaces/${own}/sandbox/check`, { folder: null });
-    expect(none.body).toMatchObject({ folder: null, problem: null, matched: [], startDir: '/workspace' });
-    const bad = await call('POST', `/api/workspaces/${own}/sandbox/check`, { folder: join(scratch, 'missing') });
-    expect(bad.body.problem).toContain('does not exist');
+    // A stored (dormant) local folder changes nothing.
+    expect(r.body).not.toHaveProperty('problem');
+  });
+
+  it('lists the compose files of each repository from Limn’s clone cache, and says when there is no copy', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { listComposeFiles, isComposeCandidate } = await import('../../sandbox/services/compose-files.js');
+    const cache = join(scratch, 'cache');
+    const repo = join(cache, 'DEFRA__bng-metric-backend');
+    for (const f of ['compose.yml', 'docker-compose.override.yaml', 'docker/compose.dev.yml', '.devcontainer/docker-compose.yml', 'node_modules/x/compose.yml', 'vendor/y/docker-compose.yml', 'src/composer.yml', 'README.md']) {
+      mkdirSync(join(repo, f, '..'), { recursive: true });
+      writeFileSync(join(repo, f), 'x');
+    }
+    const g = (...a: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' });
+    g('init', '-q', '-b', 'main');
+    g('add', '-A', '-f');
+    g('commit', '-q', '-m', 'c');
+    const got = await listComposeFiles(
+      [
+        { owner: 'DEFRA', name: 'bng-metric-backend' },
+        { owner: 'DEFRA', name: 'bng-metric-frontend' },
+      ],
+      (o, n) => join(cache, `${o}__${n}`),
+    );
+    expect(got).toEqual([
+      { repo: 'DEFRA/bng-metric-backend', copied: true, files: ['compose.yml', 'docker-compose.override.yaml', '.devcontainer/docker-compose.yml', 'docker/compose.dev.yml'] },
+      { repo: 'DEFRA/bng-metric-frontend', copied: false, files: [] },
+    ]);
+    expect(isComposeCandidate('a/b/docker-compose-test.yml')).toBe(true);
+    expect(isComposeCandidate('compose.json')).toBe(false);
+    const r = await call('GET', `/api/workspaces/${own}/sandbox/compose-files`);
+    expect(r.status).toBe(200);
+    expect(r.body.repos.map((x: { repo: string }) => x.repo)).toEqual(['DEFRA/bng-metric-backend', 'DEFRA/bng-metric-frontend']);
   });
 
   it('adds and removes "Always allow" hosts through the proxy parser', async () => {
@@ -205,6 +251,6 @@ describe('sandbox settings', () => {
     expect(accountScopedTables().map((t) => t.name)).toContain('sandboxWorkspaceSettings');
     const { exportAccountData } = await import('../../db/export-account.js');
     const out: any = await exportAccountData(1);
-    expect(out.sandboxWorkspaceSettings).toEqual([expect.objectContaining({ workspaceId: own, localFolder: join(scratch, 'Projects', 'bng'), servicesJson: expect.stringContaining('bng-metric-journey-tests') })]);
+    expect(out.sandboxWorkspaceSettings).toEqual([expect.objectContaining({ workspaceId: own, localFolder: '/Users/old/folder', servicesJson: expect.stringContaining('bng-metric-journey-tests') })]);
   });
 });

@@ -4537,11 +4537,14 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   per WORKSPACE; `SettingsFocus 'sandbox'`, AI-only tab): the runtime line + Check again + How to set
   up; the running count ("2 Limn sandboxes are running.", `useSandboxRunning`: read on open and on Check
   again, NEVER polled) + **Stop all** (inline confirm; hidden at 0; docs/SANDBOX.md § Every end removes
-  the sandbox); then the local folder and its **Check** (CLICK-GATED: a bounded walk; found / not in your folder
-  → where it goes / left out, not in this workspace), the Claude notes to bring (the check's projects;
-  the first change turns the default into an explicit list, `sandboxSettingsForm.ts
-  sandboxMemoryTicks`), ~/.claude/CLAUDE.md and skills, the starting folder, the services (repository +
-  compose file + the services allowed online), the always-allowed hosts (saved at once, through the
+  the sandbox); then "Your clones and Claude notes" and its **Find** (CLICK-GATED: bounded walks of the
+  reader's Claude projects and clones — there is NO folder or starting-folder field since 2026-11-10;
+  found on this computer / no clone found → where it goes / left out, not in this workspace / where the AI
+  starts), the Claude notes to bring (the check's projects; the first change turns the default into an
+  explicit list, `sandboxSettingsForm.ts sandboxMemoryTicks`), ~/.claude/CLAUDE.md and skills, the
+  services (**Choose compose files**, CLICK-GATED `useSandboxComposeFiles`: every compose file found in
+  Limn's own copies, ticked several at once, `addComposePicks`; "Another file" types one in; + the
+  services allowed online), the always-allowed hosts (saved at once, through the
   proxy's parser), the proxy-variables switch and the resources. ⚠ The PUT REPLACES the setting, so
   Save sends the WHOLE draft (`sandboxBodyOf`).
 - **⌘K inside the tab:** Approve the plan, Start build, Push all, Stop — each registered only while its button is on

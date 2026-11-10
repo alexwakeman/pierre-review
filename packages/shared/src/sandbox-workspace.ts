@@ -3,14 +3,16 @@
 //
 //   GET  /api/workspaces/:id/sandbox                    → SandboxWorkspaceSettings
 //   PUT  /api/workspaces/:id/sandbox                    body SandboxWorkspaceSettingsBody → SandboxWorkspaceSettings
-//   POST /api/workspaces/:id/sandbox/check              body SandboxFolderCheckBody → SandboxFolderCheck
+//   POST /api/workspaces/:id/sandbox/check              (no body) → SandboxFolderCheck
+//   GET  /api/workspaces/:id/sandbox/compose-files      → SandboxComposeFiles
 //   POST /api/workspaces/:id/sandbox/allowed-hosts      body { rule } → SandboxWorkspaceSettings
 //   DELETE /api/workspaces/:id/sandbox/allowed-hosts    body { rule } → SandboxWorkspaceSettings
 //
 import type { SandboxServiceStackChoice } from './sandbox-services.js';
 
-// The LOCAL FOLDER decides only the LAYOUT inside the sandbox and which Claude memories come with it.
-// The code always comes from Limn's own clone cache, never from the reader's checkout.
+// The reader's clones are FOUND through their Claude projects (there is no folder setting): they decide
+// only the LAYOUT inside the sandbox and which Claude memories come with it. The code always comes from
+// Limn's own clone cache, never from the reader's checkout.
 
 /** The reader's resource choice for one session. null = Limn's default. */
 export interface SandboxResourceChoice {
@@ -28,16 +30,12 @@ export const SANDBOX_RESOURCE_LIMITS = {
 
 export interface SandboxWorkspaceSettings {
   workspaceId: number;
-  /** The folder that holds the reader's clones (absolute), or null: repositories go under /workspace. */
-  localFolder: string | null;
   /** The Claude project folders the reader ticked. null = the default: every project found with memories. */
   memoryProjects: string[] | null;
-  /** Bring `~/.claude/CLAUDE.md` (and the local folder's own CLAUDE.md). Default on. */
+  /** Bring `~/.claude/CLAUDE.md` (and the found folder's own CLAUDE.md). Default on. */
   userClaudeMd: boolean;
   /** Bring `~/.claude/skills/`. Default off (opt-in per workspace). */
   userSkills: boolean;
-  /** The agent's starting folder (absolute, inside the layout). null = the default rule. */
-  startDir: string | null;
   /** Set HTTP_PROXY / HTTPS_PROXY for every program in the sandbox. Default off (docs/SANDBOX.md § How
    *  tools in the sandbox reach the internet). */
   globalProxyEnv: boolean;
@@ -50,11 +48,9 @@ export interface SandboxWorkspaceSettings {
 
 /** PUT replaces the whole setting: a field left out goes back to its default. */
 export interface SandboxWorkspaceSettingsBody {
-  localFolder?: string | null;
   memoryProjects?: string[] | null;
   userClaudeMd?: boolean;
   userSkills?: boolean;
-  startDir?: string | null;
   globalProxyEnv?: boolean;
   resources?: Partial<SandboxResourceChoice>;
   services?: SandboxServiceStackChoice[];
@@ -63,22 +59,17 @@ export interface SandboxWorkspaceSettingsBody {
 export const SANDBOX_MEMORY_PROJECTS_MAX = 50;
 export const SANDBOX_PATH_MAX = 1024;
 
-export interface SandboxFolderCheckBody {
-  /** The folder to check. Omitted: the saved one. null: check with no folder. */
-  folder?: string | null;
-}
-
-/** A workspace repository found in the folder, matched by its git remote. */
+/** A workspace repository with a clone on this computer, matched by its git remote. */
 export interface SandboxMatchedRepo {
   repoId: number;
   fullName: string;
   /** The local clone: the repository is placed at THIS path inside the sandbox. */
   localPath: string;
-  /** Other clones of the same repository in the folder (not used). */
+  /** Other clones of the same repository in the folder (lend objects only). */
   alsoAt: string[];
 }
 
-/** A workspace repository with no clone in the folder. It is still cloned, at `sandboxPath`. */
+/** A workspace repository with no clone found. It is still cloned, at `sandboxPath`. */
 export interface SandboxUnmatchedRepo {
   repoId: number;
   fullName: string;
@@ -92,23 +83,21 @@ export interface SandboxOutsideClone {
   localPath: string;
 }
 
-/** A Claude project under the folder with saved memories (`~/.claude/projects/<key>/memory`). */
+/** A Claude project of a workspace clone with saved memories (`~/.claude/projects/<key>/memory`). */
 export interface SandboxMemoryProject {
   /** The project's folder (absolute). */
   dir: string;
   /** Claude Code's project key for that folder. */
   key: string;
   memoryCount: number;
-  /** Ticked: by the saved choice, else by the default (every project with memories). */
+  /** Ticked: by the saved choice, else by the default (every such project with memories). */
   ticked: boolean;
 }
 
 export interface SandboxFolderCheck {
   workspaceId: number;
-  /** The folder checked (absolute, normalised), or null. */
+  /** The folder found from the reader's clones (absolute), or null: repositories go under /workspace. */
   folder: string | null;
-  /** One plain line when the folder cannot be used (the rest is then empty). */
-  problem: string | null;
   matched: SandboxMatchedRepo[];
   notCloned: SandboxUnmatchedRepo[];
   outside: SandboxOutsideClone[];
@@ -119,11 +108,25 @@ export interface SandboxFolderCheck {
   folderClaudeMd: boolean;
   /** Skill folders in `~/.claude/skills/`. */
   userSkills: string[];
-  /** Where the agent starts, and why. */
+  /** Where the agent starts: the project with the most notes, else the folder, else /workspace. */
   startDir: string;
-  startDirReason: 'setting' | 'memories' | 'folder' | 'default';
   /** The walk stopped at its limit: some clones may be missing. */
   truncated: boolean;
+}
+
+/** Compose files found in one workspace repository (Limn's own copy, no network). */
+export interface SandboxComposeRepoFiles {
+  /** `owner/name`. */
+  repo: string;
+  /** Paths inside the repository, sorted. */
+  files: string[];
+  /** false: Limn has no copy of this repository on this computer yet (a review or session makes one). */
+  copied: boolean;
+}
+
+export interface SandboxComposeFiles {
+  workspaceId: number;
+  repos: SandboxComposeRepoFiles[];
 }
 
 // ---- the container runtime, for the build tab and Settings → Sandbox ----------------------------------

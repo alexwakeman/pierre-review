@@ -155,7 +155,9 @@ function reposSection(i: AnySeedInput): string {
   const out = [
     '## The repositories',
     '',
-    `Every repository of the workspace is cloned here, each on the branch \`${i.branch}\` with no remote:`,
+    i.kind === 'fix'
+      ? `The pull request's repository is cloned here, with the repositories of the other pull requests of its ticket, each on the branch \`${i.branch}\` with no remote:`
+      : `Every repository of the workspace is cloned here, each on the branch \`${i.branch}\` with no remote:`,
     '',
     ...lines,
     '',

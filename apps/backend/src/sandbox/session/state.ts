@@ -129,7 +129,7 @@ export const BOOT_LABELS: Readonly<Record<SandboxBootStepKey, string>> = {
   sandbox: 'Starting the sandbox',
   ticket: 'Reading the ticket',
   task: 'Reading the pull request',
-  repos: 'Cloning the repositories',
+  repos: 'Loading the repositories',
   docs: 'Copying the reference documents',
   services: 'Getting the services ready',
   agent: 'Starting the agent',

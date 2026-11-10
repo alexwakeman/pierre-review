@@ -867,7 +867,7 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
   };
   const BOOT = (['runtime', 'image', 'network', 'proxy', 'sandbox', 'task', 'repos', 'services', 'agent'] as const).map((key) => ({
     key,
-    label: { runtime: 'Finding the container runtime', image: 'Getting the sandbox image', network: 'Making the private network', proxy: 'Starting the network filter', sandbox: 'Starting the sandbox', task: 'Reading the pull request', repos: 'Cloning the repositories', services: 'Getting the services ready', agent: 'Starting the agent' }[key],
+    label: { runtime: 'Finding the container runtime', image: 'Getting the sandbox image', network: 'Making the private network', proxy: 'Starting the network filter', sandbox: 'Starting the sandbox', task: 'Reading the pull request', repos: 'Loading the repositories', services: 'Getting the services ready', agent: 'Starting the agent' }[key],
     state: key === 'services' ? 'skipped' : 'done',
     detail: key === 'services' ? 'No compose files are picked for this workspace.' : null,
   }));
@@ -1937,7 +1937,7 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
             ['network', 'Making the private network'],
             ['proxy', 'Starting the network proxy'],
             ['sandbox', 'Starting the sandbox'],
-            ['repos', 'Cloning the repositories'],
+            ['repos', 'Loading the repositories'],
             ['services', 'Starting services'],
             ['agent', 'Starting the agent'],
           ] as const

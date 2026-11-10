@@ -651,10 +651,9 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     const places = deps.places();
     const resolved = resolveWorkspaceLayout(
       repos.map((r) => ({ repoId: r.repoId, owner: r.owner, name: r.name })),
-      { localFolder: settings.localFolder, memoryProjects: settings.memoryProjects, startDir: settings.startDir },
+      { memoryProjects: settings.memoryProjects },
       places,
     );
-    if (resolved.problem) l.state.notes.push(resolved.problem);
     const layout = resolved.layout;
 
     begin('network');

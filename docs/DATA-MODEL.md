@@ -902,9 +902,11 @@ click. Composite FK onto `workspaces (id, account_id)`, cascade; erased and expo
 ## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`)
 
 ONE row per (account, workspace), unique `(account_id, workspace_id)` — the one upsert uses that EXACT
-target. NO ROW = every default. Columns: `local_folder` (the reader's clones' parent folder, absolute),
-`memory_projects_json` (NULL = the default, every project found with memories; else a JSON array of the
-ticked project folders), `user_claude_md` (default on), `user_skills` (default off), `start_dir`,
+target. NO ROW = every default. Columns: `local_folder` (DORMANT since 2026-11-10: the reader's clones are
+found through their Claude projects; never read or written, kept, exported),
+`memory_projects_json` (NULL = the default, every related project found with memories; else a JSON array of
+the ticked project folders), `user_claude_md` (default on), `user_skills` (default off), `start_dir` (DORMANT
+likewise: the agent starts where the default rule says),
 `global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Limn's default), `services_json`
 (migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Limn may run for a
 session, [SANDBOX.md](SANDBOX.md) § Services). Per workspace,

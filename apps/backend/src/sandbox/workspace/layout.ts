@@ -1,6 +1,6 @@
 // THE WORKSPACE LAYOUT INSIDE A SANDBOX (docs/SANDBOX.md § The workspace mirror). Pure.
 //
-// The local folder decides only WHERE each repository sits and which memories come with it:
+// The reader's folder (found from their clones: discover.ts) decides only WHERE each repository sits:
 //   • a repository with a local clone in the folder (matched BY GIT REMOTE) sits at that clone's path;
 //   • one with no local clone sits at `<folder>/<name>` (`<folder>/<owner>-<name>` on a clash);
 //   • with no folder, every repository sits at `/workspace/<owner>/<name>`.
@@ -111,7 +111,7 @@ export interface WorkspaceLayout {
   folder: string | null;
   repos: LayoutRepo[];
   startDir: string;
-  startDirReason: 'setting' | 'memories' | 'folder' | 'default';
+  startDirReason: 'memories' | 'folder' | 'default';
   /** The ticked projects whose memories are copied (dir inside the layout or not: Codex still reads them). */
   memoryProjects: MemoryProjectChoice[];
   outside: SandboxOutsideClone[];
@@ -126,7 +126,6 @@ export interface LayoutInput {
   match: CloneMatch | null;
   /** Ticked projects (already filtered to the ones found). */
   memoryProjects: readonly MemoryProjectChoice[];
-  startDirSetting: string | null;
 }
 
 export function planLayout(input: LayoutInput): WorkspaceLayout {
@@ -185,8 +184,8 @@ export function planLayout(input: LayoutInput): WorkspaceLayout {
   }
   repos.sort((a, b) => (a.path < b.path ? -1 : 1));
 
-  // Start: the reader's choice (inside the root), else the ticked project with the most memories,
-  // else the folder, else the root.
+  // Start: the ticked project with the most memories, else the folder, else the root. (The reader's
+  // own choice was removed 2026-11-10; the stored `start_dir` is dormant.)
   let startDir = root;
   let startDirReason: WorkspaceLayout['startDirReason'] = folder != null ? 'folder' : 'default';
   if (folder != null) startDir = folder;
@@ -196,13 +195,6 @@ export function planLayout(input: LayoutInput): WorkspaceLayout {
   if (best && best.memoryCount > 0) {
     startDir = normalize(best.dir);
     startDirReason = 'memories';
-  }
-  if (input.startDirSetting != null) {
-    const s = normalize(input.startDirSetting);
-    if (isAbsolute(s) && inside(root, s) && sandboxPathProblem(s) == null) {
-      startDir = s;
-      startDirReason = 'setting';
-    } else notes.push(`The starting folder ${s} is outside the layout. The agent starts in ${startDir}.`);
   }
 
   return {

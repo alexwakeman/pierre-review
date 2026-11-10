@@ -1,20 +1,25 @@
-// THE FOLDER / MEMORY CHECK and the SESSION'S LAYOUT — one computation (docs/SANDBOX.md § The
+// THE CLONE / MEMORY CHECK and the SESSION'S LAYOUT — one computation (docs/SANDBOX.md § The
 // workspace mirror). Settings → Workspace → Sandbox shows `toFolderCheck(…)`; a session boots from
 // the `WorkspaceLayout` of the SAME `resolveWorkspaceLayout` call, so what the reader saw is what the
 // sandbox gets. Disk + DB only: no git process, no network.
+//
+// There is no folder setting (removed 2026-11-10; the stored `local_folder` / `start_dir` columns are
+// dormant): the reader's clones are FOUND through their Claude projects (discover.ts), and the folder
+// the layout mirrors is picked from them. The memories offered are the projects of those clones (and of
+// a team folder that holds them) — never another project that happens to sit nearby.
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, normalize } from 'node:path';
 import type { SandboxFolderCheck } from '@pierre-review/shared';
 import { resolveDataDir } from '../../data-dir.js';
+import { discoverReaderClones, pickReaderFolder } from './discover.js';
 import { matchClones, localFolderProblem, planLayout, unmatchedOf, type WorkspaceLayout, type WorkspaceRepo, type CloneMatch } from './layout.js';
-import { defaultClaudePlaces, listUserSkills, memoryCount, memoryProjectKeys, type ClaudePlaces } from './memories.js';
+import { defaultClaudePlaces, listUserSkills, memoryCount, type ClaudePlaces } from './memories.js';
 import { scanFolder, type FolderScan } from './scan.js';
 
 export interface LayoutSettings {
-  localFolder: string | null;
+  /** The ticked memory projects; null = the default (every project of a workspace clone with memories). */
   memoryProjects: string[] | null;
-  startDir: string | null;
 }
 
 export interface LayoutPlaces {
@@ -29,12 +34,11 @@ export function defaultLayoutPlaces(env: NodeJS.ProcessEnv = process.env): Layou
 }
 
 export interface ResolvedWorkspace {
-  /** The folder as checked (realpath), or null. */
+  /** The folder the layout mirrors (realpath), found from the reader's clones, or null. */
   folder: string | null;
-  problem: string | null;
   match: CloneMatch | null;
   scan: FolderScan | null;
-  /** Every project with memories under the folder, with its tick. */
+  /** Every project of a workspace clone (or of a team folder) with memories, with its tick. */
   projects: Array<{ dir: string; key: string; memoryCount: number; ticked: boolean }>;
   layout: WorkspaceLayout;
 }
@@ -62,30 +66,31 @@ export function resolveWorkspaceLayout(
   settings: LayoutSettings,
   places: LayoutPlaces = defaultLayoutPlaces(),
 ): ResolvedWorkspace {
-  const { folder, problem } = resolveFolder(settings.localFolder, places);
+  const found = discoverReaderClones(repos, places.claude, places.home);
+  const { folder } = resolveFolder(pickReaderFolder(found, places), places);
   let scan: FolderScan | null = null;
   let match: CloneMatch | null = null;
-  const projects: ResolvedWorkspace['projects'] = [];
   if (folder != null) {
-    const keys = memoryProjectKeys(places.claude);
-    scan = scanFolder(folder, { projectKeys: keys });
+    scan = scanFolder(folder);
     match = matchClones(repos, scan.clones);
-    const ticks = settings.memoryProjects == null ? null : new Set(settings.memoryProjects.map((p) => normalize(p)));
-    for (const p of scan.projectDirs) {
-      const n = memoryCount(places.claude, p.key);
-      if (n === 0) continue;
-      projects.push({ dir: p.dir, key: p.key, memoryCount: n, ticked: ticks == null ? true : ticks.has(p.dir) });
-    }
-    projects.sort((a, b) => (a.dir < b.dir ? -1 : 1));
+  }
+  const ticks = settings.memoryProjects == null ? null : new Set(settings.memoryProjects.map((p) => normalize(p)));
+  const projects: ResolvedWorkspace['projects'] = [];
+  const seen = new Set<string>();
+  for (const p of found.projects) {
+    if (seen.has(p.key)) continue;
+    seen.add(p.key);
+    const n = memoryCount(places.claude, p.key);
+    if (n === 0) continue;
+    projects.push({ dir: p.dir, key: p.key, memoryCount: n, ticked: ticks == null ? true : ticks.has(p.dir) });
   }
   const layout = planLayout({
     repos,
     folder,
     match,
     memoryProjects: projects.filter((p) => p.ticked).map(({ dir, key, memoryCount: c }) => ({ dir, key, memoryCount: c })),
-    startDirSetting: settings.startDir,
   });
-  return { folder, problem, match, scan, projects, layout };
+  return { folder, match, scan, projects, layout };
 }
 
 /** The folder's own CLAUDE.md (outside every repository: only when the folder is the layout's root). */
@@ -100,7 +105,6 @@ export function toFolderCheck(workspaceId: number, r: ResolvedWorkspace, places:
   return {
     workspaceId,
     folder: r.folder,
-    problem: r.problem,
     matched: r.match?.matched ?? [],
     notCloned: unmatchedOf(r.layout),
     outside: r.match?.outside ?? [],
@@ -109,7 +113,6 @@ export function toFolderCheck(workspaceId: number, r: ResolvedWorkspace, places:
     folderClaudeMd: folderClaudeMdPath(r) != null,
     userSkills: listUserSkills(places.claude),
     startDir: r.layout.startDir,
-    startDirReason: r.layout.startDirReason,
     truncated: r.scan?.truncated ?? false,
   };
 }

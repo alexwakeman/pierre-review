@@ -6,7 +6,7 @@ Read `/Users/alex/Projects/DEFRA/bng-fe-be/FIX.md` first. It is the task. `/User
 
 ## The repositories
 
-Every repository of the workspace is cloned here, each on the branch `limn/fix-pr-77` with no remote:
+The pull request's repository is cloned here, with the repositories of the other pull requests of its ticket, each on the branch `limn/fix-pr-77` with no remote:
 
 - DEFRA/bng-metric-backend: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend` (from PR #77's head, feature/units, at ddddddd; branch `limn/fix-pr-77`). This is the repository AI Fix pushes.
 - DEFRA/bng-metric-harness: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness` (from main at bbbbbbb; branch `limn/fix-pr-77`). Read only: edits here are left out.

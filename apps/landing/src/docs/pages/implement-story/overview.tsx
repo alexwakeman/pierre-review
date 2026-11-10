@@ -75,7 +75,8 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>
           <b>Set up.</b> Press <Ui>Start</Ui> (or <Ui>Start with docs</Ui>). Limn starts the sandbox. It takes seconds once
-          the sandbox image is on your computer; the first time it downloads it, which takes minutes.
+          the sandbox image is on your computer; the first time it downloads it, which takes minutes. While the
+          repositories load, the line counts them: <Ui>Loading repositories 3/7</Ui> and the repository&rsquo;s name.
         </li>
         <li>
           <b>Talk.</b> The agent reads the story, the code and the data, and submits a plan. Limn checks every piece of
@@ -104,9 +105,9 @@ export default function Page(): JSX.Element {
           { key: 'd', label: 'Details' },
         ]}
         rows={[
-          { _key: 'r', w: 'Every repository in the workspace', d: 'At your own folder layout, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
+          { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Limn finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
-          { _key: 'n', w: 'Your Claude notes', d: 'The notes you pick in Settings → Sandbox, your CLAUDE.md and, if you allow, skills. Copied in read only. Past sessions are never brought in.' },
+          { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
           { _key: 'd', w: 'Reference documents', d: 'With docs: the parts of the workspace library that match the story, read only.' },
           { _key: 's', w: 'Services', d: 'The compose services you picked, for integration tests. The agent starts them when it needs them.' },
         ]}

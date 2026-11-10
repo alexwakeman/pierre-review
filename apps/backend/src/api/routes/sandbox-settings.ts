@@ -5,8 +5,8 @@ import {
   SANDBOX_SERVICE_STACKS_MAX,
   SANDBOX_PATH_MAX,
   SANDBOX_RESOURCE_LIMITS,
+  type SandboxComposeFiles,
   type SandboxFolderCheck,
-  type SandboxFolderCheckBody,
   type SandboxRunningStatus,
   type SandboxRuntimeStatus,
   type SandboxStopAllResult,
@@ -27,7 +27,10 @@ import { accountIdOf } from '../plugins/auth.js';
 //
 //   GET    …/sandbox                 the setting (+ the "Always allow" hosts)
 //   PUT    …/sandbox                 REPLACES it (a field left out goes back to its default)
-//   POST   …/sandbox/check           walks the folder (bounded) and reports the match + memories
+//   POST   …/sandbox/check           finds the reader's clones through their Claude projects (bounded walks)
+//                                     and reports the match + memories
+//   GET    …/sandbox/compose-files   the compose files in each workspace repository, read from Limn's
+//                                     own clone cache (`git ls-tree`, no network: lazy fetch is off)
 //   POST   …/sandbox/allowed-hosts   adds one "Always allow" host · DELETE removes one
 //   GET    /api/sandbox/runtime       the container runtime on THIS computer (not workspace-scoped): the
 //                                     build tab's start state and Settings' status line. Local process
@@ -37,7 +40,6 @@ import { accountIdOf } from '../plugins/auth.js';
 //   POST   /api/sandbox/stop-all      closes every session and removes every leftover (sandbox/session/janitor.ts)
 
 const idParam = { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } } as const;
-const path = { type: ['string', 'null'], maxLength: SANDBOX_PATH_MAX } as const;
 const resourceProp = (k: keyof typeof SANDBOX_RESOURCE_LIMITS) =>
   ({ type: ['integer', 'null'], minimum: SANDBOX_RESOURCE_LIMITS[k].min, maximum: SANDBOX_RESOURCE_LIMITS[k].max }) as const;
 
@@ -45,11 +47,9 @@ const settingsBody = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    localFolder: path,
     memoryProjects: { type: ['array', 'null'], maxItems: SANDBOX_MEMORY_PROJECTS_MAX, items: { type: 'string', maxLength: SANDBOX_PATH_MAX } },
     userClaudeMd: { type: 'boolean' },
     userSkills: { type: 'boolean' },
-    startDir: path,
     globalProxyEnv: { type: 'boolean' },
     resources: {
       type: 'object',
@@ -164,31 +164,24 @@ export async function sandboxSettingsRoutes(app: FastifyInstance): Promise<void>
     return (await getSandboxSettings(accountId, id))!;
   });
 
-  app.post(
-    '/api/workspaces/:id/sandbox/check',
-    { schema: { params: idParam, body: { type: 'object', additionalProperties: false, properties: { folder: path } } } },
-    async (req, reply) => {
-      const accountId = accountIdOf(req);
-      const { id } = req.params as { id: number };
-      const body = (req.body ?? {}) as SandboxFolderCheckBody;
-      const [settings, repos] = await Promise.all([readSandboxSettings(accountId, id), sandboxWorkspaceRepos(accountId, id)]);
-      if (settings == null || repos == null) return reply.status(404).send(notFound(id));
-      const folder = body.folder === undefined ? settings.localFolder : body.folder;
-      const places = defaultLayoutPlaces();
-      // A folder other than the saved one starts with nothing ticked by choice: the default applies.
-      const sameFolder = folder === settings.localFolder;
-      const resolved = resolveWorkspaceLayout(
-        repos,
-        {
-          localFolder: folder,
-          memoryProjects: sameFolder ? settings.memoryProjects : null,
-          startDir: sameFolder ? settings.startDir : null,
-        },
-        places,
-      );
-      return toFolderCheck(id, resolved, places) satisfies SandboxFolderCheck;
-    },
-  );
+  app.post('/api/workspaces/:id/sandbox/check', { schema: { params: idParam } }, async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const { id } = req.params as { id: number };
+    const [settings, repos] = await Promise.all([readSandboxSettings(accountId, id), sandboxWorkspaceRepos(accountId, id)]);
+    if (settings == null || repos == null) return reply.status(404).send(notFound(id));
+    const places = defaultLayoutPlaces();
+    const resolved = resolveWorkspaceLayout(repos, { memoryProjects: settings.memoryProjects }, places);
+    return toFolderCheck(id, resolved, places) satisfies SandboxFolderCheck;
+  });
+
+  app.get('/api/workspaces/:id/sandbox/compose-files', { schema: { params: idParam } }, async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const { id } = req.params as { id: number };
+    const repos = await sandboxWorkspaceRepos(accountId, id);
+    if (repos == null) return reply.status(404).send(notFound(id));
+    const { listComposeFiles } = await import('../../sandbox/services/compose-files.js');
+    return { workspaceId: id, repos: await listComposeFiles(repos) } satisfies SandboxComposeFiles;
+  });
 
   app.post('/api/workspaces/:id/sandbox/allowed-hosts', { schema: { params: idParam, body: ruleBody } }, async (req, reply) => {
     const accountId = accountIdOf(req);
