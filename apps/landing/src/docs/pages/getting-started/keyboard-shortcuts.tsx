@@ -37,7 +37,7 @@ export default function Page(): JSX.Element {
           <Row keys={<Kbd>/</Kbd>} does="The same." />
           <Row keys={<Kbd>?</Kbd>} does="The shortcut sheet." />
           <Row keys={<Kbd>i</Kbd>} does="Back to the last of Open pull requests, Pending, Docs, Feed, Reports, Bots Monitoring or a repository page that you had open." />
-          <Row keys={<Kbd>Esc</Kbd>} does="Close the top layer. Then leave a tab for the Timeline, or clear its selection." />
+          <Row keys={<Kbd>Esc</Kbd>} does="Close the top layer. With the Timeline on, then leave a tab for the Timeline, or clear its selection." />
         </tbody>
       </table>
 
@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
           <Row keys={<><Kbd>g</Kbd> <Kbd>o</Kbd></>} does="Open pull requests" />
           <Row keys={<><Kbd>g</Kbd> <Kbd>p</Kbd></>} does="Pending" />
           <Row keys={<><Kbd>g</Kbd> <Kbd>s</Kbd></>} does="This Sprint" />
-          <Row keys={<><Kbd>g</Kbd> <Kbd>t</Kbd></>} does="Timeline" />
+          <Row keys={<><Kbd>g</Kbd> <Kbd>t</Kbd></>} does="Timeline, when it is on" />
           <Row keys={<><Kbd>g</Kbd> <Kbd>d</Kbd></>} does="Docs" />
           <Row keys={<><Kbd>g</Kbd> <Kbd>f</Kbd></>} does="Feed" />
           <Row keys={<><Kbd>g</Kbd> <Kbd>r</Kbd></>} does="Reports" />
@@ -65,7 +65,8 @@ export default function Page(): JSX.Element {
       </table>
       <Note>
         A page hidden in <DocLink to="settings/features">Settings → Features</DocLink> is left out of the
-        sheet, but its <Kbd>g</Kbd> key still works.
+        sheet, but its <Kbd>g</Kbd> key still works. The Timeline is the exception: while it is off,{' '}
+        <Kbd>g</Kbd> <Kbd>t</Kbd> does nothing.
       </Note>
 
       <H2 id="lists">Lists</H2>
@@ -100,6 +101,7 @@ export default function Page(): JSX.Element {
       </Tip>
 
       <H2 id="timeline-keys">Timeline</H2>
+      <p>These work when the Timeline is on.</p>
       <table>
         <tbody>
           <Row keys={<><Kbd>j</Kbd> <Kbd>k</Kbd></>} does="Move through the board's pull requests. Enter opens the selected one's card." />

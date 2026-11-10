@@ -32,7 +32,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>The pages.</b> <Ui>Open pull requests</Ui>, <Ui>Pending</Ui>, <Ui>This Sprint</Ui> and{' '}
-          <Ui>Timeline</Ui>; then, under <Ui>Library</Ui>, <Ui>Docs</Ui> and <Ui>Feed</Ui>; then, under{' '}
+          <Ui>Timeline</Ui> (when you switch it on in <DocLink to="settings/features">Settings → Features</DocLink>);
+          then, under <Ui>Library</Ui>, <Ui>Docs</Ui> and <Ui>Feed</Ui>; then, under{' '}
           <Ui>Insights</Ui>, <Ui>Reports</Ui> and <Ui>Bots Monitoring</Ui>.
         </li>
         <li>
@@ -97,7 +98,7 @@ export default function Page(): JSX.Element {
       <p>
         Right-click a tab and choose <Ui>Pin tab</Ui> to keep it. A pinned tab has no close button, is listed
         first under <Ui>Pinned</Ui>, stays when you choose <Ui>Close all</Ui>, and comes back after a reload.
-        Pull request, Focus, story and build tabs can be pinned.
+        Pull request, Focus, story and build tabs can be pinned. Focus tabs need the Timeline.
       </p>
       <H3>Group tabs by author</H3>
       <p>
@@ -132,9 +133,9 @@ export default function Page(): JSX.Element {
       <H2 id="on-a-phone">On a phone or a narrow window</H2>
       <p>
         On a narrow screen the sidebar folds into a menu, and a bar at the bottom holds{' '}
-        <Ui>Open PRs</Ui>, <Ui>Pending</Ui>, <Ui>Sprint</Ui>, <Ui>Timeline</Ui> and <Ui>More</Ui>. A dot on the
-        menu button tells you when a repository's sync failed or the AI budget is near its limit. The Timeline
-        shows as a list, one line per pull request.
+        <Ui>Open PRs</Ui>, <Ui>Pending</Ui>, <Ui>Sprint</Ui>, <Ui>Timeline</Ui> (when it is on) and{' '}
+        <Ui>More</Ui>. A dot on the menu button tells you when a repository's sync failed or the AI budget is
+        near its limit. The Timeline shows as a list, one line per pull request.
       </p>
     </>
   );

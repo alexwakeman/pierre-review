@@ -15,6 +15,8 @@ type Line = readonly [keys: readonly string[], does: string];
 
 function sections(destinations: readonly Destination[]): ReadonlyArray<readonly [string, readonly Line[]]> {
   const mod = modKeyLabel();
+  // Settings → Features → Timeline off: its keys go nowhere, so they are not listed.
+  const timeline = destinations.some((d) => d.id === 'timeline');
   return [
     [
       'Anywhere',
@@ -23,7 +25,10 @@ function sections(destinations: readonly Destination[]): ReadonlyArray<readonly 
         [['/'], 'The same'],
         [['?'], 'This list'],
         [['i'], 'Activity (where you were last)'],
-        [['Esc'], 'Close the top layer; then leave a tab for the Timeline, or clear its selection'],
+        [
+          ['Esc'],
+          timeline ? 'Close the top layer; then leave a tab for the Timeline, or clear its selection' : 'Close the top layer',
+        ],
       ],
     ],
     ['Go to', destinations.map((d): Line => [['g', d.goKey], d.label])],
@@ -42,7 +47,7 @@ function sections(destinations: readonly Destination[]): ReadonlyArray<readonly 
         [['1–9'], "Switch the page's tabs"],
       ],
     ],
-    ['Timeline', [[['j', 'k'], 'Move through the board’s pull requests']]],
+    ...(timeline ? ([['Timeline', [[['j', 'k'], 'Move through the board’s pull requests']]]] as const) : []),
     [
       'A pull request',
       [
@@ -57,7 +62,8 @@ function sections(destinations: readonly Destination[]): ReadonlyArray<readonly 
 
 export function ShortcutsSheet({ onClose }: { onClose: () => void }): JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
-  // A destination Settings → Features hides is left out here too (its `g` key still works).
+  // A destination Settings → Features hides is left out here too (its `g` key still works, except
+  // the Timeline's: off, `g t` goes nowhere).
   const destinations = shownDestinations(useNavGates());
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;

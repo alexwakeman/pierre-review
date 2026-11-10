@@ -15,6 +15,11 @@ export default function Page(): JSX.Element {
         below. Use it to read the history of one pull request in order: when it was reviewed, who replied, and
         when the fixes were pushed.
       </p>
+      <Note>
+        Focus tabs are part of the Timeline, which is off until you switch it on. While it is off, every Focus
+        button is hidden, and a Focus tab you had open becomes the pull request's own tab. See{' '}
+        <DocLink to="timeline/overview#switch-it-on">Switch the Timeline on</DocLink>.
+      </Note>
 
 
       <H2 id="open-a-focus-tab">Open a Focus tab</H2>

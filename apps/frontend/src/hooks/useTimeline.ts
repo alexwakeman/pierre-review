@@ -7,8 +7,14 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { buildTimelineSearch, useFilters } from '../store/filters.js';
+import { usePinnedTabs } from '../store/pinnedTabs.js';
 import { workspaceKey } from './useActivity.js';
 
+// ⚠ SETTINGS → FEATURES → TIMELINE GATES THE BOARD FETCHES. `useTimeline` and `useSearchTimeline`
+// stay IDLE unless the Timeline is on (`timelineOn === true`; null = not known yet also idles), so a
+// reader with it off never sends the board's `/api/timeline`. `useRosterTimeline` is Reports' own
+// windowed read and is NOT gated. Repos, users and mergers have their own routes and are not gated.
+//
 // ⚠ THE WORKSPACE IS READ FROM THE STORE, NOT PASSED IN — and here that is the correctness rule,
 // not a convenience. `buildTimelineSearch` derives the whole query string (including
 // `workspace=<id>`) from the same store state; a caller-supplied id could disagree with the string
@@ -61,6 +67,7 @@ export function useTimeline(override?: {
     ),
   );
   const workspaceId = useFilters((s) => s.workspaceId);
+  const timelineOn = usePinnedTabs((s) => s.timelineOn === true);
   // A pr-focus tab (`prIds`) is WORKSPACE-INDEPENDENT and must stay that way in the cache too.
   // `buildTimelineSearch` deliberately emits no `workspace=` on that path — getTimeline's prIds
   // branch bypasses the repo scope entirely so an isolate tab loads its subject PR even when the
@@ -83,7 +90,7 @@ export function useTimeline(override?: {
     // Null = the store has not resolved a workspace yet, and `search` then carries no `workspace=`
     // — the server would answer for the account's Default under whatever name the header is about
     // to show. Held idle until it resolves (except on the scope-free isolate path).
-    enabled: isolated || workspaceId != null,
+    enabled: timelineOn && (isolated || workspaceId != null),
     placeholderData: (prev) => prev, // keep previous data while refetching
   });
 }
@@ -102,10 +109,11 @@ export function useTimeline(override?: {
 export function useSearchTimeline(opts?: { enabled?: boolean }) {
   const search = useFilters((s) => buildTimelineSearch(s, false, false, false, false, null, false));
   const workspaceId = useFilters((s) => s.workspaceId);
+  const timelineOn = usePinnedTabs((s) => s.timelineOn === true);
   return useQuery<TimelineResponse>({
     queryKey: ['timeline', workspaceKey(workspaceId), search],
     queryFn: () => api.timeline(search),
-    enabled: workspaceId != null && (opts?.enabled ?? true),
+    enabled: timelineOn && workspaceId != null && (opts?.enabled ?? true),
     placeholderData: (prev) => prev,
   });
 }

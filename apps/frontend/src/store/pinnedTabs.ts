@@ -242,6 +242,34 @@ export function boardSlotMode(activeTab: ActiveTab, tabs: readonly Tab[]): Timel
   return t?.kind === 'pr-focus' ? { kind: 'isolate', prId: t.prId } : null;
 }
 
+/**
+ * SETTINGS → FEATURES → TIMELINE (shared features.ts; docs/FRONTEND.md § Features shown). With the
+ * Timeline OFF there is no board and no Focus tab, so a tab key that names either is rewritten:
+ * `'timeline'` (and a stale dynamic key, which App would otherwise draw as the board) → the default
+ * view; `'pr-focus:<id>'` → that PR's detail tab, `'pr-detail:<id>'`. Pure; on → unchanged.
+ */
+export function gateTimelineTab(tab: ActiveTab, tabs: readonly Pick<Tab, 'key'>[], timelineOn: boolean | null): ActiveTab {
+  if (timelineOn !== false) return tab;
+  if (tab === 'timeline') return DEFAULT_FIXED_VIEW;
+  const parsed = parseTabKey(tab);
+  if (parsed?.kind === 'pr-focus') return prDetailKey(parsed.prId);
+  if (!isFixedView(tab) && parsed == null && !tabs.some((t) => t.key === tab)) return DEFAULT_FIXED_VIEW;
+  return tab;
+}
+
+/** Every pr-focus tab as that PR's pr-detail tab (pinning kept; a PR open in both keeps one). */
+export function focusTabsAsDetail(tabs: readonly Tab[]): Tab[] {
+  if (!tabs.some((t) => t.kind === 'pr-focus')) return tabs as Tab[];
+  const out: Tab[] = [];
+  for (const t of tabs) {
+    const next: Tab = t.kind === 'pr-focus' ? { ...t, key: prDetailKey(t.prId), kind: 'pr-detail' } : t;
+    const dup = out.findIndex((x) => x.key === next.key);
+    if (dup === -1) out.push(next);
+    else if (next.pinned === true) out[dup] = { ...(out[dup] as Tab), pinned: true };
+  }
+  return pinnedFirst(out);
+}
+
 /** Parse a Tab.key back into its kind + PR id (null for unknown). */
 export function parseTabKey(key: string): { kind: TabKind; prId: number } | null {
   const m = /^(pr-detail|pr-focus):(\d+)$/.exec(key);
@@ -259,7 +287,12 @@ interface OpenOpts {
 
 interface TabsState {
   tabs: Tab[]; // ordered; persisted
-  activeTab: ActiveTab; // NOT persisted (fresh load 'timeline'; useUrlState → the URL's view)
+  activeTab: ActiveTab; // NOT persisted (fresh load the default view; useUrlState → the URL's view)
+  // Settings → Features → Timeline, seated by App from /api/me. null = not known yet (nothing is
+  // gated, and App mounts no board); false = no board, no Focus tabs (`gateTimelineTab`).
+  timelineOn: boolean | null;
+  /** Seat the switch. Off converts Focus tabs to detail tabs and moves off the board. */
+  setTimelineOn: (on: boolean) => void;
   // The feed item id a browser-Back should scroll-to + flash. Two fields so the flash fires
   // ONLY on a real Back, never on an ordinary return to Activity (e.g. clicking the Activity
   // tab chip): `activityReturnItemId` is the PENDING target (set on an Activity-launched
@@ -495,7 +528,18 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
 
   return {
     tabs: loadTabs(),
-    activeTab: 'timeline',
+    activeTab: DEFAULT_FIXED_VIEW,
+    timelineOn: null,
+
+    setTimelineOn: (on) =>
+      set((s) => {
+        if (on) return s.timelineOn === true ? s : { timelineOn: true };
+        const tabs = focusTabsAsDetail(s.tabs);
+        if (tabs !== s.tabs) persist(tabs);
+        const activeTab = gateTimelineTab(s.activeTab, tabs, false);
+        if (s.timelineOn === false && tabs === s.tabs && activeTab === s.activeTab) return s;
+        return { timelineOn: false, tabs, activeTab };
+      }),
     activityReturnItemId: null,
     activityFlashItemId: null,
 
@@ -510,8 +554,11 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
 
     openPrDetailTab: (meta, opts) =>
       openTab({ key: prDetailKey(meta.id), kind: 'pr-detail', prId: meta.id, meta }, opts),
+    // With the Timeline off there are no Focus tabs: the PR opens in its detail tab instead.
     openPrFocusTab: (meta, opts) =>
-      openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
+      get().timelineOn === false
+        ? openTab({ key: prDetailKey(meta.id), kind: 'pr-detail', prId: meta.id, meta }, opts)
+        : openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
     openMetricsTab: (opts) =>
       openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
     openBotPrsTab: (opts) =>
@@ -679,17 +726,18 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
       }),
     unpin: (id) => get().closeTab(prDetailKey(id)),
 
-    setActiveTab: (tab) => set({ activeTab: tab }),
+    setActiveTab: (tab) => set((s) => ({ activeTab: gateTimelineTab(tab, s.tabs, s.timelineOn) })),
     // Idempotent: a no-op when the board is already showing, so the filters store
     // can call it on EVERY timeline-navigation action without churning subscribers.
+    // With the Timeline off it does nothing: there is no board to show.
     showTimeline: () => {
-      if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
+      if (get().timelineOn !== false && get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
     // ≡ showTimeline. The "Show" back-step is the URL's own entry now: leaving `view=pr-detail:<id>`
     // for `view=timeline` is a navigation-key change, so useUrlState pushes and a browser Back
     // returns to the detail tab without this store remembering anything.
     showBoardFromDetail: () => {
-      if (get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
+      if (get().timelineOn !== false && get().activeTab !== 'timeline') set({ activeTab: 'timeline' });
     },
     showActivity: () => {
       if (get().activeTab !== 'activity') set({ activeTab: 'activity' });
@@ -697,8 +745,13 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     showSprint: () => {
       if (get().activeTab !== 'sprint') set({ activeTab: 'sprint' });
     },
-    applyUrlTab: (tab, opts) =>
+    applyUrlTab: (urlTab, opts) =>
       set((s) => {
+        // `view=timeline` / `view=pr-focus:<id>` with the Timeline off: the default view / the
+        // PR's detail tab (a stale key is left to the rules below, which re-create it if they can).
+        const tab = s.timelineOn === false && (urlTab === 'timeline' || parseTabKey(urlTab)?.kind === 'pr-focus')
+          ? gateTimelineTab(urlTab, s.tabs, false)
+          : urlTab;
         // A tab this browser has no record of (shared link / cleared storage): re-create it from
         // the key alone. The four self-describing kinds can be — the key IS the identity — and a
         // null meta is only a LABEL, which the PR fetch backfills (syncMeta) and the user/bot
@@ -773,3 +826,8 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
     },
   };
 });
+
+/** Settings → Features → Timeline is ON (known and on). Every board / Focus entry point reads this. */
+export function useTimelineOn(): boolean {
+  return usePinnedTabs((s) => s.timelineOn === true);
+}

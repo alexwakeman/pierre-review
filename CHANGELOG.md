@@ -24,6 +24,12 @@ no internals.
   4 hours without their Limn looking at that commit. No setting is needed beyond
   "Approve or request changes for me"; the AI Review tab says when it happened.
 
+### Changed
+
+- The Timeline is now optional and off by default. Switch it on in Settings → Features. While it is
+  off, it leaves the sidebar, `g t` and the search menu, a link to it opens Open pull requests, and
+  pull requests open in their own tab instead of a Focus tab.
+
 ### Removed
 
 - Website: the separate Getting started page. Its steps live in the docs' Getting started section,

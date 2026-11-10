@@ -26,7 +26,7 @@ import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import { api } from '../api/client.js';
 import { useFilters, type PrDetailTab } from '../store/filters.js';
 import { markUrlCorrection } from '../hooks/useUrlState.js';
-import { parseTabKey, usePinnedTabs, type PinnedPr } from '../store/pinnedTabs.js';
+import { parseTabKey, usePinnedTabs, useTimelineOn, type PinnedPr } from '../store/pinnedTabs.js';
 import {
   dateTime,
   indexUsers,
@@ -800,6 +800,8 @@ export function PrDetail({
   ] as Tab[];
   const cmdTabsKey = cmdTabs.join(',');
   const prNumber = pr?.number ?? null;
+  // Settings → Features → Timeline: off = no "Show on the timeline" and no Focus.
+  const timelineOn = useTimelineOn();
   const prCommands = useMemo((): Command[] | null => {
     if (!liveVisible || prNumber == null) return null;
     const where = `#${prNumber}`;
@@ -823,8 +825,12 @@ export function PrDetail({
       ...(placement === 'pane'
         ? [{ id: 'pr:full', title: 'Open this pull request full-screen', group: 'Actions' as const, hint: where, run: () => cmdLive.current.act('full') }]
         : []),
-      { id: 'pr:timeline', title: 'Show this pull request on the timeline', group: 'Actions', hint: where, run: () => cmdLive.current.act('timeline') },
-      { id: 'pr:focus', title: 'Focus this pull request in its own timeline tab', group: 'Actions', hint: where, run: () => cmdLive.current.act('focus') },
+      ...(timelineOn
+        ? [
+            { id: 'pr:timeline', title: 'Show this pull request on the timeline', group: 'Actions' as const, hint: where, run: () => cmdLive.current.act('timeline') },
+            { id: 'pr:focus', title: 'Focus this pull request in its own timeline tab', group: 'Actions' as const, hint: where, run: () => cmdLive.current.act('focus') },
+          ]
+        : []),
       { id: 'pr:feed', title: 'Show this pull request in the Activity feed', group: 'Actions', hint: where, run: () => cmdLive.current.act('feed') },
       ...storyTickets.map(
         (t): Command => ({
@@ -842,7 +848,7 @@ export function PrDetail({
       { id: 'pr:github', title: 'Open this pull request on GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('github') },
       { id: 'pr:ci', title: 'Show CI status (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('ci') },
     ];
-  }, [liveVisible, prNumber, cmdTabsKey, placement, storyTickets, openStory]);
+  }, [liveVisible, prNumber, cmdTabsKey, placement, storyTickets, openStory, timelineOn]);
   useRegisterCommands(`pr-detail:${placement}`, prCommands);
 
   if (isLoading) {
@@ -1000,8 +1006,12 @@ export function PrDetail({
     ...(placement === 'pane'
       ? [{ id: 'full', label: 'Open full-screen in its own tab', icon: <NewTabIcon size={14} />, onSelect: () => openPrDetailTab(pinnedMetaOf(pr, usersById)) }]
       : []),
-    { id: 'timeline', label: 'Show on the timeline', icon: <TimelineIcon size={14} />, onSelect: () => openPrFocused(pr.id) },
-    { id: 'focus', label: 'Focus in its own timeline tab', icon: <MagnifierIcon size={14} />, onSelect: () => openPrFocusTab(pinnedMetaOf(pr, usersById)) },
+    ...(timelineOn
+      ? [
+          { id: 'timeline', label: 'Show on the timeline', icon: <TimelineIcon size={14} />, onSelect: () => openPrFocused(pr.id) },
+          { id: 'focus', label: 'Focus in its own timeline tab', icon: <MagnifierIcon size={14} />, onSelect: () => openPrFocusTab(pinnedMetaOf(pr, usersById)) },
+        ]
+      : []),
     { id: 'feed', label: 'Show in the Activity feed', icon: <FeedIcon size={14} />, onSelect: showInFeed },
     // Only when the PR names a story; its key as the hint (a PR naming two lists both).
     ...storyTickets.map((t): MenuEntry => ({

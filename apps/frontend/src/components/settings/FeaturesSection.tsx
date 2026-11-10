@@ -9,7 +9,8 @@ import { SectionShell } from './ui.js';
 // SETTINGS → FEATURES (shared features.ts; docs/FRONTEND.md § Features shown). One switch per page the
 // sidebar can leave out. ACCOUNT grain, stored server-side (`accounts.feature_settings`), taking
 // effect on the click. Hiding is visibility only: a link still opens the page, and every sync, read
-// and scoring run carries on.
+// and scoring run carries on. ⚠ The Timeline is the exception: off (the default) means no board, no
+// Focus tabs and no board fetch, and a link to it opens Open pull requests.
 export function FeaturesSection(): JSX.Element | null {
   const features = useMe().data?.features;
   const save = useSetFeatureSettings();
@@ -24,6 +25,10 @@ export function FeaturesSection(): JSX.Element | null {
           <p>
             A page switched off leaves the sidebar and the search menu. A link to it still opens it, and
             Limn keeps syncing and scoring as before.
+          </p>
+          <p>
+            The Timeline is off until you switch it on. While it is off, a link to it opens Open pull
+            requests, and pull requests open in their own tab instead of a Focus tab.
           </p>
           <p>
             Reports and This Sprint switch themselves on when they have something to show. Switch one off

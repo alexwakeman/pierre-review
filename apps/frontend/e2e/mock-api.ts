@@ -424,9 +424,10 @@ const ME_RESPONSE: MeResponse = {
   blastRadius: null,
   // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
   myTurnSettings: { showNewPrs: false },
-  // Settings → Features: an existing install, so every destination shows (specs navigate to all of
-  // them through the sidebar).
-  features: resolveFeatures(null, { existingInstall: true, reportsReady: true, sprintSource: true }),
+  // Settings → Features: an existing install with the Timeline switched ON, so every destination
+  // shows (specs navigate to all of them through the sidebar, and several drive the board and Focus
+  // tabs). The Timeline's real default is OFF: `installMockApi(page, { timeline: false })` serves it.
+  features: resolveFeatures({ timeline: true }, { existingInstall: true, reportsReady: true, sprintSource: true }),
   authNotices: [],
 };
 
@@ -1828,6 +1829,8 @@ export async function installMockApi(
     // The picker the preview answers (default AI_FIX_PREVIEW) and the fix a Start fix produces (default aiFixBuilt).
     aiFixPreview?: AiFixPickerPreview;
     aiFixOnStart?: (prId: number) => AiFix;
+    // Settings → Features → Timeline. Default true (the fixtures above); false = the product default.
+    timeline?: boolean;
   } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
@@ -1989,7 +1992,13 @@ export async function installMockApi(
       if (path.match(/\/api\/prs\/\d+\/reviewer-candidate$/))
         return json(route, { candidate: null, users: [] } satisfies ReviewerCandidateResponse);
 
-      if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
+      if (path.endsWith('/api/me')) {
+        if (opts.timeline !== false) return json(route, ME_RESPONSE);
+        return json(route, {
+          ...ME_RESPONSE,
+          features: resolveFeatures(null, { existingInstall: true, reportsReady: true, sprintSource: true }),
+        } satisfies MeResponse);
+      }
       if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);
       if (path.endsWith('/api/storage/clones')) return json(route, CLONE_STORAGE);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`

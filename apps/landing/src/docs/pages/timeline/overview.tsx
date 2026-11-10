@@ -52,6 +52,18 @@ export default function Page(): JSX.Element {
         last 14 days by default.
       </p>
 
+      <H2 id="switch-it-on">Switch it on</H2>
+      <p>
+        The Timeline is optional and off by default. To use it, open{' '}
+        <DocLink to="settings/features">Settings → Features</DocLink> and switch on <Ui>Timeline</Ui>. It then
+        shows in the sidebar, with <Kbd>g</Kbd> <Kbd>t</Kbd>, and the <Ui>Focus</Ui> and{' '}
+        <Ui>Show on the timeline</Ui> buttons come back.
+      </p>
+      <p>
+        While it is off, Limn does not load the board, a link to the Timeline opens <Ui>Open pull requests</Ui>,
+        and a pull request opens in its own tab instead of a Focus tab.
+      </p>
+
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration

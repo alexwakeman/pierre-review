@@ -79,7 +79,7 @@ export function useShellCommands({
   const workspaceId = useFilters((s) => s.workspaceId);
 
   const commands = useMemo<Command[]>(() => {
-    const shown = (id: 'feed' | 'insights' | 'sprint' | 'bots'): boolean =>
+    const shown = (id: 'feed' | 'insights' | 'sprint' | 'bots' | 'timeline'): boolean =>
       isDestinationShown(DESTINATIONS.find((d) => d.id === id)!, { aiOn, features });
     const f = (): ReturnType<typeof useFilters.getState> => useFilters.getState();
     const t = (): ReturnType<typeof usePinnedTabs.getState> => usePinnedTabs.getState();
@@ -178,7 +178,10 @@ export function useShellCommands({
           t().showSprint();
         },
       })),
-      { id: 'timeline', group: 'Go to', title: 'Timeline', icon: <TimelineIcon size={14} />, keywords: ['board'], run: () => t().showTimeline() },
+      // Settings → Features → Timeline: off by default, and then not offered at all.
+      ...(shown('timeline')
+        ? [{ id: 'timeline', group: 'Go to' as const, title: 'Timeline', icon: <TimelineIcon size={14} />, keywords: ['board'], run: () => t().showTimeline() }]
+        : []),
       {
         id: 'settings',
         group: 'Settings',

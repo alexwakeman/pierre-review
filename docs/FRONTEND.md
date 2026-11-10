@@ -648,14 +648,32 @@ from a hover.
 
 ### Features shown — Settings → Features (`nav.ts` `isDestinationShown`, shared `features.ts`)
 
-Four destinations can be left out of the sidebar, the phone's bottom bar, the key sheet and ⌘K:
-**Feed**, **Reports**, **This Sprint** and **Bots Monitoring** (`DESTINATION_FEATURE`). Their state rides
+Five destinations can be left out of the sidebar, the phone's bottom bar, the key sheet and ⌘K:
+**Timeline**, **Feed**, **Reports**, **This Sprint** and **Bots Monitoring** (`DESTINATION_FEATURE`). Their state rides
 `GET /api/me` as `features` (`FeaturesStatus`: per feature `{visible, setting, defaultOn}`), so the shell
 needs no extra fetch; `useNavGates()` combines it with the AI gate, and every list goes through
 `shownDestinations(gates)`. An absent `features` (an older server, or `/api/me` not loaded) lists
-everything.
+everything but the Timeline.
 
-- ⚠ **VISIBILITY ONLY.** A deep link (`?activityRepo=bots`, `?view=sprint` …) and the `g` keys still
+- ⚠ **THE TIMELINE IS AN OPTIONAL FEATURE, OFF BY DEFAULT, AND OFF IS OFF** (not visibility only).
+  Its default is `false` for EVERY install, existing ones too (it was never a switch, so no stored value
+  can say the reader chose it); only a stored `timeline: true` turns it on. App seats
+  `me.features.timeline.visible` into `pinnedTabs.timelineOn` once `/api/me` answers (`null` = not known
+  yet: nothing is gated and no board mounts; a failed `/api/me` = off). While it is `false`:
+  - App mounts NO board (`<Timeline>` and `TimelineList` are not rendered; every view is an overlay over
+    an empty slot) and `useTimeline` / `useSearchTimeline` stay idle — no `/api/timeline` board fetch.
+    `useRosterTimeline` (Reports' People picker) is Reports' own read and is NOT gated.
+  - ONE store gate, `gateTimelineTab`: `setActiveTab` / `applyUrlTab` / `showTimeline` (a no-op, so
+    `g t` and Escape go nowhere) never land on `'timeline'`; `?view=timeline` and a legacy `?pr=<id>`
+    land on Activity → Open PRs; a stale dynamic key lands on Activity too (App would otherwise draw the
+    board). The correction is a history REPLACE (`markUrlCorrection`).
+  - NO FOCUS TABS: `openPrFocusTab` opens the PR's detail tab; `setTimelineOn(false)` turns every stored
+    Focus tab into a detail tab (`focusTabsAsDetail`, pinning kept); `view=pr-focus:<id>` opens
+    `pr-detail:<id>`. Every Focus / "Show on the timeline" entry point HIDES on `useTimelineOn()`
+    (PrDetail's menu + ⌘K, `ShowOnTimeline`, the Feed row's Focus button), and the key sheet drops the
+    Timeline lines.
+  - Nothing else changes: sync, the server's `/api/timeline` route and every other page are untouched.
+- ⚠ **VISIBILITY ONLY (the other four).** A deep link (`?activityRepo=bots`, `?view=sprint` …) and the `g` keys still
   land on a hidden destination (`currentLocation` never reads the gate); no sync, tracker read or ML
   scoring changes with a switch.
 - **The defaults** (shared `resolveFeatures`, one resolver for the server and the tests): a
@@ -676,7 +694,9 @@ everything.
   `nextFeatureSettings`): a switch moved back to what the default says is dropped, so it follows the
   default again (Reports switched back on keeps waiting for its backfill). The response's resolved
   `features` is seated on `['me']` at once (`useSetFeatureSettings`).
-- **The demo stack** (`pnpm demo`) is an existing install (`seed-demo.ts`), so every destination shows.
+- **The demo stack** (`pnpm demo`) is an existing install (`seed-demo.ts`) with the Timeline switched
+  on, so every destination shows. The e2e fixtures (`e2e/mock-api.ts`) serve it
+  ON; `installMockApi(page, { timeline: false })` serves the real default (`e2e/timeline-off.spec.ts`).
 
 ### The timeline (`components/Timeline/`)
 
