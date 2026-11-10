@@ -552,7 +552,7 @@ export function Stat({
   );
 }
 
-// ---- settings controls (Getting started) -------------------------------------
+// ---- settings controls (the docs) ---------------------------------------------
 //
 // The app's Settings sections, drawn with real controls. A select and a checkbox
 // change the mock's state; a text box is a still picture of what is typed there

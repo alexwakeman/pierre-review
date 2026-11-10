@@ -31,14 +31,16 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS SIX CONTENT PAGES plus the three legal ones: home, Getting
- * started, Reporting and metrics, For teams (/teams: how reviews work when
- * several teammates run Limn), How we measure and Contact. The earlier
- * feature-area pages (/features, /bots, /pro, /pricing, /how-it-works, /arcade)
- * and then the two role pages (/for-developers, /for-managers) were retired;
- * their URLs survive as aliases.
+ * THE SITE IS FIVE CONTENT PAGES plus the three legal ones (and the docs, whose
+ * routes come from the docs manifest): home, Reporting and metrics, For teams
+ * (/teams: how reviews work when several teammates run Limn), How we measure and
+ * Contact. The earlier feature-area pages (/features, /bots, /pro, /pricing,
+ * /how-it-works, /arcade) and then the two role pages (/for-developers,
+ * /for-managers) were retired; their URLs survive as aliases. The Getting started
+ * page was folded into the docs (/docs/getting-started/…): /getting-started,
+ * /for-developers and /features now 301 there (apps/site src/app.ts).
  *
- * /contact is the fifth, and it is load-bearing rather than courtesy: an
+ * /contact is load-bearing, and it is load-bearing rather than courtesy: an
  * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
  * and this is where it asks. See src/pages/Contact.tsx.
  *
@@ -52,10 +54,6 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — your team writes more code than it can review`,
     description: `${SITE_NAME} reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to ${FREE_TEAM_SIZE} people, on your machine: npx ${NPM_PACKAGE}.`,
-  },
-  '/getting-started': {
-    title: `Getting started — install, run and connect · ${SITE_NAME}`,
-    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then sign in to Claude Code or Codex (both work out of the box), give Limn a share of your weekly AI usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
   },
   '/reporting': {
     title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,

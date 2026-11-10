@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Removed
+
+- Website: the separate Getting started page. Its steps live in the docs' Getting started section,
+  which gains a "Set up the rest" list, and the old address now goes there.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed

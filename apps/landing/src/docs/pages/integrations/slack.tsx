@@ -72,6 +72,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <Note>
         The webhook URL is stored on your computer and never shown again. To change it, enter a new URL and save.
+        Each workspace has its own channel, or none. Up to 12 workspaces can have a digest.
       </Note>
 
       <H2 id="what-the-digest-says">What the digest says</H2>

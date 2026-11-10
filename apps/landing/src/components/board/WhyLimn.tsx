@@ -24,7 +24,7 @@ export function WhyLimn(): JSX.Element {
           <h3>Your AI plan</h3>
           <p>Runs on Claude Code or Codex. Set a weekly share and it stops there.</p>
           <p className="more">
-            <Link to="/getting-started#budget-h">Set a budget →</Link>
+            <Link to="/docs/settings/ai-usage-and-spend#spend-budget">Set a budget →</Link>
           </p>
         </div>
         <div className="tile rise">

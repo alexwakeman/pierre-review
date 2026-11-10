@@ -15,7 +15,6 @@ const ONLY = process.argv[2]; // 'mobile' | 'desktop' | undefined
 
 const PAGES = [
   ['home', '/'],
-  ['getting-started', '/getting-started'],
   ['reporting', '/reporting'],
   ['teams', '/teams'],
   ['how-we-measure', '/how-we-measure'],

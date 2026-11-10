@@ -55,7 +55,6 @@ export default function Footer({ wordmark = true }: { wordmark?: boolean }): JSX
           <Link to="/#see">See</Link>
         </div>
         <div>
-          <Link to="/getting-started">Getting started</Link>
           <Link to="/docs">Docs</Link>
           <Link to="/docs/changelog">Changelog</Link>
           <Link to="/reporting">Reporting and metrics</Link>
