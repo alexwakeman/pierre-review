@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Open pull requests: right-click a row and choose "Start review" to start an AI review with your
+  default choice (Claude + Codex when both are signed in). The item is greyed out, with the reason,
+  while AI is not set up or signed in, or a review is starting, queued or running. Over your AI spend
+  budget it asks once more. "Review started for #615" shows in the bottom-right corner.
+
 ### Changed
 
 - AI Review: the right-hand column starts with the pull request's latest commit (click to open it,

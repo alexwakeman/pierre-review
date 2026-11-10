@@ -4,6 +4,7 @@ import { useActiveClaudeReviews } from '../hooks/useClaudeReview.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useNotificationPref } from '../hooks/useNotificationPref.js';
 import { useFilters } from '../store/filters.js';
+import { REVIEW_START_NOTE_MS, reviewStartNoteText, useReviewStartNote } from '../store/reviewStartNote.js';
 import { playReviewComplete } from '../lib/sound.js';
 import { dateTime } from '../lib/ui.js';
 import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
@@ -86,6 +87,15 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   const kickoff = useFilters((s) => s.claudeReviewKickoff);
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const [notifEnabled] = useNotificationPref();
+  // A start made from a menu (store/reviewStartNote.ts): "Review started for #615" on this circle for
+  // a few seconds, or why it did not start until dismissed.
+  const note = useReviewStartNote((s) => s.note);
+  const clearNote = useReviewStartNote((s) => s.clear);
+  useEffect(() => {
+    if (note == null || note.error != null) return;
+    const t = window.setTimeout(() => clearNote(note.id), REVIEW_START_NOTE_MS);
+    return () => window.clearTimeout(t);
+  }, [note, clearNote]);
   // Read inside the poll effect without widening its deps (the effect keys off the
   // active set, not the pref).
   const notifEnabledRef = useRef(notifEnabled);
@@ -182,12 +192,13 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   }, [activeKey]);
 
   const visible = Object.values(tracked).filter((e) => !dismissed[e.reviewId]);
-  if (!enabled || visible.length === 0) return null;
+  if (!enabled || (visible.length === 0 && note == null)) return null;
 
   const running = visible.filter((e) => !e.done);
   const allDone = running.length === 0;
 
   const dismissAll = (): void => {
+    clearNote();
     setDismissed((prev) => {
       const next = { ...prev };
       for (const e of visible) next[e.reviewId] = true;
@@ -201,17 +212,32 @@ export function ClaudeReviewBanner(): JSX.Element | null {
   // the reviews in the expanded panel, and the X once nothing is still running (a running review
   // keeps its card).
   const ready = visible.length - running.length;
+  const noteText = note != null ? reviewStartNoteText(note) : null;
   return (
     <HeaderToast
       testId="claude-review-toast"
       tone="ai"
-      label="AI reviews"
+      label={noteText ?? 'AI reviews'}
       icon={<ReviewIcon size={13} />}
-      summary={running.length > 0 ? `${running.length} running` : `${ready} ready`}
-      onDismiss={allDone ? dismissAll : undefined}
+      summary={
+        noteText != null && visible.length === 0
+          ? undefined
+          : running.length > 0
+            ? `${running.length} running`
+            : `${ready} ready`
+      }
+      // A running review keeps its card; a note on it can still be dismissed.
+      onDismiss={allDone ? dismissAll : note != null ? () => clearNote() : undefined}
       dismissLabel="Dismiss the AI reviews card"
       count={running.length > 0 ? running.length : ready}
+      alert={note?.error != null}
     >
+      {note?.error != null && (
+        <p data-testid="review-start-error" className="m-0 text-meta text-ui-danger">
+          {note.error}
+        </p>
+      )}
+      {visible.length > 0 && (
       <ToastList>
         {visible.map((e) => (
           <ToastRow key={e.reviewId}>
@@ -261,6 +287,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
           </ToastRow>
         ))}
       </ToastList>
+      )}
     </HeaderToast>
   );
 }

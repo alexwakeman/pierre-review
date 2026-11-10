@@ -23,6 +23,7 @@ import { CLAUDE_REVIEW_STATES_MAX_IDS, DEFAULT_CLAUDE_REVIEW_MODEL } from '@pier
 import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useFilters } from '../store/filters.js';
+import { useReviewStartNote } from '../store/reviewStartNote.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { CI_REVIEW_STATES_KEY, ciReviewKey } from './useCiReview.js';
 import { anyReviewInFlight, reviewTabPill, type ReviewTabPill } from '../lib/claudeReviewColumn.js';
@@ -317,6 +318,51 @@ export function useStartReviewFromList(prId: number) {
           ])
         : undefined,
   });
+}
+
+/**
+ * Start a review from the Open PRs row menu with the AI Review tab's opening choice
+ * (lib/startReviewMenu.ts `defaultReviewChoice`): the SAME start route, the SAME per-PR mutation key
+ * (so every surface sees the start in flight) and the SAME follow-up as the tab. The menu closes as
+ * it is pressed, so this is no hook: the outcome goes to the toast cluster's AI reviews circle
+ * (store/reviewStartNote.ts). Review only — nothing is posted.
+ */
+export async function startDefaultReview(
+  qc: QueryClient,
+  pr: { id: number; number: number },
+  choice: { pair: boolean; model: AiPickerModel; provider: AiProviderId },
+): Promise<void> {
+  const note = useReviewStartNote.getState();
+  try {
+    await qc
+      .getMutationCache()
+      .build(qc, {
+        mutationKey: claudeReviewStartKey(pr.id),
+        mutationFn: () =>
+          choice.pair
+            ? api.generateClaudeReview(pr.id, choice.model, undefined, true)
+            : api.generateClaudeReview(pr.id, choice.model, choice.provider),
+        // ⚠ Awaited INSIDE the mutation, as the tab's: the start stays in flight until the column
+        // shows the queued run (see `afterReviewStarted`).
+        onSuccess: () => {
+          note.show({ prId: pr.id, prNumber: pr.number, error: null });
+          return afterReviewStarted(qc, pr.id);
+        },
+        // A stale reading (an auto review took the PR, or a run already started): re-read the column.
+        onError: () =>
+          Promise.all([
+            qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY }),
+            qc.invalidateQueries({ queryKey: ['claude-review', pr.id] }),
+          ]),
+      })
+      .execute(undefined);
+  } catch (err) {
+    note.show({
+      prId: pr.id,
+      prNumber: pr.number,
+      error: err instanceof Error && err.message !== '' ? err.message : 'Could not start the review.',
+    });
+  }
 }
 
 /** The start route's refusal while an auto review holds the PR (409 AutoReviewInProgress). */

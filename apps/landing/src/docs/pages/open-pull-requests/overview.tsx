@@ -112,6 +112,14 @@ export default function Page(): JSX.Element {
         not a draft, is not in GitHub's merge queue, has no merge armed, and you can push to the repository.
         Choosing it opens the merge options; nothing merges until you confirm there.
       </p>
+      <p>
+        Where the AI features are on, the menu also has <Ui>Start review</Ui>. It starts an AI review with the
+        same choice the <Ui>AI Review</Ui> tab opens on: <Ui>Claude + Codex</Ui> when both are signed in, else your
+        default provider. It keeps the review in Limn and posts nothing. It is greyed out, with the reason beside
+        it, while AI is not set up or signed in, while a review of that pull request is starting, queued or
+        running, and when the last review is on the latest commit. See{' '}
+        <DocLink to="open-pull-requests/ai-review-column">The AI review column</DocLink>.
+      </p>
 
       <H3>Sort and narrow the list</H3>
       <ul>

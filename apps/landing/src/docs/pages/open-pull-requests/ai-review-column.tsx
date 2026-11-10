@@ -116,6 +116,15 @@ export default function Page(): JSX.Element {
           (or the verdict) opens the pull request's <DocLink to="pull-request/ai-review-tab">AI Review tab</DocLink>.
         </li>
         <li>
+          <b>
+            <Ui>Start review</Ui>
+          </b>{' '}
+          in a row's right-click menu starts a review without opening the side panel, with the choice the AI
+          Review tab opens on (<Ui>Claude + Codex</Ui> when both are signed in). <Ui>Review started for #615</Ui>{' '}
+          shows in the bottom-right corner, and the column shows the review as queued, then running. Over your
+          AI spend budget, the menu asks once more before it starts.
+        </li>
+        <li>
           <b>The AI Fix button</b> opens the <DocLink to="pull-request/ai-fix-tab">AI Fix tab</DocLink> when a fix
           is running or ready.
         </li>

@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { flip, FloatingPortal, offset, shift } from '@floating-ui/react';
-import type { TimelinePr } from '@pierre-review/shared';
+import type { ClaudeReviewPrState, TimelinePr } from '@pierre-review/shared';
 import { landsAfterOf } from '@pierre-review/shared';
+import { useAiBudget } from '../../hooks/useAiBudget.js';
 import { usePrArmedIntent } from '../../hooks/useAutoMerge.js';
+import { useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
+import { useMe } from '../../hooks/useTriage.js';
 import { hasActivePopover } from '../../lib/activePopover.js';
 import { githubPrUrl } from '../../lib/prLink.js';
+import { defaultReviewChoice, startReviewMenuItem, type DefaultReviewChoice } from '../../lib/startReviewMenu.js';
 import { mergeVerdict } from '../../lib/ui.js';
-import { CloseIcon, DiffIcon, MergeIcon, OverviewIcon, SparkleIcon, ThreadsIcon } from '../Icons.js';
+import { CloseIcon, CoinIcon, DiffIcon, MergeIcon, OverviewIcon, ReviewIcon, SparkleIcon, ThreadsIcon } from '../Icons.js';
 import { MergeControl } from '../MergeControl.js';
 import { ContextMenu, cx, FOCUS_RING, type MenuEntry } from '../ui/index.js';
 import { usePlacedFloating } from '../ui/floating.js';
 
 // THE OPEN PRs ROW MENU (docs/FRONTEND.md § Open PRs → the row menu): a right-click on a row, or
 // Shift+F10 / the context-menu key on the selected one. Merge (only where it can land), then the
-// PR's Overview · Changes · Threads · AI Review — each opens the PR on that tab.
+// PR's Overview · Changes · Threads · AI Review — each opens the PR on that tab — then Start review.
+//
+// START REVIEW (lib/startReviewMenu.ts) starts the run the AI Review tab's Run button starts with
+// nothing picked, gated by the same checks: shown only while `me.ai.enabled`; DISABLED with the reason
+// as its hint while AI is not set up or signed in, or a review is starting, queued or running (or done
+// at the PR's latest commit). Over the spend budget it still runs, after one more choice
+// (`OpenPrsBudgetAsk`) — a run the reader starts is never refused.
 //
 // ⚠ NOTHING HERE FETCHES ON OPEN. Merge is decided from the row's SYNCED facts through the ONE
 // `mergeVerdict` (as the Pending board does — `pendingMergeGate`), the repo's synced write
@@ -49,6 +59,8 @@ export function OpenPrsRowMenu({
   onOpenTab,
   onOpenThreads,
   onOpenReview,
+  claudeState,
+  onStartReview,
 }: {
   x: number;
   y: number;
@@ -57,14 +69,26 @@ export function OpenPrsRowMenu({
   /** GitHub's merge queue holds it (`OpenPrsResponse.queuedPrIds`). */
   queued?: boolean;
   claudeOn: boolean;
+  /** The row's reading from the list's ONE batched Claude Review states answer. */
+  claudeState?: ClaudeReviewPrState | undefined;
   returnFocus: HTMLElement | null;
   onClose: () => void;
   onMerge: () => void;
   onOpenTab: (tab: RowMenuTab) => void;
   onOpenThreads: () => void;
   onOpenReview: () => void;
+  /** Start review: the choice to run, and whether to ask first (over the spend budget). */
+  onStartReview: (choice: DefaultReviewChoice, overBudget: boolean) => void;
 }): JSX.Element {
   const armed = usePrArmedIntent(pr.id) != null;
+  const me = useMe().data;
+  const choice = defaultReviewChoice(me);
+  // The budget of the provider the run goes to (the tab's gate reads the same one).
+  const budget = useAiBudget(choice.provider, { enabled: claudeOn }).data;
+  const starting = useClaudeReviewStarting(pr.id);
+  const start = claudeOn
+    ? startReviewMenuItem({ me, state: claudeState, starting, overBudget: budget?.status.overBudget === true })
+    : ({ show: false } as const);
   const items: MenuEntry[] = [
     ...(rowCanMerge(pr, writable, armed, queued)
       ? ([
@@ -78,8 +102,50 @@ export function OpenPrsRowMenu({
     ...(claudeOn
       ? [{ id: 'ai-review', label: 'AI Review', icon: <SparkleIcon size={14} className="text-ai-signal" />, onSelect: onOpenReview }]
       : []),
+    ...(start.show
+      ? [
+          {
+            id: 'start-review',
+            label: 'Start review',
+            icon: <ReviewIcon size={14} className="text-ai-signal" />,
+            ...(start.hint != null ? { hint: start.hint } : {}),
+            disabled: start.disabled,
+            onSelect: () => onStartReview(choice, start.overBudget),
+          },
+        ]
+      : []),
   ];
   return <ContextMenu x={x} y={y} items={items} label={`Pull request #${pr.number}`} onClose={onClose} returnFocus={returnFocus} />;
+}
+
+/**
+ * Start review over the spend budget: the one more choice the Run button's second press stands for
+ * (components/AiBudget.tsx `OverBudgetConfirm`), opened where the row menu was. Automatic runs stand
+ * down over budget; a run the reader starts is never refused.
+ */
+export function OpenPrsBudgetAsk({
+  x,
+  y,
+  prNumber,
+  returnFocus,
+  onClose,
+  onStart,
+  onOpenSettings,
+}: {
+  x: number;
+  y: number;
+  prNumber: number;
+  returnFocus: HTMLElement | null;
+  onClose: () => void;
+  onStart: () => void;
+  onOpenSettings: () => void;
+}): JSX.Element {
+  const items: MenuEntry[] = [
+    { id: 'over', heading: 'Over your AI spend budget' },
+    { id: 'start', label: 'Start review anyway', icon: <ReviewIcon size={14} className="text-ai-signal" />, onSelect: onStart },
+    { id: 'settings', label: 'AI spend settings', icon: <CoinIcon size={14} />, onSelect: onOpenSettings },
+  ];
+  return <ContextMenu x={x} y={y} items={items} label={`Start a review of #${prNumber}`} onClose={onClose} returnFocus={returnFocus} />;
 }
 
 /**
