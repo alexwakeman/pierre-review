@@ -290,6 +290,8 @@ import type {
   PrRefQuery,
   ResolvePrRefsBody,
   ResolvePrRefsResponse,
+  PrTabSummariesBody,
+  PrTabSummariesResponse,
   TicketReviewStatesResponse,
   CiReview,
   CiReviewStatesBody,
@@ -1593,6 +1595,12 @@ export const api = {
   // TICKET_REVIEW_STATES_MAX idents (the route 400s over, never truncates). DB-only.
   // PR references in the Review tab's prose → local PR ids. ONE batch per pane, only the refs the
   // pane could not resolve from data already on screen; at most PR_REF_RESOLVE_MAX (400 over). DB-only.
+  // The open-tabs hover card: every PR tab's stored facts in ONE batch (hooks/usePrTabSummaries.ts).
+  // DB-only; at most PR_TAB_SUMMARIES_MAX ids (the route 400s over).
+  prTabSummaries: (prIds: number[]) =>
+    fetch('/api/prs/tab-summaries', jsonBody('POST', { prIds } satisfies PrTabSummariesBody)).then((r) =>
+      handle<PrTabSummariesResponse>(r),
+    ),
   resolvePrRefs: (refs: PrRefQuery[]) =>
     fetch('/api/prs/resolve', jsonBody('POST', { refs } satisfies ResolvePrRefsBody)).then((r) =>
       handle<ResolvePrRefsResponse>(r),

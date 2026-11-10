@@ -795,6 +795,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // account-scoped reads, no GitHub, no model), one batch per pane: `read`, DECIDED rather than
   // inherited. EXACT `===` so no future `/api/prs/resolve-*` sibling can ride it.
   if (mutating && path === '/api/prs/resolve') return [TIERS.read];
+  // POST /api/prs/tab-summaries — the open-tabs hover card's ONE batch. DB-only (three
+  // account-scoped reads, no GitHub, no model): `read`, DECIDED and spelled EXACTLY.
+  if (mutating && path === '/api/prs/tab-summaries') return [TIERS.read];
   if (mutating && /^\/api\/prs\/\d+\/refresh$/.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }

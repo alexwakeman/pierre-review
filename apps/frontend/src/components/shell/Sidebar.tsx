@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   repoStatusSummary,
   type ActivityRepo,
@@ -20,7 +20,9 @@ import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
 import { groupTabsByAuthor } from '../../lib/sidebarTabGroups.js';
+import { FloatingDelayGroup } from '@floating-ui/react';
 import { TabContextMenu, useTabChip } from '../PinnedTabsBar.js';
+import { TAB_CARD_DELAY, useTabHoverCard } from './TabHoverCard.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useShell } from '../../store/shell.js';
 import { AiUsageMenu } from '../AiUsageMenu.js';
@@ -299,6 +301,8 @@ function SidebarTabRow({
   onOpenMenu: (e: React.MouseEvent, key: string) => void;
 }): JSX.Element {
   const cfg = useTabChip(tab);
+  // The hover card replaces the browser tooltip (components/shell/TabHoverCard.tsx).
+  const hoverCard = useTabHoverCard(tab, cfg);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
   const closeTab = usePinnedTabs((s) => s.closeTab);
   const togglePinTab = usePinnedTabs((s) => s.togglePinTab);
@@ -307,7 +311,15 @@ function SidebarTabRow({
   // of a scroller with no visible bar: bring the active one into view. The repo list often lands
   // AFTER the tab (a reload, a link) and pushes it down, so it is kept in view while the content
   // above settles — for a moment only, so a later "Show all" never yanks the scroll.
-  const rowRef = useRef<HTMLLIElement>(null);
+  const rowRef = useRef<HTMLLIElement | null>(null);
+  const setPositionReference = hoverCard.setPositionReference;
+  const setRow = useCallback(
+    (el: HTMLLIElement | null) => {
+      rowRef.current = el;
+      setPositionReference(el);
+    },
+    [setPositionReference],
+  );
   useEffect(() => {
     const row = rowRef.current;
     if (!active || row == null) return;
@@ -325,19 +337,24 @@ function SidebarTabRow({
   }, [active]);
   return (
     <li
-      ref={rowRef}
-      onContextMenu={(e) => onOpenMenu(e, tab.key)}
+      ref={setRow}
+      onContextMenu={(e) => {
+        hoverCard.close();
+        onOpenMenu(e, tab.key);
+      }}
       className={cx('group flex h-8 items-center rounded-ui touch:h-11', active ? 'bg-ui-sel' : 'hover:bg-ui-hover')}
     >
       <button
         type="button"
         role="tab"
         aria-selected={active}
-        title={cfg.title}
-        onClick={() => {
-          setActiveTab(tab.key);
-          useShell.getState().setDrawerOpen(false);
-        }}
+        ref={hoverCard.setReference}
+        {...hoverCard.referenceProps({
+          onClick: () => {
+            setActiveTab(tab.key);
+            useShell.getState().setDrawerOpen(false);
+          },
+        })}
         className={cx(
           'flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-ui pl-2 text-left text-body',
           active && 'font-medium',
@@ -348,6 +365,7 @@ function SidebarTabRow({
         <span className="flex w-[18px] shrink-0 justify-center text-ui-ink">{cfg.icon}</span>
         <span className="min-w-0 flex-1 truncate">{cfg.label}</span>
       </button>
+      {hoverCard.card}
       {/* A PINNED tab has no ✕: its pin, always shown, unpins it. */}
       {pinned ? (
         <button
@@ -414,6 +432,8 @@ function OpenTabs(): JSX.Element | null {
   const rows = (list: readonly Tab[]): JSX.Element[] =>
     list.map((t) => <SidebarTabRow key={t.key} tab={t} active={activeTab === t.key} onOpenMenu={openMenu} />);
   return (
+    // One delay group: once a card has shown, the next tab's card opens at once (TabHoverCard.tsx).
+    <FloatingDelayGroup delay={TAB_CARD_DELAY} timeoutMs={200}>
     <div data-testid="sidebar-open-tabs">
       <div className="mb-1 mt-4 flex items-center pl-2 pr-1">
         <p className="min-w-0 flex-1 text-meta text-ui-faint">
@@ -488,6 +508,7 @@ function OpenTabs(): JSX.Element | null {
         <TabContextMenu x={menu.x} y={menu.y} tabKey={menu.tabKey} onClose={() => setMenu(null)} />
       )}
     </div>
+    </FloatingDelayGroup>
   );
 }
 

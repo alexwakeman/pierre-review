@@ -104,6 +104,7 @@ describe('tierFor — ticket review', () => {
   });
   it('keeps the PR-reference resolver on read (DB-only batch)', () => {
     expect(tiers('POST', '/api/prs/resolve')).toEqual(['read']);
+    expect(tiers('POST', '/api/prs/tab-summaries')).toEqual(['read']);
   });
 
   it('keeps every read on read', () => {

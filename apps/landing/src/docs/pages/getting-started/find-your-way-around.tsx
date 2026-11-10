@@ -85,6 +85,14 @@ export default function Page(): JSX.Element {
         top bar. Your place in each tab is kept while you move between them, and the browser's Back button
         returns to where you were.
       </p>
+      <H3>See which tab is which</H3>
+      <p>
+        Hover a tab under <Ui>Open tabs</Ui>, or move to it with the keyboard, and a short card opens beside it.
+        For a pull request it shows the repository, the author, its state, CI, the review, the AI review and the
+        review threads by state. For a ticket it shows the status, the assignee and its pull requests; for a
+        person, a bot or a list, what that tab shows. The card closes as soon as the pointer leaves the tab, or
+        when you press <Kbd>Esc</Kbd>.
+      </p>
       <H3>Pin a tab</H3>
       <p>
         Right-click a tab and choose <Ui>Pin tab</Ui> to keep it. A pinned tab has no close button, is listed

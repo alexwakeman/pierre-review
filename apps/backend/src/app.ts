@@ -28,6 +28,7 @@ import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
 import { prRoutes } from './api/routes/prs.js';
 import { prRefRoutes } from './api/routes/pr-refs.js';
+import { prTabSummaryRoutes } from './api/routes/pr-tab-summaries.js';
 import { conflictRoutes } from './api/routes/conflicts.js';
 import { threadRoutes } from './api/routes/threads.js';
 import { meRoutes } from './api/routes/me.js';
@@ -180,6 +181,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(timelineRoutes);
   await app.register(prRoutes);
   await app.register(prRefRoutes);
+  await app.register(prTabSummaryRoutes);
   // Merge-conflict resolver. Registered unconditionally.
   await app.register(conflictRoutes);
   await app.register(threadRoutes);

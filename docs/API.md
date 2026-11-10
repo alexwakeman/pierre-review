@@ -228,6 +228,15 @@ into Limn links. `owner/repo` matches exactly. A bare `repo` resolves only when 
 repos has that name. More than `PR_REF_RESOLVE_MAX` (100) refs, or a number above int4, gives a 400 and is never
 truncated. Tier `read`.
 
+### Open-tab hover card summaries
+
+`POST /api/prs/tab-summaries {prIds}` → `PrTabSummariesResponse` (shared `pr-tab-summary.ts`): per PR the stored
+row (state, draft, CI, mergeability, merge state, review decision, merge-queue membership), the repo's full
+name, the author and the thread counts by derived state. DB-only (no GitHub call, no hydration) and
+account-scoped: an id the account does not own is ABSENT. The sidebar's open-tabs hover card sends ONE batch for
+every PR tab, the first time a card opens (docs/FRONTEND.md § The tab hover card). More than
+`PR_TAB_SUMMARIES_MAX` (100) ids gives a 400 and is never truncated. Tier `read` (spelled exactly in `tierFor`).
+
 ### Team review: standing verdicts and every finding
 
 Two shapes the AI Review tab (`GET /api/prs/:id/claude-review` → `teamView`) and the states batch
