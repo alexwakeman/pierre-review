@@ -6,7 +6,7 @@ own Claude notes. A full **Claude Code** or **Codex** agent works in it with a s
 the agent in the build tab, presses **Start build**, reviews one diff per repository and presses
 **Push**. The push runs on the HOST, with the host's GitHub sign-in; nothing is pushed, posted or written
 to the tracker before the reader presses a button. **AI Fix** runs in the same kind of session, on a pull
-request: the PR's repository at its head, the rest of the workspace read only, one push to the PR's own
+request: the PR's repository at its head, its ticket's other repositories read only, one push to the PR's own
 branch (§ AI Fix sessions). The product flows are [STORY-BUILD.md](STORY-BUILD.md) and
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix; this file is how the sandbox works and how to set one up.
 
@@ -54,7 +54,7 @@ result in one line ("Runs in Docker Desktop 29.6.2"), or what is wrong.
 | `SANDBOX_RUNTIME=docker` · `=microsandbox` | Forces one backend. |
 | `SANDBOX_CLI=podman` (or an absolute path) | Another CLI with Docker's verbs, for the Docker backend. |
 | `LIMN_SANDBOX_MAX_SESSIONS` (2) · `LIMN_SANDBOX_IDLE_MINUTES` (15) · `LIMN_SANDBOX_TURN_MAX_MINUTES` (120) | Open sessions on this computer; a session with nothing to do closes after this long (its sandbox is removed, its changes are kept); one agent turn running longer than the last is stopped. |
-| Settings → Sandbox, per workspace | CPUs, memory and disk per session (default 4 CPUs, 8 GB, 30 GB), the local folder, the Claude notes to bring, services, the always-allowed hosts. |
+| Settings → Sandbox, per workspace | CPUs, memory and disk per session (default 4 CPUs, 8 GB, 30 GB), the Claude notes to bring (found, not set: § Where the reader's clones are), services, the always-allowed hosts. |
 
 There is no Settings switch for the backend: there is no per-computer settings store.
 
@@ -126,8 +126,8 @@ the summary.
    holds ONLY inside a sandbox `sandbox/runtime` started — Implement and AI Fix (§ AI Fix sessions) run
    there; every review and every chat keep the no-shell rule (docs/CLAUDE-REVIEW.md § The agents' tools). The two drivers (`sandbox/drivers/`) are the
    only code that starts `claude` or `codex` in a sandbox (`provider-seam.test.ts`).
-8. **The local folder decides the LAYOUT and which notes come in; the BASE COMMIT comes from Limn's clone
-   cache** at the bases today's rules pick. The reader's clone may only LEND OBJECTS for that commit to the
+8. **The reader's clones (found through their Claude projects, never a setting) decide the LAYOUT and which
+   notes come in; the BASE COMMIT comes from Limn's clone cache** at the bases today's rules pick. The reader's clone may only LEND OBJECTS for that commit to the
    repo store — read-only, never its working tree, index, stash, hooks or remote credentials; a commit id
    is content-addressed, so the code is the same (§ The repo store).
 9. **One fold for everything the agent is told** (`workspace/seed.ts`), for both subjects: `CLAUDE.md`,
@@ -341,7 +341,7 @@ process), and ONE normalised event for both providers: packages/shared `SandboxA
   SAME process (it starts with `--allow-dangerously-skip-permissions`), `interrupt` for **Stop** (the
   process lives on). `--strict-mcp-config` with no server, `--setting-sources user,project`,
   `--no-session-persistence`, the seed as `--append-system-prompt-file`, the other repositories as
-  `--add-dir`. `--disallowedTools`: schedules, remote triggers, messages to other sessions, the web tools
+  `--add-dir` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` (their CLAUDE.md loads at start). `--disallowedTools`: schedules, remote triggers, messages to other sessions, the web tools
   (a web search runs on Anthropic's side, past the allow-list) and `ExitPlanMode` (the reader starts the
   build).
 - **Codex** (`codex.ts`, spike 2: `codex app-server --strict-config`): `thread/start` (or `thread/resume`
@@ -377,13 +377,15 @@ interrupt) is still NOT proven live: re-run `LIMN_SANDBOX_LIVE=codex` once the l
 
 ## The workspace mirror (`apps/backend/src/sandbox/workspace/`)
 
-What the agent finds when the session opens: every workspace repository, the ticket in full, and the
-reader's own Claude notes. The session manager (WP7) calls, in order: `resolveWorkspaceLayout` (the SAME
-computation Settings shows) → `sandboxMountsFor` → `readSessionTicket` → `prepareSessionWorkspace`.
+What the agent finds when the session opens: the repositories the job needs (Implement: every workspace
+repository; AI Fix: § AI Fix sessions → Scope), the ticket in full, and the reader's own Claude notes. The
+session manager (WP7) calls, in order: `resolveWorkspaceLayout` (the SAME computation Settings shows) →
+`sandboxMountsFor` → `readSessionTicket` → `prepareSessionWorkspace`.
 
 | File | What it holds |
 |---|---|
 | `remote.ts` | A git remote → `owner/name` (scp-like, `ssh://`, `https://` with or without a credential, `git://`, SSH host aliases); the remotes of a git config, read as TEXT. |
+| `discover.ts` | Where the reader's clones are, with no setting: every Claude project key DECODED by a disk walk, its clone (or team folder) matched by remote, and the folder the layout mirrors picked (below). |
 | `scan.ts` | The folder walk: clones at depth ≤ 3, Claude projects at depth ≤ 6 (entered only where a key leads). Dot-folders, `node_modules` and symlinks skipped; a clone inside a clone is not one; ≤ 20,000 folders and 5 s, else `truncated`. No `git` process. |
 | `layout.ts` | The match (BY REMOTE, case-insensitive, the shallowest clone first; the rest `alsoAt`) and the layout. Pure. |
 | `memories.ts` | The reader's Claude files: memory projects, `~/.claude/CLAUDE.md`, `~/.claude/skills/`. |
@@ -394,15 +396,37 @@ computation Settings shows) → `sandboxMountsFor` → `readSessionTicket` → `
 | `store.ts` | The repo store's side: the local-clone check, the copy into the store, the repository built from it (§ The repo store). |
 | `index.ts` | The order above, and `prepareSessionWorkspace`. |
 
+**Where the reader's clones are** (`discover.ts`; since 2026-11-10 — the "local folder" and "starting
+folder" settings are REMOVED, their columns `local_folder` / `start_dir` DORMANT: never read, never written,
+kept). Before, a reader who set no folder (the default) got NO memories at all, silently. Now:
+
+1. Every key under `~/.claude/projects/` (Limn's own litter skipped, ≤ 400 keys) is DECODED by walking the
+   disk from `/`: a folder is entered only when its encoded name is the next part of the key, so
+   `bng-fe-be` and `bng/fe/be` are told apart by what exists (≤ 400 folders read per key). Never a string
+   rule: the encoding is lossy.
+2. A decoded folder inside a clone (a `.git` FOLDER; the home folder and its parents never count, so a
+   dotfiles repository does not swallow everything) whose remote names a workspace repository: that clone is
+   the repository's, and the project is RELATED. A decoded folder in no clone that holds a workspace clone
+   below it (depth ≤ 3, ≤ 2,000 folders, 1 s; never the home folder) is a TEAM FOLDER, also related. A linked
+   worktree (`.git` file) is neither.
+3. The folder the layout mirrors (`pickReaderFolder`): the closest common parent of every clone's parent (a
+   team folder stands for the clones in it) when `localFolderProblem` allows it (never the home folder or an
+   ancestor), else the parent holding the most clones, else a clone itself. A clone outside the picked folder
+   is not mirrored at its path (it goes beside the others); its memories still come.
+4. The memories OFFERED are the related projects' only, every one ticked by default (a saved untick list
+   still applies). Another project that happens to sit near the clones is never offered.
+
+The check and a session run the SAME `resolveWorkspaceLayout`. Disk only, no `git` process, no network.
+
 **The layout** (owner decision D6; the plan's "mirroring absolute paths"):
 
-- a repository with a clone in the reader's LOCAL FOLDER sits at that clone's path, so Claude Code's
+- a repository with a clone in the found folder sits at that clone's path, so Claude Code's
   project key (the folder with every non-alphanumeric character as `-`) and every path a memory cites
   still hold. Measured on the BNG folder: 9 of 9 repositories matched, `DEFRA/cdp-app-config` (another
   workspace's) named and left out, the `bng-metric-harness` project's 37 memories offered, 51 ms;
 - one with no clone there sits at `<folder>/<name>` (`<folder>/<owner>-<name>` when that path is taken,
   also by a clone outside the workspace);
-- with no folder, at `/workspace/<owner>/<name>`;
+- with no clone found at all, at `/workspace/<owner>/<name>`;
 - the ROOT (the folder, or its parent when the folder is itself a clone, or `/workspace`) is ONE session
   volume holding every repository and the seed files, which sit there OUTSIDE every repository and are
   never committed. The container's working folder is the root (Docker would create a missing start
@@ -410,15 +434,17 @@ computation Settings shows) → `sandboxMountsFor` → `readSessionTicket` → `
 - refused as a folder: `/`, the home folder or an ancestor of it, Limn's data folder; refused as a place
   inside the sandbox (the layout falls back to `/workspace` with a note): the image's own trees (`/usr`,
   `/etc`, `/home/agent`, …), and `/home`, `/var`, `/tmp`, `/opt` themselves;
-- **the start folder**: the reader's choice (inside the root), else the ticked project with the most
-  memories, else the folder.
+- **the start folder**: the ticked project with the most memories (inside the root), else the folder. There is
+  no setting: Claude Code loads the memories of the project it starts in, so this is the right default.
 
 **The base commit comes from Limn's clone cache** (plan invariant 4): `prepBranchWorktree`'s fetch and
 pin rules at the base the caller chose (story-build `baseFor` rules; the base is pinned by the caller's
 ref). On Docker the repositories come from the KEPT REPO STORE (below); without it (microsandbox, a store
 that could not be made, or a store step that failed for one repository) from THE PER-SESSION COPY.
 Repositories are prepared **3 at a time** (`MIRROR_CONCURRENCY`, one constant); every host step still
-takes clone-manager's per-repository lock. Each sandbox repository keeps `refs/limn/base` = the start
+takes clone-manager's per-repository lock. As each one starts, the `repos` boot step's detail reads
+`Loading repositories <n>/<total>: <owner/name>` (`mirrorProgressLine`, on the session's existing stream; no
+polling), so the reader sees how far along it is. Each sandbox repository keeps `refs/limn/base` = the start
 commit (the patch is `git format-patch refs/limn/base..limn/<key>`) and must end with `HEAD` at exactly
 that commit (checked). A repository that cannot be cloned is one line in the boot notes; the session goes
 on and the seed names only what is there.
@@ -435,14 +461,24 @@ no remote, hook or credential crosses. Measured on the real `DEFRA/bng-metric-ha
 the first time (the cache fetching the base's blobs from GitHub), 8 s to stream and check out 770 files.
 
 **Memories** (owner decision D1): the ticked projects' `memory/**` only — never a transcript — copied as
-FILES under the SAME key in `/home/agent/.claude/projects/<key>/memory/`. Found by ENCODING each folder
-the walk visits and looking the key up (a key cannot be decoded: the encoding is lossy). Limn's own
-project folders (`ai/session-litter.ts` `litterPrefixes`) are never offered. Default ticks: every project
-under the folder with memories. Regular files only, symlinks skipped, ≤ 256 KB a file and 4 MB in all
+FILES under the SAME key in `/home/agent/.claude/projects/<key>/memory/`. Because each clone sits at its own
+path, the key Claude Code computes in the sandbox IS the reader's key, so the start project's `MEMORY.md`
+loads as on the reader's machine; the seed lists every other project's folder as files to read (each project
+is named by its folder, so the repository it belongs to is plain). Found by DECODING each key against the
+disk (§ Where the reader's clones are). Limn's own project folders (`ai/session-litter.ts`
+`litterPrefixes`) are never offered. Default ticks: every related project with memories. Pinned by
+`discover.test.ts` (two repositories, each one's memories under the key of its own sandbox path). Regular files only, symlinks skipped, ≤ 256 KB a file and 4 MB in all
 (left out and counted, never cut). Codex has no memory store: AGENTS.md lists the same files to read.
 
+**The repositories' own CLAUDE.md and AGENTS.md** are committed files, so they are in each checkout at the
+base commit (a `CLAUDE.local.md` is not committed and does not come). Claude Code loads the start folder's and
+its parents' at start; every other repository is an `--add-dir`, and the driver sets
+`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` (`claudeSandboxEnv`) so theirs load at start too. Codex
+loads AGENTS.md from the git root down to its start folder (`project_doc_max_bytes` is NOT locked in a
+session); the seed's rule 6 tells both agents to read each changed repository's CLAUDE.md / AGENTS.md first.
+
 **The reader's CLAUDE.md and skills** (Q1): `~/.claude/CLAUDE.md` → `/home/agent/.claude/CLAUDE.md`
-(default on), and the local folder's own CLAUDE.md (outside every repository) quoted in the seed under the
+(default on), and the found folder's own CLAUDE.md (outside every repository) quoted in the seed under the
 same switch; `~/.claude/skills/**` → `/home/agent/.claude/skills/` only when the workspace opts in (≤ 1 MB
 a file, 16 MB in all; an executable keeps its bit).
 
@@ -474,10 +510,12 @@ check's findings (fenced as library text) or says there is none; TICKET.md point
 built document ⇒ the step is skipped with one line; a copy that fails is skipped too, never fatal.
 
 **Settings → Sandbox** (`sandbox_workspace_settings`, migration 0174; `db/sandbox-settings.ts`;
-routes docs/API.md § Sandbox settings): the local folder, the ticked memory projects (NULL = the default),
-the user CLAUDE.md and skills switches, the start folder, `globalProxyEnv`, CPUs / memory / disk (NULL =
-4 / 8 GB / 30 GB), and the "Always allow" hosts. Per workspace, nothing inherited; PUT replaces the whole
-setting. The check (`POST …/sandbox/check`) is the same `resolveWorkspaceLayout` the session runs.
+routes docs/API.md § Sandbox settings): the ticked memory projects (NULL = the default), the user CLAUDE.md
+and skills switches, `globalProxyEnv`, CPUs / memory / disk (NULL = 4 / 8 GB / 30 GB), the services, and the
+"Always allow" hosts. Per workspace, nothing inherited; PUT replaces the whole setting. `local_folder` and
+`start_dir` are DORMANT (removed 2026-11-10): not on the wire, dropped from a stale PUT by the schema, never
+cleared, still in the data export. The check (`POST …/sandbox/check`, no body, the reader's **Find** press) is
+the same `resolveWorkspaceLayout` the session runs.
 
 ## The repo store (`workspace/store.ts`, `runtime.repoStore`; Docker only)
 
@@ -571,8 +609,23 @@ the services; the agent asks** — there is no Docker, socket or daemon in the s
 | `index.ts` | `serviceStacksFor` (the picked files, placed), `startSessionServices` (controller + relay). |
 | `../../../sandbox-image/limn-svc`, `limn-svcd.cjs` | The agent's command and the relay, baked into the image (root-owned; part of the recipe). |
 
+**Why services, and not the ones the reader already runs.** The sandbox sits ONLY on the session's
+`--internal` network: no route to the host, the LAN or Docker Desktop's VM. Its one way out is the proxy, which
+always refuses loopback (`localhost`, `127.0.0.1`), link-local and reserved addresses, allows a private
+address only for a host the reader named EXACTLY, and speaks HTTP CONNECT only — so a Postgres or Redis client
+could not use it even then. Opening a route to the reader's own containers would hand code the agent runs
+(steered by ticket and PR text Limn does not control) the reader's local data: their dev databases, queues and
+credentials. So every session gets its OWN throw-away services, on its own network, removed at its end.
+
 **Which files.** Settings → Sandbox `services` (`SandboxServiceStackChoice {repo, file,
-egress}`, migration 0175). Limn never runs a file the reader did not pick. A picked file of a repository
+egress}`, migration 0175). Limn never runs a file the reader did not pick. **Choose compose files**
+(`GET …/sandbox/compose-files`, `services/compose-files.ts`, click-gated) lists the candidates: per workspace
+repository, every path whose name is `compose*.y(a)ml` / `docker-compose*.y(a)ml` at any depth (not under
+`node_modules`, `vendor`, `third_party`, `bower_components`; ≤ 50 a repository, shallowest first), read with
+`git ls-tree` from Limn's OWN clone cache at its newest default-branch ref (`refs/pierre/ticket-default-branch`,
+`refs/heads/*`, `refs/remotes/origin/*`, else `HEAD`). Names only, so the blobless cache answers with no
+download (`GIT_NO_LAZY_FETCH=1`); a repository with no cached copy says so (`copied: false`). The reader ticks
+several at once; a file not listed can still be typed. The reader's own checkout is never read for this. A picked file of a repository
 not in the session is one line in the boot notes. `limn-svc` calls each file by its repository's name
 (`bng-metric-backend`).
 
@@ -968,6 +1021,15 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
 
 ## AI Fix sessions (`session/fix.ts`, `workspace/fix-report.ts`)
 
+**Which repositories a session loads, and why not lazily.** Implement loads every workspace repository: it is
+offered only on a ticket with NO pull request, so nothing says in advance which repositories the work
+touches, and the plan is made by reading the code. Fill gaps does the same (a gap can need a repository the
+ticket's PRs never touched). AI Fix narrows (Scope below). Loading a repository LATER, when the agent asks, is
+not built: the sandbox has no channel to Limn except the services relay (started only with services), the
+request would be untrusted agent text driving host git work mid-turn, and every per-repository row (patch,
+Push, Resume) is made after the mirror. The kept repo store makes a repeat load cheap (7 s for 9 repositories,
+§ The repo store).
+
 Every AI Fix run — manual, Plan first, the unattended auto fix and dependency automation's fix — is a session
 of the SAME machine with a second subject (`subject.ts`): the caps, the ONE build slot, boot, the idle close,
 the stream, the restart reconcile and Resume are shared with Implement. The row is the fix's own `ai_fixes`
@@ -980,7 +1042,7 @@ pushed, failed `failed`), so the banner, the Open PRs pill, the auto-fix caps, d
 | | |
 |---|---|
 | **Start** (`coding/ai-fix/manager.ts` `startRun`) | provider pre-flight → instruction → ONE FIX PER PR (`claimFixPr`, same tick) → the seed (review / CI-only / plain; `NothingToFix` boots nothing) → runtime (`409 NoRuntime`, no row) → the slot: a session and, for a fix that builds at once, THE build slot (`reserveSessionSlot`, same tick; `409 TooManySessions` / `BuildBusy`) → the live head (`base_sha`) → the row → `startFixSession`. Never queued. |
-| **Scope** | The whole workspace of the PR's repository, at the reader's layout, memories as in Implement. The PR repository at the PR's HEAD SHA, fetched through the base repository's `refs/pull/<n>/head` (`RepoBaseRequest.remoteRef`; a fork's head too); every other repository on its default branch, "read only". Branch `limn/fix-pr-<n>`; pins `refs/pierre/ai-fix/<fixId>/<repoId>` (dropped on push, discard and a failed close). |
+| **Scope** | ONLY what the job needs (2026-11-10): the PR's repository plus the workspace repositories of the OTHER pull requests of its ticket(s) (`FixSessionDeps.relatedRepoIds`: `ticketsForPr` → `ticketPrIds` → `ticketPrs`, ≤ 3 tickets, open or merged; a failed read ⇒ the PR's alone), at the reader's layout, memories as in Implement. Not every workspace repository: each costs load time. The agent cannot ask for another one mid-session (below). The PR repository at the PR's HEAD SHA, fetched through the base repository's `refs/pull/<n>/head` (`RepoBaseRequest.remoteRef`; a fork's head too); every other repository on its default branch, "read only". Branch `limn/fix-pr-<n>`; pins `refs/pierre/ai-fix/<fixId>/<repoId>` (dropped on push, discard and a failed close). |
 | **Seed** | `FIX.md` (the PR, its fenced description, the task — review-seed.ts's fenced items or the fenced plain instruction — and the report contract), `PR.diff` (GitHub's diff, noise files out, capped at 1 MB, cuts named), `TICKET.md` for a MANUAL fix of a PR with a ticket ("For context only"), `.limn/fix-refs.json` and the checker `~/.limn/fix-report-check.cjs`. Goldens `__fixtures__/seed-fix*.md`. |
 | **Turns** | Manual: the first turn is the build turn, started the moment the agent is ready ("Start fix"). Plan first: one chat turn ("make a plan"), then the session waits; Start fix (`…/plan/approve`) switches to build. Every later message is one more turn in the SAME session; in build mode the agent rewrites the report for the whole change. Unattended: ONE build turn, then the session closes (`built`, resumable). |
 | **The report** | A JSON FILE, not a tool: the drivers run no MCP server and nothing on the host listens for the sandbox, and a file is the same for both providers. The agent writes `<root>/.limn/fix-report.json` (the `submit_fix` shape) and runs the checker until it prints OK. After every build turn the host reads it out (as the agent), checks it with the SAME validator text (`FIX_REPORT_VALIDATOR_SOURCE`), and normalises it against the extracted diff (`normalizeChangeReport`). A wrong shape ⇒ no report (every shown ref "not reported") and one notice; content problems ⇒ named, and the normaliser drops them. The old report is removed before each build turn. |
@@ -1029,7 +1091,9 @@ Measured live, 2026-11-07 (`session/fix-merge-session.live.test.ts`): see § Tes
   the 0.164 protocol schema (`codex.test-support.ts`) beside the recorded usage-limit session. The live
   run (`drivers.live.test.ts`, the `live` project) needs `LIMN_SANDBOX_LIVE=claude|codex`.
 - **The workspace mirror**: the walk, the match and the layout on a scratch folder shaped like the BNG
-  one (`layout.test.ts`), the reader's files and the check (`memories.test.ts`), the ticket over seams
+  one (`layout.test.ts`), the reader's files and the check (`memories.test.ts`), finding the clones with no
+  setting and each repository's memories under its own key (`discover.test.ts`), the progress line
+  (`store.test.ts`), the compose-file list (`api/routes/sandbox-settings.test.ts`), the ticket over seams
   (`ticket.test.ts`), the seed goldens (`seed.test.ts`; `SANDBOX_SEED_GOLDEN_WRITE=1` rewrites them), the
   settings routes on a scratch DB (`api/routes/sandbox-settings.test.ts`), the tracker re-read
   (`tracker/open-points-ticket.test.ts`). `mirror-real.test.ts` (the `slow` project) runs real git — a

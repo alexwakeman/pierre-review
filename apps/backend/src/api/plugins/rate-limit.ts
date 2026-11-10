@@ -189,9 +189,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // day's cap of agentic model runs on the reader's own Claude or Codex — `ai` + `aiHourly`, decided
   // ABOVE the family's `read` line, by exact shape. The GET/PUT `…/auto-review` stay `read`.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/auto-review\/sweep$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
-  // SANDBOX SETTINGS (api/routes/sandbox-settings.ts): GET/PUT `…/sandbox`, POST `…/sandbox/check` (a
-  // BOUNDED walk of a local folder, git config read as text) and the "Always allow" hosts — DB + local
-  // disk, no GitHub, no model, no process. `read` on the next line, decided (rate-limit.test.ts).
+  // SANDBOX SETTINGS (api/routes/sandbox-settings.ts): GET/PUT `…/sandbox`, POST `…/sandbox/check`
+  // (BOUNDED walks of the reader's Claude projects and clones, git config read as text), GET
+  // `…/sandbox/compose-files` (`git ls-tree` in Limn's OWN clone cache, lazy fetch OFF: local processes,
+  // no network) and the "Always allow" hosts — DB + local disk, no GitHub, no model. `read` on the next
+  // line, decided (rate-limit.test.ts).
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----

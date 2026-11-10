@@ -8,8 +8,9 @@
 //   unattended   booting ─► building ─► closed: built           (an auto fix, dependency automation's fix)
 //   Push (coding/ai-fix/push.ts) ends a live session as `pushed`; Discard as `discarded` (status cancelled).
 //
-// SCOPE (owner decision D3): the WHOLE workspace is mirrored at the reader's paths, memories as in
-// Implement; the PR's repository is checked out at the PR's HEAD SHA, fetched through the base repository's
+// SCOPE (owner decision D3; narrowed 2026-11-10): the PR's repository, plus the workspace repositories of
+// the other pull requests of its ticket, mirrored at the reader's paths, memories as in Implement; the PR's
+// repository is checked out at the PR's HEAD SHA, fetched through the base repository's
 // `refs/pull/<n>/head` (a fork's head included); every other repository is on its default branch, and its
 // edits are shown ("left out") and never stored as a patch.
 //
@@ -139,6 +140,11 @@ export interface MergeRepoInput {
 export interface FixSessionDeps {
   /** The PR's ticket, for context (a manual fix only). Never fatal: null. */
   contextTicket(ctx: AgentContext, accountId: number, workspaceId: number, prId: number): Promise<SessionTicket | null>;
+  /**
+   * The repositories of the OTHER pull requests of this PR's tickets (open or merged): with the PR's own,
+   * the only ones a fix session loads (docs/SANDBOX.md § AI Fix sessions). Never fatal: [].
+   */
+  relatedRepoIds(ctx: AgentContext, accountId: number, prId: number): Promise<number[]>;
   /** The merge: the base tip (pinned; `baseSha` on Resume) and the merge base, from Limn's clone cache. */
   mergePlan(a: MergeRepoInput & { baseSha?: string | null }): Promise<MergePlan>;
   /** The host's check of the agent's commits (coding/ai-fix/merge-verify.ts), in Limn's clone cache. */
@@ -161,6 +167,21 @@ const defaultFixDeps: FixSessionDeps = {
       );
     } catch {
       return { ok: false, reason: 'Limn could not read its own copy of the repository to check the merge.' };
+    }
+  },
+  async relatedRepoIds(ctx, accountId, prId) {
+    try {
+      const { getTicketSource } = await import('../../tracker/ticket-source.js');
+      const { defaultStoryBuildInputSeams } = await import('../../coding/story-build/inputs.js');
+      const tickets = await getTicketSource().ticketsForPr(accountId, prId);
+      const out = new Set<number>();
+      for (const t of tickets.slice(0, 3)) {
+        const ids = await defaultStoryBuildInputSeams.ticketPrIds(ctx, accountId, t.ident).catch(() => []);
+        for (const pr of await defaultStoryBuildInputSeams.ticketPrs(ctx, accountId, ids).catch(() => [])) out.add(pr.repoId);
+      }
+      return [...out];
+    } catch {
+      return [];
     }
   },
   async contextTicket(ctx, accountId, workspaceId, prId) {
@@ -432,7 +453,11 @@ function fixSubject(
       return `#${facts.number} at ${facts.headSha.slice(0, 7)}`;
     },
     async repoIds(memberRepoIds) {
-      return [...new Set([...memberRepoIds, facts.prRepoId])];
+      // ONLY what the job needs: the PR's repository, and the workspace repositories of its ticket's other
+      // pull requests (read only). Not every workspace repository: each one costs load time.
+      const members = new Set(memberRepoIds);
+      const related = await fixDeps.relatedRepoIds(ctx, accountId, facts.prId).catch(() => []);
+      return [...new Set([facts.prRepoId, ...related.filter((id) => members.has(id))])];
     },
     async bases(l, repos) {
       if (facts.mergeBaseRef) {

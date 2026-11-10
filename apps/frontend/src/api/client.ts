@@ -253,8 +253,8 @@ import type {
   FlowSettings,
   FlowActorView,
   FlowPointersResponse,
+  SandboxComposeFiles,
   SandboxFolderCheck,
-  SandboxFolderCheckBody,
   SandboxRunningStatus,
   SandboxRuntimeStatus,
   SandboxStopAllResult,
@@ -628,9 +628,11 @@ export const api = {
     fetch(`/api/workspaces/${id}/sandbox`).then((r) => handle<SandboxWorkspaceSettings>(r)),
   setSandboxSettings: (id: number, body: SandboxWorkspaceSettingsBody) =>
     fetch(`/api/workspaces/${id}/sandbox`, jsonBody('PUT', body)).then((r) => handle<SandboxWorkspaceSettings>(r)),
-  // The folder / memory check: omit `folder` for the saved one. A disk walk on the reader's computer.
-  checkSandboxFolder: (id: number, body: SandboxFolderCheckBody = {}) =>
-    fetch(`/api/workspaces/${id}/sandbox/check`, jsonBody('POST', body)).then((r) => handle<SandboxFolderCheck>(r)),
+  // The clone / memory check: finds the reader's clones through their Claude projects (disk walks).
+  checkSandboxFolder: (id: number) =>
+    fetch(`/api/workspaces/${id}/sandbox/check`, jsonBody('POST', {})).then((r) => handle<SandboxFolderCheck>(r)),
+  // The compose files of each workspace repository, from Limn's own clone cache (no network).
+  sandboxComposeFiles: (id: number) => get<SandboxComposeFiles>(`/api/workspaces/${id}/sandbox/compose-files`),
   addSandboxAllowedHost: (id: number, rule: string) =>
     fetch(`/api/workspaces/${id}/sandbox/allowed-hosts`, jsonBody('POST', { rule })).then((r) => handle<SandboxWorkspaceSettings>(r)),
   removeSandboxAllowedHost: (id: number, rule: string) =>

@@ -64,29 +64,37 @@ describe('memory projects', () => {
     expect([...keys].some((k) => k.startsWith(places.claude.litter[0]!))).toBe(false);
   });
 
-  it('the check offers every project under the folder with memories, ticked by default, and starts in the biggest', () => {
-    const r = resolveWorkspaceLayout(REPOS, { localFolder: folder, memoryProjects: null, startDir: null }, places);
+  it('the check FINDS the clones through their Claude projects (no folder setting), offers their memories ticked, and starts in the biggest', () => {
+    const r = resolveWorkspaceLayout(REPOS, { memoryProjects: null }, places);
     const c = toFolderCheck(7, r, places);
-    expect(c.problem).toBeNull();
+    expect(c.folder).toBe(folder);
+    expect(c.matched.map((m) => [m.fullName, m.localPath])).toEqual([
+      ['DEFRA/bng-metric-backend', join(folder, 'bng-metric-backend')],
+      ['DEFRA/bng-metric-harness', join(folder, 'bng-metric-harness')],
+    ]);
     expect(c.memories).toEqual([
       { dir: join(folder, 'bng-metric-backend'), key: projectKey(join(folder, 'bng-metric-backend')), memoryCount: 1, ticked: true },
       { dir: join(folder, 'bng-metric-harness'), key: projectKey(join(folder, 'bng-metric-harness')), memoryCount: 4, ticked: true },
     ]);
-    expect([c.startDir, c.startDirReason]).toEqual([join(folder, 'bng-metric-harness'), 'memories']);
+    expect([c.startDir, r.layout.startDirReason]).toEqual([join(folder, 'bng-metric-harness'), 'memories']);
+    // Mirrored paths: the key inside the sandbox is the reader's key, so Claude Code loads these memories.
+    expect(r.layout.repos.map((x) => x.path)).toEqual([join(folder, 'bng-metric-backend'), join(folder, 'bng-metric-harness')]);
     expect(c.userClaudeMd).toBe(true);
     expect(c.folderClaudeMd).toBe(true);
     expect(c.userSkills).toEqual(['bng-story']);
   });
 
   it('honours the saved ticks', () => {
-    const r = resolveWorkspaceLayout(REPOS, { localFolder: folder, memoryProjects: [join(folder, 'bng-metric-backend')], startDir: null }, places);
+    const r = resolveWorkspaceLayout(REPOS, { memoryProjects: [join(folder, 'bng-metric-backend')] }, places);
     expect(r.projects.filter((p) => p.ticked).map((p) => p.dir)).toEqual([join(folder, 'bng-metric-backend')]);
     expect(r.layout.startDir).toBe(join(folder, 'bng-metric-backend'));
   });
 
-  it('refuses a missing folder and the home folder in one line', () => {
-    expect(resolveWorkspaceLayout(REPOS, { localFolder: join(base, 'nope'), memoryProjects: null, startDir: null }, places).problem).toContain('does not exist');
-    expect(resolveWorkspaceLayout(REPOS, { localFolder: places.home, memoryProjects: null, startDir: null }, places).problem).toContain('home folder');
+  it('with no Claude project of a workspace clone, nothing is found and every repository goes under /workspace', () => {
+    const r = resolveWorkspaceLayout([{ repoId: 9, owner: 'DEFRA', name: 'bng-unknown' }], { memoryProjects: null }, places);
+    expect(r.folder).toBeNull();
+    expect(r.projects).toEqual([]);
+    expect(r.layout.repos[0]!.path).toBe('/workspace/DEFRA/bng-unknown');
   });
 
   it('copies memories under the same key, never a transcript; the user CLAUDE.md; skills only when asked', () => {

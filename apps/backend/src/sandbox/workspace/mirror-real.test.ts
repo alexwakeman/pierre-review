@@ -126,7 +126,6 @@ describe.skipIf(!daemon)('the mirror in a real sandbox', () => {
         outside: [{ fullName: 'DEFRA/cdp-app-config', localPath: `${FOLDER}/cdp-app-config` }],
       },
       memoryProjects: [{ dir: harness, key, memoryCount: 2 }],
-      startDirSetting: null,
     });
     const volume = await rt.createVolume(owner, 'ws');
     const { mounts, workdir } = sandboxMountsFor(layout, volume);

@@ -1687,3 +1687,11 @@ the per-hunk conflict suggestion, the per-repo digest, "Discussion themes", pres
 reads or writes them. `pr_comment_annotations` stayed live for `impact` until the impact note's
 removal (2026-10-30, again no migration — the whole table is dormant now); `pro_synthesis`'s
 `brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant tables.
+
+### No migration — Settings → Sandbox's folder settings removed (2026-11-10): two columns DORMANT
+
+"Your local folder" and "Starting folder" left Settings → Sandbox: the reader's clones are found through
+their Claude projects (docs/SANDBOX.md § Where the reader's clones are) and the agent starts where the
+default rule says. NO drop migration: `sandbox_workspace_settings.local_folder` and `.start_dir` (`0174`)
+stay in the schema and the export; `db/sandbox-settings.ts` never reads or writes them, so a stored value
+is kept as it is.

@@ -64,6 +64,8 @@ let fake: import('../runtime/fake.js').FakeRuntime;
 let wsId = 0;
 let api = 0;
 let web = 0;
+/** The repositories of the PR's ticket's other PRs (fix.ts `relatedRepoIds`). */
+let relatedIds = (): number[] => [web];
 let prA = 0;
 let prB = 0;
 let prC = 0;
@@ -227,6 +229,8 @@ beforeAll(async () => {
     usageSink: { record: async (r) => void usage.push(r), noteClaudeRateLimit: () => {} },
   });
   F.setFixSessionDepsForTests({
+    // The ticket's other PR is in acme/web: that repository comes too (read only).
+    relatedRepoIds: async () => relatedIds(),
     contextTicket: async () => ({
       ident: 'jira:https://acme.atlassian.net#ACME-9',
       key: 'ACME-9',
@@ -455,6 +459,7 @@ describe('a manual AI Fix session, end to end', () => {
   });
 
   it('Plan first: one chat turn, `planned`; a message is a chat turn; Start fix builds; no report ⇒ every item "not reported"; Discard ⇒ cancelled', async () => {
+    relatedIds = () => [];
     extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
     reportAnswer = null;
     const r = await post(`/api/pro/prs/${prA}/ai-fix/plan`, { seed: 'review' });
@@ -462,6 +467,9 @@ describe('a manual AI Fix session, end to end', () => {
     const id = r.json().fixId as number;
     let f = await until(prA, (x) => x.id === id && x.session?.phase === 'ready' && x.session.conversation.some((c) => c.kind === 'turn'), 'the plan turn');
     expect(f.status).toBe('planned');
+    // ONLY the repositories the job needs: no other PR on the ticket ⇒ the PR's repository alone.
+    expect(f.session!.repos.map((x) => x.fullName)).toEqual(['acme/api']);
+    expect(f.session!.boot.find((b) => b.key === 'repos')).toMatchObject({ state: 'done', detail: '1 of 1 cloned' });
     expect(f.session!.mode).toBe('chat');
     expect(f.session!.conversation[0]).toMatchObject({ kind: 'reader', text: 'Plan first', build: false });
     expect(sentToClaude.at(-1)).toBe(F.PLAN_FIRST_TURN);
@@ -498,6 +506,7 @@ describe('a manual AI Fix session, end to end', () => {
     // The stream of a closed session: one snapshot, then done.
     const st = await get(`/api/pro/ai-fixes/${id}/session/stream`);
     expect(st.body.split('\n\n').filter(Boolean).map((l) => JSON.parse(l.replace(/^data: /, '')).type)).toEqual(['snapshot', 'done']);
+    relatedIds = () => [web];
   });
 });
 

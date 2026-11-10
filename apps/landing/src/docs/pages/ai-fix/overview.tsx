@@ -138,8 +138,8 @@ export default function Page(): JSX.Element {
       <p>The sandbox is a container on your computer, made for this fix and removed after it.</p>
       <ul>
         <li>
-          It holds every repository in the workspace. The pull request's repository is at the pull request's latest
-          commit; the others are read only.
+          It holds the pull request's repository, at the pull request's latest commit, and the repositories of the
+          other pull requests of its ticket, read only. Other workspace repositories are not loaded.
         </li>
         <li>
           The agent has a shell there, so it can run the project's own tests, lint and type checks, and start the

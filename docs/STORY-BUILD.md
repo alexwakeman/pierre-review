@@ -17,7 +17,9 @@ no ✕, kept by Close all and across a reload, until the reader unpins it) and s
 session** (since 2026-11-07):
 
 1. **Set up.** Limn starts a sandbox on the reader's computer with **every workspace repository** cloned
-   (at the reader's own local paths, so their Claude memories still apply), the **ticket in full**
+   (at the reader's own local paths — found through their Claude projects, there is no folder setting — so
+   their Claude memories still apply; the boot step counts them, "Loading repositories 3/7: owner/name"; why
+   every repository and not a subset: docs/SANDBOX.md § AI Fix sessions → "Which repositories"), the **ticket in full**
    (description, numbered acceptance criteria, open points) and the reader's **own Claude notes** — never
    a past session (owner decision D1). It takes seconds once the image is local.
 2. **Plan** (§ Plan first). Limn sends the opening turn itself: the agent investigates the code, the data

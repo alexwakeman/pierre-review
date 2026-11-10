@@ -84,7 +84,7 @@ describe('the layout', () => {
   const scanAndMatch = () => matchClones(REPOS, scanFolder(root).clones);
 
   it('mirrors matched clones at their own paths and puts the rest beside them', () => {
-    const l = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: [], startDirSetting: null });
+    const l = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: [] });
     expect(l.root).toBe(root);
     expect(l.repos.map((r) => [r.fullName, r.path, r.placed])).toEqual(
       [
@@ -100,18 +100,13 @@ describe('the layout', () => {
     expect(l.outside.map((o) => o.fullName)).toEqual(['DEFRA/cdp-app-config']);
   });
 
-  it('starts in the ticked project with the most memories, unless the reader chose a folder', () => {
+  it('starts in the ticked project with the most memories', () => {
     const memories = [
       { dir: join(root, 'bng-metric-backend'), key: 'k1', memoryCount: 3 },
       { dir: join(root, 'bng-metric-harness'), key: 'k2', memoryCount: 37 },
     ];
-    const l = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: memories, startDirSetting: null });
+    const l = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: memories });
     expect([l.startDir, l.startDirReason]).toEqual([join(root, 'bng-metric-harness'), 'memories']);
-    const s = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: memories, startDirSetting: join(root, 'bng-metric-backend') });
-    expect([s.startDir, s.startDirReason]).toEqual([join(root, 'bng-metric-backend'), 'setting']);
-    const out = planLayout({ repos: REPOS, folder: root, match: scanAndMatch(), memoryProjects: [], startDirSetting: '/etc' });
-    expect(out.startDirReason).toBe('folder');
-    expect(out.notes.join(' ')).toContain('outside the layout');
   });
 
   it('renames an unmatched repository whose name is taken, and never nests it in another', () => {
@@ -124,7 +119,7 @@ describe('the layout', () => {
       { dir: join(root, 'api'), remote: { host: 'github.com', owner: 'acme', name: 'api', slug: 'acme/api' }, depth: 1 },
       { dir: join(root, 'cdp-app-config'), remote: { host: 'github.com', owner: 'DEFRA', name: 'cdp-app-config', slug: 'defra/cdp-app-config' }, depth: 1 },
     ]);
-    const l = planLayout({ repos, folder: root, match, memoryProjects: [], startDirSetting: null });
+    const l = planLayout({ repos, folder: root, match, memoryProjects: [] });
     expect(l.repos.find((r) => r.repoId === 2)!.path).toBe(join(root, 'other-api'));
     // An outside clone's path is not reused either.
     expect(l.repos.find((r) => r.repoId === 3)!.path).toBe(join(root, 'acme-cdp-app-config'));
@@ -133,21 +128,21 @@ describe('the layout', () => {
   it('uses the parent when the folder is itself a clone, so the seed files sit outside it', () => {
     const folder = join(root, 'bng-metric-backend');
     const match = matchClones(REPOS, scanFolder(folder).clones);
-    const l = planLayout({ repos: REPOS, folder, match, memoryProjects: [], startDirSetting: null });
+    const l = planLayout({ repos: REPOS, folder, match, memoryProjects: [] });
     expect(l.root).toBe(root);
     expect(l.repos.find((r) => r.repoId === 1)!.path).toBe(folder);
     expect(l.repos.find((r) => r.repoId === 2)!.path).toBe(join(root, 'bng-metric-frontend'));
   });
 
   it('with no folder, places every repository under /workspace/<owner>/<name>', () => {
-    const l = planLayout({ repos: REPOS.slice(0, 2), folder: null, match: null, memoryProjects: [], startDirSetting: null });
+    const l = planLayout({ repos: REPOS.slice(0, 2), folder: null, match: null, memoryProjects: [] });
     expect(l.root).toBe(DEFAULT_ROOT);
     expect(l.repos.map((r) => r.path)).toEqual(['/workspace/DEFRA/bng-metric-backend', '/workspace/DEFRA/bng-metric-frontend']);
     expect([l.startDir, l.startDirReason]).toEqual(['/workspace', 'default']);
   });
 
   it('falls back to /workspace when the folder cannot exist inside the sandbox', () => {
-    const l = planLayout({ repos: REPOS.slice(0, 1), folder: '/usr/src/repos', match: null, memoryProjects: [], startDirSetting: null });
+    const l = planLayout({ repos: REPOS.slice(0, 1), folder: '/usr/src/repos', match: null, memoryProjects: [] });
     expect(l.root).toBe(DEFAULT_ROOT);
     expect(l.notes[0]).toContain('/workspace instead');
   });

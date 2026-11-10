@@ -1,6 +1,9 @@
 // SANDBOX WORKSPACE SETTINGS — the ONE reader/writer of `sandbox_workspace_settings` (migration 0174;
 // docs/SANDBOX.md § The workspace mirror). Per WORKSPACE, nothing inherited; no row = every default.
 // PUT semantics: the whole setting is REPLACED, a field left out goes back to its default.
+// ⚠ `local_folder` and `start_dir` are DORMANT (the settings were removed 2026-11-10: the reader's clones
+// are found through their Claude projects, and the agent starts where the default rule says). They are
+// never read and never written here; a stored value stays, untouched.
 import { and, asc, eq } from 'drizzle-orm';
 import {
   SANDBOX_MEMORY_PROJECTS_MAX,
@@ -25,11 +28,9 @@ export type SandboxSettingsRow = Omit<SandboxWorkspaceSettings, 'alwaysAllowedHo
 export function defaultSandboxSettings(workspaceId: number): SandboxSettingsRow {
   return {
     workspaceId,
-    localFolder: null,
     memoryProjects: null,
     userClaudeMd: true,
     userSkills: false,
-    startDir: null,
     globalProxyEnv: false,
     resources: { cpus: null, memoryGb: null, diskGb: null },
     services: [],
@@ -91,11 +92,9 @@ export async function readSandboxSettings(accountId: number, workspaceId: number
   if (!r) return defaultSandboxSettings(workspaceId);
   return {
     workspaceId,
-    localFolder: r.localFolder,
     memoryProjects: parseProjects(r.memoryProjectsJson),
     userClaudeMd: r.userClaudeMd,
     userSkills: r.userSkills,
-    startDir: r.startDir,
     globalProxyEnv: r.globalProxyEnv,
     resources: { cpus: r.cpus, memoryGb: r.memoryGb, diskGb: r.diskGb },
     services: parseServices(r.servicesJson),
@@ -113,8 +112,6 @@ const pathOk = (p: string): boolean => p.length <= SANDBOX_PATH_MAX && isAbsolut
 
 /** The meaning check, one plain sentence; null = fine. The shape is the route's ajv schema. */
 export function validateSandboxSettings(body: SandboxWorkspaceSettingsBody): string | null {
-  if (body.localFolder != null && !pathOk(body.localFolder)) return 'The local folder must be an absolute path without commas.';
-  if (body.startDir != null && !pathOk(body.startDir)) return 'The starting folder must be an absolute path without commas.';
   if (body.memoryProjects != null) {
     if (body.memoryProjects.length > SANDBOX_MEMORY_PROJECTS_MAX) return `Choose at most ${SANDBOX_MEMORY_PROJECTS_MAX} memory projects.`;
     if (body.memoryProjects.some((p) => !pathOk(p))) return 'Each memory project must be an absolute path.';
@@ -151,11 +148,9 @@ export async function writeSandboxSettings(accountId: number, workspaceId: numbe
   if (!(await ownsWorkspace(accountId, workspaceId))) return false;
   const projects = body.memoryProjects == null ? null : JSON.stringify([...new Set(body.memoryProjects.map((p) => clean(p)!))].sort());
   const values = {
-    localFolder: clean(body.localFolder),
     memoryProjectsJson: projects,
     userClaudeMd: body.userClaudeMd ?? true,
     userSkills: body.userSkills ?? false,
-    startDir: clean(body.startDir),
     globalProxyEnv: body.globalProxyEnv ?? false,
     cpus: body.resources?.cpus ?? null,
     memoryGb: body.resources?.memoryGb ?? null,

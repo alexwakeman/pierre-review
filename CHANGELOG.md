@@ -13,6 +13,26 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Settings → Sandbox: "Your local folder" and "Starting folder" are gone. Limn finds your clones
+  through the folders where you use Claude Code, places each repository at the same path in the
+  sandbox, and brings the Claude notes of each clone. **Find** shows what it found. The AI starts in
+  the repository with the most notes.
+- Settings → Sandbox → Services: **Choose compose files** lists every compose file in the
+  workspace's repositories, from Limn's own copies. Tick the ones you want.
+- Implement and AI Fix: while the repositories load, the setup counts them ("Loading repositories
+  3/7" and the repository's name).
+- AI Fix loads only the pull request's repository and the repositories of the other pull requests of
+  its ticket, not every workspace repository.
+- Implement and AI Fix with Claude: the CLAUDE.md of every repository loads at the start, not only
+  the one the AI starts in.
+
+### Fixed
+
+- Implement and AI Fix brought no Claude notes unless a local folder was set, and none was set by
+  default. The notes of each repository's clone now come in without a setting.
+
 ## [1.0.22] - 2026-11-10
 
 ### Changed

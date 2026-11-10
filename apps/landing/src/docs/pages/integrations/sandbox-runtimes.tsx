@@ -123,6 +123,11 @@ export default function Page(): JSX.Element {
           Its only way to the network is Limn's allow-list: the AI provider, package registries and GitHub downloads by
           default. Every request is logged in the session's <Ui>Network</Ui> panel.
         </li>
+        <li>
+          It cannot reach services you already run on your computer, Docker Desktop's included: the filter refuses your
+          computer's own addresses. Integration tests use the services you pick in <Ui>Settings → Sandbox</Ui>, which
+          Limn starts for each session.
+        </li>
         <li>Work leaves only as a set of changes that Limn checks and you push.</li>
       </ul>
       <H3>Allowing a host</H3>

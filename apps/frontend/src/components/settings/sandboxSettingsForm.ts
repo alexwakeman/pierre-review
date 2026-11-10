@@ -5,12 +5,10 @@ import type { SandboxMemoryProject, SandboxServiceStackChoice, SandboxWorkspaceS
 // React-free so test/sandboxSettingsForm.test.ts pins it.
 
 export interface SandboxDraft {
-  localFolder: string;
   /** null = the default (every project found with notes). */
   memoryProjects: string[] | null;
   userClaudeMd: boolean;
   userSkills: boolean;
-  startDir: string;
   globalProxyEnv: boolean;
   /** As typed ('' = Limn's default). */
   cpus: string;
@@ -23,11 +21,9 @@ const num = (n: number | null): string => (n == null ? '' : String(n));
 
 export function sandboxDraftOf(s: SandboxWorkspaceSettings): SandboxDraft {
   return {
-    localFolder: s.localFolder ?? '',
     memoryProjects: s.memoryProjects == null ? null : [...s.memoryProjects],
     userClaudeMd: s.userClaudeMd,
     userSkills: s.userSkills,
-    startDir: s.startDir ?? '',
     globalProxyEnv: s.globalProxyEnv,
     cpus: num(s.resources.cpus),
     memoryGb: num(s.resources.memoryGb),
@@ -36,7 +32,6 @@ export function sandboxDraftOf(s: SandboxWorkspaceSettings): SandboxDraft {
   };
 }
 
-const textOrNull = (v: string): string | null => (v.trim() === '' ? null : v.trim().replace(/\/+$/, '') || '/');
 const intOrNull = (v: string): number | null => {
   if (v.trim() === '') return null;
   const n = Number(v);
@@ -46,11 +41,9 @@ const intOrNull = (v: string): number | null => {
 /** The WHOLE setting (the PUT replaces it: a field left out would go back to its default). */
 export function sandboxBodyOf(d: SandboxDraft): SandboxWorkspaceSettingsBody {
   return {
-    localFolder: textOrNull(d.localFolder),
     memoryProjects: d.memoryProjects,
     userClaudeMd: d.userClaudeMd,
     userSkills: d.userSkills,
-    startDir: textOrNull(d.startDir),
     globalProxyEnv: d.globalProxyEnv,
     resources: { cpus: intOrNull(d.cpus), memoryGb: intOrNull(d.memoryGb), diskGb: intOrNull(d.diskGb) },
     services: d.services,
@@ -59,6 +52,17 @@ export function sandboxBodyOf(d: SandboxDraft): SandboxWorkspaceSettingsBody {
 
 export function sandboxDraftDirty(d: SandboxDraft, saved: SandboxWorkspaceSettings): boolean {
   return JSON.stringify(sandboxBodyOf(d)) !== JSON.stringify(sandboxBodyOf(sandboxDraftOf(saved)));
+}
+
+/** Compose files picked in the list, added to the draft's services (no duplicates, the cap kept). Pure. */
+export function addComposePicks(services: readonly SandboxServiceStackChoice[], picks: ReadonlyArray<{ repo: string; file: string }>, max: number): SandboxServiceStackChoice[] {
+  const out = [...services];
+  for (const p of picks) {
+    if (out.length >= max) break;
+    if (out.some((s) => s.repo === p.repo && s.file === p.file)) continue;
+    out.push({ repo: p.repo, file: p.file, egress: [] });
+  }
+  return out;
 }
 
 export interface SandboxMemoryTick extends SandboxMemoryProject {

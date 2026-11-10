@@ -3,7 +3,7 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Toggle
 
 export const meta: DocMeta = {
   title: 'Sandbox',
-  summary: 'Where AI Fix and Implement run: the container runtime, the local folder, notes and services.',
+  summary: 'Where AI Fix and Implement run: the container runtime, your Claude notes and services.',
 };
 
 export default function Page(): JSX.Element {
@@ -41,23 +41,20 @@ export default function Page(): JSX.Element {
 
       <H2 id="workspace-sandbox">What a session gets</H2>
       <p>The rest of the tab applies to the current workspace.</p>
-      <H3>Your local folder</H3>
+      <H3>Your clones and Claude notes</H3>
       <p>
-        The folder that holds your own clones of the repositories. Leave it empty to put each repository under{' '}
-        <code>/workspace</code>. The code always comes from Limn&rsquo;s own copy of each repository, synced from
-        GitHub: your folder only decides where each repository sits inside the sandbox, so your Claude notes and the
-        paths they name still work. Repositories are matched by their git remote. A clone of a repository outside this
-        workspace is named and left out.
+        There is nothing to set. Limn finds your own clones of the workspace&rsquo;s repositories through the folders
+        where you used Claude Code, and matches them by their git remote. Select <Ui>Find</Ui> to see what it found.
+        The code always comes from Limn&rsquo;s own copy of each repository, synced from GitHub. Your clones only
+        decide where each repository sits inside the sandbox: at the same path, so your Claude notes and the paths
+        they name still work. A repository with no clone found goes under <code>/workspace</code>.
       </p>
-      <H3>Claude notes to bring</H3>
       <p>
-        Tick the projects whose Claude notes the session may read. You can also tick{' '}
-        <Ui>Bring your ~/.claude/CLAUDE.md</Ui> and <Ui>Bring your Claude skills</Ui>. They are copied in; the
-        originals are never changed. Past AI sessions are never copied in.
-      </p>
-      <H3>Starting folder</H3>
-      <p>
-        The folder the AI starts in. Empty means the project with the most notes, else your folder.
+        Each repository&rsquo;s own <code>CLAUDE.md</code> and <code>AGENTS.md</code> are in its code, so the AI reads
+        them. Under <Ui>Claude notes to bring</Ui>, the notes of each clone (and of a folder that holds them) are
+        ticked. Untick a project to leave its notes out. You can also tick <Ui>Bring your ~/.claude/CLAUDE.md</Ui> and{' '}
+        <Ui>Bring your Claude skills</Ui>. They are copied in; the originals are never changed. Past AI sessions are
+        never copied in. The AI starts in the repository with the most notes.
       </p>
       <H3>Hosts always allowed</H3>
       <p>
@@ -75,10 +72,17 @@ export default function Page(): JSX.Element {
       </Illustration>
       <H3>Services</H3>
       <p>
-        Compose files Limn may start for a session, for integration tests (a database, a queue). Add the repository and
-        the compose file. The AI asks Limn to start them; it never gets Docker itself. A file that asks for privileged
-        mode, extra system rights, host folders or the Docker socket is refused, and the session says why. Services
-        reach the internet only when you name them under <Ui>Online</Ui>.
+        Compose files Limn may start for a session, for integration tests (a database, a queue). Select{' '}
+        <Ui>Choose compose files</Ui>: Limn lists every compose file in the workspace&rsquo;s repositories, from its
+        own copies. Tick the ones you want and select <Ui>Add</Ui>. The AI asks Limn to start them; it never gets
+        Docker itself. A file that asks for privileged mode, extra system rights, host folders or the Docker socket is
+        refused, and the session says why. Services reach the internet only when you name them under{' '}
+        <Ui>Online</Ui>.
+      </p>
+      <p>
+        The sandbox cannot use services you already run in Docker Desktop. Its only way out is Limn&rsquo;s network
+        filter, which refuses your computer&rsquo;s own addresses. Each session gets its own services, so the AI
+        never touches your local data.
       </p>
       <H3>Resources</H3>
       <p>

@@ -226,6 +226,11 @@ export interface MirrorOptions {
   concurrency?: number;
 }
 
+/** The repos step's progress line. Pure. */
+export function mirrorProgressLine(n: number, total: number, fullName: string): string {
+  return `Loading repositories ${n}/${total}: ${fullName}`;
+}
+
 /** `fn` over `items`, at most `limit` at a time; results in the items' order. */
 export async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
@@ -253,11 +258,15 @@ export async function mirrorRepos(
   const store = opts.store && runtime.repoStore ? { ...opts.store, runtime: runtime.repoStore } : null;
   type One = { ok: MirroredRepo } | { failed: MirrorResult['failed'][number] } | null;
   const skippedLocal: string[] = [];
+  // "Loading repositories 3/7: owner/name" as each one starts (3 at a time), so the reader sees how far along it is.
+  const total = layout.repos.length;
+  let started = 0;
   const results = await mapBounded<LayoutRepo, One>(layout.repos, opts.concurrency ?? MIRROR_CONCURRENCY, async (r) => {
     if (opts.signal?.aborted) return null;
     const req = bases.get(r.repoId);
     if (req == null) return { failed: { repoId: r.repoId, fullName: r.fullName, reason: 'No base was chosen.' } };
-    opts.onProgress?.(`Cloning ${r.fullName}`);
+    started += 1;
+    opts.onProgress?.(mirrorProgressLine(started, total, r.fullName));
     if (store) {
       try {
         const got = await mirrorOneViaStore({

@@ -11,6 +11,7 @@ import {
   type StoryBuildDiffResponse,
   type StoryBuildForTicketResponse,
   type StoryBuildPushResponse,
+  type SandboxComposeFiles,
   type SandboxFolderCheck,
   type SandboxNetworkAllowBody,
   type SandboxRunningStatus,
@@ -345,13 +346,24 @@ export function useRemoveSandboxHost(workspaceId: number) {
   });
 }
 
-/** The folder check: CLICK-GATED (a bounded walk of a local folder). `folder` undefined = the saved one. */
-export function useSandboxFolderCheck(workspaceId: number, folder: string | null | undefined, enabled: boolean) {
+/** The clone / notes check: CLICK-GATED (bounded walks of the reader's Claude projects and clones). */
+export function useSandboxFolderCheck(workspaceId: number, enabled: boolean) {
   return useQuery<SandboxFolderCheck>({
-    queryKey: ['sandbox-check', workspaceKey(workspaceId), folder === undefined ? '(saved)' : (folder ?? '(none)')],
-    queryFn: () => api.checkSandboxFolder(workspaceId, folder === undefined ? {} : { folder }),
+    queryKey: ['sandbox-check', workspaceKey(workspaceId)],
+    queryFn: () => api.checkSandboxFolder(workspaceId),
     enabled,
     staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/** The compose files Limn can offer: CLICK-GATED (one `git ls-tree` per repository in Limn's clone cache). */
+export function useSandboxComposeFiles(workspaceId: number, enabled: boolean) {
+  return useQuery<SandboxComposeFiles>({
+    queryKey: ['sandbox-compose-files', workspaceKey(workspaceId)],
+    queryFn: () => api.sandboxComposeFiles(workspaceId),
+    enabled,
+    staleTime: 60_000,
     retry: false,
   });
 }

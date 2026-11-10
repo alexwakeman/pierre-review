@@ -3,6 +3,7 @@ import {
   SANDBOX_RESOURCE_DEFAULTS,
   SANDBOX_RESOURCE_LIMITS,
   SANDBOX_SERVICE_STACKS_MAX,
+  type SandboxComposeRepoFiles,
   type SandboxFolderCheck,
   type SandboxServiceStackChoice,
   type SandboxWorkspaceSettings,
@@ -10,20 +11,28 @@ import {
 } from '@pierre-review/shared';
 import { api, ApiError } from '../../api/client.js';
 import { useQueryClient } from '@tanstack/react-query';
-import { sandboxSettingsKey, useRemoveSandboxHost, useSandboxFolderCheck, useSaveSandboxSettings, useSandboxSettings } from '../../hooks/useStoryBuild.js';
+import {
+  sandboxSettingsKey,
+  useRemoveSandboxHost,
+  useSandboxComposeFiles,
+  useSandboxFolderCheck,
+  useSaveSandboxSettings,
+  useSandboxSettings,
+} from '../../hooks/useStoryBuild.js';
 import { InfoButton } from '../InfoModal.js';
 import { CloseIcon, PlusIcon } from '../Icons.js';
 import { CheckInput, Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
-import { sandboxBodyOf, sandboxDraftOf, sandboxDraftDirty, sandboxMemoryTicks, type SandboxDraft } from './sandboxSettingsForm.js';
+import { addComposePicks, sandboxBodyOf, sandboxDraftOf, sandboxDraftDirty, sandboxMemoryTicks, type SandboxDraft } from './sandboxSettingsForm.js';
 
 // SETTINGS → SANDBOX (docs/SANDBOX.md § The workspace mirror, § Services; plan WP4/WP8), the workspace
 // part (the computer's container runtime is SandboxRuntimeSection.tsx, above it in the same tab).
 //
-//   • `SandboxSection` (THIS WORKSPACE, nothing inherited): the local folder and its CHECK (click-gated:
-//     a bounded walk of a local folder), the Claude notes to bring, ~/.claude/CLAUDE.md and skills, the
-//     starting folder, the services (compose files Limn may run), the "Always allow" hosts, the proxy
-//     variables and the resources.
+//   • `SandboxSection` (THIS WORKSPACE, nothing inherited): the CHECK of the reader's clones (click-gated:
+//     Limn finds them through the folders where the reader used Claude Code — there is no folder or
+//     starting-folder setting since 2026-11-10), the Claude notes to bring, ~/.claude/CLAUDE.md and skills,
+//     the services (compose files Limn may run, picked from the ones found in Limn's own copies), the
+//     "Always allow" hosts, the proxy variables and the resources.
 //
 // ⚠ DRAFT + SAVE like every section here. ⚠ The PUT REPLACES the whole setting, so the body is built
 // from the WHOLE draft (`sandboxBodyOf`), never a patch of the changed fields.
@@ -45,7 +54,7 @@ export function SandboxSection(): JSX.Element {
 
 function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: SandboxWorkspaceSettings }): JSX.Element {
   const save = useSaveSandboxSettings(workspaceId);
-  const ids = { folder: useId(), start: useId(), cpus: useId(), mem: useId(), disk: useId(), host: useId() };
+  const ids = { cpus: useId(), mem: useId(), disk: useId(), host: useId() };
   const [draft, setDraft] = useState<SandboxDraft>(() => sandboxDraftOf(saved));
   // Re-seed on the STORED values (first load, after a save), never the response object.
   const signature = JSON.stringify(sandboxDraftOf(saved));
@@ -55,17 +64,13 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
   }, [signature]);
   const set = (patch: Partial<SandboxDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
-  // THE CHECK is CLICK-GATED: it runs for the folder in the draft when the reader presses Check.
-  const [checkFor, setCheckFor] = useState<string | null | undefined>(undefined);
+  // THE CHECK is CLICK-GATED: it walks the reader's Claude projects and clones when they press Find.
   const [checked, setChecked] = useState(false);
-  const check = useSandboxFolderCheck(workspaceId, checkFor, checked);
+  const check = useSandboxFolderCheck(workspaceId, checked);
   const result: SandboxFolderCheck | null = check.data?.workspaceId === workspaceId ? check.data : null;
   const runCheck = (): void => {
-    const trimmed = draft.localFolder.trim();
-    const f = trimmed === '' ? null : trimmed;
-    // The same folder again: look again (the key does not change, so ask for it).
-    if (checked && f === checkFor) void check.refetch();
-    setCheckFor(f);
+    // Pressed again: look again (the key does not change, so ask for it).
+    if (checked) void check.refetch();
     setChecked(true);
   };
 
@@ -73,21 +78,18 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
   const body: SandboxWorkspaceSettingsBody = sandboxBodyOf(draft);
   const err = save.error instanceof ApiError ? save.error.message : save.error != null ? (save.error as Error).message : null;
   const ticks = useMemo(() => sandboxMemoryTicks(result?.memories ?? [], draft.memoryProjects), [result?.memories, draft.memoryProjects]);
-  const repoNames = useMemo(
-    () => [...(result?.matched ?? []).map((r) => r.fullName), ...(result?.notCloned ?? []).map((r) => r.fullName)].sort(),
-    [result],
-  );
 
   return (
     <SectionShell
       title="Sandbox"
-      desc="What an Implement session gets: where the repositories go, your Claude notes, and the services it may start."
+      desc="What an Implement or AI Fix session gets: your Claude notes and the services it may start."
       info={
         <InfoButton title="Sandbox" width="lg">
           <div className="space-y-2">
             <p>
-              The code always comes from Limn’s own copy of each repository, synced from GitHub. Your folder only decides where
-              each repository sits inside the sandbox, so your Claude notes and the paths they name still work.
+              The code always comes from Limn’s own copy of each repository, synced from GitHub. Limn finds your own clones
+              through the folders where you used Claude Code. Each repository then sits at the same path inside the sandbox,
+              so your Claude notes and the paths they name still work.
             </p>
             <p>Repositories are matched by their git remote. A clone of a repository outside this workspace is named and left out.</p>
             <p>Your notes, CLAUDE.md and skills are copied in. The originals are never changed.</p>
@@ -96,23 +98,16 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
       }
     >
       <div data-testid="sandbox-settings" className="space-y-3">
-        <Field label="Your local folder" htmlFor={ids.folder} hint="The folder that holds your clones. Leave empty to put each repository under /workspace.">
-          <div className="flex gap-2">
-            <input
-              id={ids.folder}
-              className={inputCls}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="/Users/you/Projects/my-team"
-              value={draft.localFolder}
-              onChange={(e) => set({ localFolder: e.target.value })}
-            />
-            <button type="button" data-testid="sandbox-check" className={SECONDARY_BTN} disabled={check.isFetching} onClick={runCheck}>
-              {check.isFetching ? 'Checking…' : 'Check'}
-            </button>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className={SUBHEAD}>Your clones and Claude notes</p>
+            <p className="text-meta text-ui-mute">Found through the folders where you use Claude Code.</p>
           </div>
-        </Field>
-        {check.isError && <p className="text-meta text-ui-danger">Could not check the folder.</p>}
+          <button type="button" data-testid="sandbox-check" className={SECONDARY_BTN} disabled={check.isFetching} onClick={runCheck}>
+            {check.isFetching ? 'Looking…' : 'Find'}
+          </button>
+        </div>
+        {check.isError && <p className="text-meta text-ui-danger">Could not look for your clones.</p>}
         {result != null && <FolderCheckResult result={result} />}
 
         {result != null && result.memories.length > 0 && (
@@ -148,22 +143,7 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
           )}
         </label>
 
-        <Field
-          label="Starting folder"
-          htmlFor={ids.start}
-          hint={result != null ? `Empty: ${result.startDir}` : 'Empty: the project with the most notes, else your folder.'}
-        >
-          <input
-            id={ids.start}
-            className={inputCls}
-            autoComplete="off"
-            spellCheck={false}
-            value={draft.startDir}
-            onChange={(e) => set({ startDir: e.target.value })}
-          />
-        </Field>
-
-        <ServicesEditor services={draft.services} repoNames={repoNames} onChange={(services) => set({ services })} />
+        <ServicesEditor workspaceId={workspaceId} services={draft.services} onChange={(services) => set({ services })} />
 
         <AllowedHosts workspaceId={workspaceId} hosts={saved.alwaysAllowedHosts} inputId={ids.host} />
 
@@ -197,18 +177,12 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
 }
 
 function FolderCheckResult({ result }: { result: SandboxFolderCheck }): JSX.Element {
-  if (result.problem != null) {
-    return (
-      <p data-testid="sandbox-check-result" className="text-meta text-ui-warn">
-        {result.problem}
-      </p>
-    );
-  }
   return (
     <div data-testid="sandbox-check-result" className="space-y-2 rounded-ui bg-ui-raise p-3 text-meta">
+      {result.matched.length === 0 && <p className="text-ui-mute">No clone found. Each repository goes under /workspace.</p>}
       {result.matched.length > 0 && (
         <div>
-          <p className={SUBHEAD}>Found in your folder ({result.matched.length})</p>
+          <p className={SUBHEAD}>Found on this computer ({result.matched.length})</p>
           <ul className="mt-1 space-y-0.5">
             {result.matched.map((r) => (
               <li key={r.repoId} className="flex flex-wrap gap-x-2">
@@ -221,7 +195,7 @@ function FolderCheckResult({ result }: { result: SandboxFolderCheck }): JSX.Elem
       )}
       {result.notCloned.length > 0 && (
         <div>
-          <p className={SUBHEAD}>Not in your folder ({result.notCloned.length})</p>
+          <p className={SUBHEAD}>No clone found ({result.notCloned.length})</p>
           <ul className="mt-1 space-y-0.5">
             {result.notCloned.map((r) => (
               <li key={r.repoId} className="flex flex-wrap gap-x-2">
@@ -239,6 +213,11 @@ function FolderCheckResult({ result }: { result: SandboxFolderCheck }): JSX.Elem
         </p>
       )}
       {result.truncated && <p className="text-ui-warn">The folder is large, so Limn stopped looking. Some clones may be missing.</p>}
+      {result.matched.length > 0 && (
+        <p className="text-ui-mute">
+          The AI starts in <span className="break-all font-mono">{result.startDir}</span>.
+        </p>
+      )}
     </div>
   );
 }
@@ -276,18 +255,23 @@ function ResourceInput({
 }
 
 function ServicesEditor({
+  workspaceId,
   services,
-  repoNames,
   onChange,
 }: {
+  workspaceId: number;
   services: SandboxServiceStackChoice[];
-  repoNames: string[];
   onChange: (s: SandboxServiceStackChoice[]) => void;
 }): JSX.Element {
   const listId = useId();
+  // The candidates: CLICK-GATED (one `git ls-tree` per repository, in Limn's own copies).
+  const [looking, setLooking] = useState(false);
+  const found = useSandboxComposeFiles(workspaceId, looking);
   const [repo, setRepo] = useState('');
   const [file, setFile] = useState('compose.yml');
-  const canAdd = /^[^/\s]+\/[^/\s]+$/.test(repo.trim()) && file.trim() !== '' && services.length < SANDBOX_SERVICE_STACKS_MAX;
+  const full = services.length >= SANDBOX_SERVICE_STACKS_MAX;
+  const canAdd = /^[^/\s]+\/[^/\s]+$/.test(repo.trim()) && file.trim() !== '' && !full;
+  const repoNames = (found.data?.repos ?? []).map((r) => r.repo);
   return (
     <fieldset data-testid="sandbox-services" className="space-y-1.5">
       <legend className="flex items-center gap-1">
@@ -297,6 +281,10 @@ function ServicesEditor({
             <p>
               Compose files Limn may start for a session, for integration tests. The AI asks for them with <code>limn-svc up</code>; it
               never gets Docker itself.
+            </p>
+            <p>
+              The sandbox cannot reach services you already run in Docker Desktop: its only way out is Limn’s network filter, which
+              refuses your computer’s own addresses. Each session gets its own services, so the AI never touches your data.
             </p>
             <p>
               A file that asks for privileged mode, extra system rights, host folders or the Docker socket is refused, with the
@@ -338,8 +326,28 @@ function ServicesEditor({
           </li>
         ))}
       </ul>
-      {services.length < SANDBOX_SERVICE_STACKS_MAX && (
+      {!full && !looking && (
+        <button type="button" data-testid="sandbox-compose-find" className={SECONDARY_BTN} onClick={() => setLooking(true)}>
+          <PlusIcon size={11} />
+          Choose compose files
+        </button>
+      )}
+      {!full && looking && (
+        <ComposePicker
+          repos={found.data?.repos ?? null}
+          loading={found.isFetching}
+          failed={found.isError}
+          chosen={services}
+          onAdd={(picks) => {
+            onChange(addComposePicks(services, picks, SANDBOX_SERVICE_STACKS_MAX));
+            setLooking(false);
+          }}
+          onClose={() => setLooking(false)}
+        />
+      )}
+      {!full && looking && (
         <div className="flex flex-wrap items-center gap-2">
+          <span className="text-meta text-ui-mute">Another file:</span>
           <input
             aria-label="Repository (owner/name)"
             className={`${sized('w-56')}`}
@@ -359,9 +367,7 @@ function ServicesEditor({
             className={SECONDARY_BTN}
             disabled={!canAdd}
             onClick={() => {
-              const next = { repo: repo.trim(), file: file.trim().replace(/^\.\//, ''), egress: [] };
-              if (services.some((s) => s.repo === next.repo && s.file === next.file)) return;
-              onChange([...services, next]);
+              onChange(addComposePicks(services, [{ repo: repo.trim(), file: file.trim().replace(/^\.\//, '') }], SANDBOX_SERVICE_STACKS_MAX));
               setRepo('');
             }}
           >
@@ -371,6 +377,73 @@ function ServicesEditor({
         </div>
       )}
     </fieldset>
+  );
+}
+
+/** Every compose file found in the workspace's repositories, as boxes to tick (several at once). */
+function ComposePicker({
+  repos,
+  loading,
+  failed,
+  chosen,
+  onAdd,
+  onClose,
+}: {
+  repos: SandboxComposeRepoFiles[] | null;
+  loading: boolean;
+  failed: boolean;
+  chosen: readonly SandboxServiceStackChoice[];
+  onAdd: (picks: Array<{ repo: string; file: string }>) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const [picked, setPicked] = useState<Array<{ repo: string; file: string }>>([]);
+  const isChosen = (repo: string, file: string): boolean => chosen.some((c) => c.repo === repo && c.file === file);
+  const isPicked = (repo: string, file: string): boolean => picked.some((p) => p.repo === repo && p.file === file);
+  const withFiles = (repos ?? []).filter((r) => r.files.length > 0);
+  const without = (repos ?? []).filter((r) => r.files.length === 0);
+  return (
+    <div data-testid="sandbox-compose-picker" className="space-y-2 rounded-ui bg-ui-raise p-3 text-meta">
+      {loading && repos == null && <p className="text-ui-mute">Looking in Limn’s copies of your repositories…</p>}
+      {failed && <p className="text-ui-danger">Could not list the compose files.</p>}
+      {repos != null && withFiles.length === 0 && <p className="text-ui-mute">No compose file found.</p>}
+      {withFiles.map((r) => (
+        <div key={r.repo}>
+          <p className={SUBHEAD}>{r.repo}</p>
+          <ul className="mt-1 space-y-0.5">
+            {r.files.map((f) => {
+              const already = isChosen(r.repo, f);
+              return (
+                <li key={f}>
+                  <label className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
+                    <CheckInput
+                      checked={already || isPicked(r.repo, f)}
+                      disabled={already}
+                      onChange={(e) =>
+                        setPicked((p) => (e.target.checked ? [...p, { repo: r.repo, file: f }] : p.filter((x) => !(x.repo === r.repo && x.file === f))))
+                      }
+                    />
+                    <span className="min-w-0 break-all font-mono text-meta">{f}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      {without.length > 0 && (
+        <p className="text-ui-mute">
+          None in: {without.map((r) => (r.copied ? r.repo : `${r.repo} (no copy on this computer yet)`)).join(', ')}.
+        </p>
+      )}
+      <div className="flex items-center gap-2">
+        <button type="button" data-testid="sandbox-compose-add" className={SECONDARY_BTN} disabled={picked.length === 0} onClick={() => onAdd(picked)}>
+          {picked.length > 1 ? `Add ${picked.length} files` : 'Add'}
+        </button>
+        <button type="button" className={SECONDARY_BTN} onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -28,7 +28,7 @@ import {
   shortBytes,
   visiblePartialText,
 } from '../src/lib/sandboxSession.js';
-import { sandboxBodyOf, sandboxDraftDirty, sandboxDraftOf, sandboxMemoryTicks } from '../src/components/settings/sandboxSettingsForm.js';
+import { addComposePicks, sandboxBodyOf, sandboxDraftDirty, sandboxDraftOf, sandboxMemoryTicks } from '../src/components/settings/sandboxSettingsForm.js';
 
 const at = '2026-11-07T10:00:00.000Z';
 
@@ -225,11 +225,9 @@ describe('the words and the buttons', () => {
 describe('Settings → Sandbox form', () => {
   const saved: SandboxWorkspaceSettings = {
     workspaceId: 3,
-    localFolder: '/Users/a/Projects/bng',
     memoryProjects: null,
     userClaudeMd: true,
     userSkills: false,
-    startDir: null,
     globalProxyEnv: false,
     resources: { cpus: null, memoryGb: 12, diskGb: null },
     services: [{ repo: 'DEFRA/bng-metric-backend', file: 'compose.yml', egress: [] }],
@@ -237,18 +235,33 @@ describe('Settings → Sandbox form', () => {
   };
 
   it('sends the WHOLE setting (the PUT replaces it)', () => {
-    const d = { ...sandboxDraftOf(saved), cpus: '6', startDir: '/Users/a/Projects/bng/harness/' };
+    const d = { ...sandboxDraftOf(saved), cpus: '6' };
     expect(sandboxBodyOf(d)).toEqual({
-      localFolder: '/Users/a/Projects/bng',
       memoryProjects: null,
       userClaudeMd: true,
       userSkills: false,
-      startDir: '/Users/a/Projects/bng/harness',
       globalProxyEnv: false,
       resources: { cpus: 6, memoryGb: 12, diskGb: null },
       services: [{ repo: 'DEFRA/bng-metric-backend', file: 'compose.yml', egress: [] }],
     });
-    expect(sandboxBodyOf({ ...d, localFolder: '  ' }).localFolder).toBeNull();
+    // The removed settings are never sent.
+    expect(Object.keys(sandboxBodyOf(d))).not.toContain('localFolder');
+    expect(Object.keys(sandboxBodyOf(d))).not.toContain('startDir');
+  });
+
+  it('adds the picked compose files once each, up to the cap', () => {
+    const now = saved.services;
+    const picks = [
+      { repo: 'DEFRA/bng-metric-backend', file: 'compose.yml' },
+      { repo: 'DEFRA/bng-metric-backend', file: 'docker/compose.dev.yml' },
+      { repo: 'DEFRA/bng-metric-journey-tests', file: 'compose.yml' },
+    ];
+    expect(addComposePicks(now, picks, 10).map((s) => `${s.repo}:${s.file}`)).toEqual([
+      'DEFRA/bng-metric-backend:compose.yml',
+      'DEFRA/bng-metric-backend:docker/compose.dev.yml',
+      'DEFRA/bng-metric-journey-tests:compose.yml',
+    ]);
+    expect(addComposePicks(now, picks, 2)).toHaveLength(2);
   });
 
   it('is dirty only when the body changes', () => {

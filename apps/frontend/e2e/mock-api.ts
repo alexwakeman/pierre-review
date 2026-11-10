@@ -88,6 +88,7 @@ import type {
   SandboxSessionActionResponse,
   SandboxSessionDiffResponse,
   SandboxSessionStreamEvent,
+  SandboxComposeFiles,
   SandboxWorkspaceSettings,
   WorkspaceProSettings,
   WorkspaceSlackTargetResponse,
@@ -890,7 +891,7 @@ const BOOT_DONE: StoryBuildSession['boot'] = (
     ['network', 'Making the private network'],
     ['proxy', 'Starting the network filter'],
     ['sandbox', 'Starting the sandbox'],
-    ['repos', 'Cloning the repositories'],
+    ['repos', 'Loading the repositories'],
     ['services', 'Getting the services ready'],
     ['agent', 'Starting the agent'],
   ] as const
@@ -1400,11 +1401,9 @@ export const SANDBOX_RUNTIME_NONE: SandboxRuntimeStatus = {
 
 const SANDBOX_SETTINGS: SandboxWorkspaceSettings = {
   workspaceId: WORKSPACE.id,
-  localFolder: null,
   memoryProjects: null,
   userClaudeMd: true,
   userSkills: false,
-  startDir: null,
   globalProxyEnv: false,
   resources: { cpus: null, memoryGb: null, diskGb: null },
   services: [],
@@ -1854,6 +1853,9 @@ export async function installMockApi(
       if (path === '/api/sandbox/running') return json(route, { running: runtime.available ? 0 : null, problem: null } satisfies SandboxRunningStatus);
       if (path === '/api/sandbox/stop-all') return json(route, { stopped: 0, running: 0, problem: null } satisfies SandboxStopAllResult);
       if (/\/api\/workspaces\/\d+\/sandbox$/.test(path)) return json(route, SANDBOX_SETTINGS);
+      if (/\/api\/workspaces\/\d+\/sandbox\/compose-files$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, repos: [{ repo: 'acme/api', files: ['compose.yml', 'docker/compose.test.yml'], copied: true }] } satisfies SandboxComposeFiles);
+      }
 
       if (path.startsWith(STORY_BUILD_API.list)) {
         const id = storyBuild?.id ?? STORY_SESSION_READY.id;

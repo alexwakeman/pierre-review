@@ -92,6 +92,17 @@ const legacySeams = (): MirrorSeams & { prepared: string[] } => {
 };
 
 describe('the repo store path', () => {
+  it('says how far along it is: "Loading repositories n/total: owner/name", one line per repository', async () => {
+    const layout = layoutOf(['api', 'backend', 'docs', 'frontend', 'harness']);
+    const present = new Set(layout.repos.map((r) => `${storeRepoDir(r.owner, r.name)} ${sha(r.name.length)}`));
+    const { rt } = withStore(present);
+    const { seams } = seamsFor(present);
+    const lines: string[] = [];
+    await mirrorRepos(rt, 'box', layout, basesOf(layout), 'limn/x', { store: { owner, seams }, onProgress: (l) => lines.push(l) });
+    expect(lines.map((l) => l.replace(/: .*$/, ''))).toEqual([1, 2, 3, 4, 5].map((n) => `Loading repositories ${n}/5`));
+    expect(lines.map((l) => l.replace(/^.*: /, '')).sort()).toEqual(layout.repos.map((r) => r.fullName).sort());
+  });
+
   it('a warm store copies nothing and reads no clone', async () => {
     const layout = layoutOf(['backend', 'harness']);
     const present = new Set(layout.repos.map((r) => `${storeRepoDir(r.owner, r.name)} ${sha(r.name.length)}`));

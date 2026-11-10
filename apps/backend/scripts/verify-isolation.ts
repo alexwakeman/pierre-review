@@ -2750,14 +2750,14 @@ check(
 {
   const sb = await import('../src/db/sandbox-settings.js');
   const wsA = (await q.resolveWorkspaceScope(1, null)).workspaceId;
-  check('writeSandboxSettings(A, A’s workspace) stores', (await sb.writeSandboxSettings(1, wsA, { localFolder: '/Users/a/src' })) === true);
-  check('readSandboxSettings(A) reads it back (mutation check)', (await sb.readSandboxSettings(1, wsA))?.localFolder === '/Users/a/src');
-  check('writeSandboxSettings(B, A’s workspace) refuses (IDOR blocked)', (await sb.writeSandboxSettings(2, wsA, { localFolder: '/Users/b' })) === false);
+  check('writeSandboxSettings(A, A’s workspace) stores', (await sb.writeSandboxSettings(1, wsA, { memoryProjects: ['/Users/a/src'] })) === true);
+  check('readSandboxSettings(A) reads it back (mutation check)', (await sb.readSandboxSettings(1, wsA))?.memoryProjects?.[0] === '/Users/a/src');
+  check('writeSandboxSettings(B, A’s workspace) refuses (IDOR blocked)', (await sb.writeSandboxSettings(2, wsA, { memoryProjects: ['/Users/b'] })) === false);
   check('readSandboxSettings(B, A’s workspace) is null (IDOR blocked)', (await sb.readSandboxSettings(2, wsA)) === null);
   check('getSandboxSettings(B, A’s workspace) is null (IDOR blocked)', (await sb.getSandboxSettings(2, wsA)) === null);
   check('sandboxWorkspaceRepos(A) lists A’s repos (mutation check)', ((await sb.sandboxWorkspaceRepos(1, wsA)) ?? []).some((r) => r.repoId === A.repoId));
   check('sandboxWorkspaceRepos(B, A’s workspace) is null (IDOR blocked)', (await sb.sandboxWorkspaceRepos(2, wsA)) === null);
-  check('A’s setting is unchanged by B', (await sb.readSandboxSettings(1, wsA))?.localFolder === '/Users/a/src');
+  check('A’s setting is unchanged by B', (await sb.readSandboxSettings(1, wsA))?.memoryProjects?.[0] === '/Users/a/src');
   let fkRefused = false;
   try {
     await db.insert(schema.sandboxWorkspaceSettings).values({ accountId: 2, workspaceId: wsA }).execute();
