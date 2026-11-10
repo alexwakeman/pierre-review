@@ -4,7 +4,6 @@ import {
   CLAUDE_REVIEW_MAX_TICKETS,
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
-  checkClaudeReviewTickets,
   isTrackerIdent,
   trackerTicketRow,
   parseTicketIdent,
@@ -22,7 +21,7 @@ import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { postStoryGapsComment } from './post-item.js';
-import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
+import { deriveTicketReviewState, readLiveMembers, ticketHash } from './fingerprint.js';
 import { config } from '../../config.js';
 import { agenticRunReady } from '../claude-review/ai-ready.js';
 import { autoReviewAvailable } from '../claude-review/auto.js';
@@ -59,19 +58,6 @@ import {
 const s = (ctx: AgentContext): any => ctx.schema as any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const TICKET_INPUT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    title: { type: 'string' },
-    description: { type: 'string' },
-    acceptanceCriteria: { type: 'string' },
-    source: { type: 'string', enum: ['jira', 'manual'] },
-    key: { type: 'string' },
-    url: { type: 'string' },
-    fetchedAt: { type: 'string' },
-  },
-} as const;
 const startSchema = {
   body: {
     type: 'object',
@@ -80,8 +66,9 @@ const startSchema = {
     properties: {
       prId: { type: 'integer' },
       ident: { type: 'string' },
-      // No maxItems: the count answers with our own message (checkClaudeReviewTickets).
-      tickets: { type: 'array', items: TICKET_INPUT_SCHEMA },
+      // REMOVED (typed stories): kept in the schema only so an old page's request is refused below
+      // rather than stripped into "check every ticket".
+      tickets: {},
     },
   },
 };
@@ -174,9 +161,7 @@ async function statesFor(
     const inp = inputs.get(ident);
     const parsed = parseTicketIdent(ident);
     let live: { ticketHash: string; members: Awaited<ReturnType<typeof readLiveMembers>> } | null = null;
-    if (parsed?.kind === 'manual' && inp?.latest?.ticketHash) {
-      live = { ticketHash: inp.latest.ticketHash, members: await readLiveMembers(ctx, accountId, [parsed.prId]) };
-    } else if (isTrackerIdent(parsed)) {
+    if (isTrackerIdent(parsed)) {
       const memberIds = await jiraMemberIds(accountId, ident);
       const story = await jiraStoryFor(accountId, ident, memberIds);
       if (story) live = { ticketHash: ticketHash(story), members: await readLiveMembers(ctx, accountId, memberIds) };
@@ -222,18 +207,13 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
   // ---- start ----
   app.post('/api/ticket-reviews', { schema: startSchema }, async (req, reply) => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
-    const body = req.body as { prId: number; ident?: string; tickets?: unknown[] };
+    const body = req.body as { prId: number; ident?: string; tickets?: unknown };
     const accountId = ctx.accountIdOf(req);
-
-    let pasted: ClaudeReviewTicket[] | null = null;
     if (body.tickets !== undefined) {
-      const checked = checkClaudeReviewTickets(body.tickets as Parameters<typeof checkClaudeReviewTickets>[0]);
-      if (!checked.ok) {
-        reply.status(400);
-        return { error: 'TicketInvalid', index: checked.index, field: checked.field, message: checked.message };
-      }
-      pasted = checked.tickets;
+      reply.status(400);
+      return { error: 'Removed', message: 'Add the ticket by its link or key instead.' };
     }
+
     if (body.ident !== undefined && parseTicketIdent(body.ident) == null) {
       reply.status(400);
       return { error: 'InvalidIdent', message: 'That ticket name is not valid.' };
@@ -252,54 +232,39 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
       (await workspaceOfPr(ctx, accountId, body.prId)) ?? (await defaultWorkspaceId(ctx, accountId)) ?? 0;
 
     // ---- which tickets ----
-    const targets: Array<{ ident: string; ticket: ClaudeReviewTicket | null; manual: boolean }> = [];
-    if (pasted) {
-      for (const t of pasted) targets.push({ ident: manualTicketIdent(body.prId, t), ticket: t, manual: true });
-    } else if (body.ident !== undefined) {
+    const targets: Array<{ ident: string; ticket: ClaudeReviewTicket | null }> = [];
+    if (body.ident !== undefined) {
       const ident = body.ident;
-      const parsed = parseTicketIdent(ident)!;
-      if (parsed.kind === 'manual') {
-        // Re-checking a pasted story: its text is the latest run's snapshot, and only its own PR.
-        const latest = parsed.prId === body.prId ? await getLatestTicketReview(ctx, accountId, ident) : null;
-        if (!latest?.ticket) {
-          reply.status(404);
-          return { error: 'NotFound', message: 'This PR is not on that ticket.' };
-        }
-        targets.push({ ident, ticket: latest.ticket, manual: true });
-      } else {
-        const detected = await detectedTickets(accountId, body.prId);
-        // A ticket the PR carries past the per-PR story cap (a hand-added one, docs/TRACKERS.md §
-        // Adding a ticket by hand) is still the PR's: its stored rows say so.
-        const known =
-          detected.some((d) => d.ident === ident) ||
-          (await getTicketIdentsForPr(ctx, accountId, body.prId)).includes(ident) ||
-          (await getTicketSource().ticketMembers(accountId, ident)).some((m) => m.prId === body.prId);
-        if (!known) {
-          reply.status(404);
-          return { error: 'NotFound', message: 'This PR is not on that ticket.' };
-        }
-        targets.push({ ident, ticket: detected.find((d) => d.ident === ident)?.ticket ?? null, manual: false });
+      const detected = await detectedTickets(accountId, body.prId);
+      // A ticket the PR carries past the per-PR story cap (a hand-added one, docs/TRACKERS.md §
+      // Adding a ticket by hand) is still the PR's: its stored rows say so.
+      const known =
+        detected.some((d) => d.ident === ident) ||
+        (await getTicketIdentsForPr(ctx, accountId, body.prId)).includes(ident) ||
+        (await getTicketSource().ticketMembers(accountId, ident)).some((m) => m.prId === body.prId);
+      if (!known) {
+        reply.status(404);
+        return { error: 'NotFound', message: 'This PR is not on that ticket.' };
       }
+      targets.push({ ident, ticket: detected.find((d) => d.ident === ident)?.ticket ?? null });
     } else {
       for (const d of (await detectedTickets(accountId, body.prId)).slice(0, CLAUDE_REVIEW_MAX_TICKETS)) {
-        targets.push({ ident: d.ident, ticket: d.ticket, manual: false });
+        targets.push({ ident: d.ident, ticket: d.ticket });
       }
     }
 
     const out: StartTicketReviewResponse = { runs: [] };
     for (const t of targets) {
       // Over the member cap a run would only refuse: answer now, with the count, and write nothing.
-      if (!t.manual) {
-        const members = await readLiveMembers(ctx, accountId, await jiraMemberIds(accountId, t.ident));
-        if (members.length > TICKET_REVIEW_MAX_PRS) {
-          out.runs.push({
-            ident: t.ident,
-            ticketReviewId: null,
-            outcome: 'refused',
-            refused: { reason: 'too_many_prs', prCount: members.length },
-          });
-          continue;
-        }
+      const members = await readLiveMembers(ctx, accountId, await jiraMemberIds(accountId, t.ident));
+      if (members.length > TICKET_REVIEW_MAX_PRS) {
+        out.runs.push({
+          ident: t.ident,
+          ticketReviewId: null,
+          outcome: 'refused',
+          refused: { reason: 'too_many_prs', prCount: members.length },
+        });
+        continue;
       }
       const r = await startTicketReview(ctx, {
         accountId,
@@ -307,7 +272,6 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
         ident: t.ident,
         ticketKey: t.ticket?.key ?? null,
         ticketTitle: t.ticket?.title ?? null,
-        manualTicket: t.manual ? t.ticket : null,
         originPrId: body.prId,
         trigger: 'manual',
       });
@@ -333,7 +297,10 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `PR ${id} not found` };
     }
     const detected = await detectedTickets(accountId, id);
-    const idents = [...new Set([...detected.map((d) => d.ident), ...(await getTicketIdentsForPr(ctx, accountId, id))])];
+    // A stored pasted story (`manual:` ident, a REMOVED feature) does not parse: never listed.
+    const idents = [
+      ...new Set([...detected.map((d) => d.ident), ...(await getTicketIdentsForPr(ctx, accountId, id))]),
+    ].filter((ident) => parseTicketIdent(ident) != null);
     const stories = new Map(detected.map((d) => [d.ident, d.ticket]));
     const states = await statesFor(ctx, accountId, idents);
     const tickets: PrTicketReviewsResponse['tickets'] = [];

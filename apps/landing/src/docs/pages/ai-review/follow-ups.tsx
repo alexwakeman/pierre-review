@@ -6,21 +6,27 @@ export const meta: DocMeta = {
   summary: 'After new commits, a follow-up review checks which findings were fixed and looks at what changed.',
 };
 
-function PreviousReview(): JSX.Element {
+function EarlierFindings(): JSX.Element {
   return (
     <Illustration
-      label="The Previous review section of a re-review of pull request 612. The blocker on paid_at is Addressed, with a line saying how. The warning about a second email is Not addressed, with the one thing still needed."
-      caption="Previous review: each earlier finding with its outcome and one line on how it was dealt with, or what is still needed."
-      title="Previous review"
+      label="The Findings section of a re-review of pull request 612. Under Open, the warning about a second email is Not addressed, with the one thing still needed. Under Resolved or addressed, the blocker on paid_at is Addressed, with a line saying how."
+      caption="Findings: each earlier finding on its own row, with its outcome and one line on how it was dealt with, or what is still needed."
+      title="Findings"
       meta="#612 · 2 newer commits"
     >
-      <FindingRow chip="Addressed" tone="green">
-        <b>Blocker</b> RefundPolicy.allows() never reads paid_at. <br />
-        <b>allows() now rejects orders paid more than 30 days ago.</b>
-      </FindingRow>
+      <p style={{ margin: '0 0 4px' }} className="muted">
+        Open
+      </p>
       <FindingRow chip="Not addressed" tone="red">
         <b>Warning</b> A retried refund sends a second email. <br />
         <b>The retry path still calls send_receipt() a second time.</b>
+      </FindingRow>
+      <p style={{ margin: '8px 0 4px' }} className="muted">
+        Resolved or addressed
+      </p>
+      <FindingRow chip="Addressed" tone="green">
+        <b>Blocker</b> RefundPolicy.allows() never reads paid_at. <br />
+        <b>allows() now rejects orders paid more than 30 days ago.</b>
       </FindingRow>
     </Illustration>
   );
@@ -34,6 +40,11 @@ export default function Page(): JSX.Element {
         checks each earlier finding against the code as it is now. You see, finding by finding, what was fixed, what
         is still open and why. Nothing is raised twice as if it were new.
       </p>
+      <p>
+        The earlier findings are in the tab's one <Ui>Findings</Ui> list. Still-open ones are under <Ui>Open</Ui>,
+        with the new findings, because they count towards the verdict. The rest are under{' '}
+        <Ui>Resolved or addressed</Ui>. Each row says who raised it and, under it, what this review found.
+      </p>
 
       <H2 id="what-is-followed-up">What is followed up</H2>
       <p>The follow-up reads the latest finished review of the pull request and takes its findings that:</p>
@@ -43,7 +54,8 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         A finding you ignored, one already settled by an accepted reply, and a repeat of a comment already on GitHub
-        are left out. The section says so in one line, for example "Left out: 1 ignored, 4 repeated posted comments."
+        are left out. The Findings list says so in one line under <Ui>Open</Ui>, for example "Left out: 1 ignored, 4
+        repeated posted comments."
       </p>
       <p>
         When the author of the pull request reviewed it with their own Limn and posted that review, your follow-up
@@ -52,7 +64,7 @@ export default function Page(): JSX.Element {
       </p>
 
       <H2 id="the-outcomes">The outcomes</H2>
-      <PreviousReview />
+      <EarlierFindings />
       <MiniTable
         cols={[
           { key: 'chip', label: 'Outcome' },
@@ -77,7 +89,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="the-one-line-how">The one-line how</H2>
       <p>
-        Every outcome carries one short line in bold under the finding. For an addressed finding it says how it was
+        Every outcome carries one short line in bold on the finding's row. For an addressed finding it says how it was
         dealt with. For a finding that is not, or only partly, addressed, it names the one thing still needed. For an
         accepted reply, it says why the reply settles it. The same line appears on the thread's card elsewhere in
         Limn, and in the reply Limn posts when it resolves a thread for you.

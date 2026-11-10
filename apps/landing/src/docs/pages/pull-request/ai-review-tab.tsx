@@ -70,13 +70,6 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>
-            <Ui>Previous review</Ui>
-          </b>
-          : which earlier findings are fixed, partly fixed or still open. See{' '}
-          <DocLink to="ai-review/follow-ups">Follow-up reviews</DocLink>.
-        </li>
-        <li>
-          <b>
             <Ui>Review threads</Ui>
           </b>
           : the AI's judgement of the open threads from people and bots.
@@ -85,7 +78,10 @@ export default function Page(): JSX.Element {
           <b>
             <Ui>Findings</Ui>
           </b>
-          : each finding with its severity, the code it is about, and who raised it.
+          : each finding with its severity, the code it is about, and who raised it. <Ui>Open</Ui> lists every
+          finding still open, earlier ones included; <Ui>Resolved or addressed</Ui> lists the rest. An earlier
+          finding says in one line how it was dealt with, or what is still needed. See{' '}
+          <DocLink to="ai-review/follow-ups">Follow-up reviews</DocLink>.
         </li>
         <li>
           <b>

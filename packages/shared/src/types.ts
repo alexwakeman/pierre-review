@@ -5086,7 +5086,7 @@ export interface JiraAcCandidate {
 }
 
 // GET /api/prs/:id/tracker-ticket?key=<KEY> — one detected ticket, as plain strings, NEVER
-// truncated (the panel's own `checkClaudeReviewTicket` flags anything over the caps).
+// truncated.
 //
 // Acceptance criteria is not a standard Jira field, and one site can carry several fields named
 // for it, differing by issue type. So the server does not pick one: it returns every custom field
@@ -7016,22 +7016,20 @@ export const CLAUDE_FINDING_LENS_LABELS: Record<ClaudeFindingLens, string> = {
 // in review/agent.ts denies the next dispatch), not only in the prompt.
 export const CLAUDE_REVIEW_MAX_SPECIALISTS = 3;
 
-// ---- Claude Review: the user story or task (optional input) ----
-// Three free-text fields the person running a review may paste. Caps and the validator live ONCE
-// in `claude-review.ts` (`CLAUDE_REVIEW_TICKET_LIMITS`, `checkClaudeReviewTicket`), read by the
-// route AND the SPA. The acceptance criteria are NOT split by code: tickets arrive in every shape
-// (Gherkin, nested bullets, tables, prose), so Claude reads the text and enumerates the criteria
-// itself, best effort.
+// ---- Claude Review: the user story or task ----
+// A story READ FROM THE TRACKER, as one review or ticket review stores it. Caps and the validator
+// live ONCE in `claude-review.ts` (`CLAUDE_REVIEW_TICKET_LIMITS`, `checkClaudeReviewTicket`), run by
+// the tracker's story reader (tracker/stories.ts). The acceptance criteria are NOT split by code:
+// tickets arrive in every shape (Gherkin, nested bullets, tables, prose), so the model reads the text
+// and enumerates the criteria itself, best effort. (Typing or pasting a story by hand was REMOVED.)
 
-// What the SPA sends (every field optional; all blank ⇒ no ticket). A pasted-story ticket review
-// carries up to CLAUDE_REVIEW_MAX_TICKETS of these (`StartTicketReviewBody.tickets`), each checked
-// as its own one-PR ticket.
+// The validator's input (every field optional; all blank ⇒ no ticket).
 export interface ClaudeReviewTicketInput {
   title?: string;
   description?: string;
   acceptanceCriteria?: string;
-  // Where the text came from. 'jira' = Limn read it through the Jira API (the SPA renders it
-  // read-only, as markdown); 'manual' (or absent) = the reader typed or pasted it.
+  // Where the text came from. 'jira' = Limn read it from the tracker (the SPA renders it read-only,
+  // as markdown); 'manual' (or absent) = typed or pasted by hand, on an older stored run only.
   source?: ClaudeReviewTicketSource;
   // The tracker key, e.g. "BMD-984". Only kept with source 'jira'.
   key?: string;
@@ -8641,8 +8639,8 @@ export type StartThreadCheckResponse =
 // IDENT. A ticket is named by a stable string:
 //   'jira:<apiRoot>#<KEY>'               a Jira ticket the plugin detected (same site ⇒ same ticket,
 //                                        across workspaces of the account)
-//   'manual:<prId>:<first 8 hex of sha256(title|acceptance criteria)>'
-//                                        a pasted story: a one-PR ticket review, never shared
+//   (a stored 'manual:<prId>:<sha8>' ident is a pasted story from before that feature was REMOVED:
+//    it parses as null and is never listed, checked or cascaded; its rows stay, dormant)
 // Shared helpers: `jiraTicketIdent` / `parseTicketIdent` (claude-review.ts).
 
 // The most member PRs one ticket review takes. Over it, the run REFUSES (`too_many_prs`) and says
@@ -8742,7 +8740,7 @@ export type TicketReviewTrigger = 'manual' | 'auto' | 'cascade';
 // Why the server declined to run (written by the server, never the model).
 //   too_many_prs     more than TICKET_REVIEW_MAX_PRS (30) open or merged PRs name the ticket
 //   no_members       no open or merged PR names the ticket any more
-//   no_ticket        the ticket could not be read (no plugin answer, no pasted text)
+//   no_ticket        the ticket could not be read (no tracker answer)
 //   peer_unreadable  no member PR could be checked out at all
 export type TicketReviewRefusal = 'too_many_prs' | 'no_members' | 'no_ticket' | 'peer_unreadable';
 
@@ -8972,7 +8970,7 @@ export interface TicketReviewState {
   checkedAt: string | null; // ISO-8601
   // THE AUTOMATIC STORY CHECK: when it will start, or why it will not — from the SAME rule the sweeper
   // follows (review/ticket-review/auto-plan.ts), recomputed on every read from stored rows. Absent
-  // on a pasted story, or from a server before it.
+  // from a server before it.
   autoCheck?: TicketAutoCheck | null;
   // People's comments on the ticket that the latest succeeded run did not see (docs/TRACKERS.md §
   // Ticket comments). They make the run stale ('new_comments') only while it has a criterion that is
@@ -9051,10 +9049,10 @@ export interface TicketReview {
 // POST /api/ticket-reviews — start a ticket review from a PR.
 //   { prId }               every ticket the PR is on (the tracker's detection)
 //   { prId, ident }        one of them
-//   { prId, tickets }      pasted stories: one one-PR ticket review each (no plugin needed)
-export type StartTicketReviewBody =
-  | { prId: number; ident?: string }
-  | { prId: number; tickets: ClaudeReviewTicketInput[] };
+export interface StartTicketReviewBody {
+  prId: number;
+  ident?: string;
+}
 
 export interface StartTicketReviewResponse {
   runs: Array<{

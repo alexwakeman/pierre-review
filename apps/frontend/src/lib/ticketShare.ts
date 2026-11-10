@@ -1,10 +1,11 @@
 // ONE PR'S SHARE OF A TICKET REVIEW — the pure half of the PR pane's slim Story check
-// (TicketCoverage.tsx), whose "See the whole story" opens the ticket's STORY VIEW tab
+// (TicketCoverage.tsx), whose "See the whole ticket" opens the ticket's STORY VIEW tab
 // (Activity/TicketStorySection.tsx holds the whole story there).
 //
 // A ticket review judges the ticket across EVERY PR that names it. The PR pane shows only the part
 // that is this PR's: the criteria it delivers, and the unmet criteria / missing items that belong in
-// it — under ONE "Post N gaps to this PR" button. The whole story lives once, in the story view.
+// it — under ONE "Post N gaps to this PR" button. The whole story lives once, in the story view: the
+// counts of the rest and every PR's contribution card ("What this PR adds") are shown there only.
 //
 // Ownership of an unmet item, in order: the item's `ownerPrId`, else the criterion's
 // `expectedIn.prId`, else `expectedIn.repoId` against this PR's repo. An item that names NO owner is
@@ -15,7 +16,6 @@ import type {
   ReviewDocReference,
   TicketAssessment,
   TicketCriterion,
-  TicketPrCard,
   TicketNotRequestedItem,
   TicketReviewItem,
   TicketReviewMember,
@@ -28,12 +28,6 @@ export interface PrTicketShare {
   missing: TicketReviewItem[];
   /** Things this PR does that the ticket did not ask for. */
   notRequested: TicketNotRequestedItem[];
-  /** Criteria met by other PRs (and not by this one). */
-  metElsewhere: number;
-  /** Criteria met outside code changes (a person's ticket comment) — done, named apart. */
-  metOutsideCode?: number;
-  /** Unmet criteria and missing items that belong in another PR or repo. */
-  todoElsewhere: number;
 }
 
 type Owner = 'this' | 'other' | 'none';
@@ -51,7 +45,7 @@ function ownerOf(
   return 'none';
 }
 
-/** Split one run into this PR's share and a count of the rest. */
+/** This PR's share of one run (the rest is the story view's). */
 export function prTicketShare(
   assessment: Pick<TicketAssessment, 'criteria' | 'missing' | 'notRequested'>,
   items: readonly TicketReviewItem[],
@@ -60,35 +54,24 @@ export function prTicketShare(
   const byRef = new Map(items.map((i) => [i.ref, i]));
   const missingByRef = new Map(assessment.missing.map((m) => [m.ref, m]));
   const criteria: TicketCriterion[] = [];
-  let metElsewhere = 0;
-  let metOutsideCode = 0;
-  let todoElsewhere = 0;
   for (const c of assessment.criteria) {
     if (c.deliveredBy.includes(pr.id)) {
       criteria.push(c);
       continue;
     }
-    if (c.status === 'met_outside_code') {
-      metOutsideCode += 1;
-      continue;
-    }
-    if (criterionDone(c.status)) {
-      metElsewhere += 1;
-      continue;
-    }
+    // Done elsewhere (another PR, or outside code changes): the story view's, not this PR's.
+    if (criterionDone(c.status)) continue;
     const owner = ownerOf(byRef.get(c.ref)?.ownerPrId, c.expectedIn, pr.id, pr.repoId);
-    if (owner === 'other') todoElsewhere += 1;
-    else criteria.push(c);
+    if (owner !== 'other') criteria.push(c);
   }
   const missing: TicketReviewItem[] = [];
   for (const i of items) {
     if (i.status !== 'missing') continue;
     const owner = ownerOf(i.ownerPrId, missingByRef.get(i.ref)?.expectedIn, pr.id, pr.repoId);
-    if (owner === 'other') todoElsewhere += 1;
-    else missing.push(i);
+    if (owner !== 'other') missing.push(i);
   }
   const notRequested = assessment.notRequested.filter((g) => g.prId === pr.id);
-  return { criteria, missing, notRequested, metElsewhere, metOutsideCode, todoElsewhere };
+  return { criteria, missing, notRequested };
 }
 
 /**
@@ -112,39 +95,17 @@ export function shareDocReferences(
 }
 
 /**
- * THIS PR's contribution card ("What this PR adds"), at its current head — null when it has none or
- * is not a member of the run. Never a placeholder.
- */
-export function prCardOf(members: readonly Pick<TicketReviewMember, 'prId' | 'card'>[], prId: number): TicketPrCard | null {
-  return members.find((m) => m.prId === prId)?.card ?? null;
-}
-
-/** "3 more criteria are met by other PRs. 1 more is met outside code changes. 1 more is still to do in
- *  another PR." — null when none. */
-export function shareRestLine(share: Pick<PrTicketShare, 'metElsewhere' | 'todoElsewhere' | 'metOutsideCode'>): string | null {
-  const parts: string[] = [];
-  const m = share.metElsewhere;
-  const o = share.metOutsideCode ?? 0;
-  const t = share.todoElsewhere;
-  if (m > 0) parts.push(m === 1 ? '1 more criterion is met by another PR.' : `${m} more criteria are met by other PRs.`);
-  if (o > 0) parts.push(o === 1 ? '1 more is met outside code changes.' : `${o} more are met outside code changes.`);
-  if (t > 0) parts.push(t === 1 ? '1 more is still to do in another PR.' : `${t} more are still to do in other PRs.`);
-  return parts.length > 0 ? parts.join(' ') : null;
-}
-
-/**
  * Does the PR pane show the SLIM block (this PR's share + a link to the story view)? Only where the
- * story view holds the whole story: a tracker ticket (never a pasted `manual:` story), the tracker on
+ * story view holds the whole story: a tracker ticket, the tracker on
  * for the PR's workspace (`PrDetail.tickets != null`), a key to name the tab by, and an open PR on it.
  */
 export function slimStoryCheck(o: {
-  ident: string;
   ticketKey: string | null;
   trackerOn: boolean;
   prOpen: boolean;
   members: readonly Pick<TicketReviewMember, 'state'>[];
 }): boolean {
-  if (!o.trackerOn || o.ident.startsWith('manual:')) return false;
+  if (!o.trackerOn) return false;
   if (o.ticketKey == null || o.ticketKey.trim() === '') return false;
   return o.prOpen || o.members.some((m) => m.state === 'open');
 }

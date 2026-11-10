@@ -113,7 +113,6 @@ async function seedCurrentRun(ident: string): Promise<void> {
     ident,
     ticketKey: keyOf(ident),
     ticketTitle: null,
-    ticket: null,
     originPrId: ids[0]!,
     trigger: 'manual',
     model: 'm',
@@ -147,7 +146,6 @@ const deps = (): import('./sweep.js').TicketSweepDeps => ({
       ident: a.ident,
       ticketKey: a.ticketKey,
       ticketTitle: a.ticketTitle,
-      ticket: null,
       originPrId: a.originPrId,
       trigger: a.trigger,
       cause: a.cause ?? null,
@@ -530,26 +528,15 @@ describe('the grace window and no per-ticket limit (BMD-1175)', () => {
 
 describe('member refusal', () => {
   it(`⚠ refuses too_many_prs with the count`, async () => {
-    const r = await prep.resolveTicketInputs(ctx, 1, BIG, { originPrId: pr.b1!, manualTicket: null });
+    const r = await prep.resolveTicketInputs(ctx, 1, BIG, { originPrId: pr.b1! });
     expect(TICKET_REVIEW_MAX_PRS).toBe(30);
     expect(r).toMatchObject({ ok: false, reason: 'too_many_prs', prCount: TICKET_REVIEW_MAX_PRS + 1 });
   });
 
   it('exactly TICKET_REVIEW_MAX_PRS members is accepted', async () => {
-    const r = await prep.resolveTicketInputs(ctx, 1, AT_CAP, { originPrId: pr.b1!, manualTicket: null });
+    const r = await prep.resolveTicketInputs(ctx, 1, AT_CAP, { originPrId: pr.b1! });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.members).toHaveLength(TICKET_REVIEW_MAX_PRS);
-  });
-
-  it('a pasted story is a one-member ticket; no story refuses no_ticket', async () => {
-    const ident = fp.manualTicketIdent(pr.x!, { title: 'Pasted', acceptanceCriteria: '- a' });
-    const ok = await prep.resolveTicketInputs(ctx, 1, ident, {
-      originPrId: pr.x!,
-      manualTicket: { title: 'Pasted', description: null, acceptanceCriteria: '- a' },
-    });
-    expect(ok.ok && ok.members.map((m) => m.prId)).toEqual([pr.x]);
-    const none = await prep.resolveTicketInputs(ctx, 1, ident, { originPrId: pr.x!, manualTicket: null });
-    expect(none).toMatchObject({ ok: false, reason: 'no_ticket' });
   });
 });
 
@@ -583,7 +570,6 @@ describe("a person's comment the latest check did not see", () => {
       ident: TC,
       ticketKey: 'BMD-77',
       ticketTitle: null,
-      ticket: null,
       originPrId: ids[0]!,
       trigger: 'manual',
       model: 'm',

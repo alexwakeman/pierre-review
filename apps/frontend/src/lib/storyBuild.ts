@@ -30,8 +30,8 @@ import {
 
 /**
  * The tracker link for a ticket, from its IDENT alone (no fetch, no sprint read in memory): Jira's
- * browse page, the GitHub issue, the Linear issue, the Notion page. Null for a pasted story or an
- * ident that does not parse. The caller still sends it through `safeExternalUrl` (TrackerLinkOut).
+ * browse page, the GitHub issue, the Linear issue, the Notion page. Null for an ident that does not
+ * parse. The caller still sends it through `safeExternalUrl` (TrackerLinkOut).
  */
 export function trackerLinkOfIdent(ident: string): { url: string; provider: TrackerProvider } | null {
   const parsed = parseTicketIdent(ident);

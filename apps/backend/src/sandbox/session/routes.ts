@@ -79,7 +79,7 @@ const notFound = (reply: FastifyReply): ErrorBody => fail(reply, 404, 'NotFound'
 
 const isTrackerIdent = (ident: string): boolean => {
   const p = parseTicketIdent(ident);
-  return p != null && p.kind !== 'manual';
+  return p != null;
 };
 
 const parseId = (raw: string | undefined): number | null => {

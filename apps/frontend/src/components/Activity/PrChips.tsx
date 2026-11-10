@@ -76,7 +76,7 @@ function CriteriaChip({ c, several, interactive }: { c: PrCriteriaCheck; several
       {label}
     </>
   );
-  // A pasted story (`manual:` ident, no key) has no story tab to open.
+  // A run with no key has no story tab to open.
   if (!interactive || c.key == null) {
     return (
       <span className={cls} title={title} data-testid="pr-chip-criteria">

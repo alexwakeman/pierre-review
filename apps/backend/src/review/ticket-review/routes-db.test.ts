@@ -4,8 +4,8 @@
 //      into ONE comment at the head the run judged; a second post is 409 AlreadyPosted.
 //   2. ⚠ A re-raised item is never posted twice: the newer run's copy inherits the posting, and an
 //      older run's item is refused once a newer check exists.
-//   3. Pasted stories start one-PR 'manual:' runs; the states route refuses over-cap and malformed
-//      ident lists rather than truncating.
+//   3. Typed stories are gone: a `tickets` body and a stored `manual:` ident are refused; the
+//      states route refuses over-cap and malformed ident lists rather than truncating.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/routes-db
 import { rmSync } from 'node:fs';
@@ -52,7 +52,6 @@ async function run(items: Array<{ ref: string; ownerPrId: number | null; title: 
     ident: IDENT,
     ticketKey: 'BMD-7',
     ticketTitle: 'Export',
-    ticket: null,
     originPrId: pr.api!,
     trigger: 'manual',
     model: 'm',
@@ -216,17 +215,20 @@ describe('POST /api/ticket-reviews/:id/post', () => {
 });
 
 describe('POST /api/ticket-reviews', () => {
-  it('a pasted story starts a one-PR manual run', async () => {
-    const res = await app.inject({
+  it('a typed story is refused: no `tickets` body, no `manual:` ident (the feature is removed)', async () => {
+    const typed = await app.inject({
       method: 'POST',
       url: '/api/ticket-reviews',
       payload: { prId: pr.api, tickets: [{ title: 'Pasted', acceptanceCriteria: '- a' }] },
     });
-    expect(res.statusCode).toBe(202);
-    const args = (startTicketReview.mock.calls[0] as unknown[])[1] as any;
-    expect(args.ident).toMatch(new RegExp(`^manual:${pr.api}:[0-9a-f]{8}$`));
-    expect(args.manualTicket.title).toBe('Pasted');
-    expect(args.trigger).toBe('manual');
+    expect(typed.statusCode).toBe(400);
+    const stored = await app.inject({
+      method: 'POST',
+      url: '/api/ticket-reviews',
+      payload: { prId: pr.api, ident: `manual:${pr.api}:abcdef12` },
+    });
+    expect(stored.statusCode).toBe(400);
+    expect(startTicketReview).not.toHaveBeenCalled();
   });
 
   it('an unknown PR is 404 and a malformed ident 400', async () => {

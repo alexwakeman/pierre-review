@@ -295,13 +295,13 @@ Review). Wire types: `packages/shared/src/types.ts` § Ticket review; persistenc
 with the other agentic routes (`registerAgenticRoutes`), so absent under `LIMN_AI_DISABLED` (404). Every id-addressed route answers 404 for another account's id.
 
 **Idents.** `jira:<apiRoot>#<KEY>` (a ticket the tracker detected; the same site and key are
-the same ticket in every workspace of the account) or `manual:<prId>:<sha8>` (a pasted story,
-one PR). Helpers: shared `jiraTicketIdent` / `parseTicketIdent`; the manual hash is
-`fingerprint.ts` `manualTicketIdent` (server only). An ident that does not parse → `400
+the same ticket in every workspace of the account). Helpers: shared `jiraTicketIdent` /
+`parseTicketIdent`. (A stored `manual:<prId>:<sha8>` ident is a typed story from before that feature
+was REMOVED, 2026-11-10: it does not parse, so it is never listed or re-checked.) An ident that does not parse → `400
 {error:'InvalidIdent'}`.
 
-**Members.** Open and merged PRs on the ticket (`tracker/ticket-source.ts` `ticketMembers`; a manual ident is its
-one PR); a closed-but-unmerged PR is dropped. Over `TICKET_REVIEW_MAX_PRS` (30) the run is
+**Members.** Open and merged PRs on the ticket (`tracker/ticket-source.ts` `ticketMembers`); a
+closed-but-unmerged PR is dropped. Over `TICKET_REVIEW_MAX_PRS` (30) the run is
 REFUSED (`refused: {reason:'too_many_prs', prCount}`), never sampled.
 
 **Contribution cards on the wire.** Every `TicketReviewMember` carries an optional `card?:
@@ -327,7 +327,7 @@ over STORED rows (`auto-inputs.ts`), so it survives a restart and the time shown
 after `lastChange`, or `lane_full`) · `due` (starts within a minute) · `held` (`daily_limit` with
 `startsAt` = 00:00 UTC, `over_budget`, `ai_not_ready`) · `off` (`auto_off`, `too_many_prs`,
 `no_floor`, `already_tried`). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed'|'commented',
-at}`. Absent on a pasted (`manual:`) ticket, or when it could not be read (the read never fails on it).
+at}`. Absent when it could not be read (the read never fails on it).
 (Replaced `waiting` / `TicketReviewWait`, 2026-11-09.)
 `newComments` (optional) counts the ticket's people comments the latest succeeded run was not given
 (`ticket_reviews.comments_seen`); absent / 0 when none or the run predates comment reading. They make the
@@ -341,7 +341,7 @@ status) — DONE, never an item ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket 
 
 | Route | Contract |
 |---|---|
-| `POST /api/ticket-reviews` | Start. Body `StartTicketReviewBody`: `{prId}` (every ticket the PR is on, via the ticket source's `ticketsForPr` — stored rows only, no Jira call) · `{prId, ident}` (one of them; an ident the PR is not on → `404`) · `{prId, tickets: ClaudeReviewTicketInput[]}` (pasted stories, ≤ `CLAUDE_REVIEW_MAX_TICKETS`, validated by `checkClaudeReviewTicket` → `400 {error:'TicketInvalid', index, field, message}`, never truncated; one `manual:` run each). The PR must be this account's (`404`). → `202 StartTicketReviewResponse {runs: [{ident, ticketReviewId, outcome: 'queued'\|'already_running'\|'refused', refused}]}`; `already_running` returns the in-flight run's id. `{prId}` with no tickets → `{runs: []}`. Over `TICKET_REVIEW_MAX_PRS` a Jira ticket answers `outcome:'refused'` with `ticketReviewId: null` and NO row written. A manual ident must be this PR's and have a stored run (`404`). `400 {error:'NoClaudeAuth'}`, `409 {error:'Busy'}` when the lane is full and nothing was queued. Trigger `manual`. Tiers **`ai` + `ai_hourly`** (spends money; add the exact path to `tierFor`) |
+| `POST /api/ticket-reviews` | Start. Body `StartTicketReviewBody`: `{prId}` (every ticket the PR is on, via the ticket source's `ticketsForPr` — stored rows only, no Jira call) · `{prId, ident}` (one of them; an ident the PR is not on → `404`) (a stored `manual:` ident → `400 InvalidIdent`). ⚠ `{prId, tickets}` (typed stories) is REMOVED (2026-11-10) → `400 {error:'Removed'}`, never stripped into "every ticket". The PR must be this account's (`404`). → `202 StartTicketReviewResponse {runs: [{ident, ticketReviewId, outcome: 'queued'\|'already_running'\|'refused', refused}]}`; `already_running` returns the in-flight run's id. `{prId}` with no tickets → `{runs: []}`. Over `TICKET_REVIEW_MAX_PRS` a Jira ticket answers `outcome:'refused'` with `ticketReviewId: null` and NO row written. `400 {error:'NoClaudeAuth'}`, `409 {error:'Busy'}` when the lane is full and nothing was queued. Trigger `manual`. Tiers **`ai` + `ai_hourly`** (spends money; add the exact path to `tierFor`) |
 | `GET /api/prs/:id/ticket-reviews` | `PrTicketReviewsResponse {prId, tickets: [{ident, ticketKey, ticketTitle, review: TicketReview\|null, state: TicketReviewState}]}` — one entry per ticket the PR is on: the tracker's detected tickets first (detection order), then any other ticket this PR was reviewed on (member or starting PR), newest first. `review` = that ticket's latest run of ANY status. DB + the stored ticket rows only (no Jira call). Tier `read` |
 | `GET /api/ticket-reviews/:id` | one run in full: `TicketReview` (members with `repo`/`number`/`title`/`headSha`/`state`/`checkedOut`; `assessment` only when `succeeded`; `items[]` with `posted`, `carried: true` when inherited from the earlier run it re-raises, `auto: true` when auto-posting posted it; `autoPost: {status, at, reason, error, postedCount, notRequested: [{index, prId, postedAt, carried}]} \| null` — what auto-posting did with an AUTOMATIC run, `notRequested` naming the "Not asked for" items on GitHub by their index in `assessment.notRequested`). Tier `read` |
 | `GET /api/ticket-reviews/:id/stream` | SSE (a GET — `req.raw.on('close')` is correct here), `TicketReviewStreamEvent`: one `snapshot`, `progress` on every phase/activity/usage change, one terminal `done {status, ticketReviewId, memberPrIds}` then close. A finished run answers `snapshot` + `done` at once. On `done` the SPA invalidates `['ticket-reviews', prId]` for EVERY `memberPrIds` entry plus `['ticket-review-states']`. Tier `read` |
@@ -381,7 +381,7 @@ Mermaid `source` and `diagramType` left the wire. Only design-era rows are read:
 |---|---|
 | `GET /api/prs/:id/sequence-diagrams` | `PrSequenceDiagramsResponse {prId, pr: slot, stories: StorySequenceDiagramSlot[]}` — the PR's diagram and, for each of its tracker tickets (≤ 3; STORED rows only) with 2+ open or merged PRs or a stored diagram, `{ident, ticketKey, memberCount, …slot}`. DB-only. Another account's PR → `404`. Tier `read` |
 | `POST /api/prs/:id/sequence-diagrams/redraw` | Queue the PR's diagram at its synced head NOW (trigger `manual`, never counted against the daily cap; a NEW row — the diagram already drawn at that head stays shown until this one succeeds). → `202 RedrawSequenceDiagramResponse {outcome: 'queued'\|'already_running', diagramId}`, or `200 {outcome:'refused', diagramId:null, refusal:'no_code'}` when the stored file list shows no code. `404` another account's PR, `409 NoHead`, `400 NoClaudeAuth`, `409 Busy`. Tiers **`ai` + `ai_hourly`** |
-| `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. A pasted (`manual:`) or malformed ident → `400 BadIdent`. Tier `read` |
+| `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. A malformed ident (a stored `manual:` one included) → `400 BadIdent`. Tier `read` |
 | `POST /api/sequence-diagrams/story/redraw {ident}` | Queue the story diagram now. Fewer than 2 members → `200 {outcome:'refused', refusal:'too_few_prs'}`; more than 12 → `too_many_prs`; otherwise as the PR redraw. Tiers **`ai` + `ai_hourly`** |
 
 ### Reference docs
@@ -440,8 +440,8 @@ note}]}]}`; null/absent = the PR's tickets had none). Never part of the verdict 
 
 `review/story-docs/routes.ts`, registered by `registerAgenticRoutes` (absent under `LIMN_AI_DISABLED` → `404`). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the docs. Wire
 types: `packages/shared/src/story-docs-alignment.ts`. The workspace resolves through
-`resolveWorkspaceScope` (absent / unknown / another account's ⇒ the caller's Default, echoed). A manual
-(`manual:`) or malformed ident → `400 BadIdent`.
+`resolveWorkspaceScope` (absent / unknown / another account's ⇒ the caller's Default, echoed). A
+malformed ident (a stored `manual:` one included) → `400 BadIdent`.
 
 | Route | Contract |
 |---|---|

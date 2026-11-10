@@ -1,5 +1,5 @@
-// The pure half of the Claude Review tab's follow-up and user-story UI: ordering, anchors, the
-// draft <-> request mapping and the chip palette. No JSX, so it is unit-tested from `test/`.
+// The pure half of the Claude Review tab's follow-up and user-story UI: ordering, anchors and the
+// chip palette. No JSX, so it is unit-tested from `test/`.
 //
 // ⚠ NOTHING HERE DECIDES A STATUS. Every status comes from the server's reconcile step
 // (`packages/pro/src/claude-review/follow-up.ts` / `ticket.ts`), which never invents "addressed";
@@ -7,9 +7,7 @@
 // retyped here either — they live once in `@pierre-review/shared` (`claude-review.ts`).
 import {
   aiProviderName,
-  checkClaudeReviewTicket,
-  checkClaudeReviewTickets,
-  CLAUDE_REVIEW_TICKET_LIMITS,
+  FOLLOW_UP_STATUS_LABEL,
   isThreadToFix,
   judgementHowOf,
   storyMissingRef,
@@ -25,11 +23,7 @@ import type {
   ClaudeFollowUpStatus,
   ClaudeReview,
   ClaudeReviewTicket,
-  ClaudeReviewTicketCheck,
   ClaudeReviewTicketEntry,
-  ClaudeReviewTicketField,
-  ClaudeReviewTicketInput,
-  ClaudeReviewTicketsCheck,
   ClaudeReviewTicketSource,
   ClaudeReviewVerdict,
   ClaudeSettledFinding,
@@ -182,6 +176,87 @@ export function partitionFollowUp(items: readonly ClaudeFollowUpItem[]): {
   });
   open.sort((a, b) => (OPEN_ORDER[a.it.status] ?? 9) - (OPEN_ORDER[b.it.status] ?? 9) || a.i - b.i);
   return { open: open.map((x) => x.it), closed };
+}
+
+// ---- the earlier findings, ON THE FINDINGS LIST ----
+// There is no separate "Previous review" section (removed 2026-11-10). What the latest run said about
+// each earlier finding — its status, the one-line HOW, the reply and its buttons — rides on that
+// finding's own row in Findings ("Open", then "Resolved or addressed"). An item no row shows (an
+// older server, a finding the team fold leaves out) gets a row of its own in the same group.
+
+/** The one line under an earlier finding: how it was dealt with, or the one thing still needed. */
+export function followUpOneLine(
+  item: Pick<ClaudeFollowUpItem, 'how' | 'explanation' | 'status' | 'sent'>,
+  by = 'Claude',
+): string | null {
+  const how = judgementHowOf(item);
+  if (how != null) return how;
+  return item.status === 'not_checked' ? notCheckedReason(item, by) : null;
+}
+
+export interface EarlierNotes {
+  // The latest run's follow-up item, by the earlier finding's id AND by its re-raise's id.
+  items: ReadonlyMap<number, ClaudeFollowUpItem>;
+  // A finding an earlier review settled by accepting a reply, by its id.
+  settled: ReadonlyMap<number, ClaudeSettledFinding>;
+}
+
+/** Index the run's follow-up and settled-earlier rows by every finding id a row may show. Pure. */
+export function earlierNotes(
+  items: readonly ClaudeFollowUpItem[],
+  settled: readonly ClaudeSettledFinding[],
+): EarlierNotes {
+  const byId = new Map<number, ClaudeFollowUpItem>();
+  for (const it of items) {
+    byId.set(it.priorFindingId, it);
+    if (it.reraisedFindingId != null) byId.set(it.reraisedFindingId, it);
+  }
+  return { items: byId, settled: new Map(settled.map((x) => [x.priorFindingId, x])) };
+}
+
+/** What the run said about a row showing any of these finding ids (its own, and everyone's who raised it too). */
+export function earlierNoteFor(
+  notes: EarlierNotes,
+  ids: readonly number[],
+): { item: ClaudeFollowUpItem | null; settled: ClaudeSettledFinding | null } {
+  let item: ClaudeFollowUpItem | null = null;
+  let settled: ClaudeSettledFinding | null = null;
+  for (const id of ids) {
+    item ??= notes.items.get(id) ?? null;
+    settled ??= notes.settled.get(id) ?? null;
+  }
+  return { item, settled: item == null ? settled : null };
+}
+
+/**
+ * The follow-up items and settled findings NO shown row carries (`shownIds`: every finding id the
+ * Findings rows show), split the way the list is: still open, then closed. Pure.
+ */
+export function unplacedEarlier(
+  items: readonly ClaudeFollowUpItem[],
+  settled: readonly ClaudeSettledFinding[],
+  shownIds: ReadonlySet<number>,
+): { open: ClaudeFollowUpItem[]; closed: ClaudeFollowUpItem[]; settled: ClaudeSettledFinding[] } {
+  const placed = (it: ClaudeFollowUpItem): boolean =>
+    shownIds.has(it.priorFindingId) || (it.reraisedFindingId != null && shownIds.has(it.reraisedFindingId));
+  const { open, closed } = partitionFollowUp(items.filter((it) => !placed(it)));
+  return { open, closed, settled: settled.filter((x) => !shownIds.has(x.priorFindingId)) };
+}
+
+/**
+ * The status chip on a row's note, or null when the row already says it: a re-raised finding's own
+ * chip ("Not addressed"), or a closed row's reason ("Your review found it addressed"). A reply status
+ * always shows ("Pushed back", "Reply accepted: not an issue").
+ */
+export function earlierNoteChip(
+  item: Pick<ClaudeFollowUpItem, 'status' | 'acceptKind'>,
+  row: { reraisedChip: boolean; closedReason: boolean },
+): string | null {
+  const reply = replyStatusHeading(item);
+  if (reply != null) return reply;
+  if (row.reraisedChip) return null;
+  if (row.closedReason && (item.status === 'addressed' || item.status === 'no_longer_applies')) return null;
+  return FOLLOW_UP_STATUS_LABEL[item.status];
 }
 
 export interface CodeAnchor {
@@ -530,11 +605,11 @@ export const ALREADY_POSTED_CHIP = {
   cls: CHIP_GREY,
 };
 
-// ---- the user story draft ----
+// ---- the user story, as drawn ----
 
-// What the three inputs hold, untrimmed (the check trims). Always three strings, so the inputs
-// stay controlled. `source: 'jira'` (+ key/url/fetchedAt) marks a story Limn READ from Jira: the
-// panel shows it read-only, as markdown. Absent / 'manual' = typed or pasted, editable.
+// A story as the story views draw it (JiraStoryView): always three strings. `source: 'jira'`
+// (+ key/url/fetchedAt) marks a story Limn READ from the tracker. (Typing a story by hand was
+// removed: a stored one without a source is an older run's.)
 export interface TicketDraft {
   title: string;
   description: string;
@@ -584,140 +659,6 @@ export function isJiraDraft(d: TicketDraft): boolean {
 
 export function ticketDraftHasContent(d: TicketDraft): boolean {
   return d.title.trim() !== '' || d.description.trim() !== '' || d.acceptanceCriteria.trim() !== '';
-}
-
-export function checkTicketDraft(d: TicketDraft): ClaudeReviewTicketCheck {
-  return checkClaudeReviewTicket(d);
-}
-
-/**
- * The request's `ticket`, or undefined when there is nothing to send (all blank) or the draft
- * does not pass the check (the caller refuses to run then). Sends the NORMALISED fields the check
- * produced; the server runs the same check again, and trimming is idempotent.
- */
-export function ticketRequestFromCheck(
-  check: ClaudeReviewTicketCheck,
-): ClaudeReviewTicketInput | undefined {
-  if (!check.ok || check.ticket == null) return undefined;
-  const t = check.ticket;
-  return ticketInputFromStored(t);
-}
-
-/** A checked (normalised) ticket back to the request shape, provenance included. */
-export function ticketInputFromStored(t: ClaudeReviewTicket): ClaudeReviewTicketInput {
-  const out: ClaudeReviewTicketInput = {};
-  if (t.title != null) out.title = t.title;
-  if (t.description != null) out.description = t.description;
-  if (t.acceptanceCriteria != null) out.acceptanceCriteria = t.acceptanceCriteria;
-  if (t.source != null) out.source = t.source;
-  if (t.key != null) out.key = t.key;
-  if (t.url != null) out.url = t.url;
-  if (t.fetchedAt != null) out.fetchedAt = t.fetchedAt;
-  return out;
-}
-
-// ---- several stories ----
-
-/** Every story at once, through the SAME shared check the route runs. */
-export function checkTicketDrafts(drafts: readonly TicketDraft[]): ClaudeReviewTicketsCheck {
-  return checkClaudeReviewTickets(drafts);
-}
-
-/** The request's `tickets`, or undefined when none / invalid (the caller refuses to run then). */
-export function ticketsRequestFromCheck(
-  check: ClaudeReviewTicketsCheck,
-): ClaudeReviewTicketInput[] | undefined {
-  if (!check.ok || check.tickets.length === 0) return undefined;
-  return check.tickets.map(ticketInputFromStored);
-}
-
-/** The header's summary of what Run sends: '', ' · 1 story', ' · 2 stories' or ' · needs a fix'. */
-export function ticketsPanelHint(
-  drafts: readonly TicketDraft[],
-  check: ClaudeReviewTicketsCheck,
-): string {
-  const n = drafts.filter(ticketDraftHasContent).length;
-  if (n === 0) return '';
-  if (!check.ok) return ' · needs a fix';
-  return ` · ${n} ${n === 1 ? 'story' : 'stories'}`;
-}
-
-/** The drafts to show: the reader's own (touched) list, else the latest run's stories. */
-export function resolveTicketDrafts(
-  own: TicketDraft[] | undefined,
-  review: Pick<ClaudeReview, 'tickets' | 'ticket'> | null | undefined,
-): TicketDraft[] {
-  return own ?? ticketDraftsFromReview(review);
-}
-
-/**
- * What the COLLAPSED panel's header adds, so a closed panel never hides that a user story will be
- * sent — or that one is blocking the run. '' when empty.
- */
-export function ticketPanelHint(d: TicketDraft, check: ClaudeReviewTicketCheck): string {
-  if (!ticketDraftHasContent(d)) return '';
-  if (!check.ok) return ' · needs a fix';
-  return ' · added';
-}
-
-const FIELD_CAP: Record<ClaudeReviewTicketField, number> = {
-  title: CLAUDE_REVIEW_TICKET_LIMITS.titleChars,
-  description: CLAUDE_REVIEW_TICKET_LIMITS.descriptionChars,
-  acceptanceCriteria: CLAUDE_REVIEW_TICKET_LIMITS.acceptanceCriteriaChars,
-};
-
-/**
- * The per-field character counter: shown past 80% of the cap, flagged once over it. Measures the
- * TRIMMED length, exactly what the check measures, so the counter and the 400 never disagree.
- */
-export function fieldCounter(
-  field: ClaudeReviewTicketField,
-  value: string,
-): { text: string; over: boolean } | null {
-  const cap = FIELD_CAP[field];
-  const len = value.trim().length;
-  if (len <= cap * 0.8) return null;
-  return { text: `${len} / ${cap} characters`, over: len > cap };
-}
-
-// ---- the draft store (a per-session convenience) ----
-
-// Survives a tab switch or a PR change within the session, so a half-typed user story is not lost.
-// A PR with an entry here was TOUCHED by the reader, and a stored ticket must not overwrite it.
-// Bounded: the oldest entry is dropped past the cap.
-export const TICKET_DRAFT_CAP = 50;
-
-export function createTicketDraftStore<T = TicketDraft>(cap = TICKET_DRAFT_CAP): {
-  get: (prId: number) => T | undefined;
-  set: (prId: number, d: T) => void;
-  has: (prId: number) => boolean;
-} {
-  const m = new Map<number, T>();
-  return {
-    get: (prId) => m.get(prId),
-    has: (prId) => m.has(prId),
-    set: (prId, d) => {
-      m.delete(prId);
-      m.set(prId, d);
-      while (m.size > cap) {
-        const oldest = m.keys().next().value;
-        if (oldest === undefined) break;
-        m.delete(oldest);
-      }
-    },
-  };
-}
-
-/**
- * The draft to show for a PR: the reader's own (touched) draft when there is one, else the latest
- * run's stored user story, else empty. The stored ticket was written at QUEUE time, so a failed or
- * cancelled run still prefills.
- */
-export function resolveTicketDraft(
-  own: TicketDraft | undefined,
-  latestStored: ClaudeReviewTicket | null | undefined,
-): TicketDraft {
-  return own ?? ticketDraftFromStored(latestStored);
 }
 
 // ---- story findings ----

@@ -1057,7 +1057,7 @@ window). Below `STORY_TWO_COLUMN_MIN_PX` (1080: a 1280px window with the sidebar
 goes to two), and ALWAYS in the PR drawer (`placement === 'pane'` passes `oneColumn` — a short strip
 under the timeline gives a sticky rail no height), it is today's single column, capped at 64rem, in
 today's order. Wide: the reading column holds the CONTENT — the summary (paragraphs at a reading measure,
-`.reading-measure`), Previous review, Review threads, Findings, Story check, CI check, SonarCloud,
+`.reading-measure`), Review threads, Findings (earlier findings included), Story check, CI check, SonarCloud,
 Reference docs, the Design and the chat — and a RIGHT RAIL ("Review facts and actions") holds the
 META, as `<RailPiece slot=…>` portals so every hook, mutation and `AiRunGate` stays exactly where it was.
 **The rail STICKS** (2026-11-03, `REVIEW_RAIL.sticky`; `RailLayout.tsx` `stickyRailTop`, pinned by
@@ -1873,10 +1873,10 @@ reappears.
   item (target named on the button; once posted, never offered again; `visible:false` = "It will
   show up here shortly", no retry). It shows the latest SUCCEEDED run; a newer running or failed one
   is a line above it; each block's header says how long ago the shown run finished (`ReviewedAgo` on
-  `completedAt`). The story-tab panel moved here behind a plain **"+ Add story" link** — no
-  disclosure box: the link reveals the tabs with a blank story (`storiesOnOpen`), and Close hides
-  them and drops blank typed tabs (`storiesOnClose`, `lib/storyTabs.ts`) (pasted stories become
-  `manual:` ticket reviews; auto-pull is off — detected tickets are already blocks). ⚠ **Open PRs
+  `completedAt`). Below the blocks, the paste box (`TicketPasteBox.tsx`, behind "Add tickets") adds
+  a ticket by its link or key; there is NO typed-story form (the "+ Add story" tabs, "Input
+  manually" and `lib/storyTabs.ts` were REMOVED 2026-11-10), and with no tracker the box does not
+  show. ⚠ **Open PRs
   reads ticket coverage through ONE batched `useTicketReviewStates(idents)`** (`POST
   /api/ticket-reviews/states`), never per card; it polls only while a state is `running`. The ident
   is built client-side with shared `jiraApiRoot` on the browse link — the plugin's own fold. Card
@@ -1886,8 +1886,8 @@ reappears.
   - ⚠ **ONE STORY SECTION.** The old "User stories" section is DELETED: an older PR review's story
     verdicts render INSIDE Story check, and only for a story NO ticket review covers
     (`legacyOnlyEntries`, `lib/ticketStory.ts`: same key, or same title when keyless), as its own
-    block under a muted "Checked on this PR only" with a Check (a `planStoryStart` of that stored
-    ticket). `ClaudesReview` places only THOSE stories' findings (`placeStoryFindings(findings,
+    block under a muted "Checked on this PR only", read-only (no Check: a story outside the tracker
+    cannot be checked again). `ClaudesReview` places only THOSE stories' findings (`placeStoryFindings(findings,
     legacyEntries)`) and hands the cards to Story check through its `storyCheck` render prop; a
     story hidden because a ticket review covers it places nothing, so its findings stay in the
     Findings list with their chip. Every finding is still on screen once.
@@ -1900,8 +1900,7 @@ reappears.
     on receipt) when `canFetchDetails`, else the latest ticket review's `ticket` snapshot, else the
     older run's ticket. A Jira story carries the criteria-field picker (`useSetJiraAcField`, no
     "None of these"); a change invalidates `['ticket-reviews']` + the states so the block shows
-    "Story edited since". "+ Add story" is only for pasting: a ticket already listed as a block is
-    not offered as "Pull KEY from Jira".
+    "Story edited since".
   - **THE WHOLE STORY LIVES ONCE, IN THE STORY VIEW; the pane shows its own share.** The story
     view's stack header (the CARDS; Open PRs' row groups show the key and name only) carries the
     coverage pill, "reviewed X ago" (`state.checkedAt`) and Re-check; the
@@ -1915,17 +1914,16 @@ reappears.
     `expectedIn.prId`, else `expectedIn.repoId` against its repo; an item naming NO owner stays here,
     since its post lands on the viewed PR and the story view has none), ONE "Post N gaps to this PR"
     (`StoryGapsPost onlyThisPr`; the full view shows one per target PR, `storyGapGroups` — the gaps go
-    as ONE collated comment, there is no per-item Post), its not-asked-for work — a
-    count of the rest (`shareRestLine`) and "See the whole story", which opens the ticket's story
-    view tab (`useOpenStory` with the block's ident, key and title). A pasted `manual:` story keeps
-    the full view in the pane.
+    as ONE collated comment, there is no per-item Post), its not-asked-for work — and "See the whole
+    ticket", which opens the ticket's story view tab (`useOpenStory` with the block's ident, key and
+    title). ⚠ The pane shows NO count of the rest ("8 more criteria are met by other PRs …") and NO
+    "What this PR adds": both are the story view's (removed from the pane 2026-11-10).
   - **"What this PR adds" — each member's CONTRIBUTION CARD** (`TicketReviewMember.card`, the card at
     the PR's CURRENT synced head; docs/CLAUDE-REVIEW.md § Ticket review). The stack's body lists
     "What each PR adds" (`MemberCards`): one collapsed `PrCardDisclosure` per member that HAS a card,
-    toggled by the PR ref alone (the heading already says what it is; a bare mount with no `label`
-    — the slim pane's own card — still reads "What this PR adds") —
+    toggled by the PR ref alone (the heading already says what it is) —
     summary, interfaces (Added/Changed/Removed chip, kind word, the exact name, its note), loose ends.
-    The slim pane shows THIS PR's card only (`prCardOf`, `lib/ticketShare.ts`) above the rest line.
+    The AI Review tab shows no card (the data stays: the ticket review reads it as its input).
     ⚠ A member with no card renders NOTHING (`membersWithCards` drops it) — never a placeholder claim.
     Both ride the review already loaded: no request of their own, and the board fetches none of it. Card text is model prose about untrusted input: PLAIN TEXT through `PrRefText`.
   - **Open PRs: a ticket opens its STORY VIEW in a tab** (`TicketKeyButton` → `useOpenStory`): the
@@ -1970,7 +1968,7 @@ reappears.
   bordered rounded box, tinted header band = sentence-case title (one size) + count pills + ⓘ +
   right-aligned actions; cards inside keep their lighter borders (pane → section → card). Order:
   Reviews and actions (the Overview's Reviews + Actions rows, shared via `components/pr/`, plus the
-  left-aligned Generate fix button) · Run a review · Claude's review · Previous review · Review threads · Findings · Story check · CI check
+  left-aligned Generate fix button) · Run a review · Claude's review · Review threads · Findings · Story check · CI check
   · Review chat (OPEN by default, so its one DB read runs on mount; Hide collapses it) · Post to
   GitHub (summary, verdict, Preview, Post). The code review draws NO CI any more.
 - **CI check is the CI REVIEW** (`CiCheckSection.tsx`, `hooks/useCiReview.ts`, pure half
@@ -1991,7 +1989,7 @@ reappears.
 - **Praise is not a finding.** New reviews raise none (the summary carries one praise line,
   rendered as part of its markdown). An older run's stored praise is HIDDEN, never deleted:
   `withoutPraise` (`lib/claudeReviewFollowUp.ts`) is applied ONCE where `ClaudesReview` takes the
-  run (findings list, counts, story placement, the Previous review list), and `findingTotal` leaves
+  run (findings list, counts, story placement, the earlier findings' notes), and `findingTotal` leaves
   it out of the cards' "N of M posted".
 - **Findings' "Copy all"** (`CopyAllFindingsButton`, left in the header beside the count; pure half
   `lib/findingsMarkdown.ts`, `test/findingsMarkdown.test.ts`) copies the Findings LIST only — never
@@ -2072,6 +2070,16 @@ reappears.
     teammate's (`postedAuto` forced false). A posted chip reads "Posted · 3 hours ago" for a post by
     hand too. No hunk preview on a teammate's (their comment's diff hunk is not stored). A
     story-placed finding stays under Story check. The rail counts read the same open rows.
+  - ⚠ **NO "PREVIOUS REVIEW" SECTION (removed 2026-11-10): the earlier findings ARE these rows.** Each
+    renderer gets the finding ids its row stands for (`pointIds`: its own and everyone's who raised it
+    too), and `ClaudesReview` hangs what the latest run said about that earlier finding at the card's
+    foot (`FindingRow note` → `EarlierFindingNote`): status chip unless the row already says it, the
+    one-line how, the reply with Post reply / Resolve, "Post still open". So "Open" holds every
+    still-open earlier finding (they matter for the verdict) and "Resolved or addressed" every closed
+    one, each saying how. An item no row shows gets its own `FollowUpRow` (`oneLine`) in the same
+    group (`moreOpen` / `moreClosed`); a past run's plain list uses the same `ResolvedGroup`. Pure
+    half: `earlierNotes` / `earlierNoteFor` / `unplacedEarlier` / `earlierNoteChip` /
+    `followUpOneLine` (`lib/claudeReviewFollowUp.ts`).
   - **Reviews on this PR** (`ReviewsOnPrSection`, `reviewsOnPr`): every review, the reader's (a pair
     once) and teammates', newest first, IN COLUMNS (2026-11-10, one fixed grid template per row,
     `REVIEW_ROW_GRID`): avatar · who · day (tabular) · commit (7-character mono, the same form as
@@ -2130,7 +2138,7 @@ reappears.
   commits" / "1 newer commit", amber "Branch changed" when the count is 0/null (rewritten history,
   reviewed commit not synced). Either head unknown ⇒ null, no pill. The card reads
   `ClaudeReviewPrState.currentHeadSha` (the PR's synced head). It replaced the pane's "Outdated"
-  chip and the Previous review header's "No new commits since that review." — do not re-add either.
+  chip and the old Previous review header's "No new commits since that review." — do not re-add either.
   `test/claudeReviewFollowUp.test.ts` pins the section list and that no bare `<section>` remains.
   ⚠ The per-ticket "Post as comment" (`TicketPostControl`, `usePostTicketAnalysis`,
   `api.postClaudeTicketAnalysis`) is DELETED, and `test/claudeReviewFollowUp.test.ts` fails if any of

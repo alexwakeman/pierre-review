@@ -1,65 +1,22 @@
-// JIRA "FILL FROM KEY" in the Claude Review panel: the pure half.
+// A STORY READ FROM THE TRACKER (lib/jiraTicket.ts): the pure half.
 //
-//   1. THE BUTTON ONLY EXISTS FOR A DETECTED JIRA TICKET WITH A SAVED TOKEN — `canFetchDetails`
-//      from the server, never inferred from the provider alone (absent reads as false).
-//   2. A FILL REPLACES title + description; the criteria box changes only through a CHOSEN
-//      candidate, and the blank option leaves it as it is.
-//   3. THE DEFAULT CHOICE (shared, applied SERVER-side now): the workspace's field for this issue
-//      type when THIS ticket has it; else the best STRONG name match (exact "Acceptance Criteria"
-//      first; weak matches never preselect); else blank. The panel uses the field the server names
-//      (`serverAcField`), falling back to that rule for an older plugin that names none.
-//   4. THE OLD PER-BROWSER CHOICE moves to the server ONCE (`legacyAcFieldToMigrate`): read, then
-//      removed; only when the server has no choice of its own; a storage failure is "nothing".
-//   5. ONE door to the ticket route: the panel reads tickets only through the query cache
-//      (`fetchQuery`), never a render-time `useQuery`. The automatic pull is in storyTabs.test.ts.
+//   1. A FILL REPLACES title + description; the criteria change only through a CHOSEN candidate,
+//      and the blank option leaves them as they are.
+//   2. THE DEFAULT CHOICE (shared, applied SERVER-side): the workspace's field for this issue type
+//      when THIS ticket has it; else the best STRONG name match (exact "Acceptance Criteria" first;
+//      weak matches never preselect); else blank. A story uses the field the server names
+//      (`serverAcField`), falling back to that rule for an older server that names none.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/jiraTicket.test.ts
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { JiraAcCandidate, JiraTicketDetails, TicketRef } from '@pierre-review/shared';
-import {
-  acCandidateLabel,
-  unfillableJiraTickets,
-  applyAcCandidate,
-  applyJiraTicket,
-  defaultAcCandidate,
-  fillableJiraTickets,
-  jiraFillNote,
-  jiraSiteOf,
-  legacyAcFieldToMigrate,
-  serverAcField,
-  type AcMemoryStore,
-} from '../src/lib/jiraTicket.js';
-
-const jira = (key: string, canFetchDetails?: boolean): TicketRef => ({
-  key,
-  url: `https://acme.atlassian.net/browse/${key}`,
-  provider: 'jira',
-  ...(canFetchDetails === undefined ? {} : { canFetchDetails }),
-});
+import type { JiraAcCandidate, JiraTicketDetails } from '@pierre-review/shared';
+import { applyAcCandidate, applyJiraTicket, defaultAcCandidate, jiraSiteOf, serverAcField } from '../src/lib/jiraTicket.js';
 
 const cand = (id: string, name: string, match: JiraAcCandidate['match'], text = `${name} text`) => ({
   id,
   name,
   text,
   match,
-});
-
-describe('fillableJiraTickets', () => {
-  it('keeps only reading-tracker tickets the server marked fetchable (Jira, Linear with a key)', () => {
-    const tickets: TicketRef[] = [
-      jira('ENG-1', true),
-      jira('ENG-2', false),
-      jira('ENG-3'),
-      { key: 'OPS-4', url: 'https://linear.app/x/issue/OPS-4', provider: 'linear', canFetchDetails: true },
-    ];
-    expect(fillableJiraTickets(tickets).map((t) => t.key)).toEqual(['ENG-1', 'OPS-4']);
-  });
-  it('nothing detected → no button', () => {
-    expect(fillableJiraTickets(null)).toEqual([]);
-    expect(fillableJiraTickets([])).toEqual([]);
-  });
 });
 
 const candidates: JiraAcCandidate[] = [
@@ -121,16 +78,6 @@ describe('defaultAcCandidate', () => {
   });
 });
 
-const memory = (): AcMemoryStore & { data: Map<string, string> } => {
-  const data = new Map<string, string>();
-  return {
-    data,
-    getItem: (k) => data.get(k) ?? null,
-    setItem: (k, v) => void data.set(k, v),
-    removeItem: (k) => void data.delete(k),
-  };
-};
-
 describe('the field the server picked', () => {
   it('is the stored acField; null is none; absent (an older plugin) falls back to the shared rule', () => {
     expect(serverAcField(details({ acField: { id: 'customfield_4', name: 'Notes' } }))).toBe('customfield_4');
@@ -139,104 +86,10 @@ describe('the field the server picked', () => {
   });
 });
 
-const LEGACY = 'limn:jira-ac-field:v1:acme.atlassian.net:10001';
-const URL1 = 'https://acme.atlassian.net/browse/ENG-1';
-
-describe('the one-shot move of the old per-browser choice', () => {
-  it('answers the old field once and removes the key', () => {
-    const m = memory();
-    m.data.set(LEGACY, 'customfield_2');
-    const d = details({ acField: { id: 'customfield_1', name: 'Acceptance Criteria' }, acFieldSource: 'default' });
-    expect(legacyAcFieldToMigrate(m, URL1, d)).toBe('customfield_2');
-    expect(m.data.has(LEGACY)).toBe(false);
-    expect(legacyAcFieldToMigrate(m, URL1, d)).toBeNull();
-  });
-  it('never overrides a server choice, a field the ticket lacks, or the same field — and still forgets', () => {
-    for (const d of [
-      details({ acField: { id: 'customfield_1', name: 'x' }, acFieldSource: 'setting' }),
-      details({ acField: { id: 'customfield_2', name: 'x' }, acFieldSource: 'default' }),
-    ]) {
-      const m = memory();
-      m.data.set(LEGACY, 'customfield_2');
-      expect(legacyAcFieldToMigrate(m, URL1, d)).toBeNull();
-      expect(m.data.size).toBe(0);
-    }
-    const m = memory();
-    m.data.set(LEGACY, 'customfield_999');
-    expect(legacyAcFieldToMigrate(m, URL1, details({ acFieldSource: 'default' }))).toBeNull();
-  });
-  it('keyed by Jira site AND issue type; no store, no site or no issue type → nothing', () => {
-    const m = memory();
-    m.data.set(LEGACY, 'customfield_2');
-    expect(legacyAcFieldToMigrate(m, 'https://other.atlassian.net/browse/ENG-1', details())).toBeNull();
-    expect(legacyAcFieldToMigrate(m, URL1, details({ issueType: { id: '10004', name: 'Bug' } }))).toBeNull();
-    expect(legacyAcFieldToMigrate(m, URL1, details({ issueType: null }))).toBeNull();
-    expect(legacyAcFieldToMigrate(null, URL1, details())).toBeNull();
-    expect(m.data.has(LEGACY)).toBe(true);
-  });
-  it('a throwing store (blocked site data) never throws out', () => {
-    const broken: AcMemoryStore = {
-      getItem: () => {
-        throw new Error('SecurityError');
-      },
-      setItem: () => {
-        throw new Error('QuotaExceeded');
-      },
-      removeItem: () => {
-        throw new Error('SecurityError');
-      },
-    };
-    expect(legacyAcFieldToMigrate(broken, URL1, details())).toBeNull();
-  });
+describe('the Jira site', () => {
   it('the site is the ticket link’s host', () => {
     expect(jiraSiteOf('https://Acme.Atlassian.net/browse/ENG-1')).toBe('acme.atlassian.net');
     expect(jiraSiteOf('http://jira.lan:8080/jira/browse/ENG-1')).toBe('jira.lan:8080');
     expect(jiraSiteOf('not a url')).toBeNull();
-  });
-});
-
-describe('labels and the note', () => {
-  it('"Name (id) — preview", preview on one line and cut for display only', () => {
-    const long = cand('customfield_1', 'Acceptance Criteria', 'strong', `Given a user\n${'x'.repeat(100)}`);
-    const label = acCandidateLabel(long);
-    expect(label.startsWith('★ Acceptance Criteria (customfield_1) — Given a user x')).toBe(true);
-    expect(label.endsWith('…')).toBe(true);
-    expect(long.text).toHaveLength(113); // the candidate itself is untouched
-  });
-  it('stars strong acceptance-criteria matches only', () => {
-    expect(acCandidateLabel(cand('customfield_2', 'Definition of Done', 'weak', 'x'))).toBe(
-      'Definition of Done (customfield_2) — x',
-    );
-    expect(acCandidateLabel(cand('customfield_3', 'Notes', null, 'y'))).toBe('Notes (customfield_3) — y');
-  });
-  it('a detected Jira ticket without a token is listed as unfillable, never as fillable', () => {
-    const t = [
-      { key: 'BMD-1', url: 'https://x.atlassian.net/browse/BMD-1', provider: 'jira' as const, canFetchDetails: false },
-      { key: 'BMD-2', url: 'https://x.atlassian.net/browse/BMD-2', provider: 'jira' as const, canFetchDetails: true },
-      { key: 'ENG-3', url: 'https://linear.app/x/issue/ENG-3', provider: 'linear' as const },
-    ];
-    // A Linear ticket with no API key saved is unfillable too.
-    expect(unfillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-1', 'ENG-3']);
-    expect(fillableJiraTickets(t).map((r) => r.key)).toEqual(['BMD-2']);
-  });
-  it('says so when there are no candidates, and asks for a pick when nothing is chosen', () => {
-    expect(jiraFillNote(details({ candidates: [] }), '')).toMatch(/no other fields with text/);
-    expect(jiraFillNote(details(), '')).toMatch(/Pick the field/);
-    expect(jiraFillNote(details(), 'customfield_1')).toBeNull();
-  });
-});
-
-describe('one door: the panel reads a ticket only through the query cache', () => {
-  it('the only call site of api.jiraTicket is the fetchQuery behind fetchTicket', () => {
-    const src = readFileSync(join(__dirname, '../src/components/ClaudeReviewFollowUp.tsx'), 'utf8');
-    const uses = src.match(/api\.jiraTicket\(/g) ?? [];
-    expect(uses).toHaveLength(1);
-    expect(src).toMatch(/const ticketKey = \(key: string\) => \['jira-ticket', prId, key\] as const;/);
-    expect(src).toMatch(/qc\.fetchQuery\(\{\s*queryKey: ticketKey\(key\),\s*queryFn: \(\) => api\.jiraTicket\(prId, key\)/);
-    // The criteria field is the server's now: the panel writes it through the route, never storage.
-    expect(src).toMatch(/api\.setJiraAcField\(/);
-    expect(src).not.toMatch(/setItem\(|rememberAcField/);
-    // Never a render-time query: a ticket is read by the one-shot automatic pull or a click.
-    expect(src).not.toMatch(/useQuery\b/);
   });
 });

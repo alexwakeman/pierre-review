@@ -19,6 +19,9 @@ no internals.
   or copy it) under "Where this PR stands". "Reviews on this PR" lines up in columns (who, when,
   commit, outcome, what ran it), shows the newest 10 with "Show all" for the rest, and the column is
   a little wider.
+- AI Review: the earlier findings are part of "Findings". Still-open ones sit under "Open" with the
+  new findings; the rest under "Resolved or addressed". Each earlier finding says in one line how it
+  was dealt with, or what is still needed, with the reply and its buttons on the same row.
 
 ### Removed
 
@@ -26,6 +29,12 @@ no internals.
   "Auto review", "From scratch", "Deep review" and cost labels (the cost is behind the review's ⓘ),
   the live token count while a review runs, "Marked on GitHub", and routine "No auto fix" lines such
   as "auto AI Fix is off for this workspace".
+- AI Review: the separate "Previous review" section (its findings are now in "Findings").
+- AI Review, Story check: "What this PR adds" and the "N more criteria are met by other PRs" line.
+  Both stay in the ticket's story view.
+- Story check: typing or pasting a story's text by hand ("Input manually", "+ Add story"). Add a
+  ticket by its link or key instead; without an issue tracker there is no story check. Older checks of
+  typed stories are no longer shown.
 
 ## [1.0.19] - 2026-11-10
 

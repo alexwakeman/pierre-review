@@ -168,7 +168,6 @@ export async function runSprintTicketChecks(
         ident: p.ident,
         ticketKey: p.live.ticketKey,
         ticketTitle: p.live.ticketTitle,
-        manualTicket: null,
         originPrId: p.originPrId,
         trigger: 'manual',
       });

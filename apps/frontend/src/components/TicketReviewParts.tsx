@@ -8,7 +8,7 @@
 // ONE "Post N gaps to …" button per target PR (`storyGapGroups`): the gaps go to GitHub as ONE
 // collated PR comment, never one comment per item.
 //
-// "What this PR adds" (`PrCardDisclosure`) is a member's CONTRIBUTION CARD at its current head: a
+// "What each PR adds" (`PrCardDisclosure`, the story view only) is a member's CONTRIBUTION CARD at its current head: a
 // model-written description of the PR, collapsed by default, drawn from the review already loaded
 // (no request of its own). A member with no card shows nothing.
 //
@@ -698,18 +698,19 @@ const CARD_CHANGE_CLASS: Record<TicketPrCard['interfaces'][number]['change'], st
   removed: 'bg-ui-danger/10 text-ui-danger',
 };
 
-/** One member's contribution card, collapsed by default: summary, interfaces, loose ends. With
- *  `row` (under "What each PR adds") the toggle is a full-width row — the PR's number and title — and
+/** One member's contribution card under "What each PR adds" (the story view), collapsed by default:
+ *  summary, interfaces, loose ends. The toggle is a full-width row — the PR's number and title — and
  *  the open card spans the whole width under it; in the story rail its Expand lays it over the main
- *  column (RailLayout.tsx `RailWideLeft`). Bare (one PR's own coverage) a small "What this PR adds". */
+ *  column (RailLayout.tsx `RailWideLeft`). (The PR pane's own "What this PR adds" was removed: the
+ *  card is the story view's, and the ticket review's input.) */
 export function PrCardDisclosure({
   card,
   label,
   row,
 }: {
   card: TicketPrCard;
-  label?: ReactNode;
-  row?: { number: number; title: string | null; repo: string };
+  label: ReactNode;
+  row: { number: number; title: string | null; repo: string };
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -753,40 +754,9 @@ export function PrCardDisclosure({
       )}
     </div>
   );
-  if (row != null) {
-    // Every PR here is on the same ticket: a title that opens with a ticket key ("BMD-1182 Send…")
-    // drops it in the row (the full title stays in the tooltip).
-    const shortTitle = row.title != null ? row.title.replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?[\s:–—-]*/, '') || row.title : null;
-    return (
-      <div>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={() => setOpen((v) => !v)}
-          title={row.title ?? undefined}
-          className="hit flex w-full min-w-0 items-center gap-2 rounded-ui px-1.5 py-1 text-left text-body hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
-        >
-          <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0 text-ui-mute" />
-          <span className="shrink-0 font-mono text-meta text-ui-mute">
-            <span className="sr-only">{row.repo}</span>#{row.number}
-          </span>
-          <span className={`min-w-0 flex-1 truncate ${shortTitle != null ? 'text-ui-ink' : MUTED}`}>{shortTitle ?? label}</span>
-        </button>
-        {open && (
-          <RailWideLeft className="mb-2 mt-1 rounded-ui bg-ui-surface p-3">
-            <div id={bodyId}>
-              <div className="mb-2 flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-meta text-ui-mute">{label}</span>
-                <RailWideToggle className="-my-0.5 ml-auto" expandTitle="Show over the main column" />
-              </div>
-              {body}
-            </div>
-          </RailWideLeft>
-        )}
-      </div>
-    );
-  }
+  // Every PR here is on the same ticket: a title that opens with a ticket key ("BMD-1182 Send…")
+  // drops it in the row (the full title stays in the tooltip).
+  const shortTitle = row.title != null ? row.title.replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?[\s:–—-]*/, '') || row.title : null;
   return (
     <div>
       <button
@@ -794,15 +764,25 @@ export function PrCardDisclosure({
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((v) => !v)}
-        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-meta font-medium text-ui-mute hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+        title={row.title ?? undefined}
+        className="hit flex w-full min-w-0 items-center gap-2 rounded-ui px-1.5 py-1 text-left text-body hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
-        {label != null ? <span className="font-mono">{label}</span> : 'What this PR adds'}
+        <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0 text-ui-mute" />
+        <span className="shrink-0 font-mono text-meta text-ui-mute">
+          <span className="sr-only">{row.repo}</span>#{row.number}
+        </span>
+        <span className={`min-w-0 flex-1 truncate ${shortTitle != null ? 'text-ui-ink' : MUTED}`}>{shortTitle ?? label}</span>
       </button>
       {open && (
-        <div id={bodyId} className="ml-5 mt-1">
-          {body}
-        </div>
+        <RailWideLeft className="mb-2 mt-1 rounded-ui bg-ui-surface p-3">
+          <div id={bodyId}>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-ui-mute">{label}</span>
+              <RailWideToggle className="-my-0.5 ml-auto" expandTitle="Show over the main column" />
+            </div>
+            {body}
+          </div>
+        </RailWideLeft>
       )}
     </div>
   );

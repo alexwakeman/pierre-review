@@ -40,7 +40,7 @@ export async function refreshTicketForSession(
 ): Promise<FreshTicketOpenPoints> {
   const none: FreshTicketOpenPoints = { points: [], fresh: false, fetchedAt: null };
   const parsed = parseTicketIdent(ident);
-  if (parsed == null || parsed.kind === 'manual') return none;
+  if (parsed == null) return none;
   const key = parsed.key;
   try {
     if (prs.length > 0) {

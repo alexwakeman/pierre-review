@@ -7,7 +7,6 @@ import {
   leadingTeammateReview,
   reviewCountLine,
   teamFindingByLabel,
-  followUpSectionTitle,
   followUpThreadsWritable,
   teammateReviewMeta,
   teammateReviewTitle,
@@ -41,10 +40,7 @@ describe('teammate review words', () => {
 });
 
 describe("a follow-up on the PR author's own review", () => {
-  it('names the author and never offers a write on their threads', () => {
-    expect(followUpSectionTitle(null)).toBe('Previous review');
-    expect(followUpSectionTitle({})).toBe('Previous review');
-    expect(followUpSectionTitle({ teammate: { userId: 3, login: 'carol-dev' } })).toBe('@carol-dev’s review');
+  it('never offers a write on their threads', () => {
     expect(followUpThreadsWritable({})).toBe(true);
     expect(followUpThreadsWritable({ teammate: { userId: 3, login: 'carol-dev' } })).toBe(false);
   });

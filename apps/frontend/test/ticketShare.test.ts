@@ -1,10 +1,10 @@
 // ONE PR'S SHARE OF A TICKET REVIEW — lib/ticketShare.ts and its wiring.
 //
 //   1. THE SPLIT: the criteria this PR delivers and the unmet work that belongs in it; the rest is
-//      counted, never listed. An item that names no owner stays postable (it is this PR's).
-//   2. THE COUNT LINE: plain words, singular/plural, null when nothing else exists.
-//   3. SLIM OR FULL: only where the story view can hold the whole story.
-//   4. WIRING: the Story section is the story view's alone (the board never mounts it), always open,
+//      the story view's (no count line, no "What this PR adds" in the pane). An item that names no
+//      owner stays postable (it is this PR's).
+//   2. SLIM OR FULL: only where the story view can hold the whole story.
+//   3. WIRING: the Story section is the story view's alone (the board never mounts it), always open,
 //      its heading carrying the two run buttons; no Post buttons there; "See the whole story" opens
 //      the story view tab.
 //
@@ -13,13 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ReviewDocReference, TicketAssessment, TicketCriterion, TicketReviewItem } from '@pierre-review/shared';
-import {
-  prCardOf,
-  prTicketShare,
-  shareDocReferences,
-  shareRestLine,
-  slimStoryCheck,
-} from '../src/lib/ticketShare.js';
+import { prTicketShare, shareDocReferences, slimStoryCheck } from '../src/lib/ticketShare.js';
 
 const THIS = { id: 10, repoId: 1 };
 
@@ -56,7 +50,7 @@ const assess = (over: Partial<TicketAssessment>): Pick<TicketAssessment, 'criter
 });
 
 describe('prTicketShare', () => {
-  it('keeps what this PR delivers and what belongs in it; counts the rest', () => {
+  it('keeps what this PR delivers and what belongs in it; leaves out the rest', () => {
     const a = assess({
       criteria: [
         crit('AC1', { deliveredBy: [10] }),
@@ -82,8 +76,6 @@ describe('prTicketShare', () => {
     // AC5 is partly delivered HERE, so it is this PR's even though its gap belongs elsewhere.
     expect(s.criteria.map((c) => c.ref)).toEqual(['AC1', 'AC4', 'AC5']);
     expect(s.missing.map((i) => i.ref)).toEqual(['M1']);
-    expect(s.metElsewhere).toBe(2);
-    expect(s.todoElsewhere).toBe(2); // AC6 + M2
   });
 
   it("falls back to the criterion's expectedIn, then its repo", () => {
@@ -97,7 +89,6 @@ describe('prTicketShare', () => {
     });
     const s = prTicketShare(a, [], THIS);
     expect(s.criteria.map((c) => c.ref)).toEqual(['AC1', 'AC2']);
-    expect(s.todoElsewhere).toBe(2);
   });
 
   it('an item that names no owner is this PR’s, so its Post stays reachable', () => {
@@ -108,14 +99,12 @@ describe('prTicketShare', () => {
     const s = prTicketShare(a, [item('AC1'), item('M1', { status: 'missing' })], THIS);
     expect(s.criteria.map((c) => c.ref)).toEqual(['AC1']);
     expect(s.missing.map((i) => i.ref)).toEqual(['M1']);
-    expect(s.todoElsewhere).toBe(0);
   });
 
-  it('a missing item with no owner PR but another repo is counted, not listed', () => {
+  it('a missing item with no owner PR but another repo is not listed', () => {
     const a = assess({ missing: [{ ref: 'M1', title: 'm', explanation: null, expectedIn: { prId: null, repoId: 2 } }] });
     const s = prTicketShare(a, [item('M1', { status: 'missing' })], THIS);
     expect(s.missing).toEqual([]);
-    expect(s.todoElsewhere).toBe(1);
   });
 
   it('lists only the not-asked-for work this PR did', () => {
@@ -130,27 +119,12 @@ describe('prTicketShare', () => {
   });
 });
 
-describe('shareRestLine', () => {
-  it('says how many more, in plain words', () => {
-    expect(shareRestLine({ metElsewhere: 3, todoElsewhere: 0 })).toBe('3 more criteria are met by other PRs.');
-    expect(shareRestLine({ metElsewhere: 1, todoElsewhere: 1 })).toBe(
-      '1 more criterion is met by another PR. 1 more is still to do in another PR.',
-    );
-    expect(shareRestLine({ metElsewhere: 0, todoElsewhere: 2 })).toBe('2 more are still to do in other PRs.');
-    expect(shareRestLine({ metElsewhere: 0, todoElsewhere: 0 })).toBeNull();
-    expect(shareRestLine({ metElsewhere: 1, metOutsideCode: 2, todoElsewhere: 0 })).toBe(
-      '1 more criterion is met by another PR. 2 more are met outside code changes.',
-    );
-  });
-});
-
 describe('slimStoryCheck', () => {
-  const base = { ident: 'jira:https://x.atlassian.net#BMD-1', ticketKey: 'BMD-1', trackerOn: true, prOpen: true, members: [] };
+  const base = { ticketKey: 'BMD-1', trackerOn: true, prOpen: true, members: [] };
   it('is slim for a tracker ticket with a stack to link to', () => {
     expect(slimStoryCheck(base)).toBe(true);
   });
-  it('keeps the full view for a pasted story, no tracker, no key, or no open PR', () => {
-    expect(slimStoryCheck({ ...base, ident: 'manual:10:abc' })).toBe(false);
+  it('keeps the full view with no tracker, no key, or no open PR', () => {
     expect(slimStoryCheck({ ...base, trackerOn: false })).toBe(false);
     expect(slimStoryCheck({ ...base, ticketKey: null })).toBe(false);
     expect(slimStoryCheck({ ...base, prOpen: false })).toBe(false);
@@ -231,16 +205,17 @@ describe('the wiring', () => {
     expect(cov).toMatch(/onClick=\{\(\) => openStory\(\{ ident, key: ticketKey, title: ticketTitle \}\)\}/);
     expect(cov).toContain('See the whole ticket');
     expect(cov).not.toContain('See the whole ticket in Open PRs');
+    // The counts of the rest are the story view's: no "N more criteria are met by other PRs" here.
+    expect(cov).not.toMatch(/shareRestLine|more criteria are met/);
   });
 
-  it('"What this PR adds" rides the loaded review: the stack lists every card, the pane this PR’s', () => {
+  it('"What each PR adds" rides the loaded review in the story view; the AI Review tab shows none', () => {
     const panel = src('components/Activity/TicketStorySection.tsx');
     expect(panel).toMatch(/<MemberCards members=\{members\} \/>/);
     const cov = src('components/TicketCoverage.tsx');
-    expect(cov).toMatch(/prCardOf\(review\.members, pr\.id\)/);
-    expect(cov).toMatch(/\{card != null && <PrCardDisclosure card=\{card\} \/>\}/);
+    expect(cov).not.toMatch(/PrCardDisclosure|prCardOf/);
     const parts = src('components/TicketReviewParts.tsx');
-    expect(parts).toContain('What this PR adds');
+    expect(parts).toContain('What each PR adds');
     // No fetch of its own.
     expect(parts).not.toMatch(/useQuery\(|fetch\(/);
   });
@@ -285,23 +260,5 @@ describe('shareDocReferences', () => {
     const src = readFileSync(join(__dirname, '../src/components/TicketCoverage.tsx'), 'utf8');
     expect(src).toContain('<DocReferencesBlock references={shareDocReferences(a?.references, share)} />');
     expect(src).not.toContain('<DocReferencesBlock references={a?.references} />');
-  });
-});
-
-describe('prCardOf', () => {
-  const card = {
-    headSha: 'h',
-    source: 'story_check' as const,
-    createdAt: '2026-10-01T00:00:00Z',
-    summary: 's',
-    interfaces: [],
-    criteria: [],
-    looseEnds: [],
-  };
-  it("is this PR's card, else null — never a placeholder", () => {
-    expect(prCardOf([{ prId: 1, card }, { prId: 2 }], 1)).toBe(card);
-    expect(prCardOf([{ prId: 1, card }, { prId: 2 }], 2)).toBeNull();
-    expect(prCardOf([{ prId: 1, card: null }], 1)).toBeNull();
-    expect(prCardOf([], 9)).toBeNull();
   });
 });

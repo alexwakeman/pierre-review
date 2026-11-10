@@ -789,7 +789,8 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   moves `changed_at` or any hash ([TRACKERS.md](TRACKERS.md) § Ticket comments).
 - **`ticket_reviews.comments_seen`** (migration `0142`) — `{ids, count, hash}` of the people comments a
   run was given. Outside the `fingerprint`; feeds `TicketReviewState.newComments`. NULL on older runs
-  and pasted stories.
+  and on a dormant pasted-story run (a `manual:` ident, a feature removed 2026-11-10: its rows and
+  `ticket_snapshot` stay, never listed or re-checked; no column was dropped).
 - **THE AUTOMATIC STORY CHECK'S STORED CLOCK** (migration `0182`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
   § The automatic story check's clock). `pull_requests.head_seen_at` — when Limn SAW the synced head
   move (`sync/upsert.ts`, only when a KNOWN stored head differs; an insert stamps `opened_at`; never the

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { StartTicketReviewResponse, TicketRefResult } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { TICKET_LINKS_KEY } from './useTicketLinks.js';
-import { TICKET_REVIEW_STATES_KEY, pastedStoryStartIdent, ticketReviewStartKey } from './useTicketReview.js';
+import { TICKET_REVIEW_STATES_KEY, prTicketsStartIdent, ticketReviewStartKey } from './useTicketReview.js';
 
 // THE STORY CHECK'S PASTE BOX (docs/TRACKERS.md § Adding a ticket by hand). Two calls to ONE route,
 // `POST /api/prs/:id/tracker-ticket/resolve`:
@@ -28,7 +28,7 @@ export interface LinkAndCheckResult {
 export function useLinkAndCheckTickets(prId: number) {
   const qc = useQueryClient();
   return useMutation<LinkAndCheckResult, Error, string[]>({
-    mutationKey: ticketReviewStartKey(pastedStoryStartIdent(prId)),
+    mutationKey: ticketReviewStartKey(prTicketsStartIdent(prId)),
     mutationFn: async (refs) => {
       const { results } = await api.resolveTicketRefs(prId, refs, true);
       const idents = [

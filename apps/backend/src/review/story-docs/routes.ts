@@ -68,7 +68,7 @@ const fail = (reply: FastifyReply, status: number, error: string, message: strin
 
 const isTrackerIdent = (ident: string): boolean => {
   const p = parseTicketIdent(ident);
-  return p != null && p.kind !== 'manual';
+  return p != null;
 };
 
 export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext): void {

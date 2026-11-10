@@ -391,7 +391,7 @@ export async function liveStoryMembers(
   ident: string,
 ): Promise<Array<LiveMember & { owner: string; name: string; defaultBranch: string | null }>> {
   const parsed = parseTicketIdent(ident);
-  if (parsed == null || parsed.kind === 'manual') return [];
+  if (parsed == null) return [];
   const members = await readLiveMembers(ctx, accountId, await jiraMemberIds(accountId, ident));
   const repos = await memberRepos(ctx, accountId, members);
   return members.flatMap((m) => {

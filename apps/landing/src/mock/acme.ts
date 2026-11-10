@@ -74,11 +74,19 @@ export const FINDINGS = {
     { sev: 'Minor', tone: 'amber', code: null, text: 'Retried refund sends a second email.', by: 'You' },
     { sev: 'Nit', tone: 'grey', code: 'policy.py', text: 'Unused import in', by: 'You' },
   ] as { sev: string; tone: Tone; code: string | null; text: string; by: string }[],
-  /** Closed findings, under "Resolved or addressed (n)", each saying why (lib/teamReview.ts closedReason). */
+  /** Closed findings, under "Resolved or addressed (n)", each saying why (lib/teamReview.ts closedReason)
+   *  and, where the latest review judged it, how in one line (the app's EarlierFindingNote). */
   closed: [
-    { sev: 'Major', tone: 'red', text: 'A partial refund closes the order.', by: 'You', reason: 'Priya’s review found it addressed · 3 Nov' },
-    { sev: 'Minor', tone: 'amber', text: 'Refund amount is not logged.', by: 'Priya', reason: 'Resolved on GitHub' },
-  ] as { sev: string; tone: Tone; text: string; by: string; reason: string }[],
+    {
+      sev: 'Major',
+      tone: 'red',
+      text: 'A partial refund closes the order.',
+      by: 'You',
+      reason: 'Priya’s review found it addressed · 3 Nov',
+      how: 'The order now stays open until the full amount is refunded.',
+    },
+    { sev: 'Minor', tone: 'amber', text: 'Refund amount is not logged.', by: 'Priya', reason: 'Resolved on GitHub', how: null },
+  ] as { sev: string; tone: Tone; text: string; by: string; reason: string; how: string | null }[],
   docs: { source: 'Payments handbook', section: '§4.2', text: 'money in whole pence' },
 } as const;
 

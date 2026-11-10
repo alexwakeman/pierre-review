@@ -135,7 +135,7 @@ export function registerSequenceDiagramRoutes(app: FastifyInstance, ctx: AgentCo
       const tickets = (await getTicketSource().ticketsForPr(accountId, id).catch(() => []))
         .filter((t) => {
           const p = parseTicketIdent(t.ident);
-          return p != null && p.kind !== 'manual';
+          return p != null;
         })
         .slice(0, MAX_TICKETS);
       const stories: StorySequenceDiagramSlot[] = [];
@@ -195,7 +195,7 @@ export function registerSequenceDiagramRoutes(app: FastifyInstance, ctx: AgentCo
       if (!AGENTIC_AI_ENABLED) return featureOff(reply);
       const { ident } = req.query as { ident: string };
       const parsed = parseTicketIdent(ident);
-      if (parsed == null || parsed.kind === 'manual') {
+      if (parsed == null) {
         reply.status(400);
         return { error: 'BadIdent', message: 'Not a tracker ticket.' };
       }
@@ -210,7 +210,7 @@ export function registerSequenceDiagramRoutes(app: FastifyInstance, ctx: AgentCo
       if (!AGENTIC_AI_ENABLED) return featureOff(reply);
       const { ident } = req.body as RedrawStoryDiagramBody;
       const parsed = parseTicketIdent(ident);
-      if (parsed == null || parsed.kind === 'manual') {
+      if (parsed == null) {
         reply.status(400);
         return { error: 'BadIdent', message: 'Not a tracker ticket.' };
       }

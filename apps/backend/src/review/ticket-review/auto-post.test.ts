@@ -88,7 +88,6 @@ async function run(
     ident,
     ticketKey: 'BMD-7',
     ticketTitle: 'Export',
-    ticket: null,
     originPrId: memberIds[0]!,
     trigger: o.trigger ?? 'auto',
     model: 'm',

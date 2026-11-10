@@ -121,7 +121,7 @@ export async function resolveStoryDocsInputs(
   seams: StoryDocsInputSeams = defaultInputSeams,
 ): Promise<StoryDocsInputs | null> {
   const parsed = parseTicketIdent(ident);
-  if (parsed == null || parsed.kind === 'manual') return null;
+  if (parsed == null) return null;
 
   // The review and the tracker's stored story are independent reads: run them together.
   const [review, tracked] = await Promise.all([

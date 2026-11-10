@@ -51,9 +51,9 @@ export interface PrBranchStack {
  * short of all done) → amber.
  */
 export interface PrCriteriaCheck {
-  /** `trackerTicketIdent` of the ticket (`manual:…` for a pasted story). */
+  /** `trackerTicketIdent` of the ticket. */
   ident: string;
-  /** The tracker key ("BMD-7"), null for a pasted story. */
+  /** The tracker key ("BMD-7"); null when unknown. */
   key: string | null;
   title: string | null;
   /** The ticket review run (`GET /api/ticket-reviews/:id`). */

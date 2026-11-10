@@ -1,15 +1,16 @@
 // The Claude Review tab's follow-up and user-story pieces, kept out of the 2,000-line tab:
 //
-//   ClaudeReviewTicketPanel     — the story input of the Story check section (TicketCoverage.tsx):
-//                                 pasted stories + the Jira picker, one tab per story.
 //   ClaudeReviewTicketResults   — HISTORY: how an older PR review measured up against ONE user
 //                                 story (read-only; its unmet items are findings). Shown INSIDE the
 //                                 Story check section (TicketCoverage.tsx), and only for a story no
 //                                 ticket review covers. New PR reviews carry no story.
-//   ClaudeReviewFollowUpSection — what became of the previous review's comments.
+//   EarlierFindingNote / FollowUpRow / SettledEarlierRow — what became of the previous review's
+//                                 comments, ON THE FINDINGS LIST (ClaudeReviewTab.tsx): the note
+//                                 rides on that finding's own row; an item no row shows gets a
+//                                 FollowUpRow of its own. There is no "Previous review" section.
 //
-// Rules for all three:
-//  - Every string from Claude or from a pasted user story renders as PLAIN TEXT: no Markdown,
+// Rules for all of them:
+//  - Every string from Claude or from a user story renders as PLAIN TEXT: no Markdown,
 //    and no href built from it — except a story's SUMMARY (markdown, so its bullets read as a list,
 //    through the sanitizing <Markdown>), and PR references ("api#12"), which become in-app buttons
 //    via <PrRefText> (ReviewPrRefs.tsx) when they name a known PR. A story READ FROM JIRA is the one exception, and it renders in
@@ -20,13 +21,11 @@
 //    are shown separately, unlabelled (everything here is Claude's).
 //  - Chips are 11px or larger, sentences 12px or larger, no uppercase-with-tracking labels, and
 //    every muted colour is paired for both themes (`textContrast.test.ts`).
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { Fragment, type ReactNode } from 'react';
+import { useIsMutating } from '@tanstack/react-query';
 import {
-  CLAUDE_REVIEW_MAX_TICKETS,
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
-  followUpLeftOutSentence,
   STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
   criterionDone,
@@ -37,59 +36,22 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeFollowUpItem,
-  ClaudeFollowUpStatus,
-  ClaudeReviewFollowUp,
   ClaudeSettledFinding,
   ClaudeReviewTicketEntry,
-  ClaudeReviewTicketField,
-  ClaudeReviewTicketsCheck,
   ClaudeTicketCriterionResult,
   ClaudeTicketGap,
-  JiraTicketDetails,
-  TicketRef,
 } from '@pierre-review/shared';
-import { api } from '../api/client.js';
 import { useResolveThread } from '../hooks/usePrWrites.js';
 import { followUpReplyMutationKey, usePostFollowUpReply, useResolvePrLevelFinding } from '../hooks/useClaudeReview.js';
 import { PrCommentLink, ReplyVerbLink } from './FollowUpGithubLinks.js';
-import {
-  acCandidateLabel,
-  browserAcMemory,
-  fillableJiraTickets,
-  trackerNameOf,
-  unfillableJiraTickets,
-  jiraFillNote,
-  jiraSiteOf,
-  legacyAcFieldToMigrate,
-} from '../lib/jiraTicket.js';
-import {
-  acFieldText,
-  addStoryTab,
-  autoPullKeys,
-  clampTab,
-  createStoryPullMemory,
-  jiraKeysToPull,
-  jiraStoryFromDetails,
-  mergePulledStories,
-  pullJiraTickets,
-  pullNote,
-  pulledAcField,
-  removeStoryTab,
-  storiesOnClose,
-  storiesOnOpen,
-  storyTabLabel,
-} from '../lib/storyTabs.js';
 import {
   FOLLOW_UP_STATUS_CLASS,
   SEVERITY_CLASS,
   TICKET_ALIGNMENT_CLASS,
   TICKET_CRITERION_STATUS_CLASS,
   anchorLabel,
-  fieldCounter,
   followUpAnchor,
-  isJiraDraft,
   notCheckedReason,
-  partitionFollowUp,
   RESOLVED_ON_GITHUB_CHIP,
   isPrLevelItem,
   isResolvedPushback,
@@ -100,19 +62,13 @@ import {
   stillOpenPostable,
   storyFindingIdFor,
   storyItemChipLabel,
-  ticketsPanelHint,
-  type TicketDraft,
+  earlierNoteChip,
+  followUpOneLine,
 } from '../lib/claudeReviewFollowUp.js';
-import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icons.js';
-import { InfoButton } from './InfoModal.js';
-import { useSettingsModal } from '../store/settingsModal.js';
-import { JiraStoryView } from './ClaudeReviewTickets.js';
-import { ReviewSection } from './ReviewSection.js';
-import { Select } from './ui/index.js';
+import { CheckIcon, ChevronIcon } from './Icons.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { Markdown } from './Markdown.js';
-import { followUpItemWritable, followUpSectionTitle } from '../lib/teammateReviews.js';
-import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
+import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -124,24 +80,11 @@ const SEVERITY_WORD: Record<ClaudeFindingSeverity, string> = {
   praise: 'Praise',
 };
 
-// The Previous review header's pills: still-open statuses first.
-const FOLLOW_UP_PILL_ORDER: ClaudeFollowUpStatus[] = [
-  'not_addressed',
-  'reply_disputed',
-  'partly_addressed',
-  'not_checked',
-  'addressed',
-  'reply_accepted',
-  'no_longer_applies',
-];
-
 const CHIP = REVIEW_CHIP;
 const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const INPUT =
-  'mt-0.5 w-full rounded-ui bg-ui-raise px-2 py-1 text-body text-ui-ink ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent';
 
 // A path (and line) that jumps into the Changes tab when the file is in the PR, else plain text.
 // A BUTTON, never an <a href="#…">: a hash navigation would write to the URL useUrlState owns.
@@ -173,661 +116,9 @@ function CodeAnchorRef({
   return <span className={`break-all font-mono text-meta ${MUTED}`}>{label}</span>;
 }
 
-// ---- (a) the input panel ----
-
-function TicketField({
-  id,
-  label,
-  field,
-  value,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  field: ClaudeReviewTicketField;
-  value: string;
-  error: string | null;
-  children: JSX.Element;
-}): JSX.Element {
-  const counter = fieldCounter(field, value);
-  return (
-    <div>
-      <label htmlFor={id} className="text-meta font-medium text-ui-ink">
-        {label}
-      </label>
-      {children}
-      {counter != null && (
-        <div className={`mt-0.5 text-meta ${counter.over ? ERROR_TEXT : MUTED}`}>{counter.text}</div>
-      )}
-      {error != null && (
-        <p id={`${id}-error`} className={`mt-0.5 text-meta ${ERROR_TEXT}`}>
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** One typed or pasted story: three editable fields (its tab carries the name and the remove). */
-function ManualStoryFields({
-  value,
-  onChange,
-  errorFor,
-}: {
-  value: TicketDraft;
-  onChange: (next: TicketDraft) => void;
-  errorFor: (f: ClaudeReviewTicketField) => string | null;
-}): JSX.Element {
-  const baseId = useId();
-  const ids = {
-    title: `${baseId}-title`,
-    description: `${baseId}-description`,
-    acceptanceCriteria: `${baseId}-criteria`,
-  };
-  const set = (field: ClaudeReviewTicketField, v: string): void =>
-    onChange({ ...value, [field]: v });
-  const describedBy = (f: ClaudeReviewTicketField): string | undefined =>
-    errorFor(f) != null ? `${ids[f]}-error` : undefined;
-  return (
-    <div className="space-y-2">
-      <TicketField id={ids.title} label="Title" field="title" value={value.title} error={errorFor('title')}>
-        <input
-          id={ids.title}
-          type="text"
-          value={value.title}
-          onChange={(e) => set('title', e.target.value)}
-          aria-invalid={errorFor('title') != null}
-          aria-describedby={describedBy('title')}
-          className={INPUT}
-        />
-      </TicketField>
-      <TicketField
-        id={ids.description}
-        label="Description"
-        field="description"
-        value={value.description}
-        error={errorFor('description')}
-      >
-        <textarea
-          id={ids.description}
-          rows={3}
-          value={value.description}
-          onChange={(e) => set('description', e.target.value)}
-          aria-invalid={errorFor('description') != null}
-          aria-describedby={describedBy('description')}
-          className={INPUT}
-        />
-      </TicketField>
-      <TicketField
-        id={ids.acceptanceCriteria}
-        label="Acceptance criteria"
-        field="acceptanceCriteria"
-        value={value.acceptanceCriteria}
-        error={errorFor('acceptanceCriteria')}
-      >
-        <textarea
-          id={ids.acceptanceCriteria}
-          rows={4}
-          value={value.acceptanceCriteria}
-          onChange={(e) => set('acceptanceCriteria', e.target.value)}
-          aria-invalid={errorFor('acceptanceCriteria') != null}
-          aria-describedby={describedBy('acceptanceCriteria')}
-          className={INPUT}
-        />
-      </TicketField>
-    </div>
-  );
-}
-
-// A ticket this session fetched, kept for its candidates so the field picker needs no refetch to
-// open.
-export interface FetchedJira {
-  details: JiraTicketDetails;
-  site: string | null;
-  chosen: string;
-}
-
 /** The label a story goes by in a run's results: its Jira key, else "Story N". */
 export function storyLabel(d: { key?: string | null }, index: number): string {
   return d.key != null && d.key !== '' ? d.key : `Story ${index + 1}`;
-}
-
-// The automatic pull's session memory (per PR): which detected-key set it already acted on, and
-// which keys the reader removed — so it runs once and never re-adds a removed story.
-const storyPullMemory = createStoryPullMemory();
-// A pulled ticket is the STORED row the plugin's worker wrote when the PR was received — reading it
-// makes no Jira call. It is reused from the query cache for this long (a remount, a tab switch,
-// "Pull all" after "Clear all"); Refresh and a field change read Jira again, server-side.
-const JIRA_TICKET_STALE_MS = 60_000;
-
-const TAB_ICON_BTN =
-  'rounded-ui p-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
-const PRIMARY_BTN =
-  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-ui-ink hover:underline disabled:opacity-50';
-const SPINNER =
-  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';
-
-/**
- * The optional user stories — up to CLAUDE_REVIEW_MAX_TICKETS, ONE TAB EACH (`lib/storyTabs.ts`).
- * A tab pulled from Jira is READ-ONLY (markdown, ClaudeReviewTickets.tsx) with the field its
- * criteria came from and Refresh; a typed one is three editable fields. Jira tickets detected on the
- * PR are pulled AUTOMATICALLY once per PR per detected-key set (never re-adding one the reader
- * removed); "Pull all from Jira" is the manual action. The Story check section passes
- * `autoPullReady={false}`: the detected tickets are its blocks already, so it pulls only on request.
- * CLOSED it is a plain "+ Add story" link (no disclosure box), which reveals the tabs with a blank
- * story ready; Close hides them again and drops blank tabs. Either way the row says what Check
- * sends ("2 stories" / "needs a fix"). NO `maxLength` on any input — it would silently cut a paste.
- */
-export function ClaudeReviewTicketPanel({
-  value,
-  onChange,
-  check,
-  prId,
-  tickets,
-  prWorkspaceName,
-  autoPullReady,
-  defaultOpen = false,
-  onClose,
-}: {
-  value: TicketDraft[];
-  onChange: (next: TicketDraft[]) => void;
-  check: ClaudeReviewTicketsCheck;
-  prId: number;
-  tickets: readonly TicketRef[] | null | undefined;
-  // The workspace that OWNS this PR's repo — the one whose Jira token is used. null = unknown.
-  prWorkspaceName?: string | null;
-  // The stored run has loaded, so the list is settled: the automatic pull waits for it, or the
-  // prefill from the latest run would land on top of (or under) what it pulled.
-  autoPullReady: boolean;
-  // Mount with the tabs shown (the paste box's "Input manually" asked for the form).
-  defaultOpen?: boolean;
-  // Close was pressed (after blank tabs were dropped).
-  onClose?: () => void;
-}): JSX.Element {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(defaultOpen);
-  const tabsId = useId();
-  const [selectedRaw, setSelected] = useState(0);
-  const selected = clampTab(selectedRaw, value.length);
-  const [fetched, setFetchedState] = useState<Record<string, FetchedJira>>({});
-  const fetchedRef = useRef(fetched);
-  const setFetched = (next: Record<string, FetchedJira>): void => {
-    fetchedRef.current = next;
-    setFetchedState(next);
-  };
-  const [pulling, setPulling] = useState<string[]>([]);
-  const [note, setNote] = useState<string | null>(null);
-  const openSettings = useSettingsModal((st) => st.openSettings);
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  // The list as it is when an answer lands, not when a button was pressed.
-  const latest = useRef(value);
-  latest.current = value;
-  // An answer that lands after the panel unmounted (the reader opened another PR) is dropped.
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-
-  const fillable = useMemo(() => fillableJiraTickets(tickets), [tickets]);
-  const unfillable = unfillableJiraTickets(tickets);
-  const busy = pulling.length > 0;
-  const hint = ticketsPanelHint(value, check);
-  const full = value.length >= CLAUDE_REVIEW_MAX_TICKETS;
-  const pullable = jiraKeysToPull(fillable, value).keys;
-
-  const refFor = (key: string): TicketRef | null => fillable.find((t) => t.key === key) ?? null;
-  // The ONE way the panel reads a STORED ticket: through the query cache, so a remount or "Pull
-  // all" after "Clear all" reuses the answer.
-  const ticketKey = (key: string) => ['jira-ticket', prId, key] as const;
-  const fetchTicket = (key: string): Promise<JiraTicketDetails> =>
-    qc.fetchQuery({
-      queryKey: ticketKey(key),
-      queryFn: () => api.jiraTicket(prId, key),
-      staleTime: JIRA_TICKET_STALE_MS,
-    });
-  // A stored ticket, with an old per-browser criteria-field choice moved to the server ONCE.
-  const readStored = async (key: string, url: string): Promise<JiraTicketDetails> => {
-    const details = await fetchTicket(key);
-    const legacy = legacyAcFieldToMigrate(browserAcMemory(), url, details);
-    if (legacy == null) return details;
-    try {
-      const moved = await api.setJiraAcField(prId, key, legacy);
-      qc.setQueryData(ticketKey(key), moved);
-      return moved;
-    } catch {
-      return details;
-    }
-  };
-
-  const pull = async (keys: string[], auto: boolean): Promise<void> => {
-    if (keys.length === 0) return;
-    setPulling(keys);
-    setNote(null);
-    const res = await pullJiraTickets(keys, (k) => readStored(k, refFor(k)?.url ?? ''));
-    if (!alive.current) {
-      // Dropped: let the next mount of this PR try again.
-      if (auto) storyPullMemory.clearAutoPull(prId);
-      return;
-    }
-    const stories: TicketDraft[] = [];
-    const nextFetched = { ...fetchedRef.current };
-    for (const { key, details } of res.ok) {
-      const ref = refFor(key);
-      if (ref == null) continue;
-      const site = jiraSiteOf(ref.url);
-      const chosen = pulledAcField(details);
-      stories.push(jiraStoryFromDetails(ref, details, chosen));
-      nextFetched[key] = { details, site, chosen };
-    }
-    const merged = mergePulledStories(latest.current, stories);
-    if (merged.added.length + merged.refreshed.length > 0) onChange(merged.drafts);
-    if (merged.selected != null) setSelected(merged.selected);
-    setFetched(nextFetched);
-    setNote(pullNote(res.failed, merged.overCap));
-    setPulling([]);
-  };
-
-  // Rebuild ONE ticket's tab from what `load` answers (a server-side re-read, or a field change),
-  // with the field the server picked — or `override` ('' = "None of these", this tab only).
-  const refetchOne = async (
-    key: string,
-    load: () => Promise<JiraTicketDetails>,
-    override?: string,
-  ): Promise<JiraTicketDetails | null> => {
-    const ref = refFor(key);
-    if (ref == null) return null;
-    setPulling([key]);
-    setNote(null);
-    try {
-      const details = await load();
-      qc.setQueryData(ticketKey(key), details);
-      if (!alive.current) return details;
-      const site = jiraSiteOf(ref.url);
-      const chosen = override ?? pulledAcField(details);
-      const story = jiraStoryFromDetails(ref, details, chosen);
-      const cur = latest.current;
-      const at = cur.findIndex((d) => isJiraDraft(d) && d.key === key);
-      if (at >= 0) onChange(cur.map((d, j) => (j === at ? story : d)));
-      setFetched({ ...fetchedRef.current, [key]: { details, site, chosen } });
-      return details;
-    } catch (e) {
-      if (alive.current) setNote(pullNote([{ key, message: e instanceof Error ? e.message : String(e) }], []));
-      return null;
-    } finally {
-      if (alive.current) setPulling([]);
-    }
-  };
-
-
-  // Refresh: Jira is read again NOW, server-side (the worker's path), and the stored row answered.
-  const refresh = (d: TicketDraft): void => {
-    const key = d.key;
-    if (key == null) return;
-    void refetchOne(key, () => api.refreshJiraTicket(prId, key));
-  };
-  // A removed Jira story: never auto-pulled again this session. (The criteria-field choice is the
-  // workspace's, per issue type — removing one story does not clear it; "Reset to default" does.)
-  const forgetJira = (ds: readonly TicketDraft[]): void => {
-    const keys = ds.filter(isJiraDraft).map((d) => d.key).filter((k): k is string => k != null);
-    if (keys.length === 0) return;
-    storyPullMemory.noteRemoved(prId, keys);
-    const next = { ...fetchedRef.current };
-    for (const k of keys) delete next[k];
-    setFetched(next);
-  };
-  const removeAt = (i: number): void => {
-    const d = latest.current[i];
-    if (d == null) return;
-    forgetJira([d]);
-    const r = removeStoryTab(latest.current, i, selected);
-    onChange(r.drafts);
-    setSelected(r.selected);
-    // Keep the keyboard on the strip: the tab that took this one's place.
-    requestAnimationFrame(() => tabRefs.current[r.selected]?.focus());
-  };
-  const clearAll = (): void => {
-    const n = latest.current.length;
-    if (n === 0) return;
-    if (!window.confirm(`Remove ${n === 1 ? 'the story' : `all ${n} stories`} from this review?`)) return;
-    forgetJira(latest.current);
-    onChange([]);
-    setSelected(0);
-    setNote(null);
-  };
-  const addStory = (): void => {
-    const r = addStoryTab(latest.current);
-    if (r == null) return;
-    onChange(r.drafts);
-    setSelected(r.selected);
-    setOpen(true);
-  };
-  const pullKeys = (keys: string[]): void => {
-    storyPullMemory.unremove(prId, keys);
-    setOpen(true);
-    void pull(keys, false);
-  };
-  const replaceAt = (i: number, d: TicketDraft): void =>
-    onChange(latest.current.map((x, j) => (j === i ? d : x)));
-  const errorAt =
-    (i: number) =>
-    (f: ClaudeReviewTicketField): string | null =>
-      !check.ok && check.index === i && check.field === f ? check.message : null;
-
-  // THE AUTOMATIC PULL: once the stored run has loaded, pull every detected ticket not yet a tab
-  // and not removed by the reader — once per PR per detected-key set (`storyPullMemory`), with no
-  // retry: a failure is one line, and "Pull all" is there.
-  useEffect(() => {
-    if (!autoPullReady || pulling.length > 0) return;
-    const detected = fillable.map((t) => t.key);
-    if (!storyPullMemory.shouldAutoPull(prId, detected)) return;
-    const keys = autoPullKeys(storyPullMemory, prId, fillable, latest.current);
-    storyPullMemory.noteAutoPull(prId, detected);
-    if (keys.length === 0) return;
-    setOpen(true);
-    void pull(keys, true);
-    // `pull` reads everything else through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoPullReady, prId, fillable]);
-
-  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, i: number): void => {
-    const n = value.length;
-    let to: number | null = null;
-    if (e.key === 'ArrowRight') to = (i + 1) % n;
-    else if (e.key === 'ArrowLeft') to = (i - 1 + n) % n;
-    else if (e.key === 'Home') to = 0;
-    else if (e.key === 'End') to = n - 1;
-    else if (e.key === 'Delete') {
-      e.preventDefault();
-      removeAt(i);
-      return;
-    }
-    if (to == null) return;
-    e.preventDefault();
-    setSelected(to);
-    tabRefs.current[to]?.focus();
-  };
-
-  const current = value[selected];
-  const tracker = trackerNameOf(fillable);
-  const pullLabel =
-    pullable.length === 1 ? `Pull ${pullable[0]} from ${tracker}` : `Pull all from ${tracker} (${pullable.length})`;
-
-  // "+ Add story": reveal the tabs, with a blank story when there is none yet.
-  const reveal = (): void => {
-    const next = storiesOnOpen(latest.current);
-    if (next !== latest.current) {
-      onChange(next);
-      setSelected(next.length - 1);
-    }
-    setOpen(true);
-  };
-  // Close: hide the tabs; blank typed tabs go, stories with content stay for next time.
-  const close = (): void => {
-    const next = storiesOnClose(latest.current);
-    if (next !== latest.current) {
-      onChange(next);
-      setSelected(clampTab(selected, next.length));
-    }
-    setOpen(false);
-    onClose?.();
-  };
-  const hintText = hint.replace(/^ · /, '');
-  const pullButton =
-    pullable.length > 0 && !busy ? (
-      <button type="button" onClick={() => pullKeys(pullable)} className={PRIMARY_BTN}>
-        {pullLabel}
-      </button>
-    ) : null;
-  const info = (
-    <InfoButton title="Add a story">
-      <p>
-        Paste a story to check this pull request against it, or pull a ticket named on the pull
-        request to read its story and pick the field its criteria come from. Up to{' '}
-        {CLAUDE_REVIEW_MAX_TICKETS} at a time.
-      </p>
-      <p className="mt-2">A pulled ticket is shown as Limn last read it from {tracker}. Refresh reads it again.</p>
-    </InfoButton>
-  );
-
-  if (!open) {
-    return (
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={reveal}
-          className={`inline-flex items-center gap-1 ${LINK_BTN}`}
-        >
-          <PlusIcon size={11} />
-          Add story
-        </button>
-        {hintText !== '' && <span className={`text-meta ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
-        {busy && <span className={`text-meta ${MUTED}`}>Pulling from {tracker}…</span>}
-        {pullButton}
-        {info}
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-2 rounded-ui bg-ui-surface">
-      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
-        <span className="text-meta font-medium text-ui-ink">Stories to check</span>
-        {hintText !== '' && <span className={`text-meta ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
-        {pullButton}
-        {info}
-        <button
-          type="button"
-          onClick={close}
-          className={`ml-auto inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink hover:underline`}
-        >
-          <CloseIcon size={10} />
-          Close
-        </button>
-      </div>
-      {open && (
-        <div className="border-t border-ui-line px-2 pb-2 pt-1.5">
-          {pullable.length > 1 && !busy && (
-            <div className="mb-1.5 flex flex-wrap items-center gap-1">
-              <span className={`text-meta ${MUTED}`}>Or pull one:</span>
-              {pullable.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => pullKeys([k])}
-                  aria-label={`Pull ${k} from ${tracker}`}
-                  className={`${BTN} font-mono`}
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-          )}
-          {fillable.length === 0 && unfillable.length > 0 && (
-            <p className={`mb-1.5 text-meta ${MUTED}`}>
-              To pull {unfillable.map((t) => t.key).join(', ')}, add{' '}
-              {unfillable.every((t) => t.provider === 'linear') ? 'a Linear API key' : 'a Jira API token'} in Settings for the{' '}
-              {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
-            </p>
-          )}
-          <div className="flex flex-wrap items-end gap-x-1 gap-y-1 border-b border-ui-line">
-            <div role="tablist" aria-label="User stories" className="flex min-w-0 flex-wrap items-end gap-1">
-              {value.map((d, i) => {
-                const label = storyTabLabel(value, i);
-                const active = i === selected;
-                const bad = !check.ok && check.index === i;
-                const jira = isJiraDraft(d) && d.key != null;
-                return (
-                  <div
-                    key={jira ? `jira-${d.key}` : `typed-${i}`}
-                    role="presentation"
-                    className={`-mb-px flex items-center rounded-t-ui border ${
-                      active
-                        ? 'border-ui-line border-b-white bg-ui-surface'
-                        : 'border-transparent hover:bg-ui-hover'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      id={`${tabsId}-tab-${i}`}
-                      ref={(el) => {
-                        tabRefs.current[i] = el;
-                      }}
-                      aria-selected={active}
-                      aria-controls={`${tabsId}-panel`}
-                      tabIndex={active ? 0 : -1}
-                      onClick={() => setSelected(i)}
-                      onKeyDown={(e) => onTabKeyDown(e, i)}
-                      className={`py-1 pl-2 pr-1 text-meta font-medium ${jira ? 'font-mono' : ''} ${
-                        bad ? ERROR_TEXT : active ? 'text-ui-ink' : MUTED
-                      }`}
-                    >
-                      {label}
-                      {bad && <span className="sr-only"> (needs a fix)</span>}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeAt(i)}
-                      aria-label={`Remove ${label}`}
-                      title={`Remove ${label}`}
-                      tabIndex={active ? 0 : -1}
-                      className={`mr-1 ${TAB_ICON_BTN}`}
-                    >
-                      <CloseIcon size={10} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            {busy && (
-              <span role="status" className={`flex items-center gap-1.5 px-2 py-1 text-meta ${MUTED}`}>
-                <span className={SPINNER} aria-hidden="true" />
-                Pulling {pulling.join(', ')}…
-              </span>
-            )}
-            {!full && (
-              <button
-                type="button"
-                onClick={addStory}
-                className="hit flex items-center gap-1 px-2 py-1 text-meta text-ui-ink hover:underline"
-              >
-                <PlusIcon size={11} />
-                Add story
-              </button>
-            )}
-            {value.length > 1 && (
-              <button type="button" onClick={clearAll} className={`ml-auto px-1 py-1 text-meta ${MUTED} hover:underline`}>
-                Clear all
-              </button>
-            )}
-          </div>
-          {note != null && <p className={`mt-1.5 text-meta ${ERROR_TEXT}`}>{note}</p>}
-          {!check.ok && check.index !== selected && (
-            <p className={`mt-1.5 text-meta ${ERROR_TEXT}`}>{check.message}</p>
-          )}
-          {current != null && (
-            <div
-              role="tabpanel"
-              id={`${tabsId}-panel`}
-              aria-labelledby={`${tabsId}-tab-${selected}`}
-              tabIndex={0}
-              className="pt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
-            >
-              {isJiraDraft(current) ? (
-                <JiraStoryView
-                  draft={current}
-                  actions={
-                    current.key != null && refFor(current.key) != null ? (
-                      <button type="button" onClick={() => refresh(current)} disabled={busy} className={`${BTN} inline-flex items-center gap-1`}>
-                        <RefreshIcon size={11} className={busy && pulling.includes(current.key) ? 'animate-spin' : undefined} />
-                        Refresh
-                      </button>
-                    ) : undefined
-                  }
-                  fieldControl={
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-                      <span className={MUTED}>Criteria from:</span>
-                      <span className="font-medium text-ui-ink">{acFieldText(current)}</span>
-                      {/* Chosen per issue type in Settings → Integrations (JiraAcFieldSettings). */}
-                      {current.key != null && refFor(current.key) != null && (
-                        <button type="button" onClick={() => openSettings('issue-tracker')} className={LINK_BTN}>
-                          Change in Settings
-                        </button>
-                      )}
-                    </div>
-                  }
-                />
-              ) : (
-                <ManualStoryFields
-                  key={`typed-${selected}`}
-                  value={current}
-                  onChange={(next) => replaceAt(selected, next)}
-                  errorFor={errorAt(selected)}
-                />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * "Take the criteria from" — every custom text field on the fetched ticket. `allowNone` offers
- * "None of these" (the story panel's one-tab override); the Story check's disclosure saves the
- * workspace's choice, so it does not.
- */
-export function AcFieldPicker({
-  fetched,
-  onChoose,
-  allowNone = true,
-  disabled = false,
-}: {
-  fetched: FetchedJira;
-  onChoose: (id: string) => void;
-  allowNone?: boolean;
-  disabled?: boolean;
-}): JSX.Element | null {
-  const selectId = useId();
-  const { details, chosen } = fetched;
-  const note = jiraFillNote(details, chosen);
-  if (details.candidates.length === 0) {
-    return note != null ? <p className={`text-meta ${MUTED}`}>{note}</p> : null;
-  }
-  return (
-    <div>
-      <label htmlFor={selectId} className="text-meta font-medium text-ui-mute">
-        Take the criteria from
-        {details.issueType != null && (
-          <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
-        )}
-      </label>
-      <Select
-        id={selectId}
-        value={chosen}
-        disabled={disabled}
-        onChange={(v) => onChoose(v)}
-        className="mt-0.5 flex w-full"
-        options={[
-          ...(allowNone || chosen === '' ? [{ value: '', label: 'None of these' }] : []),
-          ...details.candidates.map((c) => ({ value: c.id, label: acCandidateLabel(c) })),
-        ]}
-      />
-      {details.omittedCandidates > 0 && (
-        <p className={`mt-0.5 text-meta ${MUTED}`}>
-          {details.omittedCandidates} more {details.omittedCandidates === 1 ? 'field' : 'fields'} with
-          text not listed.
-        </p>
-      )}
-      {note != null && <p className={`mt-0.5 text-meta ${MUTED}`}>{note}</p>}
-    </div>
-  );
 }
 
 // ---- (b) the results against the user story ----
@@ -1219,6 +510,7 @@ export function FollowUpRow({
   actions = true,
   selection = null,
   by,
+  oneLine = false,
 }: {
   item: ClaudeFollowUpItem;
   muted: boolean;
@@ -1234,6 +526,8 @@ export function FollowUpRow({
   by?: string;
   // A leading control in the card's header (the fix picker's tick box).
   selection?: ReactNode;
+  // The Findings list: the one-line how only (`followUpOneLine`), never the whole explanation.
+  oneLine?: boolean;
 }): JSX.Element {
   const replyHeading = replyStatusHeading(item);
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
@@ -1281,12 +575,18 @@ export function FollowUpRow({
       </div>
       {/* THE ONE-LINE HOW: how it was dealt with, or the one thing still needed. A row from before
           the field has none; its explanation (below) opens with the same sentence. */}
-      {item.how != null && item.how.trim() !== '' && (
+      {oneLine ? (
+        followUpOneLine(item, by) != null && (
+          <p className="mt-1 text-body font-medium text-ui-ink" data-testid="follow-up-how">
+            <PrRefText text={followUpOneLine(item, by)!} />
+          </p>
+        )
+      ) : item.how != null && item.how.trim() !== '' ? (
         <p className="mt-1 text-body font-medium text-ui-ink" data-testid="follow-up-how">
           <PrRefText text={item.how.trim()} />
         </p>
-      )}
-      {item.explanation != null && item.explanation !== '' ? (
+      ) : null}
+      {oneLine ? null : item.explanation != null && item.explanation !== '' ? (
         <p className={`mt-1 ${REVIEW_PROSE}`}>
           <PrRefText text={item.explanation} />
         </p>
@@ -1319,7 +619,7 @@ export function FollowUpRow({
  * replied, an excerpt, and how it was accepted. It left the follow-up, so it has no status of this
  * run's and no buttons.
  */
-function SettledEarlierRow({
+export function SettledEarlierRow({
   item,
   changedPaths,
   onOpenInChanges,
@@ -1359,121 +659,61 @@ function SettledEarlierRow({
 }
 
 /**
- * What became of the previous review's comments. Still-open ones first and prominent (not
- * addressed, then partly addressed, then not checked); addressed, settled and no-longer-applies
- * ones sit in a disclosure, collapsed by default — with the findings an EARLIER review settled by
- * accepting a reply (`settledEarlier`), so the reader can see what was dismissed and by whom.
+ * WHAT THE LATEST RUN SAID ABOUT AN EARLIER FINDING, on that finding's own row in Findings: its
+ * status (unless the row already says it, `earlierNoteChip`), the one-line how, the reply it judged
+ * with "Post reply" / "Resolve", and "Post still open" on a thread the reader resolved. A finding an
+ * earlier review settled by accepting a reply shows who replied. Nothing when there is nothing to say.
  */
-export function ClaudeReviewFollowUpSection({
-  followUp,
-  settledEarlier = [],
-  findings,
-  changedPaths,
-  onOpenInChanges,
+export function EarlierFindingNote({
+  item,
+  settled = null,
+  row,
+  by,
   prId,
   reviewId,
-  by,
 }: {
-  // null when this run followed nothing up (then only `settledEarlier` can show).
-  followUp: ClaudeReviewFollowUp | null;
-  // From `settledEarlierRows` (already filtered).
-  settledEarlier?: readonly ClaudeSettledFinding[];
-  // This run's findings, to resolve each re-raised comment's CURRENT anchor.
-  findings: readonly ClaudeFinding[];
-  changedPaths: ReadonlySet<string>;
-  onOpenInChanges?: OpenInChanges;
-  // The PR and the review, for "Post reply" / "Resolve" on a reply status (absent ⇒ no buttons).
+  item: ClaudeFollowUpItem | null;
+  settled?: ClaudeSettledFinding | null;
+  // What the row already says (so the chip is not said twice).
+  row: { reraisedChip: boolean; closedReason: boolean };
+  // The provider that ran the review (absent ⇒ Claude).
+  by?: string;
+  // The PR and the review, for the reply buttons (absent ⇒ the text only, no buttons).
   prId?: number;
   reviewId?: number;
-  // The provider that ran this review (`aiRunProviderName(review)`); absent ⇒ Claude.
-  by?: string;
 }): JSX.Element | null {
-  const [closedOpen, setClosedOpen] = useState(false);
-  const findingsById = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
-  const items = followUp?.items ?? [];
-  const { open, closed } = useMemo(() => partitionFollowUp(items), [items]);
-  if (items.length === 0 && settledEarlier.length === 0) return null;
-  const rowProps = {
-    by,
-    findingsById,
-    headMoved: followUp?.headMoved ?? false,
-    changedPaths,
-    onOpenInChanges,
-  };
-  // The PR AUTHOR'S threads (a follow-up on their own Limn review): shown, never written to. The
-  // reader's own carried findings in that follow-up stay writable (decided per item).
-  const writeProps = (it: { carried: boolean }) =>
-    followUpItemWritable(followUp, it) ? { prId, reviewId } : { prId: undefined, reviewId: undefined };
-  const closedCount = closed.length + settledEarlier.length;
-  // The previous review's findings this run did not check, by reason (never dropped silently).
-  const leftOutLine = followUpLeftOutSentence(followUp?.leftOut);
+  if (item == null) {
+    if (settled == null) return null;
+    return (
+      <div className="mt-2 space-y-1 border-t border-ui-line pt-2" data-testid="earlier-note">
+        <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{settledEarlierHeading(settled)}</span>
+        {settled.reply != null && (
+          <p className={`text-meta ${MUTED}`}>
+            @{settled.reply.author} replied: “{settled.reply.excerpt}”
+          </p>
+        )}
+      </div>
+    );
+  }
+  const chip = earlierNoteChip(item, row);
+  const line = followUpOneLine(item, by);
   return (
-    <ReviewSection
-      title={followUpSectionTitle(followUp)}
-      section="previous"
-      pills={
-        <>
-          {followUp != null && (
-            <span className={`font-mono text-meta ${MUTED}`} title={followUp.priorHeadSha}>
-              {followUp.priorHeadSha.slice(0, 7)}
-            </span>
+    <div className="mt-2 space-y-1 border-t border-ui-line pt-2" data-testid="earlier-note">
+      {(chip != null || line != null || isResolvedPushback(item)) && (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          {chip != null && <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[item.status]}`}>{chip}</span>}
+          {isResolvedPushback(item) && (
+            <span className={`${CHIP} ${RESOLVED_ON_GITHUB_CHIP.cls}`}>{RESOLVED_ON_GITHUB_CHIP.label}</span>
           )}
-          {FOLLOW_UP_PILL_ORDER.map((st) => {
-            const n = items.filter((it) => it.status === st).length;
-            return n > 0 ? (
-              <span key={st} className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[st]}`}>
-                {n} {FOLLOW_UP_STATUS_LABEL[st].toLowerCase()}
-              </span>
-            ) : null;
-          })}
-          {settledEarlier.length > 0 && (
-            <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>
-              {settledEarlier.length} settled earlier
+          {line != null && (
+            <span className="min-w-0 break-words text-body font-medium text-ui-ink" data-testid="follow-up-how">
+              <PrRefText text={line} />
             </span>
-          )}
-        </>
-      }
-    >
-      {open.length > 0 && (
-        <ul className={REVIEW_ITEM_GROUP}>
-          {open.map((it) => (
-            <FollowUpRow key={it.priorFindingId} item={it} muted={false} {...rowProps} {...writeProps(it)} />
-          ))}
-        </ul>
-      )}
-      {leftOutLine != null && (
-        <p className={`text-meta ${MUTED}`} title={(followUp?.leftOut ?? []).map((l) => l.title).join('\n')}>
-          {leftOutLine}
-        </p>
-      )}
-      {closedCount > 0 && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setClosedOpen((o) => !o)}
-            aria-expanded={closedOpen}
-            className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink`}
-          >
-            <ChevronIcon dir={closedOpen ? 'down' : 'right'} size={11} />
-            Addressed, settled or no longer applies ({closedCount})
-          </button>
-          {closedOpen && (
-            <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`}>
-              {closed.map((it) => (
-                <FollowUpRow key={it.priorFindingId} item={it} muted {...rowProps} {...writeProps(it)} />
-              ))}
-              {settledEarlier.map((it) => (
-                <SettledEarlierRow
-                  key={`settled-${it.priorFindingId}`}
-                  item={it}
-                  changedPaths={changedPaths}
-                  onOpenInChanges={onOpenInChanges}
-                />
-              ))}
-            </ul>
           )}
         </div>
       )}
-    </ReviewSection>
+      <ReplyBlock item={item} prId={prId} reviewId={reviewId} />
+      <StillOpenBlock item={item} prId={prId} reviewId={reviewId} />
+    </div>
   );
 }

@@ -150,8 +150,6 @@ export interface QueueTicketReviewArgs {
   ident: string;
   ticketKey: string | null;
   ticketTitle: string | null;
-  // Known at queue time for a pasted story; a Jira ticket's is read again at prepare time.
-  ticket: ClaudeReviewTicket | null;
   originPrId: number | null;
   trigger: TicketReviewTrigger;
   model: string;
@@ -173,7 +171,6 @@ export async function insertQueuedTicketReview(
       ticketIdent: a.ident,
       ticketKey: a.ticketKey,
       ticketTitle: a.ticketTitle,
-      ticketSnapshot: a.ticket,
       originPrId: a.originPrId,
       trigger: a.trigger,
       cause: a.cause ?? null,

@@ -47,15 +47,6 @@ export function teammateReviewMeta(r: Pick<ClaudeTeammateReview, 'headSha' | 'ru
   return parts.join(' · ');
 }
 
-/**
- * The follow-up section's heading: "Previous review", or — when the previous review was the PR
- * author's own Limn review (docs/CLAUDE-REVIEW.md § The author's own review) — "@carol-dev’s review".
- */
-export function followUpSectionTitle(f: Pick<ClaudeReviewFollowUpRecord, 'teammate'> | null | undefined): string {
-  const login = f?.teammate?.login;
-  return login ? `@${login}’s review` : 'Previous review';
-}
-
 /** Limn writes on a follow-up's threads (Post reply, Resolve) only when they are the reader's own. */
 export function followUpThreadsWritable(f: Pick<ClaudeReviewFollowUpRecord, 'teammate'> | null | undefined): boolean {
   return f?.teammate == null;

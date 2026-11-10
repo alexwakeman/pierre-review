@@ -157,12 +157,47 @@ export function TeammateVersionNotes({ reviews }: { reviews: readonly ClaudeTeam
   );
 }
 
+/** Every finding id a point's row stands for: its own, and everyone's who raised it too. */
+export function pointIds(p: Pick<ClaudeTeamPoint, 'findingId' | 'alsoRaisedBy'>): number[] {
+  return [p.findingId, ...p.alsoRaisedBy.map((o) => o.findingId)];
+}
+
+/**
+ * The findings that are no longer open, collapsed under ONE heading: "Resolved or addressed (n)".
+ * Shared by the team layout and a past run's plain list.
+ */
+export function ResolvedGroup({ count, children }: { count: number; children: ReactNode }): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  if (count === 0) return null;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={cx('hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink', FOCUS_RING)}
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
+        Resolved or addressed ({count})
+      </button>
+      {open && (
+        <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`} data-testid="team-findings-closed">
+          {children}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /**
  * FINDINGS BY THEIR STATE NOW, across every review on the PR (`teamView.allFindings`): "Open", then a
  * collapsed "Resolved or addressed (n)" saying why each one closed. Every row names who raised it.
  * EVERY ROW IS THE READER'S OWN CARD (`FindingRow`): the latest run's own findings keep Post / Reword /
  * Ignore (`renderOwn`); every other point is drawn by `renderPoint` from `pointCard` — the same
- * fields, Copy, and "Post reminder" on a teammate's open point.
+ * fields, Copy, and "Post reminder" on a teammate's open point. Each renderer gets the finding ids the
+ * row stands for, so the caller can hang what the latest run said about it on the row (the one-line
+ * how, the reply; there is no separate "Previous review" section). `moreOpen` / `moreClosed`: the
+ * earlier findings no row here shows, in the same groups.
  */
 export function TeamFindingsSection({
   points,
@@ -172,6 +207,9 @@ export function TeamFindingsSection({
   renderOwn,
   renderPoint,
   pills,
+  moreOpen = [],
+  moreClosed = [],
+  openNote = null,
 }: {
   points: readonly ClaudeTeamPoint[];
   // The latest run's own findings shown in this list (story-placed ones already left out).
@@ -179,29 +217,33 @@ export function TeamFindingsSection({
   // Findings shown elsewhere (under Story check): left out here.
   hiddenFindingIds: ReadonlySet<number>;
   pairReviewIds: ReadonlySet<number>;
-  renderOwn: (f: ClaudeFinding, raisedBy: RaisedBy | null) => JSX.Element;
-  renderPoint: (card: FindingCard, raisedBy: RaisedBy) => JSX.Element;
+  renderOwn: (f: ClaudeFinding, raisedBy: RaisedBy | null, ids: readonly number[]) => JSX.Element;
+  renderPoint: (card: FindingCard, raisedBy: RaisedBy, ids: readonly number[]) => JSX.Element;
   pills?: ReactNode;
+  moreOpen?: readonly JSX.Element[];
+  moreClosed?: readonly JSX.Element[];
+  // Under the open rows (the earlier findings the latest run did not check, by reason).
+  openNote?: ReactNode;
 }): JSX.Element {
-  const [showClosed, setShowClosed] = useState(false);
   const { open, closed } = teamFindingRows(points, ownFindings, hiddenFindingIds);
   const rows = open.map((e) => {
-    if (e.kind === 'own') return { key: `o-${e.finding.id}`, el: renderOwn(e.finding, null) };
+    if (e.kind === 'own') return { key: `o-${e.finding.id}`, el: renderOwn(e.finding, null, [e.finding.id]) };
     const p = e.point;
     const by = raisedByLabel(p, pairReviewIds);
+    const ids = pointIds(p);
     return {
       key: `p-${p.findingId}`,
-      el:
-        e.own != null ? renderOwn(e.own, by) : <Fragment key={`p-${p.findingId}`}>{renderPoint(pointCard(p), by)}</Fragment>,
+      el: e.own != null ? renderOwn(e.own, by, ids) : <Fragment key={`p-${p.findingId}`}>{renderPoint(pointCard(p), by, ids)}</Fragment>,
     };
   });
+  const openCount = rows.length + moreOpen.length;
   return (
     <ReviewSection
       title="Findings"
       section="findings"
       pills={
         <>
-          <SectionCount>{`${rows.length} open`}</SectionCount>
+          <SectionCount>{`${openCount} open`}</SectionCount>
           {pills}
         </>
       }
@@ -209,32 +251,22 @@ export function TeamFindingsSection({
       <div className="space-y-3" data-testid="team-findings">
         <div className="space-y-1.5">
           <h4 className="text-meta font-medium text-ui-mute">Open</h4>
-          {rows.length > 0 ? (
-            <ul className={REVIEW_ITEM_GROUP}>{rows.map((r) => r.el)}</ul>
+          {openCount > 0 ? (
+            <ul className={REVIEW_ITEM_GROUP}>
+              {rows.map((r) => r.el)}
+              {moreOpen}
+            </ul>
           ) : (
             <div className="text-meta text-ui-mute">Nothing open.</div>
           )}
+          {openNote}
         </div>
-        {closed.length > 0 && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowClosed((o) => !o)}
-              aria-expanded={showClosed}
-              className={cx('hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink', FOCUS_RING)}
-            >
-              <ChevronIcon dir={showClosed ? 'down' : 'right'} className="shrink-0" />
-              Resolved or addressed ({closed.length})
-            </button>
-            {showClosed && (
-              <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`} data-testid="team-findings-closed">
-                {closed.map((p) => (
-                  <Fragment key={`c-${p.findingId}`}>{renderPoint(pointCard(p), raisedByLabel(p, pairReviewIds))}</Fragment>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        <ResolvedGroup count={closed.length + moreClosed.length}>
+          {closed.map((p) => (
+            <Fragment key={`c-${p.findingId}`}>{renderPoint(pointCard(p), raisedByLabel(p, pairReviewIds), pointIds(p))}</Fragment>
+          ))}
+          {moreClosed}
+        </ResolvedGroup>
       </div>
     </ReviewSection>
   );

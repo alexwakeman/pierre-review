@@ -1581,8 +1581,8 @@ export const api = {
   // ---- Ticket review (CORE, local-only): one review per TICKET across every PR on it ----
   // docs/API.md § Ticket review. The live progress is an SSE GET at
   // `/api/ticket-reviews/:id/stream`, read through `sseStream` (hooks/useTicketReview.ts).
-  // Start: `{prId}` (every ticket the PR is on), `{prId, ident}` (one), or `{prId, tickets}` (pasted
-  // stories, already checked by `checkClaudeReviewTickets`). 202 with one outcome per ticket.
+  // Start: `{prId}` (every ticket the PR is on) or `{prId, ident}` (one). 202 with one outcome per
+  // ticket.
   startTicketReview: (body: StartTicketReviewBody) =>
     fetch('/api/ticket-reviews', jsonBody('POST', body)).then((r) =>
       handle<StartTicketReviewResponse>(r),
