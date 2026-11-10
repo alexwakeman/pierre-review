@@ -77,7 +77,7 @@ export default function Teams(): JSX.Element {
         </div>
         <div className="tile gold tm-go">
           <p className="btns">
-            <Link className="btn" to="/getting-started">
+            <Link className="btn" to="/docs/getting-started/install-and-run">
               Set it up →
             </Link>
           </p>

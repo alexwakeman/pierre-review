@@ -24,6 +24,11 @@ no internals.
   4 hours without their Limn looking at that commit. No setting is needed beyond
   "Approve or request changes for me"; the AI Review tab says when it happened.
 
+### Removed
+
+- Website: the separate Getting started page. Its steps live in the docs' Getting started section,
+  which gains a "Set up the rest" list, and the old address now goes there.
+
 ## [1.0.18] - 2026-11-10
 
 ### Changed

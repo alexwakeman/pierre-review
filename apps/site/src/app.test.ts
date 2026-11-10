@@ -220,7 +220,7 @@ describe('the security headers', () => {
       const { request } = await import('node:http');
       const hit = (host: string) =>
         new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
-          const req = request(`${r.base}/getting-started`, { headers: { host } }, (resp) => {
+          const req = request(`${r.base}/reporting`, { headers: { host } }, (resp) => {
             resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
             resp.resume();
           });
@@ -230,7 +230,7 @@ describe('the security headers', () => {
       for (const host of ['pierre-review.com', 'WWW.pierre-review.com:443']) {
         const res = await hit(host);
         expect(res.status).toBe(301);
-        expect(res.location).toBe('https://limn-review.com/getting-started');
+        expect(res.location).toBe('https://limn-review.com/reporting');
       }
       expect((await hit('something-else.up.railway.app')).status).not.toBe(301);
     } finally {
@@ -260,6 +260,42 @@ describe('the old demo path', () => {
     try {
       const res = await fetch(`${r.base}/demonstration`, { redirect: 'manual' });
       expect(res.status).toBe(404);
+    } finally {
+      await stop(r);
+    }
+  });
+});
+
+describe('pages moved to the docs', () => {
+  it('301s /getting-started and its old aliases to the docs, keeping the query', async () => {
+    const r = await start();
+    try {
+      const cases: [string, string][] = [
+        ['/getting-started', '/docs/getting-started/install-and-run'],
+        ['/getting-started/', '/docs/getting-started/install-and-run'],
+        ['/getting-started?utm_source=x', '/docs/getting-started/install-and-run?utm_source=x'],
+        ['/for-developers', '/docs/getting-started/install-and-run'],
+        ['/features/', '/docs/getting-started/install-and-run'],
+      ];
+      for (const [path, location] of cases) {
+        const res = await fetch(`${r.base}${path}`, { redirect: 'manual' });
+        expect(res.status, path).toBe(301);
+        expect(res.headers.get('location'), path).toBe(location);
+      }
+      const head = await fetch(`${r.base}/getting-started`, { method: 'HEAD', redirect: 'manual' });
+      expect(head.status).toBe(301);
+    } finally {
+      await stop(r);
+    }
+  });
+
+  it('leaves the docs pages and look-alike paths alone', async () => {
+    const r = await start();
+    try {
+      for (const path of ['/getting-started-now', '/constructor', '/docs/getting-started/install-and-run']) {
+        const res = await fetch(`${r.base}${path}`, { redirect: 'manual' });
+        expect(res.status, path).not.toBe(301);
+      }
     } finally {
       await stop(r);
     }

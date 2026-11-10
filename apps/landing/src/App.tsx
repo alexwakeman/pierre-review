@@ -9,7 +9,6 @@ import CookieBanner from './components/CookieBanner';
 import { useReveal } from './components/board/useReveal';
 import './components/chrome.css';
 import Home from './pages/Home';
-import GettingStarted from './pages/GettingStarted';
 import Reporting from './pages/Reporting';
 import HowWeMeasure from './pages/HowWeMeasure';
 import Teams from './pages/Teams';
@@ -22,7 +21,6 @@ import { isDocsPath } from './docs/routes';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
-  '/getting-started': GettingStarted,
   '/reporting': Reporting,
   '/teams': Teams,
   '/how-we-measure': HowWeMeasure,
@@ -39,9 +37,7 @@ const ROUTES: Record<string, () => JSX.Element> = {
   // content, so a bookmark or a search result lands on something rather than a 404.
   // The prerenderer writes the same mapping to disk (see prerender.mjs), and the
   // canonical in that HTML points at the surviving page.
-  '/for-developers': GettingStarted,
   '/for-managers': Reporting,
-  '/features': GettingStarted,
   '/how-it-works': HowWeMeasure,
   '/bots': Reporting,
   '/pro': Reporting,
@@ -51,6 +47,32 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/insights': Reporting,
   '/reviews': Reporting,
 };
+
+// Retired pages whose content now lives in the docs. apps/site answers these with a 301
+// before the landing loads (src/app.ts MOVED_TO_DOCS); this table only matters where no
+// site server stands in front, such as `vite dev`. Keep the two lists the same.
+const MOVED_TO_DOCS: Record<string, string> = {
+  '/getting-started': '/docs/getting-started/install-and-run',
+  '/for-developers': '/docs/getting-started/install-and-run',
+  '/features': '/docs/getting-started/install-and-run',
+};
+
+function MovedToDocs({ to }: { to: string }): JSX.Element {
+  useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+  return (
+    <div className="lb notfound">
+      <section className="board nf">
+        <div className="tile nf-head">
+          <p>
+            This page moved to <Link to={to}>the docs</Link>.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function NotFound(): JSX.Element {
   useSeo(NOT_FOUND_SEO);
@@ -79,6 +101,7 @@ export default function App(): JSX.Element {
   // /docs and every page under it: the docs layout, in its own chunk (docs-loader.tsx).
   const docs = isDocsPath(path);
   const Page = ROUTES[path] ?? NotFound;
+  const moved = MOVED_TO_DOCS[path];
 
   // Re-arm analytics on mount for a visitor who consented on a PREVIOUS visit: the
   // stored grant is still valid, but a fresh page load starts with no gtag on the
@@ -100,7 +123,13 @@ export default function App(): JSX.Element {
       <div className="lb-app">
         <Nav />
         <main>
-          {docs ? <DocsRoute path={path} /> : <Page />}
+          {docs ? (
+            <DocsRoute path={path} />
+          ) : moved ? (
+            <MovedToDocs to={moved} />
+          ) : (
+            <Page />
+          )}
         </main>
         {/* The docs drop the big block wordmark: the footer is links only there. */}
         <Footer wordmark={!docs} />

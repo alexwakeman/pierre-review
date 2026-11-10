@@ -2,6 +2,8 @@
 //
 //   /                  the prerendered landing (apps/landing/dist)
 //   /demo, /demo/...   302 to / (the static demo is gone; old links land on the home page)
+//   /getting-started   301 to the docs' Install and run page (the page was folded into the
+//                      docs), with its old aliases /for-developers and /features
 //   /api/health        liveness, for Railway's health check
 //   /api/contact/...   the contact form (contact.ts)
 //
@@ -19,6 +21,16 @@ import {
 import { FixedWindowLimiter, clientIp } from './rate-limit.js';
 import { applySecurity, isCrossSiteWrite } from './security.js';
 import { cachePolicyFor, fileAt, safeJoin, sendFile } from './static.js';
+
+/**
+ * Retired landing pages whose content now lives in the docs: path → where it lives now.
+ * A 301: these pages are gone for good. Mirrors MOVED_TO_DOCS in apps/landing src/App.tsx.
+ */
+export const MOVED_TO_DOCS: Readonly<Record<string, string>> = {
+  '/getting-started': '/docs/getting-started/install-and-run',
+  '/for-developers': '/docs/getting-started/install-and-run',
+  '/features': '/docs/getting-started/install-and-run',
+};
 
 export interface Logger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -298,6 +310,17 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
       // the path may be used again.
       res.statusCode = 302;
       res.setHeader('Location', '/');
+      res.end();
+      return;
+    }
+    // An own-property lookup only: a path such as /constructor must not match Object.prototype.
+    const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
+    const moved = Object.hasOwn(MOVED_TO_DOCS, trimmed) ? MOVED_TO_DOCS[trimmed] : undefined;
+    if (moved) {
+      // Keep the query string (campaign tags); the fragment never reaches the server.
+      const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+      res.statusCode = 301;
+      res.setHeader('Location', `${moved}${query}`);
       res.end();
       return;
     }

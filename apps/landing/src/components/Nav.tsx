@@ -3,7 +3,7 @@ import { SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The header, as three tiles of the board (styles: .lb-nav in board.css): an ink
-// tile carrying the name, a surface tile with the seven links (Product, then six pages), and a flat
+// tile carrying the name, a surface tile with the six links (Product, Docs, then four pages), and a flat
 // gold "Run it now" tile that lands on the home page's run section.
 //
 // The active page is marked by a gold underline on its link (aria-current="page").
@@ -12,14 +12,13 @@ import { SITE_NAME } from '../lib/site';
 // There is no sign-in. Limn has no hosted app and no accounts.
 //
 // NO MOBILE DRAWER. On a phone the link tile is hidden, as in the design, and the
-// same seven links follow as a second row of small text under the tiles. A modal
+// same six links follow as a second row of small text under the tiles. A modal
 // drawer is a box this design does not need.
 // ---------------------------------------------------------------------------
 
 const NAV_LINKS = [
   // The home page's first chapter. On the home page it scrolls; elsewhere it lands there.
   { to: '/#review', label: 'Product' },
-  { to: '/getting-started', label: 'Getting started' },
   // The documentation: every screen of the app, Settings, integrations, security, the changelog.
   { to: '/docs', label: 'Docs' },
   { to: '/reporting', label: 'Reporting and metrics' },
@@ -39,9 +38,7 @@ const NAV_LINKS = [
 // /reviews onto a `/pro` nav link that no longer exists, so it had been inert since the
 // restructure — a mapping is only alive while its `to` is in NAV_LINKS.
 const ALIAS_OF: Record<string, string> = {
-  '/for-developers': '/getting-started',
   '/for-managers': '/reporting',
-  '/features': '/getting-started',
   '/how-it-works': '/how-we-measure',
   '/bots': '/reporting',
   '/pro': '/reporting',

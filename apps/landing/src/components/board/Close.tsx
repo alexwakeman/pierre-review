@@ -16,7 +16,7 @@ export function Close(): JSX.Element {
       <div className="tile lapis side rise">
         <p>One minute to run. Your first review a few minutes later.</p>
         <p>
-          <Link to="/getting-started">Getting started →</Link>
+          <Link to="/docs/getting-started/install-and-run">Install and run →</Link>
         </p>
       </div>
     </section>

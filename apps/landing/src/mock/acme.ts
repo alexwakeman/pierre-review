@@ -505,33 +505,7 @@ export const SPRINT = {
   ] as SprintCard[],
 };
 
-// ---- Getting started: the settings the steps describe ---------------------------
-
-/** Settings → AI (settings/AiProviderSection.tsx). */
-export const SETUP_AI = {
-  choices: [
-    { id: 'auto', label: 'Auto' },
-    { id: 'claude', label: 'Claude' },
-    { id: 'codex', label: 'Codex' },
-  ] as { id: 'auto' | 'claude' | 'codex'; label: string }[],
-  efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'],
-  claude: 'Signed in to Claude Code.',
-  codexOut: 'Not signed in.',
-  codexIn: 'Signed in with ChatGPT.',
-  signIn: 'Sign in with ChatGPT',
-  useCode: 'Use a code instead',
-  signOut: 'Sign out',
-  footer: 'Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.',
-};
-
-/** Settings → Bot comment scoring (settings/BotScoringSection.tsx, hooks/useMlInstall.ts). */
-export const SETUP_ML = {
-  title: 'Bot comment scoring',
-  desc: 'Score how serious each bot review comment is.',
-  button: 'Set up (one-time ~240 MB download)',
-  busy: 'Setting up…',
-  ready: 'Set up. Bot review comments are scored on this machine.',
-};
+// ---- the docs' Getting started: first run and Repos & workspaces ----------------
 
 /** First run (Activity/FirstRunOnboarding.tsx): the repositories you have been active in. */
 export const SETUP_REPOS = {
@@ -568,78 +542,6 @@ export const SETUP_WORKSPACES = {
 };
 
 export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';
-
-/** Settings → Issue tracker (settings/IssueLinksSection.tsx, JiraApiAccess.tsx, LinearApiAccess.tsx). */
-export const SETUP_TRACKER = {
-  desc: 'Links each PR to its tickets. This workspace only: each workspace has its own tracker, or none.',
-  providers: [
-    { id: '', label: 'None' },
-    { id: 'jira', label: 'Jira' },
-    { id: 'github', label: 'GitHub Issues' },
-    { id: 'linear', label: 'Linear' },
-    { id: 'notion', label: 'Notion' },
-  ] as { id: TrackerProvider; label: string }[],
-  github: 'Uses the issues each PR closes or links. Nothing to set up.',
-  where: ['PR title and branch name (default)', 'PR title only'],
-  jira: {
-    url: 'https://acme.atlassian.net',
-    urlHint: 'Tickets link to {base}/browse/KEY-123. Moving to a different Jira site removes the saved API token.',
-    keys: 'PAY, LED',
-    keysHint: 'Optional, comma-separated (e.g. ENG, PROJ). Only keys with these prefixes count. Leave blank to look for keys in the PR title only.',
-    access: 'Jira API access (optional)',
-    accessDesc:
-      'Lets Limn read each ticket a PR names: its title, status and assignee, its description and acceptance criteria. A saved token is never shown again.',
-    email: 'dana@acme.example',
-    emailHint: 'Needed for Jira Cloud. Leave blank for a Data Center personal access token.',
-    connected: 'Connected. Jira accepted the saved token.',
-  },
-  linear: {
-    url: 'https://linear.app/acme',
-    urlHint: 'Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.',
-    keys: 'PAY, LED',
-    keysHint: 'Optional, comma-separated (e.g. ENG, OPS). Leave blank to look for keys in the PR title only.',
-    access: 'Linear API key',
-    keyHint: 'Create one in Linear under Settings → Security & access. It starts with lin_api_. Read access is enough.',
-  },
-  notion: {
-    url: 'https://www.notion.so/acme/Tasks-1a2b3c…',
-    urlHint: 'Copy the link of the database that holds your tickets. Moving to another database clears its mapping.',
-  },
-  checking: 'Checking…',
-  check: 'Check connection',
-};
-
-/** Settings → Slack (settings/SlackSection.tsx). */
-export const SETUP_SLACK = {
-  desc: 'Sends this workspace’s Pending board, sprint summary, merges and auto reviews to a Slack channel.',
-  stored: '•••••••• (unchanged)',
-  storedHint: 'A webhook is stored. Enter a new URL to replace it.',
-  onePerChannel: 'Only one person per channel should set this up — each Limn posts its own copy.',
-  cadences: [
-    { id: 'off', label: 'Off (paused, channel kept)' },
-    { id: 'daily', label: 'Daily' },
-    { id: 'twice_daily', label: 'Twice daily' },
-  ] as { id: 'off' | 'daily' | 'twice_daily'; label: string }[],
-  hours: ['7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '1:00 PM', '2:00 PM', '4:00 PM', '5:00 PM'],
-  timezone: 'Europe/London',
-  checks: [
-    {
-      id: 'bots',
-      label: 'Include a review-bot summary',
-      hint: 'Adds each review bot’s comment count, the share your team used and the number left untouched. This workspace’s digest only.',
-      on: true,
-    },
-    {
-      id: 'reviews',
-      label: 'Post when an auto review finishes',
-      hint: 'Reviews you start yourself are never posted. The pull request, its verdict and the review’s summary. Not the comments.',
-      on: false,
-    },
-    { id: 'merges', label: 'Post when a pull request merges', hint: 'The pull request and who merged it.', on: false },
-  ],
-  cap: '1 of 12 workspaces has a digest, each its own report on every send.',
-  test: { idle: 'Send test', busy: 'Sending…', done: 'Sent — check Slack.' },
-};
 
 // ---- reviewing as a team (/teams) ---------------------------------------------
 

@@ -13,13 +13,12 @@ block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE`
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Six content routes** (home, `/getting-started`, `/reporting`, `/teams`, `/how-we-measure`, `/contact`)
-plus the three legal ones:
+A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Five content routes** (home, `/reporting`, `/teams`, `/how-we-measure`, `/contact`)
+plus the three legal ones and the docs:
 
 | Route | Page | Focus |
 |---|---|---|
 | `/` | `pages/Home.tsx` | "Your team writes more code than it can review": the hero (with the Pending board), works with, the proof figures, the Review / Fix / Ship / See chapters, Why Limn, every feature free, questions and the close |
-| `/getting-started` | `pages/GettingStarted.tsx` | Install and run, turn on Claude, add the scoring model, add repositories, connect Jira or Linear, connect Slack |
 | `/reporting` | `pages/Reporting.tsx` | Reporting and metrics: the one window, period reports, Chronology, 26 weeks, where the work is happening, what bots are worth, This Sprint |
 | `/teams` | `pages/Teams.tsx` | For teams: several teammates each running Limn, with GitHub as the go-between — team claims (one review per commit per provider), the author can't approve their own PR, one review across teammates, Waiting on others, what it never does, and the licence above the free size |
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
@@ -33,16 +32,16 @@ Albert Sans face, the shared header (`.lb-nav`) and footer (`.lb-foot`), and the
 header comment lists the classes. Every page renders a root `<div className="lb <page>">`
 with `useReveal` (`components/board/useReveal.ts`, which lifts `.rise` tiles in as they
 scroll into view and leaves everything visible without JS) and keeps its own rules in a
-page-scoped file under that root: `pages/getting-started.css`, `reporting.css`, `teams.css`,
+page-scoped file under that root: `pages/reporting.css`, `teams.css`,
 `how-we-measure.css`, `contact.css`, `legal.css`, and `components/chrome.css` for the 404, the
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
 
-**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page, Getting started's setup
-steps included; the site holds no picture of the Limn UI. They are built from one kit,
+**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Limn UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
 CheckRow, CourtBar, MiniTable, Diff, Log, Stat, and the settings controls Section / Field /
-SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx`, `setup.tsx` and `teams.tsx`;
+SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx`, `teams.tsx`, and
+`setup.tsx` for the docs' Getting started pages;
 `mock.css` + `live.css`), and every word, number and state comes from ONE file,
 `src/mock/acme.ts` (the fictional Acme team: PAY-142, #612, acme/payments …). Each mock is real
 text with an `aria-label` summary and restacks under 961px.
@@ -80,19 +79,16 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
-| `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure`, `/getting-started` | Bots Monitoring (platform), the peer benchmark |
+| `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
+| `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
+| `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
 | `reports.tsx` SprintLanesMock | `/reporting` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` |
-| `setup.tsx` AiSettingsMock | `/getting-started` | `components/settings/AiProviderSection.tsx` |
-| `setup.tsx` BotScoringMock | `/getting-started` | `components/settings/BotScoringSection.tsx`, `hooks/useMlInstall.ts` |
-| `setup.tsx` AddReposMock | `/getting-started` | `components/Activity/FirstRunOnboarding.tsx` |
-| `setup.tsx` WorkspacesMock | `/getting-started` | `components/Activity/WorkspaceManager.tsx` |
-| `setup.tsx` TrackerMock | `/getting-started` | `components/settings/IssueLinksSection.tsx`, `JiraApiAccess.tsx`, `LinearApiAccess.tsx` |
-| `setup.tsx` SlackMock | `/getting-started` | `components/settings/SlackSection.tsx` |
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. The two role pages
 that replaced them (For developers, For managers) were in turn replaced by Getting started
-and Reporting and metrics. Organising by feature
+and Reporting and metrics, and Getting started then folded into the docs' Getting started
+section (`/docs/getting-started/…`). Organising by feature
 area meant a developer and an engineering manager read the same five pages and neither found
 the half addressed to them.
 
@@ -104,9 +100,15 @@ that as "not configured" and renders its unavailable state, which looks exactly 
 failure path rather than a missing server.
 
 ⚠ **The old URLs are aliased, not deleted.** `App.tsx` maps each of them to whichever page
-now carries its content — `/pricing` to `/contact`, `/how-it-works` to `/how-we-measure`, `/for-developers` and `/features` to `/getting-started`, `/for-managers`, `/bots`, `/pro`, `/insights` and `/reviews` to `/reporting` — and the header's `ALIAS_OF` (`components/Nav.tsx`) marks the matching link — and `prerender.mjs` writes the same mapping to disk so an old
+now carries its content — `/pricing` to `/contact`, `/how-it-works` to `/how-we-measure`, `/for-managers`, `/bots`, `/pro`, `/insights` and `/reviews` to `/reporting` — and the header's `ALIAS_OF` (`components/Nav.tsx`) marks the matching link — and `prerender.mjs` writes the same mapping to disk so an old
 inbound link gets real HTML with a canonical pointing at the surviving page. Change both
-tables together. `prerender.mjs` also writes `dist/404.html`, which `apps/site` serves with a
+tables together.
+
+⚠ **`/getting-started` is a 301, not an alias.** The page was folded into the docs, so
+`apps/site` (`src/app.ts` `MOVED_TO_DOCS`) answers `/getting-started`, `/for-developers` and
+`/features` with a permanent redirect to `/docs/getting-started/install-and-run`, before the
+landing loads. `App.tsx` keeps the same table (`MOVED_TO_DOCS`) for `vite dev`, where no site
+server stands in front. Change both together. `prerender.mjs` also writes `dist/404.html`, which `apps/site` serves with a
 404 status for any unknown path.
 
 - **Routing** (`src/router.tsx`): a ~80-line client router (`useRoute`, `navigate`, `Link`)

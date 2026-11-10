@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, ExtLink, H2, H3, Illustration, Log, Note, Steps, Tip, Warning } from '../../kit';
+import { DocLink, ExtLink, H2, H3, Illustration, Log, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Install and run Limn',
@@ -138,6 +138,42 @@ export default function Page(): JSX.Element {
       <Tip>
         Install it globally with <code>npm install -g limn-review</code>, then start it with <code>limn</code>.
       </Tip>
+
+      <H2 id="set-up-the-rest">Set up the rest</H2>
+      <p>
+        Limn works as soon as you add repositories. Everything else is optional. Switch on the parts you want, in
+        this order:
+      </p>
+      <Steps>
+        <li>
+          <b>Add your repositories.</b> Tick the ones Limn suggests, or search for any repository. See{' '}
+          <DocLink to="getting-started/add-repositories">Add your repositories</DocLink>.
+        </li>
+        <li>
+          <b>Connect your AI agent</b> for AI Review, AI Fix and the chats. Sign in to Claude Code with{' '}
+          <code>claude</code>, or sign in to Codex with your ChatGPT account in <Ui>Settings → AI</Ui>. See{' '}
+          <DocLink to="integrations/claude">Claude</DocLink> and <DocLink to="integrations/codex">Codex</DocLink>.
+        </li>
+        <li>
+          <b>Check the AI budget.</b> On a subscription, Limn may use 50% of your week for its automatic runs until
+          you change it. On an API key, there is no limit until you set a weekly budget in US dollars. See{' '}
+          <DocLink to="settings/ai-usage-and-spend#spend-budget">The spend budget</DocLink>.
+        </li>
+        <li>
+          <b>Add the scoring model</b> if your repositories use review bots. It scores each bot comment from nit to
+          critical, on your machine. See <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
+        </li>
+        <li>
+          <b>Connect your issue tracker</b> so reviews can check each pull request against its ticket. GitHub Issues
+          needs nothing. See <DocLink to="integrations/jira">Jira</DocLink>,{' '}
+          <DocLink to="integrations/linear">Linear</DocLink> and{' '}
+          <DocLink to="integrations/github-issues">GitHub Issues</DocLink>.
+        </li>
+        <li>
+          <b>Connect Slack</b> for a daily digest of the team&rsquo;s Pending board. See{' '}
+          <DocLink to="integrations/slack">Slack</DocLink>.
+        </li>
+      </Steps>
 
       <H2 id="update-limn">Update Limn</H2>
       <p>

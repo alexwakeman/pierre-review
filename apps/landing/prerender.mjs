@@ -184,8 +184,9 @@ for (const path of PRERENDER_PATHS) {
 // checks against would shrink with it. That is what the hard-coded floor is
 // for, and it is the reason this number must be changed by hand whenever the
 // route list does. It was 10; the restructure took the site to six,
-// /how-we-measure took it to seven, /contact to eight, and /teams to nine (home,
-// the two role pages, the teams page, the models page, contact, and the three legal ones).
+// /how-we-measure took it to seven, /contact to eight, and /teams to nine; folding
+// Getting started into the docs took it to eight (home, Reporting, the teams page, the models
+// page, contact, and the three legal ones).
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
@@ -198,9 +199,9 @@ if (DOC_PATHS.length < 100) {
   throw new Error(`only ${DOC_PATHS.length} docs routes — expected at least 100 (the docs manifest lost pages?)`);
 }
 log(`docs           → ${DOC_PATHS.length} pages`);
-if (written.length - DOC_PATHS.length < 9) {
+if (written.length - DOC_PATHS.length < 8) {
   throw new Error(
-    `only ${written.length} routes prerendered — expected at least 9. ` +
+    `only ${written.length} routes prerendered — expected at least 8. ` +
       `If you deliberately removed a route, lower this floor in the same change.`,
   );
 }
@@ -218,12 +219,12 @@ if (smallest < 12000) {
 // NOT in ROUTE_SEO — they would be duplicate content there — but each still writes
 // real HTML: a copy of whichever surviving page now carries its content, whose
 // canonical already points at that page, which is exactly the signal a search engine
-// needs to collapse the duplicate. This mirrors the alias table in App.tsx; change
+// needs to collapse the duplicate. (/for-developers and /features, Getting started's old
+// aliases, are not here: apps/site 301s them to the docs with /getting-started.) This mirrors
+// the alias table in App.tsx; change
 // both together.
 const ALIASES = {
-  'for-developers': 'getting-started',
   'for-managers': 'reporting',
-  features: 'getting-started',
   'how-it-works': 'how-we-measure',
   bots: 'reporting',
   pro: 'reporting',

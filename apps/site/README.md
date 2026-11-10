@@ -8,6 +8,7 @@ nothing else:
 |---|---|
 | `/` and every landing route | the prerendered landing (`apps/landing/dist`); unknown paths get `404.html` with a 404 |
 | `/demo`, `/demo/…` | 302 to `/`. The static demo was removed (2026-11); old links land on the home page |
+| `/getting-started`, `/for-developers`, `/features` | 301 to `/docs/getting-started/install-and-run` (query kept). The Getting started page was folded into the docs (2026-11); `MOVED_TO_DOCS` in `src/app.ts`, mirrored in the landing's `App.tsx` |
 | `/api/health` | `{ "ok": true }` — Railway's health check |
 | `GET /api/contact/ticket` · `POST /api/contact` | the contact form, delivered to a Slack incoming webhook |
 
