@@ -97,7 +97,8 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
       </Warning>
       <Tip>
-        You can also start a review from <Ui>Open pull requests</Ui>, without opening the pull request. See{' '}
+        You can also start a review from <Ui>Open pull requests</Ui>, without opening the pull request: the{' '}
+        <Ui>Review</Ui> button in the side panel, or <Ui>Start review</Ui> in a row's right-click menu. See{' '}
         <DocLink to="open-pull-requests/ai-review-column">The AI review column</DocLink>.
       </Tip>
 

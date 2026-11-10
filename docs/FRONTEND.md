@@ -402,7 +402,19 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   row, or Shift+F10 / the context-menu key on the selected one (at the row's corner), selects the row
   (never opens the drawer) and lists Merge · Overview · Changes · Threads · AI Review (AI only), each
   opening the PR on that tab (`openPrDetailTab` + `setPrDetailTab`; `openPrThreadsView`;
-  `openClaudeReview`). ⚠ **It fetches nothing on open**: Merge shows only when `rowCanMerge` — the
+  `openClaudeReview`), then **Start review** (AI only; `lib/startReviewMenu.ts`): the AI Review tab's
+  OPENING choice (`defaultReviewChoice` = `resolveReviewModelPick(me, DEFAULT_CLAUDE_REVIEW_MODEL,
+  null)`: the pair while both can review), review only, never posts. Gated by `startReviewMenuItem`,
+  the Run button's `AiRunGate kind="review" anyProvider` checks in the gate's order (runtime, then
+  sign-in) plus the column's own `reviewCellFor` (starting / queued / running — the auto lane too —
+  and done at the head): DISABLED with the reason as its hint, never hidden (only `me.ai.enabled`
+  hides it). Over the run provider's budget (`useAiBudget(choice.provider)`, a cache read) it stays
+  enabled and choosing it opens `OpenPrsBudgetAsk` at the same point ("Start review anyway" · "AI
+  spend settings") — the Run button's second press. The start is `startDefaultReview`
+  (hooks/useClaudeReview.ts): the SAME route and per-PR `claudeReviewStartKey` mutation, built on the
+  mutation cache because the menu unmounts as it is pressed, with `afterReviewStarted` awaited inside
+  it; the outcome is `store/reviewStartNote.ts`, shown on the AI reviews circle (`ClaudeReviewBanner`)
+  — "Review started for #615" for 6s, a failure's reason until dismissed. ⚠ **It fetches nothing on open**: Merge shows only when `rowCanMerge` — the
   ONE `mergeVerdict` over the row's synced facts, not a draft, nothing armed (`usePrArmedIntent`, a
   cache read), not in GitHub's merge queue (`OpenPrsResponse.queuedPrIds`, fed to the verdict's queue
   branch), and the repo in `OpenPrsResponse.writableRepoIds` — HIDDEN otherwise; choosing it is

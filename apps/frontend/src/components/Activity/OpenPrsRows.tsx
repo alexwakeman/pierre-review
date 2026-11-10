@@ -10,7 +10,11 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { landsAfterOf } from '@pierre-review/shared';
-import { useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { startDefaultReview, useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
+import { unlockReviewSound } from '../../lib/sound.js';
+import type { DefaultReviewChoice } from '../../lib/startReviewMenu.js';
+import { useSettingsModal } from '../../store/settingsModal.js';
 import { useMergedPanelOpen } from '../../hooks/useTicketMergedPrs.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { leadVerdictText, reviewCellFor, reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
@@ -74,7 +78,7 @@ import { PrChips } from './PrChips.js';
 import { filesLabel } from './PrCardShell.js';
 import { TicketKeyButton, threadChipLabel } from './OpenPrsCards.js';
 import { useFillToPaneBottom } from '../ui/stickyFill.js';
-import { OpenPrsMergePopover, OpenPrsRowMenu, type RowMenuTab } from './OpenPrsRowMenu.js';
+import { OpenPrsBudgetAsk, OpenPrsMergePopover, OpenPrsRowMenu, type RowMenuTab } from './OpenPrsRowMenu.js';
 
 // THE OPEN PRs ROWS — Activity → Open PRs in the redesign (docs/redesign/DESIGN.md): one LINE per
 // pull request, the detail in a SidePanel. OpenPrsCards still owns every read (one batched request
@@ -361,11 +365,21 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
   const [mergeAt, setMergeAt] = useState<{ x: number; y: number; key: string } | null>(null);
   const menuEntry = rowMenu != null ? drawn.find((e) => e.key === rowMenu.key) : undefined;
   const mergeEntry = mergeAt != null ? drawn.find((e) => e.key === mergeAt.key) : undefined;
+  // Start review over the spend budget: one more choice, where the row menu was.
+  const [budgetAsk, setBudgetAsk] = useState<{ x: number; y: number; key: string; choice: DefaultReviewChoice } | null>(null);
+  const askEntry = budgetAsk != null ? drawn.find((e) => e.key === budgetAsk.key) : undefined;
+  const qc = useQueryClient();
+  const openSettings = useSettingsModal((s) => s.openSettings);
+  const startReview = (pr: TimelinePr, choice: DefaultReviewChoice): void => {
+    unlockReviewSound(); // gesture-gated WebAudio, so the completion chime can play later
+    void startDefaultReview(qc, pr, choice);
+  };
   const openRowMenu = (i: number, at: { x: number; y: number } | null): void => {
     const e = drawn[i];
     if (e == null) return;
     setSelectedKey(e.key);
     setMergeAt(null);
+    setBudgetAsk(null);
     let point = at;
     if (point == null) {
       const r = listRef.current?.querySelector<HTMLElement>(`[data-row-index="${i}"]`)?.getBoundingClientRect();
@@ -664,6 +678,21 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
           onOpenTab={(tab) => props.onOpenTab(menuEntry.pr, tab)}
           onOpenThreads={() => props.onOpenThreads(menuEntry.pr)}
           onOpenReview={() => props.onOpenReview(menuEntry.pr)}
+          claudeState={props.claudeStates.get(menuEntry.pr.id)}
+          onStartReview={(choice, overBudget) =>
+            overBudget ? setBudgetAsk({ ...rowMenu, choice }) : startReview(menuEntry.pr, choice)
+          }
+        />
+      )}
+      {budgetAsk != null && askEntry != null && (
+        <OpenPrsBudgetAsk
+          x={budgetAsk.x}
+          y={budgetAsk.y}
+          prNumber={askEntry.pr.number}
+          returnFocus={listRef.current}
+          onClose={() => setBudgetAsk(null)}
+          onStart={() => startReview(askEntry.pr, budgetAsk.choice)}
+          onOpenSettings={() => openSettings('claude-spend')}
         />
       )}
       {mergeAt != null && mergeEntry != null && (

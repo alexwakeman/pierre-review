@@ -17,6 +17,10 @@ no internals.
 
 - Settings → Sandbox: one line says how many Limn sandboxes are running now, with "Stop all" to stop
   them. Stored changes are kept; an automatic AI Fix that is running is cancelled.
+- Open pull requests: right-click a row and choose "Start review" to start an AI review with your
+  default choice (Claude + Codex when both are signed in). The item is greyed out, with the reason,
+  while AI is not set up or signed in, or a review is starting, queued or running. Over your AI spend
+  budget it asks once more. "Review started for #615" shows in the bottom-right corner.
 
 ### Changed
 
