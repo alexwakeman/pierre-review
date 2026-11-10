@@ -2906,9 +2906,11 @@ The plain-English design is docs/TEAM-REVIEW.md § 4 ("A teammate's verdict"). A
 review is never a verdict (GitHub forbids self-approval), so another Limn must give one.
 
 - **THE MARKER'S `ov=`** (shared `limnReviewMarker` / `parseLimnReviewMarker`, `LimnReviewMeta.ownPrVerdict`).
-  Auto-posting on the reader's OWN PR writes the verdict `autoVerdictFor` chose — `APPROVE` or
-  `REQUEST_CHANGES` — whatever the "Approve or request changes for me" switch says (it is a fact
-  about the run). The import keeps it on `TeammateReviewRecord.ownPrVerdict`. An older Limn ignores
+  Auto-posting on the reader's OWN PR writes the verdict it WOULD have sent off the PR —
+  `APPROVE` or `REQUEST_CHANGES` (`ownPrVerdictOf`): only with "Approve or request changes for me"
+  on, and an APPROVE only at an impact level the workspace's `approveImpact` allows (unknown =
+  high). A switched-off author or a held approve writes no `ov=`, so no teammate reads "would
+  approve" the author's own settings would not have sent. The import keeps it on `TeammateReviewRecord.ownPrVerdict`. An older Limn ignores
   the key; a post without it still triggers the pick-up, it only sorts after a held APPROVE.
 - **THE LIST** (`db/teammate-verdict-pickup.ts` `verdictPickupCandidates`, PURE; fed by
   `getAutoReviewCandidates` as `verdictNeeded`). Never the reader's own PR (`prOwnerId`; no proven
@@ -2924,19 +2926,26 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
   clock shared with the re-review loop — which then skips that PR), the team-claim hold, the ONE
   budget gate (over it, the due ones are said on the PR as "skipped · budget"), and the daily cap.
   At most `VERDICT_PICKUP_PER_TICK` (5) a tick across workspaces. ⚠ **NOT EXEMPT FROM THE DAILY
-  CAP**: own-PR ticket checks may be, because the reader's own pushes bound them; this list grows
+  CAP**, and a queued pick-up (no row yet, out of `prIds`) is counted in `waitingHere`, or the cap is
+  overshot tick after tick: own-PR ticket checks may be, because the reader's own pushes bound them; this list grows
   with other people's PRs, and on an API key the spend budget is unset by default, so the cap is the
   one count-based bound left. Prioritised means the cap is spent on these first.
 - **THE LANE** (`manager.ts`): `enqueueAutoReview(…, {priority: true, why})` inserts ahead of every
   ordinary auto item (behind earlier priority items; manual items still go first).
   `autoReviewQueueWhy` → `ClaudeReviewResponse.autoReviewWhy` (the author's login resolved in the
-  route): "Queued: needs a verdict (alex’s own review approved)" (`autoReviewWhyLine`).
+  route): "Queued: needs a verdict (alex’s own review would approve)" (`autoReviewWhyLine`).
 - **ONE TEAMMATE TAKES IT** through the ordinary team claim (§ Team claims): the author's lines are
   left out of the fold, the earliest live claim wins, a claimer silent past the 25-minute lease is
   taken over. Nothing new is written for coordination.
 - **POSTING SCOPE.** Under "Which PRs: mine", `AutoPostPrFacts.authorLimnAtHead` (an imported
-  review by the PR's owner at the head) makes the PR the reader's to answer, so the verdict reaches
-  GitHub.
+  review by the PR's owner at the head) or `limnMovedNoVerdict` (teammates' Limn reviews only at
+  older heads, none by a non-author at the head: the `'moved'` case) makes the PR the reader's to
+  answer, so the verdict reaches GitHub. ⚠ Without the second, a `'moved'` pick-up ran first, posted
+  nothing for a reader not requested and not taking part, and its "reviewed" line still held the
+  head, so the teammate who WOULD post stepped aside.
+- **THE CATCH-UP GATE IS ONE FUNCTION** (`catchUpWaitsForSync`): the pass AND the AI-not-ready
+  skipped lines ask it, so a boot before the runtime is installed says nothing on a head read
+  before the break.
 - **THE AUTHOR'S SIDE** (`db/teammate-verdict-wait.ts`). On the reader's own open PR: their posted
   review at the head, no teammate's Limn review there, AND a teammate's Limn AUTO review seen in the
   same workspace within `TEAMMATE_AUTO_SEEN_MS` (14 days). Then `ClaudeReviewResponse.teammateVerdictWait`

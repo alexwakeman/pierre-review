@@ -74,7 +74,7 @@
 // AUTO-only. "Review only" (and every older manual run) keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
 import { mergeOpenPoints, withOpenPointsBeforeFooter } from './open-points.js';
-import { and, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { aiRunProvider, clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
   type AutoApproveImpact,
@@ -174,6 +174,10 @@ export interface AutoPostPrFacts {
   // The PR AUTHOR's own Limn review is on GitHub at the PR's head: a teammate's verdict is owed there
   // (docs/TEAM-REVIEW.md § 4), so under the scope 'mine' the PR counts as the reader's to answer.
   authorLimnAtHead?: boolean;
+  // The head moved past every Limn review on the PR, all of them a teammate's, and no non-author
+  // teammate's Limn review is at the head: a teammate's verdict is owed there too (the 'moved'
+  // pick-up), so under the scope 'mine' the PR counts as the reader's to answer.
+  limnMovedNoVerdict?: boolean;
 }
 
 /** May auto-posting write on this PR? null = yes; else why not. */
@@ -181,7 +185,14 @@ export function autoPostEligibility(f: AutoPostPrFacts, scope: AutoPostScope): A
   if (f.state !== 'open') return 'not_open';
   if (f.isDraft) return 'draft';
   if (f.authorIsBot) return 'bot_author';
-  if (scope === 'mine' && !f.authorIsMe && !f.requestedOfMe && f.participatedByMe !== true && f.authorLimnAtHead !== true) {
+  if (
+    scope === 'mine' &&
+    !f.authorIsMe &&
+    !f.requestedOfMe &&
+    f.participatedByMe !== true &&
+    f.authorLimnAtHead !== true &&
+    f.limnMovedNoVerdict !== true
+  ) {
     return 'not_yours';
   }
   return null;
@@ -321,6 +332,20 @@ export type ImpactLevel = 'high' | 'medium' | 'low' | 'unknown';
 /** May an automatic APPROVE go out at this impact level? ⚠ 'unknown' is judged as HIGH. */
 export function impactAllowsApprove(level: ImpactLevel, allowed: AutoApproveImpact): boolean {
   return allowed[level === 'unknown' ? 'high' : level];
+}
+
+/**
+ * THE VERDICT THE AUTHOR'S LIMN WOULD HAVE SENT on their own PR (the marker's `ov=`; docs/TEAM-REVIEW.md
+ * § 4, "A teammate's verdict"). The same switch and gates as off the PR: nothing with "Approve or request
+ * changes for me" off (`wanted` null), and an APPROVE only at an impact level the workspace allows. Pure.
+ */
+export function ownPrVerdictOf(
+  wanted: AutoVerdictEvent | null,
+  impact: { level: ImpactLevel; allowed: AutoApproveImpact } | null,
+): 'APPROVE' | 'REQUEST_CHANGES' | null {
+  if (wanted === 'REQUEST_CHANGES') return wanted;
+  if (wanted === 'APPROVE') return impact != null && impactAllowsApprove(impact.level, impact.allowed) ? wanted : null;
+  return null;
 }
 
 /** Is the wanted verdict sent? Only off the reader's own PR, at an impact level the workspace allows
@@ -775,25 +800,31 @@ export async function readAutoPostPrFacts(
     const hits = await Promise.all([by(t.reviews, false), by(t.reviewComments, true), by(t.prComments, true)]);
     participatedByMe = hits.some((h) => h.length > 0);
   }
-  // A TEAMMATE'S VERDICT OWED: the author's own Limn review (an imported teammate review by the PR's
-  // author) at the PR's head. Read only when nothing else already makes it the reader's.
+  // A TEAMMATE'S VERDICT OWED (db/teammate-verdict-pickup.ts): the author's own Limn review at the
+  // PR's head, or a head that moved past teammates' Limn reviews with no verdict at it. Read only when
+  // nothing else already makes it the reader's.
   let authorLimnAtHead = false;
+  let limnMovedNoVerdict = false;
   if (!authorIsMe && !requestedOfMe && !participatedByMe && pr.authorId != null && pr.headSha) {
-    const hits = (await ctx.db
-      .select({ id: t.claudeReviews.id })
+    const posted = (await ctx.db
+      .select({ headSha: t.claudeReviews.headSha, sourceUserId: t.claudeReviews.sourceUserId })
       .from(t.claudeReviews)
       .where(
         and(
           eq(t.claudeReviews.accountId, accountId),
           eq(t.claudeReviews.prId, prId),
           eq(t.claudeReviews.kind, 'teammate'),
-          eq(t.claudeReviews.sourceUserId, pr.authorId),
-          eq(t.claudeReviews.headSha, pr.headSha),
+          isNotNull(t.claudeReviews.postedAt),
+          isNotNull(t.claudeReviews.sourceUserId),
         ),
       )
-      .limit(1)
-      .execute()) as unknown[];
-    authorLimnAtHead = hits.length > 0;
+      .execute()) as Array<{ headSha: string; sourceUserId: number }>;
+    const others = posted.filter((r) => r.sourceUserId !== me);
+    authorLimnAtHead = others.some((r) => r.headSha === pr.headSha && r.sourceUserId === pr.authorId);
+    limnMovedNoVerdict =
+      !authorLimnAtHead &&
+      others.some((r) => r.headSha !== pr.headSha) &&
+      !others.some((r) => r.headSha === pr.headSha && r.sourceUserId !== pr.authorId);
   }
   return {
     state: pr.state,
@@ -804,6 +835,7 @@ export async function readAutoPostPrFacts(
     openRequestOfMe,
     participatedByMe,
     ...(authorLimnAtHead ? { authorLimnAtHead: true } : {}),
+    ...(limnMovedNoVerdict ? { limnMovedNoVerdict: true } : {}),
   };
 }
 
@@ -1362,9 +1394,18 @@ async function autoPostReview(
   const liftConsent = ws.settings.teamLiftConsent && blockersAllInPost(allFindings, picked.toPost);
   // ON THE READER'S OWN PR the verdict can only be a comment (GitHub forbids self-approval). The verdict
   // Limn would have sent rides the marker (`ov=`) so a teammate's Limn knows to give one (docs/TEAM-REVIEW.md
-  // § 4, "A teammate's verdict"). Read whatever the auto-verdict switch says: it is a fact about the run.
-  const ownPrHeld = facts.authorIsMe ? autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers, earlierOpen) : null;
-  const ownPrVerdict = ownPrHeld === 'APPROVE' || ownPrHeld === 'REQUEST_CHANGES' ? ownPrHeld : null;
+  // § 4, "A teammate's verdict"). Under the same switch and impact gate as off the PR (`ownPrVerdictOf`).
+  let ownPrImpact: { level: ImpactLevel; allowed: AutoApproveImpact } | null = null;
+  if (facts.authorIsMe && wanted === 'APPROVE') {
+    let level: ImpactLevel = 'unknown';
+    try {
+      level = (await deps.impactLevel?.(accountId, prId)) ?? 'unknown';
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the PR's impact: ${errText(err)}`);
+    }
+    ownPrImpact = { level, allowed: ws.settings.approveImpact };
+  }
+  const ownPrVerdict = facts.authorIsMe ? ownPrVerdictOf(wanted, ownPrImpact) : null;
   const ownPrMeta = ownPrVerdict != null ? { ownPrVerdict } : {};
   const submit = (ev: AutoVerdictEvent) =>
     ctx.review.postReview({

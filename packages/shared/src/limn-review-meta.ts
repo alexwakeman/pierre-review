@@ -207,8 +207,9 @@ export interface LimnReviewMeta {
   // `lift=1`: the poster consents to a teammate's Limn lifting this block. Absent / false = no.
   liftConsent?: boolean;
   // `ov=` (2026-11-10, docs/TEAM-REVIEW.md § 4): on the poster's OWN PR, the verdict Limn chose but
-  // could not send (GitHub forbids self-approval, so the post is a comment). A teammate's Limn reads
-  // it to say "alex's own review approved" and to pick the PR up for a verdict first. Absent = none.
+  // could not send (GitHub forbids self-approval, so the post is a comment). Written only under the
+  // poster's own auto-verdict switch and impact gate. A teammate's Limn reads it to say "alex's own
+  // review would approve" and to pick the PR up for a verdict first. Absent = none.
   ownPrVerdict?: 'APPROVE' | 'REQUEST_CHANGES';
 }
 

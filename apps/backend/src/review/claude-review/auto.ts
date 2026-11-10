@@ -507,18 +507,8 @@ export async function runAutoReviewSweep(
     }
     // The workspace's heads are not yet checked since the catch-up opened: its pass waits (nothing
     // queued, no clock touched). A press does not wait: the reader chose the run.
-    const waitsForSync = async (ws: { accountId: number; workspaceId: number }): Promise<boolean> => {
-      if (pressed || catchUp == null) return false;
-      const k = `${ws.accountId}:${ws.workspaceId}`;
-      if (catchUp.fresh.has(k)) return false;
-      const fresh = ctx.queries.workspaceHeadsFreshSince?.bind(ctx.queries);
-      const ok =
-        fresh == null ||
-        nowMs - catchUp.sinceMs >= AUTO_CATCH_UP_SYNC_WAIT_MAX_MS ||
-        (await fresh(ws.accountId, ws.workspaceId, catchUp.sinceMs).catch(() => false));
-      if (ok) catchUp.fresh.add(k);
-      return !ok;
-    };
+    const waitsForSync = (ws: { accountId: number; workspaceId: number }): Promise<boolean> =>
+      pressed ? Promise.resolve(false) : catchUpWaitsForSync(ctx, ws, nowMs);
     let pickedUp = 0;
     for (const ws of roster) {
       if (await waitsForSync(ws)) {
@@ -553,6 +543,9 @@ export async function runAutoReviewSweep(
           ...res.prIds,
           ...(res.reReview ?? []).map((r) => r.prId),
           ...(res.retry ?? []).map((r) => r.prId),
+          // ⚠ A queued verdict pick-up has no row yet, so `autoToday` does not count it, and the read
+          // takes it out of `prIds`: without this line the daily cap is overshot.
+          ...(res.verdictNeeded ?? []).map((v) => v.prId),
         ]),
       ].filter((id) => waiting.has(id)).length;
       let budget = ws.dailyCap - res.autoToday - waitingHere;
@@ -937,6 +930,29 @@ type CandidatesOf = NonNullable<AgentContext['queries']['getAutoReviewCandidates
 export const AUTO_SKIP_LINES_PER_TICK = 25;
 
 /**
+ * THE CATCH-UP GATE (see the header): true while the open catch-up still waits for this workspace's
+ * heads to be checked since it opened. Every path that reads the synced heads asks it, the AI-not-ready
+ * skipped lines included, so nothing is said or started on a head read before the break.
+ */
+async function catchUpWaitsForSync(
+  ctx: AgentContext,
+  ws: { accountId: number; workspaceId: number },
+  nowMs: number,
+): Promise<boolean> {
+  const open = catchUp;
+  if (open == null) return false;
+  const k = `${ws.accountId}:${ws.workspaceId}`;
+  if (open.fresh.has(k)) return false;
+  const fresh = ctx.queries.workspaceHeadsFreshSince?.bind(ctx.queries);
+  const ok =
+    fresh == null ||
+    nowMs - open.sinceMs >= AUTO_CATCH_UP_SYNC_WAIT_MAX_MS ||
+    (await fresh(ws.accountId, ws.workspaceId, open.sinceMs).catch(() => false));
+  if (ok) open.fresh.add(k);
+  return !ok;
+}
+
+/**
  * The heads this workspace's tick WOULD have started — first reviews, and moved heads whose start rule
  * says go — without starting anything or touching a clock. Read-only: the spend budget and AI
  * readiness hold the whole workspace, so these are said on the PR instead. Not a held PR (a teammate's
@@ -1013,6 +1029,8 @@ async function noteSkippedWhileHeld(
 ): Promise<void> {
   const heads: SkippedHead[] = [];
   for (const ws of await listAutoReviewWorkspaces(ctx)) {
+    // ⚠ A catch-up still waiting for this workspace's sync: its heads may be stale, so say nothing yet.
+    if (await catchUpWaitsForSync(ctx, ws, nowMs)) continue;
     heads.push(...(await dueHeadsHeld(ctx, nowMs, candidatesOf, ws, reason)));
     if (heads.length >= AUTO_SKIP_LINES_PER_TICK) break;
   }

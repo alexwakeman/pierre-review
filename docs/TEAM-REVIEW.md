@@ -254,7 +254,7 @@ author's Limn reviews their own PR, **another person's Limn must give the verdic
 flowchart TD
   A["Alex's Limn reviews Alex's own PR at commit C<br/>posts a comment; its marker says it would approve"] --> S{"Robin's Limn, next tick:<br/>auto review on in the workspace?"}
   S -- no --> N["Nothing. Alex's tab says nothing either,<br/>unless a teammate's Limn ran auto reviews lately"]
-  S -- yes --> Q["Queued FIRST:<br/>'Queued: needs a verdict (alex's own review approved)'"]
+  S -- yes --> Q["Queued FIRST:<br/>'Queued: needs a verdict (alex's own review would approve)'"]
   Q --> C{"Claim on C (§ 3)"}
   C -- "Sam's Limn claimed first" --> W["Robin's Limn steps aside"]
   W -- "Sam's line not renewed for 25 minutes" --> C
@@ -269,9 +269,10 @@ flowchart TD
 | How many? | At most 5 a minute. Same start rule as any new commit, same claims, same spend budget. |
 | The daily limit? | **Counted, not exempt.** The list grows with other people's PRs, and on an API key the spend budget is unset by default, so the daily limit is the one count that stops a runaway. Being first means the limit is spent on these first. |
 | Who takes it? | **Exactly one teammate per model**, by the ordinary claim (§ 3): the author's lines are ignored, the earliest live claim wins, a claim not renewed for 25 minutes is taken over. |
-| Does it post under "Which PRs: Mine"? | Yes. A PR whose author's own Limn review is at the latest commit counts as the reader's, so the verdict reaches GitHub. |
+| Does it post under "Which PRs: Mine"? | Yes, in both cases (a) and (b): the PR counts as the reader's, so the verdict reaches GitHub. |
+| When does the author's Limn "would approve"? | Only with the author's own "Approve or request changes for me" on, and at an impact level the author's workspace lets Limn approve. Otherwise its marker says nothing and the PR sorts with the other author reviews. |
 | What does the author see? | "Waiting for a teammate's Limn to review" in the AI Review tab and on the Pending "Waiting on others" row, while their own Limn review is the only one at the latest commit. **Only with evidence**: a teammate's Limn posted an automatic review in the workspace in the last 14 days. Limn cannot read a teammate's settings, so without that it says nothing rather than promise a review. |
-| What does the teammate see? | "Queued: needs a verdict (alex's own review approved)" ("…asked for changes", "…own review", or "…new commits since the last Limn review"). |
+| What does the teammate see? | "Queued: needs a verdict (alex's own review would approve)" ("…would ask for changes", "…own review", or "…new commits since the last Limn review"). |
 
 ---
 
@@ -658,7 +659,7 @@ All names and times are illustrative; every step follows the current rules.
 
 ### 9.13 The author's own Limn approves; a teammate gives the verdict
 1. 14:00 Alex's Limn reviews Alex's own PR #40 at commit F. It would approve, but it can only comment; its marker says so.
-2. 14:01 Robin's and Sam's Limns both import the review. Each queues #40 ahead of its other automatic reviews: "Queued: needs a verdict (alex's own review approved)".
+2. 14:01 Robin's and Sam's Limns both import the review. Each queues #40 ahead of its other automatic reviews: "Queued: needs a verdict (alex's own review would approve)".
 3. 14:02 Robin's Limn claims F with Claude first; Sam's Limn steps aside ("Robin Dunn is reviewing this commit with Claude").
 4. Robin closes his laptop at 14:05. His claim is not renewed; at 14:27 the lease ends and Sam's Limn takes over, reviews F and approves through the § 5 gates.
 5. Alex's tab showed "Waiting for a teammate's Limn to review" until Sam's review synced; then the line goes.

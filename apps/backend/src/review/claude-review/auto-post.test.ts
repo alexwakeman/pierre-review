@@ -220,6 +220,22 @@ describe('the pure rules', () => {
     expect(ap.autoPostEligibility({ ...base, authorLimnAtHead: true }, 'mine')).toBeNull();
     expect(ap.autoPostEligibility({ ...base, authorLimnAtHead: true, isDraft: true }, 'mine')).toBe('draft');
   });
+  it("eligibility: under 'mine', a head that moved past teammates' Limn reviews with no verdict is the reader's to answer", () => {
+    expect(ap.autoPostEligibility({ ...base, limnMovedNoVerdict: true }, 'mine')).toBeNull();
+    expect(ap.autoPostEligibility({ ...base, limnMovedNoVerdict: true, authorIsBot: true }, 'mine')).toBe('bot_author');
+  });
+  it("the author's own-PR verdict (ov=) follows the auto-verdict switch and the impact gate", () => {
+    const allowed = { high: false, medium: true, low: true };
+    // "Approve or request changes for me" off: `wanted` is null, so nothing rides the marker.
+    expect(ap.ownPrVerdictOf(null, { level: 'low', allowed })).toBeNull();
+    expect(ap.ownPrVerdictOf('COMMENT', null)).toBeNull();
+    expect(ap.ownPrVerdictOf('REQUEST_CHANGES', null)).toBe('REQUEST_CHANGES');
+    expect(ap.ownPrVerdictOf('APPROVE', { level: 'low', allowed })).toBe('APPROVE');
+    expect(ap.ownPrVerdictOf('APPROVE', { level: 'high', allowed })).toBeNull();
+    // Unknown impact is judged as high.
+    expect(ap.ownPrVerdictOf('APPROVE', { level: 'unknown', allowed })).toBeNull();
+    expect(ap.ownPrVerdictOf('APPROVE', null)).toBeNull();
+  });
   it('kinds: praise is never a kind', () => {
     expect(ap.kindOfSeverity('praise')).toBeNull();
     expect(ap.kindOfSeverity('question')).toBe('questions');
@@ -1933,6 +1949,92 @@ describe('auto resolve', () => {
         })
         .execute();
       return { pr, first, finding: f, thread: th };
+    }
+  });
+});
+
+describe("a teammate's verdict owed: posting under 'mine' (docs/TEAM-REVIEW.md § 4)", () => {
+  const teammateReview = async (prId: number, headSha: string, by: string) =>
+    db
+      .insert(schema.claudeReviews)
+      .values({
+        accountId: 1,
+        prId,
+        headSha,
+        status: 'succeeded',
+        model: 'claude-opus-5-5',
+        kind: 'teammate',
+        sourceUserId: users[by],
+        sourceReviewNodeId: `PRR_${prId}_${headSha}_${by}`,
+        postedAt: new Date(),
+        verdict: 'COMMENT',
+      })
+      .execute();
+  const facts = (prId: number) => ap.readAutoPostPrFacts(ctx, deps(), 1, wsId, prId);
+
+  beforeAll(async () => {
+    const [u] = await db.insert(schema.users).values({ githubLogin: 'sam', githubNodeId: 'U_sam', isBot: false }).returning().execute();
+    users.sam = u.id;
+  });
+
+  it("a 'moved' pick-up (a teammate's Limn reviewed an older head) posts for a reader not asked and not taking part", async () => {
+    const pr = await makePr({ author: 'alice' });
+    await teammateReview(pr, 'OLD', 'sam');
+    expect(await facts(pr)).toMatchObject({ limnMovedNoVerdict: true });
+    const id = await run(pr, [{ severity: 'blocker', title: 'Moved bug' }]);
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps())).toMatchObject({ kind: 'done' });
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("the author's own Limn review at the head makes it the reader's too", async () => {
+    const pr = await makePr({ author: 'alice' });
+    await teammateReview(pr, 'HEAD', 'alice');
+    expect(await facts(pr)).toMatchObject({ authorLimnAtHead: true });
+    expect((await facts(pr))?.limnMovedNoVerdict).toBeUndefined();
+  });
+
+  it("not owed: a non-author teammate's Limn review is already at the head, or no Limn review at all", async () => {
+    const given = await makePr({ author: 'alice' });
+    await teammateReview(given, 'OLD', 'sam');
+    await teammateReview(given, 'HEAD', 'sam');
+    const f = await facts(given);
+    expect(f?.limnMovedNoVerdict).toBeUndefined();
+    expect(f?.authorLimnAtHead).toBeUndefined();
+    expect(ap.autoPostEligibility(f!, 'mine')).toBe('not_yours');
+    const none = await makePr({ author: 'alice' });
+    expect(ap.autoPostEligibility((await facts(none))!, 'mine')).toBe('not_yours');
+  });
+});
+
+describe("the author's own-PR verdict on the marker (ov=)", () => {
+  const withImpact = (level: 'high' | 'low') => ({ ...deps(), impactLevel: vi.fn(async () => level) });
+  const sentOv = () => postReview.mock.calls[0]![0].limnMeta?.ownPrVerdict;
+
+  it('rides the post only under the auto-verdict switch and an impact level the workspace approves', async () => {
+    try {
+      for (const [autoVerdict, level, high, expected] of [
+        [true, 'low', false, 'APPROVE'],
+        [false, 'low', false, undefined],
+        [true, 'high', false, undefined],
+        [true, 'high', true, 'APPROVE'],
+      ] as const) {
+        await setPost(true, { autoVerdict, approveImpact: { high, medium: true, low: true } });
+        postReview.mockClear();
+        const pr = await makePr({ author: 'me' });
+        const id = await run(pr, [{ severity: 'question', title: `Why ${pr}?` }], 'auto', 'APPROVE');
+        await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, withImpact(level));
+        expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+        expect(sentOv(), `${autoVerdict} ${level} ${high}`).toBe(expected);
+      }
+      // A blocker asks for changes whatever the impact.
+      await setPost(true, { autoVerdict: true, approveImpact: { high: false, medium: false, low: false } });
+      postReview.mockClear();
+      const blocked = await makePr({ author: 'me' });
+      const id = await run(blocked, [{ severity: 'blocker', title: 'Own bug' }]);
+      await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: blocked, reviewId: id }, withImpact('high'));
+      expect(sentOv()).toBe('REQUEST_CHANGES');
+    } finally {
+      await setPost(true, { autoVerdict: true, approveImpact: { high: true, medium: true, low: true } });
     }
   });
 });

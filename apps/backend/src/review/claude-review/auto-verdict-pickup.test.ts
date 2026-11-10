@@ -33,7 +33,8 @@ vi.mock('./team-claim-skip.js', () => ({
   },
   autoProvidersForPr: async () => ['claude'],
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+let aiReady = true;
+vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
 let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
 vi.mock('./auto-settings.js', () => ({ listAutoReviewWorkspaces: async () => roster }));
 
@@ -100,6 +101,7 @@ beforeEach(() => {
   roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 86_400_000, dailyCap: 20 }];
   answer = { prIds: [], autoToday: 0 };
   fresh = () => true;
+  aiReady = true;
   _resetAutoReReviewForTest();
   _setAutoProviderForTest(() => 'claude');
 });
@@ -144,11 +146,21 @@ describe("a teammate's verdict first", () => {
     answer = {
       prIds: [],
       autoToday: 0,
-      verdictNeeded: [owed(30)],
+      verdictNeeded: [owed(30, null, 'moved')],
       reReview: [{ prId: 30, headSha: 'h30', commentsAtMs: null, lastRunAtMs: NOW - 86_400_000 }],
     };
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued.map((q) => q.prId)).toEqual([30]);
+  });
+
+  it('a queued pick-up still waiting in the lane counts against the daily cap', async () => {
+    // #30 was queued on an earlier tick and has not started: no row yet, so `autoToday` misses it.
+    waiting = new Set([30]);
+    answer = { prIds: [], autoToday: 18, verdictNeeded: [owed(30), owed(31), owed(32)] };
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map((q) => q.prId)).toEqual([31]);
+    expect(r.capped).toBe(true);
+    expect(skipPosts).toEqual([{ prId: 32, headSha: 'h32', reasons: ['daily_cap'] }]);
   });
 
   it('a PR already waiting in the lane is not queued again', async () => {
@@ -212,6 +224,21 @@ describe('catch-up on return', () => {
     expect(enqueued).toEqual([]);
     await runAutoReviewSweep(makeCtx(), NOW + AUTO_CATCH_UP_SYNC_WAIT_MAX_MS);
     expect(enqueued.map((q) => q.prId)).toEqual([21]);
+  });
+
+  it('AI not ready during a catch-up: no skipped line on a head read before the sync', async () => {
+    aiReady = false;
+    answer = { prIds: [], autoToday: 0, verdictNeeded: [owed(30)] };
+    fresh = () => false;
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(r.stopped).toBe('ai_not_ready');
+    expect(skipPosts).toEqual([]);
+    expect(freshAsks).toEqual([NOW]);
+    // Once the workspace has synced, the skipped line is said.
+    fresh = () => true;
+    await runAutoReviewSweep(makeCtx(), NOW + 60_000);
+    expect(skipPosts).toEqual([{ prId: 30, headSha: 'h30', reasons: ['not_ready'] }]);
+    expect(enqueued).toEqual([]);
   });
 
   it("a reader's press does not wait for the sync", async () => {

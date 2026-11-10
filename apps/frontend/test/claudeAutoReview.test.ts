@@ -159,9 +159,9 @@ describe("why a queued auto review went first (a teammate's verdict)", () => {
   const why = (o: Record<string, unknown>) =>
     ({ kind: 'teammate_verdict', reason: 'author_review', authorLogin: 'alex', authorVerdict: null, ...o }) as never;
   it('names the author and what their own review said', () => {
-    expect(autoReviewWhyLine(why({ authorVerdict: 'APPROVE' }))).toBe('Queued: needs a verdict (alex’s own review approved)');
+    expect(autoReviewWhyLine(why({ authorVerdict: 'APPROVE' }))).toBe('Queued: needs a verdict (alex’s own review would approve)');
     expect(autoReviewWhyLine(why({ authorVerdict: 'REQUEST_CHANGES' }))).toBe(
-      'Queued: needs a verdict (alex’s own review asked for changes)',
+      'Queued: needs a verdict (alex’s own review would ask for changes)',
     );
     expect(autoReviewWhyLine(why({}))).toBe('Queued: needs a verdict (alex’s own review)');
     expect(autoReviewWhyLine(why({ authorLogin: null }))).toBe('Queued: needs a verdict (the author’s own review)');

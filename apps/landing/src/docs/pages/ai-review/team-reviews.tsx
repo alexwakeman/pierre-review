@@ -130,11 +130,19 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           On the teammate's side, the <Ui>AI Review</Ui> tab says, for example,{' '}
-          <Ui>Queued: needs a verdict (alex’s own review approved)</Ui>.
+          <Ui>Queued: needs a verdict (alex’s own review would approve)</Ui>.
         </li>
         <li>
           It needs auto review on in the teammate's workspace. It counts toward their daily limit and asks their
           spend budget, like every automatic review.
+        </li>
+        <li>
+          Your Limn "would approve" only when your own <Ui>Approve or request changes for me</Ui> is on and your
+          workspace lets Limn approve at the pull request's impact level.
+        </li>
+        <li>
+          The teammate's Limn posts the verdict even when its <Ui>Which PRs</Ui> setting is the default (their own
+          PRs, and PRs they are asked to review or took part in).
         </li>
       </ul>
 

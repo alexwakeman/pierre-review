@@ -159,7 +159,7 @@ export default function Page(): JSX.Element {
         <li>
           In the <Ui>AI Review</Ui> tab: <Ui>Auto review queued</Ui> or <Ui>Auto review running</Ui> beside the Run
           button, or <Ui>Auto review waiting for pushes to settle</Ui> while it waits. A review queued first says why:{' '}
-          <Ui>Queued: needs a verdict (alex’s own review approved)</Ui>.
+          <Ui>Queued: needs a verdict (alex’s own review would approve)</Ui>.
         </li>
         <li>
           A failed automatic review shows one line with <Ui>Retry</Ui>.

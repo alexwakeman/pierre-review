@@ -26,8 +26,8 @@ export function autoReviewWhyLine(why: ClaudeAutoReviewWhy | null | undefined): 
   if (why == null) return null;
   if (why.reason === 'moved') return 'Queued: needs a verdict (new commits since the last Limn review)';
   const who = why.authorLogin != null ? `${why.authorLogin}’s` : 'the author’s';
-  if (why.authorVerdict === 'APPROVE') return `Queued: needs a verdict (${who} own review approved)`;
-  if (why.authorVerdict === 'REQUEST_CHANGES') return `Queued: needs a verdict (${who} own review asked for changes)`;
+  if (why.authorVerdict === 'APPROVE') return `Queued: needs a verdict (${who} own review would approve)`;
+  if (why.authorVerdict === 'REQUEST_CHANGES') return `Queued: needs a verdict (${who} own review would ask for changes)`;
   return `Queued: needs a verdict (${who} own review)`;
 }
 
