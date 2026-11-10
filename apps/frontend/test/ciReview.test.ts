@@ -1,5 +1,5 @@
 // The CI review in the SPA (lib/ciReview.ts + CiCheckSection.tsx), the praise hiding
-// (claudeReviewFollowUp.ts `withoutPraise`) and the "+ Add story" open/close (storyTabs.ts).
+// (claudeReviewFollowUp.ts `withoutPraise`).
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';
@@ -26,8 +26,6 @@ import {
   ciStatesRequestIds,
 } from '../src/lib/ciReview.js';
 import { withoutPraise } from '../src/lib/claudeReviewFollowUp.js';
-import { storiesOnClose, storiesOnOpen } from '../src/lib/storyTabs.js';
-import { EMPTY_TICKET_DRAFT, type TicketDraft } from '../src/lib/claudeReviewFollowUp.js';
 
 const root = join(__dirname, '..', 'src');
 const read = (p: string): string => readFileSync(join(root, p), 'utf8');
@@ -156,22 +154,6 @@ describe('praise is hidden, never deleted', () => {
   it('returns the same object when there is no praise (stable memo)', () => {
     const review = { findings: [f(1, 'blocker')], followUp: null } as Pick<ClaudeReview, 'findings' | 'followUp'>;
     expect(withoutPraise(review)).toBe(review);
-  });
-});
-
-describe('"+ Add story"', () => {
-  const typed: TicketDraft = { title: 'T', description: '', acceptanceCriteria: 'AC' };
-  const jira: TicketDraft = { ...EMPTY_TICKET_DRAFT, title: 'J', source: 'jira', key: 'BMD-1', url: 'https://x' };
-  it('opens on a blank story when there is none, else on the stories already there', () => {
-    expect(storiesOnOpen([])).toEqual([EMPTY_TICKET_DRAFT]);
-    const kept = [typed];
-    expect(storiesOnOpen(kept)).toBe(kept);
-  });
-  it('close drops blank typed tabs and keeps everything with content', () => {
-    expect(storiesOnClose([{ ...EMPTY_TICKET_DRAFT }])).toEqual([]);
-    expect(storiesOnClose([typed, { ...EMPTY_TICKET_DRAFT }, jira])).toEqual([typed, jira]);
-    const kept = [typed];
-    expect(storiesOnClose(kept)).toBe(kept);
   });
 });
 

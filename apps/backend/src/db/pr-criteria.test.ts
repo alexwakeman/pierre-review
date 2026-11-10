@@ -70,7 +70,7 @@ describe('criteriaCheckOf', () => {
     expect(criteriaCheckOf(member(), run(assessment('met')), null)!.olderHead).toBe(false);
   });
 
-  it('orders by key, numerically, pasted stories last', () => {
+  it('orders by key, numerically, a run with no key last', () => {
     const a = { ...criteriaCheckOf(member(), run(assessment('met')), 'aaa')!, key: 'BMD-10' };
     const b = { ...a, key: 'BMD-9' };
     const c = { ...a, key: null };

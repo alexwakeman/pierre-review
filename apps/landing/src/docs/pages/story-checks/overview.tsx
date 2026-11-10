@@ -54,7 +54,7 @@ export default function Page(): JSX.Element {
           An issue tracker for the workspace (<DocLink to="integrations/jira">Jira</DocLink>,{' '}
           <DocLink to="integrations/github-issues">GitHub Issues</DocLink>,{' '}
           <DocLink to="integrations/linear">Linear</DocLink> or <DocLink to="integrations/notion">Notion</DocLink>),
-          so Limn can find the ticket a pull request names. Without one, you can type the story in by hand.
+          so Limn can find the ticket a pull request names. Every story is read from the tracker.
         </li>
         <li>
           AI set up in <DocLink to="settings/ai">Settings → AI</DocLink>, with Claude or Codex signed in.
@@ -65,11 +65,12 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           In a pull request&rsquo;s <Ui>AI Review</Ui> tab, in the <Ui>Story check</Ui> section: the ticket&rsquo;s
-          criteria, with what this pull request adds and what belongs in it.
+          criteria this pull request delivers and what belongs in it, and a <Ui>See the whole ticket</Ui> link to
+          the story view.
         </li>
         <li>
           In the <DocLink to="this-sprint/story-view">story view</DocLink>: the whole ticket across all its pull
-          requests.
+          requests, with how many criteria other pull requests meet and what each pull request adds.
         </li>
         <li>On This Sprint cards (&ldquo;3 of 4 criteria met&rdquo;) and on Open pull requests, as a coverage chip.</li>
       </ul>
@@ -94,7 +95,8 @@ export default function Page(): JSX.Element {
           <strong>Not asked for</strong>: work in the pull requests that the ticket does not ask for.
         </li>
         <li>
-          <strong>What each PR adds</strong>: a plain description of each pull request&rsquo;s part.
+          <strong>What each PR adds</strong> (in the story view): a plain description of each pull request&rsquo;s
+          part.
         </li>
         <li>
           <strong>Reference docs</strong>, when docs are on for reviews: passages from your library that support or
@@ -133,8 +135,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <p>
         A ticket on another tracker or another site is refused, because Limn only reads the workspace&rsquo;s own
-        tracker with its own sign-in. With no tracker at all, <Ui>Input manually</Ui> lets you type the story and its
-        criteria.
+        tracker with its own sign-in. Without a tracker there is no story check.
       </p>
 
       <H2 id="automatic-checks">Automatic checks</H2>

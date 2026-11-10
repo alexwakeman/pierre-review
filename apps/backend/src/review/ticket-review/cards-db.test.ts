@@ -127,7 +127,6 @@ describe('contribution card storage', () => {
       ident: 'jira:https://acme.atlassian.net/rest/api/3#BMD-7',
       ticketKey: 'BMD-7',
       ticketTitle: 't',
-      ticket: null,
       originPrId: pr.open!,
       trigger: 'manual',
       model: 'm',

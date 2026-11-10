@@ -8,8 +8,9 @@
 //      once the head moved it points at the file only — unless this run raised it again, whose
 //      anchor is current.
 //   3. NOT CHECKED IS GREY, NOT AMBER — unknown is not "not addressed".
-//   4. THE REQUEST SENDS ONLY A VALID, NON-EMPTY USER STORY, normalised by the SAME shared check
-//      the route runs; the collapsed panel's header says when one will be sent or needs a fix.
+//   4. ONE FINDINGS LIST. What the latest run said about each earlier finding rides on that
+//      finding's own row (the one-line how, the reply); an item no row shows gets a row of its own
+//      in the same group. There is no "Previous review" section, and no typed-story panel.
 //   5. THE PICKER OPENS ON THE DEFAULT and is never re-seeded from a stored run (a run stored
 //      under a retired id, such as the old Opus 4.8, would otherwise be a select value with no
 //      option).
@@ -20,33 +21,28 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  CLAUDE_REVIEW_MAX_TICKETS,
-  CLAUDE_REVIEW_TICKET_LIMITS,
-  checkClaudeReviewTicket,
-} from '@pierre-review/shared';
 import type {
   ClaudeFinding,
   ClaudeFindingSeverity,
   ClaudeFollowUpItem,
   ClaudeFollowUpStatus,
+  ClaudeSettledFinding,
 } from '@pierre-review/shared';
 import {
   ALREADY_POSTED_CHIP,
-  EMPTY_TICKET_DRAFT,
   FOLLOW_UP_STATUS_CLASS,
   RERAISED_CHIP,
   alreadyPostedReraiseIds,
-  checkTicketDrafts,
-  createTicketDraftStore,
-  fieldCounter,
+  earlierNoteChip,
+  earlierNoteFor,
+  earlierNotes,
+  followUpOneLine,
+  unplacedEarlier,
   followUpAnchor,
   itemHeadMoved,
   notCheckedReason,
   partitionFollowUp,
   reraisedStatusByFindingId,
-  resolveTicketDraft,
-  resolveTicketDrafts,
   sortFindingsForDisplay,
   raisedByLine,
   stillOpenPostable,
@@ -55,12 +51,6 @@ import {
   storyFindingIdFor,
   storyFindingIds,
   storyItemChipLabel,
-  ticketDraftFromStored,
-  ticketDraftsFromReview,
-  ticketPanelHint,
-  ticketRequestFromCheck,
-  ticketsPanelHint,
-  ticketsRequestFromCheck,
 } from '../src/lib/claudeReviewFollowUp.js';
 
 function finding(
@@ -273,146 +263,42 @@ describe('alreadyPostedReraiseIds', () => {
   });
 });
 
-describe('the user story draft', () => {
-  it('sends nothing when blank and nothing when invalid', () => {
-    expect(ticketRequestFromCheck(checkClaudeReviewTicket(EMPTY_TICKET_DRAFT))).toBeUndefined();
-    const tooLong = { ...EMPTY_TICKET_DRAFT, title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) };
-    expect(ticketRequestFromCheck(checkClaudeReviewTicket(tooLong))).toBeUndefined();
+describe('earlier findings on the Findings list (no "Previous review" section)', () => {
+  const settled = (id: number): ClaudeSettledFinding =>
+    ({ priorFindingId: id, path: 'src/a.ts', side: 'RIGHT', severity: 'warning', title: `s${id}`, acceptKind: 'not_valid', reply: { author: 'robin', excerpt: 'Fine.' } }) as ClaudeSettledFinding;
+
+  it('the one line is the model\'s how, else the first sentence, else the not-checked reason', () => {
+    expect(followUpOneLine(item(1, 'addressed', { how: '  Moved the check up.  ', explanation: 'Other. More.' }))).toBe('Moved the check up.');
+    expect(followUpOneLine(item(1, 'addressed', { explanation: 'The guard is in. It also logs.' }))).toBe('The guard is in.');
+    expect(followUpOneLine(item(1, 'not_checked', { sent: false }), 'Codex')).toBe('Not sent to Codex: too many earlier comments.');
+    expect(followUpOneLine(item(1, 'not_addressed'))).toBeNull();
   });
 
-  it('sends the trimmed fields and omits the blank ones', () => {
-    const check = checkClaudeReviewTicket({
-      title: '  Reset password  ',
-      description: '   ',
-      acceptanceCriteria: '- a\n- b',
-    });
-    expect(ticketRequestFromCheck(check)).toEqual({
-      title: 'Reset password',
-      acceptanceCriteria: '- a\n- b',
-    });
+  it('finds a row\'s note by the earlier finding, its re-raise, or anyone who raised it too', () => {
+    const notes = earlierNotes([item(10, 'not_addressed', { reraisedFindingId: 20 }), item(11, 'addressed')], [settled(12)]);
+    expect(earlierNoteFor(notes, [20]).item?.priorFindingId).toBe(10);
+    expect(earlierNoteFor(notes, [99, 11]).item?.priorFindingId).toBe(11);
+    expect(earlierNoteFor(notes, [12])).toEqual({ item: null, settled: settled(12) });
+    expect(earlierNoteFor(notes, [7])).toEqual({ item: null, settled: null });
   });
 
-  it('the collapsed header says what will be sent, or that it needs a fix', () => {
-    const hint = (d: typeof EMPTY_TICKET_DRAFT): string =>
-      ticketPanelHint(d, checkClaudeReviewTicket(d));
-    expect(hint(EMPTY_TICKET_DRAFT)).toBe('');
-    expect(hint({ ...EMPTY_TICKET_DRAFT, title: 'T' })).toBe(' · added');
-    // No code-side split any more: criteria text in any format is just "added".
-    expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: '- a\n- b\n- c' })).toBe(' · added');
-    const many = 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.acceptanceCriteriaChars + 1);
-    expect(hint({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: many })).toBe(' · needs a fix');
+  it('an item no row shows gets a row of its own, in its group', () => {
+    const items = [item(1, 'addressed'), item(2, 'not_addressed', { reraisedFindingId: 5 }), item(3, 'partly_addressed'), item(4, 'no_longer_applies')];
+    const out = unplacedEarlier(items, [settled(8), settled(9)], new Set([5, 4, 9]));
+    expect(out.open.map((i) => i.priorFindingId)).toEqual([3]);
+    expect(out.closed.map((i) => i.priorFindingId)).toEqual([1]);
+    expect(out.settled.map((s) => s.priorFindingId)).toEqual([8]);
   });
 
-  it('the counter appears past 80% of the cap, measures the TRIMMED length, flags over', () => {
-    const cap = CLAUDE_REVIEW_TICKET_LIMITS.titleChars;
-    expect(fieldCounter('title', 'x'.repeat(Math.floor(cap * 0.8)))).toBeNull();
-    expect(fieldCounter('title', `   ${'x'.repeat(cap)}   `)).toEqual({
-      text: `${cap} / ${cap} characters`,
-      over: false,
-    });
-    expect(fieldCounter('title', 'x'.repeat(cap + 1))?.over).toBe(true);
-  });
-
-  it('prefills from the stored ticket unless the reader has their own draft', () => {
-    const stored = {
-      title: 'T',
-      description: null,
-      acceptanceCriteria: '- a',
-      criteria: ['a'],
-    };
-    expect(resolveTicketDraft(undefined, stored)).toEqual({
-      title: 'T',
-      description: '',
-      acceptanceCriteria: '- a',
-    });
-    expect(resolveTicketDraft(EMPTY_TICKET_DRAFT, stored)).toEqual(EMPTY_TICKET_DRAFT);
-    expect(resolveTicketDraft(undefined, null)).toEqual(EMPTY_TICKET_DRAFT);
-    expect(ticketDraftFromStored(undefined)).toEqual(EMPTY_TICKET_DRAFT);
-  });
-
-  it('the draft store remembers a touched PR and drops the oldest past its cap', () => {
-    const store = createTicketDraftStore(2);
-    store.set(1, { ...EMPTY_TICKET_DRAFT, title: 'one' });
-    store.set(2, { ...EMPTY_TICKET_DRAFT, title: 'two' });
-    store.set(1, { ...EMPTY_TICKET_DRAFT, title: 'one again' }); // refreshes 1
-    store.set(3, { ...EMPTY_TICKET_DRAFT, title: 'three' }); // evicts 2
-    expect(store.has(2)).toBe(false);
-    expect(store.get(1)?.title).toBe('one again');
-    expect(store.get(3)?.title).toBe('three');
+  it('the chip is never said twice: not on a re-raise\'s own chip, not over a closed reason', () => {
+    expect(earlierNoteChip(item(1, 'not_addressed'), { reraisedChip: true, closedReason: false })).toBeNull();
+    expect(earlierNoteChip(item(1, 'partly_addressed'), { reraisedChip: false, closedReason: false })).toBe('Partly addressed');
+    expect(earlierNoteChip(item(1, 'addressed'), { reraisedChip: false, closedReason: true })).toBeNull();
+    expect(earlierNoteChip(item(1, 'addressed'), { reraisedChip: false, closedReason: false })).toBe('Addressed');
+    // A reply status always says what happened to the reply.
+    expect(earlierNoteChip(item(1, 'reply_disputed'), { reraisedChip: true, closedReason: false })).toBe('Pushed back');
   });
 });
-
-describe('several user stories', () => {
-  const jira = {
-    title: 'Reset password',
-    description: '*bold*',
-    acceptanceCriteria: '- a',
-    source: 'jira' as const,
-    key: 'ENG-1',
-    url: 'https://acme.atlassian.net/browse/ENG-1',
-    fetchedAt: '2026-10-02T10:00:00.000Z',
-  };
-  const manual = { ...EMPTY_TICKET_DRAFT, title: 'Typed story' };
-
-  it('sends every non-blank story, Jira provenance included, and drops blank ones', () => {
-    const check = checkTicketDrafts([jira, EMPTY_TICKET_DRAFT, manual]);
-    expect(ticketsRequestFromCheck(check)).toEqual([
-      {
-        title: 'Reset password',
-        description: '*bold*',
-        acceptanceCriteria: '- a',
-        source: 'jira',
-        key: 'ENG-1',
-        url: 'https://acme.atlassian.net/browse/ENG-1',
-        fetchedAt: '2026-10-02T10:00:00.000Z',
-      },
-      { title: 'Typed story' },
-    ]);
-    expect(ticketsRequestFromCheck(checkTicketDrafts([]))).toBeUndefined();
-  });
-
-  it('names the failing story by its position, and refuses over the count', () => {
-    const tooLong = { ...EMPTY_TICKET_DRAFT, title: 'x'.repeat(CLAUDE_REVIEW_TICKET_LIMITS.titleChars + 1) };
-    const check = checkTicketDrafts([manual, tooLong]);
-    expect(check.ok).toBe(false);
-    if (!check.ok) {
-      expect(check.index).toBe(1);
-      expect(check.field).toBe('title');
-    }
-    expect(ticketsRequestFromCheck(check)).toBeUndefined();
-    const many = Array.from({ length: CLAUDE_REVIEW_MAX_TICKETS + 1 }, () => manual);
-    const over = checkTicketDrafts(many);
-    expect(over.ok).toBe(false);
-    if (!over.ok) expect(over.index).toBeNull();
-  });
-
-  it('the collapsed header counts the stories', () => {
-    expect(ticketsPanelHint([], checkTicketDrafts([]))).toBe('');
-    expect(ticketsPanelHint([jira, manual], checkTicketDrafts([jira, manual]))).toBe(' · 2 stories');
-    expect(ticketsPanelHint([manual], checkTicketDrafts([manual]))).toBe(' · 1 story');
-  });
-
-  it('prefills from a run\'s entries (provenance kept), else its legacy single ticket', () => {
-    const entry = (ticket: object, index: number) => ({
-      index,
-      ref: `T${index + 1}`,
-      ticket: { title: null, description: null, acceptanceCriteria: null, ...ticket },
-      assessment: null,
-    });
-    const drafts = ticketDraftsFromReview({ tickets: [entry(jira, 0), entry({ title: 'B' }, 1)] });
-    expect(drafts.map((d) => [d.title, d.source, d.key])).toEqual([
-      ['Reset password', 'jira', 'ENG-1'],
-      ['B', undefined, undefined],
-    ]);
-    expect(
-      ticketDraftsFromReview({ ticket: { title: 'Old', description: null, acceptanceCriteria: null } }),
-    ).toHaveLength(1);
-    expect(resolveTicketDrafts([manual], { tickets: [entry(jira, 0)] })).toEqual([manual]);
-    expect(resolveTicketDrafts(undefined, null)).toEqual([]);
-  });
-});
-
-// ---- story findings ----
 
 describe('story findings — each unmet story item is a finding; the section links to it', () => {
   const findings = [
@@ -503,11 +389,7 @@ describe('source guards', () => {
     const all = walk(SRC)
       .map((f) => code(readFileSync(f, 'utf8')))
       .join('\n');
-    for (const name of [
-      'ClaudeReviewTicketPanel',
-      'ClaudeReviewFollowUpSection',
-      'ClaudeReviewTicketResults',
-    ]) {
+    for (const name of ['ClaudeReviewTicketResults', 'EarlierFindingNote']) {
       const mounts = all.match(new RegExp(`<${name}\\b`, 'g')) ?? [];
       expect(mounts.length, name).toBe(1);
     }
@@ -556,6 +438,11 @@ describe('source guards', () => {
       'components/ClaudeReviewChat.tsx',
     ];
     const titles = files.flatMap((f) => [...code(read(f)).matchAll(/<ReviewSection\s+title="([^"]+)"/g)].map((m) => m[1]));
+    // ONE Findings section: no "Previous review" (earlier findings ride on their rows), and the
+    // typed-story panel is gone.
+    const all = walk(SRC).map((f) => code(readFileSync(f, 'utf8'))).join('\n');
+    expect(all).not.toMatch(/ClaudeReviewFollowUpSection|ClaudeReviewTicketPanel|ManualStoryFields|Input manually/);
+    expect(all).not.toMatch(/'Previous review'/);
     expect(titles.sort()).toEqual(
       [
         'CI check',
@@ -574,16 +461,24 @@ describe('source guards', () => {
     expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
       /<ReviewSection\s+title=\{storedReview\.pair != null \? `\$\{by\} review` : `\$\{by\}'s review`\}/,
     );
-    // The follow-up section is "Previous review", or "@<author>'s review" when it follows up the PR
-    // author's own Limn review (`followUpSectionTitle`, lib/teammateReviews.ts).
-    expect(code(read('components/ClaudeReviewFollowUp.tsx'))).toMatch(
-      /<ReviewSection\s+title=\{followUpSectionTitle\(followUp\)\}/,
-    );
     // ONE story section: Story check (TicketCoverage.tsx). The old "User stories" one is gone.
     expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/'User stor(y|ies)'/);
     expect(code(read('components/TicketCoverage.tsx'))).toMatch(/<ReviewSection\s+title="Story check"/);
     // No hand-rolled <section> left in the pane's components.
     for (const f of files) expect(code(read(f)), f).not.toMatch(/<section\b/);
+  });
+
+  it('earlier findings ride on their own Findings rows, then a row each for the rest', () => {
+    const tab = code(read('components/ClaudeReviewTab.tsx'));
+    // The run's own card and every other point's card both carry the note.
+    expect(tab).toMatch(/note=\{noteFor\(ids, \{ reraisedChip: priorStatusById\.has\(f\.id\), closedReason: false \}\)\}/);
+    expect(tab).toMatch(/note=\{noteFor\(ids, \{ reraisedChip: false, closedReason: c\.reason != null \}\)\}/);
+    // An item no row shows: its own row, one line only, in the same group.
+    expect(tab).toMatch(/unplacedEarlier\(review\.followUp\?\.items \?\? \[\], settledEarlier, shownIds\)/);
+    expect(tab).toMatch(/oneLine: true/);
+    expect(tab).toMatch(/moreOpen=\{moreOpen\}/);
+    expect(tab).toMatch(/moreClosed=\{moreClosed\}/);
+    expect(code(read('components/TeamReviewLayout.tsx'))).toContain('Resolved or addressed ({count})');
   });
 
   it('the "Already posted" chip is wired into the findings list', () => {

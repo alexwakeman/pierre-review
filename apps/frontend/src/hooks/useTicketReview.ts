@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
-  ClaudeReviewTicketInput,
   PostStoryGapsResponse,
   PrTicketReviewsResponse,
   StartTicketReviewBody,
@@ -27,10 +26,10 @@ export const ticketReviewsKey = (prId: number): readonly unknown[] => ['ticket-r
 // The Open PRs stacks' query-key PREFIX (the full key appends the sorted ident list).
 export const TICKET_REVIEW_STATES_KEY = ['ticket-review-states'] as const;
 // ⚠ ONE MUTATION KEY PER TICKET for every way a check is started (the PR pane's block, the Open PRs
-// stack header), so `useIsMutating` lets each surface see the other's start in flight. A pasted
-// story has no ident until the server mints one, so the story panel uses `manual:<prId>`.
+// stack header), so `useIsMutating` lets each surface see the other's start in flight. The paste
+// box's tickets have no ident until they are read, so it uses one key per PR (`pr:<prId>`).
 export const ticketReviewStartKey = (ident: string): readonly unknown[] => ['ticket-review-start', ident];
-export const pastedStoryStartIdent = (prId: number): string => `manual:${prId}`;
+export const prTicketsStartIdent = (prId: number): string => `pr:${prId}`;
 
 /** True while a start for this ticket is in flight, from ANY surface. */
 export function useTicketReviewStarting(ident: string): boolean {
@@ -83,7 +82,7 @@ function refreshAfter(qc: QueryClient, prIds: readonly number[]): Promise<unknow
 }
 
 /**
- * Start a check. `ident` names the mutation key (the ticket, or `pastedStoryStartIdent(prId)`).
+ * Start a check. `ident` names the mutation key (the ticket).
  * ⚠ The invalidation is RETURNED, so the button stays pending until the readers show the run.
  */
 export function useStartTicketReview(ident: string) {
@@ -121,25 +120,6 @@ export function useTicketReviewsByIds(ids: readonly number[]): TicketReview[] {
 // Module-level so its identity is stable and React Query re-runs it only when a result changes.
 function loadedRuns(results: readonly { data?: TicketReview }[]): TicketReview[] {
   return results.flatMap((r) => (r.data != null ? [r.data] : []));
-}
-
-/**
- * The story panel's Check: the Jira stories the server already lists go by ident, the rest as
- * pasted stories (`planStoryStart`). One mutation key for the panel (`pastedStoryStartIdent`).
- */
-export function useStartStoryCheck(prId: number) {
-  const qc = useQueryClient();
-  return useMutation<StartTicketReviewResponse, Error, { idents: string[]; pasted: ClaudeReviewTicketInput[] }>({
-    mutationKey: ticketReviewStartKey(pastedStoryStartIdent(prId)),
-    mutationFn: async ({ idents, pasted }) => {
-      const answers = await Promise.all([
-        ...idents.map((ident) => api.startTicketReview({ prId, ident })),
-        ...(pasted.length > 0 ? [api.startTicketReview({ prId, tickets: pasted })] : []),
-      ]);
-      return { runs: answers.flatMap((a) => a.runs) };
-    },
-    onSuccess: () => refreshAfterStart(qc),
-  });
 }
 
 /**

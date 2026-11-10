@@ -120,8 +120,6 @@ export interface TicketJob {
   runId: number;
   originPrId: number | null;
   trigger: TicketReviewTrigger;
-  // A pasted story's text (the run's snapshot); null for a Jira ticket (read at prepare time).
-  manualTicket: ClaudeReviewTicket | null;
   model: ClaudeReviewModel;
   // Spent before the agent's own run (the card pre-pass), so every terminal write — including the
   // launch catch's — carries it into the run's cost.
@@ -177,7 +175,6 @@ export interface StartTicketArgs {
   ident: string;
   ticketKey: string | null;
   ticketTitle: string | null;
-  manualTicket: ClaudeReviewTicket | null;
   originPrId: number | null;
   trigger: TicketReviewTrigger;
   // Why the automatic sweeper queued it (ticket_reviews.cause); absent on a manual run.
@@ -213,7 +210,6 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
       ident: a.ident,
       ticketKey: a.ticketKey ?? (isTrackerIdent(parsed) ? trackerTicketRow(parsed).issueKey : null),
       ticketTitle: a.ticketTitle,
-      ticket: a.manualTicket,
       originPrId: a.originPrId,
       trigger: a.trigger,
       cause: a.cause ?? null,
@@ -232,7 +228,6 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
     runId,
     originPrId: a.originPrId,
     trigger: a.trigger,
-    manualTicket: a.manualTicket,
     model: DEFAULT_CLAUDE_REVIEW_MODEL,
     spentUsd: 0,
   };
@@ -372,10 +367,7 @@ async function runPipeline(
   });
 
   // ---- who is on the ticket, and what it says (refusals are stored, never sampled) ----
-  const inputs = await resolveTicketInputs(ctx, accountId, job.ident, {
-    originPrId: job.originPrId,
-    manualTicket: job.manualTicket,
-  });
+  const inputs = await resolveTicketInputs(ctx, accountId, job.ident, { originPrId: job.originPrId });
   if (!inputs.ok) {
     await markTicketReviewRefused(ctx, accountId, runId, { reason: inputs.reason, prCount: inputs.prCount });
     return;

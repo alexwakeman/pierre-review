@@ -22,11 +22,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  type ClaudeReviewPrState,
-  type JiraAcCandidate,
-  type JiraTicketDetails,
-} from '@pierre-review/shared';
+import { type ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   findingTotal,
   findingsRank,
@@ -48,8 +44,6 @@ import {
   ownSummaryFor,
 } from '../src/lib/claudeReviewColumn.js';
 import { formatDate } from '../src/lib/ui.js';
-import { fillDraftFromJira } from '../src/lib/jiraTicket.js';
-import { EMPTY_TICKET_DRAFT } from '../src/lib/claudeReviewFollowUp.js';
 
 const st = (over: Partial<ClaudeReviewPrState> = {}): ClaudeReviewPrState => ({
   prId: 1,
@@ -226,49 +220,6 @@ describe('the sort rank and the poll', () => {
     expect(anyReviewInFlight([st(), st({ status: 'failed' })])).toBe(false);
     expect(anyReviewInFlight([st(), st({ status: 'queued' })])).toBe(true);
     expect(anyReviewInFlight([st({ status: 'running' })])).toBe(true);
-  });
-});
-
-const cand = (id: string, name: string, match: JiraAcCandidate['match'], text = `${name} text`) => ({
-  id,
-  name,
-  text,
-  match,
-});
-const details = (over: Partial<JiraTicketDetails> = {}): JiraTicketDetails => ({
-  prId: 1,
-  key: 'ACME-1',
-  title: 'Reset password',
-  description: 'As a user…',
-  issueType: { id: '10001', name: 'Story' },
-  candidates: [
-    cand('customfield_1', 'Acceptance Criteria', 'strong', 'Given… When… Then…'),
-    cand('customfield_2', 'Notes', 'none', 'notes'),
-  ],
-  omittedCandidates: 0,
-  ...over,
-});
-describe('fillDraftFromJira — the one fill', () => {
-  it('replaces title + description and preselects the best strong match', () => {
-    const r = fillDraftFromJira({ ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'old' }, details());
-    expect(r.chosen).toBe('customfield_1');
-    expect(r.draft).toEqual({
-      title: 'Reset password',
-      description: 'As a user…',
-      acceptanceCriteria: 'Given… When… Then…',
-    });
-  });
-  it("the server's field wins; nothing picked leaves the criteria as they were", () => {
-    expect(
-      fillDraftFromJira(EMPTY_TICKET_DRAFT, details({ acField: { id: 'customfield_2', name: 'Notes' } })).draft
-        .acceptanceCriteria,
-    ).toBe('notes');
-    const none = fillDraftFromJira(
-      { ...EMPTY_TICKET_DRAFT, acceptanceCriteria: 'kept' },
-      details({ candidates: [cand('customfield_2', 'Notes', 'none')] }),
-    );
-    expect(none.chosen).toBe('');
-    expect(none.draft.acceptanceCriteria).toBe('kept');
   });
 });
 

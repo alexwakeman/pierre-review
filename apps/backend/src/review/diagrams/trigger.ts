@@ -321,7 +321,7 @@ export async function maybeDrawDiagramsAfterReview(
     const tickets = (await deps.ticketsForPr(accountId, prId).catch(() => []))
       .filter((t) => {
         const p = parseTicketIdent(t.ident);
-        return p != null && p.kind !== 'manual';
+        return p != null;
       })
       .slice(0, MAX_TICKETS);
     for (const t of tickets) {
@@ -351,7 +351,7 @@ export async function maybeDrawStoryDiagramAfterTicketReview(
 ): Promise<TriggerOutcome> {
   if (!deps.enabled) return 'disabled';
   const p = parseTicketIdent(a.ident);
-  if (p == null || p.kind === 'manual') return 'disabled';
+  if (p == null) return 'disabled';
   try {
     if (!(await deps.switchedOn(ctx, a.accountId, a.viaPrId))) return 'switched_off';
     if (a.reviewTrigger === 'auto' && !(await automaticRunAllowed(ctx, a.accountId, 'diagrams'))) return 'over_budget';

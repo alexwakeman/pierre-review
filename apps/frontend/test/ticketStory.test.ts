@@ -104,8 +104,10 @@ describe('the wiring', () => {
     expect(hook).toMatch(/TICKET_REVIEW_STATES_KEY/);
   });
 
-  it('"Add a story" offers no pull for a ticket already listed as a block', () => {
+  it('a story is added by ticket link or key only: no typed-story form, no "Input manually"', () => {
     const cov = src('components/TicketCoverage.tsx');
-    expect(cov).toMatch(/tickets=\{unlisted\}/);
+    expect(cov).toMatch(/<TicketPasteBox key=\{pr\.id\} prId=\{pr\.id\} \/>/);
+    expect(cov).not.toMatch(/ClaudeReviewTicketPanel|storyDrafts|useStartStoryCheck/);
+    expect(src('components/TicketPasteBox.tsx')).not.toMatch(/Input manually|onInputManually/);
   });
 });

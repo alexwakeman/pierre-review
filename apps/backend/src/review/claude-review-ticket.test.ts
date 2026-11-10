@@ -7,9 +7,7 @@ import {
   CLAUDE_REVIEW_TICKET_LIMITS,
   DEFAULT_AI_FIX_MODEL,
   DEFAULT_CLAUDE_REVIEW_MODEL,
-  CLAUDE_REVIEW_MAX_TICKETS,
   checkClaudeReviewTicket,
-  checkClaudeReviewTickets,
   storedList,
   followUpCounts,
   followUpLeftOutSentence,
@@ -220,72 +218,29 @@ describe('the model list', () => {
   });
 });
 
-describe('checkClaudeReviewTickets — several stories', () => {
-  it('drops all-blank entries and keeps the rest in order', () => {
-    const r = checkClaudeReviewTickets([{ title: 'A' }, { title: ' ' }, { description: 'B' }]);
-    expect(r).toEqual({
-      ok: true,
-      tickets: [
-        { title: 'A', description: null, acceptanceCriteria: null },
-        { title: null, description: 'B', acceptanceCriteria: null },
-      ],
-    });
-    expect(checkClaudeReviewTickets(undefined)).toEqual({ ok: true, tickets: [] });
-  });
-
-  it('over the count ⇒ refused, never truncated', () => {
-    const many = Array.from({ length: CLAUDE_REVIEW_MAX_TICKETS + 1 }, (_, i) => ({ title: `T${i}` }));
-    const r = checkClaudeReviewTickets(many);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r).toMatchObject({ index: null, field: 'tickets' });
-  });
-
-  it('names the failing ticket when there are several', () => {
-    const r = checkClaudeReviewTickets([{ title: 'ok' }, { title: 'x'.repeat(301) }]);
-    expect(r).toEqual({
-      ok: false,
-      index: 1,
-      field: 'title',
-      message: 'Story 2: Title is 301 characters; the limit is 300.',
-    });
-  });
-
-  it('numbers the failing story as it will be STORED: a blank entry before it does not count', () => {
-    // Regression: the panel showed [ok, (blank), bad] as Story 3 while the run calls it Story 2.
-    const r = checkClaudeReviewTickets([{ title: 'ok' }, { title: '  ' }, { title: 'x'.repeat(301) }]);
-    expect(r).toMatchObject({ ok: false, index: 2, message: 'Story 2: Title is 301 characters; the limit is 300.' });
-    const j = checkClaudeReviewTickets([
-      { title: 'ok' },
-      { title: 'x'.repeat(301), source: 'jira', key: 'BMD-1040' },
-    ]);
-    expect(j).toMatchObject({ ok: false, index: 1, message: 'BMD-1040: Title is 301 characters; the limit is 300.' });
-  });
-
+describe('a stored story', () => {
   it("keeps a Jira ticket's provenance when well-formed, drops it when not", () => {
-    const r = checkClaudeReviewTickets([
-      {
-        title: 'Reset',
-        source: 'jira',
-        key: 'ENG-12',
-        url: 'https://acme.atlassian.net/browse/ENG-12',
-        fetchedAt: '2026-10-01T10:00:00Z',
-      },
-      { title: 'Bad', source: 'jira', key: 'not a key', url: 'javascript:alert(1)', fetchedAt: 'nope' },
-      { title: 'Typed', source: 'manual', key: 'ENG-1' },
-    ]);
-    expect(r.ok && r.tickets).toEqual([
-      {
-        title: 'Reset',
-        description: null,
-        acceptanceCriteria: null,
-        source: 'jira',
-        key: 'ENG-12',
-        url: 'https://acme.atlassian.net/browse/ENG-12',
-        fetchedAt: '2026-10-01T10:00:00.000Z',
-      },
-      { title: 'Bad', description: null, acceptanceCriteria: null, source: 'jira', key: null, url: null, fetchedAt: null },
-      { title: 'Typed', description: null, acceptanceCriteria: null, source: 'manual' },
-    ]);
+    const ok = checkClaudeReviewTicket({
+      title: 'Reset',
+      source: 'jira',
+      key: 'ENG-12',
+      url: 'https://acme.atlassian.net/browse/ENG-12',
+      fetchedAt: '2026-10-01T10:00:00Z',
+    });
+    expect(ok.ok && ok.ticket).toEqual({
+      title: 'Reset',
+      description: null,
+      acceptanceCriteria: null,
+      source: 'jira',
+      key: 'ENG-12',
+      url: 'https://acme.atlassian.net/browse/ENG-12',
+      fetchedAt: '2026-10-01T10:00:00.000Z',
+    });
+    const bad = checkClaudeReviewTicket({ title: 'Bad', source: 'jira', key: 'not a key', url: 'javascript:alert(1)', fetchedAt: 'nope' });
+    expect(bad.ok && bad.ticket).toEqual({ title: 'Bad', description: null, acceptanceCriteria: null, source: 'jira', key: null, url: null, fetchedAt: null });
+    // Any other source is not provenance: none is kept.
+    const other = checkClaudeReviewTicket({ title: 'Typed', source: 'manual', key: 'ENG-1' });
+    expect(other.ok && other.ticket).toEqual({ title: 'Typed', description: null, acceptanceCriteria: null });
   });
 
   it('storedList reads a legacy single object and a new array alike', () => {

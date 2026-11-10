@@ -107,7 +107,6 @@ describe('the AI Review tab wide layout', () => {
   });
   it('every section the nav lists is marked where it renders', () => {
     const marks: Record<string, string> = {
-      previous: 'components/ClaudeReviewFollowUp.tsx',
       threads: 'components/ClaudeReviewThreads.tsx',
       stories: 'components/TicketCoverage.tsx',
       ci: 'components/CiCheckSection.tsx',
@@ -119,5 +118,7 @@ describe('the AI Review tab wide layout', () => {
     for (const [id, file] of Object.entries(marks)) expect(read(file)).toContain(`section="${id}"`);
     expect(tab).toContain('section="review"');
     expect(tab).toContain('section="findings"');
+    // Earlier findings live on the Findings list: there is no "Previous review" section to jump to.
+    expect(tab).not.toMatch(/id: 'previous'/);
   });
 });

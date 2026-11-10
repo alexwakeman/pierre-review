@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
+  ClaudeFollowUpItem,
   AiProviderId,
   ClaudeFinding,
   ClaudeThreadAssessment,
@@ -29,6 +30,7 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   findingSourceLabel,
   followUpSentence,
+  followUpLeftOutSentence,
   pairHalfFailedLine,
   pairModelsLabel,
 } from '@pierre-review/shared';
@@ -81,7 +83,7 @@ import {
   summaryPrefillOf,
   writeReviewPostMode,
 } from '../lib/reviewPostMode.js';
-import { PastReviewBar, ReviewsOnPrSection, StandingsSection, TeamFindingsSection, TeammateVersionNotes } from './TeamReviewLayout.js';
+import { PastReviewBar, ResolvedGroup, ReviewsOnPrSection, StandingsSection, TeamFindingsSection, TeammateVersionNotes, pointIds } from './TeamReviewLayout.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -122,7 +124,7 @@ import { VerdictIcon } from './VerdictIcon.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
-import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
+import { EarlierFindingNote, FollowUpRow, SettledEarlierRow } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { RepliesCheckLine } from './RepliesCheckLine.js';
@@ -132,7 +134,7 @@ import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, fai
 import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
 import { TeammateChip, TeammateLeadSection } from './TeammateReviews.js';
-import { alsoRaisedByFinding, alsoRaisedLabel, leadingTeammateReview, reviewCountLine, teamFindingByLabel, teammateName } from '../lib/teammateReviews.js';
+import { alsoRaisedByFinding, alsoRaisedLabel, followUpItemWritable, leadingTeammateReview, reviewCountLine, teamFindingByLabel, teammateName } from '../lib/teammateReviews.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
@@ -162,6 +164,9 @@ import {
   VERDICT_CLASS,
   withoutPraise,
   settledEarlierRows,
+  earlierNotes,
+  earlierNoteFor,
+  unplacedEarlier,
   type ReraisedStatus,
 } from '../lib/claudeReviewFollowUp.js';
 import { AgentActivityLog } from './AgentActivityLog.js';
@@ -679,9 +684,13 @@ export function FindingRow({
   alsoRaisedBy = null,
   raisedBy = null,
   card = null,
+  note = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
+  /** What the latest run said about this finding as an EARLIER one (`EarlierFindingNote`): the
+   *  one-line how and the reply, at the foot of the card. null ⇒ none. */
+  note?: ReactNode;
   /** A finding that is NOT one of the latest run's own (a teammate's, an older run's, a closed one;
    *  lib/teamReview.ts `pointCard`): the same card, read-only but for Copy and — when
    *  `onPostReminder` is given — "Post reminder". Pass `editable={false}`. null ⇒ the reader's own. */
@@ -1290,6 +1299,7 @@ export function FindingRow({
         )}
       </div>
       )}
+      {note}
     </li>
   );
 }
@@ -1382,12 +1392,14 @@ export function ClaudesReview({
   const findings = sortFindingsForDisplay(review.findings.filter((f) => !placement.placed.has(f.id)));
   const priorStatusById = reraisedStatusByFindingId(review);
   const alreadyPostedIds = alreadyPostedReraiseIds(review);
-  // TEMPLATED from the server-validated statuses (a code-derived figure) — Claude's own
-  // explanations are shown per comment in the Previous review section.
+  // TEMPLATED from the server-validated statuses (a code-derived figure) — the one-line how of
+  // each earlier comment rides on its own row in Findings.
   const followUpLine = followUpSentence(review.followUp);
-  // Findings an EARLIER review settled by accepting a reply (server-derived): shown in the closed
-  // group of Previous review, so the reader sees what was dismissed and by whom.
+  // Findings an EARLIER review settled by accepting a reply (server-derived): shown under "Resolved
+  // or addressed", so the reader sees what was dismissed and by whom.
   const settledEarlier = useMemo(() => settledEarlierRows(review), [review]);
+  // WHAT THIS RUN SAID ABOUT EACH EARLIER FINDING, by every id a Findings row may show it under.
+  const notes = useMemo(() => earlierNotes(review.followUp?.items ?? [], settledEarlier), [review.followUp, settledEarlier]);
   // Pin blob links to the reviewed commit so line numbers stay correct; fall back
   // to the PR's current head when the run didn't record a SHA.
   const headSha = review.headSha ?? prHeadSha;
@@ -1408,11 +1420,63 @@ export function ClaudesReview({
   // "Where this PR stands" names each verdict, so the summary does not repeat one.
   const showVerdict = team?.standingsShown !== true;
   const teamRows = team != null ? teamFindingRows(team.view.allFindings ?? [], findings, placement.placed) : null;
+  // ONE FINDINGS LIST (no "Previous review" section): each earlier finding's note rides on its row;
+  // one no row shows gets a row of its own, in the same group.
+  const shownIds = new Set<number>(
+    teamRows != null
+      ? [
+          ...teamRows.open.flatMap((e) => (e.kind === 'own' ? [e.finding.id] : pointIds(e.point))),
+          ...teamRows.closed.flatMap(pointIds),
+        ]
+      : findings.map((f) => f.id),
+  );
+  const unplaced = unplacedEarlier(review.followUp?.items ?? [], settledEarlier, shownIds);
+  const followUpWrite = (it: ClaudeFollowUpItem): { prId?: number; reviewId?: number } =>
+    followUpItemWritable(review.followUp ?? null, it) ? { prId: review.prId, reviewId: review.id } : {};
+  const noteFor = (ids: readonly number[], row: { reraisedChip: boolean; closedReason: boolean }): ReactNode => {
+    const n = earlierNoteFor(notes, ids);
+    if (n.item == null && n.settled == null) return null;
+    return <EarlierFindingNote item={n.item} settled={n.settled} row={row} by={by} {...(n.item != null ? followUpWrite(n.item) : {})} />;
+  };
+  const findingsById = new Map(review.findings.map((f) => [f.id, f]));
+  const followUpRowProps = {
+    by,
+    findingsById,
+    headMoved: review.followUp?.headMoved ?? false,
+    changedPaths,
+    onOpenInChanges,
+    oneLine: true,
+  };
+  const moreOpen = unplaced.open.map((it) => (
+    <FollowUpRow key={`fu-${it.priorFindingId}`} item={it} muted={false} {...followUpRowProps} {...followUpWrite(it)} />
+  ));
+  const moreClosed = [
+    ...unplaced.closed.map((it) => (
+      <FollowUpRow key={`fu-${it.priorFindingId}`} item={it} muted {...followUpRowProps} {...followUpWrite(it)} />
+    )),
+    ...unplaced.settled.map((it) => (
+      <SettledEarlierRow key={`settled-${it.priorFindingId}`} item={it} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
+    )),
+  ];
+  // The previous review's findings this run did not check, by reason (never dropped silently).
+  const leftOutLine = followUpLeftOutSentence(review.followUp?.leftOut);
+  const openNote =
+    leftOutLine != null ? (
+      <p className="text-meta text-ui-mute" title={(review.followUp?.leftOut ?? []).map((l) => l.title).join('\n')}>
+        {leftOutLine}
+      </p>
+    ) : null;
 
   // THE ONE FINDING CARD, for the Findings list and the Story check's older stories alike. `storyLabel`
   // is the chip naming the story item (null for an ordinary finding).
-  const findingCard = (f: ClaudeFinding, storyLabel: string | null, raisedBy: RaisedBy | null = null): JSX.Element => (
+  const findingCard = (
+    f: ClaudeFinding,
+    storyLabel: string | null,
+    raisedBy: RaisedBy | null = null,
+    ids: readonly number[] = [f.id],
+  ): JSX.Element => (
     <FindingRow
+      note={noteFor(ids, { reraisedChip: priorStatusById.has(f.id), closedReason: false })}
       raisedBy={raisedBy}
       // A pair's finding: its own text is the half's that raised it.
       authorName={findingAuthorName(storedReview, f)}
@@ -1540,18 +1604,6 @@ export function ClaudesReview({
           </div>
         )}
       </ReviewSection>}
-      {(review.followUp != null || settledEarlier.length > 0) && (
-        <ClaudeReviewFollowUpSection
-          followUp={review.followUp ?? null}
-          settledEarlier={settledEarlier}
-          findings={review.findings}
-          changedPaths={changedPaths}
-          onOpenInChanges={onOpenInChanges}
-          prId={review.prId}
-          reviewId={review.id}
-          by={by}
-        />
-      )}
       <ClaudeReviewThreadsSection
         items={currentThreads != null ? currentThreads.items : review.threadAssessments}
         counts={currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts}
@@ -1562,17 +1614,28 @@ export function ClaudesReview({
         by={currentThreads == null ? threadsByName(storedReview) : undefined}
       />
       {team != null ? (
-        // FINDINGS BY STATE, every review's: Open, then "Resolved or addressed (n)".
+        // FINDINGS BY STATE, every review's: Open, then "Resolved or addressed (n)" — each earlier
+        // finding carrying what this run said about it.
         <TeamFindingsSection
           points={team.view.allFindings ?? []}
           ownFindings={findings}
           hiddenFindingIds={placement.placed}
           pairReviewIds={team.pairReviewIds}
-          renderOwn={(f, raised) =>
-            findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null, raised)
+          renderOwn={(f, raised, ids) =>
+            findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null, raised, ids)
           }
-          renderPoint={(c, raised) => <PointFindingCard card={c} raisedBy={raised} env={cardEnv} />}
+          renderPoint={(c, raised, ids) => (
+            <PointFindingCard
+              card={c}
+              raisedBy={raised}
+              env={cardEnv}
+              note={noteFor(ids, { reraisedChip: false, closedReason: c.reason != null })}
+            />
+          )}
           pills={findingsPills}
+          moreOpen={moreOpen}
+          moreClosed={moreClosed}
+          openNote={openNote}
         />
       ) : (
       <ReviewSection
@@ -1585,17 +1648,20 @@ export function ClaudesReview({
           </>
         }
       >
-        {findings.length > 0 ? (
+        {findings.length + moreOpen.length > 0 ? (
           <ul className={REVIEW_ITEM_GROUP}>
             {findings.map((f) =>
               findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null),
             )}
+            {moreOpen}
           </ul>
         ) : (
           <div className="text-meta text-ui-mute">
             {placement.placed.size > 0 ? 'None outside Story check.' : 'No line-level findings.'}
           </div>
         )}
+        {openNote}
+        <ResolvedGroup count={moreClosed.length}>{moreClosed}</ResolvedGroup>
       </ReviewSection>
       )}
       {storyCheck({
@@ -1648,7 +1714,7 @@ export function ClaudesReview({
 
 // THE AI REVIEW TAB'S WIDE LAYOUT (docs/FRONTEND.md § The AI Review tab → Wide layout): the shared rail
 // layout (RailLayout.tsx, the story view's mechanism) with the review's slots. CONTENT — the summary,
-// previous review, threads, findings, Story check, CI check, SonarCloud, reference docs, the design (it
+// threads, findings (earlier ones included), Story check, CI check, SonarCloud, reference docs, the design (it
 // spans the rail) and the chat — stays in the reading column; FACTS AND ACTIONS go to the rail: the
 // run's status (`status`), the run controls + the review count (`run`), the counts (`counts`), Reviews
 // and actions + the AI Fix hand-off (`actions`) and Post to GitHub (`post`). The rail STICKS under
@@ -1657,7 +1723,6 @@ export function ClaudesReview({
 export const REVIEW_RAIL_SLOTS = ['status', 'run', 'counts', 'actions', 'post'] as const;
 export const REVIEW_SECTIONS = [
   { id: 'review', label: 'Summary' },
-  { id: 'previous', label: 'Previous review' },
   { id: 'threads', label: 'Review threads' },
   { id: 'findings', label: 'Findings' },
   { id: 'stories', label: 'Story check' },
@@ -1780,11 +1845,22 @@ interface CardEnv {
  * code in Changes, "Posted · <when>" linking its comment, who raised it. Read-only but for Copy and,
  * on a teammate's open point, "Post reminder" (posted as the reader, linking theirs).
  */
-function PointFindingCard({ card, raisedBy, env }: { card: FindingCard; raisedBy: RaisedBy; env: CardEnv }): JSX.Element {
+function PointFindingCard({
+  card,
+  raisedBy,
+  env,
+  note = null,
+}: {
+  card: FindingCard;
+  raisedBy: RaisedBy;
+  env: CardEnv;
+  note?: ReactNode;
+}): JSX.Element {
   const f = card.finding;
   const remind = card.remind ? env.onPostReminder : null;
   return (
     <FindingRow
+      note={note}
       card={{ unlabelled: card.unlabelled, reason: card.reason }}
       raisedBy={raisedBy}
       prId={env.prId}

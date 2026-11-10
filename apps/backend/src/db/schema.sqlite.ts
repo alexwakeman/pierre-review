@@ -1701,7 +1701,8 @@ export const ticketReviews = sqliteTable(
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
     workspaceId: integer('workspace_id').notNull(),
-    // 'jira:<apiRoot>#<KEY>' | 'manual:<prId>:<sha8>' (shared `parseTicketIdent`).
+    // '<provider>:<root>#<KEY>' (shared `parseTicketIdent`). An older 'manual:<prId>:<sha8>' row is a
+    // pasted story from before that feature was removed: dormant, never listed or re-checked.
     ticketIdent: text('ticket_ident').notNull(),
     // Display only.
     ticketKey: text('ticket_key'),
@@ -1747,7 +1748,7 @@ export const ticketReviews = sqliteTable(
     // The ticket's people comments this run was given (migration 0142; docs/TRACKERS.md § Ticket
     // comments): their ids, how many and a hash. NOT in `fingerprint` — a new comment never makes a
     // run stale; the state route counts the comments not in `ids` ("n new comments since this check").
-    // NULL on a run from before comments were read, or a pasted story.
+    // NULL on a run from before comments were read.
     commentsSeen: text('comments_seen', { mode: 'json' }).$type<{ ids: string[]; count: number; hash: string }>(),
     // Why the automatic sweeper queued it (migration 0182): 'first' | 'pushed' | 'joined' | 'left' |
     // 'merged' | 'story_edited'. NULL = a manual run, or a row from before 0182.

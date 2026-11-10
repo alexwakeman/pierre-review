@@ -1,4 +1,4 @@
-import { criterionCounts, type PrCriteriaCheck, type TicketAssessment } from '@pierre-review/shared';
+import { criterionCounts, parseTicketIdent, type PrCriteriaCheck, type TicketAssessment } from '@pierre-review/shared';
 
 // THE "Criteria 3/4" CHIP (docs/FRONTEND.md § PR chips; docs/CLAUDE-REVIEW.md § Ticket review).
 // CORE, DB only — never a model, tracker or GitHub call.
@@ -72,7 +72,7 @@ export function criteriaCheckOf(
   };
 }
 
-/** Order on the chip row: by key (numerically), pasted stories last. Pure. */
+/** Order on the chip row: by key (numerically), a run with no key last. Pure. */
 export function compareCriteriaChecks(a: PrCriteriaCheck, b: PrCriteriaCheck): number {
   if (a.key == null || b.key == null) return a.key == null ? (b.key == null ? a.reviewId - b.reviewId : 1) : -1;
   return a.key.localeCompare(b.key, undefined, { numeric: true });
@@ -111,7 +111,8 @@ export async function prCriteriaFor(
       .execute()) as Array<{ id: number; headSha: string | null }>;
     for (const h of headRows) heads.set(h.id, h.headSha);
   }
-  const latest = latestRunPerTicket(memberRows);
+  // A stored pasted story (`manual:` ident, a REMOVED feature) parses as null: never a chip.
+  const latest = latestRunPerTicket(memberRows.filter((r) => parseTicketIdent(r.ident) != null));
   const runIds = [...new Set([...latest.values()].flatMap((m) => [...m.values()].map((r) => r.runId)))];
   const runs = new Map<number, CriteriaRun>();
   for (let i = 0; i < runIds.length; i += CHUNK) {

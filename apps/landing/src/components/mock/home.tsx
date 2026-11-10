@@ -94,7 +94,8 @@ function ReviewFindings(): JSX.Element {
   );
 }
 
-/** The AI Review tab's findings: "Open", then a collapsed "Resolved or addressed (n)" saying why. */
+/** The AI Review tab's findings: "Open", then a collapsed "Resolved or addressed (n)" saying why and,
+ *  for an earlier finding the latest review judged, how in one line (there is no "Previous review"). */
 function ReviewFindingsByState({ onTouch }: { onTouch: () => void }): JSX.Element {
   const [showClosed, setShowClosed] = useState(false);
   return (
@@ -114,6 +115,12 @@ function ReviewFindingsByState({ onTouch }: { onTouch: () => void }): JSX.Elemen
                 {f.by} · {f.reason}
               </small>
               {f.text}
+              {f.how != null ? (
+                <>
+                  <br />
+                  <b>{f.how}</b>
+                </>
+              ) : null}
             </FindingRow>
           ))
         : null}

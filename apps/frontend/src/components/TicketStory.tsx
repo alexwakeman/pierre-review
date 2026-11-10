@@ -16,7 +16,7 @@
 import { useId, useState } from 'react';
 import type { ClaudeReviewTicket, TicketRef } from '@pierre-review/shared';
 import { hasFixedAcSource, jiraSiteOf } from '../lib/jiraTicket.js';
-import { pulledAcField, jiraStoryFromDetails, acFieldText } from '../lib/storyTabs.js';
+import { pulledAcField, jiraStoryFromDetails, acFieldText } from '../lib/storyText.js';
 import { ticketDraftFromStored } from '../lib/claudeReviewFollowUp.js';
 import { storySourceOf } from '../lib/ticketStory.js';
 import { safeExternalUrl } from '../lib/ui.js';
@@ -90,10 +90,10 @@ function JiraStory({
   );
 }
 
-/** A story Limn stored with a run (pasted, or read from Jira at the time). */
+/** A story Limn stored with a run (read from the tracker at the time; an older run's may be typed). */
 function StoredStory({ ticket, url, linkKey }: { ticket: ClaudeReviewTicket; url: string | null; linkKey: boolean }): JSX.Element {
   const d = ticketDraftFromStored(ticket);
-  // A pasted story keeps no key; a key known from the block (and its link) is still shown.
+  // A typed story (an older run's) keeps no key; a key known from the block (and its link) is still shown.
   return (
     <JiraStoryView
       capHeight={false}

@@ -19,11 +19,11 @@ import type { LegacyStoryFinding } from './prompts.js';
 // THE TICKET REVIEW'S INPUTS — who is on the ticket, what the ticket says, and what each member
 // changed. Everything here is the SERVER's answer, read before any model runs:
 //
-//   members   the tracker's `ticketMembers` (a tracker ticket: any workspace of the account, the
-//             same site) or the one PR of a pasted ('manual:') story; then the synced `pull_requests`
+//   members   the tracker's `ticketMembers` (any workspace of the account, the same site); then the
+//             synced `pull_requests`
 //             decide open / merged, and a closed-but-unmerged PR is dropped (readLiveMembers).
 //   story     a tracker ticket's text: the freshest stored row across the members (`jiraStoryFor`,
-//             the ONE story every caller hashes); a pasted story's from the run's own snapshot.
+//             the ONE story every caller hashes).
 //   refusals  no story → no_ticket; no open or merged PR → no_members; more than
 //             TICKET_REVIEW_MAX_PRS → too_many_prs (the count is stored and shown, never sampled).
 //
@@ -60,7 +60,7 @@ export async function jiraStoryFor(
   }
 }
 
-/** The PEOPLE's comments on a tracker ticket, oldest first ([] for a pasted story, none stored, or any
+/** The PEOPLE's comments on a tracker ticket, oldest first ([] for none stored, or any
  *  failure). Never part of the story or its hash (docs/TRACKERS.md § Ticket comments). */
 export async function ticketCommentsFor(accountId: number, ident: string): Promise<TicketComment[]> {
   if (!isTrackerIdent(parseTicketIdent(ident))) return [];
@@ -99,26 +99,19 @@ export async function jiraMemberIds(accountId: number, ident: string): Promise<n
 }
 
 /**
- * Who is on the ticket and what it says, with the refusals applied. `manualTicket` is the run's
- * stored snapshot (a pasted story); `originPrId` the PR that started it.
+ * Who is on the ticket and what it says, with the refusals applied. `originPrId` is the PR that
+ * started it.
  */
 export async function resolveTicketInputs(
   ctx: AgentContext,
   accountId: number,
   ident: string,
-  opts: { originPrId: number | null; manualTicket: ClaudeReviewTicket | null },
+  opts: { originPrId: number | null },
 ): Promise<TicketInputs> {
   const parsed = parseTicketIdent(ident);
   if (parsed == null) return { ok: false, reason: 'no_ticket', prCount: null, ticket: null };
-  let ticket: ClaudeReviewTicket | null;
-  let memberIds: number[];
-  if (parsed.kind === 'manual') {
-    ticket = opts.manualTicket;
-    memberIds = [parsed.prId];
-  } else {
-    memberIds = await jiraMemberIds(accountId, ident);
-    ticket = await jiraStoryFor(accountId, ident, opts.originPrId != null ? [opts.originPrId, ...memberIds] : memberIds);
-  }
+  const memberIds = await jiraMemberIds(accountId, ident);
+  const ticket = await jiraStoryFor(accountId, ident, opts.originPrId != null ? [opts.originPrId, ...memberIds] : memberIds);
   if (ticket == null) return { ok: false, reason: 'no_ticket', prCount: null, ticket: null };
   const members = await readLiveMembers(ctx, accountId, memberIds);
   if (members.length === 0) return { ok: false, reason: 'no_members', prCount: 0, ticket };

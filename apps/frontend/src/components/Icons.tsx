@@ -374,7 +374,7 @@ export function CollapseWideIcon({ size = 14, ...rest }: IconProps): JSX.Element
   );
 }
 
-// Add — a "+" beside an "Add …" label (Claude Review's "Add story" tab).
+// Add — a "+": a new participant or cell in a design diagram.
 export function PlusIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (
     <IconShell size={size} strokeWidth={2.2} {...rest}>

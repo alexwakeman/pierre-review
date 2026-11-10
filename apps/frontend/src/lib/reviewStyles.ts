@@ -1,5 +1,5 @@
 // THE AI REVIEW TAB'S TYPE SCALE, spelled once. Every section of the tab (the review, CI
-// failures, Previous review, Review threads, Findings, Story check, Review chat) and the story
+// failures, Review threads, Findings, Story check, Review chat) and the story
 // view's ticket review draw their items with these, and the reference is the FINDINGS row. The
 // redesign (docs/redesign/DESIGN.md) holds them to the four sizes and the --ui-* roles:
 //
@@ -16,7 +16,7 @@
 // ⚠ Nothing under 11px (test/designTokens.test.ts); muted pairings are measured by
 // test/textContrast.test.ts and the --ui-* inks by designTokens.test.ts.
 export const REVIEW_ITEM_CARD = 'rounded-ui bg-ui-surface px-3 py-2.5 text-body text-ui-ink';
-// THE ITEM GROUP: a section's list of items (Findings, Previous review, Review threads) reads as ONE
+// THE ITEM GROUP: a section's list of items (Findings, Review threads) reads as ONE
 // raised block on the page ground, its items split by a 1px GAP that lets the ground show through —
 // a hairline made of spacing, not a border. Inside it every item takes the `raise` tone (square
 // corners; the group carries the one radius), and the controls and chips that sit on `raise` step

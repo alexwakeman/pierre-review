@@ -1123,7 +1123,7 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
   let n = 0;
   for (const s of TICKET_SCRIPTS) {
     const ident = ticketIdent(s.key);
-    const inputs = await resolveTicketInputs(ctx, 1, ident, { originPrId: null, manualTicket: null });
+    const inputs = await resolveTicketInputs(ctx, 1, ident, { originPrId: null });
     if (!inputs.ok) throw new Error(`ticket review ${s.key}: ${inputs.reason}`);
     const { ticket, ticketHash, members } = inputs;
     const repos = await memberRepos(ctx, 1, members);
@@ -1133,7 +1133,6 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
       ident,
       ticketKey: s.key,
       ticketTitle: ticket.title ?? null,
-      ticket: null,
       originPrId: members[0]?.prId ?? null,
       trigger: 'manual',
       model: 'claude-opus-5-5',

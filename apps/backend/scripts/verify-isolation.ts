@@ -3333,7 +3333,6 @@ check(
       ident: IDENT,
       ticketKey: 'ISO-1',
       ticketTitle: 't',
-      ticket: null,
       originPrId: prId,
       trigger: 'cascade',
       model: 'm',

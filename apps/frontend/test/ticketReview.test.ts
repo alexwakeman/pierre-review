@@ -4,7 +4,7 @@
 //   2. CURRENCY: the server's verdict in a few words; the client never decides it.
 //   3. ATTRIBUTION + POSTING: "Done in web#412", where an item is posted, and that a posted item
 //      never offers Post again.
-//   4. STARTING: a pasted story re-sends its text; a known Jira story goes by ident.
+//   4. STARTING: a ticket goes by its ident; a typed story cannot be started (removed).
 //   5. THE WIRING: one batched states request, gated on AI and the tracker; the PR review's Run
 //      button no longer gates on a story.
 //
@@ -27,12 +27,10 @@ import {
   memberLabel,
   memberPrIdsOf,
   newCommentsWords,
-  planStoryStart,
   postGapsButtonLabel,
   storyGapGroups,
   postTargetOf,
   postedLabel,
-  recheckBody,
   refusalSentence,
   statesRequestIdents,
   ticketCoverage,
@@ -248,28 +246,6 @@ describe('attribution and posting', () => {
 });
 
 describe('starting', () => {
-  it('a pasted story re-sends its stored text; a Jira ticket goes by ident', () => {
-    const manual = 'manual:7:0123abcd';
-    expect(recheckBody(7, manual, { ticket: { title: 'T', description: null, acceptanceCriteria: '- a' } })).toEqual({
-      prId: 7,
-      tickets: [{ title: 'T', acceptanceCriteria: '- a' }],
-    });
-    expect(recheckBody(7, 'jira:https://x#A-1', null)).toEqual({ prId: 7, ident: 'jira:https://x#A-1' });
-  });
-
-  it('the story panel sends a known Jira story by ident and the rest pasted', () => {
-    const plan = planStoryStart(
-      [
-        { title: 'Jira one', source: 'jira', key: 'bmd-1' },
-        { title: 'Typed' },
-        { title: 'Unknown Jira', source: 'jira', key: 'BMD-9' },
-      ],
-      [{ ident: 'jira:https://acme.atlassian.net#BMD-1', ticketKey: 'BMD-1' }],
-    );
-    expect(plan.idents).toEqual(['jira:https://acme.atlassian.net#BMD-1']);
-    expect(plan.pasted.map((t) => t.title)).toEqual(['Typed', 'Unknown Jira']);
-  });
-
   it('progress and the members `done` refreshes', () => {
     expect(ticketProgressPct(null)).toBeNull();
     expect(ticketProgressPct({ phase: 'reviewing', recentActivity: ['a', 'b'] })).toBe(46);
@@ -291,6 +267,11 @@ describe('the wiring', () => {
   it('the PR review Run button no longer takes or gates on a story', () => {
     const tab = src('components/ClaudeReviewTab.tsx');
     expect(tab).not.toMatch(/ticketCheck|ClaudeReviewTicketPanel/);
+    // No typed story anywhere: the Check sends `{ prId, ident }` only, and nothing sends `tickets`.
+    const cov = src('components/TicketCoverage.tsx');
+    expect(cov).toMatch(/start\.mutate\(\{ prId: pr\.id, ident \}\)/);
+    expect(src('api/client.ts')).not.toMatch(/tickets: ClaudeReviewTicketInput/);
+    expect(src('hooks/useTicketReview.ts')).not.toMatch(/useStartStoryCheck|pasted/);
     // The menu's pick (or "Claude + Codex", a pair) — never a story.
     expect(tab).toMatch(/\? \{ model: modelPick\.chosen\.model, pair: true \}\s*: \{ model: modelPick\.chosen\.model, provider: modelPick\.chosen\.provider \}/);
     expect(tab).toMatch(/<TicketCoverageSection /);

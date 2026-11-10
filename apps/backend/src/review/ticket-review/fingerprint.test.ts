@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deriveTicketReviewState,
   fingerprint,
-  manualTicketIdent,
   memberStateOf,
   staleReasons,
   ticketHash,
@@ -36,13 +35,6 @@ describe('fingerprint', () => {
     expect(fingerprint(h, [a, { ...b, state: 'merged' }])).not.toBe(fp);
     expect(fingerprint(h, [a])).not.toBe(fp);
     expect(fingerprint(ticketHash({ ...story, acceptanceCriteria: '- CSV' }), [a, b])).not.toBe(fp);
-  });
-
-  it('manual idents are scoped to the PR and the story text', () => {
-    const id = manualTicketIdent(7, story);
-    expect(id).toMatch(/^manual:7:[0-9a-f]{8}$/);
-    expect(manualTicketIdent(8, story)).not.toBe(id);
-    expect(manualTicketIdent(7, { ...story, title: 'Other' })).not.toBe(id);
   });
 
   it('a closed-but-unmerged PR is never a member', () => {

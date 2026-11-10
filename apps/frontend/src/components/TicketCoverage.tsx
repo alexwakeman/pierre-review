@@ -13,17 +13,16 @@
 //     on, each posting its gaps as one collated comment;
 //   - SLIM where the story view holds the whole story (`slimStoryCheck`: a tracker ticket,
 //     tracker on, an open PR on it): only THIS PR's share (`prTicketShare`, lib/ticketShare.ts) —
-//     what it delivers, what belongs in it, one "Post N gaps to this PR" — "What this PR adds" (its contribution
-//     card at its current head, when it has one), a count of the rest, and "See the
-//     whole story", which opens the ticket's STORY VIEW tab (`useOpenStory`). A pasted (`manual:`) story keeps the full
-//     view: no stack exists for it. The result pieces are shared with the stack
-//     (TicketReviewParts.tsx);
+//     what it delivers, what belongs in it, one "Post N gaps to this PR" — and "See the whole
+//     ticket", which opens the ticket's STORY VIEW tab (`useOpenStory`). The PR's contribution card
+//     ("What this PR adds") and the counts of the rest are the story view's, not shown here. The
+//     result pieces are shared with the stack (TicketReviewParts.tsx);
 //   - a collapsible "Story" per block (TicketStory.tsx): the ticket as markdown, read on open;
-//   - an older PR review's stories that no ticket review covers, as blocks of their own marked
-//     "Checked on this PR only" (ONE story section; the old "User stories" section is gone);
-//   - the story panel (pasted stories + the Jira picker) behind a plain "+ Add story" link, whose
-//     Check starts a one-PR check per pasted story. The PR review's Run button no longer takes a
-//     story.
+//   - an older PR review's stories that no ticket review covers, as read-only blocks of their own
+//     marked "Checked on this PR only" (ONE story section; the old "User stories" section is gone);
+//   - the paste box (TicketPasteBox.tsx): ticket links or keys, read from the PR's workspace
+//     tracker. Typing or pasting a story's TEXT by hand was removed: every story comes from the
+//     tracker.
 //
 // Rules: every string from Claude renders as PLAIN TEXT (no href built from it), except the run's
 // summary (two plain sentences; only the leading prose of an older one), markdown through the sanitizing
@@ -34,7 +33,7 @@
 // ⚠ Posting follows the post-write copy contract: once GitHub answered with a comment id, the
 // button never comes back (a retry double-posts).
 import { DocReferencesBlock } from './DocReferences.js';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import {
   TICKET_ALIGNMENT_LABEL,
   type ClaudeFinding,
@@ -44,42 +43,30 @@ import {
   type TicketReview,
 } from '@pierre-review/shared';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
-import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import {
-  useStartStoryCheck,
   useStartTicketReview,
   useTicketReviewById,
   useTicketReviewStarting,
   useTicketReviewStream,
   useTicketReviews,
 } from '../hooks/useTicketReview.js';
-import {
-  TICKET_ALIGNMENT_CLASS,
-  checkTicketDrafts,
-  createTicketDraftStore,
-  ticketInputFromStored,
-  ticketsRequestFromCheck,
-  type TicketDraft,
-} from '../lib/claudeReviewFollowUp.js';
+import { TICKET_ALIGNMENT_CLASS } from '../lib/claudeReviewFollowUp.js';
 import {
   TICKET_PHASE_LABEL,
   coverageLabel,
   itemsByRef,
   memberLabel,
-  planStoryStart,
-  recheckBody,
   refusalSentence,
   newCommentsWords,
   ticketCurrency,
   ticketProgressPct,
 } from '../lib/ticketReview.js';
-import { prCardOf, prTicketShare, shareDocReferences, shareRestLine, slimStoryCheck } from '../lib/ticketShare.js';
+import { prTicketShare, shareDocReferences, slimStoryCheck } from '../lib/ticketShare.js';
 import { jiraRefFor, storyUrlOf } from '../lib/ticketStory.js';
 import { useOpenStory } from '../lib/ticketTab.js';
 import { AiRunGate } from './AiSetup.js';
-import { ClaudeReviewTicketPanel, ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
+import { ClaudeReviewTicketResults, storyLabel } from './ClaudeReviewFollowUp.js';
 import { TicketPasteBox } from './TicketPasteBox.js';
-import { storiesOnOpen } from '../lib/storyTabs.js';
 import { StoryDisclosure } from './TicketStory.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
@@ -93,7 +80,6 @@ import {
   CurrencyPill,
   MissingList,
   NotRequestedList,
-  PrCardDisclosure,
   StoryGapsPost,
   TicketResults,
   type OpenInChanges,
@@ -107,13 +93,11 @@ const BTN =
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 
-// The reader's half-typed stories, per PR, for this session (survives a tab switch or a PR change).
-const storyDrafts = createTicketDraftStore<TicketDraft[]>();
-
 /**
  * THIS PR's share of a ticket review (the slim block): the criteria it delivers, the unmet
- * criteria and missing items that belong in it (ONE "Post N gaps to this PR" for them), what it does that was not
- * asked for, a count of the rest, and the link that opens the whole story (the story view tab).
+ * criteria and missing items that belong in it (ONE "Post N gaps to this PR" for them), what it does
+ * that was not asked for, and the link that opens the whole story (the story view tab, which holds
+ * the counts of the rest and every PR's contribution card).
  */
 function TicketShare({
   review,
@@ -138,11 +122,9 @@ function TicketShare({
     [a, review.items, pr.id, pr.repoId],
   );
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
-  const card = prCardOf(review.members, pr.id);
   const openStory = useOpenStory();
   if (share == null) return <p className={`text-meta ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId: pr.id, changedPaths, onOpenInChanges };
-  const rest = shareRestLine(share);
   const empty = share.criteria.length === 0 && share.missing.length === 0 && share.notRequested.length === 0;
   return (
     <div className="space-y-3">
@@ -158,9 +140,7 @@ function TicketShare({
       <MissingList items={share.missing} {...ctx} />
       <NotRequestedList items={share.notRequested} {...ctx} />
       <DocReferencesBlock references={shareDocReferences(a?.references, share)} />
-      {card != null && <PrCardDisclosure card={card} />}
-      <p className={`text-meta ${MUTED}`}>
-        {rest != null && <>{rest} </>}
+      <p className="text-meta">
         <button
           type="button"
           onClick={() => openStory({ ident, key: ticketKey, title: ticketTitle })}
@@ -220,7 +200,6 @@ function TicketBlock({
   // `pr.tickets` is null exactly when the PR's workspace has no tracker (core, free since
   // apiVersion 23) — the same fact the Open PRs stacks need, with no extra request.
   const slim = slimStoryCheck({
-    ident,
     ticketKey: entry.ticketKey,
     trackerOn: pr.tickets != null,
     prOpen: pr.state === 'open',
@@ -259,7 +238,7 @@ function TicketBlock({
               <button
                 type="button"
                 disabled={starting}
-                onClick={() => start.mutate(recheckBody(pr.id, ident, shown ?? review))}
+                onClick={() => start.mutate({ prId: pr.id, ident })}
                 className={state.status === 'stale' ? BTN_PRIMARY : BTN}
               >
                 {starting ? 'Starting…' : shown == null ? 'Check' : 'Re-check'}
@@ -308,9 +287,9 @@ function TicketBlock({
 }
 
 /**
- * An older PR review's verdicts on a story NO ticket review covers yet — kept as the PR review
- * rendered them (each unmet item IS that run's finding card, so it is on screen once), under a
- * muted "Checked on this PR only", with Check to run the ticket check.
+ * An older PR review's verdicts on a story NO ticket review covers — kept as the PR review rendered
+ * them (each unmet item IS that run's finding card, so it is on screen once), under a muted "Checked
+ * on this PR only". Read-only history: a story outside the tracker cannot be checked again.
  */
 export interface LegacyStories {
   entries: ClaudeReviewTicketEntry[];
@@ -325,23 +304,19 @@ function LegacyBlock({
   entry,
   legacy,
   pr,
-  known,
   changedPaths,
   onOpenInChanges,
 }: {
   entry: ClaudeReviewTicketEntry;
   legacy: LegacyStories;
   pr: PrDetail;
-  known: readonly TicketEntry[];
   changedPaths: ReadonlySet<string>;
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
-  const start = useStartStoryCheck(pr.id);
   const { ticket } = entry;
   const jiraRef = jiraRefFor(pr.tickets, ticket.key);
   const url = storyUrlOf(jiraRef, [ticket]);
   const hasTitle = ticket.title != null && ticket.title.trim() !== '';
-  const refusals = (start.data?.runs ?? []).filter((r) => r.refused != null && r.ticketReviewId == null);
   return (
     <ClaudeReviewTicketResults
       entry={entry}
@@ -355,22 +330,6 @@ function LegacyBlock({
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
           <span className={`text-meta ${MUTED}`}>Checked on this PR only</span>
           <ReviewedAgo at={legacy.finishedAt} />
-          <AiRunGate kind="ticket_review">
-            <button
-              type="button"
-              disabled={start.isPending}
-              onClick={() => start.mutate(planStoryStart([ticketInputFromStored(ticket)], known))}
-              className={BTN}
-            >
-              {start.isPending ? 'Starting…' : 'Check'}
-            </button>
-          </AiRunGate>
-          {start.isError && <span className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
-          {refusals.map((r) => (
-            <span key={r.ident} className={`text-meta ${ERROR_TEXT}`}>
-              {refusalSentence(r.refused!)}
-            </span>
-          ))}
         </span>
       }
       below={<StoryDisclosure prId={pr.id} jiraRef={jiraRef} stored={[ticket]} url={url} linkKey={false} />}
@@ -378,89 +337,13 @@ function LegacyBlock({
   );
 }
 
-/** The story panel: pasted stories + the Jira picker, and the Check that sends them. */
-function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEntry[] }): JSX.Element {
-  const [drafts, setDraftsState] = useState<TicketDraft[]>(() => storyDrafts.get(pr.id) ?? []);
-  const setDrafts = (d: TicketDraft[]): void => {
-    storyDrafts.set(pr.id, d);
-    setDraftsState(d);
-  };
-  const check = useMemo(() => checkTicketDrafts(drafts), [drafts]);
-  const plan = useMemo(
-    () => planStoryStart(ticketsRequestFromCheck(check) ?? [], entries),
-    [check, entries],
-  );
-  const n = plan.idents.length + plan.pasted.length;
-  const start = useStartStoryCheck(pr.id);
-  // The workspace that OWNS this PR's repo — its Jira token is the one the picker uses.
-  const { data: workspaces } = useWorkspaces();
-  const prWorkspaceName = workspaces?.find((w) => w.repoIds.includes(pr.repoId))?.name ?? null;
-  const refusals = (start.data?.runs ?? []).filter((r) => r.refused != null && r.ticketReviewId == null);
-  // A ticket already shown as a block is not offered for pulling again: its Story is there.
-  const unlisted = useMemo(() => {
-    const listed = new Set(entries.map((e) => e.ticketKey?.trim().toUpperCase()).filter(Boolean));
-    return (pr.tickets ?? []).filter((t) => !listed.has(t.key.trim().toUpperCase()));
-  }, [entries, pr.tickets]);
-  // THE PASTE BOX IS THE DEFAULT (./TicketPasteBox.tsx): ticket links or keys, read from the PR's
-  // workspace tracker. The typed-story form shows when asked for ("Input manually"), while typed
-  // stories exist, or when the PR has no tracker to read from. ⚠ `ticketsAddable`, not
-  // `tickets != null`: a GitHub Issues PR whose links are not read yet has `tickets: null` but a
-  // tracker the paste box can add from — exactly the PRs most likely to need a hand-added ticket.
-  const [manualAsked, setManualAsked] = useState(false);
+/** Add tickets to the PR by link or key (the paste box). Nothing when the PR's workspace has no tracker. */
+function StoryInput({ pr }: { pr: PrDetail }): JSX.Element | null {
+  // ⚠ `ticketsAddable`, not `tickets != null`: a GitHub Issues PR whose links are not read yet has
+  // `tickets: null` but a tracker the paste box can add from.
   const hasTracker = pr.ticketsAddable ?? pr.tickets != null;
-  const showManual = !hasTracker || manualAsked || drafts.length > 0;
-  const inputManually = (): void => {
-    setDrafts(storiesOnOpen(drafts));
-    setManualAsked(true);
-  };
-
-  return (
-    <div>
-      {hasTracker && (
-        <TicketPasteBox
-          key={pr.id}
-          prId={pr.id}
-          manualShown={showManual}
-          onInputManually={inputManually}
-        />
-      )}
-      {showManual && (
-        <ClaudeReviewTicketPanel
-          key={pr.id}
-          // Detected Jira tickets are blocks above already; the panel pulls one only when asked.
-          autoPullReady={false}
-          value={drafts}
-          onChange={setDrafts}
-          check={check}
-          prId={pr.id}
-          tickets={unlisted}
-          prWorkspaceName={prWorkspaceName}
-          defaultOpen={manualAsked}
-          onClose={() => setManualAsked(false)}
-        />
-      )}
-      {n > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <AiRunGate kind="ticket_review">
-            <button
-              type="button"
-              disabled={!check.ok || start.isPending}
-              onClick={() => start.mutate(plan)}
-              className={BTN_PRIMARY}
-            >
-              {start.isPending ? 'Starting…' : n === 1 ? 'Check this story' : `Check ${n} stories`}
-            </button>
-          </AiRunGate>
-          {start.isError && <span className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
-        </div>
-      )}
-      {refusals.map((r) => (
-        <p key={r.ident} className={`mt-1 text-meta ${ERROR_TEXT}`}>
-          {refusalSentence(r.refused!)}
-        </p>
-      ))}
-    </div>
-  );
+  if (!hasTracker) return null;
+  return <TicketPasteBox key={pr.id} prId={pr.id} />;
 }
 
 /** The "Story check" section of the Claude Review tab. Local only (`me.ai`); null otherwise. */
@@ -501,7 +384,7 @@ export function TicketCoverageSection({
           </p>
           <p className="mt-2">
             A story marked “Checked on this PR only” was judged by an earlier PR review against
-            this PR alone. Its unmet items are that review’s findings. Check runs the ticket check.
+            this PR alone. Its unmet items are that review’s findings.
           </p>
         </InfoButton>
       }
@@ -522,7 +405,6 @@ export function TicketCoverageSection({
                   entry={e}
                   legacy={legacy}
                   pr={pr}
-                  known={entries}
                   changedPaths={changedPaths}
                   onOpenInChanges={onOpenInChanges}
                 />
@@ -530,7 +412,7 @@ export function TicketCoverageSection({
             ))}
         </div>
       )}
-      <StoryInput key={pr.id} pr={pr} entries={entries} />
+      <StoryInput key={pr.id} pr={pr} />
     </ReviewSection>
   );
 }

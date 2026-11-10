@@ -56,8 +56,6 @@ import {
 // the PR review uses: an open member opened at or after that workspace switched auto review on,
 // or the kick (an auto review of one of its PRs launched) — so switching auto review on never reviews
 // every old ticket at once.
-//
-// Pasted ('manual:') tickets never cascade: they have one PR and no tracker membership.
 
 export const TICKET_SWEEP_CRON = '* * * * *';
 // The most changed PRs whose tickets are read in one tick; the rest stay "changed" for the next.
@@ -321,7 +319,6 @@ export async function runTicketReviewSweep(
           ident,
           ticketKey: st.ticket?.key ?? null,
           ticketTitle: st.ticket?.title ?? null,
-          manualTicket: null,
           originPrId: cand.viaPrId ?? live.find((m) => m.state === 'open')?.prId ?? live[0]!.prId,
           trigger,
           cause: st.cause,

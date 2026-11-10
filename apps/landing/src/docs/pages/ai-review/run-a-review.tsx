@@ -150,8 +150,9 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        On a pull request that was reviewed before, a <Ui>Previous review</Ui> section says which earlier findings
-        are fixed. A finding marked <Ui>Raised in the previous review</Ui> is one that is still open. See{' '}
+        On a pull request that was reviewed before, the earlier findings are in the same <Ui>Findings</Ui> list:
+        still open ones under <Ui>Open</Ui>, the rest under <Ui>Resolved or addressed</Ui>, each with one line on
+        how it was dealt with. See{' '}
         <DocLink to="ai-review/follow-ups">Follow-up reviews</DocLink>.
       </p>
 

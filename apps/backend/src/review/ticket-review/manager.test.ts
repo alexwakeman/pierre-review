@@ -33,7 +33,6 @@ const args = (ident: string, trigger: 'manual' | 'auto' | 'cascade' = 'manual') 
   ident,
   ticketKey: null,
   ticketTitle: null,
-  manualTicket: null,
   originPrId: 5,
   trigger,
 });

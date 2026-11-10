@@ -3,12 +3,8 @@ import {
   TICKET_REVIEW_STATES_MAX,
   criteriaDoneWords,
   jiraApiRoot,
-  isTrackerIdent,
   ticketIdentForLink,
-  parseTicketIdent,
-  type ClaudeReviewTicketInput,
   type ClaudeTicketAlignment,
-  type StartTicketReviewBody,
   type TicketCriterion,
   type TicketExpectedIn,
   type TicketPrCard,
@@ -23,7 +19,6 @@ import {
   type TicketAutoCheck,
   type TicketReviewState,
 } from '@pierre-review/shared';
-import { ticketInputFromStored } from './claudeReviewFollowUp.js';
 import { relativeTime } from './ui.js';
 
 // THE TICKET REVIEW — the pure half of the PR pane's "User stories" section (TicketCoverage.tsx)
@@ -465,42 +460,6 @@ export function notRequestedPostedLabel(
 }
 
 // ---- starting ----
-
-/** What a block's Check / Re-check sends: a pasted story re-sends its stored text, else the ident. */
-export function recheckBody(
-  prId: number,
-  ident: string,
-  review: Pick<TicketReview, 'ticket'> | null | undefined,
-): StartTicketReviewBody {
-  if (parseTicketIdent(ident)?.kind === 'manual' && review?.ticket != null) {
-    return { prId, tickets: [ticketInputFromStored(review.ticket)] };
-  }
-  return { prId, ident };
-}
-
-/**
- * The story panel's Check: a Jira story the server already lists for this PR goes by its ident
- * (the plugin's stored text is what gets judged); everything else is sent as a pasted story.
- */
-export function planStoryStart(
-  tickets: readonly ClaudeReviewTicketInput[],
-  known: readonly { ident: string; ticketKey: string | null }[],
-): { idents: string[]; pasted: ClaudeReviewTicketInput[] } {
-  const identByKey = new Map<string, string>();
-  for (const k of known) {
-    if (k.ticketKey == null || !isTrackerIdent(parseTicketIdent(k.ident))) continue;
-    identByKey.set(k.ticketKey.trim().toUpperCase(), k.ident);
-  }
-  const idents: string[] = [];
-  const pasted: ClaudeReviewTicketInput[] = [];
-  for (const t of tickets) {
-    const ident = t.source === 'jira' && t.key != null ? identByKey.get(t.key.trim().toUpperCase()) : undefined;
-    if (ident != null) {
-      if (!idents.includes(ident)) idents.push(ident);
-    } else pasted.push(t);
-  }
-  return { idents, pasted };
-}
 
 // ---- progress ----
 

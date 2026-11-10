@@ -47,14 +47,6 @@ export function fingerprint(hash: string, members: readonly FingerprintMember[])
   return sha256([`v${TICKET_REVIEW_VERSION}`, hash, ...parts].join('\n'));
 }
 
-/** 'manual:<prId>:<sha8(title | acceptance criteria)>' — a pasted story, scoped to one PR. */
-export function manualTicketIdent(
-  prId: number,
-  t: Pick<ClaudeReviewTicket, 'title' | 'acceptanceCriteria'>,
-): string {
-  return `manual:${prId}:${sha256(`${t.title ?? ''}\u0000${t.acceptanceCriteria ?? ''}`).slice(0, 8)}`;
-}
-
 /** A PR's member state: open, merged, or null (closed without merging — never a member). */
 export function memberStateOf(state: string): TicketReviewPrState | null {
   return state === 'open' ? 'open' : state === 'merged' ? 'merged' : null;

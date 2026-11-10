@@ -171,48 +171,28 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   - **Model picker** opens on `DEFAULT_CLAUDE_REVIEW_MODEL` and is NEVER re-seeded from the
     stored run (a run stored under a retired id, such as the old Opus 4.8, would otherwise be a
     select value with no option).
-  - **"User stories (optional)"** sits under the Run row: ONE TAB PER STORY (`lib/storyTabs.ts`,
-    `role=tablist`, arrow keys / Home / End, Delete removes), up to `CLAUDE_REVIEW_MAX_TICKETS`. Its
-    header says what Run sends (" · 2 stories" / " · needs a fix") open or closed. Each tab has a ×
-    ("Remove BMD-1040"); "Clear all" asks first (`window.confirm`). "+ Add story" (hidden at the cap)
-    adds and selects a typed tab with three editable fields. A tab PULLED FROM JIRA is read-only
-    markdown (`JiraStoryView`): key linked, title, "Criteria from: <field> · Change", Refresh. Jira
-    tickets detected on the PR (`TicketRef.canFetchDetails`) are **pulled automatically when the tab
-    opens**, once the stored run has loaded, ONCE per PR per detected-key set, never re-adding a key the
-    reader removed this session (`createStoryPullMemory`; no retry — a failure is one line). "Pull all
-    from Jira (N)" in the header is the manual action (clears the removed mark), "Or pull one" the
-    per-key one. ⚠ **A PULL READS THE STORED TICKET, NOT JIRA**: core's tracker worker read it when the
-    PR was received ([TRACKERS.md](TRACKERS.md) § Fetch on receipt), so the auto-pull and "Pull all"
-    are instant. Every read goes through ONE
-    `qc.fetchQuery(['jira-ticket', prId, key])` (1-min stale, not persisted). Refresh is
-    `POST /api/prs/:id/tracker-ticket/refresh` — Jira is read again server-side, through the worker's path, and
-    the stored row answered. ⚠ **"Story N" is the number the RUN
-    gives the story**: the check drops all-blank stories, so a blank tab is "New story" and does not
-    count (`storyIndexAt`); numbering by raw position made the second story "Story 3". The check's
-    message names a story the same way (key, else "Story N"). It runs the SAME
-    `checkClaudeReviewTickets` the route runs (field errors under the tab's field; Re-review / "Run
-    anyway" disabled while it fails). No `maxLength`. The list prefills from the LATEST run's stored
-    stories; a list the reader has touched wins, per PR for the session.
-  - **The criteria FIELD is the reader's to correct, and the choice is the WORKSPACE's.** The server
-    picks it (`JiraTicketDetails.acField` / `acFieldSource`): the workspace's field for the ticket's
-    issue type on that Jira site when the ticket has it, else the strong name match; the tab shows
-    which (`TicketDraft.acField`, client-only — "not recorded" for a story prefilled from a run).
-    "Change" opens the picker over the stored candidates (no Jira call); a pick is
-    `PUT /api/prs/:id/tracker-ticket/ac-field`, which saves it for that issue type, re-derives every stored ticket
-    of the type and re-reads this one — other open tabs of the type are rebuilt from their stored
-    rows. "Reset to default" sends `fieldId: null`. "None of these" empties this tab's criteria only
-    and is never saved. Removing a tab does NOT clear the choice (it belongs to the issue type). An
-    old per-browser choice (localStorage `limn:jira-ac-field:v1:…`) is moved to the server ONCE on
-    the next pull and the key deleted (`legacyAcFieldToMigrate`). Candidate text is wiki markup rewritten to markdown by the tracker
-    (`candidateText` → `jiraWikiToMarkdown`), like the description.
+  - **No story input on the tab (REMOVED 2026-11-10).** The typed-story panel ("User stories
+    (optional)", one tab per story, "+ Add story", "Input manually", the Jira pull into tabs and its
+    "Criteria from · Change" picker) is gone, with `lib/storyTabs.ts`, `ClaudeReviewTicketPanel`, the
+    `{prId, tickets}` start body and the `manual:` ticket review. Every story is READ FROM THE
+    TRACKER: a ticket is added by its link or key in the Story check's paste box (§ Ticket review →
+    Adding a ticket by link or key). The criteria field is the workspace's choice (Settings →
+    tracker). A stored `manual:` run is dormant: never listed, chipped or re-checked.
   - **In `ClaudesReview`** (latest AND historic runs): the templated `followUpSentence` sits above
-    Claude's summary; then **Previous review** — open items first (Not addressed, Partly addressed,
-    then Not checked in GREY, never amber: unknown is not "not addressed"), addressed / no longer
-    applies in a collapsed disclosure. Each row's anchor prefers the re-raising finding's
-    (current) path and line, else the earlier path with its line DROPPED once the code moved since
-    THAT comment was raised (`itemHeadMoved`: the item's own `headMoved`, falling back to the
-    record's on older rows — a carried comment is older than the previous review); a
-    "Raised again below" button scrolls to `#claude-finding-<id>`. Then the **User stories** section
+    Claude's summary. There is NO "Previous review" section (removed 2026-11-10): ONE **Findings**
+    section holds every finding — **"Open"** (the run's own and every still-open earlier one, by
+    severity), then a collapsed **"Resolved or addressed (n)"**. What this run said about an EARLIER
+    finding rides on that finding's own row (`EarlierFindingNote`, matched by its id, its re-raise's id
+    or anyone who raised it too — `earlierNoteFor`): a status chip unless the row already says it
+    (`earlierNoteChip`; Not checked is GREY, never amber), the ONE-LINE HOW (`followUpOneLine`: the
+    item's `how`, else the explanation's first sentence, else the not-checked reason), the reply it
+    judged with Post reply / Resolve, and "Post still open". An item no row shows (an older server, a
+    finding the team fold leaves out) gets a `FollowUpRow` of its own in the same group (`oneLine`,
+    `unplacedEarlier`); a finding settled earlier by an accepted reply shows who replied. The
+    previous review's findings this run did not check say so under Open (`followUpLeftOutSentence`).
+    A `FollowUpRow` anchor prefers the re-raising finding's (current) path and line, else the earlier
+    path with its line DROPPED once the code moved since THAT comment was raised (`itemHeadMoved`). Then
+    the **User stories** section
     (titled "User story" when there is one), ONE BLOCK PER STORY (`ClaudeReview.tickets`; sub-header =
     key, else "Story N", omitted for a lone keyless story · title · alignment chip ·
     `ticketCriteriaSentence`). ⚠ **LIKE FOR LIKE**: each not met / partly met criterion and each
@@ -1276,7 +1256,7 @@ of this.
 - **Which findings — POSTED, OR STILL WAITING TO BE POSTED** (`isFollowUpEligible`, the ONE
   selection point: the previous review's own findings and every carried one go through it, so the
   prompt, the stored `follow_up` items, the counts in the templated sentence and the SPA's
-  "Previous review" list all agree). Never praise, never a legacy story finding. A finding is in when:
+  Findings rows all agree). Never praise, never a legacy story finding. A finding is in when:
   - it was **POSTED** (`postedAt != null`, `isPostedForFollowUp`), whatever its `included` tick
     says now: an ignored-after-posting comment is still on the PR. ⚠ The signal is `postedAt`, NOT
     `githubCommentId`: Post review (`markReviewPosted`) stamps `postedAt` on its inline findings
@@ -1315,7 +1295,7 @@ of this.
   PR, account-scoped). A posted finding is settled ONLY when an earlier review ACCEPTED a person's
   reply on its thread (`reply_accepted`, § Replies to Limn's findings). Then: it is filtered out of
   `loadPriorReviewForFollowUp` (own AND carried, after the carry bookkeeping), so it is never a P
-  item, never on the stored `follow_up` record, never in the pane's open "Previous review" list and
+  item, never on the stored `follow_up` record, never an open earlier finding in the pane and
   never an AI Fix `P` seed item; the prompt lists it (up to 30) under **Settled in an earlier
   review**, one `---BEGIN SETTLED FINDING S<n> <nonce>---` fence each carrying the path, title and the
   reply as data (in the nonce-collision scan), telling the model not to raise it again; and the
@@ -1544,7 +1524,7 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   ⇒ `auto-pushback.ts` posts ONE reply (footer + `PUSHBACK_REPLY_MARKER`), never resolves, recorded
   on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, migration `0092`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
   pushback marker already on the thread (posted by hand) blocks it too. A later run may still accept.
-- **Manual runs (or the switches off)** post nothing: the "Previous review" row shows the reply's
+- **Manual runs (or the switches off)** post nothing: the finding's row in Findings shows the reply's
   author + excerpt and the text as a draft, with "Post reply" ("Reply and resolve" for an accepted
   one; plus "Resolve" through the ordinary `/resolve` route). ⚠ **"Post reply" goes through ITS OWN
   ROUTE, `POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply`
@@ -1994,8 +1974,8 @@ thing still needed; reply accepted → the accepted reason (reply disputed → w
 
 - **Asked of the model, both providers.** `submit_review`'s `followUp[].how` and `submit_replies`'
   `how` (optional, nullable, no `.max()` — a long line never rejects the whole call; the Codex strict
-  schema is DERIVED from the same zod shape, `ai/result-schemas.ts`). The "Previous review" and
-  replies prompts ask for it; a thread's `reason` description and prompt line now say the same.
+  schema is DERIVED from the same zod shape, `ai/result-schemas.ts`). The prompt's "Previous review"
+  section and the replies prompt ask for it; a thread's `reason` description and prompt line now say the same.
   Neither section is in `prompt-golden.json`, so the golden is unchanged.
 - **Stored** on `ClaudeFollowUpItemRecord.how` (no migration: part of the follow-up JSON), clipped by
   shared `oneLineHow`. A status the code LOCKED (same head) keeps the earlier run's how, carried on
@@ -2194,7 +2174,7 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   migration: a restart fails the run anyway (`reconcileOrphanedDiagrams`).
 - **Two kinds.** `'pr'` — ONE design of how this PR's change is built, at its head.
   `'story'` — when the PR is on a TRACKER ticket (core tracker, STORED rows only via
-  `tracker/ticket-source.ts`; a pasted `manual:` story never counts) with **more than one** open or
+  `tracker/ticket-source.ts`) with **more than one** open or
   merged PR, ONE design of the whole story across every participating repository — how the PRs fit
   together, each cell tagged with its PR, arrows free to cross repositories (at most
   `SEQUENCE_DIAGRAM_STORY_MAX_PRS` = 12 members, else refused `too_many_prs`; at most 3 tickets per PR).
@@ -2355,8 +2335,9 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   comment, <date>", a button that opens the ticket's Comments at that comment.
 - **Keyed per TICKET, not per PR.** Ident `<provider>:<root>#<KEY>` — `jira:<apiRoot>#<KEY>` today,
   unchanged since the plugin era (members from core's stored tickets, `ticketMembers` — any workspace
-  of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers) or
-  `manual:<prId>:<hash>` (a pasted story: one PR, no plugin needed, never cascades). The apiRoot fold
+  of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers). (A stored
+  `manual:<prId>:<hash>` run is a typed story from before that feature was REMOVED, 2026-11-10: it
+  parses as null, so it is never listed, chipped, re-checked or cascaded; its rows stay.) The apiRoot fold
   is shared `jiraApiRoot`, ONE copy the server and the SPA both call. Members are OPEN + MERGED PRs
   (a merged one is read at its final head); closed-unmerged drop out. Over `TICKET_REVIEW_MAX_PRS`
   (30; it was 8 before contribution cards) it REFUSES `too_many_prs` with the count, never samples.
@@ -2367,8 +2348,9 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   § Adding a ticket by hand) then starts ONE ticket review PER ticket with `{prId, ident}` — never a
   combined run (`hooks/useTicketRefs.ts`). The start route's "is this PR on that ticket" check also
   accepts the ticket's stored members (`ticketMembers`), so a hand-added ticket past the
-  `CLAUDE_REVIEW_MAX_TICKETS` story cap still starts. "Input manually" reveals the typed-story form
-  (`manual:` idents), unchanged; with no tracker on the PR only that form shows.
+  `CLAUDE_REVIEW_MAX_TICKETS` story cap still starts. There is no other way in: typing or pasting a
+  story's TEXT was removed (2026-11-10), and with no tracker on the PR the box does not show. The
+  start route refuses a `tickets` body (`400 Removed`) rather than strip it into "check every ticket".
 - **Started by a sprint refresh** (`sprint-checks.ts`, 2026-10-20): a MANUAL press of This Sprint's
   Refresh (`POST /api/sprint-stories/refresh`, through the `startSprintTicketChecks` seam in
   `tracker/sprint/hooks.ts`, registered only from the agentic registration) starts the ticket review for
@@ -2556,7 +2538,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   ticket may carry `source: 'jira' | 'manual'` and, for Jira only, `key`, `url` (http/https) and
   `fetchedAt` — provenance, dropped when malformed, never a reason to refuse. A Jira ticket's
   `description` is MARKDOWN (the tracker converts Jira's wiki markup, `jiraWikiToMarkdown`), so the
-  SPA renders it read-only as markdown; a manual one is shown as typed.
+  SPA renders it read-only as markdown; an older run's typed one (`'manual'`) is shown as typed.
 - **Stored MIGRATION-FREE.** `claude_reviews.ticket` holds an ARRAY of tickets and
   `ticket_assessment` an index-aligned ARRAY of assessments; a run from before stored ONE object in
   each, and every reader goes through shared `storedList` (one object → a one-element list).

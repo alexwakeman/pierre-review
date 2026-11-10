@@ -134,49 +134,8 @@ export function checkClaudeReviewTicket(
     ticket.url = url.length <= TICKET_URL_MAX && /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
     const at = typeof raw.fetchedAt === 'string' ? Date.parse(raw.fetchedAt) : Number.NaN;
     ticket.fetchedAt = Number.isFinite(at) ? new Date(at).toISOString() : null;
-  } else if (raw?.source === 'manual') {
-    ticket.source = 'manual';
   }
   return { ok: true, ticket };
-}
-
-export type ClaudeReviewTicketsCheck =
-  | { ok: true; tickets: ClaudeReviewTicket[] }
-  | { ok: false; index: number | null; field: ClaudeReviewTicketField | 'tickets'; message: string };
-
-/**
- * Validate a review's user stories: each through `checkClaudeReviewTicket`, all-blank entries
- * dropped, at most CLAUDE_REVIEW_MAX_TICKETS left. `index` names the failing entry (null for the
- * count). It NEVER truncates.
- */
-export function checkClaudeReviewTickets(
-  raw: ReadonlyArray<ClaudeReviewTicketInput | null | undefined> | null | undefined,
-): ClaudeReviewTicketsCheck {
-  const tickets: ClaudeReviewTicket[] = [];
-  const list = raw ?? [];
-  for (let i = 0; i < list.length; i += 1) {
-    const one = checkClaudeReviewTicket(list[i]);
-    if (!one.ok) {
-      // Named as every other surface names it: the Jira key, else "Story N" where N counts the
-      // stories that will be STORED (blank entries are dropped below, so a raw position would
-      // disagree with the panel's tabs and the run's results).
-      const raw = list[i];
-      const key = raw?.source === 'jira' && typeof raw.key === 'string' ? raw.key.trim() : '';
-      const name = storyName({ key: TICKET_KEY_RE.test(key) ? key : null }, tickets.length);
-      const message = list.length > 1 ? `${name}: ${one.message}` : one.message;
-      return { ok: false, index: i, field: one.field, message };
-    }
-    if (one.ticket) tickets.push(one.ticket);
-  }
-  if (tickets.length > CLAUDE_REVIEW_MAX_TICKETS) {
-    return {
-      ok: false,
-      index: null,
-      field: 'tickets',
-      message: `${tickets.length} tickets; the limit is ${CLAUDE_REVIEW_MAX_TICKETS}.`,
-    };
-  }
-  return { ok: true, tickets };
 }
 
 /**
@@ -506,7 +465,6 @@ const GITHUB_IDENT_ROOT_RE = /^https:\/\/github\.com\/[a-z0-9][a-z0-9-]{0,38}\/[
 // A Linear ident's root: `https://linear.app/<workspace url key>`, lower-cased (`linearSiteRoot`).
 const LINEAR_IDENT_ROOT_RE = /^https:\/\/linear\.app\/[a-z0-9][a-z0-9_-]{0,63}$/;
 const TRACKER_IDENT_RE = /^(jira|github|linear|notion):(.+)#([^#]+)$/;
-const MANUAL_IDENT_RE = /^manual:(\d{1,12}):([0-9a-f]{8})$/;
 // An ident is bounded so a request body can never carry an unbounded key.
 export const TICKET_IDENT_MAX_CHARS = 600;
 
@@ -555,11 +513,13 @@ export interface ParsedTrackerIdent {
   key: string;
 }
 
-export type ParsedTicketIdent = ParsedTrackerIdent | { kind: 'manual'; prId: number; hash: string };
+// Every ident names a tracker ticket. (A pasted `manual:` story was REMOVED: a stored one parses as
+// null, so it is never shown, checked or cascaded.)
+export type ParsedTicketIdent = ParsedTrackerIdent;
 
-/** A ticket that lives in a TRACKER (members from the stored tickets), as opposed to a pasted story. */
+/** A well-formed ident (a tracker ticket). */
 export function isTrackerIdent(p: ParsedTicketIdent | null | undefined): p is ParsedTrackerIdent {
-  return p != null && p.kind !== 'manual';
+  return p != null;
 }
 
 /** null for anything that is not a well-formed ident. */
@@ -576,8 +536,6 @@ export function parseTicketIdent(ident: string): ParsedTicketIdent | null {
     if (provider === 'notion' && !NOTION_ROOT_RE.test(t[2]!)) return null;
     return { kind: provider, provider, root: t[2]!, apiRoot: t[2]!, key };
   }
-  const m = MANUAL_IDENT_RE.exec(ident);
-  if (m) return { kind: 'manual', prId: Number(m[1]), hash: m[2]! };
   return null;
 }
 

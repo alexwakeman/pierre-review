@@ -13,7 +13,7 @@
 import type { ReactNode } from 'react';
 import { safeExternalUrl } from '../lib/ui.js';
 import type { TicketDraft } from '../lib/claudeReviewFollowUp.js';
-import { criteriaHasOwnHeading } from '../lib/storyTabs.js';
+import { criteriaHasOwnHeading } from '../lib/storyText.js';
 import { Markdown } from './Markdown.js';
 import { ExternalLinkIcon } from './Icons.js';
 

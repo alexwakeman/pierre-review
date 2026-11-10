@@ -15,17 +15,14 @@ import { CheckIcon, ChevronIcon, CloseIcon, WarningIcon } from './Icons.js';
 // THE STORY CHECK'S PASTE BOX — the default way to add a ticket (docs/TRACKERS.md § Adding a ticket
 // by hand). One input takes one or more ticket links or keys; each becomes a removable chip that
 // reads its ticket from the PR's workspace tracker (`link: false`, nothing stored) and says what it
-// found. Check adds the readable ones to the PR and starts ONE ticket review per ticket. "Input
-// manually" reveals the typed-story form (ClaudeReviewTicketPanel), unchanged. The box is COLLAPSED
-// by default behind its "Add tickets" disclosure (ChevronIcon), whether or not the PR has tickets.
+// found. Check adds the readable ones to the PR and starts ONE ticket review per ticket. The box is
+// COLLAPSED by default behind its "Add tickets" disclosure (ChevronIcon), whether or not the PR has
+// tickets. (Typing a story's text by hand was removed: every story is read from the tracker.)
 
 const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
-const BTN =
-  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-ui-ink hover:underline disabled:opacity-50';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';
 
@@ -46,16 +43,7 @@ function localResult(ref: string): TicketRefResult | undefined {
   return { ref, status: 'invalid', key: null, ident: null, title: null, url: null, message: 'Not a ticket link or key.' };
 }
 
-export function TicketPasteBox({
-  prId,
-  manualShown,
-  onInputManually,
-}: {
-  prId: number;
-  // The typed-story form is already on screen: no "Input manually" button.
-  manualShown: boolean;
-  onInputManually: () => void;
-}): JSX.Element {
+export function TicketPasteBox({ prId }: { prId: number }): JSX.Element {
   const inputId = useId();
   const bodyId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -190,18 +178,7 @@ export function TicketPasteBox({
     </button>
   );
 
-  if (!open) {
-    return (
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        {toggle}
-        {!manualShown && (
-          <button type="button" onClick={onInputManually} className={LINK_BTN}>
-            Input manually
-          </button>
-        )}
-      </div>
-    );
-  }
+  if (!open) return <div className="mt-2">{toggle}</div>;
 
   return (
     <div className="mt-2 space-y-2">
@@ -249,11 +226,6 @@ export function TicketPasteBox({
             <span className={SPINNER} aria-hidden="true" />
             Reading…
           </span>
-        )}
-        {!manualShown && (
-          <button type="button" onClick={onInputManually} className={BTN}>
-            Input manually
-          </button>
         )}
         {check.isError && (
           <span className={`text-meta ${ERROR_TEXT}`}>{check.error.message || 'Could not start the check.'}</span>

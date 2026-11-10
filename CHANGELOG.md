@@ -25,6 +25,18 @@ no internals.
   after 15 minutes (was 60); its changes are kept and Resume starts a new sandbox. One turn of the AI
   that runs for more than 2 hours is stopped. Every few minutes, Limn removes any sandbox of its own that
   no open session uses.
+- AI Review: the earlier findings are part of "Findings". Still-open ones sit under "Open" with the
+  new findings; the rest under "Resolved or addressed". Each earlier finding says in one line how it
+  was dealt with, or what is still needed, with the reply and its buttons on the same row.
+
+### Removed
+
+- AI Review: the separate "Previous review" section (its findings are now in "Findings").
+- AI Review, Story check: "What this PR adds" and the "N more criteria are met by other PRs" line.
+  Both stay in the ticket's story view.
+- Story check: typing or pasting a story's text by hand ("Input manually", "+ Add story"). Add a
+  ticket by its link or key instead; without an issue tracker there is no story check. Older checks of
+  typed stories are no longer shown.
 
 ## [1.0.20] - 2026-11-10
 
