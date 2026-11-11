@@ -315,17 +315,17 @@ describe('rename after BRANCH_EXISTS, and push automatically', () => {
   });
 
   it('suggests a free -vN name that avoids the build branches, planned PR-2 names included', () => {
-    const b = { repos: [repo(1, { branch: 'limn/acme-1', pushedBranch: null })], prs: [] };
+    const b = { repos: [repo(1, { branch: 'ACME-1', pushedBranch: null })], prs: [] };
     const taken = buildBranchNames(b);
-    expect(taken).toEqual(['limn/acme-1']);
-    expect(storyBuildFreeBranch('limn/acme-1', taken)).toBe('limn/acme-1-v2');
-    expect(storyBuildFreeBranch('limn/acme-1', [...taken, 'limn/acme-1-v2'])).toBe('limn/acme-1-v3');
+    expect(taken).toEqual(['ACME-1']);
+    expect(storyBuildFreeBranch('ACME-1', taken)).toBe('ACME-1-v2');
+    expect(storyBuildFreeBranch('ACME-1', [...taken, 'ACME-1-v2'])).toBe('ACME-1-v3');
   });
 
   it('sends branch only when the reader named one', () => {
     expect(storyBuildPushBody(true)).toEqual({ draft: true });
     expect(storyBuildPushBody(false, '  ')).toEqual({ draft: false });
-    expect(storyBuildPushBody(true, ' limn/x-v2 ')).toEqual({ draft: true, branch: 'limn/x-v2' });
+    expect(storyBuildPushBody(true, ' X-1-v2 ')).toEqual({ draft: true, branch: 'X-1-v2' });
   });
 
   it('the option changes until something pushed or the automatic push started', () => {

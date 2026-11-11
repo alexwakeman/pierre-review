@@ -13,7 +13,7 @@
 //     retry lane (503 until the manager registers one);
 //   • THE RENAME after BRANCH_EXISTS: the code stored beside the sentence, `branch` on the single-item
 //     route reaching the push (stored once it lands), refused on Push all and when not a name;
-//   • THE AUTOMATIC PUSH (auto-push.ts): once, ready (draft:false), origin 'auto'; skipped when off or
+//   • THE AUTOMATIC PUSH (auto-push.ts): once, ready (draft:false), as the reader's own PR; skipped when off or
 //     switched off before the claim; a failure recorded, never retried; a concurrent manual press safe;
 //     the tab's switch (`…/auto-push`) refused once pushed.
 import { rmSync } from 'node:fs';
@@ -435,7 +435,8 @@ describe('the rename after BRANCH_EXISTS', () => {
     expect(G.pushes.map((p) => p.branch)).toEqual(['acme-214-refunds-api', 'acme-214-refunds-api-v2']);
     // The same protected list as ever: the new name is judged by assertPushTarget like any other.
     expect(G.pushes[1].protect).toEqual(['main']);
-    expect(G.pushes[1].limnRun.origin).toBe('reader_pressed');
+    // The reader's PR, never their `limn:` bot's: no run is named for the ledger.
+    expect(G.pushes[1]).not.toHaveProperty('limnRun');
     expect(await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api)).toMatchObject({
       status: 'pushed',
       branch: 'acme-214-refunds-api-v2',
@@ -506,9 +507,9 @@ describe('the automatic push', () => {
     await on(s.id);
     const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id });
     expect(d).toEqual({ status: 'pushed', opened: 2 });
-    expect(G.pushes.map((p) => [p.name, p.draft, p.limnRun.origin])).toEqual([
-      ['api', false, 'auto'],
-      ['web', false, 'auto'],
+    expect(G.pushes.map((p) => [p.name, p.draft])).toEqual([
+      ['api', false],
+      ['web', false],
     ]);
     const row = (await P.getStoryBuildRow(ctx, 1, s.id))!;
     expect(row.autoPushClaimedAt).toBeInstanceOf(Date);
@@ -548,7 +549,7 @@ describe('the automatic push', () => {
     await P.updateStoryBuild(ctx, 1, s.id, { status: 'ready' });
     await push.pushAllRepos(ctx, { accountId: 1, buildId: s.id, draft: true });
     expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'nothing' });
-    expect(G.pushes.map((p) => p.limnRun.origin)).toEqual(['reader_pressed', 'reader_pressed']);
+    expect(G.pushes.map((p) => p.draft)).toEqual([true, true]);
     expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushClaimedAt).toBeNull();
   });
 

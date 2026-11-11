@@ -21,7 +21,7 @@ export function AutoPushInfo(): JSX.Element {
         When a build finishes, Limn pushes it with your GitHub login and opens the pull request ready for review, not as a
         draft. It does this once per session. If the push fails, it says why here and you press Push yourself.
       </p>
-      <p className="mt-2">Limn's own auto review skips pull requests Limn opened. Run AI Review on it from its PR tab.</p>
+      <p className="mt-2">The pull request is yours, so auto review picks it up when it is on for this workspace.</p>
     </InfoButton>
   );
 }

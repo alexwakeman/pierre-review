@@ -861,7 +861,7 @@ function storyBuildRepo(repoId: number, fullName: string, order: number, o: Part
     baseSha: 'b'.repeat(40),
     stackedOnPrId: null,
     baseNote: null,
-    branch: 'limn/ACME-1',
+    branch: 'ACME-1',
     summary: null,
     commitMessage: null,
     filesChanged: [],
@@ -918,8 +918,8 @@ export const STORY_SESSION_READY_SESSION: StoryBuildSession = {
   notes: ['acme/infra is in your folder but not in this workspace, so it is left out.'],
   conversation: [],
   repos: [
-    { repoId: 11, fullName: 'acme/api', path: '/Users/me/acme/api', branch: 'limn/ACME-1', baseSha: 'b'.repeat(40) },
-    { repoId: 10, fullName: 'acme/web', path: '/Users/me/acme/web', branch: 'limn/ACME-1', baseSha: 'c'.repeat(40) },
+    { repoId: 11, fullName: 'acme/api', path: '/Users/me/acme/api', branch: 'ACME-1', baseSha: 'b'.repeat(40) },
+    { repoId: 10, fullName: 'acme/web', path: '/Users/me/acme/web', branch: 'ACME-1', baseSha: 'c'.repeat(40) },
   ],
   startDir: '/Users/me/acme/api',
   credentialLine: 'The model’s sign-in stays on your computer: Limn adds it to each request on the way out.',
@@ -1035,17 +1035,17 @@ export const STORY_SESSION_BUILT: StoryBuild = builtFrom(STORY_SESSION_READY);
 
 /**
  * "Push and open the pull request when the build finishes" was ticked and the automatic push ran: the
- * branch `limn/ACME-1` already exists on acme/api, so it failed there (the code is stored on the row) and
+ * branch `ACME-1` already exists on acme/api, so it failed there (the code is stored on the row) and
  * the tab offers a new branch name. acme/web was not reached in this fixture (still ready).
  */
 export const STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS: StoryBuild = {
   ...STORY_SESSION_BUILT,
   autoPush: true,
   autoPushAt: iso(0),
-  autoPushError: 'A branch named limn/ACME-1 already exists on acme/api. Pick another branch name.',
+  autoPushError: 'A branch named ACME-1 already exists on acme/api. Pick another branch name.',
   repos: STORY_SESSION_BUILT.repos.map((r) =>
     r.repoId === 11
-      ? { ...r, pushError: 'A branch named limn/ACME-1 already exists on acme/api. Pick another branch name.', pushErrorCode: 'BRANCH_EXISTS' }
+      ? { ...r, pushError: 'A branch named ACME-1 already exists on acme/api. Pick another branch name.', pushErrorCode: 'BRANCH_EXISTS' }
       : r,
   ),
 };
@@ -1139,9 +1139,9 @@ export function storyPlanRevision(revision: number, o: Partial<BuildPlanRevision
       },
     ],
     stack: [
-      { key: 'P1', repoId: 11, fullName: 'acme/api', stackIndex: 1, title: 'Lift the export row cap', contains: 'The cap constant and its test.', criteria: ['AC3'], dependsOn: [], branch: 'limn/ACME-1' },
-      { key: 'P2', repoId: 11, fullName: 'acme/api', stackIndex: 2, title: 'Stream reports as CSV', contains: 'GET /reports/:id.csv, streamed from a cursor.', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], branch: 'limn/ACME-1-2' },
-      { key: 'P3', repoId: 10, fullName: 'acme/web', stackIndex: 1, title: 'Add the Download CSV button', contains: 'The button in ReportHeader.', criteria: ['AC1'], dependsOn: ['P2'], branch: 'limn/ACME-1' },
+      { key: 'P1', repoId: 11, fullName: 'acme/api', stackIndex: 1, title: 'Lift the export row cap', contains: 'The cap constant and its test.', criteria: ['AC3'], dependsOn: [], branch: 'ACME-1' },
+      { key: 'P2', repoId: 11, fullName: 'acme/api', stackIndex: 2, title: 'Stream reports as CSV', contains: 'GET /reports/:id.csv, streamed from a cursor.', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], branch: 'ACME-1-2' },
+      { key: 'P3', repoId: 10, fullName: 'acme/web', stackIndex: 1, title: 'Add the Download CSV button', contains: 'The button in ReportHeader.', criteria: ['AC1'], dependsOn: ['P2'], branch: 'ACME-1' },
     ],
     stackReason: 'The cap change touches every export, so it is reviewed on its own before the new route.',
     ticketUpdate: {
@@ -1197,7 +1197,7 @@ function storyBuildPr(id: number, key: string, position: number, o: Partial<Stor
     contains: '',
     criteria: [],
     dependsOn: [],
-    branch: 'limn/ACME-1',
+    branch: 'ACME-1',
     status: 'ready',
     error: null,
     stat: { files: 1, insertions: 3, deletions: 0, commits: 1 },
@@ -1222,7 +1222,7 @@ export function stackBuiltFrom(b: StoryBuild): StoryBuild {
     ...builtFrom(b),
     prs: [
       storyBuildPr(501, 'P1', 0, { title: 'Lift the export row cap', criteria: ['AC3'], summary: 'Removes the 500-row cap for CSV.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
-      storyBuildPr(502, 'P2', 1, { stackIndex: 2, branch: 'limn/ACME-1-2', title: 'Stream reports as CSV', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], summary: 'Adds GET /reports/:id.csv, streamed.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
+      storyBuildPr(502, 'P2', 1, { stackIndex: 2, branch: 'ACME-1-2', title: 'Stream reports as CSV', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], summary: 'Adds GET /reports/:id.csv, streamed.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
       storyBuildPr(503, 'P3', 2, { repoId: 10, fullName: 'acme/web', title: 'Add the Download CSV button', criteria: ['AC1'], dependsOn: ['P2'], filesChanged: ['src/reports/ReportHeader.tsx'], reported: 'partly', checks: [{ command: 'pnpm lint', result: 'not_run', note: 'No lint config.' }] }),
     ],
     session: { ...builtFrom(b).session!, plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) } },

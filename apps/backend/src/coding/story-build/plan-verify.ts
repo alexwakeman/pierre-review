@@ -69,7 +69,7 @@ export interface PlanVerifyInput {
   ticketText: string;
   /** ref ('AC1', 'M1') → its text. */
   criteriaText: ReadonlyMap<string, string>;
-  /** The session branch (`limn/<key>`): stack index k ≥ 2 gets `-k`. */
+  /** The session branch (the ticket key, `<KEY>`): stack index k ≥ 2 gets `-k`. */
   branch: string;
   seams: PlanVerifySeams;
 }
@@ -78,7 +78,7 @@ export type VerifiedPlan = Omit<BuildPlanRevision, 'revision' | 'createdAt' | 's
 
 export type PlanVerifyResult = { ok: true; plan: VerifiedPlan; rawSha: string } | { ok: false; problems: string[] };
 
-/** The branch of the k-th PR of a repository (1-based): `limn/<key>`, `limn/<key>-2`, `limn/<key>-3`. */
+/** The branch of the k-th PR of a repository (1-based): `<KEY>`, `<KEY>-2`, `<KEY>-3`. */
 export const stackBranch = (branch: string, k: number): string => (k <= 1 ? branch : `${branch}-${k}`);
 
 const DATA_PATH_PATTERNS: readonly RegExp[] = [

@@ -3807,6 +3807,9 @@ for EVERY GitHub write Limn makes under a person's account: reviews and approval
 review GitHub makes around a reply or a standalone comment, story-check / CI / Sonar comments, the
 "@dependabot rebase" request, AI Fix / conflict / Implement commits, auto-merge and Dependencies
 merges, and PRs Limn opens. Each is the poster's `limn:<login>` bot; the person is kept beside it.
+⚠ **One exception (owner decision 2026-11-11): Implement story / Fill gaps.** Its push writes as the
+READER (no ledger row, no `Limn-Run:` trailer), so the PR and its commit are the reader's own and count
+like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "The reader's PR").
 
 - **Whose is a write (`github/write-origin.ts`)**: every exported write in `github/mutations.ts`, the
   Limn posts in `review/post-review.ts`, the git push (`coding/git.ts` `PushTarget.origin` +

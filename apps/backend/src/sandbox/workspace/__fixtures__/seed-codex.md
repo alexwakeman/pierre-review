@@ -6,11 +6,11 @@ Read `/Users/alex/Projects/DEFRA/bng-fe-be/TICKET.md` first. It is the requireme
 
 ## The repositories
 
-Every repository of the workspace is cloned here, each on the branch `limn/bmd-412` with no remote:
+Every repository of the workspace is cloned here, each on the branch `BMD-412` with no remote:
 
-- DEFRA/bng-metric-backend: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend` (from main at aaaaaaa; branch `limn/bmd-412`).
-- DEFRA/bng-metric-harness: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness` (from main at bbbbbbb; branch `limn/bmd-412`).
-- DEFRA/bng-perf-tests: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-perf-tests` (from main at ccccccc; branch `limn/bmd-412`). #7 on this ticket is someone else's, so this builds from main.
+- DEFRA/bng-metric-backend: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend` (from main at aaaaaaa; branch `BMD-412`).
+- DEFRA/bng-metric-harness: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness` (from main at bbbbbbb; branch `BMD-412`).
+- DEFRA/bng-perf-tests: `/Users/alex/Projects/DEFRA/bng-fe-be/bng-perf-tests` (from main at ccccccc; branch `BMD-412`). #7 on this ticket is someone else's, so this builds from main.
 
 You start in `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness`.
 The folders are at the same paths as on the reader's computer (`/Users/alex/Projects/DEFRA/bng-fe-be`), so paths in the reader's notes are correct here.
@@ -64,7 +64,7 @@ A host that is not on the list fails. Say which host you needed: the reader can 
 
 1. The session starts in CHAT. Read the code, answer the reader and plan. Do not change files until the reader starts the build.
 2. Do not push and do not add a remote. There is no GitHub credential here. Limn takes your commits from the sandbox when the reader asks.
-3. In each repository you change, commit your work on the branch `limn/bmd-412`. Do not change another branch, and do not rewrite or squash the base commit.
+3. In each repository you change, commit your work on the branch `BMD-412`. Do not change another branch, and do not rewrite or squash the base commit.
 4. Do not edit `/Users/alex/Projects/DEFRA/bng-fe-be/AGENTS.md`, the other seed file or `/Users/alex/Projects/DEFRA/bng-fe-be/TICKET.md`. They are not in any repository.
 5. Do not invent answers to open points. Where the code depends on one, write `TODO(open point N)` and list it in your report.
 6. Follow each repository's own conventions: read its CLAUDE.md, AGENTS.md, README and CONTRIBUTING first.

@@ -77,8 +77,8 @@ without a plan": a session whose agent never sends a usable plan can only be mes
 - **Approve and start** (latest revision, every point answered, live, build slot free): ONE transaction sets
   `approved_plan_id` / `approved_at` and writes one `story_build_prs` row per planned PR; `PLAN.md` (the
   plan and the decisions) goes into the sandbox; ONE build turn (`planBuildInstruction`). Start build is
-  refused `PlanNotApproved` on a plan-first session. Branches: P1 of a repository on `limn/<key>`, its
-  second and third on `limn/<key>-2` / `-3`.
+  refused `PlanNotApproved` on a plan-first session. Branches: P1 of a repository on `<KEY>` (the ticket key), its
+  second and third on `<KEY>-2` / `-3`.
 - **Closed in the plan stage** (idle, the agent ended, a restart): the session keeps its plan as
   `plan_ready` (not live, resumable). Resume boots it, writes PLAN.md marked "not approved yet" and sends
   NO turn. Approve on a closed session: `409 NotLive` ("Resume the session first.").
@@ -299,10 +299,17 @@ the session is open and that PR is not pushed, dropped with the session's refs).
 
 On the reader's press — or once, by the host, when the reader opted in (§ Push automatically). `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
 stateless push: a fresh worktree at `base_sha`, the stored patch, ONE commit by the reader (the agent's
-commit messages as its message), a NEW branch `limn/<ticket key>` (`BRANCH_EXISTS` refused with a
+commit messages as its message), a NEW branch `<KEY>` (the ticket key, case kept, `sessionBranch`) (`BRANCH_EXISTS` refused with a
 sentence, never forced; the default branch, the base ref and a stacked PR's head are protected and
 refused before any process runs), then `createPullRequest` (`draft` unless the body says `draft: false`).
 
+- **The reader's PR** (owner decision 2026-11-11): `applyAndPushBranch` writes with origin `'reader'` — no
+  `limn_actions` ledger row, no `Limn-Run:` trailer on the commit — so sync attributes the PR AND its commit
+  to the reader, never to their `limn:` bot (the one exception to "Limn's writes are a bot",
+  docs/CLAUDE-REVIEW.md § Limn's actions are bots). It is then an ordinary PR of the reader's: the
+  workspace's auto review picks it up (when on, once it is not a draft), My Turn and Reports count it.
+- **Branch** = the ticket key, case kept (`sessionBranch`: `PAY-142`; anything git rejects becomes `-`;
+  no `limn/` prefix), so Jira, Linear and GitHub link it.
 - **Title** `${KEY}: ${title}` (what Jira, Linear and Notion detection read).
 - **Body:** the summary (the agent's last words in the build turn), the criteria this repository covers,
   the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already pushed, `Closes
@@ -312,7 +319,7 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
   after it.
 - **Branch name**: `assertPushTarget` (git's own format check + the protected names) runs BEFORE the
   name is spelled into the `BRANCH_EXISTS` lookup URL, each segment URL-encoded.
-- **Rename after `BRANCH_EXISTS`** (an earlier session already pushed `limn/<key>`): the single-item
+- **Rename after `BRANCH_EXISTS`** (an earlier session already pushed `<KEY>` (the ticket key)): the single-item
   routes take `branch` (`StoryBuildPushBody`; the per-repository push of a build WITHOUT planned PRs, and
   `…/prs/:prId/push`). Push all and a planned build's per-repository push refuse it (400: one name, one
   PR). The route checks only shape (1..`STORY_BUILD_BRANCH_MAX` after trim); the name goes through the
@@ -356,11 +363,9 @@ the tab's switch `POST …/:id/auto-push` changes it until the build pushed). Th
   write, never cleared: ONCE per build, never retried. The in-process flag (`isStoryBuildAutoPushing`) is
   set in the FIRST tick, before the gate's reads, so a message cannot start a turn and burn the claim.
 - **The push**: the button's own path — `pushPlannedStack` for a plan-first build with planned PRs, else
-  `pushAllRepos` — with `draft: false` and `origin: 'auto'` (ledgered as Limn's automatic write). The
-  reader's own GitHub login (`getAccessToken` → `gh auth token`), like the button; nothing is stored.
-  `draft: false` because auto review skips drafts. ⚠ Limn's auto review ALSO skips a PR Limn opened
-  (with `LIMN_ATTRIBUTE_ALL` on, its author is the `limn:` bot; docs/TEAM-REVIEW.md), so the tab says to
-  run AI Review on it; other reviewers and review bots see a ready PR.
+  `pushAllRepos` — with `draft: false`. The reader's own GitHub login (`getAccessToken` → `gh auth
+  token`), like the button; nothing is stored. `draft: false` because auto review skips drafts: the PR is
+  the READER'S (§ Push → "The reader's PR"), so the workspace's auto review picks it up when it is on.
 - **A concurrent press** is safe: `ALREADY_PUSHED` / `PUSH_IN_PROGRESS` / the stack's in-flight set answer
   `skipped`, not a failure; when NOTHING was pushed that way the build records "Your own push was already
   running." While it runs the session refuses a message (`busyReason`) and Discard waits.

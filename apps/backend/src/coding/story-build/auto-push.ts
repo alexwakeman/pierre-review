@@ -11,8 +11,8 @@
 //      GitHub write. Never cleared: ONCE per build, never retried (a later build turn, a resume or a
 //      restart never pushes again);
 //   4. then `pushAllRepos` — or `pushPlannedStack` for a plan-first build with planned PRs — with
-//      `draft: false` (Limn's auto review SKIPS drafts; the point is that review picks the PR up) and
-//      origin 'auto'. The reader's own GitHub login, like the button (git-ops `getAccessToken`).
+//      `draft: false` (auto review SKIPS drafts; the point is that the reader's auto review picks the PR up —
+//      it is the READER'S PR, never their `limn:` bot's). The reader's own GitHub login, like the button (git-ops `getAccessToken`).
 // A concurrent manual press is safe: the push paths' own guards (ALREADY_PUSHED, PUSH_IN_PROGRESS, the
 // stack's in-flight set) answer `skipped`, which is not a failure; when NOTHING was pushed that way the build
 // records AUTO_PUSH_TAKEN_OVER, so the tab never says "Pushing…" for ever. A claim a restart cut off is
@@ -48,8 +48,8 @@ export interface StoryAutoPushDeps {
 
 const defaultDeps: StoryAutoPushDeps = {
   isPlannedBuild,
-  pushAll: (ctx, accountId, buildId) => pushAllRepos(ctx, { accountId, buildId, draft: false, origin: 'auto' }),
-  pushStack: (ctx, accountId, buildId) => pushPlannedStack(ctx, { accountId, buildId, draft: false, origin: 'auto' }),
+  pushAll: (ctx, accountId, buildId) => pushAllRepos(ctx, { accountId, buildId, draft: false }),
+  pushStack: (ctx, accountId, buildId) => pushPlannedStack(ctx, { accountId, buildId, draft: false }),
 };
 
 /** Builds with an automatic push in flight in this process (the session refuses a message; Discard waits). */

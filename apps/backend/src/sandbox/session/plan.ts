@@ -392,7 +392,7 @@ export class PlanStage {
       repos: l.state.repos.map((r: SandboxSessionRepo) => ({ repoId: r.repoId, fullName: r.fullName, baseSha: r.baseSha })),
       ticketText: ticketMarkdown(ticket, mode, docsDir),
       criteriaText,
-      branch: l.state.repos[0]?.branch ?? 'limn/ticket',
+      branch: l.state.repos[0]?.branch ?? 'ticket',
       seams: verifySeams,
     });
   }

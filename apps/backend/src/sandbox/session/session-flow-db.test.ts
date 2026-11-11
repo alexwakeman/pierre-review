@@ -306,12 +306,12 @@ describe('a workspace session, end to end', () => {
     expect(s.provider).toBe('claude');
     expect(s.credentialLine).toMatch(/stays on this computer/);
     expect(s.repos.map((x) => [x.fullName, x.path, x.branch, x.baseSha])).toEqual([
-      ['acme/api', '/workspace/acme/api', 'limn/acme-300', SHA.api],
-      ['acme/web', '/workspace/acme/web', 'limn/acme-300', SHA.web],
+      ['acme/api', '/workspace/acme/api', 'ACME-300', SHA.api],
+      ['acme/web', '/workspace/acme/web', 'ACME-300', SHA.web],
     ]);
     expect(b.repos.map((x) => [x.fullName, x.status, x.baseSha, x.branch])).toEqual([
-      ['acme/api', 'planned', SHA.api, 'limn/acme-300'],
-      ['acme/web', 'planned', SHA.web, 'limn/acme-300'],
+      ['acme/api', 'planned', SHA.api, 'ACME-300'],
+      ['acme/web', 'planned', SHA.web, 'ACME-300'],
     ]);
     // The seed is at the root, outside every repository; the model credential never reached the sandbox.
     const files = fake.files(`limn-${(await rowOf(id)).sandboxRef}-sandbox`);
@@ -389,7 +389,7 @@ describe('a workspace session, end to end', () => {
     const pushed = await post(`/api/story-builds/${id}/repos/${api}/push`, {});
     expect(pushed.statusCode).toBe(200);
     expect(pushed.json().results[0]).toMatchObject({ outcome: 'pushed', prNumber: 700 });
-    expect(G.pushes[0]).toMatchObject({ owner: 'acme', name: 'api', baseSha: SHA.api, baseRef: 'main', patch: API_PATCH, branch: 'limn/acme-300', draft: true, title: 'ACME-300: Export a report as CSV' });
+    expect(G.pushes[0]).toMatchObject({ owner: 'acme', name: 'api', baseSha: SHA.api, baseRef: 'main', patch: API_PATCH, branch: 'ACME-300', draft: true, title: 'ACME-300: Export a report as CSV' });
     expect(G.pushes[0].body).toContain('[ACME-300: Export a report as CSV](https://acme.atlassian.net/browse/ACME-300)');
     const b = await read(id);
     expect(b.session!.phase).toBe('pushed');

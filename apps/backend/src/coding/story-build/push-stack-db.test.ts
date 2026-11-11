@@ -466,10 +466,10 @@ describe('the automatic push of a stack', () => {
     await P.updateStoryBuild(ctx, 1, s.id, { autoPush: true });
     const { maybeAutoPushBuild } = await import('./auto-push.js');
     expect(await maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'pushed', opened: 3 });
-    expect(G.pushes.map((p) => [p.branch, p.draft, p.limnRun.origin])).toEqual([
-      [`${BRANCH}-${s.id}`, false, 'auto'],
-      [`${BRANCH}-${s.id}-2`, false, 'auto'],
-      [`${BRANCH}-${s.id}`, false, 'auto'],
+    expect(G.pushes.map((p) => [p.branch, p.draft])).toEqual([
+      [`${BRANCH}-${s.id}`, false],
+      [`${BRANCH}-${s.id}-2`, false],
+      [`${BRANCH}-${s.id}`, false],
     ]);
     expect(await maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'claimed' });
     expect(G.pushes).toHaveLength(3);

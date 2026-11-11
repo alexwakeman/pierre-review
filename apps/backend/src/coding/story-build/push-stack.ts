@@ -1,5 +1,5 @@
 // PUSH A PLANNED STACK (docs/STORY-BUILD.md § Plan first → Pushing a stack). On the reader's press, or once
-// by the host after the build when the reader ticked the automatic push (auto-push.ts, origin 'auto'). A
+// by the host after the build when the reader ticked the automatic push (auto-push.ts). A
 // build with an approved plan has one `story_build_prs` row per planned PR; each is pushed as ONE commit by
 // the reader (`applyAndPushBranch`, the one-PR push's own steps) on a NEW branch, with ONE addition: the
 // commit's tree must equal the host-verified tip's tree (`expectTree`, else TREE_MISMATCH before any push).
@@ -20,7 +20,7 @@
 // Earlier PRs' bodies are NOT edited afterwards (no extra GitHub write): a later body links the earlier
 // ones; an earlier body names the later ones by title.
 import { and, eq } from 'drizzle-orm';
-import type { BuildPlanRevision, LimnActionOrigin, StoryBuildPrPushResult, StoryBuildRepoPushResult } from '@pierre-review/shared';
+import type { BuildPlanRevision, StoryBuildPrPushResult, StoryBuildRepoPushResult } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { applyAndPushBranch } from '../git-ops.js';
 import { getViewerCanPush } from '../ai-fix/pr-context.js';
@@ -109,8 +109,6 @@ export interface PushPlannedPrArgs {
   /** A NEW branch name for this PR (the reader's rename after `BRANCH_EXISTS`); absent ⇒ the row's.
    *  Checked by `assertPushTarget` (the build's other planned branches are protected); stored once it lands. */
   branch?: string;
-  /** Who started the push (the ledger's origin): the reader's press (default), or the automatic push. */
-  origin?: LimnActionOrigin;
 }
 
 /** Push ONE planned PR (see the header). The outcome is recorded on its row; also returned. */
@@ -256,7 +254,6 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
       protect,
       ...(pr.treeSha ? { expectTree: pr.treeSha } : {}),
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, pr.repoId, prNumber, build.ident),
-      limnRun: { origin: a.origin ?? 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it. Nothing below may fail the push. ──
     await updateStoryBuildPr(ctx, a.accountId, pr.id, {
@@ -328,7 +325,6 @@ export async function pushPlannedStack(
     draft: boolean;
     repoId?: number;
     push?: (ctx: AgentContext, a: PushPlannedPrArgs) => Promise<StoryBuildPrPushResult>;
-    origin?: LimnActionOrigin;
   },
 ): Promise<StoryBuildPrPushResult[] | null> {
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
@@ -365,7 +361,7 @@ export async function pushPlannedStack(
         out.push(res(r, 'failed', 'NOT_READY', r.error ?? `${r.prKey} has nothing to push.`));
         continue;
       }
-      const got = await push(ctx, { accountId: a.accountId, buildId: a.buildId, prId: r.id, draft: a.draft, ...(a.origin ? { origin: a.origin } : {}) });
+      const got = await push(ctx, { accountId: a.accountId, buildId: a.buildId, prId: r.id, draft: a.draft });
       out.push(got);
       if (got.outcome !== 'pushed') {
         notPushed.add(r.prKey);

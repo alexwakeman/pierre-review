@@ -129,7 +129,6 @@ const args = (over: Record<string, unknown> = {}): any => ({
   body: 'Body.',
   draft: true,
   protect: ['main'],
-  limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: 1 } },
   ...over,
 });
 
@@ -154,6 +153,11 @@ describe('applyAndPushBranch — the no-PR push', () => {
     expect(log).toHaveLength(2);
     expect(T.pushed[0]).toMatchObject({ remoteBranch: 'acme-214-refunds-web', committish: 'HEAD', protect: ['main'] });
     expect(T.prs[0]).toMatchObject({ head: 'acme-214-refunds-web', base: 'main', draft: true, title: 'ACME-214: Refunds by card', body: 'Body.' });
+    // THE READER'S PR, never their `limn:` bot's: the push and the PR are the reader's writes (no ledger
+    // row), and the commit carries no `Limn-Run:` trailer.
+    expect(T.pushed[0].origin).toBe('reader');
+    const body = execFileSync('git', ['-C', T.worktree, 'log', '-1', '--format=%B'], { encoding: 'utf8' });
+    expect(body).not.toContain('Limn-Run:');
     // The temporary tree is always removed.
     expect(T.removed).toEqual([T.worktree]);
   });

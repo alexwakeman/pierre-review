@@ -235,15 +235,15 @@ test.describe('Implement story', () => {
     await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
     const view = page.getByTestId('story-build-overlay');
     await expect(view.getByTestId('story-build-auto-push')).toHaveAttribute('data-state', 'failed');
-    await expect(view.getByTestId('story-build-auto-push')).toContainText('Automatic push failed: A branch named limn/ACME-1 already exists');
+    await expect(view.getByTestId('story-build-auto-push')).toContainText('Automatic push failed: A branch named ACME-1 already exists');
     const api = view.locator('[data-testid="story-build-repo"][data-repo="acme/api"]');
     // Push would only be refused again: a new name in its place, prefilled with a free one.
-    await expect(api.getByTestId('story-build-rename-input')).toHaveValue('limn/ACME-1-v2');
+    await expect(api.getByTestId('story-build-rename-input')).toHaveValue('ACME-1-v2');
     const push = page.waitForRequest((r) => r.method() === 'POST' && /\/repos\/11\/push$/.test(r.url()));
     await api.getByRole('button', { name: 'Push as draft' }).click();
-    expect((await push).postDataJSON()).toEqual({ draft: true, branch: 'limn/ACME-1-v2' });
+    expect((await push).postDataJSON()).toEqual({ draft: true, branch: 'ACME-1-v2' });
     await expect(api).toHaveAttribute('data-status', 'pushed');
-    await expect(api).toContainText('limn/ACME-1-v2');
+    await expect(api).toContainText('ACME-1-v2');
     // The other repository was not refused: its Push is the plain one.
     const web = view.locator('[data-testid="story-build-repo"][data-repo="acme/web"]');
     await expect(web.getByTestId('story-build-rename')).toHaveCount(0);

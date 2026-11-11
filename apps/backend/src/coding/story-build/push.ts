@@ -4,7 +4,6 @@ import {
   isTrackerIdent,
   parseTicketIdent,
   trackerTicketRow,
-  type LimnActionOrigin,
   type StoryBuildRepoPushResult,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
@@ -26,7 +25,7 @@ import type { PushRepoArgs, PushRepoFn } from './seams.js';
 
 // PUSH ONE REPOSITORY — WORK PACKAGE 2 (docs/STORY-BUILD.md § Push). On the reader's press (routes-build.ts:
 // Push, Push all), or — when the reader ticked "Push and open the pull request when the build finishes" —
-// once by the host after the build (auto-push.ts, origin 'auto'). Stateless like AI Fix's push: a FRESH worktree at the stored base,
+// once by the host after the build (auto-push.ts). The PR and its commit are the READER'S, never their `limn:` bot's. Stateless like AI Fix's push: a FRESH worktree at the stored base,
 // the stored patch applied, ONE commit, a NEW branch (never forced; `BRANCH_EXISTS` refused with a
 // sentence; the default branch and a stacked PR's head are protected), then a NEW pull request —
 // a DRAFT unless the reader asked otherwise (owner decision 2):
@@ -392,8 +391,6 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       draft: a.draft,
       protect,
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, repo.repoId, prNumber, build.ident),
-      // Implement's work is Limn's: the reader pressed Push on what Limn built (or ticked the automatic push).
-      limnRun: { origin: a.origin ?? 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it, release the kept worktree. Nothing below may fail the push. ──
     await updateStoryBuildRepo(ctx, a.accountId, repo.id, {
@@ -444,7 +441,7 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
  */
 export async function pushAllRepos(
   ctx: AgentContext,
-  a: { accountId: number; buildId: number; draft: boolean; push?: PushRepoFn; origin?: LimnActionOrigin },
+  a: { accountId: number; buildId: number; draft: boolean; push?: PushRepoFn },
 ): Promise<StoryBuildRepoPushResult[] | null> {
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   if (!build) return null;
@@ -453,7 +450,7 @@ export async function pushAllRepos(
   const out: StoryBuildRepoPushResult[] = [];
   for (const r of rows) {
     if (!r.include || r.status !== 'ready') continue;
-    out.push(await push(ctx, { accountId: a.accountId, buildId: a.buildId, repoId: r.repoId, draft: a.draft, ...(a.origin ? { origin: a.origin } : {}) }));
+    out.push(await push(ctx, { accountId: a.accountId, buildId: a.buildId, repoId: r.repoId, draft: a.draft }));
   }
   return out;
 }

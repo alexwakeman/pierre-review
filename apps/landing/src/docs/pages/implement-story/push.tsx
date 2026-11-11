@@ -77,9 +77,9 @@ export default function Page(): JSX.Element {
 
       <H2 id="branch-exists">When the branch already exists</H2>
       <p>
-        An earlier session may have pushed the same branch, for example <b>limn/PAY-142</b>. Push then says so, and the
+        An earlier session may have pushed the same branch, for example <b>PAY-142</b>. Push then says so, and the
         pull request shows a <Ui>New branch</Ui> field in place of the button, filled in with a free name such as{' '}
-        <b>limn/PAY-142-v2</b>. Change it if you like and press <Ui>Push</Ui>. Limn checks the name and still never
+        <b>PAY-142-v2</b>. Change it if you like and press <Ui>Push</Ui>. Limn checks the name and still never
         overwrites a branch. In a stack, the pull requests after it build on the new branch.
       </p>
 
@@ -93,7 +93,7 @@ export default function Page(): JSX.Element {
         <li>A build you stopped, or one that failed, is not pushed. Press Push yourself.</li>
         <li>If the push fails, the tab says why. A branch that already exists gets the New branch field above.</li>
         <li>
-          Limn's own auto review skips pull requests Limn opened. Start a review on it yourself: see{' '}
+          The pull request is yours, so auto review picks it up when it is on for the workspace. Otherwise see{' '}
           <DocLink to="ai-review/run-a-review">Run a review</DocLink>.
         </li>
       </ul>
@@ -101,7 +101,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-is-pushed">What is pushed</H2>
       <ul>
         <li>
-          <b>The branch</b>: <b>limn/</b> and the ticket key, for example <b>limn/PAY-142</b>; a second and third pull
+          <b>The branch</b>: the ticket key, for example <b>PAY-142</b>; a second and third pull
           request in the same repository add <b>-2</b> and <b>-3</b>.
         </li>
         <li>

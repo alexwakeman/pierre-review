@@ -1,4 +1,4 @@
-import type { LimnActionOrigin, StoryBuildRepoPushResult } from '@pierre-review/shared';
+import type { StoryBuildRepoPushResult } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 
 // THE PUSH CONTRACT (docs/STORY-BUILD.md § Push). A workspace session stores each repository's work as
@@ -15,8 +15,6 @@ export interface PushRepoArgs {
   /** A NEW branch name for this push (the reader's rename after `BRANCH_EXISTS`); absent ⇒ the row's
    *  `branch`. Checked by `assertPushTarget` like any target; stored on the row once the push lands. */
   branch?: string;
-  /** Who started the push (the ledger's origin): the reader's press (default), or the automatic push. */
-  origin?: LimnActionOrigin;
   /** Bodies link sibling PRs already pushed in this session (Push all runs in build order). */
   signal?: AbortSignal;
 }

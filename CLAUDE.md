@@ -430,7 +430,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
 - ⚠ **ALL LIMN WRITES ARE A BOT** (`limn:<login>`): writes take an `origin`, Limn's are ledgered;
-  own-post checks read `trueAuthorId`.
+  own-post checks read `trueAuthorId`. EXCEPT Implement's push: the READER'S PR (no ledger, no trailer).
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
   never Limn's own. A FAILED auto run is retried by that rule only when TRANSIENT (caps and "Run auto
@@ -463,8 +463,7 @@ fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repository and the HOST pushes on the reader's press — or ONCE after a
-  completed build turn the reader opted into (`story-build/auto-push.ts`: claim first, `draft:false`,
-  never retried). `BRANCH_EXISTS` ⇒ a `branch` rename, through `assertPushTarget`.
+  build the reader opted into (`story-build/auto-push.ts`: claim first, never retried).
 - ⚠ **On Docker its only way out is Limn's allow-list proxy**; the model credential stays on the host.
 - **The base commit comes from Limn's clone cache**; the reader's clone only LENDS OBJECTS (never its
   tree, index or hooks) to the KEPT read-only repo store. **Memories only, never past sessions.** ONE fold

@@ -4746,7 +4746,7 @@ export const storyBuildPlans = sqliteTable(
 );
 
 // story_build_prs — ONE row per PLANNED pull request, created at Approve (migration 0179). Status: shared
-// `StoryBuildPrStatus`. `branch` is the sandbox branch and the push branch (`limn/<key>`, `-2`, `-3`). The
+// `StoryBuildPrStatus`. `branch` is the sandbox branch and the push branch (the ticket key, `<KEY>`, `-2`, `-3`). The
 // patch, `tip_sha` and `tree_sha` are computed on the HOST from verified commits, never the sandbox's diffs.
 export const storyBuildPrs = sqliteTable(
   'story_build_prs',

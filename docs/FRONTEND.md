@@ -4494,7 +4494,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   in-process `autoPushRunning` flag, never the claim alone, so a restart or a press that took over never
   leaves it; the read polls then: the notice frame does not refetch), the recorded `autoPushError` until
   everything is pushed. The
-  ⓘ says the PR opens ready for review and that Limn's own auto review skips a PR Limn opened. After
+  ⓘ says the PR opens ready for review, as the reader's, and that auto review picks it up when it is on. After
   `BRANCH_EXISTS` — keyed on the press's `code`, else the row's stored `pushErrorCode`, NEVER on the
   sentence (`branchExistsFor`) — the card's Push becomes `RenameBranch` (a name prefilled by shared
   `storyBuildFreeBranch` over `buildBranchNames` + the names tried, + Push) on BuildSection's repository

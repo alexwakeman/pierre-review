@@ -446,13 +446,13 @@ Repositories are prepared **3 at a time** (`MIRROR_CONCURRENCY`, one constant); 
 takes clone-manager's per-repository lock. As each one starts, the `repos` boot step's detail reads
 `Loading repositories <n>/<total>: <owner/name>` (`mirrorProgressLine`, on the session's existing stream; no
 polling), so the reader sees how far along it is. Each sandbox repository keeps `refs/limn/base` = the start
-commit (the patch is `git format-patch refs/limn/base..limn/<key>`) and must end with `HEAD` at exactly
+commit (the patch is `git format-patch refs/limn/base..<KEY>`) and must end with `HEAD` at exactly
 that commit (checked). A repository that cannot be cloned is one line in the boot notes; the session goes
 on and the seed names only what is there.
 
 **The per-session copy** (`mirror.ts`): per repository, on the HOST, `prepBranchWorktree`, then a
 throw-away DEPTH-1 repository fetched from the cache at that commit, whose `.git` is streamed into the
-sandbox as a tar on `tar -x`'s stdin (as the agent), and checked out on `limn/<ticket key>`. ⚠ The cache
+sandbox as a tar on `tar -x`'s stdin (as the agent), and checked out on `<KEY>` (the ticket key, case kept, `sessionBranch`). ⚠ The cache
 is BLOBLESS: a shallow fetch from it fails ("possible repository corruption on the remote side") until the
 base tree's blobs are in it, so the worktree checkout comes first (measured). ⚠ macOS's `tar` adds
 AppleDouble `._*` files and xattr headers: the host tar runs with `COPYFILE_DISABLE=1 --no-xattrs` and the
@@ -861,7 +861,7 @@ agent's own index untouched (measured on real git). The agent's commit messages 
 `commit_message`; its last words in the turn the `summary` (the PR body's opening). An empty patch makes
 the row `skipped`, one past `STORY_BUILD_PATCH_MAX_BYTES` (4 MB) `failed` with the reason (never cut).
 Rows with a patch are `ready`, so the EXISTING `…/repos/:repoId/diff`, Push and Push all work unchanged
-(draft by default, stacking, the fork refusal). The push branch is the sandbox branch, `limn/<key>`.
+(draft by default, stacking, the fork refusal). The push branch is the sandbox branch, `<KEY>` (the ticket key).
 
 **Closing.** Discard (any phase, a running turn included) closes the agent, the services and the proxy,
 `runtime.destroy(sessionId)`, and drops the pinned base refs. The same close runs on an IDLE session (no
@@ -983,7 +983,7 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   `claimBuildTurn` (the one build slot); inside the turn's instruction ONE transaction records the
   approval and the `story_build_prs` rows and `PLAN.md` is copied in (`planMarkdown`). Start build is
   refused `PlanNotApproved` (`buildRefused`).
-- **The build after Approve**: `planBuildInstruction` names each PR's branch (`limn/<key>`, `-2`, `-3`, each
+- **The build after Approve**: `planBuildInstruction` names each PR's branch (`<KEY>` (the ticket key), `-2`, `-3`, each
   made from the previous one in its repository) and asks for THE BUILD REPORT (`workspace/build-report.ts`,
   the fix-report pattern: ONE validator text, `~/.limn/build-report-check.cjs`, read out after every build
   turn; a self-report, never a gate). Seed rule 3 says to commit each planned PR on the branch PLAN.md
