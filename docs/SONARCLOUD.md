@@ -98,7 +98,13 @@ finding only when it agrees, and not to copy the list. The texts join the nonce-
 (`untrustedTexts`). A skipped review (nothing substantive) takes no snapshot.
 
 The tab's **SonarCloud** section (`ClaudeReviewSonarSection`, after CI check) reads the stored snapshot
-for the reviewed head — never SonarCloud on mount. Header: the gate chip and "50 of 132 issues"; an ⓘ
+for the PR's LATEST synced head (`review.head.currentHeadSha`, else the PR's head; the reviewed head only
+when neither is known) — never SonarCloud on mount. ⚠ It was the REVIEWED head until 2026-11-11: once
+the PR moved past the review, its Refresh asked about a commit SonarCloud no longer analyses ("Its
+latest analysis is of 069889c" — the latest commit) and the section stayed empty while AI Fix (which
+reads the latest head) listed the issues; and a post can only land on the latest head anyway. When the
+two differ a line says "For the latest commit, 069889c. The review above is of abc1234." The review's
+own prompt still used what was read when IT ran. Header: the gate chip and "50 of 132 issues"; an ⓘ
 holds the explanation. Actions: "Open in SonarCloud", Refresh, and "Post SonarCloud findings".
 Each card (`SonarIssueRow`) shows severity, type, rule, effort, the message, the place (a link into
 Changes when the PR touches the file), the flagged lines, and "How to fix" behind a chevron. The section
@@ -158,6 +164,18 @@ from adopting one as a finding's thread. An auto post adds
 on with its `sonar` kind (`AutoPostKinds.sonar`, default on inside auto-posting, itself on by
 default since 2026-11-04) and the PR passes `autoPostEligibility` (open, not a draft, not a bot's, and under scope
 `mine` yours). A decision NOT to post writes nothing, so a person can still post by hand.
+⚠ **THE LATE POST** (2026-11-11, `sonar/late-post.ts`): the run-end try usually finds "not analysed
+yet" — the review starts on the push, SonarCloud lands minutes later — and before this nothing tried
+again, so no Limn ever posted that commit's issues while AI Fix listed them. A per-minute sweep
+(`SONAR_LATE_CRON`, registered where auto review can run) lists, from rows, each head this account's
+Limn AUTO-reviewed (succeeded, `kind IS NULL`) in the last `SONAR_LATE_WINDOW_MS` (2 h) that is still the
+open PR's synced head, in a workspace with SonarCloud saved, whose snapshot is missing or read
+`not_analyzed` / `error` and is due a re-read by snapshot.ts's own clocks (`lateSonarDue`), at most
+`SONAR_LATE_PER_TICK` (10) a tick, and hands each to `maybeAutoPostSonar` — the SAME decision as at
+the run's end (switch, `sonar` kind, eligibility, claim before the write). An `ok` read leaves the list
+whether or not it posted; a state waiting cannot change (`no_project`, `unauthorized`, …) never joins it.
+A head this Limn did not auto-review (a manual run, a teammate's claim held it) is not posted
+automatically: its "Post SonarCloud findings" button is the way.
 
 The post route registers **locally only**: it posts through the reader's `gh` session, like every
 Claude Review post.

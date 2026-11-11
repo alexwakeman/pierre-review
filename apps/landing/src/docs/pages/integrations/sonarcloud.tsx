@@ -103,8 +103,9 @@ export default function Page(): JSX.Element {
           finding only where it agrees, and does not copy the list.
         </li>
         <li>
-          <strong>The AI Review tab:</strong> a <Ui>SonarCloud</Ui> section with the gate, each item with its place (a
-          link into Changes), its lines and <Ui>How to fix</Ui>.
+          <strong>The AI Review tab:</strong> a <Ui>SonarCloud</Ui> section for the pull request’s latest commit, with the
+          gate, each item with its place (a link into Changes), its lines and <Ui>How to fix</Ui>. When the review above
+          it is of an older commit, the section says so.
         </li>
         <li>
           <strong>AI Fix:</strong> the failing gate conditions and the issues appear under <Ui>SonarCloud issues</Ui> in
@@ -120,7 +121,8 @@ export default function Page(): JSX.Element {
         GitHub: 12 on the changed lines, 5 in the summary, 3 already there from an earlier commit.”
       </p>
       <p>
-        With auto-posting on, Limn posts SonarCloud’s findings after each auto review, unless you turn that off. See{' '}
+        With auto-posting on, Limn posts SonarCloud’s findings after each auto review, unless you turn that off. When
+        SonarCloud finishes after the review, Limn posts them when the analysis lands, for up to 2 hours. See{' '}
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting</DocLink>.
       </p>
 

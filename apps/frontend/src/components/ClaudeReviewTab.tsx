@@ -1661,11 +1661,13 @@ export function ClaudesReview({
         changedPaths={changedPaths}
         onOpenInChanges={onOpenInChanges}
       />
-      {/* SonarCloud's analysis of the reviewed head (docs/SONARCLOUD.md). Absent when the
-          workspace has no SonarCloud set up and nothing was stored. */}
+      {/* SonarCloud's analysis of the PR's LATEST commit (docs/SONARCLOUD.md § Claude Review) — the
+          commit AI Fix reads and the only one a post can land on; the reviewed commit only when the
+          latest is not known. Absent when the workspace has no SonarCloud set up and nothing was stored. */}
       <ClaudeReviewSonarSection
         prId={review.prId}
-        headSha={headSha}
+        headSha={review.head?.currentHeadSha ?? prHeadSha ?? headSha}
+        reviewedHeadSha={headSha}
         canPost={ai.enabled}
         changedPaths={changedPaths}
         onOpenInChanges={onOpenInChanges}

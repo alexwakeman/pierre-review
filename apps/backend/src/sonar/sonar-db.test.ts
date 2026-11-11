@@ -432,3 +432,55 @@ describe('auto-posting after an auto review', () => {
     expect(postReview).toHaveBeenCalledTimes(1);
   });
 });
+
+// THE LATE POST (late-post.ts): an auto-reviewed head whose SonarCloud analysis landed after the
+// review ended is tried again — and only while that could still change anything.
+describe('the late SonarCloud post', () => {
+  it('lists an auto-reviewed head with no usable read, while it is due; never an ok, a stuck, a moved or an old one', async () => {
+    const { eq, and } = await import('drizzle-orm');
+    const { lateSonarCandidates, runLateSonarPosts, SONAR_LATE_WINDOW_MS } = await import('./late-post.js');
+    const persist = await import('../review/claude-review/persist.js');
+    const ctx = { db, schema, log: { info() {}, warn() {}, error() {} } } as any;
+    const H4 = '7b'.repeat(20);
+    const now = Date.now();
+    await db.update(schema.pullRequests).set({ headSha: H4 }).where(eq(schema.pullRequests.id, prA)).execute();
+    const reviewAt = async (head: string, trigger: 'auto' | 'manual', finishedAt: Date) => {
+      const id = await persist.insertQueuedReview(ctx, prA, head, 'claude-opus-5-5', 1, [], trigger, 'claude', false, null);
+      await db.update(schema.claudeReviews).set({ status: 'succeeded', finishedAt }).where(eq(schema.claudeReviews.id, id)).execute();
+    };
+    const listed = async (at = now) => (await lateSonarCandidates(ctx, at)).filter((c) => c.prId === prA);
+
+    // A MANUAL review never auto-posts, so it is never listed.
+    await reviewAt(H4, 'manual', new Date(now));
+    expect(await listed()).toEqual([]);
+    // An AUTO review of the head, never read: listed.
+    await reviewAt(H4, 'auto', new Date(now));
+    expect(await listed()).toEqual([{ accountId: 1, prId: prA, headSha: H4 }]);
+
+    const snap = async (state: string, fetchedAt: Date) => {
+      await db.delete(schema.sonarSnapshots).where(and(eq(schema.sonarSnapshots.prId, prA), eq(schema.sonarSnapshots.headSha, H4))).execute();
+      await db.insert(schema.sonarSnapshots).values({ accountId: 1, prId: prA, headSha: H4, state, fetchedAt }).execute();
+    };
+    // "Not analysed yet", read just now: not due yet; two minutes later: due.
+    await snap('not_analyzed', new Date(now));
+    expect(await listed()).toEqual([]);
+    expect(await listed(now + 2 * 60_000)).toHaveLength(1);
+    // A state waiting will not change, or a good read: never.
+    await snap('no_project', new Date(now - 60 * 60_000));
+    expect(await listed()).toEqual([]);
+    await snap('ok', new Date(now - 60 * 60_000));
+    expect(await listed()).toEqual([]);
+    // Past the window: never.
+    await snap('not_analyzed', new Date(now - 60 * 60_000));
+    expect(await listed(now + SONAR_LATE_WINDOW_MS + 60_000)).toEqual([]);
+
+    // The tick hands each due head to the auto post (here a fake).
+    const sent: number[] = [];
+    await runLateSonarPosts(ctx, now, async (_c, a) => void sent.push(a.prId));
+    expect(sent).toEqual([prA]);
+
+    // The PR moved on: the old head is no longer listed.
+    await db.update(schema.pullRequests).set({ headSha: '5a'.repeat(20) }).where(eq(schema.pullRequests.id, prA)).execute();
+    expect(await listed()).toEqual([]);
+  });
+});

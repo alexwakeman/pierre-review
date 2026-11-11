@@ -24,6 +24,11 @@ no internals.
 
 ### Fixed
 
+- AI Review tab → SonarCloud: the section now shows the pull request's latest commit, the one AI Fix uses.
+  Before, it showed the reviewed commit, so once the pull request moved on it stayed empty and Refresh said
+  "SonarCloud has not analysed this commit yet" while naming the latest commit.
+- SonarCloud findings are now posted when SonarCloud finishes after the auto review, for up to 2 hours.
+  Before, the one try at the end of the review usually came too early, and nothing was posted.
 - Replies to a Codex finding were sent to Codex even while it was at its usage limit, so every replies check
   on them failed. They are now judged by Claude.
 

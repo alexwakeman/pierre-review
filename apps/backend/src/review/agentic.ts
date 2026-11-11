@@ -12,6 +12,8 @@ import { reconcileThreadChecksOnStartup } from './claude-review/thread-check.js'
 import { registerTicketReviewRoutes } from './ticket-review/routes.js';
 import { reconcileTicketReviewsOnStartup } from './ticket-review/manager.js';
 import { registerTicketReviewSweep } from './ticket-review/sweep.js';
+import { registerLateSonarPosts } from '../sonar/late-post.js';
+import { autoReviewAvailable } from './claude-review/auto.js';
 import { registerCiReviewRoutes } from './ci-review/routes.js';
 import { reconcileCiReviewsOnStartup } from './ci-review/manager.js';
 import { registerCiReviewSweep } from './ci-review/sweep.js';
@@ -100,6 +102,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   // The ticket review's cascade sweeper rides the same per-workspace auto-review switch; it
   // registers only where auto review can run (`autoReviewAvailable`).
   registerTicketReviewSweep(ctx);
+  // The LATE SonarCloud post: an auto-reviewed head whose analysis landed after the review ended
+  // (sonar/late-post.ts). Same gate as the ticket sweep.
+  if (autoReviewAvailable(ctx)) registerLateSonarPosts(ctx);
   // The CI review's sweeper rides the same switch: a check that fails on a PR's head is explained
   // at once (no settle, no CI hold — a failing check is final).
   registerCiReviewSweep(ctx);

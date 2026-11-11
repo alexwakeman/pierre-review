@@ -181,16 +181,24 @@ function postLine(s: SonarSnapshot, visible: boolean | null): string | null {
   return `${who} to GitHub${cut}.${later}`;
 }
 
-/** The review tab's SonarCloud section, for the reviewed head. */
+/**
+ * The review tab's SonarCloud section, for the PR's LATEST commit (2026-11-11). It was the reviewed
+ * commit: once the PR moved on, its Refresh asked SonarCloud about a commit it no longer analyses ("Its
+ * latest analysis is of 069889c" — the latest commit) and the section stayed empty while AI Fix, which
+ * reads the latest commit, listed the issues. A post can only land on the latest commit anyway.
+ */
 export function ClaudeReviewSonarSection({
   prId,
   headSha,
+  reviewedHeadSha = null,
   canPost,
   changedPaths,
   onOpenInChanges,
 }: {
   prId: number;
   headSha: string | null;
+  // The commit the review above is of; a line says so when it is not `headSha`.
+  reviewedHeadSha?: string | null;
   // Posting rides the local `gh` session.
   canPost: boolean;
   changedPaths: ReadonlySet<string>;
@@ -277,6 +285,11 @@ export function ClaudeReviewSonarSection({
         </>
       }
     >
+      {headSha != null && reviewedHeadSha != null && headSha !== reviewedHeadSha && (
+        <p className={REVIEW_META}>
+          For the latest commit, {headSha.slice(0, 7)}. The review above is of {reviewedHeadSha.slice(0, 7)}.
+        </p>
+      )}
       {snap == null ? (
         <p className={REVIEW_META}>Not read for this commit yet.</p>
       ) : snap.state !== 'ok' ? (
