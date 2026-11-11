@@ -1,12 +1,14 @@
 import type { CiReviewItem, CiReviewRefusal, ClaudeCiFailure, ClaudeReviewCiState } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import {
+  CI_EXCERPT_CHARS,
   isFailingCheck,
   planCiReview,
   selectCiFailures,
   type CiLogRead,
   type CiPlan,
 } from '../claude-review/ci-failures.js';
+import { isSonarCheckName, sonarCiExcerptText } from '../../sonar/ci-excerpt.js';
 
 // THE CI REVIEW'S INPUTS — read LIVE, server-side, before any model runs:
 //
@@ -22,6 +24,12 @@ import {
 // The selection, excerpting and budget are claude-review/ci-failures.ts's (one implementation, the
 // one the PR review used before this process existed). Refusals — nothing failing, no Actions log
 // at all, no log readable, checks unreadable — are decided HERE and stored; no model runs for them.
+//
+// SONARCLOUD (2026-11-11, sonar/ci-excerpt.ts). A failing SonarCloud check has no Actions log; with
+// SonarCloud saved for the workspace, its analysis of the head stands in for the log (the gate's
+// failing conditions and the most severe issues), so it is explained and auto-posted like any red
+// check — whether or not an AI review runs. Without SonarCloud saved, or with no analysis of THIS
+// commit, it stays `no_log` as before.
 //
 // CARRY (automatic runs only). An item already explained AT THIS HEAD for the SAME job by the
 // previous succeeded run is copied, not re-read: a set that grew by one check costs one log read
@@ -59,6 +67,9 @@ export async function readCiInputs(
     headSha: string;
     // The previous succeeded run's items AT THIS HEAD (automatic runs); null ⇒ carry nothing.
     prior: readonly CiReviewItem[] | null;
+    // Test seam: the SonarCloud stand-in text for a failing SonarCloud check (default: the head's
+    // snapshot, read now when there is no good read yet).
+    sonarText?: () => Promise<string | null>;
   },
 ): Promise<CiInputs> {
   const ci = ctx.ci;
@@ -74,8 +85,15 @@ export async function readCiInputs(
   const sel = selectCiFailures(checks.checks, checks.rollupState, a.headSha, prior);
   const ciState: ClaudeReviewCiState = { state: sel.state, checkCount: sel.checkCount };
   if (failing.length === 0) return { ok: false, reason: 'no_failures', failingChecks: [], ciState };
+  // A failing SonarCloud check: its analysis stands in for the log (never more than one stand-in read).
+  const sonarChecks = sel.noLog.filter((c) => isSonarCheckName(c.checkName));
+  let sonarText: string | null = null;
+  if (sonarChecks.length > 0) {
+    sonarText = await (a.sonarText ?? (() => headSonarText(ctx, a)))().catch(() => null);
+    if (sonarText != null) sel.noLog = sel.noLog.filter((c) => !isSonarCheckName(c.checkName));
+  }
   // Every failing check is outside GitHub Actions (and nothing is carried): there is no log to read.
-  if (sel.toRead.length === 0 && sel.overCap.length === 0 && sel.carried.length === 0) {
+  if (sel.toRead.length === 0 && sel.overCap.length === 0 && sel.carried.length === 0 && sonarText == null) {
     return { ok: false, reason: 'no_logs', failingChecks, ciState };
   }
   const reads: CiLogRead[] = await Promise.all(
@@ -93,6 +111,17 @@ export async function readCiInputs(
     }),
   );
   const plan = planCiReview(sel, reads);
+  if (sonarText != null) {
+    const lines = sonarText.split('\n').length;
+    for (const check of sonarChecks) {
+      plan.sent.push({
+        ref: `F${plan.sent.length + 1}`,
+        check,
+        step: null,
+        excerpt: { text: sonarText, shownLines: lines, windowLines: lines, windowTruncated: false, anchors: 0 },
+      });
+    }
+  }
   if (plan.sent.length === 0 && plan.carried.length === 0) {
     return { ok: false, reason: 'logs_unavailable', failingChecks, ciState };
   }
@@ -101,4 +130,28 @@ export async function readCiInputs(
     carriedExtras.set(carryKey(p.checkName, p.jobId), { path: p.path, line: p.line, suggestion: p.suggestion });
   }
   return { ok: true, plan, failingChecks, ciState, carriedExtras };
+}
+
+/**
+ * The SonarCloud stand-in for this head: the stored `ok` snapshot, else a read now (forced: the
+ * check failing means SonarCloud has finished, so an earlier "not analysed yet" is stale). null when
+ * SonarCloud is not saved for the PR's workspace or holds no analysis of this commit. Never throws.
+ */
+async function headSonarText(ctx: AgentContext, a: { accountId: number; prId: number; headSha: string }): Promise<string | null> {
+  if (!ctx.db || !ctx.schema) return null;
+  try {
+    const [{ readSonarAccessForPr, sonarConfigured }, { readSonarSnapshot }, { ensureSonarSnapshot }] = await Promise.all([
+      import('../../sonar/settings.js'),
+      import('../../sonar/store.js'),
+      import('../../sonar/snapshot.js'),
+    ]);
+    if (!sonarConfigured(await readSonarAccessForPr(ctx, a.accountId, a.prId))) return null;
+    let snap = await readSonarSnapshot(ctx, a.accountId, a.prId, a.headSha);
+    if (snap?.state !== 'ok') {
+      snap = await ensureSonarSnapshot(ctx, a.accountId, a.prId, a.headSha, { force: true, log: { warn: (m) => ctx.log.warn(m) } });
+    }
+    return sonarCiExcerptText(snap, CI_EXCERPT_CHARS);
+  } catch {
+    return null;
+  }
 }

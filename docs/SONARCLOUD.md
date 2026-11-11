@@ -199,6 +199,25 @@ cards above the issues. Each item is a seed candidate:
 The picker draws the review tab's own card (`card: {kind:'sonar', issue}`) with the tick box, under
 "SonarCloud issues". An auto fix follows `AutoFixInclude.sonar` (default on).
 
+## The CI review (2026-11-11)
+
+The CI review (docs/CLAUDE-REVIEW.md § CI review) runs on a red check whether or not any AI review of
+the head runs — so it is THE path that reacts when SonarCloud lands after the push. Before, a failing
+SonarCloud check ("SonarCloud Code Analysis") had no Actions log: it was `no_log`, and as the only red
+check the whole run refused `no_logs` with no model — the quality gate was never explained or posted.
+
+Now `ci-review/prepare.ts` gives each failing check whose name is SonarCloud's (`isSonarCheckName`) a
+STAND-IN for its log (`sonar/ci-excerpt.ts` `sonarCiExcerptText`): the stored `ok` snapshot of THE
+HEAD, else a forced read now (the check failing means SonarCloud has finished, so an earlier "not
+analysed yet" is stale) — the gate's failing conditions with their files, then the 25 most severe
+items, one line each, clipped to `CI_EXCERPT_CHARS`. It is sent like any excerpt (nonce-fenced, in the
+collision scan), reconciled, carried nowhere (no job id), and auto-posted by the CI review's own rules
+(§ CI review → auto-posting). No SonarCloud saved, or no analysis of THIS commit ⇒ `no_log` as before.
+⚠ A head whose failing set was already refused `no_logs` before this keeps that key: a Re-check (a
+click) runs it again; the next push is a new key.
+⚠ A PASSING gate is a green check: the CI review never runs for its issues. Those are the review's
+evidence when one runs, and the SonarCloud post's (§ Posting).
+
 ## Routes
 
 | Route | Tier | |

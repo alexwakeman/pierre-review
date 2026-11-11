@@ -24,6 +24,9 @@ no internals.
 
 ### Fixed
 
+- CI check: a failing SonarCloud check is now explained, from SonarCloud's own analysis of the commit
+  (the quality gate and the issues), and posted like any other failing check. Before, it had no log to read,
+  so when it was the only red check nothing was explained. This runs whether or not an AI review runs.
 - AI Review tab → SonarCloud: the section now shows the pull request's latest commit, the one AI Fix uses.
   Before, it showed the reviewed commit, so once the pull request moved on it stayed empty and Refresh said
   "SonarCloud has not analysed this commit yet" while naming the latest commit.

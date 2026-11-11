@@ -89,7 +89,9 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <Ui>The failing checks do not run on GitHub Actions, so there are no logs to read.</Ui> Such checks are listed
-          only.
+          only. The exception is SonarCloud: with{' '}
+          <DocLink to="integrations/sonarcloud">SonarCloud</DocLink> set up, a failing SonarCloud check is explained from
+          SonarCloud's own analysis of the commit, its quality gate and issues.
         </li>
         <li>
           <Ui>The failing jobs’ logs could not be read.</Ui>

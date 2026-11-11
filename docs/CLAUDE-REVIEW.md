@@ -2050,7 +2050,8 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   the account's rate budget (`isLimited` / `noteLimited`).
 - **Refusals — no model runs, stored as `failed` + `refused`** (with the keys, so the sweeper does
   not try the same inputs again): `no_failures` (a re-run passed), `no_logs` (every failing check is
-  outside GitHub Actions), `logs_unavailable` (no failing job's log could be read),
+  outside GitHub Actions — ⚠ except a SONARCLOUD check with SonarCloud saved and an analysis of THIS
+  head, whose analysis stands in for the log since 2026-11-11: docs/SONARCLOUD.md § The CI review), `logs_unavailable` (no failing job's log could be read),
   `checks_unreadable`, `head_unreadable` (the checkout failed). A THROWN run clears both keys and
   stays retryable; a restart orphan likewise. ⚠ A `no_failures` refusal judged nothing, so it keeps
   NO `trigger_key` (a check re-running at the live read fails again under the same name and must

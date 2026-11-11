@@ -4,6 +4,8 @@
 //   2. ⚠ Refusals are decided here, with no model: nothing failing, no Actions log at all, no log
 //      readable, the checks unreadable.
 //   3. Carry-forward: same head + same job ⇒ the earlier diagnosis, no log read, nothing sent.
+//   4. ⚠ A failing SONARCLOUD check is sent with SonarCloud's analysis in place of a log — alone it no
+//      longer refuses `no_logs`; with no analysis of this commit it stays `no_log`.
 //
 //   pnpm --filter @pierre-review/backend test ci-review/prepare
 import { describe, expect, it, vi } from 'vitest';
@@ -110,5 +112,31 @@ describe('readCiInputs', () => {
     expect(r.plan.sent).toHaveLength(0);
     expect(r.plan.carried).toEqual([expect.objectContaining({ checkName: 'bad', carried: true })]);
     expect([...r.carriedExtras.values()]).toEqual([{ path: 'src/a.ts', line: 3, suggestion: 's' }]);
+  });
+});
+
+describe('a failing SonarCloud check', () => {
+  const SONAR = 'SonarCloud Code Analysis';
+  it('⚠ is sent with SonarCloud\'s analysis in place of a log — alone, it no longer refuses', async () => {
+    const { ctx, readJobLog } = fakeCtx([check(SONAR, 'failure', null)]);
+    const r = await readCiInputs(ctx, { ...args(), sonarText: async () => 'Quality gate: failed.' });
+    if (!r.ok) throw new Error(`expected inputs, got ${r.reason}`);
+    expect(readJobLog).not.toHaveBeenCalled();
+    expect(r.plan.sent).toEqual([expect.objectContaining({ ref: 'F1', check: expect.objectContaining({ checkName: SONAR }) })]);
+    expect(r.plan.sent[0]!.excerpt.text).toBe('Quality gate: failed.');
+    expect(r.plan.unsent).toEqual([]);
+  });
+
+  it('beside a failing Actions job: both are sent; another third-party check stays no_log', async () => {
+    const { ctx } = fakeCtx([check('bad', 'failure', 2), check(SONAR, 'failure', null), check('ext', 'failure', null)]);
+    const r = await readCiInputs(ctx, { ...args(), sonarText: async () => 'Quality gate: failed.' });
+    if (!r.ok) throw new Error('expected inputs');
+    expect(r.plan.sent.map((x) => [x.ref, x.check.checkName])).toEqual([['F1', 'bad'], ['F2', SONAR]]);
+    expect(r.plan.unsent).toEqual([expect.objectContaining({ check: expect.objectContaining({ checkName: 'ext' }), reason: 'no_log' })]);
+  });
+
+  it('no analysis of this commit (or SonarCloud not saved): no_log, as before', async () => {
+    const { ctx } = fakeCtx([check(SONAR, 'failure', null)]);
+    expect(await readCiInputs(ctx, { ...args(), sonarText: async () => null })).toMatchObject({ ok: false, reason: 'no_logs' });
   });
 });
