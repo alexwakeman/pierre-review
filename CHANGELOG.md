@@ -19,6 +19,8 @@ no internals.
   again by itself after a push, a pull request joining or merging, or a new comment. The line says "No
   automatic story check — the last one found every criterion met". A change to the ticket text starts
   automatic checks again. Re-check still runs one now.
+- This Sprint → Refresh: no longer starts a story check for a ticket whose last check found every acceptance
+  criterion met, unless the ticket text has changed since.
 
 ## [1.0.24] - 2026-11-11
 

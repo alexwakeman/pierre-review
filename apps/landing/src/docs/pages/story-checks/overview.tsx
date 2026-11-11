@@ -159,7 +159,7 @@ export default function Page(): JSX.Element {
           <strong>Not when every criterion is met.</strong> When the latest check found every acceptance criterion
           met, Limn does not check the ticket again by itself. The line says &ldquo;No automatic story check — the
           last one found every criterion met&rdquo;. A change to the ticket text starts automatic checks again, because
-          the criteria may have changed.
+          the criteria may have changed. This Sprint&rsquo;s <Ui>Refresh</Ui> skips these tickets too.
         </li>
         <li>
           <strong>A daily limit.</strong> A workspace has up to 60 automatic story checks a day. After that the line

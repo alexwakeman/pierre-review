@@ -1,6 +1,6 @@
 // This Sprint's refresh → ticket checks (sprint-checks.ts), over fake deps. Pinned: only tickets with an
 // open or merged PR; skip a current check, a running one, a held one, an identical failed attempt and
-// a member count over the cap; never-checked first, then newest activity; at most `max` started, always
+// a member count over the cap, an all-met check (unless the story was edited); never-checked first, then newest activity; at most `max` started, always
 // 'manual'; no credential starts nothing and says why.
 import { describe, expect, it } from 'vitest';
 import { TICKET_REVIEW_MAX_PRS, type SprintGraphPr } from '@pierre-review/shared';
@@ -30,7 +30,7 @@ const member = (prId: number, updatedMs: number, state: 'open' | 'merged' = 'ope
   title: '',
   updatedAt: new Date(updatedMs),
 });
-const live = (fp: string, members: LiveMember[]): SprintCheckLive => ({ fingerprint: fp, members, ticketKey: null, ticketTitle: null });
+const live = (fp: string, members: LiveMember[]): SprintCheckLive => ({ fingerprint: fp, ticketHash: 'h', members, ticketKey: null, ticketTitle: null });
 const state = (o: Partial<{ latestFp: string; latestId: number; running: number; attempt: { id: number; fp: string } }>): TicketStateInputs => ({
   latest:
     o.latestFp != null
@@ -166,5 +166,35 @@ describe("a person's new comment", () => {
     expect(sprintCheckPickOf(cand, withRun(['met', 'not_met']), lv(['c1']))).toBeNull();
     expect(sprintCheckPickOf(cand, withRun(['met', 'not_met']), lv(['c1', 'c2']))).not.toBeNull();
     expect(sprintCheckPickOf(cand, withRun(['met', 'met_outside_code']), lv(['c1', 'c2']))).toBeNull();
+  });
+});
+
+describe('an all-met check', () => {
+  const cand = { ident: 'C-1', key: 'C-1', title: 'C1', prs: [pr(9, 'open')] };
+  const run = (statuses: string[]): TicketStateInputs => ({
+    latest: {
+      id: 1,
+      fingerprint: 'fp-old',
+      ticketHash: 'h',
+      alignment: null,
+      assessment: { alignment: 'aligned', summary: null, criteria: statuses.map((status) => ({ status })), missing: [], notRequested: [] } as never,
+      completedAt: null,
+      members: [],
+    },
+    runningRunId: null,
+    latestAttempt: null,
+  });
+
+  it('⚠ a stale check that found every criterion done is skipped; one with a gap is not', () => {
+    const pushed = live('fp-new', [member(9, 1)]);
+    expect(sprintCheckPickOf(cand, run(['met', 'met_outside_code']), pushed)).toBeNull();
+    expect(sprintCheckPickOf(cand, run(['met', 'partly_met']), pushed)).not.toBeNull();
+    // No criteria is not "all met".
+    expect(sprintCheckPickOf(cand, run([]), pushed)).not.toBeNull();
+  });
+
+  it('a story edit re-opens it', () => {
+    const edited: SprintCheckLive = { ...live('fp-new', [member(9, 1)]), ticketHash: 'h-edited' };
+    expect(sprintCheckPickOf(cand, run(['met', 'met']), edited)).not.toBeNull();
   });
 });

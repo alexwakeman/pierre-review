@@ -6,6 +6,7 @@ import { startTicketReview, ticketReviewHeld, type StartTicketArgs, type StartTi
 import { getTicketStateInputs, type TicketStateInputs } from './persist.js';
 import { jiraMemberIds, jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
+import { latestAllMet } from './auto-plan.js';
 
 // THIS SPRINT → "REFRESH" ALSO RUNS TICKET CHECKS (docs/CLAUDE-REVIEW.md § Ticket review → Started by
 // a sprint refresh). A MANUAL press of This Sprint's Refresh (POST /api/sprint-stories/refresh) starts
@@ -16,7 +17,10 @@ import { newCommentsMakeStale } from '../../tracker/comments.js';
 //   • WHO: sprint tickets (never ghosts) with ≥ 1 open or merged PR in this workspace, whose check is
 //     not CURRENT (the server fingerprint, the sweeper's own: story hash + members' heads/state — or a
 //     person's comment it did not see while it has a criterion not done, `newCommentsMakeStale`).
-//     Skipped: a run queued or running (DB or this process), ≤ 0 or > TICKET_REVIEW_MAX_PRS members,
+//     Skipped: a ticket whose latest check found every acceptance criterion done and whose story text
+//     has not changed since (the automatic check's ALL MET rule, auto-plan.ts `latestAllMet` — Refresh
+//     starts many checks at once; a single ticket's Re-check still runs one), a run queued or running
+//     (DB or this process), ≤ 0 or > TICKET_REVIEW_MAX_PRS members,
 //     no stored story, and a ticket whose newest attempt since the last success FAILED or was REFUSED
 //     on these very inputs (the sweeper's rule — pressing Refresh again must not re-bill a failure).
 //   • ORDER: never checked first, then stale; within each, the newest member PR activity first.
@@ -39,6 +43,8 @@ export interface SprintCheckCandidate {
 
 export interface SprintCheckLive {
   fingerprint: string;
+  /** The live story's hash — an all-met check is skipped only while it still matches (no story edit). */
+  ticketHash: string;
   members: LiveMember[];
   /** The people's comments now (ids) — a check that did not see one, with a criterion not done, is
    *  stale (tracker/comments.ts `newCommentsMakeStale`). Absent = not read (never stale by comments). */
@@ -75,6 +81,8 @@ export function sprintCheckPickOf(
 ): SprintCheckPick | null {
   if (live == null || live.members.length === 0 || live.members.length > TICKET_REVIEW_MAX_PRS) return null;
   if (st?.runningRunId != null) return null;
+  // ALL MET: every criterion done and the story text unchanged since — not re-checked by a refresh.
+  if (st?.latest != null && st.latest.ticketHash === live.ticketHash && latestAllMet(st.latest.assessment)) return null;
   if (
     st?.latest?.fingerprint === live.fingerprint &&
     !newCommentsMakeStale(st.latest, (live.commentIds ?? []).map((id) => ({ id })))
@@ -121,8 +129,10 @@ const DEFAULT_DEPS = (ctx: AgentContext): SprintCheckDeps => ({
     if (ticket == null) return null;
     const members = await readLiveMembers(ctx, accountId, memberIds);
     const commentIds = (await ticketCommentsFor(accountId, ident)).map((c) => c.id);
+    const hash = ticketHash(ticket);
     return {
-      fingerprint: fingerprint(ticketHash(ticket), members),
+      fingerprint: fingerprint(hash, members),
+      ticketHash: hash,
       members,
       commentIds,
       ticketKey: ticket.key ?? null,

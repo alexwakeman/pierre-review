@@ -141,7 +141,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Press <Ui>Refresh</Ui> to read the sprint again. With AI on, Refresh also starts up to three story checks
-          for tickets whose check is missing or out of date, and says how many it started.
+          for tickets whose check is missing or out of date, and says how many it started. A ticket whose last
+          check found every acceptance criterion met is skipped, unless the ticket text has changed since.
         </li>
         <li>
           Press <Kbd>⌘</Kbd> <Kbd>K</Kbd> and type a ticket key to show that ticket&rsquo;s story, or to run

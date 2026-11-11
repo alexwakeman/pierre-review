@@ -2359,7 +2359,9 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   at most `SPRINT_REFRESH_TICKET_CHECKS` (3) sprint tickets — never ghosts — that have ≥ 1 open or merged
   PR in the workspace and no CURRENT run (the server fingerprint). Skipped like the sweeper skips: queued
   / running / held, 0 or > `TICKET_REVIEW_MAX_PRS` members, no stored story, or a failed / refused attempt
-  on the SAME fingerprint since the last success. Order: never checked first, then stale; newest member
+  on the SAME fingerprint since the last success. ⚠ Also skipped (2026-11-11): ALL MET — the latest
+  succeeded run found every criterion done (`latestAllMet`) and the stored `ticket_hash` still equals the
+  live story's (a story edit re-opens it), the automatic check's own rule. Order: never checked first, then stale; newest member
   activity first within each (≤ 40 examined). Each goes through `startTicketReview(…, trigger: 'manual')`:
   a person pressed the button, so it is ahead of automatic items and NOT counted against
   `TICKET_REVIEW_DAILY_CAP`. No credential → `skipped: 'no_credential'`; the 202
@@ -2467,8 +2469,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   acceptance criterion done (shared `criterionDone`, ≥ 1 criterion; `auto-plan.ts` `latestAllMet`), the
   plan is `off` / `all_met` — no push, join, merge or comment re-checks it. Only a STORY EDIT
   (`story_edited` among the stale reasons) re-opens it, since the criteria themselves may have moved.
-  Missing items ("asked for outside the criteria") do not keep it open. A click (Re-check) and This
-  Sprint's Refresh (a person's press) still run one. A hold is said before a time that would not be kept (`ai_not_ready`,
+  Missing items ("asked for outside the criteria") do not keep it open. A click (Re-check) still runs one;
+  This Sprint's Refresh skips it (§ Started by a sprint refresh). A hold is said before a time that would not be kept (`ai_not_ready`,
   `over_budget`, `daily_limit` come before `settling`).
 - **The wait is said, in one line, in both places** — the PR pane's AI Review tab (`TicketCoverage.tsx`)
   and the Ticket / story view (`OpenPrsCards.tsx` `StoryCurrencyLine`), through ONE component,
