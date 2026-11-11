@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-11-11
+
 ### Added
 
 - Settings → AI review → Auto AI Fix: "Merge conflicts with the base branch" under Always include (off
