@@ -16,6 +16,8 @@
 //      linked minutes apart gets ONE first check with all of them.
 //  10. A person's comment the latest check did not see re-checks it (cause 'commented', the grace
 //      window from the comment) ONLY while it has a criterion not done.
+//  11. ⚠ ALL MET: a check that found every criterion done is never re-run automatically by a push
+//      ('off', 'all_met'); one with a criterion not done is.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/sweep-db
 import { rmSync } from 'node:fs';
@@ -659,5 +661,19 @@ describe("a person's comment the latest check did not see", () => {
     // The same new comment on a check whose criteria are all DONE (met + met outside code): nothing to re-check.
     await seedRun(['met', 'met_outside_code']);
     expect((await state(nowMs + 61_000))!.plan.status).toBe('up_to_date');
+  });
+
+  it('⚠ a push never re-checks a ticket whose latest check found every criterion done', async () => {
+    await endQueuedRuns();
+    const nowMs = Date.now();
+    comments[TC] = [{ id: 'c1', createdAt: new Date(nowMs - 3_600_000).toISOString() }];
+    await seedRun(['met', 'met_outside_code']);
+    await push('z', `h_allmet_${nowMs}`, nowMs - 5 * 60_000);
+    const all = (await state(nowMs))!;
+    expect(all.plan).toMatchObject({ status: 'off', reason: 'all_met', due: false });
+    // The same push on a check with a criterion not done: due.
+    await seedRun(['met', 'partly_met']);
+    await push('z', `h_gap_${nowMs}`, nowMs - 5 * 60_000);
+    expect((await state(nowMs))!.plan.status).toBe('due');
   });
 });

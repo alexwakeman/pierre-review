@@ -94,6 +94,7 @@ describe('why it waits', () => {
     expect(w('held', 'over_budget')).toBe('No automatic story check — the AI spend limit is reached');
     expect(w('off', 'auto_off')).toBe('No automatic story check — auto review is off in this workspace');
     expect(w('off', 'already_tried')).toBe('No automatic story check — the last one failed on these PRs');
+    expect(w('off', 'all_met')).toBe('No automatic story check — the last one found every criterion met');
     expect(ticketAutoCheckWords({ status: 'up_to_date', reason: null, startsAt: null, lastChange: null }, () => null, now)).toBeNull();
     expect(ticketAutoCheckWords({ status: 'running', reason: null, startsAt: null, lastChange: null }, () => null, now)).toBeNull();
     expect(ticketAutoCheckWords(undefined, () => null, now)).toBeNull();

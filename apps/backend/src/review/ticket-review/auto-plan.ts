@@ -1,4 +1,5 @@
 import {
+  criterionDone,
   TICKET_AUTO_GRACE_MS,
   TICKET_AUTO_MAX_WAIT_MS,
   type TicketAutoChangeKind,
@@ -21,6 +22,9 @@ import {
 //   "PR joined" re-check).
 //   THE CEILING. A burst — changes each less than the window apart, after the latest run — is checked
 //   at most TICKET_AUTO_MAX_WAIT_MS (20 min) after its first change, so constant pushes still get one.
+//   ALL MET. When the latest succeeded check found EVERY acceptance criterion done (`criterionDone`),
+//   nothing re-checks it automatically — pushes, joins, merges and comments alike — until the story
+//   text changes (its criteria may then differ). A click (Re-check) still runs one.
 //   THE LIMITS. The workspace's daily cap (not for a ticket with a PR the reader owns) and the spend
 //   budget. NO per-ticket limit (removed 2026-11-09: it counted joins and story edits as pushes).
 
@@ -45,6 +49,9 @@ export interface TicketAutoPlanInputs {
   alreadyTried: boolean;
   // No succeeded run yet.
   first: boolean;
+  // The latest succeeded run found every acceptance criterion done (≥ 1 criterion) and the story text
+  // has not changed since: no automatic re-check.
+  allMet: boolean;
   // A first check's onboarding floor: a member opened after auto review was switched on, or the kick.
   floorOk: boolean;
   aiReady: boolean;
@@ -65,6 +72,14 @@ export interface TicketAutoPlan {
   lastChange: TicketAutoChange | null;
   // The sweeper queues the check now.
   due: boolean;
+}
+
+/** Every acceptance criterion of a stored assessment is done (met, or met outside code). No criteria = false. */
+export function latestAllMet(
+  assessment: { criteria?: ReadonlyArray<{ status: string }> | null } | null | undefined,
+): boolean {
+  const criteria = assessment?.criteria ?? [];
+  return criteria.length > 0 && criteria.every((c) => criterionDone(c.status));
 }
 
 /** The next 00:00 UTC after `nowMs` — when the daily cap resets. */
@@ -115,6 +130,7 @@ export function ticketAutoCheckPlan(inp: TicketAutoPlanInputs, nowMs: number): T
   if (!inp.needsRun) return out('up_to_date');
   if (!inp.autoOn) return out('off', 'auto_off');
   if (inp.tooManyPrs) return out('off', 'too_many_prs');
+  if (inp.allMet) return out('off', 'all_met');
   if (inp.alreadyTried) return out('off', 'already_tried');
   if (inp.first && !inp.floorOk) return out('off', 'no_floor');
   // What holds it past the window is said first: a time that will not be kept is never promised.

@@ -7,7 +7,7 @@ import { fingerprint, readLiveMembers, staleReasons, ticketHash, type LiveMember
 import { countAutoTicketReviewsSince, getTicketStateInputs } from './persist.js';
 import { jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
-import { ticketAutoCheckPlan, type TicketAutoChange, type TicketAutoPlan } from './auto-plan.js';
+import { latestAllMet, ticketAutoCheckPlan, type TicketAutoChange, type TicketAutoPlan } from './auto-plan.js';
 
 // THE AUTOMATIC STORY CHECK'S INPUTS, read from stored rows — ONE reader for the sweeper (sweep.ts,
 // which acts on the plan) and the states route (routes.ts, which shows it). The rule itself is the
@@ -164,6 +164,9 @@ export async function loadTicketAutoState(
   const reasons: TicketReviewStaleReason[] =
     st?.latest != null ? staleReasons(st.latest, { ticketHash: liveHash, members: live }).reasons : [];
   if (commentsStale) reasons.push('new_comments');
+  // ALL MET: the latest succeeded check found every criterion done — no automatic re-check until the
+  // story text changes (its criteria may then differ). A click still runs one.
+  const allMet = !first && !reasons.includes('story_edited') && latestAllMet(st?.latest?.assessment);
 
   // ---- the changes the grace window counts from ----
   const liveIds = live.map((m) => m.prId);
@@ -221,6 +224,7 @@ export async function loadTicketAutoState(
       tooManyPrs: live.length > TICKET_REVIEW_MAX_PRS,
       alreadyTried,
       first,
+      allMet,
       floorOk,
       aiReady: a.aiReady,
       overBudget: a.overBudget,

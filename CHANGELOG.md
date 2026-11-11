@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Story check: when the latest check found every acceptance criterion met, Limn no longer checks the ticket
+  again by itself after a push, a pull request joining or merging, or a new comment. The line says "No
+  automatic story check — the last one found every criterion met". A change to the ticket text starts
+  automatic checks again. Re-check still runs one now.
+
 ## [1.0.24] - 2026-11-11
 
 ### Fixed

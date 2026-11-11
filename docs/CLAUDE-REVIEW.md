@@ -2463,7 +2463,12 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   the spend budget. ⚠ **NO PER-TICKET LIMIT** (removed 2026-11-09): the old "3 push re-checks per
   ticket per day" counted every `cascade` row, so a PR joining and two story edits used it up and ten
   real pushes waited until midnight; the grace window now folds a burst into one check and the spend
-  budget is the money brake. A hold is said before a time that would not be kept (`ai_not_ready`,
+  budget is the money brake. ⚠ **ALL MET STOPS IT** (2026-11-11): when the latest SUCCEEDED run found every
+  acceptance criterion done (shared `criterionDone`, ≥ 1 criterion; `auto-plan.ts` `latestAllMet`), the
+  plan is `off` / `all_met` — no push, join, merge or comment re-checks it. Only a STORY EDIT
+  (`story_edited` among the stale reasons) re-opens it, since the criteria themselves may have moved.
+  Missing items ("asked for outside the criteria") do not keep it open. A click (Re-check) and This
+  Sprint's Refresh (a person's press) still run one. A hold is said before a time that would not be kept (`ai_not_ready`,
   `over_budget`, `daily_limit` come before `settling`).
 - **The wait is said, in one line, in both places** — the PR pane's AI Review tab (`TicketCoverage.tsx`)
   and the Ticket / story view (`OpenPrsCards.tsx` `StoryCurrencyLine`), through ONE component,

@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { TICKET_AUTO_GRACE_MS, TICKET_AUTO_MAX_WAIT_MS } from '@pierre-review/shared';
 import {
+  latestAllMet,
   nextUtcMidnightMs,
   ticketAutoCheckPlan,
   ticketAutoDueAt,
@@ -26,6 +27,7 @@ const base = (over: Partial<TicketAutoPlanInputs> = {}): TicketAutoPlanInputs =>
   tooManyPrs: false,
   alreadyTried: false,
   first: false,
+  allMet: false,
   floorOk: true,
   aiReady: true,
   overBudget: false,
@@ -103,6 +105,22 @@ describe('ticketAutoCheckPlan', () => {
     expect(ticketAutoCheckPlan(base({ first: true, lastRunAtMs: null }), at(1)).reason).toBe('settling');
   });
 
+  it('⚠ all met: a ticket whose latest check found every criterion done is never re-checked by itself', () => {
+    // Even past the window, with room and budget: off, never due.
+    expect(ticketAutoCheckPlan(base({ allMet: true }), at(30)).due).toBe(false);
+    // Running / up to date still read first.
+    expect(ticketAutoCheckPlan(base({ allMet: true, running: true }), at(5)).status).toBe('running');
+    expect(ticketAutoCheckPlan(base({ allMet: true, needsRun: false }), at(5)).status).toBe('up_to_date');
+  });
+
+  it('latestAllMet: every criterion done (met or met outside code); no criteria is not "all met"', () => {
+    expect(latestAllMet({ criteria: [{ status: 'met' }, { status: 'met_outside_code' }] })).toBe(true);
+    expect(latestAllMet({ criteria: [{ status: 'met' }, { status: 'partly_met' }] })).toBe(false);
+    expect(latestAllMet({ criteria: [{ status: 'met' }, { status: 'unclear' }] })).toBe(false);
+    expect(latestAllMet({ criteria: [] })).toBe(false);
+    expect(latestAllMet(null)).toBe(false);
+  });
+
   it('running and up to date come first', () => {
     expect(ticketAutoCheckPlan(base({ running: true }), at(5)).status).toBe('running');
     expect(ticketAutoCheckPlan(base({ needsRun: false }), at(5)).status).toBe('up_to_date');
@@ -112,6 +130,7 @@ describe('ticketAutoCheckPlan', () => {
     expect(ticketAutoCheckPlan(base({ autoOn: false }), at(5))).toMatchObject({ status: 'off', reason: 'auto_off' });
     expect(ticketAutoCheckPlan(base({ tooManyPrs: true }), at(5)).reason).toBe('too_many_prs');
     expect(ticketAutoCheckPlan(base({ alreadyTried: true }), at(5)).reason).toBe('already_tried');
+    expect(ticketAutoCheckPlan(base({ allMet: true }), at(5))).toMatchObject({ status: 'off', reason: 'all_met', due: false });
     expect(ticketAutoCheckPlan(base({ first: true, floorOk: false }), at(5)).reason).toBe('no_floor');
     // The floor is a first check's rule only.
     expect(ticketAutoCheckPlan(base({ first: false, floorOk: false }), at(5)).status).toBe('due');

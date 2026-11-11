@@ -156,6 +156,12 @@ export default function Page(): JSX.Element {
           why no check will start: &ldquo;No automatic story check — auto review is off in this workspace&rdquo;.
         </li>
         <li>
+          <strong>Not when every criterion is met.</strong> When the latest check found every acceptance criterion
+          met, Limn does not check the ticket again by itself. The line says &ldquo;No automatic story check — the
+          last one found every criterion met&rdquo;. A change to the ticket text starts automatic checks again, because
+          the criteria may have changed.
+        </li>
+        <li>
           <strong>A daily limit.</strong> A workspace has up to 60 automatic story checks a day. After that the line
           says &ldquo;Story check starts at 00:00 UTC&rdquo;. Tickets with your own pull requests are not limited.
         </li>
@@ -165,7 +171,8 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Tip>
-        <Ui>Re-check</Ui> is never held by the wait, the limit or the budget. It always starts a check now.
+        <Ui>Re-check</Ui> is never held by the wait, the limit, the budget or an all-met check. It always starts a
+        check now.
       </Tip>
 
       <H2 id="post-the-gaps">Post the gaps to GitHub</H2>

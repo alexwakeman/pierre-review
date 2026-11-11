@@ -327,7 +327,7 @@ over STORED rows (`auto-inputs.ts`), so it survives a restart and the time shown
 `status` `up_to_date` · `running` · `waiting` (`reason` `settling` with `startsAt` = 2 quiet minutes
 after `lastChange`, or `lane_full`) · `due` (starts within a minute) · `held` (`daily_limit` with
 `startsAt` = 00:00 UTC, `over_budget`, `ai_not_ready`) · `off` (`auto_off`, `too_many_prs`,
-`no_floor`, `already_tried`). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed'|'commented',
+`no_floor`, `already_tried`, `all_met` — the latest check found every criterion done; only a story edit re-opens it). `lastChange {prId, kind: 'pushed'|'joined'|'merged'|'ticket_changed'|'commented',
 at}`. Absent when it could not be read (the read never fails on it).
 (Replaced `waiting` / `TicketReviewWait`, 2026-11-09.)
 `newComments` (optional) counts the ticket's people comments the latest succeeded run was not given

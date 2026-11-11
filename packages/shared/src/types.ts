@@ -9006,7 +9006,8 @@ export interface TicketReviewState {
 //   held        it will not start until `reason` clears: 'daily_limit' (`startsAt` = 00:00 UTC),
 //               'over_budget', 'ai_not_ready'
 //   off         no automatic check: 'auto_off', 'too_many_prs', 'no_floor' (its PRs predate auto
-//               review), 'already_tried' (the last automatic attempt failed on these same PRs)
+//               review), 'already_tried' (the last automatic attempt failed on these same PRs),
+//               'all_met' (the latest check found every criterion done; only a story edit re-opens it)
 export type TicketAutoCheckStatus = 'up_to_date' | 'running' | 'waiting' | 'due' | 'held' | 'off';
 export type TicketAutoCheckReason =
   | 'settling'
@@ -9017,7 +9018,8 @@ export type TicketAutoCheckReason =
   | 'auto_off'
   | 'too_many_prs'
   | 'no_floor'
-  | 'already_tried';
+  | 'already_tried'
+  | 'all_met';
 // The newest change the grace window counts from: a push to a member PR (or its opening), a PR
 // joining the ticket, a member merging, the ticket itself changing (story text, a PR leaving), or a
 // person's comment the latest check did not see (only while that check has a criterion not done).
