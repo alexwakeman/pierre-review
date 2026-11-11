@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-11-11
+
 ### Added
 
 - Settings → AI: **Use my API keys first**. Tick it to run Claude on the `ANTHROPIC_API_KEY` in Limn's
