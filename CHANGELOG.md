@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-11-11
+
 ### Changed
 
 - Story check: when the latest check found every acceptance criterion met, Limn no longer checks the ticket
