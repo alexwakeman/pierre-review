@@ -389,6 +389,7 @@ session manager (WP7) calls, in order: `resolveWorkspaceLayout` (the SAME comput
 | `scan.ts` | The folder walk: clones at depth ≤ 3, Claude projects at depth ≤ 6 (entered only where a key leads). Dot-folders, `node_modules` and symlinks skipped; a clone inside a clone is not one; ≤ 20,000 folders and 5 s, else `truncated`. No `git` process. |
 | `layout.ts` | The match (BY REMOTE, case-insensitive, the shallowest clone first; the rest `alsoAt`) and the layout. Pure. |
 | `memories.ts` | The reader's Claude files: memory projects, `~/.claude/CLAUDE.md`, `~/.claude/skills/`. |
+| `project-skills.ts` | The repositories' own skills (`…/.claude/skills/<name>/SKILL.md`), from the clone cache's tree: counted for the start panel, named in the seed. |
 | `check.ts` | `resolveWorkspaceLayout` + `toFolderCheck` (the Settings check's wire shape). |
 | `ticket.ts` | The ticket, read FRESH (below). |
 | `seed.ts` | THE ONE FOLD of everything the agent is told. Goldens: `__fixtures__/seed-*.md`. |
@@ -481,6 +482,15 @@ session); the seed's rule 6 tells both agents to read each changed repository's 
 (default on), and the found folder's own CLAUDE.md (outside every repository) quoted in the seed under the
 same switch; `~/.claude/skills/**` → `/home/agent/.claude/skills/` only when the workspace opts in (≤ 1 MB
 a file, 16 MB in all; an executable keeps its bit).
+
+**Project skills** (`project-skills.ts`): the skills a repository keeps in its own tree,
+`<any folder>/.claude/skills/<name>/SKILL.md` (not under `node_modules` / `vendor` / `third_party` /
+`bower_components`, ≤ 50 per repository), are in each checkout already — nothing is copied for them. Claude
+Code loads only the start folder's skills and Codex none, so the seed NAMES each one at its sandbox path
+("Read a skill's SKILL.md when its task comes up"), for both providers. Read from Limn's clone cache at the
+session's base commit (`git ls-tree`, file names only, lazy fetch off); a skill's text is repository content
+and never enters the seed. The build tab's start panel counts them, with the memories, CLAUDE.md and the
+reader's skills, before Start (`GET …/sandbox/project-skills`; frontend `lib/sessionInherits.ts`).
 
 **The ticket** (`ticket.ts`, `tracker/open-points-ticket.ts`): read FRESH at session start — a session is
 a RUN the reader started, the same exception a PR review run makes (docs/TRACKERS.md § Open points). With

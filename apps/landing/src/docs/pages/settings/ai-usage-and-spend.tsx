@@ -34,7 +34,8 @@ export default function Page(): JSX.Element {
       </ol>
       <p>
         When both exist, Limn uses the login and hides the key from the run, so a subscription run is never billed to
-        the key by accident. To use the key first, start Limn with <code>LIMN_AI_USE_API_KEY=true</code>. Limn stores
+        the key by accident. To use the key first, tick <Ui>Use my API keys first</Ui> in Settings → AI (or start Limn
+        with <code>LIMN_AI_USE_API_KEY=true</code>). Limn stores
         neither: it reads the login Claude Code already keeps, and the key only from the environment.
       </p>
       <Note title="Different from Claude Code on its own">
@@ -44,7 +45,7 @@ export default function Page(): JSX.Element {
           API key for authentication instead of your Claude subscription (Pro, Max, Ultra, Team, or Enterprise plans),
           resulting in API usage charges rather than using your subscription&rsquo;s included usage.
         </Quote>
-        Inside Limn the order is reversed, as above, unless you set <code>LIMN_AI_USE_API_KEY=true</code>.
+        Inside Limn the order is reversed, as above, unless you tick <Ui>Use my API keys first</Ui>.
       </Note>
       <H3>Codex</H3>
       <p>

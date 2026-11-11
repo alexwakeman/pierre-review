@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import {
   isAiEffort,
   isAiProviderSetting,
+  type AiApiKeySettingBody,
+  type AiApiKeySettingResponse,
   type AiEffortSettingBody,
   type AiEffortSettingResponse,
   type AiProviderSettingBody,
@@ -10,7 +12,8 @@ import {
 import { config } from '../../config.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { activeProviderId, aiProviderEnvSetting, aiProviderSettingStatus } from '../../ai/provider-setting.js';
-import { writeStoredAiEffort, writeStoredAiProvider } from '../../ai/provider-store.js';
+import { writeStoredAiEffort, writeStoredAiProvider, writeStoredPrefersApiKey } from '../../ai/provider-store.js';
+import { apiKeySettingStatus, prefersApiKeyEnvSetting } from '../../ai/credentials.js';
 import { aiEffortEnvSetting, aiEffortSettingStatus } from '../../ai/effort.js';
 
 // THE AI PROVIDER CHOICE (Settings → AI; docs/CODEX-PLAN.md Phase 4). One per machine, like the spend
@@ -28,6 +31,11 @@ import { aiEffortEnvSetting, aiEffortSettingStatus } from '../../ai/effort.js';
 //     `value`: one of the five levels, or null for Default. 400 on anything else. 409 while REVIEW_EFFORT
 //     is set (the environment wins). Same rules as the provider: one column, held in memory
 //     (ai/effort.ts), reaches the next run; `read` tier.
+//
+//   PUT /api/ai/api-key  AiApiKeySettingBody → AiApiKeySettingResponse  (Settings → AI → "Use my API keys
+//     first"). `value`: boolean, else 400. 409 while LIMN_AI_USE_API_KEY is set to true or false (the
+//     environment wins). Only the tick is stored — never a key. Held in memory (ai/credentials.ts), so
+//     the next model call picks its credential by it; `read` tier.
 export async function aiProviderRoutes(app: FastifyInstance): Promise<void> {
   if (!config.aiEnabled) return;
 
@@ -61,6 +69,20 @@ export async function aiProviderRoutes(app: FastifyInstance): Promise<void> {
     }
     await writeStoredAiEffort(value ?? null, accountId);
     const res: AiEffortSettingResponse = { setting: aiEffortSettingStatus() };
+    return res;
+  });
+
+  app.put('/api/ai/api-key', async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const value = (req.body as Partial<AiApiKeySettingBody> | null | undefined)?.value;
+    if (typeof value !== 'boolean') {
+      return reply.code(400).send({ error: 'BadRequest', message: 'value must be true or false.' });
+    }
+    if (prefersApiKeyEnvSetting() != null) {
+      return reply.code(409).send({ error: 'SetByEnvironment', message: 'LIMN_AI_USE_API_KEY is set, so it decides.' });
+    }
+    await writeStoredPrefersApiKey(value, accountId);
+    const res: AiApiKeySettingResponse = { setting: apiKeySettingStatus() };
     return res;
   });
 }

@@ -51,7 +51,11 @@ go through). It lives in **`ai/credentials.ts`** and nowhere else:
    runs hand it to the Agent SDK; one-shot completions call the Anthropic API directly (the SDK
    loaded through `ai/runtime.ts` `loadAnthropicSdk`).
 
-`LIMN_AI_USE_API_KEY=true` flips the order when a key is set. `LIMN_AI_DISABLED=true` refuses
+"Use my API keys first" (Settings → AI; `accounts.ai_use_api_key`, migration 0184, held in memory by
+`ai/credentials.ts` and written by `PUT /api/ai/api-key`) flips the order when a key is set; an explicitly
+set `LIMN_AI_USE_API_KEY` (`true` / `false`) wins and locks the box. `MeResponse.ai.apiKeySetting` carries
+the tick and WHETHER `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are set, never a value. Codex: the box never
+moves a ChatGPT sign-in onto the refused key route. `LIMN_AI_DISABLED=true` refuses
 everything (checked by the callers; the ladder answers only "which credential"). Nothing is
 stored; the ladder is read at call time, so an env change takes effect on the next call.
 

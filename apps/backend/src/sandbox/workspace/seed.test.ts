@@ -173,6 +173,17 @@ describe('the seed', () => {
     expect(s.claudeMd).toContain('The reader brought no notes for this session.');
   });
 
+  it("names the repositories' own skills for both providers, with or without the reader's notes", () => {
+    const projectSkills = [{ repo: 'acme/api', name: 'run-tests', path: '/work/api/.claude/skills/run-tests/SKILL.md' }];
+    for (const s of [buildSeed(input({ projectSkills })), buildSeed(input({ projectSkills, memories: [], userClaudeMd: null, folderClaudeMd: null, skills: [] }))]) {
+      for (const md of [s.claudeMd, s.agentsMd]) {
+        expect(md).toContain('The repositories keep their own skills.');
+        expect(md).toContain('run-tests (acme/api): `/work/api/.claude/skills/run-tests/SKILL.md`');
+      }
+    }
+    expect(buildSeed(input()).claudeMd).not.toContain('The repositories keep their own skills.');
+  });
+
   it('renders a ticket with no numbered list, no criteria, and a stale copy', () => {
     const t = ticketMarkdown({ ...ticket, criteria: [], fresh: false, readAt: '2026-11-01T00:00:00.000Z', openPoints: [] }, 'implement');
     expect(t).toContain("This is Limn's stored copy from 2026-11-01T00:00:00.000Z.");

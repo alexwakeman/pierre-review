@@ -57,8 +57,8 @@ export default function Page(): JSX.Element {
           permanent, export <code>ANTHROPIC_API_KEY</code> in your shell profile.
         </li>
         <li>
-          If you are also signed in to Claude Code and want the key to be used, add{' '}
-          <code>LIMN_AI_USE_API_KEY=true</code> the same way.
+          If you are also signed in to Claude Code and want the key to be used, tick{' '}
+          <Ui>Use my API keys first</Ui> in Settings → AI (or add <code>LIMN_AI_USE_API_KEY=true</code> the same way).
         </li>
         <li>
           The Claude line reads <Ui>Using ANTHROPIC_API_KEY.</Ui>
@@ -70,7 +70,7 @@ export default function Page(): JSX.Element {
       <H3>When you have both</H3>
       <p>
         Limn uses the login first and hides the key from those runs, so nothing is billed to the key by accident. To
-        use the key first, start Limn with <code>LIMN_AI_USE_API_KEY=true</code>. See{' '}
+        use the key first, tick <Ui>Use my API keys first</Ui> in Settings → AI. See{' '}
         <DocLink to="settings/ai-usage-and-spend#which-account">Which account Limn uses</DocLink>.
       </p>
 

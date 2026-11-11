@@ -185,6 +185,7 @@ import type {
   AiProviderSettingResponse,
   AiEffort,
   AiEffortSettingResponse,
+  AiApiKeySettingResponse,
   CodexLoginMethod,
   CodexLoginResponse,
   CodexLogoutResponse,
@@ -258,6 +259,7 @@ import type {
   FlowPointersResponse,
   SandboxComposeFiles,
   SandboxFolderCheck,
+  SandboxProjectSkills,
   SandboxRunningStatus,
   SandboxRuntimeStatus,
   SandboxStopAllResult,
@@ -636,6 +638,8 @@ export const api = {
     fetch(`/api/workspaces/${id}/sandbox/check`, jsonBody('POST', {})).then((r) => handle<SandboxFolderCheck>(r)),
   // The compose files of each workspace repository, from Limn's own clone cache (no network).
   sandboxComposeFiles: (id: number) => get<SandboxComposeFiles>(`/api/workspaces/${id}/sandbox/compose-files`),
+  // The skills each workspace repository keeps in its own tree, from Limn's own clone cache (no network).
+  sandboxProjectSkills: (id: number) => get<SandboxProjectSkills>(`/api/workspaces/${id}/sandbox/project-skills`),
   addSandboxAllowedHost: (id: number, rule: string) =>
     fetch(`/api/workspaces/${id}/sandbox/allowed-hosts`, jsonBody('POST', { rule })).then((r) => handle<SandboxWorkspaceSettings>(r)),
   removeSandboxAllowedHost: (id: number, rule: string) =>
@@ -1017,6 +1021,9 @@ export const api = {
   // set. The read side is `/api/me` (`ai.effortSetting`): invalidate `['me']` after a write.
   setAiEffort: (value: AiEffort | null) =>
     fetch('/api/ai/effort', jsonBody('PUT', { value })).then((r) => handle<AiEffortSettingResponse>(r)),
+  // "Use my API keys first" (Settings → AI). Only the tick is sent; the keys stay in Limn's environment.
+  setAiApiKey: (value: boolean) =>
+    fetch('/api/ai/api-key', jsonBody('PUT', { value })).then((r) => handle<AiApiKeySettingResponse>(r)),
   // THE CODEX SIGN-IN for Limn's own Codex home (backend api/routes/ai-codex.ts). POST starts (or
   // joins) one; poll the GET while `login.state === 'waiting'`.
   codexLogin: () => get<CodexLoginResponse>('/api/ai/codex/login'),

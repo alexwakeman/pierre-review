@@ -5,6 +5,7 @@
 //   PUT  /api/workspaces/:id/sandbox                    body SandboxWorkspaceSettingsBody → SandboxWorkspaceSettings
 //   POST /api/workspaces/:id/sandbox/check              (no body) → SandboxFolderCheck
 //   GET  /api/workspaces/:id/sandbox/compose-files      → SandboxComposeFiles
+//   GET  /api/workspaces/:id/sandbox/project-skills     → SandboxProjectSkills
 //   POST /api/workspaces/:id/sandbox/allowed-hosts      body { rule } → SandboxWorkspaceSettings
 //   DELETE /api/workspaces/:id/sandbox/allowed-hosts    body { rule } → SandboxWorkspaceSettings
 //
@@ -127,6 +128,22 @@ export interface SandboxComposeRepoFiles {
 export interface SandboxComposeFiles {
   workspaceId: number;
   repos: SandboxComposeRepoFiles[];
+}
+
+/** The skills one workspace repository keeps in its own tree (`…/.claude/skills/<name>/SKILL.md`), read
+ *  from Limn's own copy (file names only, no network). They come into the sandbox with the repository. */
+export interface SandboxProjectSkillsRepo {
+  /** `owner/name`. */
+  repo: string;
+  /** Shallowest first; `path` is relative to the repository root. */
+  skills: Array<{ name: string; path: string }>;
+  /** false: Limn has no copy of this repository on this computer yet. */
+  copied: boolean;
+}
+
+export interface SandboxProjectSkills {
+  workspaceId: number;
+  repos: SandboxProjectSkillsRepo[];
 }
 
 // ---- the container runtime, for the build tab and Settings → Sandbox ----------------------------------

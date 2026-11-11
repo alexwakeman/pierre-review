@@ -150,6 +150,10 @@ test.describe('Implement story', () => {
     await expect(view.getByTestId('story-build-start')).toBeVisible();
     await expect(view.getByTestId('story-build-start')).toContainText('It plans first.');
     await expect(view.getByTestId('sandbox-runtime-line')).toContainText('Colima 0.8.1');
+    // What comes in beside the code, counted before Start.
+    await expect(view.getByTestId('story-build-start-inherits')).toContainText(
+      'The agent also gets 12 memories from 1 project, your CLAUDE.md and 1 project skill.',
+    );
     // No built document in this workspace: no docs box.
     await expect(view.getByTestId('story-build-start-docs')).toHaveCount(0);
 

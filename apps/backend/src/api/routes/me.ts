@@ -39,6 +39,7 @@ import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
 import { usageLockedUntilIso } from '../../ai/usage-lockout.js';
 import { aiEffortSettingStatus } from '../../ai/effort.js';
+import { apiKeySettingStatus } from '../../ai/credentials.js';
 import {
   aiProviderSettingStatus,
   ALL_RUN_KINDS,
@@ -197,6 +198,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       provider,
       providerSetting: aiProviderSettingStatus(),
       effortSetting: aiEffortSettingStatus(),
+      apiKeySetting: apiKeySettingStatus(),
       providers: {
         claude: { auth: 'none', route: 'none', message: null, runtime: 'absent', runtimeMessage: null },
         codex: {
@@ -236,6 +238,7 @@ function agenticAiStatus(): MeResponse['ai'] {
     provider,
     providerSetting: aiProviderSettingStatus(),
     effortSetting: aiEffortSettingStatus(),
+      apiKeySetting: apiKeySettingStatus(),
     providers: {
       claude: {
         auth: claudeRoute === 'none' ? 'none' : 'ok',

@@ -91,6 +91,8 @@ import type {
   SandboxSessionDiffResponse,
   SandboxSessionStreamEvent,
   SandboxComposeFiles,
+  SandboxFolderCheck,
+  SandboxProjectSkills,
   SandboxWorkspaceSettings,
   WorkspaceProSettings,
   WorkspaceSlackTargetResponse,
@@ -1381,6 +1383,21 @@ export function aiFixPlanned(prId: number): AiFix {
   };
 }
 
+/** The memory check (`POST /api/workspaces/:id/sandbox/check`): one project with notes, ticked. */
+export const SANDBOX_FOLDER_CHECK: SandboxFolderCheck = {
+  workspaceId: WORKSPACE.id,
+  folder: '/Users/reader/code',
+  matched: [{ repoId: 1, fullName: 'acme/api', localPath: '/Users/reader/code/api', alsoAt: [] }],
+  notCloned: [],
+  outside: [],
+  memories: [{ dir: '/Users/reader/code/api', key: '-Users-reader-code-api', memoryCount: 12, ticked: true }],
+  userClaudeMd: true,
+  folderClaudeMd: false,
+  userSkills: [],
+  startDir: '/Users/reader/code/api',
+  truncated: false,
+};
+
 /** The computer's container runtime (`GET /api/sandbox/runtime`). */
 export const SANDBOX_RUNTIME_OK: SandboxRuntimeStatus = {
   available: true,
@@ -1857,6 +1874,11 @@ export async function installMockApi(
       if (/\/api\/workspaces\/\d+\/sandbox$/.test(path)) return json(route, SANDBOX_SETTINGS);
       if (/\/api\/workspaces\/\d+\/sandbox\/compose-files$/.test(path)) {
         return json(route, { workspaceId: WORKSPACE.id, repos: [{ repo: 'acme/api', files: ['compose.yml', 'docker/compose.test.yml'], copied: true }] } satisfies SandboxComposeFiles);
+      }
+      // The start panel's "The agent also gets …" line: the memory check and the repositories' own skills.
+      if (/\/api\/workspaces\/\d+\/sandbox\/check$/.test(path)) return json(route, SANDBOX_FOLDER_CHECK);
+      if (/\/api\/workspaces\/\d+\/sandbox\/project-skills$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, repos: [{ repo: 'acme/api', skills: [{ name: 'run-tests', path: '.claude/skills/run-tests/SKILL.md' }], copied: true }] } satisfies SandboxProjectSkills);
       }
 
       if (path.startsWith(STORY_BUILD_API.list)) {

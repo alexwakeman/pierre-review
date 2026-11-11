@@ -20,6 +20,7 @@ import type { FeaturesStatus } from './features.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
+import type { AiApiKeySettingStatus } from './ai-api-key.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 import type { RepoDocsOffers, RepoDocsUnreadableReason } from './reference-docs-offers.js';
 import type { LimnSeverity } from './limn-severity.js';
@@ -3999,6 +4000,11 @@ export interface MeResponse {
      * Default) and who chose it (REVIEW_EFFORT wins). Optional: an older server omits it (Default).
      */
     effortSetting?: AiEffortSettingStatus;
+    /**
+     * "Use my API keys first" (Settings → AI; ai-api-key.ts): the tick, who set it (LIMN_AI_USE_API_KEY
+     * wins), and whether ANTHROPIC_API_KEY / OPENAI_API_KEY are set. Optional: an older server omits it.
+     */
+    apiKeySetting?: AiApiKeySettingStatus;
     providers: {
       claude: AiClaudeProviderStatus;
       codex: AiCodexProviderStatus;

@@ -12,13 +12,17 @@
 //      hand it to the Agent SDK; one-shot completions call the Anthropic API directly with it
 //      (the SDK loaded through ai/runtime.ts `loadAnthropicSdk`, never imported here).
 //
-// LIMN_AI_USE_API_KEY=true flips the order when a key is set: the key first, the login ignored.
+// "USE MY API KEYS FIRST" flips the order when a key is set: the key first, the login ignored. It is the
+// Settings → AI box (`accounts.ai_use_api_key`, held HERE in memory — loaded at boot by
+// ai/provider-store.ts, updated by PUT /api/ai/api-key — so the next call reads it with no restart), and
+// an explicitly set LIMN_AI_USE_API_KEY (`true` / `false`) wins over the box.
 // LIMN_AI_DISABLED=true (config.aiEnabled) turns every model call off; that switch is checked by
 // the callers, not here, because this module answers only "which credential", never "may we".
 //
 // Nothing is stored. Detection of the login reads the disk (a credentials file, or `oauthAccount`
 // recorded in the Claude config — see hasClaudeLogin); a wrong
 // guess surfaces as the SDK's own auth error on the first real call.
+import type { AiApiKeySettingStatus } from '@pierre-review/shared';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -38,9 +42,38 @@ function envApiKey(env: NodeJS.ProcessEnv): string | undefined {
   return k ? k : undefined;
 }
 
-/** Does the reader prefer the API key over the login (`LIMN_AI_USE_API_KEY=true`)? */
+let storedUseApiKey = false;
+
+/** The stored box (Settings → AI → "Use my API keys first"). Memory only; see the header. */
+export function storedPrefersApiKey(): boolean {
+  return storedUseApiKey;
+}
+
+/** Hold the stored box in memory (the boot's load, the route's write, tests). */
+export function setStoredPrefersApiKey(value: boolean): void {
+  storedUseApiKey = value;
+}
+
+/** LIMN_AI_USE_API_KEY when set to `true` or `false`; null when unset, empty or anything else. */
+export function prefersApiKeyEnvSetting(env: NodeJS.ProcessEnv = process.env): boolean | null {
+  const raw = env[USE_API_KEY_ENV]?.trim().toLowerCase();
+  return raw === 'true' ? true : raw === 'false' ? false : null;
+}
+
+/** Does the reader prefer the API key over the login? LIMN_AI_USE_API_KEY when set, else the Settings box. */
 export function prefersApiKey(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[USE_API_KEY_ENV]?.trim().toLowerCase() === 'true';
+  return prefersApiKeyEnvSetting(env) ?? storedUseApiKey;
+}
+
+/** `MeResponse.ai.apiKeySetting`: the choice, who made it, and WHETHER each key is set (never its value). */
+export function apiKeySettingStatus(env: NodeJS.ProcessEnv = process.env): AiApiKeySettingStatus {
+  const fromEnv = prefersApiKeyEnvSetting(env);
+  return {
+    value: fromEnv ?? storedUseApiKey,
+    source: fromEnv != null ? 'env' : 'settings',
+    anthropicKeySet: envApiKey(env) != null,
+    openaiKeySet: (env.OPENAI_API_KEY?.trim() ?? '') !== '',
+  };
 }
 
 /**
@@ -146,7 +179,7 @@ export function agentAuthOptions(): { env: Record<string, string | undefined> } 
 // answered and auth.json does not say) is `method: 'unconfirmed'`: never runnable — the run path waits
 // for one fresh `account/read` first (ai/providers/codex.ts `runnableCredential`).
 //
-// ⚠ LIMN_AI_USE_API_KEY=true (shared with Claude) does NOT push a ChatGPT sign-in onto the key route
+// ⚠ "Use my API keys first" / LIMN_AI_USE_API_KEY=true (shared with Claude) does NOT push a ChatGPT sign-in onto the key route
 // while that route is refused: the sign-in is consulted first. Without one, the flag still puts
 // OPENAI_API_KEY ahead of a key stored in the home.
 //

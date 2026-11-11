@@ -7,9 +7,10 @@
 //   3. `readSessionTicket(…)`                      (ticket.ts) — the ticket, read fresh;
 //   4. `prepareSessionWorkspace(runtime, container, …)` — the git identity, the repositories, the reader's
 //      files, then the seed (seed.ts). Returns the seed so the driver appends `systemPrompts[provider]`.
+import { posix } from 'node:path';
 import { readSmallFile } from './memories.js';
 import { mirrorRepos, prepareSandboxGit, readerFiles, type MirrorResult, type MirrorSeams, type RepoBaseRequest } from './mirror.js';
-import { buildSeed, type FixSeedInput, type Seed, type SeedRepoBase, type SeedService } from './seed.js';
+import { buildSeed, type FixSeedInput, type Seed, type SeedProjectSkill, type SeedRepoBase, type SeedService } from './seed.js';
 import type { LayoutPlaces, ResolvedWorkspace } from './check.js';
 import { folderClaudeMdPath } from './check.js';
 import type { WorkspaceLayout } from './layout.js';
@@ -74,6 +75,9 @@ export interface PrepareSessionArgs {
   seams?: MirrorSeams;
   /** The repo store, when the sandbox was started with it mounted. */
   store?: { owner: SessionOwner; seams?: StoreSeams } | null;
+  /** The repositories' own skills at their base commits (default: `projectSkillsAt` in Limn's clone
+   *  cache, file names only). A seam for tests. */
+  projectSkills?: (repos: MirrorResult['repos']) => Promise<SeedProjectSkill[]>;
   onProgress?: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -116,6 +120,8 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   if (reader.skippedSkills > 0) notes.push(`${reader.skippedSkills} skill files were too large and were left out.`);
   await runtime.copyIn(container, reader.files);
 
+  const projectSkills = await (a.projectSkills ?? cachedProjectSkills)(mirror.repos).catch((): SeedProjectSkill[] => []);
+
   const folderMd = a.userClaudeMd ? folderClaudeMdPath(a.resolved) : null;
   const folderText = folderMd ? readSmallFile(folderMd, FOLDER_CLAUDE_MD_MAX_BYTES)?.toString('utf8') ?? null : null;
 
@@ -135,10 +141,27 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
     userClaudeMd: reader.userClaudeMd,
     folderClaudeMd: folderText,
     skills: reader.skills,
+    projectSkills,
     services,
   };
   if (a.fix == null && a.ticket == null) throw new Error('A session needs a ticket or a fix to seed.');
   const seed = a.fix != null ? buildSeed({ ...common, kind: 'fix', fix: a.fix }) : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement', planFirst: a.planFirst === true, docs });
   await runtime.copyIn(container, seed.files);
   return { mirror, seed, notes };
+}
+
+/** The cloned repositories' own skills, read from Limn's clone cache at each repository's base commit. */
+async function cachedProjectSkills(repos: MirrorResult['repos']): Promise<SeedProjectSkill[]> {
+  // Lazy, like the mirror's clone-manager import: it is not needed to build a seed in a test.
+  const { projectSkillsAt } = await import('./project-skills.js');
+  const { repoCloneDir } = await import('../../review/clone-manager.js');
+  const per = await Promise.all(
+    repos.map(async (r) => {
+      const [owner, name] = r.fullName.split('/');
+      if (!owner || !name) return [];
+      const skills = await projectSkillsAt(repoCloneDir(owner, name), r.sha).catch(() => []);
+      return skills.map((k) => ({ repo: r.fullName, name: k.name, path: posix.join(r.path, k.path) }));
+    }),
+  );
+  return per.flat();
 }

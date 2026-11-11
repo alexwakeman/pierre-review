@@ -30,6 +30,19 @@ export function useSetAiEffort() {
   });
 }
 
+/** "Use my API keys first" (Settings → AI). Read back from `/api/me`; the budget follows the credential
+ *  (US$ on a key, a share of the week on a sign-in), so it is refetched too. */
+export function useSetAiApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (value: boolean) => api.setAiApiKey(value),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: AI_BUDGET_QUERY_KEY });
+    },
+  });
+}
+
 export const CODEX_LOGIN_QUERY_KEY = ['codex-login'] as const;
 
 /**

@@ -65,9 +65,11 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     // The Settings → AI provider choice, into memory before any run can start (LIMN_AI_PROVIDER, when
     // set, still wins). Never fails the boot: a read error means "not chosen" (auto).
     // The Effort level beside it (REVIEW_EFFORT, when set, wins); a read error means Default.
-    const { loadStoredAiEffort, loadStoredAiProvider } = await import('./ai/provider-store.js');
+    // And "Use my API keys first" (LIMN_AI_USE_API_KEY, when set, wins); a read error means off.
+    const { loadStoredAiEffort, loadStoredAiProvider, loadStoredPrefersApiKey } = await import('./ai/provider-store.js');
     await loadStoredAiProvider(me?.id);
     await loadStoredAiEffort(me?.id);
+    await loadStoredPrefersApiKey(me?.id);
     // LIMN FINDINGS ARE BOTS (db/limn-bots.ts): stored finding comments go to their poster's
     // `limn:` bot (and edited-away ones back to their person) before anything reads them. DB only,
     // idempotent; a no-op pass is one indexed scan. Never fails the boot.

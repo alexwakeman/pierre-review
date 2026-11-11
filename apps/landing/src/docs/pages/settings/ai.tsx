@@ -80,6 +80,29 @@ export default function Page(): JSX.Element {
         <code>limn ai install</code> does the same.
       </Tip>
 
+      <H2 id="api-keys">Use my API keys first</H2>
+      <p>
+        Tick <Ui>Use my API keys first</Ui> to pay for AI runs with an API key instead of your subscription. Limn reads
+        the keys from the environment it started in (your shell, or the <code>.env</code> file), and never stores one.
+        The line under the box says which keys are set.
+      </p>
+      <ul>
+        <li>
+          <b>Claude</b> reads <code>ANTHROPIC_API_KEY</code>. With the box ticked and the key set, every Claude run uses
+          the key, even while you are signed in to Claude Code. Anthropic bills it per token, and Limn shows its spend
+          in US$. With the box not ticked, Limn uses your Claude Code sign-in, and the key only when you are not signed
+          in.
+        </li>
+        <li>
+          <b>Codex</b> reads <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex keeps
+          using your ChatGPT sign-in.
+        </li>
+      </ul>
+      <p>
+        Starting Limn with <code>LIMN_AI_USE_API_KEY=true</code> or <code>false</code> decides it from the
+        environment, and the box shows that value, locked.
+      </p>
+
       <H2 id="effort">Effort</H2>
       <p>
         <Ui>Effort for reviews and AI Fix</Ui> sets how hard the AI works. Higher effort reads more and finds more, and

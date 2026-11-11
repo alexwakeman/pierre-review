@@ -52,8 +52,8 @@ run on Codex instead (below).
 - The reviewer reads code. It cannot edit files, run commands or reach the web.
 - The fixer edits files. It has no shell, and builds and tests nothing.
 - Nothing is posted or pushed until you press the button.
-- `LIMN_AI_USE_API_KEY=true` uses `ANTHROPIC_API_KEY` even when you are signed
-  in to Claude Code.
+- **Use my API keys first** (Settings → AI), or `LIMN_AI_USE_API_KEY=true`, uses
+  `ANTHROPIC_API_KEY` even when you are signed in to Claude Code.
 - `LIMN_AI_DISABLED=true` turns every AI feature off.
 
 ### Codex instead of Claude

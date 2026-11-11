@@ -388,11 +388,11 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   budget use the RUN's. Every run row stores the `provider` + `model` that RAN, shown ONLY via
   `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
 - **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
-  Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else the
-  environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs pass
+  Claude Code login first (a `claude` session or `CLAUDE_CODE_OAUTH_TOKEN`), else the
+  environment's `ANTHROPIC_API_KEY`; a Settings tick (`LIMN_AI_USE_API_KEY` wins) puts it first. Agent runs pass
   the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never sees the
   key); `cheapComplete` takes the Agent SDK on the login and the Anthropic API on the key. **No
-  caller picks its own credential, and nothing is stored.** Copy never promises subscription
+  caller picks its own credential; no key stored.** Copy never promises subscription
   billing. `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded (`recordAiUsage`), never metered.
 - **EFFORT IS ONE SETTING** (Settings → AI → Effort; `ai/effort.ts` `agenticRunEffort`, read once per
   run): EVERY review (PR, CI, story check, Check threads), AI Fix + Plan first; SAME word on both providers.

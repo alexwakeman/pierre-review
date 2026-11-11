@@ -3,7 +3,16 @@ import { useIsMutating } from '@tanstack/react-query';
 import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
-import { storyBuildMutationKey, useSandboxRuntime, useStartStorySession } from '../../hooks/useStoryBuild.js';
+import {
+  storyBuildMutationKey,
+  useSandboxFolderCheck,
+  useSandboxProjectSkills,
+  useSandboxRuntime,
+  useSandboxSettings,
+  useStartStorySession,
+} from '../../hooks/useStoryBuild.js';
+import { sessionInherits, sessionInheritsText } from '../../lib/sessionInherits.js';
+import { useSettingsModal } from '../../store/settingsModal.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import { useStoryDocsAlignment } from '../../hooks/useStoryDocsAlignment.js';
 import { TICKET_CRITERION_STATUS_CLASS } from '../../lib/claudeReviewFollowUp.js';
@@ -28,6 +37,12 @@ import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
 // up" — the button stays, owner decision Q2: there is no other path), the model menu (kind
 // `story_build`, opening on the deep model) and Start inside the ONE `AiRunGate`. A failed / discarded
 // session reads as one line above it.
+//
+// WHAT COMES IN BESIDE THE CODE (`InheritsLine`): how many Claude memories (and from how many projects),
+// the reader's CLAUDE.md, their own skills (when the workspace opts in) and the repositories' own skills
+// — counted before Start by the same rules the boot copies by (lib/sessionInherits.ts). Three local
+// reads, asked only while this panel offers Start: the folder check (disk walks), the sandbox setting
+// and the project skills (`git ls-tree` in Limn's clone cache). "Change" opens Settings → Sandbox.
 //
 // "FILL GAPS" (a started ticket whose current story check found gaps — shared `storyBuildOffered`): the
 // same start, worded for the gaps, listed UP FRONT from that check (`check.reviewId`, one read of the
@@ -95,6 +110,7 @@ export function StartPanel({
       <div className="mt-3">
         <SandboxRuntimeLine status={runtime.data} loading={runtime.isLoading} />
       </div>
+      {offered != null && <InheritsLine workspaceId={workspaceId} />}
       {offered != null && docsAvailable && (
         <label data-testid="story-build-start-docs" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
           <CheckboxBox checked={docsPicked} disabled={busy} onChange={(e) => setDocsPicked(e.target.checked)} />
@@ -138,6 +154,67 @@ export function StartPanel({
         </p>
       )}
     </section>
+  );
+}
+
+/** One line: what the agent gets beside the code, with the details behind ⓘ and Change → Settings → Sandbox. */
+function InheritsLine({ workspaceId }: { workspaceId: number }): JSX.Element {
+  const check = useSandboxFolderCheck(workspaceId, true);
+  const settings = useSandboxSettings(workspaceId);
+  const skills = useSandboxProjectSkills(workspaceId, true);
+  const openSettings = useSettingsModal((s) => s.openSettings);
+  const loading = check.isLoading || settings.isLoading || skills.isLoading;
+  const counts = sessionInherits(check.data, settings.data, skills.data);
+  const text = sessionInheritsText(counts);
+  const ticked = (check.data?.memories ?? []).filter((m) => m.ticked && m.memoryCount > 0);
+  const skillRows = (skills.data?.repos ?? []).filter((r) => r.skills.length > 0);
+  return (
+    <div data-testid="story-build-start-inherits" className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-ui-mute">
+      <span>
+        {loading
+          ? 'Counting your memories and skills…'
+          : check.isError
+            ? 'Limn could not count your memories.'
+            : text != null
+              ? `The agent also gets ${text}.`
+              : 'The agent gets none of your Claude memories or skills.'}
+      </span>
+      {!loading && (
+        <InfoButton title="Memories and skills">
+          <p>Limn copies only your saved memories into the sandbox, never a past session.</p>
+          {ticked.length > 0 && (
+            <ul className="mt-2 space-y-0.5">
+              {ticked.map((m) => (
+                <li key={m.key}>
+                  <span className="font-mono text-meta">{m.dir}</span>: {m.memoryCount} {m.memoryCount === 1 ? 'memory' : 'memories'}
+                </li>
+              ))}
+            </ul>
+          )}
+          {skillRows.length > 0 && (
+            <>
+              <p className="mt-2">Skills the repositories keep in .claude/skills come with the code. The agent is told where each one is:</p>
+              <ul className="mt-1 space-y-0.5">
+                {skillRows.map((r) => (
+                  <li key={r.repo}>
+                    {r.repo}: {r.skills.map((k) => k.name).join(', ')}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {counts.userSkills > 0 && <p className="mt-2">Your own skills: {check.data?.userSkills.join(', ')}.</p>}
+          <p className="mt-2">Choose the projects, your CLAUDE.md and your own skills in Settings → Sandbox.</p>
+        </InfoButton>
+      )}
+      <button
+        type="button"
+        className="hit text-meta text-ui-ink underline"
+        onClick={() => openSettings('sandbox')}
+      >
+        Change
+      </button>
+    </div>
   );
 }
 

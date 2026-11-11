@@ -184,6 +184,10 @@ export const accounts = sqliteTable('accounts', {
   // NULL = never chosen (Default: each provider's own depth). An explicitly set REVIEW_EFFORT wins
   // over it (ai/effort.ts).
   aiEffort: text('ai_effort'),
+  // 0184. "USE MY API KEYS FIRST" (Settings → AI): true ⇒ ANTHROPIC_API_KEY (and OPENAI_API_KEY, where
+  // Codex may use it) ahead of the sign-in. NULL = never chosen (off). An explicitly set
+  // LIMN_AI_USE_API_KEY wins over it (ai/credentials.ts). Only the tick is stored, never a key.
+  aiUseApiKey: integer('ai_use_api_key', { mode: 'boolean' }),
   // 0153. SETTINGS → FEATURES (shared features.ts): which sidebar destinations show. OVERRIDES ONLY,
   // `{feed?, reports?, sprint?, bots?}` booleans; NULL = every default applies. One writer: PUT
   // /api/me/feature-settings (compacted). Visibility only — nothing else reads it.

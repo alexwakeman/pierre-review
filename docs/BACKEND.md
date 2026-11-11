@@ -34,7 +34,7 @@ docs-check shortlist) goes through `cheapComplete`, and every one takes THE ONE 
 2. else **`ANTHROPIC_API_KEY`** from the environment → the Anthropic API directly
    (`@anthropic-ai/sdk`, loaded through `ai/runtime.ts` `loadAnthropicSdk`).
 
-`LIMN_AI_USE_API_KEY=true` puts the key first. No caller passes a key or a route
+"Use my API keys first" (Settings → AI, or `LIMN_AI_USE_API_KEY=true`/`false`, which wins) puts the key first. No caller passes a key or a route
 (`SUMMARY_ANTHROPIC_API_KEY`, `apiKey`, `localRoute` are gone). With no credential the call throws
 the one auth line; under `LIMN_AI_DISABLED` it throws "Claude is switched off here." Pinned by
 `ai/credentials.test.ts`, `review/llm-ladder.test.ts` (incl. the platform clients) and

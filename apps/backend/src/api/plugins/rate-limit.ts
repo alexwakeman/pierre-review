@@ -134,6 +134,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THE EFFORT LEVEL: PUT /api/ai/effort (same file, same shape: one validated UPDATE of one column,
   // held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/effort') return [TIERS.read];
+  // "USE MY API KEYS FIRST": PUT /api/ai/api-key (same file, same shape: one boolean column, held in
+  // memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
+  if (path === '/api/ai/api-key') return [TIERS.read];
   // DISK SPACE: GET /api/storage/clones (api/routes/storage.ts). A walk of the local clone cache,
   // cached for a minute inside review/worktree-gc.ts — no model, no GitHub. `read`, decided; EXACT `===`.
   if (path === '/api/storage/clones') return [TIERS.read];
@@ -191,8 +194,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/auto-review\/sweep$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
   // SANDBOX SETTINGS (api/routes/sandbox-settings.ts): GET/PUT `…/sandbox`, POST `…/sandbox/check`
   // (BOUNDED walks of the reader's Claude projects and clones, git config read as text), GET
-  // `…/sandbox/compose-files` (`git ls-tree` in Limn's OWN clone cache, lazy fetch OFF: local processes,
-  // no network) and the "Always allow" hosts — DB + local disk, no GitHub, no model. `read` on the next
+  // `…/sandbox/compose-files` and `…/sandbox/project-skills` (`git ls-tree` in Limn's OWN clone cache,
+  // lazy fetch OFF: local processes, no network) and the "Always allow" hosts — DB + local disk, no GitHub, no model. `read` on the next
   // line, decided (rate-limit.test.ts).
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 

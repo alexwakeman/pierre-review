@@ -6,6 +6,7 @@ import {
   SANDBOX_PATH_MAX,
   SANDBOX_RESOURCE_LIMITS,
   type SandboxComposeFiles,
+  type SandboxProjectSkills,
   type SandboxFolderCheck,
   type SandboxRunningStatus,
   type SandboxRuntimeStatus,
@@ -31,6 +32,8 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                     and reports the match + memories
 //   GET    …/sandbox/compose-files   the compose files in each workspace repository, read from Limn's
 //                                     own clone cache (`git ls-tree`, no network: lazy fetch is off)
+//   GET    …/sandbox/project-skills  the skills each workspace repository keeps (`…/.claude/skills/<name>/
+//                                     SKILL.md`), the same way; the build tab's start panel counts them
 //   POST   …/sandbox/allowed-hosts   adds one "Always allow" host · DELETE removes one
 //   GET    /api/sandbox/runtime       the container runtime on THIS computer (not workspace-scoped): the
 //                                     build tab's start state and Settings' status line. Local process
@@ -181,6 +184,15 @@ export async function sandboxSettingsRoutes(app: FastifyInstance): Promise<void>
     if (repos == null) return reply.status(404).send(notFound(id));
     const { listComposeFiles } = await import('../../sandbox/services/compose-files.js');
     return { workspaceId: id, repos: await listComposeFiles(repos) } satisfies SandboxComposeFiles;
+  });
+
+  app.get('/api/workspaces/:id/sandbox/project-skills', { schema: { params: idParam } }, async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const { id } = req.params as { id: number };
+    const repos = await sandboxWorkspaceRepos(accountId, id);
+    if (repos == null) return reply.status(404).send(notFound(id));
+    const { listProjectSkills } = await import('../../sandbox/workspace/project-skills.js');
+    return { workspaceId: id, repos: await listProjectSkills(repos) } satisfies SandboxProjectSkills;
   });
 
   app.post('/api/workspaces/:id/sandbox/allowed-hosts', { schema: { params: idParam, body: ruleBody } }, async (req, reply) => {

@@ -110,7 +110,9 @@ uses the same two sources, first one wins:
    `CLAUDE_CODE_OAUTH_TOKEN`). A run on the login never sees `ANTHROPIC_API_KEY`.
 2. **`ANTHROPIC_API_KEY`** in the environment.
 
-Set `LIMN_AI_USE_API_KEY=true` to use the key even when you are signed in. With
+Tick **Use my API keys first** in Settings → AI (or set `LIMN_AI_USE_API_KEY=true`) to use the
+key even when you are signed in. Codex reads `OPENAI_API_KEY`, but Codex runs on an API key are not
+available yet. With
 neither, the Run button is replaced by one line: *Sign in to Claude Code or set
 ANTHROPIC_API_KEY*. The ladder lives in `apps/backend/src/ai/credentials.ts`.
 

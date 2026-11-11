@@ -13,6 +13,7 @@ import {
   type StoryBuildPushResponse,
   type SandboxComposeFiles,
   type SandboxFolderCheck,
+  type SandboxProjectSkills,
   type SandboxNetworkAllowBody,
   type SandboxRunningStatus,
   type SandboxRuntimeStatus,
@@ -353,6 +354,18 @@ export function useSandboxFolderCheck(workspaceId: number, enabled: boolean) {
     queryFn: () => api.checkSandboxFolder(workspaceId),
     enabled,
     staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/** The repositories' own skills (the build tab's start panel counts them): one `git ls-tree` per
+ *  repository in Limn's clone cache, no network. Asked only while the start panel is on screen. */
+export function useSandboxProjectSkills(workspaceId: number, enabled: boolean) {
+  return useQuery<SandboxProjectSkills>({
+    queryKey: ['sandbox-project-skills', workspaceKey(workspaceId)],
+    queryFn: () => api.sandboxProjectSkills(workspaceId),
+    enabled,
+    staleTime: 60_000,
     retry: false,
   });
 }

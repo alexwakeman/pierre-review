@@ -34,6 +34,7 @@ export * from './ai-budget.js';
 export * from './ai-usage-report.js';
 export * from './ai-run-label.js';
 export * from './ai-effort.js';
+export * from './ai-api-key.js';
 export * from './ai-provider-words.js';
 export * from './limn-status.js';
 export * from './limn-severity.js';

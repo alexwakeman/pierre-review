@@ -45,6 +45,14 @@ export interface SeedMemoryProject {
   skipped: number;
 }
 
+export interface SeedProjectSkill {
+  /** `owner/name`. */
+  repo: string;
+  name: string;
+  /** The SKILL.md's absolute path inside the sandbox. */
+  path: string;
+}
+
 export interface SeedService {
   name: string;
   /** Where it came from: "bng-metric-backend/compose.yml". */
@@ -67,6 +75,9 @@ export interface SeedInput {
   folderClaudeMd: string | null;
   /** Skill names copied into `~/.claude/skills/`. */
   skills: readonly string[];
+  /** The skills the cloned repositories keep in their own trees (project-skills.ts), at their sandbox
+   *  paths. They are there with the repository; the seed only names them. Absent or empty ⇒ no line. */
+  projectSkills?: readonly SeedProjectSkill[];
   /** WP6: the services the reader picked. null = none set up. */
   services: readonly SeedService[] | null;
   /**
@@ -174,10 +185,21 @@ function reposSection(i: AnySeedInput): string {
   return out.join('\n');
 }
 
+/** The repositories' own skills: one line each, the SKILL.md to read when its task comes up. */
+function projectSkillsLines(skills: readonly SeedProjectSkill[]): string {
+  return [
+    'The repositories keep their own skills. Read a skill\'s `SKILL.md` when its task comes up, and follow it where it does not conflict with this file:',
+    '',
+    list(skills.map((k) => `${k.name} (${k.repo}): \`${k.path}\``)),
+  ].join('\n');
+}
+
 function memoriesSection(i: AnySeedInput, provider: AiProviderId): string {
   const out: string[] = ['## The reader\'s notes'];
+  const projectSkills = i.projectSkills ?? [];
   if (i.memories.length === 0 && i.userClaudeMd == null && i.folderClaudeMd == null && i.skills.length === 0) {
     out.push('', 'The reader brought no notes for this session.');
+    if (projectSkills.length > 0) out.push('', projectSkillsLines(projectSkills));
     return out.join('\n');
   }
   if (i.memories.length > 0) {
@@ -216,6 +238,7 @@ function memoriesSection(i: AnySeedInput, provider: AiProviderId): string {
         : `The reader's skills are in \`${dir}/<name>/SKILL.md\`: ${i.skills.join(', ')}. Read a skill's SKILL.md when its task comes up.`,
     );
   }
+  if (projectSkills.length > 0) out.push('', projectSkillsLines(projectSkills));
   if (i.folderClaudeMd != null) {
     out.push('', `The reader's notes for \`${i.layout.folder}\` (from its own CLAUDE.md, which is not in any repository):`, '', '````markdown', i.folderClaudeMd.trimEnd(), '````');
   }

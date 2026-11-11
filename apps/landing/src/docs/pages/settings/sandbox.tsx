@@ -54,7 +54,9 @@ export default function Page(): JSX.Element {
         them. Under <Ui>Claude notes to bring</Ui>, the notes of each clone (and of a folder that holds them) are
         ticked. Untick a project to leave its notes out. You can also tick <Ui>Bring your ~/.claude/CLAUDE.md</Ui> and{' '}
         <Ui>Bring your Claude skills</Ui>. They are copied in; the originals are never changed. Past AI sessions are
-        never copied in. The AI starts in the repository with the most notes.
+        never copied in. The AI starts in the repository with the most notes. Skills a repository keeps in{' '}
+        <code>.claude/skills</code> come with its code, and the AI is told where each one is. The build tab counts all
+        of this before you press <Ui>Start</Ui>.
       </p>
       <H3>Hosts always allowed</H3>
       <p>

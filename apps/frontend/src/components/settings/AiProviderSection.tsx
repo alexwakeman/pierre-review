@@ -4,6 +4,7 @@ import {
   AI_PROVIDER_SETTINGS,
   aiProviderName,
   isAiEffort,
+  type AiApiKeySettingStatus,
   type AiEffortSettingStatus,
   type AiClaudeProviderStatus,
   type AiCodexProviderStatus,
@@ -12,7 +13,8 @@ import {
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useAiRuntimeInstall, useAiRuntimePoll } from '../../hooks/useAiCapabilities.js';
-import { useCodexLogin, useCodexLoginActions, useSetAiEffort, useSetAiProvider } from '../../hooks/useAiProvider.js';
+import { useCodexLogin, useCodexLoginActions, useSetAiApiKey, useSetAiEffort, useSetAiProvider } from '../../hooks/useAiProvider.js';
+import { CheckboxBox } from '../ui/FormControls.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
@@ -36,6 +38,10 @@ const EFFORT_OPTIONS: readonly SelectOption<string>[] = [
 // EFFORT (PUT /api/ai/effort, read back as `ai.effortSetting`): one level for AI Review and AI Fix on
 // both providers (packages/shared ai-effort.ts). "Default" (null) is each provider's own depth; an
 // explicitly set REVIEW_EFFORT wins and the control shows it, disabled.
+//
+// "USE MY API KEYS FIRST" (PUT /api/ai/api-key, read back as `ai.apiKeySetting`; shared ai-api-key.ts):
+// ANTHROPIC_API_KEY ahead of the Claude Code sign-in (OPENAI_API_KEY for Codex is not used yet). The ⓘ
+// names both variables; the line under the box says which are set. LIMN_AI_USE_API_KEY wins, disabled.
 
 const BTN =
   'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-50';
@@ -142,6 +148,7 @@ export function AiProviderSection(): JSX.Element | null {
       {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
 
       <EffortControl setting={ai.effortSetting ?? { value: null, source: 'settings' }} />
+      {ai.apiKeySetting != null && <ApiKeyControl setting={ai.apiKeySetting} />}
 
       <dl className="space-y-1.5 text-body">
         <div className="flex flex-wrap items-baseline gap-x-2">
@@ -233,6 +240,46 @@ function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Ele
         </InfoButton>
       </div>
       {fromEnv && <p className={`text-body ${MUTED}`}>Set by REVIEW_EFFORT.</p>}
+      {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
+    </div>
+  );
+}
+
+const isSet = (name: string, set: boolean): string => `${name} is ${set ? 'set' : 'not set'}.`;
+
+/** Settings → AI → "Use my API keys first": the environment's API key ahead of the sign-in. */
+function ApiKeyControl({ setting }: { setting: AiApiKeySettingStatus }): JSX.Element {
+  const set = useSetAiApiKey();
+  const fromEnv = setting.source === 'env';
+  const checked = set.isPending && set.variables !== undefined ? set.variables : setting.value;
+  return (
+    <div className="space-y-1" data-testid="ai-api-key-setting">
+      <div className="flex flex-wrap items-center gap-2 text-body">
+        <label className={`flex w-fit cursor-pointer items-center gap-1.5 text-ui-ink ${fromEnv ? 'opacity-60' : ''}`}>
+          <CheckboxBox checked={checked} disabled={fromEnv || set.isPending} onChange={(e) => set.mutate(e.target.checked)} />
+          Use my API keys first
+        </label>
+        <InfoButton title="API keys">
+          <p>
+            Claude: Limn looks for <code>ANTHROPIC_API_KEY</code> in the environment it started in (your shell, or the
+            .env file). When this is ticked and the key is set, every Claude run uses the key, even while you are signed in
+            to Claude Code. Anthropic bills the key per token, and Limn shows its spend in US$.
+          </p>
+          <p className="mt-2">When this is not ticked, Limn uses your Claude Code sign-in, and the key only when you are not signed in.</p>
+          <p className="mt-2">
+            Codex: Limn looks for <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex
+            keeps using your ChatGPT sign-in.
+          </p>
+          <p className="mt-2">
+            Limn never stores a key. Start Limn with <code>LIMN_AI_USE_API_KEY=true</code> or <code>false</code> to
+            decide this from the environment.
+          </p>
+        </InfoButton>
+      </div>
+      <p className={`text-body ${MUTED}`}>
+        {isSet('ANTHROPIC_API_KEY', setting.anthropicKeySet)} {isSet('OPENAI_API_KEY', setting.openaiKeySet)}
+      </p>
+      {fromEnv && <p className={`text-body ${MUTED}`}>Set by LIMN_AI_USE_API_KEY.</p>}
       {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
     </div>
   );

@@ -5,7 +5,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { agentSdkEnv, hasClaudeLogin, prefersApiKey, resolveAiCredential } from './credentials.js';
+import {
+  agentSdkEnv,
+  apiKeySettingStatus,
+  hasClaudeLogin,
+  prefersApiKey,
+  resolveAiCredential,
+  setStoredPrefersApiKey,
+} from './credentials.js';
 
 const loggedIn = () => true;
 const loggedOut = () => false;
@@ -42,6 +49,38 @@ describe('resolveAiCredential', () => {
 
   it('nothing → none (an empty key is no key)', () => {
     expect(resolveAiCredential({ ANTHROPIC_API_KEY: '  ' }, loggedOut)).toEqual({ route: 'none' });
+  });
+});
+
+describe('"Use my API keys first" (the Settings box)', () => {
+  afterEach(() => setStoredPrefersApiKey(false));
+
+  it('ticked → the key first, over a login and an OAuth token', () => {
+    setStoredPrefersApiKey(true);
+    const env = { ANTHROPIC_API_KEY: 'sk-ant', CLAUDE_CODE_OAUTH_TOKEN: 'tok' };
+    expect(resolveAiCredential(env, loggedIn)).toEqual({ route: 'api_key', method: 'api_key', apiKey: 'sk-ant' });
+    expect(apiKeySettingStatus(env)).toEqual({ value: true, source: 'settings', anthropicKeySet: true, openaiKeySet: false });
+  });
+
+  it('ticked without a key → still the login', () => {
+    setStoredPrefersApiKey(true);
+    expect(resolveAiCredential({}, loggedIn)).toEqual({ route: 'login', method: 'ambient' });
+  });
+
+  it('LIMN_AI_USE_API_KEY wins over the box both ways; anything else leaves the box in charge', () => {
+    setStoredPrefersApiKey(true);
+    expect(prefersApiKey({ LIMN_AI_USE_API_KEY: 'false' })).toBe(false);
+    expect(apiKeySettingStatus({ LIMN_AI_USE_API_KEY: ' FALSE ' })).toMatchObject({ value: false, source: 'env' });
+    expect(prefersApiKey({ LIMN_AI_USE_API_KEY: 'yes' })).toBe(true);
+    setStoredPrefersApiKey(false);
+    expect(prefersApiKey({ LIMN_AI_USE_API_KEY: 'true' })).toBe(true);
+    expect(prefersApiKey({})).toBe(false);
+  });
+
+  it('says whether each key is set, never its value', () => {
+    const s = apiKeySettingStatus({ ANTHROPIC_API_KEY: ' ', OPENAI_API_KEY: 'sk-openai' });
+    expect(s).toEqual({ value: false, source: 'settings', anthropicKeySet: false, openaiKeySet: true });
+    expect(JSON.stringify(s)).not.toContain('sk-openai');
   });
 });
 

@@ -13,6 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → AI: **Use my API keys first**. Tick it to run Claude on the `ANTHROPIC_API_KEY` in Limn's
+  environment even while you are signed in to Claude Code. The box says whether `ANTHROPIC_API_KEY` and
+  `OPENAI_API_KEY` are set. Codex keeps using your ChatGPT sign-in: Codex runs on an API key are not
+  available yet. `LIMN_AI_USE_API_KEY=true` or `false` still decides it from the environment.
+- Implement story: before you press Start, the build tab says what the agent gets beside the code — how
+  many of your Claude memories (and from how many projects), your CLAUDE.md, your own skills and the
+  skills your repositories keep in `.claude/skills`. **Change** opens Settings → Sandbox.
+- Implement story and AI Fix sessions: the agent is told about every skill your repositories keep in
+  `.claude/skills`, and reads one when its task comes up.
+
 ## [1.0.26] - 2026-11-11
 
 ### Changed

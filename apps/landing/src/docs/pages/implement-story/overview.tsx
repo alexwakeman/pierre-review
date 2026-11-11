@@ -9,8 +9,8 @@ export const meta: DocMeta = {
 function StartPicture(): JSX.Element {
   return (
     <Illustration
-      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A box to give the agent the reference documents is ticked. A Start with docs button."
-      caption="A new build tab: what the session gets, the docs box, the model and Start."
+      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. A Start with docs button."
+      caption="A new build tab: what the session gets, your memories and skills, the docs box, the model and Start."
       title="PAY-142 Partial refunds"
       meta="Implement"
     >
@@ -25,6 +25,9 @@ function StartPicture(): JSX.Element {
         <Chip>☑ Give the agent the reference documents</Chip>
       </p>
       <p className="muted">Runs in Colima on this computer.</p>
+      <p className="muted">
+        The agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills. ⓘ <u>Change</u>
+      </p>
       <p>
         <Chip>Model: Claude Opus 5.5 (most thorough)</Chip> <Btn tone="go">Start with docs</Btn>
       </p>
@@ -74,7 +77,9 @@ export default function Page(): JSX.Element {
       <p>The tab's step line reads <Ui>Set up · Talk · Build · Push</Ui>.</p>
       <Steps>
         <li>
-          <b>Set up.</b> Press <Ui>Start</Ui> (or <Ui>Start with docs</Ui>). Limn starts the sandbox. It takes seconds once
+          <b>Set up.</b> Above <Ui>Start</Ui>, one line counts what the agent gets beside the code: your Claude
+          memories and the projects they come from, your CLAUDE.md and the skills. <Ui>Change</Ui> opens Settings →
+          Sandbox. Press <Ui>Start</Ui> (or <Ui>Start with docs</Ui>). Limn starts the sandbox. It takes seconds once
           the sandbox image is on your computer; the first time it downloads it, which takes minutes. While the
           repositories load, the line counts them: <Ui>Loading repositories 3/7</Ui> and the repository&rsquo;s name.
         </li>
@@ -108,6 +113,7 @@ export default function Page(): JSX.Element {
           { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Limn finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
           { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
+          { _key: 'k', w: 'Skills', d: 'Skills your repositories keep in .claude/skills come with the code, and the agent is told where each one is. Your own ~/.claude/skills come only if you allow it in Settings → Sandbox.' },
           { _key: 'd', w: 'Reference documents', d: 'With docs: the parts of the workspace library that match the story, read only.' },
           { _key: 's', w: 'Services', d: 'The compose services you picked, for integration tests. The agent starts them when it needs them.' },
         ]}

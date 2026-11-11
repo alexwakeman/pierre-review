@@ -984,11 +984,13 @@ describe('the AI runtime download', () => {
     expect(tiers('GET', '/api/ai/usage-report')).toEqual(['read']);
   });
 
-  it('keeps the AI provider choice on read (one UPDATE, no model, no GitHub)', () => {
+  it('keeps the AI provider choice, effort and API-key box on read (one UPDATE, no model, no GitHub)', () => {
     expect(tiers('PUT', '/api/ai/provider')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/provider')).not.toContain('ai');
     expect(tiers('PUT', '/api/ai/effort')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/effort')).not.toContain('ai');
+    expect(tiers('PUT', '/api/ai/api-key')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/api-key')).not.toContain('ai');
   });
 
   it('keeps the disk-space read on read (a local walk, no model, no GitHub)', () => {

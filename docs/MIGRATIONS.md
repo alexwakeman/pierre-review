@@ -1695,3 +1695,9 @@ their Claude projects (docs/SANDBOX.md § Where the reader's clones are) and the
 default rule says. NO drop migration: `sandbox_workspace_settings.local_folder` and `.start_dir` (`0174`)
 stay in the schema and the export; `db/sandbox-settings.ts` never reads or writes them, so a stored value
 is kept as it is.
+
+### `0184_ai_use_api_key` — "Use my API keys first"
+
+`ALTER TABLE accounts ADD ai_use_api_key integer` (Settings → AI; NULL = never chosen = off; written by
+`PUT /api/ai/api-key`, loaded at boot into `ai/credentials.ts`). An explicitly set `LIMN_AI_USE_API_KEY`
+wins. Only the tick is stored, never a key. Additive; journal `when` `1792656000000`.
