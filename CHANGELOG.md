@@ -13,19 +13,8 @@ no internals.
 
 ## [Unreleased]
 
-## [1.0.27] - 2026-11-11
-
 ### Added
 
-- Settings → AI: **Use my API keys first**. Tick it to run Claude on the `ANTHROPIC_API_KEY` in Limn's
-  environment even while you are signed in to Claude Code. The box says whether `ANTHROPIC_API_KEY` and
-  `OPENAI_API_KEY` are set. Codex keeps using your ChatGPT sign-in: Codex runs on an API key are not
-  available yet. `LIMN_AI_USE_API_KEY=true` or `false` still decides it from the environment.
-- Implement story: before you press Start, the build tab says what the agent gets beside the code — how
-  many of your Claude memories (and from how many projects), your CLAUDE.md, your own skills and the
-  skills your repositories keep in `.claude/skills`. **Change** opens Settings → Sandbox.
-- Implement story and AI Fix sessions: the agent is told about every skill your repositories keep in
-  `.claude/skills`, and reads one when its task comes up.
 - Implement story and Fill gaps: a new box, "Push and open the pull request when the build finishes". Off by
   default. When ticked, Limn pushes the build once it finishes and opens the pull request ready for review, with your
   GitHub login. You can change it in the tab until anything is pushed. When auto review is on for the workspace, it
@@ -41,6 +30,20 @@ no internals.
 
 - Implement story: when the branch already exists on GitHub, Push now offers a new branch name (such as
   PAY-142-v2) and pushes to it. Before, there was no way past it.
+
+## [1.0.27] - 2026-11-11
+
+### Added
+
+- Settings → AI: **Use my API keys first**. Tick it to run Claude on the `ANTHROPIC_API_KEY` in Limn's
+  environment even while you are signed in to Claude Code. The box says whether `ANTHROPIC_API_KEY` and
+  `OPENAI_API_KEY` are set. Codex keeps using your ChatGPT sign-in: Codex runs on an API key are not
+  available yet. `LIMN_AI_USE_API_KEY=true` or `false` still decides it from the environment.
+- Implement story: before you press Start, the build tab says what the agent gets beside the code — how
+  many of your Claude memories (and from how many projects), your CLAUDE.md, your own skills and the
+  skills your repositories keep in `.claude/skills`. **Change** opens Settings → Sandbox.
+- Implement story and AI Fix sessions: the agent is told about every skill your repositories keep in
+  `.claude/skills`, and reads one when its task comes up.
 
 ## [1.0.26] - 2026-11-11
 
