@@ -1,5 +1,5 @@
 // THE WORKSPACE MIRROR (docs/SANDBOX.md § The workspace mirror): every workspace repository, cloned
-// INSIDE the sandbox at its layout path, on `limn/<ticket key>`, with no remote; then the reader's
+// INSIDE the sandbox at its layout path, on the ticket-key branch (`sessionBranch`), with no remote; then the reader's
 // memories, CLAUDE.md and skills, then the seed files.
 //
 // ⚠ THE BASE COMMIT COMES FROM LIMN'S CLONE CACHE (plan invariant 4); the reader's checkout is never

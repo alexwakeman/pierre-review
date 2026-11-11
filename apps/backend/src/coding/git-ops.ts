@@ -12,7 +12,7 @@ import {
 } from '../github/mutations.js';
 import { ghRestGetFor, ghRestGetText } from '../github/client.js';
 import { withLimnRunTrailer, type LimnActionOrigin } from '@pierre-review/shared';
-import { limnOriginForPrNumber, limnOriginForRepo, limnRunRef, orReader } from '../db/limn-actions.js';
+import { limnOriginForPrNumber, limnRunRef, orReader } from '../db/limn-actions.js';
 import type { WriteOrigin } from '../github/write-origin.js';
 import { db, schema } from '../db/client.js';
 import { settlePrAfterWrite } from '../sync/resync-after-write.js';
@@ -305,8 +305,6 @@ export interface ApplyAndPushBranchArgs {
    * `TREE_MISMATCH`, refused BEFORE anything is pushed.
    */
   expectTree?: string;
-  /** The run this push lands (the commit's `Limn-Run:` trailer, the ledger's source). */
-  limnRun: { origin: LimnActionOrigin; source: { table: string; id: number } };
 }
 
 export const TREE_MISMATCH_LINE = "Limn's copy of the earlier pull request does not match. Push it again from Limn.";
@@ -329,9 +327,10 @@ export async function applyAndPushBranch(
   const authorEmail = account?.githubLogin
     ? `${account.githubLogin}@users.noreply.github.com`
     : 'pierre-review@users.noreply.github.com';
-  const origin: WriteOrigin = orReader(
-    await limnOriginForRepo(accountId, owner, name, args.limnRun.origin, { source: args.limnRun.source }).catch(() => null),
-  );
+  // AN IMPLEMENT PR IS THE READER'S (owner decision 2026-11-11): no ledger row, no `Limn-Run:` trailer, so
+  // sync attributes the PR and its commit to the reader, never to their `limn:` bot — and the reader's own
+  // auto review picks it up like any PR of theirs (docs/STORY-BUILD.md § Push).
+  const origin: WriteOrigin = 'reader';
 
   // The name is the reader's (or the plan's slug): git's own check and the protected names FIRST, before
   // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
@@ -353,7 +352,7 @@ export async function applyAndPushBranch(
     ));
     await applyPatchToWorktree(worktreePath, args.patch);
     const commitSha = await commitAll(worktreePath, {
-      message: withLimnRunTrailer(args.commitMessage, limnRunRef(args.limnRun.source)),
+      message: args.commitMessage,
       authorName,
       authorEmail,
     });

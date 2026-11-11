@@ -247,6 +247,9 @@ export interface SandboxSessionStartBody {
   model?: string;
   /** "Implement with docs": a read-only subset of the workspace's reference library goes into the sandbox. */
   docs?: boolean;
+  /** "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
+   *  Off unless `true`; the reader may change it in the tab until the build pushed (`STORY_BUILD_API.autoPush`). */
+  autoPush?: boolean;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

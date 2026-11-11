@@ -31,7 +31,9 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
   - Safety facts the copy may state, and nothing more: the reviewer reads code and cannot edit
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
     nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
-    workspace's AUTO-POSTING covers (§ Auto-posting; on by default, AUTO runs only). Never promise
+    workspace's AUTO-POSTING covers (§ Auto-posting; on by default, AUTO runs only), AI Fix's Push
+    automatically, and Implement / Fill gaps' opt-in "Push and open the pull request when the build
+    finishes" (docs/STORY-BUILD.md § Push automatically). Never promise
     subscription billing. Copy reads "your own Claude Code login or Anthropic API key", or names
     the ChatGPT sign-in when Codex is the provider (§ Codex, the second provider).
 
@@ -3809,6 +3811,9 @@ for EVERY GitHub write Limn makes under a person's account: reviews and approval
 review GitHub makes around a reply or a standalone comment, story-check / CI / Sonar comments, the
 "@dependabot rebase" request, AI Fix / conflict / Implement commits, auto-merge and Dependencies
 merges, and PRs Limn opens. Each is the poster's `limn:<login>` bot; the person is kept beside it.
+⚠ **One exception (owner decision 2026-11-11): Implement story / Fill gaps.** Its push writes as the
+READER (no ledger row, no `Limn-Run:` trailer), so the PR and its commit are the reader's own and count
+like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "The reader's PR").
 
 - **Whose is a write (`github/write-origin.ts`)**: every exported write in `github/mutations.ts`, the
   Limn posts in `review/post-review.ts`, the git push (`coding/git.ts` `PushTarget.origin` +
@@ -5156,7 +5161,9 @@ reference-docs library, sprint briefs/paths and every one-shot completion. Detai
   removed shell-less plan and build agents (`coding/story-build/plan-agent.ts`, `build.ts`, their write
   deny-list `protectWrites`) are gone; do not bring them back as a fallback (owner decision Q2).
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post (ON by default) / Push automatically (OFF) switches. Auto-posting is AUTO RUNS ONLY, under
+  auto-post (ON by default) / Push automatically (OFF) switches, and Implement / Fill gaps' opt-in
+  "Push and open the pull request when the build finishes" tick (docs/STORY-BUILD.md § Push
+  automatically). Auto-posting is AUTO RUNS ONLY, under
   the reader's account, ONE review, `COMMENT` unless `autoVerdict` (ON by default) allows
   stricter; ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
   failure is recorded and NEVER retried. Every posted body carries the hidden marker so

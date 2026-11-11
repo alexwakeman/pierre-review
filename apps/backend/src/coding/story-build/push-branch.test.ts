@@ -129,7 +129,6 @@ const args = (over: Record<string, unknown> = {}): any => ({
   body: 'Body.',
   draft: true,
   protect: ['main'],
-  limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: 1 } },
   ...over,
 });
 
@@ -154,6 +153,11 @@ describe('applyAndPushBranch — the no-PR push', () => {
     expect(log).toHaveLength(2);
     expect(T.pushed[0]).toMatchObject({ remoteBranch: 'acme-214-refunds-web', committish: 'HEAD', protect: ['main'] });
     expect(T.prs[0]).toMatchObject({ head: 'acme-214-refunds-web', base: 'main', draft: true, title: 'ACME-214: Refunds by card', body: 'Body.' });
+    // THE READER'S PR, never their `limn:` bot's: the push and the PR are the reader's writes (no ledger
+    // row), and the commit carries no `Limn-Run:` trailer.
+    expect(T.pushed[0].origin).toBe('reader');
+    const body = execFileSync('git', ['-C', T.worktree, 'log', '-1', '--format=%B'], { encoding: 'utf8' });
+    expect(body).not.toContain('Limn-Run:');
     // The temporary tree is always removed.
     expect(T.removed).toEqual([T.worktree]);
   });
@@ -180,6 +184,20 @@ describe('applyAndPushBranch — the no-PR push', () => {
     await expect(applyAndPushBranch(args({ branch: 'feature/#123' }))).rejects.toMatchObject({ code: 'BRANCH_EXISTS' });
     expect(T.refReads).toEqual(['/repos/acme/web/git/ref/heads/feature/%23123']);
     T.branchExists = false;
+  });
+
+  it('a READER-TYPED rename (after BRANCH_EXISTS) gets the same checks first: refused names never reach GitHub', async () => {
+    T.refReads.length = 0;
+    for (const branch of ['-x', '/x', 'x/', 'a b', 'x.lock', 'MAIN', 'a//b', 'HEAD']) {
+      await expect(applyAndPushBranch(args({ branch })), branch).rejects.toMatchObject({ code: 'PUSH_DENIED' });
+    }
+    expect(T.refReads).toEqual([]);
+    expect(T.prepped).toEqual([]);
+    // A good new name pushes as any branch does: new, never forced, the PR opened on it (ready when asked).
+    const r = await applyAndPushBranch(args({ branch: 'limn/acme-214-v2', draft: false }));
+    expect(r.pushedBranch).toBe('limn/acme-214-v2');
+    expect(T.refReads).toEqual(['/repos/acme/web/git/ref/heads/limn/acme-214-v2']);
+    expect(T.prs[0]).toMatchObject({ head: 'limn/acme-214-v2', draft: false });
   });
 
   it('a patch that does not apply is APPLY_FAILED, nothing pushed', async () => {

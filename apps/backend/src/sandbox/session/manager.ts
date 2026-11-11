@@ -30,7 +30,8 @@
 //
 // ⚠ THE STREAM GAP: the in-memory session is set in the SAME tick as the claim, before any other await.
 // ⚠ Nothing here pushes, posts or writes to the tracker; the host pushes only on the reader's press (or
-//   an AI Fix's own push rules, coding/ai-fix/auto-push.ts).
+//   an AI Fix's own push rules, coding/ai-fix/auto-push.ts, or a story build's opt-in automatic push,
+//   coding/story-build/auto-push.ts, started from the subject's afterBuildSettled).
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   SANDBOX_SESSION_LIVE_PHASES,
@@ -71,6 +72,7 @@ import {
 } from '../../coding/story-build/persist.js';
 import { isStoryBuildRepoPushing } from '../../coding/story-build/push.js';
 import { isStoryBuildStackPushing } from '../../coding/story-build/push-stack.js';
+import { isStoryBuildAutoPushing, maybeAutoPushBuild, reconcileStoryAutoPushOnStartup } from '../../coding/story-build/auto-push.js';
 import { defaultSandboxSettings, readSandboxSettings, type SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import { resolveSandboxAgentChoice, startSandboxAgent, type SandboxAgentChoice, type SandboxAgentDriver, type SandboxUsageSink } from '../drivers/index.js';
 import { credentialModeLine } from '../proxy/credentials.js';
@@ -476,6 +478,8 @@ export interface StartSessionArgs {
   choice: SandboxAgentChoice;
   /** "Implement with docs". */
   docs?: boolean;
+  /** "Push and open the pull request when the build finishes" (coding/story-build/auto-push.ts). */
+  autoPush?: boolean;
 }
 
 export type StartSessionResult =
@@ -580,7 +584,9 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
   const state = { ...emptySessionState(a.action), planFirst: deps.planFirst, withDocs: a.docs === true, docs: null, serviceRuns: [], planStage: null, planProblem: null };
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
-  if (a.docs === true) await updateStoryBuild(ctx, a.accountId, id, { withDocs: true }).catch(() => {});
+  if (a.docs === true || a.autoPush === true) {
+    await updateStoryBuild(ctx, a.accountId, id, { ...(a.docs === true ? { withDocs: true } : {}), ...(a.autoPush === true ? { autoPush: true } : {}) }).catch(() => {});
+  }
   return { outcome: 'started', id };
 }
 
@@ -949,6 +955,11 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
     let after: 'keep' | 'close' = 'keep';
     let afterChat: AfterChatTurn | null = null;
     let buildFollow: string | null = null;
+    // THIS turn's outcome (`l.lastOutcome` may still hold an earlier turn's when `o.text()` throws).
+    let outcome: SandboxTurnOutcome | null = null;
+    // THIS turn's work was stored (afterBuildTurn returned): a failed store must not let the automatic
+    // push send an EARLIER turn's patch.
+    let stored = false;
     try {
       l.planSource = o.build ? null : (o.planSource ?? null);
       l.turnTexts = [];
@@ -961,13 +972,17 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
       l.lastOutcome = null;
       const end = await l.driver.send(text);
       l.lastOutcome = end.outcome;
+      outcome = end.outcome;
       await l.subject.addSpend(l, end.mode, end.usage).catch(() => {});
     } catch (err) {
       if (!l.closing) addItem(l, { kind: 'error', code: 'session', text: scrub(err) });
     } finally {
       clearTimeout(watchdog);
       try {
-        if (o.build && !l.closing && l.container) after = await l.subject.afterBuildTurn(l);
+        if (o.build && !l.closing && l.container) {
+          after = await l.subject.afterBuildTurn(l);
+          stored = true;
+        }
         if (o.build && after === 'keep' && !l.closing && l.subject.buildFollowUp) buildFollow = await l.subject.buildFollowUp(l);
         if (!o.build && !l.closing && l.subject.afterChatTurn) afterChat = await l.subject.afterChatTurn(l, [...l.turnTexts]);
       } catch (err) {
@@ -992,8 +1007,18 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
           runTurn(l, { build: false, text: async () => follow.text, planSource: follow.planSource });
         } else {
           const next: SandboxSessionPhase = o.build || l.phase === 'built' ? 'built' : (afterChat?.nextPhase ?? 'ready');
-          await setPhase(l, next).catch(() => {});
+          const saved = await setPhase(l, next).then(
+            () => true,
+            () => false,
+          );
           touch(l);
+          if (o.build && stored && saved && next === 'built' && outcome === 'completed' && !l.closing) {
+            try {
+              l.subject.afterBuildSettled?.(l);
+            } catch {
+              /* a subject's listener never stops the machine */
+            }
+          }
         }
       }
     }
@@ -1356,6 +1381,7 @@ export async function discardSession(ctx: AgentContext, accountId: number, build
   // Plan first: a planned PR (or Push all of the stack) in flight.
   const planned = await listPlannedPrRows(ctx, accountId, buildId);
   if (isStoryBuildStackPushing(buildId, planned.map((p) => p.id))) return { status: 'not_ready' };
+  if (isStoryBuildAutoPushing(buildId)) return { status: 'not_ready' };
   if (row.sessionPhase == null) {
     // A row of the old plan/build flow: its own discard (kept worktrees, refs).
     const { discardLegacyStoryBuild } = await import('../../coding/story-build/legacy.js');
@@ -1439,7 +1465,12 @@ export async function sessionWire(ctx: AgentContext, accountId: number, row: Sto
     repos.some((r) => (r.patch ?? '') !== ''),
     plan,
   );
-  return { ...base, session, prs: prRows.map((r) => toStoryBuildPr(r, prNames.get(r.repoId) ?? `#${r.repoId}`)) };
+  return {
+    ...base,
+    autoPushRunning: isStoryBuildAutoPushing(row.id),
+    session,
+    prs: prRows.map((r) => toStoryBuildPr(r, prNames.get(r.repoId) ?? `#${r.repoId}`)),
+  };
 }
 
 /** The live facts the wire mapper reads (agent state, the idle close time). */
@@ -1506,6 +1537,8 @@ export async function reconcileSessionsOnStartup(ctx: AgentContext): Promise<num
     moved += 1;
   }
   if (moved > 0) ctx.log.info(`reconciled ${moved} sandbox session(s) cut off by a restart`);
+  // An automatic push a restart cut off after its claim: recorded so the tab says so (never a push).
+  await reconcileStoryAutoPushOnStartup(ctx).catch((err: unknown) => ctx.log.warn({ err }, 'story auto-push reconcile failed'));
   return moved;
 }
 
@@ -1790,6 +1823,19 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       continuations = 0;
       return text;
     },
+    // PUSH AUTOMATICALLY (coding/story-build/auto-push.ts): the reader's opt-in. Off the turn ("a push is
+    // not a turn"); the module re-reads the option, claims once, records a failure, never throws.
+    afterBuildSettled(l0) {
+      const l = l0 as Live;
+      void maybeAutoPushBuild(ctx, { accountId, buildId })
+        .then((d) => {
+          if (d.status === 'pushed' && d.opened > 0) notice(l, d.opened === 1 ? 'Limn pushed the build and opened the pull request.' : `Limn pushed the build and opened ${d.opened} pull requests.`);
+          else if (d.status === 'failed') notice(l, `Automatic push failed: ${d.message}`);
+        })
+        .catch(() => {});
+    },
+    // A message would start a build turn that rewrites the stored work while the automatic push reads it.
+    busyReason: () => (isStoryBuildAutoPushing(buildId) ? 'Wait for the push to finish.' : null),
   };
 }
 

@@ -12,6 +12,9 @@ export interface PushRepoArgs {
   repoId: number;
   /** Open the PR as a draft (owner decision 2: default true). */
   draft: boolean;
+  /** A NEW branch name for this push (the reader's rename after `BRANCH_EXISTS`); absent ⇒ the row's
+   *  `branch`. Checked by `assertPushTarget` like any target; stored on the row once the push lands. */
+  branch?: string;
   /** Bodies link sibling PRs already pushed in this session (Push all runs in build order). */
   signal?: AbortSignal;
 }

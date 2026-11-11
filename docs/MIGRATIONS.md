@@ -1701,3 +1701,12 @@ is kept as it is.
 `ALTER TABLE accounts ADD ai_use_api_key integer` (Settings → AI; NULL = never chosen = off; written by
 `PUT /api/ai/api-key`, loaded at boot into `ai/credentials.ts`). An explicitly set `LIMN_AI_USE_API_KEY`
 wins. Only the tick is stored, never a key. Additive; journal `when` `1792656000000`.
+
+### `0185_story_build_auto_push` — Implement's "Push and open the pull request when the build finishes"
+
+`ALTER TABLE story_builds ADD auto_push` (the reader's opt-in, default 0), `auto_push_claimed_at` (the
+compare-and-set claim, never cleared) and `auto_push_error` (the one recorded failure); `ALTER TABLE
+story_build_repos` / `story_build_prs ADD push_error_code` (so the tab offers the rename after
+`BRANCH_EXISTS` across a reload). Existing tables, so erasure and export already cover them. Additive;
+journal `when` `1792742400000` (written as 0184 on its own branch; renumbered at integration).
+[STORY-BUILD.md](STORY-BUILD.md) § Push automatically.

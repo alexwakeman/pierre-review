@@ -11,9 +11,9 @@ organisations where ≤ 3 people use it; a commercial licence above that, via th
 competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.
 
-> **How to use this file.** The lean operating guide: the mental model, the commands, and the
-> invariants and landmines to know BEFORE editing. Per-area depth is in the topic docs below —
-> read the matching one before non-trivial work in its area; put NEW detail there. **Hard size
+> **How to use this file.** The lean operating guide: the mental model, the commands, the invariants
+> and landmines to know BEFORE editing. Depth is in the topic docs below — read the matching one
+> before non-trivial work in its area; put NEW detail there. **Hard size
 > budget: under 48k bytes**; nothing discoverable by grepping code or a route/table belongs here.
 
 ## Doc map
@@ -57,8 +57,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 - **Sync** pulls PR activity into the DB.
 - **The API** is a thin read layer; the timeline endpoint is deliberately _lean_, heavy detail
   fetched on demand.
-- **The frontend** is a timeline-first dashboard: server state in React Query, UI/filter state
-  in a Zustand store mirrored to the URL.
+- **The frontend** is a timeline-first dashboard (state layers: § Frontend).
 
 The load-bearing concept is **derived thread state** (below).
 
@@ -216,7 +215,7 @@ EXACTLY ONE of which, `'review'`, is the reviewer cohort · `AutomatedReviewerKi
 
 JSON wire, ISO-8601 timestamps; payload types in `packages/shared`; one file per resource in
 `api/routes/`, each mapping to a `client.ts` method. **Consult [docs/API.md](docs/API.md) before
-changing a route's shape.** The platform's `/api/pro/*` URL paths are historical and stay.
+changing a route's shape.**
 
 - **`?workspace=<integer>` is THE scope parameter.** Absent / unknown / unparseable ⇒ the
   DEFAULT workspace — **never a 404**. Every scoped response echoes `workspaceId`. `?repoIds=` is
@@ -424,14 +423,14 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
-  (ON; own PRs, any run, still `ownOnly`) switches. Auto-posting is
+  (ON; own PRs, any run, still `ownOnly`) switches, and Implement's opt-in tick (below). Auto-posting is
   AUTO runs plus a manual "Review and post" press, under the reader's account, ONE review,
   `COMMENT` unless `autoVerdict` (ON likewise) allows stricter (a run not approved says why,
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
   write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
 - ⚠ **ALL LIMN WRITES ARE A BOT** (`limn:<login>`): writes take an `origin`, Limn's are ledgered;
-  own-post checks read `trueAuthorId`.
+  own-post checks read `trueAuthorId`. EXCEPT Implement's push: the READER'S PR (no ledger, no trailer).
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
   never Limn's own. A FAILED auto run is retried by that rule only when TRANSIENT (caps and "Run auto
@@ -463,7 +462,8 @@ a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents 
 fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued, an unattended one skips.
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
-  leaves ONLY as a patch per repository and the HOST pushes on the reader's press.
+  leaves ONLY as a patch per repository and the HOST pushes on the reader's press — or ONCE after a
+  build the reader opted into (`story-build/auto-push.ts`: claim first, never retried).
 - ⚠ **On Docker its only way out is Limn's allow-list proxy**; the model credential stays on the host.
 - **The base commit comes from Limn's clone cache**; the reader's clone only LENDS OBJECTS (never its
   tree, index or hooks) to the KEPT read-only repo store. **Memories only, never past sessions.** ONE fold
@@ -489,8 +489,7 @@ Monitoring, Slack.
   in-flight slot claimed SYNCHRONOUSLY.
 - ⚠ **The D4 digit gate rejects UNICODE numerals** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`). A
   model-derived figure and a code-derived figure are LABELLED APART.
-- **"Plan my day" is REMOVED (2026-11-04)** — no route, no narration; `pro_work_plans` stays
-  dormant. The Do next scorer (`db/work-plan.ts` `scoreCards`) is core and ranks the Pending tabs.
+- **"Plan my day" is REMOVED** (`pro_work_plans` dormant). `db/work-plan.ts` `scoreCards` is core.
 - **The peer benchmark** reads the BUNDLED `platform/data/benchmark/benchmark-fit.json`. ⚠
   **Refusals are the product** — never normalise one into a distribution shape. ⚠ **Money lives
   at WORKSPACE grain only** (a `?repoIds=`-NARROWED request builds no rollup); `$ per acted-on
@@ -634,9 +633,8 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). GA lives in the landing only, never the SPA.
 - The landing's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in
   `apps/landing/index.html` are load-bearing (the prerenderer throws without them).
-- **There is NO static demo** (dropped 2026-11-04). Every picture of the app on the landing is a
-  CLICKABLE HTML mock (`apps/landing/src/components/mock/`, data in `src/mock/acme.ts`) — no product
-  screenshots. ⚠ **A user-visible change a mock mirrors updates that mock IN THE SAME COMMIT**
+- **No static demo, no product screenshots**: every picture of the app on the landing is a
+  CLICKABLE HTML mock (`apps/landing/src/components/mock/`, data in `src/mock/acme.ts`). ⚠ **A user-visible change a mock mirrors updates that mock IN THE SAME COMMIT**
   (mock → component table: [apps/landing/README.md](apps/landing/README.md)).
 - ⚠ **THE USER DOCS (`/docs`)**: a user-visible change updates its docs page and `CHANGELOG.md`
   Unreleased in the same commit; remove sections for removed features

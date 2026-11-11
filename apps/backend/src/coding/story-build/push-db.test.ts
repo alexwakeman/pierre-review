@@ -10,7 +10,12 @@
 //   • Push all: every unpushed ready repository IN PLAN ORDER, each on its own, a later body linking
 //     the earlier PR;
 //   • the routes: tenancy 404s, `draft` parsing, the diff, the checks preview at the base (cached), the
-//     retry lane (503 until the manager registers one).
+//     retry lane (503 until the manager registers one);
+//   • THE RENAME after BRANCH_EXISTS: the code stored beside the sentence, `branch` on the single-item
+//     route reaching the push (stored once it lands), refused on Push all and when not a name;
+//   • THE AUTOMATIC PUSH (auto-push.ts): once, ready (draft:false), as the reader's own PR; skipped when off or
+//     switched off before the claim; a failure recorded, never retried; a concurrent manual press safe;
+//     the tab's switch (`…/auto-push`) refused once pushed.
 import { rmSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,6 +71,7 @@ let closeDb: (() => Promise<void> | void) | undefined;
 let P: typeof import('./persist.js');
 let push: typeof import('./push.js');
 let routes: typeof import('./routes-build.js');
+let auto: typeof import('./auto-push.js');
 const repo: Record<number, { api: number; web: number }> = {};
 const ws: Record<number, number> = {};
 const IDENT = 'jira:https://acme.atlassian.net#ACME-214';
@@ -128,6 +134,7 @@ beforeAll(async () => {
   P = await import('./persist.js');
   push = await import('./push.js');
   routes = await import('./routes-build.js');
+  auto = await import('./auto-push.js');
 });
 
 afterAll(async () => {
@@ -413,5 +420,259 @@ describe('the patch routes', () => {
     const s = await readySession();
     expect((await app.inject({ method: 'GET', url: `/api/story-builds/${s.id}/repos/${s.web}/checks`, headers: as(1) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: `/api/story-builds/${s.id}/repos/${s.web}/retry`, headers: as(1), payload: {} })).statusCode).toBe(404);
+  });
+});
+
+describe('the rename after BRANCH_EXISTS', () => {
+  it('stores the code beside the sentence; a push with a new name lands there and records it', async () => {
+    const s = await readySession();
+    G.fail = { code: 'BRANCH_EXISTS', message: 'branch exists' };
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true });
+    expect(await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api)).toMatchObject({ status: 'ready', pushErrorCode: 'BRANCH_EXISTS', branch: 'acme-214-refunds-api' });
+    G.fail = null;
+    const r = await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true, branch: 'acme-214-refunds-api-v2' });
+    expect(r).toMatchObject({ outcome: 'pushed', code: null });
+    expect(G.pushes.map((p) => p.branch)).toEqual(['acme-214-refunds-api', 'acme-214-refunds-api-v2']);
+    // The same protected list as ever: the new name is judged by assertPushTarget like any other.
+    expect(G.pushes[1].protect).toEqual(['main']);
+    // The reader's PR, never their `limn:` bot's: no run is named for the ledger.
+    expect(G.pushes[1]).not.toHaveProperty('limnRun');
+    expect(await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api)).toMatchObject({
+      status: 'pushed',
+      branch: 'acme-214-refunds-api-v2',
+      pushedBranch: 'acme-214-refunds-api-v2',
+      pushError: null,
+      pushErrorCode: null,
+    });
+    const wire = P.toStoryBuild((await P.getStoryBuildRow(ctx, 1, s.id))!, await P.listStoryBuildRepoRows(ctx, 1, s.id), { repoNames: new Map(), sessionBudgetUsd: 1 } as any);
+    expect(wire.repos.find((x) => x.repoId === s.api)).toMatchObject({ branch: 'acme-214-refunds-api-v2', pushErrorCode: null });
+    expect(wire).toMatchObject({ autoPush: false, autoPushAt: null, autoPushError: null });
+  });
+
+  it('a rename the host refuses (PUSH_DENIED) keeps the stored BRANCH_EXISTS, so the field stays', async () => {
+    const s = await readySession();
+    G.fail = { code: 'BRANCH_EXISTS', message: 'exists' };
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true });
+    G.fail = { code: 'PUSH_DENIED', message: 'Limn never pushes to main.' };
+    const r = await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true, branch: 'main' });
+    expect(r).toMatchObject({ outcome: 'failed', code: 'PUSH_DENIED' });
+    expect(G.pushes[1].branch).toBe('main');
+    expect(await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api)).toMatchObject({
+      branch: 'acme-214-refunds-api',
+      pushErrorCode: 'BRANCH_EXISTS',
+      pushError: 'Limn never pushes to main.',
+    });
+  });
+
+  it('a rename git refuses is answered before any lookup or push, and never recorded', async () => {
+    const s = await readySession();
+    const before = await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api);
+    const r = await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true, branch: 'bad..name' });
+    expect(r).toMatchObject({ outcome: 'failed', code: 'PUSH_DENIED' });
+    expect(G.pushes).toHaveLength(0);
+    const after = await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api);
+    expect(after).toMatchObject({ pushError: before!.pushError ?? null, pushErrorCode: before!.pushErrorCode ?? null });
+  });
+
+  it('the routes: `branch` reaches the one-repository push; a non-name is 400; Push all refuses it', async () => {
+    const app = Fastify();
+    routes.registerStoryBuildBuildRoutes(app, ctx);
+    await app.ready();
+    try {
+      const s = await readySession();
+      const url = storyBuildPath('repoPush', { id: s.id, repoId: s.api });
+      for (const branch of [42, '', '   ', 'x'.repeat(121)]) {
+        expect((await app.inject({ method: 'POST', url, headers: { 'x-account': '1' }, payload: { branch } })).statusCode, String(branch)).toBe(400);
+      }
+      const all = await app.inject({ method: 'POST', url: storyBuildPath('pushAll', { id: s.id }), headers: { 'x-account': '1' }, payload: { branch: 'x' } });
+      expect(all.statusCode).toBe(400);
+      expect(G.pushes).toEqual([]);
+      const ok = await app.inject({ method: 'POST', url, headers: { 'x-account': '1' }, payload: { branch: '  limn/acme-214-v2 ' } });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().results[0]).toMatchObject({ outcome: 'pushed' });
+      expect(G.pushes[0].branch).toBe('limn/acme-214-v2');
+      // Another account: 404 before anything.
+      expect((await app.inject({ method: 'POST', url, headers: { 'x-account': '2' }, payload: { branch: 'y' } })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('the automatic push', () => {
+  const on = async (id: number) => P.updateStoryBuild(ctx, 1, id, { autoPush: true });
+
+  it('pushes every ready repository ONCE, ready for review (draft:false), as an automatic run', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id });
+    expect(d).toEqual({ status: 'pushed', opened: 2 });
+    expect(G.pushes.map((p) => [p.name, p.draft])).toEqual([
+      ['api', false],
+      ['web', false],
+    ]);
+    const row = (await P.getStoryBuildRow(ctx, 1, s.id))!;
+    expect(row.autoPushClaimedAt).toBeInstanceOf(Date);
+    expect(row.autoPushError).toBeNull();
+    // Never twice: a later build turn (or anything else) finds the claim.
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'claimed' });
+    expect(G.pushes).toHaveLength(2);
+  });
+
+  it('does nothing while the option is off, and nothing when it is switched off before the claim', async () => {
+    const s = await readySession();
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'off' });
+    await on(s.id);
+    // The reader unticks it between the gate's read and the claim: the claim re-checks it.
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id }, {
+      isPlannedBuild: async () => {
+        await auto.setStoryBuildAutoPush(ctx, 1, s.id, false);
+        return false;
+      },
+      pushAll: async () => {
+        throw new Error('must not push');
+      },
+      pushStack: async () => {
+        throw new Error('must not push');
+      },
+    });
+    expect(d).toEqual({ status: 'skipped', reason: 'off' });
+    expect(G.pushes).toEqual([]);
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushClaimedAt).toBeNull();
+  });
+
+  it('waits for a settled build, and leaves nothing to do after a person pushed', async () => {
+    const s = await readySession();
+    await on(s.id);
+    await P.updateStoryBuild(ctx, 1, s.id, { status: 'building' });
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'not_ready' });
+    await P.updateStoryBuild(ctx, 1, s.id, { status: 'ready' });
+    await push.pushAllRepos(ctx, { accountId: 1, buildId: s.id, draft: true });
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'nothing' });
+    expect(G.pushes.map((p) => p.draft)).toEqual([true, true]);
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushClaimedAt).toBeNull();
+  });
+
+  it('a failure (BRANCH_EXISTS) is recorded on the build and the repository, and never retried', async () => {
+    const s = await readySession({ only: 'api' });
+    await on(s.id);
+    G.fail = { code: 'BRANCH_EXISTS', message: 'branch exists' };
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id });
+    const sentence = 'A branch named acme-214-refunds-api already exists on acme/api. Pick another branch name.';
+    expect(d).toEqual({ status: 'failed', message: sentence });
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushError).toBe(sentence);
+    expect(await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api)).toMatchObject({ status: 'ready', pushError: sentence, pushErrorCode: 'BRANCH_EXISTS' });
+    G.fail = null;
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'claimed' });
+    expect(G.pushes).toHaveLength(1);
+    // The reader recovers by hand with a new name (Part A).
+    expect(await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: false, branch: 'acme-214-refunds-api-v2' })).toMatchObject({ outcome: 'pushed' });
+  });
+
+  it('a thrown push after the claim is recorded, never thrown', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id }, {
+      isPlannedBuild: async () => false,
+      pushAll: async () => {
+        throw new Error('the network went away');
+      },
+      pushStack: async () => [],
+    });
+    expect(d).toEqual({ status: 'failed', message: 'the network went away' });
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushError).toBe('the network went away');
+  });
+
+  it('a concurrent manual press is safe: one PR per repository, and no failure', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const [d, manual] = await Promise.all([
+      auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id }),
+      push.pushAllRepos(ctx, { accountId: 1, buildId: s.id, draft: true }),
+    ]);
+    expect(G.pushes.map((p) => p.name).sort()).toEqual(['api', 'web']);
+    expect(manual!.every((r) => r.outcome !== 'failed')).toBe(true);
+    // Either the automatic push pushed something, or the press held every item and that is said.
+    const err = (await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushError;
+    if (d.status === 'pushed') expect(err).toBeNull();
+    else expect(err).toBe(auto.AUTO_PUSH_TAKEN_OVER);
+    const rows = await P.listStoryBuildRepoRows(ctx, 1, s.id);
+    expect(rows.map((r) => r.status)).toEqual(['pushed', 'pushed']);
+  });
+
+  it('nothing pushed because the press held every item: recorded, so the tab leaves "Pushing…"', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id }, {
+      isPlannedBuild: async () => false,
+      pushAll: async () => [{ outcome: 'skipped', code: 'PUSH_IN_PROGRESS', error: 'This repository is being pushed.' }],
+      pushStack: async () => [],
+    });
+    expect(d).toEqual({ status: 'failed', message: auto.AUTO_PUSH_TAKEN_OVER });
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushError).toBe(auto.AUTO_PUSH_TAKEN_OVER);
+  });
+
+  it('is held in-process from the first tick (a message cannot start a turn), and released after', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const p = auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id });
+    expect(auto.isStoryBuildAutoPushing(s.id)).toBe(true);
+    // A second call while it runs is not a second push.
+    expect(await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'claimed' });
+    await p;
+    expect(auto.isStoryBuildAutoPushing(s.id)).toBe(false);
+    expect(G.pushes).toHaveLength(2);
+  });
+
+  it('the claim fails when a turn started (status no longer ready), so the one push is not burned', async () => {
+    const s = await readySession();
+    await on(s.id);
+    const d = await auto.maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id }, {
+      isPlannedBuild: async () => {
+        await P.updateStoryBuild(ctx, 1, s.id, { status: 'building' });
+        return false;
+      },
+      pushAll: async () => {
+        throw new Error('must not push');
+      },
+      pushStack: async () => [],
+    });
+    expect(d).toEqual({ status: 'skipped', reason: 'not_ready' });
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushClaimedAt).toBeNull();
+  });
+
+  it('boot: a claim a restart cut off is recorded (never a push); a pushed or answered one is left alone', async () => {
+    const cut = await readySession({ only: 'api' });
+    await on(cut.id);
+    expect(await auto.claimStoryBuildAutoPush(ctx, 1, cut.id)).toBe(true);
+    expect(await auto.reconcileStoryAutoPushOnStartup(ctx)).toBe(1);
+    expect((await P.getStoryBuildRow(ctx, 1, cut.id))!.autoPushError).toBe(auto.AUTO_PUSH_INTERRUPTED);
+    expect(G.pushes).toEqual([]);
+    expect(await auto.reconcileStoryAutoPushOnStartup(ctx)).toBe(0);
+  });
+
+  it('the switch (`…/auto-push`): on and off until the build pushed, then 409; 400 / 404 otherwise', async () => {
+    const app = Fastify();
+    routes.registerStoryBuildBuildRoutes(app, ctx);
+    await app.ready();
+    try {
+      const s = await readySession();
+      const url = storyBuildPath('autoPush', { id: s.id });
+      const h = { 'x-account': '1' };
+      expect((await app.inject({ method: 'POST', url, headers: h, payload: { on: 'yes' } })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url, headers: h, payload: {} })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url, headers: { 'x-account': '2' }, payload: { on: true } })).statusCode).toBe(404);
+      const r = await app.inject({ method: 'POST', url, headers: h, payload: { on: true } });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ autoPush: true });
+      expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPush).toBe(true);
+      expect((await app.inject({ method: 'POST', url, headers: h, payload: { on: false } })).json()).toEqual({ autoPush: false });
+      await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: s.api, draft: true });
+      const late = await app.inject({ method: 'POST', url, headers: h, payload: { on: true } });
+      expect(late.statusCode).toBe(409);
+      expect(late.json().error).toBe('NotReady');
+    } finally {
+      await app.close();
+    }
   });
 });

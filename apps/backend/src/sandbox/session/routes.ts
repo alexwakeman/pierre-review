@@ -219,6 +219,8 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             diagram: { type: 'boolean' },
             // "Implement with docs": a read-only copy of part of the reference library goes into the sandbox.
             docs: { type: 'boolean' },
+            // "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
+            autoPush: { type: 'boolean' },
           },
         },
       },
@@ -254,6 +256,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         ticketTitle: inputs.title,
         action: body.action === 'fill_gaps' ? 'fill_gaps' : 'implement',
         docs: body.docs === true,
+        autoPush: body.autoPush === true,
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);

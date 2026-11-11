@@ -155,7 +155,7 @@ describe('the seed', () => {
   it('gives both providers the same repositories, rules and writing rules; Codex gets its memory files listed', () => {
     const s = buildSeed(input());
     for (const text of [s.claudeMd, s.agentsMd]) {
-      expect(text).toContain('`/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness` (from main at bbbbbbb; branch `limn/bmd-412`)');
+      expect(text).toContain('`/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-harness` (from main at bbbbbbb; branch `BMD-412`)');
       expect(text).toContain('DEFRA/cdp-app-config');
       expect(text).toContain('Do not push and do not add a remote.');
       expect(text).toContain('`limn-svc up');
@@ -195,9 +195,10 @@ describe('the seed', () => {
   });
 
   it('names the session branch from the ticket key', () => {
-    expect(sessionBranch('BMD-412')).toBe('limn/bmd-412');
-    expect(sessionBranch('DEFRA/bng-library#12')).toBe('limn/defra-bng-library-12');
-    expect(sessionBranch('…')).toBe('limn/ticket');
+    expect(sessionBranch('BMD-412')).toBe('BMD-412');
+    expect(sessionBranch('DEFRA/bng-library#12')).toBe('DEFRA-bng-library-12');
+    expect(sessionBranch('…')).toBe('ticket');
+    expect(sessionBranch('ACME..9.lock')).toBe('ACME.9');
   });
 });
 

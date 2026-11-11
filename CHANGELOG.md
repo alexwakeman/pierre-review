@@ -24,6 +24,21 @@ no internals.
   skills your repositories keep in `.claude/skills`. **Change** opens Settings → Sandbox.
 - Implement story and AI Fix sessions: the agent is told about every skill your repositories keep in
   `.claude/skills`, and reads one when its task comes up.
+- Implement story and Fill gaps: a new box, "Push and open the pull request when the build finishes". Off by
+  default. When ticked, Limn pushes the build once it finishes and opens the pull request ready for review, with your
+  GitHub login. You can change it in the tab until anything is pushed. When auto review is on for the workspace, it
+  reviews the new pull request.
+
+### Changed
+
+- Implement story and Fill gaps: the pull request and its commit are now yours, not your Limn bot's, so they
+  count like any pull request of yours (auto review included). The branch is the ticket key, such as
+  PAY-142, with no `limn/` in front.
+
+### Fixed
+
+- Implement story: when the branch already exists on GitHub, Push now offers a new branch name (such as
+  PAY-142-v2) and pushes to it. Before, there was no way past it.
 
 ## [1.0.26] - 2026-11-11
 

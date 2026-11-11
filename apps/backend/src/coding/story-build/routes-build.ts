@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import {
   STORY_BUILD_API,
+  STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_PUSH_DRAFT_DEFAULT,
+  type StoryBuildAutoPushResponse,
   type StoryBuildDiffResponse,
   type StoryBuildPrDiffResponse,
   type StoryBuildPrPushResult,
@@ -11,6 +13,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { getStoryBuildRepoPatch, getStoryBuildRepoRow, getStoryBuildRow } from './persist.js';
 import { getStoryBuildPrRow } from './plan-persist.js';
 import { pushAllRepos, pushRepo } from './push.js';
+import { setStoryBuildAutoPush } from './auto-push.js';
 import { isPlannedBuild, isStoryBuildStackPushing, pushPlannedPr, pushPlannedStack, repoResultsOf, type PushPlannedPrArgs } from './push-stack.js';
 import type { PushRepoFn } from './seams.js';
 
@@ -25,6 +28,12 @@ import type { PushRepoFn } from './seams.js';
 //   POST …/push                   push every unpushed ready repository, in build order
 //   GET  …/prs/:prId/diff         plan first: one planned PR's patch (against the PR before it)
 //   POST …/prs/:prId/push         plan first: push one planned PR (a stacked PR needs the one before it)
+//   POST …/auto-push              "Push and open the pull request when the build finishes" on/off (409 once pushed)
+//
+// RENAME (the recovery from BRANCH_EXISTS): the single-item pushes take `branch` — `…/repos/:repoId/push`
+// of a build without planned PRs, and `…/prs/:prId/push`. Push all, and a planned build's per-repository
+// push (several PRs), refuse it (400). Here only its type and length; the HOST checks the name itself
+// (git-ops `assertPushTarget`: git's rules, never a protected or planned branch) before any lookup.
 //
 // PLAN FIRST: a build with an approved plan pushes PLANNED PRs (push-stack.ts): Push all in plan order,
 // the per-repository route that repository's stack in order; the response adds `prs`.
@@ -47,6 +56,20 @@ export function parseDraft(body: unknown): boolean | null {
   if (v === undefined) return STORY_BUILD_PUSH_DRAFT_DEFAULT;
   return typeof v === 'boolean' ? v : null;
 }
+
+/** `branch` from a push body: absent ⇒ undefined (the row's branch); a non-string, blank or over-long
+ *  value ⇒ refused (null). Only shape here — `assertPushTarget` judges the name. */
+export function parseBranch(body: unknown): string | undefined | null {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const v = (body as { branch?: unknown }).branch;
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 && t.length <= STORY_BUILD_BRANCH_MAX ? t : null;
+}
+
+const BAD_BRANCH = { error: 'BadRequest', message: `\`branch\` must be a branch name of 1 to ${STORY_BUILD_BRANCH_MAX} characters.` } as const;
+const NO_BRANCH_HERE = { error: 'BadRequest', message: 'Name the branch on one pull request at a time.' } as const;
 
 type Params = { id: string; repoId: string };
 const NOT_FOUND = { error: 'NotFound', message: 'Not found.' } as const;
@@ -74,11 +97,13 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (id == null || prId == null) return reply.code(404).send(NOT_FOUND);
     const draft = parseDraft(req.body);
     if (draft == null) return reply.code(400).send({ error: 'BadRequest', message: '`draft` must be true or false.' });
+    const branch = parseBranch(req.body);
+    if (branch === null) return reply.code(400).send(BAD_BRANCH);
     const pr = await getStoryBuildPrRow(ctx, accountId, id, prId);
     if (!pr) return reply.code(404).send(NOT_FOUND);
     const r: StoryBuildPrPushResult = isStoryBuildStackPushing(id)
       ? { prId: pr.id, key: pr.prKey, repoId: pr.repoId, outcome: 'skipped', prNumber: null, prUrl: null, code: 'PUSH_IN_PROGRESS', error: 'This build is being pushed.' }
-      : await pushPr(ctx, { accountId, buildId: id, prId, draft });
+      : await pushPr(ctx, { accountId, buildId: id, prId, draft, ...(branch !== undefined ? { branch } : {}) });
     if (r.code === 'NotFound') return reply.code(404).send(NOT_FOUND);
     const resp: StoryBuildPushResponse = { results: repoResultsOf([r]), prs: [r] };
     return reply.send(resp);
@@ -102,13 +127,16 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (id == null || repoId == null) return reply.code(404).send(NOT_FOUND);
     const draft = parseDraft(req.body);
     if (draft == null) return reply.code(400).send({ error: 'BadRequest', message: '`draft` must be true or false.' });
+    const branch = parseBranch(req.body);
+    if (branch === null) return reply.code(400).send(BAD_BRANCH);
     if (!(await getStoryBuildRepoRow(ctx, accountId, id, repoId))) return reply.code(404).send(NOT_FOUND);
     if (await isPlannedBuild(ctx, accountId, id)) {
+      if (branch !== undefined) return reply.code(400).send(NO_BRANCH_HERE);
       const prs = (await pushPlannedStack(ctx, { accountId, buildId: id, draft, repoId, push: pushPr })) ?? [];
       const stacked: StoryBuildPushResponse = { results: repoResultsOf(prs), prs };
       return reply.send(stacked);
     }
-    const r = await push(ctx, { accountId, buildId: id, repoId, draft });
+    const r = await push(ctx, { accountId, buildId: id, repoId, draft, ...(branch !== undefined ? { branch } : {}) });
     if (r.code === 'NotFound') return reply.code(404).send(NOT_FOUND);
     const resp: StoryBuildPushResponse = { results: [r] };
     return reply.send(resp);
@@ -120,6 +148,7 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (id == null) return reply.code(404).send(NOT_FOUND);
     const draft = parseDraft(req.body);
     if (draft == null) return reply.code(400).send({ error: 'BadRequest', message: '`draft` must be true or false.' });
+    if (parseBranch(req.body) !== undefined) return reply.code(400).send(NO_BRANCH_HERE);
     if (!(await getStoryBuildRow(ctx, accountId, id))) return reply.code(404).send(NOT_FOUND);
     if (await isPlannedBuild(ctx, accountId, id)) {
       const prs = await pushPlannedStack(ctx, { accountId, buildId: id, draft, push: pushPr });
@@ -130,6 +159,21 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const results = await pushAllRepos(ctx, { accountId, buildId: id, draft, push });
     if (results == null) return reply.code(404).send(NOT_FOUND);
     const resp: StoryBuildPushResponse = { results };
+    return reply.send(resp);
+  });
+
+  // "Push and open the pull request when the build finishes" (auto-push.ts): on or off until the build pushed.
+  app.post<{ Params: { id: string }; Body: unknown }>(STORY_BUILD_API.autoPush, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const b = req.body;
+    const on = b != null && typeof b === 'object' && !Array.isArray(b) ? (b as { on?: unknown }).on : undefined;
+    if (typeof on !== 'boolean') return reply.code(400).send({ error: 'BadRequest', message: '`on` must be true or false.' });
+    const r = await setStoryBuildAutoPush(ctx, accountId, id, on);
+    if (r.status === 'not_found') return reply.code(404).send(NOT_FOUND);
+    if (r.status === 'pushed') return reply.code(409).send({ error: 'NotReady', message: 'This build has already pushed.' });
+    const resp: StoryBuildAutoPushResponse = { autoPush: r.autoPush };
     return reply.send(resp);
   });
 }

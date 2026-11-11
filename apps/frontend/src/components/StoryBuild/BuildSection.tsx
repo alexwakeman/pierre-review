@@ -10,7 +10,7 @@ import { api, ApiError } from '../../api/client.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { storyBuildMutationKey, useStoryBuildDiff, useStoryBuildPush } from '../../hooks/useStoryBuild.js';
 import { parseGitPatch } from '../../lib/diff.js';
-import { canPushRepo, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
+import { branchExistsFor, buildBranchNames, canPushRepo, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { PrCardChips, PrCardFrame, PrCardMeta, PrCardTitle, CARD_NEUTRAL_CHIP, CARD_RED_CHIP, CARD_TONE_CHIP } from '../Activity/PrCardShell.js';
@@ -20,12 +20,15 @@ import { AiRunLabel } from '../AiRunLabel.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from '../diff/FileDiffView.js';
 import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
+import { RenameBranch } from './RenameBranch.js';
 
 // THE CHANGES: one card per repository with stored work, in build order (the One PR card shell look).
 // Each card: its status, what the agent says it changed (`ChangeReportSections`; the refs jump to the
 // criterion in the Ticket panel), the diff — fetched only when opened, drawn exactly as AI Fix draws one —
 // and Push. Pushed: the new pull request, which opens its PR tab. Nothing here pushes without the reader
-// pressing Push. A row of the removed plan/build flow (no `session`) shows the same card, plus the test
+// pressing Push (the opt-in automatic push runs on the host: auto-push.ts). After BRANCH_EXISTS (the
+// press's code, or the row's stored one after a reload or an automatic push) Push becomes a new branch
+// name + Push (`RenameBranch`). A row of the removed plan/build flow (no `session`) shows the same card, plus the test
 // run it stored (`ChecksReport`) and "Not built or tested here." when it ran none.
 
 function errorOf(err: unknown): string | null {
@@ -53,6 +56,9 @@ export function BuildSection({
   const push = useStoryBuildPush(build.workspaceId, build.ident);
   const results = new Map((push.data?.results ?? []).map((r) => [r.repoId, r] as const));
   const repos = build.repos.filter((r) => r.include || r.status === 'pushed').sort((a, b) => a.order - b.order);
+  // The names the rename avoids: the build's own branches and every name this tab already tried.
+  const tried = push.variables?.branch;
+  const taken = [...buildBranchNames(build), ...(tried != null ? [tried] : [])];
   return (
     <ul data-testid="story-build-repos" className="space-y-2">
       {repos.map((r) => (
@@ -62,7 +68,13 @@ export function BuildSection({
           repo={r}
           draft={draft}
           session={session}
-          onPush={() => push.mutate({ id: build.id, repoId: r.repoId, draft })}
+          taken={taken}
+          branchExists={
+            // A refused NEW name (git's rules, a protected branch) keeps the field: Push would retry the old one.
+            (tried != null && push.variables?.repoId === r.repoId && results.get(r.repoId)?.outcome !== 'pushed') ||
+            branchExistsFor(results.get(r.repoId)?.code, r.pushErrorCode)
+          }
+          onPush={(branch) => push.mutate({ id: build.id, repoId: r.repoId, draft, ...(branch != null ? { branch } : {}) })}
           pushError={pushFailure(results.get(r.repoId)) ?? (push.variables?.repoId === r.repoId ? errorOf(push.error) : null)}
         />
       ))}
@@ -75,6 +87,8 @@ function BuildRepoCard({
   repo,
   draft,
   session,
+  taken,
+  branchExists,
   onPush,
   pushError,
 }: {
@@ -82,7 +96,11 @@ function BuildRepoCard({
   repo: StoryBuildRepo;
   draft: boolean;
   session: boolean;
-  onPush: () => void;
+  taken: readonly string[];
+  /** The last push said the branch exists on GitHub: offer a new name instead of Push. */
+  branchExists: boolean;
+  /** `branch`: the new name (the rename); absent, the row's branch. */
+  onPush: (branch?: string) => void;
   pushError: string | null;
 }): JSX.Element {
   const titleId = useId();
@@ -155,7 +173,17 @@ function BuildRepoCard({
             {diffOpen && <RepoDiff build={build} repo={repo} session={session} />}
           </div>
         )}
-        {canPushRepo(repo) && (
+        {canPushRepo(repo) && branchExists && (
+          <RenameBranch
+            branch={repo.branch ?? ''}
+            taken={taken}
+            draft={draft}
+            disabled={busy}
+            actionId={`push-renamed-${repo.repoId}`}
+            onPush={(branch) => onPush(branch)}
+          />
+        )}
+        {canPushRepo(repo) && !branchExists && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
             <Button
               variant="primary"
@@ -163,7 +191,7 @@ function BuildRepoCard({
               icon={<PullRequestIcon size={12} />}
               disabled={busy}
               data-story-build-action={`push-${repo.repoId}`}
-              onClick={onPush}
+              onClick={() => onPush()}
             >
               {draft ? 'Push as draft' : 'Push'}
             </Button>

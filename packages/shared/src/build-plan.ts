@@ -261,6 +261,8 @@ export interface StoryBuildPr {
   pushedPrNumber: number | null;
   pushedPrUrl: string | null;
   pushError: string | null;
+  /** The code beside `pushError` (`BRANCH_EXISTS` ⇒ the tab offers a new branch name); null otherwise. */
+  pushErrorCode?: string | null;
 }
 
 /** `GET …/prs/:prId/diff` — one planned PR's host-computed patch (against the previous PR, or the base). */

@@ -129,6 +129,9 @@ export interface SessionSubject {
   /** After a kept build turn: an AUTOMATIC continuation's text (plan first: the turn cap hit with work
    *  unfinished; the subject asks the budget gate), or null. The machine claims it in the same tick. */
   buildFollowUp?(l: SubjectLive): Promise<string | null>;
+  /** A build turn that ENDED WELL (outcome `completed`, no continuation) has settled in `built` — the row
+   *  saved, so a push is no longer refused as busy (story: the opt-in automatic push). Never awaited. */
+  afterBuildSettled?(l: SubjectLive): void;
   onPhase?(l: SubjectLive, phase: SandboxSessionPhase): void;
   onClosed?(l: SubjectLive, phase: SandboxSessionPhase): Promise<void>;
 }

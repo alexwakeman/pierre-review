@@ -136,7 +136,7 @@ function realRepos(root: string): void {
     sh(box, 'commit', '-qm', 'base');
     REAL_BASE[`acme/${name}`] = sh(box, 'rev-parse', 'HEAD');
     sh(box, 'update-ref', 'refs/limn/base', 'HEAD');
-    sh(box, 'checkout', '-q', '-b', 'limn/acme-400');
+    sh(box, 'checkout', '-q', '-b', 'ACME-400');
     CACHE[`acme/${name}`] = join(root, `cache-${name}`);
     execFileSync('git', ['clone', '-q', box, CACHE[`acme/${name}`]!], { env: GENV });
     BOX[name] = box;
@@ -391,8 +391,8 @@ describe('plan first, end to end', () => {
       ['AC2', 'A Download CSV button', ['P2']],
     ]);
     expect(plan.latest!.stack.map((p) => [p.key, p.fullName, p.branch])).toEqual([
-      ['P1', 'acme/api', 'limn/acme-400'],
-      ['P2', 'acme/web', 'limn/acme-400'],
+      ['P1', 'acme/api', 'ACME-400'],
+      ['P2', 'acme/web', 'ACME-400'],
     ]);
     expect(plan.latest!.ticketUpdate?.acceptanceCriteria).toBe('1. Stream every row, in pages of 1000\n2. A Download CSV button');
     // The checker and its context are in the sandbox; the planning turn was a chat turn (plan cost).
@@ -473,7 +473,7 @@ describe('plan first, end to end', () => {
     const b = await until(id, (x) => x.session?.phase === 'built' && sentToClaude.length === turnsBefore + 2, 'built after the continuation', 180_000);
     const sent = sentToClaude.at(-2)!;
     expect(sent).toMatch(/^The reader approved the plan \(revision 2\)\. Build it now\./);
-    expect(sent).toContain('  - P1: `limn/acme-400` in acme/api');
+    expect(sent).toContain('  - P1: `ACME-400` in acme/api');
     expect(sent).toContain('Finish with the build report: write `/workspace/.limn/build-report.json`');
     expect(sent).toContain('The reader adds:\n````text\nKeep the commits small.\n````');
     // ONE automatic continuation, the budget gate asked first; the second turn ended normally, so no more.
@@ -482,8 +482,8 @@ describe('plan first, end to end', () => {
     expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === 'The build stopped at the turn limit with work left, so Limn asked the agent to go on (1 of 2).')).toBe(true);
     expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 2 });
     expect(b.prs!.map((p) => [p.key, p.fullName, p.position, p.stackIndex, p.branch, p.status, p.criteria])).toEqual([
-      ['P1', 'acme/api', 0, 1, 'limn/acme-400', 'ready', ['AC1']],
-      ['P2', 'acme/web', 1, 1, 'limn/acme-400', 'ready', ['AC2']],
+      ['P1', 'acme/api', 0, 1, 'ACME-400', 'ready', ['AC1']],
+      ['P2', 'acme/web', 1, 1, 'ACME-400', 'ready', ['AC2']],
     ]);
     expect(b.prs![0]).toMatchObject({ filesChanged: ['export.ts'], summary: 'Pages through the rows, 500 at a time.', reported: 'done', checks: [{ command: 'npm test', result: 'passed', note: null }] });
     expect(b.prs![1]).toMatchObject({ filesChanged: ['button.tsx'], reported: 'partly', stat: { files: 1, commits: 1 } });

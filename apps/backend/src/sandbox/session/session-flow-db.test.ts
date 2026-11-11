@@ -25,7 +25,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 delete process.env.LIMN_AI_DISABLED;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const G = vi.hoisted(() => ({ pushes: [] as any[], nextPr: 700, sync: null as null | ((name: string, n: number) => Promise<void>) }));
+const G = vi.hoisted(() => ({ pushes: [] as any[], nextPr: 700, sync: null as null | ((name: string, n: number) => Promise<void>), autoPush: [] as any[] }));
 
 vi.mock('../../coding/git-ops.js', () => ({
   applyAndPushBranch: async (a: any) => {
@@ -36,6 +36,18 @@ vi.mock('../../coding/git-ops.js', () => ({
     return { pushedBranch: a.branch, commitSha: `c${n}`, prNumber: n, prUrl: `https://github.com/${a.owner}/${a.name}/pull/${n}` };
   },
 }));
+// The automatic push's hook (manager.ts runTurn → the story subject): recorded, then the real gate.
+vi.mock('../../coding/story-build/auto-push.js', async (orig) => {
+  const real = await orig<typeof import('../../coding/story-build/auto-push.js')>();
+  return {
+    ...real,
+    maybeAutoPushBuild: async (...a: Parameters<typeof real.maybeAutoPushBuild>) => {
+      const d = await real.maybeAutoPushBuild(...a);
+      G.autoPush.push({ ...a[1], decision: d });
+      return d;
+    },
+  };
+});
 vi.mock('../../tracker/manual-links.js', () => ({ resolveTicketRefs: async () => ({ ok: true, body: { results: [] } }) }));
 vi.mock('../../tracker/runtime.js', () => ({ trackerContext: () => ({}) }));
 vi.mock('../../review/clone-manager.js', async (orig) => ({
@@ -294,12 +306,12 @@ describe('a workspace session, end to end', () => {
     expect(s.provider).toBe('claude');
     expect(s.credentialLine).toMatch(/stays on this computer/);
     expect(s.repos.map((x) => [x.fullName, x.path, x.branch, x.baseSha])).toEqual([
-      ['acme/api', '/workspace/acme/api', 'limn/acme-300', SHA.api],
-      ['acme/web', '/workspace/acme/web', 'limn/acme-300', SHA.web],
+      ['acme/api', '/workspace/acme/api', 'ACME-300', SHA.api],
+      ['acme/web', '/workspace/acme/web', 'ACME-300', SHA.web],
     ]);
     expect(b.repos.map((x) => [x.fullName, x.status, x.baseSha, x.branch])).toEqual([
-      ['acme/api', 'planned', SHA.api, 'limn/acme-300'],
-      ['acme/web', 'planned', SHA.web, 'limn/acme-300'],
+      ['acme/api', 'planned', SHA.api, 'ACME-300'],
+      ['acme/web', 'planned', SHA.web, 'ACME-300'],
     ]);
     // The seed is at the root, outside every repository; the model credential never reached the sandbox.
     const files = fake.files(`limn-${(await rowOf(id)).sandboxRef}-sandbox`);
@@ -360,6 +372,13 @@ describe('a workspace session, end to end', () => {
     const again = await post(`/api/story-builds/${id}/build`, {});
     expect(again.statusCode).toBe(409);
     expect(again.json().error).toBe('NotReady');
+    // The build turn ended well and settled in `built`: the automatic push was asked once — and, with the
+    // option off (the default), pushed nothing (the reader's Push below is the first push).
+    expect(b.autoPush).toBe(false);
+    // It runs off the turn ("a push is not a turn"): wait for it to answer.
+    for (let i = 0; i < 100 && G.autoPush.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(G.autoPush).toEqual([{ accountId: 1, buildId: id, decision: { status: 'skipped', reason: 'off' } }]);
+    expect(G.pushes).toEqual([]);
   });
 
   it('the diff routes serve the stored patch; Push (the existing route) opens a draft and the session reads pushed', async () => {
@@ -370,7 +389,7 @@ describe('a workspace session, end to end', () => {
     const pushed = await post(`/api/story-builds/${id}/repos/${api}/push`, {});
     expect(pushed.statusCode).toBe(200);
     expect(pushed.json().results[0]).toMatchObject({ outcome: 'pushed', prNumber: 700 });
-    expect(G.pushes[0]).toMatchObject({ owner: 'acme', name: 'api', baseSha: SHA.api, baseRef: 'main', patch: API_PATCH, branch: 'limn/acme-300', draft: true, title: 'ACME-300: Export a report as CSV' });
+    expect(G.pushes[0]).toMatchObject({ owner: 'acme', name: 'api', baseSha: SHA.api, baseRef: 'main', patch: API_PATCH, branch: 'ACME-300', draft: true, title: 'ACME-300: Export a report as CSV' });
     expect(G.pushes[0].body).toContain('[ACME-300: Export a report as CSV](https://acme.atlassian.net/browse/ACME-300)');
     const b = await read(id);
     expect(b.session!.phase).toBe('pushed');
@@ -415,9 +434,12 @@ describe('limits, teardown, restart and resume', () => {
   it('caps the open sessions, and closes an idle one (no patch ⇒ failed, the work is gone)', async () => {
     process.env.LIMN_SANDBOX_MAX_SESSIONS = '1';
     ticketReads = 0;
-    const a = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT });
+    expect((await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: 'yes' })).statusCode).toBe(400);
+    // "Push and open the pull request when the build finishes", ticked at Start: stored on the row.
+    const a = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: true });
     expect(a.statusCode).toBe(202);
     const id = a.json().buildId;
+    expect((await read(id)).autoPush).toBe(true);
     const b = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT2 });
     expect(b.statusCode).toBe(409);
     expect(b.json()).toEqual({ error: 'TooManySessions', message: 'A session is already open. Discard one first.' });

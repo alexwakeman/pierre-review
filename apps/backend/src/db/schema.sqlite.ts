@@ -4621,6 +4621,11 @@ export const storyBuilds = sqliteTable(
     withDocs: integer('with_docs', { mode: 'boolean' }).notNull().default(false),
     approvedPlanId: integer('approved_plan_id'),
     approvedAt: integer('approved_at', { mode: 'timestamp' }),
+    // PUSH AUTOMATICALLY (migration 0185): the reader's opt-in; THE CLAIM (compare-and-set before any GitHub
+    // write, never cleared: once per build); why the automatic push did not land (one sentence).
+    autoPush: integer('auto_push', { mode: 'boolean' }).notNull().default(false),
+    autoPushClaimedAt: integer('auto_push_claimed_at', { mode: 'timestamp' }),
+    autoPushError: text('auto_push_error'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -4682,6 +4687,8 @@ export const storyBuildRepos = sqliteTable(
     pushedCommitSha: text('pushed_commit_sha'),
     pushedAt: integer('pushed_at', { mode: 'timestamp' }),
     pushError: text('push_error'),
+    // The code beside push_error (`BRANCH_EXISTS`, …; migration 0185); NULL = none.
+    pushErrorCode: text('push_error_code'),
     provider: text('provider'),
     model: text('model'),
     effort: text('effort'),
@@ -4743,7 +4750,7 @@ export const storyBuildPlans = sqliteTable(
 );
 
 // story_build_prs — ONE row per PLANNED pull request, created at Approve (migration 0179). Status: shared
-// `StoryBuildPrStatus`. `branch` is the sandbox branch and the push branch (`limn/<key>`, `-2`, `-3`). The
+// `StoryBuildPrStatus`. `branch` is the sandbox branch and the push branch (the ticket key, `<KEY>`, `-2`, `-3`). The
 // patch, `tip_sha` and `tree_sha` are computed on the HOST from verified commits, never the sandbox's diffs.
 export const storyBuildPrs = sqliteTable(
   'story_build_prs',
@@ -4783,6 +4790,8 @@ export const storyBuildPrs = sqliteTable(
     prTitle: text('pr_title'),
     prBody: text('pr_body'),
     pushError: text('push_error'),
+    // The code beside push_error (`BRANCH_EXISTS`, …; migration 0185); NULL = none.
+    pushErrorCode: text('push_error_code'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },

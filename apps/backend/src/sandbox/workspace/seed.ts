@@ -140,15 +140,20 @@ export interface Seed {
   systemPrompts: Record<AiProviderId, string>;
 }
 
-/** The session branch in every repository: `limn/<ticket key>`. */
+/**
+ * The session branch in every repository = the push branch: the TICKET KEY itself, case kept, no `limn/`
+ * prefix (owner decision 2026-11-11: an Implement PR is the reader's, and Jira, Linear and GitHub link a
+ * branch that names the key). Anything git rejects becomes `-`. A stack's later PRs add `-2`, `-3`.
+ */
 export function sessionBranch(ticketKey: string): string {
   const s = ticketKey
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-    .replace(/-+$/g, '');
-  return `limn/${s === '' ? 'ticket' : s}`;
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60)
+    .replace(/[-.]+$/g, '')
+    .replace(/\.lock$/i, '');
+  return s === '' ? 'ticket' : s;
 }
 
 const short = (sha: string): string => sha.slice(0, 7);

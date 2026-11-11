@@ -31,9 +31,12 @@ session** (since 2026-11-07):
    files the reader picked — and reports per acceptance criterion. After every build turn each
    repository's work is stored as a patch.
 4. **Push.** The reader reviews one diff per repository and presses **Push** (or Push all). The push runs
-   on the HOST: a NEW branch and a NEW pull request, **draft** by default.
+   on the HOST: a NEW branch and a NEW pull request, **draft** by default. Or, opted in at Start, the host
+   pushes once by itself when the build finishes (§ Push automatically).
 
-Nothing is pushed, posted or written to the tracker before the reader presses a button. With no container
+Nothing is pushed, posted or written to the tracker before the reader presses a button — the one
+exception is the opt-in "Push and open the pull request when the build finishes" (§ Push automatically):
+the reader's tick is the consent. With no container
 runtime, the tab says what is missing in one line with "How to set up" (owner decision Q2: there is no
 fallback to the removed shell-less agents).
 
@@ -74,8 +77,8 @@ without a plan": a session whose agent never sends a usable plan can only be mes
 - **Approve and start** (latest revision, every point answered, live, build slot free): ONE transaction sets
   `approved_plan_id` / `approved_at` and writes one `story_build_prs` row per planned PR; `PLAN.md` (the
   plan and the decisions) goes into the sandbox; ONE build turn (`planBuildInstruction`). Start build is
-  refused `PlanNotApproved` on a plan-first session. Branches: P1 of a repository on `limn/<key>`, its
-  second and third on `limn/<key>-2` / `-3`.
+  refused `PlanNotApproved` on a plan-first session. Branches: P1 of a repository on `<KEY>` (the ticket key), its
+  second and third on `<KEY>-2` / `-3`.
 - **Closed in the plan stage** (idle, the agent ended, a restart): the session keeps its plan as
   `plan_ready` (not live, resumable). Resume boots it, writes PLAN.md marked "not approved yet" and sends
   NO turn. Approve on a closed session: `409 NotLive` ("Resume the session first.").
@@ -216,12 +219,14 @@ story.
 | `POST …/:id/plan/decisions` · `GET …/:id/plan?revision=` | Agree / Keep the story / clear → `BuildPlanView` · one older revision | read |
 | `POST …/:id/interrupt` · `…/:id/network/allow` · `…/:id/discard` | Stop · an Allow press · Discard | read |
 | `GET …/:id/diff` · `GET …/:id/repos/:repoId/diff` | every stored patch · one | read |
-| `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` (plan first: that repository's stack / every planned PR, in order; adds `prs`) | github_write |
+| `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` (plan first: that repository's stack / every planned PR, in order; adds `prs`). `branch` only on the per-repository push of a build without planned PRs (400 elsewhere) | github_write |
 | `GET …/:id/prs/:prId/diff` | plan first: one planned PR's host-computed patch, `StoryBuildPrDiffResponse` | read |
-| `POST …/:id/prs/:prId/push` | plan first: one planned PR → `StoryBuildPushResponse` with `prs: [one]` | github_write |
+| `POST …/:id/prs/:prId/push` | plan first: one planned PR → `StoryBuildPushResponse` with `prs: [one]`; takes `branch` | github_write |
+| `POST …/:id/auto-push` | `StoryBuildAutoPushBody {on}` → `{autoPush}` (400 not a boolean · 404 · 409 `NotReady` once anything pushed or the automatic push was claimed) | read |
 
 Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode` + `BuildPlanErrorCode`. The plan paths
-are shared `BUILD_PLAN_API`; the start body's `docs: true` is `400 NoDocs` without a built document. The
+are shared `BUILD_PLAN_API`; the start body's `docs: true` is `400 NoDocs` without a built document; its
+`autoPush: true` stores the option (§ Push automatically; a non-boolean is 400). The
 stream adds `{ type: 'plan', plan }` and `{ type: 'prs', prs }`; `StoryBuild.prs` lists the planned PRs (no patch).
 
 ## Entry points
@@ -292,12 +297,19 @@ the session is open and that PR is not pushed, dropped with the session's refs).
 
 ## Push (`coding/story-build/push.ts`)
 
-Only on the reader's press. `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
+On the reader's press — or once, by the host, when the reader opted in (§ Push automatically). `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
 stateless push: a fresh worktree at `base_sha`, the stored patch, ONE commit by the reader (the agent's
-commit messages as its message), a NEW branch `limn/<ticket key>` (`BRANCH_EXISTS` refused with a
+commit messages as its message), a NEW branch `<KEY>` (the ticket key, case kept, `sessionBranch`) (`BRANCH_EXISTS` refused with a
 sentence, never forced; the default branch, the base ref and a stacked PR's head are protected and
 refused before any process runs), then `createPullRequest` (`draft` unless the body says `draft: false`).
 
+- **The reader's PR** (owner decision 2026-11-11): `applyAndPushBranch` writes with origin `'reader'` — no
+  `limn_actions` ledger row, no `Limn-Run:` trailer on the commit — so sync attributes the PR AND its commit
+  to the reader, never to their `limn:` bot (the one exception to "Limn's writes are a bot",
+  docs/CLAUDE-REVIEW.md § Limn's actions are bots). It is then an ordinary PR of the reader's: the
+  workspace's auto review picks it up (when on, once it is not a draft), My Turn and Reports count it.
+- **Branch** = the ticket key, case kept (`sessionBranch`: `PAY-142`; anything git rejects becomes `-`;
+  no `limn/` prefix), so Jira, Linear and GitHub link it.
 - **Title** `${KEY}: ${title}` (what Jira, Linear and Notion detection read).
 - **Body:** the summary (the agent's last words in the build turn), the criteria this repository covers,
   the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already pushed, `Closes
@@ -307,6 +319,17 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
   after it.
 - **Branch name**: `assertPushTarget` (git's own format check + the protected names) runs BEFORE the
   name is spelled into the `BRANCH_EXISTS` lookup URL, each segment URL-encoded.
+- **Rename after `BRANCH_EXISTS`** (an earlier session already pushed `<KEY>` (the ticket key)): the single-item
+  routes take `branch` (`StoryBuildPushBody`; the per-repository push of a build WITHOUT planned PRs, and
+  `…/prs/:prId/push`). Push all and a planned build's per-repository push refuse it (400: one name, one
+  PR). The route checks only shape (1..`STORY_BUILD_BRANCH_MAX` after trim); the name goes through the
+  SAME `assertPushTarget` before any lookup (a stack also protects its other planned/pushed branches),
+  an existing one is still `BRANCH_EXISTS`, never forced. It is written to the row's `branch` only once
+  the push lands (or `PR_NOT_OPENED`, the branch was pushed), so a later Push all reuses it. The code is
+  STORED beside `push_error` (`push_error_code` on `story_build_repos` / `story_build_prs`, wire
+  `pushErrorCode`), so the tab keys the field on it after a reload or an automatic push — never on the
+  sentence. The tab's field is prefilled with shared `storyBuildFreeBranch` (`<branch>-v2`, `-v3`, …:
+  `-N` would collide with a stack's PR-N branch).
 - **Stacked:** the new PR targets the head branch of the reader's own open PR it stacks on; once that PR
   is no longer open the push is refused (`STACK_CLOSED`); a PR GitHub says is from a FORK is refused
   `STACK_FORK`, an unreadable one `STACK_UNKNOWN`.
@@ -320,8 +343,39 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
   fails on its own, and a later body links the earlier PRs.
 - The routes answer 200 `StoryBuildPushResponse` with per-repository results (`404` for another account's
   build). The SPA refetches through `invalidateAfterPrWrite` + `['ticket-prs']` + `['sprint-graph']`.
-- ⚠ Known gap: when an earlier session already pushed `limn/<key>`, Push answers `BRANCH_EXISTS` and there
-  is no way to rename the branch yet.
+
+### Push automatically (`coding/story-build/auto-push.ts`)
+
+"Push and open the pull request when the build finishes": the reader's OPT-IN on Implement and Fill gaps
+(`story_builds.auto_push`, OFF by default; the Start panel's box sends `autoPush: true` only when ticked;
+the tab's switch `POST …/:id/auto-push` changes it until the build pushed). The tick IS the consent.
+
+- **When**: the machine calls the subject's `afterBuildSettled` from `runTurn`'s final branch only — a
+  BUILD turn whose own outcome is `completed` AND whose work was stored (`afterBuildTurn` returned — a
+  failed store never pushes an earlier turn's patch), with no continuation or chat follow-up claimed, after
+  `setPhase('built')` is saved (so the push guards see `ready`). Never from boot reconcile, Resume, idle
+  close or any other close; an interrupted, failed, over-budget or max-turns turn never pushes. Ticking
+  the option after the build finished (or a restart between `built` and the claim) waits for the next
+  build turn, and the tab says so ("Limn pushes when the next build finishes.").
+- **The gate** (`maybeAutoPushBuild`, re-read at push time): on, never claimed, `ready`, something ready
+  to push (a person's Push before it leaves nothing: their action wins). THE CLAIM is a compare-and-set
+  of `auto_push_claimed_at` (`WHERE auto_push = 1 AND status = 'ready' AND … IS NULL`) BEFORE any GitHub
+  write, never cleared: ONCE per build, never retried. The in-process flag (`isStoryBuildAutoPushing`) is
+  set in the FIRST tick, before the gate's reads, so a message cannot start a turn and burn the claim.
+- **The push**: the button's own path — `pushPlannedStack` for a plan-first build with planned PRs, else
+  `pushAllRepos` — with `draft: false`. The reader's own GitHub login (`getAccessToken` → `gh auth
+  token`), like the button; nothing is stored. `draft: false` because auto review skips drafts: the PR is
+  the READER'S (§ Push → "The reader's PR"), so the workspace's auto review picks it up when it is on.
+- **A concurrent press** is safe: `ALREADY_PUSHED` / `PUSH_IN_PROGRESS` / the stack's in-flight set answer
+  `skipped`, not a failure; when NOTHING was pushed that way the build records "Your own push was already
+  running." While it runs the session refuses a message (`busyReason`) and Discard waits.
+- **"Pushing…"** reads the in-process flag (wire `autoPushRunning`, never stored), so it ends with the push
+  or the process. A claim a restart cut off is recorded at boot (`reconcileStoryAutoPushOnStartup`, from
+  `reconcileSessionsOnStartup`; never a push): "Limn stopped before the push finished. Press Push."
+- **A failure** is RECORDED, never retried: each item's own `push_error` + `push_error_code`
+  (`BRANCH_EXISTS` ⇒ the rename above; a refused RENAME is judged by git's rules before any lookup,
+  `renameRefusal`, and never overwrites the stored code) and one sentence on the build (`auto_push_error`, wire
+  `autoPushError`); a session notice says what happened. The reader can still press Push.
 
 ### Pushing a stack (`coding/story-build/push-stack.ts`)
 

@@ -75,7 +75,8 @@ export default function Page(): JSX.Element {
           <Ui>Approve and start</Ui>. The agent builds only the gaps the plan names.
         </li>
         <li>
-          Review and push. Each new pull request's description names the gaps it covers. See{' '}
+          Review and push, or tick <Ui>Push and open the pull request when the build finishes</Ui> at the start. Each new
+          pull request's description names the gaps it covers. See{' '}
           <DocLink to="implement-story/push">Push the result</DocLink>.
         </li>
       </Steps>

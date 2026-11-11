@@ -4485,6 +4485,21 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   **Always allow** — a reader's click, never automatic), Spend → **Changes** (`BuildSection`, the old
   per-repository cards in SESSION mode: no Retry, no live step, no "Not built or tested here." — the
   agent ran the tests in the sandbox; lazy diff; Push / Push as draft; the pushed PR chip).
+- **PUSH AUTOMATICALLY + THE RENAME** ([STORY-BUILD.md](STORY-BUILD.md) § Push automatically, § Push):
+  `StartPanel`'s box "Push and open the pull request when the build finishes" (OFF; `autoPush: true` sent
+  ONLY when ticked, the `docs` pattern) and, under the header, `AutoPushOption.tsx` `AutoPushLine`: the
+  switch (`useStoryBuildAutoPush`, its OWN mutation key — a DB write, never blocked by a turn) while
+  `autoPushEditable` (nothing pushed, not claimed; "Limn pushes when the next build finishes." under it when
+  the build already settled, `autoPushWaitsForNextBuild`), "Pushing…" while `autoPushRunning` (the wire's
+  in-process `autoPushRunning` flag, never the claim alone, so a restart or a press that took over never
+  leaves it; the read polls then: the notice frame does not refetch), the recorded `autoPushError` until
+  everything is pushed. The
+  ⓘ says the PR opens ready for review, as the reader's, and that auto review picks it up when it is on. After
+  `BRANCH_EXISTS` — keyed on the press's `code`, else the row's stored `pushErrorCode`, NEVER on the
+  sentence (`branchExistsFor`) — the card's Push becomes `RenameBranch` (a name prefilled by shared
+  `storyBuildFreeBranch` over `buildBranchNames` + the names tried, + Push) on BuildSection's repository
+  cards and StackView's PR cards; a refused new name keeps the field. The push body carries `branch` ONLY
+  when named (`storyBuildPushBody`; the e2e pins `{ draft: true }` exactly).
 - **PLAN FIRST (2026-11-08; [STORY-BUILD.md](STORY-BUILD.md) § Plan first).** Every NEW session plans
   before it builds; the build starts only from the plan panel. The pieces:
   - **The split button** (`components/ui/SplitButton.tsx`: a primary `Button` joined to a `CaretIcon`

@@ -588,7 +588,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   POST …/:id/plan/reply · …/:id/plan/approve            a plan revision turn / the build turn → ai + ai_hourly
   //   POST …/:id/repos/:repoId/push · …/:id/push · …/:id/prs/:prId/push   branch push + PR create → github_write
   //   GET list / :id / stream / diff / repos/:repoId/diff / prs/:prId/diff / plan · POST interrupt /
-  //   network/allow / discard / plan/decisions → read
+  //   network/allow / discard / plan/decisions / auto-push → read
+  //   (auto-push only stores the reader's opt-in; the push it arms runs once, on the host, after a build turn)
   // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
   // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {

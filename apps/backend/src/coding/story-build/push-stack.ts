@@ -1,4 +1,5 @@
-// PUSH A PLANNED STACK (docs/STORY-BUILD.md § Plan first → Pushing a stack). Only on the reader's press. A
+// PUSH A PLANNED STACK (docs/STORY-BUILD.md § Plan first → Pushing a stack). On the reader's press, or once
+// by the host after the build when the reader ticked the automatic push (auto-push.ts). A
 // build with an approved plan has one `story_build_prs` row per planned PR; each is pushed as ONE commit by
 // the reader (`applyAndPushBranch`, the one-PR push's own steps) on a NEW branch, with ONE addition: the
 // commit's tree must equal the host-verified tip's tree (`expectTree`, else TREE_MISMATCH before any push).
@@ -34,6 +35,7 @@ import {
   repoFacts,
   storyBuildPrBody,
   storyBuildPrTitle,
+  renameRefusal,
   storyBuildStackTitle,
 } from './push.js';
 
@@ -104,6 +106,9 @@ export interface PushPlannedPrArgs {
   buildId: number;
   prId: number;
   draft: boolean;
+  /** A NEW branch name for this PR (the reader's rename after `BRANCH_EXISTS`); absent ⇒ the row's.
+   *  Checked by `assertPushTarget` (the build's other planned branches are protected); stored once it lands. */
+  branch?: string;
 }
 
 /** Push ONE planned PR (see the header). The outcome is recorded on its row; also returned. */
@@ -111,6 +116,9 @@ export async function pushPlannedPr(ctx: AgentContext, a: PushPlannedPrArgs): Pr
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   const pr = build ? await getStoryBuildPrRow(ctx, a.accountId, a.buildId, a.prId) : null;
   if (!build || !pr) return { prId: a.prId, key: '', repoId: 0, outcome: 'failed', prNumber: null, prUrl: null, code: 'NotFound', error: 'Not found.' };
+  // A rename is judged by git's rules before any GitHub lookup; a refusal is not recorded (push.ts).
+  const refused = await renameRefusal(a.branch);
+  if (refused != null) return res(pr, 'failed', 'PUSH_DENIED', refused);
   if (pr.status === 'pushed') {
     return res(pr, 'skipped', 'ALREADY_PUSHED', null, pr.pushedPrNumber != null ? { number: pr.pushedPrNumber, url: pr.pushedPrUrl ?? '' } : null);
   }
@@ -132,7 +140,9 @@ export async function pushPlannedPr(ctx: AgentContext, a: PushPlannedPrArgs): Pr
 
 async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: StoryBuildRow, pr: StoryBuildPrRow): Promise<StoryBuildPrPushResult> {
   const recordError = async (code: string, message: string): Promise<StoryBuildPrPushResult> => {
-    await updateStoryBuildPr(ctx, a.accountId, pr.id, { pushError: message }).catch(() => {});
+    // A failed RENAME keeps the stored code: the row's own branch still exists, so the field stays.
+    const keepCode = a.branch !== undefined && code !== 'BRANCH_EXISTS';
+    await updateStoryBuildPr(ctx, a.accountId, pr.id, { pushError: message, ...(keepCode ? {} : { pushErrorCode: code }) }).catch(() => {});
     return res(pr, 'failed', code, message);
   };
   const rows = await listPlannedPrRows(ctx, a.accountId, build.id);
@@ -191,7 +201,10 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
     stackedNumber = first.stackedNumber;
   }
   const facts = await repoFacts(ctx, a.accountId, pr.repoId);
-  const ownBranches = rows.filter((r) => r.repoId === pr.repoId && r.id !== pr.id).map((r) => r.branch);
+  const ownBranches = rows.filter((r) => r.repoId === pr.repoId && r.id !== pr.id).flatMap((r) => [r.branch, r.pushedBranch ?? '']);
+  // THE BRANCH: the reader's rename for this push (after BRANCH_EXISTS), else the planned one.
+  const branch = (a.branch ?? pr.branch ?? '').trim();
+  if (!branch) return recordError('BRANCH_REQUIRED', 'Name the branch to push.');
   const protect = [...new Set([facts?.defaultBranch, repo.baseRef, prBase, ...ownBranches].filter((n): n is string => Boolean(n)))];
 
   // THE TITLE AND THE BODY.
@@ -233,7 +246,7 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
       baseRef,
       patch: pr.patch!,
       commitMessage,
-      branch: pr.branch,
+      branch,
       prBase,
       title,
       body,
@@ -241,11 +254,11 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
       protect,
       ...(pr.treeSha ? { expectTree: pr.treeSha } : {}),
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, pr.repoId, prNumber, build.ident),
-      limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it. Nothing below may fail the push. ──
     await updateStoryBuildPr(ctx, a.accountId, pr.id, {
       status: 'pushed',
+      branch,
       pushedBranch: pushed.pushedBranch,
       pushedPrNumber: pushed.prNumber,
       pushedPrUrl: pushed.prUrl,
@@ -254,15 +267,16 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
       prTitle: title,
       prBody: body,
       pushError: null,
+      pushErrorCode: null,
     }).catch((err: unknown) => ctx.log.warn({ err }, 'story build: recording a stacked push failed'));
     await afterPushed(ctx, a.accountId, build, pr, pushed, fullName).catch((err: unknown) => ctx.log.warn({ err }, 'story build: after a stacked push'));
     return res(pr, 'pushed', null, null, { number: pushed.prNumber, url: pushed.prUrl });
   } catch (err) {
     const code = (err as { code?: string })?.code ?? 'failed';
     const message = err instanceof Error ? err.message : String(err);
-    if (code === 'BRANCH_EXISTS') return recordError(code, `A branch named ${pr.branch} already exists on ${fullName}. Discard this build and start again, or delete that branch on GitHub.`);
+    if (code === 'BRANCH_EXISTS') return recordError(code, `A branch named ${branch} already exists on ${fullName}. Pick another branch name.`);
     if (code === 'PR_NOT_OPENED') {
-      await updateStoryBuildPr(ctx, a.accountId, pr.id, { pushedBranch: pr.branch, pushedCommitSha: (err as { commitSha?: string }).commitSha ?? null, pushError: message }).catch(() => {});
+      await updateStoryBuildPr(ctx, a.accountId, pr.id, { branch, pushedBranch: branch, pushedCommitSha: (err as { commitSha?: string }).commitSha ?? null, pushError: message, pushErrorCode: code }).catch(() => {});
       return res(pr, 'failed', code, message);
     }
     if (code === 'PUSH_DENIED' || code === 'APPLY_FAILED' || code === 'TREE_MISMATCH') return recordError(code, message);
@@ -305,7 +319,13 @@ async function afterPushed(
 /** Push every ready, unpushed PR of the build (or of one repository) in PLAN ORDER (see the header). */
 export async function pushPlannedStack(
   ctx: AgentContext,
-  a: { accountId: number; buildId: number; draft: boolean; repoId?: number; push?: (ctx: AgentContext, a: PushPlannedPrArgs) => Promise<StoryBuildPrPushResult> },
+  a: {
+    accountId: number;
+    buildId: number;
+    draft: boolean;
+    repoId?: number;
+    push?: (ctx: AgentContext, a: PushPlannedPrArgs) => Promise<StoryBuildPrPushResult>;
+  },
 ): Promise<StoryBuildPrPushResult[] | null> {
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   if (!build) return null;
